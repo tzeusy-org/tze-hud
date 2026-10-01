@@ -16,7 +16,6 @@
 //!   zone_geometry_adapts_profile, zone_disconnect_cleanup
 //! - All four contention policies (LatestWins, Stack, MergeByKey, Replace)
 //! - All five v1 media types (StreamText, ShortTextWithIcon, KeyValuePairs, StaticImage, SolidColor)
-//! - VideoSurfaceRef: schema accepted in config but not rendered
 //! - Layer attachment routing: Background, Content (z >= ZONE_TILE_Z_MIN), Chrome
 //! - ZonePublishToken: validation rejects expired/invalid tokens
 //! - ZoneOccupancy: query API in v1 (no effective_geometry)
@@ -703,65 +702,6 @@ fn static_image_content_publishes_successfully() {
         result.is_ok(),
         "StaticImage content must publish to a zone accepting StaticImage"
     );
-}
-
-#[test]
-fn video_surface_ref_schema_defined_but_not_rendered() {
-    // VideoSurfaceRef is a valid enum variant (schema defined for post-v1)
-    // but should be accepted in config for zones that declare it.
-    let mut scene = SceneGraph::new(1920.0, 1080.0);
-    scene.register_zone(ZoneDefinition {
-        id: SceneId::new(),
-        name: "media".to_string(),
-        description: "Media zone (accepts VideoSurfaceRef for post-v1)".to_string(),
-        geometry_policy: GeometryPolicy::Relative {
-            x_pct: 0.0,
-            y_pct: 0.0,
-            width_pct: 1.0,
-            height_pct: 1.0,
-        },
-        accepted_media_types: vec![ZoneMediaType::VideoSurfaceRef],
-        rendering_policy: RenderingPolicy::default(),
-        contention_policy: ContentionPolicy::Replace,
-        max_publishers: 1,
-        transport_constraint: None,
-        auto_clear_ms: None,
-        layer_attachment: LayerAttachment::Content,
-        ephemeral: false,
-    });
-
-    // The zone can be registered and the content can be published (schema accepted).
-    // Actual rendering is deferred to post-v1.
-    let surface_id = SceneId::new();
-    let result = scene.publish_to_zone(
-        "media",
-        ZoneContent::VideoSurfaceRef(surface_id),
-        "agent",
-        None,
-        None,
-        None,
-    );
-    assert!(
-        result.is_ok(),
-        "VideoSurfaceRef schema must be accepted for zones that declare it"
-    );
-}
-
-#[test]
-fn default_pip_and_ambient_background_do_not_accept_video_surface_ref() {
-    let registry = tze_hud_scene::types::ZoneRegistry::with_defaults();
-    for zone_name in ["pip", "ambient-background"] {
-        let zone = registry
-            .zones
-            .get(zone_name)
-            .expect("default zone should exist");
-        assert!(
-            !zone
-                .accepted_media_types
-                .contains(&ZoneMediaType::VideoSurfaceRef),
-            "{zone_name} must not implicitly accept VideoSurfaceRef"
-        );
-    }
 }
 
 // ─── ZonePublishToken validation ──────────────────────────────────────────────

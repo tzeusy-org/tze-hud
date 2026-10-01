@@ -94,19 +94,6 @@ pub(super) struct StreamSession {
 
     /// Per-session upload-byte limiter for resident resource transport.
     pub(super) resource_upload_rate_limiter: UploadByteRateLimiter,
-
-    /// Active Windows media ingress stream for the one-stream exemplar slice.
-    pub(super) media_ingress: Option<ActiveMediaIngressStream>,
-
-    /// Next non-zero stream epoch assigned by this session.
-    pub(super) next_media_stream_epoch: u64,
-}
-
-#[derive(Clone, Debug)]
-pub(super) struct ActiveMediaIngressStream {
-    pub(super) stream_epoch: u64,
-    pub(super) zone_name: String,
-    pub(super) surface_id: tze_hud_scene::SceneId,
 }
 
 impl StreamSession {
@@ -158,12 +145,6 @@ impl StreamSession {
         self.last_client_sequence = seq;
         Ok(())
     }
-
-    pub(super) fn next_media_epoch(&mut self) -> u64 {
-        let epoch = self.next_media_stream_epoch.max(1);
-        self.next_media_stream_epoch = epoch.saturating_add(1).max(1);
-        epoch
-    }
 }
 
 // ─── Capability Revocation Event ─────────────────────────────────────────────
@@ -174,8 +155,6 @@ impl StreamSession {
 /// this event. Each session handler checks whether any of its leases match `lease_id`
 /// and, if so, applies the revocation to the scene graph and notifies the agent via
 /// `CapabilityNotice(revoked=[capability_name])` and a `LeaseStateChange` audit event.
-/// A null `lease_id` is reserved for runtime-global session capabilities that
-/// are not represented in scene-graph leases, currently only `media_ingress`.
 ///
 /// RFC 0001 §3.3: capability checks are enforced at mutation time against the live scope,
 /// not merely at grant time.

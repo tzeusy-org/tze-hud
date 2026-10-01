@@ -8,7 +8,6 @@
 pub mod collector;
 pub mod idle_efficiency;
 pub mod invalidation_closure;
-pub mod media_audit;
 pub mod publish_load;
 pub mod record;
 pub mod resource_monitor;
@@ -36,10 +35,6 @@ pub use invalidation_closure::{
     PartialPresentCapability, PixelRect, RenderPlanWorkItemId,
     TRANSPARENT_OVERLAP_FIFTY_TILE_SCENARIO_NAME, TRANSPARENT_OVERLAP_FIFTY_TILE_SCENARIO_VERSION,
     TextureUploadActualWork, TextureUploadCategory, TextureUploadWorkItemId,
-};
-pub use media_audit::{
-    DegradationStep, DegradationTrigger, MediaAuditEvent, MediaCloseReason, MediaRejectCode,
-    OperatorOverrideKind,
 };
 pub use publish_load::{
     ByteAccountingMode, PublishLoadArtifact, PublishLoadCalibrationStatus, PublishLoadIdentity,

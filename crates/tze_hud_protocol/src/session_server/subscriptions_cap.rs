@@ -192,59 +192,7 @@ pub(super) async fn handle_capability_revocation(
     session: &mut StreamSession,
     tx: &tokio::sync::mpsc::Sender<Result<ServerMessage, Status>>,
     event: CapabilityRevocationEvent,
-    render_wake: &tze_hud_scene::render_wake::RenderWakeNotifier,
 ) {
-    if event.capability_name == "media_ingress" {
-        session.capabilities.retain(|c| c != &event.capability_name);
-        let reason = "CAPABILITY_REVOKED:media_ingress".to_string();
-
-        let notice_seq = session.next_server_seq();
-        let _ = tx
-            .send(Ok(ServerMessage {
-                sequence: notice_seq,
-                timestamp_wall_us: now_wall_us(),
-                payload: Some(ServerPayload::CapabilityNotice(CapabilityNotice {
-                    granted: Vec::new(),
-                    revoked: vec![event.capability_name.clone()],
-                    reason: reason.clone(),
-                    effective_at_server_seq: notice_seq,
-                })),
-            }))
-            .await;
-
-        if !event.lease_id.is_null() {
-            let state_seq = session.next_server_seq();
-            let _ = tx
-                .send(Ok(ServerMessage {
-                    sequence: state_seq,
-                    timestamp_wall_us: now_wall_us(),
-                    payload: Some(ServerPayload::LeaseStateChange(LeaseStateChange {
-                        lease_id: scene_id_to_bytes(event.lease_id),
-                        previous_state: "ACTIVE".to_string(),
-                        new_state: "ACTIVE".to_string(),
-                        reason: reason.clone(),
-                        timestamp_wall_us: now_wall_us(),
-                    })),
-                }))
-                .await;
-        }
-
-        close_active_media_ingress(
-            state,
-            session,
-            tx,
-            MediaIngressCloseDisposition {
-                reason: MediaCloseReason::CapabilityRevoked as i32,
-                detail: "media_ingress capability revoked".to_string(),
-                final_state: MediaSessionState::Revoked as i32,
-                retry_after_us: None,
-            },
-            render_wake,
-        )
-        .await;
-        return;
-    }
-
     // Map canonical capability name to enum value.
     let Some(cap) = canonical_name_to_capability(&event.capability_name) else {
         // Unknown capability name — emit a diagnostic and return.

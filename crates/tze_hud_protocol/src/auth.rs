@@ -354,7 +354,6 @@ pub const CANONICAL_FIXED_CAPS: &[&str] = &[
     "exceed_default_budgets",
     "read_telemetry",
     "resident_mcp",
-    "media_ingress",
     "lease:priority:1",
     // publish_zone:* is a parameterized form but * is a valid literal suffix.
     "publish_zone:*",

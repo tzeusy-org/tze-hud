@@ -206,7 +206,6 @@ pub(super) fn start_network_services_with_render_wake(
         runtime_context.snapshot_agent_resource_budgets(),
         runtime_context.fallback_resource_budget(),
         fallback_unrestricted,
-        runtime_context.media_ingress.clone(),
         Some(std::sync::Arc::new(
             crate::RuntimeMutationBudgetEnforcer::with_limits(
                 runtime_context.operational_envelope.max_resident_sessions,

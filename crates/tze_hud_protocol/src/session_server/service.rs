@@ -115,9 +115,6 @@ pub struct HudSessionImpl {
     /// Subscription category: TELEMETRY_FRAMES (requires `read_telemetry`).
     /// Message class: State-stream (coalesced/droppable under backpressure).
     pub frame_presented_tx: tokio::sync::broadcast::Sender<crate::proto::FramePresented>,
-
-    /// Frozen Windows media-ingress admission config. Defaults disabled.
-    pub(super) media_ingress_config: Arc<tze_hud_scene::config::MediaIngressConfig>,
 }
 
 impl HudSessionImpl {
@@ -150,7 +147,6 @@ impl HudSessionImpl {
                 token_store: crate::token::TokenStore::new(),
                 freeze_active: false,
                 degradation_level: crate::session::RuntimeDegradationLevel::Normal,
-                media_ingress_active: None,
                 input_capture_tx: None,
                 input_capture_wake: tze_hud_scene::render_wake::RenderWakeNotifier::default(),
                 resolved_portal_tokens: std::collections::HashMap::new(),
@@ -168,7 +164,6 @@ impl HudSessionImpl {
             input_event_tx,
             element_repositioned_tx,
             frame_presented_tx,
-            media_ingress_config: Arc::new(tze_hud_scene::config::MediaIngressConfig::default()),
         }
     }
 
@@ -187,39 +182,20 @@ impl HudSessionImpl {
         agent_capabilities: HashMap<String, Vec<String>>,
         fallback_unrestricted: bool,
     ) -> Self {
-        Self::from_shared_state_with_config_and_media_ingress(
+        Self::from_shared_state_with_config_and_degradation_notices(
             state,
             psk,
             agent_capabilities,
             fallback_unrestricted,
-            tze_hud_scene::config::MediaIngressConfig::default(),
-        )
-    }
-
-    /// Create from existing shared state with config-driven capability and media-ingress state.
-    pub fn from_shared_state_with_config_and_media_ingress(
-        state: Arc<Mutex<SharedState>>,
-        psk: &str,
-        agent_capabilities: HashMap<String, Vec<String>>,
-        fallback_unrestricted: bool,
-        media_ingress_config: tze_hud_scene::config::MediaIngressConfig,
-    ) -> Self {
-        Self::from_shared_state_with_config_media_ingress_and_degradation_notices(
-            state,
-            psk,
-            agent_capabilities,
-            fallback_unrestricted,
-            media_ingress_config,
             super::DegradationNoticeSender::default(),
         )
     }
 
-    pub fn from_shared_state_with_config_media_ingress_and_degradation_notices(
+    pub fn from_shared_state_with_config_and_degradation_notices(
         state: Arc<Mutex<SharedState>>,
         psk: &str,
         agent_capabilities: HashMap<String, Vec<String>>,
         fallback_unrestricted: bool,
-        media_ingress_config: tze_hud_scene::config::MediaIngressConfig,
         degradation_notices: super::DegradationNoticeSender,
     ) -> Self {
         Self::from_shared_state_with_runtime_envelope_and_degradation_notices(
@@ -229,7 +205,6 @@ impl HudSessionImpl {
             HashMap::new(),
             ResourceBudget::default(),
             fallback_unrestricted,
-            media_ingress_config,
             None,
             degradation_notices,
         )
@@ -243,7 +218,6 @@ impl HudSessionImpl {
         agent_resource_budgets: HashMap<String, ResourceBudget>,
         fallback_resource_budget: ResourceBudget,
         fallback_unrestricted: bool,
-        media_ingress_config: tze_hud_scene::config::MediaIngressConfig,
         budget_enforcer: Option<SharedMutationBudgetEnforcer>,
     ) -> Self {
         Self::from_shared_state_with_runtime_envelope_and_degradation_notices(
@@ -253,7 +227,6 @@ impl HudSessionImpl {
             agent_resource_budgets,
             fallback_resource_budget,
             fallback_unrestricted,
-            media_ingress_config,
             budget_enforcer,
             super::DegradationNoticeSender::default(),
         )
@@ -267,7 +240,6 @@ impl HudSessionImpl {
         agent_resource_budgets: HashMap<String, ResourceBudget>,
         fallback_resource_budget: ResourceBudget,
         fallback_unrestricted: bool,
-        media_ingress_config: tze_hud_scene::config::MediaIngressConfig,
         budget_enforcer: Option<SharedMutationBudgetEnforcer>,
         degradation_notices: super::DegradationNoticeSender,
     ) -> Self {
@@ -294,7 +266,6 @@ impl HudSessionImpl {
             input_event_tx,
             element_repositioned_tx,
             frame_presented_tx,
-            media_ingress_config: Arc::new(media_ingress_config),
         }
     }
 

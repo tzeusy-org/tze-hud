@@ -133,13 +133,8 @@ pub use badges::{
     DISCONNECTION_BADGE_SIZE_PX,
     DISCONNECTION_CONTENT_SCRIM_COLOR,
     // Media-disconnection badge (B11)
-    MEDIA_DISCONNECT_BADGE_DEFAULT_COLOR,
-    MEDIA_DISCONNECT_BADGE_MARGIN_PX,
-    MEDIA_DISCONNECT_BADGE_SCRIM_COLOR,
-    MEDIA_DISCONNECT_BADGE_SIZE_PX,
     // Per-tile badge state (written by control plane, read by chrome render pass)
     TileBadgeState,
     // Draw command builders
     build_badge_cmds,
-    build_media_disconnect_badge_cmds,
 };

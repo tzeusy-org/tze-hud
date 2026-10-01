@@ -12,9 +12,6 @@ license.workspace = true
 # the marker lets consumers and CI jobs opt-in by name rather than relying on
 # implicit availability.
 headless = []
-# v2 media plane — video surface render path (E26, B11).
-# Code landing waits until v1 tagged v1.0.0 per F27 (signoff-packet.md).
-v2_preview = []
 
 [dependencies]
 tze_hud_scene = { path = "../tze_hud_scene", version = "0.1.0" }
@@ -36,7 +33,6 @@ unicode-segmentation = { workspace = true }
 resvg = { workspace = true }
 tiny-skia = { workspace = true }
 ab_glyph = { workspace = true }
-statig = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }

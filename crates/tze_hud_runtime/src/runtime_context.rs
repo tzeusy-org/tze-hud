@@ -33,7 +33,7 @@
 //!
 //! ### Frozen fields
 //!
-//! `profile`, `media_ingress`, `agent_capabilities`, and `fallback_policy` are
+//! `profile`, `agent_capabilities`, and `fallback_policy` are
 //! frozen at startup. A restart is required to change them.
 //!
 //! ### Hot-reloadable fields
@@ -83,9 +83,7 @@ use std::sync::Arc;
 use arc_swap::ArcSwap;
 use tze_hud_config::HotReloadableConfig;
 use tze_hud_protocol::auth::CapabilityPolicy;
-use tze_hud_scene::config::{
-    DisplayProfile, MediaIngressConfig, RegisteredAgentBudgetOverrides, ResolvedConfig,
-};
+use tze_hud_scene::config::{DisplayProfile, RegisteredAgentBudgetOverrides, ResolvedConfig};
 use tze_hud_scene::types::ResourceBudget;
 
 use crate::admission::{DEFAULT_MAX_GUEST_SESSIONS, SessionLimits};
@@ -181,7 +179,7 @@ fn resident_ledger_for(envelope: &OperationalRuntimeEnvelope) -> tze_hud_resourc
 ///
 /// Built once at startup; shared via `Arc<RuntimeContext>` across all subsystems.
 ///
-/// **Frozen fields** (`profile`, `media_ingress`, `agent_capabilities`,
+/// **Frozen fields** (`profile`, `agent_capabilities`,
 /// `fallback_policy`) are immutable after construction. A restart is required
 /// to change them.
 ///
@@ -204,12 +202,6 @@ pub struct RuntimeContext {
 
     /// Shared physical resident-allocation authority for all cache classes.
     pub resident_ledger: tze_hud_resource::ResidentLedger,
-
-    /// Frozen Windows media-ingress configuration.
-    ///
-    /// Default-off unless the startup configuration explicitly enables the
-    /// approved one-stream `media-pip` slice.
-    pub media_ingress: MediaIngressConfig,
 
     /// Per-agent capability grants keyed by agent name.
     /// Populated from `[agents.registered]` in config.
@@ -248,7 +240,6 @@ impl RuntimeContext {
             profile: config.profile,
             operational_envelope,
             resident_ledger,
-            media_ingress: config.media_ingress,
             agent_capabilities: config.agent_capabilities,
             agent_budget_overrides: config.agent_budget_overrides,
             fallback_policy,
@@ -273,7 +264,6 @@ impl RuntimeContext {
             profile: config.profile,
             operational_envelope,
             resident_ledger,
-            media_ingress: config.media_ingress,
             agent_capabilities: config.agent_capabilities,
             agent_budget_overrides: config.agent_budget_overrides,
             fallback_policy,
@@ -294,7 +284,6 @@ impl RuntimeContext {
             profile,
             operational_envelope,
             resident_ledger,
-            media_ingress: MediaIngressConfig::default(),
             agent_capabilities: HashMap::new(),
             agent_budget_overrides: HashMap::new(),
             fallback_policy: FallbackPolicy::Guest,
@@ -565,7 +554,6 @@ mod tests {
             tab_names: vec!["main".to_string()],
             agent_capabilities,
             agent_budget_overrides: HashMap::new(),
-            media_ingress: Default::default(),
             source_path: None,
         }
     }

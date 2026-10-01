@@ -34,9 +34,9 @@ use super::draw_cmds::TexturedDrawCmd;
 use super::token_colors::{
     ICON_SIZE_PX, NOTIFICATION_BACKDROP_OPACITY, NOTIFICATION_BODY_SCALE,
     NOTIFICATION_ICON_SIZE_PX, NOTIFICATION_INTER_LINE_GAP, STATIC_IMAGE_PLACEHOLDER_COLOR,
-    VIDEO_SURFACE_PLACEHOLDER_COLOR, emit_border_quads, is_alert_banner_zone,
-    notification_dismiss_bounds, resolve_border_default_color, resolve_notification_control_color,
-    sort_alert_banner_indices, urgency_to_notification_color, urgency_to_severity_color,
+    emit_border_quads, is_alert_banner_zone, notification_dismiss_bounds,
+    resolve_border_default_color, resolve_notification_control_color, sort_alert_banner_indices,
+    urgency_to_notification_color, urgency_to_severity_color,
 };
 use crate::pipeline::RectVertex;
 use crate::pipeline::rect_vertices;
@@ -145,7 +145,6 @@ impl Compositor {
                         //   with fixed 0.8 opacity and 1px 4-quad border
                         // SolidColor: always its own color
                         // StaticImage: warm-gray placeholder quad (full GPU texture deferred)
-                        // VideoSurfaceRef: dark placeholder quad; badge via chrome layer (B11)
                         // Other: policy.backdrop
                         let is_notification_content =
                             matches!(&record.content, ZoneContent::Notification(_));
@@ -172,19 +171,6 @@ impl Compositor {
                                     // Placeholder warm-gray backdrop.
                                     Some(STATIC_IMAGE_PLACEHOLDER_COLOR)
                                 }
-                            }
-                            // VideoSurfaceRef render path (v2 media plane).
-                            //
-                            // Renders a dark placeholder quad unconditionally in this pass.
-                            // Full decoded-frame GPU texture upload (GStreamer → wgpu) is
-                            // a follow-up implementation task.  The disconnection badge
-                            // (B11: last frame + badge on media drop) is added by the
-                            // chrome layer when the video_surfaces state machine is in
-                            // `Paused` state (video_render_state() == LastFrameWithBadge).
-                            //
-                            // See also: crate::video_surface::{VideoSurfaceMap, MediaEvent}
-                            ZoneContent::VideoSurfaceRef(_surface_id) => {
-                                Some(VIDEO_SURFACE_PLACEHOLDER_COLOR)
                             }
                             ZoneContent::Notification(n) if is_alert_banner_zone(zone_name) => {
                                 // alert-banner: severity tokens (color.severity.*).
@@ -372,19 +358,6 @@ impl Compositor {
                             } else {
                                 None
                             }
-                        }
-                        // VideoSurfaceRef render path (v2 media plane, E26 / B11).
-                        //
-                        // Renders a dark placeholder quad.  The disconnection badge
-                        // (B11 "last frame + badge" on media drop) is injected into the
-                        // chrome layer by the runtime when `Compositor::video_render_state`
-                        // returns `LastFrameWithBadge` for this surface.
-                        //
-                        // Full GStreamer → wgpu decoded-frame texture upload is a
-                        // follow-up task (tracked as a discovered follow-up in the
-                        // worker report for hud-ora8.1.25).
-                        ZoneContent::VideoSurfaceRef(_surface_id) => {
-                            Some(VIDEO_SURFACE_PLACEHOLDER_COLOR)
                         }
                         _ => {
                             // All other content: use policy.backdrop.

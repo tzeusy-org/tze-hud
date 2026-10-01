@@ -56,25 +56,6 @@ from proto_gen import session_pb2, session_pb2_grpc, types_pb2  # noqa: E402  # 
 
 
 # ---------------------------------------------------------------------------
-# Errors
-# ---------------------------------------------------------------------------
-
-
-class MediaIngressRejected(RuntimeError):
-    """Raised when MediaIngressOpen is answered with admitted=false.
-
-    Subclasses RuntimeError so existing ``except RuntimeError`` callers keep
-    working, while admission-rejection callers can inspect the structured
-    ``reject_code`` (e.g. ``MEDIA_DISABLED``) and ``reject_reason``.
-    """
-
-    def __init__(self, reject_code: str, reject_reason: str) -> None:
-        self.reject_code = reject_code
-        self.reject_reason = reject_reason
-        super().__init__(f"Media ingress rejected [{reject_code}]: {reject_reason}")
-
-
-# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
@@ -889,86 +870,6 @@ class HudClient:
         )
         await self._wait_for("lease_response", timeout=5.0)
         print("  [grpc] Lease released", flush=True)
-
-    async def open_media_ingress(
-        self,
-        *,
-        client_stream_id: bytes,
-        agent_sdp_offer: bytes,
-        zone_name: str = "media-pip",
-        content_classification: str = "household",
-        declared_peak_kbps: int = 2_000,
-        codec_preference: Optional[list[int]] = None,
-        expires_at_wall_us: int = 0,
-        timeout: float = 10.0,
-    ) -> session_pb2.MediaIngressOpenResult:
-        """Open a video-only media ingress stream on the approved media zone."""
-        if not hasattr(session_pb2, "MediaIngressOpen"):
-            raise RuntimeError(
-                "session_pb2 is missing MediaIngressOpen; regenerate user-test proto stubs"
-            )
-        if len(client_stream_id) != 16:
-            raise ValueError("client_stream_id must be exactly 16 bytes")
-        if not agent_sdp_offer:
-            raise ValueError("agent_sdp_offer is required for the local producer path")
-        if zone_name != "media-pip":
-            raise ValueError("media ingress is currently approved only for zone 'media-pip'")
-        codecs = codec_preference or [session_pb2.VIDEO_H264_BASELINE]
-        await self._send(
-            media_ingress_open=session_pb2.MediaIngressOpen(
-                client_stream_id=client_stream_id,
-                transport=session_pb2.TransportDescriptor(
-                    mode=session_pb2.WEBRTC_STANDARD,
-                    agent_sdp_offer=agent_sdp_offer,
-                    relay_hint=session_pb2.DIRECT,
-                ),
-                zone_name=zone_name,
-                codec_preference=codecs,
-                has_audio_track=False,
-                has_video_track=True,
-                content_classification=content_classification,
-                expires_at_wall_us=expires_at_wall_us,
-                declared_peak_kbps=declared_peak_kbps,
-            )
-        )
-        resp = await self._wait_for("media_ingress_open_result", timeout=timeout)
-        result = resp.media_ingress_open_result
-        if not result.admitted:
-            raise MediaIngressRejected(result.reject_code, result.reject_reason)
-        print(
-            "  [grpc] Media ingress admitted: "
-            f"epoch={result.stream_epoch} surface={result.assigned_surface_id.hex()} "
-            f"codec={result.selected_codec}",
-            flush=True,
-        )
-        return result
-
-    async def close_media_ingress(
-        self,
-        stream_epoch: int,
-        *,
-        reason: str = "local producer complete",
-        timeout: float = 10.0,
-    ) -> session_pb2.MediaIngressCloseNotice:
-        """Close an admitted media ingress stream and wait for the close notice."""
-        await self._send(
-            media_ingress_close=session_pb2.MediaIngressClose(
-                stream_epoch=stream_epoch,
-                reason=reason,
-            )
-        )
-        resp = await self._wait_for(
-            "media_ingress_close_notice",
-            timeout=timeout,
-            matcher=lambda msg: msg.media_ingress_close_notice.stream_epoch == stream_epoch,
-        )
-        notice = resp.media_ingress_close_notice
-        print(
-            f"  [grpc] Media ingress closed: epoch={stream_epoch} "
-            f"reason={notice.reason}",
-            flush=True,
-        )
-        return notice
 
     async def close(self, reason: str = "test complete", expect_resume: bool = False):
         """Gracefully close the session."""

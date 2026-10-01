@@ -66,8 +66,6 @@ use tze_hud_scene::HitResult;
 use tze_hud_scene::config::ConfigLoader;
 use tze_hud_scene::graph::SceneGraph;
 use tze_hud_scene::types::ZoneInteractionKind;
-#[cfg(feature = "v2_preview")]
-use tze_hud_scene::types::{SceneId, ZoneContent};
 use tze_hud_telemetry::{FrameTelemetry, TelemetryCollector};
 use wgpu::TextureFormat;
 
@@ -397,7 +395,6 @@ impl HeadlessRuntime {
             token_store: tze_hud_protocol::token::TokenStore::new(),
             freeze_active: false,
             degradation_level: tze_hud_protocol::session::RuntimeDegradationLevel::Normal,
-            media_ingress_active: None,
             input_capture_tx: None,
             input_capture_wake: tze_hud_scene::render_wake::RenderWakeNotifier::default(),
             resolved_portal_tokens: std::collections::HashMap::new(),
@@ -720,64 +717,6 @@ impl HeadlessRuntime {
         self.surface.read_pixels(&self.compositor.device)
     }
 
-    /// Publish a synthetic `VideoSurfaceRef` into the approved media zone and,
-    /// optionally, upload one generated frame for it.
-    ///
-    /// This is the deterministic validation hook for the Windows media ingress
-    /// slice. It is available without GStreamer so CI can prove compositor
-    /// ownership, placeholder behavior, clipping, and teardown using in-process
-    /// frames. The same explicit media-ingress config gate used by startup must
-    /// be enabled; default runtime configuration rejects the call.
-    #[cfg(feature = "v2_preview")]
-    pub async fn publish_synthetic_media_surface(
-        &mut self,
-        surface_id: SceneId,
-        frame: Option<&tze_hud_compositor::video_surface::VideoFrame>,
-        publisher_namespace: &str,
-    ) -> Result<(), String> {
-        let media = &self.runtime_context.media_ingress;
-        if !media.enabled {
-            return Err("media ingress is disabled by runtime config".to_string());
-        }
-        if media.operator_disabled {
-            return Err("media ingress is operator-disabled".to_string());
-        }
-        let approved_zone = media
-            .approved_zone
-            .as_deref()
-            .ok_or_else(|| "media ingress has no approved zone".to_string())?;
-        if approved_zone != tze_hud_config::APPROVED_MEDIA_ZONE {
-            return Err(format!(
-                "unsupported media ingress zone {approved_zone:?}; expected {:?}",
-                tze_hud_config::APPROVED_MEDIA_ZONE
-            ));
-        }
-
-        let state = self.state.lock().await;
-        let scene_arc = state.scene.clone();
-        drop(state);
-        let mut scene = scene_arc.lock().await;
-        scene
-            .publish_to_zone(
-                approved_zone,
-                ZoneContent::VideoSurfaceRef(surface_id),
-                publisher_namespace,
-                None,
-                None,
-                None,
-            )
-            .map_err(|e| format!("publish VideoSurfaceRef to {approved_zone}: {e}"))?;
-        drop(scene);
-
-        if let Some(frame) = frame {
-            if !self.compositor.upload_video_frame(surface_id, frame) {
-                return Err("synthetic video frame upload was rejected".to_string());
-            }
-        }
-
-        Ok(())
-    }
-
     /// Start the gRPC server in the background, serving the HudSession streaming service.
     ///
     /// Per spec Requirement: Session Limits (line 355): headless runtime still
@@ -844,7 +783,6 @@ impl HeadlessRuntime {
                 self.runtime_context.snapshot_agent_resource_budgets(),
                 self.runtime_context.fallback_resource_budget(),
                 self.fallback_unrestricted,
-                self.runtime_context.media_ingress.clone(),
                 Some(std::sync::Arc::new(
                     crate::RuntimeMutationBudgetEnforcer::with_limits(
                         self.runtime_context
@@ -2498,171 +2436,6 @@ default_tab = true
             runtime.compositor.token_map.is_empty(),
             "compositor token_map should be empty when config_toml is None"
         );
-    }
-
-    #[cfg(feature = "v2_preview")]
-    fn media_ingress_test_config() -> String {
-        r#"
-[runtime]
-profile = "full-display"
-headless_width = 320
-headless_height = 180
-
-[[tabs]]
-name = "Main"
-
-[media_ingress]
-enabled = true
-approved_zone = "media-pip"
-max_active_streams = 1
-default_classification = "household"
-operator_disabled = false
-
-[media_ingress.geometry]
-x = 80
-y = 45
-width = 160
-height = 90
-
-[agents.registered.windows-local-media-producer]
-capabilities = ["media_ingress", "publish_zone:media-pip"]
-"#
-        .to_string()
-    }
-
-    #[cfg(feature = "v2_preview")]
-    fn media_test_frame(rgba: [u8; 4]) -> tze_hud_compositor::VideoFrame {
-        tze_hud_compositor::VideoFrame {
-            rgba: rgba.into_iter().cycle().take(4 * 4 * 4).collect(),
-            width: 4,
-            height: 4,
-            presented_at_us: 1,
-        }
-    }
-
-    /// Verify that `publish_synthetic_media_surface` rejects calls when the
-    /// runtime config has media ingress disabled (the default).
-    ///
-    /// This test exercises the pure-Rust gate check in
-    /// `publish_synthetic_media_surface` — it does NOT create a GPU device.
-    /// We drive the same conditional logic directly via
-    /// `HeadlessConfig::build_runtime_context()`.
-    #[test]
-    #[cfg(feature = "v2_preview")]
-    fn synthetic_media_surface_rejects_default_off_config() {
-        let config = HeadlessConfig {
-            width: 320,
-            height: 180,
-            grpc_port: 0,
-            bind_all_interfaces: false,
-            psk: "test".to_string(),
-            config_toml: None,
-        };
-        // build_runtime_context is pure Rust — no wgpu adapter required.
-        let (runtime_ctx, _) = config
-            .build_runtime_context()
-            .expect("build_runtime_context should succeed with config_toml: None in test builds");
-
-        // Mirror the gate check from publish_synthetic_media_surface.
-        let media = &runtime_ctx.media_ingress;
-        let err = if !media.enabled {
-            "media ingress is disabled by runtime config".to_string()
-        } else if media.operator_disabled {
-            "media ingress is operator-disabled".to_string()
-        } else {
-            panic!("default-off config should have disabled media ingress");
-        };
-
-        assert!(
-            err.contains("disabled"),
-            "default-off rejection should be explicit, got {err:?}"
-        );
-    }
-
-    /// Verify that `publish_synthetic_media_surface` publishes a
-    /// `VideoSurfaceRef` to the "media-pip" zone and drives the video surface
-    /// state machine to `Streaming` when media ingress is enabled.
-    ///
-    /// This test exercises the pure-Rust path — scene zone registration,
-    /// `publish_to_zone`, and `VideoSurfaceMap` state-machine transitions — all
-    /// without creating a GPU device.  The GPU texture-upload step inside
-    /// `publish_synthetic_media_surface` is replaced by direct calls to
-    /// `VideoSurfaceMap` (the same state machine that `upload_video_frame`
-    /// drives after the GPU upload succeeds).
-    #[test]
-    #[cfg(feature = "v2_preview")]
-    fn synthetic_media_surface_publishes_when_media_gate_enabled() {
-        use tze_hud_compositor::video_surface::MediaEvent;
-
-        let config = HeadlessConfig {
-            width: 320,
-            height: 180,
-            grpc_port: 0,
-            bind_all_interfaces: false,
-            psk: "test".to_string(),
-            config_toml: Some(media_ingress_test_config()),
-        };
-
-        // build_runtime_context is pure Rust — no wgpu adapter required.
-        let (runtime_ctx, _) = config
-            .build_runtime_context()
-            .expect("build_runtime_context should succeed with enabled media config");
-
-        // Confirm the gate passes (mirrors the check in publish_synthetic_media_surface).
-        assert!(
-            runtime_ctx.media_ingress.enabled,
-            "media_ingress should be enabled by test config"
-        );
-        assert!(
-            !runtime_ctx.media_ingress.operator_disabled,
-            "operator_disabled should be false in test config"
-        );
-
-        // Build a minimal SceneGraph and register the approved media zone, which
-        // mirrors what run_component_startup step 8 does at runtime.
-        let mut scene = SceneGraph::new(320., 180.);
-        let raw: tze_hud_config::raw::RawConfig =
-            toml::from_str(&media_ingress_test_config()).expect("TOML parse");
-        if let Some(zone_def) = tze_hud_config::approved_media_zone(&raw) {
-            scene.zone_registry.register(zone_def);
-        }
-
-        // Publish the VideoSurfaceRef to the approved zone — pure Rust scene mutation.
-        let surface_id = SceneId::new();
-        scene
-            .publish_to_zone(
-                tze_hud_config::APPROVED_MEDIA_ZONE,
-                ZoneContent::VideoSurfaceRef(surface_id),
-                "windows-local-media-producer",
-                None,
-                None,
-                None,
-            )
-            .expect("publish_to_zone should succeed with registered media-pip zone");
-
-        // Drive the VideoSurfaceMap state machine to Streaming without a GPU device.
-        // This mirrors what upload_video_frame does after the GPU texture write:
-        //   ensure → Admitted, handle(Admitted) → Streaming, handle_decoded_frame → Streaming + frame stored.
-        let mut video_surfaces = tze_hud_compositor::VideoSurfaceMap::new();
-        video_surfaces.ensure(surface_id);
-        video_surfaces.handle(surface_id, &MediaEvent::Admitted);
-        video_surfaces.handle_decoded_frame(surface_id, media_test_frame([0, 0, 255, 255]));
-
-        assert_eq!(
-            video_surfaces.render_state_for(&surface_id),
-            tze_hud_compositor::VideoRenderState::Streaming,
-            "synthetic frame upload should make the surface renderable"
-        );
-
-        let publishes = scene
-            .zone_registry
-            .active_publishes
-            .get(tze_hud_config::APPROVED_MEDIA_ZONE)
-            .expect("media-pip should have one VideoSurfaceRef publish");
-        assert!(matches!(
-            publishes.last().map(|record| &record.content),
-            Some(ZoneContent::VideoSurfaceRef(id)) if *id == surface_id
-        ));
     }
 
     // ── bind_all_interfaces tests (hud-d2lld) ─────────────────────────────────

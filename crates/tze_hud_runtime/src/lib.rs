@@ -88,13 +88,9 @@ pub mod element_store;
 pub mod event_bus;
 pub mod font_loader;
 pub mod gpu_lock;
-#[cfg(feature = "gstreamer")]
-pub mod gst_decode_pipeline;
 pub mod headless;
 pub mod idle_efficiency;
 pub mod mcp;
-pub mod media_admission;
-pub mod media_ingress;
 pub mod mutation_budget_bridge;
 pub mod pipeline;
 pub mod portal_cadence;
@@ -182,17 +178,6 @@ pub use idle_efficiency::{
     IdleEfficiencyCounters, IdleEfficiencyDeltaError, IdleEfficiencySnapshot, RuntimeWakeupSource,
 };
 pub use mcp::{McpServerConfig, start_mcp_http_server};
-pub use media_admission::{
-    ActivationGateError, ActivationGateOutcome, ActivationGateRequest, C13_CAPABILITIES,
-    CAPABILITY_AGENT_TO_AGENT_MEDIA, CAPABILITY_AUDIO_EMIT, CAPABILITY_CLOUD_RELAY,
-    CAPABILITY_EXTERNAL_TRANSCODE, CAPABILITY_FEDERATED_SEND, CAPABILITY_MEDIA_INGRESS,
-    CAPABILITY_MICROPHONE_INGRESS, CAPABILITY_RECORDING, CapabilityRememberRecord,
-    CollectingMediaAuditSink, DEFAULT_DIALOG_TIMEOUT_MS, DEFAULT_MAX_CONCURRENT_MEDIA_STREAMS,
-    MAX_SIGNALING_REQUESTS_PER_SECOND, MIN_GPU_TEXTURE_HEADROOM_BYTES, MediaActivationGate,
-    MediaAuditSink, MediaCapabilityConfig, MediaTransport, NoopMediaAuditSink, OperatorRole,
-    REMEMBER_TTL_US, SessionCapabilityCache, SessionCapabilityGrant, SignalingRateLimiter,
-    now_us as media_now_us, now_us_monotonic as media_now_us_monotonic, runtime_level_to_e25_step,
-};
 pub use mutation_budget_bridge::RuntimeMutationBudgetEnforcer;
 pub use quiet_hours::{
     GateDecision, QuietHoursConfig, QuietHoursGate, ZoneContentionPolicy, ZoneQueue,
@@ -242,11 +227,6 @@ pub use admission::{
     HARD_MAX_RESIDENT_SESSIONS, HARD_MAX_TOTAL_SESSIONS, HotConnectSnapshot, LimitKind,
     ResourceExhaustedDetail, SessionLimits,
 };
-pub use media_ingress::{
-    MediaAdmissionError, MediaAdmissionOutcome, MediaAdmissionRejectCode, MediaAdmissionRequest,
-    MediaCloseReason, MediaDegradationTrigger, MediaIngressStateMachine, MediaPauseTrigger,
-    MediaSessionEvent, MediaSessionState, TransitionOutcome, check_media_admission,
-};
 pub use pipeline::{
     DEFAULT_POST_REVOCATION_CLEANUP_DELAY_MS, FramePipeline, HitTestSnapshot,
     INPUT_TO_LOCAL_ACK_BUDGET_US, INPUT_TO_NEXT_PRESENT_BUDGET_US, INPUT_TO_SCENE_COMMIT_BUDGET_US,
@@ -265,10 +245,8 @@ pub use shell::badges::{
     BUDGET_WARNING_AMBER_COLOR, BUDGET_WARNING_BORDER_OPACITY, BUDGET_WARNING_BORDER_PX,
     BackpressureSignal, BadgeFrame, DISCONNECTED_BADGE_OPACITY, DISCONNECTED_CONTENT_OPACITY,
     DISCONNECTION_BADGE_BG_COLOR, DISCONNECTION_BADGE_ICON_COLOR, DISCONNECTION_BADGE_OFFSET_PX,
-    DISCONNECTION_BADGE_SIZE_PX, DISCONNECTION_CONTENT_SCRIM_COLOR,
-    MEDIA_DISCONNECT_BADGE_DEFAULT_COLOR, MEDIA_DISCONNECT_BADGE_MARGIN_PX,
-    MEDIA_DISCONNECT_BADGE_SCRIM_COLOR, MEDIA_DISCONNECT_BADGE_SIZE_PX, TileBadgeState,
-    build_badge_cmds, build_media_disconnect_badge_cmds,
+    DISCONNECTION_BADGE_SIZE_PX, DISCONNECTION_CONTENT_SCRIM_COLOR, TileBadgeState,
+    build_badge_cmds,
 };
 pub use threads::{
     CompositorReady, CompositorThreadHandle, NetworkRuntime, ShutdownConfig, ShutdownReason,

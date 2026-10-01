@@ -5,7 +5,6 @@
 
 use crate::loader::TzeHudConfig;
 use tze_hud_scene::config::{ConfigErrorCode, ConfigLoader, ParseError};
-use tze_hud_scene::types::GeometryPolicy;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -992,7 +991,6 @@ fn spec_all_flat_canonical_capabilities_accepted() {
         "high_priority_z_order",
         "exceed_default_budgets",
         "read_telemetry",
-        "media_ingress",
         "resident_mcp",
     ];
     let cap_list = caps
@@ -1027,187 +1025,6 @@ capabilities = [{cap_list}]
         cap_errors.is_empty(),
         "all flat canonical capabilities should be accepted, got errors: {cap_errors:?}"
     );
-}
-
-#[test]
-fn media_ingress_absent_defaults_to_disabled() {
-    let toml = r#"
-[runtime]
-profile = "full-display"
-
-[[tabs]]
-name = "Main"
-"#;
-    let resolved = parse_ok(toml).freeze().expect("config should freeze");
-    assert!(!resolved.media_ingress.enabled);
-    assert_eq!(resolved.media_ingress.max_active_streams, 0);
-    assert!(resolved.media_ingress.approved_zone.is_none());
-}
-
-#[test]
-fn media_ingress_explicit_windows_slice_freezes() {
-    let toml = r#"
-[runtime]
-profile = "full-display"
-headless_width = 3840
-headless_height = 2160
-
-[[tabs]]
-name = "Main"
-
-[media_ingress]
-enabled = true
-approved_zone = "media-pip"
-max_active_streams = 1
-default_classification = "household"
-operator_disabled = false
-
-[media_ingress.geometry]
-x = 1440
-y = 756
-width = 420
-height = 236
-
-[agents.registered.windows-local-media-producer]
-capabilities = ["media_ingress", "publish_zone:media-pip"]
-"#;
-    let resolved = parse_ok(toml).freeze().expect("config should freeze");
-    assert!(resolved.media_ingress.enabled);
-    assert_eq!(
-        resolved.media_ingress.approved_zone.as_deref(),
-        Some("media-pip")
-    );
-    assert_eq!(resolved.media_ingress.max_active_streams, 1);
-    assert_eq!(
-        resolved.media_ingress.default_classification.as_deref(),
-        Some("household")
-    );
-    assert_eq!(
-        resolved.media_ingress.zone_geometry,
-        Some(GeometryPolicy::Relative {
-            x_pct: 1440.0 / 3840.0,
-            y_pct: 756.0 / 2160.0,
-            width_pct: 420.0 / 3840.0,
-            height_pct: 236.0 / 2160.0,
-        })
-    );
-    assert!(!resolved.media_ingress.operator_disabled);
-    assert_eq!(
-        resolved
-            .agent_capabilities
-            .get("windows-local-media-producer")
-            .expect("producer should be registered"),
-        &vec![
-            "media_ingress".to_string(),
-            "publish_zone:media-pip".to_string()
-        ]
-    );
-}
-
-#[test]
-fn media_ingress_enabled_requires_approved_zone_and_fixed_geometry() {
-    let toml = r#"
-[runtime]
-profile = "full-display"
-
-[[tabs]]
-name = "Main"
-
-[media_ingress]
-enabled = true
-approved_zone = "pip"
-max_active_streams = 2
-default_classification = ""
-
-[media_ingress.geometry]
-x_pct = 0.75
-y_pct = 0.70
-width_pct = 0.22
-height_pct = 0.26
-"#;
-    let loader = parse_ok(toml);
-    let errors = loader.validate();
-    let media_errors: Vec<_> = errors
-        .iter()
-        .filter(|e| matches!(e.code, ConfigErrorCode::ConfigInvalidMediaIngress))
-        .collect();
-    assert!(
-        media_errors.len() >= 4,
-        "invalid media ingress config should report all media errors: {media_errors:?}"
-    );
-}
-
-#[test]
-fn invalid_media_ingress_does_not_resolve_or_register_zone() {
-    let toml = r#"
-[runtime]
-profile = "full-display"
-
-[[tabs]]
-name = "Main"
-
-[media_ingress]
-enabled = true
-approved_zone = "pip"
-max_active_streams = 1
-default_classification = "household"
-operator_disabled = false
-
-[media_ingress.geometry]
-x = 1440
-y = 756
-width = 420
-height = 236
-"#;
-    let loader = parse_ok(toml);
-    assert!(
-        loader
-            .validate()
-            .iter()
-            .any(|e| matches!(e.code, ConfigErrorCode::ConfigInvalidMediaIngress)),
-        "invalid approved_zone should fail media ingress validation"
-    );
-    assert!(!crate::resolve_media_ingress(&loader.raw).enabled);
-    assert!(crate::approved_media_zone(&loader.raw).is_none());
-}
-
-#[test]
-fn media_ingress_requires_positive_reference_dimensions() {
-    let toml = r#"
-[runtime]
-profile = "full-display"
-headless_width = 0
-headless_height = 0
-
-[[tabs]]
-name = "Main"
-
-[media_ingress]
-enabled = true
-approved_zone = "media-pip"
-max_active_streams = 1
-default_classification = "household"
-operator_disabled = false
-
-[media_ingress.geometry]
-x = 1440
-y = 756
-width = 420
-height = 236
-"#;
-    let loader = parse_ok(toml);
-    let media_fields = loader
-        .validate()
-        .into_iter()
-        .filter(|e| matches!(e.code, ConfigErrorCode::ConfigInvalidMediaIngress))
-        .map(|e| e.field_path)
-        .collect::<Vec<_>>();
-    assert!(
-        media_fields.contains(&"runtime.headless_width".to_string())
-            && media_fields.contains(&"runtime.headless_height".to_string()),
-        "zero reference dimensions should be rejected for media ingress: {media_fields:?}"
-    );
-    assert!(!crate::resolve_media_ingress(&loader.raw).enabled);
 }
 
 // ── freeze / ResolvedConfig ───────────────────────────────────────────────────

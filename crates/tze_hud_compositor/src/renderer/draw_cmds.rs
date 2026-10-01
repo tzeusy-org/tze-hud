@@ -34,29 +34,6 @@ pub(super) struct TexturedDrawCmd {
     pub(super) tint: [f32; 4],
 }
 
-/// A draw command for a decoded video frame (v2 media plane, `v2_preview` only).
-///
-/// Collected by [`Compositor::collect_video_frame_cmds`] and consumed by
-/// [`Compositor::encode_video_frame_pass`].  The bind group is looked up from
-/// `video_frame_cache` keyed by `surface_id` at draw time.
-///
-/// Separate from [`TexturedDrawCmd`] because video surfaces are keyed by
-/// [`tze_hud_scene::types::SceneId`] (not `ResourceId`) and come from a
-/// different cache (`video_frame_cache` vs `image_texture_cache`).
-#[cfg(feature = "v2_preview")]
-pub(crate) struct VideoFrameDrawCmd {
-    /// The `SceneId` of the `ZoneContent::VideoSurfaceRef` surface.
-    pub(crate) surface_id: tze_hud_scene::types::SceneId,
-    /// Pixel-space destination rectangle.
-    pub(crate) x: f32,
-    pub(crate) y: f32,
-    pub(crate) w: f32,
-    pub(crate) h: f32,
-    /// Per-vertex tint (currently always opaque white — no fade animation
-    /// on the video frame itself; badge is rendered by the chrome pass).
-    pub(crate) tint: [f32; 4],
-}
-
 /// Collected runtime drag handle geometry + style for one visible element.
 #[derive(Clone, Debug)]
 pub(super) struct DragHandleEntry {
