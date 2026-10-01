@@ -145,31 +145,6 @@ pub struct RawTabLayout {
     pub reserved_right_fraction: Option<f64>,
 }
 
-// ─── [degradation] ───────────────────────────────────────────────────────────
-
-/// `[degradation]` table — optional.
-#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
-pub struct RawDegradation {
-    // Frame-time thresholds (ms) — must be monotonically non-decreasing.
-    pub coalesce_frame_ms: Option<f64>,
-    pub simplify_rendering_frame_ms: Option<f64>,
-    pub shed_tiles_frame_ms: Option<f64>,
-    pub audio_only_frame_ms: Option<f64>,
-
-    // GPU fraction thresholds — must be monotonically non-decreasing.
-    pub reduce_media_quality_gpu_fraction: Option<f64>,
-    pub reduce_concurrent_streams_gpu_fraction: Option<f64>,
-}
-
-// ─── [chrome] ────────────────────────────────────────────────────────────────
-
-/// `[chrome]` table — optional.
-#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
-pub struct RawChrome {
-    // Intentionally minimal — chrome options are spec-reserved for now.
-    // Future fields added here when the chrome spec matures.
-}
-
 // ─── [zones] ─────────────────────────────────────────────────────────────────
 
 /// `[zones]` table — optional.  Custom zone type definitions.
@@ -366,8 +341,6 @@ pub struct RawConfig {
     #[serde(default)]
     pub tabs: Vec<RawTab>,
 
-    pub degradation: Option<RawDegradation>,
-    pub chrome: Option<RawChrome>,
     pub zones: Option<RawZones>,
     pub agents: Option<RawAgents>,
     /// Optional widget bundle directories to scan at startup.

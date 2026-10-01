@@ -40,7 +40,7 @@ use tze_hud_scene::config::{
 use crate::agents;
 use crate::capability::{capability_hint, has_reserved_event_prefix};
 use crate::profile;
-use crate::raw::{RawConfig, RawDegradation};
+use crate::raw::RawConfig;
 use crate::resolver;
 use crate::runtime_widget_assets;
 use crate::tokens;
@@ -227,9 +227,6 @@ impl ConfigLoader for TzeHudConfig {
         }
 
         // ── (7) Degradation thresholds ────────────────────────────────────────
-        if let Some(deg) = &self.raw.degradation {
-            validate_degradation_order(deg, &mut errors);
-        }
 
         // ── (8) Scene event naming convention (tab_switch_on_event) ──────────
         for (i, tab) in self.raw.tabs.iter().enumerate() {
@@ -659,46 +656,6 @@ fn validate_fps_range(
     }
 }
 
-/// Validate degradation threshold ordering.
-fn validate_degradation_order(deg: &RawDegradation, errors: &mut Vec<ConfigError>) {
-    // Frame-time thresholds must be monotonically non-decreasing:
-    // coalesce_frame_ms <= simplify_rendering_frame_ms <= shed_tiles_frame_ms <= audio_only_frame_ms
-    let frame_thresholds: &[(&str, Option<f64>)] = &[
-        ("coalesce_frame_ms", deg.coalesce_frame_ms),
-        (
-            "simplify_rendering_frame_ms",
-            deg.simplify_rendering_frame_ms,
-        ),
-        ("shed_tiles_frame_ms", deg.shed_tiles_frame_ms),
-        ("audio_only_frame_ms", deg.audio_only_frame_ms),
-    ];
-
-    check_monotone_non_decreasing(frame_thresholds, errors);
-
-    // GPU fraction thresholds:
-    // reduce_media_quality_gpu_fraction <= reduce_concurrent_streams_gpu_fraction
-    let gpu_thresholds: &[(&str, Option<f64>)] = &[
-        (
-            "reduce_media_quality_gpu_fraction",
-            deg.reduce_media_quality_gpu_fraction,
-        ),
-        (
-            "reduce_concurrent_streams_gpu_fraction",
-            deg.reduce_concurrent_streams_gpu_fraction,
-        ),
-    ];
-
-    check_monotone_non_decreasing(gpu_thresholds, errors);
-}
-
-/// Validate per-agent resource budget overrides against the active profile ceiling.
-///
-/// From spec §Requirement: Agent Registration with Per-Agent Budget Overrides:
-/// - `max_tiles` MUST NOT exceed `profile.max_tiles`.
-/// - `max_texture_mb` MUST NOT exceed `profile.max_texture_mb`.
-/// - `max_update_hz` MUST NOT exceed `profile.max_agent_update_hz`.
-///
-/// Violations produce `CONFIG_AGENT_BUDGET_EXCEEDS_PROFILE`.
 fn validate_agents(raw: &RawConfig, errors: &mut Vec<ConfigError>) {
     let ceiling = match profile::profile_ceiling_for_validation(raw) {
         Some(p) => p,
@@ -766,30 +723,6 @@ fn validate_agents(raw: &RawConfig, errors: &mut Vec<ConfigError>) {
                     ),
                 });
             }
-        }
-    }
-}
-
-/// Check that each pair of adjacent non-None thresholds is non-decreasing.
-fn check_monotone_non_decreasing(fields: &[(&str, Option<f64>)], errors: &mut Vec<ConfigError>) {
-    let mut prev: Option<(&str, f64)> = None;
-    for (name, val_opt) in fields {
-        if let Some(val) = *val_opt {
-            if let Some((prev_name, prev_val)) = prev
-                && val < prev_val
-            {
-                errors.push(ConfigError {
-                    code: ConfigErrorCode::DegradationThresholdOrder,
-                    field_path: format!("degradation.{name}"),
-                    expected: format!("{name} ({val}) >= {prev_name} ({prev_val})"),
-                    got: format!("{name}={val}, {prev_name}={prev_val}"),
-                    hint: format!(
-                        "degradation thresholds must be non-decreasing; \
-                             {name} ({val}) is less than preceding {prev_name} ({prev_val})"
-                    ),
-                });
-            }
-            prev = Some((name, val));
         }
     }
 }
@@ -994,42 +927,5 @@ mod unit_tests {
         let mut errors = Vec::new();
         validate_fps_range(Some(60), Some(30), &mut errors);
         assert!(errors.is_empty());
-    }
-
-    // ── degradation order ────────────────────────────────────────────────────
-
-    #[test]
-    fn test_degradation_out_of_order_produces_error() {
-        let deg = RawDegradation {
-            coalesce_frame_ms: Some(14.0),
-            shed_tiles_frame_ms: Some(12.0),
-            ..Default::default()
-        };
-        let mut errors = Vec::new();
-        validate_degradation_order(&deg, &mut errors);
-        assert!(
-            errors
-                .iter()
-                .any(|e| matches!(e.code, ConfigErrorCode::DegradationThresholdOrder)),
-            "out-of-order thresholds should produce error"
-        );
-    }
-
-    #[test]
-    fn test_degradation_in_order_no_error() {
-        let deg = RawDegradation {
-            coalesce_frame_ms: Some(10.0),
-            simplify_rendering_frame_ms: Some(12.0),
-            shed_tiles_frame_ms: Some(14.0),
-            audio_only_frame_ms: Some(20.0),
-            reduce_media_quality_gpu_fraction: Some(0.7),
-            reduce_concurrent_streams_gpu_fraction: Some(0.9),
-        };
-        let mut errors = Vec::new();
-        validate_degradation_order(&deg, &mut errors);
-        assert!(
-            errors.is_empty(),
-            "in-order thresholds should not produce errors"
-        );
     }
 }

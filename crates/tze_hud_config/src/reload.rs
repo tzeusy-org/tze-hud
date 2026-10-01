@@ -4,8 +4,7 @@
 //!
 //! - **Configuration Reload** (lines 263-274, v1-mandatory)
 //!   SIGHUP and `RuntimeService.ReloadConfig` gRPC trigger a live reload.
-//!   Hot-reloadable fields: `[degradation]`, `[chrome]`,
-//!   `[agents.dynamic_policy]`.
+//!   Hot-reloadable fields: `[agents.dynamic_policy]`.
 //!   Frozen fields (require restart): `[runtime]`, `[[tabs]]`,
 //!   `[agents.registered]`.
 //!   On reload: entire config re-validated; validation errors returned without
@@ -29,8 +28,6 @@
 //! | `[component_profile_bundles]`   | Frozen (restart required) |
 //! | `[component_profiles]`          | Frozen (restart required) |
 //! | `[widget_runtime_assets]`       | Frozen (restart required) |
-//! | `[degradation]`                 | Hot-reloadable |
-//! | `[chrome]`                      | Hot-reloadable |
 //! | `[agents.dynamic_policy]`       | Hot-reloadable |
 //!
 //! ## Design Note
@@ -50,7 +47,7 @@
 use tze_hud_scene::config::{ConfigError, ConfigErrorCode};
 
 use crate::loader::TzeHudConfig;
-use crate::raw::{RawChrome, RawDegradation, RawDynamicPolicy};
+use crate::raw::RawDynamicPolicy;
 
 // ─── Field classification ──────────────────────────────────────────────────────
 
@@ -67,11 +64,11 @@ pub enum FieldClassification {
 
 /// Returns the reload classification for a top-level configuration section.
 ///
-/// `section_path` is the dotted section name (e.g., `"runtime"`, `"degradation"`).
+/// `section_path` is the dotted section name (e.g., `"runtime"`, `"agents.dynamic_policy"`).
 pub fn section_classification(section_path: &str) -> FieldClassification {
     match section_path {
         // Hot-reloadable sections.
-        "degradation" | "chrome" | "agents.dynamic_policy" => FieldClassification::HotReloadable,
+        "agents.dynamic_policy" => FieldClassification::HotReloadable,
         // Everything else is frozen at startup.
         _ => FieldClassification::Frozen,
     }
@@ -174,10 +171,6 @@ pub fn check_frozen_section_changes(
 /// suitable as the initial state before the first SIGHUP or `ReloadConfig` call.
 #[derive(Clone, Debug, Default)]
 pub struct HotReloadableConfig {
-    /// Updated `[degradation]` section (or defaults if absent).
-    pub degradation: RawDegradation,
-    /// Updated `[chrome]` section (or defaults if absent).
-    pub chrome: RawChrome,
     /// Updated `[agents.dynamic_policy]` (or `None` if absent — disables dynamic agents).
     pub dynamic_policy: Option<RawDynamicPolicy>,
 }
@@ -221,8 +214,6 @@ pub fn reload_config(new_toml: &str) -> Result<HotReloadableConfig, Vec<ConfigEr
     // Step 3: extract the hot-reloadable subset.
     let raw = loader.into_raw();
     let hot = HotReloadableConfig {
-        degradation: raw.degradation.unwrap_or_default(),
-        chrome: raw.chrome.unwrap_or_default(),
         dynamic_policy: raw.agents.and_then(|a| a.dynamic_policy),
     };
 
@@ -375,14 +366,6 @@ name = "Main"
     #[test]
     fn test_hot_reloadable_sections_classified_correctly() {
         assert_eq!(
-            section_classification("degradation"),
-            FieldClassification::HotReloadable
-        );
-        assert_eq!(
-            section_classification("chrome"),
-            FieldClassification::HotReloadable
-        );
-        assert_eq!(
             section_classification("agents.dynamic_policy"),
             FieldClassification::HotReloadable
         );
@@ -399,8 +382,8 @@ profile = "full-display"
 [[tabs]]
 name = "Main"
 
-[degradation]
-coalesce_frame_ms = 20.0
+[agents.dynamic_policy]
+allow_dynamic_agents = true
 "#;
         let result = reload_config(toml);
         assert!(
@@ -408,7 +391,10 @@ coalesce_frame_ms = 20.0
             "valid config should reload successfully, got: {result:?}"
         );
         let hot = result.unwrap();
-        assert_eq!(hot.degradation.coalesce_frame_ms, Some(20.0));
+        assert_eq!(
+            hot.dynamic_policy.as_ref().map(|p| p.allow_dynamic_agents),
+            Some(true)
+        );
     }
 
     #[test]
@@ -455,7 +441,12 @@ name = "Tab1"
     fn test_reload_config_missing_optional_sections_use_defaults() {
         // When optional sections are absent from new TOML, defaults applied.
         let hot = reload_config(minimal_valid_toml()).expect("reload should succeed");
-        assert!(hot.degradation.coalesce_frame_ms.is_none());
+        assert!(
+            hot.dynamic_policy
+                .as_ref()
+                .map(|p| p.allow_dynamic_agents)
+                .is_none()
+        );
         // Dynamic policy absent → None.
         assert!(hot.dynamic_policy.is_none());
     }

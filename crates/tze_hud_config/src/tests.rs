@@ -248,32 +248,6 @@ name = "Main"
     );
 }
 
-// ── Spec §Degradation Threshold Ordering ──────────────────────────────────────
-
-/// WHEN degradation thresholds are out of order THEN CONFIG_DEGRADATION_THRESHOLD_ORDER.
-#[test]
-fn spec_degradation_out_of_order_rejected() {
-    let toml = r#"
-[runtime]
-profile = "full-display"
-
-[[tabs]]
-name = "Main"
-
-[degradation]
-shed_tiles_frame_ms = 12.0
-coalesce_frame_ms = 14.0
-"#;
-    let loader = parse_ok(toml);
-    let errors = loader.validate();
-    assert!(
-        errors
-            .iter()
-            .any(|e| matches!(e.code, ConfigErrorCode::DegradationThresholdOrder)),
-        "out-of-order thresholds should produce CONFIG_DEGRADATION_THRESHOLD_ORDER"
-    );
-}
-
 // ── Spec §Scene Event Naming Convention ──────────────────────────────────────
 
 /// WHEN tab_switch_on_event = "doorbell.ring" THEN accepted.
@@ -1386,15 +1360,15 @@ profile = "full-display"
 [[tabs]]
 name = "Main"
 
-[degradation]
-coalesce_frame_ms = 20.0
+[agents.dynamic_policy]
+allow_dynamic_agents = true
 "#;
     let result = reload_config(new_toml);
     assert!(result.is_ok(), "valid reload config should succeed");
     let hot = result.unwrap();
     assert_eq!(
-        hot.degradation.coalesce_frame_ms,
-        Some(20.0),
+        hot.dynamic_policy.as_ref().map(|p| p.allow_dynamic_agents),
+        Some(true),
         "reload should apply new degradation threshold"
     );
 }

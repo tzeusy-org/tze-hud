@@ -73,8 +73,7 @@ impl RuntimeService for RuntimeServiceImpl {
     /// Reload hot-reloadable config sections from a new TOML string.
     ///
     /// Per RFC 0006 §9: the entire config is re-validated; only the
-    /// hot-reloadable sections ([degradation], [chrome],
-    /// [agents.dynamic_policy]) are applied on success. Frozen sections
+    /// hot-reloadable sections ([agents.dynamic_policy]) are applied on success. Frozen sections
     /// ([runtime], [[tabs]], [agents.registered]) are silently ignored.
     async fn reload_config(
         &self,
@@ -246,7 +245,7 @@ mod tests {
     use crate::runtime_context::RuntimeContext;
     use std::sync::Arc;
     use tze_hud_config::HotReloadableConfig;
-    use tze_hud_config::raw::{RawChrome, RawDegradation};
+    use tze_hud_config::raw::RawDynamicPolicy;
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -263,8 +262,8 @@ profile = "headless"
 name = "Main"
 default_tab = true
 
-[degradation]
-coalesce_frame_ms = 20.0
+[agents.dynamic_policy]
+allow_dynamic_agents = true
 "#
         .to_string()
     }
@@ -300,7 +299,13 @@ name = "Main"
         let svc = RuntimeServiceImpl::new(Arc::clone(&ctx));
 
         // Before reload: defaults (all None).
-        assert!(ctx.hot_config().degradation.coalesce_frame_ms.is_none());
+        assert!(
+            ctx.hot_config()
+                .dynamic_policy
+                .as_ref()
+                .map(|p| p.allow_dynamic_agents)
+                .is_none()
+        );
 
         let req = Request::new(ReloadConfigRequest {
             config_toml: valid_toml(),
@@ -320,8 +325,11 @@ name = "Main"
 
         // After reload: new value is visible.
         assert_eq!(
-            ctx.hot_config().degradation.coalesce_frame_ms,
-            Some(20.0),
+            ctx.hot_config()
+                .dynamic_policy
+                .as_ref()
+                .map(|p| p.allow_dynamic_agents),
+            Some(true),
             "hot-reloadable section must be applied"
         );
     }
@@ -336,16 +344,17 @@ name = "Main"
 
         // Set a known hot config value before the failed reload.
         ctx.reload_hot_config(HotReloadableConfig {
-            degradation: RawDegradation {
-                coalesce_frame_ms: Some(10.0),
+            dynamic_policy: Some(RawDynamicPolicy {
+                allow_dynamic_agents: true,
                 ..Default::default()
-            },
-            chrome: RawChrome::default(),
-            dynamic_policy: None,
+            }),
         });
         assert_eq!(
-            ctx.hot_config().degradation.coalesce_frame_ms,
-            Some(10.0),
+            ctx.hot_config()
+                .dynamic_policy
+                .as_ref()
+                .map(|p| p.allow_dynamic_agents),
+            Some(true),
             "setup: initial hot config should be applied"
         );
 
@@ -367,8 +376,11 @@ name = "Main"
 
         // Running config must be unchanged.
         assert_eq!(
-            ctx.hot_config().degradation.coalesce_frame_ms,
-            Some(10.0),
+            ctx.hot_config()
+                .dynamic_policy
+                .as_ref()
+                .map(|p| p.allow_dynamic_agents),
+            Some(true),
             "running config must NOT be modified on parse failure"
         );
     }
@@ -399,7 +411,11 @@ name = "Main"
 
         // Running config is still default.
         assert!(
-            ctx.hot_config().degradation.coalesce_frame_ms.is_none(),
+            ctx.hot_config()
+                .dynamic_policy
+                .as_ref()
+                .map(|p| p.allow_dynamic_agents)
+                .is_none(),
             "running config must remain default after validation failure"
         );
     }
@@ -450,7 +466,11 @@ name = "Main"
 
         let ctx = Arc::new(RuntimeContext::headless_default());
         assert!(
-            ctx.hot_config().degradation.coalesce_frame_ms.is_none(),
+            ctx.hot_config()
+                .dynamic_policy
+                .as_ref()
+                .map(|p| p.allow_dynamic_agents)
+                .is_none(),
             "initial defaults"
         );
 
@@ -463,8 +483,8 @@ profile = "headless"
 [[tabs]]
 name = "Main"
 
-[degradation]
-coalesce_frame_ms = 20.0
+[agents.dynamic_policy]
+allow_dynamic_agents = true
 "#;
         {
             let mut f = std::fs::File::create(&tmp).expect("create temp file");
@@ -480,8 +500,11 @@ coalesce_frame_ms = 20.0
             .expect("trigger_reload must succeed with valid config");
 
         assert_eq!(
-            ctx.hot_config().degradation.coalesce_frame_ms,
-            Some(20.0),
+            ctx.hot_config()
+                .dynamic_policy
+                .as_ref()
+                .map(|p| p.allow_dynamic_agents),
+            Some(true),
             "after SIGHUP-triggered reload, hot config must be updated"
         );
 
