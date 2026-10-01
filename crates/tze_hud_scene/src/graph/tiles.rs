@@ -136,7 +136,6 @@ impl SceneGraph {
                 z_order,
                 opacity: 1.0,
                 input_mode: InputMode::Capture,
-                sync_group: None,
                 present_at: None,
                 expires_at: None,
                 resource_budget: ResourceBudget::default(),
@@ -317,8 +316,6 @@ impl SceneGraph {
         self.require_active_lease(lease_id)?;
         self.require_capability(lease_id, Capability::ModifyOwnTiles)?;
 
-        // Leave sync group before removing the tile to avoid dangling member entries.
-        let _ = self.leave_sync_group(tile_id);
         self.remove_tile_and_nodes(tile_id);
         self.version += 1;
         Ok(())

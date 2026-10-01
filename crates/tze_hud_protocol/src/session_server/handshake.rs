@@ -276,13 +276,7 @@ pub(super) async fn handle_session_init(
         ),
     };
 
-    // ── Step 5: Clock skew estimation (RFC 0003 §1.3) ────────────────────────
     let compositor_ts = now_wall_us();
-    let estimated_skew = if init.agent_timestamp_wall_us > 0 {
-        init.agent_timestamp_wall_us as i64 - compositor_ts as i64
-    } else {
-        0
-    };
 
     let seq = session.next_server_seq();
     let _ = tx
@@ -299,7 +293,6 @@ pub(super) async fn handle_session_init(
                 heartbeat_interval_ms: DEFAULT_HEARTBEAT_INTERVAL_MS,
                 server_sequence: seq,
                 compositor_timestamp_wall_us: compositor_ts,
-                estimated_skew_us: estimated_skew,
                 active_subscriptions: sub_result.active,
                 denied_subscriptions: sub_result.denied,
                 negotiated_protocol_version: negotiated_version,

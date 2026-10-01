@@ -113,7 +113,7 @@ impl SceneGraph {
         if !self.tabs.contains_key(&tab_id) {
             return Err(ValidationError::TabNotFound { id: tab_id });
         }
-        // Remove all tiles in this tab (leave sync groups first to avoid dangling members)
+        // Remove all tiles in this tab
         let tab_tiles: Vec<SceneId> = self
             .tiles
             .values()
@@ -121,9 +121,6 @@ impl SceneGraph {
             .map(|t| t.id)
             .collect();
         for tile_id in tab_tiles {
-            // Remove tile from its sync group before deleting the tile itself,
-            // so sync_group.members does not retain a dangling tile ID.
-            let _ = self.leave_sync_group(tile_id);
             self.remove_tile_and_nodes(tile_id);
         }
         self.tabs.remove(&tab_id);

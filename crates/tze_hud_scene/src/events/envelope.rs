@@ -112,7 +112,7 @@ impl EventSource {
 
 /// Typed payload carried inside a `SceneEvent`.
 ///
-/// The payload is a `oneof` of zone, tile, tab, agent, system, or sync_group
+/// The payload is a `oneof` of zone, tile, tab, agent, or system
 /// payloads per spec §2.1.  Only scene-level variants are present here;
 /// the full set will be populated as beads #2–#4 land.
 ///

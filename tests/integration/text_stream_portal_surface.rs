@@ -11,8 +11,7 @@ use tze_hud_resource::{
     UploadId, UploadStartRequest,
 };
 use tze_hud_scene::{
-    Capability, DeliveryPolicy, MAX_MARKDOWN_BYTES, MessageClass, MonoUs, TimestampValidationInput,
-    TimingError, TimingHints, WallUs, ZONE_TILE_Z_MIN,
+    Capability, MAX_MARKDOWN_BYTES, MonoUs, ZONE_TILE_Z_MIN,
     graph::{MAX_NODES_PER_TILE, SceneGraph},
     lease::LeaseState,
     mutation::{MutationBatch, SceneMutation},
@@ -1044,31 +1043,6 @@ fn portal_typing_indicator_updates_use_transient_in_place_path() {
         scene.zone_registry.active_publishes.is_empty(),
         "typing indicator path must remain raw-tile ambient state, not notification publishes"
     );
-}
-
-#[test]
-fn portal_typing_indicator_timing_profile_is_ephemeral_realtime() {
-    let mut typing_hints = TimingHints::new();
-    typing_hints.message_class = MessageClass::EphemeralRealtime;
-    typing_hints.delivery_policy = DeliveryPolicy::DropIfLate;
-
-    let now = 2_000_000_000_u64;
-    let ctx = TimestampValidationInput {
-        session_open_wall_us: WallUs(now),
-        now_wall_us: WallUs(now),
-        max_future_schedule_us: 300_000_000,
-        estimated_skew_us: 0,
-    };
-    assert!(
-        tze_hud_scene::validate_timing_hints(&typing_hints, &ctx).is_ok(),
-        "portal typing indicators should use valid ephemeral-realtime timing semantics"
-    );
-
-    let mut transactional = typing_hints.clone();
-    transactional.message_class = MessageClass::Transactional;
-    let err = tze_hud_scene::validate_timing_hints(&transactional, &ctx)
-        .expect_err("drop-if-late must reject transactional message class");
-    assert_eq!(err, TimingError::InvalidDeliveryPolicy);
 }
 
 // ─── Scroll-offset seam tests (hud-w5ih) ─────────────────────────────────────

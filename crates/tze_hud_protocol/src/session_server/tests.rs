@@ -720,7 +720,6 @@ async fn handshake(
             ],
             initial_subscriptions: vec!["SCENE_TOPOLOGY".to_string()],
             resume_token: Vec::new(),
-            agent_timestamp_wall_us: now_wall_us(),
             min_protocol_version: 1000,
             max_protocol_version: 1001,
             auth_credential: None,
@@ -766,7 +765,6 @@ async fn handshake_with_requested_capabilities(
             requested_capabilities,
             initial_subscriptions: vec!["SCENE_TOPOLOGY".to_string()],
             resume_token: Vec::new(),
-            agent_timestamp_wall_us: now_wall_us(),
             min_protocol_version: 1000,
             max_protocol_version: 1001,
             auth_credential: None,
@@ -954,7 +952,6 @@ async fn test_handshake_auth_failure() {
                 requested_capabilities: Vec::new(),
                 initial_subscriptions: Vec::new(),
                 resume_token: Vec::new(),
-                agent_timestamp_wall_us: 0,
                 min_protocol_version: 1000,
                 max_protocol_version: 1001,
                 auth_credential: None,
@@ -2365,7 +2362,6 @@ async fn test_subscription_change_result() {
             ],
             initial_subscriptions: vec!["SCENE_TOPOLOGY".to_string()],
             resume_token: Vec::new(),
-            agent_timestamp_wall_us: now_wall_us(),
             ..Default::default()
         })),
     })
@@ -2458,7 +2454,6 @@ async fn test_subscription_change_with_filter_prefix() {
             requested_capabilities: vec!["read_scene_topology".to_string()],
             initial_subscriptions: Vec::new(),
             resume_token: Vec::new(),
-            agent_timestamp_wall_us: now_wall_us(),
             ..Default::default()
         })),
     })
@@ -2600,7 +2595,6 @@ async fn test_subscription_denied_without_capability() {
             // Request INPUT_EVENTS without access_input_events capability
             initial_subscriptions: vec!["SCENE_TOPOLOGY".to_string(), "INPUT_EVENTS".to_string()],
             resume_token: Vec::new(),
-            agent_timestamp_wall_us: now_wall_us(),
             ..Default::default()
         })),
     })
@@ -3570,7 +3564,6 @@ async fn test_state_machine_auth_failure_to_closed() {
                 requested_capabilities: Vec::new(),
                 initial_subscriptions: Vec::new(),
                 resume_token: Vec::new(),
-                agent_timestamp_wall_us: 0,
                 min_protocol_version: 1000,
                 max_protocol_version: 1001,
                 auth_credential: None,
@@ -3873,7 +3866,6 @@ async fn test_auth_structured_psk_credential_accepted() {
             requested_capabilities: Vec::new(),
             initial_subscriptions: Vec::new(),
             resume_token: Vec::new(),
-            agent_timestamp_wall_us: 0,
             min_protocol_version: 1000,
             max_protocol_version: 1001,
             auth_credential: Some(crate::proto::session::AuthCredential {
@@ -3918,7 +3910,6 @@ async fn test_auth_structured_psk_credential_wrong_key() {
             requested_capabilities: Vec::new(),
             initial_subscriptions: Vec::new(),
             resume_token: Vec::new(),
-            agent_timestamp_wall_us: 0,
             min_protocol_version: 1000,
             max_protocol_version: 1001,
             auth_credential: Some(crate::proto::session::AuthCredential {
@@ -3965,7 +3956,6 @@ async fn test_auth_local_socket_credential_accepted() {
             requested_capabilities: Vec::new(),
             initial_subscriptions: Vec::new(),
             resume_token: Vec::new(),
-            agent_timestamp_wall_us: 0,
             min_protocol_version: 1000,
             max_protocol_version: 1001,
             auth_credential: Some(crate::proto::session::AuthCredential {
@@ -4006,7 +3996,6 @@ fn local_socket_session_init(agent_id: &str) -> SessionInit {
         requested_capabilities: Vec::new(),
         initial_subscriptions: Vec::new(),
         resume_token: Vec::new(),
-        agent_timestamp_wall_us: 0,
         min_protocol_version: 1000,
         max_protocol_version: 1001,
         auth_credential: Some(crate::proto::session::AuthCredential {
@@ -4189,7 +4178,6 @@ async fn test_version_negotiation_success() {
             requested_capabilities: Vec::new(),
             initial_subscriptions: Vec::new(),
             resume_token: Vec::new(),
-            agent_timestamp_wall_us: 0,
             min_protocol_version: 1000,
             max_protocol_version: 1001,
             auth_credential: None,
@@ -4231,7 +4219,6 @@ async fn test_version_negotiation_unsupported() {
             requested_capabilities: Vec::new(),
             initial_subscriptions: Vec::new(),
             resume_token: Vec::new(),
-            agent_timestamp_wall_us: 0,
             min_protocol_version: 2000,
             max_protocol_version: 2001,
             auth_credential: None,
@@ -4256,54 +4243,6 @@ async fn test_version_negotiation_unsupported() {
             );
         }
         other => panic!("Expected SessionError(UNSUPPORTED_PROTOCOL_VERSION), got: {other:?}"),
-    }
-}
-
-/// Scenario: Clock sync — estimated_skew_us returned when agent_timestamp_wall_us is set
-/// (RFC 0005 §1.2 / RFC 0003 §1.3)
-/// WHEN agent includes agent_timestamp_wall_us in SessionInit,
-/// THEN runtime computes initial clock-skew and returns estimated_skew_us in SessionEstablished.
-#[tokio::test]
-async fn test_clock_skew_estimation() {
-    let (mut client, _server) = setup_test().await;
-
-    let agent_ts = now_wall_us();
-    let (tx, rx) = tokio::sync::mpsc::channel::<ClientMessage>(64);
-    let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
-
-    tx.send(ClientMessage {
-        sequence: 1,
-        timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::SessionInit(SessionInit {
-            agent_id: "clock-agent".to_string(),
-            agent_display_name: "clock-agent".to_string(),
-            pre_shared_key: "test-key".to_string(),
-            requested_capabilities: Vec::new(),
-            initial_subscriptions: Vec::new(),
-            resume_token: Vec::new(),
-            agent_timestamp_wall_us: agent_ts,
-            min_protocol_version: 1000,
-            max_protocol_version: 1001,
-            auth_credential: None,
-        })),
-    })
-    .await
-    .unwrap();
-
-    let mut response_stream = client.session(stream).await.unwrap().into_inner();
-    let msg = response_stream.next().await.unwrap().unwrap();
-    match &msg.payload {
-        Some(ServerPayload::SessionEstablished(established)) => {
-            // estimated_skew_us should be set (may be near 0 or slightly negative
-            // due to timing between send and receive, but the field should exist
-            // and be plausible — within ±1s for a loopback test)
-            assert!(
-                established.estimated_skew_us.abs() < 1_000_000,
-                "Clock skew should be within ±1s on loopback, got: {}µs",
-                established.estimated_skew_us
-            );
-        }
-        other => panic!("Expected SessionEstablished, got: {other:?}"),
     }
 }
 
@@ -4332,7 +4271,6 @@ async fn test_legacy_capability_rejected_with_hint() {
             ],
             initial_subscriptions: Vec::new(),
             resume_token: Vec::new(),
-            agent_timestamp_wall_us: 0,
             min_protocol_version: 1000,
             max_protocol_version: 1001,
             auth_credential: None,
@@ -4394,7 +4332,6 @@ async fn test_pre_round14_capability_name_rejected() {
             ],
             initial_subscriptions: Vec::new(),
             resume_token: Vec::new(),
-            agent_timestamp_wall_us: 0,
             min_protocol_version: 1000,
             max_protocol_version: 1001,
             auth_credential: None,
@@ -4551,7 +4488,6 @@ async fn test_psk_with_capability_allows_input_events_subscription() {
             requested_capabilities: vec!["access_input_events".to_string()],
             initial_subscriptions: vec!["INPUT_EVENTS".to_string()],
             resume_token: Vec::new(),
-            agent_timestamp_wall_us: 0,
             min_protocol_version: 1000,
             max_protocol_version: 1001,
             auth_credential: None,
@@ -5433,7 +5369,6 @@ async fn test_resume_result_carries_subscription_state() {
             ],
             initial_subscriptions: vec!["SCENE_TOPOLOGY".to_string(), "INPUT_EVENTS".to_string()],
             resume_token: Vec::new(),
-            agent_timestamp_wall_us: now_wall_us(),
             min_protocol_version: 1000,
             max_protocol_version: 1001,
             auth_credential: None,
@@ -6410,7 +6345,6 @@ async fn test_input_capture_release_delivers_event() {
             requested_capabilities: vec!["access_input_events".to_string()],
             initial_subscriptions: vec!["INPUT_EVENTS".to_string(), "FOCUS_EVENTS".to_string()],
             resume_token: Vec::new(),
-            agent_timestamp_wall_us: now_wall_us(),
             ..Default::default()
         })),
     })
@@ -7164,7 +7098,6 @@ async fn handshake_with_publish_zone_lease(
             ],
             initial_subscriptions: vec![],
             resume_token: Vec::new(),
-            agent_timestamp_wall_us: now_wall_us(),
             min_protocol_version: 1000,
             max_protocol_version: 1001,
             auth_credential: None,
@@ -9859,7 +9792,6 @@ async fn handshake_with_capabilities(
             requested_capabilities: caps,
             initial_subscriptions: vec![],
             resume_token: Vec::new(),
-            agent_timestamp_wall_us: now_wall_us(),
             min_protocol_version: 1000,
             max_protocol_version: 1001,
             auth_credential: None,
@@ -10117,7 +10049,6 @@ async fn test_element_repositioned_not_delivered_without_scene_topology_subscrip
             requested_capabilities: vec!["create_tiles".to_string()],
             initial_subscriptions: vec![],
             resume_token: Vec::new(),
-            agent_timestamp_wall_us: now_wall_us(),
             min_protocol_version: 1000,
             max_protocol_version: 1001,
             auth_credential: None,
@@ -10226,7 +10157,6 @@ async fn handshake_telemetry(
             requested_capabilities: vec!["read_telemetry".to_string()],
             initial_subscriptions,
             resume_token: Vec::new(),
-            agent_timestamp_wall_us: now_wall_us(),
             min_protocol_version: 1000,
             max_protocol_version: 1001,
             auth_credential: None,

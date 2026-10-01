@@ -43,7 +43,6 @@ pub use graph::{
     MAX_TILES_PER_TAB,
     RuntimeOverlayState,
     SceneGraph,
-    SyncGroupCommitDecision,
     // RFC 0001 §2.3 zone band reservation
     ZONE_TILE_Z_MIN,
     // Node data validation
@@ -57,64 +56,7 @@ pub use test_scenes::{
     ClockMs, InvariantViolation, SceneGraphTestExt, SceneSpec, TestSceneRegistry,
     assert_layer0_invariants,
 };
-pub use timing::{
-    ClockDriftEstimator,
-    ClockOffset,
-    ClockSyncRequest,
-    ClockSyncResponse,
-    // Sync group coordination (rig-cruk)
-    CommitDecision,
-    DEFAULT_SYNC_DRIFT_BUDGET_US,
-    // TimingHints and supporting types
-    DeliveryPolicy,
-    DurationUs,
-    // Expiration heap
-    ExpirationEntry,
-    ExpirationHeap,
-    FrameSyncDriftRecord,
-    IntakeContext,
-    MessageClass,
-    MonoUs,
-    ORPHAN_GRACE_PERIOD_US,
-    OrphanReason,
-    // Pending queue
-    PendingEntry,
-    PendingQueue,
-    Schedule,
-    SessionClockSync,
-    SyncDriftHighAlert,
-    SyncGroupArrival,
-    SyncGroupEvent,
-    SyncGroupOrphanState,
-    TileArrival,
-    // Staleness
-    TileStaleness,
-    TimestampValidationInput,
-    // Timing configuration
-    TimingConfig,
-    TimingConfigError,
-    // Errors and warnings
-    TimingError,
-    TimingHints,
-    TimingWarning,
-    VsyncSyncPoint,
-    WallUs,
-    apply_decision,
-    check_sync_group_ownership,
-    compute_spread,
-    evaluate_commit,
-    evaluate_frame_drift,
-    // Drift detection / ClockSync
-    handle_clock_sync,
-    // Scheduling helpers
-    is_in_scope_for_frame,
-    // Relative scheduling primitives (rig-wu3q)
-    resolve_after_us,
-    resolve_frames_from_now,
-    resolve_next_frame,
-    resolve_schedule,
-    validate_timing_hints,
-};
+pub use timing::{DeliveryPolicy, DurationUs, MessageClass, MonoUs, Schedule, TimingHints, WallUs};
 pub use types::*;
 pub use validation::{BatchRejected, BatchValidationError, ValidationError, ValidationErrorCode};
 

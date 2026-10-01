@@ -144,7 +144,6 @@ impl TestSceneRegistry {
             "tab_switch" => Some(self.build_tab_switch(clock)),
             "lease_expiry" => Some(self.build_lease_expiry(clock)),
             "mobile_degraded" => Some(self.build_mobile_degraded(clock)),
-            "sync_group_media" => Some(self.build_sync_group_media(clock)),
             "input_highlight" => Some(self.build_input_highlight(clock)),
             "coalesced_dashboard" => Some(self.build_coalesced_dashboard(clock)),
             "three_agents_contention" => Some(self.build_three_agents_contention(clock)),
@@ -182,7 +181,6 @@ impl TestSceneRegistry {
             "tab_switch",
             "lease_expiry",
             "mobile_degraded",
-            "sync_group_media",
             "input_highlight",
             "coalesced_dashboard",
             "three_agents_contention",
@@ -896,125 +894,6 @@ impl TestSceneRegistry {
                           Per configuration/spec.md lines 71-82.",
             expected_tab_count: 1,
             expected_tile_count: 1,
-            has_hit_regions: false,
-            has_zones: false,
-        };
-
-        (graph, spec)
-    }
-
-    /// `sync_group_media` — 2 tiles enrolled in a sync group with staggered `present_at`.
-    ///
-    /// Both tiles share a sync group with `AllOrDefer` commit policy and `max_deferrals=3`.
-    /// Per timing-model/spec.md lines 124-173 and lines 50-61 (`present_at` semantics).
-    fn build_sync_group_media(&self, clock: ClockMs) -> (SceneGraph, SceneSpec) {
-        use crate::types::SyncCommitPolicy;
-
-        let mut graph = SceneGraph::new(self.display_width, self.display_height);
-
-        let tab_id = graph.create_tab("SyncMedia", 0).expect("create_tab failed");
-
-        let lease_id = graph.grant_lease_at(
-            "agent.sync",
-            clock.0,
-            300_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
-
-        // Create sync group with AllOrDefer policy (both tiles must be ready before commit)
-        let group_id = graph
-            .create_sync_group(
-                Some("media-pair".to_string()),
-                "agent.sync",
-                SyncCommitPolicy::AllOrDefer,
-                3, // max_deferrals
-            )
-            .expect("create_sync_group failed");
-
-        // Tile A — left panel (45% wide), present_at = clock
-        // Tile B — right panel (45% wide), present_at = clock + 100ms
-        // Both tiles are display-relative so they fit within any reasonable resolution.
-        let pad = 20.0_f32.min(self.display_width * 0.025);
-        let sync_tile_w = (self.display_width - pad * 3.0) / 2.0;
-        let sync_tile_h = self.display_height - pad * 2.0;
-
-        let tile_a = graph
-            .create_tile(
-                tab_id,
-                "agent.sync",
-                lease_id,
-                Rect::new(pad, pad, sync_tile_w, sync_tile_h),
-                1,
-            )
-            .expect("create_tile failed");
-        graph
-            .set_tile_root(
-                tile_a,
-                Node {
-                    layout: Default::default(),
-                    id: SceneId::new(),
-                    children: vec![],
-                    data: NodeData::SolidColor(SolidColorNode {
-                        color: Rgba::new(0.2, 0.4, 0.7, 1.0),
-                        bounds: Rect::new(0.0, 0.0, sync_tile_w, sync_tile_h),
-                        radius: None,
-                    }),
-                },
-            )
-            .expect("set_tile_root failed");
-        graph
-            .tiles
-            .get_mut(&tile_a)
-            .expect("tile_a missing")
-            .present_at = Some(clock.0);
-
-        // Tile B — right panel, staggered present_at (100ms later)
-        let tile_b_x = pad * 2.0 + sync_tile_w;
-        let tile_b = graph
-            .create_tile(
-                tab_id,
-                "agent.sync",
-                lease_id,
-                Rect::new(tile_b_x, pad, sync_tile_w, sync_tile_h),
-                2,
-            )
-            .expect("create_tile failed");
-        graph
-            .set_tile_root(
-                tile_b,
-                Node {
-                    layout: Default::default(),
-                    id: SceneId::new(),
-                    children: vec![],
-                    data: NodeData::SolidColor(SolidColorNode {
-                        color: Rgba::new(0.7, 0.4, 0.2, 1.0),
-                        bounds: Rect::new(0.0, 0.0, sync_tile_w, sync_tile_h),
-                        radius: None,
-                    }),
-                },
-            )
-            .expect("set_tile_root failed");
-        graph
-            .tiles
-            .get_mut(&tile_b)
-            .expect("tile_b missing")
-            .present_at = Some(clock.offset(100).0);
-
-        // Enroll both tiles in the sync group
-        graph
-            .join_sync_group(tile_a, group_id)
-            .expect("join_sync_group tile_a failed");
-        graph
-            .join_sync_group(tile_b, group_id)
-            .expect("join_sync_group tile_b failed");
-
-        let spec = SceneSpec {
-            name: "sync_group_media",
-            description: "Two tiles enrolled in a sync group (AllOrDefer, max_deferrals=3). \
-                          present_at timestamps differ by 100ms to exercise deferred-commit \
-                          path. Per timing-model/spec.md lines 124-173.",
-            expected_tab_count: 1,
-            expected_tile_count: 2,
             has_hit_regions: false,
             has_zones: false,
         };
@@ -2935,8 +2814,6 @@ pub fn assert_layer0_invariants(graph: &SceneGraph) -> Vec<InvariantViolation> {
     violations.extend(check_lease_namespace_nonempty(graph));
     violations.extend(check_zone_names_nonempty(graph));
     violations.extend(check_zone_name_key_consistency(graph));
-    violations.extend(check_sync_group_id_key_consistency(graph));
-    violations.extend(check_sync_group_member_back_refs(graph));
     violations.extend(check_version_non_decreasing(graph));
 
     violations
@@ -3224,52 +3101,6 @@ pub fn check_version_non_decreasing(graph: &SceneGraph) -> Vec<InvariantViolatio
     } else {
         vec![]
     }
-}
-
-/// For every entry in `sync_groups`, the HashMap key must match `sync_group.id`.
-/// Deserialization can silently produce a mismatch if the key and id field diverge.
-pub fn check_sync_group_id_key_consistency(graph: &SceneGraph) -> Vec<InvariantViolation> {
-    graph
-        .sync_groups
-        .iter()
-        .filter(|(key, sg)| **key != sg.id)
-        .map(|(key, sg)| {
-            InvariantViolation::new(
-                "sync_group_id_key_mismatch",
-                format!(
-                    "sync_groups map key {} does not match SyncGroup.id {}",
-                    key, sg.id
-                ),
-            )
-        })
-        .collect()
-}
-
-/// Every tile_id in a sync group's `members` set must reference a tile that
-/// exists in the graph AND whose `sync_group` field points back to this group.
-pub fn check_sync_group_member_back_refs(graph: &SceneGraph) -> Vec<InvariantViolation> {
-    let mut violations = Vec::new();
-    for (group_id, sg) in &graph.sync_groups {
-        for member_id in &sg.members {
-            match graph.tiles.get(member_id) {
-                None => violations.push(InvariantViolation::new(
-                    "sync_group_member_tile_missing",
-                    format!("sync group {group_id} member {member_id} does not exist in tiles map"),
-                )),
-                Some(tile) if tile.sync_group != Some(*group_id) => {
-                    violations.push(InvariantViolation::new(
-                        "sync_group_member_back_ref_mismatch",
-                        format!(
-                            "sync group {} member {}: tile.sync_group = {:?}, expected Some({})",
-                            group_id, member_id, tile.sync_group, group_id
-                        ),
-                    ))
-                }
-                _ => {}
-            }
-        }
-    }
-    violations
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -3705,66 +3536,6 @@ mod tests {
         let registry = TestSceneRegistry::new();
         let (graph, _spec) = registry.build("mobile_degraded", ClockMs::FIXED).unwrap();
         assert_no_violations(&graph, "mobile_degraded");
-    }
-
-    // ── Scene: sync_group_media ───────────────────────────────────────────
-
-    #[test]
-    fn sync_group_media_builds_without_error() {
-        let registry = TestSceneRegistry::new();
-        let result = registry.build("sync_group_media", ClockMs::FIXED);
-        assert!(result.is_some(), "sync_group_media must build");
-    }
-
-    #[test]
-    fn sync_group_media_has_correct_structure() {
-        let registry = TestSceneRegistry::new();
-        let (graph, spec) = registry.build("sync_group_media", ClockMs::FIXED).unwrap();
-        assert_eq!(graph.tabs.len(), spec.expected_tab_count, "tab count");
-        assert_eq!(graph.tiles.len(), spec.expected_tile_count, "tile count");
-        assert_eq!(spec.expected_tile_count, 2, "must have 2 tiles");
-    }
-
-    #[test]
-    fn sync_group_media_tiles_share_sync_group() {
-        let registry = TestSceneRegistry::new();
-        let (graph, _spec) = registry.build("sync_group_media", ClockMs::FIXED).unwrap();
-        assert_eq!(
-            graph.sync_groups.len(),
-            1,
-            "must have exactly one sync group"
-        );
-        let group = graph.sync_groups.values().next().unwrap();
-        assert_eq!(group.members.len(), 2, "sync group must have 2 members");
-        // Both tiles must point to the sync group
-        let tiles_in_group: Vec<_> = graph
-            .tiles
-            .values()
-            .filter(|t| t.sync_group.is_some())
-            .collect();
-        assert_eq!(
-            tiles_in_group.len(),
-            2,
-            "both tiles must be in a sync group"
-        );
-    }
-
-    #[test]
-    fn sync_group_media_present_at_are_staggered() {
-        let registry = TestSceneRegistry::new();
-        let (graph, _spec) = registry.build("sync_group_media", ClockMs::FIXED).unwrap();
-        let present_ats: Vec<u64> = graph.tiles.values().filter_map(|t| t.present_at).collect();
-        assert_eq!(present_ats.len(), 2, "both tiles must have present_at set");
-        let min = *present_ats.iter().min().unwrap();
-        let max = *present_ats.iter().max().unwrap();
-        assert_eq!(max - min, 100, "present_at must differ by 100ms");
-    }
-
-    #[test]
-    fn sync_group_media_passes_layer0_invariants() {
-        let registry = TestSceneRegistry::new();
-        let (graph, _spec) = registry.build("sync_group_media", ClockMs::FIXED).unwrap();
-        assert_no_violations(&graph, "sync_group_media");
     }
 
     // ── Scene: input_highlight ────────────────────────────────────────────
@@ -4478,14 +4249,14 @@ mod tests {
         assert_no_violations(&graph, "policy_arbitration_collision");
     }
 
-    // ── scene_names() has exactly 25 entries ──────────────────────────────
+    // ── scene_names() has exactly 24 entries ──────────────────────────────
 
     #[test]
-    fn scene_names_returns_exactly_25_entries() {
+    fn scene_names_returns_exactly_24_entries() {
         assert_eq!(
             TestSceneRegistry::scene_names().len(),
-            25,
-            "scene_names() must return exactly 25 entries"
+            24,
+            "scene_names() must return exactly 24 entries"
         );
     }
 

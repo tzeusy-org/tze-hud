@@ -7,7 +7,6 @@ use crate::validation::ValidationError;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Returns a `SystemClock` wrapped in `Arc<dyn Clock>`.
 /// Used as the serde default for the `clock` field so that deserialized
@@ -77,8 +76,6 @@ pub struct SceneGraph {
     pub zone_registry: ZoneRegistry,
     /// Widget registry.
     pub widget_registry: WidgetRegistry,
-    /// Sync groups, keyed by ID.
-    pub sync_groups: HashMap<SceneId, SyncGroup>,
     /// Display area (the viewport dimensions).
     pub display_area: Rect,
     /// Monotonic version counter, incremented on every mutation.
@@ -173,7 +170,6 @@ pub mod node_tree;
 pub mod queries;
 pub mod resources;
 pub mod snapshot;
-pub mod sync_groups;
 pub mod tabs;
 pub mod tiles;
 pub use tiles::validate_text_markdown_node_data;
@@ -209,7 +205,6 @@ impl SceneGraph {
             hit_region_states: HashMap::new(),
             zone_registry: ZoneRegistry::new(),
             widget_registry: WidgetRegistry::new(),
-            sync_groups: HashMap::new(),
             display_area: Rect::new(0.0, 0.0, width, height),
             version: 0,
             geometry_epoch: 0,
@@ -261,25 +256,6 @@ impl SceneGraph {
     pub fn now_millis(&self) -> u64 {
         self.clock.now_millis()
     }
-}
-
-fn now_micros() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_micros() as u64
-}
-
-/// Decision returned by `SceneGraph::evaluate_sync_group_commit`.
-#[derive(Clone, Debug, PartialEq)]
-pub enum SyncGroupCommitDecision {
-    /// Commit the listed tiles' pending mutations this frame.
-    Commit { tiles: Vec<SceneId> },
-    /// Defer the entire group to the next frame (AllOrDefer policy).
-    Defer,
-    /// Force-commit with the listed tiles after exhausting max_deferrals.
-    /// The compositor should emit a `sync_group_force_commit` telemetry event.
-    ForceCommit { tiles: Vec<SceneId> },
 }
 
 #[cfg(test)]

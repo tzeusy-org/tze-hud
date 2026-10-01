@@ -955,7 +955,6 @@ fn spec_all_flat_canonical_capabilities_accepted() {
         "create_tiles",
         "modify_own_tiles",
         "manage_tabs",
-        "manage_sync_groups",
         "upload_resource",
         "register_widget_asset",
         "read_scene_topology",

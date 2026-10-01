@@ -162,7 +162,6 @@ async fn connect_agent_with_zone_publish_cap(
                 requested_capabilities: vec![cap.clone()],
                 initial_subscriptions: vec!["SCENE_TOPOLOGY".to_string()],
                 resume_token: Vec::new(),
-                agent_timestamp_wall_us: now_us,
                 min_protocol_version: RUNTIME_MIN_VERSION,
                 max_protocol_version: RUNTIME_MAX_VERSION,
                 auth_credential: None,

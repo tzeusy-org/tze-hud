@@ -13,7 +13,7 @@
 //! ## Strategy
 //!
 //! 1. **Oracle state tracker** — maintain an independent set of live IDs (tabs, tiles,
-//!    nodes, leases, sync groups) alongside the scene graph.  The oracle is used for
+//!    nodes, leases) alongside the scene graph.  The oracle is used for
 //!    realistic ID selection so operations have valid targets; structural consistency is
 //!    verified by `assert_layer0_invariants`, not by count comparisons.
 //!
@@ -29,8 +29,8 @@ use tze_hud_scene::{
     mutation::{MAX_BATCH_SIZE, MutationBatch, SceneMutation},
     test_scenes::assert_layer0_invariants,
     types::{
-        Capability, FontFamily, Node, NodeData, Rect, Rgba, SceneId, SolidColorNode,
-        SyncCommitPolicy, TextAlign, TextMarkdownNode, TextOverflow,
+        Capability, FontFamily, Node, NodeData, Rect, Rgba, SceneId, SolidColorNode, TextAlign,
+        TextMarkdownNode, TextOverflow,
     },
 };
 
@@ -100,10 +100,6 @@ enum FuzzOp {
     AddNode { node: Node },
     GrantLease,
     RevokeLease,
-    CreateSyncGroup,
-    DeleteSyncGroup,
-    JoinSyncGroup,
-    LeaveSyncGroup,
 }
 
 fn arb_fuzz_op() -> impl Strategy<Value = FuzzOp> {
@@ -120,10 +116,6 @@ fn arb_fuzz_op() -> impl Strategy<Value = FuzzOp> {
         2 => arb_node().prop_map(|node| FuzzOp::AddNode { node }),
         2 => Just(FuzzOp::GrantLease),
         1 => Just(FuzzOp::RevokeLease),
-        1 => Just(FuzzOp::CreateSyncGroup),
-        1 => Just(FuzzOp::DeleteSyncGroup),
-        1 => Just(FuzzOp::JoinSyncGroup),
-        1 => Just(FuzzOp::LeaveSyncGroup),
     ]
 }
 
@@ -135,7 +127,6 @@ struct Oracle {
     tile_ids: Vec<SceneId>,
     node_ids: Vec<SceneId>,
     lease_ids: Vec<SceneId>,
-    sync_group_ids: Vec<SceneId>,
     /// Monotonically increasing counter used as unique z_order per CreateTile.
     /// Avoids duplicate_z_order invariant violations by never reusing z-order values.
     next_z: u32,
@@ -148,7 +139,6 @@ impl Oracle {
             tile_ids: Vec::new(),
             node_ids: Vec::new(),
             lease_ids: Vec::new(),
-            sync_group_ids: Vec::new(),
             next_z: 1,
         }
     }
@@ -185,15 +175,6 @@ impl Oracle {
             None
         } else {
             Some(self.lease_ids[idx % self.lease_ids.len()])
-        }
-    }
-
-    /// Pick a random sync group id, or None if no groups exist.
-    fn random_sync_group(&self, idx: usize) -> Option<SceneId> {
-        if self.sync_group_ids.is_empty() {
-            None
-        } else {
-            Some(self.sync_group_ids[idx % self.sync_group_ids.len()])
         }
     }
 }
@@ -387,38 +368,6 @@ fn apply_fuzz_op(graph: &mut SceneGraph, oracle: &mut Oracle, op: &FuzzOp, idx: 
                         .node_ids
                         .retain(|&node_id| graph.nodes.contains_key(&node_id));
                 }
-            }
-        }
-
-        FuzzOp::CreateSyncGroup => {
-            if oracle.sync_group_ids.len() < 4 {
-                if let Ok(id) =
-                    graph.create_sync_group(None, AGENT, SyncCommitPolicy::AvailableMembers, 0)
-                {
-                    oracle.sync_group_ids.push(id)
-                }
-            }
-        }
-
-        FuzzOp::DeleteSyncGroup => {
-            if let Some(group_id) = oracle.random_sync_group(idx) {
-                if graph.delete_sync_group(group_id).is_ok() {
-                    oracle.sync_group_ids.retain(|&id| id != group_id);
-                }
-            }
-        }
-
-        FuzzOp::JoinSyncGroup => {
-            if let (Some(tile_id), Some(group_id)) =
-                (oracle.random_tile(idx), oracle.random_sync_group(idx))
-            {
-                let _ = graph.join_sync_group(tile_id, group_id);
-            }
-        }
-
-        FuzzOp::LeaveSyncGroup => {
-            if let Some(tile_id) = oracle.random_tile(idx) {
-                let _ = graph.leave_sync_group(tile_id);
             }
         }
     }

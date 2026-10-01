@@ -1189,7 +1189,7 @@ async fn test_layer1_pixel_readback_z_order() {
 // Per validation-framework/spec.md Requirement: DR-V5 (line 228):
 // "`cargo test --features headless` SHALL run full test suite (Layers 0-2)."
 //
-// These tests cover all 25 scenes in TestSceneRegistry.  For each scene:
+// These tests cover all 24 scenes in TestSceneRegistry.  For each scene:
 // - Pixel buffer size is correct (width × height × 4).
 // - The render completed: at least some pixels have been written.
 // - For scenes with tiles, tile pixels differ from the pure-black default.
@@ -1424,10 +1424,10 @@ async fn test_scene_overlay_transparency_pixels() {
     );
 }
 
-// ─── Batch test for remaining 19 scenes ──────────────────────────────────────
+// ─── Batch test for remaining 18 scenes ──────────────────────────────────────
 //
 // For the remaining scenes (tab_switch, lease_expiry, mobile_degraded,
-// sync_group_media, input_highlight, coalesced_dashboard, three_agents_contention,
+// input_highlight, coalesced_dashboard, three_agents_contention,
 // overlay_passthrough_regions, disconnect_reclaim_multiagent, privacy_redaction_mode,
 // chatty_dashboard_touch, zone_publish_subtitle, zone_reject_wrong_type,
 // zone_conflict_two_publishers, zone_orchestrate_then_publish,
@@ -1467,7 +1467,6 @@ macro_rules! scene_render_test {
 scene_render_test!(test_scene_tab_switch_pixels, "tab_switch");
 scene_render_test!(test_scene_lease_expiry_pixels, "lease_expiry");
 scene_render_test!(test_scene_mobile_degraded_pixels, "mobile_degraded");
-scene_render_test!(test_scene_sync_group_media_pixels, "sync_group_media");
 scene_render_test!(test_scene_input_highlight_pixels, "input_highlight");
 scene_render_test!(test_scene_coalesced_dashboard_pixels, "coalesced_dashboard");
 scene_render_test!(

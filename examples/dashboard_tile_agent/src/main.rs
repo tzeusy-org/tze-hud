@@ -396,7 +396,6 @@ async fn do_content_update_with_host(
                 ],
                 initial_subscriptions: vec!["LEASE_CHANGES".to_string()],
                 resume_token: Vec::new(),
-                agent_timestamp_wall_us: now_us,
                 min_protocol_version: 1000,
                 max_protocol_version: 1001,
                 auth_credential: Some(session_proto::AuthCredential {
@@ -940,7 +939,6 @@ async fn establish_session_with_host(
                 // LEASE_CHANGES is mandatory; listing it explicitly is idiomatic.
                 initial_subscriptions: vec!["LEASE_CHANGES".to_string()],
                 resume_token: Vec::new(), // new session, no prior resume token
-                agent_timestamp_wall_us: now_us,
                 min_protocol_version: 1000, // v1.0
                 max_protocol_version: 1001, // v1.1
                 auth_credential: Some(session_proto::AuthCredential {
@@ -991,7 +989,6 @@ async fn establish_session_with_host(
             println!("  heartbeat_ms         = {}", e.heartbeat_interval_ms);
             println!("  granted_capabilities = {:?}", e.granted_capabilities);
             println!("  active_subscriptions = {:?}", e.active_subscriptions);
-            println!("  clock_skew           = {}us", e.estimated_skew_us);
             println!(
                 "  protocol_version     = v{}.{}",
                 e.negotiated_protocol_version / 1000,
@@ -1151,7 +1148,6 @@ async fn request_lease_with_host(
                 ],
                 initial_subscriptions: vec!["LEASE_CHANGES".to_string()],
                 resume_token: Vec::new(),
-                agent_timestamp_wall_us: now_us,
                 min_protocol_version: 1000,
                 max_protocol_version: 1001,
                 auth_credential: Some(session_proto::AuthCredential {
@@ -1470,7 +1466,6 @@ async fn create_tile_batch_with_host(
                 ],
                 initial_subscriptions: vec!["LEASE_CHANGES".to_string()],
                 resume_token: Vec::new(),
-                agent_timestamp_wall_us: now_us,
                 min_protocol_version: 1000,
                 max_protocol_version: 1001,
                 auth_credential: Some(session_proto::AuthCredential {
@@ -2200,7 +2195,6 @@ mod tests {
                 ],
                 initial_subscriptions: vec!["LEASE_CHANGES".to_string()],
                 resume_token: Vec::new(),
-                agent_timestamp_wall_us: now_us,
                 min_protocol_version: 1000,
                 max_protocol_version: 1001,
                 auth_credential: Some(sp::AuthCredential {
@@ -2594,7 +2588,6 @@ mod tests {
                 ],
                 initial_subscriptions: vec!["LEASE_CHANGES".to_string()],
                 resume_token: vec![],
-                agent_timestamp_wall_us: now_us,
                 min_protocol_version: 1000,
                 max_protocol_version: 1001,
                 auth_credential: Some(sp::AuthCredential {
@@ -2854,7 +2847,6 @@ mod tests {
                 ],
                 initial_subscriptions: vec!["LEASE_CHANGES".to_string()],
                 resume_token: vec![],
-                agent_timestamp_wall_us: now_us,
                 min_protocol_version: 1000,
                 max_protocol_version: 1001,
                 auth_credential: Some(sp::AuthCredential {
@@ -3298,7 +3290,6 @@ mod tests {
                 ],
                 initial_subscriptions: vec!["LEASE_CHANGES".to_string()],
                 resume_token: vec![],
-                agent_timestamp_wall_us: now_us,
                 min_protocol_version: 1000,
                 max_protocol_version: 1001,
                 auth_credential: Some(sp::AuthCredential {
@@ -3975,7 +3966,6 @@ mod tests {
                     "INPUT_EVENTS".to_string(),
                 ],
                 resume_token: vec![],
-                agent_timestamp_wall_us: now_us,
                 min_protocol_version: 1000,
                 max_protocol_version: 1001,
                 auth_credential: Some(sp::AuthCredential {

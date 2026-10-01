@@ -1587,7 +1587,6 @@ pub(super) fn canonical_name_to_capability(name: &str) -> Option<Capability> {
         "create_tiles" => Some(Capability::CreateTiles),
         "modify_own_tiles" => Some(Capability::ModifyOwnTiles),
         "manage_tabs" => Some(Capability::ManageTabs),
-        "manage_sync_groups" => Some(Capability::ManageSyncGroups),
         "upload_resource" => Some(Capability::UploadResource),
         "read_scene_topology" => Some(Capability::ReadSceneTopology),
         "subscribe_scene_events" => Some(Capability::SubscribeSceneEvents),

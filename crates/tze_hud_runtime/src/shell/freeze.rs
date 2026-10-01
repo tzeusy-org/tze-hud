@@ -70,8 +70,7 @@ pub const DEFAULT_AUTO_UNFREEZE_MS: u64 = 5 * 60 * 1_000;
 /// operations contained in the batch:
 ///
 /// - Any structural / identity-changing mutation (`CreateTile`, `DeleteTile`,
-///   `CreateTab`, `SwitchActiveTab`, `CreateSyncGroup`, `DeleteSyncGroup`,
-///   `JoinSyncGroup`, `LeaveSyncGroup`, `SetPortalSurface`) → **Transactional**.
+///   `CreateTab`, `SwitchActiveTab`, `SetPortalSurface`) → **Transactional**.
 /// - Content / state mutations (`SetTileRoot`, `AddNode`, `UpdateTileBounds`,
 ///   `PublishToZone`, `ClearZone`, `UpdatePortalSurfaceState`) → **StateStream**.
 /// - Ephemeral batches are not currently expressed at the `MutationBatch`
@@ -571,8 +570,7 @@ impl Default for FreezeManager {
 /// The caller passes a slice of mutation kind strings. The recognised
 /// transactional kinds are:
 /// `"create_tile"`, `"delete_tile"`, `"create_tab"`, `"switch_active_tab"`,
-/// `"create_sync_group"`, `"delete_sync_group"`, `"join_sync_group"`,
-/// `"leave_sync_group"`, `"set_portal_surface"`.
+/// `"set_portal_surface"`.
 ///
 /// Everything else is classified as StateStream. This mirrors the authoritative
 /// protocol-layer classifier
@@ -586,8 +584,7 @@ pub fn classify_mutation_batch(mutation_kinds: &[&str]) -> MutationTrafficClass 
     for kind in mutation_kinds {
         match *kind {
             "create_tile" | "delete_tile" | "create_tab" | "switch_active_tab"
-            | "create_sync_group" | "delete_sync_group" | "join_sync_group"
-            | "leave_sync_group" | "set_portal_surface" => {
+            | "set_portal_surface" => {
                 // Transactional is the highest class — short-circuit.
                 return MutationTrafficClass::Transactional;
             }
@@ -996,10 +993,6 @@ mod tests {
             "delete_tile",
             "create_tab",
             "switch_active_tab",
-            "create_sync_group",
-            "delete_sync_group",
-            "join_sync_group",
-            "leave_sync_group",
             "set_portal_surface",
         ];
         for kind in &kinds {

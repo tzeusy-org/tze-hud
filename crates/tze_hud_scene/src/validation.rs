@@ -90,20 +90,6 @@ pub enum ValidationError {
     #[error("zone '{zone}' has reached max keys ({max})")]
     ZoneMaxKeysReached { zone: String, max: u32 },
 
-    #[error("sync group not found: {id}")]
-    SyncGroupNotFound { id: crate::types::SceneId },
-
-    #[error("sync group limit exceeded: {limit} sync groups per namespace")]
-    SyncGroupLimitExceeded { limit: usize },
-
-    #[error("sync group member limit exceeded: {limit} tiles per sync group")]
-    SyncGroupMemberLimitExceeded { limit: usize },
-
-    /// Returned when an agent attempts to add a tile (or modify a group) it
-    /// does not own. Spec: timing-model/spec.md lines 188–189.
-    #[error("sync group ownership violation: {reason}")]
-    SyncGroupOwnershipViolation { reason: String },
-
     /// A mutation was rejected because the requesting agent does not own the target tile.
     /// RFC 0001 §1.2: namespace isolation.
     #[error(
@@ -248,12 +234,6 @@ pub enum ValidationErrorCode {
     ZoneMaxPublishersReached,
     ZoneMaxKeysReached,
 
-    // Sync group
-    SyncGroupNotFound,
-    SyncGroupLimitExceeded,
-    SyncGroupMemberLimitExceeded,
-    SyncGroupOwnershipViolation,
-
     // Misc
     InvalidField,
     DuplicateDisplayOrder,
@@ -318,14 +298,6 @@ impl ValidationErrorCode {
             ValidationError::ZoneMediaTypeMismatch { .. } => Self::ZoneMediaTypeMismatch,
             ValidationError::ZoneMaxPublishersReached { .. } => Self::ZoneMaxPublishersReached,
             ValidationError::ZoneMaxKeysReached { .. } => Self::ZoneMaxKeysReached,
-            ValidationError::SyncGroupNotFound { .. } => Self::SyncGroupNotFound,
-            ValidationError::SyncGroupLimitExceeded { .. } => Self::SyncGroupLimitExceeded,
-            ValidationError::SyncGroupMemberLimitExceeded { .. } => {
-                Self::SyncGroupMemberLimitExceeded
-            }
-            ValidationError::SyncGroupOwnershipViolation { .. } => {
-                Self::SyncGroupOwnershipViolation
-            }
             ValidationError::CycleDetected { .. } => Self::CycleDetected,
             ValidationError::ZOrderConflict { .. } => Self::ZOrderConflict,
             ValidationError::BatchSizeExceeded { .. } => Self::BatchSizeExceeded,
@@ -525,21 +497,6 @@ fn build_context_and_hint(
             json!({ "field": "zone_name", "value": zone, "constraint": format!("max {} keys", max) }),
             None,
         ),
-        ValidationError::SyncGroupNotFound { id } => (
-            json!({ "field": "group_id", "value": id.to_string(), "constraint": "sync group must exist" }),
-            None,
-        ),
-        ValidationError::SyncGroupLimitExceeded { limit } => (
-            json!({ "field": "sync_group_count", "constraint": format!("max {} sync groups per namespace", limit) }),
-            None,
-        ),
-        ValidationError::SyncGroupMemberLimitExceeded { limit } => (
-            json!({ "field": "member_count", "constraint": format!("max {} tiles per sync group", limit) }),
-            None,
-        ),
-        ValidationError::SyncGroupOwnershipViolation { reason } => {
-            (json!({ "field": "sync_group", "constraint": reason }), None)
-        }
         ValidationError::ZonePublishLeaseNotFound { namespace } => (
             json!({ "field": "lease", "value": namespace, "constraint": "active lease required for zone publish" }),
             None,

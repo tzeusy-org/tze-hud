@@ -122,7 +122,6 @@ async fn perform_handshake(
             // SubscriptionChange round-trip.
             initial_subscriptions: vec!["INPUT_EVENTS".to_string()],
             resume_token: Vec::new(),
-            agent_timestamp_wall_us: now_wall_us(),
             min_protocol_version: 1000,
             max_protocol_version: 1001,
             auth_credential: None,
@@ -782,7 +781,6 @@ async fn event_batch_not_delivered_without_input_events_subscription() {
             requested_capabilities: vec!["create_tiles".to_string()],
             initial_subscriptions: vec![],
             resume_token: Vec::new(),
-            agent_timestamp_wall_us: now_wall_us(),
             min_protocol_version: 1000,
             max_protocol_version: 1001,
             auth_credential: None,

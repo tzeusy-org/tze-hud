@@ -715,7 +715,6 @@ pub struct Tile {
     pub z_order: u32,
     pub opacity: f32,
     pub input_mode: InputMode,
-    pub sync_group: Option<SceneId>,
     pub present_at: Option<u64>,
     pub expires_at: Option<u64>,
     pub resource_budget: ResourceBudget,
@@ -1538,8 +1537,6 @@ pub enum Capability {
     ModifyOwnTiles,
     /// `manage_tabs` — agent may create/switch tabs.
     ManageTabs,
-    /// `manage_sync_groups` — agent may create/manage sync groups.
-    ManageSyncGroups,
     /// `upload_resource` — agent may upload resources.
     UploadResource,
     /// `read_scene_topology` — agent may read the scene graph topology.
@@ -1730,78 +1727,6 @@ impl Lease {
         match (self.state, self.suspended_at_ms) {
             (LeaseState::Suspended, Some(susp_at)) => now_ms >= susp_at + max_suspend_ms,
             _ => false,
-        }
-    }
-}
-
-// ─── Sync Groups ────────────────────────────────────────────────────────────
-
-/// Type alias for sync group IDs (they are just SceneIds).
-pub type SyncGroupId = SceneId;
-
-/// Commit policy for a sync group.
-///
-/// See RFC 0003 §2.2 for full semantics.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub enum SyncCommitPolicy {
-    /// All members must have a pending mutation before any are applied.
-    /// If not all members are ready when Stage 4 runs, the group is deferred.
-    /// After `max_deferrals` consecutive deferrals the available members are
-    /// force-committed and a telemetry event is emitted.
-    #[default]
-    AllOrDefer,
-
-    /// Apply whatever subset of members have pending mutations this frame.
-    /// Members without pending mutations are implicitly "unchanged".
-    AvailableMembers,
-}
-
-/// A sync group is a named set of tiles whose mutations must be applied
-/// atomically in the same frame.
-///
-/// See RFC 0003 §2 for the full specification.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct SyncGroup {
-    /// Unique identifier (UUIDv7).
-    pub id: SyncGroupId,
-    /// Optional human-readable label (max 128 UTF-8 bytes).
-    pub name: Option<String>,
-    /// Namespace that created this group.
-    pub owner_namespace: String,
-    /// Tile IDs currently in the group.
-    pub members: std::collections::BTreeSet<SceneId>,
-    /// Wall-clock creation time (UTC microseconds since Unix epoch).
-    pub created_at_us: u64,
-    /// Commit policy.
-    pub commit_policy: SyncCommitPolicy,
-    /// Maximum number of consecutive deferral frames before a force-commit.
-    /// Only relevant when `commit_policy == AllOrDefer`. Default: 3.
-    pub max_deferrals: u32,
-    /// Current consecutive deferral count (runtime state — not part of
-    /// the authoritative scene snapshot, but carried in the struct for
-    /// simplicity in the scene crate).
-    #[serde(default)]
-    pub deferral_count: u32,
-}
-
-impl SyncGroup {
-    pub fn new(
-        id: SyncGroupId,
-        name: Option<String>,
-        owner_namespace: String,
-        commit_policy: SyncCommitPolicy,
-        max_deferrals: u32,
-        created_at_us: u64,
-    ) -> Self {
-        Self {
-            id,
-            name,
-            owner_namespace,
-            members: std::collections::BTreeSet::new(),
-            created_at_us,
-            commit_policy,
-            max_deferrals,
-            deferral_count: 0,
         }
     }
 }

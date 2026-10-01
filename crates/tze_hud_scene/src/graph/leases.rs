@@ -215,8 +215,6 @@ impl SceneGraph {
             ns
         };
         // Remove all tiles associated with this lease.
-        // Leave sync groups first to avoid dangling member entries — same pattern as
-        // delete_tile and delete_tab (Layer 0 invariant: sync_group_member_tile_missing).
         let orphaned_tiles: Vec<SceneId> = self
             .tiles
             .values()
@@ -224,7 +222,6 @@ impl SceneGraph {
             .map(|t| t.id)
             .collect();
         for tile_id in orphaned_tiles {
-            let _ = self.leave_sync_group(tile_id);
             self.remove_tile_and_nodes(tile_id);
         }
         // Spec §Requirement: Lease Revocation Clears Zone Publications
@@ -580,10 +577,6 @@ impl SceneGraph {
             .filter(|t| t.lease_id == id)
             .map(|t| t.id)
             .collect();
-        // Leave sync groups before removing tiles to avoid dangling member entries.
-        for tile_id in &removed_tiles {
-            let _ = self.leave_sync_group(*tile_id);
-        }
         for tile_id in &removed_tiles {
             self.remove_tile_and_nodes(*tile_id);
         }

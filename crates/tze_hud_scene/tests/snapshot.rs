@@ -7,7 +7,7 @@
 //! ## Acceptance criteria verified
 //! - Snapshot determinism: serialize same scene twice, assert byte equality and BLAKE3 equality
 //! - Round-trip: deserialize → re-serialize → assert byte equality
-//! - All 25 test scenes produce valid snapshots (no panics, all fields populated, checksum verifiable)
+//! - All 24 test scenes produce valid snapshots (no panics, all fields populated, checksum verifiable)
 //! - Snapshot includes zone publications but NOT effective_geometry
 //! - Snapshot references ResourceIds but does not embed resource data
 //! - BTreeMap used for all map types (determinism guaranteed at compile time)
@@ -170,19 +170,19 @@ fn snapshot_roundtrip_simple_scene() {
     assert!(deserialized.verify_checksum());
 }
 
-// ── All 25 test scenes produce valid snapshots ────────────────────────────────
+// ── All 24 test scenes produce valid snapshots ────────────────────────────────
 
 /// WHEN a snapshot is taken of any test scene
 /// THEN it must serialize without panics, all fields populated, checksum verifiable.
 #[test]
-fn all_25_test_scenes_produce_valid_snapshots() {
+fn all_24_test_scenes_produce_valid_snapshots() {
     let registry = TestSceneRegistry::new();
     let all_names = TestSceneRegistry::scene_names();
 
     assert_eq!(
         all_names.len(),
-        25,
-        "expected exactly 25 test scenes, got {}; update this test if scenes were added",
+        24,
+        "expected exactly 24 test scenes, got {}; update this test if scenes were added",
         all_names.len()
     );
 

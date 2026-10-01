@@ -627,7 +627,6 @@ class HudClient:
                 ),
                 requested_capabilities=self.capabilities,
                 initial_subscriptions=self.initial_subscriptions,
-                agent_timestamp_wall_us=_now_wall_us(),
                 min_protocol_version=1000,
                 max_protocol_version=1000,
             ),

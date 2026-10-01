@@ -1,8 +1,7 @@
 //! Clock-domain newtype wrappers.
 //!
-//! tze_hud recognises four clock domains (spec `timing-model/spec.md` §Clock
-//! Domain Separation, lines 10–21).  This module provides compile-time
-//! type-safe wrappers for the two that appear in v1 Rust/proto fields:
+//! Compile-time type-safe wrappers for the two clock domains that appear in
+//! Rust/proto fields:
 //!
 //! | Wrapper       | Domain         | Field suffix | Unit                         |
 //! |---------------|----------------|--------------|------------------------------|
@@ -11,12 +10,11 @@
 //! | [`DurationUs`]| —              | *(delta)*    | Microsecond delta            |
 //!
 //! `WallUs` and `MonoUs` are **not interchangeable**: passing one where the
-//! other is expected is a compile-time error.  Converting between them
-//! requires an explicit [`ClockOffset`] calibration value.
+//! other is expected is a compile-time error.
 //!
 //! ## Zero-value semantics
 //!
-//! Per spec lines 68–70: a timestamp of `0` means "not set".
+//! A timestamp of `0` means "not set".
 //! [`WallUs::is_set`] and [`MonoUs::is_set`] encode this convention.
 //!
 //! ## Field naming convention
@@ -75,17 +73,6 @@ impl WallUs {
     pub fn as_u64(self) -> u64 {
         self.0
     }
-
-    /// Convert to [`MonoUs`] using a calibration offset.
-    ///
-    /// `offset = wall_us - mono_us` at the calibration point.
-    #[inline]
-    pub fn to_mono(self, offset: ClockOffset) -> MonoUs {
-        // Use saturating_neg() instead of the unary `-` operator to avoid
-        // overflow when offset.0 == i64::MIN (which would panic in debug
-        // builds and wrap in release).
-        MonoUs(self.0.saturating_add_signed(offset.0.saturating_neg()))
-    }
 }
 
 impl From<u64> for WallUs {
@@ -115,7 +102,6 @@ impl std::fmt::Display for WallUs {
 /// `timestamp_mono_us`).
 ///
 /// Monotonic values MUST NOT be compared directly with wall-clock values.
-/// Use [`MonoUs::to_wall`] with a [`ClockOffset`] for inter-domain arithmetic.
 ///
 /// # Zero semantics
 ///
@@ -149,14 +135,6 @@ impl MonoUs {
     #[inline]
     pub fn as_u64(self) -> u64 {
         self.0
-    }
-
-    /// Convert to [`WallUs`] using a calibration offset.
-    ///
-    /// `offset = wall_us - mono_us` at the calibration point.
-    #[inline]
-    pub fn to_wall(self, offset: ClockOffset) -> WallUs {
-        WallUs(self.0.saturating_add_signed(offset.0))
     }
 }
 
@@ -230,33 +208,6 @@ impl From<DurationUs> for u64 {
 impl std::fmt::Display for DurationUs {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}µs", self.0)
-    }
-}
-
-// ─── ClockOffset ─────────────────────────────────────────────────────────────
-
-/// Calibration offset used to convert between [`WallUs`] and [`MonoUs`].
-///
-/// Computed at session open as:
-/// ```text
-/// offset = session_open_wall_us - session_open_mono_us
-/// ```
-///
-/// A positive offset means the wall clock is ahead of the monotonic clock.
-/// The value is signed to handle the case where monotonic is ahead of
-/// an absolute wall timestamp (e.g. when wall time is set in the past).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ClockOffset(pub i64);
-
-impl ClockOffset {
-    /// Compute the offset from a (wall, mono) calibration pair.
-    ///
-    /// Returns `None` if the subtraction would overflow.
-    pub fn from_pair(wall: WallUs, mono: MonoUs) -> Option<Self> {
-        (wall.0 as i128)
-            .checked_sub(mono.0 as i128)
-            .and_then(|v| i64::try_from(v).ok())
-            .map(Self)
     }
 }
 
@@ -343,55 +294,11 @@ mod tests {
         assert_eq!(delta.after_wall(base), WallUs(u64::MAX));
     }
 
-    // ── ClockOffset ──
-
-    #[test]
-    fn clock_offset_from_pair_positive() {
-        // wall > mono: offset is positive
-        let offset = ClockOffset::from_pair(WallUs(2_000_000), MonoUs(1_000_000)).unwrap();
-        assert_eq!(offset.0, 1_000_000);
-    }
-
-    #[test]
-    fn clock_offset_from_pair_negative() {
-        // mono > wall: offset is negative
-        let offset = ClockOffset::from_pair(WallUs(1_000_000), MonoUs(2_000_000)).unwrap();
-        assert_eq!(offset.0, -1_000_000);
-    }
-
-    #[test]
-    fn clock_offset_from_pair_overflow_returns_none() {
-        // u64::MAX - 0 overflows i64
-        let result = ClockOffset::from_pair(WallUs(u64::MAX), MonoUs(0));
-        assert!(result.is_none());
-    }
-
-    // ── Cross-domain conversion ──
-
-    #[test]
-    fn wall_to_mono_roundtrip() {
-        let offset = ClockOffset(1_000_000); // wall is 1s ahead
-        let wall = WallUs(5_000_000);
-        let mono = wall.to_mono(offset);
-        assert_eq!(mono, MonoUs(4_000_000));
-        // Round-trip back
-        assert_eq!(mono.to_wall(offset), wall);
-    }
-
-    #[test]
-    fn mono_to_wall_roundtrip() {
-        let offset = ClockOffset(-500_000); // mono is 0.5s ahead
-        let mono = MonoUs(3_000_000);
-        let wall = mono.to_wall(offset);
-        assert_eq!(wall, WallUs(2_500_000));
-        assert_eq!(wall.to_mono(offset), mono);
-    }
-
     // ── Spec: cross-domain assignment is a compile error ──
     // The tests below are compile_fail doc-tests in the struct documentation.
     // They are not repeated here because they cannot be written as #[test].
 
-    // ── Spec: zero-value semantics (spec lines 68-70) ──
+    // ── Zero-value semantics ──
 
     #[test]
     fn zero_means_not_set_wall() {

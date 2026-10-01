@@ -104,7 +104,6 @@ scene_buffer_size_test!(test_buf_05_overlay_transparency, "overlay_transparency"
 scene_buffer_size_test!(test_buf_06_tab_switch, "tab_switch");
 scene_buffer_size_test!(test_buf_07_lease_expiry, "lease_expiry");
 scene_buffer_size_test!(test_buf_08_mobile_degraded, "mobile_degraded");
-scene_buffer_size_test!(test_buf_09_sync_group_media, "sync_group_media");
 scene_buffer_size_test!(test_buf_10_input_highlight, "input_highlight");
 scene_buffer_size_test!(test_buf_11_coalesced_dashboard, "coalesced_dashboard");
 scene_buffer_size_test!(test_buf_12_max_tiles_stress, "max_tiles_stress");
@@ -508,42 +507,6 @@ async fn test_color_08_mobile_degraded() {
         BG_SRGB,
         CI_SOLID_TOLERANCE,
         "mobile_degraded: outside tile at (500,300) must be background",
-    )
-    .unwrap_or_else(|e| panic!("{e}"));
-}
-
-// ─── 9. sync_group_media ─────────────────────────────────────────────────────
-
-/// sync_group_media: Tile A (0.2, 0.4, 0.7) at (x=20, y=20, w=880, h=600).
-///
-/// Covers x=20..900, y=20..620 on the 1920×1080 canvas.
-/// Tile B starts at x=920 (adjacent, not overlapping).
-/// At (400, 300) we sample the centre of Tile A.
-/// (0.2, 0.4, 0.7) → sRGB ≈ (124, 174, 214). Blue channel dominant.
-///
-/// WHEN sync_group_media rendered
-/// THEN (400, 300): blue channel > red channel.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn test_color_09_sync_group_media_tile_a_visible() {
-    // Tile A (0.2, 0.4, 0.7) linear → sRGB ≈ (124, 174, 214)
-    const EXPECTED_TILE_A: [u8; 4] = [124, 174, 214, 255];
-
-    let mut runtime = make_scene_runtime().await;
-    let registry = TestSceneRegistry::new();
-    let (scene, _spec) = registry
-        .build("sync_group_media", ClockMs::FIXED)
-        .expect("build failed");
-
-    let pixels = render_scene_pixels(&mut runtime, scene).await;
-
-    HeadlessSurface::assert_pixel_color(
-        &pixels,
-        SCENE_W,
-        400,
-        300,
-        EXPECTED_TILE_A,
-        CI_BLEND_TOLERANCE,
-        "sync_group_media: Tile A at (400,300)",
     )
     .unwrap_or_else(|e| panic!("{e}"));
 }

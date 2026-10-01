@@ -628,7 +628,6 @@ fn build_session_init(cli: &Cli, psk: &str, sequence: u64) -> session_proto::Cli
             requested_capabilities: vec![format!("publish_widget:{}", cli.widget_name)],
             initial_subscriptions: Vec::new(),
             resume_token: Vec::new(),
-            agent_timestamp_wall_us: now_wall_us(),
             min_protocol_version: 1000,
             max_protocol_version: 1001,
             auth_credential: Some(session_proto::AuthCredential {

@@ -209,7 +209,6 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                 ),
                 requested_capabilities=requested_capabilities,
                 initial_subscriptions=[],
-                agent_timestamp_wall_us=now_wall_us(),
                 min_protocol_version=1000,
                 max_protocol_version=1000,
             )
