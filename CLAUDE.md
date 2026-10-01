@@ -4,10 +4,11 @@ Guidance for Claude Code working in this repository.
 
 ## What This Is
 
-**tze_hud** — a local Windows overlay HUD for a few trusted LLM agents. Four
-surfaces: a session portal (an LLM session projects output and takes replies),
-ambient zones (one-call MCP text publishing), agent-owned tiles (gRPC), and
-SVG widgets. Read `docs/vision.md` first, then `docs/scope.md`.
+**tze_hud** — a well-designed, extremely performant MCP/gRPC layer that lets
+models generate and manage the real-estate lifecycle of a HUD over the user's
+screen (discover, claim, fill, interact, hold, release, reclaim). Surfaces: a
+session portal, ambient zones, agent-owned tiles, and SVG widgets, on a
+Windows overlay. Read `docs/vision.md` first, then `docs/scope.md`.
 
 ## Status
 
@@ -33,7 +34,8 @@ requirements. Do not restore them or design against them.
 - **Idle costs ~nothing; work is proportional to change.** Don't re-render unchanged content.
 - **Token-minimal LLM surfaces.** No layout, geometry, or styling payloads through model context; typed widget parameters are fine.
 - **No hardcoded styling.** Use `[design_tokens]` via `RenderingPolicy`.
-- **Trusted agents only.** PSK auth plus ownership-with-disconnect-cleanup. Don't add policy engines, capability matrices, attention budgets, or privacy layers.
+- **Trusted agents only.** PSK auth, a per-agent zone/widget allowlist, and leases with TTL that disconnect, expiry, or human override reclaim. Don't add policy engines, attention budgets, or privacy layers.
+- **The API is the product.** Each lifecycle stage should be one or two small, deterministic calls; treat token cost per stage like latency.
 - **Prefer deleting over generalizing.** New abstractions need a current user.
 
 ## Commands
