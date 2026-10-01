@@ -60,10 +60,6 @@ path = "dashboard_tile_input.rs"
 name = "dashboard_tile_lifecycle"
 path = "dashboard_tile_lifecycle.rs"
 
-[[test]]
-name = "trace_regression"
-path = "trace_regression.rs"
-
 # Soak and leak test suite (validation-framework/spec.md lines 298-310).
 #
 # Default run (fast CI, 10 seconds):
@@ -77,16 +73,6 @@ path = "trace_regression.rs"
 [[test]]
 name = "soak"
 path = "soak.rs"
-
-# E12.6: V1 thesis proof — capstone test demonstrating all 7 v1 success criteria.
-# Aggregates evidence from Layers 0-4, multi-agent integration, zone publish,
-# headless rendering, and performance budgets into a structured proof report.
-#
-# Run:
-#   cargo test --test v1_thesis -- --nocapture
-[[test]]
-name = "v1_thesis"
-path = "v1_thesis.rs"
 
 # hud-hzub.4: Subtitle streaming breakpoint reveal — MCP and gRPC publish path verification.
 # Tests: gRPC ZonePublish with stream_text + breakpoints forwarded to compositor,
@@ -187,7 +173,6 @@ tze_hud_projection = { path = "../../crates/tze_hud_projection", version = "0.1.
 tze_hud_config = { path = "../../crates/tze_hud_config", version = "0.1.0" }
 tze_hud_resource = { path = "../../crates/tze_hud_resource", version = "0.1.0" }
 tze_hud_telemetry = { path = "../../crates/tze_hud_telemetry", version = "0.1.0" }
-tze_hud_validation = { path = "../../crates/tze_hud_validation", version = "0.1.0" }
 tokio = { workspace = true }
 tonic = { workspace = true }
 tokio-stream = { workspace = true }

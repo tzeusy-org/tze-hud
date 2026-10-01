@@ -1318,7 +1318,6 @@ dependencies = [
  "tze_hud_runtime",
  "tze_hud_scene",
  "tze_hud_telemetry",
- "tze_hud_validation",
  "uuid",
 ]
 
@@ -2472,7 +2471,6 @@ dependencies = [
  "tze_hud_runtime",
  "tze_hud_scene",
  "tze_hud_telemetry",
- "tze_hud_validation",
 ]
 
 [[package]]
@@ -3707,19 +3705,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tze_hud_validation"
-version = "0.1.0"
-dependencies = [
- "image",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tze_hud_compositor",
- "tze_hud_scene",
-]
-
-[[package]]
 name = "tze_hud_widget"
 version = "0.1.0"
 dependencies = [
@@ -4304,7 +4289,6 @@ dependencies = [
  "tonic",
  "tze_hud_protocol",
  "tze_hud_telemetry",
- "tze_hud_validation",
 ]
 
 [[package]]

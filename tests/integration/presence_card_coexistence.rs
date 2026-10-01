@@ -38,7 +38,7 @@ use tze_hud_scene::{
 use uuid::Uuid;
 
 // ─── Shared gRPC session harness ─────────────────────────────────────────────
-// Extracted from duplicate copies in multi_agent, v1_thesis, and subtitle_streaming
+// Extracted from duplicate copies in multi_agent and subtitle_streaming
 // (hud-ls5pz). See common/mod.rs for drift reconciliation notes.
 #[path = "common/mod.rs"]
 mod common;

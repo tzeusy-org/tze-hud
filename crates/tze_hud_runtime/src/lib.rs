@@ -81,7 +81,6 @@ pub mod tab_switch_trigger;
 #[cfg(test)]
 pub(crate) mod test_support;
 pub mod threads;
-pub mod trace_capture;
 mod widget_hover;
 pub mod widget_runtime_registration;
 pub mod widget_startup;
@@ -199,9 +198,6 @@ pub use window::{
     FallbackReason, HitRegion, OverlaySupport, WindowConfig, WindowMode, check_overlay_support,
     resolve_window_mode, should_capture_pointer_event,
 };
-
-// ── Record/Replay Trace capture ───────────────────────────────────────────────
-pub use trace_capture::{TraceRecorder, build_regression_trace};
 
 // ── Font loader (resource store → compositor bridge) ─────────────────────────
 pub use font_loader::FontLoader;

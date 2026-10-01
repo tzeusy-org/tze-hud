@@ -9,35 +9,11 @@
 //!
 //! ## Design
 //!
-//! This module consolidates the ~300-line gRPC session helpers that were previously
-//! duplicated across `multi_agent.rs`, `v1_thesis.rs`, `presence_card_coexistence.rs`,
-//! and `subtitle_streaming.rs`. Each file-level constant (PSK, port) is now a
-//! parameter so the shared helpers remain test-agnostic.
-//!
-//! ## Drift reconciliation (hud-ls5pz)
-//!
-//! Four behavioral differences were found across the duplicates. Canonical choice:
-//!
-//! 1. **`create_tile_via_grpc` error on missing ID**: The v1_thesis copy used
-//!    `ok_or_else(|| "…")` rather than `unwrap_or_default()`. An accepted mutation
-//!    that returns no created_id is a server bug; surfacing it as an error is more
-//!    correct. Chosen: **error on missing id** (v1_thesis behavior).
-//!
-//! 2. **`next_non_state_change` as method vs. standalone function**: Three of four
-//!    files had it as an `&mut self` method on `AgentSession`; v1_thesis had a
-//!    standalone function with a different return type (`Result<…, Box<dyn Error>>`).
-//!    Chosen: **method on AgentSession** returning `Option<Result<…, Status>>` (used
-//!    by the majority; callers add `.ok_or(…)?` for ergonomic unwrapping).
-//!
-//! 3. **`connect_agent` `lease_priority` parameter**: `multi_agent` and `v1_thesis`
-//!    exposed it; `presence_card_coexistence` hardcoded 2. Chosen: **explicit
-//!    `lease_priority` parameter** (more flexible; callers that always want 2 pass 2).
-//!
-//! 4. **`connect_agent` PSK and port as parameters**: Previously each file read its
-//!    own `TEST_PSK`/`GRPC_PORT` constants via closed-over captures. Now both are
-//!    explicit parameters so the shared function is test-agnostic.
+//! Shared gRPC session helpers for the multi-agent integration suites
+//! (`multi_agent.rs`, `presence_card_coexistence.rs`, `subtitle_streaming.rs`).
+//! PSK and port are parameters so the helpers stay test-agnostic.
 
-#![allow(dead_code)] // Items are selectively used across the four test binaries.
+#![allow(dead_code)] // Items are selectively used across the test binaries.
 
 use tokio_stream::StreamExt;
 use tze_hud_protocol::auth::{RUNTIME_MAX_VERSION, RUNTIME_MIN_VERSION};
@@ -252,11 +228,6 @@ pub async fn connect_agent(
 /// `MutationResult` does not include a `created_id`. The latter case indicates
 /// a server bug (accepted but did not return the ID); surfacing it as an error
 /// prevents tests from silently operating on an empty tile ID.
-///
-/// **Drift note**: earlier copies of this function in `multi_agent.rs` and
-/// `presence_card_coexistence.rs` used `unwrap_or_default()`, which silently
-/// returned an empty `Vec<u8>` on a missing ID. The `v1_thesis.rs` copy used
-/// `ok_or_else(…)` and was more correct. This canonical version errors.
 pub async fn create_tile_via_grpc(
     session: &mut AgentSession,
     bounds: [f32; 4],

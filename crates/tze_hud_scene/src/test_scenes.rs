@@ -68,7 +68,7 @@ impl Default for ClockMs {
 pub struct SceneSpec {
     /// Canonical name (the key used with [`TestSceneRegistry::build`]).
     pub name: &'static str,
-    /// Human-readable description — used in Layer 4 `explanation.md`.
+    /// Human-readable description.
     pub description: &'static str,
     /// Expected number of tabs.
     pub expected_tab_count: usize,

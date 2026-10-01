@@ -53,8 +53,6 @@ Each local recipe maps to a CI job:
 | `clippy` | `clippy` | `cargo clippy --workspace --all-targets -D warnings` |
 | `test` | `test-unit` | workspace unit tests (excludes `integration`) |
 | `test-integration` | `test-integration` | headless integration suites |
-| `test-trace` | `test-trace` | trace-regression suite |
-| `test-v1-thesis` | `test-v1-thesis` | v1 thesis proof |
 | `production-boot` | `production-boot-vertical-slice` | vertical-slice production-config boot |
 | `canonical-app-boot` | `canonical-app-production-boot` | canonical app production-config boot |
 | `dev-mode-guard` | `dev-mode-guard` | dev-mode excluded from release default features |
@@ -341,14 +339,11 @@ cargo test -p tze_hud_protocol -- --nocapture
 
 ```bash
 cargo test -p tze_hud_runtime --test pixel_readback -- --nocapture
-cargo test -p tze_hud_validation --test layer2_headless -- --nocapture
-cargo test -p tze_hud_validation --test layer4 -- --nocapture
 ```
 
 ### Integration tests
 
 ```bash
-cargo test -p integration --test trace_regression -- --nocapture
 cargo test -p integration --test soak -- --nocapture
 ```
 

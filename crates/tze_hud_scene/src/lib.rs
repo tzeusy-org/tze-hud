@@ -15,11 +15,9 @@ pub mod graph;
 pub mod invariants;
 pub mod mutation;
 pub mod render_wake;
-pub mod replay;
 pub mod svg_tokens;
 pub mod test_scenes;
 pub mod timing;
-pub mod trace;
 pub mod types;
 pub mod validation;
 
@@ -132,11 +130,4 @@ pub use lease::capability::{
 pub use lease::degradation::DegradationLevel;
 pub use lease::priority::{
     PRIORITY_DEFAULT, PRIORITY_HIGH, PRIORITY_SYSTEM, TileSortKey, clamp_requested_priority,
-};
-
-// ── Record/Replay Trace harness ───────────────────────────────────────────────
-pub use replay::{TraceReplayer, assert_trace_is_deterministic};
-pub use trace::{
-    ReplayResult, ReplayStepOutcome, SceneTrace, TraceEvent, TraceEventKind, TraceHeader,
-    TraceTimestamp, TracedAgentEvent, TracedInputEvent, TracedZonePublish,
 };

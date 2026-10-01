@@ -8,8 +8,6 @@
 #   just clippy    # lint check
 #   just test      # unit tests (workspace, excludes integration)
 #   just test-integration   # integration headless suites
-#   just test-trace         # trace regression suite
-#   just test-v1-thesis     # v1 thesis proof
 #   just production-boot    # vertical_slice production config boot
 #   just canonical-app-boot # canonical app production config boot
 #   just dev-mode-guard     # verify dev-mode is not in release default features
@@ -67,7 +65,7 @@ idle-efficiency-checker:
     python3 scripts/ci/test_run_quiescent_efficiency_script.py
 
 # Integration headless suites (mirror CI test-integration job)
-# Excludes: trace_regression, v1_thesis (own jobs), soak (wall-clock, opt-in via TZE_HUD_SOAK_SECS).
+# Excludes: soak (wall-clock, opt-in via TZE_HUD_SOAK_SECS).
 test-integration:
     HEADLESS_FORCE_SOFTWARE=1 \
         cargo test \
@@ -86,22 +84,6 @@ test-integration:
             --test text_stream_portal_governance \
             --test drag_reposition \
             --test movable_elements_e2e
-
-# Trace capture + replay regression tests (mirror CI test-trace job)
-# Does NOT require a GPU (scene graph only; no compositor).
-test-trace:
-    cargo test \
-        -p integration \
-        --test trace_regression
-
-# v1 thesis proof — 7 v1 success criteria (mirror CI test-v1-thesis job)
-# Requires software GPU (HEADLESS_FORCE_SOFTWARE=1).
-test-v1-thesis:
-    HEADLESS_FORCE_SOFTWARE=1 \
-        cargo test \
-            -p integration \
-            --test v1_thesis \
-            -- --nocapture
 
 # vertical_slice production config boot (mirror CI production-boot-vertical-slice job)
 production-boot:
@@ -133,4 +115,4 @@ dev-mode-guard:
 # Run all CI gates that are feasible locally (excludes Windows perf budget and
 # GPU pixel-readback, which need specific hardware or Mesa llvmpipe + GPU).
 # Runs in the same logical order as CI: fast-fail gates first, then tests.
-ci: check fmt clippy dev-mode-guard idle-efficiency-checker test test-integration test-trace test-v1-thesis production-boot canonical-app-boot
+ci: check fmt clippy dev-mode-guard idle-efficiency-checker test test-integration production-boot canonical-app-boot

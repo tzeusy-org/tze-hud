@@ -1,13 +1,9 @@
 [package]
 name = "render_artifacts"
-description = "Layer 4 render-artifacts binary — generates developer visibility artifacts"
+description = "Headless readback binaries that render runtime scenes to PNG"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-
-[[bin]]
-name = "render-artifacts"
-path = "src/main.rs"
 
 [[bin]]
 name = "cooperative-projection-readback"
@@ -20,11 +16,10 @@ path = "src/bin/vertical_flow_readback.rs"
 required-features = ["headless"]
 
 [features]
-# Enable headless GPU rendering so Layer 1/2 images can be sourced live.
+# Enable headless GPU rendering for the readback binaries.
 headless = ["dep:tze_hud_compositor", "dep:tze_hud_runtime", "tze_hud_runtime/headless"]
 
 [dependencies]
-tze_hud_validation = { path = "../../crates/tze_hud_validation", version = "0.1.0" }
 tze_hud_scene = { path = "../../crates/tze_hud_scene", version = "0.1.0" }
 tze_hud_telemetry = { path = "../../crates/tze_hud_telemetry", version = "0.1.0" }
 tze_hud_compositor = { path = "../../crates/tze_hud_compositor", version = "0.1.0", features = ["headless"], optional = true }

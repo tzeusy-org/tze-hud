@@ -47,7 +47,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 // ─── Shared gRPC session harness ─────────────────────────────────────────────
-// Extracted from duplicate copies in v1_thesis, presence_card_coexistence, and
+// Extracted from duplicate copies in presence_card_coexistence, and
 // subtitle_streaming (hud-ls5pz). See common/mod.rs for drift reconciliation notes.
 #[path = "common/mod.rs"]
 mod common;

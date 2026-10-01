@@ -58,7 +58,6 @@ mod common;
 // Other tests use:
 //   50052  multi_agent
 //   50053  soak
-//   50054  v1_thesis
 //   50055  presence_card_coexistence
 //   50056-50060 reserved for this file
 //
