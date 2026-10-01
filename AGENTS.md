@@ -230,6 +230,8 @@ scripts/worktree-add.sh .worktrees/agent-hud-XXXX -b agent/hud-XXXX
 
 ## CI / Build
 
+- `main` merges go through the GitHub merge queue (ruleset `main merge queue`, squash). Enqueue with `gh pr merge <N> --squash --auto`. Every required check in `ci.yml` must also trigger on `merge_group`; a required check name that no job emits blocks the queue forever, so update the ruleset whenever a required job is renamed or removed.
+
 - `tze_hud_protocol` requires `protoc` (protobuf-compiler) as a build dependency; GitHub-hosted runners don't include it by default. All CI jobs that compile Rust must install `protobuf-compiler` via apt before running cargo commands.
 - Quiescent-efficiency proof is emitted by the real constrained windowed runtime via `--quiescent-efficiency-emit`; keep its sampler deadline independent of `scheduled_main_deadline` so a normal winit resume cannot be counted as an excluded measurement wake. The canonical Windows CI harness is `scripts/ci/windows/run-quiescent-efficiency.ps1`: it enforces process affinity and validates an actual `overlay` artifact through `check_idle_efficiency.py` rather than accepting a host-side fixture.
 - CI's clippy gate runs `cargo clippy --workspace --all-targets -- -D warnings`, so test, example, and bench code must be clippy-clean too. The `integration` package's headless test targets are gated by the `test-integration` CI job (everything except `trace_regression`, `v1_thesis`, and the wall-clock `soak` suite, which stays opt-in via `TZE_HUD_SOAK_SECS`).
