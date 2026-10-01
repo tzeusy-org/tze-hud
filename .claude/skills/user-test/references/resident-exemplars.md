@@ -92,7 +92,7 @@ Integration tests in `tests/integration/`:
   non-tmux adapter conformance, external adapter isolation
 - `text_stream_portal_coalescing.rs` — retained-window coherence under
   backpressure
-- `text_stream_portal_governance.rs` — redaction, safe-mode, freeze, orphan
+- `text_stream_portal_governance.rs` — safe-mode, freeze, orphan
   path, chrome exclusion
 
 Evidence artifact: `docs/evidence/text-stream-portals/validation-2026-04-16.md`.
@@ -158,7 +158,6 @@ cannot validate alone:
 | Local-first scroll | Transcript Interaction Contract | Scroll offset visibly updates before any adapter ack |
 | Bounded viewport | Bounded Transcript Viewport | Retained window stays within on-screen bounds as transcript grows |
 | Coalescing coherence | Coherent Transcript Coalescing | Under rapid-publish pressure, retained window never collapses to only latest line |
-| Redaction | Governance, Privacy, and Override Compliance | Portal geometry preserved; transcript content suppressed under viewer policy |
 | Safe mode | Governance, Privacy, and Override Compliance | Portal updates suspend under safe mode like other content surfaces |
 | Orphan path | Governance, Privacy, and Override Compliance | Disconnected portal freezes at last coherent state; grace expiry removes it |
 | Ambient attention | Ambient Portal Attention Defaults | Unread backlog does not auto-escalate interruption class |

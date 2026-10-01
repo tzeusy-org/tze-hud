@@ -1,15 +1,13 @@
 //! Text stream portal governance and shell-isolation validation (hud-t98e.4).
 //!
-//! Focus: lease lifecycle, privacy redaction, safe-mode/freeze behavior,
-//! ambient attention defaults, and shell isolation constraints for the
-//! phase-0 raw-tile portal pilot.
+//! Focus: lease lifecycle, safe-mode/freeze behavior, and shell isolation
+//! constraints for the phase-0 raw-tile portal pilot.
 //!
 //! The second half of this file (hud-8z3w3, RFC 0013 §7.2 promotion) mirrors
 //! every governance contract above over the promoted first-class `PortalSurface`
-//! attached to the same host tile — proving lease ownership, redaction (with a
-//! flashes-no-content transition check), safe mode, freeze, dismissal, orphan
-//! handling, and ambient-attention defaults hold UNCHANGED on the first-class
-//! surface, and that it stays content-layer below chrome.
+//! attached to the same host tile — proving lease ownership, safe mode, freeze,
+//! dismissal, and orphan handling hold UNCHANGED on the first-class surface,
+//! and that it stays content-layer below chrome.
 
 use std::sync::Arc;
 
@@ -362,7 +360,7 @@ fn shell_dismiss_override_removes_portal_tile() {
 // on the RAW-TILE path must hold UNCHANGED once a first-class surface is
 // attached to the same host tile. The tests below MIRROR the raw-tile suite
 // one-for-one over a tile that carries a declared `PortalSurface`, and add the
-// redaction-flashes-no-content acceptance check plus the content-layer proof.
+// content-layer proof.
 //
 // Governance for the surface lives on the host tile's lease exactly as the raw
 // tiles do: the surface holds no capability, no lease, and no z-order of its

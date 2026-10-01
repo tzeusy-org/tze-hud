@@ -391,7 +391,7 @@ authorizes first-class portal surface work (`hud-tc153`) to proceed.
 | Cooperative-projection adapter + agent ergonomics | **PASS** | Cooperative render recovered/durable; resident ingress confirmed; owner verified live. |
 | C5 sustained soak evidence | **ACCEPTED PARTIAL** | Lease self-termination fixed (`hud-hk8kl`) — soak ran 57.6 min (13303 cycles) vs prior 608 s; memory flat (27–34 MiB, no trend). Full 3600 s completion deferred to `hud-5kq8k`; transient abort `hud-n5bqp`. Owner accepts partial. |
 | Repeated raw-tile complexity criterion | **PASS** | Six raw tiles, split root/child mutation batches, capture tiles, drag shields, minimized-icon state, explicit cleanup, OS-input diagnostics — recurring complexity a first-class surface should absorb. |
-| Governance stability criterion | **PASS (owner-accepted)** | Redaction/safe-mode/freeze/orphan covered by 9 passing integration tests; orphan/grace live-drivable. Owner accepts integration coverage for Phase-1. |
+| Governance stability criterion | **PASS (owner-accepted)** | Safe-mode/freeze/orphan covered by 9 passing integration tests; orphan/grace live-drivable. Owner accepts integration coverage for Phase-1. |
 | Presence-thesis boundary | **PASS (owner)** | Content-layer, lease-governed, bounded, below chrome, subordinate to the presence model. |
 | No terminal semantics | **PASS** | No PTY hosting, VT100/xterm compatibility, alternate screen, terminal mouse reporting, terminal keystroke passthrough, dedicated portal transport, or process lifecycle ownership is introduced. |
 
@@ -413,7 +413,6 @@ A governed, low-latency **text stream portal** — not a terminal host, not a ch
 - [ ] Unread/activity indicator remains ambient — does not escalate interruption class on backlog growth
 - [x] Scroll input feels local-first (offset updates before adapter ack)
 - [x] Reply submission affordance reads as transactional, not coalescible
-- [ ] Redaction treatment preserves portal geometry without leaking transcript content
 - [ ] Safe-mode / freeze visual is indistinguishable from generic queue-pressure state (no portal-specific leakage)
 - [x] Orphan/disconnect cleanup path removes stale portal tiles during ordinary `/user-test` exit
 - [ ] Caret geometry remains stable after long markdown paste and near right-edge line ends
@@ -426,7 +425,7 @@ Integration tests in `tests/integration/`:
 - `text_stream_portal_surface.rs` — raw-tile composition, bounded viewport, local-first scroll, ambient attention
 - `text_stream_portal_adapter.rs` — transport-agnostic seam, tmux + non-tmux conformance, external adapter isolation
 - `text_stream_portal_coalescing.rs` — retained-window coherence under backpressure
-- `text_stream_portal_governance.rs` — redaction, safe-mode, freeze, orphan path, chrome exclusion
+- `text_stream_portal_governance.rs` — safe-mode, freeze, orphan path, chrome exclusion
 
 Evidence: `docs/evidence/text-stream-portals/validation-2026-04-16.md`. Spec-to-test requirement matrix: see the closeout report's compliance table.
 
@@ -449,7 +448,6 @@ Integration tests prove structure; these axes still need operator-visible proof 
 | Cooperative projection adapter | Cooperative LLM Projection Adapter / Phase-1 Promotion Evidence Gate | 2026-06-19 `hud-kylt0` live reachability PASS, but full agent-ergonomics lifecycle BLOCKED: projection attach/publish/input/detach over HTTP MCP returned `resident_mcp` capability errors, and cleanup/status dispatcher methods were absent on the deployed runtime |
 | 60-minute sustained soak | Sustained Streaming Cadence / Phase-1 Promotion Evidence Gate | NOT SIGNED OFF: PR #899 landed the `soak` phase and tests, but no completed 60-minute reference-host portal artifact proves `<=5 MiB` memory drift |
 | RFC 0013 section 7.2 promotion gate | Phase-1 Promotion Evidence Gate | 2026-06-19 `hud-qfyfg` FAIL: raw-tile pilot remains authoritative; owner approval is not present |
-| Redaction | Governance / Privacy / Override | Portal geometry preserved; transcript content suppressed under viewer policy |
 | Safe mode | Governance / Privacy / Override | Portal updates suspend under safe mode like other content surfaces |
 | Orphan path | Governance / Privacy / Override | PASS for ordinary `/user-test` cleanup; explicit orphan/grace behavior still needs a dedicated run |
 | Ambient attention | Ambient Portal Attention Defaults | Unread backlog does not auto-escalate interruption class |

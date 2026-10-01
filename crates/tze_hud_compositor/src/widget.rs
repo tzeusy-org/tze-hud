@@ -4217,19 +4217,14 @@ mod tests {
         );
     }
 
-    /// Under Simplified, transitions snap to t=1.0.
-    ///
-    /// Covers: openspec/changes/widget-system/design.md D5 stage 4 degradation note.
+    /// Under Simplified, transitions snap to t=1.0 regardless of elapsed time.
     #[test]
-    fn compute_transition_t_snaps_at_rendering_simplified_and_above() {
-        // Simplified must snap to 1.0, regardless of elapsed time.
-        for level in [DegradationLevel::Simplified] {
-            let t = compute_transition_t(1.0, 1000.0, level); // only 0.1% elapsed
-            assert_eq!(
-                t, 1.0,
-                "degradation level {level:?} should snap transition to t=1.0, got {t}"
-            );
-        }
+    fn compute_transition_t_snaps_when_simplified() {
+        let t = compute_transition_t(1.0, 1000.0, DegradationLevel::Simplified); // 0.1% elapsed
+        assert_eq!(
+            t, 1.0,
+            "Simplified should snap transition to t=1.0, got {t}"
+        );
     }
 
     /// Verify the snap produces the final parameter value for an f32 transition.
