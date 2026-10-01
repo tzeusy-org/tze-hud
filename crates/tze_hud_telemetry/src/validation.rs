@@ -297,85 +297,6 @@ impl BudgetAssertion {
     }
 }
 
-/// Per-mutation policy admission latency budget (policy-arbitration/spec.md §9.1).
-pub const POLICY_MUTATION_EVAL_BUDGET_US: u64 = 50;
-
-/// Structured conformance result for mutation-path policy evaluation latency.
-///
-/// This harness is intentionally calibration-free (`factor = 1.0`) because the
-/// bounded pilot validates evaluator overhead in-process, not end-to-end frame
-/// performance.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct MutationPathLatencyConformance {
-    /// Metric name used in CI logs and telemetry payloads.
-    pub metric: String,
-    /// Number of per-mutation samples observed in the batch check.
-    pub sample_count: u32,
-    /// p99 per-mutation evaluation latency in microseconds.
-    pub p99_eval_us: u64,
-    /// Maximum observed per-mutation evaluation latency in microseconds.
-    pub max_eval_us: u64,
-    /// Number of individual mutation evaluations above budget.
-    pub over_budget_samples: u32,
-    /// Budget applied to `p99_eval_us`.
-    pub budget_us: u64,
-    /// Assertion outcome for the p99 check.
-    pub assertion: AssertionOutcome,
-}
-
-impl MutationPathLatencyConformance {
-    /// Returns true when the p99 latency assertion passed.
-    pub fn within_budget(&self) -> bool {
-        self.assertion.is_pass()
-    }
-}
-
-/// Evaluate mutation-path policy latency against the v1 p99 budget.
-pub fn evaluate_policy_mutation_latency_conformance(
-    sample_count: u32,
-    p99_eval_us: u64,
-    max_eval_us: u64,
-    over_budget_samples: u32,
-) -> MutationPathLatencyConformance {
-    let metric = "policy_mutation_eval_p99".to_string();
-    let assertion = if sample_count == 0 {
-        AssertionOutcome::NoSamples {
-            metric: metric.clone(),
-        }
-    } else if p99_eval_us < POLICY_MUTATION_EVAL_BUDGET_US {
-        AssertionOutcome::Pass {
-            metric: metric.clone(),
-            observed: p99_eval_us,
-            budget: POLICY_MUTATION_EVAL_BUDGET_US,
-            factor: 1.0,
-        }
-    } else {
-        let overage = p99_eval_us.saturating_sub(POLICY_MUTATION_EVAL_BUDGET_US);
-        let overage_pct =
-            (p99_eval_us as f64 / POLICY_MUTATION_EVAL_BUDGET_US as f64 - 1.0) * 100.0;
-        AssertionOutcome::Fail {
-            metric: metric.clone(),
-            observed: p99_eval_us,
-            budget: POLICY_MUTATION_EVAL_BUDGET_US,
-            factor: 1.0,
-            overage,
-            overage_pct,
-        }
-    };
-
-    MutationPathLatencyConformance {
-        metric,
-        sample_count,
-        p99_eval_us,
-        max_eval_us,
-        over_budget_samples,
-        budget_us: POLICY_MUTATION_EVAL_BUDGET_US,
-        assertion,
-    }
-}
-
-// ─── Session validation report ────────────────────────────────────────────────
-
 /// Full set of Layer-3 assertion outcomes for a session.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ValidationReport {
@@ -693,51 +614,6 @@ mod tests {
         // Should not be "fail" — uncalibrated is not a failure
         assert_ne!(report.verdict, "fail", "report: {:?}", report.assertions);
         assert!(report.uncalibrated_count > 0);
-    }
-
-    #[test]
-    fn mutation_path_latency_conformance_passes_within_budget() {
-        let report = evaluate_policy_mutation_latency_conformance(64, 38, 49, 0);
-        assert!(
-            report.within_budget(),
-            "expected pass for p99 under budget: {report:?}"
-        );
-        assert_eq!(report.budget_us, POLICY_MUTATION_EVAL_BUDGET_US);
-        assert_eq!(report.sample_count, 64);
-        assert_eq!(report.p99_eval_us, 38);
-    }
-
-    #[test]
-    fn mutation_path_latency_conformance_fails_when_p99_exceeds_budget() {
-        let report = evaluate_policy_mutation_latency_conformance(64, 71, 88, 5);
-        assert!(
-            report.assertion.is_fail(),
-            "expected fail for p99 over budget: {report:?}"
-        );
-        assert_eq!(report.over_budget_samples, 5);
-    }
-
-    #[test]
-    fn mutation_path_latency_conformance_handles_missing_samples() {
-        let report = evaluate_policy_mutation_latency_conformance(0, 0, 0, 0);
-        assert!(
-            matches!(report.assertion, AssertionOutcome::NoSamples { .. }),
-            "expected NoSamples, got {report:?}"
-        );
-    }
-
-    #[test]
-    fn mutation_path_latency_conformance_fails_at_exact_budget_boundary() {
-        let report = evaluate_policy_mutation_latency_conformance(
-            64,
-            POLICY_MUTATION_EVAL_BUDGET_US,
-            POLICY_MUTATION_EVAL_BUDGET_US,
-            1,
-        );
-        assert!(
-            report.assertion.is_fail(),
-            "expected fail for p99 at strict budget boundary: {report:?}"
-        );
     }
 
     #[test]

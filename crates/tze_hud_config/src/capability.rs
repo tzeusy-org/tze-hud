@@ -3,7 +3,7 @@
 //! This module implements the canonical v1 capability vocabulary from
 //! `configuration/spec.md §Requirement: Capability Vocabulary`.
 //!
-//! ## Canonical v1 Capabilities (17 entries)
+//! ## Canonical v1 Capabilities (16 entries)
 //!
 //! Flat names (exact match):
 //! - `create_tiles`
