@@ -34,5 +34,7 @@ remains. Each tranche must still build, pass tests, and boot the overlay.
 
 - Prefer deleting over generalizing. New abstractions need a current user.
 - Tests guard behavior a user would notice, not internal structure.
-- `docs/` holds only this file, `vision.md`, `QUICKSTART.md`, and
-  `operations/` runbooks. Investigation notes go in PR descriptions.
+- Removals and redesigns must keep every contract in `invariants.md`; changing
+  one is a deliberate decision recorded there, with its tests.
+- `docs/` holds only this file, `vision.md`, `invariants.md`, `QUICKSTART.md`,
+  and `operations/` runbooks. Investigation notes go in PR descriptions.
