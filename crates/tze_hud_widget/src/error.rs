@@ -80,26 +80,6 @@ pub enum BundleError {
         svg_file: String,
         token_key: String,
     },
-
-    /// A profile-scoped SVG violates readability structural conventions.
-    ///
-    /// Produced when a widget bundle that is part of a component profile
-    /// contains SVG elements that violate the readability conventions for the
-    /// profile's component type (e.g. missing stroke on `data-role="text"` in a
-    /// DualLayer profile, or `data-role="backdrop"` appearing after
-    /// `data-role="text"` in document order).
-    ///
-    /// Global widget bundles (not in any profile) are never subject to this check.
-    ///
-    /// Wire code: `WIDGET_BUNDLE_READABILITY_CONVENTION_VIOLATION`
-    #[error(
-        "WIDGET_BUNDLE_READABILITY_CONVENTION_VIOLATION: {path}: SVG file '{svg_file}': {detail}"
-    )]
-    ReadabilityConventionViolation {
-        path: String,
-        svg_file: String,
-        detail: String,
-    },
 }
 
 impl BundleError {
@@ -114,9 +94,6 @@ impl BundleError {
             BundleError::SvgParseError { .. } => "WIDGET_BUNDLE_SVG_PARSE_ERROR",
             BundleError::BindingUnresolvable { .. } => "WIDGET_BINDING_UNRESOLVABLE",
             BundleError::UnresolvedToken { .. } => "WIDGET_BUNDLE_UNRESOLVED_TOKEN",
-            BundleError::ReadabilityConventionViolation { .. } => {
-                "WIDGET_BUNDLE_READABILITY_CONVENTION_VIOLATION"
-            }
         }
     }
 }

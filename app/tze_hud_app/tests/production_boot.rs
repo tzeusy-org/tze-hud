@@ -6,7 +6,7 @@
 //! The gate is intentionally CI-visible:
 //! - startup must succeed
 //! - config-declared widget instances/types must be registered
-//! - component-profile rendering overrides must be visible in zone policy
+//! - config `[design_tokens]` must be visible in zone policy
 //!
 //! If startup silently falls back to a default/headless policy, these assertions
 //! fail even when runtime construction itself succeeds.
@@ -43,8 +43,6 @@ fn canonical_config_for_headless() -> String {
     // config_file_path, so relative asset paths cannot be resolved against
     // app/tze_hud_app/config/. Rebase only asset roots for deterministic CI.
     config["widget_bundles"]["paths"] = Value::Array(widget_bundle_paths);
-    config["component_profile_bundles"]["paths"] =
-        Value::Array(vec![Value::String(format!("{REPO_ROOT}/profiles"))]);
 
     toml::to_string(&config).expect("headless canonical config must serialize")
 }
@@ -99,7 +97,7 @@ async fn canonical_app_production_config_registers_declared_state() {
         );
     }
 
-    // The active notification profile sets color.text.primary = #F5F7FA.
+    // production.toml's [design_tokens] sets color.text.primary = #F5F7FA.
     // Verify the resolved zone policy reflects that override, not default fallback.
     let notification_zone = scene
         .zone_registry
@@ -121,7 +119,7 @@ async fn canonical_app_production_config_registers_declared_state() {
         (text_color.r - expected.0).abs() < eps
             && (text_color.g - expected.1).abs() < eps
             && (text_color.b - expected.2).abs() < eps,
-        "expected notification-area text_color to resolve to #F5F7FA from active profile, got ({:.4}, {:.4}, {:.4})",
+        "expected notification-area text_color to resolve to #F5F7FA from [design_tokens], got ({:.4}, {:.4}, {:.4})",
         text_color.r,
         text_color.g,
         text_color.b

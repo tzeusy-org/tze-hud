@@ -321,8 +321,8 @@ pub struct Compositor {
     /// alert-banner backdrop colors. When empty (the default), all severity
     /// lookups fall back to the hardcoded `SEVERITY_*` constants.
     ///
-    /// Populated by calling `set_token_map` after `run_component_startup`
-    /// produces a `ComponentStartupResult::global_tokens`.
+    /// Populated by calling `set_token_map` with the global token map from
+    /// scene startup.
     pub token_map: HashMap<String, String>,
     /// Decoded RGBA image bytes indexed by `ResourceId`.
     ///
@@ -1472,8 +1472,8 @@ impl Compositor {
 
     /// Replace the compositor's resolved design token map.
     ///
-    /// Should be called once at startup after `run_component_startup` produces a
-    /// `ComponentStartupResult::global_tokens`.  The map is keyed by canonical
+    /// Should be called once at startup with the global token map from scene
+    /// startup.  The map is keyed by canonical
     /// token names (e.g. `"color.severity.warning"`) with hex-color string values
     /// (e.g. `"#FFB800"`).
     ///

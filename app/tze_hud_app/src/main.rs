@@ -53,7 +53,7 @@
 //! 5. `%APPDATA%\tze_hud\config.toml` (Windows)
 //!
 //! The loader schema is driven by `[runtime]` and `[[tabs]]` (plus optional
-//! sections such as `[agents]`, `[widget_bundles]`, and `[component_profiles]`).
+//! sections such as `[agents]`, `[widget_bundles]`, and `[design_tokens]`).
 //! Legacy `[display]`/`[network]` config tables are not part of the current schema.
 //!
 //! In the canonical operator path, startup is fail-closed: a readable, valid
@@ -176,7 +176,7 @@ NOTES:
     fallback startup behavior without a config file. In canonical startup, the
     required config file uses the loader schema rooted at [runtime] and [[tabs]]
     (plus optional sections such as [agents], [widget_bundles], and
-    [component_profiles]). In insecure dev mode, the same schema applies when a
+    [design_tokens]). In insecure dev mode, the same schema applies when a
     config file is provided. Legacy [display]/[network] tables are unsupported.
     CLI flags override individual settings from the config file.
     Passing --config with a path that does not exist or cannot be read is an error.

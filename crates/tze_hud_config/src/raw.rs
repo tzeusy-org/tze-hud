@@ -289,32 +289,6 @@ pub struct RawWidgetGeometry {
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
 pub struct RawDesignTokens(pub HashMap<String, String>);
 
-// ─── [component_profile_bundles] ─────────────────────────────────────────────
-
-/// `[component_profile_bundles]` table — optional.
-///
-/// Specifies directories to scan for component profile bundles. Each directory
-/// may contain one or more component profile definitions (e.g. `profile.toml`).
-/// Paths are resolved relative to the configuration file's parent directory.
-#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
-pub struct RawComponentProfileBundles {
-    /// Array of directory paths to scan for component profile bundles.
-    /// Each path is resolved relative to the config file's parent directory.
-    #[serde(default)]
-    pub paths: Vec<String>,
-}
-
-// ─── [component_profiles] ────────────────────────────────────────────────────
-
-/// `[component_profiles]` table — optional.
-///
-/// Maps component type names to profile names.  For example:
-/// `subtitle = "minimal"` selects the "minimal" profile for the subtitle
-/// component type.  Profile names must reference a profile loaded from a
-/// bundle in `[component_profile_bundles].paths`.
-#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
-pub struct RawComponentProfiles(pub HashMap<String, String>);
-
 // ─── Top-level document ──────────────────────────────────────────────────────
 
 /// The top-level TOML document.
@@ -350,10 +324,4 @@ pub struct RawConfig {
     /// Optional design token overrides.
     #[serde(default)]
     pub design_tokens: Option<RawDesignTokens>,
-    /// Optional component profile bundle directories to scan at startup.
-    #[serde(default)]
-    pub component_profile_bundles: Option<RawComponentProfileBundles>,
-    /// Optional mapping of component type → profile name.
-    #[serde(default)]
-    pub component_profiles: Option<RawComponentProfiles>,
 }

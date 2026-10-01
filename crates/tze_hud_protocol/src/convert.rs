@@ -1018,8 +1018,8 @@ pub fn proto_to_rendering_policy(p: &proto::RenderingPolicyProto) -> RenderingPo
         transition_in_ms,
         transition_out_ms,
         overflow,
-        // key_icon_map is intentionally config-layer only. It is populated at
-        // startup from component profiles and is NOT transmitted via proto
+        // key_icon_map is intentionally config-layer only. It is NOT
+        // transmitted via proto
         // (protocol messages carry payloads, not zone configuration). Any
         // RenderingPolicy reconstructed from proto will have an empty map; the
         // compositor must re-apply zone config after proto-roundtrip if needed.

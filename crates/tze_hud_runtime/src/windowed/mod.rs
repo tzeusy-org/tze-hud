@@ -88,7 +88,7 @@ use winit::event::{ElementState, MouseButton, StartCause, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::window::{Fullscreen, Window, WindowAttributes, WindowId, WindowLevel};
 
-use crate::component_startup::{register_profile_widgets, run_component_startup};
+use crate::scene_startup::run_scene_startup;
 use tze_hud_compositor::{
     Compositor, CompositorSurface, FocusRingOwnerHandle, LocalComposerStateHandle,
     PortalViewerEchoQueue, ResizeGripHoverHandle, WindowSurface,
@@ -440,10 +440,9 @@ struct WindowedRuntimeState {
     modifiers: winit::keyboard::ModifiersState,
     /// Current monitor index for Ctrl+Shift+F8/F9 cycling.
     current_monitor_index: usize,
-    /// Pre-merged compositor token map from component startup (global tokens +
-    /// all active profile overrides).
+    /// Global design token map from scene startup.
     ///
-    /// Stashed here after `run_component_startup` returns so it can be applied
+    /// Stashed here after `run_scene_startup` returns so it can be applied
     /// to the compositor via `set_token_map` when the compositor is created in
     /// `resumed()`. After that call the field is no longer needed but is kept
     /// for potential hot-reload use.
@@ -2478,26 +2477,14 @@ impl WindowedRuntime {
                 None
             };
 
-            // Run the full component shape language startup sequence (steps 2-9):
-            // design token loading, global widget bundles, component profile loading,
-            // profile selection, effective rendering policy construction, readability
-            // validation, zone registry construction, and widget registry population.
-            //
-            // Per component-shape-language/spec.md §Requirement: Startup Sequence Integration
+            // Scene startup: design tokens, config tabs, widget bundles, and
+            // token-derived zone rendering policies.
             let compositor_tokens = if let Some(raw) = &raw_config_for_startup {
-                let startup_result = run_component_startup(
-                    raw,
-                    config_parent_buf.as_deref(),
-                    None, // profile_name: windowed mode uses production readability (no dev-mode unless TZE_HUD_DEV=1)
-                    &mut scene,
-                );
-                // Step 9b: register profile-scoped widget bundles
-                register_profile_widgets(&mut scene, &startup_result);
+                let startup_result =
+                    run_scene_startup(raw, config_parent_buf.as_deref(), &mut scene);
                 // Stash SVG assets for compositor registration after init_widget_renderer.
                 pending_widget_svgs = startup_result.widget_svg_assets;
-                // compositor_tokens is pre-merged: global tokens + all active profile
-                // token overrides. Pass directly to compositor.set_token_map().
-                startup_result.compositor_tokens
+                startup_result.global_tokens
             } else {
                 // No config provided — bootstrap with canonical zone defaults (no token derivation).
                 scene.zone_registry = tze_hud_scene::types::ZoneRegistry::with_defaults();
@@ -2912,8 +2899,8 @@ impl WindowedRuntime {
                         bridge_cfg.lease_ttl_ms = settings.lease_ttl_ms;
                         // Resolve the bridge's visual tokens from the runtime's
                         // LOADED startup design tokens (`startup_compositor_tokens`
-                        // — canonical defaults pre-merged with the active profile's
-                        // overrides), NOT empty maps. This mirrors the in-process
+                        // — canonical defaults merged with `[design_tokens]`), NOT
+                        // empty maps. This mirrors the in-process
                         // driver's `resolve_visual_tokens`, which resolves against
                         // the same startup token map (applied via
                         // `apply_token_map(global_tokens)`), so a bridged portal is

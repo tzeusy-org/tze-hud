@@ -57,7 +57,6 @@
 //!
 pub mod agent_events;
 pub mod channels;
-pub mod component_startup;
 pub mod degradation;
 pub mod diag;
 pub mod element_store;
@@ -75,6 +74,7 @@ pub mod portal_tokens;
 pub mod reload_triggers;
 pub mod resident_grpc_bridge;
 pub mod runtime_context;
+pub mod scene_startup;
 pub mod shell;
 pub mod subscriptions;
 pub mod tab_switch_trigger;

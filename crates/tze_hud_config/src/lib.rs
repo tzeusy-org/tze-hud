@@ -38,29 +38,14 @@
 //!
 //! ## Does NOT include
 //! - Capability vocabulary validation (rig-9yfh)
-//!
-//! ### hud-sc0a.4 (Component type contracts)
-//! - Component Type Contract (v1-mandatory)
-//! - V1 Component Type Definitions (v1-mandatory)
-//! - Zone Name Reconciliation (v1-mandatory)
-//!
-//! ### hud-sc0a.5 (Component profile loader and zone override parser)
-//! - Component Profile Format (v1-mandatory)
-//! - Zone Rendering Override Schema (v1-mandatory)
-//! - Profile-Scoped Token Resolution (v1-mandatory)
-//! - Profile Widget Scope (v1-mandatory)
-//! - Zone Name Reconciliation (v1-mandatory)
 
 pub mod agents;
 pub mod capability;
-pub mod component_profiles;
-pub mod component_types;
 pub mod loader;
 pub mod policy_builder;
 pub mod portal_tokens;
 pub mod profile;
 pub mod raw;
-pub mod readability;
 pub mod reload;
 pub mod resolver;
 pub mod runtime_widget_assets;
@@ -75,12 +60,9 @@ pub use agents::{
     AuthEnvWarning, check_agent_auth_env_vars, check_agent_auth_env_vars_with_lookup,
     dynamic_agents_allowed, validate_agents,
 };
-pub use component_profiles::{ComponentProfile, ZoneRenderingOverride, scan_profile_dirs};
-pub use component_types::{ComponentType, ComponentTypeContract, ReadabilityTechnique};
 pub use loader::TzeHudConfig;
 pub use policy_builder::{
-    ProfileSelection, apply_token_defaults_for_zone, build_all_effective_policies,
-    build_effective_policy, merge_zone_override, resolve_profile_selection,
+    apply_token_defaults_for_zone, build_all_effective_policies, build_effective_policy,
 };
 pub use portal_tokens::{
     PORTAL_TOKEN_COLLAPSED_BACKGROUND, PORTAL_TOKEN_COLLAPSED_FONT_SIZE,
@@ -110,7 +92,6 @@ pub use profile::{
     AutoDetectResult, HeadlessSignal, auto_detect_profile, resolve_headless_dimensions,
     resolve_profile, validate_display_profile,
 };
-pub use readability::{PolicySnapshot, ReadabilityViolation, check_zone_readability, is_dev_mode};
 pub use reload::{
     FROZEN_SECTIONS, FieldClassification, HotReloadableConfig, SighupHandler,
     check_frozen_section_changes, reload_config, section_classification,

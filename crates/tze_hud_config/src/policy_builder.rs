@@ -1,37 +1,14 @@
-//! Token-to-RenderingPolicy mapper and effective policy constructor — hud-sc0a.7.
+//! Token-to-RenderingPolicy mapper.
 //!
-//! Implements spec sections:
-//! - `component-shape-language/spec.md §Requirement: Default Zone Rendering with Tokens`
-//! - `component-shape-language/spec.md §Requirement: Component Profile Selection`
-//!
-//! ## Overview
-//!
-//! At startup, the runtime constructs an **effective `RenderingPolicy`** for each
-//! built-in zone type following a three-layer merge:
-//!
-//! 1. **Zone defaults** — the existing `RenderingPolicy::default()` from zone registration.
-//! 2. **Token-derived defaults** — per-zone-type token-to-field mappings applied to
-//!    any field that is still `None` after layer 1.
-//! 3. **Profile overrides** — zone rendering overrides from the active component profile
-//!    (if any) merged on top.
-//!
+//! At startup, the runtime builds each built-in zone's `RenderingPolicy` by
+//! starting from the zone registry default and filling every `None` field from
+//! the global design tokens (`[design_tokens]` merged over canonical fallbacks).
 //! The result is immutable after startup.
-//!
-//! ## Error codes produced
-//!
-//! | Error code | Condition |
-//! |---|---|
-//! | `CONFIG_UNKNOWN_COMPONENT_TYPE` | A `[component_profiles]` key is not a known component type |
-//! | `CONFIG_UNKNOWN_COMPONENT_PROFILE` | A `[component_profiles]` value doesn't match any loaded profile |
-//! | `CONFIG_PROFILE_TYPE_MISMATCH` | A `[component_profiles]` entry maps a component type to a profile of a different type |
 
 use std::collections::HashMap;
 
-use tze_hud_scene::config::{ConfigError, ConfigErrorCode};
 use tze_hud_scene::types::{FontFamily, RenderingPolicy, Rgba, TextAlign, TextOverflow};
 
-use crate::component_profiles::ComponentProfile;
-use crate::component_types::ComponentType;
 use crate::tokens::{DesignTokenMap, parse_color_hex, parse_font_family, parse_numeric};
 
 // ─── Token lookup helpers ─────────────────────────────────────────────────────
@@ -146,6 +123,7 @@ pub fn apply_subtitle_token_defaults(policy: &mut RenderingPolicy, tokens: &Desi
 /// - `margin_horizontal` ← `spacing.padding.medium`
 /// - `margin_vertical` ← `spacing.padding.medium`
 /// - `backdrop_radius` ← `border.radius.medium`
+/// - `text_align` ← `Start`; transitions 120 ms in / 180 ms out (not token-driven)
 pub fn apply_notification_area_token_defaults(
     policy: &mut RenderingPolicy,
     tokens: &DesignTokenMap,
@@ -177,6 +155,15 @@ pub fn apply_notification_area_token_defaults(
     }
     if policy.backdrop_radius.is_none() {
         policy.backdrop_radius = token_f32(tokens, "border.radius.medium");
+    }
+    if policy.text_align.is_none() {
+        policy.text_align = Some(TextAlign::Start);
+    }
+    if policy.transition_in_ms.is_none() {
+        policy.transition_in_ms = Some(120);
+    }
+    if policy.transition_out_ms.is_none() {
+        policy.transition_out_ms = Some(180);
     }
 }
 
@@ -275,208 +262,17 @@ pub fn apply_token_defaults_for_zone(
     }
 }
 
-// ─── Profile overrides → RenderingPolicy merge ───────────────────────────────
-
-/// Merge a `ZoneRenderingOverride` on top of an existing `RenderingPolicy`.
-///
-/// Override fields (when `Some`) replace the corresponding policy fields.
-/// `None` override fields leave the policy field unchanged.
-///
-/// Color strings in the override are expected to be already resolved
-/// (no `{{token.key}}` references remain after `scan_profile_dirs` parsing).
-pub fn merge_zone_override(
-    policy: &mut RenderingPolicy,
-    override_: &crate::component_profiles::ZoneRenderingOverride,
-) {
-    if let Some(ref ff_str) = override_.font_family {
-        if let Some(ff) = parse_font_family(ff_str) {
-            policy.font_family = Some(ff);
-        }
-    }
-    if let Some(sz) = override_.font_size_px {
-        policy.font_size_px = Some(sz);
-    }
-    if let Some(fw) = override_.font_weight {
-        // font_weight is already Option<u16> in ZoneRenderingOverride — clamping and
-        // rounding to the nearest 100 happened at parse time in component_profiles.rs.
-        policy.font_weight = Some(fw);
-    }
-    if let Some(ref color_str) = override_.text_color {
-        if let Some(c) = parse_color_hex(color_str) {
-            policy.text_color = Some(tokens_color_to_scene(c));
-        }
-    }
-    if let Some(ref align_str) = override_.text_align {
-        policy.text_align = match align_str.as_str() {
-            "start" => Some(TextAlign::Start),
-            "center" => Some(TextAlign::Center),
-            "end" => Some(TextAlign::End),
-            _ => policy.text_align,
-        };
-    }
-    if let Some(ref color_str) = override_.backdrop_color {
-        if let Some(c) = parse_color_hex(color_str) {
-            policy.backdrop = Some(tokens_color_to_scene(c));
-        }
-    }
-    if let Some(op) = override_.backdrop_opacity {
-        policy.backdrop_opacity = Some(op);
-    }
-    if let Some(ref color_str) = override_.outline_color {
-        if let Some(c) = parse_color_hex(color_str) {
-            policy.outline_color = Some(tokens_color_to_scene(c));
-        }
-    }
-    if let Some(w) = override_.outline_width {
-        policy.outline_width = Some(w);
-    }
-    if let Some(mh) = override_.margin_horizontal {
-        policy.margin_horizontal = Some(mh);
-    }
-    if let Some(mv) = override_.margin_vertical {
-        policy.margin_vertical = Some(mv);
-    }
-    if let Some(t) = override_.transition_in_ms {
-        policy.transition_in_ms = Some(t);
-    }
-    if let Some(t) = override_.transition_out_ms {
-        policy.transition_out_ms = Some(t);
-    }
-    if let Some(r) = override_.backdrop_radius {
-        policy.backdrop_radius = Some(r);
-    }
-    // ── key_icon_map (status-bar icons) ──────────────────────────────────────
-    // Merge: entries in the override are inserted; keys absent from the override
-    // retain their existing value in the policy. This allows additive composition
-    // when multiple overrides are applied sequentially (profile → tab → instance).
-    if !override_.key_icon_map.is_empty() {
-        policy.key_icon_map.extend(
-            override_
-                .key_icon_map
-                .iter()
-                .map(|(k, v)| (k.clone(), v.clone())),
-        );
-    }
-}
-
-// ─── Profile selection resolver ───────────────────────────────────────────────
-
-/// A resolved profile selection: component type → loaded ComponentProfile.
-pub type ProfileSelection = HashMap<ComponentType, ComponentProfile>;
-
-/// Validate and resolve `[component_profiles]` entries against the loaded profiles.
-///
-/// For each entry in `raw_profiles` (component type name → profile name):
-/// 1. Validate the component type name against v1 component types.
-/// 2. Look up the profile by name in `loaded_profiles`.
-/// 3. Validate that the profile's `component_type` matches the key.
-///
-/// On success, returns a `ProfileSelection` mapping component types to profiles.
-/// Errors are appended to `errors`; if any errors occur, the returned map may
-/// be partial (used only for logging; callers should check `errors` before using).
-pub fn resolve_profile_selection(
-    raw_profiles: &HashMap<String, String>,
-    loaded_profiles: &[ComponentProfile],
-    errors: &mut Vec<ConfigError>,
-) -> ProfileSelection {
-    let mut selection = ProfileSelection::new();
-
-    for (ct_name, profile_name) in raw_profiles {
-        // Step 1: validate component type name.
-        let component_type = match ComponentType::from_name(ct_name) {
-            Some(ct) => ct,
-            None => {
-                errors.push(ConfigError {
-                    code: ConfigErrorCode::ConfigUnknownComponentType,
-                    field_path: format!("component_profiles.{ct_name}"),
-                    expected: "a recognized v1 component type name (e.g. 'subtitle', 'notification', 'status-bar', 'alert-banner', 'ambient-background', 'pip')".into(),
-                    got: ct_name.clone(),
-                    hint: format!(
-                        "'{ct_name}' is not a recognized v1 component type; \
-                         valid names are: subtitle, notification, status-bar, \
-                         alert-banner, ambient-background, pip"
-                    ),
-                });
-                continue;
-            }
-        };
-
-        // Step 2: look up profile by name.
-        let profile = match loaded_profiles.iter().find(|p| p.name == *profile_name) {
-            Some(p) => p,
-            None => {
-                errors.push(ConfigError {
-                    code: ConfigErrorCode::ConfigUnknownComponentProfile,
-                    field_path: format!("component_profiles.{ct_name}"),
-                    expected: format!("a loaded profile named '{profile_name}'"),
-                    got: profile_name.clone(),
-                    hint: format!(
-                        "profile '{profile_name}' not found among loaded profiles; \
-                         check [component_profile_bundles].paths and verify the \
-                         profile directory contains a valid profile.toml"
-                    ),
-                });
-                continue;
-            }
-        };
-
-        // Step 3: validate component type match.
-        if profile.component_type != component_type {
-            let expected_type_name = component_type.contract().name;
-            let actual_type_name = profile.component_type.contract().name;
-            errors.push(ConfigError {
-                code: ConfigErrorCode::ConfigProfileTypeMismatch,
-                field_path: format!("component_profiles.{ct_name}"),
-                expected: format!("a profile with component_type = '{expected_type_name}'"),
-                got: format!("profile '{profile_name}' has component_type = '{actual_type_name}'"),
-                hint: format!(
-                    "component_profiles.{ct_name} = '{profile_name}' is invalid because \
-                     profile '{profile_name}' implements '{actual_type_name}', not \
-                     '{expected_type_name}'; use a '{expected_type_name}' profile here"
-                ),
-            });
-            continue;
-        }
-
-        selection.insert(component_type, profile.clone());
-    }
-
-    selection
-}
-
 // ─── Effective policy constructor ─────────────────────────────────────────────
 
-/// Construct the effective `RenderingPolicy` for a zone type.
-///
-/// Merge order (lowest → highest priority):
-/// 1. Zone type default policy (passed in as `zone_default`)
-/// 2. Token-derived defaults (from `tokens`)
-/// 3. Active profile zone override (if any)
-///
-/// The `zone_name` is the zone registry name (e.g., `"subtitle"`,
-/// `"notification-area"`, `"status-bar"`, `"alert-banner"`).
-///
-/// If `active_profile` is `None` (no profile selected for this component type),
-/// only layers 1 and 2 are applied.
+/// Construct the effective `RenderingPolicy` for a zone type: the zone default
+/// with token-derived defaults filling every `None` field.
 pub fn build_effective_policy(
     zone_name: &str,
     zone_default: &RenderingPolicy,
     tokens: &DesignTokenMap,
-    active_profile: Option<&ComponentProfile>,
 ) -> RenderingPolicy {
-    // Start from the zone's current policy (layer 1).
     let mut policy = zone_default.clone();
-
-    // Layer 2: token-derived defaults (populate None fields only).
     apply_token_defaults_for_zone(zone_name, &mut policy, tokens);
-
-    // Layer 3: profile zone override (if any).
-    if let Some(profile) = active_profile {
-        if let Some(zone_override) = profile.zone_overrides.get(zone_name) {
-            merge_zone_override(&mut policy, zone_override);
-        }
-    }
-
     policy
 }
 
@@ -484,29 +280,19 @@ pub fn build_effective_policy(
 ///
 /// Returns a `HashMap<zone_name, effective_RenderingPolicy>` that can be used
 /// to patch `ZoneRegistry::with_defaults()` after construction.
-///
-/// The `profile_selection` maps component types to their active profiles.
-/// Zone types with no active profile receive token-derived defaults only.
 pub fn build_all_effective_policies(
     zone_defaults: &HashMap<String, RenderingPolicy>,
     tokens: &DesignTokenMap,
-    profile_selection: &ProfileSelection,
 ) -> HashMap<String, RenderingPolicy> {
-    // Map: component type zone_type_name → active profile
-    let profile_by_zone: HashMap<&str, &ComponentProfile> = profile_selection
+    zone_defaults
         .iter()
-        .map(|(ct, profile)| (ct.contract().zone_type_name, profile))
-        .collect();
-
-    let mut result = HashMap::new();
-
-    for (zone_name, zone_default) in zone_defaults {
-        let active_profile = profile_by_zone.get(zone_name.as_str()).copied();
-        let effective = build_effective_policy(zone_name, zone_default, tokens, active_profile);
-        result.insert(zone_name.clone(), effective);
-    }
-
-    result
+        .map(|(zone_name, zone_default)| {
+            (
+                zone_name.clone(),
+                build_effective_policy(zone_name, zone_default, tokens),
+            )
+        })
+        .collect()
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -739,10 +525,10 @@ mod tests {
     // ── build_effective_policy ────────────────────────────────────────────────
 
     #[test]
-    fn test_build_effective_policy_no_profile() {
+    fn test_build_effective_policy_fills_token_defaults() {
         let tokens = default_tokens();
         let zone_default = RenderingPolicy::default();
-        let policy = build_effective_policy("subtitle", &zone_default, &tokens, None);
+        let policy = build_effective_policy("subtitle", &zone_default, &tokens);
 
         // Should have token-derived defaults
         assert!(policy.text_color.is_some());
@@ -754,180 +540,9 @@ mod tests {
     fn test_build_effective_policy_absent_zone_type_is_noop() {
         let tokens = default_tokens();
         let zone_default = RenderingPolicy::default();
-        let policy = build_effective_policy("ambient-background", &zone_default, &tokens, None);
+        let policy = build_effective_policy("ambient-background", &zone_default, &tokens);
 
         // ambient-background gets no token defaults
         assert_eq!(policy, RenderingPolicy::default());
-    }
-
-    // ── resolve_profile_selection ─────────────────────────────────────────────
-
-    #[test]
-    fn test_resolve_profile_selection_empty_config() {
-        let mut errors = Vec::new();
-        let selection = resolve_profile_selection(&HashMap::new(), &[], &mut errors);
-        assert!(errors.is_empty());
-        assert!(selection.is_empty());
-    }
-
-    #[test]
-    fn test_resolve_profile_selection_unknown_component_type() {
-        let mut raw = HashMap::new();
-        raw.insert("not-a-type".to_string(), "some-profile".to_string());
-        let mut errors = Vec::new();
-        let selection = resolve_profile_selection(&raw, &[], &mut errors);
-        assert_eq!(errors.len(), 1);
-        assert!(
-            matches!(errors[0].code, ConfigErrorCode::ConfigUnknownComponentType),
-            "expected ConfigUnknownComponentType, got {:?}",
-            errors[0].code
-        );
-        assert!(selection.is_empty());
-    }
-
-    #[test]
-    fn test_resolve_profile_selection_unknown_profile() {
-        let mut raw = HashMap::new();
-        raw.insert("subtitle".to_string(), "nonexistent-profile".to_string());
-        let mut errors = Vec::new();
-        let selection = resolve_profile_selection(&raw, &[], &mut errors);
-        assert_eq!(errors.len(), 1);
-        assert!(
-            matches!(
-                errors[0].code,
-                ConfigErrorCode::ConfigUnknownComponentProfile
-            ),
-            "expected ConfigUnknownComponentProfile, got {:?}",
-            errors[0].code
-        );
-        assert!(selection.is_empty());
-    }
-
-    // ── merge_zone_override: font_weight ──────────────────────────────────────
-
-    /// font_weight in ZoneRenderingOverride is Option<u16>; merge_zone_override
-    /// must assign it directly to policy.font_weight without re-conversion.
-    #[test]
-    fn test_merge_zone_override_font_weight_assigned() {
-        use crate::component_profiles::ZoneRenderingOverride;
-
-        let mut policy = RenderingPolicy::default();
-        let override_ = ZoneRenderingOverride {
-            font_weight: Some(700_u16),
-            ..ZoneRenderingOverride::default()
-        };
-        merge_zone_override(&mut policy, &override_);
-        assert_eq!(
-            policy.font_weight,
-            Some(700_u16),
-            "merge_zone_override must pass font_weight u16 through unchanged"
-        );
-    }
-
-    /// When font_weight override is None, policy.font_weight is unchanged.
-    #[test]
-    fn test_merge_zone_override_font_weight_none_leaves_policy_unchanged() {
-        use crate::component_profiles::ZoneRenderingOverride;
-
-        let mut policy = RenderingPolicy {
-            font_weight: Some(400_u16),
-            ..RenderingPolicy::default()
-        };
-        let override_ = ZoneRenderingOverride {
-            font_weight: None,
-            ..ZoneRenderingOverride::default()
-        };
-        merge_zone_override(&mut policy, &override_);
-        assert_eq!(
-            policy.font_weight,
-            Some(400_u16),
-            "None font_weight override must leave existing policy.font_weight intact"
-        );
-    }
-
-    // ── key_icon_map merge ────────────────────────────────────────────────────
-
-    /// WHEN merge_zone_override is called with a non-empty key_icon_map
-    /// THEN the entries are inserted into the policy's key_icon_map.
-    #[test]
-    fn merge_zone_override_key_icon_map_inserted() {
-        use crate::component_profiles::ZoneRenderingOverride;
-        use std::collections::HashMap;
-
-        let mut policy = RenderingPolicy::default();
-        assert!(
-            policy.key_icon_map.is_empty(),
-            "default policy has empty key_icon_map"
-        );
-
-        let mut icon_map = HashMap::new();
-        icon_map.insert("weather".to_string(), "icons/weather.svg".to_string());
-        icon_map.insert("battery".to_string(), "icons/battery.svg".to_string());
-
-        let override_ = ZoneRenderingOverride {
-            key_icon_map: icon_map,
-            ..ZoneRenderingOverride::default()
-        };
-        merge_zone_override(&mut policy, &override_);
-
-        assert_eq!(
-            policy.key_icon_map.get("weather").map(String::as_str),
-            Some("icons/weather.svg"),
-            "weather icon must be in policy.key_icon_map after merge"
-        );
-        assert_eq!(
-            policy.key_icon_map.get("battery").map(String::as_str),
-            Some("icons/battery.svg"),
-            "battery icon must be in policy.key_icon_map after merge"
-        );
-    }
-
-    /// WHEN merge_zone_override is called with an empty key_icon_map
-    /// THEN existing entries in policy.key_icon_map are preserved (no-op).
-    #[test]
-    fn merge_zone_override_empty_key_icon_map_is_noop() {
-        use crate::component_profiles::ZoneRenderingOverride;
-
-        let mut policy = RenderingPolicy::default();
-        policy
-            .key_icon_map
-            .insert("time".to_string(), "icons/clock.svg".to_string());
-
-        let override_ = ZoneRenderingOverride::default(); // key_icon_map is empty
-        merge_zone_override(&mut policy, &override_);
-
-        assert_eq!(
-            policy.key_icon_map.get("time").map(String::as_str),
-            Some("icons/clock.svg"),
-            "existing key_icon_map entry must be preserved when override is empty"
-        );
-    }
-
-    /// WHEN merge_zone_override overlaps an existing key in key_icon_map
-    /// THEN the override value wins (replaces the existing entry).
-    #[test]
-    fn merge_zone_override_key_icon_map_override_wins() {
-        use crate::component_profiles::ZoneRenderingOverride;
-        use std::collections::HashMap;
-
-        let mut policy = RenderingPolicy::default();
-        policy
-            .key_icon_map
-            .insert("weather".to_string(), "icons/old-weather.svg".to_string());
-
-        let mut icon_map = HashMap::new();
-        icon_map.insert("weather".to_string(), "icons/new-weather.svg".to_string());
-
-        let override_ = ZoneRenderingOverride {
-            key_icon_map: icon_map,
-            ..ZoneRenderingOverride::default()
-        };
-        merge_zone_override(&mut policy, &override_);
-
-        assert_eq!(
-            policy.key_icon_map.get("weather").map(String::as_str),
-            Some("icons/new-weather.svg"),
-            "override value must replace the existing key_icon_map entry"
-        );
     }
 }

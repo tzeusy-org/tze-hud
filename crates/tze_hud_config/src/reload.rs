@@ -10,12 +10,10 @@
 //!   On reload: entire config re-validated; validation errors returned without
 //!   applying new config.
 //!
-//! - **Hot-Reload Classification for component-shape-language** (hud-sc0a.7)
-//!   `[design_tokens]`, `[component_profile_bundles]`, and `[component_profiles]`
-//!   are **frozen** — they are resolved at startup and baked into RenderingPolicy
-//!   fields, SVG templates, and zone/widget registries. Changing them requires a
-//!   restart. A SIGHUP that detects changes in these frozen sections MUST log a
-//!   WARN and MUST NOT apply partial updates.
+//! - `[design_tokens]` is **frozen** — tokens are resolved at startup and baked
+//!   into RenderingPolicy fields, SVG templates, and zone/widget registries.
+//!   A SIGHUP that detects changes in a frozen section logs a WARN and applies
+//!   nothing from it.
 //!
 //! ## Field Classification
 //!
@@ -25,8 +23,6 @@
 //! | `[[tabs]]`                      | Frozen (restart required) |
 //! | `[agents.registered]`           | Frozen (restart required) |
 //! | `[design_tokens]`               | Frozen (restart required) |
-//! | `[component_profile_bundles]`   | Frozen (restart required) |
-//! | `[component_profiles]`          | Frozen (restart required) |
 //! | `[widget_runtime_assets]`       | Frozen (restart required) |
 //! | `[agents.dynamic_policy]`       | Hot-reloadable |
 //!
@@ -84,8 +80,6 @@ pub const FROZEN_SECTIONS: &[&str] = &[
     "display_profile",
     "includes",
     "design_tokens",
-    "component_profile_bundles",
-    "component_profiles",
     "widget_runtime_assets",
 ];
 
@@ -109,7 +103,7 @@ pub fn check_frozen_section_changes(
 ) -> bool {
     // Compare serialized representations of the frozen sections.
     // We use serde_json::Value for order-independent structural comparison so
-    // that HashMap fields (design_tokens, component_profiles, agents.registered)
+    // that HashMap fields (design_tokens, agents.registered)
     // do not produce false-positive warnings due to non-deterministic map
     // iteration order in Rust's HashMap.
     let mut any_changed = false;
@@ -134,8 +128,6 @@ pub fn check_frozen_section_changes(
     check_frozen_field!(tabs, "tabs");
     check_frozen_field!(display_profile, "display_profile");
     check_frozen_field!(design_tokens, "design_tokens");
-    check_frozen_field!(component_profile_bundles, "component_profile_bundles");
-    check_frozen_field!(component_profiles, "component_profiles");
     check_frozen_field!(widget_runtime_assets, "widget_runtime_assets");
 
     // agents.registered is frozen; agents.dynamic_policy is hot-reloadable.
@@ -340,21 +332,10 @@ name = "Main"
             section_classification("includes"),
             FieldClassification::Frozen
         );
-        // hud-sc0a.7: component-shape-language sections are frozen
         assert_eq!(
             section_classification("design_tokens"),
             FieldClassification::Frozen,
             "[design_tokens] must be frozen (requires restart)"
-        );
-        assert_eq!(
-            section_classification("component_profile_bundles"),
-            FieldClassification::Frozen,
-            "[component_profile_bundles] must be frozen (requires restart)"
-        );
-        assert_eq!(
-            section_classification("component_profiles"),
-            FieldClassification::Frozen,
-            "[component_profiles] must be frozen (requires restart)"
         );
         assert_eq!(
             section_classification("widget_runtime_assets"),
@@ -488,18 +469,10 @@ name = "Tab1"
 
     /// Verify the FROZEN_SECTIONS list includes the three component-shape-language sections.
     #[test]
-    fn test_frozen_sections_list_includes_component_shape_language() {
+    fn test_frozen_sections_list_includes_token_and_asset_sections() {
         assert!(
             FROZEN_SECTIONS.contains(&"design_tokens"),
             "design_tokens must be in FROZEN_SECTIONS"
-        );
-        assert!(
-            FROZEN_SECTIONS.contains(&"component_profile_bundles"),
-            "component_profile_bundles must be in FROZEN_SECTIONS"
-        );
-        assert!(
-            FROZEN_SECTIONS.contains(&"component_profiles"),
-            "component_profiles must be in FROZEN_SECTIONS"
         );
         assert!(
             FROZEN_SECTIONS.contains(&"widget_runtime_assets"),
@@ -534,24 +507,6 @@ name = "Tab1"
         assert!(
             changed,
             "changed design_tokens should return true and emit WARN"
-        );
-    }
-
-    /// When component_profiles section changes, returns true.
-    #[test]
-    fn test_check_frozen_section_changes_component_profiles_changed() {
-        use crate::raw::RawComponentProfiles;
-        let current = TzeHudConfig::parse(minimal_valid_toml())
-            .unwrap()
-            .into_raw();
-        let mut new_raw = current.clone();
-        let mut profiles = std::collections::HashMap::new();
-        profiles.insert("subtitle".to_string(), "my-profile".to_string());
-        new_raw.component_profiles = Some(RawComponentProfiles(profiles));
-        let changed = check_frozen_section_changes(&current, &new_raw);
-        assert!(
-            changed,
-            "changed component_profiles should return true and emit WARN"
         );
     }
 }

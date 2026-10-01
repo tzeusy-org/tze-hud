@@ -45,28 +45,6 @@ pub enum ConfigErrorCode {
     InvalidTokenKey,
     /// A token value string could not be parsed into the expected format.
     TokenValueParseError,
-    /// A profile's `component_type` field does not match any known v1 component type.
-    ProfileUnknownComponentType,
-    /// Two profile directories declare the same profile name.
-    ConfigProfileDuplicateName,
-    /// A configured component profile bundle path does not exist on disk.
-    ConfigProfilePathNotFound,
-    /// A profile's zone override file governs a zone not owned by the profile's component type.
-    ProfileZoneOverrideMismatch,
-    /// A zone override field has an invalid value or type.
-    ProfileInvalidZoneOverride,
-    /// A `{{token.key}}` reference in a zone override field could not be resolved.
-    ProfileUnresolvedToken,
-    /// A profile's effective RenderingPolicy fails the component type's readability check.
-    ///
-    /// Wire code: `PROFILE_READABILITY_VIOLATION`
-    ProfileReadabilityViolation,
-    /// A `[component_profiles]` key is not a recognized v1 component type name.
-    ConfigUnknownComponentType,
-    /// A `[component_profiles]` value does not match any loaded profile.
-    ConfigUnknownComponentProfile,
-    /// A `[component_profiles]` entry maps a component type to a profile of a different type.
-    ConfigProfileTypeMismatch,
     Other(String),
 }
 

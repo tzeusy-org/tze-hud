@@ -40,13 +40,13 @@
 //! Setting `grpc_port = 0` in `HeadlessConfig` disables the gRPC server.
 //! Tests that don't exercise the session layer use this to skip server startup.
 
-use crate::component_startup::{register_profile_widgets, run_component_startup};
 use crate::degradation::{DegradationController, DegradationEnvelope};
 use crate::element_store::bootstrap_scene_element_store;
 use crate::idle_efficiency::{IdleEfficiencyCounters, IdleEfficiencySnapshot, RuntimeWakeupSource};
 use crate::pipeline::{FramePipeline, HitTestSnapshot};
 use crate::reload_triggers::{RuntimeServiceImpl, spawn_sighup_listener};
 use crate::runtime_context::{FallbackPolicy, RuntimeContext};
+use crate::scene_startup::run_scene_startup;
 use crate::widget_runtime_registration::process_pending_widget_svgs;
 use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
@@ -297,13 +297,10 @@ impl HeadlessRuntime {
             "headless: text + widget renderers initialized"
         );
 
-        // ── Component startup: design tokens + zone registry ──────────────
-        // When config_toml is provided, run the full component shape language
-        // startup sequence (steps 2-9) so that design tokens are applied to
+        // ── Scene startup: design tokens + zone registry ──────────────────
+        // When config_toml is provided, run scene startup so design tokens reach
         // the compositor and the zone registry receives token-derived rendering
         // policies.  Mirrors what the windowed runtime does in its initializer.
-        //
-        // Per component-shape-language/spec.md §Requirement: Startup Sequence Integration
         let mut scene = SceneGraph::new(config.width as f32, config.height as f32);
         let (runtime_widget_store, compositor_token_map): (
             Option<RuntimeWidgetStore>,
@@ -323,23 +320,18 @@ impl HeadlessRuntime {
                             max_total_bytes: resolved.max_total_bytes,
                             max_agent_bytes: resolved.max_agent_bytes,
                         })?;
-                    let mut startup_result =
-                        run_component_startup(&raw, None, Some("headless"), &mut scene);
-                    // Step 9b: register profile-scoped widget bundles
-                    register_profile_widgets(&mut scene, &startup_result);
-                    // Step 9c: register global widget SVG assets with the headless widget renderer,
+                    let mut startup_result = run_scene_startup(&raw, None, &mut scene);
+                    // Register widget SVG assets with the headless widget renderer,
                     // mirroring the windowed runtime so bundled SVG-based widgets render correctly.
                     process_pending_widget_svgs(
                         compositor.widget_renderer_mut(),
                         startup_result.widget_svg_assets.drain(..),
                     );
-                    // compositor_tokens is pre-merged: global tokens + all active profile
-                    // token overrides. Pass directly to compositor.set_token_map().
                     tracing::debug!(
-                        token_count = startup_result.compositor_tokens.len(),
-                        "headless: component startup complete — design tokens and zone registry applied"
+                        token_count = startup_result.global_tokens.len(),
+                        "headless: scene startup complete — design tokens and zone registry applied"
                     );
-                    (Some(runtime_widget_store), startup_result.compositor_tokens)
+                    (Some(runtime_widget_store), startup_result.global_tokens)
                 }
                 Err(e) => {
                     // Even when a RuntimeContext has been constructed (potentially via
@@ -361,7 +353,7 @@ impl HeadlessRuntime {
             (None, std::collections::HashMap::new())
         };
 
-        // Apply resolved design tokens (global + all active profile overrides) to the
+        // Apply the resolved design tokens to the
         // compositor so token-driven properties are resolved at render time.
         compositor.set_token_map(compositor_token_map);
         tracing::debug!("headless: compositor token map applied");
@@ -2013,12 +2005,12 @@ capabilities = ["read_telemetry", "read_scene_topology"]
     /// when HeadlessRuntime is initialized.
     ///
     /// When config_toml contains a [design_tokens] section, the HeadlessRuntime
-    /// must call run_component_startup and compositor.set_token_map so that
+    /// must call run_scene_startup and compositor.set_token_map so that
     /// token-driven properties (e.g. severity colors for alert-banner) are
     /// resolved at render time rather than falling back to hardcoded constants.
     ///
     /// Regression test for hud-kz2l: HeadlessRuntime was not calling
-    /// run_component_startup, so design tokens were never applied even when
+    /// run_scene_startup, so design tokens were never applied even when
     /// config_toml with [design_tokens] was supplied.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_design_tokens_applied_when_config_toml_provided() {
