@@ -8,14 +8,11 @@ members = [
     "crates/tze_hud_input",
     "crates/tze_hud_telemetry",
     "crates/tze_hud_mcp",
-    "crates/tze_hud_a11y",
-    "crates/tze_hud_policy",
     "crates/tze_hud_config",
     "crates/tze_hud_resource",
     "crates/tze_hud_validation",
     "crates/tze_hud_widget",
     "crates/tze_hud_projection",
-    "crates/tze_hud_media_apple",
     "app/tze_hud_app",
     "examples/vertical_slice",
     "examples/dashboard_tile_agent",
@@ -23,7 +20,6 @@ members = [
     "examples/widget_publish_load_harness",
     "examples/render_artifacts",
     "tests/integration",
-    "crates/tze_hud_media_android",
 ]
 
 [workspace.package]

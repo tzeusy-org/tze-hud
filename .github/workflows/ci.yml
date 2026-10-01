@@ -151,11 +151,11 @@ jobs:
   # only needs to typecheck). A workspace-wide `--workspace --target
   # x86_64-pc-windows-gnu` clippy run is NOT used here: several workspace
   # members pull in Linux-only GStreamer/media and windowing deps that do not
-  # cross-compile, so this job is deliberately scoped to the four crates
+  # cross-compile, so this job is deliberately scoped to the three crates
   # confirmed (hud-fsfkx) to cross-compile clippy-clean:
-  #   tze_hud_runtime, tze_hud_compositor, tze_hud_config, tze_hud_a11y
+  #   tze_hud_runtime, tze_hud_compositor, tze_hud_config
   #
-  # If a fifth crate later grows cfg(windows) code, add it to the -p list
+  # If another crate later grows cfg(windows) code, add it to the -p list
   # below (or drop it here with a comment if it doesn't cross-compile clean).
 
   clippy-windows-gnu:
@@ -182,7 +182,6 @@ jobs:
             -p tze_hud_runtime \
             -p tze_hud_compositor \
             -p tze_hud_config \
-            -p tze_hud_a11y \
             --target x86_64-pc-windows-gnu \
             -- -D warnings
 

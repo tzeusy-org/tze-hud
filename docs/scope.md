@@ -23,10 +23,10 @@ tranches. Each tranche must still build, pass tests, and boot the overlay.
 | Tranche | What | Status |
 |---|---|---|
 | T0 | Doctrine, RFCs, OpenSpec, curriculum, evidence/report docs, doctrine and OpenSpec agent skills, vocabulary lint | done |
-| T1 | Unused crates: `tze_hud_a11y`, `tze_hud_media_apple`, `tze_hud_media_android`, `tze_hud_policy`, `tze_hud_validation`; mobile/media CI workflows | pending |
+| T1 | Unused crates: `tze_hud_a11y`, `tze_hud_media_apple`, `tze_hud_media_android`, `tze_hud_policy`; Android/iOS/Safari CI workflows | done |
 | T2 | Media: GStreamer feature, media ingress/admission, video surface, `v2_preview`, real-decode CI | pending |
 | T3 | Governance: attention budget, quiet hours, admission, budget ladder, capability matrix, lease TTL renewal, redaction; leases become ownership + disconnect cleanup | pending |
-| T4 | Component profiles (keep tokens), sync groups / clock domains, replay, calibration, unused test scenes; shrink oversized test files | pending |
+| T4 | Component profiles (keep tokens), sync groups / clock domains, replay, calibration, unused test scenes; `tze_hud_validation` + v1-thesis/Layer-4 artifact harness; shrink oversized test files | pending |
 
 ## Working rules
 
