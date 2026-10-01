@@ -1184,17 +1184,16 @@ mod tests {
         );
     }
 
-    // ── 8. policy_matrix_basic: safe mode overrides all policy levels ─────────
+    // ── 8. Safe mode suspends every agent's leases ───────────────────────────
 
-    /// Acceptance criterion: test scenes: policy_matrix_basic (safe mode overrides all policy levels).
     /// WHEN safe mode entered THEN all leases at all priority levels are suspended.
     #[tokio::test]
-    async fn test_safe_mode_overrides_all_policy_levels_policy_matrix_basic() {
+    async fn test_safe_mode_suspends_leases_at_every_priority() {
         let shared = make_shared_state();
         let chrome = Arc::new(RwLock::new(ChromeState::new()));
         let mut ctrl = SafeModeController::new_headless(shared.clone(), chrome);
 
-        // Grant leases at multiple priorities (simulating policy_matrix_basic agents).
+        // Grant leases to several agents.
         {
             let st = shared.lock().await;
             let mut scene = st.scene.lock().await;
@@ -1222,7 +1221,7 @@ mod tests {
                 .all(|l| l.state == LeaseState::Suspended || l.state.is_terminal());
             assert!(
                 all_suspended,
-                "ALL leases must be SUSPENDED — safe mode overrides all policy levels"
+                "ALL leases must be SUSPENDED regardless of agent"
             );
         }
     }

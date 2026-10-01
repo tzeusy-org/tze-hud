@@ -1189,7 +1189,7 @@ async fn test_layer1_pixel_readback_z_order() {
 // Per validation-framework/spec.md Requirement: DR-V5 (line 228):
 // "`cargo test --features headless` SHALL run full test suite (Layers 0-2)."
 //
-// These tests cover all 24 scenes in TestSceneRegistry.  For each scene:
+// These tests cover every scene in TestSceneRegistry.  For each scene:
 // - Pixel buffer size is correct (width × height × 4).
 // - The render completed: at least some pixels have been written.
 // - For scenes with tiles, tile pixels differ from the pure-black default.
@@ -1199,7 +1199,7 @@ async fn test_layer1_pixel_readback_z_order() {
 
 use tze_hud_scene::test_scenes::{ClockMs, TestSceneRegistry};
 
-// ─── Display dimensions used for all 25-scene tests ──────────────────────────
+// ─── Display dimensions used for the scene tests ─────────────────────────────
 // 800×600: fast to render on llvmpipe/WARP, matches existing pixel tests.
 const SCENE_W: u32 = 800;
 const SCENE_H: u32 = 600;
@@ -1424,15 +1424,9 @@ async fn test_scene_overlay_transparency_pixels() {
     );
 }
 
-// ─── Batch test for remaining 18 scenes ──────────────────────────────────────
+// ─── Batch test for the remaining scenes ─────────────────────────────────────
 //
-// For the remaining scenes (tab_switch, lease_expiry, mobile_degraded,
-// input_highlight, coalesced_dashboard, three_agents_contention,
-// overlay_passthrough_regions, disconnect_reclaim_multiagent, privacy_redaction_mode,
-// chatty_dashboard_touch, zone_publish_subtitle, zone_reject_wrong_type,
-// zone_conflict_two_publishers, zone_orchestrate_then_publish,
-// zone_geometry_adapts_profile, zone_disconnect_cleanup, policy_matrix_basic,
-// policy_arbitration_collision) the assertion is:
+// For the remaining scenes the assertion is:
 //   - Pixel buffer size matches SCENE_W × SCENE_H × 4.
 //   - At least one pixel is non-zero (compositor rendered something).
 //
@@ -1466,7 +1460,6 @@ macro_rules! scene_render_test {
 
 scene_render_test!(test_scene_tab_switch_pixels, "tab_switch");
 scene_render_test!(test_scene_lease_expiry_pixels, "lease_expiry");
-scene_render_test!(test_scene_mobile_degraded_pixels, "mobile_degraded");
 scene_render_test!(test_scene_input_highlight_pixels, "input_highlight");
 scene_render_test!(test_scene_coalesced_dashboard_pixels, "coalesced_dashboard");
 scene_render_test!(
@@ -1480,10 +1473,6 @@ scene_render_test!(
 scene_render_test!(
     test_scene_disconnect_reclaim_multiagent_pixels,
     "disconnect_reclaim_multiagent"
-);
-scene_render_test!(
-    test_scene_privacy_redaction_mode_pixels,
-    "privacy_redaction_mode"
 );
 scene_render_test!(
     test_scene_chatty_dashboard_touch_pixels,
@@ -1506,15 +1495,6 @@ scene_render_test!(
     "zone_orchestrate_then_publish"
 );
 scene_render_test!(
-    test_scene_zone_geometry_adapts_profile_pixels,
-    "zone_geometry_adapts_profile"
-);
-scene_render_test!(
     test_scene_zone_disconnect_cleanup_pixels,
     "zone_disconnect_cleanup"
-);
-scene_render_test!(test_scene_policy_matrix_basic_pixels, "policy_matrix_basic");
-scene_render_test!(
-    test_scene_policy_arbitration_collision_pixels,
-    "policy_arbitration_collision"
 );

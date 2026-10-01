@@ -13,7 +13,7 @@
 //!
 //! - Zone test scenes: zone_publish_subtitle, zone_reject_wrong_type,
 //!   zone_conflict_two_publishers, zone_orchestrate_then_publish,
-//!   zone_geometry_adapts_profile, zone_disconnect_cleanup
+//!   zone_disconnect_cleanup
 //! - All four contention policies (LatestWins, Stack, MergeByKey, Replace)
 //! - All five v1 media types (StreamText, ShortTextWithIcon, KeyValuePairs, StaticImage, SolidColor)
 //! - Layer attachment routing: Background, Content (z >= ZONE_TILE_Z_MIN), Chrome
@@ -256,46 +256,6 @@ fn zone_orchestrate_then_publish_passes_layer0_invariants() {
         .build("zone_orchestrate_then_publish", ClockMs::FIXED)
         .unwrap();
     assert_no_violations(&graph, "zone_orchestrate_then_publish");
-}
-
-// ─── Scene: zone_geometry_adapts_profile ─────────────────────────────────────
-
-#[test]
-fn zone_geometry_adapts_profile_builds() {
-    let registry = TestSceneRegistry::default();
-    let result = registry.build("zone_geometry_adapts_profile", ClockMs::FIXED);
-    assert!(result.is_some(), "zone_geometry_adapts_profile must build");
-}
-
-#[test]
-fn zone_geometry_adapts_profile_has_relative_zones() {
-    let registry = TestSceneRegistry::default();
-    let (graph, _spec) = registry
-        .build("zone_geometry_adapts_profile", ClockMs::FIXED)
-        .unwrap();
-    let mut found_relative = false;
-    for name in &["pip", "ambient-background"] {
-        if let Some(zone) = graph.zone_registry.get_by_name(name) {
-            assert!(
-                matches!(zone.geometry_policy, GeometryPolicy::Relative { .. }),
-                "zone '{name}' must use Relative geometry policy"
-            );
-            found_relative = true;
-        }
-    }
-    assert!(
-        found_relative,
-        "zone_geometry_adapts_profile scene must contain at least one Relative-geometry zone (pip or ambient-background)"
-    );
-}
-
-#[test]
-fn zone_geometry_adapts_profile_passes_layer0_invariants() {
-    let registry = TestSceneRegistry::default();
-    let (graph, _spec) = registry
-        .build("zone_geometry_adapts_profile", ClockMs::FIXED)
-        .unwrap();
-    assert_no_violations(&graph, "zone_geometry_adapts_profile");
 }
 
 // ─── Scene: zone_disconnect_cleanup ──────────────────────────────────────────

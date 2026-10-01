@@ -2237,7 +2237,7 @@ mod tests {
 
     // ── All 24 test scenes pass ────────────────────────────────────────────
 
-    /// WHEN all 24 canonical test scenes are built THEN check_all returns no violations.
+    /// WHEN all registered test scenes are built THEN check_all returns no violations.
     #[test]
     fn all_24_scenes_pass_check_all() {
         let registry = TestSceneRegistry::new();
@@ -2257,7 +2257,7 @@ mod tests {
         }
     }
 
-    /// check_all and assert_layer0_invariants (legacy) must agree on all 24 scenes.
+    /// check_all and assert_layer0_invariants (legacy) must agree on every registered scene.
     #[test]
     fn check_all_agrees_with_legacy_assert_layer0_invariants() {
         let registry = TestSceneRegistry::new();

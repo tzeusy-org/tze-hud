@@ -1,4 +1,4 @@
-//! Layer 1 pixel readback assertions for all 25 canonical test scenes.
+//! Layer 1 pixel readback assertions for every registered test scene.
 //!
 //! # Overview
 //!
@@ -64,7 +64,7 @@ use tze_hud_scene::test_scenes::{ClockMs, TestSceneRegistry};
 // returns a buffer of the correct size for every scene.  They do NOT assert
 // colour values — those are in the colour-assertion tests below.
 //
-// All 25 must pass unconditionally in CI.
+// All must pass unconditionally in CI.
 
 macro_rules! scene_buffer_size_test {
     ($test_name:ident, $scene_name:literal) => {
@@ -103,7 +103,6 @@ scene_buffer_size_test!(
 scene_buffer_size_test!(test_buf_05_overlay_transparency, "overlay_transparency");
 scene_buffer_size_test!(test_buf_06_tab_switch, "tab_switch");
 scene_buffer_size_test!(test_buf_07_lease_expiry, "lease_expiry");
-scene_buffer_size_test!(test_buf_08_mobile_degraded, "mobile_degraded");
 scene_buffer_size_test!(test_buf_10_input_highlight, "input_highlight");
 scene_buffer_size_test!(test_buf_11_coalesced_dashboard, "coalesced_dashboard");
 scene_buffer_size_test!(test_buf_12_max_tiles_stress, "max_tiles_stress");
@@ -119,7 +118,6 @@ scene_buffer_size_test!(
     test_buf_15_disconnect_reclaim_multiagent,
     "disconnect_reclaim_multiagent"
 );
-scene_buffer_size_test!(test_buf_16_privacy_redaction_mode, "privacy_redaction_mode");
 scene_buffer_size_test!(test_buf_17_chatty_dashboard_touch, "chatty_dashboard_touch");
 scene_buffer_size_test!(test_buf_18_zone_publish_subtitle, "zone_publish_subtitle");
 scene_buffer_size_test!(test_buf_19_zone_reject_wrong_type, "zone_reject_wrong_type");
@@ -132,17 +130,8 @@ scene_buffer_size_test!(
     "zone_orchestrate_then_publish"
 );
 scene_buffer_size_test!(
-    test_buf_22_zone_geometry_adapts_profile,
-    "zone_geometry_adapts_profile"
-);
-scene_buffer_size_test!(
     test_buf_23_zone_disconnect_cleanup,
     "zone_disconnect_cleanup"
-);
-scene_buffer_size_test!(test_buf_24_policy_matrix_basic, "policy_matrix_basic");
-scene_buffer_size_test!(
-    test_buf_25_policy_arbitration_collision,
-    "policy_arbitration_collision"
 );
 
 // ─── Colour assertions ────────────────────────────────────────────────────────
@@ -153,7 +142,7 @@ scene_buffer_size_test!(
 // rendered data after each frame.
 //
 // Expected values documented here are the SPECIFICATION; the compositor
-// implementation must produce these values.  All 25 tests run unconditionally.
+// implementation must produce these values.  All tests run unconditionally.
 
 // ─── 1. empty_scene ──────────────────────────────────────────────────────────
 
@@ -470,47 +459,6 @@ async fn test_color_07_lease_expiry_tile_visible() {
     .unwrap_or_else(|e| panic!("{e}"));
 }
 
-// ─── 8. mobile_degraded ──────────────────────────────────────────────────────
-
-/// mobile_degraded: single tile on 390×844 mobile display, rendered via the 1920×1080 runtime.
-///
-/// Tile: (0, 0, 390, 422), background (0.05, 0.1, 0.15) → sRGB ≈ (64, 89, 106).
-/// Blue-grey bias.  Tile center at (195, 211).
-/// Outside tile (500, 300) — beyond x=390 — must be background.
-///
-/// WHEN mobile_degraded rendered
-/// THEN (195, 211): tile colour — blue channel ≥ red channel.
-/// THEN (500, 300): outside tile — background colour.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn test_color_08_mobile_degraded() {
-    let mut runtime = make_scene_runtime().await;
-    let registry = TestSceneRegistry::new();
-    let (scene, _spec) = registry
-        .build("mobile_degraded", ClockMs::FIXED)
-        .expect("build failed");
-
-    let pixels = render_scene_pixels(&mut runtime, scene).await;
-
-    // Tile interior (0.05, 0.1, 0.15) — blue channel ≥ red.
-    let tile_px = HeadlessSurface::pixel_at(&pixels, SCENE_W, 195, 211);
-    assert!(
-        tile_px[2] >= tile_px[0],
-        "mobile_degraded: tile at (195,211) must have blue ≥ red: pixel={tile_px:?}"
-    );
-
-    // Outside tile (x=500 > tile width 390) — background.
-    HeadlessSurface::assert_pixel_color(
-        &pixels,
-        SCENE_W,
-        500,
-        300,
-        BG_SRGB,
-        CI_SOLID_TOLERANCE,
-        "mobile_degraded: outside tile at (500,300) must be background",
-    )
-    .unwrap_or_else(|e| panic!("{e}"));
-}
-
 // ─── 10. input_highlight ─────────────────────────────────────────────────────
 
 /// input_highlight: background tile (0.05, 0.05, 0.15) covers entire display.
@@ -730,37 +678,6 @@ async fn test_color_15_disconnect_reclaim_multiagent_agents_visible() {
     );
 }
 
-// ─── 16. privacy_redaction_mode ──────────────────────────────────────────────
-
-/// privacy_redaction_mode: PUBLIC tile (x=0..960, green) + SENSITIVE tile (x=980+).
-///
-/// Public tile background: (0.05, 0.2, 0.05) → sRGB ≈ (64, 124, 64). Green dominant.
-/// Sensitive tile starts at x=980 — well within the 1920-wide canvas, but the
-/// test only checks the public tile region at (400, 300).
-///
-/// At (400, 300): inside public tile — green dominant.
-///
-/// WHEN privacy_redaction_mode rendered
-/// THEN (400,300): green channel > red channel.
-/// THEN (400,300): green channel > blue channel.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn test_color_16_privacy_redaction_mode_public_tile() {
-    let mut runtime = make_scene_runtime().await;
-    let registry = TestSceneRegistry::new();
-    let (scene, _spec) = registry
-        .build("privacy_redaction_mode", ClockMs::FIXED)
-        .expect("build failed");
-
-    let pixels = render_scene_pixels(&mut runtime, scene).await;
-
-    // Public tile (0.05, 0.2, 0.05) → green dominant.
-    let px = HeadlessSurface::pixel_at(&pixels, SCENE_W, 400, 300);
-    assert!(
-        px[1] > px[0] && px[1] > px[2],
-        "privacy_redaction_mode: (400,300) must be green-dominant (public tile): pixel={px:?}"
-    );
-}
-
 // ─── 17. chatty_dashboard_touch ──────────────────────────────────────────────
 
 /// chatty_dashboard_touch: 50 HitRegionNode tiles in 5×10 grid.
@@ -935,34 +852,6 @@ async fn test_color_21_zone_orchestrate_then_publish_has_content() {
     );
 }
 
-// ─── 22. zone_geometry_adapts_profile ────────────────────────────────────────
-
-/// zone_geometry_adapts_profile: zone adapts its geometry to the active profile.
-///
-/// WHEN zone_geometry_adapts_profile rendered
-/// THEN at least one non-background pixel exists.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn test_color_22_zone_geometry_adapts_profile_has_content() {
-    let mut runtime = make_scene_runtime().await;
-    let registry = TestSceneRegistry::new();
-    let (scene, _spec) = registry
-        .build("zone_geometry_adapts_profile", ClockMs::FIXED)
-        .expect("build failed");
-
-    let pixels = render_scene_pixels(&mut runtime, scene).await;
-
-    let has_content = pixels.chunks(4).any(|p| {
-        BG_SRGB
-            .iter()
-            .zip(p.iter())
-            .any(|(&e, &a)| a.abs_diff(e) > CI_SOLID_TOLERANCE)
-    });
-    assert!(
-        has_content,
-        "zone_geometry_adapts_profile: at least one tile must render"
-    );
-}
-
 // ─── 23. zone_disconnect_cleanup ─────────────────────────────────────────────
 
 /// zone_disconnect_cleanup: zone publisher tile still ACTIVE at build time.
@@ -988,64 +877,6 @@ async fn test_color_23_zone_disconnect_cleanup_tile_initially_visible() {
     assert!(
         has_content,
         "zone_disconnect_cleanup: tile active at build time — must render before disconnect"
-    );
-}
-
-// ─── 24. policy_matrix_basic ─────────────────────────────────────────────────
-
-/// policy_matrix_basic: multiple policy evaluation levels.
-///
-/// WHEN policy_matrix_basic rendered
-/// THEN at least one non-background pixel exists.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn test_color_24_policy_matrix_basic_has_content() {
-    let mut runtime = make_scene_runtime().await;
-    let registry = TestSceneRegistry::new();
-    let (scene, _spec) = registry
-        .build("policy_matrix_basic", ClockMs::FIXED)
-        .expect("build failed");
-
-    let pixels = render_scene_pixels(&mut runtime, scene).await;
-
-    let has_content = pixels.chunks(4).any(|p| {
-        BG_SRGB
-            .iter()
-            .zip(p.iter())
-            .any(|(&e, &a)| a.abs_diff(e) > CI_SOLID_TOLERANCE)
-    });
-    assert!(
-        has_content,
-        "policy_matrix_basic: at least one tile must render"
-    );
-}
-
-// ─── 25. policy_arbitration_collision ────────────────────────────────────────
-
-/// policy_arbitration_collision: full seven-level policy collision.
-///
-/// Per policy-arbitration/spec.md lines 10-17 and 194-199.
-///
-/// WHEN policy_arbitration_collision rendered
-/// THEN at least one non-background pixel exists.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn test_color_25_policy_arbitration_collision_has_content() {
-    let mut runtime = make_scene_runtime().await;
-    let registry = TestSceneRegistry::new();
-    let (scene, _spec) = registry
-        .build("policy_arbitration_collision", ClockMs::FIXED)
-        .expect("build failed");
-
-    let pixels = render_scene_pixels(&mut runtime, scene).await;
-
-    let has_content = pixels.chunks(4).any(|p| {
-        BG_SRGB
-            .iter()
-            .zip(p.iter())
-            .any(|(&e, &a)| a.abs_diff(e) > CI_SOLID_TOLERANCE)
-    });
-    assert!(
-        has_content,
-        "policy_arbitration_collision: at least one tile must render"
     );
 }
 

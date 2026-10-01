@@ -1410,18 +1410,14 @@ mod tests {
         // If we reach here, no data races (RwLock enforces mutual exclusion).
     }
 
-    // ── policy_matrix_basic: chrome visible during policy evaluation ───────
+    // ── Chrome renders independently of agent content ─────────────────────
 
     #[test]
-    fn policy_matrix_basic_chrome_visible_during_policy_evaluation() {
-        // Acceptance criterion: policy_matrix_basic — chrome visible during policy evaluation.
-        //
-        // The chrome render pass is independent of policy evaluation state.
-        // Policy evaluation happens in the scene graph (agent content); chrome
-        // reads only ChromeState. This test confirms the two are decoupled.
+    fn chrome_renders_health_dot_independent_of_agent_content() {
+        // Chrome reads only ChromeState, never the scene graph (agent content).
         let chrome_state = Arc::new(RwLock::new({
             let mut state = ChromeState::new();
-            // Simulate the policy_matrix_basic scenario: a system session with 3 agents.
+            // A system session with 3 connected agents.
             state.add_tab(1, "system".into());
             state.connected_agent_count = 3;
             state.health = SystemHealth::AllConnected;
@@ -1429,12 +1425,11 @@ mod tests {
         }));
 
         let mut renderer = ChromeRenderer::new_headless(chrome_state);
-        // Chrome must render regardless of what policies are being evaluated.
         let cmds = renderer.render_chrome(1920.0, 1080.0);
 
         assert!(
             !cmds.is_empty(),
-            "chrome must be visible during policy evaluation"
+            "chrome must render from ChromeState alone"
         );
 
         // Verify health dot is green (AllConnected).

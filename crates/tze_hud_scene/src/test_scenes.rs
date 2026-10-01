@@ -1,4 +1,4 @@
-//! Test scene registry — deterministic named scene configurations for validation layers 0-4.
+//! Test scene registry — deterministic named scene configurations for scene, render, and pixel tests.
 //!
 //! # Design
 //!
@@ -120,7 +120,7 @@ impl TestSceneRegistry {
         }
     }
 
-    /// Create a registry with a custom display area (useful for mobile-profile tests).
+    /// Create a registry with a custom display area (e.g. the 800×600 pixel-readback surface).
     pub fn with_display(width: f32, height: f32) -> Self {
         Self {
             display_width: width,
@@ -133,17 +133,14 @@ impl TestSceneRegistry {
     /// Returns `None` if the name is not known.
     pub fn build(&self, name: &str, clock: ClockMs) -> Option<(SceneGraph, SceneSpec)> {
         match name {
-            // ── original 5 (canonical names per validation-framework/spec.md §"Test Scene Registry") ──
             "empty_scene" => Some(self.build_empty_scene(clock)),
             "single_tile_solid" => Some(self.build_single_tile_solid(clock)),
             "three_tiles_no_overlap" => Some(self.build_three_tiles_no_overlap(clock)),
             "max_tiles_stress" => Some(self.build_max_tiles_stress(clock)),
-            // ── 20 new scenes ──
             "overlapping_tiles_zorder" => Some(self.build_overlapping_tiles_zorder(clock)),
             "overlay_transparency" => Some(self.build_overlay_transparency(clock)),
             "tab_switch" => Some(self.build_tab_switch(clock)),
             "lease_expiry" => Some(self.build_lease_expiry(clock)),
-            "mobile_degraded" => Some(self.build_mobile_degraded(clock)),
             "input_highlight" => Some(self.build_input_highlight(clock)),
             "coalesced_dashboard" => Some(self.build_coalesced_dashboard(clock)),
             "three_agents_contention" => Some(self.build_three_agents_contention(clock)),
@@ -151,7 +148,6 @@ impl TestSceneRegistry {
             "disconnect_reclaim_multiagent" => {
                 Some(self.build_disconnect_reclaim_multiagent(clock))
             }
-            "privacy_redaction_mode" => Some(self.build_privacy_redaction_mode(clock)),
             "chatty_dashboard_touch" => Some(self.build_chatty_dashboard_touch(clock)),
             "zone_publish_subtitle" => Some(self.build_zone_publish_subtitle(clock)),
             "zone_reject_wrong_type" => Some(self.build_zone_reject_wrong_type(clock)),
@@ -159,43 +155,33 @@ impl TestSceneRegistry {
             "zone_orchestrate_then_publish" => {
                 Some(self.build_zone_orchestrate_then_publish(clock))
             }
-            "zone_geometry_adapts_profile" => Some(self.build_zone_geometry_adapts_profile(clock)),
             "zone_disconnect_cleanup" => Some(self.build_zone_disconnect_cleanup(clock)),
-            "policy_matrix_basic" => Some(self.build_policy_matrix_basic(clock)),
-            "policy_arbitration_collision" => Some(self.build_policy_arbitration_collision(clock)),
             _ => None,
         }
     }
 
-    /// All known scene names (canonical per validation-framework/spec.md §"Test Scene Registry").
+    /// All known scene names.
     pub fn scene_names() -> &'static [&'static str] {
         &[
-            // original 4 (canonical names)
             "empty_scene",
             "single_tile_solid",
             "three_tiles_no_overlap",
             "max_tiles_stress",
-            // 21 additional scenes
             "overlapping_tiles_zorder",
             "overlay_transparency",
             "tab_switch",
             "lease_expiry",
-            "mobile_degraded",
             "input_highlight",
             "coalesced_dashboard",
             "three_agents_contention",
             "overlay_passthrough_regions",
             "disconnect_reclaim_multiagent",
-            "privacy_redaction_mode",
             "chatty_dashboard_touch",
             "zone_publish_subtitle",
             "zone_reject_wrong_type",
             "zone_conflict_two_publishers",
             "zone_orchestrate_then_publish",
-            "zone_geometry_adapts_profile",
             "zone_disconnect_cleanup",
-            "policy_matrix_basic",
-            "policy_arbitration_collision",
         ]
     }
 
@@ -479,7 +465,7 @@ impl TestSceneRegistry {
         (graph, spec)
     }
 
-    // ─── New scene builders (scenes 5-25) ────────────────────────────────
+    // ─── More scene builders ─────────────────────────────────────────────
 
     /// `overlapping_tiles_zorder` — 3 tiles with overlapping bounds and explicit z-orders.
     ///
@@ -829,69 +815,6 @@ impl TestSceneRegistry {
                           Call expire_leases(now_ms) with now_ms past the TTL to drive the \
                           ACTIVE→EXPIRED transition and remove the tile. Validates the \
                           ACTIVE→EXPIRED state machine per lease-governance/spec.md §1.",
-            expected_tab_count: 1,
-            expected_tile_count: 1,
-            has_hit_regions: false,
-            has_zones: false,
-        };
-
-        (graph, spec)
-    }
-
-    /// `mobile_degraded` — scene using a narrow mobile display (390×844) to exercise
-    /// the mobile-profile degradation path.
-    ///
-    /// Per configuration/spec.md lines 71-82, the mobile profile enforces stricter
-    /// resource budgets. This scene is constructed with `with_display(390, 844)`.
-    fn build_mobile_degraded(&self, clock: ClockMs) -> (SceneGraph, SceneSpec) {
-        // Use a mobile-sized display rather than 1920×1080
-        let mobile_w = 390.0_f32;
-        let mobile_h = 844.0_f32;
-        let mut graph = SceneGraph::new(mobile_w, mobile_h);
-
-        let tab_id = graph.create_tab("Mobile", 0).expect("create_tab failed");
-
-        let lease_id = graph.grant_lease_at(
-            "agent.mobile",
-            clock.0,
-            300_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
-
-        // Single full-width tile within mobile bounds
-        let tile_bounds = Rect::new(0.0, 0.0, mobile_w, mobile_h * 0.5);
-        let tile_id = graph
-            .create_tile(tab_id, "agent.mobile", lease_id, tile_bounds, 1)
-            .expect("create_tile failed");
-
-        graph
-            .set_tile_root(
-                tile_id,
-                Node {
-                    layout: Default::default(),
-                    id: SceneId::new(),
-                    children: vec![],
-                    data: NodeData::TextMarkdown(TextMarkdownNode {
-                        content: "Mobile presence (390×844)".to_string(),
-                        bounds: Rect::new(0.0, 0.0, tile_bounds.width, tile_bounds.height),
-                        font_size_px: 14.0,
-                        font_family: FontFamily::SystemSansSerif,
-                        color: Rgba::WHITE,
-                        background: Some(Rgba::new(0.05, 0.1, 0.15, 1.0)),
-                        alignment: TextAlign::Center,
-                        overflow: TextOverflow::Ellipsis,
-                        color_runs: Box::default(),
-                    }),
-                },
-            )
-            .expect("set_tile_root failed");
-
-        let spec = SceneSpec {
-            name: "mobile_degraded",
-            description: "Single tile on a 390×844 mobile display. Validates the mobile \
-                          profile degradation path: tighter resource budgets apply, \
-                          content must fit the smaller viewport. \
-                          Per configuration/spec.md lines 71-82.",
             expected_tab_count: 1,
             expected_tile_count: 1,
             has_hit_regions: false,
@@ -1520,111 +1443,6 @@ impl TestSceneRegistry {
         (graph, spec)
     }
 
-    /// `privacy_redaction_mode` — tiles with SENSITIVE classification present for
-    /// redaction testing.
-    ///
-    /// Validates Level 2 Privacy Evaluation: VisibilityClassification vs ViewerClass
-    /// per policy-arbitration/spec.md lines 91-104.
-    fn build_privacy_redaction_mode(&self, clock: ClockMs) -> (SceneGraph, SceneSpec) {
-        let mut graph = SceneGraph::new(self.display_width, self.display_height);
-
-        let tab_id = graph.create_tab("Privacy", 0).expect("create_tab failed");
-
-        let lease_id = graph.grant_lease_at(
-            "agent.privacy",
-            clock.0,
-            300_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
-
-        // Two tiles side-by-side (left: public, right: sensitive).
-        // Widths are display-relative (each ~49.5%) to fit at any resolution.
-        let half_w = self.display_width / 2.0 - 1.0;
-
-        // Public tile — safe to display to any viewer class
-        let public_tile = graph
-            .create_tile(
-                tab_id,
-                "agent.privacy",
-                lease_id,
-                Rect::new(0.0, 0.0, half_w, self.display_height),
-                1,
-            )
-            .expect("create_tile failed");
-        graph
-            .set_tile_root(
-                public_tile,
-                Node {
-                    layout: Default::default(),
-                    id: SceneId::new(),
-                    children: vec![],
-                    data: NodeData::TextMarkdown(TextMarkdownNode {
-                        content: "**PUBLIC CONTENT**\n\nVisible to all viewer classes.".to_string(),
-                        bounds: Rect::new(0.0, 0.0, half_w, self.display_height),
-                        font_size_px: 16.0,
-                        font_family: FontFamily::SystemSansSerif,
-                        color: Rgba::WHITE,
-                        background: Some(Rgba::new(0.05, 0.2, 0.05, 1.0)),
-                        alignment: TextAlign::Start,
-                        overflow: TextOverflow::Clip,
-                        color_runs: Box::default(),
-                    }),
-                },
-            )
-            .expect("set_tile_root failed");
-
-        // Sensitive tile — must be redacted for untrusted viewers
-        // (VisibilityClassification=SENSITIVE triggers Level 2 Privacy Evaluation)
-        let sensitive_x = half_w + 1.0;
-        let sensitive_w = self.display_width - sensitive_x;
-        let sensitive_tile = graph
-            .create_tile(
-                tab_id,
-                "agent.privacy",
-                lease_id,
-                Rect::new(sensitive_x, 0.0, sensitive_w, self.display_height),
-                2,
-            )
-            .expect("create_tile failed");
-        graph
-            .set_tile_root(
-                sensitive_tile,
-                Node {
-                    layout: Default::default(),
-                    id: SceneId::new(),
-                    children: vec![],
-                    data: NodeData::TextMarkdown(TextMarkdownNode {
-                        content: "**[SENSITIVE]**\n\nMust be redacted for UNTRUSTED viewers. \
-                                  Visible only to TRUSTED ViewerClass."
-                            .to_string(),
-                        bounds: Rect::new(0.0, 0.0, sensitive_w, self.display_height),
-                        font_size_px: 16.0,
-                        font_family: FontFamily::SystemSansSerif,
-                        color: Rgba::new(1.0, 0.8, 0.0, 1.0),
-                        background: Some(Rgba::new(0.3, 0.05, 0.05, 1.0)),
-                        alignment: TextAlign::Start,
-                        overflow: TextOverflow::Clip,
-                        color_runs: Box::default(),
-                    }),
-                },
-            )
-            .expect("set_tile_root failed");
-
-        let spec = SceneSpec {
-            name: "privacy_redaction_mode",
-            description: "Two tiles: one PUBLIC (visible to all), one SENSITIVE (must be \
-                          redacted for untrusted viewers). Validates Level 2 Privacy \
-                          Evaluation (VisibilityClassification vs ViewerClass) per \
-                          policy-arbitration/spec.md lines 91-104.",
-            expected_tab_count: 1,
-            expected_tile_count: 2,
-            has_hit_regions: false,
-            has_zones: false,
-        };
-
-        (graph, spec)
-    }
-
     /// `chatty_dashboard_touch` — dashboard layout with HitRegionNode tiles ready for
     /// high-frequency input injection (<100µs hit-test for 50 tiles).
     fn build_chatty_dashboard_touch(&self, clock: ClockMs) -> (SceneGraph, SceneSpec) {
@@ -2122,114 +1940,6 @@ impl TestSceneRegistry {
         (graph, spec)
     }
 
-    /// `zone_geometry_adapts_profile` — zone with geometry policy that adapts to the
-    /// display profile (desktop vs mobile).
-    ///
-    /// Uses Relative geometry so the zone scales correctly across viewport sizes.
-    /// Per configuration/spec.md lines 123-134.
-    fn build_zone_geometry_adapts_profile(&self, clock: ClockMs) -> (SceneGraph, SceneSpec) {
-        let mut graph = SceneGraph::new(self.display_width, self.display_height);
-
-        let tab_id = graph
-            .create_tab("AdaptiveZone", 0)
-            .expect("create_tab failed");
-
-        let lease_id = graph.grant_lease_at(
-            "agent.adaptive",
-            clock.0,
-            300_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
-
-        // pip zone: relative geometry — adapts to display size
-        graph.zone_registry.zones.insert(
-            "pip".to_string(),
-            ZoneDefinition {
-                id: SceneId::new(),
-                name: "pip".to_string(),
-                description: "Picture-in-picture zone that adapts to display profile.".to_string(),
-                geometry_policy: GeometryPolicy::Relative {
-                    x_pct: 0.75,
-                    y_pct: 0.70,
-                    width_pct: 0.22,
-                    height_pct: 0.26,
-                },
-                accepted_media_types: vec![ZoneMediaType::SolidColor],
-                rendering_policy: RenderingPolicy::default(),
-                contention_policy: ContentionPolicy::Replace,
-                max_publishers: 1,
-                transport_constraint: None,
-                auto_clear_ms: None,
-                ephemeral: false,
-                layer_attachment: LayerAttachment::Content,
-            },
-        );
-
-        // ambient_background zone: full-screen relative geometry
-        graph.zone_registry.zones.insert(
-            "ambient_background".to_string(),
-            ZoneDefinition {
-                id: SceneId::new(),
-                name: "ambient_background".to_string(),
-                description: "Ambient background zone (full display, behind all content)."
-                    .to_string(),
-                geometry_policy: GeometryPolicy::Relative {
-                    x_pct: 0.0,
-                    y_pct: 0.0,
-                    width_pct: 1.0,
-                    height_pct: 1.0,
-                },
-                accepted_media_types: vec![ZoneMediaType::SolidColor, ZoneMediaType::StaticImage],
-                rendering_policy: RenderingPolicy::default(),
-                contention_policy: ContentionPolicy::Replace,
-                max_publishers: 1,
-                transport_constraint: None,
-                auto_clear_ms: None,
-                ephemeral: false,
-                layer_attachment: LayerAttachment::Background,
-            },
-        );
-
-        // Tile occupying the pip zone region
-        let pip_bounds = Rect::new(
-            self.display_width * 0.75,
-            self.display_height * 0.70,
-            self.display_width * 0.22,
-            self.display_height * 0.26,
-        );
-        let tile_id = graph
-            .create_tile(tab_id, "agent.adaptive", lease_id, pip_bounds, 5)
-            .expect("create_tile failed");
-        graph
-            .set_tile_root(
-                tile_id,
-                Node {
-                    layout: Default::default(),
-                    id: SceneId::new(),
-                    children: vec![],
-                    data: NodeData::SolidColor(SolidColorNode {
-                        color: Rgba::new(0.0, 0.3, 0.5, 0.9),
-                        bounds: Rect::new(0.0, 0.0, pip_bounds.width, pip_bounds.height),
-                        radius: None,
-                    }),
-                },
-            )
-            .expect("set_tile_root failed");
-
-        let spec = SceneSpec {
-            name: "zone_geometry_adapts_profile",
-            description: "Two zones with Relative geometry ('pip' and 'ambient_background') \
-                          that scale proportionally to the display size, adapting to \
-                          desktop/mobile profiles. Per configuration/spec.md lines 123-134.",
-            expected_tab_count: 1,
-            expected_tile_count: 1,
-            has_hit_regions: false,
-            has_zones: true,
-        };
-
-        (graph, spec)
-    }
-
     /// `zone_disconnect_cleanup` — zone publisher agent disconnects; validates cleanup.
     ///
     /// One agent registers as a zone publisher; then its lease enters Disconnected state.
@@ -2352,387 +2062,6 @@ impl TestSceneRegistry {
             expected_tile_count: 2,
             has_hit_regions: false,
             has_zones: true,
-        };
-
-        (graph, spec)
-    }
-
-    /// `policy_matrix_basic` — scene that exercises all 7 policy evaluation levels.
-    ///
-    /// Includes tiles with: viewer classification, content sensitivity, interruption
-    /// class markers, and degradation state — sufficient for Level 1→2→5→6 per-frame
-    /// evaluation per policy-arbitration/spec.md lines 10-17 and 194-199.
-    fn build_policy_matrix_basic(&self, clock: ClockMs) -> (SceneGraph, SceneSpec) {
-        let mut graph = SceneGraph::new(self.display_width, self.display_height);
-
-        let tab_id = graph
-            .create_tab("PolicyMatrix", 0)
-            .expect("create_tab failed");
-
-        let system_lease = graph.grant_lease_at(
-            "system.chrome",
-            clock.0,
-            86_400_000, // 24h — system chrome stays up
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
-
-        let agent_lease = graph.grant_lease_at(
-            "agent.content",
-            clock.0,
-            300_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
-
-        let sensitive_lease = graph.grant_lease_at(
-            "agent.sensitive",
-            clock.0,
-            300_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
-
-        // Set system lease to priority 0 (system/chrome tier)
-        if let Some(lease) = graph.leases.get_mut(&system_lease) {
-            lease.priority = 0;
-        }
-
-        // Set agent lease to priority 2 (normal agent)
-        // (already the default)
-
-        // Set sensitive lease to priority 1 (high — sensitive content needs priority scheduling)
-        if let Some(lease) = graph.leases.get_mut(&sensitive_lease) {
-            lease.priority = 1;
-        }
-
-        // Level 1: system chrome tile (always visible, never redacted)
-        let chrome_tile = graph
-            .create_tile(
-                tab_id,
-                "system.chrome",
-                system_lease,
-                Rect::new(0.0, 0.0, self.display_width, 40.0),
-                100,
-            )
-            .expect("create_tile failed");
-        graph
-            .set_tile_root(
-                chrome_tile,
-                Node {
-                    layout: Default::default(),
-                    id: SceneId::new(),
-                    children: vec![],
-                    data: NodeData::SolidColor(SolidColorNode {
-                        color: Rgba::new(0.05, 0.05, 0.1, 1.0),
-                        bounds: Rect::new(0.0, 0.0, self.display_width, 40.0),
-                        radius: None,
-                    }),
-                },
-            )
-            .expect("set_tile_root failed");
-
-        // Level 2: PUBLIC content tile (visible to all viewer classes)
-        let public_tile = graph
-            .create_tile(
-                tab_id,
-                "agent.content",
-                agent_lease,
-                Rect::new(
-                    0.0,
-                    50.0,
-                    self.display_width * 0.5,
-                    self.display_height - 90.0,
-                ),
-                10,
-            )
-            .expect("create_tile failed");
-        graph
-            .set_tile_root(
-                public_tile,
-                Node {
-                    layout: Default::default(),
-                    id: SceneId::new(),
-                    children: vec![],
-                    data: NodeData::TextMarkdown(TextMarkdownNode {
-                        content: "PUBLIC — Level 1 policy (visible to all)".to_string(),
-                        bounds: Rect::new(
-                            0.0,
-                            0.0,
-                            self.display_width * 0.5,
-                            self.display_height - 90.0,
-                        ),
-                        font_size_px: 14.0,
-                        font_family: FontFamily::SystemSansSerif,
-                        color: Rgba::WHITE,
-                        background: Some(Rgba::new(0.05, 0.2, 0.05, 1.0)),
-                        alignment: TextAlign::Start,
-                        overflow: TextOverflow::Clip,
-                        color_runs: Box::default(),
-                    }),
-                },
-            )
-            .expect("set_tile_root failed");
-
-        // Level 2: SENSITIVE content tile (redacted for untrusted viewers)
-        let sensitive_tile = graph
-            .create_tile(
-                tab_id,
-                "agent.sensitive",
-                sensitive_lease,
-                Rect::new(
-                    self.display_width * 0.5 + 10.0,
-                    50.0,
-                    self.display_width * 0.5 - 10.0,
-                    self.display_height - 90.0,
-                ),
-                20,
-            )
-            .expect("create_tile failed");
-        graph
-            .set_tile_root(
-                sensitive_tile,
-                Node {
-                    layout: Default::default(),
-                    id: SceneId::new(),
-                    children: vec![],
-                    data: NodeData::TextMarkdown(TextMarkdownNode {
-                        content: "SENSITIVE — Level 2 privacy (redacted for UNTRUSTED viewers)\n\n\
-                                  INTERRUPTION CLASS: high-urgency\n\
-                                  DEGRADATION: graceful (content collapses to summary)"
-                            .to_string(),
-                        bounds: Rect::new(
-                            0.0,
-                            0.0,
-                            self.display_width * 0.5 - 10.0,
-                            self.display_height - 90.0,
-                        ),
-                        font_size_px: 14.0,
-                        font_family: FontFamily::SystemSansSerif,
-                        color: Rgba::new(1.0, 0.85, 0.0, 1.0),
-                        background: Some(Rgba::new(0.3, 0.05, 0.05, 1.0)),
-                        alignment: TextAlign::Start,
-                        overflow: TextOverflow::Ellipsis,
-                        color_runs: Box::default(),
-                    }),
-                },
-            )
-            .expect("set_tile_root failed");
-
-        // Level 5: interactive chrome element (hit region — blocks lower z tiles)
-        let chrome_btn_tile = graph
-            .create_tile(
-                tab_id,
-                "system.chrome",
-                system_lease,
-                Rect::new(
-                    self.display_width - 120.0,
-                    self.display_height - 50.0,
-                    110.0,
-                    40.0,
-                ),
-                200,
-            )
-            .expect("create_tile failed");
-        graph
-            .set_tile_root(
-                chrome_btn_tile,
-                Node {
-                    layout: Default::default(),
-                    id: SceneId::new(),
-                    children: vec![],
-                    data: NodeData::HitRegion(HitRegionNode {
-                        bounds: Rect::new(0.0, 0.0, 110.0, 40.0),
-                        interaction_id: "policy-dismiss-btn".to_string(),
-                        accepts_focus: true,
-                        accepts_pointer: true,
-                        ..Default::default()
-                    }),
-                },
-            )
-            .expect("set_tile_root failed");
-
-        let spec = SceneSpec {
-            name: "policy_matrix_basic",
-            description: "Four tiles covering all 7 policy evaluation levels: system chrome \
-                          (Level 1, priority=0), public content (Level 2, visible to all), \
-                          sensitive content (Level 2, redacted for UNTRUSTED + interruption \
-                          class + degradation marker), and interactive chrome button (Level 5). \
-                          Per policy-arbitration/spec.md lines 10-17 and 194-199.",
-            expected_tab_count: 1,
-            expected_tile_count: 4,
-            has_hit_regions: true,
-            has_zones: false,
-        };
-
-        (graph, spec)
-    }
-
-    /// `policy_arbitration_collision` — multiple agents compete across all policy levels in a
-    /// single frame, triggering per-frame evaluation order (L1→L2→L5→L6) per
-    /// policy-arbitration/spec.md lines 194-199.
-    ///
-    /// Three agents hold leases at different priorities. Each creates tiles that intentionally
-    /// compete: a high-priority system tile (L1/safety), a privacy-sensitive tile (L2), and a
-    /// resource-heavy agent tile (L5/resource). The scene exercises the arbitration pipeline
-    /// by placing all agents in contention simultaneously.
-    fn build_policy_arbitration_collision(&self, clock: ClockMs) -> (SceneGraph, SceneSpec) {
-        let mut graph = SceneGraph::new(self.display_width, self.display_height);
-
-        let tab_id = graph
-            .create_tab("ArbitrationCollision", 0)
-            .expect("create_tab failed");
-
-        // Level 1 (Safety) — system agent; priority 0, highest authority
-        let system_lease = graph.grant_lease_at(
-            "system.safety",
-            clock.0,
-            86_400_000, // 24h
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
-        if let Some(lease) = graph.leases.get_mut(&system_lease) {
-            lease.priority = 0;
-        }
-
-        // Level 2 (Privacy) — privacy-sensitive agent; priority 1
-        let privacy_lease = graph.grant_lease_at(
-            "agent.privacy",
-            clock.0,
-            300_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
-        if let Some(lease) = graph.leases.get_mut(&privacy_lease) {
-            lease.priority = 1;
-        }
-
-        // Level 5 (Resource) + Level 6 (Content) — normal content agent; priority 2
-        let content_lease = graph.grant_lease_at(
-            "agent.content",
-            clock.0,
-            300_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
-
-        // L1: system safety overlay — full-width banner at top (z_order 100)
-        let safety_tile_id = graph
-            .create_tile(
-                tab_id,
-                "system.safety",
-                system_lease,
-                Rect::new(0.0, 0.0, self.display_width, 48.0),
-                100,
-            )
-            .expect("create_tile failed");
-        graph
-            .set_tile_root(
-                safety_tile_id,
-                Node {
-                    layout: Default::default(),
-                    id: SceneId::new(),
-                    children: vec![],
-                    data: NodeData::SolidColor(SolidColorNode {
-                        color: Rgba::new(0.9, 0.1, 0.1, 1.0),
-                        bounds: Rect::new(0.0, 0.0, self.display_width, 48.0),
-                        radius: None,
-                    }),
-                },
-            )
-            .expect("set_tile_root failed");
-
-        // L2: privacy-sensitive tile — left panel (z_order 20)
-        let privacy_tile_id = graph
-            .create_tile(
-                tab_id,
-                "agent.privacy",
-                privacy_lease,
-                Rect::new(
-                    0.0,
-                    60.0,
-                    self.display_width * 0.45,
-                    self.display_height - 120.0,
-                ),
-                20,
-            )
-            .expect("create_tile failed");
-        graph
-            .set_tile_root(
-                privacy_tile_id,
-                Node {
-                    layout: Default::default(),
-                    id: SceneId::new(),
-                    children: vec![],
-                    data: NodeData::TextMarkdown(TextMarkdownNode {
-                        content: "SENSITIVE — L2 Privacy\nRedacted for untrusted viewers."
-                            .to_string(),
-                        bounds: Rect::new(
-                            0.0,
-                            0.0,
-                            self.display_width * 0.45,
-                            self.display_height - 120.0,
-                        ),
-                        font_size_px: 14.0,
-                        font_family: FontFamily::SystemSansSerif,
-                        color: Rgba::new(1.0, 0.9, 0.0, 1.0),
-                        background: Some(Rgba::new(0.25, 0.05, 0.05, 1.0)),
-                        alignment: TextAlign::Start,
-                        overflow: TextOverflow::Ellipsis,
-                        color_runs: Box::default(),
-                    }),
-                },
-            )
-            .expect("set_tile_root failed");
-
-        // L5/L6: content agent tile — right panel (z_order 10); evaluated last
-        let content_tile_id = graph
-            .create_tile(
-                tab_id,
-                "agent.content",
-                content_lease,
-                Rect::new(
-                    self.display_width * 0.5,
-                    60.0,
-                    self.display_width * 0.5,
-                    self.display_height - 120.0,
-                ),
-                10,
-            )
-            .expect("create_tile failed");
-        graph
-            .set_tile_root(
-                content_tile_id,
-                Node {
-                    layout: Default::default(),
-                    id: SceneId::new(),
-                    children: vec![],
-                    data: NodeData::TextMarkdown(TextMarkdownNode {
-                        content:
-                            "PUBLIC — L5/L6 Content\nResource and content gate evaluated last."
-                                .to_string(),
-                        bounds: Rect::new(
-                            0.0,
-                            0.0,
-                            self.display_width * 0.5,
-                            self.display_height - 120.0,
-                        ),
-                        font_size_px: 14.0,
-                        font_family: FontFamily::SystemSansSerif,
-                        color: Rgba::WHITE,
-                        background: Some(Rgba::new(0.05, 0.15, 0.05, 1.0)),
-                        alignment: TextAlign::Start,
-                        overflow: TextOverflow::Clip,
-                        color_runs: Box::default(),
-                    }),
-                },
-            )
-            .expect("set_tile_root failed");
-
-        let spec = SceneSpec {
-            name: "policy_arbitration_collision",
-            description: "Three agents compete across all per-frame policy levels simultaneously: \
-                          system.safety (L1, priority=0), agent.privacy (L2, priority=1), and \
-                          agent.content (L5/L6, priority=2). Validates per-frame evaluation order \
-                          L1→L2→L5→L6 per policy-arbitration/spec.md lines 194-199.",
-            expected_tab_count: 1,
-            expected_tile_count: 3,
-            has_hit_regions: false,
-            has_zones: false,
         };
 
         (graph, spec)
@@ -3502,42 +2831,6 @@ mod tests {
         assert_no_violations(&graph, "lease_expiry");
     }
 
-    // ── Scene: mobile_degraded ────────────────────────────────────────────
-
-    #[test]
-    fn mobile_degraded_builds_without_error() {
-        let registry = TestSceneRegistry::new();
-        let result = registry.build("mobile_degraded", ClockMs::FIXED);
-        assert!(result.is_some(), "mobile_degraded must build");
-    }
-
-    #[test]
-    fn mobile_degraded_has_correct_structure() {
-        let registry = TestSceneRegistry::new();
-        let (graph, spec) = registry.build("mobile_degraded", ClockMs::FIXED).unwrap();
-        assert_eq!(graph.tabs.len(), spec.expected_tab_count, "tab count");
-        assert_eq!(graph.tiles.len(), spec.expected_tile_count, "tile count");
-    }
-
-    #[test]
-    fn mobile_degraded_display_is_mobile_size() {
-        let registry = TestSceneRegistry::new();
-        let (graph, _spec) = registry.build("mobile_degraded", ClockMs::FIXED).unwrap();
-        // Mobile display: 390×844
-        assert_eq!(graph.display_area.width, 390.0, "display width must be 390");
-        assert_eq!(
-            graph.display_area.height, 844.0,
-            "display height must be 844"
-        );
-    }
-
-    #[test]
-    fn mobile_degraded_passes_layer0_invariants() {
-        let registry = TestSceneRegistry::new();
-        let (graph, _spec) = registry.build("mobile_degraded", ClockMs::FIXED).unwrap();
-        assert_no_violations(&graph, "mobile_degraded");
-    }
-
     // ── Scene: input_highlight ────────────────────────────────────────────
 
     #[test]
@@ -3794,55 +3087,6 @@ mod tests {
         assert_no_violations(&graph, "disconnect_reclaim_multiagent");
     }
 
-    // ── Scene: privacy_redaction_mode ─────────────────────────────────────
-
-    #[test]
-    fn privacy_redaction_mode_builds_without_error() {
-        let registry = TestSceneRegistry::new();
-        let result = registry.build("privacy_redaction_mode", ClockMs::FIXED);
-        assert!(result.is_some(), "privacy_redaction_mode must build");
-    }
-
-    #[test]
-    fn privacy_redaction_mode_has_correct_structure() {
-        let registry = TestSceneRegistry::new();
-        let (graph, spec) = registry
-            .build("privacy_redaction_mode", ClockMs::FIXED)
-            .unwrap();
-        assert_eq!(graph.tabs.len(), spec.expected_tab_count, "tab count");
-        assert_eq!(graph.tiles.len(), spec.expected_tile_count, "tile count");
-        assert_eq!(spec.expected_tile_count, 2, "must have 2 tiles");
-    }
-
-    #[test]
-    fn privacy_redaction_mode_has_sensitive_tile_content() {
-        let registry = TestSceneRegistry::new();
-        let (graph, _spec) = registry
-            .build("privacy_redaction_mode", ClockMs::FIXED)
-            .unwrap();
-        // The sensitive tile has yellow text (Rgba with high r and g) to signal classification
-        let has_sensitive_color = graph.nodes.values().any(|n| {
-            if let NodeData::TextMarkdown(t) = &n.data {
-                t.color.r > 0.9 && t.color.g > 0.7 && t.color.b < 0.2
-            } else {
-                false
-            }
-        });
-        assert!(
-            has_sensitive_color,
-            "must have a tile with sensitive (yellow) text color"
-        );
-    }
-
-    #[test]
-    fn privacy_redaction_mode_passes_layer0_invariants() {
-        let registry = TestSceneRegistry::new();
-        let (graph, _spec) = registry
-            .build("privacy_redaction_mode", ClockMs::FIXED)
-            .unwrap();
-        assert_no_violations(&graph, "privacy_redaction_mode");
-    }
-
     // ── Scene: chatty_dashboard_touch ─────────────────────────────────────
 
     #[test]
@@ -4040,40 +3284,6 @@ mod tests {
         assert_no_violations(&graph, "zone_orchestrate_then_publish");
     }
 
-    // ── Scene: zone_geometry_adapts_profile ───────────────────────────────
-
-    #[test]
-    fn zone_geometry_adapts_profile_builds_without_error() {
-        let registry = TestSceneRegistry::new();
-        let result = registry.build("zone_geometry_adapts_profile", ClockMs::FIXED);
-        assert!(result.is_some(), "zone_geometry_adapts_profile must build");
-    }
-
-    #[test]
-    fn zone_geometry_adapts_profile_has_relative_zones() {
-        let registry = TestSceneRegistry::new();
-        let (graph, spec) = registry
-            .build("zone_geometry_adapts_profile", ClockMs::FIXED)
-            .unwrap();
-        assert!(spec.has_zones, "spec must declare has_zones = true");
-        for zone in graph.zone_registry.zones.values() {
-            assert!(
-                matches!(zone.geometry_policy, GeometryPolicy::Relative { .. }),
-                "zone '{}' must use Relative geometry",
-                zone.name
-            );
-        }
-    }
-
-    #[test]
-    fn zone_geometry_adapts_profile_passes_layer0_invariants() {
-        let registry = TestSceneRegistry::new();
-        let (graph, _spec) = registry
-            .build("zone_geometry_adapts_profile", ClockMs::FIXED)
-            .unwrap();
-        assert_no_violations(&graph, "zone_geometry_adapts_profile");
-    }
-
     // ── Scene: zone_disconnect_cleanup ────────────────────────────────────
 
     #[test]
@@ -4112,151 +3322,14 @@ mod tests {
         assert_no_violations(&graph, "zone_disconnect_cleanup");
     }
 
-    // ── Scene: policy_matrix_basic ────────────────────────────────────────
-
-    #[test]
-    fn policy_matrix_basic_builds_without_error() {
-        let registry = TestSceneRegistry::new();
-        let result = registry.build("policy_matrix_basic", ClockMs::FIXED);
-        assert!(result.is_some(), "policy_matrix_basic must build");
-    }
-
-    #[test]
-    fn policy_matrix_basic_has_correct_structure() {
-        let registry = TestSceneRegistry::new();
-        let (graph, spec) = registry
-            .build("policy_matrix_basic", ClockMs::FIXED)
-            .unwrap();
-        assert_eq!(graph.tiles.len(), spec.expected_tile_count, "tile count");
-        assert_eq!(spec.expected_tile_count, 4, "must have 4 tiles");
-        assert!(
-            spec.has_hit_regions,
-            "spec must declare has_hit_regions = true"
-        );
-    }
-
-    #[test]
-    fn policy_matrix_basic_has_system_lease_at_priority_zero() {
-        let registry = TestSceneRegistry::new();
-        let (graph, _spec) = registry
-            .build("policy_matrix_basic", ClockMs::FIXED)
-            .unwrap();
-        let system_lease = graph
-            .leases
-            .values()
-            .find(|l| l.namespace == "system.chrome")
-            .expect("must have system.chrome lease");
-        assert_eq!(
-            system_lease.priority, 0,
-            "system.chrome lease must have priority 0"
-        );
-    }
-
-    #[test]
-    fn policy_matrix_basic_has_three_distinct_namespaces() {
-        let registry = TestSceneRegistry::new();
-        let (graph, _spec) = registry
-            .build("policy_matrix_basic", ClockMs::FIXED)
-            .unwrap();
-        let mut namespaces: Vec<&str> = graph
-            .leases
-            .values()
-            .map(|l| l.namespace.as_str())
-            .collect();
-        namespaces.sort_unstable();
-        namespaces.dedup();
-        assert_eq!(namespaces.len(), 3, "must have 3 distinct lease namespaces");
-    }
-
-    #[test]
-    fn policy_matrix_basic_passes_layer0_invariants() {
-        let registry = TestSceneRegistry::new();
-        let (graph, _spec) = registry
-            .build("policy_matrix_basic", ClockMs::FIXED)
-            .unwrap();
-        assert_no_violations(&graph, "policy_matrix_basic");
-    }
-
-    // ── Scene: policy_arbitration_collision ───────────────────────────────
-
-    #[test]
-    fn policy_arbitration_collision_builds_without_error() {
-        let registry = TestSceneRegistry::new();
-        let result = registry.build("policy_arbitration_collision", ClockMs::FIXED);
-        assert!(result.is_some(), "policy_arbitration_collision must build");
-    }
-
-    #[test]
-    fn policy_arbitration_collision_has_correct_structure() {
-        let registry = TestSceneRegistry::new();
-        let (graph, spec) = registry
-            .build("policy_arbitration_collision", ClockMs::FIXED)
-            .unwrap();
-        assert_eq!(graph.tabs.len(), spec.expected_tab_count, "tab count");
-        assert_eq!(graph.tiles.len(), spec.expected_tile_count, "tile count");
-        assert_eq!(
-            spec.expected_tile_count, 3,
-            "must have 3 tiles (one per policy level group)"
-        );
-        assert!(!spec.has_zones, "no zones expected in this scene");
-    }
-
-    #[test]
-    fn policy_arbitration_collision_has_three_distinct_priorities() {
-        let registry = TestSceneRegistry::new();
-        let (graph, _spec) = registry
-            .build("policy_arbitration_collision", ClockMs::FIXED)
-            .unwrap();
-        let mut priorities: Vec<u8> = graph.leases.values().map(|l| l.priority).collect();
-        priorities.sort_unstable();
-        priorities.dedup();
-        assert_eq!(
-            priorities.len(),
-            3,
-            "must have 3 distinct lease priorities (0, 1, 2)"
-        );
-        assert_eq!(
-            priorities[0], 0,
-            "must have a priority-0 (system/safety) lease"
-        );
-        assert_eq!(priorities[1], 1, "must have a priority-1 (privacy) lease");
-        assert_eq!(priorities[2], 2, "must have a priority-2 (content) lease");
-    }
-
-    #[test]
-    fn policy_arbitration_collision_has_system_safety_lease() {
-        let registry = TestSceneRegistry::new();
-        let (graph, _spec) = registry
-            .build("policy_arbitration_collision", ClockMs::FIXED)
-            .unwrap();
-        let system_lease = graph
-            .leases
-            .values()
-            .find(|l| l.namespace == "system.safety")
-            .expect("must have system.safety lease");
-        assert_eq!(
-            system_lease.priority, 0,
-            "system.safety lease must have priority 0"
-        );
-    }
-
-    #[test]
-    fn policy_arbitration_collision_passes_layer0_invariants() {
-        let registry = TestSceneRegistry::new();
-        let (graph, _spec) = registry
-            .build("policy_arbitration_collision", ClockMs::FIXED)
-            .unwrap();
-        assert_no_violations(&graph, "policy_arbitration_collision");
-    }
-
-    // ── scene_names() has exactly 24 entries ──────────────────────────────
+    // ── scene_names() has exactly 19 entries ──────────────────────────────
 
     #[test]
     fn scene_names_returns_exactly_24_entries() {
         assert_eq!(
             TestSceneRegistry::scene_names().len(),
-            24,
-            "scene_names() must return exactly 24 entries"
+            19,
+            "scene_names() must return exactly 19 entries"
         );
     }
 

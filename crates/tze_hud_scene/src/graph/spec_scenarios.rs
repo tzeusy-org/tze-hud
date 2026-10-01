@@ -844,20 +844,14 @@ fn tile_opacity_accepts_boundary_values() {
     assert!((scene.tiles[&tile_id].opacity - 0.5).abs() < f32::EPSILON);
 }
 
-// ─ All 24 test scenes pass Layer 0 invariants ────────────────────────────
+// ─ All test scenes pass Layer 0 invariants ───────────────────────────────
 
 #[test]
-fn all_24_test_scenes_pass_layer0_invariants() {
+fn all_test_scenes_pass_layer0_invariants() {
     use crate::test_scenes::{ClockMs, TestSceneRegistry, assert_layer0_invariants};
 
     let registry = TestSceneRegistry::new();
     let names = TestSceneRegistry::scene_names();
-    assert_eq!(
-        names.len(),
-        24,
-        "must have exactly 24 registered scenes, got {}",
-        names.len()
-    );
 
     for name in names {
         let (graph, _spec) = registry
