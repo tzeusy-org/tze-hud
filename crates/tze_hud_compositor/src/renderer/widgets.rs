@@ -48,7 +48,7 @@ impl super::Compositor {
     /// - If the instance has a `dirty` flag set, re-rasterizes with current params.
     /// - If an animation is active, resolves interpolated params and re-rasterizes.
     ///
-    /// Under degradation level [`DegradationLevel::Significant`] or higher, active
+    /// Under degradation level [`DegradationLevel::Simplified`] or higher, active
     /// transitions are snapped to their final values immediately, reducing
     /// re-rasterization to at most once per parameter change during transitions.
     ///

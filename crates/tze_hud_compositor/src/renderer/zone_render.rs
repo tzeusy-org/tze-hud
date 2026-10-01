@@ -97,12 +97,12 @@ impl Compositor {
             // Skip flat-rect backdrop emission for those zones; collect_all_rounded_rect_cmds
             // handles their backdrops separately in encode_rounded_rect_pass.
             let use_rounded_rect = self.degradation_policy.level
-                < tze_hud_scene::DegradationLevel::Significant
+                < tze_hud_scene::DegradationLevel::Simplified
                 && policy.backdrop_radius.is_some_and(|r| r > 0.0);
 
             // Determine current animation opacity for this zone.
             let anim_opacity =
-                if self.degradation_policy.level >= tze_hud_scene::DegradationLevel::Significant {
+                if self.degradation_policy.level >= tze_hud_scene::DegradationLevel::Simplified {
                     1.0
                 } else {
                     self.zone_animation_states

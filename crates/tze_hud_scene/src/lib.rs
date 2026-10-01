@@ -129,13 +129,9 @@ pub use lease::capability::{
     CapabilityRevocationError, ZonePublishError, check_zone_publish, has_publish_zone_capability,
     revoke_capability_from_lease, should_clear_on_revoke,
 };
-pub use lease::degradation::{
-    DegradationLevel, DegradationTracker, ENTRY_THRESHOLD_MS, ENTRY_WINDOW_FRAMES, FrameTimeWindow,
-    RECOVERY_THRESHOLD_MS, RECOVERY_WINDOW_FRAMES,
-};
+pub use lease::degradation::DegradationLevel;
 pub use lease::priority::{
-    PRIORITY_DEFAULT, PRIORITY_HIGH, PRIORITY_SYSTEM, TileSheddingEntry, TileSortKey,
-    clamp_requested_priority, shed_count_for_level4, shedding_order,
+    PRIORITY_DEFAULT, PRIORITY_HIGH, PRIORITY_SYSTEM, TileSortKey, clamp_requested_priority,
 };
 
 // ── Record/Replay Trace harness ───────────────────────────────────────────────

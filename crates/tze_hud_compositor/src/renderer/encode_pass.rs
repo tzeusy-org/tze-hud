@@ -43,7 +43,7 @@ use super::token_colors::{
 
 #[inline]
 fn simplify_flat_alpha(mut color: [f32; 4], level: tze_hud_scene::DegradationLevel) -> [f32; 4] {
-    if level >= tze_hud_scene::DegradationLevel::Significant && color[3] > 0.0 {
+    if level >= tze_hud_scene::DegradationLevel::Simplified && color[3] > 0.0 {
         color[3] = 1.0;
     }
     color
@@ -355,7 +355,7 @@ impl super::Compositor {
             content: Vec::new(),
             chrome: Vec::new(),
         };
-        if self.degradation_policy.level >= tze_hud_scene::DegradationLevel::Significant {
+        if self.degradation_policy.level >= tze_hud_scene::DegradationLevel::Simplified {
             return result;
         }
 
@@ -519,7 +519,7 @@ impl super::Compositor {
         &self,
         scene: &SceneGraph,
     ) -> Vec<crate::pipeline::RoundedRectDrawCmd> {
-        if self.degradation_policy.level >= tze_hud_scene::DegradationLevel::Significant {
+        if self.degradation_policy.level >= tze_hud_scene::DegradationLevel::Simplified {
             return Vec::new();
         }
         let mut cmds = Vec::new();
@@ -727,15 +727,15 @@ mod degradation_flat_alpha_tests {
     #[test]
     fn significant_policy_forces_visible_flat_geometry_opaque_but_preserves_clear() {
         assert_eq!(
-            simplify_flat_alpha([0.2, 0.3, 0.4, 0.25], DegradationLevel::Moderate),
+            simplify_flat_alpha([0.2, 0.3, 0.4, 0.25], DegradationLevel::Nominal),
             [0.2, 0.3, 0.4, 0.25]
         );
         assert_eq!(
-            simplify_flat_alpha([0.2, 0.3, 0.4, 0.25], DegradationLevel::Significant,),
+            simplify_flat_alpha([0.2, 0.3, 0.4, 0.25], DegradationLevel::Simplified,),
             [0.2, 0.3, 0.4, 1.0]
         );
         assert_eq!(
-            simplify_flat_alpha([0.0, 0.0, 0.0, 0.0], DegradationLevel::Significant),
+            simplify_flat_alpha([0.0, 0.0, 0.0, 0.0], DegradationLevel::Simplified),
             [0.0, 0.0, 0.0, 0.0]
         );
     }

@@ -221,7 +221,7 @@ impl Compositor {
     /// completed transition still rests at full opacity.
     #[inline]
     pub(crate) fn portal_tile_anim_opacity(&self, tile_id: SceneId) -> f32 {
-        if self.degradation_policy.level >= DegradationLevel::Significant {
+        if self.degradation_policy.level >= DegradationLevel::Simplified {
             return 1.0;
         }
         self.portal_tile_anim_states
@@ -555,7 +555,7 @@ impl Compositor {
     ///
     /// Returns 1.0 if no animation state is found (publication is fully visible).
     pub(crate) fn pub_opacity(&self, zone_name: &str, record: &ZonePublishRecord) -> f32 {
-        if self.degradation_policy.level >= DegradationLevel::Significant {
+        if self.degradation_policy.level >= DegradationLevel::Simplified {
             return 1.0;
         }
         let key: PubKey = (

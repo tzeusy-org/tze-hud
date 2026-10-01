@@ -133,7 +133,7 @@ pub use channels::{
     coalesce_key_channel,
     frame_ready_channel,
 };
-pub use degradation::{DegradationConfig, DegradationController, DegradationLevel, TileDescriptor};
+pub use degradation::{DegradationConfig, DegradationController, DegradationLevel};
 pub use event_bus::{
     AGGREGATE_RATE_CAP, AggregateRateLimiter, ClassifiedEvent, EventBus, InterruptionClass,
     SubscriberQueue,

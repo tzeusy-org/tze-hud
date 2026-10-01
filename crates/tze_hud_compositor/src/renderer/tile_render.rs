@@ -58,7 +58,7 @@ use super::{Compositor, CompositorDegradationPolicy};
 /// deliberately removed from the frame.
 #[inline]
 pub(super) fn degradation_tile_opacity(opacity: f32, level: DegradationLevel) -> f32 {
-    if level >= DegradationLevel::Significant && opacity > 0.0 {
+    if level >= DegradationLevel::Simplified && opacity > 0.0 {
         1.0
     } else {
         opacity
@@ -376,8 +376,8 @@ pub(super) fn composer_draft_base_color(
 impl Compositor {
     /// Install the complete runtime-selected policy for the next frame.
     pub fn set_degradation_policy(&mut self, policy: CompositorDegradationPolicy) {
-        let texture_policy_changed = (self.degradation_policy.level < DegradationLevel::Moderate)
-            != (policy.level < DegradationLevel::Moderate)
+        let texture_policy_changed = (self.degradation_policy.level < DegradationLevel::Simplified)
+            != (policy.level < DegradationLevel::Simplified)
             || self.degradation_policy.texture_quality_threshold_px
                 != policy.texture_quality_threshold_px
             || self.degradation_policy.texture_scale_factor != policy.texture_scale_factor;
@@ -388,13 +388,9 @@ impl Compositor {
         self.degradation_policy = policy;
     }
 
-    /// Visible tiles after applying the immutable suppression snapshot.
+    /// Visible tiles for this frame. Degradation never hides tiles.
     pub(super) fn policy_visible_tiles<'a>(&self, scene: &'a SceneGraph) -> Vec<&'a Tile> {
-        scene
-            .visible_tiles()
-            .into_iter()
-            .filter(|tile| !self.degradation_policy.suppressed_tiles.contains(&tile.id))
-            .collect()
+        scene.visible_tiles()
     }
 
     pub(super) fn rendered_tile_opacity(&self, tile: &Tile, scene: &SceneGraph) -> f32 {
@@ -410,7 +406,7 @@ impl Compositor {
     /// the same no-blend path to implement the degradation ladder's
     /// DisableTransparency contract.
     pub(super) fn use_opaque_rect_pipeline(&self) -> bool {
-        self.overlay_mode || self.degradation_policy.level >= DegradationLevel::Significant
+        self.overlay_mode || self.degradation_policy.level >= DegradationLevel::Simplified
     }
 
     // ─── Drag-boost helpers ───────────────────────────────────────────────────
@@ -898,7 +894,7 @@ impl Compositor {
         {
             match &node.data {
                 NodeData::SolidColor(sc) => {
-                    if self.degradation_policy.level < DegradationLevel::Significant
+                    if self.degradation_policy.level < DegradationLevel::Simplified
                         && sc.radius.is_some_and(|r| r > 0.0)
                     {
                         return None;
@@ -3078,19 +3074,19 @@ mod degradation_opacity_tests {
     #[test]
     fn significant_degradation_preserves_hidden_tiles_and_opaques_visible_tiles() {
         assert_eq!(
-            degradation_tile_opacity(0.0, DegradationLevel::Significant),
+            degradation_tile_opacity(0.0, DegradationLevel::Simplified),
             0.0,
             "durably hidden tiles must remain hidden when transparency is disabled"
         );
         assert_eq!(
-            degradation_tile_opacity(0.35, DegradationLevel::Significant),
+            degradation_tile_opacity(0.35, DegradationLevel::Simplified),
             1.0,
             "visible tiles must become opaque when transparency is disabled"
         );
         assert_eq!(
-            degradation_tile_opacity(0.35, DegradationLevel::Moderate),
+            degradation_tile_opacity(0.35, DegradationLevel::Nominal),
             0.35,
-            "lower degradation levels must preserve fractional opacity"
+            "nominal rendering must preserve fractional opacity"
         );
     }
 }
