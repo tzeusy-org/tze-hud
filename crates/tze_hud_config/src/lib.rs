@@ -23,7 +23,6 @@
 //! ### rig-umgy (Display profile resolution)
 //! - Display Profile full-display (v1-mandatory)
 //! - Display Profile headless (v1-mandatory)
-//! - Mobile Profile Schema-Reserved (v1-mandatory)
 //! - Profile Auto-Detection (v1-mandatory)
 //! - Profile Budget Escalation Prevention (v1-mandatory)
 //! - Profile Extends Conflict Detection (v1-mandatory)

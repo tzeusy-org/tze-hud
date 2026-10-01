@@ -17,7 +17,6 @@
 //!
 //! **rig-umgy** (Display profile resolution):
 //! - `extends = "headless"` rejection (§Display Profile headless)
-//! - Mobile profile rejection (§Mobile Profile Schema-Reserved)
 //! - Profile budget escalation prevention (§Profile Budget Escalation Prevention)
 //! - Profile capability escalation prevention (§Profile Budget Escalation Prevention)
 //! - Profile/extends conflict detection (§Profile Extends Conflict Detection)
@@ -454,24 +453,14 @@ fn parse_toml_location(msg: &str) -> (u32, u32) {
 fn validate_profile(profile: &str, errors: &mut Vec<ConfigError>) {
     match profile {
         "full-display" | "headless" | "auto" | "custom" => {}
-        "mobile" => {
-            errors.push(ConfigError {
-                code: ConfigErrorCode::MobileProfileNotExercised,
-                field_path: "runtime.profile".into(),
-                expected: "\"full-display\", \"headless\", \"auto\", or \"custom\"".into(),
-                got: "\"mobile\"".into(),
-                hint: "mobile profile is schema-reserved; use \"full-display\" or \"headless\""
-                    .into(),
-            });
-        }
         other => {
             errors.push(ConfigError {
                 code: ConfigErrorCode::UnknownProfile,
                 field_path: "runtime.profile".into(),
-                expected: "\"full-display\", \"headless\", \"auto\", \"custom\", or \"mobile\"".into(),
+                expected: "\"full-display\", \"headless\", \"auto\", or \"custom\"".into(),
                 got: format!("{other:?}"),
                 hint: format!(
-                    "unknown profile {other:?}; valid values: full-display, headless, auto, custom (mobile is schema-reserved)"
+                    "unknown profile {other:?}; valid values: full-display, headless, auto, custom"
                 ),
             });
         }
@@ -759,14 +748,11 @@ mod unit_tests {
     // ── profile validation ────────────────────────────────────────────────────
 
     #[test]
-    fn test_validate_profile_mobile_gives_mobile_error() {
+    fn test_validate_profile_mobile_is_unknown() {
         let mut errors = Vec::new();
         validate_profile("mobile", &mut errors);
         assert_eq!(errors.len(), 1);
-        assert!(matches!(
-            errors[0].code,
-            ConfigErrorCode::MobileProfileNotExercised
-        ));
+        assert!(matches!(errors[0].code, ConfigErrorCode::UnknownProfile));
     }
 
     #[test]

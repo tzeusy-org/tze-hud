@@ -445,47 +445,6 @@ fn spec_schema_export_produces_valid_json_schema() {
     assert!(schema.is_object(), "schema must be a JSON object");
 }
 
-// ── Spec §Mobile Profile ──────────────────────────────────────────────────────
-
-/// WHEN profile = "mobile" THEN CONFIG_MOBILE_PROFILE_NOT_EXERCISED (not CONFIG_UNKNOWN_PROFILE).
-#[test]
-fn spec_mobile_profile_rejected_with_correct_code() {
-    let toml = r#"
-[runtime]
-profile = "mobile"
-
-[[tabs]]
-name = "Main"
-"#;
-    let loader = parse_ok(toml);
-    let errors = loader.validate();
-    let has_mobile_error = errors
-        .iter()
-        .any(|e| matches!(e.code, ConfigErrorCode::MobileProfileNotExercised));
-    assert!(
-        has_mobile_error,
-        "mobile profile should produce CONFIG_MOBILE_PROFILE_NOT_EXERCISED"
-    );
-    // Must NOT produce CONFIG_UNKNOWN_PROFILE (it's a distinct error).
-    let has_unknown = errors
-        .iter()
-        .any(|e| matches!(e.code, ConfigErrorCode::UnknownProfile));
-    assert!(
-        !has_unknown,
-        "mobile profile must NOT produce CONFIG_UNKNOWN_PROFILE"
-    );
-    // Hint must mention full-display or headless.
-    let mobile_error = errors
-        .iter()
-        .find(|e| matches!(e.code, ConfigErrorCode::MobileProfileNotExercised))
-        .unwrap();
-    assert!(
-        mobile_error.hint.contains("full-display") || mobile_error.hint.contains("headless"),
-        "hint should suggest full-display or headless, got: {:?}",
-        mobile_error.hint
-    );
-}
-
 // ── Spec §Display Profile headless - not extendable ──────────────────────────
 
 /// WHEN extends = "headless" THEN CONFIG_HEADLESS_NOT_EXTENDABLE.
@@ -509,41 +468,6 @@ name = "Main"
             .any(|e| matches!(e.code, ConfigErrorCode::HeadlessNotExtendable)),
         "extends=headless must produce CONFIG_HEADLESS_NOT_EXTENDABLE, got: {:?}",
         errors.iter().map(|e| &e.code).collect::<Vec<_>>()
-    );
-}
-
-// ── Spec §Mobile Profile - extends mobile is valid ────────────────────────────
-
-/// WHEN profile = "custom" and extends = "mobile" THEN accepted.
-#[test]
-fn spec_extends_mobile_with_custom_profile_accepted() {
-    let toml = r#"
-[runtime]
-profile = "custom"
-
-[display_profile]
-extends = "mobile"
-
-[[tabs]]
-name = "Main"
-"#;
-    let loader = parse_ok(toml);
-    let errors = loader.validate();
-    // No HEADLESS_NOT_EXTENDABLE, UNKNOWN_PROFILE, or EXTENDS_CONFLICTS error.
-    let fatal_errors: Vec<_> = errors
-        .iter()
-        .filter(|e| {
-            matches!(
-                e.code,
-                ConfigErrorCode::HeadlessNotExtendable
-                    | ConfigErrorCode::UnknownProfile
-                    | ConfigErrorCode::ProfileExtendsConflictsWithProfile
-            )
-        })
-        .collect();
-    assert!(
-        fatal_errors.is_empty(),
-        "extends=mobile with profile=custom should be accepted, got errors: {fatal_errors:?}"
     );
 }
 
@@ -585,32 +509,6 @@ name = "Main"
     );
 }
 
-/// WHEN custom profile sets allow_background_zones = true over mobile base (false) THEN
-/// CONFIG_PROFILE_CAPABILITY_ESCALATION (spec lines 111-112).
-#[test]
-fn spec_capability_escalation_rejected() {
-    let toml = r#"
-[runtime]
-profile = "custom"
-
-[display_profile]
-extends = "mobile"
-allow_background_zones = true
-
-[[tabs]]
-name = "Main"
-"#;
-    let loader = parse_ok(toml);
-    let errors = loader.validate();
-    assert!(
-        errors
-            .iter()
-            .any(|e| matches!(e.code, ConfigErrorCode::ProfileCapabilityEscalation)),
-        "allow_background_zones=true over mobile base should produce CAPABILITY_ESCALATION, got: {:?}",
-        errors.iter().map(|e| &e.code).collect::<Vec<_>>()
-    );
-}
-
 // ── Spec §Profile Extends Conflict Detection ─────────────────────────────────
 
 /// WHEN profile = "full-display" and extends = "headless" THEN
@@ -646,16 +544,16 @@ name = "Main"
     );
 }
 
-/// WHEN profile = "full-display" and extends = "mobile" THEN
+/// WHEN profile = "headless" and extends = "full-display" THEN
 /// CONFIG_PROFILE_EXTENDS_CONFLICTS_WITH_PROFILE.
 #[test]
-fn spec_full_display_extends_mobile_conflict() {
+fn spec_headless_extends_full_display_conflict() {
     let toml = r#"
 [runtime]
-profile = "full-display"
+profile = "headless"
 
 [display_profile]
-extends = "mobile"
+extends = "full-display"
 
 [[tabs]]
 name = "Main"
@@ -666,7 +564,7 @@ name = "Main"
         errors
             .iter()
             .any(|e| matches!(e.code, ConfigErrorCode::ProfileExtendsConflictsWithProfile)),
-        "profile=full-display + extends=mobile must produce EXTENDS_CONFLICTS, got: {:?}",
+        "profile=headless + extends=full-display must produce EXTENDS_CONFLICTS, got: {:?}",
         errors.iter().map(|e| &e.code).collect::<Vec<_>>()
     );
 }

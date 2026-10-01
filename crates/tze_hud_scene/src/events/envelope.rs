@@ -32,19 +32,16 @@ use super::taxonomy::SubscriptionCategory;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum InterruptionClass {
-    /// Overrides everything. Bypasses quiet hours and attention budget.
-    /// Only the runtime may emit CRITICAL events; agent-requested CRITICAL
+    /// Highest urgency. Only the runtime may emit CRITICAL events; agent-requested CRITICAL
     /// is downgraded to HIGH.
     Critical = 0,
-    /// May override quiet hours (subject to `pass_through_class` config).
-    /// Subject to attention budget. Maps to "Urgent" in privacy doctrine.
+    /// Urgent. The highest class an agent may declare.
     High = 1,
-    /// Standard. Filtered by attention budget.
+    /// Standard.
     Normal = 2,
-    /// Batched/deferred. Blocked (discarded) during quiet hours.
-    /// Subtle indicators only. Maps to "Gentle" in privacy doctrine.
+    /// Low urgency; subtle indicators only.
     Low = 3,
-    /// Never interrupts. Always passes quiet hours. Zero interruption cost.
+    /// Never interrupts.
     Silent = 4,
 }
 

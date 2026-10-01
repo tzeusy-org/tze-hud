@@ -18,7 +18,6 @@ pub enum ConfigErrorCode {
     MultipleDefaultTabs,
     UnknownLayout,
     UnknownProfile,
-    MobileProfileNotExercised,
     HeadlessNotExtendable,
     ProfileExtendsConflictsWithProfile,
     ProfileBudgetEscalation,
@@ -203,7 +202,6 @@ pub struct ResolvedConfig {
 /// - Accept only TOML with parse errors including line/column.
 /// - Search configuration file chain (CLI → env → cwd → XDG) in order.
 /// - Enforce built-in profile budget values exactly.
-/// - Reject `profile = "mobile"` with `CONFIG_MOBILE_PROFILE_NOT_EXERCISED`.
 /// - Prevent budget escalation in custom profiles.
 /// - Validate capability names against the canonical v1 vocabulary.
 /// - Collect ALL validation errors before reporting.

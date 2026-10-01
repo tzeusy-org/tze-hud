@@ -73,7 +73,7 @@ pub enum SubscriptionCategory {
     /// Telemetry frame snapshots.
     /// Prefix: `system.telemetry_*`. Maps to `EventCategory::System`.
     TelemetryFrames,
-    /// Attention budget warnings and state.
+    /// Reserved category; the runtime currently emits no `system.attention_*` events.
     /// Prefix: `system.attention_*`. Maps to `EventCategory::System`.
     AttentionEvents,
     /// Agent-emitted events (prefixed with `agent.<namespace>.`).

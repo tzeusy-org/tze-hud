@@ -58,7 +58,7 @@ pub struct RawRuntime {
 /// a built-in.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
 pub struct RawDisplayProfile {
-    /// Built-in profile to extend (`full-display`, `mobile`; NOT `headless`).
+    /// Built-in profile to extend (only `full-display`; NOT `headless`).
     pub extends: Option<String>,
 
     /// Override: max tiles.
