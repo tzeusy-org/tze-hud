@@ -576,7 +576,6 @@ pub struct Tab {
     /// - Agent events match against the bare name (before namespace prefixing) for
     ///   agent-independence: "doorbell.ring" fires for ANY agent emitting "doorbell.ring".
     /// - System events (system.* prefix) are excluded from matching.
-    /// - Triggered switch is subject to attention filtering (quiet hours, attention budget).
     /// - Successful switch generates ActiveTabChangedEvent (event_type "scene.tab.active_changed").
     ///
     /// Set to `None` to disable event-triggered tab switching for this tab.

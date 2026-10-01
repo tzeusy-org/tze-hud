@@ -77,7 +77,6 @@ pub mod runtime_context;
 pub mod scene_startup;
 pub mod shell;
 pub mod subscriptions;
-pub mod tab_switch_trigger;
 #[cfg(test)]
 pub(crate) mod test_support;
 pub mod threads;
@@ -169,10 +168,6 @@ pub use shell::{
     DEFAULT_AUTO_UNFREEZE_MS, DEFAULT_FREEZE_QUEUE_CAPACITY, EnqueueResult, FreezeManager,
     FreezeQueue, FreezeState, MutationTrafficClass, QUEUE_PRESSURE_FRACTION, QueuedMutation,
     classify_mutation_batch,
-};
-pub use tab_switch_trigger::{
-    ACTIVE_TAB_CHANGED_EVENT_TYPE, AttentionGate, BlockingGate, PermissiveGate, TabSwitchOutcome,
-    TabSwitchTrigger,
 };
 pub use tze_hud_compositor::ChromeDrawCmd;
 
