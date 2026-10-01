@@ -1,1 +1,0 @@
-sampler_exit=0 producer_exit=0

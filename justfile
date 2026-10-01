@@ -12,7 +12,6 @@
 #   just test-v1-thesis     # v1 thesis proof
 #   just production-boot    # vertical_slice production config boot
 #   just canonical-app-boot # canonical app production config boot
-#   just vocabulary-lint    # canonical vocabulary check
 #   just dev-mode-guard     # verify dev-mode is not in release default features
 #   just idle-efficiency-checker # fail-closed idle artifact contract tests
 #   just ci        # full CI gate (all jobs in dependency order, excluding GPU/Windows-only)
@@ -122,11 +121,6 @@ canonical-app-boot:
 
 # ── Static analysis ──────────────────────────────────────────────────────────
 
-# Canonical vocabulary lint (mirror CI vocabulary-lint job)
-# Pure text search — no compilation required.
-vocabulary-lint:
-    bash scripts/check_canonical_vocabulary.sh --verbose
-
 # Verify dev-mode feature is not in release default features (mirror CI dev-mode-guard job)
 # Note: this only checks Cargo metadata; it does not run a release build.
 # For the full belt-and-suspenders release-build check, run the CI job.
@@ -139,4 +133,4 @@ dev-mode-guard:
 # Run all CI gates that are feasible locally (excludes Windows perf budget and
 # GPU pixel-readback, which need specific hardware or Mesa llvmpipe + GPU).
 # Runs in the same logical order as CI: fast-fail gates first, then tests.
-ci: check fmt clippy vocabulary-lint dev-mode-guard idle-efficiency-checker test test-integration test-trace test-v1-thesis production-boot canonical-app-boot
+ci: check fmt clippy dev-mode-guard idle-efficiency-checker test test-integration test-trace test-v1-thesis production-boot canonical-app-boot

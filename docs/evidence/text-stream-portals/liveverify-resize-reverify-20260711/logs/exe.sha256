@@ -1,8 +1,0 @@
-997cf67e5d5f87992726ae7ba7ef10610eb82cc2997e22dd3a336aef3be35c4f  tze_hud.exe
-# Fresh cross-compiled build (x86_64-pc-windows-gnu, release) of current main
-# git 82790cf7 — includes #1129 (fix(portal): wire whole-portal resize on the
-# first-class surface path [hud-yno2r]). Deployed to the hud-windows VM and
-# re-hashed on-device (Get-FileHash SHA256) == the sha above; running PID
-# confirmed launched from this exe under the default TzeHudFullscreen task
-# (--window-mode fullscreen --config tze_hud.toml --bind-all-interfaces, no
-# TZE_HUD_RESIDENT_GRPC_PORTAL bridge flag at any env scope).

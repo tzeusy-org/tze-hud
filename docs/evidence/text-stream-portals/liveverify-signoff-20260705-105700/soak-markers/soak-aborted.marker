@@ -1,5 +1,0 @@
-SOAK_ABORTED
-reason=TimeoutError: Timed out waiting for mutation_result
-intended_duration_s=3600.000
-actual_duration_s=3453.887
-cycles=13303

@@ -1,6 +1,0 @@
-{
-  "existing_pid": 30228,
-  "exit_code": 1,
-  "result": "fail-closed concurrent HUD conflict",
-  "stderr": "error: [gpu-lock] GPU is already in use: SESSION_TYPE=interactive-untracked PID=30228 STARTED_AT=unknown - existing tze_hud.exe process without a live gpu.lock\nhint: A CI real-decode job or another tze_hud session is using the GPU. Wait for it to finish, then retry. See docs/design/tzehouse-windows-gpu-scheduling.md."
-}

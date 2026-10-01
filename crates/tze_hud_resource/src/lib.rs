@@ -12,9 +12,7 @@
 //! - Per-agent reference counts and GC candidacy.
 //!
 //! The runtime calls into this crate during mutation validation to check and
-//! charge resource budgets. The policy crate (`tze_hud_policy`) consumes the
-//! outcome via `ResourceContext.budget_exceeded` — it never reads the
-//! `BudgetRegistry` directly, and it never writes resource state.
+//! charge resource budgets.
 //!
 //! **Do not add enforcement-ladder logic here.** The enforcement ladder
 //! (Warning → Throttle → Revoke) lives in `tze_hud_runtime::budget::BudgetEnforcer`,

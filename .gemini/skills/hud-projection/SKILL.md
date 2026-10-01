@@ -24,7 +24,7 @@ Hard boundaries:
 ## Source Of Truth
 
 When changing behavior or resolving ambiguity, read:
-- `openspec/specs/cooperative-hud-projection/spec.md` — canonical spec (synced from the concluded change; the change directory is now archived under `openspec/changes/archive/2026-05-10-cooperative-hud-projection/`)
+- The code: `crates/tze_hud_projection/` (authority, session state) and the `portal_projection_*` tools in `crates/tze_hud_mcp/`. The old OpenSpec contract is history at git tag `pre-reset-2026-10-02`.
 
 ## Use When
 

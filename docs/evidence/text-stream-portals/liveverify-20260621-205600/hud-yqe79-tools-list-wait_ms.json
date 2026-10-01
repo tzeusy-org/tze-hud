@@ -1,7 +1,0 @@
-{
-  "tool": "portal_projection_get_pending_input",
-  "wait_ms_property": {
-    "description": "Optional long-poll wait in milliseconds (clamped to 30000). When set, the call blocks until at least one input item is available or the wait elapses; omit (or 0) for return-immediately behavior.",
-    "type": "integer"
-  }
-}

@@ -115,7 +115,7 @@ python3 .claude/skills/user-test/scripts/text_stream_portal_exemplar.py \
   --target windows-host.example:50051 \
   --psk-env TZE_HUD_PSK \
   --agent-id agent-alpha \
-  --doc docs/reports/exemplar-manual-review-checklist.md \
+  --doc .claude/skills/user-test/references/exemplar-manual-review-checklist.md \
   --tab-width 1920 \
   --phases baseline,scroll \
   --baseline-hold-s 30 \
@@ -187,4 +187,4 @@ cannot validate alone:
   against the live overlay, so failures are runtime/input-path evidence rather
   than synthetic transcript success.
 - Manual review notes and any UX tweaks are recorded in
-  `docs/reports/exemplar-manual-review-checklist.md` row 11.
+  `.claude/skills/user-test/references/exemplar-manual-review-checklist.md` row 11.

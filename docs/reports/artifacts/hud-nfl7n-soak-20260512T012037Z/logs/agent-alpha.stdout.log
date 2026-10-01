@@ -1,1 +1,0 @@
-completed: target_id=user-test-windows-tailnet mode=Paced requests=3600 success=3600 errors=0 p99_us=57690 throughput_rps=1.00 output=/home/tze/gt/tze_hud/mayor/rig/.worktrees/parallel-agents/hud-nfl7n/docs/reports/artifacts/hud-nfl7n-soak-20260512T012037Z/agents/agent-alpha.json

@@ -5,7 +5,6 @@ import copy
 import importlib.util
 import json
 import pathlib
-import re
 import unittest
 
 
@@ -210,9 +209,6 @@ class CandidatePacketTests(unittest.TestCase):
                 encoding="utf-8"
             )
         )
-        self.packet = (
-            self.root / "docs/reports/token_footprint_candidate_v1_20260716.md"
-        ).read_text(encoding="utf-8")
 
     def test_candidate_records_revised_owner_approval(self):
         self.assertEqual(self.candidate["approval"]["status"], "owner_approved")
@@ -220,68 +216,11 @@ class CandidatePacketTests(unittest.TestCase):
             self.candidate["approval"]["decision_reference"],
             "hud-ht1k7",
         )
-        self.assertRegex(
-            self.packet,
-            r"Decision reference:\s+`hud-ht1k7`\.",
-        )
 
     def test_approved_candidate_is_accepted_by_fail_closed_gate(self):
         report = checker.compare(copy.deepcopy(self.candidate), self.candidate)
         self.assertEqual(report["status"], "passed")
         self.assertFalse(report["incompatibilities"])
-
-    def test_markdown_operation_table_matches_candidate_json(self):
-        rows = re.findall(
-            r"^\| `([^`]+)` \| `([^`]+)` \| (\d+) \| (\d+) \| (\d+) \| "
-            r"(\d+) \| (\d+) \| (\d+) \|$",
-            self.packet,
-            flags=re.MULTILINE,
-        )
-        self.assertTrue(rows, "candidate packet operation table is missing")
-        expected = []
-        for flow_name, flow in self.candidate["flows"].items():
-            for operation_name, operation in flow["operations"].items():
-                expected.append(
-                    (
-                        flow_name,
-                        operation_name,
-                        str(operation["request"]["bytes"]),
-                        str(operation["request"]["tokens"]),
-                        str(operation["response"]["bytes"]),
-                        str(operation["response"]["tokens"]),
-                        str(operation["total"]["bytes"]),
-                        str(operation["total"]["tokens"]),
-                    )
-                )
-        self.assertEqual(sorted(rows), sorted(expected))
-
-    def test_markdown_flow_totals_and_identity_match_candidate_json(self):
-        rows = re.findall(
-            r"^\| `([^`]+)` \| (\d+) \| (\d+) \|$",
-            self.packet,
-            flags=re.MULTILINE,
-        )
-        expected = sorted(
-            (
-                flow_name,
-                str(flow["total"]["bytes"]),
-                str(flow["total"]["tokens"]),
-            )
-            for flow_name, flow in self.candidate["flows"].items()
-        )
-        self.assertEqual(sorted(rows), expected)
-        tokenizer = self.candidate["tokenizer"]
-        for identity in (
-            tokenizer["name"],
-            tokenizer["implementation"],
-            tokenizer["version"],
-            tokenizer["vocab_fingerprint"].removeprefix("sha256:"),
-            self.candidate["fixture_fingerprint"],
-        ):
-            self.assertIn(identity, self.packet)
-        for flow in self.candidate["flows"].values():
-            self.assertIn(f"Canonical flow version: `{flow['flow_version']}`", self.packet)
-            self.assertIn(flow["flow_fingerprint"], self.packet)
 
 
 if __name__ == "__main__":

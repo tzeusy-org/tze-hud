@@ -10,15 +10,12 @@
 //!   (spec lines 126-133).
 //!
 //! Also provides the canonical **attention budget defaults** (RFC 0010 §3.1),
-//! which must be identical in both `tze_hud_policy::attention_budget` and
-//! `tze_hud_runtime::attention_budget`.  Both crates re-export from here so
-//! divergence is a compile error rather than a hand-sync comment.
+//! re-exported by `tze_hud_runtime::attention_budget`.
 //!
 //! ## Why here?
 //!
 //! Both `tze_hud_protocol::session_server` and `tze_hud_runtime::agent_events`
-//! need the emission definitions. `tze_hud_policy` and `tze_hud_runtime` both
-//! need the attention-budget defaults. `tze_hud_scene` is the common zero-dep
+//! need the emission definitions. `tze_hud_scene` is the common zero-dep
 //! dependency of all of these crates, so it is the natural home for shared
 //! numeric contracts.
 
@@ -37,10 +34,7 @@ pub const DEFAULT_MAX_EVENTS_PER_SECOND: u32 = 10;
 //
 // These are the SINGLE SOURCE OF TRUTH for the three attention-budget limits.
 //
-// Both `tze_hud_policy::attention_budget` and `tze_hud_runtime::attention_budget`
-// re-export these constants.  Neither crate defines its own numeric literals for
-// these three values.  Any change here is a compile-visible breaking change in
-// every downstream that re-exports: the old name disappears and the build fails.
+// `tze_hud_runtime::attention_budget` re-exports these constants.
 //
 // DO NOT copy these values into other crates — import them from here.
 
