@@ -17,7 +17,6 @@ just test-trace      # trace regression suite
 just test-v1-thesis  # v1 thesis proof
 just production-boot # vertical_slice production config boot
 just canonical-app-boot # canonical app production config boot
-just vocabulary-lint # scripts/check_canonical_vocabulary.sh
 just dev-mode-guard  # verify dev-mode not in release default features
 just ci              # full CI sweep (all of the above in order)
 ```
