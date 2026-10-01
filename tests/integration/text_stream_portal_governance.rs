@@ -14,14 +14,13 @@
 use std::sync::Arc;
 
 use tze_hud_runtime::{
-    AttentionBudgetOutcome, AttentionBudgetTracker, ChromeState, ContentClassification,
-    EnqueueResult, FreezeQueue, MutationTrafficClass, QueuedMutation, RedactionFrame,
-    RedactionStyle, TileRedactionState, ViewerClass, build_redaction_cmds, classify_mutation_batch,
-    collect_diagnostic, hit_regions_enabled, is_tile_redacted,
+    ChromeState, ContentClassification, EnqueueResult, FreezeQueue, MutationTrafficClass,
+    QueuedMutation, RedactionFrame, RedactionStyle, TileRedactionState, ViewerClass,
+    build_redaction_cmds, classify_mutation_batch, collect_diagnostic, hit_regions_enabled,
+    is_tile_redacted,
 };
 use tze_hud_scene::{
     Capability, Clock, SceneGraph, SceneId, TestClock, ZONE_TILE_Z_MIN,
-    events::InterruptionClass,
     lease::{LeaseState, ORPHAN_GRACE_PERIOD_MS},
     mutation::{MutationBatch, SceneMutation},
     types::{
@@ -360,39 +359,6 @@ fn freeze_path_uses_generic_backpressure_signal_not_portal_specific_signal() {
     assert!(
         !proto.contains("PORTAL_FREEZE"),
         "protocol must not expose a portal-specific freeze signal"
-    );
-}
-
-#[test]
-fn unread_backlog_defaults_to_ambient_attention_class() {
-    let mut tracker = AttentionBudgetTracker::new();
-    let mut saw_warning = false;
-    let mut saw_coalesce = false;
-
-    for i in 0..50_u64 {
-        let outcome = tracker.record(
-            "portal-gov",
-            "portal-zone",
-            InterruptionClass::Low,
-            i * 1_000_000,
-        );
-        match outcome {
-            AttentionBudgetOutcome::Ok => {}
-            AttentionBudgetOutcome::Warning => saw_warning = true,
-            AttentionBudgetOutcome::Coalesce => saw_coalesce = true,
-            AttentionBudgetOutcome::CriticalExempt | AttentionBudgetOutcome::SilentPassthrough => {
-                panic!("ambient portal backlog must not auto-upgrade into stronger interruption");
-            }
-        }
-    }
-
-    assert!(
-        saw_warning,
-        "ambient traffic should still respect budget warning"
-    );
-    assert!(
-        saw_coalesce,
-        "heavy ambient backlog should coalesce, not escalate urgency"
     );
 }
 
@@ -902,62 +868,6 @@ fn freeze_path_governs_first_class_surface_via_generic_queue() {
     assert!(
         !proto.contains("PORTAL_FREEZE") && !proto.contains("SURFACE_FREEZE"),
         "protocol must not expose a portal/surface-specific freeze signal"
-    );
-}
-
-#[test]
-fn first_class_surface_backlog_defaults_to_ambient_attention_class() {
-    // Ambient-attention parity: heavy surface backlog rides the same ambient
-    // interruption budget as the raw-tile path — it coalesces, never escalates.
-    let mut tracker = AttentionBudgetTracker::new();
-    let mut saw_warning = false;
-    let mut saw_coalesce = false;
-    for i in 0..50_u64 {
-        match tracker.record(
-            "portal-gov",
-            "portal-surface-zone",
-            InterruptionClass::Low,
-            i * 1_000_000,
-        ) {
-            AttentionBudgetOutcome::Ok => {}
-            AttentionBudgetOutcome::Warning => saw_warning = true,
-            AttentionBudgetOutcome::Coalesce => saw_coalesce = true,
-            AttentionBudgetOutcome::CriticalExempt | AttentionBudgetOutcome::SilentPassthrough => {
-                panic!("ambient surface backlog must not auto-upgrade interruption class");
-            }
-        }
-    }
-    assert!(saw_warning, "ambient traffic still respects budget warning");
-    assert!(
-        saw_coalesce,
-        "heavy ambient backlog coalesces, not escalates"
-    );
-
-    // A lifecycle escalation on the surface itself (Active → Blocked) is a
-    // coalescible state patch that must NOT elevate the host tile's lease
-    // priority or push it toward chrome — the surface stays ambient by default.
-    let (mut scene, clock, _tab_id, lease_id, tile_id) = create_first_class_portal_scene(120_000);
-    let priority_before = scene.leases[&lease_id].priority;
-    let z_before = scene.tiles.get(&tile_id).expect("tile").z_order;
-    let escalate = scene.apply_batch(&make_batch(
-        "portal-gov",
-        lease_id,
-        vec![SceneMutation::UpdatePortalSurfaceState {
-            tile_id,
-            lifecycle: Some(PortalLifecycleState::Blocked),
-            display_state: None,
-        }],
-    ));
-    assert!(escalate.applied, "lifecycle patch applies");
-    let _ = clock;
-    assert_eq!(
-        scene.leases[&lease_id].priority, priority_before,
-        "surface lifecycle escalation must not raise lease priority (stays ambient)"
-    );
-    assert_eq!(
-        scene.tiles.get(&tile_id).expect("tile").z_order,
-        z_before,
-        "surface lifecycle escalation must not change host tile z-order"
     );
 }
 

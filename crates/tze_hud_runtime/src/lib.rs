@@ -11,7 +11,6 @@
 //! |-----------|-------|------|
 //! | Resource accounting | `tze_hud_resource` | Decoded-byte budget registry; GC; dedup |
 //! | Budget enforcement | `tze_hud_runtime::budget` | Enforcement ladder (Warning/Throttle/Revoke) |
-//! | Attention budgets | `tze_hud_runtime::attention_budget` | Stateful event-pipeline tracker |
 //! | Override state | `tze_hud_runtime::shell::SafeModeController` | Sole writer of freeze/safe-mode flags |
 //! | Scene orchestration | `tze_hud_runtime` (this crate) | Wires authority modules; drives pipeline |
 //!
@@ -19,9 +18,9 @@
 //! `BudgetEnforcer` owns the per-agent enforcement state machine
 //! (`Normal` → `Warning` → `Throttled` → `Revoked`), the enforcement ladder tick, the
 //! frame-time guardian, and the per-mutation admission gate. All enforcement
-//! decisions originate from `budget.rs` and `attention_budget/`.**
+//! decisions originate from `budget.rs`.**
 //!
-//! See `budget.rs`, `attention_budget/`, and `shell/safe_mode.rs` for boundary
+//! See `budget.rs` and `shell/safe_mode.rs` for boundary
 //! doc comments in each authority module.
 //!
 //! ## Frame Pipeline
@@ -69,16 +68,8 @@
 //! library and `cfg(test)` is set by the compiler. Integration test binaries
 //! (in `tests/` directories) require `features = ["dev-mode"]` explicitly.
 //!
-//! ## Bead 3: Interruption classification and quiet hours
-//!
-//! - [`attention_budget`] — per-agent and per-zone rolling interruption budgets,
-//!   80% warning, exhaustion coalescing, earned-urgency tracker.
-//! - [`quiet_hours`] — quiet-hours gate (deliver / queue / discard) and
-//!   per-zone FIFO queues with LatestWins coalescing.
-
 pub mod admission;
 pub mod agent_events;
-pub mod attention_budget;
 pub mod budget;
 pub mod channels;
 pub mod component_startup;
@@ -96,7 +87,6 @@ pub mod pipeline;
 pub mod portal_cadence;
 pub mod portal_projection_driver;
 pub mod portal_tokens;
-pub mod quiet_hours;
 pub mod reload_triggers;
 pub mod resident_grpc_bridge;
 pub mod runtime_context;
@@ -118,11 +108,6 @@ pub use agent_events::rate_limiter::AgentEventRateLimiter;
 pub use agent_events::{
     AgentEventHandler, DEFAULT_MAX_EVENTS_PER_SECOND, EmissionError, EmissionOutcome,
     EmissionResult, MAX_PAYLOAD_BYTES,
-};
-pub use attention_budget::{
-    AttentionBudgetOutcome, AttentionBudgetTracker, DEFAULT_AGENT_BUDGET,
-    DEFAULT_STACK_ZONE_BUDGET, DEFAULT_ZONE_BUDGET, EarnedUrgencyConfig, EarnedUrgencyTracker,
-    ROLLING_WINDOW_US, UrgencyRecord, WARNING_FRACTION,
 };
 pub use budget::{
     AgentResourceState, BudgetCheckOutcome, BudgetEnforcer, BudgetState, BudgetTelemetrySink,
@@ -179,9 +164,6 @@ pub use idle_efficiency::{
 };
 pub use mcp::{McpServerConfig, start_mcp_http_server};
 pub use mutation_budget_bridge::RuntimeMutationBudgetEnforcer;
-pub use quiet_hours::{
-    GateDecision, QuietHoursConfig, QuietHoursGate, ZoneContentionPolicy, ZoneQueue,
-};
 pub use runtime_context::{FallbackPolicy, RuntimeContext, SharedRuntimeContext};
 pub use shell::chrome::{
     AgentVisibleTopology, AuditPayload, AuditTrigger, ChromeLayout, ChromeRenderer, ChromeShortcut,

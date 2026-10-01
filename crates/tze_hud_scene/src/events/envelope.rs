@@ -156,12 +156,6 @@ pub enum EventPayload {
     LeaseSuspended { lease_id: Uuid },
     /// A lease was resumed.
     LeaseResumed { lease_id: Uuid },
-    /// Attention budget warning (80% threshold reached).
-    AttentionBudgetWarning {
-        agent_namespace: String,
-        used: u32,
-        limit: u32,
-    },
 
     // Agent events
     /// An agent-emitted event with arbitrary encoded payload (≤4 KB).

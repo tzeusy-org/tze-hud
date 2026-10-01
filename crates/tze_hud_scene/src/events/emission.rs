@@ -9,9 +9,6 @@
 //! - Sliding-window rate limit: default 10 events/second per agent session
 //!   (spec lines 126-133).
 //!
-//! Also provides the canonical **attention budget defaults** (RFC 0010 §3.1),
-//! re-exported by `tze_hud_runtime::attention_budget`.
-//!
 //! ## Why here?
 //!
 //! Both `tze_hud_protocol::session_server` and `tze_hud_runtime::agent_events`
@@ -29,31 +26,6 @@ pub const MAX_PAYLOAD_BYTES: usize = 4096;
 
 /// Default rate limit per agent session (spec line 127: "default: 10 events/second").
 pub const DEFAULT_MAX_EVENTS_PER_SECOND: u32 = 10;
-
-// ─── Attention budget defaults (RFC 0010 §3.1) ───────────────────────────────
-//
-// These are the SINGLE SOURCE OF TRUTH for the three attention-budget limits.
-//
-// `tze_hud_runtime::attention_budget` re-exports these constants.
-//
-// DO NOT copy these values into other crates — import them from here.
-
-/// Default per-agent interruption budget (interruptions per rolling 60-second window).
-///
-/// RFC 0010 §3.1: "default: 20/min per agent session".
-pub const ATTENTION_DEFAULT_PER_AGENT: u32 = 20;
-
-/// Default per-zone interruption budget (interruptions per rolling 60-second window).
-///
-/// RFC 0010 §3.1: "default: 10/min per zone".
-pub const ATTENTION_DEFAULT_PER_ZONE: u32 = 10;
-
-/// Default per-zone budget for Stack-policy zones (RFC 0010 §7).
-///
-/// Stack zones receive a higher budget because the Stack contention policy is
-/// designed for notification accumulation; a tighter limit would cause premature
-/// coalescing in typical notification streams.
-pub const ATTENTION_DEFAULT_PER_ZONE_STACK: u32 = 30;
 
 // ─── Rate limiter ─────────────────────────────────────────────────────────────
 
