@@ -28,7 +28,7 @@ use std::collections::HashMap;
 
 use tze_hud_scene::{
     graph::SceneGraph,
-    test_scenes::{ClockMs, TestSceneRegistry, assert_layer0_invariants},
+    test_scenes::{ClockMs, TestSceneRegistry},
     types::{
         ContentionPolicy, DisplayEdge, GeometryPolicy, LayerAttachment, NotificationPayload,
         RenderingPolicy, ResourceId, Rgba, SceneId, StatusBarPayload, ZONE_TILE_Z_MIN, ZoneContent,
@@ -61,22 +61,7 @@ fn make_subtitle_zone() -> ZoneDefinition {
     }
 }
 
-fn assert_no_violations(graph: &SceneGraph, scene_name: &str) {
-    let violations = assert_layer0_invariants(graph);
-    assert!(
-        violations.is_empty(),
-        "Layer 0 invariant violations in '{scene_name}': {violations:?}"
-    );
-}
-
 // ─── Scene: zone_publish_subtitle ────────────────────────────────────────────
-
-#[test]
-fn zone_publish_subtitle_builds() {
-    let registry = TestSceneRegistry::default();
-    let result = registry.build("zone_publish_subtitle", ClockMs::FIXED);
-    assert!(result.is_some(), "zone_publish_subtitle must build");
-}
 
 #[test]
 fn zone_publish_subtitle_has_subtitle_zone() {
@@ -89,15 +74,6 @@ fn zone_publish_subtitle_has_subtitle_zone() {
         graph.zone_registry.get_by_name("subtitle").is_some(),
         "subtitle zone must be registered"
     );
-}
-
-#[test]
-fn zone_publish_subtitle_passes_layer0_invariants() {
-    let registry = TestSceneRegistry::default();
-    let (graph, _spec) = registry
-        .build("zone_publish_subtitle", ClockMs::FIXED)
-        .unwrap();
-    assert_no_violations(&graph, "zone_publish_subtitle");
 }
 
 #[test]
@@ -115,22 +91,6 @@ fn zone_publish_subtitle_layer_attachment_is_content() {
 }
 
 // ─── Scene: zone_reject_wrong_type ───────────────────────────────────────────
-
-#[test]
-fn zone_reject_wrong_type_builds() {
-    let registry = TestSceneRegistry::default();
-    let result = registry.build("zone_reject_wrong_type", ClockMs::FIXED);
-    assert!(result.is_some(), "zone_reject_wrong_type must build");
-}
-
-#[test]
-fn zone_reject_wrong_type_passes_layer0_invariants() {
-    let registry = TestSceneRegistry::default();
-    let (graph, _spec) = registry
-        .build("zone_reject_wrong_type", ClockMs::FIXED)
-        .unwrap();
-    assert_no_violations(&graph, "zone_reject_wrong_type");
-}
 
 #[test]
 fn zone_reject_wrong_type_rejects_mismatched_media_type() {
@@ -175,22 +135,6 @@ fn zone_reject_wrong_type_accepts_correct_media_type() {
 // ─── Scene: zone_conflict_two_publishers ─────────────────────────────────────
 
 #[test]
-fn zone_conflict_two_publishers_builds() {
-    let registry = TestSceneRegistry::default();
-    let result = registry.build("zone_conflict_two_publishers", ClockMs::FIXED);
-    assert!(result.is_some(), "zone_conflict_two_publishers must build");
-}
-
-#[test]
-fn zone_conflict_two_publishers_passes_layer0_invariants() {
-    let registry = TestSceneRegistry::default();
-    let (graph, _spec) = registry
-        .build("zone_conflict_two_publishers", ClockMs::FIXED)
-        .unwrap();
-    assert_no_violations(&graph, "zone_conflict_two_publishers");
-}
-
-#[test]
 fn zone_conflict_latest_wins_policy() {
     // Two publishers to a LatestWins zone: only the latest should survive.
     let mut scene = SceneGraph::new(1920.0, 1080.0);
@@ -229,13 +173,6 @@ fn zone_conflict_latest_wins_policy() {
 // ─── Scene: zone_orchestrate_then_publish ────────────────────────────────────
 
 #[test]
-fn zone_orchestrate_then_publish_builds() {
-    let registry = TestSceneRegistry::default();
-    let result = registry.build("zone_orchestrate_then_publish", ClockMs::FIXED);
-    assert!(result.is_some(), "zone_orchestrate_then_publish must build");
-}
-
-#[test]
 fn zone_orchestrate_then_publish_has_three_zones() {
     let registry = TestSceneRegistry::default();
     let (graph, _spec) = registry
@@ -249,32 +186,7 @@ fn zone_orchestrate_then_publish_has_three_zones() {
     }
 }
 
-#[test]
-fn zone_orchestrate_then_publish_passes_layer0_invariants() {
-    let registry = TestSceneRegistry::default();
-    let (graph, _spec) = registry
-        .build("zone_orchestrate_then_publish", ClockMs::FIXED)
-        .unwrap();
-    assert_no_violations(&graph, "zone_orchestrate_then_publish");
-}
-
 // ─── Scene: zone_disconnect_cleanup ──────────────────────────────────────────
-
-#[test]
-fn zone_disconnect_cleanup_builds() {
-    let registry = TestSceneRegistry::default();
-    let result = registry.build("zone_disconnect_cleanup", ClockMs::FIXED);
-    assert!(result.is_some(), "zone_disconnect_cleanup must build");
-}
-
-#[test]
-fn zone_disconnect_cleanup_passes_layer0_invariants() {
-    let registry = TestSceneRegistry::default();
-    let (graph, _spec) = registry
-        .build("zone_disconnect_cleanup", ClockMs::FIXED)
-        .unwrap();
-    assert_no_violations(&graph, "zone_disconnect_cleanup");
-}
 
 // ─── All four contention policies ────────────────────────────────────────────
 

@@ -846,25 +846,6 @@ fn tile_opacity_accepts_boundary_values() {
 
 // ─ All test scenes pass Layer 0 invariants ───────────────────────────────
 
-#[test]
-fn all_test_scenes_pass_layer0_invariants() {
-    use crate::test_scenes::{ClockMs, TestSceneRegistry, assert_layer0_invariants};
-
-    let registry = TestSceneRegistry::new();
-    let names = TestSceneRegistry::scene_names();
-
-    for name in names {
-        let (graph, _spec) = registry
-            .build(name, ClockMs::FIXED)
-            .unwrap_or_else(|| panic!("scene '{name}' failed to build"));
-        let violations = assert_layer0_invariants(&graph);
-        assert!(
-            violations.is_empty(),
-            "scene '{name}' has Layer 0 violations: {violations:?}"
-        );
-    }
-}
-
 // ─ V1 node types constructable without GPU ───────────────────────────────
 
 #[test]

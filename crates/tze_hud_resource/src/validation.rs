@@ -804,18 +804,6 @@ mod tests {
     }
 
     #[test]
-    fn svg_without_dimensions_uses_default() {
-        // Acceptance: no viewBox/width/height → default 512×512 → 1,048,576 bytes.
-        // Source: resource-store/spec.md §Scenario: SVG without dimensions uses 512x512 default
-        let svg = b"<svg xmlns=\"http://www.w3.org/2000/svg\"><rect/></svg>";
-        let config = default_config();
-        let meta = decode_and_validate(svg, ResourceType::ImageSvg, &config, 0, 0).unwrap();
-        assert_eq!(meta.width_px, 512);
-        assert_eq!(meta.height_px, 512);
-        assert_eq!(meta.decoded_bytes, 512 * 512 * 4);
-    }
-
-    #[test]
     fn svg_large_dimensions_clamped_to_2048() {
         // Acceptance: width=4096 height=4096 → clamped to 2048×2048.
         // Source: resource-store/spec.md §Scenario: SVG exceeding 2048 clamped

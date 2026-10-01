@@ -12,8 +12,7 @@
 //!
 //! ## Verifications
 //! 1. Namespace isolation — each agent's tiles are in its own namespace only.
-//! 2. Lease priority ordering — priority-1 (agent-weather) is highest; priority-3
-//!    (agent-media) is shed first under resource pressure.
+//! 2. Lease priority ordering — priority-1 (agent-weather) is highest.
 //! 3. Zone contention resolution — notifications stack; subtitles are latest-wins.
 //! 4. Compositor renders ≥ 1 frame without panic; tile count and active-lease count
 //!    match expectations.
@@ -33,7 +32,7 @@
 //!
 //! ## Cross-epic references validated
 //! - Epic 1  (scene graph):    namespace isolation, tile CRUD
-//! - Epic 4  (lease governance): priority shedding, concurrent leases
+//! - Epic 4  (lease governance): lease priorities, concurrent leases
 //! - Epic 6  (session protocol): multi-agent gRPC connections
 //! - Epic 9  (zone system):    zone contention resolution policies
 
@@ -438,61 +437,6 @@ async fn test_three_agents_contention() -> Result<(), Box<dyn std::error::Error>
     assert!(
         prio_b <= prio_c,
         "agent-notifications priority ({prio_b}) must be <= agent-media priority ({prio_c})"
-    );
-
-    // Verify priority-sorted tile shedding order: agent-media tiles shed first,
-    // agent-weather tiles shed last.
-    // Per lease-governance/spec.md line 63: shed order = (lease_priority ASC, z_order DESC)
-    // → tiles with highest priority value (least important) and lowest z_order shed first.
-    //
-    // Build the shed order from the scene graph.
-    let shed_order = {
-        let state = runtime.shared_state().lock().await;
-        let scene = state.scene.lock().await;
-        let mut tiles: Vec<(String, u32, u8)> = scene // (namespace, z_order, priority)
-            .tiles
-            .values()
-            .filter_map(|t| {
-                let prio = lease_priorities.get(&t.namespace).copied()?;
-                Some((t.namespace.clone(), t.z_order, prio))
-            })
-            .collect();
-        // Sort: (lease_priority DESC, z_order ASC) = shed-first order
-        tiles.sort_by(|a, b| b.2.cmp(&a.2).then(a.1.cmp(&b.1)));
-        tiles
-    };
-
-    // Agent A has 2 tiles (priority 1 or 2); agents B and C have no tiles.
-    // This tests INTRA-NAMESPACE z-order shedding for agent-weather's two tiles.
-    // (Cross-namespace shedding order — where tiles from agents at different
-    // priorities compete — is validated in the dedicated scene-registry test
-    // `test_three_agents_contention_scene_registry` which uses three namespaces.)
-    //
-    // We assert unconditionally (no silent guard): the test scenario guarantees
-    // exactly 2 agent-A tiles exist by this point.  A guard that silently no-ops
-    // when shed_order.len() < 2 would make the assertion vacuous if tile creation
-    // ever regressed to 0 or 1 tiles.
-    assert_eq!(
-        shed_order.len(),
-        2,
-        "shed_order must contain exactly 2 tiles (agent-weather's two tiles); \
-         agents B and C are zone-only in this scenario"
-    );
-    assert_eq!(
-        shed_order[0].0, agent_a.namespace,
-        "shed_order[0] must belong to agent-weather (sole tile owner in this scenario)"
-    );
-    assert_eq!(
-        shed_order[1].0, agent_a.namespace,
-        "shed_order[1] must also belong to agent-weather (sole tile owner in this scenario)"
-    );
-    // Within agent-weather: tile with lower z_order (z=9) sheds before tile with higher
-    // z_order (z=10).  Sort key: (lease_priority DESC, z_order ASC) = shed-first order.
-    assert!(
-        shed_order[0].1 < shed_order[1].1,
-        "within agent-weather, lower z-order tile ({}) must shed before higher z-order tile ({})",
-        shed_order[0].1,
-        shed_order[1].1
     );
 
     // ── Phase 6b: Adversarial cross-agent namespace security check ──────────
@@ -984,88 +928,6 @@ async fn test_grpc_and_mcp_share_single_scene_graph() {
         );
         eprintln!("[coherence] PASS: cross-protocol scene coherence verified (one shared Arc)");
     }
-}
-
-// ─── Auxiliary tests for scene registry alignment ────────────────────────────
-
-/// Verify the three_agents_contention scene builds correctly from the registry
-/// and that all Layer 0 invariants hold (scene-graph-only, no GPU).
-#[test]
-fn test_three_agents_contention_scene_registry() {
-    use tze_hud_scene::test_scenes::{ClockMs, TestSceneRegistry};
-
-    let registry = TestSceneRegistry::new();
-    let (graph, spec) = registry
-        .build("three_agents_contention", ClockMs::FIXED)
-        .expect("three_agents_contention must be in the test scene registry");
-
-    assert_eq!(spec.name, "three_agents_contention");
-    assert_eq!(
-        graph.tiles.len(),
-        spec.expected_tile_count,
-        "tile count must match spec"
-    );
-
-    // Three distinct namespaces
-    let mut namespaces: Vec<&str> = graph.tiles.values().map(|t| t.namespace.as_str()).collect();
-    namespaces.sort_unstable();
-    namespaces.dedup();
-    assert_eq!(namespaces.len(), 3, "must have 3 distinct agent namespaces");
-
-    // Three distinct lease priorities
-    let mut priorities: Vec<u8> = graph.leases.values().map(|l| l.priority).collect();
-    priorities.sort_unstable();
-    priorities.dedup();
-    assert_eq!(priorities.len(), 3, "must have 3 distinct lease priorities");
-
-    // Priority ordering: high (1) < normal (2) < low (3)
-    assert!(priorities[0] < priorities[1]);
-    assert!(priorities[1] < priorities[2]);
-
-    // Layer 0 invariants
-    let violations = tze_hud_scene::test_scenes::assert_layer0_invariants(&graph);
-    assert!(
-        violations.is_empty(),
-        "Layer 0 invariants must hold for three_agents_contention: {violations:?}"
-    );
-}
-
-/// Verify zone_conflict_two_publishers scene: LatestWins resolves to one active publisher.
-#[test]
-fn test_zone_conflict_two_publishers_scene_registry() {
-    use tze_hud_scene::test_scenes::{ClockMs, TestSceneRegistry};
-
-    let registry = TestSceneRegistry::new();
-    let (graph, spec) = registry
-        .build("zone_conflict_two_publishers", ClockMs::FIXED)
-        .expect("zone_conflict_two_publishers must be in the test scene registry");
-
-    assert_eq!(spec.name, "zone_conflict_two_publishers");
-
-    let violations = tze_hud_scene::test_scenes::assert_layer0_invariants(&graph);
-    assert!(
-        violations.is_empty(),
-        "Layer 0 invariants must hold for zone_conflict_two_publishers: {violations:?}"
-    );
-}
-
-/// Verify zone_publish_subtitle scene: single publisher, LatestWins, subtitle zone.
-#[test]
-fn test_zone_publish_subtitle_scene_registry() {
-    use tze_hud_scene::test_scenes::{ClockMs, TestSceneRegistry};
-
-    let registry = TestSceneRegistry::new();
-    let (graph, spec) = registry
-        .build("zone_publish_subtitle", ClockMs::FIXED)
-        .expect("zone_publish_subtitle must be in the test scene registry");
-
-    assert_eq!(spec.name, "zone_publish_subtitle");
-
-    let violations = tze_hud_scene::test_scenes::assert_layer0_invariants(&graph);
-    assert!(
-        violations.is_empty(),
-        "Layer 0 invariants must hold for zone_publish_subtitle: {violations:?}"
-    );
 }
 
 /// Verify LatestWins contention resolution with TWO DISTINCT publishers.

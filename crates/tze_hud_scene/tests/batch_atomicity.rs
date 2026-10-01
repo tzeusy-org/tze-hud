@@ -20,7 +20,7 @@ use tze_hud_scene::{
     MAX_BATCH_SIZE,
     graph::SceneGraph,
     mutation::{MutationBatch, SceneMutation},
-    test_scenes::{ClockMs, TestSceneRegistry, assert_layer0_invariants},
+    test_scenes::assert_layer0_invariants,
     types::{
         Capability, InputMode, LeaseState, Node, NodeData, Rect, Rgba, SceneId, SolidColorNode,
     },
@@ -669,60 +669,6 @@ fn layer0_partial_failure_rollback() {
     assert!(
         violations.is_empty(),
         "Layer 0 violations after rollback: {violations:?}"
-    );
-}
-
-// ─── Test scene integration — Epic 0 Test Gates ──────────────────────────────
-
-/// `three_agents_contention`: concurrent mutation batches from 3 agents.
-/// Verifies Layer 0 invariants hold.
-#[test]
-fn scene_three_agents_contention() {
-    let registry = TestSceneRegistry::new();
-    let (scene, spec) = registry
-        .build("three_agents_contention", ClockMs::FIXED)
-        .expect("three_agents_contention must be in registry");
-
-    assert_eq!(spec.name, "three_agents_contention");
-
-    let violations = assert_layer0_invariants(&scene);
-    assert!(
-        violations.is_empty(),
-        "Layer 0 violations in three_agents_contention: {violations:?}"
-    );
-}
-
-/// `max_tiles_stress`: budget validation under maximum tile pressure.
-#[test]
-fn scene_max_tiles_stress() {
-    let registry = TestSceneRegistry::new();
-    let (scene, spec) = registry
-        .build("max_tiles_stress", ClockMs::FIXED)
-        .expect("max_tiles_stress must be in registry");
-
-    assert_eq!(spec.name, "max_tiles_stress");
-
-    let violations = assert_layer0_invariants(&scene);
-    assert!(
-        violations.is_empty(),
-        "Layer 0 violations in max_tiles_stress: {violations:?}"
-    );
-}
-
-/// `overlapping_tiles_zorder`: z-order conflict detection.
-#[test]
-fn scene_overlapping_tiles_zorder() {
-    let registry = TestSceneRegistry::new();
-    let (scene, spec) = registry
-        .build("overlapping_tiles_zorder", ClockMs::FIXED)
-        .expect("overlapping_tiles_zorder must be in registry");
-
-    assert_eq!(spec.name, "overlapping_tiles_zorder");
-
-    let violations = assert_layer0_invariants(&scene);
-    assert!(
-        violations.is_empty(),
-        "Layer 0 violations in overlapping_tiles_zorder: {violations:?}"
     );
 }
 

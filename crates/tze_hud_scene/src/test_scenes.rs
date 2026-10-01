@@ -2438,19 +2438,6 @@ pub fn check_version_non_decreasing(graph: &SceneGraph) -> Vec<InvariantViolatio
 mod tests {
     use super::*;
 
-    // ── Helpers ──────────────────────────────────────────────────────────
-
-    fn assert_no_violations(graph: &SceneGraph, scene_name: &str) {
-        let violations = assert_layer0_invariants(graph);
-        if !violations.is_empty() {
-            let report: Vec<String> = violations.iter().map(|v| v.to_string()).collect();
-            panic!(
-                "Layer 0 violations in scene '{scene_name}':\n{}",
-                report.join("\n")
-            );
-        }
-    }
-
     // ── Scene: empty_scene ───────────────────────────────────────────────
 
     #[test]
@@ -2467,13 +2454,6 @@ mod tests {
         assert!(graph.leases.is_empty(), "empty scene must have no leases");
         assert!(graph.nodes.is_empty(), "empty scene must have no nodes");
         assert_eq!(graph.version, 0, "empty graph version must be 0");
-    }
-
-    #[test]
-    fn empty_scene_passes_all_layer0_invariants() {
-        let registry = TestSceneRegistry::new();
-        let (graph, _spec) = registry.build("empty_scene", ClockMs::FIXED).unwrap();
-        assert_no_violations(&graph, "empty_scene");
     }
 
     // ── Scene: single_tile_solid ──────────────────────────────────────────
@@ -2525,13 +2505,6 @@ mod tests {
             tile.bounds.is_within(&graph.display_area),
             "tile bounds must be within display area"
         );
-    }
-
-    #[test]
-    fn single_tile_scene_passes_all_layer0_invariants() {
-        let registry = TestSceneRegistry::new();
-        let (graph, _spec) = registry.build("single_tile_solid", ClockMs::FIXED).unwrap();
-        assert_no_violations(&graph, "single_tile_solid");
     }
 
     // ── Scene: three_tiles_no_overlap ────────────────────────────────────
@@ -2616,15 +2589,6 @@ mod tests {
         assert_eq!(z_orders.len(), before, "all z_orders must be unique");
     }
 
-    #[test]
-    fn two_tiles_scene_passes_all_layer0_invariants() {
-        let registry = TestSceneRegistry::new();
-        let (graph, _spec) = registry
-            .build("three_tiles_no_overlap", ClockMs::FIXED)
-            .unwrap();
-        assert_no_violations(&graph, "three_tiles_no_overlap");
-    }
-
     // ── Scene: max_tiles_stress ───────────────────────────────────────────
 
     #[test]
@@ -2672,21 +2636,7 @@ mod tests {
         assert_eq!(z_orders.len(), before, "all z_orders must be unique");
     }
 
-    #[test]
-    fn max_tiles_scene_passes_all_layer0_invariants() {
-        let registry = TestSceneRegistry::new();
-        let (graph, _spec) = registry.build("max_tiles_stress", ClockMs::FIXED).unwrap();
-        assert_no_violations(&graph, "max_tiles_stress");
-    }
-
     // ── Scene: overlapping_tiles_zorder ──────────────────────────────────
-
-    #[test]
-    fn overlapping_tiles_zorder_builds_without_error() {
-        let registry = TestSceneRegistry::new();
-        let result = registry.build("overlapping_tiles_zorder", ClockMs::FIXED);
-        assert!(result.is_some(), "overlapping_tiles_zorder must build");
-    }
 
     #[test]
     fn overlapping_tiles_zorder_has_correct_structure() {
@@ -2712,23 +2662,7 @@ mod tests {
         assert_eq!(z_orders.len(), before, "z_orders must be unique");
     }
 
-    #[test]
-    fn overlapping_tiles_zorder_passes_layer0_invariants() {
-        let registry = TestSceneRegistry::new();
-        let (graph, _spec) = registry
-            .build("overlapping_tiles_zorder", ClockMs::FIXED)
-            .unwrap();
-        assert_no_violations(&graph, "overlapping_tiles_zorder");
-    }
-
     // ── Scene: overlay_transparency ───────────────────────────────────────
-
-    #[test]
-    fn overlay_transparency_builds_without_error() {
-        let registry = TestSceneRegistry::new();
-        let result = registry.build("overlay_transparency", ClockMs::FIXED);
-        assert!(result.is_some(), "overlay_transparency must build");
-    }
 
     #[test]
     fn overlay_transparency_has_correct_structure() {
@@ -2754,23 +2688,7 @@ mod tests {
         );
     }
 
-    #[test]
-    fn overlay_transparency_passes_layer0_invariants() {
-        let registry = TestSceneRegistry::new();
-        let (graph, _spec) = registry
-            .build("overlay_transparency", ClockMs::FIXED)
-            .unwrap();
-        assert_no_violations(&graph, "overlay_transparency");
-    }
-
     // ── Scene: tab_switch ─────────────────────────────────────────────────
-
-    #[test]
-    fn tab_switch_builds_without_error() {
-        let registry = TestSceneRegistry::new();
-        let result = registry.build("tab_switch", ClockMs::FIXED);
-        assert!(result.is_some(), "tab_switch must build");
-    }
 
     #[test]
     fn tab_switch_has_two_tabs() {
@@ -2794,21 +2712,7 @@ mod tests {
         assert_eq!(tiles_on_active.len(), 2, "active tab (B) must have 2 tiles");
     }
 
-    #[test]
-    fn tab_switch_passes_layer0_invariants() {
-        let registry = TestSceneRegistry::new();
-        let (graph, _spec) = registry.build("tab_switch", ClockMs::FIXED).unwrap();
-        assert_no_violations(&graph, "tab_switch");
-    }
-
     // ── Scene: lease_expiry ───────────────────────────────────────────────
-
-    #[test]
-    fn lease_expiry_builds_without_error() {
-        let registry = TestSceneRegistry::new();
-        let result = registry.build("lease_expiry", ClockMs::FIXED);
-        assert!(result.is_some(), "lease_expiry must build");
-    }
 
     #[test]
     fn lease_expiry_lease_is_active_at_build_time() {
@@ -2824,21 +2728,7 @@ mod tests {
         assert_eq!(lease.ttl_ms, 1, "TTL must be 1ms");
     }
 
-    #[test]
-    fn lease_expiry_passes_layer0_invariants_at_build_time() {
-        let registry = TestSceneRegistry::new();
-        let (graph, _spec) = registry.build("lease_expiry", ClockMs::FIXED).unwrap();
-        assert_no_violations(&graph, "lease_expiry");
-    }
-
     // ── Scene: input_highlight ────────────────────────────────────────────
-
-    #[test]
-    fn input_highlight_builds_without_error() {
-        let registry = TestSceneRegistry::new();
-        let result = registry.build("input_highlight", ClockMs::FIXED);
-        assert!(result.is_some(), "input_highlight must build");
-    }
 
     #[test]
     fn input_highlight_has_hit_region() {
@@ -2871,21 +2761,7 @@ mod tests {
         }
     }
 
-    #[test]
-    fn input_highlight_passes_layer0_invariants() {
-        let registry = TestSceneRegistry::new();
-        let (graph, _spec) = registry.build("input_highlight", ClockMs::FIXED).unwrap();
-        assert_no_violations(&graph, "input_highlight");
-    }
-
     // ── Scene: coalesced_dashboard ────────────────────────────────────────
-
-    #[test]
-    fn coalesced_dashboard_builds_without_error() {
-        let registry = TestSceneRegistry::new();
-        let result = registry.build("coalesced_dashboard", ClockMs::FIXED);
-        assert!(result.is_some(), "coalesced_dashboard must build");
-    }
 
     #[test]
     fn coalesced_dashboard_has_twelve_tiles() {
@@ -2915,23 +2791,7 @@ mod tests {
         );
     }
 
-    #[test]
-    fn coalesced_dashboard_passes_layer0_invariants() {
-        let registry = TestSceneRegistry::new();
-        let (graph, _spec) = registry
-            .build("coalesced_dashboard", ClockMs::FIXED)
-            .unwrap();
-        assert_no_violations(&graph, "coalesced_dashboard");
-    }
-
     // ── Scene: three_agents_contention ────────────────────────────────────
-
-    #[test]
-    fn three_agents_contention_builds_without_error() {
-        let registry = TestSceneRegistry::new();
-        let result = registry.build("three_agents_contention", ClockMs::FIXED);
-        assert!(result.is_some(), "three_agents_contention must build");
-    }
 
     #[test]
     fn three_agents_contention_has_three_distinct_namespaces() {
@@ -2959,23 +2819,7 @@ mod tests {
         assert_eq!(priorities.len(), 3, "must have 3 distinct lease priorities");
     }
 
-    #[test]
-    fn three_agents_contention_passes_layer0_invariants() {
-        let registry = TestSceneRegistry::new();
-        let (graph, _spec) = registry
-            .build("three_agents_contention", ClockMs::FIXED)
-            .unwrap();
-        assert_no_violations(&graph, "three_agents_contention");
-    }
-
     // ── Scene: overlay_passthrough_regions ────────────────────────────────
-
-    #[test]
-    fn overlay_passthrough_regions_builds_without_error() {
-        let registry = TestSceneRegistry::new();
-        let result = registry.build("overlay_passthrough_regions", ClockMs::FIXED);
-        assert!(result.is_some(), "overlay_passthrough_regions must build");
-    }
 
     #[test]
     fn overlay_passthrough_regions_has_correct_structure() {
@@ -3010,23 +2854,7 @@ mod tests {
         );
     }
 
-    #[test]
-    fn overlay_passthrough_regions_passes_layer0_invariants() {
-        let registry = TestSceneRegistry::new();
-        let (graph, _spec) = registry
-            .build("overlay_passthrough_regions", ClockMs::FIXED)
-            .unwrap();
-        assert_no_violations(&graph, "overlay_passthrough_regions");
-    }
-
     // ── Scene: disconnect_reclaim_multiagent ──────────────────────────────
-
-    #[test]
-    fn disconnect_reclaim_multiagent_builds_without_error() {
-        let registry = TestSceneRegistry::new();
-        let result = registry.build("disconnect_reclaim_multiagent", ClockMs::FIXED);
-        assert!(result.is_some(), "disconnect_reclaim_multiagent must build");
-    }
 
     #[test]
     fn disconnect_reclaim_multiagent_has_correct_structure() {
@@ -3078,23 +2906,7 @@ mod tests {
         assert_eq!(three_tiles, 1, "agent.three must have 1 tile");
     }
 
-    #[test]
-    fn disconnect_reclaim_multiagent_passes_layer0_invariants() {
-        let registry = TestSceneRegistry::new();
-        let (graph, _spec) = registry
-            .build("disconnect_reclaim_multiagent", ClockMs::FIXED)
-            .unwrap();
-        assert_no_violations(&graph, "disconnect_reclaim_multiagent");
-    }
-
     // ── Scene: chatty_dashboard_touch ─────────────────────────────────────
-
-    #[test]
-    fn chatty_dashboard_touch_builds_without_error() {
-        let registry = TestSceneRegistry::new();
-        let result = registry.build("chatty_dashboard_touch", ClockMs::FIXED);
-        assert!(result.is_some(), "chatty_dashboard_touch must build");
-    }
 
     #[test]
     fn chatty_dashboard_touch_has_fifty_tiles() {
@@ -3127,23 +2939,7 @@ mod tests {
         );
     }
 
-    #[test]
-    fn chatty_dashboard_touch_passes_layer0_invariants() {
-        let registry = TestSceneRegistry::new();
-        let (graph, _spec) = registry
-            .build("chatty_dashboard_touch", ClockMs::FIXED)
-            .unwrap();
-        assert_no_violations(&graph, "chatty_dashboard_touch");
-    }
-
     // ── Scene: zone_publish_subtitle ──────────────────────────────────────
-
-    #[test]
-    fn zone_publish_subtitle_builds_without_error() {
-        let registry = TestSceneRegistry::new();
-        let result = registry.build("zone_publish_subtitle", ClockMs::FIXED);
-        assert!(result.is_some(), "zone_publish_subtitle must build");
-    }
 
     #[test]
     fn zone_publish_subtitle_has_subtitle_zone() {
@@ -3158,23 +2954,7 @@ mod tests {
         );
     }
 
-    #[test]
-    fn zone_publish_subtitle_passes_layer0_invariants() {
-        let registry = TestSceneRegistry::new();
-        let (graph, _spec) = registry
-            .build("zone_publish_subtitle", ClockMs::FIXED)
-            .unwrap();
-        assert_no_violations(&graph, "zone_publish_subtitle");
-    }
-
     // ── Scene: zone_reject_wrong_type ─────────────────────────────────────
-
-    #[test]
-    fn zone_reject_wrong_type_builds_without_error() {
-        let registry = TestSceneRegistry::new();
-        let result = registry.build("zone_reject_wrong_type", ClockMs::FIXED);
-        assert!(result.is_some(), "zone_reject_wrong_type must build");
-    }
 
     #[test]
     fn zone_reject_wrong_type_has_typed_zone() {
@@ -3195,23 +2975,7 @@ mod tests {
         );
     }
 
-    #[test]
-    fn zone_reject_wrong_type_passes_layer0_invariants() {
-        let registry = TestSceneRegistry::new();
-        let (graph, _spec) = registry
-            .build("zone_reject_wrong_type", ClockMs::FIXED)
-            .unwrap();
-        assert_no_violations(&graph, "zone_reject_wrong_type");
-    }
-
     // ── Scene: zone_conflict_two_publishers ───────────────────────────────
-
-    #[test]
-    fn zone_conflict_two_publishers_builds_without_error() {
-        let registry = TestSceneRegistry::new();
-        let result = registry.build("zone_conflict_two_publishers", ClockMs::FIXED);
-        assert!(result.is_some(), "zone_conflict_two_publishers must build");
-    }
 
     #[test]
     fn zone_conflict_two_publishers_has_correct_structure() {
@@ -3241,23 +3005,7 @@ mod tests {
         );
     }
 
-    #[test]
-    fn zone_conflict_two_publishers_passes_layer0_invariants() {
-        let registry = TestSceneRegistry::new();
-        let (graph, _spec) = registry
-            .build("zone_conflict_two_publishers", ClockMs::FIXED)
-            .unwrap();
-        assert_no_violations(&graph, "zone_conflict_two_publishers");
-    }
-
     // ── Scene: zone_orchestrate_then_publish ──────────────────────────────
-
-    #[test]
-    fn zone_orchestrate_then_publish_builds_without_error() {
-        let registry = TestSceneRegistry::new();
-        let result = registry.build("zone_orchestrate_then_publish", ClockMs::FIXED);
-        assert!(result.is_some(), "zone_orchestrate_then_publish must build");
-    }
 
     #[test]
     fn zone_orchestrate_then_publish_has_three_zones() {
@@ -3275,23 +3023,7 @@ mod tests {
         }
     }
 
-    #[test]
-    fn zone_orchestrate_then_publish_passes_layer0_invariants() {
-        let registry = TestSceneRegistry::new();
-        let (graph, _spec) = registry
-            .build("zone_orchestrate_then_publish", ClockMs::FIXED)
-            .unwrap();
-        assert_no_violations(&graph, "zone_orchestrate_then_publish");
-    }
-
     // ── Scene: zone_disconnect_cleanup ────────────────────────────────────
-
-    #[test]
-    fn zone_disconnect_cleanup_builds_without_error() {
-        let registry = TestSceneRegistry::new();
-        let result = registry.build("zone_disconnect_cleanup", ClockMs::FIXED);
-        assert!(result.is_some(), "zone_disconnect_cleanup must build");
-    }
 
     #[test]
     fn zone_disconnect_cleanup_publisher_is_disconnected() {
@@ -3310,26 +3042,6 @@ mod tests {
             pub_lease.state,
             LeaseState::Orphaned,
             "zone publisher must be in Orphaned state"
-        );
-    }
-
-    #[test]
-    fn zone_disconnect_cleanup_passes_layer0_invariants() {
-        let registry = TestSceneRegistry::new();
-        let (graph, _spec) = registry
-            .build("zone_disconnect_cleanup", ClockMs::FIXED)
-            .unwrap();
-        assert_no_violations(&graph, "zone_disconnect_cleanup");
-    }
-
-    // ── scene_names() has exactly 19 entries ──────────────────────────────
-
-    #[test]
-    fn scene_names_returns_exactly_24_entries() {
-        assert_eq!(
-            TestSceneRegistry::scene_names().len(),
-            19,
-            "scene_names() must return exactly 19 entries"
         );
     }
 

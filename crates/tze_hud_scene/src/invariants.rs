@@ -2235,11 +2235,11 @@ mod tests {
         assert_eq!(v[0].code, "version_not_incremented");
     }
 
-    // ── All 24 test scenes pass ────────────────────────────────────────────
+    // ── All test scenes pass ───────────────────────────────────────────────
 
     /// WHEN all registered test scenes are built THEN check_all returns no violations.
     #[test]
-    fn all_24_scenes_pass_check_all() {
+    fn all_scenes_pass_check_all() {
         let registry = TestSceneRegistry::new();
         let mut all_violations: Vec<String> = Vec::new();
         for name in TestSceneRegistry::scene_names() {
