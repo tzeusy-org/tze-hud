@@ -1,7 +1,0 @@
-────────────────────────────────────────────────────────────────────
- tze_hud runtime ready
-   gRPC   : disabled
-   MCP    : disabled
-   attach : invoke the `hud-projection` skill in an LLM session, or run
-            scripts/quickstart.sh — see docs/QUICKSTART.md
-────────────────────────────────────────────────────────────────────

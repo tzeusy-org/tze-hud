@@ -1,4 +1,0 @@
-[external-agent-projection-authority] checking Tailscale reachability for windows-host.example
-ping "198.51.100.1" timed out
-no reply
-[external-agent-projection-authority] BLOCKED: tailscale ping failed for windows-host.example

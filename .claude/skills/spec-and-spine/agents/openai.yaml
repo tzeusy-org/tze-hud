@@ -1,4 +1,0 @@
-interface:
-  display_name: "Spec & Spine"
-  short_description: "Specs as source of truth for all dev"
-  default_prompt: "Use $spec-and-spine to ground this implementation work in the v1 MVP specifications before writing any code."

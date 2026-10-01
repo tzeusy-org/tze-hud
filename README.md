@@ -1,30 +1,13 @@
 # tze_hud
 
-A local, high-performance, compute- and token-efficient display runtime that gives LLMs safe, synchronized, live, interactive presence on real screens — desktop overlays and wall displays today, smart glasses and VR headsets as the eventual goal.
+A local Windows overlay HUD for a few trusted LLM agents. Agents get four
+surfaces: a session portal (live output plus a reply composer), ambient zones
+(one MCP call to put text on screen), agent-owned tiles (gRPC), and SVG
+widgets. The runtime owns layout, styling, and rendering; agents only state
+intent.
 
-## The Problem
-
-LLMs today are stuck in three forms: the CLI, the chat transcript, and generated webpages. None of these let a model hold a region of a shared physical screen, update it continuously, react to touch, or coordinate with other agents on the same display with runtime-level governance. There is no substrate for LLM presence on surfaces people actually look at.
-
-Household screens make this harder. A wall display is visible to the homeowner, their partner, kids, guests, and service workers — all with different information access needs. Privacy, attention governance, and human override have to be structural, built into the rendering and protocol layers.
-
-## What tze_hud Does
-
-tze_hud owns the screen. The runtime handles compositing, timing, input routing, permissions, and resource budgets. In v1, only two protocol planes are active: MCP (compatibility) and gRPC (resident control). LLMs request presence through leases with TTL, capability scopes, and revocation semantics. The WebRTC/media plane is intentionally inactive in v1 and remains post-v1 behind explicit bounded-ingress contract gates (`openspec/specs/media-webrtc-bounded-ingress/spec.md`).
-
-Agents publish semantic intent — "put this text in the subtitle zone," "bind these parameters to the CPU gauge widget" — and the runtime handles layout, visual identity, and rendering at 60fps. Agents never sit in the frame loop. Arrival time is decoupled from presentation time; every payload carries timing semantics.
-
-Key properties:
-
-- **Governed presence.** Agents occupy presence levels (guest, resident, embodied) with escalating trust requirements. Every surface lease has a TTL, capability scope, and resource budget. Humans always override.
-- **Attention as a finite resource.** The runtime enforces attention budgets and interruption policies. Quiet hours, contention resolution, and classification ceilings prevent notification spam.
-- **Viewer-aware privacy.** Content classification (public, household, private, sensitive) is enforced based on who is looking at the screen. Private content is redacted when a guest is present.
-- **Graceful degradation.** Under resource pressure, the system degrades along explicit axes — coalescing updates and shedding tiles — rather than crashing or stuttering.
-- **Swappable visual identity.** Design tokens, component types, and component profiles separate visual styling from agent code and runtime logic. An operator changes the look of the entire display by swapping a configuration directory.
-- **Multi-agent coordination.** When agents compete for screen territory, the runtime arbitrates based on space, budgets, priorities, and lease state. Agents negotiate through the runtime, never directly.
-- **Efficient in compute and tokens.** Idle screens cost ~nothing; work is proportional to change; nothing assumes desktop-class headroom without a degradation path — the eventual envelope is glasses/VR-class. LLM-facing surfaces are token-minimal: models state semantic intent in a few deterministic calls, and layout/styling never passes through model context (`about/heart-and-soul/efficiency.md`).
-
-~260k lines of Rust across 16 crates (13 active + 3 parked platform stubs) plus the `tze_hud_app` binary. Tokio async runtime, tonic for gRPC, wgpu + winit for cross-platform GPU rendering. See `about/heart-and-soul/` for full doctrine, `about/legends-and-lore/` for design contracts (14 RFCs), and `openspec/` for capability specs.
+See [`docs/vision.md`](docs/vision.md) for what this is and isn't, and
+[`docs/scope.md`](docs/scope.md) for the in-progress scope reset.
 
 ---
 
@@ -73,7 +56,6 @@ Each local recipe maps to a CI job:
 | `test-v1-thesis` | `test-v1-thesis` | v1 thesis proof |
 | `production-boot` | `production-boot-vertical-slice` | vertical-slice production-config boot |
 | `canonical-app-boot` | `canonical-app-production-boot` | canonical app production-config boot |
-| `vocabulary-lint` | `vocabulary-lint` | canonical-vocabulary lint |
 | `dev-mode-guard` | `dev-mode-guard` | dev-mode excluded from release default features |
 | — (raw `cargo test --test pixel_readback`) | `test-gpu-pixel-readback` | GPU pixel-readback; needs Mesa llvmpipe headless, excluded from `just ci` |
 | — | `cargo-deny` | dependency/advisory policy (`deny.toml`) |
@@ -81,7 +63,7 @@ Each local recipe maps to a CI job:
 | — | `v2-preview` | v2-scope preview (informational) |
 
 The toolchain is pinned in `rust-toolchain.toml` (Rust 1.88, matching CI and the
-`glyphon 0.8.x` / `wgpu 24.x` co-pin; see `docs/dependency-upgrade-ledger.md`).
+`glyphon 0.8.x` / `wgpu 24.x` co-pin).
 
 ## Overview: Canonical Runtime App vs. Demo Binaries
 
@@ -95,9 +77,7 @@ The toolchain is pinned in `rust-toolchain.toml` (Rust 1.88, matching CI and the
 - **Network support**: Includes full `NetworkRuntime` with MCP HTTP listener lifecycle in windowed mode.
 - **Use case**: Remote deployment, cross-machine validation, automated publish workflows.
 
-v1 scope note:
-- Live media/WebRTC is explicitly deferred in v1 (`about/heart-and-soul/v1.md`, "V1 explicitly defers"): no GStreamer media pipelines, no video decode, and no audio/video streaming in default v1 runtime behavior.
-- Post-v1 media activation is spec-first and gate-based (`openspec/specs/media-webrtc-bounded-ingress/spec.md`) and MUST NOT change v1 defaults.
+Live media (GStreamer/WebRTC) is out of scope; see `docs/vision.md`.
 
 ### Demo and Reference Binaries
 - `vertical_slice` (`examples/vertical_slice/`): Development reference showing scene/lease/zone publish semantics. **Not** intended for operations or remote deployment.

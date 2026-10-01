@@ -1,3 +1,0 @@
-[benchmark-task] Registering TzeHudBenchmarkOverlay as TZEHOUSE\admin-user with config C:\tze_hud\benchmark.toml
-[benchmark-task] Registered. Launch with: schtasks /Run /TN TzeHudBenchmarkOverlay
-[benchmark-task] Logs: C:\tze_hud\logs\benchmark-hud.*.log

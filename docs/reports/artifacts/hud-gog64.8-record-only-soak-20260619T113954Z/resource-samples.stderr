@@ -1,8 +1,0 @@
-Traceback (most recent call last):
-  File "/home/tze/gt/tze_hud/mayor/rig/.worktrees/parallel-agents/hud-ith1h/.claude/skills/user-test/scripts/windows_media_resource_sampler.py", line 318, in <module>
-    raise SystemExit(main())
-  File "/home/tze/gt/tze_hud/mayor/rig/.worktrees/parallel-agents/hud-ith1h/.claude/skills/user-test/scripts/windows_media_resource_sampler.py", line 309, in main
-    raw = collect_samples(args)
-  File "/home/tze/gt/tze_hud/mayor/rig/.worktrees/parallel-agents/hud-ith1h/.claude/skills/user-test/scripts/windows_media_resource_sampler.py", line 275, in collect_samples
-    raise RuntimeError(
-RuntimeError: remote sampler failed status=1 stdout='' stderr='The command line is too long.\n'

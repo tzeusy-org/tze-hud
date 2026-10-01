@@ -1,4 +1,0 @@
-interface:
-  display_name: "Soul Doctrine"
-  short_description: "Load tze_hud project doctrine selectively"
-  default_prompt: "Load relevant soul doctrine for my current task"

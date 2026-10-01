@@ -1,4 +1,0 @@
-ts_unix,phase,working_set_kb
-1781604900,baseline,"tze_hud.exe""41456""Console""1""263244 K"
-1781604960,soak,"tze_hud.exe""41456""Console""1""267272 K"
-1781604961,final,"tze_hud.exe""41456""Console""1""267272 K"

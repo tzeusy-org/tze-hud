@@ -1,9 +1,0 @@
-{"action": "connect and open resident session", "code": "scenario", "doc": "docs/reports/exemplar-manual-review-checklist.md", "expected_visual": "operator follows JSON step transcript", "phases": "cadence", "status": "started", "step_index": 0, "target": "windows-host.example:50051", "title": "Text Stream Portal live scenario", "ts_wall": 1781605212}
-  [grpc] Session established: namespace=agent-alpha, caps=['create_tiles', 'modify_own_tiles', 'access_input_events']
-  [grpc] Scene display area: 3840x2160
-{"action": "use live scene dimensions for portal placement and drag bounds", "code": "scene:display-area", "expected_visual": "portal can be dragged across the full HUD surface", "scene_height": 2160.0, "scene_width": 3840.0, "status": "checkpoint", "step_index": 0, "title": "Scene display area resolved", "ts_wall": 1781605212}
-  [grpc] Lease granted: ttl=600000ms, priority=2
-{"action": "scale portal defaults from live scene dimensions unless explicit size overrides were provided", "code": "portal:size", "expected_visual": "portal occupies a readable portion of the detected display", "explicit_height": false, "explicit_width": false, "portal_h": 960.0, "portal_w": 1280.0, "status": "checkpoint", "step_index": 0, "title": "Portal size resolved", "ts_wall": 1781605212}
-  [grpc] Lease released
-{"action": "release the lease before closing the session", "code": "cleanup:lease-release", "expected_visual": "all portal tiles are removed from the HUD", "status": "completed", "step_index": 100, "title": "Portal lease released", "ts_wall": 1781605212}
-{"error": "exception", "detail": "Mutation batch rejected: MUTATION_REJECTED \u2014 z-order conflict: tiles 019ecff2-1fd3-7643-a97a-5cb1cf920278 and 019ecfed-5eee-7521-ae89-7516200615a7 share z_order 120 with overlapping bounds"}

@@ -2,13 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import importlib.util
 import math
 import sys
 import tempfile
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
 from unittest import mock
 
 
@@ -265,84 +263,6 @@ class TextStreamPortalExemplarTests(unittest.TestCase):
         self.assertLess(hide_console, hide_window)
         self.assertLess(hide_window, settle_delay)
         self.assertLess(settle_delay, first_action)
-
-    def test_legacy_resize_drivers_compose_one_console_hide_prelude(self) -> None:
-        repo_root = Path(portal.__file__).resolve().parents[4]
-        drivers = (
-            repo_root
-            / "docs/evidence/text-stream-portals/liveverify-resize-injection-20260711/resize_injection_driver.py",
-            repo_root
-            / "docs/evidence/text-stream-portals/liveverify-resize-reverify-20260711/resize_injection_driver.py",
-        )
-        args = SimpleNamespace(
-            admin_user="admin-user",
-            win_host="windows-host.example",
-            ssh_key="/tmp/no-key",
-        )
-        actions = [{"kind": "click", "label": "focus", "x": 10.0, "y": 20.0}]
-
-        for driver_path in drivers:
-            with self.subTest(driver=driver_path.parent.name):
-                spec = importlib.util.spec_from_file_location(
-                    f"resize_driver_{driver_path.parent.name}", driver_path
-                )
-                assert spec is not None
-                assert spec.loader is not None
-                driver = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(driver)
-                bodies: list[str] = []
-
-                def capture_task_script(body: str, **_: object) -> str:
-                    bodies.append(body)
-                    return "captured-task"
-
-                async def fake_run_ssh_task(*_: object) -> dict[str, bool]:
-                    return {"ok": True}
-
-                with (
-                    mock.patch.object(
-                        driver.ex,
-                        "windows_diagnostic_task_script",
-                        side_effect=capture_task_script,
-                    ),
-                    mock.patch.object(
-                        driver,
-                        "run_ssh_task",
-                        side_effect=fake_run_ssh_task,
-                    ),
-                ):
-                    asyncio.run(
-                        driver.inject_pointer(
-                            args, actions, scene_w=1280.0, scene_h=800.0
-                        )
-                    )
-                    asyncio.run(
-                        driver.inject_focus_then_chord(
-                            args,
-                            actions,
-                            [0x11, 0x10, 0x27],
-                            repeat=1,
-                            scene_w=1280.0,
-                            scene_h=800.0,
-                        )
-                    )
-
-                self.assertEqual(len(bodies), 2)
-                for body in bodies:
-                    self.assertEqual(
-                        body.count(
-                            "Add-Type -Name Win -Namespace Native -MemberDefinition"
-                        ),
-                        1,
-                    )
-                    self.assertEqual(body.count("[Native.Win]::GetConsoleWindow()"), 1)
-                    self.assertEqual(
-                        body.count("[Native.Win]::ShowWindow($hudConsole, 0)"), 1
-                    )
-                    self.assertLess(
-                        body.index("Start-Sleep -Milliseconds 400"),
-                        body.index("diagnostic:focus"),
-                    )
 
     def test_windows_diagnostic_input_script_scales_scene_to_desktop_coordinates(self) -> None:
         script = portal.windows_diagnostic_input_script(

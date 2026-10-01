@@ -1,8 +1,0 @@
-  [grpc] Session established: namespace=windows-local-media-producer, caps=['media_ingress', 'publish_zone:media-pip', 'read_telemetry']
-  [grpc] Scene display area: 3840x2160
-  [grpc] Media ingress admitted: epoch=1 surface=019edfbcf18272b0a5305b1afdb94e01 codec=1
-  [grpc] Stream error: <AioRpcError of RPC that terminated with:
-	status = StatusCode.UNAVAILABLE
-	details = "Socket closed"
-	debug_error_string = "UNKNOWN:Error received from peer ipv4:198.51.100.1:50052 {grpc_status:14, grpc_message:"Socket closed"}"
->

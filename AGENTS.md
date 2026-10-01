@@ -72,94 +72,6 @@ cp -rf source dest          # NOT: cp -r source dest
 - `apt-get` - use `-y` flag
 - `brew` - use `HOMEBREW_NO_AUTO_UPDATE=1` env var
 
-## Issue Tracking with bd (beads)
-
-**IMPORTANT**: This project uses **bd (beads)** for ALL issue tracking. Do NOT use markdown TODOs, task lists, or other tracking methods.
-
-### Why bd?
-
-- Dependency-aware: Track blockers and relationships between issues
-- Dolt-powered: Issues live in a shared Dolt SQL server on port 3307 (auto-synced; no manual JSONL export needed)
-- Agent-optimized: JSON output, ready work detection, discovered-from links
-- Prevents duplicate tracking systems and confusion
-
-### Quick Start
-
-**Check for ready work:**
-
-```bash
-bd ready --json
-```
-
-**Create new issues:**
-
-```bash
-bd create "Issue title" --description="Detailed context" -t bug|feature|task -p 0-4 --json
-bd create "Issue title" --description="What this issue is about" -p 1 --deps discovered-from:bd-123 --json
-```
-
-**Claim and update:**
-
-```bash
-bd update <id> --claim --json
-bd update bd-42 --priority 1 --json
-```
-
-**Complete work:**
-
-```bash
-bd close bd-42 --reason "Completed" --json
-```
-
-### Issue Types
-
-- `bug` - Something broken
-- `feature` - New functionality
-- `task` - Work item (tests, docs, refactoring)
-- `epic` - Large feature with subtasks
-- `chore` - Maintenance (dependencies, tooling)
-
-### Priorities
-
-- `0` - Critical (security, data loss, broken builds)
-- `1` - High (major features, important bugs)
-- `2` - Medium (default, nice-to-have)
-- `3` - Low (polish, optimization)
-- `4` - Backlog (future ideas)
-
-### Workflow for AI Agents
-
-1. **Check ready work**: `bd ready` shows unblocked issues
-2. **Claim your task atomically**: `bd update <id> --claim`
-3. **Work on it**: Implement, test, document
-4. **Discover new work?** Create linked issue:
-   - `bd create "Found bug" --description="Details about what was found" -p 1 --deps discovered-from:<parent-id>`
-5. **Complete**: `bd close <id> --reason "Done"`
-
-### Important Rules
-
-- ✅ Use bd for ALL task tracking
-- ✅ Always use `--json` flag for programmatic use
-- ✅ Link discovered work with `discovered-from` dependencies
-- ✅ Check `bd ready` before asking "what should I work on?"
-- ❌ Do NOT create markdown TODO lists
-- ❌ Do NOT use external issue trackers
-- ❌ Do NOT duplicate tracking systems
-- ❌ `bd sync` does NOT exist in this repo — do NOT run it
-
-### Beads Database Routing
-
-This workspace has **two separate beads databases** on the Dolt server (port 3307):
-
-| Working directory | Database | Prefix | Contains |
-|---|---|---|---|
-| `tze_hud/` (project root) | `tze_hud` | `th-` | Structural beads only (rig identity, patrol molecules) |
-| `tze_hud/mayor/rig/` | `hud` | `hud-` | **All implementation work** (features, bugs, epics, tasks) |
-
-**Always run `bd` from `mayor/rig/`** to see implementation beads.
-
-For more details, see `README.md` and `about/heart-and-soul/development.md`.
-
 ## Landing the Plane (Session Completion)
 
 **When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.
@@ -188,21 +100,11 @@ For more details, see `README.md` and `about/heart-and-soul/development.md`.
 
 ## Worker Isolation for Rust Code Changes
 
-This repo (`mayor/rig/`) is a **nested git repo** inside the monorepo (`~/gt`). Monorepo worktrees created by `bd worktree create` do NOT contain the Rust crate code.
-
-For **Rust code workers**, use `git worktree` on the **tze-hud repo itself**:
+Use a worktree of this repo for isolated workers; don't switch branches in the main checkout:
 
 ```bash
-# From mayor/rig/ (the tze-hud repo root):
-scripts/worktree-add.sh .worktrees/agent-hud-XXXX -b agent/hud-XXXX
-# Worker operates in .worktrees/agent-hud-XXXX/
+scripts/worktree-add.sh .worktrees/<name> -b <branch>
 ```
-
-**Do NOT** have workers `git checkout -b agent/...` directly in the main checkout — this leaves `mayor/rig/` on a non-main branch and blocks other workers.
-
-`scripts/worktree-add.sh` wraps `git worktree add` and symlinks the new worktree's `target/` to `/data/tze_hud-cargo-target/<name>/target` before any build runs, so Rust build output lands on `/data` (large, mostly empty) instead of `/` (tight). Falling back to plain `git worktree add` still works but leaves build output on `/`.
-
-# Notes to self
 
 ## Beads / Issue Tracking
 
@@ -274,16 +176,6 @@ scripts/worktree-add.sh .worktrees/agent-hud-XXXX -b agent/hud-XXXX
 - `docs/reconciliations/policy_wiring_seam_contract.md` is the canonical PW-02 seam artifact; policy-wiring implementation/reconciliation beads should use it as the source of truth for level input provenance, ownership boundaries, and PolicyContext/ArbitrationOutcome contracts.
 - `crates/tze_hud_protocol::session_server` test helpers now rely on `handshake()` requesting both `create_tiles` and `modify_own_tiles` by default; policy-gated mutation tests that need narrower scopes must override capabilities explicitly.
 - Mutation-path pilot latency conformance now lives in `crates/tze_hud_telemetry/src/validation.rs` under `evaluate_policy_mutation_latency_conformance` with budget constant `POLICY_MUTATION_EVAL_BUDGET_US = 50`; `session_server` policy-admission logs emit the structured conformance payload, and future policy telemetry work should extend that harness instead of inventing a parallel metric.
-- `openspec/.../policy-arbitration/spec.md` still marks Policy Telemetry / Arbitration Telemetry Events / Capability Grant Audit as `v1-mandatory`, but runtime telemetry currently uses `tze_hud_runtime::channels::TelemetryRecord` without policy fields; treat this as an active spec-to-runtime reconciliation seam for closeout work.
-
-## OpenSpec / Docs
-
-- `docs/reports/validation_operations_extraction_decision_20260425.md` records the decision to extract the v1 carry-forward validation-operations backlog into a standalone OpenSpec change before canonical sync; the v2 delta is only a temporary staging location for that backlog.
-- `openspec validate <change> --strict` rejects proposal/design/tasks-only change directories; even scope/bookkeeping changes need at least one `specs/<capability>/spec.md` delta with requirement/scenario blocks.
-- `openspec archive <change> --yes` updates `openspec/specs/`, but if a change with ADDED-only deltas was already synced earlier (for example `exemplar-notification`), rerun archive with `--skip-specs` to avoid duplicate-requirement failures.
-- OpenSpec strict validation can fail a requirement when its first scenarios appear only after a fenced schema/code block; place at least one `#### Scenario` before long fenced examples.
-- `docs/audits/statig-state-machine-audit.md` records the E26 library audit: `statig` is acceptable for internal media/embodied state machines only behind project-owned protobuf mirror enums, with generated macro state kept private and no reactivation of deferred v2 work.
-- Exemplar OpenSpec change directories can have all task checkboxes left unchecked even after implementation lands; use reconciliation/coverage docs plus live/manual-review artifacts as the closure signal, not `tasks.md` counts alone.
 
 ## Windows / User-Test
 
@@ -358,13 +250,12 @@ scripts/worktree-add.sh .worktrees/agent-hud-XXXX -b agent/hud-XXXX
 
 ## Cooperative HUD Projection
 
-- The cooperative-hud-projection OpenSpec change (archived at `openspec/changes/archive/2026-05-10-cooperative-hud-projection/`) defines `/hud-projection` as cooperative opt-in for already-running LLM sessions: no PTY attachment, no terminal capture, daemon owns durable transcript/inbox/HUD state outside token context, and the LLM session publishes/polls/acks through a provider-neutral contract.
+- Cooperative projection defines `/hud-projection` as cooperative opt-in for already-running LLM sessions: no PTY attachment, no terminal capture, daemon owns durable transcript/inbox/HUD state outside token context, and the LLM session publishes/polls/acks through a provider-neutral contract.
 - As of `hud-ggntn.8`, `crates/tze_hud_projection` ships `tze_hud_projection_authority`, a daemon-local stdio CLI surface for cooperative HUD projection operations; it retains state only for the process lifetime and emits a bounded `ProjectionResponse` plus newly written audit records for each JSON-line operation.
 - Cooperative HUD projection resident adapter code lives behind the `tze_hud_projection` `resident-grpc` feature (`crates/tze_hud_projection/src/resident_grpc.rs`); it is daemon-side glue that emits existing `HudSession` raw-tile mutations and lease release messages, not a replacement for the authority/control surface.
 - Running `cargo test -p tze_hud_projection` WITHOUT `--features resident-grpc` reports 5 spurious FAILs in `tests/projection_authority_cli.rs` (`stdio_surface_*`, `demo_plan_*`) that panic with `Os { code: 2, NotFound }` — the CLI bin `tze_hud_projection_authority` has `required-features = ["resident-grpc"]`, so `CARGO_BIN_EXE_...` points at an unbuilt path. Always run that crate's tests with `--features resident-grpc`; the failures are an invocation gap, not a regression.
 - The `portal_projection_*` MCP tools/list `inputSchema` is derived from the `*Params` structs' `///` doc-comments via schemars (`crates/tze_hud_mcp/src/schema.rs`, PR #1014). Those doc-comments are the MCP wire description every attached session pays for — keep them terse (one line, enum values + defaults only); put rationale on the handler fn, not the field. `schema::tests::tools_list_stays_within_token_budget` guards the byte budget (hud-hzsgp).
 - Cooperative HUD projection gen-2 reconciliation lives at `docs/reports/cooperative_hud_projection_gen2_reconciliation_20260510.md`; it records the accepted runtime-native readback substitution for unavailable SSH desktop screenshot capture.
-- Cooperative HUD projection is now archived at `openspec/changes/archive/2026-05-10-cooperative-hud-projection/`; use `openspec/specs/cooperative-hud-projection/spec.md` and the cooperative additions in `openspec/specs/text-stream-portals/spec.md` as the canonical contract.
 - `bd create --graph <plan.json>` (bd v1.x, this repo) has two traps: (1) `--dry-run` is IGNORED for `--graph` — it CREATES real beads (delete junk with `bd delete <id>... -f`); (2) per-node `deps` entries (e.g. `"deps":["blocks:otherKey"]`) are SILENTLY DROPPED — only `parent` links and the nodes themselves are created, blocking edges are NOT. Wire edges separately afterward via `bd dep add --file edges.jsonl` where each line is `{"from":"<blocked/dependent-id>","to":"<blocker/prereq-id>"}` (from depends on to; default type `blocks`). Then verify with `bd dep cycles` and `bd ready`. Graph-plan schema: top-level `{"nodes":[...]}`, each node keyed by `key` (not `id`), with `title`/`type`/`priority`/`description`/`parent`.
 - cargo-deny `[advisories].ignore` entries are per-advisory-ID and cannot be scoped to one crate instance: if an advisory hits both a direct dep and a build-time transitive (e.g. quick-xml RUSTSEC-2026-0194/0195 in our workspace AND inside winit's wayland-scanner), first bump the direct workspace dep to the patched version, then add the ID waiver documenting that the only remaining instance is the pinned transitive. Follow the existing documented-waiver style in deny.toml (id/reason/action). Verify with `cargo deny check advisories licenses` (fast, local, safe).
 - `gh pr merge --delete-branch` fails when the PR branch is checked out in a `.worktrees/` worktree ("cannot delete branch used by worktree") — but the MERGE still succeeds. Sequence: `gh pr merge <n> --squash`, then `git worktree remove .worktrees/<dir> --force`, `git branch -D <branch>`, `git push origin --delete <branch>`.

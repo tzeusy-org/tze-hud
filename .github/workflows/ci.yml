@@ -16,7 +16,6 @@
 #     and a real constrained WARP overlay quiescent-efficiency artifact gate
 #   constrained-envelope-budget — llvmpipe proxy, exactly two logical CPUs, same normalized ceilings
 #   release-artifact-provenance-smoke — cross-build tze_hud.exe and verify uploaded checksum round-trip
-#   vocabulary-lint — scripts/check_canonical_vocabulary.sh
 #   user-test-python-suite — pytest over the user-test and repo script suites;
 #     pure-Python tests only, with no GPU, Windows, live HUD runtime, or network
 #   dev-mode-guard  — verifies dev-mode feature is NOT compiled into release binary
@@ -52,7 +51,7 @@
 #
 #   All blocking jobs (check, fmt, clippy, test-unit, test-trace,
 #   test-v1-thesis, vertical_slice production boot, canonical app production
-#   boot, release artifact provenance smoke, vocabulary-lint, dev-mode-guard,
+#   boot, release artifact provenance smoke, dev-mode-guard,
 #   v2-preview) are required to pass before merge.
 # ─────────────────────────────────────────────────────────────────────────────
 # Spec ref:
@@ -700,20 +699,6 @@ jobs:
         run: |
           bash scripts/ci/release_artifact_provenance_smoke.sh \
             --artifact-dir test_results/release-provenance-roundtrip
-
-  # ── Vocabulary lint ─────────────────────────────────────────────────────────
-  #
-  # Runs scripts/check_canonical_vocabulary.sh — fails if any stale pre-Round-14
-  # capability names are found outside the explicitly exempted files.
-  # This is a pure text search, no compilation required.
-
-  vocabulary-lint:
-    name: vocabulary lint
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      - name: Check canonical vocabulary
-        run: bash scripts/check_canonical_vocabulary.sh --verbose
 
   # ── User-test Python suite ──────────────────────────────────────────────────
   #

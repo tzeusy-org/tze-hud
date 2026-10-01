@@ -420,7 +420,7 @@ class ComposerLineWindow:
 
 DEFAULT_PSK_ENV = "TZE_HUD_PSK"
 DEFAULT_TARGET = "windows-host.example:50051"
-DEFAULT_DOC = "docs/reports/exemplar-manual-review-checklist.md"
+DEFAULT_DOC = ".claude/skills/user-test/references/exemplar-manual-review-checklist.md"
 DEFAULT_TRANSCRIPT_PATH = "test_results/text-stream-portal-latest.json"
 DEFAULT_SSH_KEY = os.path.expanduser("~/.ssh/hud-ssh-key")
 MAX_MARKDOWN_BYTES = 65535
@@ -3249,14 +3249,14 @@ def emit_step_event(
 
 # ─── Promotion-gate evidence schema (RFC 0013 §7.2, spec Phase-1 gate) ────────
 #
-# The promotion gate (openspec/specs/text-stream-portals/spec.md, "Phase-1
+# The promotion gate (former text-stream-portals spec, "Phase-1
 # Promotion Evidence Gate") requires every live artifact to carry the
 # engineering-bar *reference hardware tag* and, for the cadence axis, to report
 # runtime-added overhead separately from transport RTT with per-append
 # publish→present timestamps. The helpers below shape that evidence so it is
 # constructible and verifiable headlessly (no live HUD required).
 
-# Canonical reference host per about/craft-and-care/engineering-bar.md §2.
+# Canonical reference host (historical engineering bar, tag pre-reset-2026-10-02).
 # A live run on the reference host SHALL match this; off-reference runs are
 # informational-only per the gate's "evidence without reference tag" scenario.
 REFERENCE_HARDWARE_TAG = "TzeHouse"
@@ -6076,7 +6076,7 @@ def run_composer_self_test() -> int:
     width = composer_wrap_area_width_px()
     failures: list[str] = []
 
-    expected_doc = "docs/reports/exemplar-manual-review-checklist.md"
+    expected_doc = ".claude/skills/user-test/references/exemplar-manual-review-checklist.md"
     stale_doc = "docs/" + "exemplar-manual-review-checklist.md"
     if DEFAULT_DOC != expected_doc:
         failures.append(f"DEFAULT_DOC is {DEFAULT_DOC!r}, expected {expected_doc!r}")

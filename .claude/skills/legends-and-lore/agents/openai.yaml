@@ -1,4 +1,0 @@
-interface:
-  display_name: "Legends and Lore"
-  short_description: "Load tze_hud RFC design contracts selectively"
-  default_prompt: "Load relevant RFC contracts for my current task"
