@@ -29,10 +29,7 @@
 //! - Profile Extends Conflict Detection (v1-mandatory)
 //! - Headless Virtual Display (v1-mandatory)
 //!
-//! ### rig-mop4 (Privacy, zone registry, agent registration, hot-reload)
-//! - Privacy Configuration Defaults (v1-mandatory)
-//! - Quiet Hours Configuration (v1-mandatory)
-//! - Redaction Style Ownership (v1-mandatory)
+//! ### rig-mop4 (Zone registry, agent registration, hot-reload)
 //! - Zone Registry Configuration (v1-mandatory)
 //! - Agent Registration with Per-Agent Budget Overrides (v1-mandatory)
 //! - Dynamic Agent Policy (v1-mandatory)
@@ -61,7 +58,6 @@ pub mod component_types;
 pub mod loader;
 pub mod policy_builder;
 pub mod portal_tokens;
-pub mod privacy;
 pub mod profile;
 pub mod raw;
 pub mod readability;
@@ -110,7 +106,6 @@ pub use portal_tokens::{
     PORTAL_TOKEN_WINDOW_RESIZE_STEP_PX, PortalPartTokens, TimestampGranularity,
     resolve_portal_token_strings, resolve_portal_tokens,
 };
-pub use privacy::{QuietHoursAction, quiet_hours_action, validate_privacy};
 pub use profile::{
     AutoDetectResult, HeadlessSignal, auto_detect_profile, resolve_headless_dimensions,
     resolve_profile, validate_display_profile,

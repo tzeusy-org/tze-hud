@@ -73,7 +73,7 @@ impl RuntimeService for RuntimeServiceImpl {
     /// Reload hot-reloadable config sections from a new TOML string.
     ///
     /// Per RFC 0006 §9: the entire config is re-validated; only the
-    /// hot-reloadable sections ([privacy], [degradation], [chrome],
+    /// hot-reloadable sections ([degradation], [chrome],
     /// [agents.dynamic_policy]) are applied on success. Frozen sections
     /// ([runtime], [[tabs]], [agents.registered]) are silently ignored.
     async fn reload_config(
@@ -246,7 +246,7 @@ mod tests {
     use crate::runtime_context::RuntimeContext;
     use std::sync::Arc;
     use tze_hud_config::HotReloadableConfig;
-    use tze_hud_config::raw::{RawChrome, RawDegradation, RawPrivacy};
+    use tze_hud_config::raw::{RawChrome, RawDegradation};
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -263,8 +263,8 @@ profile = "headless"
 name = "Main"
 default_tab = true
 
-[privacy]
-redaction_style = "blank"
+[degradation]
+coalesce_frame_ms = 20.0
 "#
         .to_string()
     }
@@ -277,13 +277,15 @@ redaction_style = "blank"
         // Parses OK but fails validation (unknown classification value).
         r#"
 [runtime]
-profile = "headless"
+profile = "custom"
+
+[display_profile]
+extends = "full-display"
+target_fps = 15
+min_fps = 30
 
 [[tabs]]
 name = "Main"
-
-[privacy]
-default_classification = "top_secret_invalid_value"
 "#
         .to_string()
     }
@@ -297,8 +299,8 @@ default_classification = "top_secret_invalid_value"
         let ctx = make_ctx();
         let svc = RuntimeServiceImpl::new(Arc::clone(&ctx));
 
-        // Before reload: privacy defaults (all None).
-        assert!(ctx.hot_config().privacy.redaction_style.is_none());
+        // Before reload: defaults (all None).
+        assert!(ctx.hot_config().degradation.coalesce_frame_ms.is_none());
 
         let req = Request::new(ReloadConfigRequest {
             config_toml: valid_toml(),
@@ -316,11 +318,11 @@ default_classification = "top_secret_invalid_value"
         );
         assert!(body.reloaded_at_wall_us > 0, "timestamp must be set");
 
-        // After reload: new privacy value is visible.
+        // After reload: new value is visible.
         assert_eq!(
-            ctx.hot_config().privacy.redaction_style,
-            Some("blank".to_string()),
-            "hot-reloadable privacy section must be applied"
+            ctx.hot_config().degradation.coalesce_frame_ms,
+            Some(20.0),
+            "hot-reloadable section must be applied"
         );
     }
 
@@ -334,17 +336,16 @@ default_classification = "top_secret_invalid_value"
 
         // Set a known hot config value before the failed reload.
         ctx.reload_hot_config(HotReloadableConfig {
-            privacy: RawPrivacy {
-                redaction_style: Some("pattern".to_string()),
+            degradation: RawDegradation {
+                coalesce_frame_ms: Some(10.0),
                 ..Default::default()
             },
-            degradation: RawDegradation::default(),
             chrome: RawChrome::default(),
             dynamic_policy: None,
         });
         assert_eq!(
-            ctx.hot_config().privacy.redaction_style,
-            Some("pattern".to_string()),
+            ctx.hot_config().degradation.coalesce_frame_ms,
+            Some(10.0),
             "setup: initial hot config should be applied"
         );
 
@@ -366,8 +367,8 @@ default_classification = "top_secret_invalid_value"
 
         // Running config must be unchanged.
         assert_eq!(
-            ctx.hot_config().privacy.redaction_style,
-            Some("pattern".to_string()),
+            ctx.hot_config().degradation.coalesce_frame_ms,
+            Some(10.0),
             "running config must NOT be modified on parse failure"
         );
     }
@@ -398,7 +399,7 @@ default_classification = "top_secret_invalid_value"
 
         // Running config is still default.
         assert!(
-            ctx.hot_config().privacy.redaction_style.is_none(),
+            ctx.hot_config().degradation.coalesce_frame_ms.is_none(),
             "running config must remain default after validation failure"
         );
     }
@@ -449,7 +450,7 @@ default_classification = "top_secret_invalid_value"
 
         let ctx = Arc::new(RuntimeContext::headless_default());
         assert!(
-            ctx.hot_config().privacy.redaction_style.is_none(),
+            ctx.hot_config().degradation.coalesce_frame_ms.is_none(),
             "initial defaults"
         );
 
@@ -462,8 +463,8 @@ profile = "headless"
 [[tabs]]
 name = "Main"
 
-[privacy]
-redaction_style = "blank"
+[degradation]
+coalesce_frame_ms = 20.0
 "#;
         {
             let mut f = std::fs::File::create(&tmp).expect("create temp file");
@@ -479,9 +480,9 @@ redaction_style = "blank"
             .expect("trigger_reload must succeed with valid config");
 
         assert_eq!(
-            ctx.hot_config().privacy.redaction_style,
-            Some("blank".to_string()),
-            "after SIGHUP-triggered reload, privacy config must be updated"
+            ctx.hot_config().degradation.coalesce_frame_ms,
+            Some(20.0),
+            "after SIGHUP-triggered reload, hot config must be updated"
         );
 
         let _ = std::fs::remove_file(&tmp);

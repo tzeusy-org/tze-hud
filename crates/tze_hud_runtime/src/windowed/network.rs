@@ -20,7 +20,7 @@ use crate::threads::NetworkRuntime;
 ///
 /// When `cfg.config_toml` is `Some`, the TOML is parsed and validated. On
 /// success, capability grants from `[agents.registered]` and the hot-reloadable
-/// sections (`[privacy]`, `[degradation]`, `[chrome]`, `[agents.dynamic_policy]`)
+/// sections (`[degradation]`, `[chrome]`, `[agents.dynamic_policy]`)
 /// are loaded into the context. The fallback policy is `Guest` (registered
 /// agents only).
 ///
@@ -82,7 +82,7 @@ pub(super) fn build_runtime_context(cfg: &WindowedConfig) -> (SharedRuntimeConte
             };
 
             // Parse hot-reloadable sections from the same TOML so the initial
-            // privacy/degradation/chrome/dynamic_policy settings take effect
+            // degradation/chrome/dynamic_policy settings take effect
             // immediately (before the first SIGHUP).
             let hot = tze_hud_config::reload_config(toml_src).unwrap_or_default();
 
@@ -794,8 +794,8 @@ mod tests {
         // Hot config should be all defaults.
         let hot = ctx.hot_config();
         assert!(
-            hot.privacy.redaction_style.is_none(),
-            "hot config privacy must default to None when no config file is given"
+            hot.degradation.coalesce_frame_ms.is_none(),
+            "hot config must default to None when no config file is given"
         );
     }
 
@@ -917,7 +917,7 @@ profile = "full-display"
         );
     }
 
-    /// Hot-reloadable sections (privacy, degradation) from the initial config
+    /// Hot-reloadable sections (degradation) from the initial config
     /// are applied immediately - no SIGHUP required.
     #[test]
     fn build_runtime_context_hot_sections_applied_from_config() {
@@ -928,8 +928,8 @@ profile = "full-display"
 [[tabs]]
 name = "Main"
 
-[privacy]
-redaction_style = "blank"
+[degradation]
+coalesce_frame_ms = 20.0
 "#;
         let cfg = WindowedConfig {
             config_toml: Some(toml.to_string()),
@@ -938,9 +938,9 @@ redaction_style = "blank"
         let (ctx, _) = build_runtime_context(&cfg);
         let hot = ctx.hot_config();
         assert_eq!(
-            hot.privacy.redaction_style,
-            Some("blank".to_string()),
-            "privacy.redaction_style from config must be applied immediately at startup"
+            hot.degradation.coalesce_frame_ms,
+            Some(20.0),
+            "degradation.coalesce_frame_ms from config must be applied immediately at startup"
         );
     }
 }

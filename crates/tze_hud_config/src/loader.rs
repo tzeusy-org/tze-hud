@@ -39,7 +39,6 @@ use tze_hud_scene::config::{
 
 use crate::agents;
 use crate::capability::{capability_hint, has_reserved_event_prefix};
-use crate::privacy;
 use crate::profile;
 use crate::raw::{RawConfig, RawDegradation};
 use crate::resolver;
@@ -247,11 +246,6 @@ impl ConfigLoader for TzeHudConfig {
                         ),
                     });
             }
-        }
-
-        // ── (9) Privacy section ───────────────────────────────────────────────
-        if let Some(priv_cfg) = &self.raw.privacy {
-            privacy::validate_privacy(priv_cfg, &mut errors);
         }
 
         // ── (10) Zone registry ────────────────────────────────────────────────

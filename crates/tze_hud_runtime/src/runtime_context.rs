@@ -13,7 +13,7 @@
 //! - **Profile budgets** — max tiles, max texture MB, max agents, target/min FPS.
 //! - **Agent capability registry** — per-agent capability grants from `[agents.registered]`.
 //! - **Media ingress policy** — frozen Windows media-ingress startup gate.
-//! - **Hot-reloadable policy** — privacy, degradation, chrome, and dynamic agent policy
+//! - **Hot-reloadable policy** — degradation, chrome, and dynamic agent policy
 //!   sections, which can be updated live without restart.
 //!
 //! ## Two-Tier Configuration Model
@@ -26,7 +26,6 @@
 //! | `[runtime]`               | Frozen — restart required |
 //! | `[[tabs]]`                | Frozen — restart required |
 //! | `[agents.registered]`     | Frozen — restart required |
-//! | `[privacy]`               | Hot-reloadable via SIGHUP or `ReloadConfig` RPC |
 //! | `[degradation]`           | Hot-reloadable via SIGHUP or `ReloadConfig` RPC |
 //! | `[chrome]`                | Hot-reloadable via SIGHUP or `ReloadConfig` RPC |
 //! | `[agents.dynamic_policy]` | Hot-reloadable via SIGHUP or `ReloadConfig` RPC |
@@ -185,7 +184,7 @@ fn resident_ledger_for(envelope: &OperationalRuntimeEnvelope) -> tze_hud_resourc
 ///
 /// **Hot-reloadable fields** are held in `hot` as an `ArcSwap<HotReloadableConfig>`.
 /// Call `reload_hot_config()` to atomically swap in a freshly validated config subset
-/// (privacy, degradation, chrome, dynamic_policy) with no locks and no restart.
+/// (degradation, chrome, dynamic_policy) with no locks and no restart.
 ///
 /// Per spec §Configuration Reload (lines 263-274, v1-mandatory): SIGHUP and the
 /// `RuntimeService.ReloadConfig` gRPC call both trigger a live reload of the
@@ -215,7 +214,7 @@ pub struct RuntimeContext {
 
     // ── Hot-reloadable fields ─────────────────────────────────────────────────
     // Atomically swappable via SIGHUP or ReloadConfig RPC.
-    /// Hot-reloadable policy sections: privacy, degradation, chrome,
+    /// Hot-reloadable policy sections: degradation, chrome,
     /// and agents.dynamic_policy.
     ///
     /// Access the current snapshot via `self.hot.load()`. Update atomically
@@ -305,7 +304,6 @@ impl RuntimeContext {
     ///
     /// ## What is reloaded
     ///
-    /// - `[privacy]` — privacy classification, redaction style, quiet hours.
     /// - `[degradation]` — frame-time and GPU thresholds for degradation steps.
     /// - `[chrome]` — chrome rendering policy.
     /// - `[agents.dynamic_policy]` — whether dynamic agents are allowed and their
@@ -323,13 +321,13 @@ impl RuntimeContext {
     /// Return a snapshot of the hot-reloadable configuration.
     ///
     /// The returned `Arc` keeps the current `HotReloadableConfig` alive for as long
-    /// as there are strong references to it. Use this to access privacy,
+    /// as there are strong references to it. Use this to access
     /// degradation, chrome, and dynamic policy settings without exposing the
     /// internal hot-reload mechanism.
     ///
     /// ```rust,ignore
     /// let hot = ctx.hot_config();
-    /// let privacy = &hot.privacy;
+    /// let degradation = &hot.degradation;
     /// ```
     pub fn hot_config(&self) -> Arc<HotReloadableConfig> {
         self.hot.load_full()
@@ -538,7 +536,7 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
     use tze_hud_config::HotReloadableConfig;
-    use tze_hud_config::raw::{RawChrome, RawDegradation, RawDynamicPolicy, RawPrivacy};
+    use tze_hud_config::raw::{RawChrome, RawDegradation, RawDynamicPolicy};
     use tze_hud_scene::config::ResolvedConfig;
 
     fn make_config(caps: Vec<(&str, Vec<&str>)>) -> ResolvedConfig {
@@ -693,8 +691,8 @@ mod tests {
         let config = make_config(vec![]);
         let ctx = RuntimeContext::from_config(config, FallbackPolicy::Guest);
         let hot = ctx.hot_config();
-        assert!(hot.privacy.default_classification.is_none());
-        assert!(hot.privacy.redaction_style.is_none());
+        assert!(hot.degradation.simplify_rendering_frame_ms.is_none());
+        assert!(hot.degradation.coalesce_frame_ms.is_none());
         assert!(hot.dynamic_policy.is_none());
     }
 
@@ -704,17 +702,16 @@ mod tests {
     fn from_config_with_hot_stores_initial_hot_config() {
         let config = make_config(vec![]);
         let hot = HotReloadableConfig {
-            privacy: RawPrivacy {
-                redaction_style: Some("blank".to_string()),
+            degradation: RawDegradation {
+                coalesce_frame_ms: Some(20.0),
                 ..Default::default()
             },
-            degradation: RawDegradation::default(),
             chrome: RawChrome::default(),
             dynamic_policy: None,
         };
         let ctx = RuntimeContext::from_config_with_hot(config, FallbackPolicy::Guest, hot);
         let loaded = ctx.hot_config();
-        assert_eq!(loaded.privacy.redaction_style, Some("blank".to_string()));
+        assert_eq!(loaded.degradation.coalesce_frame_ms, Some(20.0));
     }
 
     // ── headless_default ─────────────────────────────────────────────────────
@@ -738,7 +735,7 @@ mod tests {
     fn headless_default_hot_config_all_defaults() {
         let ctx = RuntimeContext::headless_default();
         let hot = ctx.hot_config();
-        assert!(hot.privacy.redaction_style.is_none());
+        assert!(hot.degradation.coalesce_frame_ms.is_none());
         assert!(hot.dynamic_policy.is_none());
     }
 
@@ -747,19 +744,18 @@ mod tests {
     /// Spec §Configuration Reload (lines 263-274): SIGHUP or ReloadConfig RPC
     /// atomically replaces the hot-reloadable sections without restart.
     #[test]
-    fn reload_hot_config_atomically_replaces_privacy() {
+    fn reload_hot_config_atomically_replaces_hot_sections() {
         let ctx = RuntimeContext::headless_default();
 
         // Before reload: defaults (all None).
-        assert!(ctx.hot_config().privacy.redaction_style.is_none());
+        assert!(ctx.hot_config().degradation.coalesce_frame_ms.is_none());
 
-        // Reload with updated privacy.
+        // Reload with an updated degradation threshold.
         let new_hot = HotReloadableConfig {
-            privacy: RawPrivacy {
-                redaction_style: Some("pattern".to_string()),
+            degradation: RawDegradation {
+                coalesce_frame_ms: Some(10.0),
                 ..Default::default()
             },
-            degradation: RawDegradation::default(),
             chrome: RawChrome::default(),
             dynamic_policy: None,
         };
@@ -767,9 +763,9 @@ mod tests {
 
         // After reload: new value is visible.
         assert_eq!(
-            ctx.hot_config().privacy.redaction_style,
-            Some("pattern".to_string()),
-            "reload_hot_config must atomically replace privacy settings"
+            ctx.hot_config().degradation.coalesce_frame_ms,
+            Some(10.0),
+            "reload_hot_config must atomically replace hot settings"
         );
     }
 
@@ -778,7 +774,6 @@ mod tests {
         let ctx = RuntimeContext::headless_default();
 
         let new_hot = HotReloadableConfig {
-            privacy: RawPrivacy::default(),
             degradation: RawDegradation {
                 coalesce_frame_ms: Some(16.0),
                 simplify_rendering_frame_ms: Some(33.0),
@@ -803,7 +798,6 @@ mod tests {
         );
 
         let new_hot = HotReloadableConfig {
-            privacy: RawPrivacy::default(),
             degradation: RawDegradation::default(),
             chrome: RawChrome::default(),
             dynamic_policy: Some(RawDynamicPolicy {
@@ -828,19 +822,17 @@ mod tests {
         let ctx = RuntimeContext::headless_default();
 
         for i in 1u32..=5 {
-            let style = format!("style-{i}");
             ctx.reload_hot_config(HotReloadableConfig {
-                privacy: RawPrivacy {
-                    redaction_style: Some(style.clone()),
+                degradation: RawDegradation {
+                    coalesce_frame_ms: Some(f64::from(i)),
                     ..Default::default()
                 },
-                degradation: RawDegradation::default(),
                 chrome: RawChrome::default(),
                 dynamic_policy: None,
             });
             assert_eq!(
-                ctx.hot_config().privacy.redaction_style,
-                Some(style),
+                ctx.hot_config().degradation.coalesce_frame_ms,
+                Some(f64::from(i)),
                 "after reload {i}, hot_config must return the latest value"
             );
         }
@@ -859,11 +851,10 @@ mod tests {
 
         // Reload hot config.
         ctx.reload_hot_config(HotReloadableConfig {
-            privacy: RawPrivacy {
-                redaction_style: Some("blank".to_string()),
+            degradation: RawDegradation {
+                coalesce_frame_ms: Some(20.0),
                 ..Default::default()
             },
-            degradation: RawDegradation::default(),
             chrome: RawChrome::default(),
             dynamic_policy: None,
         });

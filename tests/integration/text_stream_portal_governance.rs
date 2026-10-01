@@ -14,10 +14,8 @@
 use std::sync::Arc;
 
 use tze_hud_runtime::{
-    ChromeState, ContentClassification, EnqueueResult, FreezeQueue, MutationTrafficClass,
-    QueuedMutation, RedactionFrame, RedactionStyle, TileRedactionState, ViewerClass,
-    build_redaction_cmds, classify_mutation_batch, collect_diagnostic, hit_regions_enabled,
-    is_tile_redacted,
+    ChromeState, EnqueueResult, FreezeQueue, MutationTrafficClass, QueuedMutation,
+    classify_mutation_batch, collect_diagnostic,
 };
 use tze_hud_scene::{
     Capability, Clock, SceneGraph, SceneId, TestClock, ZONE_TILE_Z_MIN,
@@ -230,57 +228,6 @@ fn orphaned_portal_freezes_and_grace_expiry_removes_tile() {
     assert!(
         !scene.tiles.contains_key(&tile_id),
         "portal tile must be removed when orphan grace expires"
-    );
-}
-
-#[test]
-fn redaction_preserves_geometry_and_hides_portal_content() {
-    let (scene, _clock, _tab_id, _lease_id, tile_id) = create_portal_scene(120_000);
-    let tile_bounds = scene.tiles.get(&tile_id).expect("tile exists").bounds;
-    let raw_text = portal_text(&scene, tile_id);
-
-    assert!(
-        is_tile_redacted(ViewerClass::KnownGuest, ContentClassification::Private),
-        "known guest must not see private portal transcript"
-    );
-    let redaction_state = TileRedactionState::Redacted {
-        classification: ContentClassification::Private,
-    };
-    assert!(
-        !hit_regions_enabled(&redaction_state),
-        "redacted portal must disable interactive affordances"
-    );
-
-    let cmds = build_redaction_cmds(tile_bounds, RedactionStyle::Pattern);
-    assert!(
-        cmds.iter().any(|cmd| {
-            cmd.x == tile_bounds.x
-                && cmd.y == tile_bounds.y
-                && cmd.width == tile_bounds.width
-                && cmd.height == tile_bounds.height
-        }),
-        "redaction overlay must preserve tile geometry"
-    );
-
-    let frame = RedactionFrame::build(
-        ViewerClass::KnownGuest,
-        RedactionStyle::Pattern,
-        1,
-        &[(0, ContentClassification::Private)],
-    );
-    assert!(
-        frame.is_redacted(0),
-        "redaction frame must mark private tile as redacted for known guest viewer"
-    );
-    assert_eq!(
-        portal_text(&scene, tile_id),
-        raw_text,
-        "redaction must not mutate the underlying scene transcript data"
-    );
-    let overlay_debug = format!("{cmds:?}");
-    assert!(
-        !overlay_debug.contains(&raw_text),
-        "redaction overlay commands must not carry transcript content"
     );
 }
 
@@ -609,103 +556,6 @@ fn orphaned_first_class_surface_freezes_and_grace_expiry_prunes_surface() {
     assert!(
         scene.portal_surface(tile_id).is_none(),
         "first-class surface overlay must be pruned via the same orphan path"
-    );
-}
-
-#[test]
-fn redaction_over_first_class_surface_hides_content_and_flashes_nothing() {
-    let (scene, _clock, _tab_id, _lease_id, tile_id) = create_first_class_portal_scene(120_000);
-    let tile_bounds = scene.tiles.get(&tile_id).expect("tile exists").bounds;
-    let raw_text = portal_text(&scene, tile_id);
-    let surface_before = scene
-        .portal_surface(tile_id)
-        .expect("surface present")
-        .clone();
-
-    // A restricted viewer must not see private portal content, and redaction
-    // disables the surface's interactive affordances.
-    assert!(
-        is_tile_redacted(ViewerClass::KnownGuest, ContentClassification::Private),
-        "known guest must not see private first-class surface content"
-    );
-    assert!(
-        !hit_regions_enabled(&TileRedactionState::Redacted {
-            classification: ContentClassification::Private,
-        }),
-        "redacted first-class surface must disable interactive affordances"
-    );
-
-    // Flash-no-content: at the frame redaction becomes active, the placeholder
-    // must cover the ENTIRE host-tile footprint. `Blank` yields exactly one
-    // full-bounds cmd; `Pattern` yields a full-bounds base fill first. Because
-    // `build_redaction_cmds` is a pure function of bounds+style (no scene/content
-    // access — see redaction.rs `redaction_cmds_are_independent_of_content_pass`),
-    // the clear→redacted swap is atomic: no partial-cover intermediate frame can
-    // expose content.
-    let blank = build_redaction_cmds(tile_bounds, RedactionStyle::Blank);
-    assert_eq!(
-        blank.len(),
-        1,
-        "blank redaction must be a single full cover"
-    );
-    assert!(
-        (blank[0].x - tile_bounds.x).abs() < 0.01
-            && (blank[0].y - tile_bounds.y).abs() < 0.01
-            && (blank[0].width - tile_bounds.width).abs() < 0.01
-            && (blank[0].height - tile_bounds.height).abs() < 0.01,
-        "blank redaction cover must match the full host-tile bounds exactly"
-    );
-    let pattern = build_redaction_cmds(tile_bounds, RedactionStyle::Pattern);
-    assert!(
-        pattern.iter().any(|cmd| {
-            cmd.x == tile_bounds.x
-                && cmd.y == tile_bounds.y
-                && cmd.width == tile_bounds.width
-                && cmd.height == tile_bounds.height
-        }),
-        "pattern redaction must include a full-bounds base fill (no exposed gap)"
-    );
-
-    // Transition proof across a viewer change: Owner (cleared) → not redacted;
-    // KnownGuest (restricted) → redacted. The decision is per-frame and pure, so
-    // each frame is wholly-clear or wholly-covered — never half-applied.
-    let cleared = RedactionFrame::build(
-        ViewerClass::Owner,
-        RedactionStyle::Pattern,
-        1,
-        &[(0, ContentClassification::Private)],
-    );
-    assert!(!cleared.is_redacted(0), "owner frame is fully clear");
-    let redacted = RedactionFrame::build(
-        ViewerClass::KnownGuest,
-        RedactionStyle::Pattern,
-        1,
-        &[(0, ContentClassification::Private)],
-    );
-    assert!(redacted.is_redacted(0), "guest frame is fully redacted");
-
-    // The redaction overlay carries pure geometry — never the transcript text or
-    // the surface's identity strings — so nothing leaks through the placeholder.
-    let overlay_debug = format!("{pattern:?}");
-    assert!(
-        !overlay_debug.contains(&raw_text),
-        "redaction overlay must not carry transcript content"
-    );
-    assert!(
-        !overlay_debug.contains(FC_SESSION_ID) && !overlay_debug.contains(FC_DISPLAY_NAME),
-        "redaction overlay must not carry the surface's identity strings"
-    );
-
-    // Redaction is overlay-only: it must not mutate the underlying surface data.
-    assert_eq!(
-        portal_text(&scene, tile_id),
-        raw_text,
-        "redaction must not mutate the underlying transcript"
-    );
-    assert_eq!(
-        scene.portal_surface(tile_id).expect("surface present"),
-        &surface_before,
-        "redaction must not mutate the first-class surface descriptor"
     );
 }
 

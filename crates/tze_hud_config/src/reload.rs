@@ -4,7 +4,7 @@
 //!
 //! - **Configuration Reload** (lines 263-274, v1-mandatory)
 //!   SIGHUP and `RuntimeService.ReloadConfig` gRPC trigger a live reload.
-//!   Hot-reloadable fields: `[privacy]`, `[degradation]`, `[chrome]`,
+//!   Hot-reloadable fields: `[degradation]`, `[chrome]`,
 //!   `[agents.dynamic_policy]`.
 //!   Frozen fields (require restart): `[runtime]`, `[[tabs]]`,
 //!   `[agents.registered]`.
@@ -29,7 +29,6 @@
 //! | `[component_profile_bundles]`   | Frozen (restart required) |
 //! | `[component_profiles]`          | Frozen (restart required) |
 //! | `[widget_runtime_assets]`       | Frozen (restart required) |
-//! | `[privacy]`                     | Hot-reloadable |
 //! | `[degradation]`                 | Hot-reloadable |
 //! | `[chrome]`                      | Hot-reloadable |
 //! | `[agents.dynamic_policy]`       | Hot-reloadable |
@@ -51,7 +50,7 @@
 use tze_hud_scene::config::{ConfigError, ConfigErrorCode};
 
 use crate::loader::TzeHudConfig;
-use crate::raw::{RawChrome, RawDegradation, RawDynamicPolicy, RawPrivacy};
+use crate::raw::{RawChrome, RawDegradation, RawDynamicPolicy};
 
 // ─── Field classification ──────────────────────────────────────────────────────
 
@@ -68,13 +67,11 @@ pub enum FieldClassification {
 
 /// Returns the reload classification for a top-level configuration section.
 ///
-/// `section_path` is the dotted section name (e.g., `"runtime"`, `"privacy"`).
+/// `section_path` is the dotted section name (e.g., `"runtime"`, `"degradation"`).
 pub fn section_classification(section_path: &str) -> FieldClassification {
     match section_path {
         // Hot-reloadable sections.
-        "privacy" | "degradation" | "chrome" | "agents.dynamic_policy" => {
-            FieldClassification::HotReloadable
-        }
+        "degradation" | "chrome" | "agents.dynamic_policy" => FieldClassification::HotReloadable,
         // Everything else is frozen at startup.
         _ => FieldClassification::Frozen,
     }
@@ -177,8 +174,6 @@ pub fn check_frozen_section_changes(
 /// suitable as the initial state before the first SIGHUP or `ReloadConfig` call.
 #[derive(Clone, Debug, Default)]
 pub struct HotReloadableConfig {
-    /// Updated `[privacy]` section (or defaults if absent from new TOML).
-    pub privacy: RawPrivacy,
     /// Updated `[degradation]` section (or defaults if absent).
     pub degradation: RawDegradation,
     /// Updated `[chrome]` section (or defaults if absent).
@@ -226,7 +221,6 @@ pub fn reload_config(new_toml: &str) -> Result<HotReloadableConfig, Vec<ConfigEr
     // Step 3: extract the hot-reloadable subset.
     let raw = loader.into_raw();
     let hot = HotReloadableConfig {
-        privacy: raw.privacy.unwrap_or_default(),
         degradation: raw.degradation.unwrap_or_default(),
         chrome: raw.chrome.unwrap_or_default(),
         dynamic_policy: raw.agents.and_then(|a| a.dynamic_policy),
@@ -381,10 +375,6 @@ name = "Main"
     #[test]
     fn test_hot_reloadable_sections_classified_correctly() {
         assert_eq!(
-            section_classification("privacy"),
-            FieldClassification::HotReloadable
-        );
-        assert_eq!(
             section_classification("degradation"),
             FieldClassification::HotReloadable
         );
@@ -409,8 +399,8 @@ profile = "full-display"
 [[tabs]]
 name = "Main"
 
-[privacy]
-redaction_style = "blank"
+[degradation]
+coalesce_frame_ms = 20.0
 "#;
         let result = reload_config(toml);
         assert!(
@@ -418,8 +408,7 @@ redaction_style = "blank"
             "valid config should reload successfully, got: {result:?}"
         );
         let hot = result.unwrap();
-        // Privacy redaction_style should be reflected.
-        assert_eq!(hot.privacy.redaction_style, Some("blank".into()));
+        assert_eq!(hot.degradation.coalesce_frame_ms, Some(20.0));
     }
 
     #[test]
@@ -438,13 +427,15 @@ redaction_style = "blank"
         // config unchanged.
         let bad_config = r#"
 [runtime]
-profile = "full-display"
+profile = "custom"
+
+[display_profile]
+extends = "full-display"
+target_fps = 15
+min_fps = 30
 
 [[tabs]]
 name = "Tab1"
-
-[privacy]
-default_classification = "top_secret"
 "#;
         let result = reload_config(bad_config);
         assert!(
@@ -455,36 +446,16 @@ default_classification = "top_secret"
         assert!(
             errors
                 .iter()
-                .any(|e| matches!(e.code, ConfigErrorCode::UnknownClassification)),
-            "should return CONFIG_UNKNOWN_CLASSIFICATION, got: {errors:?}"
+                .any(|e| matches!(e.code, ConfigErrorCode::InvalidFpsRange)),
+            "should return CONFIG_INVALID_FPS_RANGE, got: {errors:?}"
         );
     }
 
     #[test]
-    fn test_reload_config_privacy_redaction_style_change() {
-        // Spec scenario: SIGHUP with redaction_style changed from "pattern" to "blank"
-        // → new style takes effect without restart.
-        let toml_v2 = r#"
-[runtime]
-profile = "full-display"
-
-[[tabs]]
-name = "Main"
-
-[privacy]
-redaction_style = "blank"
-"#;
-        let hot = reload_config(toml_v2).expect("reload should succeed");
-        assert_eq!(hot.privacy.redaction_style, Some("blank".into()));
-    }
-
-    #[test]
     fn test_reload_config_missing_optional_sections_use_defaults() {
-        // When [privacy] absent from new TOML, defaults applied.
+        // When optional sections are absent from new TOML, defaults applied.
         let hot = reload_config(minimal_valid_toml()).expect("reload should succeed");
-        // Privacy should default (all None).
-        assert!(hot.privacy.default_classification.is_none());
-        assert!(hot.privacy.redaction_style.is_none());
+        assert!(hot.degradation.coalesce_frame_ms.is_none());
         // Dynamic policy absent → None.
         assert!(hot.dynamic_policy.is_none());
     }

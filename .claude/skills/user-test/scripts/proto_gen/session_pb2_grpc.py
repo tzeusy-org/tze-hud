@@ -144,7 +144,7 @@ class RuntimeServiceStub(object):
 
     Implements RFC 0006 §9 (v1-mandatory): live configuration reload without
     process restart. The `ReloadConfig` RPC is one of the two required triggers
-    for hot-reloadable config sections ([privacy], [degradation], [chrome],
+    for hot-reloadable config sections ([degradation], [chrome],
     [agents.dynamic_policy]). The other trigger is SIGHUP (OS signal).
 
     Callers must supply the full TOML config; the runtime re-validates the entire
@@ -170,7 +170,7 @@ class RuntimeServiceServicer(object):
 
     Implements RFC 0006 §9 (v1-mandatory): live configuration reload without
     process restart. The `ReloadConfig` RPC is one of the two required triggers
-    for hot-reloadable config sections ([privacy], [degradation], [chrome],
+    for hot-reloadable config sections ([degradation], [chrome],
     [agents.dynamic_policy]). The other trigger is SIGHUP (OS signal).
 
     Callers must supply the full TOML config; the runtime re-validates the entire
@@ -182,7 +182,7 @@ class RuntimeServiceServicer(object):
         """Reload hot-reloadable configuration sections from a new TOML string.
 
         The runtime validates the supplied TOML. If validation succeeds, the
-        hot-reloadable sections ([privacy], [degradation], [chrome],
+        hot-reloadable sections ([degradation], [chrome],
         [agents.dynamic_policy]) are atomically applied. Frozen sections
         ([runtime], [[tabs]], [agents.registered]) are silently ignored.
 
@@ -216,7 +216,7 @@ class RuntimeService(object):
 
     Implements RFC 0006 §9 (v1-mandatory): live configuration reload without
     process restart. The `ReloadConfig` RPC is one of the two required triggers
-    for hot-reloadable config sections ([privacy], [degradation], [chrome],
+    for hot-reloadable config sections ([degradation], [chrome],
     [agents.dynamic_policy]). The other trigger is SIGHUP (OS signal).
 
     Callers must supply the full TOML config; the runtime re-validates the entire

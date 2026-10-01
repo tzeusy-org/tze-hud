@@ -4,7 +4,7 @@
 //! rendered on top of all agent content and are NEVER accessible to agents.
 //!
 //! The shell layer also implements human-override semantics: chrome sovereignty,
-//! safe mode, freeze, privacy redaction, and disconnection badges.
+//! safe mode, freeze, and disconnection badges.
 //!
 //! # Sovereignty contract
 //!
@@ -14,11 +14,6 @@
 //! - The shell is the **sole** owner of `OverrideState` transitions (freeze, safe mode).
 //!   No other subsystem may write these fields.
 //! - Override controls are local, frame-bounded, unconditional, and cannot be vetoed.
-//!
-//! # Redaction (Shell #4)
-//!
-//! Privacy redaction is handled by [`redaction`]. The shell is the sole owner of
-//! redaction rendering decisions. Agents are never notified. See `redaction.rs`.
 //!
 //! # Badges (Shell #5)
 //!
@@ -34,7 +29,6 @@
 pub mod badges;
 pub mod chrome;
 pub mod freeze;
-pub mod redaction;
 pub mod safe_mode;
 
 pub use chrome::{
@@ -65,8 +59,6 @@ pub use chrome::{
     ShortcutResult,
     SystemHealth,
     TabBarPosition,
-    ViewerClass,
-    ViewerClassTransition,
     collect_diagnostic,
     handle_shortcut,
     strip_chrome_from_topology,
@@ -92,28 +84,6 @@ pub use freeze::{
     DEFAULT_AUTO_UNFREEZE_MS, DEFAULT_FREEZE_QUEUE_CAPACITY, EnqueueResult, FreezeManager,
     FreezeQueue, FreezeState, MutationTrafficClass, QUEUE_PRESSURE_FRACTION, QueuedMutation,
     classify_mutation_batch,
-};
-
-pub use redaction::{
-    // Content classification (ViewerClass is already re-exported from chrome above)
-    ContentClassification,
-    MAX_PATTERN_ACCENT_RECTS,
-    // Rendering constants
-    PATTERN_CELL_PX,
-    REDACTION_BLANK_COLOR,
-    REDACTION_PATTERN_ACCENT,
-    REDACTION_PATTERN_BASE,
-    // Frame-level evaluation
-    RedactionFrame,
-    // Redaction style
-    RedactionStyle,
-    // Per-tile state
-    TileRedactionState,
-    // Placeholder rendering
-    build_redaction_cmds,
-    hit_regions_enabled,
-    // Core evaluation
-    is_tile_redacted,
 };
 
 pub use badges::{

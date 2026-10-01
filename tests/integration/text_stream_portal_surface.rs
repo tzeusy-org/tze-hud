@@ -10,10 +10,6 @@ use tze_hud_resource::{
     AgentBudget, CAPABILITY_UPLOAD_RESOURCE, ResourceStore, ResourceStoreConfig, ResourceType,
     UploadId, UploadStartRequest,
 };
-use tze_hud_runtime::{
-    ContentClassification, RedactionStyle, TileRedactionState, ViewerClass, build_redaction_cmds,
-    hit_regions_enabled, is_tile_redacted,
-};
 use tze_hud_scene::{
     Capability, DeliveryPolicy, MAX_MARKDOWN_BYTES, MessageClass, MonoUs, TimestampValidationInput,
     TimingError, TimingHints, WallUs, ZONE_TILE_Z_MIN,
@@ -836,7 +832,7 @@ fn expanded_transcript_materialization_is_bounded_to_viewport_and_budget() {
 }
 
 #[tokio::test]
-async fn portal_surface_state_remains_governed_by_existing_privacy_and_orphan_rules() {
+async fn portal_surface_state_remains_governed_by_orphan_rules() {
     let namespace = "portal-agent-governed";
     let store = ResourceStore::new(ResourceStoreConfig::default());
     let icon_id = upload_png_icon(&store, namespace).await;
@@ -883,32 +879,6 @@ async fn portal_surface_state_remains_governed_by_existing_privacy_and_orphan_ru
                 root_batch_for_tile(tile_id, root, nodes),
             ))
             .applied
-    );
-
-    let redacted = is_tile_redacted(ViewerClass::KnownGuest, ContentClassification::Private);
-    assert!(
-        redacted,
-        "portal content must redact under existing privacy policy"
-    );
-    let redaction_state = TileRedactionState::Redacted {
-        classification: ContentClassification::Private,
-    };
-    assert!(
-        !hit_regions_enabled(&redaction_state),
-        "redacted portal must not keep hit regions interactive"
-    );
-
-    let tile_bounds = scene.tiles.get(&tile_id).expect("tile must exist").bounds;
-    let cmds = build_redaction_cmds(tile_bounds, RedactionStyle::Pattern);
-    let cover = cmds.iter().any(|cmd| {
-        cmd.x == tile_bounds.x
-            && cmd.y == tile_bounds.y
-            && cmd.width == tile_bounds.width
-            && cmd.height == tile_bounds.height
-    });
-    assert!(
-        cover,
-        "redaction placeholder must preserve portal geometry while replacing visible content"
     );
 
     scene

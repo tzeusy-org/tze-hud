@@ -169,8 +169,8 @@ pub use shell::chrome::{
     AgentVisibleTopology, AuditPayload, AuditTrigger, ChromeLayout, ChromeRenderer, ChromeShortcut,
     ChromeState, ChromeTab, CollectingAuditSink, DiagnosticSnapshot, DismissTileResult,
     NoopAuditSink, RevokeReason, SafeModeEntryReason, ShellAuditEvent, ShellAuditSink,
-    ShortcutResult, SystemHealth, TabBarPosition, ViewerClass, ViewerClassTransition,
-    collect_diagnostic, handle_shortcut, strip_chrome_from_topology,
+    ShortcutResult, SystemHealth, TabBarPosition, collect_diagnostic, handle_shortcut,
+    strip_chrome_from_topology,
 };
 pub use shell::safe_mode::{
     LeaseResumeInfo, SafeModeController, SafeModeEntryResult, SafeModeExitResult, SafeModeInput,
@@ -196,12 +196,6 @@ pub use tab_switch_trigger::{
     TabSwitchTrigger,
 };
 pub use tze_hud_compositor::ChromeDrawCmd;
-
-pub use shell::redaction::{
-    ContentClassification, MAX_PATTERN_ACCENT_RECTS, PATTERN_CELL_PX, REDACTION_BLANK_COLOR,
-    REDACTION_PATTERN_ACCENT, REDACTION_PATTERN_BASE, RedactionFrame, RedactionStyle,
-    TileRedactionState, build_redaction_cmds, hit_regions_enabled, is_tile_redacted,
-};
 
 pub use admission::{
     AdmissionController, AdmissionOutcome, DEFAULT_MAX_GUEST_SESSIONS,
