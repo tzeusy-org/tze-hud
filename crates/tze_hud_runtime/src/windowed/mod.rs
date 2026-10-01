@@ -2586,7 +2586,6 @@ impl WindowedRuntime {
             token_store: TokenStore::new(),
             freeze_active: false,
             degradation_level: tze_hud_protocol::session::RuntimeDegradationLevel::Normal,
-            media_ingress_active: None,
             input_capture_tx: Some(input_capture_tx),
             input_capture_wake: wake.main_work_notifier(),
             // Expose the runtime's ACTIVE-profile resolved portal tokens over the

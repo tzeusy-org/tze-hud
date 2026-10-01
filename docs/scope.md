@@ -1,8 +1,9 @@
 # Scope and reset plan
 
-The project is being cut back from a general "agent presence engine" to the
-four surfaces in [vision.md](vision.md). The cut happens in place, in
-tranches. Each tranche must still build, pass tests, and boot the overlay.
+The project is being cut back from a general "agent presence engine" to an
+MCP/gRPC layer for the HUD real-estate lifecycle (see [vision.md](vision.md)).
+Tranches T0–T4 remove what doesn't serve that; T5 redesigns the API that
+remains. Each tranche must still build, pass tests, and boot the overlay.
 
 ## Keep
 
@@ -18,15 +19,16 @@ tranches. Each tranche must still build, pass tests, and boot the overlay.
 | Frame/idle telemetry | `tze_hud_telemetry` |
 | App binary | `app/tze_hud_app` |
 
-## Remove
+## Tranches
 
 | Tranche | What | Status |
 |---|---|---|
 | T0 | Doctrine, RFCs, OpenSpec, curriculum, evidence/report docs, doctrine and OpenSpec agent skills, vocabulary lint | done |
 | T1 | Unused crates: `tze_hud_a11y`, `tze_hud_media_apple`, `tze_hud_media_android`, `tze_hud_policy`; Android/iOS/Safari CI workflows | done |
-| T2 | Media: GStreamer feature, media ingress/admission, video surface, `v2_preview`, real-decode CI | pending |
-| T3 | Governance: attention budget, quiet hours, admission, budget ladder, capability matrix, lease TTL renewal, redaction; leases become ownership + disconnect cleanup | pending |
+| T2 | Media and cloud relay: GStreamer/`v2_preview` features, media ingress/admission, video surface, media signaling protobuf messages (field numbers reserved), media config and capability, real-decode and v2-preview CI, Python media exemplars | done |
+| T3 | Governance: attention budget, quiet hours, privacy redaction, policy-shaped admission and budget ladder, degradation ladder down to one fallback. **Keep** the lease lifecycle (request, TTL, renew, release, revoke, disconnect grace); capability scopes shrink to a per-agent zone/widget allowlist | pending |
 | T4 | Component profiles (keep tokens), sync groups / clock domains, replay, calibration, unused test scenes; `tze_hud_validation` + v1-thesis/Layer-4 artifact harness; shrink oversized test files | pending |
+| T5 | API design pass: one coherent verb set per lifecycle stage (discover, claim, fill, interact, hold, release, reclaim) across MCP and gRPC; measure token cost per stage; collapse accreted constructors and per-feature parameter threading in the session server | pending |
 
 ## Working rules
 

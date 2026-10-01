@@ -262,11 +262,6 @@ pub struct SharedState {
     /// Current degradation level (RFC 0005 §3.4).
     /// Default: Normal (no degradation).
     pub degradation_level: RuntimeDegradationLevel,
-    /// Runtime-global Windows media ingress admission slot.
-    ///
-    /// The active exemplar slice admits at most one inbound media stream for
-    /// the approved surface, regardless of how many sessions are connected.
-    pub media_ingress_active: Option<MediaIngressSharedState>,
     /// Optional bridge for session-plane pointer capture requests. Windowed
     /// runtime installs this so gRPC InputCaptureRequest/InputCaptureRelease
     /// mutates the same InputProcessor used for OS pointer routing.
@@ -316,15 +311,6 @@ impl SharedState {
             .map(|g| *g)
             .unwrap_or_else(|poisoned| *poisoned.into_inner())
     }
-}
-
-/// Runtime-global owner for the currently admitted Windows media ingress stream.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MediaIngressSharedState {
-    pub publisher_namespace: String,
-    pub stream_epoch: u64,
-    pub zone_name: String,
-    pub surface_id: SceneId,
 }
 
 /// Bounded per-session event channel capacity (events).

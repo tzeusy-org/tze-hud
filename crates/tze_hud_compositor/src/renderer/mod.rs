@@ -76,9 +76,9 @@ mod retained;
 pub mod text;
 pub mod tile_render;
 pub mod token_colors;
-pub mod video;
 pub mod viewer_echo;
 pub mod widget_geometry;
+pub mod widgets;
 pub mod zone_render;
 
 pub use retained::RetainedChangeEfficiencyCapture;
@@ -512,27 +512,6 @@ pub struct Compositor {
     /// (which is effectively bypassed because `resize_reprime_last_at` is
     /// `None` and the gate never defers on the first call).
     resize_reprime_content_bytes: usize,
-    /// Per-surface video state machines (v2 media plane, E26 / B11).
-    ///
-    /// Keyed by the `SceneId` carried in `ZoneContent::VideoSurfaceRef`.
-    /// In v1 builds (no `v2_preview` feature) this is a zero-cost empty
-    /// stub that always returns `VideoRenderState::Placeholder`.
-    ///
-    /// The runtime delivers [`crate::video_surface::MediaEvent`]s to this
-    /// map via [`Compositor::handle_media_event`].  The render path queries
-    /// it each frame via [`crate::video_surface::VideoSurfaceMap::render_state_for`].
-    pub video_surfaces: crate::video_surface::VideoSurfaceMap,
-    /// GPU texture cache for decoded video frames (v2 media plane, `v2_preview` only).
-    ///
-    /// Keyed by the `SceneId` carried in `ZoneContent::VideoSurfaceRef`.
-    /// One entry per active video surface; populated by
-    /// [`Compositor::upload_video_frame`] and evicted when the surface
-    /// transitions to a terminal state ([`Compositor::evict_video_frame_texture`]).
-    ///
-    /// In v1 builds (no `v2_preview` feature) this field is absent; the render
-    /// path always falls back to the dark placeholder quad.
-    #[cfg(feature = "v2_preview")]
-    pub(crate) video_frame_cache: HashMap<tze_hud_scene::types::SceneId, ImageTextureEntry>,
     /// Shared handle for receiving local composer echo state from the
     /// input-event thread (main thread) without blocking on the scene lock.
     ///
@@ -835,9 +814,6 @@ impl Compositor {
             image_dims: HashMap::new(),
             image_texture_cache: HashMap::new(),
             failed_icon_paths: HashSet::new(),
-            video_surfaces: crate::video_surface::VideoSurfaceMap::new(),
-            #[cfg(feature = "v2_preview")]
-            video_frame_cache: HashMap::new(),
             local_composer_state: Arc::new(StdMutex::new(None)),
             viewer_echo_queue: Arc::new(StdMutex::new(Vec::new())),
             viewer_echoes: viewer_echo::ViewerEchoStore::new(),
@@ -1159,9 +1135,6 @@ impl Compositor {
             image_dims: HashMap::new(),
             image_texture_cache: HashMap::new(),
             failed_icon_paths: HashSet::new(),
-            video_surfaces: crate::video_surface::VideoSurfaceMap::new(),
-            #[cfg(feature = "v2_preview")]
-            video_frame_cache: HashMap::new(),
             local_composer_state: Arc::new(StdMutex::new(None)),
             viewer_echo_queue: Arc::new(StdMutex::new(Vec::new())),
             viewer_echoes: viewer_echo::ViewerEchoStore::new(),

@@ -36,9 +36,6 @@ pub struct WindowedFrameBuild {
     context_menu_vertices: Vec<RectVertex>,
     /// Precomputed per-instance widget draw quads.
     widget_quads: Vec<crate::widget::WidgetDrawQuad>,
-    /// Decoded video-frame draw commands (v2_preview only).
-    #[cfg(feature = "v2_preview")]
-    video_cmds: Vec<VideoFrameDrawCmd>,
     /// Wall-clock start of the frame, for the total frame-time telemetry.
     frame_start: std::time::Instant,
 }
@@ -583,10 +580,6 @@ impl Compositor {
         // stage run lock-free.
         let encode_inputs = self.collect_encode_inputs(scene, surf_w, surf_h);
 
-        // ── Decoded video-frame draw commands (v2_preview only) ──────────────
-        #[cfg(feature = "v2_preview")]
-        let video_cmds = self.collect_video_frame_cmds(scene, sw, sh);
-
         // ── Widget draw geometry (precomputed from the registry) ─────────────
         let widget_quads = self.collect_widget_draw_geometry(scene, sw, sh);
 
@@ -616,8 +609,6 @@ impl Compositor {
             focus_ring_vertices,
             context_menu_vertices,
             widget_quads,
-            #[cfg(feature = "v2_preview")]
-            video_cmds,
             frame_start,
         }
     }
@@ -661,8 +652,6 @@ impl Compositor {
             focus_ring_vertices,
             context_menu_vertices,
             widget_quads,
-            #[cfg(feature = "v2_preview")]
-            video_cmds,
             frame_start,
         } = build;
 
@@ -701,13 +690,6 @@ impl Compositor {
 
         // ── Image pass: draw textured quads on top of color geometry ─────────
         self.encode_image_pass(&mut encoder, &frame.view, &textured_cmds, sw, sh);
-
-        // ── Video frame pass: draw decoded video textures over dark placeholders ──
-        // Only active when `v2_preview` is enabled; no-op otherwise.
-        #[cfg(feature = "v2_preview")]
-        {
-            self.encode_video_frame_pass(&mut encoder, &frame.view, &video_cmds, sw, sh);
-        }
 
         // ── Widget pass: composite pre-synced textures above zone content ────
         self.encode_widget_pass_prepared(&mut encoder, &frame.view, &widget_quads, sw, sh);
@@ -768,9 +750,6 @@ impl Compositor {
                 gpu_submitted,
             };
         }
-
-        // Evict terminal video surface entries periodically to prevent unbounded growth.
-        self.maybe_prune_terminal_video_surfaces();
 
         telemetry.frame_time_us = frame_start.elapsed().as_micros() as u64;
         WindowedPresentOutcome {
@@ -930,13 +909,6 @@ impl Compositor {
         // ── Image pass: draw textured quads on top of color geometry ─────────
         self.encode_image_pass(&mut encoder, &frame.view, &textured_cmds, sw, sh);
 
-        // ── Video frame pass: draw decoded video textures over dark placeholders ──
-        #[cfg(feature = "v2_preview")]
-        {
-            let video_cmds = self.collect_video_frame_cmds(scene, sw, sh);
-            self.encode_video_frame_pass(&mut encoder, &frame.view, &video_cmds, sw, sh);
-        }
-
         // ── Widget pass: composite pre-synced textures above zone content ────
         self.encode_widget_pass(&mut encoder, &frame.view, &scene.widget_registry, sw, sh);
         self.encode_drag_handle_pass(&mut encoder, &frame.view, &drag_handle_vertices);
@@ -977,9 +949,6 @@ impl Compositor {
         self.populate_zone_hit_regions(scene, sw, sh);
         // Reuse the pre-computed drag_handles list rather than collecting again.
         self.populate_drag_handle_hit_regions_from(scene, drag_handles);
-
-        // Evict terminal video surface entries periodically to prevent unbounded growth.
-        self.maybe_prune_terminal_video_surfaces();
 
         // Seed the private retained snapshot only after this real full frame
         // completed its submit/readback tail. Structured fallback diagnostics
@@ -1323,13 +1292,6 @@ impl Compositor {
         // ── Image pass: draw textured quads on top of color geometry ─────────
         self.encode_image_pass(&mut encoder, &surface.view, &textured_cmds, sw, sh);
 
-        // ── Video frame pass: draw decoded video textures over dark placeholders ──
-        #[cfg(feature = "v2_preview")]
-        {
-            let video_cmds = self.collect_video_frame_cmds(scene, sw, sh);
-            self.encode_video_frame_pass(&mut encoder, &surface.view, &video_cmds, sw, sh);
-        }
-
         // ── Widget pass: composite pre-synced textures above content + text ──
         // sync_widget_textures is called earlier, before frame encoding begins.
         self.encode_widget_pass(&mut encoder, &surface.view, &scene.widget_registry, sw, sh);
@@ -1372,9 +1334,6 @@ impl Compositor {
         self.queue.submit(std::iter::once(encoder.finish()));
         self.device.poll(wgpu::Maintain::Wait);
         telemetry.stage7_gpu_submit_us = submit_start.elapsed().as_micros() as u64;
-
-        // Evict terminal video surface entries periodically to prevent unbounded growth.
-        self.maybe_prune_terminal_video_surfaces();
 
         telemetry.frame_time_us = frame_start.elapsed().as_micros() as u64;
         telemetry

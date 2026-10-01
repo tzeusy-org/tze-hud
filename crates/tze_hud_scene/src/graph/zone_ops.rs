@@ -828,7 +828,6 @@ impl SceneGraph {
             ZoneContent::StatusBar(_) => Some(ZoneMediaType::KeyValuePairs),
             ZoneContent::SolidColor(_) => Some(ZoneMediaType::SolidColor),
             ZoneContent::StaticImage(_) => Some(ZoneMediaType::StaticImage),
-            ZoneContent::VideoSurfaceRef(_) => Some(ZoneMediaType::VideoSurfaceRef),
         }
     }
 

@@ -771,7 +771,6 @@ pub fn handle_list_zones(params: Value, scene: &SceneGraph) -> McpResult<ListZon
                     ZoneMediaType::StreamText => "stream_text".to_string(),
                     ZoneMediaType::ShortTextWithIcon => "notification".to_string(),
                     ZoneMediaType::KeyValuePairs => "status_bar".to_string(),
-                    ZoneMediaType::VideoSurfaceRef => "video_surface_ref".to_string(),
                     ZoneMediaType::StaticImage => "static_image".to_string(),
                     ZoneMediaType::SolidColor => "solid_color".to_string(),
                 })

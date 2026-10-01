@@ -19,7 +19,6 @@
 //! - `high_priority_z_order`
 //! - `exceed_default_budgets`
 //! - `read_telemetry`
-//! - `media_ingress`
 //! - `resident_mcp`
 //!
 //! Parameterized (prefix + non-empty suffix):
@@ -223,7 +222,6 @@ mod tests {
             "high_priority_z_order",
             "exceed_default_budgets",
             "read_telemetry",
-            "media_ingress",
             "resident_mcp",
             "publish_zone:*",
             "publish_zone:subtitle",

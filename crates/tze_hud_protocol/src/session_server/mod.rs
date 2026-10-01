@@ -70,7 +70,6 @@ pub mod input_event_bus;
 pub mod lease_expiry_bus;
 pub mod leases;
 pub mod lifecycle;
-pub mod media;
 pub mod mutations;
 pub mod service;
 pub mod stream_session;
@@ -102,10 +101,6 @@ pub use input_event_bus::{InputEventReceiver, InputEventRecvError, InputEventSen
 pub use lease_expiry_bus::{LeaseExpiryNotice, LeaseExpiryReceiver, LeaseExpirySender};
 use leases::{handle_lease_release, handle_lease_renew, handle_lease_request};
 pub use lifecycle::SessionState;
-use media::{
-    MediaIngressCloseDisposition, close_active_media_ingress, handle_media_ingress_close,
-    handle_media_ingress_open,
-};
 use mutations::{apply_queued_batch_to_scene, handle_mutation_batch};
 pub use service::HudSessionImpl;
 pub use stream_session::CapabilityRevocationEvent;
@@ -136,10 +131,6 @@ const DEFAULT_HEARTBEAT_TIMEOUT_MS: u64 =
 
 /// Default maximum sequence gap before SEQUENCE_GAP_EXCEEDED (RFC 0005 §2.3).
 const DEFAULT_MAX_SEQUENCE_GAP: u64 = 100;
-
-/// Maximum declared peak bitrate budget for a single media ingress stream (kbps).
-/// Used by `media::media_open_rejection` and referenced in tests.
-pub(super) const MEDIA_INGRESS_PEAK_KBPS_BUDGET: u32 = 25_000;
 
 // ─── Helper ─────────────────────────────────────────────────────────────────
 
@@ -512,7 +503,6 @@ impl HudSession for HudSessionImpl {
         let fallback_resource_budget = self.fallback_resource_budget.clone();
         let budget_enforcer = self.budget_enforcer.clone();
         let fallback_unrestricted = self.fallback_unrestricted;
-        let media_ingress_config = self.media_ingress_config.clone();
         let render_wake = self.render_wake.clone();
         let degradation_notices = self.degradation_notices.clone();
         // This durable lane is subscribed before the handler task starts so a
@@ -775,7 +765,6 @@ impl HudSession for HudSessionImpl {
                             &state,
                             &tx,
                             &upload_command_tx,
-                            &media_ingress_config,
                             &render_wake,
                         ).await {
                             LoopAction::Continue => continue,
@@ -810,7 +799,6 @@ impl HudSession for HudSessionImpl {
                             revocation_result,
                             &state,
                             &tx,
-                            &render_wake,
                         ).await {
                             break;
                         }
@@ -875,22 +863,6 @@ impl HudSession for HudSessionImpl {
                 }
             }
 
-            if session.media_ingress.is_some() {
-                close_active_media_ingress(
-                    &state,
-                    session,
-                    &tx,
-                    MediaIngressCloseDisposition {
-                        reason: MediaCloseReason::SessionDisconnected as i32,
-                        detail: "session closed with active media ingress stream".to_string(),
-                        final_state: MediaSessionState::Closed as i32,
-                        retry_after_us: None,
-                    },
-                    &render_wake,
-                )
-                .await;
-            }
-
             // Cleanup: remove session from registry and store resume token.
             //
             // The resume token issued at handshake time is saved to the TokenStore so
@@ -937,7 +909,6 @@ async fn handle_client_message(
     session: &mut StreamSession,
     tx: &tokio::sync::mpsc::Sender<Result<ServerMessage, Status>>,
     upload_command_tx: &tokio::sync::mpsc::Sender<UploadWorkerCommand>,
-    media_ingress_config: &tze_hud_scene::config::MediaIngressConfig,
     render_wake: &tze_hud_scene::render_wake::RenderWakeNotifier,
     msg: ClientMessage,
 ) {
@@ -1058,87 +1029,7 @@ async fn handle_client_message(
         ClientPayload::SessionInit(_) | ClientPayload::SessionResume(_) => {
             // Protocol violation: ignore (or could send RuntimeError)
         }
-
-        // ── Media plane (RFC 0014 §2.2.1) — v1 runtime stubs ────────────────
-        // The v1 runtime does not implement media plane signaling.
-        // These stubs are wire-complete; the implementation is deferred to v2.
-        //
-        // Transactional messages (RFC 0014 §2.4): reject with CAPABILITY_NOT_IMPLEMENTED
-        // so agents can distinguish a soft rejection from a hard protocol violation.
-        // Ephemeral realtime messages (MediaIceCandidate): silently dropped to avoid
-        // outbound channel saturation — ICE candidates can arrive at high frequency and
-        // an error per candidate would be wasteful (an earlier MediaIngressOpen rejection
-        // already signals the capability is unavailable).
-        // NOTE: ClientPayload::MediaEgressOpen (field 64) is plain `reserved` in the
-        // proto — no variant exists until phase 4 egress is defined. Any bytes at
-        // field 64 are treated as an unrecognised payload by prost and will not match
-        // this arm; the outer fallthrough handler covers that case.
-        ClientPayload::MediaIngressOpen(open) => {
-            let _ = handle_media_ingress_open(
-                state,
-                session,
-                tx,
-                media_ingress_config,
-                open,
-                render_wake,
-            )
-            .await;
-        }
-        ClientPayload::MediaIngressClose(close) => {
-            handle_media_ingress_close(state, session, tx, close, render_wake).await;
-        }
-        ClientPayload::MediaSdpAnswer(_)
-        | ClientPayload::MediaPauseRequest(_)
-        | ClientPayload::MediaResumeRequest(_)
-        | ClientPayload::CloudRelayOpen(_)
-        | ClientPayload::CloudRelayClose(_) => {
-            // Reject with CAPABILITY_NOT_IMPLEMENTED (RFC 0014 §2.4).
-            send_runtime_error(
-                session,
-                tx,
-                "CAPABILITY_NOT_IMPLEMENTED",
-                "media message is deferred outside the one-stream Windows ingress slice",
-                "windows-media-ingress-exemplar deferred media message",
-                ErrorCode::Unknown,
-            )
-            .await;
-        }
-
-        // Ephemeral realtime: silently drop ICE candidates in v1 stub to avoid
-        // outbound error flooding if an agent mistakenly sends them (RFC 0014 §2.4).
-        ClientPayload::MediaIceCandidate(_) => {}
     }
-}
-
-/// Send a `RuntimeError` server message.
-///
-/// Canonical definition shared by this module and all handler submodules.
-/// Submodules call this as `super::send_runtime_error(...)`. No visibility
-/// modifier is needed: Rust child modules can always reach a parent module's
-/// private items, and keeping this private avoids leaking it beyond the
-/// `session_server` boundary.
-async fn send_runtime_error(
-    session: &mut StreamSession,
-    tx: &tokio::sync::mpsc::Sender<Result<ServerMessage, Status>>,
-    error_code: &str,
-    message: &str,
-    context: &str,
-    error_code_enum: ErrorCode,
-) {
-    let seq = session.next_server_seq();
-    let _ = tx
-        .send(Ok(ServerMessage {
-            sequence: seq,
-            timestamp_wall_us: now_wall_us(),
-            payload: Some(ServerPayload::RuntimeError(RuntimeError {
-                error_code: error_code.to_string(),
-                message: message.to_string(),
-                context: context.to_string(),
-                hint: String::new(),
-                error_code_enum: error_code_enum as i32,
-            })),
-        }))
-        .await;
 }
 
 /// Signal returned by each `on_*` select-arm handler.
@@ -1170,7 +1061,6 @@ impl StreamSession {
         state: &Arc<Mutex<SharedState>>,
         tx: &tokio::sync::mpsc::Sender<Result<ServerMessage, tonic::Status>>,
         upload_command_tx: &tokio::sync::mpsc::Sender<UploadWorkerCommand>,
-        media_ingress_config: &tze_hud_scene::config::MediaIngressConfig,
         render_wake: &tze_hud_scene::render_wake::RenderWakeNotifier,
     ) -> LoopAction {
         match msg_result {
@@ -1200,16 +1090,8 @@ impl StreamSession {
                     // This is a retransmit: dispatch to the lease handler which
                     // will replay the cached response.  Skip sequence validation
                     // so the duplicate sequence does not terminate the session.
-                    handle_client_message(
-                        state,
-                        self,
-                        tx,
-                        upload_command_tx,
-                        media_ingress_config,
-                        render_wake,
-                        msg,
-                    )
-                    .await;
+                    handle_client_message(state, self, tx, upload_command_tx, render_wake, msg)
+                        .await;
                     return LoopAction::Continue;
                 }
 
@@ -1243,16 +1125,7 @@ impl StreamSession {
                 // Check if this is a graceful close message
                 let is_close = matches!(&msg.payload, Some(ClientPayload::SessionClose(_)));
 
-                handle_client_message(
-                    state,
-                    self,
-                    tx,
-                    upload_command_tx,
-                    media_ingress_config,
-                    render_wake,
-                    msg,
-                )
-                .await;
+                handle_client_message(state, self, tx, upload_command_tx, render_wake, msg).await;
 
                 // After handling SessionClose, transition to Disconnecting then Closed
                 if is_close {
@@ -1392,15 +1265,12 @@ impl StreamSession {
         >,
         state: &Arc<Mutex<SharedState>>,
         tx: &tokio::sync::mpsc::Sender<Result<ServerMessage, tonic::Status>>,
-        render_wake: &tze_hud_scene::render_wake::RenderWakeNotifier,
     ) -> LoopAction {
         match revocation_result {
             Ok(event) => {
                 // Only this session's leases are affected.
-                let global_media_ingress_revoke =
-                    event.capability_name == "media_ingress" && event.lease_id.is_null();
-                if global_media_ingress_revoke || self.lease_ids.contains(&event.lease_id) {
-                    handle_capability_revocation(state, self, tx, event, render_wake).await;
+                if self.lease_ids.contains(&event.lease_id) {
+                    handle_capability_revocation(state, self, tx, event).await;
                 }
                 LoopAction::Continue
             }

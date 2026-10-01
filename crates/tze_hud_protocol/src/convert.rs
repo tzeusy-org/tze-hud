@@ -534,11 +534,6 @@ pub fn proto_zone_content_to_scene(c: &proto::ZoneContent) -> Option<ZoneContent
                 None
             }
         }
-        // VideoSurfaceRef → ZoneContent::VideoSurfaceRef (WM-S2b types.proto delta; RFC 0014 §2.7).
-        // The surface_id carries the 16-byte UUIDv7 (little-endian) assigned by MediaIngressOpenResult.
-        Payload::VideoSurfaceRef(v) => {
-            SceneId::from_bytes_le(&v.surface_id).map(ZoneContent::VideoSurfaceRef)
-        }
     }
 }
 
@@ -574,18 +569,6 @@ pub fn scene_zone_content_to_proto(c: &ZoneContent) -> proto::ZoneContent {
         ZoneContent::StaticImage(resource_id) => Payload::StaticImageRef(proto::StaticImageRef {
             resource_id: resource_id.as_bytes().to_vec(),
         }),
-        // VideoSurfaceRef → VideoSurfaceRef proto: encode the 16-byte surface ID (RFC 0014 §2.7).
-        // Snapshot parity: expires_at_wall_us and content_classification are snapshot parity fields
-        // defined on VideoSurfaceRef (WM-S2b types.proto delta), but per WM-S2b snapshot exclusion
-        // rules they are NOT carried inside ZoneContent; they live on ZonePublishRecordProto
-        // (fields 6-7) and are zeroed here to keep ZoneContent clean of publication state.
-        ZoneContent::VideoSurfaceRef(scene_id) => {
-            Payload::VideoSurfaceRef(proto::VideoSurfaceRef {
-                surface_id: scene_id.to_bytes_le().to_vec(),
-                expires_at_wall_us: 0, // Not carried in ZoneContent; see ZonePublishRecordProto.expires_at_wall_us
-                content_classification: String::new(), // Not carried in ZoneContent; see ZonePublishRecordProto.content_classification
-            })
-        }
     };
     proto::ZoneContent {
         payload: Some(payload),
@@ -1047,10 +1030,6 @@ pub fn proto_to_rendering_policy(p: &proto::RenderingPolicyProto) -> RenderingPo
         } else {
             None
         },
-        // media_disconnect_badge_color is config-layer only (design token).
-        // It is NOT transmitted via proto — badge color is resolved at profile
-        // load time and is not a per-publish payload field.
-        media_disconnect_badge_color: None,
         // stream_tail_anchored is config-layer only (zone configuration / design
         // token). It is NOT transmitted via proto — it is resolved at profile
         // load time and is not a per-publish payload field.

@@ -337,29 +337,6 @@ pub struct RawWidgetGeometry {
     pub height_pct: Option<f32>,
 }
 
-// ─── [media_ingress] ─────────────────────────────────────────────────────────
-
-/// `[media_ingress]` table — optional, default-off.
-///
-/// This is the approved Windows-only media ingress configuration surface for
-/// `windows-media-ingress-exemplar`. Absence means media ingress is disabled.
-#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
-pub struct RawMediaIngress {
-    /// Explicit enablement. Defaults to false when the table is absent.
-    #[serde(default)]
-    pub enabled: bool,
-    /// Approved zone identity. The accepted Windows slice requires `media-pip`.
-    pub approved_zone: Option<String>,
-    /// Per-runtime active stream limit. The accepted Windows slice requires `1`.
-    pub max_active_streams: Option<u32>,
-    /// Classification assigned when a media open omits one.
-    pub default_classification: Option<String>,
-    /// Persistent operator-disable flag.
-    pub operator_disabled: Option<bool>,
-    /// Fixed absolute media-zone geometry.
-    pub geometry: Option<RawWidgetGeometry>,
-}
-
 // ─── [design_tokens] ─────────────────────────────────────────────────────────
 
 /// `[design_tokens]` table — optional.
@@ -430,8 +407,6 @@ pub struct RawConfig {
     pub chrome: Option<RawChrome>,
     pub zones: Option<RawZones>,
     pub agents: Option<RawAgents>,
-    /// Optional Windows media ingress configuration. Absence means disabled.
-    pub media_ingress: Option<RawMediaIngress>,
     /// Optional widget bundle directories to scan at startup.
     pub widget_bundles: Option<RawWidgetBundles>,
     /// Optional runtime widget asset store configuration.

@@ -1,10 +1,11 @@
 # tze_hud
 
-A local Windows overlay HUD for a few trusted LLM agents. Agents get four
-surfaces: a session portal (live output plus a reply composer), ambient zones
-(one MCP call to put text on screen), agent-owned tiles (gRPC), and SVG
-widgets. The runtime owns layout, styling, and rendering; agents only state
-intent.
+An MCP/gRPC layer that lets models manage the real-estate lifecycle of a HUD
+over the user's screen: claim space, fill it, keep it current, take input,
+and give it back. Surfaces: a session portal (live output plus a reply
+composer), ambient zones (one MCP call to put text on screen), agent-owned
+tiles (gRPC), and SVG widgets, rendered on a Windows overlay. The runtime
+owns layout, styling, and rendering; models only state intent.
 
 See [`docs/vision.md`](docs/vision.md) for what this is and isn't, and
 [`docs/scope.md`](docs/scope.md) for the in-progress scope reset.

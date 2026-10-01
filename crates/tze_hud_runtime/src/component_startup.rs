@@ -331,9 +331,6 @@ pub fn run_component_startup(
             zone_def.rendering_policy = effective_policy.clone();
         }
     }
-    if let Some(media_zone) = tze_hud_config::approved_media_zone(raw) {
-        zone_registry.register(media_zone);
-    }
 
     // Apply the populated zone registry to the scene graph.
     scene.zone_registry = zone_registry.clone();

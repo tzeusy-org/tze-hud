@@ -37,9 +37,8 @@ use super::LayerPartitionedRoundedRectCmds;
 use super::draw_cmds::TexturedDrawCmd;
 use super::tile_render::node_uses_display_tile_scroll;
 use super::token_colors::{
-    NOTIFICATION_BACKDROP_OPACITY, STATIC_IMAGE_PLACEHOLDER_COLOR, VIDEO_SURFACE_PLACEHOLDER_COLOR,
-    is_alert_banner_zone, linear_to_srgb, srgb_to_linear, urgency_to_notification_color,
-    urgency_to_severity_color,
+    NOTIFICATION_BACKDROP_OPACITY, STATIC_IMAGE_PLACEHOLDER_COLOR, is_alert_banner_zone,
+    linear_to_srgb, srgb_to_linear, urgency_to_notification_color, urgency_to_severity_color,
 };
 
 #[inline]
@@ -407,13 +406,6 @@ impl super::Compositor {
                         let backdrop_rgba: Option<Rgba> = match &record.content {
                             ZoneContent::SolidColor(rgba) => Some(*rgba),
                             ZoneContent::StaticImage(_) => Some(STATIC_IMAGE_PLACEHOLDER_COLOR),
-                            // VideoSurfaceRef: render a dark placeholder quad in all states.
-                            // Full decoded-frame texture upload follows in a later task.
-                            // The disconnection badge (B11) is added by the chrome layer
-                            // when video_surfaces.render_state_for() == LastFrameWithBadge.
-                            ZoneContent::VideoSurfaceRef(_) => {
-                                Some(VIDEO_SURFACE_PLACEHOLDER_COLOR)
-                            }
                             ZoneContent::Notification(n) if is_alert_banner_zone(zone_name) => {
                                 if policy.backdrop.is_some() {
                                     Some(urgency_to_severity_color(n.urgency, &self.token_map))
@@ -473,9 +465,6 @@ impl super::Compositor {
                     let backdrop_rgba: Option<Rgba> = match &latest.content {
                         ZoneContent::SolidColor(rgba) => Some(*rgba),
                         ZoneContent::StaticImage(_) => Some(STATIC_IMAGE_PLACEHOLDER_COLOR),
-                        // VideoSurfaceRef: dark placeholder in all states (full GPU
-                        // frame upload follows in a later task; badge via chrome layer).
-                        ZoneContent::VideoSurfaceRef(_) => Some(VIDEO_SURFACE_PLACEHOLDER_COLOR),
                         ZoneContent::Notification(n) if is_alert_banner_zone(zone_name) => {
                             if policy.backdrop.is_some() {
                                 Some(urgency_to_severity_color(n.urgency, &self.token_map))

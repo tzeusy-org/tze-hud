@@ -4,14 +4,11 @@
 //!
 //! ## Background
 //!
-//! The tzehouse-windows box (`windows-host.example`, RTX 3080) is dual-use:
-//! - **Interactive `/user-test` sessions** — wgpu compositor running `tze_hud.exe`
-//! - **Nightly real-decode CI** — GStreamer D3D11/NVDEC decoders
-//!
-//! Running both concurrently can cause DXGI device-lost errors, GPU OOM, or
-//! corrupted decode test output. A file-based advisory lock provides mutual
-//! exclusion. See `docs/design/tzehouse-windows-gpu-scheduling.md` for the full
-//! policy.
+//! The tzehouse-windows box (`windows-host.example`, RTX 3080) is shared
+//! between interactive `/user-test` sessions and scripted GPU runs (perf and
+//! readback proofs). Running them concurrently can cause DXGI device-lost
+//! errors or skewed measurements. A file-based advisory lock provides mutual
+//! exclusion.
 //!
 //! ## Lock file
 //!

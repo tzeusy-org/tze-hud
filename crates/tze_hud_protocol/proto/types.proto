@@ -494,18 +494,6 @@ message StaticImageRef {
   bytes resource_id = 1;  // 32-byte BLAKE3 content hash (ResourceIdProto.bytes); MUST NOT be empty
 }
 
-// Runtime-assigned surface reference for zone-bound media streams (field 6 in
-// ZoneContent oneof). Materialised by the compositor when a MediaIngressOpen is
-// admitted for a zone-bound stream (RFC 0014 §2.3.1, §2.7). The `surface_id`
-// echoes MediaIngressOpenResult.assigned_surface_id and is stable for the
-// lifetime of the stream's stream_epoch. Carries declarative publication state
-// only; transport internals MUST NOT appear here (WM-S2b snapshot exclusion).
-message VideoSurfaceRef {
-  bytes  surface_id             = 1;  // 16-byte UUIDv7 runtime-assigned surface identity
-  uint64 expires_at_wall_us     = 2;  // Absolute expiry UTC µs (0 = no expiry); snapshot parity
-  string content_classification = 3;  // Empty = unclassified (RFC 0009 A1 viewer-class filter)
-}
-
 message ZoneContent {
   oneof payload {
     string              stream_text       = 1;
@@ -513,8 +501,8 @@ message ZoneContent {
     StatusBarPayload    status_bar        = 3;
     Rgba                solid_color       = 4;
     StaticImageRef      static_image_ref  = 5;  // Content-addressed static image (WM-S2b types.proto delta)
-    VideoSurfaceRef     video_surface_ref = 6;  // Zone-bound media surface (RFC 0014 §2.7; WM-S2b types.proto delta)
   }
+  reserved 6;  // video_surface_ref, removed in the 2026-10 scope reset
 }
 
 message ZonePublishToken {

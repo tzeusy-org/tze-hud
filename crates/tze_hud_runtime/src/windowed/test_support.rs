@@ -69,7 +69,6 @@ pub(super) fn make_shared_state() -> Arc<TokioMutex<SharedState>> {
         token_store: TokenStore::new(),
         freeze_active: false,
         degradation_level: RuntimeDegradationLevel::Normal,
-        media_ingress_active: None,
         input_capture_tx: None,
         input_capture_wake: tze_hud_scene::render_wake::RenderWakeNotifier::default(),
         resolved_portal_tokens: std::collections::HashMap::new(),

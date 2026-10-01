@@ -86,10 +86,6 @@ bytemuck = { version = "1", features = ["derive"] }
 blake3 = "1"
 getrandom = "0.3"
 arc-swap = "1"
-# State machines (v2 media plane). default-features = false omits statig_macro,
-# which depends on the unmaintained proc-macro-error2 crate (RUSTSEC-2026-0173).
-# State machines use the no-macro blocking API instead.
-statig = { version = "0.4", default-features = false }
 # Image decode for resource validation and integration test helpers.
 # default-features = false: crates opt in to the specific codec features they need.
 image = { version = "0.25", default-features = false }
@@ -114,12 +110,6 @@ windows = { version = "0.58", features = [
     # timeBeginPeriod/timeEndPeriod for compositor frame-pacing timer resolution.
     "Win32_Media",
 ] }
-
-# GStreamer bindings — declared here so crates can reference them via
-# `{ workspace = true, optional = true }`.
-# System packages required: libgstreamer1.0-dev + libgstreamer-plugins-base1.0-dev.
-gstreamer = "0.23"
-gstreamer-app = "0.23"
 
 # ── Workspace-wide lint policy ────────────────────────────────────────────────
 #

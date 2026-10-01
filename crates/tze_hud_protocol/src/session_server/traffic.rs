@@ -79,33 +79,6 @@ pub fn classify_server_payload(payload: &ServerPayload) -> TrafficClass {
 
         // Element repositioned event — transactional (drag completion / reset-to-default)
         ServerPayload::ElementRepositioned(_) => TrafficClass::Transactional,
-
-        // ── Media plane (RFC 0014 §2.2.2) ────────────────────────────────────
-        // Transactional: admission, teardown, degradation, pause/resume notices,
-        // SDP offer — never dropped, must be reliably delivered.
-        // NOTE: ServerPayload::MediaEgressOpenResult (field 66) is plain `reserved`
-        // in the proto — no variant exists until phase 4 egress is defined.
-        ServerPayload::MediaIngressOpenResult(_)
-        | ServerPayload::MediaIngressCloseNotice(_)
-        | ServerPayload::MediaSdpOffer(_)
-        | ServerPayload::MediaDegradationNotice(_)
-        | ServerPayload::MediaPauseNotice(_)
-        | ServerPayload::MediaResumeNotice(_) => TrafficClass::Transactional,
-
-        // State-stream: per-stream health/degradation updates (coalescible, latest-wins)
-        ServerPayload::MediaIngressState(_) => TrafficClass::StateStream,
-
-        // Ephemeral realtime: ICE candidates (latest-wins per candidate family)
-        ServerPayload::MediaIceCandidate(_) => TrafficClass::Ephemeral,
-
-        // ── Phase 4b cloud-relay (RFC 0018 §4.3) ─────────────────────────────
-        // Transactional: relay open result and close notice
-        ServerPayload::CloudRelayOpenResult(_) | ServerPayload::CloudRelayCloseNotice(_) => {
-            TrafficClass::Transactional
-        }
-
-        // State-stream: relay path health (coalescible, latest-wins)
-        ServerPayload::CloudRelayStateUpdate(_) => TrafficClass::StateStream,
     }
 }
 

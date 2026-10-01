@@ -278,8 +278,6 @@ pub(super) async fn handle_session_init(
         resource_upload_rate_limiter: UploadByteRateLimiter::with_limit(
             upload_rate_limit_bytes_per_sec,
         ),
-        media_ingress: None,
-        next_media_stream_epoch: 1,
     };
 
     // ── Step 5: Clock skew estimation (RFC 0003 §1.3) ────────────────────────
@@ -503,8 +501,6 @@ pub(super) async fn handle_session_resume(
         resource_upload_rate_limiter: UploadByteRateLimiter::with_limit(
             upload_rate_limit_bytes_per_sec,
         ),
-        media_ingress: None,
-        next_media_stream_epoch: 1,
     };
 
     let compositor_ts = now_wall_us();

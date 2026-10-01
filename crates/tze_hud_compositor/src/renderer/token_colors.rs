@@ -167,29 +167,6 @@ pub(super) const STATIC_IMAGE_PLACEHOLDER_COLOR: Rgba = Rgba {
     a: 1.0,
 };
 
-/// Dark placeholder color rendered for `ZoneContent::VideoSurfaceRef` zones.
-///
-/// Rendered when the video surface is in `Admitted`, `Placeholder`, or
-/// `Closed`/`Revoked` state (no frame available).  Distinct from
-/// `STATIC_IMAGE_PLACEHOLDER_COLOR` so video zones are visually identifiable
-/// (dark/off vs warm-gray/loading).
-///
-/// In `Streaming` state the compositor will eventually draw the decoded
-/// frame texture; until real GStreamer → GPU upload lands (a follow-up task),
-/// this placeholder is always shown.  When in `LastFrameWithBadge` state
-/// (B11 media drop), the same placeholder is shown with a disconnection-badge
-/// overlay emitted by the chrome layer.
-///
-/// Per engineering-bar.md §1: placeholder behavior is tested in
-/// `video_surface.rs` unit tests; frame-timing budget (Stage 6 < 4 ms) is
-/// not materially affected by the color quad.
-pub(super) const VIDEO_SURFACE_PLACEHOLDER_COLOR: Rgba = Rgba {
-    r: 0.05,
-    g: 0.05,
-    b: 0.05,
-    a: 1.0,
-};
-
 /// Size of a notification icon in pixels (square, 24×24).
 ///
 /// Icons are rendered left-aligned within the notification backdrop, at the

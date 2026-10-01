@@ -29,7 +29,6 @@ pub mod renderer;
 pub mod surface;
 pub mod text;
 pub mod vertical_flow;
-pub mod video_surface;
 pub mod widget;
 
 pub use adapter::{AdapterSelectionError, PlatformBackends, select_gpu_adapter};
@@ -49,7 +48,4 @@ pub use renderer::{
 };
 pub use surface::{CompositorFrame, CompositorSurface, HeadlessSurface, WindowSurface};
 pub use text::{LINE_HEIGHT_MULTIPLIER, StyledRunItem, TextItem, TextRasterizer};
-#[cfg(feature = "v2_preview")]
-pub use video_surface::{MediaDecodePipeline, SyntheticTestPipeline, VideoFrame};
-pub use video_surface::{VideoRenderState, VideoSurfaceMap};
 pub use widget::{WidgetRenderer, interpolate_param};
