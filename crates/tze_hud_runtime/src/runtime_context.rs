@@ -85,8 +85,14 @@ use tze_hud_protocol::auth::CapabilityPolicy;
 use tze_hud_scene::config::{DisplayProfile, RegisteredAgentBudgetOverrides, ResolvedConfig};
 use tze_hud_scene::types::ResourceBudget;
 
-use crate::admission::{DEFAULT_MAX_GUEST_SESSIONS, SessionLimits};
-use crate::session::{HARD_MAX_TEXTURE_BYTES, HARD_MAX_TILES, HARD_MAX_UPDATE_RATE_HZ};
+use crate::mutation_budget_bridge::DEFAULT_MAX_GUEST_SESSIONS;
+
+/// Absolute maximum tiles any agent may hold, regardless of config.
+const HARD_MAX_TILES: u32 = 64;
+/// Absolute maximum texture memory any agent may hold, regardless of config.
+const HARD_MAX_TEXTURE_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+/// Absolute maximum update rate any agent may sustain, regardless of config.
+const HARD_MAX_UPDATE_RATE_HZ: f32 = 120.0;
 
 // ─── FallbackPolicy ───────────────────────────────────────────────────────────
 
@@ -472,20 +478,6 @@ impl RuntimeContext {
         self.agent_budget_overrides.get(agent_name)
     }
 
-    /// Build runtime session limits from the frozen profile envelope.
-    ///
-    /// Resident/embodied sessions consume the profile presence pool. Guests
-    /// retain the independent control-plane safety limit.
-    pub fn session_limits(&self) -> SessionLimits {
-        let max_resident =
-            usize::try_from(self.operational_envelope.max_resident_sessions).unwrap_or(usize::MAX);
-        SessionLimits::new(
-            max_resident,
-            DEFAULT_MAX_GUEST_SESSIONS,
-            max_resident.saturating_add(DEFAULT_MAX_GUEST_SESSIONS),
-        )
-    }
-
     /// Resolve a per-session resource budget using config precedence.
     ///
     /// A registered override replaces the canonical default for its dimension,
@@ -626,16 +618,6 @@ mod tests {
                 max_update_hz: Some(7),
             })
         );
-    }
-
-    #[test]
-    fn session_limits_use_profile_resident_ceiling_and_separate_guest_pool() {
-        let ctx = RuntimeContext::from_config(make_config(vec![]), FallbackPolicy::Guest);
-        let limits = ctx.session_limits();
-
-        assert_eq!(limits.max_resident, 8);
-        assert_eq!(limits.max_guest, DEFAULT_MAX_GUEST_SESSIONS);
-        assert_eq!(limits.max_total, 8 + DEFAULT_MAX_GUEST_SESSIONS);
     }
 
     #[test]

@@ -8,7 +8,6 @@ pub mod budget;
 pub mod capability;
 pub mod cleanup;
 pub mod degradation;
-pub mod enforcement;
 pub mod orphan;
 pub mod priority;
 pub mod state_machine;
@@ -33,7 +32,6 @@ pub use cleanup::{
     CleanupResult, POST_REVOCATION_FREE_DELAY_MS, PostRevocationCleanupSpec, RevocationKind,
     ZonePublicationSweep,
 };
-pub use enforcement::{CriticalBypassTrigger, EnforcementAction, EnforcementLadder};
 pub use orphan::{
     DEFAULT_GRACE_PERIOD_MS as ORPHAN_GRACE_PERIOD_MS, GRACE_PRECISION_MS, GracePeriodTimer,
     OrphanedLeaseSnapshot, TileVisualHint, ZonePublishResult, check_zone_publish_allowed,

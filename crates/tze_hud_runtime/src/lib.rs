@@ -2,26 +2,14 @@
 //!
 //! Runtime kernel for tze_hud — the **orchestration layer**.
 //!
-//! ## Governance Authority Map
+//! ## Authority Map
 //!
-//! The runtime orchestrates; it does not own policy arbitration or resource accounting.
-//! The authority split is:
-//!
-//! | Authority | Crate | Role |
-//! |-----------|-------|------|
+//! | Authority | Module | Role |
+//! |-----------|--------|------|
 //! | Resource accounting | `tze_hud_resource` | Decoded-byte budget registry; GC; dedup |
-//! | Budget enforcement | `tze_hud_runtime::budget` | Enforcement ladder (Warning/Throttle/Revoke) |
+//! | Mutation budgets | `tze_hud_runtime::mutation_budget_bridge` | Per-session and aggregate hard caps |
 //! | Override state | `tze_hud_runtime::shell::SafeModeController` | Sole writer of freeze/safe-mode flags |
 //! | Scene orchestration | `tze_hud_runtime` (this crate) | Wires authority modules; drives pipeline |
-//!
-//! **Budget enforcement is self-contained in `tze_hud_runtime::budget`. The
-//! `BudgetEnforcer` owns the per-agent enforcement state machine
-//! (`Normal` → `Warning` → `Throttled` → `Revoked`), the enforcement ladder tick, the
-//! frame-time guardian, and the per-mutation admission gate. All enforcement
-//! decisions originate from `budget.rs`.**
-//!
-//! See `budget.rs` and `shell/safe_mode.rs` for boundary
-//! doc comments in each authority module.
 //!
 //! ## Frame Pipeline
 //!
@@ -39,8 +27,7 @@
 //! | 8     | Telemetry Emit     | Telemetry  | < 200µs     |
 //!
 //! See `pipeline.rs` for the `FramePipeline` orchestrator and `HitTestSnapshot`
-//! (ArcSwap-backed lock-free tile bounds for Stage 2), as well as
-//! `MutationIntakeStage` for Stage 3 budget-gated mutation intake.
+//! (ArcSwap-backed lock-free tile bounds for Stage 2).
 //!
 //! ## Architecture (spec §Thread Model, line 19)
 //!
@@ -68,9 +55,7 @@
 //! library and `cfg(test)` is set by the compiler. Integration test binaries
 //! (in `tests/` directories) require `features = ["dev-mode"]` explicitly.
 //!
-pub mod admission;
 pub mod agent_events;
-pub mod budget;
 pub mod channels;
 pub mod component_startup;
 pub mod degradation;
@@ -90,7 +75,6 @@ pub mod portal_tokens;
 pub mod reload_triggers;
 pub mod resident_grpc_bridge;
 pub mod runtime_context;
-pub mod session;
 pub mod shell;
 pub mod subscriptions;
 pub mod tab_switch_trigger;
@@ -108,10 +92,6 @@ pub use agent_events::rate_limiter::AgentEventRateLimiter;
 pub use agent_events::{
     AgentEventHandler, DEFAULT_MAX_EVENTS_PER_SECOND, EmissionError, EmissionOutcome,
     EmissionResult, MAX_PAYLOAD_BYTES,
-};
-pub use budget::{
-    AgentResourceState, BudgetCheckOutcome, BudgetEnforcer, BudgetState, BudgetTelemetrySink,
-    CollectingTelemetrySink, NoopTelemetrySink,
 };
 pub use channels::{
     BackpressureReceiver,
@@ -197,25 +177,11 @@ pub use tab_switch_trigger::{
 };
 pub use tze_hud_compositor::ChromeDrawCmd;
 
-pub use admission::{
-    AdmissionController, AdmissionOutcome, DEFAULT_MAX_GUEST_SESSIONS,
-    DEFAULT_MAX_RESIDENT_SESSIONS, DEFAULT_MAX_TOTAL_SESSIONS, HARD_MAX_GUEST_SESSIONS,
-    HARD_MAX_RESIDENT_SESSIONS, HARD_MAX_TOTAL_SESSIONS, HotConnectSnapshot, LimitKind,
-    ResourceExhaustedDetail, SessionLimits,
-};
 pub use pipeline::{
-    DEFAULT_POST_REVOCATION_CLEANUP_DELAY_MS, FramePipeline, HitTestSnapshot,
-    INPUT_TO_LOCAL_ACK_BUDGET_US, INPUT_TO_NEXT_PRESENT_BUDGET_US, INPUT_TO_SCENE_COMMIT_BUDGET_US,
-    IntakeResult, MAX_POST_REVOCATION_CLEANUP_DELAY_MS, MIN_POST_REVOCATION_CLEANUP_DELAY_MS,
-    MutationIntakeStage, PendingCleanup, STAGE1_BUDGET_US, STAGE2_BUDGET_US, STAGE3_BUDGET_US,
+    FramePipeline, HitTestSnapshot, INPUT_TO_LOCAL_ACK_BUDGET_US, INPUT_TO_NEXT_PRESENT_BUDGET_US,
+    INPUT_TO_SCENE_COMMIT_BUDGET_US, STAGE1_BUDGET_US, STAGE2_BUDGET_US, STAGE3_BUDGET_US,
     STAGE4_BUDGET_US, STAGE5_BUDGET_US, STAGE6_BUDGET_US, STAGE7_BUDGET_US, STAGE8_BUDGET_US,
     STAGE12_COMBINED_BUDGET_US, TOTAL_PIPELINE_BUDGET_US, TileBoundsEntry,
-};
-pub use session::{
-    AgentKind, DEFAULT_MAX_ACTIVE_LEASES, DEFAULT_MAX_NODES_PER_TILE, DEFAULT_MAX_TEXTURE_BYTES,
-    DEFAULT_MAX_TILES, DEFAULT_MAX_UPDATE_RATE_HZ, HARD_MAX_ACTIVE_LEASES, HARD_MAX_NODES_PER_TILE,
-    HARD_MAX_TEXTURE_BYTES, HARD_MAX_TILES, HARD_MAX_UPDATE_RATE_HZ, SessionEnvelope,
-    assert_memory_overhead_within_budget,
 };
 pub use shell::badges::{
     BUDGET_WARNING_AMBER_COLOR, BUDGET_WARNING_BORDER_OPACITY, BUDGET_WARNING_BORDER_PX,

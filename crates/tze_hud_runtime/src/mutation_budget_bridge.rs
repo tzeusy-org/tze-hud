@@ -1,8 +1,13 @@
-//! Thread-safe protocol bridge to the runtime-owned mutation budget enforcer.
+//! Runtime implementation of the protocol's mutation budget gate.
+//!
+//! Budgets are hard caps: a session registers with a [`ResourceBudget`], and
+//! each mutation batch is admitted only if the session's tiles, texture bytes,
+//! update rate, and nodes-per-tile stay within that budget and the runtime-wide
+//! aggregate limits. Over-budget batches are rejected; nothing escalates.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Mutex;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use tze_hud_protocol::session_server::{
     MutationBudgetDecision, MutationBudgetEnforcer as MutationBudgetEnforcerContract,
@@ -10,7 +15,11 @@ use tze_hud_protocol::session_server::{
 };
 use tze_hud_scene::types::{ResourceBudget, SceneId};
 
-use crate::{BudgetCheckOutcome, BudgetEnforcer, NoopTelemetrySink};
+/// Default cap on concurrent guest (non-resident) sessions.
+pub const DEFAULT_MAX_GUEST_SESSIONS: u32 = 64;
+
+/// Window over which `max_update_rate_hz` is measured.
+const UPDATE_RATE_WINDOW: Duration = Duration::from_secs(1);
 
 /// Shared enforcement object used by production gRPC session handlers.
 pub struct RuntimeMutationBudgetEnforcer {
@@ -18,7 +27,6 @@ pub struct RuntimeMutationBudgetEnforcer {
 }
 
 struct AggregateBudgetState {
-    enforcer: BudgetEnforcer,
     sessions: HashMap<SceneId, SessionBudgetState>,
     resident_sessions: u32,
     guest_sessions: u32,
@@ -31,8 +39,74 @@ struct AggregateBudgetState {
 }
 
 struct SessionBudgetState {
-    budget_key: String,
     resident: bool,
+    budget: ResourceBudget,
+    tiles: u32,
+    texture_bytes: u64,
+    recent_updates: VecDeque<Instant>,
+}
+
+impl SessionBudgetState {
+    /// Check a batch against this session's budget, recording it for rate
+    /// tracking. Returns the rejection message, if any.
+    fn check(
+        &mut self,
+        proposed_tiles: u32,
+        proposed_texture_bytes: u64,
+        max_nodes_in_batch: u32,
+        now: Instant,
+    ) -> Option<String> {
+        if proposed_tiles > self.budget.max_tiles {
+            return Some(format!(
+                "tiles proposed={proposed_tiles} limit={}",
+                self.budget.max_tiles
+            ));
+        }
+        if proposed_texture_bytes > self.budget.max_texture_bytes {
+            return Some(format!(
+                "texture_bytes proposed={proposed_texture_bytes} limit={}",
+                self.budget.max_texture_bytes
+            ));
+        }
+        if max_nodes_in_batch > self.budget.max_nodes_per_tile {
+            return Some(format!(
+                "nodes_per_tile proposed={max_nodes_in_batch} limit={}",
+                self.budget.max_nodes_per_tile
+            ));
+        }
+        while self
+            .recent_updates
+            .front()
+            .is_some_and(|t| now.duration_since(*t) >= UPDATE_RATE_WINDOW)
+        {
+            self.recent_updates.pop_front();
+        }
+        self.recent_updates.push_back(now);
+        let rate_hz = self.recent_updates.len() as f32;
+        if rate_hz > self.budget.max_update_rate_hz {
+            return Some(format!(
+                "update_rate_hz current={rate_hz} limit={}",
+                self.budget.max_update_rate_hz
+            ));
+        }
+        None
+    }
+}
+
+fn apply_delta_u32(value: u32, delta: i32) -> u32 {
+    if delta >= 0 {
+        value.saturating_add(delta as u32)
+    } else {
+        value.saturating_sub(delta.unsigned_abs())
+    }
+}
+
+fn apply_delta_u64(value: u64, delta: i64) -> u64 {
+    if delta >= 0 {
+        value.saturating_add(delta as u64)
+    } else {
+        value.saturating_sub(delta.unsigned_abs())
+    }
 }
 
 impl RuntimeMutationBudgetEnforcer {
@@ -47,7 +121,7 @@ impl RuntimeMutationBudgetEnforcer {
     ) -> Self {
         Self::with_session_limits(
             max_resident_sessions,
-            u32::try_from(crate::admission::DEFAULT_MAX_GUEST_SESSIONS).unwrap_or(u32::MAX),
+            DEFAULT_MAX_GUEST_SESSIONS,
             max_leased_tiles,
             max_leased_texture_bytes,
         )
@@ -61,7 +135,6 @@ impl RuntimeMutationBudgetEnforcer {
     ) -> Self {
         Self {
             inner: Mutex::new(AggregateBudgetState {
-                enforcer: BudgetEnforcer::new(),
                 sessions: HashMap::new(),
                 resident_sessions: 0,
                 guest_sessions: 0,
@@ -88,105 +161,77 @@ impl Default for RuntimeMutationBudgetEnforcer {
     }
 }
 
+fn exhausted(message: String) -> MutationBudgetDecision {
+    MutationBudgetDecision::Reject {
+        error_code: "RESOURCE_EXHAUSTED",
+        message,
+    }
+}
+
 impl MutationBudgetEnforcerContract for RuntimeMutationBudgetEnforcer {
     fn register_session(
         &self,
         session_id: SceneId,
-        namespace: String,
+        _namespace: String,
         budget: ResourceBudget,
         resident: bool,
         initial_usage: MutationBudgetUsage,
     ) -> MutationBudgetDecision {
         let mut state = self.lock();
         if state.sessions.contains_key(&session_id) {
-            return MutationBudgetDecision::Reject {
-                error_code: "RESOURCE_EXHAUSTED",
-                message: format!("session_id {session_id} is already registered"),
-            };
+            return exhausted(format!("session_id {session_id} is already registered"));
         }
         if resident && state.resident_sessions >= state.max_resident_sessions {
-            return MutationBudgetDecision::Reject {
-                error_code: "RESOURCE_EXHAUSTED",
-                message: format!(
-                    "resident_sessions current={} limit={}",
-                    state.resident_sessions, state.max_resident_sessions
-                ),
-            };
+            return exhausted(format!(
+                "resident_sessions current={} limit={}",
+                state.resident_sessions, state.max_resident_sessions
+            ));
         }
         if !resident && state.guest_sessions >= state.max_guest_sessions {
-            return MutationBudgetDecision::Reject {
-                error_code: "RESOURCE_EXHAUSTED",
-                message: format!(
-                    "guest_sessions current={} limit={}",
-                    state.guest_sessions, state.max_guest_sessions
-                ),
-            };
+            return exhausted(format!(
+                "guest_sessions current={} limit={}",
+                state.guest_sessions, state.max_guest_sessions
+            ));
         }
         let proposed_tiles = state.leased_tiles.saturating_add(initial_usage.tiles);
         if proposed_tiles > state.max_leased_tiles {
-            return MutationBudgetDecision::Reject {
-                error_code: "RESOURCE_EXHAUSTED",
-                message: format!(
-                    "leased_tiles current={} restored={} limit={}",
-                    state.leased_tiles, initial_usage.tiles, state.max_leased_tiles
-                ),
-            };
+            return exhausted(format!(
+                "leased_tiles current={} restored={} limit={}",
+                state.leased_tiles, initial_usage.tiles, state.max_leased_tiles
+            ));
         }
         let proposed_texture = state
             .leased_texture_bytes
             .saturating_add(initial_usage.texture_bytes);
         if proposed_texture > state.max_leased_texture_bytes {
-            return MutationBudgetDecision::Reject {
-                error_code: "RESOURCE_EXHAUSTED",
-                message: format!(
-                    "agent_leased_texture_bytes current={} restored={} limit={}",
-                    state.leased_texture_bytes,
-                    initial_usage.texture_bytes,
-                    state.max_leased_texture_bytes
-                ),
-            };
+            return exhausted(format!(
+                "agent_leased_texture_bytes current={} restored={} limit={}",
+                state.leased_texture_bytes,
+                initial_usage.texture_bytes,
+                state.max_leased_texture_bytes
+            ));
         }
-        let budget_key = format!("{namespace}@{session_id}");
-        state
-            .enforcer
-            .register_session(session_id, budget_key.clone(), budget);
-        let mut sink = NoopTelemetrySink;
-        let restored_texture = i64::try_from(initial_usage.texture_bytes).unwrap_or(i64::MAX);
-        match state.enforcer.check_mutation(
-            &budget_key,
-            i32::try_from(initial_usage.tiles).unwrap_or(i32::MAX),
-            restored_texture,
+        let mut session = SessionBudgetState {
+            resident,
+            budget,
+            tiles: 0,
+            texture_bytes: 0,
+            recent_updates: VecDeque::new(),
+        };
+        if let Some(message) = session.check(
+            initial_usage.tiles,
+            initial_usage.texture_bytes,
             0,
             Instant::now(),
-            &mut sink,
         ) {
-            BudgetCheckOutcome::Allow => state.enforcer.apply_mutation_delta(
-                &budget_key,
-                i32::try_from(initial_usage.tiles).unwrap_or(i32::MAX),
-                restored_texture,
-            ),
-            BudgetCheckOutcome::Reject(violation) => {
-                state.enforcer.remove_session(&budget_key);
-                return MutationBudgetDecision::Reject {
-                    error_code: "RESOURCE_BUDGET_EXCEEDED",
-                    message: format!("restored session usage rejected: {violation:?}"),
-                };
-            }
-            BudgetCheckOutcome::Revoke(violation) => {
-                state.enforcer.remove_session(&budget_key);
-                return MutationBudgetDecision::Revoke {
-                    error_code: "RESOURCE_BUDGET_CRITICAL",
-                    message: format!("restored session usage revoked: {violation:?}"),
-                };
-            }
+            return MutationBudgetDecision::Reject {
+                error_code: "RESOURCE_BUDGET_EXCEEDED",
+                message: format!("restored session usage rejected: {message}"),
+            };
         }
-        state.sessions.insert(
-            session_id,
-            SessionBudgetState {
-                budget_key,
-                resident,
-            },
-        );
+        session.tiles = initial_usage.tiles;
+        session.texture_bytes = initial_usage.texture_bytes;
+        state.sessions.insert(session_id, session);
         if resident {
             state.resident_sessions = state.resident_sessions.saturating_add(1);
         } else {
@@ -202,20 +247,15 @@ impl MutationBudgetEnforcerContract for RuntimeMutationBudgetEnforcer {
         let Some(session) = state.sessions.remove(&session_id) else {
             return;
         };
-        if let Some((tiles, texture_bytes)) = state
-            .enforcer
-            .agent_state(&session.budget_key)
-            .map(|usage| (usage.tile_count, usage.texture_bytes_used))
-        {
-            state.leased_tiles = state.leased_tiles.saturating_sub(tiles);
-            state.leased_texture_bytes = state.leased_texture_bytes.saturating_sub(texture_bytes);
-        }
+        state.leased_tiles = state.leased_tiles.saturating_sub(session.tiles);
+        state.leased_texture_bytes = state
+            .leased_texture_bytes
+            .saturating_sub(session.texture_bytes);
         if session.resident {
             state.resident_sessions = state.resident_sessions.saturating_sub(1);
         } else {
             state.guest_sessions = state.guest_sessions.saturating_sub(1);
         }
-        state.enforcer.remove_session(&session.budget_key);
     }
 
     fn reserve_mutation(
@@ -225,106 +265,62 @@ impl MutationBudgetEnforcerContract for RuntimeMutationBudgetEnforcer {
         delta_texture_bytes: i64,
         max_nodes_in_batch: u32,
     ) -> MutationBudgetDecision {
-        let mut state = self.lock();
-        let Some(budget_key) = state
-            .sessions
-            .get(&session_id)
-            .map(|session| session.budget_key.clone())
-        else {
+        let mut guard = self.lock();
+        let state = &mut *guard;
+        let Some(session) = state.sessions.get_mut(&session_id) else {
             return MutationBudgetDecision::Reject {
                 error_code: "RESOURCE_BUDGET_SESSION_UNKNOWN",
                 message: format!("session_id {session_id} is not registered"),
             };
         };
-        let proposed_tiles = if delta_tiles >= 0 {
-            state.leased_tiles.saturating_add(delta_tiles as u32)
-        } else {
-            state.leased_tiles.saturating_sub((-delta_tiles) as u32)
-        };
+        let proposed_tiles = apply_delta_u32(state.leased_tiles, delta_tiles);
         if proposed_tiles > state.max_leased_tiles {
-            return MutationBudgetDecision::Reject {
-                error_code: "RESOURCE_EXHAUSTED",
-                message: format!(
-                    "leased_tiles current={} requested_delta={} limit={}",
-                    state.leased_tiles, delta_tiles, state.max_leased_tiles
-                ),
-            };
+            return exhausted(format!(
+                "leased_tiles current={} requested_delta={} limit={}",
+                state.leased_tiles, delta_tiles, state.max_leased_tiles
+            ));
         }
-        let proposed_texture = if delta_texture_bytes >= 0 {
-            state
-                .leased_texture_bytes
-                .saturating_add(delta_texture_bytes as u64)
-        } else {
-            state
-                .leased_texture_bytes
-                .saturating_sub((-delta_texture_bytes) as u64)
-        };
+        let proposed_texture = apply_delta_u64(state.leased_texture_bytes, delta_texture_bytes);
         if proposed_texture > state.max_leased_texture_bytes {
-            return MutationBudgetDecision::Reject {
-                error_code: "RESOURCE_EXHAUSTED",
-                message: format!(
-                    "agent_leased_texture_bytes current={} requested_delta={} limit={}",
-                    state.leased_texture_bytes, delta_texture_bytes, state.max_leased_texture_bytes
-                ),
-            };
+            return exhausted(format!(
+                "agent_leased_texture_bytes current={} requested_delta={} limit={}",
+                state.leased_texture_bytes, delta_texture_bytes, state.max_leased_texture_bytes
+            ));
         }
-
-        let mut sink = NoopTelemetrySink;
-        match state.enforcer.check_mutation(
-            &budget_key,
-            delta_tiles,
-            delta_texture_bytes,
+        let session_tiles = apply_delta_u32(session.tiles, delta_tiles);
+        let session_texture = apply_delta_u64(session.texture_bytes, delta_texture_bytes);
+        if let Some(message) = session.check(
+            session_tiles,
+            session_texture,
             max_nodes_in_batch,
             Instant::now(),
-            &mut sink,
         ) {
-            BudgetCheckOutcome::Allow => {
-                state
-                    .enforcer
-                    .apply_mutation_delta(&budget_key, delta_tiles, delta_texture_bytes);
-                state.leased_tiles = proposed_tiles;
-                state.leased_texture_bytes = proposed_texture;
-                MutationBudgetDecision::Allow
-            }
-            BudgetCheckOutcome::Reject(violation) => MutationBudgetDecision::Reject {
+            return MutationBudgetDecision::Reject {
                 error_code: "RESOURCE_BUDGET_EXCEEDED",
-                message: format!("{violation:?}"),
-            },
-            BudgetCheckOutcome::Revoke(violation) => MutationBudgetDecision::Revoke {
-                error_code: "RESOURCE_BUDGET_CRITICAL",
-                message: format!("{violation:?}"),
-            },
+                message,
+            };
         }
+        session.tiles = session_tiles;
+        session.texture_bytes = session_texture;
+        state.leased_tiles = proposed_tiles;
+        state.leased_texture_bytes = proposed_texture;
+        MutationBudgetDecision::Allow
     }
 
     fn rollback_mutation(&self, session_id: SceneId, delta_tiles: i32, delta_texture_bytes: i64) {
-        let mut state = self.lock();
-        let Some(budget_key) = state
-            .sessions
-            .get(&session_id)
-            .map(|session| session.budget_key.clone())
-        else {
+        let mut guard = self.lock();
+        let state = &mut *guard;
+        let Some(session) = state.sessions.get_mut(&session_id) else {
             return;
         };
-        state.enforcer.apply_mutation_delta(
-            &budget_key,
-            delta_tiles.saturating_neg(),
+        session.tiles = apply_delta_u32(session.tiles, delta_tiles.saturating_neg());
+        session.texture_bytes =
+            apply_delta_u64(session.texture_bytes, delta_texture_bytes.saturating_neg());
+        state.leased_tiles = apply_delta_u32(state.leased_tiles, delta_tiles.saturating_neg());
+        state.leased_texture_bytes = apply_delta_u64(
+            state.leased_texture_bytes,
             delta_texture_bytes.saturating_neg(),
         );
-        if delta_tiles >= 0 {
-            state.leased_tiles = state.leased_tiles.saturating_sub(delta_tiles as u32);
-        } else {
-            state.leased_tiles = state.leased_tiles.saturating_add((-delta_tiles) as u32);
-        }
-        if delta_texture_bytes >= 0 {
-            state.leased_texture_bytes = state
-                .leased_texture_bytes
-                .saturating_sub(delta_texture_bytes as u64);
-        } else {
-            state.leased_texture_bytes = state
-                .leased_texture_bytes
-                .saturating_add((-delta_texture_bytes) as u64);
-        }
     }
 }
 

@@ -12,10 +12,6 @@ pub enum MutationBudgetDecision {
         error_code: &'static str,
         message: String,
     },
-    Revoke {
-        error_code: &'static str,
-        message: String,
-    },
 }
 
 /// Existing logical scene usage restored when a session resumes.
@@ -25,7 +21,7 @@ pub struct MutationBudgetUsage {
     pub texture_bytes: u64,
 }
 
-/// Protocol-facing contract implemented by the runtime's `BudgetEnforcer`.
+/// Protocol-facing contract implemented by the runtime's budget enforcer.
 pub trait MutationBudgetEnforcer: Send + Sync {
     fn register_session(
         &self,
