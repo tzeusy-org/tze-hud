@@ -7,13 +7,13 @@
 //! All types are constructable, mutable, queryable, serializable,
 //! and assertable without any GPU context.
 
-pub mod calibration;
 pub mod clock;
 pub mod diff;
 pub mod element_store;
 pub mod graph;
 pub mod invariants;
 pub mod mutation;
+pub mod perf_budget;
 pub mod render_wake;
 pub mod svg_tokens;
 pub mod test_scenes;
@@ -26,10 +26,6 @@ pub mod config;
 pub mod events;
 pub mod lease;
 
-pub use calibration::{
-    CalibrationResult, current_calibration, current_calibration_with_gpu, gpu_scaled_budget,
-    scaled_budget, set_gpu_factors, test_budget, texture_upload_scaled_budget,
-};
 pub use clock::{Clock, SimulatedClock, SystemClock, TestClock};
 pub use diff::{DiffEntry, SceneDiff};
 pub use element_store::{

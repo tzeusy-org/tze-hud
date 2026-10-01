@@ -1,6 +1,6 @@
 # tze_hud — Performance-assert CI lane (hud-94vm5)
 #
-# Runs calibrated wall-clock / p99 latency assertions that are intentionally
+# Runs wall-clock / p99 latency assertions that are intentionally
 # EXCLUDED from the blocking `test-unit` lane (ci.yml) because they are
 # sensitive to scheduler noise on shared GitHub runners.
 #
@@ -42,7 +42,7 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
-  # Activate all calibrated wall-clock / p99 assertions.
+  # Activate all wall-clock / p99 assertions.
   TZE_HUD_PERF_ASSERT: "1"
   # Force software GPU (llvmpipe on Linux) for headless rendering.
   HEADLESS_FORCE_SOFTWARE: "1"
@@ -56,11 +56,9 @@ jobs:
   # ── Workspace unit + crate perf asserts ──────────────────────────────────────
   #
   # Runs all workspace tests (excluding integration package) with
-  # TZE_HUD_PERF_ASSERT=1 so calibrated timing assertions are active.
+  # TZE_HUD_PERF_ASSERT=1 so timing assertions are active. Budgets come from
+  # tze_hud_scene::perf_budget::test_budget (TZE_HUD_TEST_BUDGET_SLACK).
   # Covers:
-  #   - crates/tze_hud_scene/src/calibration.rs  (test_calibration_completes_under_500ms)
-  #   - crates/tze_hud_scene/src/lease/budget.rs (test_budget_check_latency_under_50us)
-  #   - crates/tze_hud_runtime/src/pipeline.rs   (test_check_latency_*)
   #   - crates/tze_hud_compositor/src/markdown.rs (adversarial_*_flood_completes_fast)
 
   perf-assert-unit:

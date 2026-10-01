@@ -2439,7 +2439,7 @@ mod tests {
     /// Returns `true` when wall-clock / p99 latency hard assertions should run.
     ///
     /// Set `TZE_HUD_PERF_ASSERT=1` to enable.  On the standard `test-unit` / blocking
-    /// CI lane this is unset; calibrated wall-clock budget assertions are skipped to
+    /// CI lane this is unset; wall-clock budget assertions are skipped to
     /// avoid flakes from scheduler noise on shared runners.
     fn perf_assert_enabled() -> bool {
         std::env::var("TZE_HUD_PERF_ASSERT")

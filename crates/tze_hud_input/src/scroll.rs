@@ -1014,7 +1014,7 @@ mod tests {
     #[test]
     fn test_input_to_local_ack_p99_within_budget_scroll() {
         use std::time::Instant;
-        use tze_hud_scene::calibration::{budgets, test_budget};
+        use tze_hud_scene::perf_budget::{budgets, test_budget};
 
         let tile_id = SceneId::new();
         let mut scroll = ScrollState::new();

@@ -127,13 +127,8 @@ struct FrameRateMeasurements {
     active_leases: u32,
     tile_count: u32,
     frame_time_us: u64,
-    /// Whether the hardware-normalized calibration harness is active.
-    /// Per validation-framework/spec.md — performance results are "uncalibrated"
-    /// when the harness is not yet operational.
-    calibration_status: String,
-    /// Raw measured fps (informational; not validated as pass/fail without calibration).
+    /// Raw measured fps (informational; not a pass/fail gate).
     raw_fps_informational: f64,
-    note: String,
 }
 
 // ─── Main integration test ───────────────────────────────────────────────────
@@ -787,19 +782,11 @@ async fn test_three_agents_contention() -> Result<(), Box<dyn std::error::Error>
         active_leases: frame.active_leases,
         tile_count: frame.tile_count,
         frame_time_us: frame.frame_time_us,
-        // Per validation-framework/spec.md — hardware-normalized calibration harness
-        // is not yet implemented (post-v1). Until it is, all performance budgets are
-        // "uncalibrated" and treated as informational warnings, not pass/fail.
-        calibration_status: "uncalibrated".to_string(),
         raw_fps_informational: if frame.frame_time_us > 0 {
             1_000_000.0 / frame.frame_time_us as f64
         } else {
             0.0
         },
-        note: "Hardware-normalized calibration harness not yet operational (post-v1). \
-               Raw frame time is informational only. See validation-framework/spec.md \
-               Requirement: Hardware-Normalized Calibration Harness."
-            .to_string(),
     };
     println!(
         "ARTIFACT:frame_rate:{}",

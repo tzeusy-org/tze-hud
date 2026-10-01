@@ -3604,24 +3604,23 @@ mod tests {
         let result = processor.process(&event, &mut scene);
         let elapsed_us = t0.elapsed().as_micros() as u64;
 
-        // tasks.md §7.2: local_ack_us must be within the calibrated 4ms budget.
-        // Use tze_hud_scene::calibration::test_budget() to scale the raw budget
-        // by the measured hardware speed factor, preventing flakiness on slower CI
-        // machines while still enforcing the intended latency contract.
-        use tze_hud_scene::calibration::{budgets, test_budget};
+        // tasks.md §7.2: local_ack_us must be within the 4ms budget.
+        // test_budget() widens the raw budget by the test slack factor so slow
+        // CI machines don't flake.
+        use tze_hud_scene::perf_budget::{budgets, test_budget};
         let ack_budget = test_budget(budgets::INPUT_ACK_BUDGET_US);
         assert!(
             result.local_ack_us < ack_budget,
-            "local_ack_us must be < {}µs (calibrated 4ms p99 budget) — tasks.md §7.2; \
+            "local_ack_us must be < {}µs (4ms budget with test slack) — tasks.md §7.2; \
              got {}µs",
             ack_budget,
             result.local_ack_us
         );
 
-        // Also assert wall-clock elapsed time is within calibrated budget.
+        // Also assert wall-clock elapsed time is within the budget.
         assert!(
             elapsed_us < ack_budget,
-            "wall-clock elapsed must be < {ack_budget}µs (calibrated) — tasks.md §7.2; got {elapsed_us}µs"
+            "wall-clock elapsed must be < {ack_budget}µs — tasks.md §7.2; got {elapsed_us}µs"
         );
 
         // Verify pressed state is set in the scene graph.
@@ -5074,7 +5073,7 @@ mod tests {
     //       test_disconnect_during_lifecycle_triggers_orphan_path (§12.2)
     //
     //   Gaps / coverage notes:
-    //     - §7.2 p99 < 4ms budget: tested via calibrated headless budget (passes on CI)
+    //     - §7.2 p99 < 4ms budget: tested via a slack-scaled headless budget (passes on CI)
     //     - §10.1 auto-renewal: tested at the TtlState layer (no 45s wall-clock wait)
     //     - §5.2/5.3 chrome rendering above: tested via z-order arithmetic only
     //       (no GPU compositing test — GPU path is explicitly excluded from Layer 0 scope)

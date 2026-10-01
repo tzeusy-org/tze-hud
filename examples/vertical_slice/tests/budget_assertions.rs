@@ -14,24 +14,16 @@
 //! Render a known scene and verify background, tile, and z-order pixels are
 //! within ±tolerance per channel (±2 is the spec; wider for llvmpipe CI).
 //!
-//! ## Hardware-Normalized Calibration (validation-framework spec lines 137-157)
+//! ## Budgets and slack
 //!
-//! All GPU-dependent budget assertions use hardware-normalized thresholds derived
-//! from the three calibration workloads:
-//!
-//! 1. **CPU scene-graph** — via `tze_hud_scene::calibration::test_budget`.
-//! 2. **GPU fill/composition** — measured by `run_gpu_fill_calibration` in this
-//!    module and stored via `set_gpu_factors`.
-//! 3. **Texture upload** — measured by `run_texture_upload_calibration` and stored
-//!    alongside the GPU fill factor.
-//!
-//! Per the spec: when calibration factors are not available (`None`), budget tests
-//! MUST emit a warning and skip the hard pass/fail assertion.  Use
-//! `LatencyBucket::assert_p99_calibrated` for this behaviour.
+//! Budgets are reference-hardware targets widened by
+//! `tze_hud_scene::perf_budget::test_budget`, a fixed slack factor
+//! (`TZE_HUD_TEST_BUDGET_SLACK`, default 20×) that absorbs debug builds and
+//! llvmpipe on CI.
 //!
 //! ## Timing-assertion quarantine (hud-1aswu.3)
 //!
-//! Calibrated wall-clock / p99 latency assertions are **gated** behind the
+//! Wall-clock / p99 latency assertions are **gated** behind the
 //! `TZE_HUD_PERF_ASSERT=1` environment variable so they never block the
 //! standard `test-unit` CI lane on shared runners (where scheduler noise
 //! causes spurious failures).  See `about/heart-and-soul/validation.md`
@@ -39,8 +31,8 @@
 //!
 //! - **Blocking everywhere**: structural assertions (sample counts, correctness
 //!   invariants, pixel readback, scene rendering completeness).
-//! - **Gated (`TZE_HUD_PERF_ASSERT=1`)**: all `assert_p99_under` and
-//!   `assert_p99_calibrated` hard-failure calls.
+//! - **Gated (`TZE_HUD_PERF_ASSERT=1`)**: all `assert_p99_under` hard-failure
+//!   calls.
 //!
 //! To run wall-clock assertions locally or on a reference host:
 //!   ```sh
@@ -51,17 +43,15 @@ use tze_hud_compositor::HeadlessSurface;
 use tze_hud_input::{PointerEvent, PointerEventKind};
 use tze_hud_runtime::HeadlessRuntime;
 use tze_hud_runtime::headless::HeadlessConfig;
-use tze_hud_scene::calibration::{
-    current_calibration_with_gpu, gpu_scaled_budget, set_gpu_factors, texture_upload_scaled_budget,
-};
 use tze_hud_scene::diff::SceneDiff;
 use tze_hud_scene::graph::SceneGraph;
 use tze_hud_scene::mutation::{MutationBatch, SceneMutation};
+use tze_hud_scene::perf_budget::test_budget;
 use tze_hud_scene::types::{
     Capability, FontFamily, HitRegionNode, Node, NodeData, Rect, Rgba, SceneId, SolidColorNode,
     TextAlign, TextMarkdownNode, TextOverflow,
 };
-use tze_hud_telemetry::{CalibrationStatus, LatencyBucket};
+use tze_hud_telemetry::LatencyBucket;
 
 // ─── Timing-assertion gate (hud-1aswu.3) ─────────────────────────────────────
 
@@ -69,7 +59,7 @@ use tze_hud_telemetry::{CalibrationStatus, LatencyBucket};
 ///
 /// Set `TZE_HUD_PERF_ASSERT=1` in the environment to enable timing assertions.
 /// On the standard `test-unit` CI lane (shared Ubuntu runners) this is unset,
-/// so calibrated budget assertions are skipped — structural correctness assertions
+/// so budget assertions are skipped — structural correctness assertions
 /// always run regardless of this flag.
 ///
 /// On a reference host or the `windows-performance-budget` lane, callers that
@@ -80,209 +70,18 @@ fn perf_assert_enabled() -> bool {
         .unwrap_or(false)
 }
 
-// ─── GPU calibration workloads ───────────────────────────────────────────────
-
-/// Measure GPU fill/composition throughput and store as a hardware factor.
-///
-/// Renders a fixed multi-tile scene with overlapping alpha-blended regions
-/// (`CALIB_TILES` tiles, `CALIB_FRAME_ROUNDS` frames).  The measured p50
-/// frame time is compared to the reference baseline to produce a fill factor.
-///
-/// Per the validation-framework spec (line 143): this is calibration workload
-/// (2) — Fill/composition GPU calibration.
-///
-/// The factor is stored via `set_gpu_factors` so that subsequent calls to
-/// `current_calibration_with_gpu()` include it.
-async fn run_gpu_fill_calibration() {
-    /// Reference p50 frame time on target hardware (µs).  A modern discrete GPU
-    /// renders a 10-tile 800×600 scene in roughly 1 ms.  This baseline was
-    /// profiled on a reference x86-64 machine with a mid-range discrete GPU.
-    const REFERENCE_FRAME_TIME_US: f64 = 1_000.0;
-    /// Number of overlapping tiles in the calibration scene.
-    const CALIB_TILES: usize = 10;
-    /// Frames to render during GPU calibration (excluding warmup).
-    const CALIB_FRAME_ROUNDS: usize = 10;
-
-    let config = HeadlessConfig {
-        width: 800,
-        height: 600,
-        grpc_port: 0,
-        bind_all_interfaces: false,
-        psk: "calib".to_string(),
-        config_toml: None,
-    };
-    let Ok(mut runtime) = HeadlessRuntime::new(config).await else {
-        // GPU not available — leave gpu_fill_factor as None (uncalibrated).
-        return;
-    };
-
-    // Build an overlapping alpha-blended multi-tile scene.
-    {
-        let state = runtime.shared_state().lock().await;
-        let mut scene = state.scene.lock().await;
-        let tab = scene.create_tab("calib", 0).unwrap();
-        let lease = scene.grant_lease("calib", 60_000, vec![]);
-        if let Some(l) = scene.leases.get_mut(&lease) {
-            l.resource_budget.max_tiles = (CALIB_TILES + 4) as u32;
-        }
-        for i in 0..CALIB_TILES {
-            // Intentionally overlapping tiles at different z-levels.
-            let x = (i as f32 * 60.0) % 700.0;
-            let y = (i as f32 * 40.0) % 500.0;
-            let _ = scene.create_tile(
-                tab,
-                "calib",
-                lease,
-                Rect::new(x, y, 150.0, 100.0),
-                (i + 1) as u32,
-            );
-        }
-    }
-
-    // Warmup frame — discarded.
-    runtime.render_frame().await;
-    runtime.telemetry = tze_hud_telemetry::TelemetryCollector::new();
-
-    for _ in 0..CALIB_FRAME_ROUNDS {
-        runtime.render_frame().await;
-    }
-
-    let summary = runtime.telemetry.summary();
-    let p50_us = summary.frame_time.p50().unwrap_or(1) as f64;
-    // Factor > 1.0 means this machine is slower than the reference.
-    let gpu_fill_factor = (p50_us / REFERENCE_FRAME_TIME_US).clamp(0.1, 200.0);
-
-    // Texture upload calibration runs here too (workload 3 per spec).
-    let tex_factor = run_texture_upload_calibration_factor(&runtime).await;
-
-    set_gpu_factors(gpu_fill_factor, tex_factor);
-}
-
-/// Measure texture upload throughput and return the hardware factor.
-///
-/// Runs `UPLOAD_ROUNDS` create-and-destroy rounds, measuring the CPU-side
-/// scene-mutation cost as a proxy for texture-backed tile creation throughput.
-/// Each round creates a fresh `SolidColor` tile and immediately deletes it via
-/// `apply_batch`.  No `render_frame()` call is made; the timing covers the
-/// scene-graph mutation path only (full GStreamer texture upload is deferred to
-/// a later implementation phase).
-/// Returns a factor: 1.0 = reference hardware, >1.0 = slower.
-///
-/// Per the validation-framework spec (line 143): this is calibration workload
-/// (3) — Upload-heavy resource calibration.
-async fn run_texture_upload_calibration_factor(runtime: &HeadlessRuntime) -> f64 {
-    /// Reference scene-mutation proxy time per round on target hardware (µs).
-    /// Measured as the p50 of creating and destroying a fresh solid-color tile.
-    const REFERENCE_UPLOAD_US: f64 = 500.0;
-    /// How many create-destroy rounds to measure.
-    const UPLOAD_ROUNDS: usize = 10;
-
-    // Set up a reusable lease before the timed loop to avoid lease bookkeeping
-    // accumulation skewing the per-round p50 measurement.
-    let (calib_tab, calib_lease) = {
-        let state = runtime.shared_state().lock().await;
-        let mut scene = state.scene.lock().await;
-        let tab = if let Some(t) = scene.active_tab {
-            t
-        } else {
-            scene.create_tab("upload-calib", 0).unwrap()
-        };
-        let lease = scene.grant_lease("upload-calib", 60_000, vec![]);
-        if let Some(l) = scene.leases.get_mut(&lease) {
-            l.resource_budget.max_tiles = 4;
-        }
-        (tab, lease)
-    };
-
-    let mut bucket = LatencyBucket::new("tex_upload_calib");
-
-    for i in 0..UPLOAD_ROUNDS {
-        let start = std::time::Instant::now();
-        {
-            let state_arc = runtime.shared_state().clone();
-            let state = state_arc.lock().await;
-            let mut scene = state.scene.lock().await;
-            let tile_result = scene.create_tile(
-                calib_tab,
-                "upload-calib",
-                calib_lease,
-                Rect::new(0.0, 0.0, 64.0, 64.0),
-                200 + i as u32,
-            );
-            if let Ok(tile_id) = tile_result {
-                let node = Node {
-                    layout: Default::default(),
-                    id: SceneId::new(),
-                    children: vec![],
-                    data: NodeData::SolidColor(SolidColorNode {
-                        color: Rgba::new(i as f32 / UPLOAD_ROUNDS as f32, 0.5, 0.5, 0.8),
-                        bounds: Rect::new(0.0, 0.0, 64.0, 64.0),
-                        radius: None,
-                    }),
-                };
-                let _ = scene.set_tile_root(tile_id, node);
-                // Delete the tile immediately to exercise the upload lifecycle.
-                // Ignore apply_batch result in calibration: if delete is rejected,
-                // the round still gets timed and the factor degrades gracefully
-                // (calibration is best-effort, not a pass/fail path).
-                let batch = MutationBatch {
-                    batch_id: SceneId::new(),
-                    agent_namespace: "upload-calib".to_string(),
-                    mutations: vec![SceneMutation::DeleteTile { tile_id }],
-                    timing_hints: None,
-                    lease_id: None,
-                };
-                let _ = scene.apply_batch(&batch);
-            }
-        }
-        bucket.record(start.elapsed().as_micros() as u64);
-    }
-
-    let p50_us = bucket.p50().unwrap_or(1) as f64;
-    (p50_us / REFERENCE_UPLOAD_US).clamp(0.1, 200.0)
-}
-
 // ─── Layer 3: p99 budget assertions ──────────────────────────────────────────
 
-/// Assert that frame time p99 is under the 16.6ms GPU-fill-normalized budget.
+/// Assert that frame time p99 is under the 16.6ms budget (times the test slack).
 ///
 /// Runs 20 frames headlessly and verifies the p99 telemetry bucket stays within
-/// the hardware-normalized budget.
-///
-/// ## Hardware normalization
-///
-/// The 16.6ms budget applies to reference GPU hardware (fill factor = 1.0).
-/// This test runs the GPU fill calibration workload first and scales the budget
-/// by the measured `gpu_fill_factor`:
-///
-/// ```text
-/// effective_budget = NOMINAL_BUDGET_US * gpu_fill_factor
-/// ```
-///
-/// On a software-rasterised CI runner (llvmpipe), `gpu_fill_factor` is typically
-/// 8–12×, yielding an effective budget of ~133–200ms.  On real GPU hardware,
-/// `gpu_fill_factor` is ~1.0 and the budget stays at 16.6ms.
-///
-/// Per the validation-framework spec (line 154-156): if the GPU calibration
-/// workload fails to produce a valid factor (`gpu_fill_factor == None`), this
-/// test emits an "uncalibrated" warning and does NOT produce a pass/fail result.
-///
-/// See: openspec/changes/v1-mvp-standards/specs/validation-framework/spec.md
-///      lines 137-157 (Requirement: Hardware-Normalized Calibration Harness)
+/// budget.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_frame_time_p99_within_budget() {
     const NOMINAL_BUDGET_US: u64 = 16_600;
     const FRAME_COUNT: usize = 20;
 
-    // ── Workload 2: GPU fill calibration (spec line 143) ──────────────────
-    // This populates gpu_fill_factor in the global GPU_FACTORS store via
-    // set_gpu_factors().  On CI with llvmpipe this will measure a large factor
-    // (≥8×); on real GPU hardware it will be ~1.0.
-    run_gpu_fill_calibration().await;
-
-    // ── Retrieve calibrated budget ─────────────────────────────────────────
-    let cal = current_calibration_with_gpu();
-    let calibrated_budget = gpu_scaled_budget(NOMINAL_BUDGET_US, &cal);
+    let budget_us = test_budget(NOMINAL_BUDGET_US);
 
     let config = HeadlessConfig {
         width: 800,
@@ -327,49 +126,30 @@ async fn test_frame_time_p99_within_budget() {
         "expected {FRAME_COUNT} frames recorded"
     );
 
-    // Timing assertion: gated — calibrated wall-clock budget that would flake on
+    // Timing assertion: gated — wall-clock budget that would flake on
     // shared CI runners.  Set TZE_HUD_PERF_ASSERT=1 to enable.  (hud-1aswu.3)
     if perf_assert_enabled() {
-        let status = summary
+        let p99 = summary
             .frame_time
-            .assert_p99_calibrated(calibrated_budget, NOMINAL_BUDGET_US)
-            .expect("frame_time p99 calibrated budget");
-
-        match status {
-            CalibrationStatus::Pass(p99) => {
-                eprintln!(
-                    "[PASS] frame_time p99={}us within calibrated budget={}us (factor={:.2}×)",
-                    p99,
-                    calibrated_budget.unwrap_or(0),
-                    cal.gpu_fill_factor.unwrap_or(0.0),
-                );
-            }
-            CalibrationStatus::Uncalibrated { raw_p99 } => {
-                // Already printed warning inside assert_p99_calibrated.
-                eprintln!(
-                    "[UNCALIBRATED] frame_time raw_p99={raw_p99}us; test is informational only",
-                );
-            }
-        }
+            .assert_p99_under(budget_us)
+            .expect("frame_time p99 budget");
+        eprintln!("[PASS] frame_time p99={p99}us within budget={budget_us}us");
     } else {
         let raw_p99 = summary.frame_time.p99().unwrap_or(0);
         eprintln!(
             "[SKIP-TIMING] frame_time raw_p99={raw_p99}us; \
-             set TZE_HUD_PERF_ASSERT=1 to enforce calibrated budget"
+             set TZE_HUD_PERF_ASSERT=1 to enforce budget"
         );
     }
 }
 
-/// Assert that input_to_local_ack p99 is under the 4ms CPU-calibrated budget.
+/// Assert that input_to_local_ack p99 is under the 4ms budget.
 ///
 /// Simulates 30 pointer-press events and verifies each local-ack latency
-/// (entirely local, no network roundtrip) satisfies the hardware-normalized budget.
-///
-/// This is a CPU-only path (hit-test + ArcSwap snapshot), so the budget scales
-/// via the CPU scene-graph calibration factor (`test_budget`).
+/// (entirely local, no network roundtrip) is within budget.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_input_to_local_ack_p99_within_budget() {
-    use tze_hud_scene::calibration::{budgets::INPUT_ACK_BUDGET_US, test_budget};
+    use tze_hud_scene::perf_budget::budgets::INPUT_ACK_BUDGET_US;
     let budget_us = test_budget(INPUT_ACK_BUDGET_US);
     const EVENT_COUNT: usize = 30;
 
@@ -448,7 +228,7 @@ async fn test_input_to_local_ack_p99_within_budget() {
 
     let summary = runtime.telemetry.summary();
 
-    // Timing assertion: gated — calibrated wall-clock budget.  (hud-1aswu.3)
+    // Timing assertion: gated — wall-clock budget.  (hud-1aswu.3)
     if perf_assert_enabled() {
         summary
             .input_to_local_ack
@@ -458,7 +238,7 @@ async fn test_input_to_local_ack_p99_within_budget() {
         let raw_p99 = summary.input_to_local_ack.p99().unwrap_or(0);
         eprintln!(
             "[SKIP-TIMING] input_to_local_ack raw_p99={raw_p99}us; \
-             set TZE_HUD_PERF_ASSERT=1 to enforce calibrated budget"
+             set TZE_HUD_PERF_ASSERT=1 to enforce budget"
         );
     }
 }
@@ -522,7 +302,7 @@ async fn test_input_to_scene_commit_p99_within_budget() {
         let raw_p99 = bucket.p99().unwrap_or(0);
         eprintln!(
             "[SKIP-TIMING] input_to_scene_commit raw_p99={raw_p99}us; \
-             set TZE_HUD_PERF_ASSERT=1 to enforce calibrated budget"
+             set TZE_HUD_PERF_ASSERT=1 to enforce budget"
         );
     }
 
@@ -550,8 +330,6 @@ async fn test_input_to_scene_commit_p99_within_budget() {
 /// ## Hardware normalization
 /// The 33ms budget is for real GPU hardware at 60Hz. On llvmpipe/SwiftShader
 /// the same 10× headless multiplier used for frame-time tests applies.
-/// Replace with `NOMINAL_BUDGET_US / calibration.gpu_fill_factor` once the
-/// hardware calibration harness is implemented.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_input_to_next_present_p99_within_budget() {
     const NOMINAL_BUDGET_US: u64 = 33_000; // 33ms at 60Hz (two frames)
@@ -613,7 +391,7 @@ async fn test_input_to_next_present_p99_within_budget() {
         let raw_p99 = bucket.p99().unwrap_or(0);
         eprintln!(
             "[SKIP-TIMING] input_to_next_present raw_p99={raw_p99}us; \
-             set TZE_HUD_PERF_ASSERT=1 to enforce calibrated budget"
+             set TZE_HUD_PERF_ASSERT=1 to enforce budget"
         );
     }
 
@@ -626,14 +404,13 @@ async fn test_input_to_next_present_p99_within_budget() {
         .extend(bucket.samples.iter().copied());
 }
 
-/// Assert that hit-test p99 is under the 100µs CPU-calibrated budget.
+/// Assert that hit-test p99 is under the 100µs budget.
 ///
 /// Exercises the hit-test path in isolation via repeated pointer-move events
-/// over a large hit region.  The 100µs reference budget is scaled by the CPU
-/// scene-graph calibration factor.
+/// over a large hit region.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_hit_test_p99_within_budget() {
-    use tze_hud_scene::calibration::{budgets::HIT_TEST_BUDGET_US, test_budget};
+    use tze_hud_scene::perf_budget::budgets::HIT_TEST_BUDGET_US;
     let budget_us = test_budget(HIT_TEST_BUDGET_US);
     const EVENT_COUNT: usize = 50;
 
@@ -705,7 +482,7 @@ async fn test_hit_test_p99_within_budget() {
     }
 
     let summary = runtime.telemetry.summary();
-    // Timing assertion: gated — calibrated wall-clock budget.  (hud-1aswu.3)
+    // Timing assertion: gated — wall-clock budget.  (hud-1aswu.3)
     if perf_assert_enabled() {
         summary
             .hit_test_latency
@@ -715,36 +492,20 @@ async fn test_hit_test_p99_within_budget() {
         let raw_p99 = summary.hit_test_latency.p99().unwrap_or(0);
         eprintln!(
             "[SKIP-TIMING] hit_test raw_p99={raw_p99}us; \
-             set TZE_HUD_PERF_ASSERT=1 to enforce calibrated budget"
+             set TZE_HUD_PERF_ASSERT=1 to enforce budget"
         );
     }
 }
 
-/// Assert that transaction validation p99 is under the 200µs CPU-calibrated budget.
+/// Assert that transaction validation p99 is under the 200µs budget.
 ///
 /// Applies a large sample of single-mutation `UpdateTileBounds` batches against
 /// a fixed-size scene and records the round-trip latency of each `apply_batch`
 /// call including validation and scene mutation.
-///
-/// ## Hardware normalization
-///
-/// The 200µs budget applies to reference hardware (speed_factor = 1.0).  The
-/// test uses `tze_hud_scene::calibration::test_budget` — which runs the scene-
-/// graph CPU calibration workload (workload 1 per spec) on first call — to
-/// scale the budget for the current machine.
-///
-/// This replaces the previous hard-coded `CI_MULTIPLIER = 5` constant with an
-/// empirically measured, hardware-normalized threshold.
-///
-/// See: openspec/changes/v1-mvp-standards/specs/validation-framework/spec.md
-///      lines 137-157 (Requirement: Hardware-Normalized Calibration Harness)
 #[test]
 fn test_transaction_validation_p99_within_budget() {
-    use tze_hud_scene::calibration::budgets::TRANSACTION_VALIDATION_BUDGET_US;
-    use tze_hud_scene::calibration::test_budget;
+    use tze_hud_scene::perf_budget::budgets::TRANSACTION_VALIDATION_BUDGET_US;
 
-    // CPU-calibrated budget for this machine. On reference hardware this is
-    // 200µs; on slow CI with high load it scales proportionally.
     let budget_us = test_budget(TRANSACTION_VALIDATION_BUDGET_US);
     // Keep a larger sample window so p99 is not effectively the max sample.
     const BATCH_COUNT: usize = 200;
@@ -793,7 +554,7 @@ fn test_transaction_validation_p99_within_budget() {
         assert!(result.applied, "batch {i} should have applied");
     }
 
-    // Timing assertion: gated — calibrated wall-clock budget.  (hud-1aswu.3)
+    // Timing assertion: gated — wall-clock budget.  (hud-1aswu.3)
     if perf_assert_enabled() {
         validation_bucket
             .assert_p99_under(budget_us)
@@ -802,19 +563,18 @@ fn test_transaction_validation_p99_within_budget() {
         let raw_p99 = validation_bucket.p99().unwrap_or(0);
         eprintln!(
             "[SKIP-TIMING] transaction_validation raw_p99={raw_p99}us; \
-             set TZE_HUD_PERF_ASSERT=1 to enforce calibrated budget"
+             set TZE_HUD_PERF_ASSERT=1 to enforce budget"
         );
     }
 }
 
-/// Assert that scene diff p99 is under the 500µs CPU-calibrated budget.
+/// Assert that scene diff p99 is under the 500µs budget.
 ///
 /// Computes diffs between before/after snapshots of a scene with 10 tiles and
-/// verifies the p99 latency across 50 iterations.  The 500µs reference budget
-/// is scaled by the CPU scene-graph calibration factor.
+/// verifies the p99 latency across 50 iterations.
 #[test]
 fn test_scene_diff_p99_within_budget() {
-    use tze_hud_scene::calibration::{budgets::SCENE_DIFF_BUDGET_US, test_budget};
+    use tze_hud_scene::perf_budget::budgets::SCENE_DIFF_BUDGET_US;
     let budget_us = test_budget(SCENE_DIFF_BUDGET_US);
     const DIFF_COUNT: usize = 50;
 
@@ -858,7 +618,7 @@ fn test_scene_diff_p99_within_budget() {
         assert!(!diff.is_empty(), "diff should detect the new tile");
     }
 
-    // Timing assertion: gated — calibrated wall-clock budget.  (hud-1aswu.3)
+    // Timing assertion: gated — wall-clock budget.  (hud-1aswu.3)
     if perf_assert_enabled() {
         diff_bucket
             .assert_p99_under(budget_us)
@@ -867,54 +627,23 @@ fn test_scene_diff_p99_within_budget() {
         let raw_p99 = diff_bucket.p99().unwrap_or(0);
         eprintln!(
             "[SKIP-TIMING] scene_diff raw_p99={raw_p99}us; \
-             set TZE_HUD_PERF_ASSERT=1 to enforce calibrated budget"
+             set TZE_HUD_PERF_ASSERT=1 to enforce budget"
         );
     }
 }
 
-/// Assert that texture upload throughput meets the hardware-normalized budget.
-///
-/// This is calibration workload (3) from the validation-framework spec (line 143):
-/// "Upload-heavy resource calibration (rapid texture-backed tile creation/update,
-/// measures texture upload throughput)."
+/// Assert that texture upload (tile create + node assign + delete) p99 is within
+/// budget.
 ///
 /// The test creates `UPLOAD_ROUNDS` tiles with fresh `SolidColor` nodes (CPU proxy
-/// for GPU texture upload) and verifies the p99 latency is within the texture-upload-
-/// calibrated budget.
-///
-/// Per spec line 154-156: if `texture_upload_factor` is `None` (GPU calibration not
-/// run), the result is treated as "uncalibrated" — a warning, not a failure.
-///
-/// ## Calibration note (hud-srnr5)
-///
-/// On fast hardware (and on CI runners using native execution without software GPU),
-/// `texture_upload_factor` clamps to its minimum of 0.1, yielding
-/// `calibrated_budget = NOMINAL_BUDGET_US × 0.1`.  With only 30 samples the
-/// nearest-rank p99 is `ceil(0.99 × 30) = 30`, i.e. the worst sample — effectively
-/// p100.  This caused a CI flake (p99=125µs vs 100µs budget) because a single
-/// scheduler-jitter spike was indistinguishable from a regression.
-///
-/// Fix applied:
-/// - `NOMINAL_BUDGET_US` raised from 1_000 to 2_000 µs so the minimum-clamped
-///   calibrated budget is 200µs rather than 100µs, providing ≥2× headroom over
-///   the observed steady-state p99 (≤98µs in 5 local runs).
-/// - `UPLOAD_ROUNDS` raised from 30 to 100: nearest-rank p99 index =
-///   `ceil(0.99 × 100) = 99`, so one outlier is dropped and p99 is no longer
-///   equivalent to max.
-/// - 5 warm-up rounds (not recorded) added so async lock machinery and CPU caches
-///   are hot before measurement begins, matching the pattern used by
-///   `test_frame_time_p99_within_budget` (which discards its first frame).
+/// for GPU texture upload). 100 samples so nearest-rank p99 drops one outlier
+/// instead of being the max, plus 5 unrecorded warm-up rounds (hud-srnr5).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_texture_upload_p99_within_budget() {
     /// Reference texture upload budget (µs) per tile creation on target hardware.
     ///
     /// On reference hardware, one create+assign+delete round takes ≈500µs.  The
     /// 2ms budget provides a defensible ×4 headroom over that baseline.
-    ///
-    /// At the minimum hardware factor clamp (0.1×, applied when calibration sees
-    /// very fast hardware), the effective calibrated budget is 200µs — roughly
-    /// ×2 over the steady-state local p99 (≈62–98µs across 5 runs).  That margin
-    /// accommodates typical CI scheduler jitter without masking genuine regressions.
     ///
     /// This covers the CPU-side tile creation + node assignment path as a proxy
     /// for GPU texture upload throughput until GStreamer textures are implemented.
@@ -925,11 +654,7 @@ async fn test_texture_upload_p99_within_budget() {
     /// discarding 1 outlier rather than using the raw maximum.
     const UPLOAD_ROUNDS: usize = 100;
 
-    // Ensure GPU factors are populated (reuses calibration from frame_time test
-    // if it has already run in this process, or runs it fresh).
-    run_gpu_fill_calibration().await;
-    let cal = current_calibration_with_gpu();
-    let calibrated_budget = texture_upload_scaled_budget(NOMINAL_BUDGET_US, &cal);
+    let budget_us = test_budget(NOMINAL_BUDGET_US);
 
     let config = HeadlessConfig {
         width: 400,
@@ -1054,40 +779,25 @@ async fn test_texture_upload_p99_within_budget() {
         upload_bucket.record(start.elapsed().as_micros() as u64);
     }
 
-    // Timing assertion: gated — calibrated wall-clock budget that caused the
+    // Timing assertion: gated — wall-clock budget that caused the
     // recurring flake hud-1aswu.3 on the blocking test-unit lane.
     // Set TZE_HUD_PERF_ASSERT=1 to enable hard p99 assertion on a reference host.
     if perf_assert_enabled() {
-        let status = upload_bucket
-            .assert_p99_calibrated(calibrated_budget, NOMINAL_BUDGET_US)
-            .expect("texture_upload p99 calibrated budget");
-
-        match status {
-            CalibrationStatus::Pass(p99) => {
-                eprintln!(
-                    "[PASS] texture_upload p99={}us within calibrated budget={}us (factor={:.2}×)",
-                    p99,
-                    calibrated_budget.unwrap_or(0),
-                    cal.texture_upload_factor.unwrap_or(0.0),
-                );
-            }
-            CalibrationStatus::Uncalibrated { raw_p99 } => {
-                eprintln!(
-                    "[UNCALIBRATED] texture_upload raw_p99={raw_p99}us; test is informational only",
-                );
-            }
-        }
+        let p99 = upload_bucket
+            .assert_p99_under(budget_us)
+            .expect("texture_upload p99 budget");
+        eprintln!("[PASS] texture_upload p99={p99}us within budget={budget_us}us");
     } else {
         let raw_p99 = upload_bucket.p99().unwrap_or(0);
         eprintln!(
             "[SKIP-TIMING] texture_upload raw_p99={raw_p99}us; \
-             set TZE_HUD_PERF_ASSERT=1 to enforce calibrated budget"
+             set TZE_HUD_PERF_ASSERT=1 to enforce budget"
         );
     }
 }
 
-/// Assert that Stage 6 (Render Encode) p99 is under the hardware-normalized budget
-/// with text rendering active.
+/// Assert that Stage 6 (Render Encode) p99 is within budget with text rendering
+/// active.
 ///
 /// ## Spec Reference
 ///
@@ -1106,47 +816,21 @@ async fn test_texture_upload_p99_within_budget() {
 /// paragraph of text across multiple lines. This exercises the full text-rasterization
 /// path (glyphon layout + atlas upload) on every frame.
 ///
-/// ## Thresholds
+/// ## Threshold
 ///
-/// - **Spec target**: 4ms p99 (4_000 µs) on reference GPU hardware.
-/// - **CI threshold**: 16ms p99 (16_000 µs) — a 4× budget to accommodate
-///   llvmpipe/SwiftShader software rasterisers and slow CI runners.
-///
-/// The test uses `assert_p99_calibrated` with the GPU fill factor. The 16ms CI floor
-/// is applied as an absolute lower bound on the effective budget regardless of calibration
-/// state. On uncalibrated machines (no GPU calibration data), the hard assertion still
-/// runs against the 16ms floor — 16ms is conservative enough to be safe on any runner.
-/// On calibrated machines, `gpu_scaled_budget` may produce a larger budget (e.g., on
-/// llvmpipe with fill factor 10×, the budget is 40ms), but never below the 16ms floor.
-///
-/// ## CI Compatibility
-///
-/// Per the note in hud-3m8h: budget assertions can be fragile in CI. This test is
-/// intentionally lenient (4× multiplier = 16ms floor) to avoid spurious failures on
-/// slow software renderers. The spec target (4ms) is logged for observability only.
+/// 4ms p99 on reference GPU hardware, widened by the test slack factor to
+/// accommodate llvmpipe and slow CI runners. The goal in automation is catching
+/// runaway regressions, not enforcing the 4ms boundary.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_stage6_render_encode_p99_within_budget() {
     /// Spec target: 4ms p99 on reference GPU hardware (runtime-kernel/spec.md line 135).
     const NOMINAL_BUDGET_US: u64 = 4_000;
-    /// CI-friendly threshold: 4× the spec target, used as an absolute floor for all runners.
-    /// This floor is applied even on reference hardware (gpu_fill_factor ~1.0) where the
-    /// calibrated budget would be 4ms — the floor lifts it to 16ms to protect against
-    /// transient CI noise. The goal is catching runaway regressions (>>16ms), not enforcing
-    /// the 4ms spec boundary in automation. The spec target is tracked separately via
-    /// NOMINAL_BUDGET_US in the assertion output for observability.
-    const CI_BUDGET_MULTIPLIER: u64 = 4;
-    const CI_BUDGET_US: u64 = NOMINAL_BUDGET_US * CI_BUDGET_MULTIPLIER;
     /// Number of text-content tiles in the benchmark scene.
     const TEXT_TILE_COUNT: usize = 5;
     /// Frames measured (excluding warmup).
     const FRAME_COUNT: usize = 30;
 
-    // Ensure GPU factors are populated (reuses calibration from frame_time test
-    // if it ran earlier in this process, otherwise runs fresh).
-    run_gpu_fill_calibration().await;
-    let cal = current_calibration_with_gpu();
-    // Use gpu_scaled_budget for calibrated path; fall back to CI_BUDGET_US when uncalibrated.
-    let calibrated_budget = gpu_scaled_budget(NOMINAL_BUDGET_US, &cal).map(|b| b.max(CI_BUDGET_US)); // CI_BUDGET_US is an absolute floor on all hardware
+    let budget_us = test_budget(NOMINAL_BUDGET_US);
 
     let config = HeadlessConfig {
         width: 800,
@@ -1242,40 +926,23 @@ async fn test_stage6_render_encode_p99_within_budget() {
         "expected {FRAME_COUNT} stage6 samples"
     );
 
-    // ── Budget assertion (calibrated) — gated (hud-1aswu.3) ──────────────────
+    // ── Budget assertion — gated (hud-1aswu.3) ───────────────────────────────
     // Set TZE_HUD_PERF_ASSERT=1 to enable the hard p99 assertion on a reference
     // host.  On the standard test-unit CI lane (shared runners) the timing
     // assertion is skipped; only the structural sample-count assertion above runs.
     if perf_assert_enabled() {
-        // effective_budget is always Some: CI_BUDGET_US is used as the fallback when
-        // gpu_scaled_budget returns None (uncalibrated GPU). Passing Some(...) to
-        // assert_p99_calibrated means uncalibrated machines still get a hard assertion
-        // against the 16ms CI floor — intentional, since 16ms is conservative enough
-        // to be safe on any runner, including those without GPU calibration data.
-        let effective_budget = calibrated_budget.unwrap_or(CI_BUDGET_US);
-        let status = bucket
-            .assert_p99_calibrated(Some(effective_budget), NOMINAL_BUDGET_US)
-            .expect("stage6_render_encode p99 calibrated budget");
-
-        // CalibrationStatus::Uncalibrated is unreachable here because we always pass
-        // Some(effective_budget) — but Rust requires exhaustive enum handling.
-        let CalibrationStatus::Pass(p99) = status else {
-            unreachable!(
-                "assert_p99_calibrated returns Uncalibrated only when passed None; \
-                 effective_budget is always Some"
-            );
-        };
+        let p99 = bucket
+            .assert_p99_under(budget_us)
+            .expect("stage6_render_encode p99 budget");
         eprintln!(
-            "[PASS] stage6_render_encode p99={p99}us within budget={effective_budget}us \
-             (spec target={NOMINAL_BUDGET_US}us, ci floor={CI_BUDGET_US}us, \
-             gpu_fill_factor={:.2}×)",
-            cal.gpu_fill_factor.unwrap_or(0.0),
+            "[PASS] stage6_render_encode p99={p99}us within budget={budget_us}us \
+             (spec target={NOMINAL_BUDGET_US}us)"
         );
     } else {
         let raw_p99 = bucket.p99().unwrap_or(0);
         eprintln!(
             "[SKIP-TIMING] stage6_render_encode raw_p99={raw_p99}us; \
-             set TZE_HUD_PERF_ASSERT=1 to enforce calibrated budget"
+             set TZE_HUD_PERF_ASSERT=1 to enforce budget"
         );
     }
 }

@@ -67,7 +67,7 @@ const MAX_AGGREGATE_EVENTS_PER_SEC: u64 = 1_000;
 /// Returns `true` when wall-clock / p99 latency hard assertions should run.
 ///
 /// Set `TZE_HUD_PERF_ASSERT=1` to enable.  On the standard `test-unit` / blocking
-/// CI lane this is unset; calibrated wall-clock budget assertions are skipped to
+/// CI lane this is unset; wall-clock budget assertions are skipped to
 /// avoid flakes from scheduler noise on shared runners.
 fn perf_assert_enabled() -> bool {
     std::env::var("TZE_HUD_PERF_ASSERT")
@@ -365,7 +365,7 @@ async fn frame_budgets_hold_under_sustained_portal_stream() {
 
     // ── Budget assertions ──────────────────────────────────────────────────────
 
-    // Timing assertions: gated — calibrated wall-clock budgets.  (hud-94vm5)
+    // Timing assertions: gated — wall-clock budgets.  (hud-94vm5)
     // Set TZE_HUD_PERF_ASSERT=1 to enforce on a reference host.
     let p99_frame = summary.frame_time.p99().unwrap_or(0);
     if perf_assert_enabled() {
@@ -402,12 +402,12 @@ async fn frame_budgets_hold_under_sustained_portal_stream() {
     } else {
         eprintln!(
             "[SKIP-TIMING] frame_time p99={p99_frame}µs; \
-             set TZE_HUD_PERF_ASSERT=1 to enforce calibrated budget"
+             set TZE_HUD_PERF_ASSERT=1 to enforce budget"
         );
         if stage3_bucket.samples.len() >= 3 {
             eprintln!(
                 "[SKIP-TIMING] stage3 p99={}µs, stage4 p99={}µs, stage5 p99={}µs; \
-                 set TZE_HUD_PERF_ASSERT=1 to enforce calibrated budgets",
+                 set TZE_HUD_PERF_ASSERT=1 to enforce budgets",
                 stage3_bucket.p99().unwrap_or(0),
                 stage4_bucket.p99().unwrap_or(0),
                 stage5_bucket.p99().unwrap_or(0),
@@ -880,7 +880,7 @@ async fn input_latency_not_degraded_under_portal_stream() {
         } else {
             eprintln!(
                 "[SKIP-TIMING] input_to_local_ack p99={p99}µs; \
-                 set TZE_HUD_PERF_ASSERT=1 to enforce calibrated budget"
+                 set TZE_HUD_PERF_ASSERT=1 to enforce budget"
             );
         }
     }
