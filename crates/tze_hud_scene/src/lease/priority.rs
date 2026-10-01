@@ -1,9 +1,8 @@
-//! Lease priority assignment, sort semantics, and tile shedding order.
+//! Lease priority assignment and sort semantics.
 //!
 //! Implements:
 //! - Requirement: Priority Assignment (lease-governance/spec.md lines 49-60)
 //! - Requirement: Priority Sort Semantics (lease-governance/spec.md lines 62-69)
-//! - Requirement: Tile Shedding Order (lease-governance/spec.md lines 271-278)
 //!
 //! ## Priority values
 //! | Value | Meaning |
@@ -120,64 +119,6 @@ impl Ord for TileSortKey {
     }
 }
 
-// ─── Shedding Order ───────────────────────────────────────────────────────────
-
-/// A lightweight view of a tile used for shedding-order computation.
-///
-/// Callers pass a slice of `TileSheddingEntry` values; `shedding_order` returns
-/// the indices of tiles that should be shed first (least important first).
-#[derive(Clone, Debug)]
-pub struct TileSheddingEntry {
-    /// Unique tile identifier (opaque; passed back in the result).
-    pub index: usize,
-    pub key: TileSortKey,
-}
-
-impl TileSheddingEntry {
-    pub fn new(index: usize, lease_priority: u8, z_order: u32) -> Self {
-        TileSheddingEntry {
-            index,
-            key: TileSortKey::new(lease_priority, z_order),
-        }
-    }
-}
-
-/// Compute the shedding order for a set of active tiles at degradation Level 4.
-///
-/// Returns `count` tile indices in shedding order: **least important first**
-/// (highest `lease_priority` value, then lowest `z_order`).
-///
-/// Per spec §Requirement: Tile Shedding Order (lines 271-278):
-/// > "sort tiles by `(lease_priority ASC, z_order DESC)` and remove approximately
-/// >  25% of active tiles per application. Shed tiles remain in the scene graph;
-/// >  their leases are not revoked."
-///
-/// `count` is typically `ceil(tiles.len() / 4)` (≈25%) — the caller decides the
-/// exact number.  This function is pure: it does **not** modify any state.
-pub fn shedding_order(tiles: &[TileSheddingEntry], count: usize) -> Vec<usize> {
-    // Sort ascending by (lease_priority ASC, z_order DESC): tile indices at the
-    // *end* of this order are the least important and should be shed first.
-    let mut sorted: Vec<&TileSheddingEntry> = tiles.iter().collect();
-    // Sort so that the LEAST important tiles come FIRST.
-    // Least important = highest lease_priority value (numerically), then lowest z_order.
-    //   primary:   lease_priority DESC (b cmp a → DESC; highest value = least important)
-    //   secondary: z_order ASC        (a cmp b → ASC;  lowest z_order = less important)
-    sorted.sort_by(
-        |a, b| match b.key.lease_priority.cmp(&a.key.lease_priority) {
-            std::cmp::Ordering::Equal => a.key.z_order.cmp(&b.key.z_order),
-            ord => ord,
-        },
-    );
-
-    // Take the first `count` entries: they are the least important tiles to shed.
-    sorted.iter().take(count).map(|e| e.index).collect()
-}
-
-/// Compute the shed count for ~25% of `total` tiles (rounded up, min 0).
-pub fn shed_count_for_level4(total: usize) -> usize {
-    total.div_ceil(4)
-}
-
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -260,81 +201,5 @@ mod tests {
         keys.sort();
         assert_eq!(keys[0], TileSortKey::new(1, 10)); // highest-priority tile first
         assert_eq!(keys[2], TileSortKey::new(3, 1)); // lowest-priority tile last
-    }
-
-    // ── Shedding order ───────────────────────────────────────────────────────
-
-    /// WHEN degradation requires tile shedding THEN least-important tiles shed first.
-    ///
-    /// Spec scenario (lines 67-69):
-    /// "WHEN the degradation ladder requires tile shedding
-    ///  THEN tiles with the highest lease_priority values (least important) and
-    ///  lowest z_order values are shed first."
-    #[test]
-    fn shedding_order_least_important_first() {
-        let tiles = vec![
-            TileSheddingEntry::new(0, 1, 10), // high-prio, high-z — most important
-            TileSheddingEntry::new(1, 2, 5),  // normal prio, mid-z
-            TileSheddingEntry::new(2, 3, 1),  // low-prio, low-z — least important
-        ];
-        let shed = shedding_order(&tiles, 1);
-        assert_eq!(
-            shed,
-            vec![2],
-            "tile index 2 (priority=3, z=1) should shed first"
-        );
-    }
-
-    /// With equal priorities, lower z_order is shed first.
-    #[test]
-    fn shedding_order_equal_priority_lower_z_first() {
-        let tiles = vec![
-            TileSheddingEntry::new(0, 2, 10),
-            TileSheddingEntry::new(1, 2, 1),
-        ];
-        let shed = shedding_order(&tiles, 1);
-        assert_eq!(shed, vec![1], "tile with z=1 should shed before z=10");
-    }
-
-    /// shed_count_for_level4: approximately 25% rounded up.
-    #[test]
-    fn shed_count_25_percent() {
-        assert_eq!(shed_count_for_level4(4), 1);
-        assert_eq!(shed_count_for_level4(8), 2);
-        assert_eq!(shed_count_for_level4(3), 1);
-        assert_eq!(shed_count_for_level4(0), 0);
-    }
-
-    /// Shedding empty list returns empty.
-    #[test]
-    fn shedding_order_empty() {
-        let shed = shedding_order(&[], 0);
-        assert!(shed.is_empty());
-    }
-
-    /// Three-agent contention scenario from the spec (lines 67-69):
-    /// agents at priority 1/2/3, z-orders 10/5/1.
-    /// Priority-1 tile (high-prio, z=10) must be the LAST shed.
-    #[test]
-    fn shedding_order_three_agents_contention() {
-        let tiles = vec![
-            TileSheddingEntry::new(0, 1, 10), // agent.high_prio
-            TileSheddingEntry::new(1, 2, 5),  // agent.normal_prio
-            TileSheddingEntry::new(2, 3, 1),  // agent.low_prio
-        ];
-        // Shed 1 tile (~ 33% of 3) — least important is priority=3, z=1.
-        let shed = shedding_order(&tiles, 1);
-        assert_eq!(shed, vec![2], "low_prio tile (priority=3, z=1) sheds first");
-
-        // Shed 2 tiles — after low_prio, normal_prio sheds next.
-        let shed2 = shedding_order(&tiles, 2);
-        assert_eq!(shed2[0], 2, "low_prio sheds first");
-        assert_eq!(shed2[1], 1, "normal_prio sheds second");
-
-        // High-prio tile (index 0) must never be in a 2-tile shed from 3.
-        assert!(
-            !shed2.contains(&0),
-            "high_prio tile must not shed before low and normal"
-        );
     }
 }

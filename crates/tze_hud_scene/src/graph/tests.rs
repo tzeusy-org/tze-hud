@@ -3974,43 +3974,6 @@ fn test_renew_lease_preserves_priority() {
     assert_eq!(scene.leases[&lease_id].ttl_ms, 120_000);
 }
 
-/// WHEN multiple leases are granted with distinct priorities
-/// THEN the degradation ladder shedding order is (priority DESC numerically, z_order ASC).
-///
-/// Spec §Requirement: Tile Shedding Order (runtime-kernel/spec.md lines 263-270):
-/// tiles with the highest lease_priority values (least important) shed first.
-#[test]
-fn test_grant_lease_with_priority_shedding_order() {
-    use crate::lease::priority::{TileSheddingEntry, shed_count_for_level4, shedding_order};
-
-    let mut scene = SceneGraph::new(1920.0, 1080.0);
-    let _l_high = scene.grant_lease_with_priority("chrome", 60_000, 0, vec![]);
-    let _l_normal = scene.grant_lease_with_priority("agent-normal", 60_000, 2, vec![]);
-    let _l_low = scene.grant_lease_with_priority("agent-low", 60_000, 3, vec![]);
-
-    // Build TileSheddingEntry list using the stored priorities.
-    // (In production the runtime reads l.priority directly from the lease record.)
-    let entries: Vec<TileSheddingEntry> = scene
-        .leases
-        .values()
-        .enumerate()
-        .map(|(i, l)| TileSheddingEntry::new(i, l.priority, 5))
-        .collect();
-
-    let count = shed_count_for_level4(entries.len());
-    let shed = shedding_order(&entries, count);
-
-    // The shed entry must be the lease with the highest priority value (priority=3).
-    let shed_priorities: Vec<u8> = shed
-        .iter()
-        .map(|&i| entries[i].key.lease_priority)
-        .collect();
-    assert!(
-        shed_priorities.iter().all(|&p| p == 3),
-        "only the lowest-priority (highest value) lease should shed first; got {shed_priorities:?}"
-    );
-}
-
 // ─── Resource Usage Tests ───────────────────────────────────────────
 
 #[test]

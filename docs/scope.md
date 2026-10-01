@@ -26,13 +26,15 @@ remains. Each tranche must still build, pass tests, and boot the overlay.
 | T0 | Doctrine, RFCs, OpenSpec, curriculum, evidence/report docs, doctrine and OpenSpec agent skills, vocabulary lint | done |
 | T1 | Unused crates: `tze_hud_a11y`, `tze_hud_media_apple`, `tze_hud_media_android`, `tze_hud_policy`; Android/iOS/Safari CI workflows | done |
 | T2 | Media and cloud relay: GStreamer/`v2_preview` features, media ingress/admission, video surface, media signaling protobuf messages (field numbers reserved), media config and capability, real-decode and v2-preview CI, Python media exemplars | done |
-| T3 | Governance: attention budget, quiet hours, privacy redaction, policy-shaped admission and budget ladder, degradation ladder down to one fallback. **Keep** the lease lifecycle (request, TTL, renew, release, revoke, disconnect grace); capability scopes shrink to a per-agent zone/widget allowlist | pending |
-| T4 | Component profiles (keep tokens), sync groups / clock domains, replay, calibration, unused test scenes; `tze_hud_validation` + v1-thesis/Layer-4 artifact harness; shrink oversized test files | pending |
-| T5 | API design pass: one coherent verb set per lifecycle stage (discover, claim, fill, interact, hold, release, reclaim) across MCP and gRPC; measure token cost per stage; collapse accreted constructors and per-feature parameter threading in the session server | pending |
+| T3 | Governance: attention budget, quiet hours, privacy redaction and viewer classes, `[privacy]`/`[degradation]`/`[chrome]` config, admission controller, budget ladder (now plain hard caps), unwired lease state machine and suspension manager, degradation ladder down to one fallback (Normal ↔ Simplified). **Kept** the lease lifecycle (request, TTL, renew, release, revoke, disconnect grace). Capability-scope shrink moved to T5: it changes the session-init and lease wire contract | done |
+| T4 | Component profiles (keep tokens), sync groups / clock domains, replay, calibration, unused test scenes (incl. `privacy_redaction_mode`, `policy_*`); `tze_hud_validation` + v1-thesis/Layer-4 artifact harness; shrink oversized test files | pending |
+| T5 | API design pass: one coherent verb set per lifecycle stage (discover, claim, fill, interact, hold, release, reclaim) across MCP and gRPC; measure token cost per stage; collapse accreted constructors and per-feature parameter threading in the session server; replace the 17-entry capability vocabulary with a per-agent zone/widget allowlist; trim the wire `DegradationLevel` enum to Normal/Simplified | pending |
 
 ## Working rules
 
 - Prefer deleting over generalizing. New abstractions need a current user.
 - Tests guard behavior a user would notice, not internal structure.
-- `docs/` holds only this file, `vision.md`, `QUICKSTART.md`, and
-  `operations/` runbooks. Investigation notes go in PR descriptions.
+- Removals and redesigns must keep every contract in `invariants.md`; changing
+  one is a deliberate decision recorded there, with its tests.
+- `docs/` holds only this file, `vision.md`, `invariants.md`, `QUICKSTART.md`,
+  and `operations/` runbooks. Investigation notes go in PR descriptions.

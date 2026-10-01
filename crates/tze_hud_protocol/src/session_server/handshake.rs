@@ -199,10 +199,6 @@ pub(super) async fn handle_session_init(
         if let super::MutationBudgetDecision::Reject {
             error_code,
             message,
-        }
-        | super::MutationBudgetDecision::Revoke {
-            error_code,
-            message,
         } = enforcer.register_session(
             scene_session_id,
             namespace.clone(),
@@ -420,10 +416,6 @@ pub(super) async fn handle_session_resume(
     };
     if let Some(enforcer) = budget_enforcer {
         if let super::MutationBudgetDecision::Reject {
-            error_code,
-            message,
-        }
-        | super::MutationBudgetDecision::Revoke {
             error_code,
             message,
         } = enforcer.register_session(

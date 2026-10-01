@@ -145,67 +145,6 @@ pub struct RawTabLayout {
     pub reserved_right_fraction: Option<f64>,
 }
 
-// ─── [degradation] ───────────────────────────────────────────────────────────
-
-/// `[degradation]` table — optional.
-#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
-pub struct RawDegradation {
-    // Frame-time thresholds (ms) — must be monotonically non-decreasing.
-    pub coalesce_frame_ms: Option<f64>,
-    pub simplify_rendering_frame_ms: Option<f64>,
-    pub shed_tiles_frame_ms: Option<f64>,
-    pub audio_only_frame_ms: Option<f64>,
-
-    // GPU fraction thresholds — must be monotonically non-decreasing.
-    pub reduce_media_quality_gpu_fraction: Option<f64>,
-    pub reduce_concurrent_streams_gpu_fraction: Option<f64>,
-}
-
-// ─── [privacy] ───────────────────────────────────────────────────────────────
-
-/// `[privacy]` table — optional.
-#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
-pub struct RawPrivacy {
-    pub default_classification: Option<String>,
-    pub default_viewer_class: Option<String>,
-    pub viewer_id_method: Option<String>,
-    pub redaction_style: Option<String>,
-    pub multi_viewer_policy: Option<String>,
-
-    pub quiet_hours: Option<RawQuietHours>,
-}
-
-/// `[privacy.quiet_hours]` — optional.
-#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
-pub struct RawQuietHours {
-    #[serde(default)]
-    pub enabled: bool,
-    pub pass_through_class: Option<String>,
-    pub quiet_mode_display: Option<String>,
-    pub schedule: Option<Vec<RawQuietHoursSchedule>>,
-}
-
-/// A single time-range entry in `[[privacy.quiet_hours.schedule]]`.
-#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
-pub struct RawQuietHoursSchedule {
-    pub start: Option<String>,
-    pub end: Option<String>,
-    pub days: Option<Vec<String>>,
-}
-
-// ─── [chrome] ────────────────────────────────────────────────────────────────
-
-/// `[chrome]` table — optional.
-///
-/// NOTE: `redaction_style` MUST NOT appear here (spec §Requirement: Redaction
-/// Style Ownership).  We use a deny-unknown-fields variant in validation rather
-/// than here to give a better error message.
-#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
-pub struct RawChrome {
-    // Intentionally minimal — chrome options are spec-reserved for now.
-    // Future fields added here when the chrome spec matures.
-}
-
 // ─── [zones] ─────────────────────────────────────────────────────────────────
 
 /// `[zones]` table — optional.  Custom zone type definitions.
@@ -402,9 +341,6 @@ pub struct RawConfig {
     #[serde(default)]
     pub tabs: Vec<RawTab>,
 
-    pub degradation: Option<RawDegradation>,
-    pub privacy: Option<RawPrivacy>,
-    pub chrome: Option<RawChrome>,
     pub zones: Option<RawZones>,
     pub agents: Option<RawAgents>,
     /// Optional widget bundle directories to scan at startup.

@@ -8,7 +8,7 @@ Guidance for Claude Code working in this repository.
 models generate and manage the real-estate lifecycle of a HUD over the user's
 screen (discover, claim, fill, interact, hold, release, reclaim). Surfaces: a
 session portal, ambient zones, agent-owned tiles, and SVG widgets, on a
-Windows overlay. Read `docs/vision.md` first, then `docs/scope.md`.
+Windows overlay. Read `docs/vision.md` first, then `docs/scope.md` and `docs/invariants.md`.
 
 ## Status
 

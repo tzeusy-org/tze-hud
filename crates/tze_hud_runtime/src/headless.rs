@@ -41,7 +41,7 @@
 //! Tests that don't exercise the session layer use this to skip server startup.
 
 use crate::component_startup::{register_profile_widgets, run_component_startup};
-use crate::degradation::{DegradationController, DegradationEnvelope, TileDescriptor};
+use crate::degradation::{DegradationController, DegradationEnvelope};
 use crate::element_store::bootstrap_scene_element_store;
 use crate::idle_efficiency::{IdleEfficiencyCounters, IdleEfficiencySnapshot, RuntimeWakeupSource};
 use crate::pipeline::{FramePipeline, HitTestSnapshot};
@@ -539,25 +539,9 @@ impl HeadlessRuntime {
         // Gated internally on scene.version; no-op when unchanged.
         self.compositor.prime_truncation_cache(&scene_guard);
 
-        let degradation_tiles: Vec<TileDescriptor> = scene_guard
-            .visible_tiles()
-            .into_iter()
-            .filter_map(|tile| {
-                scene_guard
-                    .leases
-                    .get(&tile.lease_id)
-                    .map(|lease| TileDescriptor {
-                        tile_id: tile.id,
-                        lease_priority: u32::from(lease.priority),
-                        z_order: tile.z_order,
-                    })
-            })
-            .collect();
         let applied_degradation_level = self.degradation_controller.level();
-        self.compositor.set_degradation_policy(
-            self.degradation_controller
-                .compositor_policy(&degradation_tiles),
-        );
+        self.compositor
+            .set_degradation_policy(self.degradation_controller.compositor_policy());
 
         let stage4_us = s4_start.elapsed().as_micros() as u64;
         // input_to_scene_commit: wall time from frame_start to end of Stage 4.
@@ -1636,16 +1620,16 @@ mod tests {
             "retained update did not visibly change its declared damage region"
         );
 
-        // A full-frame baseline rendered under degradation can suppress tiles.
+        // A full-frame baseline rendered under degradation draws differently.
         // The retained path must decline and invalidate its snapshot rather than
-        // paint a suppressed tile back onto that baseline.
+        // paint a nominal-quality update onto that baseline.
         for _ in 0..40 {
             runtime.degradation_controller.record_frame(20_000);
         }
         assert_eq!(
             runtime.degradation_controller.level(),
-            crate::degradation::DegradationLevel::ShedTiles,
-            "the real runtime controller must produce the suppression policy"
+            crate::degradation::DegradationLevel::Simplified,
+            "the real runtime controller must produce the simplified policy"
         );
         {
             let mut scene = scene_arc.lock().await;
@@ -1681,12 +1665,12 @@ mod tests {
                 .compositor
                 .take_change_efficiency_capture()
                 .is_none(),
-            "suppressed tiles must never certify a retained update"
+            "degraded frames must never certify a retained update"
         );
         let suppressed_diagnostic = runtime
             .compositor
             .take_change_efficiency_diagnostic()
-            .expect("suppressed retained change emits a structured diagnostic");
+            .expect("degraded retained change emits a structured diagnostic");
         assert_eq!(
             suppressed_diagnostic
                 .full_surface_invalidation

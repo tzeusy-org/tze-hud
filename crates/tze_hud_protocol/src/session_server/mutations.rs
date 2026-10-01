@@ -1060,10 +1060,6 @@ pub(super) async fn handle_mutation_batch(
             MutationBudgetDecision::Reject {
                 error_code,
                 message,
-            }
-            | MutationBudgetDecision::Revoke {
-                error_code,
-                message,
             } => {
                 let cached = CachedResult {
                     accepted: false,

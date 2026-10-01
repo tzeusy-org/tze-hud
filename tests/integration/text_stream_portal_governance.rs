@@ -1,27 +1,22 @@
 //! Text stream portal governance and shell-isolation validation (hud-t98e.4).
 //!
-//! Focus: lease lifecycle, privacy redaction, safe-mode/freeze behavior,
-//! ambient attention defaults, and shell isolation constraints for the
-//! phase-0 raw-tile portal pilot.
+//! Focus: lease lifecycle, safe-mode/freeze behavior, and shell isolation
+//! constraints for the phase-0 raw-tile portal pilot.
 //!
 //! The second half of this file (hud-8z3w3, RFC 0013 §7.2 promotion) mirrors
 //! every governance contract above over the promoted first-class `PortalSurface`
-//! attached to the same host tile — proving lease ownership, redaction (with a
-//! flashes-no-content transition check), safe mode, freeze, dismissal, orphan
-//! handling, and ambient-attention defaults hold UNCHANGED on the first-class
-//! surface, and that it stays content-layer below chrome.
+//! attached to the same host tile — proving lease ownership, safe mode, freeze,
+//! dismissal, and orphan handling hold UNCHANGED on the first-class surface,
+//! and that it stays content-layer below chrome.
 
 use std::sync::Arc;
 
 use tze_hud_runtime::{
-    AttentionBudgetOutcome, AttentionBudgetTracker, ChromeState, ContentClassification,
-    EnqueueResult, FreezeQueue, MutationTrafficClass, QueuedMutation, RedactionFrame,
-    RedactionStyle, TileRedactionState, ViewerClass, build_redaction_cmds, classify_mutation_batch,
-    collect_diagnostic, hit_regions_enabled, is_tile_redacted,
+    ChromeState, EnqueueResult, FreezeQueue, MutationTrafficClass, QueuedMutation,
+    classify_mutation_batch, collect_diagnostic,
 };
 use tze_hud_scene::{
     Capability, Clock, SceneGraph, SceneId, TestClock, ZONE_TILE_Z_MIN,
-    events::InterruptionClass,
     lease::{LeaseState, ORPHAN_GRACE_PERIOD_MS},
     mutation::{MutationBatch, SceneMutation},
     types::{
@@ -235,57 +230,6 @@ fn orphaned_portal_freezes_and_grace_expiry_removes_tile() {
 }
 
 #[test]
-fn redaction_preserves_geometry_and_hides_portal_content() {
-    let (scene, _clock, _tab_id, _lease_id, tile_id) = create_portal_scene(120_000);
-    let tile_bounds = scene.tiles.get(&tile_id).expect("tile exists").bounds;
-    let raw_text = portal_text(&scene, tile_id);
-
-    assert!(
-        is_tile_redacted(ViewerClass::KnownGuest, ContentClassification::Private),
-        "known guest must not see private portal transcript"
-    );
-    let redaction_state = TileRedactionState::Redacted {
-        classification: ContentClassification::Private,
-    };
-    assert!(
-        !hit_regions_enabled(&redaction_state),
-        "redacted portal must disable interactive affordances"
-    );
-
-    let cmds = build_redaction_cmds(tile_bounds, RedactionStyle::Pattern);
-    assert!(
-        cmds.iter().any(|cmd| {
-            cmd.x == tile_bounds.x
-                && cmd.y == tile_bounds.y
-                && cmd.width == tile_bounds.width
-                && cmd.height == tile_bounds.height
-        }),
-        "redaction overlay must preserve tile geometry"
-    );
-
-    let frame = RedactionFrame::build(
-        ViewerClass::KnownGuest,
-        RedactionStyle::Pattern,
-        1,
-        &[(0, ContentClassification::Private)],
-    );
-    assert!(
-        frame.is_redacted(0),
-        "redaction frame must mark private tile as redacted for known guest viewer"
-    );
-    assert_eq!(
-        portal_text(&scene, tile_id),
-        raw_text,
-        "redaction must not mutate the underlying scene transcript data"
-    );
-    let overlay_debug = format!("{cmds:?}");
-    assert!(
-        !overlay_debug.contains(&raw_text),
-        "redaction overlay commands must not carry transcript content"
-    );
-}
-
-#[test]
 fn safe_mode_suspend_blocks_portal_updates_until_resume() {
     let (mut scene, clock, _tab_id, lease_id, tile_id) = create_portal_scene(120_000);
     let baseline = portal_text(&scene, tile_id);
@@ -364,39 +308,6 @@ fn freeze_path_uses_generic_backpressure_signal_not_portal_specific_signal() {
 }
 
 #[test]
-fn unread_backlog_defaults_to_ambient_attention_class() {
-    let mut tracker = AttentionBudgetTracker::new();
-    let mut saw_warning = false;
-    let mut saw_coalesce = false;
-
-    for i in 0..50_u64 {
-        let outcome = tracker.record(
-            "portal-gov",
-            "portal-zone",
-            InterruptionClass::Low,
-            i * 1_000_000,
-        );
-        match outcome {
-            AttentionBudgetOutcome::Ok => {}
-            AttentionBudgetOutcome::Warning => saw_warning = true,
-            AttentionBudgetOutcome::Coalesce => saw_coalesce = true,
-            AttentionBudgetOutcome::CriticalExempt | AttentionBudgetOutcome::SilentPassthrough => {
-                panic!("ambient portal backlog must not auto-upgrade into stronger interruption");
-            }
-        }
-    }
-
-    assert!(
-        saw_warning,
-        "ambient traffic should still respect budget warning"
-    );
-    assert!(
-        saw_coalesce,
-        "heavy ambient backlog should coalesce, not escalate urgency"
-    );
-}
-
-#[test]
 fn shell_status_snapshot_exposes_no_portal_identity_or_transcript() {
     let (scene, _clock, _tab_id, _lease_id, tile_id) = create_portal_scene(120_000);
     let transcript = portal_text(&scene, tile_id);
@@ -449,7 +360,7 @@ fn shell_dismiss_override_removes_portal_tile() {
 // on the RAW-TILE path must hold UNCHANGED once a first-class surface is
 // attached to the same host tile. The tests below MIRROR the raw-tile suite
 // one-for-one over a tile that carries a declared `PortalSurface`, and add the
-// redaction-flashes-no-content acceptance check plus the content-layer proof.
+// content-layer proof.
 //
 // Governance for the surface lives on the host tile's lease exactly as the raw
 // tiles do: the surface holds no capability, no lease, and no z-order of its
@@ -647,103 +558,6 @@ fn orphaned_first_class_surface_freezes_and_grace_expiry_prunes_surface() {
 }
 
 #[test]
-fn redaction_over_first_class_surface_hides_content_and_flashes_nothing() {
-    let (scene, _clock, _tab_id, _lease_id, tile_id) = create_first_class_portal_scene(120_000);
-    let tile_bounds = scene.tiles.get(&tile_id).expect("tile exists").bounds;
-    let raw_text = portal_text(&scene, tile_id);
-    let surface_before = scene
-        .portal_surface(tile_id)
-        .expect("surface present")
-        .clone();
-
-    // A restricted viewer must not see private portal content, and redaction
-    // disables the surface's interactive affordances.
-    assert!(
-        is_tile_redacted(ViewerClass::KnownGuest, ContentClassification::Private),
-        "known guest must not see private first-class surface content"
-    );
-    assert!(
-        !hit_regions_enabled(&TileRedactionState::Redacted {
-            classification: ContentClassification::Private,
-        }),
-        "redacted first-class surface must disable interactive affordances"
-    );
-
-    // Flash-no-content: at the frame redaction becomes active, the placeholder
-    // must cover the ENTIRE host-tile footprint. `Blank` yields exactly one
-    // full-bounds cmd; `Pattern` yields a full-bounds base fill first. Because
-    // `build_redaction_cmds` is a pure function of bounds+style (no scene/content
-    // access — see redaction.rs `redaction_cmds_are_independent_of_content_pass`),
-    // the clear→redacted swap is atomic: no partial-cover intermediate frame can
-    // expose content.
-    let blank = build_redaction_cmds(tile_bounds, RedactionStyle::Blank);
-    assert_eq!(
-        blank.len(),
-        1,
-        "blank redaction must be a single full cover"
-    );
-    assert!(
-        (blank[0].x - tile_bounds.x).abs() < 0.01
-            && (blank[0].y - tile_bounds.y).abs() < 0.01
-            && (blank[0].width - tile_bounds.width).abs() < 0.01
-            && (blank[0].height - tile_bounds.height).abs() < 0.01,
-        "blank redaction cover must match the full host-tile bounds exactly"
-    );
-    let pattern = build_redaction_cmds(tile_bounds, RedactionStyle::Pattern);
-    assert!(
-        pattern.iter().any(|cmd| {
-            cmd.x == tile_bounds.x
-                && cmd.y == tile_bounds.y
-                && cmd.width == tile_bounds.width
-                && cmd.height == tile_bounds.height
-        }),
-        "pattern redaction must include a full-bounds base fill (no exposed gap)"
-    );
-
-    // Transition proof across a viewer change: Owner (cleared) → not redacted;
-    // KnownGuest (restricted) → redacted. The decision is per-frame and pure, so
-    // each frame is wholly-clear or wholly-covered — never half-applied.
-    let cleared = RedactionFrame::build(
-        ViewerClass::Owner,
-        RedactionStyle::Pattern,
-        1,
-        &[(0, ContentClassification::Private)],
-    );
-    assert!(!cleared.is_redacted(0), "owner frame is fully clear");
-    let redacted = RedactionFrame::build(
-        ViewerClass::KnownGuest,
-        RedactionStyle::Pattern,
-        1,
-        &[(0, ContentClassification::Private)],
-    );
-    assert!(redacted.is_redacted(0), "guest frame is fully redacted");
-
-    // The redaction overlay carries pure geometry — never the transcript text or
-    // the surface's identity strings — so nothing leaks through the placeholder.
-    let overlay_debug = format!("{pattern:?}");
-    assert!(
-        !overlay_debug.contains(&raw_text),
-        "redaction overlay must not carry transcript content"
-    );
-    assert!(
-        !overlay_debug.contains(FC_SESSION_ID) && !overlay_debug.contains(FC_DISPLAY_NAME),
-        "redaction overlay must not carry the surface's identity strings"
-    );
-
-    // Redaction is overlay-only: it must not mutate the underlying surface data.
-    assert_eq!(
-        portal_text(&scene, tile_id),
-        raw_text,
-        "redaction must not mutate the underlying transcript"
-    );
-    assert_eq!(
-        scene.portal_surface(tile_id).expect("surface present"),
-        &surface_before,
-        "redaction must not mutate the first-class surface descriptor"
-    );
-}
-
-#[test]
 fn safe_mode_suspend_blocks_first_class_surface_mutations_until_resume() {
     let (mut scene, clock, _tab_id, lease_id, tile_id) = create_first_class_portal_scene(120_000);
 
@@ -902,62 +716,6 @@ fn freeze_path_governs_first_class_surface_via_generic_queue() {
     assert!(
         !proto.contains("PORTAL_FREEZE") && !proto.contains("SURFACE_FREEZE"),
         "protocol must not expose a portal/surface-specific freeze signal"
-    );
-}
-
-#[test]
-fn first_class_surface_backlog_defaults_to_ambient_attention_class() {
-    // Ambient-attention parity: heavy surface backlog rides the same ambient
-    // interruption budget as the raw-tile path — it coalesces, never escalates.
-    let mut tracker = AttentionBudgetTracker::new();
-    let mut saw_warning = false;
-    let mut saw_coalesce = false;
-    for i in 0..50_u64 {
-        match tracker.record(
-            "portal-gov",
-            "portal-surface-zone",
-            InterruptionClass::Low,
-            i * 1_000_000,
-        ) {
-            AttentionBudgetOutcome::Ok => {}
-            AttentionBudgetOutcome::Warning => saw_warning = true,
-            AttentionBudgetOutcome::Coalesce => saw_coalesce = true,
-            AttentionBudgetOutcome::CriticalExempt | AttentionBudgetOutcome::SilentPassthrough => {
-                panic!("ambient surface backlog must not auto-upgrade interruption class");
-            }
-        }
-    }
-    assert!(saw_warning, "ambient traffic still respects budget warning");
-    assert!(
-        saw_coalesce,
-        "heavy ambient backlog coalesces, not escalates"
-    );
-
-    // A lifecycle escalation on the surface itself (Active → Blocked) is a
-    // coalescible state patch that must NOT elevate the host tile's lease
-    // priority or push it toward chrome — the surface stays ambient by default.
-    let (mut scene, clock, _tab_id, lease_id, tile_id) = create_first_class_portal_scene(120_000);
-    let priority_before = scene.leases[&lease_id].priority;
-    let z_before = scene.tiles.get(&tile_id).expect("tile").z_order;
-    let escalate = scene.apply_batch(&make_batch(
-        "portal-gov",
-        lease_id,
-        vec![SceneMutation::UpdatePortalSurfaceState {
-            tile_id,
-            lifecycle: Some(PortalLifecycleState::Blocked),
-            display_state: None,
-        }],
-    ));
-    assert!(escalate.applied, "lifecycle patch applies");
-    let _ = clock;
-    assert_eq!(
-        scene.leases[&lease_id].priority, priority_before,
-        "surface lifecycle escalation must not raise lease priority (stays ambient)"
-    );
-    assert_eq!(
-        scene.tiles.get(&tile_id).expect("tile").z_order,
-        z_before,
-        "surface lifecycle escalation must not change host tile z-order"
     );
 }
 

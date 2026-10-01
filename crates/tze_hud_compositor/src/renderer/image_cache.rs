@@ -597,7 +597,7 @@ impl super::Compositor {
             return false;
         }
         let reduce_quality = self.degradation_policy.level
-            >= tze_hud_scene::DegradationLevel::Moderate
+            >= tze_hud_scene::DegradationLevel::Simplified
             && (img_width > self.degradation_policy.texture_quality_threshold_px
                 || img_height > self.degradation_policy.texture_quality_threshold_px);
         let (texture_width, texture_height) = if reduce_quality {

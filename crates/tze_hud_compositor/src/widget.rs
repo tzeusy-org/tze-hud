@@ -1652,19 +1652,17 @@ fn rgba_to_svg_color(rgba: &Rgba) -> String {
 /// Compute the effective transition progress `t` (0.0..=1.0) for a widget
 /// animation, taking the current degradation level into account.
 ///
-/// Under [`DegradationLevel::Significant`] or higher (the spec's
-/// `RENDERING_SIMPLIFIED` threshold), the compositor snaps to the final values
+/// Under [`DegradationLevel::Simplified`], the compositor snaps to the final values
 /// by returning `1.0` immediately, regardless of elapsed time.  This reduces
 /// per-frame re-rasterizations during periods of degradation.
 ///
-/// Under `Nominal`, `Minor`, or `Moderate`, the normal time-based interpolation
-/// value is returned.
+/// Under `Nominal`, the normal time-based interpolation value is returned.
 pub fn compute_transition_t(
     elapsed_ms: f32,
     duration_ms: f32,
     degradation_level: DegradationLevel,
 ) -> f32 {
-    if degradation_level >= DegradationLevel::Significant {
+    if degradation_level >= DegradationLevel::Simplified {
         1.0
     } else {
         (elapsed_ms / duration_ms).clamp(0.0, 1.0)
@@ -2682,7 +2680,7 @@ impl WidgetRenderer {
 
     /// Resolve effective parameters for an instance, applying animation if active.
     ///
-    /// Under degradation level [`DegradationLevel::Significant`] or higher
+    /// Under degradation level [`DegradationLevel::Simplified`] or higher
     /// (corresponding to the spec's `RENDERING_SIMPLIFIED` threshold), the
     /// compositor snaps to the final parameter values immediately (`t = 1.0`)
     /// instead of interpolating.  This reduces re-rasterization to at most once
@@ -4208,7 +4206,7 @@ mod tests {
 
     // ── Degradation-aware transition snapping tests ───────────────────────────
 
-    /// Under Nominal/Minor/Moderate, compute_transition_t returns the elapsed/duration ratio.
+    /// Under Nominal, compute_transition_t returns the elapsed/duration ratio.
     #[test]
     fn compute_transition_t_interpolates_below_rendering_simplified() {
         // At 50% elapsed out of 100ms duration → t = 0.5
@@ -4217,37 +4215,16 @@ mod tests {
             (t_nominal - 0.5).abs() < 1e-6,
             "Nominal: expected t=0.5, got {t_nominal}"
         );
-
-        let t_minor = compute_transition_t(50.0, 100.0, DegradationLevel::Minor);
-        assert!(
-            (t_minor - 0.5).abs() < 1e-6,
-            "Minor: expected t=0.5, got {t_minor}"
-        );
-
-        let t_moderate = compute_transition_t(50.0, 100.0, DegradationLevel::Moderate);
-        assert!(
-            (t_moderate - 0.5).abs() < 1e-6,
-            "Moderate: expected t=0.5, got {t_moderate}"
-        );
     }
 
-    /// Under RENDERING_SIMPLIFIED (Significant) or higher, transitions snap to t=1.0.
-    ///
-    /// Covers: openspec/changes/widget-system/design.md D5 stage 4 degradation note.
+    /// Under Simplified, transitions snap to t=1.0 regardless of elapsed time.
     #[test]
-    fn compute_transition_t_snaps_at_rendering_simplified_and_above() {
-        // All levels >= Significant must snap to 1.0, regardless of elapsed time.
-        for level in [
-            DegradationLevel::Significant,
-            DegradationLevel::ShedTiles,
-            DegradationLevel::Emergency,
-        ] {
-            let t = compute_transition_t(1.0, 1000.0, level); // only 0.1% elapsed
-            assert_eq!(
-                t, 1.0,
-                "degradation level {level:?} should snap transition to t=1.0, got {t}"
-            );
-        }
+    fn compute_transition_t_snaps_when_simplified() {
+        let t = compute_transition_t(1.0, 1000.0, DegradationLevel::Simplified); // 0.1% elapsed
+        assert_eq!(
+            t, 1.0,
+            "Simplified should snap transition to t=1.0, got {t}"
+        );
     }
 
     /// Verify the snap produces the final parameter value for an f32 transition.

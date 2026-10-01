@@ -454,7 +454,7 @@ impl super::Compositor {
             let policy = &zone_def.rendering_policy;
 
             // Current animation opacity for this zone.
-            let anim_opacity = if self.degradation_policy.level >= DegradationLevel::Significant {
+            let anim_opacity = if self.degradation_policy.level >= DegradationLevel::Simplified {
                 1.0
             } else {
                 self.zone_animation_states

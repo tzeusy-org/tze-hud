@@ -20,39 +20,6 @@ use std::sync::{Arc, RwLock};
 use tze_hud_compositor::ChromeDrawCmd;
 use tze_hud_scene::types::SceneId;
 
-// ─── Viewer class ────────────────────────────────────────────────────────────
-
-/// Viewer class determines what content an authenticated viewer is allowed to see.
-/// Agents MUST NOT receive viewer class information through any API.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum ViewerClass {
-    /// Displays a filled circle icon.
-    Owner,
-    /// Displays a partial circle icon.
-    HouseholdMember,
-    /// Displays an outline circle icon.
-    KnownGuest,
-    /// Displays a question mark icon.
-    #[default]
-    Unknown,
-    /// Displays a dim circle icon.
-    Nobody,
-}
-
-impl ViewerClass {
-    /// Icon representation for rendering (the only animation-permitted in v1 chrome
-    /// is the 300ms cross-fade on viewer class transition).
-    pub fn icon_label(&self) -> &'static str {
-        match self {
-            ViewerClass::Owner => "●",           // filled circle
-            ViewerClass::HouseholdMember => "◕", // partial circle
-            ViewerClass::KnownGuest => "○",      // outline circle
-            ViewerClass::Unknown => "?",         // question mark
-            ViewerClass::Nobody => "·",          // dim circle
-        }
-    }
-}
-
 // ─── Tab bar position ────────────────────────────────────────────────────────
 
 /// Where the tab bar renders. When `Hidden`, keyboard shortcuts remain active.
@@ -92,35 +59,6 @@ pub struct ChromeTab {
     pub active: bool,
 }
 
-// ─── Viewer class transition ─────────────────────────────────────────────────
-
-/// Tracks a cross-fade transition between two viewer class icons.
-/// The only animation permitted in v1 chrome: 300ms cross-fade.
-#[derive(Clone, Debug)]
-pub struct ViewerClassTransition {
-    /// Class being faded out.
-    pub from: ViewerClass,
-    /// Class being faded in.
-    pub to: ViewerClass,
-    /// Elapsed microseconds since the transition started (0..=300_000).
-    pub elapsed_us: u64,
-}
-
-impl ViewerClassTransition {
-    /// Duration of the cross-fade in microseconds (300ms).
-    pub const DURATION_US: u64 = 300_000;
-
-    /// Progress in [0.0, 1.0] — 0 = fully from, 1 = fully to.
-    pub fn progress(&self) -> f32 {
-        (self.elapsed_us as f32 / Self::DURATION_US as f32).min(1.0)
-    }
-
-    /// Whether the transition has completed.
-    pub fn is_complete(&self) -> bool {
-        self.elapsed_us >= Self::DURATION_US
-    }
-}
-
 // ─── ChromeState ─────────────────────────────────────────────────────────────
 
 /// The authoritative state for all chrome rendering.
@@ -146,10 +84,6 @@ pub struct ChromeState {
     pub active_tab_index: usize,
     /// Tab bar position configuration.
     pub tab_bar_position: TabBarPosition,
-    /// Current viewer class.
-    pub viewer_class: ViewerClass,
-    /// Active viewer class cross-fade transition, if any.
-    pub viewer_class_transition: Option<ViewerClassTransition>,
     /// Whether safe mode is currently active.
     pub safe_mode_active: bool,
     /// Whether the mute control is active (v1-reserved: always false).
@@ -268,39 +202,6 @@ impl ChromeState {
         }
         let last = self.tabs.len() - 1;
         self.switch_to_tab_index(last)
-    }
-
-    /// Begin a viewer class transition (initiates 300ms cross-fade).
-    ///
-    /// If a transition is already in progress, it is replaced.
-    pub fn begin_viewer_class_transition(&mut self, new_class: ViewerClass) {
-        if self.viewer_class == new_class {
-            return;
-        }
-        self.viewer_class_transition = Some(ViewerClassTransition {
-            from: self.viewer_class,
-            to: new_class,
-            elapsed_us: 0,
-        });
-        // The viewer_class field is updated only when the transition completes.
-    }
-
-    /// Advance the viewer class transition by `delta_us` microseconds.
-    ///
-    /// Returns `true` if the transition completed this tick.
-    pub fn advance_transition(&mut self, delta_us: u64) -> bool {
-        let completed = if let Some(ref mut t) = self.viewer_class_transition {
-            t.elapsed_us += delta_us;
-            t.is_complete()
-        } else {
-            return false;
-        };
-
-        if completed {
-            let to_class = self.viewer_class_transition.take().unwrap().to;
-            self.viewer_class = to_class;
-        }
-        completed
     }
 }
 
@@ -505,7 +406,7 @@ pub enum RevokeReason {
 ///
 /// ## Privacy invariants
 /// Audit events MUST NOT contain: viewer name, biometric features, auth details,
-/// device IDs, or geolocation. Viewer class changes carry only old_class/new_class.
+/// device IDs, or geolocation.
 ///
 /// ## Agent exclusion
 /// Audit events are NEVER routed to agents. They are sent to the telemetry thread only.
@@ -531,8 +432,6 @@ pub enum AuditTrigger {
 }
 
 /// The specific payload of a shell audit event.
-///
-/// Privacy constraint: `AuditViewerClassChanged` carries only old_class/new_class — no identity.
 #[derive(Clone, Debug)]
 pub enum AuditPayload {
     TileDismissed {
@@ -548,13 +447,6 @@ pub enum AuditPayload {
     SafeModeExited,
     FreezeActivated,
     FreezeDeactivated,
-    /// Privacy-safe: carries only class values, no viewer identity.
-    ViewerClassChanged {
-        old_class: ViewerClass,
-        new_class: ViewerClass,
-    },
-    ViewerPromptShown,
-    ViewerPromptResolved,
     MuteNoopLogged,
 }
 
@@ -628,7 +520,7 @@ impl ShellAuditSink for CollectingAuditSink {
 ///
 /// # Layer sovereignty
 ///
-/// The chrome render pass reads EXCLUSIVELY from `ChromeState`, the tab list, viewer context,
+/// The chrome render pass reads EXCLUSIVELY from `ChromeState`, the tab list,
 /// and cached `ChromeLayout`. It reads NO agent state. If all agents crash, chrome renders
 /// correctly on the next frame.
 pub struct ChromeRenderer {
@@ -638,7 +530,7 @@ pub struct ChromeRenderer {
     /// Cached layout geometry, recomputed when display size changes.
     layout: Option<ChromeLayout>,
     /// Audit sink — never routes to agents. Used when chrome renderer emits audit events
-    /// (e.g., viewer class transitions complete, safe mode changes are detected).
+    /// (e.g., safe mode changes are detected).
     #[allow(dead_code)]
     audit_sink: Arc<dyn ShellAuditSink>,
 }
@@ -690,7 +582,7 @@ impl ChromeRenderer {
             cmds.extend(self.build_tab_bar_cmds(&state, &layout));
         }
 
-        // Render viewer class indicator + system status (only when tab bar is visible).
+        // Render system status (only when tab bar is visible).
         cmds.extend(self.build_status_indicator_cmds(
             &state,
             &layout,
@@ -700,7 +592,7 @@ impl ChromeRenderer {
 
         // Safe mode overlay (if active) — renders over everything.
         if state.safe_mode_active {
-            cmds.extend(self.build_safe_mode_overlay_cmds(&state, display_width, display_height));
+            cmds.extend(self.build_safe_mode_overlay_cmds(display_width, display_height));
         }
 
         // Lock is released here (state drops at end of scope before return).
@@ -859,33 +751,6 @@ impl ChromeRenderer {
             });
         }
 
-        // Viewer class icon (fills right side of status indicator).
-        // Transitions cross-fade over 300ms (the only v1 animation).
-        let icon_x = display_width - 36.0;
-        let icon_y = layout.tab_bar_y + (layout.tab_bar_height - 16.0) / 2.0;
-        let icon_color = if let Some(ref t) = state.viewer_class_transition {
-            let p = t.progress();
-            let from_c = viewer_class_color(t.from);
-            let to_c = viewer_class_color(t.to);
-            // Linear interpolation between from and to colors (including alpha).
-            [
-                from_c[0] * (1.0 - p) + to_c[0] * p,
-                from_c[1] * (1.0 - p) + to_c[1] * p,
-                from_c[2] * (1.0 - p) + to_c[2] * p,
-                from_c[3] * (1.0 - p) + to_c[3] * p,
-            ]
-        } else {
-            viewer_class_color(state.viewer_class)
-        };
-
-        cmds.push(ChromeDrawCmd {
-            x: icon_x,
-            y: icon_y,
-            width: 16.0,
-            height: 16.0,
-            color: icon_color,
-        });
-
         // Mute control (v1-reserved: rendered disabled/greyed).
         let mute_x = display_width
             - ChromeState::STATUS_INDICATOR_WIDTH_PX
@@ -905,11 +770,10 @@ impl ChromeRenderer {
 
     /// Build the safe mode overlay draw commands.
     ///
-    /// The safe mode overlay reads EXCLUSIVELY from ChromeState. It renders correctly
-    /// even if the scene graph is corrupted (because it does not depend on it).
+    /// The overlay depends only on the display size, so it renders correctly
+    /// even if the scene graph is corrupted.
     fn build_safe_mode_overlay_cmds(
         &self,
-        state: &ChromeState,
         display_width: f32,
         display_height: f32,
     ) -> Vec<ChromeDrawCmd> {
@@ -950,30 +814,7 @@ impl ChromeRenderer {
             color: [0.3, 0.5, 0.9, 1.0], // blue button
         });
 
-        // Viewer class icon in overlay (uses same color logic as tab bar).
-        let vc_color = viewer_class_color(state.viewer_class);
-        cmds.push(ChromeDrawCmd {
-            x: btn_x + btn_w + 24.0,
-            y: btn_y + (btn_h - 20.0) / 2.0,
-            width: 20.0,
-            height: 20.0,
-            color: vc_color,
-        });
-
         cmds
-    }
-}
-
-/// Map a viewer class to a representative RGBA color for icon rendering.
-///
-/// Alpha is encoded in `[3]`. Call sites use the full array for cross-fade interpolation.
-fn viewer_class_color(vc: ViewerClass) -> [f32; 4] {
-    match vc {
-        ViewerClass::Owner => [0.4, 0.7, 1.0, 1.0], // bright blue filled
-        ViewerClass::HouseholdMember => [0.4, 0.7, 1.0, 0.7], // medium blue partial
-        ViewerClass::KnownGuest => [0.4, 0.7, 1.0, 0.4], // outline blue
-        ViewerClass::Unknown => [0.7, 0.7, 0.7, 0.8], // grey question
-        ViewerClass::Nobody => [0.4, 0.4, 0.4, 0.3], // dim
     }
 }
 
@@ -997,8 +838,6 @@ pub struct DiagnosticSnapshot {
     pub active_tab_index: usize,
     /// Tab bar position.
     pub tab_bar_position_label: &'static str,
-    /// Viewer class (note: this is ONLY available in the CLI diagnostic, never to agents).
-    pub viewer_class_label: &'static str,
     /// Safe mode active.
     pub safe_mode_active: bool,
     /// Capture surface active (v1: always false).
@@ -1028,13 +867,6 @@ pub fn collect_diagnostic(
             TabBarPosition::Bottom => "bottom",
             TabBarPosition::Hidden => "hidden",
         },
-        viewer_class_label: match state.viewer_class {
-            ViewerClass::Owner => "owner",
-            ViewerClass::HouseholdMember => "household_member",
-            ViewerClass::KnownGuest => "known_guest",
-            ViewerClass::Unknown => "unknown",
-            ViewerClass::Nobody => "nobody",
-        },
         safe_mode_active: state.safe_mode_active,
         capture_surface_active: state.capture_surface_active,
     }
@@ -1052,7 +884,6 @@ impl std::fmt::Display for DiagnosticSnapshot {
             self.tab_count, self.active_tab_index
         )?;
         writeln!(f, "  tab_bar_position:   {}", self.tab_bar_position_label)?;
-        writeln!(f, "  viewer_class:       {}", self.viewer_class_label)?;
         writeln!(f, "  safe_mode:          {}", self.safe_mode_active)?;
         writeln!(f, "  capture_surface:    {}", self.capture_surface_active)?;
         Ok(())
@@ -1100,7 +931,6 @@ mod tests {
         assert_eq!(state.tabs.len(), 0);
         assert_eq!(state.active_tab_index, 0);
         assert_eq!(state.tab_bar_position, TabBarPosition::Top);
-        assert_eq!(state.viewer_class, ViewerClass::Unknown);
         assert!(!state.safe_mode_active);
         assert!(!state.mute_active);
         assert_eq!(state.connected_agent_count, 0);
@@ -1267,82 +1097,6 @@ mod tests {
         assert!(!result.tab_switched);
         assert!(result.mute_noop_logged);
     }
-
-    // ── Viewer class transition ───────────────────────────────────────────
-
-    #[test]
-    fn viewer_class_transition_begins_and_completes() {
-        let mut state = ChromeState::new();
-        assert_eq!(state.viewer_class, ViewerClass::Unknown);
-
-        state.begin_viewer_class_transition(ViewerClass::Owner);
-        assert!(state.viewer_class_transition.is_some());
-        // viewer_class not yet updated
-        assert_eq!(state.viewer_class, ViewerClass::Unknown);
-
-        // Advance to completion.
-        let completed = state.advance_transition(ViewerClassTransition::DURATION_US);
-        assert!(completed);
-        assert_eq!(state.viewer_class, ViewerClass::Owner);
-        assert!(state.viewer_class_transition.is_none());
-    }
-
-    #[test]
-    fn viewer_class_transition_partial_progress() {
-        let mut state = ChromeState::new();
-        state.begin_viewer_class_transition(ViewerClass::Owner);
-
-        let t = state.viewer_class_transition.as_ref().unwrap();
-        assert_eq!(t.from, ViewerClass::Unknown);
-        assert_eq!(t.to, ViewerClass::Owner);
-
-        // Advance 150ms — halfway.
-        state.advance_transition(150_000);
-        let t = state.viewer_class_transition.as_ref().unwrap();
-        let p = t.progress();
-        assert!((p - 0.5).abs() < 0.01, "expected ~50% progress");
-        // viewer_class still the old value mid-transition
-        assert_eq!(state.viewer_class, ViewerClass::Unknown);
-    }
-
-    #[test]
-    fn begin_same_viewer_class_is_noop() {
-        let mut state = ChromeState::new();
-        state.viewer_class = ViewerClass::Owner;
-        state.begin_viewer_class_transition(ViewerClass::Owner);
-        assert!(
-            state.viewer_class_transition.is_none(),
-            "no transition needed for same class"
-        );
-    }
-
-    #[test]
-    fn viewer_class_change_audit_carries_only_class_values() {
-        // Privacy constraint: audit must carry only old_class/new_class — no identity.
-        let event = ShellAuditEvent {
-            timestamp_mono_us: 12345,
-            trigger: AuditTrigger::Auto,
-            payload: AuditPayload::ViewerClassChanged {
-                old_class: ViewerClass::Owner,
-                new_class: ViewerClass::Unknown,
-            },
-        };
-
-        // Verify the payload only contains class values.
-        match event.payload {
-            AuditPayload::ViewerClassChanged {
-                old_class,
-                new_class,
-            } => {
-                assert_eq!(old_class, ViewerClass::Owner);
-                assert_eq!(new_class, ViewerClass::Unknown);
-                // There are no other fields — privacy constraint satisfied.
-            }
-            _ => panic!("unexpected payload variant"),
-        }
-    }
-
-    // ── Audit sink ────────────────────────────────────────────────────────
 
     #[test]
     fn collecting_audit_sink_accumulates_events() {
@@ -1557,7 +1311,6 @@ mod tests {
         let chrome_state = Arc::new(RwLock::new({
             let mut state = ChromeState::new();
             state.safe_mode_active = true;
-            state.viewer_class = ViewerClass::Owner;
             state
         }));
 
@@ -1597,13 +1350,11 @@ mod tests {
         state.add_tab(1, "A".into());
         state.add_tab(2, "B".into());
         state.connected_agent_count = 3;
-        state.viewer_class = ViewerClass::Owner;
         state.safe_mode_active = false;
 
         let snap = collect_diagnostic(&state, 999_000, 5);
         assert_eq!(snap.tab_count, 2);
         assert_eq!(snap.connected_agent_count, 3);
-        assert_eq!(snap.viewer_class_label, "owner");
         assert_eq!(snap.active_lease_count, 5);
         assert!(!snap.safe_mode_active);
         assert!(
@@ -1619,7 +1370,7 @@ mod tests {
         let snap = collect_diagnostic(&state, 0, 0);
         let output = format!("{snap}");
         assert!(output.contains("tze_hud Chrome Diagnostic Snapshot"));
-        assert!(output.contains("unknown"));
+        assert!(output.contains("tab_bar_position:   top"));
     }
 
     // ── Concurrent ChromeState access ─────────────────────────────────────

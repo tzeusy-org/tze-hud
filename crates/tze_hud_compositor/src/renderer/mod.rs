@@ -41,13 +41,10 @@ use tze_hud_telemetry::FrameTelemetry;
 
 /// Runtime-selected render policy for one frame.
 ///
-/// The suppression set is computed under the same scene lock as the frame
-/// build and uses stable tile identities. The compositor never derives or
-/// advances degradation state independently.
+/// The compositor never derives or advances degradation state independently.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CompositorDegradationPolicy {
     pub level: DegradationLevel,
-    pub suppressed_tiles: HashSet<SceneId>,
     pub texture_quality_threshold_px: u32,
     pub texture_scale_factor: f32,
 }
@@ -56,7 +53,6 @@ impl Default for CompositorDegradationPolicy {
     fn default() -> Self {
         Self {
             level: DegradationLevel::Nominal,
-            suppressed_tiles: HashSet::new(),
             texture_quality_threshold_px: 512,
             texture_scale_factor: 0.5,
         }
@@ -225,7 +221,7 @@ pub struct Compositor {
     pub debug_zone_tints: bool,
     /// Current degradation level, set by the runtime before each frame.
     ///
-    /// At [`DegradationLevel::Significant`] or higher, widget transition
+    /// At [`DegradationLevel::Simplified`] or higher, widget transition
     /// interpolation is skipped and final parameter values are applied
     /// immediately to reduce re-rasterization under load.
     pub degradation_level: DegradationLevel,

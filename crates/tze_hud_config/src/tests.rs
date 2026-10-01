@@ -248,32 +248,6 @@ name = "Main"
     );
 }
 
-// ── Spec §Degradation Threshold Ordering ──────────────────────────────────────
-
-/// WHEN degradation thresholds are out of order THEN CONFIG_DEGRADATION_THRESHOLD_ORDER.
-#[test]
-fn spec_degradation_out_of_order_rejected() {
-    let toml = r#"
-[runtime]
-profile = "full-display"
-
-[[tabs]]
-name = "Main"
-
-[degradation]
-shed_tiles_frame_ms = 12.0
-coalesce_frame_ms = 14.0
-"#;
-    let loader = parse_ok(toml);
-    let errors = loader.validate();
-    assert!(
-        errors
-            .iter()
-            .any(|e| matches!(e.code, ConfigErrorCode::DegradationThresholdOrder)),
-        "out-of-order thresholds should produce CONFIG_DEGRADATION_THRESHOLD_ORDER"
-    );
-}
-
 // ── Spec §Scene Event Naming Convention ──────────────────────────────────────
 
 /// WHEN tab_switch_on_event = "doorbell.ring" THEN accepted.
@@ -1190,180 +1164,6 @@ name = "Main"
     );
 }
 
-// ── Spec §Privacy Configuration Defaults (rig-mop4) ──────────────────────────
-
-/// WHEN default_classification = "top_secret" THEN CONFIG_UNKNOWN_CLASSIFICATION.
-#[test]
-fn spec_unknown_classification_rejected() {
-    let toml = r#"
-[runtime]
-profile = "full-display"
-
-[[tabs]]
-name = "Main"
-
-[privacy]
-default_classification = "top_secret"
-"#;
-    let loader = parse_ok(toml);
-    let errors = loader.validate();
-    assert!(
-        errors
-            .iter()
-            .any(|e| matches!(e.code, ConfigErrorCode::UnknownClassification)),
-        "default_classification=top_secret should produce CONFIG_UNKNOWN_CLASSIFICATION, got: {:?}",
-        errors.iter().map(|e| &e.code).collect::<Vec<_>>()
-    );
-}
-
-/// WHEN default_viewer_class = "admin" THEN CONFIG_UNKNOWN_VIEWER_CLASS.
-#[test]
-fn spec_unknown_viewer_class_rejected() {
-    let toml = r#"
-[runtime]
-profile = "full-display"
-
-[[tabs]]
-name = "Main"
-
-[privacy]
-default_viewer_class = "admin"
-"#;
-    let loader = parse_ok(toml);
-    let errors = loader.validate();
-    assert!(
-        errors
-            .iter()
-            .any(|e| matches!(e.code, ConfigErrorCode::UnknownViewerClass)),
-        "default_viewer_class=admin should produce CONFIG_UNKNOWN_VIEWER_CLASS"
-    );
-}
-
-/// WHEN privacy section has valid fields THEN no errors.
-#[test]
-fn spec_valid_privacy_section_accepted() {
-    let toml = r#"
-[runtime]
-profile = "full-display"
-
-[[tabs]]
-name = "Main"
-
-[privacy]
-default_classification = "private"
-default_viewer_class = "unknown"
-redaction_style = "pattern"
-multi_viewer_policy = "most_restrictive"
-"#;
-    let loader = parse_ok(toml);
-    let errors = loader.validate();
-    let privacy_errors: Vec<_> = errors
-        .iter()
-        .filter(|e| {
-            matches!(
-                e.code,
-                ConfigErrorCode::UnknownClassification
-                    | ConfigErrorCode::UnknownViewerClass
-                    | ConfigErrorCode::UnknownInterruptionClass
-            )
-        })
-        .collect();
-    assert!(
-        privacy_errors.is_empty(),
-        "valid privacy section should not produce errors, got: {privacy_errors:?}"
-    );
-}
-
-// ── Spec §Quiet Hours Configuration (rig-mop4) ────────────────────────────────
-
-/// WHEN pass_through_class = "urgent" (doctrine name) THEN CONFIG_UNKNOWN_INTERRUPTION_CLASS
-/// with hint suggesting canonical name.
-#[test]
-fn spec_quiet_hours_doctrine_name_rejected_with_hint() {
-    let toml = r#"
-[runtime]
-profile = "full-display"
-
-[[tabs]]
-name = "Main"
-
-[privacy.quiet_hours]
-enabled = true
-pass_through_class = "urgent"
-"#;
-    let loader = parse_ok(toml);
-    let errors = loader.validate();
-    assert!(
-        errors
-            .iter()
-            .any(|e| matches!(e.code, ConfigErrorCode::UnknownInterruptionClass)),
-        "doctrine name 'urgent' should produce CONFIG_UNKNOWN_INTERRUPTION_CLASS"
-    );
-    let err = errors
-        .iter()
-        .find(|e| matches!(e.code, ConfigErrorCode::UnknownInterruptionClass))
-        .unwrap();
-    // Per spec line 239 and RFC 0010 §3.1: "urgent" → canonical "HIGH".
-    assert!(
-        err.hint.contains("HIGH"),
-        "hint for 'urgent' must suggest canonical name 'HIGH' (RFC 0010 §3.1), got: {:?}",
-        err.hint
-    );
-}
-
-/// WHEN pass_through_class = "HIGH" THEN quiet hours semantics correct.
-#[test]
-fn spec_quiet_hours_high_pass_through_class_accepted() {
-    let toml = r#"
-[runtime]
-profile = "full-display"
-
-[[tabs]]
-name = "Main"
-
-[privacy.quiet_hours]
-enabled = true
-pass_through_class = "HIGH"
-"#;
-    let loader = parse_ok(toml);
-    let errors = loader.validate();
-    let qh_errors: Vec<_> = errors
-        .iter()
-        .filter(|e| matches!(e.code, ConfigErrorCode::UnknownInterruptionClass))
-        .collect();
-    assert!(
-        qh_errors.is_empty(),
-        "HIGH is a valid pass_through_class, got errors: {qh_errors:?}"
-    );
-}
-
-// ── Spec §Redaction Style Ownership (rig-mop4) ────────────────────────────────
-
-/// WHEN privacy.redaction_style = "pattern" and [chrome] has no redaction_style THEN accepted.
-#[test]
-fn spec_redaction_style_in_privacy_section_accepted() {
-    let toml = r#"
-[runtime]
-profile = "full-display"
-
-[[tabs]]
-name = "Main"
-
-[privacy]
-redaction_style = "pattern"
-"#;
-    let loader = parse_ok(toml);
-    let errors = loader.validate();
-    let redaction_errors: Vec<_> = errors
-        .iter()
-        .filter(|e| e.field_path.contains("redaction_style"))
-        .collect();
-    assert!(
-        redaction_errors.is_empty(),
-        "redaction_style in [privacy] should be accepted, got: {redaction_errors:?}"
-    );
-}
-
 // ── Spec §Zone Registry Configuration (rig-mop4) ─────────────────────────────
 
 /// WHEN a tab references zone type "news_ticker" not defined in [zones] and not built-in
@@ -1547,10 +1347,10 @@ fn spec_auth_psk_unset_env_produces_warning() {
 
 // ── Spec §Configuration Reload (rig-mop4) ────────────────────────────────────
 
-/// WHEN SIGHUP received and updated config changes privacy.redaction_style THEN
-/// new style takes effect without restart.
+/// WHEN SIGHUP received and updated config changes a hot-reloadable section THEN
+/// the new value takes effect without restart.
 #[test]
-fn spec_reload_privacy_redaction_style_change() {
+fn spec_reload_hot_section_change() {
     use crate::reload::reload_config;
 
     let new_toml = r#"
@@ -1560,16 +1360,16 @@ profile = "full-display"
 [[tabs]]
 name = "Main"
 
-[privacy]
-redaction_style = "blank"
+[agents.dynamic_policy]
+allow_dynamic_agents = true
 "#;
     let result = reload_config(new_toml);
     assert!(result.is_ok(), "valid reload config should succeed");
     let hot = result.unwrap();
     assert_eq!(
-        hot.privacy.redaction_style,
-        Some("blank".into()),
-        "reload should apply new redaction_style"
+        hot.dynamic_policy.as_ref().map(|p| p.allow_dynamic_agents),
+        Some(true),
+        "reload should apply new degradation threshold"
     );
 }
 
@@ -1581,13 +1381,15 @@ fn spec_reload_validation_failure_leaves_config_unchanged() {
 
     let bad_toml = r#"
 [runtime]
-profile = "full-display"
+profile = "custom"
+
+[display_profile]
+extends = "full-display"
+target_fps = 15
+min_fps = 30
 
 [[tabs]]
 name = "Main"
-
-[privacy]
-default_classification = "top_secret"
 "#;
     let result = reload_config(bad_toml);
     assert!(
@@ -1598,7 +1400,7 @@ default_classification = "top_secret"
     assert!(
         errors
             .iter()
-            .any(|e| matches!(e.code, ConfigErrorCode::UnknownClassification)),
+            .any(|e| matches!(e.code, ConfigErrorCode::InvalidFpsRange)),
         "should return validation error from reload, got: {errors:?}"
     );
 }

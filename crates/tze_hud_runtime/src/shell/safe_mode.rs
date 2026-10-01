@@ -1234,14 +1234,10 @@ mod tests {
     /// THEN overlay still renders correctly (reads only from ChromeState).
     #[tokio::test]
     async fn test_overlay_renders_from_chrome_state_only_after_critical_error() {
-        use super::super::chrome::{ChromeRenderer, ViewerClass};
+        use super::super::chrome::ChromeRenderer;
 
         let shared = make_shared_state();
-        let chrome = Arc::new(RwLock::new({
-            let mut cs = ChromeState::new();
-            cs.viewer_class = ViewerClass::Owner;
-            cs
-        }));
+        let chrome = Arc::new(RwLock::new(ChromeState::new()));
         let mut ctrl = SafeModeController::new_headless(shared, Arc::clone(&chrome));
 
         // Enter safe mode simulating scene graph corruption (critical error).

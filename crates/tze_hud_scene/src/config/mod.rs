@@ -29,13 +29,9 @@ pub enum ConfigErrorCode {
     UnknownCapability,
     ReservedEventPrefix,
     InvalidEventName,
-    UnknownClassification,
-    UnknownViewerClass,
-    UnknownInterruptionClass,
     AgentBudgetExceedsProfile,
     InvalidReservedFraction,
     InvalidFpsRange,
-    DegradationThresholdOrder,
     ConfigIncludesNotSupported,
     /// `[widget_bundles].paths` entry does not exist on disk.
     WidgetBundlePathNotFound,

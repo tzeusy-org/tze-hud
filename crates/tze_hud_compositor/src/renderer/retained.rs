@@ -773,7 +773,6 @@ impl Compositor {
 
     fn retained_headless_policy_is_supported(&self) -> bool {
         self.degradation_policy.level == tze_hud_scene::DegradationLevel::Nominal
-            && self.degradation_policy.suppressed_tiles.is_empty()
             // The retained proof can reproduce only the deterministic idle
             // drag-grip layer below. All other compositor-owned chrome remains
             // a full-frame concern until it has its own bounded evidence lane.

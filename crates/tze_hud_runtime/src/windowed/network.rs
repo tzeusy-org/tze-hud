@@ -20,7 +20,7 @@ use crate::threads::NetworkRuntime;
 ///
 /// When `cfg.config_toml` is `Some`, the TOML is parsed and validated. On
 /// success, capability grants from `[agents.registered]` and the hot-reloadable
-/// sections (`[privacy]`, `[degradation]`, `[chrome]`, `[agents.dynamic_policy]`)
+/// section (`[agents.dynamic_policy]`)
 /// are loaded into the context. The fallback policy is `Guest` (registered
 /// agents only).
 ///
@@ -82,7 +82,7 @@ pub(super) fn build_runtime_context(cfg: &WindowedConfig) -> (SharedRuntimeConte
             };
 
             // Parse hot-reloadable sections from the same TOML so the initial
-            // privacy/degradation/chrome/dynamic_policy settings take effect
+            // dynamic_policy settings take effect
             // immediately (before the first SIGHUP).
             let hot = tze_hud_config::reload_config(toml_src).unwrap_or_default();
 
@@ -794,8 +794,11 @@ mod tests {
         // Hot config should be all defaults.
         let hot = ctx.hot_config();
         assert!(
-            hot.privacy.redaction_style.is_none(),
-            "hot config privacy must default to None when no config file is given"
+            hot.dynamic_policy
+                .as_ref()
+                .map(|p| p.allow_dynamic_agents)
+                .is_none(),
+            "hot config must default to None when no config file is given"
         );
     }
 
@@ -917,7 +920,7 @@ profile = "full-display"
         );
     }
 
-    /// Hot-reloadable sections (privacy, degradation) from the initial config
+    /// Hot-reloadable sections from the initial config
     /// are applied immediately - no SIGHUP required.
     #[test]
     fn build_runtime_context_hot_sections_applied_from_config() {
@@ -928,8 +931,8 @@ profile = "full-display"
 [[tabs]]
 name = "Main"
 
-[privacy]
-redaction_style = "blank"
+[agents.dynamic_policy]
+allow_dynamic_agents = true
 "#;
         let cfg = WindowedConfig {
             config_toml: Some(toml.to_string()),
@@ -938,9 +941,9 @@ redaction_style = "blank"
         let (ctx, _) = build_runtime_context(&cfg);
         let hot = ctx.hot_config();
         assert_eq!(
-            hot.privacy.redaction_style,
-            Some("blank".to_string()),
-            "privacy.redaction_style from config must be applied immediately at startup"
+            hot.dynamic_policy.as_ref().map(|p| p.allow_dynamic_agents),
+            Some(true),
+            "dynamic_policy.as_ref().map(|p| p.allow_dynamic_agents) from config must be applied immediately at startup"
         );
     }
 }

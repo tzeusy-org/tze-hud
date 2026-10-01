@@ -1628,28 +1628,9 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                         scene.drain_expired_widget_publications();
                         let terminal_lease_expiries = scene.expire_leases();
 
-                        // Snapshot identity, priority, z-order, and selected
-                        // policy atomically under this frame's scene lock.
-                        // Chrome is a separate compositor layer; every agent or
-                        // runtime tile, including priority zero, participates in
-                        // the one-tile Emergency selection.
-                        let degradation_tiles: Vec<crate::degradation::TileDescriptor> = scene
-                            .visible_tiles()
-                            .into_iter()
-                            .filter_map(|tile| {
-                                scene.leases.get(&tile.lease_id).map(|lease| {
-                                    crate::degradation::TileDescriptor {
-                                        tile_id: tile.id,
-                                        lease_priority: u32::from(lease.priority),
-                                        z_order: tile.z_order,
-                                    }
-                                })
-                            })
-                            .collect();
                         let applied_degradation_level = degradation_controller.level();
-                        compositor.set_degradation_policy(
-                            degradation_controller.compositor_policy(&degradation_tiles),
-                        );
+                        compositor
+                            .set_degradation_policy(degradation_controller.compositor_policy());
 
                         // ── Per-publication TTL fade-out sweep ───────────
                         // update_publication_animations seeds new state and ticks
