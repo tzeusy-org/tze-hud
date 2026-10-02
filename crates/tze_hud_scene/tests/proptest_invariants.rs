@@ -34,7 +34,7 @@ use tze_hud_scene::{
     graph::SceneGraph,
     invariants::check_all,
     mutation::{MutationBatch, SceneMutation},
-    types::{Capability, Rect, SceneId},
+    types::{Rect, SceneId},
 };
 
 // ─── PropTest configuration ───────────────────────────────────────────────────
@@ -123,11 +123,7 @@ fn build_valid_scene(params: &ValidSceneParams) -> SceneGraph {
             .expect("create_tab failed in build_valid_scene");
 
         // Create a fresh lease per tab to avoid budget pressure from multiple tabs.
-        let lease_id = graph.grant_lease(
-            &format!("agent.t{tab_idx}"),
-            300_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id = graph.grant_lease(&format!("agent.t{tab_idx}"), 300_000);
 
         let tile_w = 1920.0 / (params.tiles_per_tab as f32 + 1.0);
         let tile_h = 1080.0 / (params.tab_count as f32 + 1.0);
@@ -190,7 +186,7 @@ proptest! {
     ) {
         let mut graph = SceneGraph::new(1920.0, 1080.0);
         let tab_id = graph.create_tab(&tab_name, 0).unwrap();
-        let lease_id = graph.grant_lease(&namespace, 300_000, vec![Capability::CreateTiles, Capability::ModifyOwnTiles]);
+        let lease_id = graph.grant_lease(&namespace, 300_000);
 
         // Apply n_tiles valid CreateTile mutations
         let tile_w = 200.0f32.min(extra_bounds.width);
@@ -239,7 +235,7 @@ proptest! {
     ) {
         let mut graph = SceneGraph::new(1920.0, 1080.0);
         let tab_id = graph.create_tab(&tab_name, 0).unwrap();
-        let lease_id = graph.grant_lease(&namespace, 300_000, vec![Capability::CreateTiles, Capability::ModifyOwnTiles]);
+        let lease_id = graph.grant_lease(&namespace, 300_000);
 
         // Build pre-state: pre_tiles valid tiles
         for i in 0..pre_tiles {
@@ -321,8 +317,8 @@ proptest! {
     ) {
         let mut graph = SceneGraph::new(1920.0, 1080.0);
         let tab_id = graph.create_tab(&tab_name, 0).unwrap();
-        let lease_a = graph.grant_lease(&ns_a, 300_000, vec![Capability::CreateTiles, Capability::ModifyOwnTiles]);
-        let lease_b = graph.grant_lease(&ns_b, 300_000, vec![Capability::CreateTiles, Capability::ModifyOwnTiles]);
+        let lease_a = graph.grant_lease(&ns_a, 300_000);
+        let lease_b = graph.grant_lease(&ns_b, 300_000);
 
         for i in 0..n_a {
             let bounds = Rect::new(i as f32 * 50.0, 0.0, 40.0, 40.0);
@@ -435,7 +431,7 @@ proptest! {
         let tab_id = graph.create_tab("Stress", 0).unwrap();
         // Budget cap of 255: batches of n > 255 may fail for TILE_BUDGET_EXCEEDED,
         // but must never fail for BatchSizeExceeded (n ≤ MAX_BATCH_SIZE = 1000).
-        let lease_id = graph.grant_lease("stress.agent", 300_000, vec![Capability::CreateTiles, Capability::ModifyOwnTiles]);
+        let lease_id = graph.grant_lease("stress.agent", 300_000);
         {
             let lease = graph.leases.get_mut(&lease_id).unwrap();
             lease.resource_budget.max_tiles = 255; // tile budget cap (< MAX_BATCH_SIZE)

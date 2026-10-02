@@ -23,7 +23,7 @@
 use std::sync::Arc;
 
 use tze_hud_scene::{
-    Capability, Clock, SceneGraph, SceneId, TestClock,
+    Clock, SceneGraph, SceneId, TestClock,
     lease::{LeaseState, ORPHAN_GRACE_PERIOD_MS, TileVisualHint},
     mutation::{MutationBatch, SceneMutation},
     types::{InputMode, Node, NodeData, Rect, Rgba, SolidColorNode},
@@ -132,11 +132,7 @@ fn setup_three_agent_scene() -> (SceneGraph, TestClock, SceneId, [SceneId; 3], [
     let mut tile_ids = [SceneId::nil(); 3];
 
     for (i, ns) in namespaces.iter().enumerate() {
-        let lease_id = scene.grant_lease(
-            ns,
-            120_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id = scene.grant_lease(ns, 120_000);
         lease_ids[i] = lease_id;
 
         // Create tile

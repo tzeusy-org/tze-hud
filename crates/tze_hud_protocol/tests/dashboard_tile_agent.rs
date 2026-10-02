@@ -195,8 +195,7 @@ async fn exemplar_session_establishment_produces_session_established() {
 // ─── Scenario 2: Lease grant with valid capabilities ─────────────────────────
 
 /// GIVEN a successfully established session for "dashboard-agent",
-/// WHEN the agent sends LeaseRequest { ttl_ms: 60000, capabilities: [create_tiles,
-///   modify_own_tiles], lease_priority: 2 },
+/// WHEN the agent sends LeaseRequest { ttl_ms: 60000 },
 /// THEN the server responds with LeaseResponse { granted: true } and a 16-byte
 ///   UUIDv7 lease_id that the agent MUST store for subsequent MutationBatch calls.
 ///

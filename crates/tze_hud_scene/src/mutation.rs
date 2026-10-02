@@ -1011,11 +1011,7 @@ mod tests {
     fn test_mutation_batch_apply() {
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
-        let lease_id = scene.grant_lease(
-            "agent",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id = scene.grant_lease("agent", 60_000);
 
         let batch = make_batch(
             "agent",
@@ -1043,11 +1039,7 @@ mod tests {
         // isolation matching the sibling content mutations.
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
-        let lease_id = scene.grant_lease(
-            "agent",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id = scene.grant_lease("agent", 60_000);
         let created = scene.apply_batch(&make_batch_with_lease(
             "agent",
             lease_id,
@@ -1148,29 +1140,6 @@ mod tests {
             3,
             "a rejected cross-namespace write must not change the count"
         );
-
-        // Revoking `ModifyOwnTiles` (lease still Active, same namespace) must
-        // reject the badge write with `CapabilityMissing` — parity with the
-        // checked lifecycle-accent / portal-surface paths (hud-a745w). A
-        // capability-revoked session must not keep mutating tile UI state.
-        scene
-            .revoke_capability(lease_id, &Capability::ModifyOwnTiles)
-            .expect("revoke ModifyOwnTiles");
-        assert!(
-            !scene
-                .apply_batch(&make_batch_with_lease(
-                    "agent",
-                    lease_id,
-                    vec![SceneMutation::SetTileUnreadCount { tile_id, count: 7 }],
-                ))
-                .applied,
-            "a ModifyOwnTiles-revoked session must not set the badge count"
-        );
-        assert_eq!(
-            scene.tile_unread_count(tile_id),
-            3,
-            "a capability-rejected write must not change the count"
-        );
     }
 
     #[test]
@@ -1179,11 +1148,7 @@ mod tests {
         // correlation; the render loop drains it exactly once per present.
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
-        let lease_id = scene.grant_lease(
-            "agent",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id = scene.grant_lease("agent", 60_000);
         let batch = make_batch(
             "agent",
             vec![SceneMutation::CreateTile {
@@ -1240,11 +1205,7 @@ mod tests {
         // Multiple batches applied before a present drain in application order.
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
-        let lease_id = scene.grant_lease(
-            "agent",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id = scene.grant_lease("agent", 60_000);
         let mut expected = Vec::new();
         for i in 0..3 {
             let batch = make_batch(
@@ -1267,11 +1228,7 @@ mod tests {
     fn set_tile_lifecycle_accent_sets_clears_and_cleans_up() {
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
-        let lease_id = scene.grant_lease(
-            "agent",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id = scene.grant_lease("agent", 60_000);
         let create = make_batch(
             "agent",
             vec![SceneMutation::CreateTile {
@@ -1379,11 +1336,7 @@ mod tests {
     fn transcript_scene_with_tile(text: &str) -> (SceneGraph, SceneId) {
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
-        let lease_id = scene.grant_lease(
-            "agent",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id = scene.grant_lease("agent", 60_000);
         let create = make_batch(
             "agent",
             vec![SceneMutation::CreateTile {
@@ -1568,11 +1521,7 @@ mod tests {
     fn set_tile_composer_interaction_rejects_cross_namespace() {
         let (mut scene, tile_id) = transcript_scene_with_tile("render 1");
         // A different namespace with its own lease must not attach a composer.
-        let _intruder = scene.grant_lease(
-            "intruder",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let _intruder = scene.grant_lease("intruder", 60_000);
         let hostile = make_batch(
             "intruder",
             vec![SceneMutation::SetTileComposerInteraction {
@@ -1599,11 +1548,7 @@ mod tests {
     fn set_tile_lifecycle_accent_rejects_cross_namespace() {
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
-        let owner_lease = scene.grant_lease(
-            "owner",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let owner_lease = scene.grant_lease("owner", 60_000);
         let create = make_batch(
             "owner",
             vec![SceneMutation::CreateTile {
@@ -1651,11 +1596,7 @@ mod tests {
     fn portal_scene_with_tile() -> (SceneGraph, SceneId, SceneId) {
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
-        let lease_id = scene.grant_lease(
-            "agent",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id = scene.grant_lease("agent", 60_000);
         let create = make_batch(
             "agent",
             vec![SceneMutation::CreateTile {
@@ -1887,93 +1828,6 @@ mod tests {
         assert_eq!(scene.portal_surface(tile_id), None);
     }
 
-    /// hud-tc153 review P1: a portal surface is a content-layer, lease-governed
-    /// object, so once `ModifyOwnTiles` is revoked mid-lease both
-    /// `SetPortalSurface` and `UpdatePortalSurfaceState` must be rejected with
-    /// `CapabilityMissing` — an active lease alone is not sufficient authority.
-    #[test]
-    fn portal_surface_mutations_require_live_modify_capability() {
-        let mut scene = SceneGraph::new(1920.0, 1080.0);
-        let tab_id = scene.create_tab("Main", 0).unwrap();
-        let lease_id = scene.grant_lease(
-            "agent",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
-        let create = make_batch(
-            "agent",
-            vec![SceneMutation::CreateTile {
-                tab_id,
-                namespace: "agent".to_string(),
-                lease_id,
-                bounds: Rect::new(10.0, 10.0, 400.0, 300.0),
-                z_order: 1,
-            }],
-        );
-        let tile_id = scene.apply_batch(&create).created_ids[0];
-
-        // Declare a surface while the capability is still present — succeeds.
-        let declare = make_batch(
-            "agent",
-            vec![SceneMutation::SetPortalSurface {
-                tile_id,
-                surface: PortalSurface {
-                    lifecycle: PortalLifecycleState::Active,
-                    display_state: PortalDisplayState::Expanded,
-                    ..Default::default()
-                },
-            }],
-        );
-        assert!(scene.apply_batch(&declare).applied);
-
-        // Revoke ModifyOwnTiles; the lease stays active.
-        scene
-            .revoke_capability(lease_id, &Capability::ModifyOwnTiles)
-            .expect("revoke must succeed");
-
-        // SetPortalSurface is now blocked by the missing capability.
-        let set = make_batch(
-            "agent",
-            vec![SceneMutation::SetPortalSurface {
-                tile_id,
-                surface: PortalSurface {
-                    lifecycle: PortalLifecycleState::Blocked,
-                    ..Default::default()
-                },
-            }],
-        );
-        let set_result = scene.apply_batch(&set);
-        assert!(!set_result.applied, "SetPortalSurface must be rejected");
-        assert_eq!(
-            set_result.rejection.unwrap().errors[0].code,
-            ValidationErrorCode::CapabilityMissing
-        );
-
-        // UpdatePortalSurfaceState is likewise blocked.
-        let patch = make_batch(
-            "agent",
-            vec![SceneMutation::UpdatePortalSurfaceState {
-                tile_id,
-                lifecycle: Some(PortalLifecycleState::Blocked),
-                display_state: None,
-            }],
-        );
-        let patch_result = scene.apply_batch(&patch);
-        assert!(
-            !patch_result.applied,
-            "UpdatePortalSurfaceState must be rejected"
-        );
-        assert_eq!(
-            patch_result.rejection.unwrap().errors[0].code,
-            ValidationErrorCode::CapabilityMissing
-        );
-
-        // The originally declared state is untouched by the rejected writes.
-        let surviving = scene.portal_surface(tile_id).unwrap();
-        assert_eq!(surviving.lifecycle, PortalLifecycleState::Active);
-        assert_eq!(surviving.display_state, PortalDisplayState::Expanded);
-    }
-
     /// hud-tc153 review P2: the descriptor survives a content republish, but a
     /// part node reference that pointed at the now-removed root must not dangle —
     /// `SetTileRoot` prunes it back to `None` so consumers never resolve a stale
@@ -2081,11 +1935,7 @@ mod tests {
     fn test_mutation_batch_rollback_on_failure() {
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
-        let lease_id = scene.grant_lease(
-            "agent",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id = scene.grant_lease("agent", 60_000);
 
         let batch = make_batch(
             "agent",
@@ -2124,11 +1974,7 @@ mod tests {
     fn test_batch_size_exceeded() {
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
-        let lease_id = scene.grant_lease(
-            "agent",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id = scene.grant_lease("agent", 60_000);
 
         // Build a batch with 1001 mutations
         let mutations: Vec<SceneMutation> = (0..=1000)
@@ -2162,11 +2008,7 @@ mod tests {
         let tab_id = scene.create_tab("Main", 0).unwrap();
 
         // Grant a lease with a 1ms TTL, then immediately expire it
-        let lease_id = scene.grant_lease(
-            "agent",
-            1,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id = scene.grant_lease("agent", 1);
         // Advance the clock past TTL by expiring leases (simulated by direct state manipulation)
         scene.leases.get_mut(&lease_id).unwrap().state = crate::types::LeaseState::Expired;
 
@@ -2201,11 +2043,7 @@ mod tests {
     fn test_sequence_numbers_monotonically_increasing() {
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
-        let lease_id = scene.grant_lease(
-            "agent",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id = scene.grant_lease("agent", 60_000);
 
         let mut prev_seq = 0u64;
         for z in 1..=5u32 {
@@ -2234,11 +2072,7 @@ mod tests {
     fn test_z_order_conflict_detected() {
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
-        let lease_id = scene.grant_lease(
-            "agent",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id = scene.grant_lease("agent", 60_000);
 
         // Create first tile at z_order=1 with bounds [0,0,200,200]
         let b1 = make_batch(
@@ -2280,11 +2114,7 @@ mod tests {
     fn make_scene_with_text_node() -> (SceneGraph, SceneId, SceneId, SceneId, SceneId) {
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
-        let lease_id = scene.grant_lease(
-            "agent",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id = scene.grant_lease("agent", 60_000);
         let tile_id = scene
             .create_tile(
                 tab_id,
@@ -2436,11 +2266,7 @@ mod tests {
     fn test_update_node_content_node_in_wrong_tile_rejected() {
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
-        let lease_id = scene.grant_lease(
-            "agent",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id = scene.grant_lease("agent", 60_000);
 
         // Tile A with a text node.
         let tile_a = scene
@@ -2562,11 +2388,7 @@ mod tests {
         // Verify structured rejection includes mutation_index, code, message, context.
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
-        let lease_id = scene.grant_lease(
-            "agent",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id = scene.grant_lease("agent", 60_000);
 
         let batch = make_batch(
             "agent",

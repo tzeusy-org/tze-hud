@@ -994,18 +994,14 @@ fn compute_ring(tab_id: SceneId, owner: &FocusOwner, scene: &SceneGraph) -> Focu
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tze_hud_scene::{Capability, HitRegionNode, Node, NodeData, Rect, SceneGraph, SceneId};
+    use tze_hud_scene::{HitRegionNode, Node, NodeData, Rect, SceneGraph, SceneId};
 
     // ── Scene setup helpers ──────────────────────────────────────────────
 
     fn setup_scene() -> (SceneGraph, SceneId, SceneId) {
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
-        let lease_id = scene.grant_lease(
-            "agent-a",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id = scene.grant_lease("agent-a", 60_000);
         let tile_id = scene
             .create_tile(
                 tab_id,
@@ -1115,11 +1111,7 @@ mod tests {
             true,
         );
 
-        let lease_id2 = scene.grant_lease(
-            "agent-b",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id2 = scene.grant_lease("agent-b", 60_000);
         let tile_id2 = scene
             .create_tile(
                 tab_id,
@@ -1258,11 +1250,7 @@ mod tests {
         );
 
         // Create a second tile owned by agent-b.
-        let lease_id2 = scene.grant_lease(
-            "agent-b",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id2 = scene.grant_lease("agent-b", 60_000);
         let tile_id2 = scene
             .create_tile(
                 tab_id,
@@ -1335,11 +1323,7 @@ mod tests {
         );
 
         // Create a second tile.
-        let lease_id2 = scene.grant_lease(
-            "agent-b",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id2 = scene.grant_lease("agent-b", 60_000);
         let tile_id2 = scene
             .create_tile(
                 tab_id,
@@ -1418,11 +1402,7 @@ mod tests {
             true,
         );
 
-        let lease_id2 = scene.grant_lease(
-            "agent-b",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id2 = scene.grant_lease("agent-b", 60_000);
         let _tile_id2 = scene
             .create_tile(
                 tab_id,
@@ -1456,21 +1436,9 @@ mod tests {
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
 
-        let lease_a = scene.grant_lease(
-            "a",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
-        let lease_b = scene.grant_lease(
-            "b",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
-        let lease_c = scene.grant_lease(
-            "c",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_a = scene.grant_lease("a", 60_000);
+        let lease_b = scene.grant_lease("b", 60_000);
+        let lease_c = scene.grant_lease("c", 60_000);
 
         let t1 = scene
             .create_tile(tab_id, "a", lease_a, Rect::new(0.0, 0.0, 100.0, 100.0), 1)
@@ -1596,11 +1564,7 @@ mod tests {
     fn portal_tab_ring_visits_controls_and_skips_pointer_only_handles() {
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
-        let lease = scene.grant_lease(
-            "portal-agent",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease = scene.grant_lease("portal-agent", 60_000);
         let tile = scene
             .create_tile(
                 tab_id,
@@ -1705,16 +1669,8 @@ mod tests {
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
 
-        let lease_a = scene.grant_lease(
-            "a",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
-        let lease_b = scene.grant_lease(
-            "b",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_a = scene.grant_lease("a", 60_000);
+        let lease_b = scene.grant_lease("b", 60_000);
 
         let t1 = scene
             .create_tile(tab_id, "a", lease_a, Rect::new(0.0, 0.0, 100.0, 100.0), 1)
@@ -1797,11 +1753,7 @@ mod tests {
             true,
         );
 
-        let lease_b = scene.grant_lease(
-            "b",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_b = scene.grant_lease("b", 60_000);
         let t2 = scene
             .create_tile(tab_id, "b", lease_b, Rect::new(200.0, 0.0, 100.0, 100.0), 2)
             .unwrap();
@@ -1897,21 +1849,13 @@ mod tests {
             true,
         );
 
-        let lease_b = scene.grant_lease(
-            "b",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_b = scene.grant_lease("b", 60_000);
         let t2 = scene
             .create_tile(tab_id, "b", lease_b, Rect::new(200.0, 0.0, 100.0, 100.0), 2)
             .unwrap();
         let n2 = add_hit_region(&mut scene, t2, Rect::new(0.0, 0.0, 50.0, 50.0), "n2", true);
 
-        let lease_c = scene.grant_lease(
-            "c",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_c = scene.grant_lease("c", 60_000);
         let t3 = scene
             .create_tile(tab_id, "c", lease_c, Rect::new(400.0, 0.0, 100.0, 100.0), 3)
             .unwrap();
@@ -1975,11 +1919,7 @@ mod tests {
         let tab_id = scene.create_tab("Main", 0).unwrap();
         fm.add_tab(tab_id);
 
-        let lease_id = scene.grant_lease(
-            "agent",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id = scene.grant_lease("agent", 60_000);
         let tile_id = scene
             .create_tile(
                 tab_id,
@@ -2014,11 +1954,7 @@ mod tests {
         let tab_id = scene.create_tab("Main", 0).unwrap();
         fm.add_tab(tab_id);
 
-        let lease_id = scene.grant_lease(
-            "agent",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id = scene.grant_lease("agent", 60_000);
         let tile_id = scene
             .create_tile(
                 tab_id,

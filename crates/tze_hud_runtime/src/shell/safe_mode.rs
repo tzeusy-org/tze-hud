@@ -736,7 +736,7 @@ mod tests {
     /// Grant an active lease in the scene graph; returns the lease ID.
     async fn grant_active_lease(ctrl: &SafeModeController, namespace: &str) -> SceneId {
         let st = ctrl.shared_state.lock().await;
-        st.scene.lock().await.grant_lease(namespace, 60_000, vec![])
+        st.scene.lock().await.grant_lease(namespace, 60_000)
     }
 
     // ── 1. Entry protocol ─────────────────────────────────────────────────────
@@ -960,17 +960,17 @@ mod tests {
         assert!(!ctrl.chrome_state.read().unwrap().safe_mode_active);
     }
 
-    /// Agents do NOT re-request leases — identity, capability scope, and budget preserved.
+    /// Agents do NOT re-request leases — identity and budget preserved.
     #[tokio::test]
     async fn test_lease_identity_preserved_across_suspend_resume() {
         let mut ctrl = make_controller();
         let lease_id = grant_active_lease(&ctrl, "agent.alpha").await;
 
-        let (ns_before, priority_before) = {
+        let (ns_before, session_before) = {
             let st = ctrl.shared_state.lock().await;
             let scene = st.scene.lock().await;
             let l = &scene.leases[&lease_id];
-            (l.namespace.clone(), l.priority)
+            (l.namespace.clone(), l.session_id)
         };
 
         ctrl.enter_safe_mode_viewer_action().await;
@@ -982,8 +982,8 @@ mod tests {
             let l = &scene.leases[&lease_id];
             assert_eq!(l.namespace, ns_before, "namespace preserved across cycle");
             assert_eq!(
-                l.priority, priority_before,
-                "priority preserved across cycle"
+                l.session_id, session_before,
+                "session preserved across cycle"
             );
         }
     }
@@ -1184,9 +1184,9 @@ mod tests {
 
     // ── 8. Safe mode suspends every agent's leases ───────────────────────────
 
-    /// WHEN safe mode entered THEN all leases at all priority levels are suspended.
+    /// WHEN safe mode entered THEN every agent's leases are suspended.
     #[tokio::test]
-    async fn test_safe_mode_suspends_leases_at_every_priority() {
+    async fn test_safe_mode_suspends_every_agents_leases() {
         let shared = make_shared_state();
         let chrome = Arc::new(RwLock::new(ChromeState::new()));
         let mut ctrl = SafeModeController::new_headless(shared.clone(), chrome);
@@ -1195,13 +1195,8 @@ mod tests {
         {
             let st = shared.lock().await;
             let mut scene = st.scene.lock().await;
-            for ns in [
-                "system.agent",
-                "high.priority.agent",
-                "normal.agent",
-                "low.agent",
-            ] {
-                scene.grant_lease(ns, 60_000, vec![]);
+            for ns in ["system.agent", "high.agent", "normal.agent", "low.agent"] {
+                scene.grant_lease(ns, 60_000);
             }
         }
 
@@ -1209,7 +1204,7 @@ mod tests {
         let result = ctrl.enter_safe_mode_viewer_action().await;
         assert!(result.leases_suspended > 0);
 
-        // All leases must be SUSPENDED regardless of priority.
+        // All leases must be SUSPENDED.
         {
             let st = shared.lock().await;
             let scene = st.scene.lock().await;

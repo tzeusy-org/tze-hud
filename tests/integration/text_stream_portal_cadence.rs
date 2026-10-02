@@ -24,7 +24,6 @@ use tze_hud_runtime::{
     STAGE3_BUDGET_US, STAGE4_BUDGET_US, STAGE5_BUDGET_US,
 };
 use tze_hud_scene::{
-    Capability,
     graph::SceneGraph,
     mutation::{MutationBatch, SceneMutation},
     types::{Node, NodeData, Rect, Rgba, SceneId, SolidColorNode},
@@ -270,11 +269,7 @@ async fn frame_budgets_hold_under_sustained_portal_stream() {
         let scene_arc = scene_handle(&runtime).await;
         let mut scene = scene_arc.lock().await;
         let tab_id = scene.create_tab("cadence_test", 0).expect("create_tab");
-        let lease_id = scene.grant_lease(
-            "cadence_test",
-            300_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id = scene.grant_lease("cadence_test", 300_000);
         if let Some(lease) = scene.leases.get_mut(&lease_id) {
             lease.resource_budget.max_tiles = 5;
         }
@@ -441,11 +436,7 @@ async fn frame_budgets_hold_under_burst() {
         let scene_arc = scene_handle(&runtime).await;
         let mut scene = scene_arc.lock().await;
         let tab_id = scene.create_tab("burst_test", 0).expect("create_tab");
-        let lease_id = scene.grant_lease(
-            "burst_test",
-            300_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id = scene.grant_lease("burst_test", 300_000);
         if let Some(lease) = scene.leases.get_mut(&lease_id) {
             lease.resource_budget.max_tiles = 5;
         }
@@ -742,11 +733,7 @@ async fn input_latency_not_degraded_under_portal_stream() {
         let scene_arc = scene_handle(&runtime).await;
         let mut scene = scene_arc.lock().await;
         let tab_id = scene.create_tab("latency_test", 0).expect("create_tab");
-        let lease_id = scene.grant_lease(
-            "latency_test",
-            300_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id = scene.grant_lease("latency_test", 300_000);
         if let Some(lease) = scene.leases.get_mut(&lease_id) {
             lease.resource_budget.max_tiles = 5;
         }

@@ -657,7 +657,7 @@ pub(super) fn drain_pending_input_latency(
 
 pub(super) fn seed_windowed_benchmark_scene(scene: &mut SceneGraph, width: u32, height: u32) {
     use tze_hud_scene::types::HitRegionNode;
-    use tze_hud_scene::{Capability, Node, NodeData, Rect, Rgba, SceneId, SolidColorNode};
+    use tze_hud_scene::{Node, NodeData, Rect, Rgba, SceneId, SolidColorNode};
 
     let width = width.max(1) as f32;
     let height = height.max(1) as f32;
@@ -674,11 +674,7 @@ pub(super) fn seed_windowed_benchmark_scene(scene: &mut SceneGraph, width: u32, 
         return;
     };
     scene.active_tab = Some(tab_id);
-    let lease_id = scene.grant_lease(
-        WINDOWED_BENCHMARK_AGENT,
-        300_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease(WINDOWED_BENCHMARK_AGENT, 300_000);
     if let Some(lease) = scene.leases.get_mut(&lease_id) {
         lease.resource_budget.max_tiles = 32;
     }

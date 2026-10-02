@@ -1,4 +1,4 @@
-//! Zone-publish handler for the session server (RFC 0005 §3.1, §8.6).
+//! Zone-publish handler for the session server.
 //!
 //! This module contains `handle_zone_publish`, which processes a `ZonePublish`
 //! message from the client and routes it through the scene-graph mutation path.
@@ -18,11 +18,12 @@ use crate::session::SharedState;
 
 use super::stream_session::StreamSession;
 use super::{
-    bytes_to_scene_id, now_ms, now_wall_us, persist_element_store, touch_element_store_entry_by_id,
-    touch_element_store_entry_by_namespace,
+    bytes_to_scene_id, capability_set_covers, now_ms, now_wall_us, persist_element_store,
+    touch_element_store_entry_by_id, touch_element_store_entry_by_namespace,
 };
 
-/// Handle a ZonePublish from the client (RFC 0005 §3.1, §8.6).
+/// Handle a ZonePublish from the client. The agent's allow list must cover
+/// the zone.
 ///
 /// Durable-zone publishes are transactional and receive a ZonePublishResult.
 /// Ephemeral-zone publishes are fire-and-forget; no ZonePublishResult is sent.
@@ -94,7 +95,20 @@ pub(super) async fn handle_zone_publish(
                 .as_ref()
                 .and_then(crate::convert::proto_zone_content_to_scene);
 
-            if let Some(content) = content {
+            let allowed = capability_set_covers(
+                &session.capabilities,
+                &format!("publish_zone:{resolved_zone_name}"),
+            );
+
+            if !allowed {
+                (
+                    false,
+                    "CAPABILITY_MISSING".to_string(),
+                    format!("agent allow list lacks zone:{resolved_zone_name}"),
+                    zone_is_ephemeral,
+                    None,
+                )
+            } else if let Some(content) = content {
                 // Validate: breakpoints are only meaningful for StreamText content.
                 if !publish.breakpoints.is_empty()
                     && !matches!(content, tze_hud_scene::types::ZoneContent::StreamText(_))
@@ -203,12 +217,6 @@ pub(super) async fn handle_zone_publish(
                             Some(tze_hud_scene::ValidationError::BudgetExceeded { resource }) => (
                                 "BUDGET_EXCEEDED".to_string(),
                                 format!("Budget exceeded: {resource}"),
-                            ),
-                            Some(tze_hud_scene::ValidationError::CapabilityMissing {
-                                capability,
-                            }) => (
-                                "CAPABILITY_MISSING".to_string(),
-                                format!("Capability missing: {capability}"),
                             ),
                             Some(err) => ("ZONE_PUBLISH_FAILED".to_string(), err.to_string()),
                             None => (

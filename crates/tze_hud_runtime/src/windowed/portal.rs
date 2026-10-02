@@ -2828,15 +2828,11 @@ mod tests {
     fn ctrl_resize_hotkey_resizes_focused_portal_while_composer_active() {
         use tze_hud_input::{FocusManager, InputProcessor, KeyboardModifiers};
         use tze_hud_scene::types::{HitRegionNode, TileScrollConfig};
-        use tze_hud_scene::{Capability, Node, NodeData, Rect, SceneGraph, SceneId};
+        use tze_hud_scene::{Node, NodeData, Rect, SceneGraph, SceneId};
 
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
-        let lease_id = scene.grant_lease(
-            "portal-agent",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id = scene.grant_lease("portal-agent", 60_000);
         let tile_id = scene
             .create_tile(
                 tab_id,
@@ -3006,15 +3002,11 @@ mod tests {
     fn ctrl_resize_hotkey_resizes_portal_focused_via_tab_without_pointer() {
         use tze_hud_input::{FocusManager, InputProcessor, KeyboardModifiers};
         use tze_hud_scene::types::{HitRegionNode, TileScrollConfig};
-        use tze_hud_scene::{Capability, Node, NodeData, Rect, SceneGraph, SceneId};
+        use tze_hud_scene::{Node, NodeData, Rect, SceneGraph, SceneId};
 
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
-        let lease_id = scene.grant_lease(
-            "portal-agent",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id = scene.grant_lease("portal-agent", 60_000);
         let tile_id = scene
             .create_tile(
                 tab_id,
@@ -3126,15 +3118,11 @@ mod tests {
     fn ctrl_resize_keyup_fallback_resizes_when_live_windows_omits_keydown() {
         use tze_hud_input::{FocusManager, InputProcessor, KeyboardModifiers};
         use tze_hud_scene::types::{HitRegionNode, TileScrollConfig};
-        use tze_hud_scene::{Capability, Node, NodeData, Rect, SceneGraph, SceneId};
+        use tze_hud_scene::{Node, NodeData, Rect, SceneGraph, SceneId};
 
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
-        let lease_id = scene.grant_lease(
-            "portal-agent",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id = scene.grant_lease("portal-agent", 60_000);
         let tile_id = scene
             .create_tile(
                 tab_id,
@@ -3255,15 +3243,11 @@ mod tests {
         use tze_hud_input::{FocusManager, FocusRequest, InputProcessor, KeyboardModifiers};
         use tze_hud_protocol::proto::input_envelope::Event as InputEvent;
         use tze_hud_scene::types::TileScrollConfig;
-        use tze_hud_scene::{Capability, Rect, SceneGraph};
+        use tze_hud_scene::{Rect, SceneGraph};
 
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
-        let lease_id = scene.grant_lease(
-            "portal-agent",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id = scene.grant_lease("portal-agent", 60_000);
         let portal_tile_id = scene
             .create_tile(
                 tab_id,
@@ -3378,15 +3362,11 @@ mod tests {
         tze_hud_scene::SceneId,
     ) {
         use tze_hud_scene::types::{HitRegionNode, TileScrollConfig};
-        use tze_hud_scene::{Capability, Node, NodeData, Rect, SceneGraph, SceneId};
+        use tze_hud_scene::{Node, NodeData, Rect, SceneGraph, SceneId};
 
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
-        let lease_id = scene.grant_lease(
-            "portal-agent",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id = scene.grant_lease("portal-agent", 60_000);
         let tile_id = scene
             .create_tile(
                 tab_id,
@@ -3604,15 +3584,11 @@ mod tests {
         use tze_hud_input::{FocusManager, InputProcessor, KeyboardModifiers};
         use tze_hud_protocol::proto::input_envelope::Event as InputEvent;
         use tze_hud_scene::types::HitRegionNode;
-        use tze_hud_scene::{Capability, Node, NodeData, Rect, SceneGraph, SceneId};
+        use tze_hud_scene::{Node, NodeData, Rect, SceneGraph, SceneId};
 
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
-        let lease_id = scene.grant_lease(
-            "agent",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id = scene.grant_lease("agent", 60_000);
         let tile_id = scene
             .create_tile(
                 tab_id,
@@ -4853,15 +4829,11 @@ mod tests {
 
         use tze_hud_input::{FocusManager, InputProcessor, KeyboardModifiers};
         use tze_hud_scene::types::{HitRegionNode, TileScrollConfig};
-        use tze_hud_scene::{Capability, Node, NodeData, Rect, SceneGraph, SceneId};
+        use tze_hud_scene::{Node, NodeData, Rect, SceneGraph, SceneId};
 
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
-        let lease_id = scene.grant_lease(
-            "portal-agent",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id = scene.grant_lease("portal-agent", 60_000);
         let tile_id = scene
             .create_tile(
                 tab_id,
@@ -5181,15 +5153,11 @@ mod tests {
     /// `device_id`, not merely the first portal that has any active gesture.
     #[test]
     fn multi_device_resize_move_and_up_route_to_matching_device_gesture() {
+        use tze_hud_scene::Rect;
         use tze_hud_scene::types::TileScrollConfig;
-        use tze_hud_scene::{Capability, Rect};
 
         let (mut scene, tab_id, tile_a, mut fm) = portal_scene_with_focus();
-        let lease_b = scene.grant_lease(
-            "portal-agent-b",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_b = scene.grant_lease("portal-agent-b", 60_000);
         let tile_b = scene
             .create_tile(
                 tab_id,
@@ -5558,15 +5526,11 @@ mod tests {
     #[test]
     fn pointer_drag_respects_lease_bound_maximum() {
         use tze_hud_input::FocusManager;
-        use tze_hud_scene::{Capability, Rect, SceneGraph};
+        use tze_hud_scene::{Rect, SceneGraph};
 
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
-        let lease_id = scene.grant_lease(
-            "portal-agent",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id = scene.grant_lease("portal-agent", 60_000);
         // Tile at (100, 100, 400, 300) — starts at 400×300.
         let tile_id = scene
             .create_tile(
@@ -5663,16 +5627,12 @@ mod tests {
     /// avoid spinning up a full winit event loop.
     #[test]
     fn portal_resize_state_pruned_after_tile_removal() {
-        use tze_hud_scene::{Capability, Rect, SceneGraph};
+        use tze_hud_scene::{Rect, SceneGraph};
 
         // Build a minimal scene with one portal tile.
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
-        let lease_id = scene.grant_lease(
-            "portal-agent",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id = scene.grant_lease("portal-agent", 60_000);
         let tile_id = scene
             .create_tile(
                 tab_id,
@@ -5720,15 +5680,11 @@ mod tests {
     /// exist in the scene.
     #[test]
     fn portal_resize_state_preserved_for_live_tiles() {
-        use tze_hud_scene::{Capability, Rect, SceneGraph};
+        use tze_hud_scene::{Rect, SceneGraph};
 
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
-        let lease_id = scene.grant_lease(
-            "portal-agent",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id = scene.grant_lease("portal-agent", 60_000);
         let tile_a = scene
             .create_tile(
                 tab_id,
@@ -5796,16 +5752,12 @@ mod tests {
     /// `tze_hud_scene` (where the function is visible).
     #[test]
     fn portal_resize_state_pruned_via_drain_queue_on_tile_removal() {
-        use tze_hud_scene::{Capability, Rect, SceneGraph};
+        use tze_hud_scene::{Rect, SceneGraph};
 
         // Build a minimal scene with one portal tile.
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
-        let lease_id = scene.grant_lease(
-            "portal-agent",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id = scene.grant_lease("portal-agent", 60_000);
         let tile_id = scene
             .create_tile(
                 tab_id,
@@ -5988,15 +5940,11 @@ mod tests {
         FocusManager,
     ) {
         use tze_hud_scene::types::TileScrollConfig;
-        use tze_hud_scene::{Capability, Rect, SceneGraph};
+        use tze_hud_scene::{Rect, SceneGraph};
 
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
-        let lease_id = scene.grant_lease(
-            "portal-agent",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id = scene.grant_lease("portal-agent", 60_000);
         // Frame is the portal-sized anchor (largest area, not scrollable).
         let frame_id = scene
             .create_tile(
@@ -6442,17 +6390,13 @@ mod tests {
     fn ctrl_shift_arrow_dispatch_respects_composer_focus() {
         use tze_hud_input::{FocusManager, InputProcessor, KeyboardModifiers};
         use tze_hud_scene::types::{HitRegionNode, TileScrollConfig};
-        use tze_hud_scene::{Capability, Node, NodeData, Rect, SceneGraph, SceneId};
+        use tze_hud_scene::{Node, NodeData, Rect, SceneGraph, SceneId};
 
         // Single-tile portal with a focusable NON-composer control node.
         let build = |accepts_composer_input: bool| {
             let mut scene = SceneGraph::new(1920.0, 1080.0);
             let tab_id = scene.create_tab("Main", 0).unwrap();
-            let lease_id = scene.grant_lease(
-                "portal-agent",
-                60_000,
-                vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-            );
+            let lease_id = scene.grant_lease("portal-agent", 60_000);
             let tile_id = scene
                 .create_tile(
                     tab_id,
@@ -7148,7 +7092,7 @@ mod tests {
 
         let mut scene = tze_hud_scene::graph::SceneGraph::new(800.0, 600.0);
         let tab = scene.create_tab("t", 0).unwrap();
-        let lease = scene.grant_lease("ns", 120_000, vec![]);
+        let lease = scene.grant_lease("ns", 120_000);
         let tile = scene
             .create_tile(tab, "ns", lease, Rect::new(0.0, 0.0, 300.0, 200.0), 1)
             .unwrap();
@@ -7771,14 +7715,10 @@ mod tests {
     /// — it must advance `geometry_epoch`, not `scene.version`.
     #[test]
     fn single_tile_move_fallback_is_position_only() {
-        use tze_hud_scene::{Capability, Rect, SceneGraph};
+        use tze_hud_scene::{Rect, SceneGraph};
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
-        let lease_id = scene.grant_lease(
-            "agent",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id = scene.grant_lease("agent", 60_000);
         let tile_id = scene
             .create_tile(
                 tab_id,
@@ -7872,14 +7812,10 @@ mod tests {
     /// path (no scrollable constituent), so behavior is unchanged for plain tiles.
     #[test]
     fn drag_move_single_non_portal_tile_is_not_group_translated() {
-        use tze_hud_scene::{Capability, Rect, SceneGraph};
+        use tze_hud_scene::{Rect, SceneGraph};
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
-        let lease_id = scene.grant_lease(
-            "agent",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id = scene.grant_lease("agent", 60_000);
         let tile_id = scene
             .create_tile(
                 tab_id,
@@ -8027,15 +7963,11 @@ mod tests {
     /// `WinitApp::enqueue_pointer_event` pointer-down/move/up dispatch.
     fn scene_with_pointer_composer() -> (tze_hud_scene::graph::SceneGraph, tze_hud_scene::SceneId) {
         use tze_hud_scene::types::HitRegionNode;
-        use tze_hud_scene::{Capability, Node, NodeData, Rect, SceneGraph, SceneId};
+        use tze_hud_scene::{Node, NodeData, Rect, SceneGraph, SceneId};
 
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
-        let lease_id = scene.grant_lease(
-            "agent",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id = scene.grant_lease("agent", 60_000);
         let tile_id = scene
             .create_tile(
                 tab_id,

@@ -1236,7 +1236,7 @@ mod tests {
     fn canonical_scene_with_first_content(first_content: &str) -> SceneGraph {
         let mut scene = SceneGraph::new(1_000.0, 500.0);
         let tab_id = scene.create_tab("canonical", 0).expect("canonical tab");
-        let lease_id = scene.grant_lease("canonical-agent", 60_000, vec![]);
+        let lease_id = scene.grant_lease("canonical-agent", 60_000);
 
         for index in 0..CANONICAL_TILE_COUNT {
             let column = index % 10;

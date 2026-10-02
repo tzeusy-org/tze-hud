@@ -126,18 +126,13 @@ fn hit_test_node_reverse(
 mod tests {
     use super::*;
     use tze_hud_scene::{
-        Capability, HitRegionNode, InputMode, Node, NodeData, Rect, Rgba, SceneGraph, SceneId,
-        SolidColorNode,
+        HitRegionNode, InputMode, Node, NodeData, Rect, Rgba, SceneGraph, SceneId, SolidColorNode,
     };
 
     fn make_scene_with_hit_regions(n_tiles: usize) -> (SceneGraph, Vec<SceneId>, Vec<SceneId>) {
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
-        let lease_id = scene.grant_lease(
-            "agent",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id = scene.grant_lease("agent", 60_000);
 
         let cols = 5_usize;
         let tile_w = 200.0_f32;
@@ -217,11 +212,7 @@ mod tests {
     fn hit_test_returns_tile_hit_when_no_node_matches() {
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
-        let lease_id = scene.grant_lease(
-            "agent",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id = scene.grant_lease("agent", 60_000);
         let tile_id = scene
             .create_tile(
                 tab_id,
@@ -264,16 +255,8 @@ mod tests {
         // Chrome layer always wins when overlapping content.
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
-        let content_lease = scene.grant_lease(
-            "agent",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
-        let chrome_lease = scene.grant_lease(
-            "chrome.ui",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let content_lease = scene.grant_lease("agent", 60_000);
+        let chrome_lease = scene.grant_lease("chrome.ui", 60_000);
 
         // Content tile at z=1
         let content_tile = scene
@@ -350,16 +333,8 @@ mod tests {
     fn passthrough_tile_does_not_block_content() {
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
-        let content_lease = scene.grant_lease(
-            "agent",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
-        let overlay_lease = scene.grant_lease(
-            "overlay",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let content_lease = scene.grant_lease("agent", 60_000);
+        let overlay_lease = scene.grant_lease("overlay", 60_000);
 
         // Content tile (z=1)
         let content_tile = scene
@@ -474,11 +449,7 @@ mod tests {
         // (last child first).
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
-        let lease_id = scene.grant_lease(
-            "agent",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id = scene.grant_lease("agent", 60_000);
         let tile_id = scene
             .create_tile(
                 tab_id,

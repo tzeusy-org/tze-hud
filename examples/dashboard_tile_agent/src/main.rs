@@ -158,8 +158,6 @@ async fn run_headless(dev_mode: bool) -> Result<(), Box<dyn std::error::Error>> 
     //
     // Sends LeaseRequest with:
     //   - ttl_ms = 60000 (60-second TTL per spec §Lease Request With AutoRenew)
-    //   - capabilities = [create_tiles, modify_own_tiles] (spec-mandated scope)
-    //   - lease_priority = 2 (default agent-owned band)
     //
     // Reads LeaseResponse and verifies granted = true and a 16-byte UUIDv7 lease_id.
     // Stores the lease_id for use in tile creation batches (Phase 4+).
@@ -1016,8 +1014,6 @@ async fn establish_session_with_host(
 ///    testable without coupling to the Phase 1 session state.
 /// 2. Sends `LeaseRequest` with:
 ///    - `ttl_ms = 60000` (spec §Lease Request With AutoRenew: 60-second TTL)
-///    - `capabilities = ["create_tiles", "modify_own_tiles"]`
-///    - `lease_priority = 2` (default agent-owned band)
 /// 3. Reads the next non-state-change message and expects `LeaseResponse`.
 /// 4. Verifies `granted = true` (spec §Scenario: Lease granted with requested parameters).
 /// 5. Returns the 16-byte UUIDv7 `lease_id` for use in subsequent MutationBatch calls.
@@ -1141,7 +1137,7 @@ async fn request_lease_with_host(
     // ── 2. Send LeaseRequest (tasks.md §2.1) ──────────────────────────────
     //
     // Spec §Requirement: Lease Request With AutoRenew:
-    //   ttl_ms = 60000, capabilities = [create_tiles, modify_own_tiles], lease_priority = 2.
+    //   ttl_ms = 60000.
     //
     // Note: renewal policy (AutoRenew) and resource budgets are server-side concerns;
     // they are not fields on the LeaseRequest proto.
@@ -1996,8 +1992,7 @@ mod tests {
     ///
     /// Spec §Requirement: Lease Request With AutoRenew — Scenario: Lease granted
     /// with requested parameters.
-    /// tasks.md §2.1: send LeaseRequest { ttl_ms=60000, capabilities=[create_tiles,
-    ///   modify_own_tiles], lease_priority=2 }.
+    /// tasks.md §2.1: send LeaseRequest { ttl_ms=60000 }.
     /// tasks.md §2.2: verify LeaseResponse.granted=true and store the 16-byte lease_id.
     #[tokio::test]
     async fn test_lease_grant_returns_granted_true_and_16_byte_lease_id() {
@@ -2836,9 +2831,8 @@ mod tests {
     /// tasks.md §5.3: verify chrome layer elements (tab bar, disconnection badges)
     ///   render above the dashboard tile.
     ///
-    /// Chrome tiles have lease priority 0 and MUST use z_order >= ZONE_TILE_Z_MIN.
-    /// The hit-test contract checks chrome tiles before content tiles regardless of z_order
-    /// (per scene-graph/spec.md §Requirement: Hit-Testing Contract, RFC 0001 §5.1-5.2).
+    /// Chrome is runtime-owned and structurally above agent content; agent tiles
+    /// MUST stay below ZONE_TILE_Z_MIN.
     #[test]
     fn test_chrome_z_order_renders_above_dashboard_tile() {
         // Chrome elements use z_orders >= ZONE_TILE_Z_MIN.
@@ -3133,22 +3127,18 @@ mod tests {
     /// (no gRPC), so hit-test and InputProcessor tests can operate without a
     /// running server.
     fn build_dashboard_scene() -> (tze_hud_scene::graph::SceneGraph, tze_hud_scene::SceneId) {
+        use tze_hud_scene::Rgba;
         use tze_hud_scene::graph::SceneGraph;
         use tze_hud_scene::types::{
             HitRegionNode, Node, NodeData, Rect, SolidColorNode, TextMarkdownNode,
         };
-        use tze_hud_scene::{Capability, Rgba};
 
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Test", 0).expect("create_tab");
         scene.active_tab = Some(tab_id);
 
         // Lease + tile (no real resource needed for input tests).
-        let lease_id = scene.grant_lease(
-            "test-agent",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id = scene.grant_lease("test-agent", 60_000);
 
         let tile_id = scene
             .create_tile(
@@ -4540,7 +4530,6 @@ mod tests {
     ///   - Tile's `visual_hint` MUST be `DisconnectionBadge`.
     #[test]
     fn test_disconnect_transitions_lease_to_orphaned_and_sets_badge() {
-        use tze_hud_scene::Capability;
         use tze_hud_scene::lease::TileVisualHint;
         use tze_hud_scene::types::LeaseState;
 
@@ -4570,8 +4559,6 @@ mod tests {
             TileVisualHint::DisconnectionBadge,
             "tile visual_hint must be DisconnectionBadge after disconnect — tasks.md §10.2"
         );
-
-        let _ = Capability::CreateTiles; // suppress unused import warning
     }
 
     /// Task 10.3 — agent reconnect within grace period restores ACTIVE and clears badge.
@@ -4636,10 +4623,10 @@ mod tests {
     #[test]
     fn test_grace_expiry_removes_tile() {
         use std::sync::Arc;
+        use tze_hud_scene::Rect;
         use tze_hud_scene::clock::SimulatedClock;
         use tze_hud_scene::graph::SceneGraph;
         use tze_hud_scene::types::LeaseState;
-        use tze_hud_scene::{Capability, Rect};
 
         let clock = SimulatedClock::new(1_000 * 1_000); // start at 1 s in µs
         let mut scene = SceneGraph::new_with_clock(1920.0, 1080.0, Arc::new(clock.clone()));
@@ -4648,11 +4635,7 @@ mod tests {
         scene.active_tab = Some(tab_id);
 
         // Grant a lease with TTL 120 s (longer than grace period, so TTL is not the cause).
-        let lease_id = scene.grant_lease(
-            "grace-expiry-agent",
-            120_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id = scene.grant_lease("grace-expiry-agent", 120_000);
 
         let tile_id = scene
             .create_tile(
@@ -4997,11 +4980,11 @@ mod tests {
     #[test]
     fn test_disconnect_during_lifecycle_triggers_orphan_path() {
         use std::sync::Arc;
+        use tze_hud_scene::Rect;
         use tze_hud_scene::clock::SimulatedClock;
         use tze_hud_scene::graph::SceneGraph;
         use tze_hud_scene::lease::TileVisualHint;
         use tze_hud_scene::types::LeaseState;
-        use tze_hud_scene::{Capability, Rect};
 
         // ── Step 1: Build a scene with the dashboard tile ─────────────────────
         // Use a SimulatedClock so we can advance time precisely for the grace period.
@@ -5012,11 +4995,7 @@ mod tests {
         scene.active_tab = Some(tab_id);
 
         // Grant lease with 60s TTL (longer than the 30s grace period).
-        let lease_id = scene.grant_lease(
-            "disconnect-lifecycle-agent",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id = scene.grant_lease("disconnect-lifecycle-agent", 60_000);
 
         // Create the dashboard tile (400×300 at (50,50), z_order=100 per spec).
         let tile_id = scene
@@ -5187,7 +5166,7 @@ mod tests {
     #[test]
     fn test_dashboard_agent_cannot_mutate_other_agent_tile() {
         use tze_hud_scene::types::{HitRegionNode, Node, NodeData, Rect, SolidColorNode};
-        use tze_hud_scene::{Capability, Rgba, SceneId, ValidationError};
+        use tze_hud_scene::{Rgba, SceneId, ValidationError};
 
         let (mut scene, dashboard_tile_id) = build_dashboard_scene();
         let dashboard_ns = "test-agent";
@@ -5195,11 +5174,7 @@ mod tests {
 
         // Create a tile for "other-agent" on the same tab.
         let tab_id = scene.active_tab.expect("active_tab must be set");
-        let other_lease_id = scene.grant_lease(
-            other_ns,
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let other_lease_id = scene.grant_lease(other_ns, 60_000);
         let other_tile_id = scene
             .create_tile(
                 tab_id,

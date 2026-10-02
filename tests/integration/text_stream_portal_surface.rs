@@ -11,7 +11,7 @@ use tze_hud_resource::{
     UploadId, UploadStartRequest,
 };
 use tze_hud_scene::{
-    Capability, MAX_MARKDOWN_BYTES, MonoUs, ZONE_TILE_Z_MIN,
+    MAX_MARKDOWN_BYTES, MonoUs, ZONE_TILE_Z_MIN,
     graph::{MAX_NODES_PER_TILE, SceneGraph},
     lease::LeaseState,
     mutation::{MutationBatch, SceneMutation},
@@ -495,11 +495,7 @@ fn user_scroll_offset_remains_authoritative_after_append_update() {
     let mut scene = SceneGraph::new(DISPLAY_W, DISPLAY_H);
     let tab_id = scene.create_tab("Main", 0).expect("tab create");
     scene.active_tab = Some(tab_id);
-    let lease_id = scene.grant_lease(
-        namespace,
-        120_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease(namespace, 120_000);
     let create = scene.apply_batch(&make_batch(
         namespace,
         lease_id,
@@ -618,11 +614,7 @@ async fn collapsed_and_expanded_portal_surface_use_only_v1_node_types() {
     let tab_id = scene.create_tab("Main", 0).expect("must create tab");
     scene.active_tab = Some(tab_id);
     scene.register_resource(icon_id);
-    let lease_id = scene.grant_lease(
-        namespace,
-        120_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease(namespace, 120_000);
 
     let create = scene.apply_batch(&make_batch(
         namespace,
@@ -640,10 +632,6 @@ async fn collapsed_and_expanded_portal_surface_use_only_v1_node_types() {
     const _PORTAL_BELOW_ZONE_BAND: () = assert!(
         PORTAL_Z_ORDER < ZONE_TILE_Z_MIN,
         "portal pilot tile must stay below runtime-managed zone band"
-    );
-    assert_ne!(
-        scene.leases[&lease_id].priority, 0,
-        "portal pilot must remain content-layer, not chrome lease-priority 0"
     );
 
     let collapsed = PortalSurfaceState {
@@ -752,11 +740,7 @@ fn expanded_transcript_materialization_is_bounded_to_viewport_and_budget() {
     let mut scene = SceneGraph::new(DISPLAY_W, DISPLAY_H);
     let tab_id = scene.create_tab("Main", 0).expect("must create tab");
     scene.active_tab = Some(tab_id);
-    let lease_id = scene.grant_lease(
-        "portal-agent",
-        120_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("portal-agent", 120_000);
     let create = scene.apply_batch(&make_batch(
         "portal-agent",
         lease_id,
@@ -840,11 +824,7 @@ async fn portal_surface_state_remains_governed_by_orphan_rules() {
     let tab_id = scene.create_tab("Main", 0).expect("must create tab");
     scene.active_tab = Some(tab_id);
     scene.register_resource(icon_id);
-    let lease_id = scene.grant_lease(
-        namespace,
-        120_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease(namespace, 120_000);
     let create = scene.apply_batch(&make_batch(
         namespace,
         lease_id,
@@ -960,11 +940,7 @@ fn portal_typing_indicator_updates_use_transient_in_place_path() {
     scene.active_tab = Some(tab_id);
     let icon_id = tze_hud_scene::ResourceId::from_bytes([0xCD; 32]);
     scene.register_resource(icon_id);
-    let lease_id = scene.grant_lease(
-        namespace,
-        120_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease(namespace, 120_000);
     let create = scene.apply_batch(&make_batch(
         namespace,
         lease_id,
@@ -1065,11 +1041,7 @@ fn portal_scroll_updates_local_first_via_input_processor() {
     let mut scene = SceneGraph::new(DISPLAY_W, DISPLAY_H);
     let tab_id = scene.create_tab("Main", 0).expect("tab create");
     scene.active_tab = Some(tab_id);
-    let lease_id = scene.grant_lease(
-        namespace,
-        120_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease(namespace, 120_000);
     let create = scene.apply_batch(&make_batch(
         namespace,
         lease_id,
@@ -1206,11 +1178,7 @@ fn portal_scroll_offset_clamped_to_content_boundary() {
     let mut scene = SceneGraph::new(DISPLAY_W, DISPLAY_H);
     let tab_id = scene.create_tab("Main", 0).expect("tab create");
     scene.active_tab = Some(tab_id);
-    let lease_id = scene.grant_lease(
-        namespace,
-        120_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease(namespace, 120_000);
     let create = scene.apply_batch(&make_batch(
         namespace,
         lease_id,
@@ -1281,11 +1249,7 @@ fn portal_adapter_append_preserves_user_scroll_position() {
     let mut scene = SceneGraph::new(DISPLAY_W, DISPLAY_H);
     let tab_id = scene.create_tab("Main", 0).expect("tab create");
     scene.active_tab = Some(tab_id);
-    let lease_id = scene.grant_lease(
-        namespace,
-        120_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease(namespace, 120_000);
     let create = scene.apply_batch(&make_batch(
         namespace,
         lease_id,
@@ -1433,17 +1397,13 @@ impl ComposerBuffer {
 #[test]
 fn click_to_focus_grants_focus_to_composer_hit_region() {
     use tze_hud_input::{FocusManager, FocusOwner, InputProcessor, PointerEvent, PointerEventKind};
-    use tze_hud_scene::{Capability, HitRegionNode, InputMode, Node, NodeData, Rect, SceneGraph};
+    use tze_hud_scene::{HitRegionNode, InputMode, Node, NodeData, Rect, SceneGraph};
 
     let namespace = "composer-agent";
     let mut scene = SceneGraph::new(DISPLAY_W, DISPLAY_H);
     let tab_id = scene.create_tab("Main", 0).expect("tab create");
     scene.active_tab = Some(tab_id);
-    let lease_id = scene.grant_lease(
-        namespace,
-        120_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease(namespace, 120_000);
 
     // Create the expanded portal tile in Capture mode (required for keyboard focus).
     let create = scene.apply_batch(&make_batch(
@@ -1536,19 +1496,13 @@ fn keyboard_processor_delivers_to_focused_composer_and_buffer_mutates() {
         FocusManager, FocusOwner, InputProcessor, KeyboardModifiers, KeyboardProcessor,
         PointerEvent, PointerEventKind, RawCharacterEvent, RawKeyDownEvent,
     };
-    use tze_hud_scene::{
-        Capability, HitRegionNode, InputMode, MonoUs, Node, NodeData, Rect, SceneGraph,
-    };
+    use tze_hud_scene::{HitRegionNode, InputMode, MonoUs, Node, NodeData, Rect, SceneGraph};
 
     let namespace = "composer-kb-agent";
     let mut scene = SceneGraph::new(DISPLAY_W, DISPLAY_H);
     let tab_id = scene.create_tab("Main", 0).expect("tab create");
     scene.active_tab = Some(tab_id);
-    let lease_id = scene.grant_lease(
-        namespace,
-        120_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease(namespace, 120_000);
     let create = scene.apply_batch(&make_batch(
         namespace,
         lease_id,

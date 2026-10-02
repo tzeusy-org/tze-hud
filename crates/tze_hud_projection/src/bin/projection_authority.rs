@@ -2373,7 +2373,7 @@ mod tests {
     fn drain_append_geometry_at_tail_tile_advances_scroll_offset() {
         use tze_hud_input::InputProcessor;
         use tze_hud_projection::{AdapterGeometrySnapshot, AdapterPortalRect};
-        use tze_hud_scene::{Capability, Rect, SceneGraph};
+        use tze_hud_scene::{Rect, SceneGraph};
 
         let mut authority = ProjectionAuthority::new(ProjectionBounds {
             max_portal_updates_per_second: 100,
@@ -2415,11 +2415,7 @@ mod tests {
         // Scene tile: match the geometry snapshot viewport height.
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
-        let lease_id = scene.grant_lease(
-            "portal-agent",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id = scene.grant_lease("portal-agent", 60_000);
         let tile_id = scene
             .create_tile(
                 tab_id,
@@ -2555,7 +2551,7 @@ mod tests {
             AdapterGeometrySnapshot, AdapterPortalRect, ContentClassification,
             PortalInputSubmission,
         };
-        use tze_hud_scene::{Capability, Rect, SceneGraph};
+        use tze_hud_scene::{Rect, SceneGraph};
 
         let mut authority = ProjectionAuthority::new(ProjectionBounds {
             max_portal_updates_per_second: 100,
@@ -2591,11 +2587,7 @@ mod tests {
 
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
-        let lease_id = scene.grant_lease(
-            "portal-agent",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id = scene.grant_lease("portal-agent", 60_000);
         let tile_id = scene
             .create_tile(
                 tab_id,
@@ -2698,7 +2690,7 @@ mod tests {
     #[test]
     fn drain_append_geometry_scrolled_back_tile_is_stable() {
         use tze_hud_input::{InputProcessor, ScrollEvent};
-        use tze_hud_scene::{Capability, Rect, SceneGraph};
+        use tze_hud_scene::{Rect, SceneGraph};
 
         let mut authority = ProjectionAuthority::new(ProjectionBounds {
             max_portal_updates_per_second: 100,
@@ -2713,11 +2705,7 @@ mod tests {
         // Scene setup.
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
-        let lease_id = scene.grant_lease(
-            "portal-agent",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id = scene.grant_lease("portal-agent", 60_000);
         let viewport_h = 200.0_f32;
         let tile_id = scene
             .create_tile(
@@ -2866,7 +2854,7 @@ mod tests {
     #[test]
     fn head_trim_scrolled_back_viewport_stays_stable_via_drain_record() {
         use tze_hud_input::{InputProcessor, ScrollEvent};
-        use tze_hud_scene::{Capability, Rect, SceneGraph};
+        use tze_hud_scene::{Rect, SceneGraph};
 
         // max_vis=250: five 50B units fill the window exactly.
         // A subsequent 55B unit displaces the oldest 50B unit
@@ -2910,11 +2898,7 @@ mod tests {
 
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
-        let lease_id = scene.grant_lease(
-            "portal-agent",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id = scene.grant_lease("portal-agent", 60_000);
         let tile_id = scene
             .create_tile(
                 tab_id,

@@ -18,9 +18,6 @@
 //! - `hit_test/50_tiles_passthrough` — 50 passthrough tiles.  Tests the
 //!   passthrough-skip loop.
 //!
-//! - `hit_test/chrome_first` — 1 chrome tile + 49 content tiles.  Tests that
-//!   the chrome-first path short-circuits after the first chrome tile.
-//!
 //! ## Interpretation
 //!
 //! Criterion reports median and p99 wall-clock time.  The < 100µs requirement
@@ -32,9 +29,7 @@
 //! the threshold.  Use it to detect regressions and to validate optimisations.
 
 use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
-use tze_hud_scene::{
-    Capability, HitRegionNode, InputMode, Node, NodeData, Rect, SceneId, graph::SceneGraph,
-};
+use tze_hud_scene::{HitRegionNode, InputMode, Node, NodeData, Rect, SceneId, graph::SceneGraph};
 
 // ─── Scene builders ───────────────────────────────────────────────────────────
 
@@ -45,11 +40,7 @@ use tze_hud_scene::{
 fn build_scene_grid(tile_count: usize) -> (SceneGraph, f32, f32) {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab_id = scene.create_tab("Bench", 0).unwrap();
-    let lease_id = scene.grant_lease(
-        "agent.bench",
-        86_400_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("agent.bench", 86_400_000);
 
     let cols = 10usize;
     let tile_w = 192.0f32;
@@ -101,11 +92,7 @@ fn build_scene_grid(tile_count: usize) -> (SceneGraph, f32, f32) {
 fn build_passthrough_scene(tile_count: usize) -> SceneGraph {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab_id = scene.create_tab("Bench", 0).unwrap();
-    let lease_id = scene.grant_lease(
-        "agent.bench",
-        86_400_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("agent.bench", 86_400_000);
 
     for i in 0..tile_count {
         let tile_id = scene
@@ -119,92 +106,6 @@ fn build_passthrough_scene(tile_count: usize) -> SceneGraph {
             .unwrap();
         scene.tiles.get_mut(&tile_id).unwrap().input_mode = InputMode::Passthrough;
     }
-    scene
-}
-
-/// Build a scene with 1 chrome tile and `content_tile_count` content tiles.
-fn build_chrome_scene(content_tile_count: usize) -> SceneGraph {
-    let mut scene = SceneGraph::new(1920.0, 1080.0);
-    let tab_id = scene.create_tab("Bench", 0).unwrap();
-
-    // Chrome lease (priority 0).
-    let chrome_lease = scene.grant_lease(
-        "chrome.ui",
-        86_400_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
-    scene.leases.get_mut(&chrome_lease).unwrap().priority = 0;
-
-    let chrome_tile = scene
-        .create_tile(
-            tab_id,
-            "chrome.ui",
-            chrome_lease,
-            Rect::new(0.0, 0.0, 200.0, 60.0),
-            999,
-        )
-        .unwrap();
-    let node_id = SceneId::new();
-    scene
-        .set_tile_root(
-            chrome_tile,
-            Node {
-                layout: Default::default(),
-                id: node_id,
-                children: vec![],
-                data: NodeData::HitRegion(HitRegionNode {
-                    bounds: Rect::new(0.0, 0.0, 200.0, 60.0),
-                    interaction_id: "chrome-btn".to_string(),
-                    accepts_focus: false,
-                    accepts_pointer: true,
-                    ..Default::default()
-                }),
-            },
-        )
-        .unwrap();
-
-    // Content tiles.
-    let content_lease = scene.grant_lease(
-        "agent.bench",
-        86_400_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
-    let cols = 10usize;
-    let tile_w = 192.0f32;
-    let tile_h = 108.0f32;
-
-    for i in 0..content_tile_count {
-        let col = i % cols;
-        let row = i / cols;
-        let tile_id = scene
-            .create_tile(
-                tab_id,
-                "agent.bench",
-                content_lease,
-                Rect::new(col as f32 * tile_w, row as f32 * tile_h, tile_w, tile_h),
-                (i + 1) as u32,
-            )
-            .unwrap();
-        let n_id = SceneId::new();
-        scene
-            .set_tile_root(
-                tile_id,
-                Node {
-                    layout: Default::default(),
-                    id: n_id,
-                    children: vec![],
-                    data: NodeData::HitRegion(HitRegionNode {
-                        bounds: Rect::new(0.0, 0.0, tile_w, tile_h),
-                        interaction_id: format!("content-{i}"),
-                        accepts_focus: false,
-                        accepts_pointer: true,
-                        ..Default::default()
-                    }),
-                },
-            )
-            .unwrap();
-    }
-
     scene
 }
 
@@ -243,19 +144,6 @@ fn bench_hit_test(c: &mut Criterion) {
         &passthrough_scene,
         |b, scene| {
             b.iter(|| black_box(scene.hit_test(black_box(960.0), black_box(540.0))));
-        },
-    );
-
-    // ── Chrome first (1 chrome + 49 content, point on chrome tile) ────────
-    let chrome_scene = build_chrome_scene(49);
-    group.bench_with_input(
-        BenchmarkId::new("chrome_first", ""),
-        &chrome_scene,
-        |b, scene| {
-            b.iter(|| {
-                // Point inside chrome tile bounds (0..200, 0..60).
-                black_box(scene.hit_test(black_box(100.0), black_box(30.0)))
-            });
         },
     );
 

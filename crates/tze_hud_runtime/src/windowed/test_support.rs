@@ -9,18 +9,12 @@ use tze_hud_scene::types::{
     ContentionPolicy, DragHandleElementKind, GeometryPolicy, LayerAttachment, RenderingPolicy,
     TileScrollConfig, ZoneDefinition, ZoneMediaType,
 };
-use tze_hud_scene::{
-    Capability, DragHandleHitRegion, HitRegionNode, Node, NodeData, Rect, SceneId,
-};
+use tze_hud_scene::{DragHandleHitRegion, HitRegionNode, Node, NodeData, Rect, SceneId};
 
 pub(super) fn scene_with_capture_tile() -> (SceneGraph, SceneId) {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease(
-        "portal-agent",
-        60_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("portal-agent", 60_000);
     let tile_id = scene
         .create_tile(
             tab_id,
@@ -104,11 +98,7 @@ pub(super) fn scene_with_drag_handle_tile(
 ) -> (SceneGraph, SceneId, SceneId, String) {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab_id = scene.create_tab("Main", 0).expect("tab must be created");
-    let lease_id = scene.grant_lease(
-        "portal-agent",
-        60_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("portal-agent", 60_000);
     let tile_id = scene
         .create_tile(
             tab_id,
@@ -161,11 +151,7 @@ pub(super) fn scene_with_composer_in_nonactive_tab()
     let portal_tab = scene.create_tab("Portal", 1).unwrap();
     assert_eq!(scene.active_tab, Some(other_tab));
 
-    let lease_id = scene.grant_lease(
-        "portal-agent",
-        60_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("portal-agent", 60_000);
     let tile_id = scene
         .create_tile(
             portal_tab,
@@ -202,11 +188,7 @@ pub(super) fn scene_with_composer_in_nonactive_tab()
 pub(super) fn portal_scene_with_focus() -> (SceneGraph, SceneId, SceneId, FocusManager) {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease(
-        "portal-agent",
-        60_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("portal-agent", 60_000);
     let tile_id = scene
         .create_tile(
             tab_id,
@@ -342,16 +324,12 @@ mod tests {
     async fn composer_echo_applies_while_scene_lock_is_held() {
         use tze_hud_input::{FocusManager, InputProcessor, PointerEvent, PointerEventKind};
         use tze_hud_scene::types::HitRegionNode;
-        use tze_hud_scene::{Capability, Node, NodeData, Rect, SceneGraph, SceneId};
+        use tze_hud_scene::{Node, NodeData, Rect, SceneGraph, SceneId};
 
         // Build a scene with a focusable composer region (accepts_composer_input).
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
-        let lease_id = scene.grant_lease(
-            "agent",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id = scene.grant_lease("agent", 60_000);
         let tile_id = scene
             .create_tile(
                 tab_id,
@@ -477,16 +455,12 @@ mod tests {
         use std::collections::VecDeque;
         use tze_hud_input::{FocusManager, InputProcessor, PointerEvent, PointerEventKind};
         use tze_hud_scene::types::HitRegionNode;
-        use tze_hud_scene::{Capability, Node, NodeData, Rect, SceneGraph, SceneId};
+        use tze_hud_scene::{Node, NodeData, Rect, SceneGraph, SceneId};
 
         // ── Active composer (real InputProcessor draft) ──────────────────────
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
-        let lease_id = scene.grant_lease(
-            "agent",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id = scene.grant_lease("agent", 60_000);
         let tile_id = scene
             .create_tile(
                 tab_id,

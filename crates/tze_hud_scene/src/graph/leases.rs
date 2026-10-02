@@ -4,11 +4,11 @@ impl SceneGraph {
     // ─── Lease operations ────────────────────────────────────────────────
 
     /// Default maximum suspension time before a suspended lease is revoked (ms).
-    /// RFC 0008 SS3.2: default 300,000 ms (5 minutes).
+    /// Default 300,000 ms (5 minutes).
     pub const DEFAULT_MAX_SUSPENSION_MS: u64 = 300_000;
 
     /// Default grace period for disconnected leases (ms).
-    /// RFC 0008 SS3.2: default 30,000 ms (30 seconds).
+    /// Default 30,000 ms (30 seconds).
     pub const DEFAULT_GRACE_PERIOD_MS: u64 = crate::lease::ORPHAN_GRACE_PERIOD_MS;
 
     /// Budget soft-limit threshold (80% of hard limit).
@@ -33,50 +33,14 @@ impl SceneGraph {
     /// Maximum nodes per tile (spec §Lease Caps).
     pub const MAX_NODES_PER_TILE: u32 = 64;
 
-    /// Grant a lease with a default (nil) session_id and normal priority (2).
-    ///
-    /// Convenience wrapper for tests and callers that do not need priority control.
-    /// Production callers should use `grant_lease_with_priority` or
-    /// `grant_lease_for_session` to persist the session-layer priority.
-    pub fn grant_lease(
-        &mut self,
-        namespace: &str,
-        ttl_ms: u64,
-        capabilities: Vec<Capability>,
-    ) -> SceneId {
-        self.grant_lease_for_session(
-            namespace,
-            SceneId::nil(),
-            ttl_ms,
-            crate::lease::priority::PRIORITY_DEFAULT,
-            capabilities,
-        )
-    }
-
-    /// Grant a lease with an explicit priority and default (nil) session_id.
-    ///
-    /// Persists `priority` in the `Lease` record so that the degradation ladder
-    /// and arbitration engine can read it directly from the scene graph.
-    ///
-    /// Spec §Requirement: Priority Assignment (lease-governance/spec.md lines 49-60):
-    /// the caller MUST pass the clamped priority returned by `effective_priority` /
-    /// `clamp_requested_priority`; this function stores it verbatim.
+    /// Grant a lease with a default (nil) session_id.
     ///
     /// Panics if caps are exceeded (use `try_grant_lease_for_session` for graceful errors).
-    pub fn grant_lease_with_priority(
-        &mut self,
-        namespace: &str,
-        ttl_ms: u64,
-        priority: u8,
-        capabilities: Vec<Capability>,
-    ) -> SceneId {
-        self.grant_lease_for_session(namespace, SceneId::nil(), ttl_ms, priority, capabilities)
+    pub fn grant_lease(&mut self, namespace: &str, ttl_ms: u64) -> SceneId {
+        self.grant_lease_for_session(namespace, SceneId::nil(), ttl_ms)
     }
 
     /// Grant a lease, enforcing runtime-wide and per-session caps.
-    ///
-    /// Persists `priority` in the `Lease` record so that the degradation ladder
-    /// can sort by stored priority without consulting the session layer.
     ///
     /// Panics if caps are exceeded (use `try_grant_lease_for_session` for graceful errors).
     pub fn grant_lease_for_session(
@@ -84,60 +48,39 @@ impl SceneGraph {
         namespace: &str,
         session_id: SceneId,
         ttl_ms: u64,
-        priority: u8,
-        capabilities: Vec<Capability>,
     ) -> SceneId {
-        self.try_grant_lease_for_session_with_budget(
-            namespace,
-            session_id,
-            ttl_ms,
-            priority,
-            capabilities,
-            ResourceBudget::default(),
-        )
-        .expect("lease grant failed cap check")
+        self.try_grant_lease_for_session(namespace, session_id, ttl_ms)
+            .expect("lease grant failed cap check")
     }
 
     /// Try to grant a lease, returning an error if runtime or session caps are exceeded.
     ///
-    /// Persists `priority` in the `Lease` record so that the degradation ladder and
-    /// arbitration engine read stored priority directly from the scene graph.
-    ///
-    /// Spec §Requirement: Priority Assignment (lease-governance/spec.md lines 49-60):
-    /// callers MUST pass the effective (clamped) priority; this function stores it verbatim.
-    ///
-    /// Enforces (spec §Requirement: Lease Caps):
+    /// Enforces the lease caps:
     /// - Max 64 leases per runtime across all agents (`MAX_RUNTIME_LEASES`).
     /// - Max 64 leases per session hard cap (`MAX_LEASES_PER_SESSION`).
-    ///   Session-layer policy should enforce the softer 8-lease default
-    ///   (`DEFAULT_MAX_LEASES_PER_SESSION`) before calling this.
     pub fn try_grant_lease_for_session(
         &mut self,
         namespace: &str,
         session_id: SceneId,
         ttl_ms: u64,
-        priority: u8,
-        capabilities: Vec<Capability>,
     ) -> Result<SceneId, LeaseError> {
         self.try_grant_lease_for_session_with_budget(
             namespace,
             session_id,
             ttl_ms,
-            priority,
-            capabilities,
             ResourceBudget::default(),
         )
     }
 
     /// Try to grant a lease with the session's frozen effective resource budget.
-    #[allow(clippy::too_many_arguments)]
+    ///
+    /// Leases carry no permissions: the protocol and MCP boundaries check the
+    /// agent's allow list before calling into the scene.
     pub fn try_grant_lease_for_session_with_budget(
         &mut self,
         namespace: &str,
         session_id: SceneId,
         ttl_ms: u64,
-        priority: u8,
-        capabilities: Vec<Capability>,
         resource_budget: ResourceBudget,
     ) -> Result<SceneId, LeaseError> {
         // Check runtime-wide cap
@@ -181,14 +124,9 @@ impl SceneGraph {
                 namespace: namespace.to_string(),
                 session_id,
                 state: LeaseState::Active,
-                // Persist the effective priority so the degradation ladder can sort
-                // by (lease_priority ASC, z_order DESC) without consulting the session layer.
-                // Spec §Requirement: Priority Sort Semantics (lease-governance/spec.md lines 62-69).
-                priority,
                 granted_at_ms: now_ms,
                 ttl_ms,
                 renewal_policy: RenewalPolicy::default(),
-                capabilities,
                 resource_budget,
                 spatial_budget: Default::default(),
                 suspended_at_ms: None,
@@ -231,81 +169,13 @@ impl SceneGraph {
         Ok(())
     }
 
-    /// Remove a specific capability from a live (non-terminal) lease at runtime.
-    ///
-    /// # RFC 0001 §3.3 — Live capability revocation
-    ///
-    /// The spec requires that capability checks enforce the live scope at mutation
-    /// time, not merely at grant time. This method removes `cap` from the lease's
-    /// current scope without revoking the lease itself. After this call, any
-    /// mutation that requires `cap` will be rejected with `CapabilityMissing`.
-    ///
-    /// # Behavior
-    ///
-    /// - The lease remains in its current state (e.g., `Active`). Tiles are NOT removed.
-    /// - If the lease does not exist → `Err(LeaseNotFound)`.
-    /// - If the lease is terminal → `Err(InvalidField { "lease_terminal" })`.
-    /// - If `cap` is not in the lease scope → `Err(InvalidField { "capability_not_present" })`.
-    /// - On success → `Ok((capability_name, revoked_at_wall_us))`.  The caller MUST emit a
-    ///   [`LeaseEventKind::CapabilityRevoked`] audit event using the returned name and
-    ///   timestamp to populate its fields, then notify the agent with `CapabilityNotice`.
-    ///
-    /// # Audit events
-    ///
-    /// This method does **not** push a [`LeaseAuditEvent`] directly (the lease module's
-    /// audit channel is separate from the scene graph's mutation pipeline). Callers that
-    /// audit revocations use the returned `(capability_name, revoked_at_wall_us)` to
-    /// populate the [`LeaseEventKind::CapabilityRevoked`] fields.
-    pub fn revoke_capability(
-        &mut self,
-        lease_id: SceneId,
-        cap: &Capability,
-    ) -> Result<(String, u64), ValidationError> {
-        let lease = self
-            .leases
-            .get_mut(&lease_id)
-            .ok_or(ValidationError::LeaseNotFound { id: lease_id })?;
-
-        let now_us = self.clock.now_us();
-
-        use crate::lease::capability::{CapabilityRevocationError, revoke_capability_from_lease};
-        match revoke_capability_from_lease(lease, cap) {
-            Ok(cap_name) => {
-                self.version += 1;
-                Ok((cap_name, now_us))
-            }
-            Err(CapabilityRevocationError::LeaseTerminal) => Err(ValidationError::InvalidField {
-                field: "lease_terminal".into(),
-                reason: format!(
-                    "lease {} is in terminal state {:?}; live capability revocation requires a non-terminal lease",
-                    lease_id, lease.state
-                ),
-            }),
-            Err(CapabilityRevocationError::CapabilityNotPresent) => {
-                Err(ValidationError::InvalidField {
-                    field: "capability_not_present".into(),
-                    reason: format!("capability {cap:?} is not in the scope of lease {lease_id}"),
-                })
-            }
-        }
-    }
-
-    /// Returns the current capability scope for a lease.
-    ///
-    /// Used to inspect the live capability scope after revocations.
-    /// Returns `None` if the lease is not found.
-    pub fn lease_capabilities(&self, lease_id: &SceneId) -> Option<&[Capability]> {
-        self.leases.get(lease_id).map(|l| l.capabilities.as_slice())
-    }
-
     /// Whether a lease is present AND in the `Active` state (mutations allowed).
     ///
     /// Returns `false` for an unknown lease, or for a lease in any non-Active
     /// state (Suspended, Orphaned, Expired, Revoked). This is the correct
     /// liveness predicate for "may I still create/modify tiles under this
-    /// lease?" — unlike [`Self::lease_capabilities`], which returns `Some` for
-    /// any lease still resident in the map (including terminal/Expired leases
-    /// that `expire_leases` left in place after grace-period reaping).
+    /// lease?" — a lease still resident in the map may be terminal (Expired
+    /// leases that `expire_leases` left in place after grace-period reaping).
     ///
     /// Used by the portal driver's lease-reuse decision so that a session
     /// attaching *after* its prior lease's grace period has already expired

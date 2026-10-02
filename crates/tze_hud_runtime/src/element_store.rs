@@ -684,15 +684,11 @@ mod tests {
     /// a non-Tile entry with one, must not be locked.
     #[test]
     fn bootstrap_relocks_tiles_that_load_a_durable_override() {
-        use tze_hud_scene::{Capability, Rect};
+        use tze_hud_scene::Rect;
 
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("main", 0).expect("tab");
-        let lease = scene.grant_lease(
-            "agent",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease = scene.grant_lease("agent", 60_000);
         let locked_tile = scene
             .create_tile(tab_id, "agent", lease, Rect::new(0.0, 0.0, 100.0, 80.0), 1)
             .expect("locked tile");

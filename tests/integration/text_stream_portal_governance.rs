@@ -16,7 +16,7 @@ use tze_hud_runtime::{
     classify_mutation_batch, collect_diagnostic,
 };
 use tze_hud_scene::{
-    Capability, Clock, SceneGraph, SceneId, TestClock, ZONE_TILE_Z_MIN,
+    Clock, SceneGraph, SceneId, TestClock, ZONE_TILE_Z_MIN,
     lease::{LeaseState, ORPHAN_GRACE_PERIOD_MS},
     mutation::{MutationBatch, SceneMutation},
     types::{
@@ -101,11 +101,7 @@ fn create_portal_scene(ttl_ms: u64) -> (SceneGraph, TestClock, SceneId, SceneId,
     let namespace = "portal-gov";
     let tab_id = scene.create_tab("Main", 0).expect("tab");
     scene.active_tab = Some(tab_id);
-    let lease_id = scene.grant_lease(
-        namespace,
-        ttl_ms,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease(namespace, ttl_ms);
 
     let create = scene.apply_batch(&make_batch(
         namespace,
@@ -755,18 +751,13 @@ fn shell_dismiss_override_prunes_first_class_surface() {
 
 #[test]
 fn first_class_surface_stays_content_layer_below_chrome() {
-    let (scene, _clock, _tab_id, lease_id, tile_id) = create_first_class_portal_scene(120_000);
+    let (scene, _clock, _tab_id, _lease_id, tile_id) = create_first_class_portal_scene(120_000);
 
     // The host tile stays strictly below the runtime-managed zone/chrome band.
     let tile = scene.tiles.get(&tile_id).expect("tile exists");
     assert!(
         tile.z_order < ZONE_TILE_Z_MIN,
         "surface host tile must stay below the reserved zone/chrome z band"
-    );
-    // Content-layer lease priority is never chrome priority 0.
-    assert_ne!(
-        scene.leases[&lease_id].priority, 0,
-        "surface lease must remain content-layer, not chrome priority 0"
     );
     // The surface holds no z-order of its own: it is a descriptor over the tile,
     // inheriting the tile's layer. This is a structural invariant of the schema

@@ -52,8 +52,6 @@ pub enum RevocationKind {
     ViewerDismissed,
     /// Safe-mode suspension timed out (> 300 000 ms).
     SuspensionTimeout,
-    /// Runtime revoked agent capability.
-    CapabilityRevoked,
     /// Unspecified runtime-initiated revocation.
     Other,
 }
@@ -73,7 +71,6 @@ impl RevocationKind {
             RevocationKind::BudgetPolicy => RevokeReason::BudgetPolicy,
             RevocationKind::ViewerDismissed => RevokeReason::ViewerDismissed,
             RevocationKind::SuspensionTimeout => RevokeReason::SuspensionTimeout,
-            RevocationKind::CapabilityRevoked => RevokeReason::CapabilityRevoked,
             RevocationKind::Other => RevokeReason::Other,
         }
     }
@@ -264,7 +261,6 @@ mod tests {
         for kind in [
             RevocationKind::ViewerDismissed,
             RevocationKind::SuspensionTimeout,
-            RevocationKind::CapabilityRevoked,
             RevocationKind::Other,
         ] {
             assert!(

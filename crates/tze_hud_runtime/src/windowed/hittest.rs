@@ -557,14 +557,10 @@ mod tests {
 
     #[test]
     fn passthrough_tile_with_hit_region_does_not_register_capture_region() {
-        use tze_hud_scene::{Capability, HitRegionNode, InputMode, Node, NodeData, Rect, SceneId};
+        use tze_hud_scene::{HitRegionNode, InputMode, Node, NodeData, Rect, SceneId};
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
-        let lease_id = scene.grant_lease(
-            "overlay",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id = scene.grant_lease("overlay", 60_000);
         let tile_id = scene
             .create_tile(
                 tab_id,
@@ -603,14 +599,10 @@ mod tests {
 
     #[test]
     fn tile_with_accepts_pointer_false_does_not_register_capture_region() {
-        use tze_hud_scene::{Capability, HitRegionNode, Node, NodeData, Rect, SceneId};
+        use tze_hud_scene::{HitRegionNode, Node, NodeData, Rect, SceneId};
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
-        let lease_id = scene.grant_lease(
-            "agent",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id = scene.grant_lease("agent", 60_000);
         let tile_id = scene
             .create_tile(
                 tab_id,

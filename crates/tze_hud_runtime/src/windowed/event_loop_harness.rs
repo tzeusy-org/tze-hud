@@ -42,7 +42,7 @@ use tze_hud_input::{
 };
 use tze_hud_scene::graph::SceneGraph;
 use tze_hud_scene::types::HitRegionNode;
-use tze_hud_scene::{Capability, Node, NodeData, Rect, SceneId};
+use tze_hud_scene::{Node, NodeData, Rect, SceneId};
 
 use super::WindowedRuntimeState;
 use super::WinitApp;
@@ -225,11 +225,7 @@ impl HeadlessEventLoopHarness {
     pub(super) fn focus_composer(&mut self) -> SceneId {
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
-        let lease_id = scene.grant_lease(
-            "agent",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id = scene.grant_lease("agent", 60_000);
         let tile_id = scene
             .create_tile(
                 tab_id,
@@ -418,11 +414,7 @@ mod tests {
     ) {
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
-        let lease_id = scene.grant_lease(
-            "command-agent",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id = scene.grant_lease("command-agent", 60_000);
         let tile_id = scene
             .create_tile(
                 tab_id,
@@ -502,11 +494,7 @@ mod tests {
     ) {
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
-        let lease_id = scene.grant_lease(
-            "scroll-agent",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id = scene.grant_lease("scroll-agent", 60_000);
         let focused_tile = scene
             .create_tile(
                 tab_id,

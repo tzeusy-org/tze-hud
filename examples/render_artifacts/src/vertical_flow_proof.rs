@@ -8,8 +8,8 @@ use tze_hud_compositor::markdown::MarkdownTokens;
 use tze_hud_compositor::vertical_flow::resolve_tile_flow_offsets;
 use tze_hud_scene::graph::SceneGraph;
 use tze_hud_scene::types::{
-    Capability, FontFamily, Node, NodeData, NodeLayout, Rect, Rgba, SceneId, SolidColorNode,
-    TextAlign, TextColorRun, TextMarkdownNode, TextOverflow,
+    FontFamily, Node, NodeData, NodeLayout, Rect, Rgba, SceneId, SolidColorNode, TextAlign,
+    TextColorRun, TextMarkdownNode, TextOverflow,
 };
 
 pub const REFERENCE_TAG: &str = "TzeHouse";
@@ -178,11 +178,7 @@ pub struct ProofReport {
 pub fn build_fixture() -> Result<VerticalFlowFixture, Box<dyn std::error::Error>> {
     let mut scene = SceneGraph::new(REFERENCE_WIDTH as f32, REFERENCE_HEIGHT as f32);
     let tab_id = scene.create_tab("Vertical Flow Pixel Proof", 0)?;
-    let lease_id = scene.grant_lease(
-        "vertical-flow-proof",
-        120_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("vertical-flow-proof", 120_000);
     let tile_id = scene.create_tile(
         tab_id,
         "vertical-flow-proof",

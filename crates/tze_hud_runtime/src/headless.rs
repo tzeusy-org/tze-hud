@@ -58,7 +58,7 @@ use tze_hud_protocol::proto::FramePresented;
 use tze_hud_protocol::proto::session::hud_session_server::HudSessionServer;
 use tze_hud_protocol::proto::session::runtime_service_server::RuntimeServiceServer;
 use tze_hud_protocol::session::SharedState;
-use tze_hud_protocol::session_server::{DegradationNoticeSender, HudSessionImpl};
+use tze_hud_protocol::session_server::{DegradationNoticeSender, HudSessionImpl, SessionDeps};
 use tze_hud_resource::{
     ResourceStore, ResourceStoreConfig, RuntimeWidgetStore, RuntimeWidgetStoreConfig,
 };
@@ -751,30 +751,29 @@ impl HeadlessRuntime {
         // Wire config-driven agent identity: `allow`-derived permissions and
         // per-agent PSKs. Agents without a table get nothing unless
         // fallback_unrestricted is true (dev mode).
-        let agent_caps = self.runtime_context.snapshot_agent_capabilities();
-
-        let service =
-            HudSessionImpl::from_shared_state_with_runtime_envelope_and_degradation_notices(
-                self.state.clone(),
-                &self.config.psk,
-                agent_caps,
-                self.runtime_context.snapshot_agent_resource_budgets(),
-                self.runtime_context.fallback_resource_budget(),
-                self.fallback_unrestricted,
-                Some(std::sync::Arc::new(
-                    crate::RuntimeMutationBudgetEnforcer::with_limits(
-                        self.runtime_context
-                            .operational_envelope
-                            .max_resident_sessions,
-                        self.runtime_context.operational_envelope.max_leased_tiles,
-                        self.runtime_context
-                            .operational_envelope
-                            .max_agent_leased_texture_bytes,
-                    ),
-                )),
-                self.degradation_notices.clone(),
-            )
-            .with_agent_psks(self.runtime_context.snapshot_agent_psks(&self.config.psk));
+        let mut agents = self.runtime_context.agent_directory(&self.config.psk);
+        agents.fallback_permissions = if self.fallback_unrestricted {
+            vec!["*".to_string()]
+        } else {
+            Vec::new()
+        };
+        let service = HudSessionImpl::from_deps(SessionDeps {
+            agent_resource_budgets: self.runtime_context.snapshot_agent_resource_budgets(),
+            fallback_resource_budget: self.runtime_context.fallback_resource_budget(),
+            budget_enforcer: Some(std::sync::Arc::new(
+                crate::RuntimeMutationBudgetEnforcer::with_limits(
+                    self.runtime_context
+                        .operational_envelope
+                        .max_resident_sessions,
+                    self.runtime_context.operational_envelope.max_leased_tiles,
+                    self.runtime_context
+                        .operational_envelope
+                        .max_agent_leased_texture_bytes,
+                ),
+            )),
+            degradation_notices: self.degradation_notices.clone(),
+            ..SessionDeps::new(self.state.clone(), agents)
+        });
 
         let handle = tokio::spawn(async move {
             let incoming = tokio_stream::wrappers::TcpListenerStream::new(listener);
@@ -925,7 +924,7 @@ mod tests {
     use tze_hud_scene::types::{
         FontFamily, Node, NodeData, ResourceBudget, Rgba, TextAlign, TextMarkdownNode, TextOverflow,
     };
-    use tze_hud_scene::{Capability, MutationBatch, SceneMutation};
+    use tze_hud_scene::{MutationBatch, SceneMutation};
 
     fn retained_plain_text_node(content: &str, width: f32, height: f32) -> Node {
         Node {
@@ -970,8 +969,6 @@ mod tests {
                 "transparent-overlap-agent",
                 SceneId::nil(),
                 60_000,
-                tze_hud_scene::lease::priority::PRIORITY_DEFAULT,
-                vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
                 ResourceBudget {
                     max_tiles: 50,
                     ..ResourceBudget::default()
@@ -1442,8 +1439,6 @@ mod tests {
                     "change-efficiency-agent",
                     SceneId::nil(),
                     60_000,
-                    tze_hud_scene::lease::priority::PRIORITY_DEFAULT,
-                    vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
                     ResourceBudget {
                         max_tiles: 50,
                         ..ResourceBudget::default()
@@ -2248,17 +2243,11 @@ default_tab = true
     /// pixels, per the compositor headless-render footgun in AGENTS.md.
     #[test]
     fn process_pointer_event_jump_to_latest_resets_scroll_to_tail() {
-        use tze_hud_scene::Capability;
-
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene
             .create_tab("Main", 0)
             .expect("tab creation must succeed");
-        let lease_id = scene.grant_lease(
-            "test-agent",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id = scene.grant_lease("test-agent", 60_000);
         let tile_id = scene
             .create_tile(
                 tab_id,

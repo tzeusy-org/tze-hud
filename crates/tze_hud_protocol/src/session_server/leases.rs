@@ -1,12 +1,11 @@
-//! Lease handlers for the session server (RFC 0005 §3.2, §5.3; lease-governance spec).
+//! Lease handlers for the session server.
 //!
 //! This module contains the three lease lifecycle handlers:
-//! - `handle_lease_request`: grant a new lease scoped to the session's permissions.
+//! - `handle_lease_request`: grant a new lease to the session's namespace.
 //! - `handle_lease_renew`: extend the TTL of an existing lease.
 //! - `handle_lease_release`: revoke an existing lease.
 //!
-//! All three handlers implement the retransmit-dedup contract (RFC 0005 §5.3)
-//! via `session.lease_correlation_cache`.
+//! All three handlers replay cached responses for retransmitted requests via `session.lease_correlation_cache`.
 
 use std::sync::Arc;
 
@@ -17,36 +16,9 @@ use crate::lease::CachedLeaseResponse;
 use crate::proto::session::server_message::Payload as ServerPayload;
 use crate::proto::session::*;
 use crate::session::SharedState;
-use tze_hud_scene::types::Capability;
 
 use super::stream_session::StreamSession;
-use super::{bytes_to_scene_id, canonical_name_to_capability, now_wall_us, scene_id_to_bytes};
-
-/// Default internal lease priority. Agents no longer choose a priority; chrome
-/// is structurally above agent content and ties go to claim order.
-const AGENT_LEASE_PRIORITY: u8 = 2;
-
-/// Expand the session's permission strings to scene lease capabilities.
-fn lease_capabilities(permissions: &[String]) -> Vec<Capability> {
-    if permissions.iter().any(|p| p == "*") {
-        return vec![
-            Capability::CreateTiles,
-            Capability::ModifyOwnTiles,
-            Capability::ManageTabs,
-            Capability::UploadResource,
-            Capability::ReadSceneTopology,
-            Capability::AccessInputEvents,
-            Capability::ReadTelemetry,
-            Capability::ResidentMcp,
-            Capability::PublishZone("*".to_string()),
-            Capability::PublishWidget("*".to_string()),
-        ];
-    }
-    permissions
-        .iter()
-        .filter_map(|p| canonical_name_to_capability(p))
-        .collect()
-}
+use super::{bytes_to_scene_id, now_wall_us, scene_id_to_bytes};
 
 pub(super) async fn handle_lease_request(
     state: &Arc<Mutex<SharedState>>,
@@ -56,7 +28,7 @@ pub(super) async fn handle_lease_request(
     req: LeaseRequest,
     render_wake: &tze_hud_scene::render_wake::RenderWakeNotifier,
 ) -> bool {
-    // Retransmit dedup (RFC 0005 §5.3): if we have already processed this
+    // Retransmit dedup: if we have already processed this
     // client sequence, replay the cached response.
     if client_sequence > 0 {
         if let Some(cached) = session
@@ -87,8 +59,6 @@ pub(super) async fn handle_lease_request(
         }
     }
 
-    let capabilities = lease_capabilities(&session.capabilities);
-
     let ttl = if req.ttl_ms > 0 { req.ttl_ms } else { 60_000 };
 
     let lease_result = {
@@ -98,8 +68,6 @@ pub(super) async fn handle_lease_request(
             &session.namespace,
             session.scene_session_id,
             ttl,
-            AGENT_LEASE_PRIORITY,
-            capabilities,
             session.resource_budget.clone(),
         )
     };
@@ -141,7 +109,7 @@ pub(super) async fn handle_lease_request(
     session.lease_ids.push(lease_id);
     let lease_id_bytes = scene_id_to_bytes(lease_id);
 
-    // Cache the response for retransmit handling (RFC 0005 §5.3).
+    // Cache the response for retransmit handling.
     if client_sequence > 0 {
         session.lease_correlation_cache.insert(
             client_sequence,
@@ -155,7 +123,7 @@ pub(super) async fn handle_lease_request(
         );
     }
 
-    // Send LeaseResponse (transactional: never dropped, RFC 0005 §3.1).
+    // Send LeaseResponse (transactional: never dropped).
     let seq = session.next_server_seq();
     let _ = tx
         .send(Ok(ServerMessage {
@@ -182,7 +150,7 @@ pub(super) async fn handle_lease_renew(
     renew: LeaseRenew,
     render_wake: &tze_hud_scene::render_wake::RenderWakeNotifier,
 ) -> bool {
-    // Retransmit dedup (RFC 0005 §5.3).
+    // Retransmit dedup.
     if client_sequence > 0 {
         if let Some(cached) = session
             .lease_correlation_cache
@@ -340,7 +308,7 @@ pub(super) async fn handle_lease_release(
     release: LeaseRelease,
     render_wake: &tze_hud_scene::render_wake::RenderWakeNotifier,
 ) -> bool {
-    // Retransmit dedup (RFC 0005 §5.3).
+    // Retransmit dedup.
     // Replay the cached LeaseResponse for both success and denial paths so the
     // client always receives a LeaseResponse on retransmit (consistent with the
     // original send).

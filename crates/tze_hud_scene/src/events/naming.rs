@@ -1,7 +1,7 @@
 //! # Event Type Naming Convention
 //!
-//! Implements the dotted namespace hierarchy per scene-events/spec.md §2.2,
-//! Requirement: Event Type Naming Convention, lines 35-47.
+//! Dotted event-name grammar, used to validate configured bare event names
+//! (`tab_switch_on_event`).
 //!
 //! ## Naming grammar
 //!
@@ -10,7 +10,7 @@
 //! | Scene   | `scene.<object>.<action>`                          | `scene.tile.created`                 |
 //! | Agent   | `agent.<namespace>.<category>.<action>`            | `agent.doorbell_agent.doorbell.ring` |
 //! | System  | `system.<action>`                                  | `system.degradation_changed`         |
-//! | Input   | `input.<device>.<action>` (governed by RFC 0004)   | `input.pointer.down`                 |
+//! | Input   | `input.<device>.<action>`                          | `input.pointer.down`                 |
 //!
 //! ## Segment rules
 //!
@@ -50,8 +50,6 @@ pub enum NamingError {
     /// An agent event bare name does not have at least two segments (needs
     /// at least `<category>.<action>`).
     BareTooFewSegments,
-    /// A fully-qualified event type does not match any known prefix structure.
-    UnknownPrefix,
 }
 
 impl fmt::Display for NamingError {
@@ -79,12 +77,6 @@ impl fmt::Display for NamingError {
                 f,
                 "agent bare name must have at least two segments (e.g. \"doorbell.ring\")"
             ),
-            NamingError::UnknownPrefix => {
-                write!(
-                    f,
-                    "event type must start with scene., agent., system., or input."
-                )
-            }
         }
     }
 }
@@ -127,74 +119,6 @@ fn validate_segment(segment: &str, position: usize) -> Result<(), NamingError> {
     Ok(())
 }
 
-// ─── Full event type validation ───────────────────────────────────────────────
-
-/// Validate a fully-qualified event type string.
-///
-/// Accepts well-formed `scene.*`, `agent.*`, `system.*`, or `input.*` strings.
-/// Each dot-separated segment must consist of `[a-z0-9_]+` and must not start
-/// with a digit.
-///
-/// # Examples
-///
-/// ```
-/// use tze_hud_scene::events::naming::validate_event_type;
-///
-/// assert!(validate_event_type("scene.tile.created").is_ok());
-/// assert!(validate_event_type("agent.doorbell_agent.doorbell.ring").is_ok());
-/// assert!(validate_event_type("system.degradation_changed").is_ok());
-/// assert!(validate_event_type("system.lease_revoked").is_ok());
-/// assert!(validate_event_type("scene.zone.occupancy_changed").is_ok());
-/// assert!(validate_event_type("scene.focus.changed").is_ok());
-/// assert!(validate_event_type("BadName").is_err()); // uppercase
-/// assert!(validate_event_type("scene.tile").is_err()); // too few segments for scene
-/// ```
-pub fn validate_event_type(event_type: &str) -> Result<(), NamingError> {
-    if event_type.is_empty() {
-        return Err(NamingError::Empty);
-    }
-
-    let segments: Vec<&str> = event_type.split('.').collect();
-
-    // Validate each segment for character constraints.
-    for (i, seg) in segments.iter().enumerate() {
-        validate_segment(seg, i)?;
-    }
-
-    // Validate structure based on leading prefix.
-    match segments[0] {
-        "scene" => {
-            // scene.<object>.<action> — minimum 3 segments.
-            if segments.len() < 3 {
-                return Err(NamingError::UnknownPrefix);
-            }
-        }
-        "agent" => {
-            // agent.<namespace>.<category>.<action> — minimum 4 segments.
-            if segments.len() < 4 {
-                return Err(NamingError::UnknownPrefix);
-            }
-        }
-        "system" => {
-            // system.<action> — minimum 2 segments.
-            if segments.len() < 2 {
-                return Err(NamingError::UnknownPrefix);
-            }
-        }
-        "input" => {
-            // input.* — minimum 2 segments (governed by RFC 0004).
-            if segments.len() < 2 {
-                return Err(NamingError::UnknownPrefix);
-            }
-        }
-        _ => {
-            return Err(NamingError::UnknownPrefix);
-        }
-    }
-
-    Ok(())
-}
-
 // ─── Agent bare-name validation ───────────────────────────────────────────────
 
 /// Validate an agent-supplied bare event name.
@@ -202,7 +126,7 @@ pub fn validate_event_type(event_type: &str) -> Result<(), NamingError> {
 /// Bare names are the `<category>.<action>` suffix that agents supply.
 /// The runtime prepends `agent.<namespace>.` before delivery.
 ///
-/// Rules (spec §2.2, bead #4 regex: `[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+`):
+/// Rules (`[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+`):
 /// - At least two segments separated by a dot.
 /// - Each segment: `[a-z][a-z0-9_]*`.
 /// - Must not begin with the reserved prefixes `system.` or `scene.`.
@@ -226,7 +150,7 @@ pub fn validate_bare_name(bare_name: &str) -> Result<(), NamingError> {
         return Err(NamingError::Empty);
     }
 
-    // Reserved prefix check (spec line 46).
+    // Reserved prefix check.
     if bare_name.starts_with("system.") {
         return Err(NamingError::ReservedPrefix {
             prefix: "system.".to_string(),
@@ -250,103 +174,16 @@ pub fn validate_bare_name(bare_name: &str) -> Result<(), NamingError> {
     Ok(())
 }
 
-// ─── Namespace prefixing ──────────────────────────────────────────────────────
-
-/// Build the fully-qualified agent event type from namespace and bare name.
-///
-/// Spec: scene-events/spec.md line 42 — "the delivered event_type MUST be
-/// `agent.doorbell_agent.doorbell.ring`".
-///
-/// This function does **not** validate the bare name.  Call
-/// `validate_bare_name` first if the bare name comes from an untrusted source.
-///
-/// # Examples
-///
-/// ```
-/// use tze_hud_scene::events::naming::build_agent_event_type;
-///
-/// let t = build_agent_event_type("doorbell_agent", "doorbell.ring");
-/// assert_eq!(t, "agent.doorbell_agent.doorbell.ring");
-///
-/// let t2 = build_agent_event_type("alarm_agent", "fire.detected");
-/// assert_eq!(t2, "agent.alarm_agent.fire.detected");
-/// ```
-pub fn build_agent_event_type(namespace: &str, bare_name: &str) -> String {
-    format!("agent.{namespace}.{bare_name}")
-}
-
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    // ── validate_event_type ───────────────────────────────────────────────────
-
-    /// Spec-mandated examples that MUST be valid (spec lines 35-47).
-    #[test]
-    fn valid_scene_event_types() {
-        assert!(validate_event_type("scene.tile.created").is_ok());
-        assert!(validate_event_type("scene.zone.occupancy_changed").is_ok());
-        assert!(validate_event_type("scene.focus.changed").is_ok());
-        assert!(validate_event_type("scene.tab.active_changed").is_ok());
-    }
-
-    #[test]
-    fn valid_agent_event_types() {
-        assert!(validate_event_type("agent.doorbell_agent.doorbell.ring").is_ok());
-        assert!(validate_event_type("agent.alarm_agent.fire.detected").is_ok());
-    }
-
-    #[test]
-    fn valid_system_event_types() {
-        assert!(validate_event_type("system.degradation_changed").is_ok());
-        assert!(validate_event_type("system.lease_revoked").is_ok());
-    }
-
-    #[test]
-    fn invalid_event_type_uppercase() {
-        assert!(validate_event_type("Scene.tile.created").is_err());
-        assert!(validate_event_type("scene.Tile.created").is_err());
-    }
-
-    #[test]
-    fn invalid_event_type_unknown_prefix() {
-        assert!(validate_event_type("unknown.event.type").is_err());
-    }
-
-    #[test]
-    fn invalid_event_type_empty() {
-        assert!(validate_event_type("").is_err());
-    }
-
-    #[test]
-    fn invalid_event_type_too_few_scene_segments() {
-        // scene must have at least 3 segments
-        assert!(validate_event_type("scene.tile").is_err());
-    }
-
-    #[test]
-    fn invalid_event_type_too_few_agent_segments() {
-        // agent must have at least 4 segments
-        assert!(validate_event_type("agent.ns.action").is_err());
-    }
-
-    #[test]
-    fn invalid_event_type_consecutive_dots() {
-        assert!(validate_event_type("scene..tile.created").is_err());
-    }
-
-    #[test]
-    fn invalid_event_type_special_characters() {
-        assert!(validate_event_type("scene.tile-created").is_err());
-        assert!(validate_event_type("scene.tile.created!").is_err());
-    }
-
     // ── validate_bare_name ────────────────────────────────────────────────────
 
     /// WHEN an agent attempts to emit an event with name starting with "system."
-    /// or "scene." THEN the runtime MUST reject the emission (spec line 46).
+    /// or "scene." THEN the runtime MUST reject the emission.
     #[test]
     fn reserved_prefix_system_rejected() {
         let err = validate_bare_name("system.fake").unwrap_err();
@@ -400,37 +237,6 @@ mod tests {
     fn segment_leading_underscore_rejected() {
         // A segment starting with '_' must be rejected — [a-z][a-z0-9_]* requires
         // a lowercase letter as the first character.
-        assert!(validate_event_type("scene._hidden.created").is_err());
         assert!(validate_bare_name("_hidden.event").is_err());
-    }
-
-    // ── build_agent_event_type ────────────────────────────────────────────────
-
-    /// WHEN an agent with namespace "doorbell_agent" emits event "doorbell.ring"
-    /// THEN the delivered event_type MUST be "agent.doorbell_agent.doorbell.ring"
-    /// (spec line 42).
-    #[test]
-    fn agent_event_type_prefixing() {
-        assert_eq!(
-            build_agent_event_type("doorbell_agent", "doorbell.ring"),
-            "agent.doorbell_agent.doorbell.ring"
-        );
-    }
-
-    #[test]
-    fn agent_event_type_alarm_agent() {
-        assert_eq!(
-            build_agent_event_type("alarm_agent", "fire.detected"),
-            "agent.alarm_agent.fire.detected"
-        );
-    }
-
-    #[test]
-    fn agent_event_type_is_valid() {
-        let et = build_agent_event_type("doorbell_agent", "doorbell.ring");
-        assert!(
-            validate_event_type(&et).is_ok(),
-            "built agent event type should pass validation: {et}"
-        );
     }
 }

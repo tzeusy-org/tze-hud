@@ -1059,13 +1059,6 @@ pub enum HitResult {
     /// The event should be forwarded to the desktop in overlay mode or discarded
     /// in fullscreen.
     Passthrough,
-    /// The point hit a chrome-layer element (lease priority 0).
-    ///
-    /// Chrome always wins; no content-layer tile receives the event.
-    Chrome {
-        /// The scene ID of the chrome tile (or node, for chrome HitRegionNodes).
-        element_id: SceneId,
-    },
     /// The point hit a runtime-managed zone interaction region (dismiss button
     /// or action button on a notification slot).
     ///
@@ -1201,11 +1194,6 @@ impl HitResult {
     /// Returns `true` if this is a [`HitResult::NodeHit`].
     pub fn is_node_hit(&self) -> bool {
         matches!(self, HitResult::NodeHit { .. })
-    }
-
-    /// Returns `true` if this is a [`HitResult::Chrome`] hit.
-    pub fn is_chrome(&self) -> bool {
-        matches!(self, HitResult::Chrome { .. })
     }
 
     /// Extract the `(tile_id, node_id)` pair for `NodeHit` results.
@@ -1493,15 +1481,11 @@ pub struct Lease {
     /// Parent session identifier. Lease is invalidated if session is revoked.
     pub session_id: SceneId,
     pub state: LeaseState,
-    /// Priority: 0=system/chrome (reserved), 1=high, 2=normal (default), 3=low, 4+=background.
-    /// Per RFC 0008 SS2.
-    pub priority: u8,
     /// Wall-clock grant timestamp in milliseconds since Unix epoch (RFC 0003 wall-clock domain).
     /// Corresponds to `granted_at_wall_us / 1000` in the wire protocol.
     pub granted_at_ms: u64,
     pub ttl_ms: u64,
     pub renewal_policy: RenewalPolicy,
-    pub capabilities: Vec<Capability>,
     pub resource_budget: ResourceBudget,
     /// Spatial constraints on tiles owned by this lease, enforced at
     /// interactive resize time (gesture + hotkey).  `0.0` for either field
@@ -1518,40 +1502,6 @@ pub struct Lease {
     pub disconnected_at_ms: Option<u64>,
     /// Grace period before an orphaned lease is cleaned up (ms). Default 30_000.
     pub grace_period_ms: u64,
-}
-
-/// Agent capabilities that govern what mutations are permitted.
-///
-/// Canonical names per configuration/spec.md §Requirement: Capability Vocabulary.
-/// RFC 0001 §3.1, §3.3 defines the canonical capability names.
-///
-/// The `String`-bearing variants (`PublishZone`, `PublishWidget`) carry their
-/// parameterized argument (zone or widget name).
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Capability {
-    // ── Canonical v1 capability vocabulary ────────────────────────────────────
-    /// `create_tiles` — agent may create tiles.
-    CreateTiles,
-    /// `modify_own_tiles` — agent may mutate tiles it owns.
-    ModifyOwnTiles,
-    /// `manage_tabs` — agent may create/switch tabs.
-    ManageTabs,
-    /// `upload_resource` — agent may upload resources.
-    UploadResource,
-    /// `read_scene_topology` — agent may read the scene graph topology.
-    ReadSceneTopology,
-    /// `access_input_events` — agent may receive input events.
-    AccessInputEvents,
-    /// `read_telemetry` — agent may read telemetry data.
-    ReadTelemetry,
-    /// `publish_zone:<zone_name>` or `publish_zone:*` — agent may publish to a zone.
-    PublishZone(String),
-    /// `publish_widget:<widget_name>` — agent may publish parameter values to a widget.
-    PublishWidget(String),
-    /// `resident_mcp` — agent is a resident MCP agent.
-    ResidentMcp,
-    /// `lease:priority:1` — agent may request lease priority 1 (high).
-    LeasePriority1,
 }
 
 impl Lease {
@@ -1574,11 +1524,6 @@ impl Lease {
                 self.effective_remaining_ms(now_ms) == 0
             }
         }
-    }
-
-    /// Check whether this lease grants the requested capability.
-    pub fn has_capability(&self, cap: Capability) -> bool {
-        self.capabilities.contains(&cap)
     }
 
     /// Remaining TTL in milliseconds (0 if expired).

@@ -10,7 +10,7 @@
 //!   - Capability negotiation: shows granted vs denied capabilities
 //!   - Mandatory subscription categories: `LEASE_CHANGES`, `SCENE_TOPOLOGY`,
 //!     `ZONE_EVENTS`
-//!   - Lease acquisition with priority (spec §Priority Assignment)
+//!   - Lease acquisition
 //!   - Structured error handling: capability denied, budget exceeded
 //!
 //! **Phase 2** — Scene Setup
@@ -376,13 +376,7 @@ async fn run_headless(dev_mode: bool) -> Result<(), Box<dyn std::error::Error>> 
         }
     }
 
-    // Request lease with priority.
-    //
-    // `lease_priority` controls arbitration when the runtime must shed leases under
-    // resource pressure (spec §Priority Assignment). Priority 2 is the default;
-    // priority 1 (high) requires the `lease:priority:1` capability.
-    // Capabilities listed here are scoped to this lease — the agent can only
-    // exercise these capabilities while the lease is active.
+    // Request a lease. What the agent may do under it comes from its allow list.
     tx.send(session_proto::ClientMessage {
         sequence: 2,
         timestamp_wall_us: now_wall_us(),
@@ -469,11 +463,7 @@ async fn run_headless(dev_mode: bool) -> Result<(), Box<dyn std::error::Error>> 
         let state = runtime.shared_state().lock().await;
         let mut scene = state.scene.lock().await;
         let demo_tab = scene.create_tab("BudgetDemo", 1).unwrap();
-        let demo_lease = scene.grant_lease(
-            "budget-demo-agent",
-            5_000,
-            vec![tze_hud_scene::types::Capability::CreateTiles],
-        );
+        let demo_lease = scene.grant_lease("budget-demo-agent", 5_000);
         // Shrink the budget to 2 tiles for demonstration purposes.
         scene
             .leases
@@ -1227,16 +1217,7 @@ mod tests {
     fn setup_scene_with_lease() -> (SceneGraph, SceneId, SceneId) {
         let mut scene = SceneGraph::new(800.0, 600.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
-        let lease_id = scene.grant_lease(
-            "test-agent",
-            60_000,
-            // Canonical v1 capability variants (not the legacy CreateTile / ReceiveInput).
-            vec![
-                Capability::CreateTiles,
-                Capability::ModifyOwnTiles,
-                Capability::AccessInputEvents,
-            ],
-        );
+        let lease_id = scene.grant_lease("test-agent", 60_000);
         (scene, tab_id, lease_id)
     }
 

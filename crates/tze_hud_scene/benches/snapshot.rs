@@ -23,7 +23,7 @@
 
 use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
 use tze_hud_scene::{
-    Capability, Node, NodeData, Rect, Rgba, SceneId, SolidColorNode,
+    Node, NodeData, Rect, Rgba, SceneId, SolidColorNode,
     graph::SceneGraph,
     test_scenes::{ClockMs, TestSceneRegistry},
     types::{
@@ -46,11 +46,7 @@ const MONO_US: u64 = 12_345_678;
 fn build_dense_scene(tile_count: usize, nodes_per_tile: usize) -> SceneGraph {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab_id = scene.create_tab("Bench", 0).unwrap();
-    let lease_id = scene.grant_lease(
-        "agent.bench",
-        600_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("agent.bench", 600_000);
 
     let cols = 10usize;
     for i in 0..tile_count {

@@ -42,17 +42,32 @@ async fn send_auth_failed(
         .await;
 }
 
+/// What the handshake handlers read from the service, borrowed per stream.
+#[derive(Clone, Copy)]
+pub(super) struct HandshakeCtx<'a> {
+    pub state: &'a Arc<Mutex<SharedState>>,
+    pub agents: &'a AgentDirectory,
+    pub agent_resource_budgets: &'a HashMap<String, ResourceBudget>,
+    pub fallback_resource_budget: &'a ResourceBudget,
+    pub budget_enforcer: Option<&'a super::SharedMutationBudgetEnforcer>,
+    /// Peer address, for loopback gating of local-socket credentials.
+    pub peer_ip: Option<std::net::IpAddr>,
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn handle_session_init(
-    state: &Arc<Mutex<SharedState>>,
-    agents: &AgentDirectory,
+    ctx: HandshakeCtx<'_>,
     tx: &tokio::sync::mpsc::Sender<Result<ServerMessage, Status>>,
     init: &SessionInit,
-    agent_resource_budgets: &HashMap<String, ResourceBudget>,
-    fallback_resource_budget: &ResourceBudget,
-    budget_enforcer: Option<&super::SharedMutationBudgetEnforcer>,
-    peer_ip: Option<std::net::IpAddr>,
 ) -> Option<StreamSession> {
+    let HandshakeCtx {
+        state,
+        agents,
+        agent_resource_budgets,
+        fallback_resource_budget,
+        budget_enforcer,
+        peer_ip,
+    } = ctx;
     // ── Step 1: Version negotiation (RFC 0005 §4.1) ──────────────────────────
     // Do this before authentication so agents can learn about version
     // incompatibility even if they send a wrong key.
@@ -231,15 +246,18 @@ pub(super) async fn handle_session_init(
 ///    after this function returns (same mechanism as new connections).
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn handle_session_resume(
-    state: &Arc<Mutex<SharedState>>,
-    agents: &AgentDirectory,
+    ctx: HandshakeCtx<'_>,
     tx: &tokio::sync::mpsc::Sender<Result<ServerMessage, Status>>,
     resume: &SessionResume,
-    agent_resource_budgets: &HashMap<String, ResourceBudget>,
-    fallback_resource_budget: &ResourceBudget,
-    budget_enforcer: Option<&super::SharedMutationBudgetEnforcer>,
-    peer_ip: Option<std::net::IpAddr>,
 ) -> Option<StreamSession> {
+    let HandshakeCtx {
+        state,
+        agents,
+        agent_resource_budgets,
+        fallback_resource_budget,
+        budget_enforcer,
+        peer_ip,
+    } = ctx;
     // Re-authentication is required on resume (RFC 0005 §6.2).
     // peer_ip is passed for LocalSocketCredential loopback gating (hud-1aswu.1).
     let identity = match identify_session(

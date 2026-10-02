@@ -1297,7 +1297,7 @@ impl InputProcessor {
                 (Some(*tile_id), Some(*node_id))
             }
             HitResult::TileHit { tile_id } => (Some(*tile_id), None),
-            HitResult::Chrome { .. } | HitResult::Passthrough => (None, None),
+            HitResult::Passthrough => (None, None),
             // ZoneInteraction hits are handled by the zone interaction layer,
             // not by the tile/node dispatch path.  No tile or node ID is associated.
             HitResult::ZoneInteraction {
@@ -2072,11 +2072,7 @@ mod tests {
     fn setup_scene_with_hit_region() -> (SceneGraph, SceneId, SceneId) {
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
-        let lease_id = scene.grant_lease(
-            "test",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id = scene.grant_lease("test", 60_000);
 
         let tile_id = scene
             .create_tile(
@@ -2109,11 +2105,7 @@ mod tests {
     fn setup_scrollable_scene() -> (SceneGraph, SceneId) {
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
-        let lease_id = scene.grant_lease(
-            "test",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id = scene.grant_lease("test", 60_000);
         let tile_id = scene
             .create_tile(
                 tab_id,
@@ -2374,11 +2366,7 @@ mod tests {
         let tab_id = scene.create_tab("Main", 0).unwrap();
 
         // Tile A — left half
-        let lease_a = scene.grant_lease(
-            "agent-a",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_a = scene.grant_lease("agent-a", 60_000);
         let tile_a = scene
             .create_tile(
                 tab_id,
@@ -2408,11 +2396,7 @@ mod tests {
             .unwrap();
 
         // Tile B — right half
-        let lease_b = scene.grant_lease(
-            "agent-b",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_b = scene.grant_lease("agent-b", 60_000);
         let tile_b = scene
             .create_tile(
                 tab_id,
@@ -2902,16 +2886,8 @@ mod tests {
     fn setup_two_tile_scene() -> (SceneGraph, SceneId, SceneId, SceneId, SceneId) {
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
-        let lease1 = scene.grant_lease(
-            "agent1",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
-        let lease2 = scene.grant_lease(
-            "agent2",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease1 = scene.grant_lease("agent1", 60_000);
+        let lease2 = scene.grant_lease("agent2", 60_000);
 
         let t1 = scene
             .create_tile(
@@ -3181,11 +3157,7 @@ mod tests {
     fn test_auto_capture_on_pointer_down() {
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
-        let lease = scene.grant_lease(
-            "agent1",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease = scene.grant_lease("agent1", 60_000);
         let tile_id = scene
             .create_tile(
                 tab_id,
@@ -3563,11 +3535,7 @@ mod tests {
     fn spec_3_2_at_tail_tile_advances_by_whole_lines_on_append() {
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
-        let lease_id = scene.grant_lease(
-            "test",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id = scene.grant_lease("test", 60_000);
         let tile_id = scene
             .create_tile(
                 tab_id,
@@ -3633,11 +3601,7 @@ mod tests {
     fn spec_3_3_scrolled_back_append_does_not_disturb_viewport() {
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
-        let lease_id = scene.grant_lease(
-            "test",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id = scene.grant_lease("test", 60_000);
         let tile_id = scene
             .create_tile(
                 tab_id,
@@ -3732,11 +3696,7 @@ mod tests {
     fn reset_tile_scroll_to_tail_forces_scrolled_back_tile_and_syncs_scene() {
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
-        let lease_id = scene.grant_lease(
-            "test",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id = scene.grant_lease("test", 60_000);
         let tile_id = scene
             .create_tile(
                 tab_id,
@@ -3797,11 +3757,7 @@ mod tests {
     fn reset_tile_scroll_to_tail_unregistered_tile_is_noop() {
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
-        let lease_id = scene.grant_lease(
-            "test",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id = scene.grant_lease("test", 60_000);
         let tile_id = scene
             .create_tile(
                 tab_id,
@@ -3825,11 +3781,7 @@ mod tests {
     fn tile_total_content_height_px_supports_incremental_append_callers() {
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
-        let lease_id = scene.grant_lease(
-            "test",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id = scene.grant_lease("test", 60_000);
         let tile_id = scene
             .create_tile(
                 tab_id,
@@ -3868,11 +3820,7 @@ mod tests {
     fn coordinate_reconciliation_total_vs_max_scroll_offset() {
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
-        let lease_id = scene.grant_lease(
-            "test",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id = scene.grant_lease("test", 60_000);
         let tile_id = scene
             .create_tile(
                 tab_id,
@@ -3944,11 +3892,7 @@ mod tests {
     fn setup_composer_scene() -> (SceneGraph, SceneId, SceneId, SceneId, SceneId) {
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
-        let lease_id = scene.grant_lease(
-            "agent",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id = scene.grant_lease("agent", 60_000);
         let tile_id = scene
             .create_tile(
                 tab_id,

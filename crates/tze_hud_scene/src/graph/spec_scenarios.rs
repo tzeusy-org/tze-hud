@@ -1,8 +1,8 @@
 use super::*;
 use crate::clock::TestClock;
 use crate::types::{
-    Capability, FontFamily, HitRegionNode, Node, NodeData, Rect, Rgba, SceneId, SolidColorNode,
-    TextAlign, TextMarkdownNode, TextOverflow,
+    FontFamily, HitRegionNode, Node, NodeData, Rect, Rgba, SceneId, SolidColorNode, TextAlign,
+    TextMarkdownNode, TextOverflow,
 };
 use std::sync::Arc;
 
@@ -44,11 +44,7 @@ fn tab_limit_256_enforced() {
 fn tile_limit_1024_per_tab_enforced() {
     let mut scene = make_scene();
     let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease(
-        "agent",
-        300_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("agent", 300_000);
 
     // The test scene is 1920×1080; tiles are 1px×1px at unique positions.
     // Use a grid: 32 cols × 32 rows = 1024. We'll use tiny tiles in bounds.
@@ -107,11 +103,7 @@ fn tile_limit_1024_per_tab_enforced() {
 fn node_limit_64_per_tile_enforced() {
     let mut scene = make_scene();
     let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease(
-        "agent",
-        300_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("agent", 300_000);
     let tile_id = scene
         .create_tile(
             tab_id,
@@ -190,11 +182,7 @@ fn node_limit_64_per_tile_enforced() {
 fn duplicate_node_id_rejected() {
     let mut scene = make_scene();
     let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease(
-        "agent",
-        300_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("agent", 300_000);
     let tile_id = scene
         .create_tile(
             tab_id,
@@ -253,24 +241,6 @@ fn tab_name_too_long_rejected() {
     );
 }
 
-// ─ Tab mutation without capability (spec line 83) ─────────────────────────
-// WHEN an agent without manage_tabs capability submits CreateTab
-// THEN the runtime MUST reject with CapabilityMissing
-
-#[test]
-fn tab_create_without_manage_tabs_rejected() {
-    let mut scene = make_scene();
-    // Lease with no capabilities
-    let lease_id = scene.grant_lease("agent", 300_000, vec![]);
-    let err = scene
-        .create_tab_with_lease("My Tab", 0, lease_id)
-        .unwrap_err();
-    assert!(
-        matches!(err, ValidationError::CapabilityMissing { ref capability } if capability.contains("ManageTabs")),
-        "expected CapabilityMissing(ManageTabs), got {err:?}"
-    );
-}
-
 // ─ Create and switch tab (spec line 71) ──────────────────────────────────
 // WHEN an agent with manage_tabs submits CreateTab + SwitchActiveTab
 // THEN the new tab MUST be created and become active
@@ -278,7 +248,7 @@ fn tab_create_without_manage_tabs_rejected() {
 #[test]
 fn create_and_switch_tab_with_capability() {
     let mut scene = make_scene();
-    let lease_id = scene.grant_lease("agent", 300_000, vec![Capability::ManageTabs]);
+    let lease_id = scene.grant_lease("agent", 300_000);
     let tab_id = scene.create_tab_with_lease("New Tab", 0, lease_id).unwrap();
     scene
         .switch_active_tab_with_lease(tab_id, lease_id)
@@ -300,52 +270,15 @@ fn rename_tab_with_100_byte_name() {
 }
 
 // ─ Create tile with valid lease (spec line 92) ────────────────────────────
-// WHEN an agent with create_tiles + modify_own_tiles and valid lease submits CreateTile
+// WHEN an agent with a valid lease submits CreateTile
 // THEN the tile MUST be created with specified bounds, z_order, and opacity
 
 #[test]
-fn create_tile_checked_requires_capabilities() {
+fn create_tile_checked_with_active_lease() {
     let mut scene = make_scene();
     let tab_id = scene.create_tab("Main", 0).unwrap();
 
-    // No capabilities — should fail
-    let lease_no_caps = scene.grant_lease("agent", 300_000, vec![]);
-    let err = scene
-        .create_tile_checked(
-            tab_id,
-            "agent",
-            lease_no_caps,
-            Rect::new(0.0, 0.0, 100.0, 100.0),
-            1,
-        )
-        .unwrap_err();
-    assert!(
-        matches!(err, ValidationError::CapabilityMissing { .. }),
-        "got {err:?}"
-    );
-
-    // Only create_tiles (not modify_own_tiles) — should still fail
-    let lease_create_only = scene.grant_lease("agent", 300_000, vec![Capability::CreateTiles]);
-    let err = scene
-        .create_tile_checked(
-            tab_id,
-            "agent",
-            lease_create_only,
-            Rect::new(0.0, 0.0, 100.0, 100.0),
-            1,
-        )
-        .unwrap_err();
-    assert!(
-        matches!(err, ValidationError::CapabilityMissing { .. }),
-        "got {err:?}"
-    );
-
-    // Full capabilities — should succeed
-    let lease_full = scene.grant_lease(
-        "agent",
-        300_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_full = scene.grant_lease("agent", 300_000);
     let tile_id = scene
         .create_tile_checked(
             tab_id,
@@ -367,11 +300,7 @@ fn create_tile_checked_requires_capabilities() {
 fn tile_mutation_with_expired_lease_rejected() {
     let (mut scene, clock) = make_scene_with_clock();
     let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease(
-        "agent",
-        100,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("agent", 100);
     let tile_id = scene
         .create_tile(
             tab_id,
@@ -402,11 +331,7 @@ fn tile_mutation_with_expired_lease_rejected() {
 fn delete_tile_removes_tile_and_nodes() {
     let mut scene = make_scene();
     let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease(
-        "agent",
-        300_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("agent", 300_000);
     let tile_id = scene
         .create_tile(
             tab_id,
@@ -451,11 +376,7 @@ fn delete_tile_removes_tile_and_nodes() {
 fn tile_unread_count_set_get_and_prune() {
     let mut scene = make_scene();
     let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease(
-        "agent",
-        300_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("agent", 300_000);
     let tile_id = scene
         .create_tile(
             tab_id,
@@ -498,11 +419,7 @@ fn tile_unread_count_set_get_and_prune() {
 fn opacity_out_of_range_rejected() {
     let mut scene = make_scene();
     let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease(
-        "agent",
-        300_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("agent", 300_000);
     let tile_id = scene
         .create_tile(
             tab_id,
@@ -541,11 +458,7 @@ fn zero_size_bounds_rejected() {
 
     // create_tile_checked requires CreateTiles + ModifyOwnTiles; use correct capabilities
     // so the bounds check is reached (not capability check).
-    let lease_id = scene.grant_lease(
-        "agent",
-        300_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("agent", 300_000);
 
     let err = scene
         .create_tile_checked(
@@ -562,11 +475,7 @@ fn zero_size_bounds_rejected() {
     );
 
     // Use the basic create_tile (no capability check) to also confirm bounds are rejected
-    let lease_unchecked = scene.grant_lease(
-        "agent",
-        300_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_unchecked = scene.grant_lease("agent", 300_000);
     let err2 = scene
         .create_tile(
             tab_id,
@@ -590,11 +499,7 @@ fn zero_size_bounds_rejected() {
 fn bounds_outside_display_rejected() {
     let mut scene = make_scene(); // 1920×1080
     let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease(
-        "agent",
-        300_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("agent", 300_000);
 
     let err = scene
         .create_tile(
@@ -619,11 +524,7 @@ fn bounds_outside_display_rejected() {
 fn z_order_reserved_zone_band_rejected() {
     let mut scene = make_scene();
     let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease(
-        "agent",
-        300_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("agent", 300_000);
 
     let err = scene
         .create_tile(
@@ -699,17 +600,13 @@ fn text_markdown_content_limit_enforced() {
 
 // ─ Cross-namespace tile access denied (spec line 37) ─────────────────────
 // WHEN agent "weather-agent" attempts to mutate a tile owned by namespace "cal"
-// THEN reject with CapabilityMissing or LeaseNotFound
+// THEN reject with NamespaceMismatch
 
 #[test]
 fn cross_namespace_tile_access_denied() {
     let mut scene = make_scene();
     let tab_id = scene.create_tab("Main", 0).unwrap();
-    let cal_lease = scene.grant_lease(
-        "cal",
-        300_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let cal_lease = scene.grant_lease("cal", 300_000);
     let tile_id = scene
         .create_tile(
             tab_id,
@@ -767,11 +664,7 @@ fn node_struct_size_under_160_bytes() {
 fn tab_delete_removes_tiles_too() {
     let mut scene = make_scene();
     let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease(
-        "agent",
-        300_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("agent", 300_000);
     scene
         .create_tile(
             tab_id,
@@ -819,11 +712,7 @@ fn tab_reorder_conflict_rejected() {
 fn tile_opacity_accepts_boundary_values() {
     let mut scene = make_scene();
     let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease(
-        "agent",
-        300_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("agent", 300_000);
     let tile_id = scene
         .create_tile(
             tab_id,
@@ -1280,14 +1169,7 @@ fn widget_registry_runtime_svg_handle_round_trip() {
 fn portal_resize_drain_queue_populated_by_remove_tile() {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease(
-        "portal-agent",
-        60_000,
-        vec![
-            crate::Capability::CreateTiles,
-            crate::Capability::ModifyOwnTiles,
-        ],
-    );
+    let lease_id = scene.grant_lease("portal-agent", 60_000);
     let tile_id = scene
         .create_tile(
             tab_id,
@@ -1334,14 +1216,7 @@ fn portal_resize_drain_queue_populated_by_remove_tile() {
 fn portal_resize_drain_queue_accumulates_multiple_removals() {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease(
-        "portal-agent",
-        60_000,
-        vec![
-            crate::Capability::CreateTiles,
-            crate::Capability::ModifyOwnTiles,
-        ],
-    );
+    let lease_id = scene.grant_lease("portal-agent", 60_000);
     let tile_a = scene
         .create_tile(
             tab_id,
