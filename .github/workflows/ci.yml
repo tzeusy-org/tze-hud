@@ -1,55 +1,37 @@
-# tze_hud CI — closure-grade gates for v1-MVP.
+# tze_hud CI — merge gates.
+#
+# Merge-gate jobs must finish in under ~8 minutes. Anything slower goes in the
+# weekly lanes (perf-budget.yml, perf-assert.yml). Every job has a job-level
+# timeout-minutes and every apt step has its own, so a stalled runner or
+# mirror fails fast instead of timing out the merge queue.
+#
+# Required checks (ruleset "main merge queue"; job `name:`s must not change):
+#   cargo check, cargo fmt, cargo clippy, cargo test (unit),
+#   vertical_slice production config boot, canonical app production config boot gate,
+#   dev-mode guard (release build), cargo clippy (windows-gnu cross-target)
 #
 # Job map:
 #   check          — cargo check: fast compilation gate (no codegen)
 #                    + fail-closed idle-efficiency checker contract tests
-#   fmt            — cargo fmt --check: formatting gate
-#   clippy         — cargo clippy --all-targets -D warnings: lint gate (incl. tests/examples/benches)
-#   clippy-windows-gnu — cargo clippy --target x86_64-pc-windows-gnu -D warnings: lints the four
-#     crates carrying cfg(windows) code, which the Linux clippy job above never compiles
+#   fmt            — cargo fmt --check
+#   clippy         — cargo clippy --all-targets -D warnings (incl. tests/examples/benches)
+#   clippy-windows-gnu — cargo clippy --target x86_64-pc-windows-gnu -D warnings on the
+#     crates carrying cfg(windows) code, which the Linux clippy job never compiles
 #   test-unit      — cargo test --workspace --all-targets --exclude integration
 #   test-integration — cargo test -p integration (headless suites; excl. soak)
-#   production-boot — cargo test -p vertical_slice --test production_boot
-#   windows-performance-budget — headless Windows benchmark + locked budget gate
-#     and a real constrained WARP overlay quiescent-efficiency artifact gate
-#   constrained-envelope-budget — llvmpipe proxy, exactly two logical CPUs, same normalized ceilings
-#   release-artifact-provenance-smoke — cross-build tze_hud.exe and verify uploaded checksum round-trip
+#                    + deterministic LLM-facing token-footprint gate
+#   production-boot-vertical-slice / canonical-app-production-boot — boot the
+#     runtime with the committed production configs
+#   release-artifact-provenance-build/smoke — cross-build tze_hud.exe and verify
+#     the uploaded checksum round-trip (informational)
 #   user-test-python-suite — pytest over the user-test and repo script suites;
 #     pure-Python tests only, with no GPU, Windows, live HUD runtime, or network
-#   dev-mode-guard  — verifies dev-mode feature is NOT compiled into release binary
+#   dev-mode-guard — verifies dev-mode feature is NOT compiled into release binary
+#   cargo-deny     — advisories + licenses (informational)
+#   test-gpu-pixel-readback — pixel readback on llvmpipe (informational)
 #
-# GPU / windowed jobs:
-#   Windowed rendering and pixel-readback tests require a GPU (real or software).
-#   These run with HEADLESS_FORCE_SOFTWARE=1 (llvmpipe on Linux) to avoid
-#   hardware GPU dependency.  They are gated on the `test-unit` job and clearly
-#   documented as GPU-required so teams can opt them out in environments without
-#   llvmpipe (e.g., minimal container images).
-#
-# ── fmt gate contract ────────────────────────────────────────────────────────
-#
-# The `fmt` job runs `cargo fmt --check` (without --all) from the workspace
-# root.  From a workspace root, `cargo fmt` and `cargo fmt --all` are
-# equivalent — both discover and format every file in every workspace member
-# by traversing `mod` declarations from each crate's entry point (lib.rs /
-# main.rs).  Rustfmt operates on the source tree, not the compilation graph,
-# so `#[cfg(target_os = "windows")]` blocks and other cfg-gated code are
-# formatted regardless of the build host.
-#
-# Investigation note (hud-18hth, 2026-04-25):
-#   PR #598 (native GPU lock) introduced fmt violations in gpu_lock.rs inside
-#   a `#[cfg(target_os = "windows")]` block.  The `cargo fmt` CI check
-#   correctly reported FAILURE on that PR.  The violations were merged anyway
-#   because the main branch had no required-status-checks protection.  The
-#   fix was applied in PR #599 during rebase.
-#
-#   Root cause: missing branch protection, NOT a gap in the fmt gate itself.
-#   Branch protection with required status checks has now been enabled on
-#   `main` to prevent future merges over failing CI.
-#
-#   All blocking jobs (check, fmt, clippy, test-unit, vertical_slice production boot, canonical app production
-#   boot, release artifact provenance smoke, dev-mode-guard) are required
-#   to pass before merge.
-# ─────────────────────────────────────────────────────────────────────────────
+# GPU jobs run with HEADLESS_FORCE_SOFTWARE=1 (llvmpipe on Linux) so no
+# hardware GPU is needed.
 
 name: CI
 
@@ -63,6 +45,9 @@ on:
   merge_group:
 
 env:
+  # apt retries and network timeouts: a stalled mirror fails fast instead of
+  # hanging the job (a 51-minute mingw-w64 install once timed out the merge queue).
+  APT_OPTS: "-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30"
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
   # Force software GPU (llvmpipe on Linux, WARP on Windows) for headless rendering.
@@ -75,6 +60,7 @@ jobs:
   check:
     name: cargo check
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
       - name: Test fullscreen vs overlay harness contract
@@ -89,9 +75,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2.9.1
         timeout-minutes: 10
       - name: Install protobuf compiler (required by tze_hud_protocol build script)
+        timeout-minutes: 5
         run: |
-          sudo apt-get update -q
-          sudo apt-get install -y --no-install-recommends protobuf-compiler
+          sudo apt-get $APT_OPTS update -q
+          sudo apt-get $APT_OPTS install -y --no-install-recommends protobuf-compiler
       - name: cargo check (workspace)
         run: cargo check --workspace
       - name: Test idle-efficiency artifact gate
@@ -102,6 +89,7 @@ jobs:
   fmt:
     name: cargo fmt
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
@@ -114,6 +102,7 @@ jobs:
   clippy:
     name: cargo clippy
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
@@ -126,9 +115,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2.9.1
         timeout-minutes: 10
       - name: Install protobuf compiler (required by tze_hud_protocol build script)
+        timeout-minutes: 5
         run: |
-          sudo apt-get update -q
-          sudo apt-get install -y --no-install-recommends protobuf-compiler
+          sudo apt-get $APT_OPTS update -q
+          sudo apt-get $APT_OPTS install -y --no-install-recommends protobuf-compiler
       - name: cargo clippy (workspace, all targets, deny warnings)
         run: cargo clippy --workspace --all-targets -- -D warnings
 
@@ -155,6 +145,7 @@ jobs:
   clippy-windows-gnu:
     name: cargo clippy (windows-gnu cross-target)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
@@ -165,9 +156,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2.9.1
         timeout-minutes: 10
       - name: Install protobuf compiler + MinGW cross toolchain
+        timeout-minutes: 5
         run: |
-          sudo apt-get update -q
-          sudo apt-get install -y --no-install-recommends \
+          sudo apt-get $APT_OPTS update -q
+          sudo apt-get $APT_OPTS install -y --no-install-recommends \
             protobuf-compiler \
             mingw-w64
       - name: cargo clippy (windows-gnu, cfg(windows) crates, deny warnings)
@@ -191,6 +183,7 @@ jobs:
   test-unit:
     name: cargo test (unit)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: [check]
     steps:
       - uses: actions/checkout@v5
@@ -203,9 +196,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2.9.1
         timeout-minutes: 10
       - name: Install Mesa / llvmpipe + protobuf compiler
+        timeout-minutes: 5
         run: |
-          sudo apt-get update -q
-          sudo apt-get install -y --no-install-recommends \
+          sudo apt-get $APT_OPTS update -q
+          sudo apt-get $APT_OPTS install -y --no-install-recommends \
             libvulkan1 \
             mesa-vulkan-drivers \
             mesa-utils \
@@ -239,6 +233,7 @@ jobs:
   test-integration:
     name: cargo test (integration)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: [check]
     steps:
       - uses: actions/checkout@v5
@@ -251,9 +246,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2.9.1
         timeout-minutes: 10
       - name: Install Mesa / llvmpipe + protobuf compiler
+        timeout-minutes: 5
         run: |
-          sudo apt-get update -q
-          sudo apt-get install -y --no-install-recommends \
+          sudo apt-get $APT_OPTS update -q
+          sudo apt-get $APT_OPTS install -y --no-install-recommends \
             libvulkan1 \
             mesa-vulkan-drivers \
             mesa-utils \
@@ -312,158 +308,6 @@ jobs:
           path: test_results/token-footprint/
           if-no-files-found: error
 
-  windows-performance-budget:
-    name: Windows performance budget
-    runs-on: windows-latest
-    needs: [check]
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: "1.88"
-      - uses: Swatinem/rust-cache@v2.9.1
-        timeout-minutes: 10
-      - name: Ensure protobuf compiler is available
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          if (-not (Get-Command protoc -ErrorAction SilentlyContinue)) {
-            choco install protoc -y --no-progress
-          }
-          protoc --version
-      - name: Run headless benchmark artifact
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          New-Item -ItemType Directory -Force -Path test_results/windows-performance-budget | Out-Null
-          cargo run -p benchmark --features headless -- `
-            --emit test_results/windows-performance-budget/benchmark.json `
-            --frames 180
-      - name: Enforce locked Windows budgets
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          python scripts/ci/check_windows_perf_budgets.py `
-            --benchmark-json test_results/windows-performance-budget/benchmark.json `
-            --output-json test_results/windows-performance-budget/budget-gate.json
-      - name: Build canonical windowed runtime for quiescent evidence
-        shell: pwsh
-        run: cargo build -p tze_hud_app --release
-      - name: Prove static overlay idle efficiency on WARP / two CPUs
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          .\scripts\ci\windows\run-quiescent-efficiency.ps1 `
-            -ExePath target\release\tze_hud.exe `
-            -OutputDir test_results\windows-performance-budget\quiescent-efficiency
-      # ── Cross-run telemetry trend (informational; hud-kkx15, hud-bp3c3) ──────
-      #
-      # The gate above is a hard PASS/FAIL against the checked-in baseline; it
-      # does not retain prior numeric values, so within-budget drift is
-      # invisible. This step surfaces the numeric deltas.
-      #
-      # RETENTION/SCOPE POLICY (hud-bp3c3): the trend baseline is MAIN-PINNED,
-      # not branch-scoped. Every run compares against the budget-gate summary
-      # published as an artifact by the latest SUCCESSFUL `main` run. This gives
-      # a stable baseline immune to per-branch cache divergence — a PR no longer
-      # drifts against its own prior PR runs, and the headline "vs main" delta is
-      # what a reviewer actually wants. The previous branch-scoped actions/cache
-      # approach was replaced because it made each branch its own moving target.
-      #
-      # We fetch the main artifact with `gh run download` (cross-run, so plain
-      # actions/download-artifact does not apply): pick the latest successful run
-      # of this workflow on `main` and pull its `windows-perf-baseline-main`
-      # artifact. On main pushes there may be no prior green main yet -> the
-      # reporter handles the no-baseline case gracefully (prints a notice).
-      - name: Download main-pinned Windows perf baseline
-        id: perf-baseline
-        if: always()
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          $ErrorActionPreference = "Stop"
-          New-Item -ItemType Directory -Force -Path perf-baseline-main | Out-Null
-          # Latest successful CI run on main (exclude this run if we ARE main).
-          $runId = gh run list --workflow ci.yml --branch main --status success `
-            --limit 1 --json databaseId --jq '.[0].databaseId' 2>$null
-          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($runId)) {
-            Write-Host "No successful main run found yet; no baseline to download."
-          } else {
-            Write-Host "Downloading perf baseline artifact from main run $runId"
-            # Non-fatal: a green run may predate this artifact name.
-            gh run download $runId `
-              --name windows-perf-baseline-main `
-              --dir perf-baseline-main 2>$null
-            if ($LASTEXITCODE -ne 0) {
-              Write-Host "Baseline artifact not present on run $runId; treating as no baseline."
-            }
-          }
-          # Missing baseline is the expected bootstrap state, not a step failure.
-          # GitHub's pwsh shell appends `exit $LASTEXITCODE`, so clear any
-          # non-zero code left by the probing `gh` calls above.
-          $global:LASTEXITCODE = 0
-      - name: Report Windows perf trend deltas (vs main baseline)
-        if: always()
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          $baseline = "perf-baseline-main/budget-gate.json"
-          $baselineArg = @()
-          if (Test-Path $baseline) { $baselineArg = @("--baseline", $baseline) }
-          python scripts/ci/report_telemetry_trend.py `
-            --current test_results/windows-performance-budget/budget-gate.json `
-            @baselineArg
-      # Publish this run's summary as the main-pinned baseline artifact. Only
-      # main pushes update the baseline (branch/PR runs must not overwrite it),
-      # and only when the run is green up to here — a failed gate must not become
-      # the baseline future runs trend against.
-      - name: Publish main-pinned Windows perf baseline
-        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: actions/upload-artifact@v6
-        with:
-          name: windows-perf-baseline-main
-          path: test_results/windows-performance-budget/budget-gate.json
-          if-no-files-found: error
-          retention-days: 90
-      - name: Upload Windows performance artifact
-        uses: actions/upload-artifact@v6
-        if: always()
-        with:
-          name: windows-performance-budget
-          path: test_results/windows-performance-budget/
-          if-no-files-found: error
-
-  constrained-envelope-budget:
-    name: Constrained-envelope budget (llvmpipe / 2 CPUs)
-    runs-on: ubuntu-latest
-    needs: [check]
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: "1.88"
-      - uses: Swatinem/rust-cache@v2.9.1
-        timeout-minutes: 10
-      - name: Install benchmark dependencies
-        run: |
-          sudo apt-get update -q
-          sudo apt-get install -y --no-install-recommends \
-            mesa-vulkan-drivers \
-            protobuf-compiler \
-            util-linux
-      - name: Run constrained-envelope benchmark and unchanged normalized budget gate
-        run: scripts/ci/run_constrained_envelope.sh
-      - name: Upload constrained-envelope artifact
-        uses: actions/upload-artifact@v6
-        if: always()
-        with:
-          name: constrained-envelope-budget
-          path: test_results/constrained-envelope-budget/
-          if-no-files-found: error
-
   # ── Example production config boot (vertical_slice) ────────────────────────
   #
   # Boots the runtime with the committed production config (config/production.toml)
@@ -480,6 +324,7 @@ jobs:
   production-boot-vertical-slice:
     name: vertical_slice production config boot
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: [check]
     steps:
       - uses: actions/checkout@v5
@@ -492,9 +337,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2.9.1
         timeout-minutes: 10
       - name: Install Mesa / llvmpipe + protobuf compiler
+        timeout-minutes: 5
         run: |
-          sudo apt-get update -q
-          sudo apt-get install -y --no-install-recommends \
+          sudo apt-get $APT_OPTS update -q
+          sudo apt-get $APT_OPTS install -y --no-install-recommends \
             libvulkan1 \
             mesa-vulkan-drivers \
             mesa-utils \
@@ -521,6 +367,7 @@ jobs:
   canonical-app-production-boot:
     name: canonical app production config boot gate
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: [check]
     steps:
       - uses: actions/checkout@v5
@@ -533,9 +380,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2.9.1
         timeout-minutes: 10
       - name: Install Mesa / llvmpipe + protobuf compiler
+        timeout-minutes: 5
         run: |
-          sudo apt-get update -q
-          sudo apt-get install -y --no-install-recommends \
+          sudo apt-get $APT_OPTS update -q
+          sudo apt-get $APT_OPTS install -y --no-install-recommends \
             libvulkan1 \
             mesa-vulkan-drivers \
             mesa-utils \
@@ -562,8 +410,8 @@ jobs:
   release-artifact-provenance-build:
     name: release artifact provenance build
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: [check]
-    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
@@ -573,9 +421,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2.9.1
         timeout-minutes: 10
       - name: Install protobuf compiler + MinGW cross toolchain
+        timeout-minutes: 5
         run: |
-          sudo apt-get update -q
-          sudo apt-get install -y --no-install-recommends \
+          sudo apt-get $APT_OPTS update -q
+          sudo apt-get $APT_OPTS install -y --no-install-recommends \
             protobuf-compiler \
             mingw-w64
       - name: Build and stage release artifact + checksum
@@ -605,13 +454,15 @@ jobs:
   release-artifact-provenance-smoke:
     name: release artifact provenance smoke
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     needs: [release-artifact-provenance-build]
     steps:
       - uses: actions/checkout@v5
       - name: Install PE inspector
+        timeout-minutes: 5
         run: |
-          sudo apt-get update -q
-          sudo apt-get install -y --no-install-recommends binutils-mingw-w64-x86-64
+          sudo apt-get $APT_OPTS update -q
+          sudo apt-get $APT_OPTS install -y --no-install-recommends binutils-mingw-w64-x86-64
       - name: Run release provenance verifier unit tests
         run: python3 scripts/ci/test_release_artifact_provenance_smoke.py
       - name: Download published release artifact + checksum
@@ -652,6 +503,7 @@ jobs:
   user-test-python-suite:
     name: user-test python suite
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v5
@@ -695,6 +547,7 @@ jobs:
   dev-mode-guard:
     name: dev-mode guard (release build)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: [check]
     steps:
       - uses: actions/checkout@v5
@@ -707,9 +560,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2.9.1
         timeout-minutes: 10
       - name: Install protobuf compiler (required by tze_hud_protocol build script)
+        timeout-minutes: 5
         run: |
-          sudo apt-get update -q
-          sudo apt-get install -y --no-install-recommends protobuf-compiler
+          sudo apt-get $APT_OPTS update -q
+          sudo apt-get $APT_OPTS install -y --no-install-recommends protobuf-compiler
       - name: Build workspace release (no dev-mode feature)
         run: |
           cargo build --workspace --release 2>&1 | tee /tmp/release-build.log
@@ -773,6 +627,7 @@ jobs:
   cargo-deny:
     name: cargo deny (advisories + licenses)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
       - name: cargo deny check advisories + licenses
@@ -811,6 +666,7 @@ jobs:
   test-gpu-pixel-readback:
     name: pixel readback (GPU / llvmpipe, informational)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: [test-unit]
     continue-on-error: true  # GATED: does not block merge; see comment above
     steps:
@@ -824,9 +680,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2.9.1
         timeout-minutes: 10
       - name: Install Mesa / llvmpipe + Vulkan loader + protobuf compiler
+        timeout-minutes: 5
         run: |
-          sudo apt-get update -q
-          sudo apt-get install -y --no-install-recommends \
+          sudo apt-get $APT_OPTS update -q
+          sudo apt-get $APT_OPTS install -y --no-install-recommends \
             libvulkan1 \
             mesa-vulkan-drivers \
             mesa-utils \

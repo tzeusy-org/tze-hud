@@ -58,8 +58,10 @@ Each local recipe maps to a CI job:
 | `dev-mode-guard` | `dev-mode-guard` | dev-mode excluded from release default features |
 | — (raw `cargo test --test pixel_readback`) | `test-gpu-pixel-readback` | GPU pixel-readback; needs Mesa llvmpipe headless, excluded from `just ci` |
 | — | `cargo-deny` | dependency/advisory policy (`deny.toml`) |
-| — | `windows-performance-budget` | Windows perf-budget lane (reference hardware) |
-| — | `v2-preview` | v2-scope preview (informational) |
+
+Slower suites run weekly, on demand, or on PRs labelled `perf-assert`, never as
+merge gates: `perf-budget.yml` (Windows performance budget, constrained-envelope
+budget) and `perf-assert.yml` (p99 timing asserts).
 
 The toolchain is pinned in `rust-toolchain.toml` (Rust 1.88, matching CI and the
 `glyphon 0.8.x` / `wgpu 24.x` co-pin).

@@ -19,6 +19,11 @@ on:
 permissions:
   contents: read
 
+env:
+  # apt retries and network timeouts: a stalled mirror fails fast instead of
+  # hanging the job (a 51-minute mingw-w64 install once timed out the merge queue).
+  APT_OPTS: "-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30"
+
 jobs:
   windows-artifact-provenance:
     name: Cross-build tze_hud.exe + publish SHA-256 checksum
@@ -36,9 +41,10 @@ jobs:
         timeout-minutes: 10
 
       - name: Install protobuf compiler + MinGW cross toolchain
+        timeout-minutes: 5
         run: |
-          sudo apt-get update -q
-          sudo apt-get install -y --no-install-recommends \
+          sudo apt-get $APT_OPTS update -q
+          sudo apt-get $APT_OPTS install -y --no-install-recommends \
             protobuf-compiler \
             mingw-w64
 

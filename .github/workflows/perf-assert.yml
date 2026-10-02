@@ -6,7 +6,7 @@
 #
 # Trigger policy
 # ──────────────
-# This workflow runs on a schedule (weekly, Monday 02:00 UTC) and on any pull
+# This workflow runs on a schedule (weekly, Monday 02:00 UTC), on demand, and on any pull
 # request that carries the `perf-assert` label.  It is NEVER on the blocking
 # PR lane — a failure here does NOT prevent merge.
 #
@@ -34,12 +34,16 @@ on:
   # Weekly scheduled run on a reference-class host.
   schedule:
     - cron: "0 2 * * 1"  # Monday 02:00 UTC
+  workflow_dispatch:
 
   # Label-gated: add `perf-assert` label to a PR to trigger this lane.
   pull_request:
     types: [labeled]
 
 env:
+  # apt retries and network timeouts: a stalled mirror fails fast instead of
+  # hanging the job (a 51-minute mingw-w64 install once timed out the merge queue).
+  APT_OPTS: "-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30"
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
   # Activate all wall-clock / p99 assertions.
@@ -48,11 +52,6 @@ env:
   HEADLESS_FORCE_SOFTWARE: "1"
 
 jobs:
-  # ── Label gate ────────────────────────────────────────────────────────────────
-  #
-  # For label-triggered runs, check that the triggering event matches.
-  # Scheduled runs always proceed.
-
   # ── Workspace unit + crate perf asserts ──────────────────────────────────────
   #
   # Runs all workspace tests (excluding integration package) with
@@ -63,9 +62,9 @@ jobs:
 
   perf-assert-unit:
     name: Perf assert (workspace unit tests)
-    # Only run on schedule, or on PRs carrying the `perf-assert` label.
+    # Run on schedule/dispatch, or on PRs carrying the `perf-assert` label.
     if: >
-      github.event_name == 'schedule' ||
+      github.event_name != 'pull_request' ||
       (github.event_name == 'pull_request' && github.event.label.name == 'perf-assert')
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -77,9 +76,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2.9.1
         timeout-minutes: 10
       - name: Install Mesa / llvmpipe + protobuf compiler
+        timeout-minutes: 5
         run: |
-          sudo apt-get update -q
-          sudo apt-get install -y --no-install-recommends \
+          sudo apt-get $APT_OPTS update -q
+          sudo apt-get $APT_OPTS install -y --no-install-recommends \
             libvulkan1 \
             mesa-vulkan-drivers \
             mesa-utils \
@@ -138,7 +138,7 @@ jobs:
   perf-assert-integration:
     name: Perf assert (integration tests)
     if: >
-      github.event_name == 'schedule' ||
+      github.event_name != 'pull_request' ||
       (github.event_name == 'pull_request' && github.event.label.name == 'perf-assert')
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -150,9 +150,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2.9.1
         timeout-minutes: 10
       - name: Install Mesa / llvmpipe + protobuf compiler
+        timeout-minutes: 5
         run: |
-          sudo apt-get update -q
-          sudo apt-get install -y --no-install-recommends \
+          sudo apt-get $APT_OPTS update -q
+          sudo apt-get $APT_OPTS install -y --no-install-recommends \
             libvulkan1 \
             mesa-vulkan-drivers \
             mesa-utils \
@@ -207,7 +208,7 @@ jobs:
   perf-assert-budget:
     name: Perf assert (vertical_slice budget_assertions)
     if: >
-      github.event_name == 'schedule' ||
+      github.event_name != 'pull_request' ||
       (github.event_name == 'pull_request' && github.event.label.name == 'perf-assert')
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -219,9 +220,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2.9.1
         timeout-minutes: 10
       - name: Install Mesa / llvmpipe + protobuf compiler
+        timeout-minutes: 5
         run: |
-          sudo apt-get update -q
-          sudo apt-get install -y --no-install-recommends \
+          sudo apt-get $APT_OPTS update -q
+          sudo apt-get $APT_OPTS install -y --no-install-recommends \
             libvulkan1 \
             mesa-vulkan-drivers \
             mesa-utils \
