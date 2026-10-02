@@ -82,7 +82,7 @@ pub use portal_tokens::{
     PORTAL_TOKEN_WINDOW_RESIZE_AFFORDANCE_PX, PORTAL_TOKEN_WINDOW_RESIZE_GRIP_COLOR,
     PORTAL_TOKEN_WINDOW_RESIZE_GRIP_HOVER_COLOR, PORTAL_TOKEN_WINDOW_RESIZE_GRIP_SIZE_PX,
     PORTAL_TOKEN_WINDOW_RESIZE_STEP_PX, PortalPartTokens, TimestampGranularity,
-    resolve_portal_token_strings, resolve_portal_tokens,
+    resolve_portal_tokens,
 };
 pub use profile::{
     AutoDetectResult, HeadlessSignal, auto_detect_profile, resolve_headless_dimensions,

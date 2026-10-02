@@ -478,18 +478,12 @@ jobs:
   # ── User-test Python suite ──────────────────────────────────────────────────
   #
   # Runs the pure-Python unit tests under .claude/skills/user-test/{tests,scripts}/.
-  # These hold the Rust<->Python token/geometry drift-guards (e.g.
-  # test_text_stream_portal_exemplar.py::PortalTokenResolutionTests::
-  # test_python_defaults_mirror_rust_defaults) for the exemplar scripts that
-  # mirror crates/tze_hud_config/src/portal_tokens.rs. Previously this suite
-  # only ran interactively via the user-test skill, so the same-day hud-yu20f
-  # SPACING_HEADER_HEIGHT_PX 28->52 drift went undetected until a worker
-  # tripped over it (hud-43z24).
+  # Previously this suite only ran interactively via the user-test skill, so
+  # drift went undetected until a worker tripped over it (hud-43z24).
   #
   # Scope is limited to files verified hermetic by reading + running locally:
   # no GPU, no Windows, no live HUD runtime, no external network.
-  #   - tests/test_text_stream_portal_exemplar.py (94 tests — primary drift-guard target)
-  #   - tests/test_presence_card_exemplar.py
+  #   - tests/ (presence card, portal client, projection adoption docs)
   #   - scripts/test_hud_grpc_client.py (needs the packages installed below;
   #     without the `blake3` package it falls back to compiling a tiny cargo
   #     helper on the fly — a hidden crates.io network dependency — so

@@ -558,9 +558,6 @@ class HudClient:
         # callers (soak, sustained streaming) read this to schedule holds before
         # the lease expires — otherwise the runtime rejects mutations mid-run.
         self.last_granted_lease_ttl_ms: int = 0
-        # Runtime-resolved portal design tokens from the handshake (hud-16um0);
-        # populated by connect(), empty when the runtime does not expose them.
-        self.resolved_portal_tokens: dict[str, str] = {}
         self.scene_snapshot_json: Optional[str] = None
         self.scene_display_area: Optional[tuple[float, float]] = None
         # Optional minimum spacing between mutation-batch sends. The default
@@ -653,14 +650,6 @@ class HudClient:
         # Permissions come from the agent's allow list in the runtime config;
         # gated subscriptions it lacks show up in denied_subscriptions.
         self.active_subscriptions = list(est.active_subscriptions)
-        # Runtime-resolved portal design tokens (hud-16um0). When the runtime
-        # exposes them, this is the ACTIVE profile's fully-resolved portal token
-        # map ({key: value_string}); empty when the runtime predates the field,
-        # in which case a client falls back to its local default mirror.
-        if est.HasField("portal_part_tokens"):
-            self.resolved_portal_tokens = dict(est.portal_part_tokens.tokens)
-        else:
-            self.resolved_portal_tokens = {}
         print(f"  [grpc] Session established: namespace={self.namespace}, "
               f"subscriptions={self.active_subscriptions}", flush=True)
 

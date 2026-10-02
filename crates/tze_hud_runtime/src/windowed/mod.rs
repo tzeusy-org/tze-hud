@@ -2523,16 +2523,6 @@ impl WindowedRuntime {
             freeze_active: false,
             input_capture_tx: Some(input_capture_tx),
             input_capture_wake: wake.main_work_notifier(),
-            // Expose the runtime's ACTIVE-profile resolved portal tokens over the
-            // session handshake so clients (the text-stream portal exemplar)
-            // render the runtime's live look rather than a client-side mirror
-            // (hud-16um0, promoting hud-7jrj3). Resolved from the same startup
-            // token map the in-process/bridged portal drivers use.
-            resolved_portal_tokens: tze_hud_config::resolve_portal_token_strings(
-                &startup_compositor_tokens,
-            )
-            .into_iter()
-            .collect(),
             tile_placement: tze_hud_config::tile_placement_from_tokens(&startup_compositor_tokens),
         }));
 
