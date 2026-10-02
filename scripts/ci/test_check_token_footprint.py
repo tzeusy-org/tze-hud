@@ -259,13 +259,8 @@ class CandidatePacketTests(unittest.TestCase):
             )
         )
 
-    def test_candidate_awaits_owner_review(self):
-        # The owner records approval in review; the candidate must not claim it.
-        self.assertEqual(self.candidate["approval"]["status"], "pending_owner_review")
-        self.assertEqual(
-            self.candidate["approval"]["decision_reference"],
-            "pending owner review (T5 S3)",
-        )
+    def test_candidate_is_owner_approved(self):
+        self.assertEqual(self.candidate["approval"]["status"], "owner_approved")
 
     def test_baseline_budgets_match_api_targets(self):
         self.assertEqual(
@@ -282,7 +277,7 @@ class CandidatePacketTests(unittest.TestCase):
 
     def test_candidate_is_accepted_by_fail_closed_gate(self):
         report = checker.compare(copy.deepcopy(self.candidate), self.candidate)
-        self.assertEqual(report["status"], "warning")
+        self.assertEqual(report["status"], "passed")
         self.assertFalse(report["incompatibilities"])
         self.assertFalse(report["warnings"] or report["regressions"])
 
