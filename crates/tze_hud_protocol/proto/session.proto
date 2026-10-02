@@ -327,29 +327,10 @@ message SessionEstablished {
   // 0 = field not set (old server); treat as 1000 (v1.0).
   uint32 negotiated_protocol_version = 11;
 
-  // Runtime-resolved portal design tokens (hud-16um0, promoting hud-7jrj3).
-  //
-  // Carries the runtime's ACTIVE profile's fully-resolved PortalPartTokens so a
-  // client renders the runtime's live look instead of resolving against a
-  // client-side token mirror. Transactional handshake data (this message class),
-  // append-only field 12. Absent (message unset) on runtimes that predate this
-  // field — clients MUST fall back to their local typed default mirror.
-  ResolvedPortalTokens portal_part_tokens = 12;
-}
-
-// Runtime-resolved portal design tokens delivered on the session handshake
-// (hud-16um0). Each entry maps a canonical portal token key (e.g.
-// "portal.frame.background") to its runtime-resolved value string, in the exact
-// forms the token resolver consumes: colors as `#RRGGBB` / `#RRGGBBAA` hex,
-// numerics as decimal strings. The map is FULLY resolved — every canonical
-// portal key is present with the active profile's override layered over the
-// runtime's canonical default — so the runtime (not any client mirror) is
-// authoritative for every published visual value. Modeled as a string map
-// rather than a fixed struct so new portal tokens flow to clients without a
-// wire/schema change; a client parses it with the same resolver it would apply
-// to a local profile override map.
-message ResolvedPortalTokens {
-  map<string, string> tokens = 1;
+  // Field 12 (portal_part_tokens) removed in T5 S5: agents no longer draw the
+  // portal, so the runtime no longer ships its resolved portal tokens.
+  reserved 12;
+  reserved "portal_part_tokens";
 }
 
 // Server response: session error (auth failure, version mismatch, protocol violation, etc.)

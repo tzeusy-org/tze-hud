@@ -27,7 +27,6 @@ use tze_hud_protocol::proto::session::{
     ReclaimReason,
     Reclaimed,
     RequestResult,
-    ResolvedPortalTokens,
     SceneSnapshot,
     ServerMessage,
     SessionClose,
@@ -922,12 +921,6 @@ fn roundtrip_session_established() {
         ],
         denied_subscriptions: vec!["SCENE_TOPOLOGY".to_string()],
         negotiated_protocol_version: 1000,
-        portal_part_tokens: Some(ResolvedPortalTokens {
-            tokens: std::collections::HashMap::from([
-                ("portal.frame.background".to_string(), "#111720".to_string()),
-                ("portal.header.font_size".to_string(), "16".to_string()),
-            ]),
-        }),
     };
     let decoded = round_trip(&orig);
     assert_eq!(orig.heartbeat_interval_ms, decoded.heartbeat_interval_ms);
@@ -936,15 +929,6 @@ fn roundtrip_session_established() {
     assert_eq!(
         orig.negotiated_protocol_version,
         decoded.negotiated_protocol_version
-    );
-    // Resolved portal tokens (hud-16um0) survive the wire round-trip.
-    assert_eq!(orig.portal_part_tokens, decoded.portal_part_tokens);
-    let decoded_tokens = decoded
-        .portal_part_tokens
-        .expect("portal_part_tokens must round-trip as Some");
-    assert_eq!(
-        decoded_tokens.tokens.get("portal.frame.background"),
-        Some(&"#111720".to_string())
     );
 }
 

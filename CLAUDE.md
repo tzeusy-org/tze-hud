@@ -8,13 +8,13 @@ Guidance for Claude Code working in this repository.
 models generate and manage the real-estate lifecycle of a HUD over the user's
 screen (discover, claim, fill, interact, hold, release, reclaim). Surfaces: a
 session portal, ambient zones, agent-owned tiles, and SVG widgets, on a
-Windows overlay. Read `docs/vision.md` first, then `docs/scope.md` and `docs/invariants.md`.
+Windows overlay. Read `docs/vision.md` first, then `docs/api.md`, `docs/invariants.md`, and `docs/scope.md`.
 
 ## Status
 
-Mid-reset (started 2026-10-02). The project is being cut back from a much
-larger "agent presence engine" vision. `docs/scope.md` lists what stays, what
-goes, and which removal tranches are done. The old doctrine, RFCs, and
+The 2026-10-02 reset is complete (T0–T5 in `docs/scope.md`): the project was
+cut back from a much larger "agent presence engine" vision, and `docs/api.md`
+is the API reference. The old doctrine, RFCs, and
 OpenSpec specs live only at git tag `pre-reset-2026-10-02` — history, not
 requirements. Do not restore them or design against them.
 

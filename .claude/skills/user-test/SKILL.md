@@ -120,7 +120,7 @@ Use these files when the matching workflow section below calls for them:
 - Batch publishers and broad zone fixtures: [scripts/publish_zone_batch.py](scripts/publish_zone_batch.py), [scripts/publish_widget_batch.py](scripts/publish_widget_batch.py), [scripts/all-zones-test.json](scripts/all-zones-test.json), [scripts/widget-cleanup.json](scripts/widget-cleanup.json)
 - Widget fixtures: [scripts/gauge_cycle_test.json](scripts/gauge_cycle_test.json), [scripts/progress-bar-step.json](scripts/progress-bar-step.json), [scripts/progress-bar-color-sweep.json](scripts/progress-bar-color-sweep.json), [scripts/progress-bar-rapidfire-100-5s.json](scripts/progress-bar-rapidfire-100-5s.json), [scripts/status-indicator-enum-cycle-test.json](scripts/status-indicator-enum-cycle-test.json), [scripts/status-indicator-theme-cycle-test.json](scripts/status-indicator-theme-cycle-test.json), [scripts/status-indicator-label-update-test.json](scripts/status-indicator-label-update-test.json), [scripts/status-indicator-validation-test.json](scripts/status-indicator-validation-test.json), [scripts/status-indicator-contention-test.json](scripts/status-indicator-contention-test.json), [scripts/status-indicator-theme-status-matrix-test.json](scripts/status-indicator-theme-status-matrix-test.json)
 - Zone exemplars and fixtures: [scripts/subtitle_exemplar.py](scripts/subtitle_exemplar.py), [scripts/subtitle-full-sequence.json](scripts/subtitle-full-sequence.json), [scripts/subtitle-single-line.json](scripts/subtitle-single-line.json), [scripts/subtitle-multiline.json](scripts/subtitle-multiline.json), [scripts/subtitle-rapid-replace.json](scripts/subtitle-rapid-replace.json), [scripts/subtitle-streaming.json](scripts/subtitle-streaming.json), [scripts/subtitle-ttl-expiry.json](scripts/subtitle-ttl-expiry.json), [scripts/notification_exemplar.py](scripts/notification_exemplar.py), [scripts/notification-full-gamut.json](scripts/notification-full-gamut.json), [scripts/alert_banner_exemplar.py](scripts/alert_banner_exemplar.py), [scripts/status_bar_exemplar.py](scripts/status_bar_exemplar.py), [scripts/ambient_background_exemplar.py](scripts/ambient_background_exemplar.py)
-- Resident gRPC, portal, and stress helpers: [scripts/hud_grpc_client.py](scripts/hud_grpc_client.py), [scripts/test_hud_grpc_client.py](scripts/test_hud_grpc_client.py), [scripts/presence_card_exemplar.py](scripts/presence_card_exemplar.py), [scripts/text_stream_portal_exemplar.py](scripts/text_stream_portal_exemplar.py), [scripts/stress_test_zones.py](scripts/stress_test_zones.py)
+- Resident gRPC, portal, and stress helpers: [scripts/hud_grpc_client.py](scripts/hud_grpc_client.py), [scripts/test_hud_grpc_client.py](scripts/test_hud_grpc_client.py), [scripts/presence_card_exemplar.py](scripts/presence_card_exemplar.py), [scripts/stress_test_zones.py](scripts/stress_test_zones.py)
 
 ## Reference Files
 
@@ -137,7 +137,7 @@ scenarios live in `references/`. Load the one matching the task:
   exemplar scenarios: subtitle, notification stack, alert-banner, status-bar, and
   ambient-background.
 - [references/resident-exemplars.md](references/resident-exemplars.md) — resident
-  gRPC session scenarios: Presence Card and Text Stream Portals.
+  gRPC session scenario: Presence Card.
 
 ## Workflow
 
@@ -319,7 +319,7 @@ visual checklist, and payload shape:
 - **Zone exemplars** (MCP `hud_publish`): subtitle, notification stack,
   alert-banner, status-bar, ambient-background —
   [references/zone-exemplars.md](references/zone-exemplars.md).
-- **Resident gRPC exemplars**: Presence Card and Text Stream Portals —
+- **Resident gRPC exemplar**: Presence Card —
   [references/resident-exemplars.md](references/resident-exemplars.md).
 
 ## Behavior Rules

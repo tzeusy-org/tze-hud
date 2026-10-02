@@ -1,7 +1,8 @@
 # API
 
-**Status:** the MCP section (T5 S3) and the gRPC section (T5 S4b) are
-implemented and are the reference. S5 in "Plan" remains.
+The reference for the agent-facing API. Changing it is a deliberate decision:
+update this file, `invariants.md`, and the token-footprint baseline in the
+same PR.
 
 ## Shape
 
@@ -174,36 +175,6 @@ down to the lifecycle.
   in-process portal driver. The session server rejects them from agents with
   `INVALID_ARGUMENT`.
 
-## Plan
-
-Each slice builds, passes tests, and keeps `invariants.md`. Every client in
-this repo (skills, examples, Python stubs) is updated in the same PR. There
-are no compatibility shims; removed proto fields are `reserved`.
-
-| Slice | What |
-|---|---|
-| S0 | **Fix invariant breaks found by the audit.** (a) A gRPC disconnect never calls `disconnect_lease`, so there is no orphan badge and no grace-expiry reclaim; only the TTL frees the lease (invariant 4; the tests drive the scene directly). (b) gRPC drops `TimingHints` after validating them, and `ZonePublish` ignores `ttl_us`, `present_at`, and `expires_at` (invariant 1). Add end-to-end tests over the gRPC path. |
-| S1 | **Remove dead wire.** Messages that are never sent or never handled: `SceneDelta`, `BackpressureSignal`, `RuntimeTelemetryFrame`, `TelemetryFrame`, `SetImePosition`, `EmitSceneEvent` (never delivered), and `Zone/WidgetRegistry*`. Also `events_legacy.proto`, fields that are never read, duplicate `LeaseStateChange`, deprecated `pre_shared_key`, `DegradationLevel` cut to two values, error enum values that are never set, the dead `SessionConfig`, and three copies of the capability vocabulary. |
-| S2 | **Identity and allowlist.** Per-agent PSK; `allow` replaces the 16-entry capability vocabulary and the resident principal; namespace comes from identity; the portal owner token leaves model context. |
-| S3 | **MCP verbs.** Done: five tools replace 22. One error shape. The token-footprint benchmark adds `tools/list`, discovery, and errors. |
-| S4 | **gRPC verbs.** Done: `Publish`/`Clear`/`Hold`/`ClaimTile`/`Reclaimed`/one `RequestResult`. Collapse the six `HudSessionImpl` constructors into one deps struct (done in S4a, with scene capabilities and lease priority removed). |
-| S5 | This file loses "proposal"; `scope.md` marks T5 done. |
-
-**S2 notes (landed).** Config is `[agents.<id>]` with `psk_env` and `allow`;
-`psk_env = "TZE_HUD_PSK"` always means the runtime PSK. Deferred to later
-slices:
-
-- The scene's internal `Capability` enum and per-lease priority (removed in
-  S4a). The session server now checks the allow list at the boundary, and
-  leases carry neither.
-- MCP still accepts the JSON-RPC `_auth` param next to the bearer.
-- The tool param structs still deserialize `namespace` and `owner_token`, but
-  both are hidden from `tools/list`; the server sets the namespace and fills in
-  the owner token when absent. S3 replaces
-  these tools.
-
-
-
 ## Token budgets
 
 `token_footprint` (CI) records o200k tokens per flow two ways: **wire** (the
@@ -213,7 +184,7 @@ The budgets are enforced on model-visible tokens; the JSON-RPC envelope adds
 about 50 tokens per call that the model never sees. Both measures are
 baselined against regressions.
 
-| Measure | Before T5 (wire) | Wire now | Model-visible now | Budget (model-visible) |
+| Measure | Before T5 (wire) | Wire | Model-visible | Budget (model-visible) |
 |---|---|---|---|---|
 | `tools/list` | 4,418 | 495 | 458 | ≤ 900 |
 | Discover (default scene) | ~430 (`list_zones`) | 181 | 113 | ≤ 150 |
@@ -226,7 +197,7 @@ The portal flow takes 4 round trips in the canonical fixture because the
 first poll has nothing to ack; in a steady loop each `hud_input` both acks
 the previous items and polls, so poll+ack is one round trip.
 
-## Decisions (2026-10-02)
+## Design decisions (T5, 2026-10-02)
 
 1. **Tiles are gRPC only.** MCP loses `create_tile`, `set_content`,
    `dismiss`, `create_tab`, and `publish_to_element`.
