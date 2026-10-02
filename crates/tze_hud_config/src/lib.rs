@@ -31,15 +31,11 @@
 //! ### rig-mop4 (Zone registry, agent registration, hot-reload)
 //! - Zone Registry Configuration (v1-mandatory)
 //! - Agent Registration with Per-Agent Budget Overrides (v1-mandatory)
-//! - Dynamic Agent Policy (v1-mandatory)
-//! - Authentication Secret Indirection (v1-mandatory)
+//! - Per-agent PSK (`psk_env`) and allow lists
 //! - Configuration Reload (v1-mandatory)
-//!
-//! ## Does NOT include
-//! - Capability vocabulary validation (rig-9yfh)
 
 pub mod agents;
-pub mod capability;
+pub mod allow;
 pub mod loader;
 pub mod policy_builder;
 pub mod portal_tokens;
@@ -56,9 +52,9 @@ pub mod widgets;
 pub mod zones;
 
 pub use agents::{
-    AuthEnvWarning, check_agent_auth_env_vars, check_agent_auth_env_vars_with_lookup,
-    dynamic_agents_allowed, validate_agents,
+    AuthEnvWarning, resolve_agent_psks, resolve_agent_psks_with_lookup, validate_agents,
 };
+pub use allow::{allow_to_permissions, validate_allow_entry};
 pub use loader::TzeHudConfig;
 pub use policy_builder::{
     apply_token_defaults_for_zone, build_all_effective_policies, build_effective_policy,

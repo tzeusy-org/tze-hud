@@ -615,7 +615,6 @@ fn build_session_init(cli: &Cli, psk: &str, sequence: u64) -> session_proto::Cli
         timestamp_wall_us: now_wall_us(),
         payload: Some(ClientPayload::SessionInit(session_proto::SessionInit {
             agent_id: cli.agent_id.clone(),
-            requested_capabilities: vec![format!("publish_widget:{}", cli.widget_name)],
             initial_subscriptions: Vec::new(),
             resume_token: Vec::new(),
             min_protocol_version: 1000,

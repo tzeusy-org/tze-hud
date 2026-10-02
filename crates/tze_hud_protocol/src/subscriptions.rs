@@ -96,7 +96,7 @@ fn has_required_capability(category: &str, capabilities: &[String]) -> bool {
     match required_capability(category) {
         None => true,                 // mandatory — no capability check
         Some("__unknown__") => false, // unknown category — unconditionally denied
-        Some(req) => capabilities.iter().any(|c| c == req),
+        Some(req) => capabilities.iter().any(|c| c == req || c == "*"),
     }
 }
 

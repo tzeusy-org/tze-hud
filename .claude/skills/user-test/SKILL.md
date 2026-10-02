@@ -63,7 +63,7 @@ gpu.lock clearing per hud-7gp40, HUD task relaunch) with the canonical helper:
 ```bash
 eval "$(.claude/skills/user-test/scripts/hud_vm_env.sh)"
 # exports TZE_HUD_TEST_HOST, HUD_MCP_URL, HUD_MCP_PSK, MCP_TEST_PSK,
-# TZE_HUD_MCP_RESIDENT_PRINCIPAL
+# TZE_HUD_PSK
 WIN_HOST=$TZE_HUD_TEST_HOST
 ```
 
@@ -81,7 +81,7 @@ networked MCP publish → subtitle rendered on the VM console):
   Deploy = SCP the exe, `taskkill /F /IM tze_hud.exe` (admin-user), then
   `schtasks /Run /TN TzeHudFullscreen`.
 - `C:\tze_hud\tze_hud.toml` (profile `full-display`) and the PSK machine env
-  (`TZE_HUD_PSK` = `TZE_HUD_MCP_RESIDENT_PRINCIPAL`) are provisioned by
+  (`TZE_HUD_PSK`) are provisioned by
   firstboot. The PSK value is `HUD_WINDOWS_PSK` in
   `~/gt/homelab/mayor/rig/.env` on the controller.
 - Console proof shots without a human: on sentinel,
@@ -152,8 +152,7 @@ resolve-and-self-heal helper — run it instead of hand-discovering anything:
 # TzeHudOverlay, recovers the PSK live from the task XML, gates MCP initialize.
 eval "$(.claude/skills/user-test/scripts/tzehouse_env.sh)"
 # -> TZE_HUD_TEST_HOST, WIN_HOST, WIN_FILE_USER, WIN_ADMIN_USER, HUD_SSH_KEY,
-#    HUD_MCP_URL, HUD_GRPC_TARGET, HUD_PSK, MCP_TEST_PSK, TZE_HUD_PSK,
-#    TZE_HUD_MCP_RESIDENT_PRINCIPAL
+#    HUD_MCP_URL, HUD_GRPC_TARGET, HUD_PSK, MCP_TEST_PSK, TZE_HUD_PSK
 
 # hud-windows VM (autonomous): see "Autonomous testhost" above
 eval "$(.claude/skills/user-test/scripts/hud_vm_env.sh)"

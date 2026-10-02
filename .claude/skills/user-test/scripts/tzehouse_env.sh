@@ -8,7 +8,7 @@
 #   eval "$(.claude/skills/user-test/scripts/tzehouse_env.sh)"
 #     -> exports TZE_HUD_TEST_HOST, WIN_HOST, WIN_FILE_USER, WIN_ADMIN_USER,
 #        HUD_SSH_KEY, HUD_MCP_URL, HUD_GRPC_TARGET, HUD_PSK, HUD_MCP_PSK,
-#        MCP_TEST_PSK, TZE_HUD_MCP_RESIDENT_PRINCIPAL, TZE_HUD_PSK
+#        MCP_TEST_PSK, TZE_HUD_PSK
 #   tzehouse_env.sh --host-only   -> print the bare hostname (no healing/PSK)
 #
 # Identity comes from the git-ignored env file next to this skill
@@ -123,4 +123,3 @@ echo "export HUD_PSK='$psk'"
 echo "export HUD_MCP_PSK='$psk'"
 echo "export MCP_TEST_PSK='$psk'"
 echo "export TZE_HUD_PSK='$psk'"
-echo "export TZE_HUD_MCP_RESIDENT_PRINCIPAL='$psk'"

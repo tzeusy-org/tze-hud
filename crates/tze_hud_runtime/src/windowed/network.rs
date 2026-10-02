@@ -19,10 +19,8 @@ use crate::threads::NetworkRuntime;
 /// Build a `RuntimeContext` from the windowed config.
 ///
 /// When `cfg.config_toml` is `Some`, the TOML is parsed and validated. On
-/// success, capability grants from `[agents.registered]` and the hot-reloadable
-/// section (`[agents.dynamic_policy]`)
-/// are loaded into the context. The fallback policy is `Guest` (registered
-/// agents only).
+/// success, each `[agents.<id>]` table's `allow` list and PSK are loaded into
+/// the context. The fallback policy is `Guest` (configured agents only).
 ///
 /// When `cfg.config_toml` is `None` (no config file), the context falls back to
 /// `RuntimeContext::headless_default()` and `fallback_unrestricted = true` for
@@ -40,7 +38,13 @@ pub(super) fn build_runtime_context(cfg: &WindowedConfig) -> (SharedRuntimeConte
                 "windowed runtime: no config TOML provided; \
                  using headless_default (all agents unrestricted)"
             );
-            (Arc::new(RuntimeContext::headless_default()), true)
+            (
+                Arc::new(
+                    RuntimeContext::headless_default()
+                        .with_fallback_policy(crate::runtime_context::FallbackPolicy::Unrestricted),
+                ),
+                true,
+            )
         }
         Some(toml_src) => {
             // Parse the TOML.
@@ -81,16 +85,13 @@ pub(super) fn build_runtime_context(cfg: &WindowedConfig) -> (SharedRuntimeConte
                 }
             };
 
-            // Parse hot-reloadable sections from the same TOML so the initial
-            // dynamic_policy settings take effect
-            // immediately (before the first SIGHUP).
             let hot = tze_hud_config::reload_config(toml_src).unwrap_or_default();
 
             tracing::info!(
                 profile = %resolved.profile.name,
                 agents = resolved.agent_capabilities.len(),
                 "windowed runtime: config loaded; \
-                 capability grants applied from [agents.registered]"
+                 agent allow lists applied from [agents.<id>]"
             );
 
             let ctx = RuntimeContext::from_config_with_hot(
@@ -197,7 +198,7 @@ pub(super) fn start_network_services_with_render_wake(
         .parse()
         .map_err(|e| format!("windowed runtime: invalid gRPC address (port {grpc_port}): {e}"))?;
 
-    // Wire config-driven capability registry into the session service.
+    // Wire config-driven agent identity (allow lists + per-agent PSKs).
     let agent_caps = runtime_context.snapshot_agent_capabilities();
     let service = HudSessionImpl::from_shared_state_with_runtime_envelope(
         shared_state,
@@ -216,6 +217,7 @@ pub(super) fn start_network_services_with_render_wake(
             ),
         )),
     )
+    .with_agent_psks(runtime_context.snapshot_agent_psks(psk))
     .with_render_wake_notifier(render_wake);
 
     // Clone the broadcast senders before moving the service into the gRPC task.
@@ -416,24 +418,14 @@ pub fn render_attach_info(
     lines.push("     Authorization: Bearer <your PSK — the value of TZE_HUD_PSK>".to_string());
 
     lines.push(String::new());
-    lines.push(" Resident projection (the portal_projection_* tools):".to_string());
+    lines.push(" Projection (the portal_projection_* tools):".to_string());
     lines.push(
-        "   The runtime grants the portal_projection_* tools only to a caller whose bearer"
-            .to_string(),
+        "   The MCP Authorization: Bearer PSK identifies your agent; its [agents.<id>]".to_string(),
     );
     lines.push(
-        "   matches BOTH the configured resident principal AND the PSK. So set the runtime"
-            .to_string(),
+        "   allow list must include \"portal\" (shipped configs: [agents.claude] reads".to_string(),
     );
-    lines.push(
-        "   env var TZE_HUD_MCP_RESIDENT_PRINCIPAL EQUAL to your PSK, and send that same PSK"
-            .to_string(),
-    );
-    lines.push(
-        "   as the MCP Authorization: Bearer. PSK auth stays mandatory; this only attaches"
-            .to_string(),
-    );
-    lines.push("   the resident_mcp capability.".to_string());
+    lines.push("   TZE_HUD_PSK with allow = [\"*\"]).".to_string());
     lines.push("   (This command never prints the PSK value itself.)".to_string());
 
     lines.push(String::new());
@@ -451,8 +443,7 @@ pub fn render_attach_info(
                 "         \"type\": \"url\",".to_string(),
                 format!("         \"url\": \"{url}\","),
                 "         \"headers\": {".to_string(),
-                "           \"Authorization\": \"Bearer <PSK from TZE_HUD_MCP_RESIDENT_PRINCIPAL>\""
-                    .to_string(),
+                "           \"Authorization\": \"Bearer <PSK from TZE_HUD_PSK>\"".to_string(),
                 "         }".to_string(),
                 "       }".to_string(),
                 "     }".to_string(),
@@ -547,8 +538,8 @@ mod tests {
             "config path missing:\n{info}"
         );
         assert!(
-            info.contains("TZE_HUD_MCP_RESIDENT_PRINCIPAL"),
-            "resident-principal rule missing:\n{info}"
+            info.contains("allow list must include"),
+            "allow-list rule missing:\n{info}"
         );
         assert!(
             info.contains("Authorization: Bearer") || info.contains("\"Authorization\""),
@@ -559,7 +550,7 @@ mod tests {
             "JSON snippet missing:\n{info}"
         );
         assert!(
-            info.contains("<PSK from TZE_HUD_MCP_RESIDENT_PRINCIPAL>"),
+            info.contains("<PSK from TZE_HUD_PSK>"),
             "JSON snippet must use a PSK placeholder:\n{info}"
         );
     }
@@ -791,19 +782,13 @@ mod tests {
             ctx.profile.name, "headless",
             "no-config path must use the headless profile"
         );
-        // Hot config should be all defaults.
-        let hot = ctx.hot_config();
-        assert!(
-            hot.dynamic_policy
-                .as_ref()
-                .map(|p| p.allow_dynamic_agents)
-                .is_none(),
-            "hot config must default to None when no config file is given"
-        );
+        // Dev mode: an agent without a table is unrestricted.
+        let any = ctx.agent_directory("psk").resolve("psk", "anyone").unwrap();
+        assert!(any.allows("create_tiles"));
     }
 
-    /// Acceptance criterion 1: when a valid config TOML is provided, capability
-    /// grants from [agents.registered] are parsed and applied.
+    /// Acceptance criterion 1: when a valid config TOML is provided, each
+    /// agent's `allow` list is parsed and applied.
     #[test]
     fn build_runtime_context_with_valid_config_applies_capability_grants() {
         let toml = r#"
@@ -813,8 +798,8 @@ profile = "full-display"
 [[tabs]]
 name = "Main"
 
-[agents.registered.weather-agent]
-capabilities = ["create_tiles", "modify_own_tiles"]
+[agents.weather-agent]
+allow = ["tiles"]
 "#;
         let cfg = WindowedConfig {
             config_toml: Some(toml.to_string()),
@@ -841,14 +826,12 @@ capabilities = ["create_tiles", "modify_own_tiles"]
             caps.contains(&"modify_own_tiles".to_string()),
             "weather-agent must have modify_own_tiles grant"
         );
-        // Unregistered agent must get guest (denied) policy.
-        let policy = ctx.capability_policy_for("unknown-agent");
-        assert!(
-            policy
-                .evaluate_capability_request(&["create_tiles".to_string()])
-                .is_err(),
-            "unregistered agent must be denied under config-driven Guest fallback"
-        );
+        // An agent without a table gets nothing under the Guest fallback.
+        let unknown = ctx
+            .agent_directory("psk")
+            .resolve("psk", "unknown-agent")
+            .unwrap();
+        assert!(unknown.permissions.is_empty());
     }
 
     /// Acceptance criterion 1: config-driven context uses the full-display profile.
@@ -917,33 +900,6 @@ profile = "full-display"
         assert_eq!(
             ctx.profile.name, "headless",
             "validation-error path must fall back to headless profile"
-        );
-    }
-
-    /// Hot-reloadable sections from the initial config
-    /// are applied immediately - no SIGHUP required.
-    #[test]
-    fn build_runtime_context_hot_sections_applied_from_config() {
-        let toml = r#"
-[runtime]
-profile = "full-display"
-
-[[tabs]]
-name = "Main"
-
-[agents.dynamic_policy]
-allow_dynamic_agents = true
-"#;
-        let cfg = WindowedConfig {
-            config_toml: Some(toml.to_string()),
-            ..WindowedConfig::default()
-        };
-        let (ctx, _) = build_runtime_context(&cfg);
-        let hot = ctx.hot_config();
-        assert_eq!(
-            hot.dynamic_policy.as_ref().map(|p| p.allow_dynamic_agents),
-            Some(true),
-            "dynamic_policy.as_ref().map(|p| p.allow_dynamic_agents) from config must be applied immediately at startup"
         );
     }
 }

@@ -64,18 +64,15 @@ message ClientMessage {
     // proto `reserved` declaration is possible here. Document in changelog instead.
     Heartbeat         heartbeat          = 31;
 
-    // Capability management (RFC 0005 §5.3)
-    // At most one CapabilityRequest SHOULD be in flight per session at a time.
-    CapabilityRequest capability_request = 32;
 
     // Widget asset registration/upload (session-protocol spec §Requirement: Widget Asset Registration via Session Stream).
     // Two-stage flow: metadata preflight + optional payload upload.
-    // Requires register_widget_asset capability.
+    // Requires allow entry "tiles" or "widget:<name>".
     WidgetAssetRegister widget_asset_register = 34;
 
     // Widget publishing (widget-system spec §Requirement: Widget Publishing via gRPC).
     // Durable-widget publishes receive WidgetPublishResult; ephemeral are fire-and-forget.
-    // Requires publish_widget:<widget_name> capability.
+    // Requires allow entry "widget:<widget_name>".
     WidgetPublish widget_publish = 35;
 
     // Resident scene-resource upload (RFC 0011; session-protocol spec §Resident Upload Handshake).
@@ -96,6 +93,10 @@ message ClientMessage {
   // agent scene-event emission (never delivered).
   reserved 26, 30, 33;
   reserved "telemetry_frame", "set_ime_position", "emit_scene_event";
+  // Removed in T5 S2: capabilities come from the agent's allow list, not
+  // mid-session requests.
+  reserved 32;
+  reserved "capability_request";
 }
 
 // ─── Server -> Client envelope ────────────────────────────────────────────────
@@ -126,9 +127,6 @@ message ServerMessage {
 
     // Lease lifecycle (RFC 0008)
     LeaseResponse         lease_response         = 21;
-
-    // Capability grant/revocation notice (RFC 0005 §5.3)
-    CapabilityNotice      capability_notice      = 25;
 
     // Scene state
     SceneSnapshot         scene_snapshot         = 30;
@@ -177,7 +175,7 @@ message ServerMessage {
     tze_hud.protocol.v1.ListElementsResponse list_elements_response = 50;
 
     // Element repositioned event — emitted on drag completion or reset-to-default.
-    // Subscription: SCENE_TOPOLOGY (requires read_scene_topology capability).
+    // Subscription: SCENE_TOPOLOGY (requires allow entry "tiles").
     // Message class: Transactional (never coalesced or dropped).
     tze_hud.protocol.v1.ElementRepositionedEvent element_repositioned = 51;
 
@@ -185,7 +183,7 @@ message ServerMessage {
     // accepted MutationBatch.batch_ids to the wall-clock time their composited
     // frame presented (Stage 7 complete). Enables true mutation-arrival →
     // on-screen-present latency measurement.
-    // Subscription: TELEMETRY_FRAMES (requires read_telemetry capability).
+    // Subscription: TELEMETRY_FRAMES (requires allow entry "tiles").
     // Message class: State-stream (coalesced/droppable under backpressure).
     tze_hud.protocol.v1.FramePresented frame_presented = 52;
   }
@@ -208,6 +206,9 @@ message ServerMessage {
   // deltas, backpressure signals, and runtime telemetry were never sent;
   // emit_scene_event_result went with agent scene events.
   reserved 23, 31, 35, 36, 45;
+  // Removed in T5 S2 with capability negotiation.
+  reserved 25;
+  reserved "capability_notice";
   reserved "lease_state_change", "scene_delta", "backpressure_signal",
     "runtime_telemetry", "emit_scene_event_result";
 }
@@ -264,8 +265,10 @@ message SessionInit {
   reserved 2, 3;
   reserved "agent_display_name", "pre_shared_key";
 
-  // Capabilities requested by the agent
-  repeated string requested_capabilities = 4;
+  // Field 4 (requested_capabilities) removed in T5 S2: permissions come from
+  // the agent's allow list in the runtime config.
+  reserved 4;
+  reserved "requested_capabilities";
 
   // Initial event subscriptions
   repeated string initial_subscriptions  = 5;
@@ -313,7 +316,9 @@ message SessionClose {
 message SessionEstablished {
   bytes  session_id               = 1;  // Opaque session identifier (UUIDv7)
   string namespace                = 2;  // Agent's namespace in the scene (RFC 0001 SS1.2)
-  repeated string granted_capabilities = 3;  // Capabilities actually granted
+  // Field 3 (granted_capabilities) removed in T5 S2.
+  reserved 3;
+  reserved "granted_capabilities";
   bytes  resume_token             = 4;  // Token for future reconnect within grace period
   uint64 heartbeat_interval_ms    = 5;  // How often client must send Heartbeat (default 5000)
   uint64 server_sequence          = 6;  // Starting server-side sequence number
@@ -375,13 +380,15 @@ message SessionResumeResult {
   bytes  new_session_token               = 2;   // New token for this resumed session (opaque bytes, e.g. UUIDv7)
   uint64 new_server_sequence             = 3;   // Current server-side sequence
   uint32 negotiated_protocol_version     = 4;   // Protocol version in use
-  repeated string granted_capabilities   = 5;   // Capabilities confirmed for resumed session
+  // Field 5 (granted_capabilities) removed in T5 S2.
+  reserved 5;
+  reserved "granted_capabilities";
   // Field 6 (error) removed in T5 S1: rejections are sent as SessionError.
   reserved 6;
   reserved "error";
   // Confirmed subscription state after resume. Agents MUST use these values.
   repeated string active_subscriptions   = 7;   // Confirmed active subscription set
-  repeated string denied_subscriptions   = 8;   // Denied (missing capability)
+  repeated string denied_subscriptions   = 8;   // Denied (not in allow list)
 }
 
 // ─── Safe-mode lifecycle messages (RFC 0005 §3.7) ─────────────────────────────
@@ -442,26 +449,6 @@ message RuntimeError {
   ErrorCode error_code_enum = 5;  // Typed enum for well-known codes; ERROR_CODE_UNKNOWN if not in enum
 }
 
-// ─── Capability management messages (RFC 0005 §5.3) ───────────────────────────
-
-// Client requests additional capabilities mid-session.
-// At most one CapabilityRequest SHOULD be in flight per session at a time.
-// Re-uses retransmit semantics (sequence as correlation key) per RFC 0005 §5.3.
-message CapabilityRequest {
-  repeated string capabilities = 1;  // Capabilities being requested
-  string          reason       = 2;  // Human-readable rationale for audit/logging
-}
-
-// Server response to a CapabilityRequest (RFC 0005 §5.3).
-// Also sent spontaneously when the runtime revokes capabilities.
-// On full denial the runtime sends RuntimeError(PERMISSION_DENIED) instead of this message.
-message CapabilityNotice {
-  repeated string granted               = 1;  // Capabilities newly granted (RFC 0005 §5.3, §9)
-  repeated string revoked               = 2;  // Capabilities being revoked (spontaneous notice)
-  string          reason                = 3;  // Human-readable reason
-  uint64          effective_at_server_seq = 4; // Server sequence at which change takes effect
-}
-
 // ─── Mutation messages ────────────────────────────────────────────────────────
 
 // Optional timing semantics for a MutationBatch (RFC 0003 §3.5, §4.5).
@@ -502,8 +489,10 @@ message MutationResult {
 // Client requests a new lease.
 message LeaseRequest {
   uint64 ttl_ms                  = 1;  // Requested TTL; 0 = server default
-  repeated string capabilities   = 2;  // Requested capability scope
-  uint32 lease_priority          = 3;  // Requested priority [0-4]; 2 = default
+  // Fields 2 (capabilities) and 3 (lease_priority) removed in T5 S2: leases
+  // carry the session's allow-list permissions, and there is one priority.
+  reserved 2, 3;
+  reserved "capabilities", "lease_priority";
 }
 
 // Client renews an existing lease.
@@ -535,8 +524,9 @@ message LeaseResponse {
   // Populated when granted = true.
   bytes  lease_id             = 2;  // Granted lease ID (UUIDv7)
   uint64 granted_ttl_ms       = 3;  // Actual TTL granted
-  uint32 granted_priority     = 4;
-  repeated string granted_capabilities = 5;
+  // Fields 4 (granted_priority) and 5 (granted_capabilities) removed in T5 S2.
+  reserved 4, 5;
+  reserved "granted_priority", "granted_capabilities";
 
   // Populated when granted = false.
   string deny_reason          = 6;  // Human-readable denial reason
@@ -571,11 +561,11 @@ message SubscriptionChange {
 
 // Server acknowledges subscription change (RFC 0005 §7.3).
 // Echoes the full active subscription set after the change.
-// Denied additions (missing capability) appear in denied_subscriptions.
+// Denied additions (not in allow list) appear in denied_subscriptions.
 // SHALL NOT reuse MutationResult; this is a dedicated ack type.
 message SubscriptionChangeResult {
   repeated string active_subscriptions = 1;  // Full active set after change
-  repeated string denied_subscriptions = 2;  // Requested but denied (missing capability)
+  repeated string denied_subscriptions = 2;  // Requested but denied (not in allow list)
 }
 
 // ─── Zone publishing messages ──────────────────────────────────────────────────
@@ -616,7 +606,7 @@ message ZonePublishResult {
 
 // Client publishes parameter values to a named widget instance (widget-system spec).
 // Durable-widget publishes receive WidgetPublishResult; ephemeral are fire-and-forget.
-// Requires publish_widget:<widget_name> capability.
+// Requires allow entry "widget:<widget_name>".
 // Encoded at ClientMessage field 35.
 message WidgetPublish {
   string widget_name   = 1;  // Instance addressing key (instance_id or widget_type_name)
@@ -895,7 +885,7 @@ message DegradationNotice {
 //
 // Implements RFC 0006 §9 (v1-mandatory): live configuration reload without
 // process restart. The `ReloadConfig` RPC is one of the two required triggers
-// for hot-reloadable config sections ([agents.dynamic_policy]). The other trigger is SIGHUP (OS signal).
+// for hot-reloadable config sections (currently none). The other trigger is SIGHUP (OS signal).
 //
 // Callers must supply the full TOML config; the runtime re-validates the entire
 // file and applies only the hot-reloadable sections on success.
@@ -904,8 +894,8 @@ service RuntimeService {
   // Reload hot-reloadable configuration sections from a new TOML string.
   //
   // The runtime validates the supplied TOML. If validation succeeds, the
-  // hot-reloadable sections ([agents.dynamic_policy]) are atomically applied. Frozen sections
-  // ([runtime], [[tabs]], [agents.registered]) are silently ignored.
+  // hot-reloadable sections (currently none) are atomically applied. Frozen sections
+  // ([runtime], [[tabs]], [agents]) are silently ignored.
   //
   // Returns:
   //   - ReloadConfigResponse with success=true on successful reload.

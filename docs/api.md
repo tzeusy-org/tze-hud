@@ -138,6 +138,19 @@ are no compatibility shims; removed proto fields are `reserved`.
 | S4 | **gRPC verbs.** `Publish`/`Clear`/`Hold`/`ClaimTile`/`Reclaimed`/one `Result`. Collapse the six `HudSessionImpl` constructors into one deps struct. |
 | S5 | This file loses "proposal"; `scope.md` marks T5 done. |
 
+**S2 notes (landed).** Config is `[agents.<id>]` with `psk_env` and `allow`;
+`psk_env = "TZE_HUD_PSK"` always means the runtime PSK. Deferred to later
+slices:
+
+- The scene still has its internal `Capability` enum and per-lease priority.
+  `allow` entries expand to those at the session boundary, and every agent
+  lease gets the same priority. Deleting them belongs with S4.
+- MCP still accepts the JSON-RPC `_auth` param next to the bearer.
+- The tool param structs still deserialize `namespace` and `owner_token`, but
+  both are hidden from `tools/list`; the server sets the namespace and fills in
+  the owner token when absent. S3 replaces
+  these tools.
+
 
 
 ## Token budgets

@@ -45,7 +45,7 @@ done
 
 case "$TARGET" in
   tzehouse) eval "$("$SCRIPT_DIR/tzehouse_env.sh")" ;;
-  vm)       eval "$("$SCRIPT_DIR/hud_vm_env.sh")"; export HUD_PSK="$TZE_HUD_MCP_RESIDENT_PRINCIPAL" ;;
+  vm)       eval "$("$SCRIPT_DIR/hud_vm_env.sh")"; export HUD_PSK="$TZE_HUD_PSK" ;;
   *) echo "portal_trial: --target must be tzehouse or vm" >&2; exit 1 ;;
 esac
 

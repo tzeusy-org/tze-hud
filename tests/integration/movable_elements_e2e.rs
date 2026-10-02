@@ -791,10 +791,6 @@ async fn agent_receives_element_repositioned_event_with_old_and_new_geometry() {
         timestamp_wall_us: now_us(),
         payload: Some(ClientPayload::SessionInit(SessionInit {
             agent_id: "test-agent-notify".to_string(),
-            requested_capabilities: vec![
-                "create_tiles".to_string(),
-                "read_scene_topology".to_string(),
-            ],
             initial_subscriptions: vec!["SCENE_TOPOLOGY".to_string()],
             resume_token: vec![],
             min_protocol_version: 1000,

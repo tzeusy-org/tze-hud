@@ -279,7 +279,7 @@ mod tests {
     fn create_tile_schema_matches_params_struct() {
         let schema = input_schema("create_tile");
         let props = prop_names(&schema);
-        for expected in ["tab_id", "namespace", "bounds", "z_order", "ttl_ms"] {
+        for expected in ["tab_id", "bounds", "z_order", "ttl_ms"] {
             assert!(
                 props.contains(&expected.to_string()),
                 "create_tile schema missing property {expected}; has {props:?}"
@@ -287,7 +287,10 @@ mod tests {
         }
         // Non-`Option`, non-defaulted fields are required; defaulted/optional are not.
         let req = required(&schema);
-        assert!(req.contains(&"namespace".to_string()));
+        assert!(
+            !props.contains(&"namespace".to_string()),
+            "namespace is set by the server from identity"
+        );
         assert!(req.contains(&"bounds".to_string()));
         assert!(
             !req.contains(&"z_order".to_string()),

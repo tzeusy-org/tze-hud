@@ -117,7 +117,7 @@ pub(super) async fn handle_widget_asset_register(
     render_wake: &tze_hud_scene::render_wake::RenderWakeNotifier,
 ) {
     let required_cap = "register_widget_asset".to_string();
-    if !session.capabilities.contains(&required_cap) {
+    if !super::capability_set_covers(&session.capabilities, &required_cap) {
         send_widget_asset_register_result(
             session,
             tx,

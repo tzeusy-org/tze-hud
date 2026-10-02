@@ -117,11 +117,10 @@ async fn start_runtime_with_subtitle_zone(
     Ok(runtime)
 }
 
-/// Connect to the runtime at the given port and acquire a publish_zone:subtitle lease.
+/// Connect to the runtime at the given port and acquire a lease.
 async fn connect_agent_with_zone_publish_cap(
     port: u16,
     agent_id: &str,
-    zone_name: &str,
 ) -> Result<AgentSession, Box<dyn std::error::Error>> {
     let mut client = HudSessionClient::connect(format!("http://[::1]:{port}")).await?;
 
@@ -129,7 +128,6 @@ async fn connect_agent_with_zone_publish_cap(
     let stream = tokio_stream::wrappers::ReceiverStream::new(rx_chan);
 
     let now_us = common::now_wall_us();
-    let cap = format!("publish_zone:{zone_name}");
 
     tx.send(session_proto::ClientMessage {
         sequence: 1,
@@ -137,7 +135,6 @@ async fn connect_agent_with_zone_publish_cap(
         payload: Some(session_proto::client_message::Payload::SessionInit(
             session_proto::SessionInit {
                 agent_id: agent_id.to_string(),
-                requested_capabilities: vec![cap.clone()],
                 initial_subscriptions: vec!["SCENE_TOPOLOGY".to_string()],
                 resume_token: Vec::new(),
                 min_protocol_version: RUNTIME_MIN_VERSION,
@@ -172,11 +169,7 @@ async fn connect_agent_with_zone_publish_cap(
         sequence: 2,
         timestamp_wall_us: common::now_wall_us(),
         payload: Some(session_proto::client_message::Payload::LeaseRequest(
-            session_proto::LeaseRequest {
-                ttl_ms: 120_000,
-                capabilities: vec![cap],
-                lease_priority: 2,
-            },
+            session_proto::LeaseRequest { ttl_ms: 120_000 },
         )),
     })
     .await?;
@@ -260,12 +253,9 @@ async fn test_grpc_zone_publish_with_breakpoints_forwarded()
     let runtime = start_runtime_with_subtitle_zone(PORT_BREAKPOINTS_FORWARDED).await?;
     let _server_handle = runtime.start_grpc_server().await?;
 
-    let mut agent = connect_agent_with_zone_publish_cap(
-        PORT_BREAKPOINTS_FORWARDED,
-        "grpc-stream-agent",
-        "subtitle",
-    )
-    .await?;
+    let mut agent =
+        connect_agent_with_zone_publish_cap(PORT_BREAKPOINTS_FORWARDED, "grpc-stream-agent")
+            .await?;
 
     // "The quick brown fox" — breakpoints at word boundaries
     // byte offsets: after "The"=3, after "quick"=9, after "brown"=15
@@ -316,12 +306,8 @@ async fn test_grpc_zone_publish_empty_breakpoints_reveals_immediately()
     let runtime = start_runtime_with_subtitle_zone(PORT_EMPTY_BREAKPOINTS).await?;
     let _server_handle = runtime.start_grpc_server().await?;
 
-    let mut agent = connect_agent_with_zone_publish_cap(
-        PORT_EMPTY_BREAKPOINTS,
-        "grpc-empty-bp-agent",
-        "subtitle",
-    )
-    .await?;
+    let mut agent =
+        connect_agent_with_zone_publish_cap(PORT_EMPTY_BREAKPOINTS, "grpc-empty-bp-agent").await?;
 
     // Publish with empty breakpoints (should reveal immediately, no streaming)
     zone_publish_stream_text(&mut agent, "subtitle", "Instant display", vec![]).await?;
@@ -355,12 +341,8 @@ async fn test_grpc_zone_publish_replacement_cancels_breakpoints()
     let runtime = start_runtime_with_subtitle_zone(PORT_REPLACEMENT_CANCELS).await?;
     let _server_handle = runtime.start_grpc_server().await?;
 
-    let mut agent = connect_agent_with_zone_publish_cap(
-        PORT_REPLACEMENT_CANCELS,
-        "grpc-replace-agent",
-        "subtitle",
-    )
-    .await?;
+    let mut agent =
+        connect_agent_with_zone_publish_cap(PORT_REPLACEMENT_CANCELS, "grpc-replace-agent").await?;
 
     // First publish: streaming with breakpoints
     zone_publish_stream_text(
@@ -414,8 +396,7 @@ async fn test_grpc_zone_publish_breakpoints_match_mcp_behavior()
     let _server_handle = runtime.start_grpc_server().await?;
 
     let mut agent =
-        connect_agent_with_zone_publish_cap(PORT_MCP_PARITY, "grpc-parity-agent", "subtitle")
-            .await?;
+        connect_agent_with_zone_publish_cap(PORT_MCP_PARITY, "grpc-parity-agent").await?;
 
     // Same payload as subtitle-streaming.json fixture:
     // "The quick brown fox jumps over the lazy dog" with breakpoints at word boundaries

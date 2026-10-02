@@ -5336,8 +5336,8 @@ async def run_cadence(
     # (deferred, hud-4va6q): if the first cycle sees none we stop paying the full
     # per-cycle wait so a live windowed run is not stalled ~PRESENT_ACK_TIMEOUT_S
     # every cycle. Headless runs, which do emit, keep correlating throughout.
-    present_ack_supported = "read_telemetry" in getattr(
-        client, "granted_capabilities", [],
+    present_ack_supported = "TELEMETRY_FRAMES" in getattr(
+        client, "active_subscriptions", [],
     )
     present_ack_seen = False
     appends: list[dict[str, Any]] = []
@@ -5744,14 +5744,10 @@ async def run_scenario(args: argparse.Namespace) -> int:
         args.target,
         psk=psk,
         agent_id=args.agent_id,
-        # read_telemetry + TELEMETRY_FRAMES let the cadence axis consume live
-        # FramePresented present-acks (hud-vjlqh); when the runtime does not grant
-        # them (or does not emit present-acks on this path) the cadence axis falls
-        # back to the transport-RTT present proxy. Harmless for the other phases.
-        capabilities=[
-            "create_tiles", "modify_own_tiles", "access_input_events",
-            "read_telemetry",
-        ],
+        # TELEMETRY_FRAMES lets the cadence axis consume live FramePresented
+        # present-acks (hud-vjlqh) when the agent's allow list includes "tiles";
+        # otherwise (or if the runtime does not emit present-acks on this path)
+        # the cadence axis falls back to the transport-RTT present proxy.
         initial_subscriptions=[
             "SCENE_TOPOLOGY", "INPUT_EVENTS", "FOCUS_EVENTS", "TELEMETRY_FRAMES",
         ],

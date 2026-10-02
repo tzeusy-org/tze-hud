@@ -141,8 +141,7 @@ scripts/quickstart.sh --window-mode overlay
 or equivalently, by hand:
 
 ```bash
-export TZE_HUD_PSK="$(cat tze_hud.psk)"
-export TZE_HUD_MCP_RESIDENT_PRINCIPAL="$TZE_HUD_PSK"   # see the note below
+export TZE_HUD_PSK="$(cat tze_hud.psk)"   # see the note below
 ./target/release/tze_hud \
   --config tze_hud.toml \
   --window-mode overlay \
@@ -176,12 +175,12 @@ The banner is deliberately non-secret: it shows only the bound addresses and an
 attach hint, never the PSK. (A disabled service — `--mcp-port 0` or
 `--grpc-port 0` — shows as `disabled`.)
 
-> **The resident-principal rule (this is the one non-obvious bit).** The
-> `portal_projection_*` MCP tools are *Resident* tools. The runtime grants them
-> only to a caller whose bearer matches **both** the configured resident
-> principal **and** the PSK (each compared constant-time). So you must set
-> `TZE_HUD_MCP_RESIDENT_PRINCIPAL` equal to your PSK, and send that same PSK as
-> the MCP `Authorization: Bearer`. `quickstart.sh` exports it for you.
+> **Identity is the PSK.** The MCP bearer identifies an agent, and that
+> agent's `allow` list in the config decides which tools it may call. The
+> generated config has `[agents.claude]` with `psk_env = "TZE_HUD_PSK"` and
+> `allow = ["*"]`, so sending the PSK as the MCP `Authorization: Bearer` gets
+> you the portal tools. A disallowed call fails with `NOT_ALLOWED` and a hint
+> naming the `allow` entry to add.
 
 ---
 
@@ -226,10 +225,9 @@ call the tools directly:
 
 1. `portal_projection_attach` — choose a stable `projection_id`, set
    `provider_kind` (`claude` / `codex` / `opencode` / `other`) and a
-   `display_name`. **Store the most recently returned `owner_token`**. An
-   authenticated re-attach with the matching `idempotency_key` returns a fresh
-   token and immediately invalidates the previous one without extending its
-   original expiry deadline; other operations never return the token.
+   `display_name`. Ownership is your agent identity: the runtime keeps the
+   owner token server-side, so no call takes or returns one. Re-attach with the
+   matching `idempotency_key` to rotate ownership.
 2. `portal_projection_publish` — publish transcript/output fragments; they render
    in the portal on screen.
 3. `portal_projection_get_pending_input` / `portal_projection_acknowledge_input`
@@ -267,7 +265,7 @@ curl -s -X POST http://127.0.0.1:9090/mcp \
 | `canonical startup requires a readable config file` | No config resolved. Run from a dir containing `tze_hud.toml`, or pass `--config <path>`. `quickstart.sh` scaffolds one. |
 | `refusing startup with default PSK value "tze-hud-key"` | Set a non-trivial PSK (`--psk` / `TZE_HUD_PSK`). `quickstart.sh` generates one. |
 | Nothing printed on stdout after launch | The runtime always prints a one-time non-secret startup banner (bind addrs + attach hint). *Structured* logs beyond it are gated behind the `TZE_HUD_LOG` env filter — run with `TZE_HUD_LOG=info` for detailed startup/bind logs. (`quickstart.sh` prints the attach block regardless.) |
-| Projection tool call rejected `CAPABILITY_REQUIRED` | `TZE_HUD_MCP_RESIDENT_PRINCIPAL` is not set equal to the PSK, or the bearer differs from the PSK. Make principal == bearer == PSK. |
+| Projection tool call rejected `NOT_ALLOWED` | The bearer's agent lacks `portal` in its `allow` list. Add it (or `*`) to that `[agents.<id>]` table, as the hint says. |
 | `No active tab` on the autonomous test VM | WARP-VM-specific fallback: call MCP `create_tab {"name":"Main"}` once before portal work. The general config-tab bootstrap is fixed; this is not needed on a normal GPU desktop where `[[tabs]]` materializes. |
 | Window won't open on a headless box | Expected — you need a real display server. Use overlay/fullscreen on a desktop, or the TigerVNC path in `README.md`. |
 

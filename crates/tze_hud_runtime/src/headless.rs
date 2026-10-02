@@ -158,7 +158,12 @@ impl HeadlessConfig {
             None => {
                 #[cfg(any(test, feature = "dev-mode"))]
                 {
-                    Ok((RuntimeContext::headless_default(), true))
+                    Ok((
+                        RuntimeContext::headless_default().with_fallback_policy(
+                            crate::runtime_context::FallbackPolicy::Unrestricted,
+                        ),
+                        true,
+                    ))
                 }
                 #[cfg(not(any(test, feature = "dev-mode")))]
                 {
@@ -743,11 +748,9 @@ impl HeadlessRuntime {
             .map_err(|e| format!("gRPC server: failed to bind {bind_addr}: {e}"))?;
         tracing::info!(addr = %bind_addr, "gRPC server listener bound");
 
-        // Wire config-driven capability registry into the session service.
-        // Snapshot the agent capability map from RuntimeContext (one-time clone at startup).
-        // Per configuration/spec.md §Requirement: Agent Registration (lines 136-147):
-        // registered agents get their configured capability set; unlisted agents get
-        // guest policy (no capabilities) unless fallback_unrestricted is true (dev mode).
+        // Wire config-driven agent identity: `allow`-derived permissions and
+        // per-agent PSKs. Agents without a table get nothing unless
+        // fallback_unrestricted is true (dev mode).
         let agent_caps = self.runtime_context.snapshot_agent_capabilities();
 
         let service =
@@ -770,7 +773,8 @@ impl HeadlessRuntime {
                     ),
                 )),
                 self.degradation_notices.clone(),
-            );
+            )
+            .with_agent_psks(self.runtime_context.snapshot_agent_psks(&self.config.psk));
 
         let handle = tokio::spawn(async move {
             let incoming = tokio_stream::wrappers::TcpListenerStream::new(listener);
@@ -1902,11 +1906,11 @@ profile = "headless"
 name = "Main"
 default_tab = true
 
-[agents.registered.weather-agent]
-capabilities = ["create_tiles", "modify_own_tiles", "read_scene_topology"]
+[agents.weather-agent]
+allow = ["tiles"]
 
-[agents.registered.monitor-agent]
-capabilities = ["read_telemetry", "read_scene_topology"]
+[agents.monitor-agent]
+allow = ["zone:subtitle"]
 "#;
 
         let config = HeadlessConfig {
@@ -1927,52 +1931,21 @@ capabilities = ["read_telemetry", "read_scene_topology"]
             "valid config should set fallback_unrestricted = false"
         );
 
-        // weather-agent gets its configured capabilities
-        let policy = ctx.capability_policy_for("weather-agent");
+        let agents = ctx.agent_directory("test");
+        let weather = agents.resolve("test", "weather-agent").unwrap();
         assert!(
-            !policy.is_unrestricted(),
-            "registered agent should not be unrestricted"
+            weather.allows("create_tiles"),
+            "tiles expands to create_tiles"
         );
-        assert!(
-            policy
-                .evaluate_capability_request(&["create_tiles".to_string()])
-                .is_ok(),
-            "weather-agent should be granted create_tiles"
-        );
-        assert!(
-            policy
-                .evaluate_capability_request(&["read_telemetry".to_string()])
-                .is_err(),
-            "weather-agent should be denied read_telemetry (not in its list)"
-        );
+        assert!(!weather.allows("publish_zone:subtitle"));
 
-        // monitor-agent gets its configured capabilities
-        let monitor_policy = ctx.capability_policy_for("monitor-agent");
-        assert!(
-            monitor_policy
-                .evaluate_capability_request(&["read_telemetry".to_string()])
-                .is_ok(),
-            "monitor-agent should be granted read_telemetry"
-        );
-        assert!(
-            monitor_policy
-                .evaluate_capability_request(&["create_tiles".to_string()])
-                .is_err(),
-            "monitor-agent should be denied create_tiles"
-        );
+        let monitor = agents.resolve("test", "monitor-agent").unwrap();
+        assert!(monitor.allows("publish_zone:subtitle"));
+        assert!(!monitor.allows("create_tiles"));
 
-        // unknown agent gets guest policy (no capabilities) since fallback = Guest
-        let guest_policy = ctx.capability_policy_for("unknown-agent");
-        assert!(
-            !guest_policy.is_unrestricted(),
-            "unknown agent should get guest policy"
-        );
-        assert!(
-            guest_policy
-                .evaluate_capability_request(&["create_tiles".to_string()])
-                .is_err(),
-            "unknown agent should be denied all capabilities"
-        );
+        // An agent without a table gets nothing (fallback = Guest).
+        let unknown = agents.resolve("test", "unknown-agent").unwrap();
+        assert!(unknown.permissions.is_empty());
     }
 
     /// Verify that a malformed TOML falls back to the guest (fail-safe) policy, NOT dev mode.

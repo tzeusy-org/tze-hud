@@ -164,8 +164,8 @@ profile = "headless"
 name = "Cooperative Projection Proof"
 default_tab = true
 
-[agents.registered.agent-alpha]
-capabilities = ["create_tiles", "modify_own_tiles"]
+[agents.agent-alpha]
+allow = ["tiles"]
 "#
     .to_string()
 }

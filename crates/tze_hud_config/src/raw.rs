@@ -160,36 +160,23 @@ pub struct RawZoneType {
 
 // ─── [agents] ────────────────────────────────────────────────────────────────
 
-/// `[agents]` table — optional.
-#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
-pub struct RawAgents {
-    pub registered: Option<HashMap<String, RawRegisteredAgent>>,
-    pub dynamic_policy: Option<RawDynamicPolicy>,
-}
+/// `[agents.<id>]` tables — one per trusted agent, keyed by agent id.
+pub type RawAgents = HashMap<String, RawAgent>;
 
-/// A single pre-registered agent entry under `[agents.registered.<name>]`.
+/// One trusted agent: identity, allow list, and optional budget overrides.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
-pub struct RawRegisteredAgent {
-    pub capabilities: Option<Vec<String>>,
-    pub auth_psk_env: Option<String>,
+#[serde(deny_unknown_fields)]
+pub struct RawAgent {
+    /// Environment variable holding this agent's PSK. The PSK identifies the
+    /// agent; it never appears in the config file.
+    pub psk_env: Option<String>,
+    /// Surfaces the agent may use: `zone:<name|*>`, `widget:<name|*>`,
+    /// `portal`, `tiles`, or `*`.
+    #[serde(default)]
+    pub allow: Vec<String>,
     pub max_tiles: Option<u32>,
     pub max_texture_mb: Option<u32>,
     pub max_update_hz: Option<u32>,
-}
-
-/// `[agents.dynamic_policy]` — optional.
-#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
-pub struct RawDynamicPolicy {
-    #[serde(default)]
-    pub allow_dynamic_agents: bool,
-    pub default_capabilities: Option<Vec<String>>,
-    #[serde(default = "default_true")]
-    pub prompt_for_elevated_capabilities: bool,
-    pub dynamic_presence_ceiling: Option<String>,
-}
-
-fn default_true() -> bool {
-    true
 }
 
 // ─── [widget_bundles] ────────────────────────────────────────────────────────

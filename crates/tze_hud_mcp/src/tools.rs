@@ -99,7 +99,9 @@ pub fn handle_create_tab(params: Value, scene: &mut SceneGraph) -> McpResult<Cre
 pub struct CreateTileParams {
     /// ID of the tab to place the tile in. If omitted, uses the active tab.
     pub tab_id: Option<String>,
-    /// Namespace (agent identity) for the tile. Used as the lease namespace.
+    /// Set by the server from the caller's identity; never sent by the model.
+    #[serde(default)]
+    #[schemars(skip)]
     pub namespace: String,
     /// Bounds: x, y, width, height in display pixels.
     pub bounds: BoundsParams,
@@ -381,8 +383,9 @@ pub struct PublishToZoneParams {
     ///   - `{"type":"solid_color","r":1.0,"g":0.0,"b":0.0,"a":1.0}` → `SolidColor`
     ///   - `{"type":"static_image","resource_id":"<hex>"}` → `StaticImage`
     pub content: Value,
-    /// Optional namespace for the lease. Defaults to "mcp".
-    #[serde(default = "default_mcp_namespace")]
+    /// Set by the server from the caller's identity; never sent by the model.
+    #[serde(default)]
+    #[schemars(skip)]
     pub namespace: String,
     /// Font size in pixels. Defaults to 16.
     #[serde(default = "default_font_size")]
@@ -569,10 +572,6 @@ fn parse_zone_content(content: &Value) -> Result<ZoneContent, McpError> {
             "content must be a string or an object with a \"type\" field".to_string(),
         )),
     }
-}
-
-fn default_mcp_namespace() -> String {
-    "mcp".to_string()
 }
 
 /// Response from `publish_to_zone`.
@@ -1126,8 +1125,9 @@ pub struct PublishToElementParams {
     /// as `set_content` / `publish_to_zone`. For widgets this may be either an
     /// object of parameter key/value pairs or `{"params": {...}}`.
     pub content: Value,
-    /// Optional namespace used for zone/widget publish bookkeeping.
-    #[serde(default = "default_mcp_namespace")]
+    /// Set by the server from the caller's identity; never sent by the model.
+    #[serde(default)]
+    #[schemars(skip)]
     pub namespace: String,
     /// Optional zone merge key.
     #[serde(default)]
@@ -1551,8 +1551,9 @@ pub struct PublishToWidgetParams {
     /// Transition duration in milliseconds (0 = instant). Defaults to 0.
     #[serde(default)]
     pub transition_ms: u32,
-    /// Optional namespace (auto-derived from "mcp" if omitted).
-    #[serde(default = "default_mcp_namespace")]
+    /// Set by the server from the caller's identity; never sent by the model.
+    #[serde(default)]
+    #[schemars(skip)]
     pub namespace: String,
     /// TTL in microseconds (0 = use widget instance default). Defaults to 0.
     #[serde(default)]
@@ -1941,9 +1942,9 @@ pub fn handle_list_widgets(params: Value, scene: &SceneGraph) -> McpResult<ListW
 pub struct ClearWidgetParams {
     /// Widget instance name (addressing key).
     pub widget_name: String,
-    /// Agent namespace performing the clear. Defaults to "" (cleared publications
-    /// belonging to the namespace are removed).
+    /// Set by the server from the caller's identity; never sent by the model.
     #[serde(default)]
+    #[schemars(skip)]
     pub namespace: String,
     /// Optional disambiguation when multiple instances share the same name.
     #[serde(default)]
@@ -2281,8 +2282,8 @@ pub struct PortalProjectionAttachParams {
 pub struct PortalProjectionAttachResult {
     /// `true` when the authority accepted the attach.
     pub accepted: bool,
-    /// Owner token (only present on success). Required for
-    /// subsequent `portal_projection_publish` calls.
+    /// Owner token from the authority. The MCP server binds it to the caller's
+    /// identity and strips it before replying.
     pub owner_token: Option<String>,
     /// Human-readable status summary.
     pub status_summary: String,
@@ -2372,7 +2373,9 @@ pub(crate) async fn handle_portal_projection_attach_with_render_wake(
 pub struct PortalProjectionPublishParams {
     /// Projection session id from attach.
     pub projection_id: String,
-    /// Owner token from attach.
+    /// Bound by the server to the caller's identity; never sent by the model.
+    #[serde(default)]
+    #[schemars(skip)]
     pub owner_token: String,
     /// Text to append to the transcript.
     pub output_text: String,
@@ -2508,7 +2511,9 @@ pub(crate) async fn handle_portal_projection_publish_with_render_wake(
 pub struct PortalProjectionPublishStatusParams {
     /// Projection session id from attach.
     pub projection_id: String,
-    /// Owner token from attach.
+    /// Bound by the server to the caller's identity; never sent by the model.
+    #[serde(default)]
+    #[schemars(skip)]
     pub owner_token: String,
     /// Lifecycle: `attached`|`active`|`degraded`|`hud_unavailable`|`detached`|`cleanup_pending`|`expired`. No `waiting`/`blocked` — use `status_text`.
     pub lifecycle_state: String,
@@ -2627,7 +2632,9 @@ pub(crate) async fn handle_portal_projection_publish_status_with_render_wake(
 pub struct PortalProjectionGetPendingInputParams {
     /// Projection session id from attach.
     pub projection_id: String,
-    /// Owner token from attach.
+    /// Bound by the server to the caller's identity; never sent by the model.
+    #[serde(default)]
+    #[schemars(skip)]
     pub owner_token: String,
     /// Optional cap on items returned (clamped to the authority's `max_poll_items`).
     #[serde(default)]
@@ -2768,7 +2775,9 @@ pub(crate) async fn handle_portal_projection_get_pending_input_with_render_wake(
 pub struct PortalProjectionAcknowledgeInputParams {
     /// Projection session id from attach.
     pub projection_id: String,
-    /// Owner token from attach.
+    /// Bound by the server to the caller's identity; never sent by the model.
+    #[serde(default)]
+    #[schemars(skip)]
     pub owner_token: String,
     /// Input item id from a `get_pending_input` response.
     pub input_id: String,
@@ -2883,7 +2892,9 @@ pub(crate) async fn handle_portal_projection_acknowledge_input_with_render_wake(
 pub struct PortalProjectionDetachParams {
     /// Projection session id from attach.
     pub projection_id: String,
-    /// Owner token from attach.
+    /// Bound by the server to the caller's identity; never sent by the model.
+    #[serde(default)]
+    #[schemars(skip)]
     pub owner_token: String,
     /// Human-readable reason for the audit log.
     pub reason: String,
@@ -2981,8 +2992,9 @@ pub struct PortalProjectionCleanupParams {
     pub projection_id: String,
     /// `owner` or `operator`.
     pub cleanup_authority: String,
-    /// Owner token (required when `cleanup_authority = owner`).
+    /// Bound by the server to the caller's identity; never sent by the model.
     #[serde(default)]
+    #[schemars(skip)]
     pub owner_token: Option<String>,
     /// Operator credential (required when `cleanup_authority = operator`).
     #[serde(default)]

@@ -43,7 +43,7 @@ All requests include:
 - `request_id`
 - `client_timestamp_wall_us`
 
-Owner-scoped operations after `attach` also include `owner_token`. Operator cleanup is the only non-attach operation that may instead use separate daemon authority.
+Ownership is your agent identity (the MCP bearer PSK): the runtime keeps the owner token server-side and adds it to your later calls. Operator cleanup is the only non-attach operation that may instead use separate daemon authority.
 
 The normative operations are:
 - `attach`
@@ -59,7 +59,7 @@ Read `references/operation-examples.md` for compact JSON examples of every opera
 ## Workflow
 
 1. **Attach once.** Choose a stable `projection_id`, set `provider_kind` to `codex`, `claude`, `opencode`, or `other`, and include a human-readable `display_name`. Default missing or uncertain classification to `private`.
-2. **Store the owner token securely and immediately.** A successful attach returns `owner_token`; no other operation response will ever return it. Store it in a tool-call result or session variable, never in transcript text, assistant-visible output, or log lines. If it is lost before detach, you must treat the projection as unrecoverable and wait for operator cleanup or TTL expiry. Do not request the token again — there is no retrieval path.
+2. **Keep your idempotency key.** No operation takes or returns `owner_token`; the runtime holds it, keyed by your agent and `projection_id`. Re-attach with the same idempotency key to rotate ownership.
 3. **Publish intentionally.** Call `publish_output` for assistant-visible transcript/status fragments and `publish_status` for lifecycle updates such as `active`, `degraded`, or `detached`.
 
    **Accepted `lifecycle_state` values** (snake_case strings; any other value is rejected):
@@ -81,7 +81,7 @@ Read `references/operation-examples.md` for compact JSON examples of every opera
 4. **Poll HUD input compactly.** Call `get_pending_input` with small `max_items` and `max_bytes`. Treat returned input as semantic operator-submitted text, not terminal keystrokes.
 5. **Acknowledge every input item.** Use `acknowledge_input` with `handled`, `deferred`, or `rejected`. Use `not_before_wall_us` only with `deferred`.
 6. **Detach on normal exit.** Call `detach` with a bounded reason when the session is done projecting.
-7. **Cleanup stale state when appropriate.** Use owner cleanup with `owner_token`; operator cleanup uses a separate daemon authority and must not expose private projection content.
+7. **Cleanup stale state when appropriate.** Owner cleanup uses your identity; operator cleanup uses a separate daemon authority and must not expose private projection content.
 
 ## Production Ingress (Pending)
 
@@ -97,8 +97,8 @@ See `references/mcp-facade.md` for facade requirements, boundary rules, and a co
 
 - Keep operation responses bounded; do not request unbounded transcripts, inbox history, or raw scene state.
 - Do not publish secrets or owner tokens into the transcript window or any user-visible output.
-- Treat `owner_token` as attach-only response material; it must never be returned by publish, input, acknowledgement, detach, or cleanup responses. If a response includes `owner_token` outside an `attach` success, treat that as a protocol error and do not use or forward the value.
-- **Owner-token loss is unrecoverable.** If the token is lost (session crash, transcript cleared), there is no retrieval path. The only recovery options are operator cleanup (requires separate operator authority, not the owner token) or waiting for the projection's TTL to expire. Do not attempt to re-attach with the same `projection_id` without the idempotency key — the authority will reject it with `PROJECTION_ALREADY_ATTACHED`.
-- **Do not embed `owner_token` in `publish_output` text, `status_text`, `ack_message`, or `reason` fields.** These fields are readable by audit records and portal rendering; tokens in them constitute a credential leak.
+- No MCP response carries `owner_token`; the runtime strips it from attach and keeps it server-side.
+- Re-attach with the same `projection_id` requires the original idempotency key; otherwise the authority rejects it with `PROJECTION_ALREADY_ATTACHED`.
+- Do not publish secrets into `publish_output` text, `status_text`, `ack_message`, or `reason` fields; they are readable by audit records and portal rendering.
 - Treat `PROJECTION_UNAUTHORIZED`, `PROJECTION_TOKEN_EXPIRED`, and `PROJECTION_STATE_CONFLICT` as hard stops unless the user explicitly authorizes reattach or operator cleanup.
 - If the runtime restarts, prior transcript text, pending input text, owner tokens, and cached lease identity are gone. Attach again and receive a fresh owner token — the old token is permanently invalid after a restart.

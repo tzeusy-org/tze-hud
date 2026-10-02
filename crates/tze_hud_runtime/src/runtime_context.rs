@@ -11,53 +11,15 @@
 //! The following configuration dimensions are surfaced:
 //!
 //! - **Profile budgets** — max tiles, max texture MB, max agents, target/min FPS.
-//! - **Agent capability registry** — per-agent capability grants from `[agents.registered]`.
-//! - **Hot-reloadable policy** — the dynamic agent policy, which can be updated
-//!   live without restart.
+//! - **Agent registry** — per-agent `allow`-derived permissions and resolved
+//!   PSKs from `[agents.<id>]`, exposed as an [`AgentDirectory`].
 //!
-//! ## Two-Tier Configuration Model
+//! Every config section is frozen; a restart is required to change any of
+//! them. `hot` (an empty `HotReloadableConfig` behind an `ArcSwap`) remains
+//! as the reload seam for SIGHUP / `ReloadConfig`.
 //!
-//! Per the configuration spec §Configuration Reload (lines 263-274, v1-mandatory),
-//! configuration sections are divided into two tiers:
-//!
-//! | Section                   | Reload tier           |
-//! |---------------------------|-----------------------|
-//! | `[runtime]`               | Frozen — restart required |
-//! | `[[tabs]]`                | Frozen — restart required |
-//! | `[agents.registered]`     | Frozen — restart required |
-//! | `[agents.dynamic_policy]` | Hot-reloadable via SIGHUP or `ReloadConfig` RPC |
-//!
-//! ### Frozen fields
-//!
-//! `profile`, `agent_capabilities`, and `fallback_policy` are
-//! frozen at startup. A restart is required to change them.
-//!
-//! ### Hot-reloadable fields
-//!
-//! `hot` holds an `Arc<HotReloadableConfig>` stored inside an `ArcSwap`. Call
-//! `reload_hot_config()` with a freshly validated `HotReloadableConfig` to atomically
-//! replace the live policy without locking any subsystem:
-//!
-//! ```rust,ignore
-//! // In the SIGHUP or ReloadConfig handler:
-//! let hot = tze_hud_config::reload_config(&new_toml)?;
-//! ctx.reload_hot_config(hot);
-//! // All subsystems reading ctx.hot_config() will see the new values
-//! // immediately on their next access.
-//! ```
-//!
-//! ## Configuration-Driven Capability Gating
-//!
-//! Per configuration/spec.md §Requirement: Agent Registration with Per-Agent Budget
-//! Overrides (lines 136-147), each agent entry in `[agents.registered]` carries an
-//! explicit capability list. `RuntimeContext::capability_policy_for` returns the
-//! appropriate `CapabilityPolicy` for a given agent name:
-//!
-//! - **Registered agent**: policy built from that agent's listed capabilities.
-//! - **Unknown agent**: falls back to the `fallback_policy` (configurable; default `guest`).
-//!
-//! This replaces the v0 `CapabilityPolicy::unrestricted()` sentinel used for PSK
-//! sessions, which granted `"*"` (all capabilities) to any authenticated agent.
+//! An agent without an `[agents.<id>]` table gets the `fallback_policy`
+//! (`Guest`: nothing; `Unrestricted`: `*`, dev only).
 //!
 //! ## Usage
 //!
@@ -66,11 +28,7 @@
 //! use tze_hud_scene::config::ResolvedConfig;
 //!
 //! let ctx = RuntimeContext::from_config(resolved_config, FallbackPolicy::Guest);
-//! let policy = ctx.capability_policy_for("my-agent");
-//!
-//! // Hot-reload on SIGHUP:
-//! let hot = tze_hud_config::reload_config(&new_toml).expect("valid toml");
-//! ctx.reload_hot_config(hot);
+//! let agents = ctx.agent_directory(&runtime_psk);
 //! ```
 
 use std::collections::HashMap;
@@ -78,8 +36,9 @@ use std::sync::Arc;
 
 use arc_swap::ArcSwap;
 use tze_hud_config::HotReloadableConfig;
-use tze_hud_protocol::auth::CapabilityPolicy;
-use tze_hud_scene::config::{DisplayProfile, RegisteredAgentBudgetOverrides, ResolvedConfig};
+use tze_hud_scene::config::{
+    AgentDirectory, DisplayProfile, RegisteredAgentBudgetOverrides, ResolvedConfig,
+};
 use tze_hud_scene::types::ResourceBudget;
 
 use crate::mutation_budget_bridge::DEFAULT_MAX_GUEST_SESSIONS;
@@ -93,7 +52,7 @@ const HARD_MAX_UPDATE_RATE_HZ: f32 = 120.0;
 
 // ─── FallbackPolicy ───────────────────────────────────────────────────────────
 
-/// What capability policy to apply to agents not listed in `[agents.registered]`.
+/// What permissions to give agents without an `[agents.<id>]` table.
 ///
 /// - `Guest` — no capabilities granted (safest default for v1).
 /// - `Unrestricted` — all capabilities granted (useful for single-agent dev setups).
@@ -175,6 +134,35 @@ fn resident_ledger_for(envelope: &OperationalRuntimeEnvelope) -> tze_hud_resourc
     })
 }
 
+/// `psk_env` naming this variable always means the runtime PSK, however it
+/// was supplied (`--psk` or the environment).
+pub const RUNTIME_PSK_ENV: &str = "TZE_HUD_PSK";
+
+fn resolve_agent_psks_logged(psk_env: &HashMap<String, String>) -> HashMap<String, String> {
+    let external: HashMap<String, String> = psk_env
+        .iter()
+        .filter(|(_, env)| env.as_str() != RUNTIME_PSK_ENV)
+        .map(|(id, env)| (id.clone(), env.clone()))
+        .collect();
+    let (psks, warnings) = tze_hud_config::resolve_agent_psks(&external);
+    for w in warnings {
+        tracing::warn!(
+            agent = %w.agent_name,
+            env = %w.env_var_name,
+            "agent psk_env is unset or empty; that agent cannot authenticate"
+        );
+    }
+    psks
+}
+
+fn runtime_psk_agents(psk_env: &HashMap<String, String>) -> Vec<String> {
+    psk_env
+        .iter()
+        .filter(|(_, env)| env.as_str() == RUNTIME_PSK_ENV)
+        .map(|(id, _)| id.clone())
+        .collect()
+}
+
 // ─── RuntimeContext ───────────────────────────────────────────────────────────
 
 /// Runtime context derived from validated configuration.
@@ -187,7 +175,7 @@ fn resident_ledger_for(envelope: &OperationalRuntimeEnvelope) -> tze_hud_resourc
 ///
 /// **Hot-reloadable fields** are held in `hot` as an `ArcSwap<HotReloadableConfig>`.
 /// Call `reload_hot_config()` to atomically swap in a freshly validated config subset
-/// (dynamic_policy) with no locks and no restart.
+/// with no locks and no restart. Every section is frozen today, so it is empty.
 ///
 /// Per spec §Configuration Reload (lines 263-274, v1-mandatory): SIGHUP and the
 /// `RuntimeService.ReloadConfig` gRPC call both trigger a live reload of the
@@ -205,19 +193,24 @@ pub struct RuntimeContext {
     /// Shared physical resident-allocation authority for all cache classes.
     pub resident_ledger: tze_hud_resource::ResidentLedger,
 
-    /// Per-agent capability grants keyed by agent name.
-    /// Populated from `[agents.registered]` in config.
+    /// Per-agent permission strings (expanded from `allow`) keyed by agent id.
     agent_capabilities: HashMap<String, Vec<String>>,
+
+    /// Per-agent PSKs resolved from each agent's `psk_env` at startup.
+    agent_psks: HashMap<String, String>,
+
+    /// Agents whose `psk_env` is [`RUNTIME_PSK_ENV`]: their PSK is the runtime PSK.
+    runtime_psk_agents: Vec<String>,
 
     /// Validated per-agent budget overrides, frozen at startup.
     agent_budget_overrides: HashMap<String, RegisteredAgentBudgetOverrides>,
 
-    /// Policy to apply to agents not listed in `[agents.registered]`.
+    /// Policy for agents without an `[agents.<id>]` table.
     pub fallback_policy: FallbackPolicy,
 
     // ── Hot-reloadable fields ─────────────────────────────────────────────────
     // Atomically swappable via SIGHUP or ReloadConfig RPC.
-    /// Hot-reloadable policy sections: agents.dynamic_policy.
+    /// Hot-reload seam; every section is currently frozen, so this is empty.
     ///
     /// Access the current snapshot via `self.hot.load()`. Update atomically
     /// via `self.reload_hot_config(new_hot)`.
@@ -229,11 +222,8 @@ impl RuntimeContext {
 
     /// Build a `RuntimeContext` from a fully validated `ResolvedConfig`.
     ///
-    /// The `fallback_policy` is applied to any agent whose name is not found
-    /// in `[agents.registered]`. For v1 production use, pass `FallbackPolicy::Guest`.
-    ///
-    /// Hot-reloadable sections are initialized to defaults (all `None` / empty).
-    /// They will be populated on the first SIGHUP or `ReloadConfig` RPC call.
+    /// The `fallback_policy` is applied to any agent without an
+    /// `[agents.<id>]` table. For production use, pass `FallbackPolicy::Guest`.
     pub fn from_config(config: ResolvedConfig, fallback_policy: FallbackPolicy) -> Self {
         let operational_envelope = OperationalRuntimeEnvelope::from_profile(&config.profile);
         let resident_ledger = resident_ledger_for(&operational_envelope);
@@ -242,6 +232,8 @@ impl RuntimeContext {
             operational_envelope,
             resident_ledger,
             agent_capabilities: config.agent_capabilities,
+            agent_psks: resolve_agent_psks_logged(&config.agent_psk_env),
+            runtime_psk_agents: runtime_psk_agents(&config.agent_psk_env),
             agent_budget_overrides: config.agent_budget_overrides,
             fallback_policy,
             hot: ArcSwap::from_pointee(HotReloadableConfig::default()),
@@ -266,6 +258,8 @@ impl RuntimeContext {
             operational_envelope,
             resident_ledger,
             agent_capabilities: config.agent_capabilities,
+            agent_psks: resolve_agent_psks_logged(&config.agent_psk_env),
+            runtime_psk_agents: runtime_psk_agents(&config.agent_psk_env),
             agent_budget_overrides: config.agent_budget_overrides,
             fallback_policy,
             hot: ArcSwap::from_pointee(hot),
@@ -286,10 +280,18 @@ impl RuntimeContext {
             operational_envelope,
             resident_ledger,
             agent_capabilities: HashMap::new(),
+            agent_psks: HashMap::new(),
+            runtime_psk_agents: Vec::new(),
             agent_budget_overrides: HashMap::new(),
             fallback_policy: FallbackPolicy::Guest,
             hot: ArcSwap::from_pointee(HotReloadableConfig::default()),
         }
+    }
+
+    /// Replace the policy for agents without an `[agents.<id>]` table.
+    pub fn with_fallback_policy(mut self, fallback_policy: FallbackPolicy) -> Self {
+        self.fallback_policy = fallback_policy;
+        self
     }
 
     // ── Hot-reload ────────────────────────────────────────────────────────────
@@ -304,16 +306,7 @@ impl RuntimeContext {
     /// values until their next `load()` call. This is intentional — the swap is
     /// atomic and lock-free; subsystems do not need to coordinate.
     ///
-    /// ## What is reloaded
-    ///
-    /// - `[agents.dynamic_policy]` — whether dynamic agents are allowed and their
-    ///   default capabilities.
-    ///
-    /// ## What is NOT reloaded (frozen, restart required)
-    ///
-    /// - `[runtime]` / `profile` — display profile and budget values.
-    /// - `[[tabs]]` — tab layout and zone configuration.
-    /// - `[agents.registered]` — pre-registered agent capability grants.
+    /// Every section is currently frozen, so a reload changes nothing.
     pub fn reload_hot_config(&self, new_hot: HotReloadableConfig) {
         self.hot.store(Arc::new(new_hot));
     }
@@ -324,42 +317,40 @@ impl RuntimeContext {
     /// as there are strong references to it. Use this to access
     /// dynamic policy settings without exposing the
     /// internal hot-reload mechanism.
-    ///
-    /// ```rust,ignore
-    /// let hot = ctx.hot_config();
-    /// let dynamic_policy = &hot.dynamic_policy;
-    /// ```
     pub fn hot_config(&self) -> Arc<HotReloadableConfig> {
         self.hot.load_full()
     }
 
-    // ── Capability policy lookup ──────────────────────────────────────────────
+    // ── Agent identity ────────────────────────────────────────────────────────
 
-    /// Return the `CapabilityPolicy` for the given agent name.
-    ///
-    /// Per configuration/spec.md §Requirement: Agent Registration (lines 136-147):
-    /// - Registered agents receive their configured capability set.
-    /// - Unregistered agents receive the fallback policy (default: guest).
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// let policy = ctx.capability_policy_for("weather-agent");
-    /// let (granted, denied) = policy.partition_capabilities(&requested);
-    /// ```
-    pub fn capability_policy_for(&self, agent_name: &str) -> CapabilityPolicy {
-        match self.agent_capabilities.get(agent_name) {
-            Some(caps) => CapabilityPolicy::new(caps.clone()),
-            None => match self.fallback_policy {
-                FallbackPolicy::Guest => CapabilityPolicy::guest(),
-                FallbackPolicy::Unrestricted => CapabilityPolicy::unrestricted(),
+    /// Build the credential → agent directory used by MCP and gRPC.
+    pub fn agent_directory(&self, runtime_psk: &str) -> AgentDirectory {
+        AgentDirectory {
+            runtime_psk: runtime_psk.to_string(),
+            agent_psks: self.snapshot_agent_psks(runtime_psk),
+            permissions: self.agent_capabilities.clone(),
+            fallback_permissions: match self.fallback_policy {
+                FallbackPolicy::Guest => Vec::new(),
+                FallbackPolicy::Unrestricted => vec!["*".to_string()],
             },
         }
     }
 
+    /// Per-agent PSKs: those resolved at startup, plus `runtime_psk` for
+    /// agents whose `psk_env` is [`RUNTIME_PSK_ENV`].
+    pub fn snapshot_agent_psks(&self, runtime_psk: &str) -> HashMap<String, String> {
+        let mut psks = self.agent_psks.clone();
+        if !runtime_psk.is_empty() {
+            for id in &self.runtime_psk_agents {
+                psks.insert(id.clone(), runtime_psk.to_string());
+            }
+        }
+        psks
+    }
+
     /// Return the registered capability list for the given agent, if any.
     ///
-    /// Returns `None` if the agent is not listed in `[agents.registered]`.
+    /// Returns `None` if the agent has no `[agents.<id>]` table.
     pub fn agent_capabilities(&self, agent_name: &str) -> Option<&[String]> {
         self.agent_capabilities.get(agent_name).map(Vec::as_slice)
     }
@@ -521,8 +512,6 @@ pub type SharedRuntimeContext = Arc<RuntimeContext>;
 mod tests {
     use super::*;
     use std::collections::HashMap;
-    use tze_hud_config::HotReloadableConfig;
-    use tze_hud_config::raw::RawDynamicPolicy;
     use tze_hud_scene::config::ResolvedConfig;
 
     fn make_config(caps: Vec<(&str, Vec<&str>)>) -> ResolvedConfig {
@@ -538,8 +527,45 @@ mod tests {
             tab_names: vec!["main".to_string()],
             agent_capabilities,
             agent_budget_overrides: HashMap::new(),
+            agent_psk_env: HashMap::new(),
             source_path: None,
         }
+    }
+
+    #[test]
+    fn runtime_psk_env_resolves_to_runtime_psk_without_env_var() {
+        let mut config = make_config(vec![("claude", vec!["*"])]);
+        config
+            .agent_psk_env
+            .insert("claude".to_string(), RUNTIME_PSK_ENV.to_string());
+        let ctx = RuntimeContext::from_config(config, FallbackPolicy::Guest);
+        let id = ctx
+            .agent_directory("cli-psk")
+            .resolve("cli-psk", "")
+            .unwrap();
+        assert_eq!(id.agent_id, "claude");
+        assert!(id.allows("publish_zone:subtitle"));
+    }
+
+    #[test]
+    fn agent_directory_uses_allow_permissions_and_fallback() {
+        let ctx = RuntimeContext::from_config(
+            make_config(vec![("weather-agent", vec!["create_tiles"])]),
+            FallbackPolicy::Guest,
+        );
+        let dir = ctx.agent_directory("psk");
+        let weather = dir.resolve("psk", "weather-agent").unwrap();
+        assert_eq!(weather.permissions, vec!["create_tiles".to_string()]);
+        assert!(
+            dir.resolve("psk", "stranger")
+                .unwrap()
+                .permissions
+                .is_empty()
+        );
+
+        let dev = RuntimeContext::from_config(make_config(vec![]), FallbackPolicy::Unrestricted);
+        let any = dev.agent_directory("psk").resolve("psk", "anyone").unwrap();
+        assert!(any.allows("publish_zone:subtitle"));
     }
 
     // ── from_config ───────────────────────────────────────────────────────────
@@ -662,41 +688,7 @@ mod tests {
         assert!(caps.contains(&"modify_own_tiles".to_string()));
     }
 
-    #[test]
-    fn from_config_hot_defaults_are_all_none() {
-        let config = make_config(vec![]);
-        let ctx = RuntimeContext::from_config(config, FallbackPolicy::Guest);
-        let hot = ctx.hot_config();
-        assert!(
-            hot.dynamic_policy
-                .as_ref()
-                .map(|p| p.allow_dynamic_agents)
-                .is_none()
-        );
-        assert!(hot.dynamic_policy.is_none());
-    }
-
     // ── from_config_with_hot ──────────────────────────────────────────────────
-
-    #[test]
-    fn from_config_with_hot_stores_initial_hot_config() {
-        let config = make_config(vec![]);
-        let hot = HotReloadableConfig {
-            dynamic_policy: Some(RawDynamicPolicy {
-                allow_dynamic_agents: true,
-                ..Default::default()
-            }),
-        };
-        let ctx = RuntimeContext::from_config_with_hot(config, FallbackPolicy::Guest, hot);
-        let loaded = ctx.hot_config();
-        assert_eq!(
-            loaded
-                .dynamic_policy
-                .as_ref()
-                .map(|p| p.allow_dynamic_agents),
-            Some(true)
-        );
-    }
 
     // ── headless_default ─────────────────────────────────────────────────────
 
@@ -706,266 +698,12 @@ mod tests {
         assert_eq!(ctx.profile.name, "headless");
     }
 
-    #[test]
-    fn headless_default_returns_guest_for_unknown_agent() {
-        let ctx = RuntimeContext::headless_default();
-        let policy = ctx.capability_policy_for("any-agent");
-        // Guest policy: no capabilities
-        let result = policy.evaluate_capability_request(&["create_tiles".to_string()]);
-        assert!(result.is_err(), "guest policy should deny all capabilities");
-    }
-
-    #[test]
-    fn headless_default_hot_config_all_defaults() {
-        let ctx = RuntimeContext::headless_default();
-        let hot = ctx.hot_config();
-        assert!(
-            hot.dynamic_policy
-                .as_ref()
-                .map(|p| p.allow_dynamic_agents)
-                .is_none()
-        );
-        assert!(hot.dynamic_policy.is_none());
-    }
-
     // ── reload_hot_config ─────────────────────────────────────────────────────
-
-    /// Spec §Configuration Reload (lines 263-274): SIGHUP or ReloadConfig RPC
-    /// atomically replaces the hot-reloadable sections without restart.
-    #[test]
-    fn reload_hot_config_atomically_replaces_hot_sections() {
-        let ctx = RuntimeContext::headless_default();
-
-        // Before reload: defaults (all None).
-        assert!(
-            ctx.hot_config()
-                .dynamic_policy
-                .as_ref()
-                .map(|p| p.allow_dynamic_agents)
-                .is_none()
-        );
-
-        // Reload with an updated degradation threshold.
-        let new_hot = HotReloadableConfig {
-            dynamic_policy: Some(RawDynamicPolicy {
-                allow_dynamic_agents: true,
-                ..Default::default()
-            }),
-        };
-        ctx.reload_hot_config(new_hot);
-
-        // After reload: new value is visible.
-        assert_eq!(
-            ctx.hot_config()
-                .dynamic_policy
-                .as_ref()
-                .map(|p| p.allow_dynamic_agents),
-            Some(true),
-            "reload_hot_config must atomically replace hot settings"
-        );
-    }
-
-    #[test]
-    fn reload_hot_config_enables_dynamic_agents() {
-        let ctx = RuntimeContext::headless_default();
-        assert!(
-            ctx.hot_config().dynamic_policy.is_none(),
-            "dynamic_policy absent by default"
-        );
-
-        let new_hot = HotReloadableConfig {
-            dynamic_policy: Some(RawDynamicPolicy {
-                allow_dynamic_agents: true,
-                default_capabilities: Some(vec!["create_tiles".to_string()]),
-                prompt_for_elevated_capabilities: true,
-                dynamic_presence_ceiling: None,
-            }),
-        };
-        ctx.reload_hot_config(new_hot);
-
-        let hot = ctx.hot_config();
-        let dp = hot
-            .dynamic_policy
-            .as_ref()
-            .expect("dynamic_policy should be set");
-        assert!(dp.allow_dynamic_agents);
-    }
-
-    #[test]
-    fn reload_hot_config_multiple_reloads_always_returns_latest() {
-        let ctx = RuntimeContext::headless_default();
-
-        for i in 1u32..=5 {
-            ctx.reload_hot_config(HotReloadableConfig {
-                dynamic_policy: Some(RawDynamicPolicy {
-                    allow_dynamic_agents: i % 2 == 0,
-                    ..Default::default()
-                }),
-            });
-            assert_eq!(
-                ctx.hot_config()
-                    .dynamic_policy
-                    .as_ref()
-                    .map(|p| p.allow_dynamic_agents),
-                Some(i % 2 == 0),
-                "after reload {i}, hot_config must return the latest value"
-            );
-        }
-    }
-
-    /// Frozen sections must not change after a reload.
-    #[test]
-    fn reload_hot_config_does_not_touch_frozen_fields() {
-        let config = make_config(vec![("my-agent", vec!["create_tiles"])]);
-        let ctx = RuntimeContext::from_config(config, FallbackPolicy::Guest);
-
-        // Snapshot frozen state before reload.
-        let profile_name_before = ctx.profile.name.clone();
-        let max_tiles_before = ctx.profile.max_tiles;
-        let envelope_before = ctx.operational_envelope.clone();
-
-        // Reload hot config.
-        ctx.reload_hot_config(HotReloadableConfig {
-            dynamic_policy: Some(RawDynamicPolicy {
-                allow_dynamic_agents: true,
-                ..Default::default()
-            }),
-        });
-
-        // Frozen fields unchanged.
-        assert_eq!(ctx.profile.name, profile_name_before);
-        assert_eq!(ctx.profile.max_tiles, max_tiles_before);
-        assert_eq!(ctx.operational_envelope, envelope_before);
-        // Frozen agent registry unchanged.
-        let policy = ctx.capability_policy_for("my-agent");
-        assert!(
-            policy
-                .evaluate_capability_request(&["create_tiles".to_string()])
-                .is_ok()
-        );
-    }
 
     // ── capability_policy_for ─────────────────────────────────────────────────
 
-    #[test]
-    fn registered_agent_gets_configured_capabilities() {
-        let config = make_config(vec![(
-            "agent-a",
-            vec!["create_tiles", "read_scene_topology"],
-        )]);
-        let ctx = RuntimeContext::from_config(config, FallbackPolicy::Guest);
-        let policy = ctx.capability_policy_for("agent-a");
-        let result = policy.evaluate_capability_request(&["create_tiles".to_string()]);
-        assert!(
-            result.is_ok(),
-            "registered agent should be granted create_tiles"
-        );
-        let result = policy.evaluate_capability_request(&["manage_tabs".to_string()]);
-        assert!(
-            result.is_err(),
-            "registered agent should be denied unconfigured capability"
-        );
-    }
-
-    #[test]
-    fn unregistered_agent_gets_guest_policy_by_default() {
-        let config = make_config(vec![]);
-        let ctx = RuntimeContext::from_config(config, FallbackPolicy::Guest);
-        let policy = ctx.capability_policy_for("unknown-agent");
-        assert!(!policy.is_unrestricted());
-        let result = policy.evaluate_capability_request(&["create_tiles".to_string()]);
-        assert!(
-            result.is_err(),
-            "unregistered agent should be denied under guest fallback"
-        );
-    }
-
-    #[test]
-    fn unregistered_agent_gets_unrestricted_under_dev_fallback() {
-        let config = make_config(vec![]);
-        let ctx = RuntimeContext::from_config(config, FallbackPolicy::Unrestricted);
-        let policy = ctx.capability_policy_for("unknown-agent");
-        assert!(policy.is_unrestricted());
-    }
-
-    #[test]
-    fn multiple_agents_get_independent_policies() {
-        let config = make_config(vec![
-            ("agent-a", vec!["create_tiles"]),
-            ("agent-b", vec!["read_telemetry"]),
-        ]);
-        let ctx = RuntimeContext::from_config(config, FallbackPolicy::Guest);
-
-        // agent-a can create tiles but not read telemetry
-        let policy_a = ctx.capability_policy_for("agent-a");
-        assert!(
-            policy_a
-                .evaluate_capability_request(&["create_tiles".to_string()])
-                .is_ok()
-        );
-        assert!(
-            policy_a
-                .evaluate_capability_request(&["read_telemetry".to_string()])
-                .is_err()
-        );
-
-        // agent-b can read telemetry but not create tiles
-        let policy_b = ctx.capability_policy_for("agent-b");
-        assert!(
-            policy_b
-                .evaluate_capability_request(&["read_telemetry".to_string()])
-                .is_ok()
-        );
-        assert!(
-            policy_b
-                .evaluate_capability_request(&["create_tiles".to_string()])
-                .is_err()
-        );
-    }
-
     // ── Spec: Agent Registration with Per-Agent Budget Overrides ─────────────
     // configuration/spec.md lines 136-147
-
-    #[test]
-    fn config_registered_agent_caps_replace_psk_unrestricted_sentinel() {
-        // This test encodes the core invariant: after wiring config,
-        // PSK auth no longer implies unrestricted "*" — only registered
-        // agents get their listed capabilities.
-        let config = make_config(vec![(
-            "my-agent",
-            vec!["create_tiles", "modify_own_tiles", "access_input_events"],
-        )]);
-        let ctx = RuntimeContext::from_config(config, FallbackPolicy::Guest);
-        let policy = ctx.capability_policy_for("my-agent");
-
-        // Should NOT be unrestricted
-        assert!(
-            !policy.is_unrestricted(),
-            "config-registered agent policy must not be unrestricted"
-        );
-
-        // Should allow exactly the listed capabilities
-        assert!(
-            policy
-                .evaluate_capability_request(&["create_tiles".to_string()])
-                .is_ok()
-        );
-        assert!(
-            policy
-                .evaluate_capability_request(&["modify_own_tiles".to_string()])
-                .is_ok()
-        );
-        assert!(
-            policy
-                .evaluate_capability_request(&["access_input_events".to_string()])
-                .is_ok()
-        );
-        assert!(
-            policy
-                .evaluate_capability_request(&["manage_tabs".to_string()])
-                .is_err()
-        );
-    }
 
     #[test]
     fn headless_production_consumers_share_exact_store_limits() {

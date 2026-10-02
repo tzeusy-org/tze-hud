@@ -33,11 +33,11 @@ use std::collections::HashMap;
 
 use tze_hud_scene::config::{
     ConfigError, ConfigErrorCode, ConfigLoader, ParseError, RegisteredAgentBudgetOverrides,
-    ResolvedConfig, is_canonical_capability,
+    ResolvedConfig,
 };
 
 use crate::agents;
-use crate::capability::capability_hint;
+use crate::allow::allow_to_permissions;
 use crate::profile;
 use crate::raw::RawConfig;
 use crate::resolver;
@@ -249,43 +249,9 @@ impl ConfigLoader for TzeHudConfig {
             zones::validate_zones(zone_registry, &mut errors);
         }
 
-        // ── (11) Agent registration budgets ───────────────────────────────────
-        // We need the resolved profile for budget ceiling checks.  Derive it
-        // here from the raw config (best-effort; skip if profile is invalid).
+        // ── (11) Agent allow lists and PSK variable names ─────────────────────
         if let Some(raw_agents) = &self.raw.agents {
-            // Only validate budgets when we can resolve the profile.
-            // profile::resolve_profile performs its own error collection
-            // separately; we pass synthetic GPU values to avoid display
-            // dependency during pure validation.
-            if let Ok(resolved_profile) = profile::resolve_profile(
-                &self.raw, /*gpu_vram_mb=*/ 8192, /*refresh_hz=*/ 60,
-            ) {
-                agents::validate_agents(raw_agents, &resolved_profile, &mut errors);
-            }
-            // If profile resolution fails, its errors were already added in step (2)/(3).
-            // Skip agent budget checks to avoid duplicate/misleading errors.
-        }
-
-        // ── (12) Capability vocabulary ────────────────────────────────────────
-        if let Some(agents) = &self.raw.agents
-            && let Some(registered) = &agents.registered
-        {
-            for (agent_name, agent) in registered {
-                if let Some(caps) = &agent.capabilities {
-                    for cap in caps {
-                        if !is_canonical_capability(cap) {
-                            let hint = capability_hint(cap);
-                            errors.push(ConfigError {
-                                code: ConfigErrorCode::UnknownCapability,
-                                field_path: format!("agents.registered.{agent_name}.capabilities"),
-                                expected: "canonical v1 capability name".into(),
-                                got: cap.clone(),
-                                hint,
-                            });
-                        }
-                    }
-                }
-            }
+            agents::validate_agents(raw_agents, &mut errors);
         }
 
         // ── (10) Per-agent budget ceiling validation ───────────────────────────
@@ -353,13 +319,14 @@ impl ConfigLoader for TzeHudConfig {
             .collect();
 
         let mut agent_capabilities: HashMap<String, Vec<String>> = HashMap::new();
+        let mut agent_psk_env: HashMap<String, String> = HashMap::new();
         let mut agent_budget_overrides = HashMap::new();
-        if let Some(agents) = &self.raw.agents
-            && let Some(registered) = &agents.registered
-        {
-            for (name, agent) in registered {
-                agent_capabilities
-                    .insert(name.clone(), agent.capabilities.clone().unwrap_or_default());
+        if let Some(agents) = &self.raw.agents {
+            for (name, agent) in agents {
+                agent_capabilities.insert(name.clone(), allow_to_permissions(&agent.allow));
+                if let Some(env) = &agent.psk_env {
+                    agent_psk_env.insert(name.clone(), env.clone());
+                }
                 agent_budget_overrides.insert(
                     name.clone(),
                     RegisteredAgentBudgetOverrides {
@@ -377,6 +344,7 @@ impl ConfigLoader for TzeHudConfig {
             profile,
             tab_names,
             agent_capabilities,
+            agent_psk_env,
             agent_budget_overrides,
             source_path,
         })
@@ -389,15 +357,6 @@ impl ConfigLoader for TzeHudConfig {
         Self: Sized,
     {
         resolver::resolve_config_path(cli_path)
-    }
-
-    // ── is_known_capability ───────────────────────────────────────────────────
-
-    fn is_known_capability(name: &str) -> bool
-    where
-        Self: Sized,
-    {
-        is_canonical_capability(name)
     }
 }
 
@@ -612,8 +571,8 @@ fn validate_agents(raw: &RawConfig, errors: &mut Vec<ConfigError>) {
         None => return, // Unresolvable profile — other checks will report the error.
     };
 
-    let agents = match raw.agents.as_ref().and_then(|a| a.registered.as_ref()) {
-        Some(registered) => registered,
+    let agents = match raw.agents.as_ref() {
+        Some(agents) => agents,
         None => return,
     };
 
@@ -623,7 +582,7 @@ fn validate_agents(raw: &RawConfig, errors: &mut Vec<ConfigError>) {
             if agent_max_tiles > ceiling.max_tiles {
                 errors.push(ConfigError {
                     code: ConfigErrorCode::AgentBudgetExceedsProfile,
-                    field_path: format!("agents.registered.{agent_name}.max_tiles"),
+                    field_path: format!("agents.{agent_name}.max_tiles"),
                     expected: format!("<= {} (active profile ceiling)", ceiling.max_tiles),
                     got: format!("{agent_max_tiles}"),
                     hint: format!(
@@ -641,7 +600,7 @@ fn validate_agents(raw: &RawConfig, errors: &mut Vec<ConfigError>) {
             if agent_max_texture_mb > ceiling.max_texture_mb {
                 errors.push(ConfigError {
                     code: ConfigErrorCode::AgentBudgetExceedsProfile,
-                    field_path: format!("agents.registered.{agent_name}.max_texture_mb"),
+                    field_path: format!("agents.{agent_name}.max_texture_mb"),
                     expected: format!("<= {} (active profile ceiling)", ceiling.max_texture_mb),
                     got: format!("{agent_max_texture_mb}"),
                     hint: format!(
@@ -659,7 +618,7 @@ fn validate_agents(raw: &RawConfig, errors: &mut Vec<ConfigError>) {
             if agent_max_update_hz > ceiling.max_agent_update_hz {
                 errors.push(ConfigError {
                     code: ConfigErrorCode::AgentBudgetExceedsProfile,
-                    field_path: format!("agents.registered.{agent_name}.max_update_hz"),
+                    field_path: format!("agents.{agent_name}.max_update_hz"),
                     expected: format!(
                         "<= {} (active profile max_agent_update_hz ceiling)",
                         ceiling.max_agent_update_hz

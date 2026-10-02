@@ -299,7 +299,7 @@ pub struct ProjectionListEntry {
 /// Bounded caller-scoped result of [`PortalOp::List`].
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct ProjectionListBatch {
-    /// Content-free summaries belonging to the calling resident principal.
+    /// Content-free summaries belonging to the calling agent.
     pub projections: Vec<ProjectionListEntry>,
 }
 

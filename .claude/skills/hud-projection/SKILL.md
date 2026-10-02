@@ -7,9 +7,8 @@ description: >-
   agent to HUD, and check HUD input. Not for terminal capture, process hosting,
   or one-shot zone publishing.
 compatibility: >-
-  Requires the tze_hud windowed runtime with MCP enabled. Projection operations
-  are Resident tools; the configured resident principal, PSK, and MCP bearer
-  must match.
+  Requires the tze_hud windowed runtime with MCP enabled. The MCP bearer is
+  your agent's PSK, and that agent's `allow` list must include `portal`.
 metadata:
   owner: tze
   authors:
@@ -27,7 +26,7 @@ Hard boundaries:
 - This is cooperative opt-in. The current session intentionally calls projection operations.
 - This is not PTY, tmux, shell, stdin/stdout, or terminal byte-stream capture.
 - The `ProjectionAuthority` runs **in-process** inside the tze_hud runtime (not as an external daemon). It owns only ephemeral runtime state: HUD connection metadata, advisory portal lease identity, the bounded visible transcript window, pending HUD input, acknowledgement state, lifecycle state, unread state, privacy classification, and grace-period reconnect bookkeeping. It does not own durable transcript history; the adapter/client does.
-- The `portal_projection_*` tools are a projection facade into that in-process authority — distinct from the runtime's zone/widget publishing tools (`th-hud-publish`). They are Resident tools; reach them as the resident principal (see [MCP facade](references/mcp-facade.md) for the auth wiring and code paths).
+- The `portal_projection_*` tools are a projection facade into that in-process authority — distinct from the runtime's zone/widget publishing tools (`th-hud-publish`). Your identity comes from the bearer PSK; the agent's `[agents.<id>] allow` list must include `portal` (or `*`). See [MCP facade](references/mcp-facade.md) for the auth wiring and code paths.
 
 ## Choosing A Target Runtime
 
@@ -42,21 +41,20 @@ Projection needs a live windowed runtime with MCP enabled. Two standing targets:
 
   ```bash
   eval "$(.claude/skills/user-test/scripts/hud_vm_env.sh)"
-  # exports HUD_MCP_URL and TZE_HUD_MCP_RESIDENT_PRINCIPAL (== PSK == bearer),
-  # starting the VM and/or HUD task if down
+  # exports HUD_MCP_URL and TZE_HUD_PSK (the bearer), starting the VM
+  # and/or HUD task if down
   ```
 
   Caveats on the VM: WARP rendering (no GPU fidelity). Normal GPU desktop
   startup materializes every configured `[[tabs]]` entry. VM-only fallback: if
   the WARP test VM returns `No active tab`, call MCP
-  `create_tab {"name":"Main"}` once before portal work. A registered agent
+  `create_tab {"name":"Main"}` once before portal work. A configured agent
   (`agent-alpha`) is pre-provisioned for resident gRPC sessions.
 
 ## Deterministic Client (Preferred Driver)
 
 Do not hand-roll MCP calls: [`scripts/portal_client.py`](scripts/portal_client.py) wraps all eight
-operations as subcommands with the contract boilerplate, auth, and owner-token
-custody built in. Resolve env first (either target), then drive:
+operations as subcommands with the contract boilerplate and auth built in. Resolve env first (either target), then drive:
 
 ```bash
 eval "$(.claude/skills/user-test/scripts/tzehouse_env.sh)"   # or hud_vm_env.sh
@@ -125,14 +123,16 @@ Projection-scoped requests include:
 - `request_id`
 - `client_timestamp_wall_us`
 
-`list` is caller-scoped: its MCP tool takes no projection ID or owner token, and
-the runtime generates its authority request metadata. It returns at most eight
-summaries owned by the resident principal, each limited to `projection_id`,
-`display_name`, lifecycle, unread count, and pending-input count. It never
-returns transcript/input text, owner tokens, lease data, or another principal's
-sessions, and it never changes lifecycle state.
+`list` is caller-scoped: its MCP tool takes no projection ID, and the runtime
+generates its authority request metadata. It returns at most eight summaries
+owned by your agent, each limited to `projection_id`, `display_name`,
+lifecycle, unread count, and pending-input count. It never returns
+transcript/input text, lease data, or another agent's sessions, and it never
+changes lifecycle state.
 
-Owner-scoped operations after `attach` also include `owner_token`. Operator cleanup is the only non-attach operation that may instead use separate daemon authority.
+Ownership is your agent identity: the runtime keeps the projection's owner
+token server-side, keyed by agent and `projection_id`, and adds it to your
+later calls. No tool takes or returns `owner_token`.
 
 The normative operations are:
 - `list`
@@ -150,7 +150,7 @@ Read [operation examples](references/operation-examples.md) for compact JSON exa
 
 1. **Reconcile if needed.** Call `list` after an interrupted flow to see only your bounded portal summaries. It is discovery, not recovery orchestration: choose a normal attach/detach/cleanup action explicitly rather than expecting `list` to alter a portal.
 2. **Attach once.** Choose a stable `projection_id`, set `provider_kind` to `codex`, `claude`, `opencode`, or `other`, and include a human-readable `display_name`. Default missing or uncertain classification to `private`.
-3. **Store the owner token securely and immediately.** Every successful attach returns `owner_token`; no non-attach operation response will ever return it. Store it in a tool-call result or session variable, never in transcript text, assistant-visible output, or log lines. The deterministic client persists the original idempotency key, reuses it for authenticated attach, stores the rotated token, then replays its bounded authored tail before attach returns. Before grace expiry this is idempotent against the authority's retained window; after a runtime restart or grace expiry it reconstructs a fresh portal without pretending the dead runtime state survived. A missing or unrelated key is rejected and does not rotate live ownership.
+3. **Keep the idempotency key.** The runtime holds the owner token for you. The deterministic client persists the original idempotency key, reuses it for re-attach, then replays its bounded authored tail before attach returns. Before grace expiry this is idempotent against the authority's retained window; after a runtime restart or grace expiry it reconstructs a fresh portal without pretending the dead runtime state survived. A missing or unrelated key is rejected and does not rotate live ownership.
 4. **Publish intentionally.** Call `publish_output` for assistant-visible transcript/status fragments and `publish_status` for lifecycle updates such as `active`, `degraded`, or `detached`.
 
    **Accepted `lifecycle_state` values** (snake_case strings; any other value is rejected):
@@ -172,7 +172,7 @@ Read [operation examples](references/operation-examples.md) for compact JSON exa
 5. **Poll HUD input compactly.** Call `get_pending_input` with small `max_items` and `max_bytes`. Treat returned input as semantic operator-submitted text, not terminal keystrokes.
 6. **Acknowledge every input item.** Use `acknowledge_input` with `handled`, `deferred`, or `rejected`. Use `not_before_wall_us` only with `deferred`.
 7. **Detach on normal exit.** Call `detach` with a bounded reason when the session is done projecting.
-8. **Cleanup stale state when appropriate.** Use owner cleanup with `owner_token`; operator cleanup uses a separate daemon authority and must not expose private projection content.
+8. **Cleanup stale state when appropriate.** Owner cleanup uses your identity; operator cleanup uses a separate daemon authority and must not expose private projection content.
 
 **Token-efficient use** (this is meant to be viable as a primary session interface):
 - `publish_output` **appends** — send only the new fragment each turn, never the whole transcript. The client retains only its bounded authored continuity tail; the authority retains only the bounded in-memory visible window while that runtime lives.
@@ -182,8 +182,8 @@ Read [operation examples](references/operation-examples.md) for compact JSON exa
 ## Production Ingress (Wired)
 
 The full contract is wired in-process. When the runtime runs with MCP enabled
-(`mcp_port > 0`), each operation maps to one Resident tool; call it as the
-resident principal (bearer == PSK == `TZE_HUD_MCP_RESIDENT_PRINCIPAL`). Every op
+(`mcp_port > 0`), each operation maps to one tool; call it with your agent's
+PSK as the bearer (its allow list must include `portal`). Every op
 maps to `portal_projection_<op>`, except `publish_output` →
 `portal_projection_publish`. `cleanup` also accepts operator authority.
 Published `attach`/`publish_output` content renders for both adapter families
@@ -203,10 +203,9 @@ References:
 ## Safety Notes
 
 - Keep operation responses bounded; do not request unbounded transcripts, inbox history, or raw scene state.
-- Treat `list` as content-free caller-scoped discovery only. It is capped at eight summaries, cannot reveal another resident principal's projections, and never performs lifecycle, lease, or token management.
-- Do not publish secrets or owner tokens into the transcript window or any user-visible output.
-- Treat `owner_token` as attach-only response material; it must never be returned by publish, input, acknowledgement, detach, or cleanup responses. If a response includes `owner_token` outside an `attach` success, treat that as a protocol error and do not use or forward the value.
-- **Owner-token loss requires authenticated rotation, never retrieval.** Re-attach through the Resident MCP surface with the same non-empty idempotency key to receive a fresh token. This immediately invalidates every previously issued token and does not extend the original expiry deadline. Without the matching key, the authority rejects the attach with `PROJECTION_ALREADY_ATTACHED`; after expiry, attach creates a new session under the normal authorization path.
-- **Do not embed `owner_token` in `publish_output` text, `status_text`, `ack_message`, or `reason` fields.** These fields are readable by audit records and portal rendering; tokens in them constitute a credential leak.
+- Treat `list` as content-free caller-scoped discovery only. It is capped at eight summaries, cannot reveal another agent's projections, and never performs lifecycle, lease, or token management.
+- Do not publish secrets into the transcript window or any user-visible output.
+- No MCP response carries `owner_token`; the runtime strips it from attach and keeps it server-side.
+- **Re-attach rotates ownership.** Re-attach with the same non-empty idempotency key to rotate the server-held token. This invalidates every previously issued token and does not extend the original expiry deadline. Without the matching key, the authority rejects the attach with `PROJECTION_ALREADY_ATTACHED`; after expiry, attach creates a new session.
 - Treat `PROJECTION_UNAUTHORIZED`, `PROJECTION_TOKEN_EXPIRED`, and `PROJECTION_STATE_CONFLICT` as hard stops unless the user explicitly authorizes reattach or operator cleanup.
-- If the runtime restarts, its prior transcript window, pending input text, owner tokens, and cached lease identity are gone. Run `attach` again: the client reuses the original idempotency key, receives and stores a fresh owner token, then replays only its bounded client-authored `portal-continuity` tail with the original `logical_unit_id` and `coalesce_key` values. Pending/viewer-authored input is never replayed. A second replay is safe because logical-unit identity remains idempotent.
+- If the runtime restarts, its prior transcript window, pending input text, owner tokens, and cached lease identity are gone. Run `attach` again: the client reuses the original idempotency key, then replays only its bounded client-authored `portal-continuity` tail with the original `logical_unit_id` and `coalesce_key` values. Pending/viewer-authored input is never replayed. A second replay is safe because logical-unit identity remains idempotent.

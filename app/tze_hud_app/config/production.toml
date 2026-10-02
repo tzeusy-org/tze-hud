@@ -110,27 +110,20 @@ y      = 40
 width  = 252
 height = 96
 
-# ── Registered agents ─────────────────────────────────────────────────────────
-# Capability governance is fail-closed under production config: only agents listed
-# in [agents.registered] may connect, and only with the capabilities enumerated
-# here. Unknown agents receive guest policy (no capabilities). See
-# configuration/spec.md §Capability Vocabulary for the canonical vocabulary.
+# ── Agents ────────────────────────────────────────────────────────────────────
+# Identity comes from the PSK; `allow` is the whole permission model.
+# Entries: "zone:<name|*>", "widget:<name|*>", "portal", "tiles", "*".
+# Agents without a table here get nothing under this config.
 
-# Resident gRPC portal bridge (hud-x2e2v / hud-osy3m).
-# The bridge is default-OFF: it only connects when enabled via
-# TZE_HUD_RESIDENT_GRPC_PORTAL=1 or a [resident_grpc_portal] settings block. When
-# enabled against this runtime's own loopback gRPC server, it presents the agent
-# identity `resident-grpc-portal` (DEFAULT_RESIDENT_GRPC_AGENT_ID) and authenticates
-# with the hosting runtime's own PSK (ResidentGrpcCredentialSource::RuntimePsk —
-# no separate auth_psk_env is required for the loopback self-target).
-#
-# Without this entry the bridge connects but fails handshake with
-# CapabilityNotGranted, because the runtime is the final authorizer. The bridge
-# requires exactly PORTAL_CAPABILITIES (crates/tze_hud_runtime resident_grpc_bridge):
-# it creates one portal tile and mutates only that tile. Grant the least-privilege
-# set — nothing more.
-[agents.registered.resident-grpc-portal]
-capabilities = [
-    "create_tiles",
-    "modify_own_tiles",
-]
+# The operator's own LLM sessions (MCP and hud-projection). Reads the runtime
+# PSK, so a caller presenting TZE_HUD_PSK is this agent.
+[agents.claude]
+psk_env = "TZE_HUD_PSK"
+allow = ["*"]
+
+# Resident gRPC portal bridge (hud-x2e2v / hud-osy3m). Default-OFF: it only
+# connects when enabled via TZE_HUD_RESIDENT_GRPC_PORTAL=1 or a
+# [resident_grpc_portal] block. It authenticates with the runtime PSK and the
+# id `resident-grpc-portal`, creates one portal tile, and mutates only that tile.
+[agents.resident-grpc-portal]
+allow = ["tiles"]

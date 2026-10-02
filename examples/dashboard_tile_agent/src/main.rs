@@ -766,10 +766,6 @@ pub struct SessionState {
     /// Scopes all scene objects the agent creates.  Non-empty per spec.
     pub namespace: String,
 
-    /// Capabilities actually granted after intersecting the requested set
-    /// with the agent's authorization policy.
-    pub granted_capabilities: Vec<String>,
-
     /// Resume token for reconnecting within the grace period.
     pub resume_token: Vec<u8>,
 
@@ -884,11 +880,6 @@ async fn establish_session_with_host(
                 agent_id: agent_id.to_string(),
                 // Canonical v1 capability names — non-canonical names are
                 // rejected with CONFIG_UNKNOWN_CAPABILITY.
-                requested_capabilities: vec![
-                    "create_tiles".to_string(),        // create tiles in leased area
-                    "modify_own_tiles".to_string(),    // mutate tiles owned by this agent
-                    "access_input_events".to_string(), // receive pointer/keyboard events
-                ],
                 // LEASE_CHANGES is mandatory; listing it explicitly is idiomatic.
                 initial_subscriptions: vec!["LEASE_CHANGES".to_string()],
                 resume_token: Vec::new(), // new session, no prior resume token
@@ -940,7 +931,6 @@ async fn establish_session_with_host(
             );
             println!("  namespace            = {}", e.namespace);
             println!("  heartbeat_ms         = {}", e.heartbeat_interval_ms);
-            println!("  granted_capabilities = {:?}", e.granted_capabilities);
             println!("  active_subscriptions = {:?}", e.active_subscriptions);
             println!(
                 "  protocol_version     = v{}.{}",
@@ -1008,7 +998,6 @@ async fn establish_session_with_host(
     Ok(SessionState {
         session_id: established.session_id.clone(),
         namespace: established.namespace.clone(),
-        granted_capabilities: established.granted_capabilities.clone(),
         resume_token: established.resume_token.clone(),
         heartbeat_interval_ms: established.heartbeat_interval_ms,
         negotiated_protocol_version: established.negotiated_protocol_version,
@@ -1090,11 +1079,6 @@ async fn request_lease_with_host(
         payload: Some(session_proto::client_message::Payload::SessionInit(
             session_proto::SessionInit {
                 agent_id: agent_id.to_string(),
-                requested_capabilities: vec![
-                    "create_tiles".to_string(),
-                    "modify_own_tiles".to_string(),
-                    "access_input_events".to_string(),
-                ],
                 initial_subscriptions: vec!["LEASE_CHANGES".to_string()],
                 resume_token: Vec::new(),
                 min_protocol_version: 1000,
@@ -1165,11 +1149,7 @@ async fn request_lease_with_host(
         sequence: 2,
         timestamp_wall_us: now_wall_us(),
         payload: Some(session_proto::client_message::Payload::LeaseRequest(
-            session_proto::LeaseRequest {
-                ttl_ms: 60_000,
-                capabilities: vec!["create_tiles".to_string(), "modify_own_tiles".to_string()],
-                lease_priority: 2,
-            },
+            session_proto::LeaseRequest { ttl_ms: 60_000 },
         )),
     })
     .await?;
@@ -1200,8 +1180,6 @@ async fn request_lease_with_host(
                 "  LeaseResponse: granted=true, ttl={}ms",
                 resp.granted_ttl_ms
             );
-            println!("    granted_capabilities = {:?}", resp.granted_capabilities);
-            println!("    granted_priority     = {}", resp.granted_priority);
             // ── 5. Return lease_id ────────────────────────────────────
             Ok(resp.lease_id)
         }
@@ -1391,10 +1369,6 @@ async fn create_tile_batch_with_host(
         payload: Some(session_proto::client_message::Payload::SessionInit(
             session_proto::SessionInit {
                 agent_id: agent_id.to_string(),
-                requested_capabilities: vec![
-                    "create_tiles".to_string(),
-                    "modify_own_tiles".to_string(),
-                ],
                 initial_subscriptions: vec!["LEASE_CHANGES".to_string()],
                 resume_token: Vec::new(),
                 min_protocol_version: 1000,
@@ -1436,11 +1410,7 @@ async fn create_tile_batch_with_host(
         sequence: 2,
         timestamp_wall_us: now_wall_us(),
         payload: Some(session_proto::client_message::Payload::LeaseRequest(
-            session_proto::LeaseRequest {
-                ttl_ms: 60_000,
-                capabilities: vec!["create_tiles".to_string(), "modify_own_tiles".to_string()],
-                lease_priority: 2,
-            },
+            session_proto::LeaseRequest { ttl_ms: 60_000 },
         )),
     })
     .await?;
@@ -2050,125 +2020,6 @@ mod tests {
         server.abort();
     }
 
-    /// Task 2.3 — LeaseRequest with a non-canonical capability is denied.
-    ///
-    /// Spec §Requirement: Lease Request With AutoRenew — Scenario: Tile creation
-    /// requires active lease (only valid capabilities may be requested).
-    /// tasks.md §2.3: add test — lease request without required capabilities is denied.
-    ///
-    /// "create_tile" (singular) is a legacy non-canonical name rejected since
-    /// RFC 0005 Round 14. The server MUST respond with:
-    ///   LeaseResponse { granted: false, deny_code: "CONFIG_UNKNOWN_CAPABILITY" }.
-    #[tokio::test]
-    async fn test_lease_request_with_invalid_capability_is_denied() {
-        use tokio_stream::StreamExt as _;
-        use tze_hud_protocol::proto::session as sp;
-
-        let port = ephemeral_port();
-        let server = start_test_runtime(port).await.expect("runtime start");
-
-        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-
-        // ── 1. Open a session ─────────────────────────────────────────────────
-        #[allow(deprecated)]
-        let mut session_client =
-            sp::hud_session_client::HudSessionClient::connect(format!("http://[::1]:{port}"))
-                .await
-                .expect("connect");
-
-        let (tx, rx) = tokio::sync::mpsc::channel::<sp::ClientMessage>(64);
-        let stream_req = tokio_stream::wrappers::ReceiverStream::new(rx);
-        let mut resp_stream = session_client
-            .session(stream_req)
-            .await
-            .expect("session rpc")
-            .into_inner();
-
-        let now_us = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_micros() as u64)
-            .unwrap_or(1);
-
-        // SessionInit with valid capabilities for the session.
-        tx.send(sp::ClientMessage {
-            sequence: 1,
-            timestamp_wall_us: now_us,
-            payload: Some(sp::client_message::Payload::SessionInit(sp::SessionInit {
-                agent_id: "bad-cap-test-agent".to_string(),
-                requested_capabilities: vec![
-                    "create_tiles".to_string(),
-                    "modify_own_tiles".to_string(),
-                ],
-                initial_subscriptions: vec!["LEASE_CHANGES".to_string()],
-                resume_token: Vec::new(),
-                min_protocol_version: 1000,
-                max_protocol_version: 1001,
-                auth_credential: Some(sp::AuthCredential {
-                    credential: Some(sp::auth_credential::Credential::PreSharedKey(
-                        sp::PreSharedKeyCredential {
-                            key: TEST_PSK.to_string(),
-                        },
-                    )),
-                }),
-            })),
-        })
-        .await
-        .unwrap();
-
-        // Drain SessionEstablished + SceneSnapshot + current DegradationNotice.
-        for _ in 0..3 {
-            resp_stream
-                .next()
-                .await
-                .expect("stream not closed")
-                .expect("no stream error");
-        }
-
-        // ── 2. Send a LeaseRequest with a non-canonical (legacy singular) capability ──
-        //
-        // "create_tile" (singular) was superseded by "create_tiles" (plural) in
-        // RFC 0005 Round 14.  The server must reject this with CONFIG_UNKNOWN_CAPABILITY.
-        tx.send(sp::ClientMessage {
-            sequence: 2,
-            timestamp_wall_us: now_us,
-            payload: Some(sp::client_message::Payload::LeaseRequest(
-                sp::LeaseRequest {
-                    ttl_ms: 60_000,
-                    capabilities: vec!["create_tile".to_string()], // non-canonical singular form
-                    lease_priority: 2,
-                },
-            )),
-        })
-        .await
-        .unwrap();
-
-        // ── 3. Assert denial ──────────────────────────────────────────────────
-        let resp_msg = next_server_msg(&mut resp_stream).await;
-        match resp_msg.payload {
-            Some(sp::server_message::Payload::LeaseResponse(resp)) => {
-                assert!(
-                    !resp.granted,
-                    "LeaseResponse must NOT be granted for non-canonical capability — tasks.md §2.3"
-                );
-                assert_eq!(
-                    resp.deny_code, "CONFIG_UNKNOWN_CAPABILITY",
-                    "deny_code must be CONFIG_UNKNOWN_CAPABILITY for unknown capability, \
-                     got: {:?}",
-                    resp.deny_code
-                );
-                assert!(
-                    !resp.deny_reason.is_empty(),
-                    "deny_reason must be non-empty — tasks.md §2.3"
-                );
-            }
-            other => panic!(
-                "Expected LeaseResponse(denied) for non-canonical capability, got: {other:?}"
-            ),
-        }
-
-        server.abort();
-    }
-
     // ── Phase 3: Resource Upload tests ───────────────────────────────────────
 
     /// Task 3.1 — `upload_icon` returns a 32-byte BLAKE3 ResourceId.
@@ -2484,10 +2335,6 @@ mod tests {
             timestamp_wall_us: now_us,
             payload: Some(sp::client_message::Payload::SessionInit(sp::SessionInit {
                 agent_id: "partial-fail-test-agent".to_string(),
-                requested_capabilities: vec![
-                    "create_tiles".to_string(),
-                    "modify_own_tiles".to_string(),
-                ],
                 initial_subscriptions: vec!["LEASE_CHANGES".to_string()],
                 resume_token: vec![],
                 min_protocol_version: 1000,
@@ -2518,11 +2365,7 @@ mod tests {
             sequence: 2,
             timestamp_wall_us: crate::now_wall_us(),
             payload: Some(sp::client_message::Payload::LeaseRequest(
-                sp::LeaseRequest {
-                    ttl_ms: 60_000,
-                    capabilities: vec!["create_tiles".to_string(), "modify_own_tiles".to_string()],
-                    lease_priority: 2,
-                },
+                sp::LeaseRequest { ttl_ms: 60_000 },
             )),
         })
         .await
@@ -2741,10 +2584,6 @@ mod tests {
             timestamp_wall_us: now_us,
             payload: Some(sp::client_message::Payload::SessionInit(sp::SessionInit {
                 agent_id: "node-atomicity-test-agent".to_string(),
-                requested_capabilities: vec![
-                    "create_tiles".to_string(),
-                    "modify_own_tiles".to_string(),
-                ],
                 initial_subscriptions: vec!["LEASE_CHANGES".to_string()],
                 resume_token: vec![],
                 min_protocol_version: 1000,
@@ -2773,11 +2612,7 @@ mod tests {
             sequence: 2,
             timestamp_wall_us: crate::now_wall_us(),
             payload: Some(sp::client_message::Payload::LeaseRequest(
-                sp::LeaseRequest {
-                    ttl_ms: 60_000,
-                    capabilities: vec!["create_tiles".to_string(), "modify_own_tiles".to_string()],
-                    lease_priority: 2,
-                },
+                sp::LeaseRequest { ttl_ms: 60_000 },
             )),
         })
         .await
@@ -3179,10 +3014,6 @@ mod tests {
             timestamp_wall_us: now_us,
             payload: Some(sp::client_message::Payload::SessionInit(sp::SessionInit {
                 agent_id: "expired-lease-update-agent".to_string(),
-                requested_capabilities: vec![
-                    "create_tiles".to_string(),
-                    "modify_own_tiles".to_string(),
-                ],
                 initial_subscriptions: vec!["LEASE_CHANGES".to_string()],
                 resume_token: vec![],
                 min_protocol_version: 1000,
@@ -3848,11 +3679,6 @@ mod tests {
             timestamp_wall_us: now_us,
             payload: Some(sp::client_message::Payload::SessionInit(sp::SessionInit {
                 agent_id: agent_id.to_string(),
-                requested_capabilities: vec![
-                    "create_tiles".to_string(),
-                    "modify_own_tiles".to_string(),
-                    "access_input_events".to_string(),
-                ],
                 // Subscribe to INPUT_EVENTS to receive ClickEvent / CommandInputEvent.
                 initial_subscriptions: vec![
                     "LEASE_CHANGES".to_string(),

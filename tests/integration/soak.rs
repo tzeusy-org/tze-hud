@@ -213,7 +213,6 @@ impl SoakAgentSession {
 /// Connect a soak agent, complete the handshake, and acquire a lease.
 async fn connect_soak_agent(
     agent_id: &str,
-    lease_priority: u32,
     lease_ttl_ms: u64,
 ) -> Result<SoakAgentSession, Box<dyn std::error::Error>> {
     let mut client = HudSessionClient::connect(format!("http://[::1]:{SOAK_GRPC_PORT}")).await?;
@@ -230,10 +229,6 @@ async fn connect_soak_agent(
         payload: Some(session_proto::client_message::Payload::SessionInit(
             session_proto::SessionInit {
                 agent_id: agent_id.to_string(),
-                requested_capabilities: vec![
-                    "create_tiles".to_string(),
-                    "modify_own_tiles".to_string(),
-                ],
                 initial_subscriptions: vec!["SCENE_TOPOLOGY".to_string()],
                 resume_token: Vec::new(),
                 min_protocol_version: 0,
@@ -287,8 +282,6 @@ async fn connect_soak_agent(
         payload: Some(session_proto::client_message::Payload::LeaseRequest(
             session_proto::LeaseRequest {
                 ttl_ms: lease_ttl_ms,
-                capabilities: vec!["create_tiles".to_string(), "modify_own_tiles".to_string()],
-                lease_priority,
             },
         )),
     })
@@ -667,8 +660,8 @@ async fn test_soak_resource_growth() -> Result<(), Box<dyn std::error::Error>> {
         .collect();
 
     let mut agents: Vec<SoakAgentSession> = Vec::new();
-    for (i, id) in agent_ids.iter().enumerate() {
-        let session = connect_soak_agent(id, (i + 1) as u32, 120_000).await?;
+    for id in agent_ids.iter() {
+        let session = connect_soak_agent(id, 120_000).await?;
         eprintln!("[soak] Connected: {} → namespace={}", id, session.namespace);
         agents.push(session);
     }
@@ -888,13 +881,12 @@ async fn test_post_disconnect_cleanup() -> Result<(), Box<dyn std::error::Error>
 
     let mut agent_alpha = connect_soak_agent_to(
         "cleanup-alpha",
-        1,
         5_000, // 5-second TTL
         grpc_port,
     )
     .await?;
-    let mut agent_beta = connect_soak_agent_to("cleanup-beta", 2, 5_000, grpc_port).await?;
-    let mut agent_gamma = connect_soak_agent_to("cleanup-gamma", 3, 5_000, grpc_port).await?;
+    let mut agent_beta = connect_soak_agent_to("cleanup-beta", 5_000, grpc_port).await?;
+    let mut agent_gamma = connect_soak_agent_to("cleanup-gamma", 5_000, grpc_port).await?;
 
     let namespaces = [
         agent_alpha.namespace.clone(),
@@ -1086,7 +1078,7 @@ async fn test_lease_expiry_frees_resources() -> Result<(), Box<dyn std::error::E
     // ── Phase 1: Connect agent with short TTL lease ───────────────────────
 
     // Use a 1-second TTL so we can drive expiry quickly in the test
-    let mut agent = connect_soak_agent_to("expiry-agent", 1, 1_000, grpc_port).await?;
+    let mut agent = connect_soak_agent_to("expiry-agent", 1_000, grpc_port).await?;
     let namespace = agent.namespace.clone();
 
     // ── Phase 2: Create tile and publish zone entry ───────────────────────
@@ -1171,7 +1163,6 @@ async fn test_lease_expiry_frees_resources() -> Result<(), Box<dyn std::error::E
 /// Connect a soak agent to an arbitrary port (for tests using ephemeral ports).
 async fn connect_soak_agent_to(
     agent_id: &str,
-    lease_priority: u32,
     lease_ttl_ms: u64,
     grpc_port: u16,
 ) -> Result<SoakAgentSession, Box<dyn std::error::Error>> {
@@ -1188,10 +1179,6 @@ async fn connect_soak_agent_to(
         payload: Some(session_proto::client_message::Payload::SessionInit(
             session_proto::SessionInit {
                 agent_id: agent_id.to_string(),
-                requested_capabilities: vec![
-                    "create_tiles".to_string(),
-                    "modify_own_tiles".to_string(),
-                ],
                 initial_subscriptions: vec!["SCENE_TOPOLOGY".to_string()],
                 resume_token: Vec::new(),
                 min_protocol_version: 0,
@@ -1242,8 +1229,6 @@ async fn connect_soak_agent_to(
         payload: Some(session_proto::client_message::Payload::LeaseRequest(
             session_proto::LeaseRequest {
                 ttl_ms: lease_ttl_ms,
-                capabilities: vec!["create_tiles".to_string(), "modify_own_tiles".to_string()],
-                lease_priority,
             },
         )),
     })

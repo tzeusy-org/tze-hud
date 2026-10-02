@@ -61,7 +61,7 @@ opencode:
 }
 ```
 
-Successful attach responses include `owner_token`, `request_id`, `projection_id`, `accepted`, `error_code`, `server_timestamp_wall_us`, bounded `status_summary`, and initial lifecycle state. The `owner_token` is returned only by successful `attach`; later operation responses must not return it.
+Successful attach responses include `request_id`, `projection_id`, `accepted`, `error_code`, `server_timestamp_wall_us`, bounded `status_summary`, and initial lifecycle state. Over MCP no operation takes or returns `owner_token`; the server keeps it, keyed by the caller's agent and `projection_id`.
 
 ## Publish Output
 
@@ -73,7 +73,6 @@ Successful attach responses include `owner_token`, `request_id`, `projection_id`
   "projection_id": "codex-rig-hud-ggntn4",
   "request_id": "req-output-001",
   "client_timestamp_wall_us": 1777400001000000,
-  "owner_token": "<owner-token-from-attach>",
   "output_text": "Implemented the HUD projection skill package and mirror docs.",
   "output_kind": "assistant",
   "content_classification": "private",
@@ -92,7 +91,6 @@ Successful attach responses include `owner_token`, `request_id`, `projection_id`
   "projection_id": "codex-rig-hud-ggntn4",
   "request_id": "req-status-001",
   "client_timestamp_wall_us": 1777400002000000,
-  "owner_token": "<owner-token-from-attach>",
   "lifecycle_state": "active",
   "status_text": "Verifying mirror consistency"
 }
@@ -106,7 +104,6 @@ Successful attach responses include `owner_token`, `request_id`, `projection_id`
   "projection_id": "codex-rig-hud-ggntn4",
   "request_id": "req-input-001",
   "client_timestamp_wall_us": 1777400003000000,
-  "owner_token": "<owner-token-from-attach>",
   "max_items": 4,
   "max_bytes": 4096,
   "wait_ms": 15000
@@ -127,7 +124,6 @@ Handled:
   "projection_id": "codex-rig-hud-ggntn4",
   "request_id": "req-ack-001",
   "client_timestamp_wall_us": 1777400004000000,
-  "owner_token": "<owner-token-from-attach>",
   "input_id": "input-0007",
   "ack_state": "handled",
   "ack_message": "Applied the requested edit."
@@ -142,7 +138,6 @@ Deferred:
   "projection_id": "codex-rig-hud-ggntn4",
   "request_id": "req-ack-002",
   "client_timestamp_wall_us": 1777400005000000,
-  "owner_token": "<owner-token-from-attach>",
   "input_id": "input-0008",
   "ack_state": "deferred",
   "ack_message": "Will revisit after tests finish.",
@@ -160,7 +155,6 @@ Use `not_before_wall_us` only when `ack_state` is `deferred`; it must be before 
   "projection_id": "codex-rig-hud-ggntn4",
   "request_id": "req-detach-001",
   "client_timestamp_wall_us": 1777400006000000,
-  "owner_token": "<owner-token-from-attach>",
   "reason": "session complete"
 }
 ```
@@ -175,7 +169,6 @@ Owner cleanup:
   "projection_id": "codex-rig-hud-ggntn4",
   "request_id": "req-cleanup-001",
   "client_timestamp_wall_us": 1777400007000000,
-  "owner_token": "<owner-token-from-attach>",
   "reason": "remove stale portal after normal detach"
 }
 ```

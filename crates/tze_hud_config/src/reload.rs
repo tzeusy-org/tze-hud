@@ -4,9 +4,9 @@
 //!
 //! - **Configuration Reload** (lines 263-274, v1-mandatory)
 //!   SIGHUP and `RuntimeService.ReloadConfig` gRPC trigger a live reload.
-//!   Hot-reloadable fields: `[agents.dynamic_policy]`.
-//!   Frozen fields (require restart): `[runtime]`, `[[tabs]]`,
-//!   `[agents.registered]`.
+//!   No section is hot-reloadable today; a reload re-validates the whole
+//!   config and warns about frozen sections that changed.
+//!   Frozen fields (require restart): `[runtime]`, `[[tabs]]`, `[agents]`.
 //!   On reload: entire config re-validated; validation errors returned without
 //!   applying new config.
 //!
@@ -21,10 +21,9 @@
 //! |---------------------------------|-----------------|
 //! | `[runtime]`                     | Frozen (restart required) |
 //! | `[[tabs]]`                      | Frozen (restart required) |
-//! | `[agents.registered]`           | Frozen (restart required) |
+//! | `[agents]`                      | Frozen (restart required) |
 //! | `[design_tokens]`               | Frozen (restart required) |
 //! | `[widget_runtime_assets]`       | Frozen (restart required) |
-//! | `[agents.dynamic_policy]`       | Hot-reloadable |
 //!
 //! ## Design Note
 //!
@@ -43,7 +42,6 @@
 use tze_hud_scene::config::{ConfigError, ConfigErrorCode};
 
 use crate::loader::TzeHudConfig;
-use crate::raw::RawDynamicPolicy;
 
 // ─── Field classification ──────────────────────────────────────────────────────
 
@@ -54,20 +52,14 @@ use crate::raw::RawDynamicPolicy;
 pub enum FieldClassification {
     /// Field is frozen at startup; changes require a full restart.
     Frozen,
-    /// Field can be reloaded live via SIGHUP or `ReloadConfig` RPC.
-    HotReloadable,
 }
 
 /// Returns the reload classification for a top-level configuration section.
 ///
-/// `section_path` is the dotted section name (e.g., `"runtime"`, `"agents.dynamic_policy"`).
-pub fn section_classification(section_path: &str) -> FieldClassification {
-    match section_path {
-        // Hot-reloadable sections.
-        "agents.dynamic_policy" => FieldClassification::HotReloadable,
-        // Everything else is frozen at startup.
-        _ => FieldClassification::Frozen,
-    }
+/// `section_path` is the dotted section name (e.g., `"runtime"`, `"agents"`).
+/// Every section is frozen at startup today.
+pub fn section_classification(_section_path: &str) -> FieldClassification {
+    FieldClassification::Frozen
 }
 
 /// The names of config sections that are frozen for startup (require restart).
@@ -76,7 +68,7 @@ pub fn section_classification(section_path: &str) -> FieldClassification {
 pub const FROZEN_SECTIONS: &[&str] = &[
     "runtime",
     "tabs",
-    "agents.registered",
+    "agents",
     "display_profile",
     "includes",
     "design_tokens",
@@ -103,7 +95,7 @@ pub fn check_frozen_section_changes(
 ) -> bool {
     // Compare serialized representations of the frozen sections.
     // We use serde_json::Value for order-independent structural comparison so
-    // that HashMap fields (design_tokens, agents.registered)
+    // that HashMap fields (design_tokens, agents)
     // do not produce false-positive warnings due to non-deterministic map
     // iteration order in Rust's HashMap.
     let mut any_changed = false;
@@ -129,25 +121,7 @@ pub fn check_frozen_section_changes(
     check_frozen_field!(display_profile, "display_profile");
     check_frozen_field!(design_tokens, "design_tokens");
     check_frozen_field!(widget_runtime_assets, "widget_runtime_assets");
-
-    // agents.registered is frozen; agents.dynamic_policy is hot-reloadable.
-    // Compare only the registered sub-field to avoid false positives from
-    // dynamic_policy changes being flagged as requiring a restart.
-    let current_registered = current_raw
-        .agents
-        .as_ref()
-        .and_then(|a| a.registered.as_ref());
-    let new_registered = new_raw.agents.as_ref().and_then(|a| a.registered.as_ref());
-    let current_reg_val = serde_json::to_value(current_registered).ok();
-    let new_reg_val = serde_json::to_value(new_registered).ok();
-    if current_reg_val != new_reg_val {
-        tracing::warn!(
-            section = "agents.registered",
-            "SIGHUP detected change in frozen config section 'agents.registered'; \
-             a restart is required for this change to take effect",
-        );
-        any_changed = true;
-    }
+    check_frozen_field!(agents, "agents");
 
     any_changed
 }
@@ -161,11 +135,11 @@ pub fn check_frozen_section_changes(
 ///
 /// The `Default` implementation produces an all-`None` config (no policy overrides),
 /// suitable as the initial state before the first SIGHUP or `ReloadConfig` call.
+///
+/// Empty today: every section is frozen. A successful reload still proves the
+/// new file validates.
 #[derive(Clone, Debug, Default)]
-pub struct HotReloadableConfig {
-    /// Updated `[agents.dynamic_policy]` (or `None` if absent — disables dynamic agents).
-    pub dynamic_policy: Option<RawDynamicPolicy>,
-}
+pub struct HotReloadableConfig {}
 
 // ─── Reload entry point ────────────────────────────────────────────────────────
 
@@ -204,12 +178,7 @@ pub fn reload_config(new_toml: &str) -> Result<HotReloadableConfig, Vec<ConfigEr
     }
 
     // Step 3: extract the hot-reloadable subset.
-    let raw = loader.into_raw();
-    let hot = HotReloadableConfig {
-        dynamic_policy: raw.agents.and_then(|a| a.dynamic_policy),
-    };
-
-    Ok(hot)
+    Ok(HotReloadableConfig {})
 }
 
 // ─── SIGHUP handler ───────────────────────────────────────────────────────────
@@ -275,29 +244,20 @@ impl SighupHandler {
     }
 }
 
-// ─── TzeHudConfig accessor ────────────────────────────────────────────────────
-//
-// We need access to the raw config to extract hot-reloadable fields.
-// Add a `into_raw` method to `TzeHudConfig` via a dedicated trait.
-
-/// Extension that exposes the inner `RawConfig` for extraction.
-///
-/// Intentionally crate-private — `reload_config` is the public API for reload.
-/// External callers have no need to access the raw TOML representation directly.
-pub(crate) trait IntoRaw {
-    fn into_raw(self) -> crate::raw::RawConfig;
-}
-
-impl IntoRaw for TzeHudConfig {
-    fn into_raw(self) -> crate::raw::RawConfig {
-        self.raw
-    }
-}
-
 // ─── Unit tests ───────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
+    trait IntoRaw {
+        fn into_raw(self) -> crate::raw::RawConfig;
+    }
+
+    impl IntoRaw for TzeHudConfig {
+        fn into_raw(self) -> crate::raw::RawConfig {
+            self.raw
+        }
+    }
+
     use super::*;
     use tze_hud_scene::config::ConfigLoader;
 
@@ -344,14 +304,6 @@ name = "Main"
         );
     }
 
-    #[test]
-    fn test_hot_reloadable_sections_classified_correctly() {
-        assert_eq!(
-            section_classification("agents.dynamic_policy"),
-            FieldClassification::HotReloadable
-        );
-    }
-
     // ── reload_config ─────────────────────────────────────────────────────────
 
     #[test]
@@ -363,18 +315,13 @@ profile = "full-display"
 [[tabs]]
 name = "Main"
 
-[agents.dynamic_policy]
-allow_dynamic_agents = true
+[agents.claude]
+allow = ["*"]
 "#;
         let result = reload_config(toml);
         assert!(
             result.is_ok(),
             "valid config should reload successfully, got: {result:?}"
-        );
-        let hot = result.unwrap();
-        assert_eq!(
-            hot.dynamic_policy.as_ref().map(|p| p.allow_dynamic_agents),
-            Some(true)
         );
     }
 
@@ -416,20 +363,6 @@ name = "Tab1"
                 .any(|e| matches!(e.code, ConfigErrorCode::InvalidFpsRange)),
             "should return CONFIG_INVALID_FPS_RANGE, got: {errors:?}"
         );
-    }
-
-    #[test]
-    fn test_reload_config_missing_optional_sections_use_defaults() {
-        // When optional sections are absent from new TOML, defaults applied.
-        let hot = reload_config(minimal_valid_toml()).expect("reload should succeed");
-        assert!(
-            hot.dynamic_policy
-                .as_ref()
-                .map(|p| p.allow_dynamic_agents)
-                .is_none()
-        );
-        // Dynamic policy absent → None.
-        assert!(hot.dynamic_policy.is_none());
     }
 
     // ── SighupHandler ─────────────────────────────────────────────────────────

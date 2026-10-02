@@ -10,11 +10,9 @@
 //! Test scenarios:
 //! 1. Session establishment produces `SessionEstablished` with valid `session_id`
 //!    and namespace assignment.
-//! 2. Lease request with ttl_ms=60000 and capabilities=[create_tiles, modify_own_tiles]
-//!    returns `LeaseResponse { granted: true }` with a 16-byte UUIDv7 `lease_id`.
-//! 3. Lease request containing a non-canonical capability name is denied with
-//!    `LeaseResponse { granted: false }` (CONFIG_UNKNOWN_CAPABILITY).
-//! 4. MutationBatch submitted with a random (unknown) lease_id is rejected with
+//! 2. Lease request with ttl_ms=60000 returns `LeaseResponse { granted: true }`
+//!    with a 16-byte UUIDv7 `lease_id`.
+//! 3. MutationBatch submitted with a random (unknown) lease_id is rejected with
 //!    `MutationResult { accepted: false }` (MUTATION_REJECTED / LeaseNotFound).
 
 use tokio_stream::StreamExt;
@@ -79,7 +77,6 @@ fn now_wall_us() -> u64 {
 async fn perform_handshake(
     client: &mut HudSessionClient<tonic::transport::Channel>,
     agent_id: &str,
-    capabilities: Vec<String>,
 ) -> (
     tokio::sync::mpsc::Sender<ClientMessage>,
     tze_hud_protocol::proto::session::SessionEstablished,
@@ -93,7 +90,6 @@ async fn perform_handshake(
         timestamp_wall_us: now_wall_us(),
         payload: Some(ClientPayload::SessionInit(SessionInit {
             agent_id: agent_id.to_string(),
-            requested_capabilities: capabilities,
             initial_subscriptions: vec![],
             resume_token: vec![],
             min_protocol_version: 1000,
@@ -154,12 +150,7 @@ async fn next_server_msg(
 async fn exemplar_session_establishment_produces_session_established() {
     let (mut client, _server) = start_server().await;
 
-    let (_tx, established, _stream) = perform_handshake(
-        &mut client,
-        "dashboard-agent",
-        vec!["create_tiles".to_string(), "modify_own_tiles".to_string()],
-    )
-    .await;
+    let (_tx, established, _stream) = perform_handshake(&mut client, "dashboard-agent").await;
 
     // session_id must be a non-empty 16-byte blob (UUIDv7).
     assert!(
@@ -179,18 +170,6 @@ async fn exemplar_session_establishment_produces_session_established() {
     );
 
     // Both requested capabilities must be granted.
-    assert!(
-        established
-            .granted_capabilities
-            .contains(&"create_tiles".to_string()),
-        "create_tiles must be in granted_capabilities"
-    );
-    assert!(
-        established
-            .granted_capabilities
-            .contains(&"modify_own_tiles".to_string()),
-        "modify_own_tiles must be in granted_capabilities"
-    );
 
     // Resume token must be present for reconnection support.
     assert!(
@@ -228,22 +207,14 @@ async fn exemplar_session_establishment_produces_session_established() {
 async fn exemplar_lease_grant_returns_granted_true_and_uuidv7_lease_id() {
     let (mut client, _server) = start_server().await;
 
-    let (tx, _established, mut stream) = perform_handshake(
-        &mut client,
-        "dashboard-agent-lease",
-        vec!["create_tiles".to_string(), "modify_own_tiles".to_string()],
-    )
-    .await;
+    let (tx, _established, mut stream) =
+        perform_handshake(&mut client, "dashboard-agent-lease").await;
 
     // Send the spec-mandated LeaseRequest.
     tx.send(ClientMessage {
         sequence: 2,
         timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::LeaseRequest(LeaseRequest {
-            ttl_ms: 60_000,
-            capabilities: vec!["create_tiles".to_string(), "modify_own_tiles".to_string()],
-            lease_priority: 2,
-        })),
+        payload: Some(ClientPayload::LeaseRequest(LeaseRequest { ttl_ms: 60_000 })),
     })
     .await
     .unwrap();
@@ -269,19 +240,8 @@ async fn exemplar_lease_grant_returns_granted_true_and_uuidv7_lease_id() {
             );
 
             // Both requested capabilities must be in the grant.
-            assert!(
-                resp.granted_capabilities
-                    .contains(&"create_tiles".to_string()),
-                "create_tiles must be in granted_capabilities"
-            );
-            assert!(
-                resp.granted_capabilities
-                    .contains(&"modify_own_tiles".to_string()),
-                "modify_own_tiles must be in granted_capabilities"
-            );
 
             // Priority 2 is the agent-owned default.
-            assert_eq!(resp.granted_priority, 2, "granted_priority must be 2");
 
             resp.lease_id
         }
@@ -298,67 +258,6 @@ async fn exemplar_lease_grant_returns_granted_true_and_uuidv7_lease_id() {
 
 // ─── Scenario 3: Lease request with non-canonical capability is denied ────────
 
-/// GIVEN a successfully established session,
-/// WHEN the agent sends a LeaseRequest containing a non-canonical capability name
-///   (e.g. "create_tile" — legacy singular form rejected since RFC 0005 Round 14),
-/// THEN the server responds with LeaseResponse { granted: false } and a non-empty
-///   deny_code of "CONFIG_UNKNOWN_CAPABILITY".
-///
-/// spec.md §Requirement: Lease Request With AutoRenew — Scenario: Tile creation
-/// requires active lease (precondition: only valid capabilities may be requested).
-/// tasks.md §2.3: add test — lease request without required capabilities is denied.
-#[tokio::test]
-async fn exemplar_lease_request_with_invalid_capability_is_denied() {
-    let (mut client, _server) = start_server().await;
-
-    // The session itself only needs create_tiles to be established.
-    let (tx, _established, mut stream) = perform_handshake(
-        &mut client,
-        "bad-caps-agent",
-        vec!["create_tiles".to_string()],
-    )
-    .await;
-
-    // Request a lease with a non-canonical (legacy singular) capability name.
-    // "create_tile" (singular) was superseded by "create_tiles" (plural) in
-    // RFC 0005 Round 14. The server must reject this with CONFIG_UNKNOWN_CAPABILITY.
-    tx.send(ClientMessage {
-        sequence: 2,
-        timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::LeaseRequest(LeaseRequest {
-            ttl_ms: 60_000,
-            capabilities: vec!["create_tile".to_string()], // non-canonical: singular form
-            lease_priority: 2,
-        })),
-    })
-    .await
-    .unwrap();
-
-    let resp_msg = next_server_msg(&mut stream).await;
-
-    match resp_msg.payload {
-        Some(ServerPayload::LeaseResponse(resp)) => {
-            assert!(
-                !resp.granted,
-                "LeaseResponse must NOT be granted for non-canonical capability"
-            );
-            assert_eq!(
-                resp.deny_code, "CONFIG_UNKNOWN_CAPABILITY",
-                "deny_code must be CONFIG_UNKNOWN_CAPABILITY for unknown capability names, \
-                 got: {:?}",
-                resp.deny_code
-            );
-            assert!(
-                !resp.deny_reason.is_empty(),
-                "deny_reason must be non-empty"
-            );
-        }
-        other => {
-            panic!("Expected LeaseResponse(denied) for non-canonical capability, got: {other:?}")
-        }
-    }
-}
-
 // ─── Scenario 4: MutationBatch without ACTIVE lease is rejected ───────────────
 
 /// GIVEN a successfully established session with NO prior lease acquisition,
@@ -374,12 +273,7 @@ async fn exemplar_lease_request_with_invalid_capability_is_denied() {
 async fn exemplar_mutation_without_active_lease_is_rejected() {
     let (mut client, _server) = start_server().await;
 
-    let (tx, _established, mut stream) = perform_handshake(
-        &mut client,
-        "no-lease-agent",
-        vec!["create_tiles".to_string()],
-    )
-    .await;
+    let (tx, _established, mut stream) = perform_handshake(&mut client, "no-lease-agent").await;
 
     // Use a random 16-byte UUID as the lease_id. Since no lease has been acquired,
     // the server must not find this in its active lease registry and must reject

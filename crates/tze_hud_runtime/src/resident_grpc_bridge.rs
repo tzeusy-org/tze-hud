@@ -29,9 +29,8 @@
 //! - **fails closed** on an empty PSK ([`ResidentGrpcBridgeError::MissingPsk`]),
 //!   mirroring the PSK-gated resident posture landed in #944 (hud-nu65o);
 //! - presents the configured PSK in the `SessionInit` handshake;
-//! - requests a capability-scoped session/lease
-//!   ([`PORTAL_CAPABILITIES`] = `create_tiles` + `modify_own_tiles`) and verifies
-//!   the runtime actually granted them before publishing;
+//! - operates under the permissions its `[agents.<id>] allow` list grants
+//!   (`tiles` covers create/modify and input);
 //! - treats runtime denial (handshake, lease, or mutation) as authoritative.
 //!
 //! It never gains authority over an external process or transport lifecycle: it
@@ -58,24 +57,6 @@ use tze_hud_protocol::proto::session::{
     server_message::Payload as ServerPayload,
 };
 use tze_hud_protocol::subscriptions::category;
-
-/// Canonical v1 capability scope required for the resident portal adapter to
-/// create and update its own raw tiles. Kept minimal (no input/topology/zone
-/// scopes) so the resident session is least-privilege.
-pub const PORTAL_CAPABILITIES: [&str; 2] = ["create_tiles", "modify_own_tiles"];
-
-/// Capability that authorises the resident session to *receive* input events
-/// (composer draft / submit / cancel) over the session stream, and the gate the
-/// runtime enforces before delivering any `INPUT_EVENTS` batch
-/// (`tze_hud_protocol::subscriptions`).
-///
-/// Requested (alongside a matching `INPUT_EVENTS` subscription) **only** when the
-/// bridge is wired with an input sink — i.e. the runtime wants bridged composer
-/// input routed back to the driving session (hud-omfqi). Unlike
-/// [`PORTAL_CAPABILITIES`], its denial is **non-fatal**: the bridge still
-/// publishes portal output, it just refuses to route input (fail-closed — no
-/// capability, no input).
-pub const INPUT_CAPABILITY: &str = "access_input_events";
 
 /// A message fed to the resident gRPC bridge task by the per-projection transport
 /// router (hud-g7ool).
@@ -272,9 +253,6 @@ fn resolve_input_projection_by_sole_interaction(
 /// Default lease TTL requested for a resident portal lease.
 const DEFAULT_LEASE_TTL_MS: u64 = 60_000;
 
-/// Default lease priority (2 = agent-owned default per RFC 0008).
-const DEFAULT_LEASE_PRIORITY: u32 = 2;
-
 /// Bound on the outbound `ClientMessage` channel feeding the gRPC stream.
 const OUTBOUND_CHANNEL_CAPACITY: usize = 64;
 
@@ -356,9 +334,6 @@ pub enum ResidentGrpcBridgeError {
     /// The server rejected the `SessionInit` handshake.
     #[error("resident gRPC handshake rejected: {0}")]
     Handshake(String),
-    /// The runtime did not grant a capability the bridge requires.
-    #[error("resident gRPC session not granted required capability {0:?}")]
-    CapabilityNotGranted(&'static str),
     /// The runtime denied the lease request.
     #[error("resident gRPC lease denied: {code} {reason}")]
     LeaseDenied { code: String, reason: String },
@@ -439,16 +414,14 @@ pub struct ResidentGrpcPortalBridge {
     sequence: u64,
     /// Namespace assigned by the server at handshake.
     namespace: String,
-    /// Capabilities the server granted at handshake.
-    granted_capabilities: Vec<String>,
     /// Sink for inbound composer input events, when input routing is wired
     /// (hud-omfqi). `None` disables input routing entirely (least-privilege
     /// default): the handshake requests no input capability/subscription and the
     /// read loops keep discarding non-response payloads.
     input_tx: Option<mpsc::Sender<ResidentBridgeInput>>,
-    /// Whether the runtime actually granted [`INPUT_CAPABILITY`]. Input is routed
-    /// only when this is true (fail-closed on capability denial), regardless of
-    /// whether an `input_tx` was supplied.
+    /// Whether the runtime activated the `INPUT_EVENTS` subscription (the agent's
+    /// allow list must grant input). Input is routed only when this is true
+    /// (fail-closed), regardless of whether an `input_tx` was supplied.
     input_granted: bool,
     /// Per-projection last-published `interaction_enabled`, used to attribute and
     /// gate inbound composer input (see [`resolve_input_projection`]).
@@ -476,16 +449,9 @@ impl ResidentGrpcPortalBridge {
         let (tx, rx) = mpsc::channel::<ClientMessage>(OUTBOUND_CHANNEL_CAPACITY);
         let inbound = ReceiverStream::new(rx);
 
-        // Input routing is opt-in and least-privilege: only when the bridge is
-        // wired with an input sink do we request the input capability +
-        // subscription, so a bridge that never routes input stays scoped to
-        // create/modify (hud-omfqi).
+        // Input routing is opt-in: only when the bridge is wired with an input
+        // sink do we subscribe to input events (hud-omfqi).
         let route_input = input_tx.is_some();
-        let requested_capabilities: Vec<String> = PORTAL_CAPABILITIES
-            .iter()
-            .map(|s| s.to_string())
-            .chain(route_input.then(|| INPUT_CAPABILITY.to_string()))
-            .collect();
         let initial_subscriptions: Vec<String> = if route_input {
             vec![category::INPUT_EVENTS.to_string()]
         } else {
@@ -498,7 +464,6 @@ impl ResidentGrpcPortalBridge {
             timestamp_wall_us: now_wall_us(),
             payload: Some(ClientPayload::SessionInit(SessionInit {
                 agent_id: config.agent_id.clone(),
-                requested_capabilities,
                 initial_subscriptions,
                 resume_token: vec![],
                 min_protocol_version: 1000,
@@ -536,31 +501,19 @@ impl ResidentGrpcPortalBridge {
             }
         };
 
-        // Capability verification: the runtime is the final authorizer; refuse to
-        // proceed unless it granted the scope we need.
-        for required in PORTAL_CAPABILITIES {
-            if !established
-                .granted_capabilities
-                .iter()
-                .any(|c| c == required)
-            {
-                return Err(ResidentGrpcBridgeError::CapabilityNotGranted(required));
-            }
-        }
-
-        // Input routing is gated on an ACTUAL grant, not merely the request:
-        // fail-closed if the runtime withheld the input capability. Denial is
-        // non-fatal — the bridge still publishes portal output; it just won't
-        // route input back (hud-omfqi).
+        // Input routing is gated on the runtime actually activating the
+        // INPUT_EVENTS subscription: fail-closed if the agent's allow list
+        // withholds input. Denial is non-fatal — the bridge still publishes
+        // portal output; it just won't route input back (hud-omfqi).
         let input_granted = route_input
             && established
-                .granted_capabilities
+                .active_subscriptions
                 .iter()
-                .any(|c| c == INPUT_CAPABILITY);
+                .any(|c| c == category::INPUT_EVENTS);
         if route_input && !input_granted {
             tracing::warn!(
                 "resident gRPC portal bridge requested input routing but the runtime withheld \
-                 {INPUT_CAPABILITY}; bridged composer input will NOT be routed (fail-closed)"
+                 INPUT_EVENTS; bridged composer input will NOT be routed (fail-closed)"
             );
         }
 
@@ -573,7 +526,6 @@ impl ResidentGrpcPortalBridge {
             lease_ttl_ms: config.lease_ttl_ms,
             sequence: 1,
             namespace: established.namespace,
-            granted_capabilities: established.granted_capabilities,
             input_tx: if input_granted { input_tx } else { None },
             input_granted,
             interaction: HashMap::new(),
@@ -583,11 +535,6 @@ impl ResidentGrpcPortalBridge {
     /// Namespace assigned to this resident session by the runtime.
     pub fn namespace(&self) -> &str {
         &self.namespace
-    }
-
-    /// Capabilities the runtime granted at handshake.
-    pub fn granted_capabilities(&self) -> &[String] {
-        &self.granted_capabilities
     }
 
     /// Render `state` for `projection_id` and ship it over the authenticated
@@ -746,8 +693,6 @@ impl ResidentGrpcPortalBridge {
             timestamp_wall_us: now_wall_us(),
             payload: Some(ClientPayload::LeaseRequest(LeaseRequest {
                 ttl_ms: self.lease_ttl_ms,
-                capabilities: PORTAL_CAPABILITIES.iter().map(|s| s.to_string()).collect(),
-                lease_priority: DEFAULT_LEASE_PRIORITY,
             })),
         };
         Self::send(&self.tx, lease_req).await?;
@@ -928,7 +873,7 @@ impl ResidentGrpcPortalBridge {
     }
 
     /// Whether the bridge is actively routing inbound composer input: a sink is
-    /// wired AND the runtime granted [`INPUT_CAPABILITY`]. Used by the driver loop
+    /// wired AND the runtime activated `INPUT_EVENTS`. Used by the driver loop
     /// to decide whether to poll the stream for inbound input between requests.
     fn input_routing_active(&self) -> bool {
         self.input_granted && self.input_tx.is_some()
@@ -1156,14 +1101,11 @@ fn is_reconnectable(err: &ResidentGrpcBridgeError) -> bool {
     )
 }
 
-/// Whether a *connect* error is fatal (retrying cannot help): a missing PSK or a
-/// capability the runtime refuses to grant are configuration/authorization
-/// faults, so the bridge gives up immediately rather than consuming its budget.
+/// Whether a *connect* error is fatal (retrying cannot help): a missing PSK is
+/// a configuration fault, so the bridge gives up immediately rather than
+/// consuming its budget.
 fn is_fatal_connect_error(err: &ResidentGrpcBridgeError) -> bool {
-    matches!(
-        err,
-        ResidentGrpcBridgeError::MissingPsk | ResidentGrpcBridgeError::CapabilityNotGranted(_)
-    )
+    matches!(err, ResidentGrpcBridgeError::MissingPsk)
 }
 
 /// Long-lived bridge driver: (re)connects with bounded backoff, replays the
@@ -1537,14 +1479,6 @@ mod tests {
                 .await
                 .expect("authenticated connect must succeed");
 
-        // Capability scope was actually granted by the runtime.
-        for cap in PORTAL_CAPABILITIES {
-            assert!(
-                bridge.granted_capabilities().iter().any(|c| c == cap),
-                "runtime must grant {cap}"
-            );
-        }
-
         // First publish creates the tile and publishes content over gRPC.
         bridge
             .publish_state(projection_id, &state)
@@ -1849,9 +1783,6 @@ mod tests {
         assert!(!is_reconnectable(&ResidentGrpcBridgeError::MissingPsk));
 
         assert!(is_fatal_connect_error(&ResidentGrpcBridgeError::MissingPsk));
-        assert!(is_fatal_connect_error(
-            &ResidentGrpcBridgeError::CapabilityNotGranted("create_tiles")
-        ));
         assert!(!is_fatal_connect_error(
             &ResidentGrpcBridgeError::Transport("x".into())
         ));
@@ -2259,13 +2190,6 @@ mod tests {
         .expect("authenticated connect must succeed");
 
         assert!(
-            bridge
-                .granted_capabilities()
-                .iter()
-                .any(|c| c == INPUT_CAPABILITY),
-            "runtime must grant {INPUT_CAPABILITY} when the bridge requests input routing"
-        );
-        assert!(
             bridge.input_routing_active(),
             "input routing must be active once the capability is granted + sink wired"
         );
@@ -2284,13 +2208,6 @@ mod tests {
                 .await
                 .expect("authenticated connect must succeed");
 
-        assert!(
-            !bridge
-                .granted_capabilities()
-                .iter()
-                .any(|c| c == INPUT_CAPABILITY),
-            "a sink-less bridge must not request/hold {INPUT_CAPABILITY}"
-        );
         assert!(
             !bridge.input_routing_active(),
             "input routing must be inert without a sink"

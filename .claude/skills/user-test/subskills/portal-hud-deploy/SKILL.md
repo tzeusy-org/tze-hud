@@ -89,12 +89,14 @@ which the OS silently disables under `CREATE_NO_WINDOW`. If the HUD comes up
 - **Runs as the admin / interactive-desktop user** (the one logged into the
   console), so the process can reach the desktop GPU.
 
-## Resident-principal / PSK model
+## PSK model
 
-The runtime uses a **single PSK**: the value passed via `--psk` MUST equal the
-resident principal in `TZE_HUD_MCP_RESIDENT_PRINCIPAL` (env-only; there is no CLI
-flag for the resident principal). On the host this env var is persistently set in
-the admin user's environment.
+The PSK identifies the agent; its `[agents.<id>] allow` list decides what it
+may do. The shipped config's `[agents.claude]` uses `psk_env = "TZE_HUD_PSK"`,
+which always means the runtime PSK (however it was passed), so a caller sending
+the `--psk` value is `claude` with `allow = ["*"]`. On the host the PSK is
+stored in the admin user's `TZE_HUD_MCP_RESIDENT_PRINCIPAL` env var (a storage
+name only; the runtime no longer reads it).
 
 **The secret never crosses the Linux command line.** `launch_portal_hud.ps1`
 reads `TZE_HUD_MCP_RESIDENT_PRINCIPAL` from the host environment itself (User

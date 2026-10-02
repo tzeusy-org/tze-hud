@@ -10,7 +10,6 @@
 //! block, which is valid Rust (split impl across files in the same module).
 
 use super::SharedMutationBudgetEnforcer;
-use super::stream_session::CapabilityRevocationEvent;
 use crate::convert;
 use crate::session::SharedState;
 use std::collections::HashMap;
@@ -18,6 +17,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 #[cfg(any(test, feature = "dev-mode"))]
 use tze_hud_resource::{ResourceStore, ResourceStoreConfig};
+use tze_hud_scene::config::AgentDirectory;
 #[cfg(any(test, feature = "dev-mode"))]
 use tze_hud_scene::graph::SceneGraph;
 use tze_hud_scene::types::{GeometryPolicy, ResourceBudget, SceneId};
@@ -32,36 +32,22 @@ use tze_hud_scene::types::{GeometryPolicy, ResourceBudget, SceneId};
 /// `degradation_notices` is a bounded per-session transactional hub. It applies
 /// producer backpressure instead of allowing lag/drop semantics.
 ///
-/// `agent_capabilities` drives per-agent capability gating at handshake time
-/// (configuration/spec.md §Requirement: Agent Registration, lines 136-147).
-/// Agents whose `agent_id` matches a key in this map receive only the listed
-/// capabilities; unlisted agents are treated as guests (no capabilities).
+/// `agents` resolves the handshake credential to an agent identity and its
+/// `allow`-derived permissions (see [`AgentDirectory`]).
 pub struct HudSessionImpl {
     pub state: Arc<Mutex<SharedState>>,
     /// Runtime-owned callback that wakes the windowed event/compositor loops
     /// after render-relevant session work is accepted or enqueued.
     pub(super) render_wake: tze_hud_scene::render_wake::RenderWakeNotifier,
-    pub(super) psk: String,
-    /// Per-agent capability grants from `[agents.registered]` config.
-    ///
-    /// Keyed by agent name (the `agent_id` sent in `SessionInit`).
-    /// Used to build `CapabilityPolicy` at handshake: registered agents get
-    /// their listed capabilities; unregistered agents get guest (empty) policy.
-    ///
-    /// For dev/test scenarios where no config is loaded, pass an empty map
-    /// and set `fallback_unrestricted = true` to restore the legacy behaviour.
-    pub(super) agent_capabilities: Arc<HashMap<String, Vec<String>>>,
+    /// Credential → agent identity and permissions (runtime PSK, per-agent
+    /// PSKs, `allow`-derived permissions, fallback for agents without a table).
+    pub(super) agents: Arc<AgentDirectory>,
     /// Frozen per-agent mutation/lease budgets derived at runtime startup.
     pub(super) agent_resource_budgets: Arc<HashMap<String, ResourceBudget>>,
     /// Budget applied to agents without an explicit registered override.
     pub(super) fallback_resource_budget: ResourceBudget,
     /// Runtime-owned mutation-intake enforcement bridge.
     pub(super) budget_enforcer: Option<SharedMutationBudgetEnforcer>,
-    /// When true and an agent is not found in `agent_capabilities`, grant
-    /// unrestricted capabilities (backwards-compatible dev mode).
-    ///
-    /// Production deployments MUST set this to `false`.
-    pub(super) fallback_unrestricted: bool,
     /// Bounded never-drop sender for transactional degradation notices.
     pub degradation_notices: super::DegradationNoticeSender,
     /// Runtime-to-session durable bridge for terminal lease transitions.
@@ -70,13 +56,6 @@ pub struct HudSessionImpl {
     /// after releasing the scene lock. The handler that owns the lease emits
     /// the wire `LeaseResponse` transactionally.
     pub lease_expirations: super::LeaseExpirySender,
-    /// Broadcast sender for live capability revocation commands (RFC 0001 §3.3, GAP-G3-4).
-    ///
-    /// When the runtime calls `revoke_capability_on_lease`, it broadcasts a
-    /// `CapabilityRevocationEvent` here. Each active session handler subscribes
-    /// and processes revocations for leases it owns, applying the scene-graph
-    /// mutation and delivering the `CapabilityNotice`.
-    pub capability_revocation_tx: tokio::sync::broadcast::Sender<CapabilityRevocationEvent>,
 
     /// Traffic-class-aware sender for runtime-injected input event batches (hud-i6yd.6).
     ///
@@ -125,8 +104,6 @@ impl HudSessionImpl {
     pub fn new(scene: SceneGraph, psk: &str) -> Self {
         let degradation_notices = super::DegradationNoticeSender::default();
         let lease_expirations = super::LeaseExpirySender::default();
-        let (capability_revocation_tx, _) =
-            tokio::sync::broadcast::channel(super::BROADCAST_CHANNEL_CAPACITY);
         let input_event_tx = super::InputEventSender::new(super::BROADCAST_CHANNEL_CAPACITY);
         let (element_repositioned_tx, _) =
             tokio::sync::broadcast::channel(super::BROADCAST_CHANNEL_CAPACITY);
@@ -150,15 +127,12 @@ impl HudSessionImpl {
                 resolved_portal_tokens: std::collections::HashMap::new(),
             })),
             render_wake: tze_hud_scene::render_wake::RenderWakeNotifier::default(),
-            psk: psk.to_string(),
-            agent_capabilities: Arc::new(HashMap::new()),
+            agents: Arc::new(AgentDirectory::unrestricted(psk)),
             agent_resource_budgets: Arc::new(HashMap::new()),
             fallback_resource_budget: ResourceBudget::default(),
             budget_enforcer: None,
-            fallback_unrestricted: true,
             degradation_notices,
             lease_expirations,
-            capability_revocation_tx,
             input_event_tx,
             element_repositioned_tx,
             frame_presented_tx,
@@ -168,7 +142,7 @@ impl HudSessionImpl {
     /// Create from existing shared state with a config-driven capability registry.
     ///
     /// `agent_capabilities` is populated from `ResolvedConfig::agent_capabilities`
-    /// (i.e. the `[agents.registered]` TOML section).
+    /// (i.e. the `[agents.<id>] allow` lists).
     ///
     /// `fallback_unrestricted` controls what happens when an agent is NOT found in
     /// the registry:
@@ -241,8 +215,6 @@ impl HudSessionImpl {
         budget_enforcer: Option<SharedMutationBudgetEnforcer>,
         degradation_notices: super::DegradationNoticeSender,
     ) -> Self {
-        let (capability_revocation_tx, _) =
-            tokio::sync::broadcast::channel(super::BROADCAST_CHANNEL_CAPACITY);
         let lease_expirations = super::LeaseExpirySender::default();
         let input_event_tx = super::InputEventSender::new(super::BROADCAST_CHANNEL_CAPACITY);
         let (element_repositioned_tx, _) =
@@ -252,15 +224,21 @@ impl HudSessionImpl {
         Self {
             state,
             render_wake: tze_hud_scene::render_wake::RenderWakeNotifier::default(),
-            psk: psk.to_string(),
-            agent_capabilities: Arc::new(agent_capabilities),
+            agents: Arc::new(AgentDirectory {
+                runtime_psk: psk.to_string(),
+                agent_psks: HashMap::new(),
+                permissions: agent_capabilities,
+                fallback_permissions: if fallback_unrestricted {
+                    vec!["*".to_string()]
+                } else {
+                    Vec::new()
+                },
+            }),
             agent_resource_budgets: Arc::new(agent_resource_budgets),
             fallback_resource_budget,
             budget_enforcer,
-            fallback_unrestricted,
             degradation_notices,
             lease_expirations,
-            capability_revocation_tx,
             input_event_tx,
             element_repositioned_tx,
             frame_presented_tx,
@@ -277,39 +255,22 @@ impl HudSessionImpl {
         self
     }
 
-    /// Revoke a named capability from an active lease at runtime.
-    ///
-    /// This is the end-to-end API for live capability revocation. It:
-    /// 1. Broadcasts a [`CapabilityRevocationEvent`] to all active session handlers.
-    /// 2. The session handler that owns `lease_id` receives the event, calls
-    ///    [`tze_hud_scene::graph::SceneGraph::revoke_capability`] to narrow the live scope,
-    ///    then delivers `CapabilityNotice(revoked=[capability_name])` to the affected agent.
-    ///
-    /// After revocation, any attempt to use `capability_name` under `lease_id` will be
-    /// rejected by the existing capability-check path in the mutation pipeline.
-    ///
-    /// # Arguments
-    ///
-    /// * `lease_id`        — The lease whose capability scope is being narrowed.
-    /// * `capability_name` — Canonical name of the capability to remove
-    ///   (e.g. `"create_tiles"`, `"publish_zone:subtitle"`).
-    ///
-    /// # Returns
-    ///
-    /// The number of session handlers that received the revocation event (0 if the
-    /// lease is not owned by any currently-connected session).
-    pub fn revoke_capability_on_lease(
-        &self,
-        lease_id: tze_hud_scene::SceneId,
-        capability_name: impl Into<String>,
-    ) -> usize {
-        let event = CapabilityRevocationEvent {
-            lease_id,
-            capability_name: capability_name.into(),
-        };
-        self.capability_revocation_tx
-            .send(event)
-            .unwrap_or_default()
+    /// Register per-agent PSKs (`[agents.<id>] psk_env`, resolved). A session
+    /// presenting one of these keys is identified as that agent.
+    pub fn with_agent_psks(mut self, agent_psks: HashMap<String, String>) -> Self {
+        Arc::make_mut(&mut self.agents).agent_psks = agent_psks;
+        self
+    }
+
+    /// Replace per-agent permissions (expanded `allow` lists). Test-only:
+    /// production builds the directory from config.
+    #[cfg(test)]
+    pub(crate) fn with_agent_permissions(
+        mut self,
+        permissions: HashMap<String, Vec<String>>,
+    ) -> Self {
+        Arc::make_mut(&mut self.agents).permissions = permissions;
+        self
     }
 
     /// Inject an `EventBatch` into the gRPC stream of the session owning `namespace`.

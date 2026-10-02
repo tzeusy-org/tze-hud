@@ -245,7 +245,6 @@ class HudGrpcClientTests(unittest.IsolatedAsyncioTestCase):
                 granted=True,
                 lease_id=b"\x02" * 16,
                 granted_ttl_ms=60_000,
-                granted_priority=2,
             )
         )
         await client._response_queue.put(mutation)
