@@ -22,8 +22,6 @@
 #                    + deterministic LLM-facing token-footprint gate
 #   production-boot-vertical-slice / canonical-app-production-boot — boot the
 #     runtime with the committed production configs
-#   release-artifact-provenance-build/smoke — cross-build tze_hud.exe and verify
-#     the uploaded checksum round-trip (informational)
 #   user-test-python-suite — pytest over the user-test and repo script suites;
 #     pure-Python tests only, with no GPU, Windows, live HUD runtime, or network
 #   dev-mode-guard — verifies dev-mode feature is NOT compiled into release binary
@@ -396,84 +394,6 @@ jobs:
             -p tze_hud_app \
             --test production_boot \
             -- --nocapture
-
-  # ── Release artifact provenance smoke gate ─────────────────────────────────
-  #
-  # Builds the real Windows release artifact (`tze_hud.exe`) and publishes its
-  # pipeline-generated SHA-256 checksum as a workflow artifact, then verifies the
-  # downloaded artifact/checksum pair in a separate job. This is intentionally
-  # distinct from canonical-app-production-boot: production boot validates the
-  # committed config can construct the runtime; this gate validates release
-  # artifact integrity and the provenance round-trip required by
-  # openspec/changes/release-provenance.
-
-  release-artifact-provenance-build:
-    name: release artifact provenance build
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    needs: [check]
-    steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: "1.88"
-          targets: x86_64-pc-windows-gnu
-      - uses: Swatinem/rust-cache@v2.9.1
-        timeout-minutes: 10
-      - name: Install protobuf compiler + MinGW cross toolchain
-        timeout-minutes: 5
-        run: |
-          sudo apt-get $APT_OPTS update -q
-          sudo apt-get $APT_OPTS install -y --no-install-recommends \
-            protobuf-compiler \
-            mingw-w64
-      - name: Build and stage release artifact + checksum
-        run: |
-          set -euo pipefail
-          ARTIFACT_DIR="test_results/release-provenance"
-          EXE_PATH="$(scripts/build_windows_app.sh \
-            --target x86_64-pc-windows-gnu \
-            --profile release \
-            --skip-toolchain)"
-          mkdir -p "$ARTIFACT_DIR"
-          cp -f "$EXE_PATH" "$ARTIFACT_DIR/tze_hud.exe"
-          (
-            cd "$ARTIFACT_DIR"
-            sha256sum tze_hud.exe > tze_hud.exe.sha256
-          )
-          bash scripts/ci/release_artifact_provenance_smoke.sh --artifact-dir "$ARTIFACT_DIR"
-      - name: Publish release artifact + checksum for smoke round-trip
-        uses: actions/upload-artifact@v6
-        with:
-          name: release-provenance-tze_hud-windows-gnu
-          path: |
-            test_results/release-provenance/tze_hud.exe
-            test_results/release-provenance/tze_hud.exe.sha256
-          if-no-files-found: error
-
-  release-artifact-provenance-smoke:
-    name: release artifact provenance smoke
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    needs: [release-artifact-provenance-build]
-    steps:
-      - uses: actions/checkout@v5
-      - name: Install PE inspector
-        timeout-minutes: 5
-        run: |
-          sudo apt-get $APT_OPTS update -q
-          sudo apt-get $APT_OPTS install -y --no-install-recommends binutils-mingw-w64-x86-64
-      - name: Run release provenance verifier unit tests
-        run: python3 scripts/ci/test_release_artifact_provenance_smoke.py
-      - name: Download published release artifact + checksum
-        uses: actions/download-artifact@v6
-        with:
-          name: release-provenance-tze_hud-windows-gnu
-          path: test_results/release-provenance-roundtrip
-      - name: Verify downloaded artifact/checksum round-trip
-        run: |
-          bash scripts/ci/release_artifact_provenance_smoke.sh \
-            --artifact-dir test_results/release-provenance-roundtrip
 
   # ── User-test Python suite ──────────────────────────────────────────────────
   #

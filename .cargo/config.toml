@@ -1,0 +1,4 @@
+# Windows release binaries link the C runtime statically, so `tze_hud.exe` is
+# one file with no Visual C++ redistributable to install.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
