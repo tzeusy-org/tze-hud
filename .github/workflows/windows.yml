@@ -1,0 +1,136 @@
+# Windows build, boot smoke, and release.
+#
+# windows-build — native x86_64-pc-windows-msvc release build on a Windows
+#   runner, then boots the binary with the production config (WARP software
+#   rendering) and drives the MCP lifecycle (scripts/ci/windows_smoke.py).
+#   Runs on every PR, merge-queue entry, push to main, and v* tag.
+# release — signs the exe with minisign (secret MINISIGN_SECRET_KEY; public key
+#   app/tze_hud_app/minisign.pub) and publishes it:
+#     push to main → rolling `dev` prerelease (tag `dev` moves to the commit)
+#     v* tag       → a release for that tag
+#   Hosts install and update from these releases; see docs/operations.
+
+name: windows
+
+on:
+  pull_request:
+  merge_group:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  windows-build:
+    name: windows build + boot smoke
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.88"
+          targets: x86_64-pc-windows-msvc
+
+      - uses: Swatinem/rust-cache@v2.9.1
+        timeout-minutes: 10
+        with:
+          shared-key: windows-msvc-release
+
+      - name: Install protoc
+        timeout-minutes: 5
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP "protoc"
+          Invoke-WebRequest -Uri "https://github.com/protocolbuffers/protobuf/releases/download/v29.3/protoc-29.3-win64.zip" -OutFile "$dir.zip"
+          Expand-Archive "$dir.zip" -DestinationPath $dir
+          "$dir\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+
+      - name: Build tze_hud.exe (release, static CRT)
+        run: cargo build --release --locked -p tze_hud_app --bin tze_hud
+
+      - name: Boot smoke (production config, MCP lifecycle)
+        timeout-minutes: 5
+        run: python scripts/ci/windows_smoke.py --exe target/release/tze_hud.exe --config app/tze_hud_app/config/production.toml
+
+      - name: Stage artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cp target/release/tze_hud.exe dist/
+          cp target/release/tze_hud.pdb dist/ 2>/dev/null || echo "no PDB emitted"
+          (cd dist && sha256sum tze_hud.exe > tze_hud.exe.sha256)
+          cat dist/tze_hud.exe.sha256
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: tze_hud-windows-msvc
+          path: dist/
+          if-no-files-found: error
+
+  release:
+    name: sign + publish release
+    needs: [windows-build]
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    concurrency:
+      group: release-${{ github.ref }}
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v6
+        with:
+          name: tze_hud-windows-msvc
+          path: dist
+
+      - name: Install minisign
+        timeout-minutes: 5
+        run: |
+          sudo apt-get -o Acquire::Retries=3 update -q
+          sudo apt-get -o Acquire::Retries=3 install -y --no-install-recommends minisign
+
+      - name: Sign and verify against the committed public key
+        env:
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${MINISIGN_SECRET_KEY}" ]; then
+            echo "::error::MINISIGN_SECRET_KEY is not set; refusing to publish an unsigned release"
+            exit 1
+          fi
+          umask 077
+          key="$RUNNER_TEMP/minisign.key"
+          printf '%s\n' "$MINISIGN_SECRET_KEY" > "$key"
+          minisign -S -s "$key" -m dist/tze_hud.exe -t "tze_hud ${GITHUB_REF_NAME} ${GITHUB_SHA}"
+          rm -f "$key"
+          minisign -V -p app/tze_hud_app/minisign.pub -m dist/tze_hud.exe
+
+      - name: Publish rolling dev prerelease
+        if: github.ref == 'refs/heads/main'
+        run: |
+          set -euo pipefail
+          gh release delete dev --cleanup-tag --yes 2>/dev/null || true
+          gh release create dev dist/* \
+            --prerelease --latest=false \
+            --target "$GITHUB_SHA" \
+            --title "dev ${GITHUB_SHA::7}" \
+            --notes "Rolling build of main at ${GITHUB_SHA}. Verify: minisign -Vm tze_hud.exe -p minisign.pub"
+
+      - name: Publish tagged release
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --generate-notes
