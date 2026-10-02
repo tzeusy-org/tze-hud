@@ -15,7 +15,7 @@
 //! ## Test scenarios
 //!
 //! 1. Auto-renewal fires at 75% TTL (45s for 60s lease) — agent receives
-//!    `LeaseResponse { granted: true }` with an updated expiry.
+//!    `RequestResult { ok: true }` with an updated expiry.
 //! 2. Agent disconnect → lease transitions ACTIVE→ORPHANED, tile frozen with
 //!    `TileVisualHint::DisconnectionBadge` (must happen within 1 frame, i.e.
 //!    synchronously from the scene graph's perspective).

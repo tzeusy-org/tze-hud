@@ -276,10 +276,7 @@ pub(super) fn dispatch_command_event(
 /// - `tx`: the shared traffic-class-aware sender; `None` when gRPC is disabled.
 /// - `namespace`: the agent namespace that owns the composer node.
 /// - `node_id_bytes`: 16-byte UUIDv7 of the focused composer node.
-/// - `tile_id_bytes`: 16-byte UUIDv7 of the owning portal tile. Carried on the
-///   wire (hud-25g5i) so a resident bridge serving more than one interaction-
-///   enabled projection can attribute inbound input to the correct one — see
-///   `resident_grpc_bridge::resolve_input_projection`.
+/// - `tile_id_bytes`: 16-byte UUIDv7 of the owning portal tile.
 /// - `batch`: the coalesced draft batch to deliver.
 pub(super) fn deliver_composer_batch(
     tx: &Option<tze_hud_protocol::session_server::InputEventSender>,

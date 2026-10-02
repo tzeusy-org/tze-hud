@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """
-Benchmark WidgetPublish throughput over one gRPC bidirectional Session stream.
+Benchmark widget Publish throughput over one gRPC bidirectional Session stream.
 
 This script measures stream-level performance (send phase and end-to-end
-completion). Proto v1 WidgetPublishResult is not correlated by request
-sequence, so per-request RTT is not reported.
+completion). Per-request RTT is not reported.
 """
 
 from __future__ import annotations
@@ -63,14 +62,6 @@ class SessionClient:
         self.bytes_in_total = 0
         self.payload_counts: dict[str, int] = {}
 
-        # TTL (ms) granted by the most recent renew_lease(). Long-lived perf paths
-        # that drive a lease directly read this to schedule renewals before the
-        # lease expires; otherwise the runtime rejects mutations with
-        # MUTATION_REJECTED / "lease expired" mid-run (parity with hud-hk8kl/#1010).
-        # The current WidgetPublish benchmark is capability-based and drives no
-        # lease, so nothing renews yet.
-        self.last_granted_lease_ttl_ms: int = 0
-
     def next_seq(self) -> int:
         self.seq += 1
         return self.seq
@@ -124,7 +115,7 @@ class SessionClient:
 
         size = int(msg.ByteSize())
         self.bytes_out_total += size
-        if "widget_publish" in payload_kwargs:
+        if "publish" in payload_kwargs:
             self.bytes_out_publish_only += size
 
         await self.send_queue.put(msg)
@@ -145,35 +136,6 @@ class SessionClient:
             if which == "session_error":
                 err = msg.session_error
                 raise RuntimeError(f"session_error: {err.code} {err.message} ({err.hint})")
-
-    async def renew_lease(self, lease_id: bytes, new_ttl_ms: int = 0) -> int:
-        """Renew an existing lease's TTL and return the newly granted TTL (ms).
-
-        ``new_ttl_ms=0`` asks the runtime to re-grant the lease's original TTL
-        (see ``LeaseRenew.new_ttl_ms`` in session.proto). Sustained callers renew
-        before ~75% of the granted TTL elapses so the lease never expires mid-run.
-
-        Mirrors ``HudClient.renew_lease`` in the user-test skill (hud-hk8kl/#1010).
-        This benchmark's WidgetPublish path is capability-based and drives no
-        lease, so no caller renews yet; the method exists so a future long-lived,
-        lease-driven perf path never hits the runtime's "lease expired" rejection.
-        """
-        await self.send(
-            lease_renew=session_pb2.LeaseRenew(
-                lease_id=lease_id,
-                new_ttl_ms=new_ttl_ms,
-            )
-        )
-        msg = await self.wait_for_payload("lease_response", timeout_s=5.0)
-        lr = msg.lease_response
-        if not lr.granted:
-            deny_reason = getattr(lr, "deny_reason", "") or "unspecified denial"
-            deny_code = getattr(lr, "deny_code", "")
-            if deny_code:
-                raise RuntimeError(f"Lease renew denied [{deny_code}]: {deny_reason}")
-            raise RuntimeError(f"Lease renew denied: {deny_reason}")
-        self.last_granted_lease_ttl_ms = lr.granted_ttl_ms
-        return lr.granted_ttl_ms
 
 
 def default_benchmark_name(args: argparse.Namespace) -> str:
@@ -229,15 +191,14 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                     await asyncio.sleep(deadline - now)
 
             await client.send(
-                widget_publish=session_pb2.WidgetPublish(
-                    widget_name=args.widget_name,
-                    instance_id=args.instance_id,
+                publish=session_pb2.Publish(
+                    surface=f"widget:{args.widget_name}",
                     params=[
                         types_pb2.WidgetParameterValueProto(param_name="progress", f32_value=float(value)),
                         types_pb2.WidgetParameterValueProto(param_name="label", string_value=label),
                     ],
                     transition_ms=int(args.transition_ms),
-                    merge_key=args.merge_key,
+                    key=args.merge_key,
                 )
             )
 
@@ -260,15 +221,12 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                     break
 
                 which = msg.WhichOneof("payload")
-                if which == "widget_publish_result":
+                if which == "request_result":
                     result_count += 1
-                    res = msg.widget_publish_result
-                    if not res.accepted:
+                    res = msg.request_result
+                    if not res.ok:
                         rejected_count += 1
-                        result_errors.append(f"{res.error_code}: {res.error_message}")
-                elif which == "runtime_error":
-                    err = msg.runtime_error
-                    result_errors.append(f"runtime_error {err.error_code}: {err.message}")
+                        result_errors.append(f"{res.code}: {res.hint}")
                 elif which == "session_error":
                     err = msg.session_error
                     result_errors.append(f"session_error {err.code}: {err.message}")
@@ -282,7 +240,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
 
         missing_results = max(0, args.count - result_count) if args.expect_results else 0
         error_count = rejected_count + missing_results + len(
-            [e for e in result_errors if e.startswith("runtime_error") or e.startswith("session_error")]
+            [e for e in result_errors if e.startswith("session_error")]
         )
         success_count = max(0, args.count - error_count)
         error_rate = (error_count / args.count) if args.count > 0 else 0.0
@@ -438,7 +396,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="gRPC WidgetPublish performance benchmark")
+    parser = argparse.ArgumentParser(description="gRPC widget Publish performance benchmark")
     parser.add_argument("--target", default=None, help="Direct gRPC target override (host:port)")
     parser.add_argument("--target-id", default=None, help="Target id from targets file")
     parser.add_argument("--targets-file", default=DEFAULT_TARGETS_FILE, help="Target registry JSON")
@@ -447,7 +405,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--agent-id", default="user-test-performance-agent", help="Session agent_id")
 
     parser.add_argument("--widget-name", default="main-progress", help="Widget instance name")
-    parser.add_argument("--instance-id", default="", help="Optional widget instance_id override")
     parser.add_argument("--count", type=int, default=100, help="Publish count")
     parser.add_argument("--duration-ms", type=int, default=0, help="Target total send duration")
     parser.add_argument("--transition-ms", type=int, default=0, help="Widget transition duration")
@@ -458,7 +415,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--label-template", default="{pct}%", help="Label template")
 
     expect_group = parser.add_mutually_exclusive_group()
-    expect_group.add_argument("--expect-results", action="store_true", dest="expect_results", help="Wait for WidgetPublishResult messages")
+    expect_group.add_argument("--expect-results", action="store_true", dest="expect_results", help="Wait for RequestResult messages")
     expect_group.add_argument("--no-expect-results", action="store_false", dest="expect_results", help="Do not wait for results")
     parser.set_defaults(expect_results=True)
 

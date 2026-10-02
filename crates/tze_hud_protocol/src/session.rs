@@ -210,6 +210,9 @@ pub struct SharedState {
     /// authority for the portal exemplar's live look instead of a client-side
     /// Python token mirror (promotes hud-7jrj3).
     pub resolved_portal_tokens: std::collections::HashMap<String, String>,
+    /// Claimed-tile sizes and spacing from `[design_tokens]` `tile.*`, used
+    /// to resolve `ClaimTile` placement hints.
+    pub tile_placement: tze_hud_scene::placement::TilePlacementTokens,
 }
 
 impl SharedState {

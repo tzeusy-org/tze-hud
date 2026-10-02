@@ -58,6 +58,7 @@ pub use allow::{allow_to_permissions, validate_allow_entry};
 pub use loader::TzeHudConfig;
 pub use policy_builder::{
     apply_token_defaults_for_zone, build_all_effective_policies, build_effective_policy,
+    tile_placement_from_tokens,
 };
 pub use portal_tokens::{
     PORTAL_TOKEN_COLLAPSED_BACKGROUND, PORTAL_TOKEN_COLLAPSED_FONT_SIZE,

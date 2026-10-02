@@ -462,7 +462,10 @@ pub fn scene_error(e: &ValidationError) -> McpError {
             "CONTENT_REJECTED",
             format!("widget {widget} is full; retry later"),
         ),
-        other => tool_err("CONTENT_REJECTED", other.to_string()),
+        other => tool_err(
+            tze_hud_scene::error_codes::validation_error_code(other),
+            other.to_string(),
+        ),
     }
 }
 
@@ -712,44 +715,18 @@ pub async fn hud_hold(ctx: &ToolCtx<'_>, args: Value) -> McpResult<Value> {
         Surface::Zone(zone) => {
             let mut scene = ctx.scene.lock().await;
             let expires = expiry(now_us(&scene));
-            let mut held = false;
-            for r in scene
-                .zone_registry
-                .active_publishes
-                .get_mut(&zone)
-                .into_iter()
-                .flatten()
-                .filter(|r| r.publisher_namespace == ns)
-            {
-                r.expires_at_wall_us = expires;
-                held = true;
-            }
-            if !held {
+            if !scene.hold_zone_publications(&zone, &ns, expires) {
                 return Err(not_held(&p.surface));
             }
             ensure_lease(ctx, &mut scene);
-            scene.version += 1;
         }
         Surface::Widget(widget) => {
             let mut scene = ctx.scene.lock().await;
             let expires = expiry(now_us(&scene));
-            let mut held = false;
-            for r in scene
-                .widget_registry
-                .active_publishes
-                .get_mut(&widget)
-                .into_iter()
-                .flatten()
-                .filter(|r| r.publisher_namespace == ns)
-            {
-                r.expires_at_wall_us = expires;
-                held = true;
-            }
-            if !held {
+            if !scene.hold_widget_publications(&widget, &ns, expires) {
                 return Err(not_held(&p.surface));
             }
             ensure_lease(ctx, &mut scene);
-            scene.version += 1;
         }
         Surface::Portal(pid) => {
             // The runtime keeps a held portal (and its transcript) past the

@@ -27,11 +27,6 @@
 //! | `--benchmark-frames <n>` | `TZE_HUD_BENCHMARK_FRAMES` | `600` | Measured frames for benchmark mode. |
 //! | `--benchmark-warmup-frames <n>` | `TZE_HUD_BENCHMARK_WARMUP_FRAMES` | `120` | Warmup frames skipped before measurement. |
 //! | `--quiescent-efficiency-emit <path>` | `TZE_HUD_QUIESCENT_EFFICIENCY_EMIT` | — | Emit a real event-driven static-overlay efficiency artifact after 5s settle + 60s observation. |
-//! | `--resident-grpc-portal` | `TZE_HUD_RESIDENT_GRPC_PORTAL=1` | — | Enable resident gRPC portal bridge with loopback defaults. |
-//! | `--resident-grpc-endpoint <url>` | `TZE_HUD_RESIDENT_GRPC_ENDPOINT` | — | Target endpoint for the resident bridge (e.g. `http://10.0.0.4:50051`). Implies `--resident-grpc-portal`. |
-//! | `--resident-grpc-agent-id <id>` | `TZE_HUD_RESIDENT_GRPC_AGENT_ID` | `resident-grpc-portal` | Agent identity for the resident session. Implies `--resident-grpc-portal`. |
-//! | `--resident-grpc-lease-ttl <ms>` | `TZE_HUD_RESIDENT_GRPC_LEASE_TTL_MS` | `60000` | Requested lease TTL in milliseconds. Implies `--resident-grpc-portal`. |
-//! | `--resident-grpc-psk <key>` | `TZE_HUD_RESIDENT_GRPC_PSK` | — | Explicit PSK for the target runtime (omit to reuse the runtime PSK). Implies `--resident-grpc-portal`. |
 //! | `--print-attach-info` | —                    | —            | Print the MCP attach-info block (endpoint URL, resident-principal==PSK rule, paste-ready MCP client config) and exit 0 without starting the runtime. Never prints the PSK. |
 //! | `--help`            | —                      | —            | Print this help and exit.                |
 //! | `--version`         | —                      | —            | Print version and exit.                  |
@@ -82,8 +77,7 @@ use tze_hud_config::{reload_config, resolve_config_path};
 use tze_hud_runtime::gpu_lock::GpuLock;
 use tze_hud_runtime::window::{WindowConfig, WindowMode};
 use tze_hud_runtime::windowed::{
-    ResidentGrpcCredentialSource, ResidentGrpcPortalSettings, WindowedBenchmarkConfig,
-    WindowedConfig, WindowedQuiescentEfficiencyConfig, WindowedRuntime,
+    WindowedBenchmarkConfig, WindowedConfig, WindowedQuiescentEfficiencyConfig, WindowedRuntime,
 };
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -136,24 +130,6 @@ OPTIONS:
                            mandatory 5s settle plus 60s interval, emit JSON, and exit.
                            Requires a constrained software-renderer CI invocation.
                            (env: TZE_HUD_QUIESCENT_EFFICIENCY_EMIT)
-    --resident-grpc-portal Enable the resident gRPC portal bridge with loopback defaults
-                           (env: TZE_HUD_RESIDENT_GRPC_PORTAL=1)
-    --resident-grpc-endpoint <url>
-                           Target gRPC endpoint for the resident bridge, e.g.
-                           http://10.0.0.4:50051  (implies --resident-grpc-portal)
-                           (env: TZE_HUD_RESIDENT_GRPC_ENDPOINT)
-    --resident-grpc-agent-id <id>
-                           Agent identity for the resident session
-                           [default: resident-grpc-portal]  (implies --resident-grpc-portal)
-                           (env: TZE_HUD_RESIDENT_GRPC_AGENT_ID)
-    --resident-grpc-lease-ttl <ms>
-                           Requested lease TTL in milliseconds  [default: 60000]
-                           (implies --resident-grpc-portal)
-                           (env: TZE_HUD_RESIDENT_GRPC_LEASE_TTL_MS)
-    --resident-grpc-psk <key>
-                           Explicit PSK for the target runtime; omit to reuse the runtime PSK
-                           (implies --resident-grpc-portal)
-                           (env: TZE_HUD_RESIDENT_GRPC_PSK)
     --print-attach-info    Print the MCP attach-info block (endpoint URL, the
                            resident-principal == PSK rule, and a paste-ready MCP
                            client config snippet) and exit 0 WITHOUT starting the
@@ -228,20 +204,6 @@ struct StartupOptions {
     benchmark_warmup_frames: u64,
     /// Path for a bounded real-runtime quiescent-efficiency artifact.
     quiescent_efficiency_emit: Option<String>,
-    /// Enable the resident gRPC portal bridge (hud-ev2lr).
-    ///
-    /// Set by `--resident-grpc-portal`, any `--resident-grpc-*` sub-flag, or any
-    /// `TZE_HUD_RESIDENT_GRPC_*` env var. When false and none of the sub-fields
-    /// are populated, the bridge stays off (default).
-    resident_grpc_portal_enabled: bool,
-    /// Optional explicit target endpoint for the bridge.
-    resident_grpc_endpoint: Option<String>,
-    /// Agent identity presented for the resident session.
-    resident_grpc_agent_id: String,
-    /// Requested lease TTL in milliseconds.
-    resident_grpc_lease_ttl_ms: u64,
-    /// Explicit PSK for the target runtime.  `None` → reuse the runtime PSK.
-    resident_grpc_psk: Option<String>,
     /// When true, print the MCP attach-info block (endpoint URL, the
     /// resident-principal == PSK rule, and a paste-ready MCP client config
     /// snippet) and exit 0 *without* starting the runtime (hud-b7c0m).
@@ -269,13 +231,6 @@ impl Default for StartupOptions {
             benchmark_frames: 600,
             benchmark_warmup_frames: 120,
             quiescent_efficiency_emit: None,
-            resident_grpc_portal_enabled: false,
-            resident_grpc_endpoint: None,
-            resident_grpc_agent_id: tze_hud_runtime::windowed::DEFAULT_RESIDENT_GRPC_AGENT_ID
-                .to_string(),
-            resident_grpc_lease_ttl_ms:
-                tze_hud_runtime::windowed::DEFAULT_RESIDENT_GRPC_LEASE_TTL_MS,
-            resident_grpc_psk: None,
             print_attach_info: false,
         }
     }
@@ -411,30 +366,6 @@ fn parse_options(args: &[String]) -> Result<StartupOptions, String> {
             "TZE_HUD_QUIESCENT_EFFICIENCY_EMIT",
         )?);
     }
-    if let Ok(v) = std::env::var("TZE_HUD_RESIDENT_GRPC_PORTAL") {
-        if v == "1" || v.eq_ignore_ascii_case("true") {
-            opts.resident_grpc_portal_enabled = true;
-        }
-    }
-    if let Ok(v) = std::env::var("TZE_HUD_RESIDENT_GRPC_ENDPOINT") {
-        opts.resident_grpc_endpoint = Some(v);
-        opts.resident_grpc_portal_enabled = true;
-    }
-    if let Ok(v) = std::env::var("TZE_HUD_RESIDENT_GRPC_AGENT_ID") {
-        opts.resident_grpc_agent_id = v;
-        opts.resident_grpc_portal_enabled = true;
-    }
-    if let Ok(v) = std::env::var("TZE_HUD_RESIDENT_GRPC_LEASE_TTL_MS") {
-        opts.resident_grpc_lease_ttl_ms = v
-            .parse::<u64>()
-            .map_err(|_| format!("TZE_HUD_RESIDENT_GRPC_LEASE_TTL_MS: invalid integer: {v:?}"))?;
-        opts.resident_grpc_portal_enabled = true;
-    }
-    if let Ok(v) = std::env::var("TZE_HUD_RESIDENT_GRPC_PSK") {
-        opts.resident_grpc_psk = Some(v);
-        opts.resident_grpc_portal_enabled = true;
-    }
-
     // Parse CLI flags (override env vars).
     let mut i = 0usize;
     while i < args.len() {
@@ -585,41 +516,6 @@ fn parse_options(args: &[String]) -> Result<StartupOptions, String> {
                     "--quiescent-efficiency-emit",
                 )?);
             }
-            "--resident-grpc-portal" => {
-                opts.resident_grpc_portal_enabled = true;
-            }
-            "--resident-grpc-endpoint" => {
-                i += 1;
-                opts.resident_grpc_endpoint = Some(args.get(i).cloned().ok_or_else(|| {
-                    "--resident-grpc-endpoint requires a URL argument".to_string()
-                })?);
-                opts.resident_grpc_portal_enabled = true;
-            }
-            "--resident-grpc-agent-id" => {
-                i += 1;
-                opts.resident_grpc_agent_id = args.get(i).cloned().ok_or_else(|| {
-                    "--resident-grpc-agent-id requires an id argument".to_string()
-                })?;
-                opts.resident_grpc_portal_enabled = true;
-            }
-            "--resident-grpc-lease-ttl" => {
-                i += 1;
-                let val = args.get(i).ok_or_else(|| {
-                    "--resident-grpc-lease-ttl requires a millisecond count argument".to_string()
-                })?;
-                opts.resident_grpc_lease_ttl_ms = val
-                    .parse::<u64>()
-                    .map_err(|_| format!("--resident-grpc-lease-ttl: invalid integer: {val:?}"))?;
-                opts.resident_grpc_portal_enabled = true;
-            }
-            "--resident-grpc-psk" => {
-                i += 1;
-                opts.resident_grpc_psk =
-                    Some(args.get(i).cloned().ok_or_else(|| {
-                        "--resident-grpc-psk requires a key argument".to_string()
-                    })?);
-                opts.resident_grpc_portal_enabled = true;
-            }
             flag if flag.starts_with('-') => {
                 return Err(format!(
                     "unknown flag: {flag}\nRun '{BIN_NAME} --help' for usage."
@@ -638,36 +534,13 @@ fn parse_options(args: &[String]) -> Result<StartupOptions, String> {
     Ok(opts)
 }
 
-/// Build resident gRPC portal settings from parsed startup options (hud-ev2lr).
-///
-/// Returns `None` when the bridge is disabled (default). Otherwise assembles
-/// `ResidentGrpcPortalSettings` from the options, applying `RuntimePsk` when
-/// no explicit PSK was provided.
-fn build_resident_grpc_portal_settings(
-    opts: &StartupOptions,
-) -> Option<ResidentGrpcPortalSettings> {
-    if !opts.resident_grpc_portal_enabled {
-        return None;
-    }
-    Some(ResidentGrpcPortalSettings {
-        endpoint: opts.resident_grpc_endpoint.clone(),
-        agent_id: opts.resident_grpc_agent_id.clone(),
-        lease_ttl_ms: opts.resident_grpc_lease_ttl_ms,
-        credential: opts
-            .resident_grpc_psk
-            .clone()
-            .map(ResidentGrpcCredentialSource::Psk)
-            .unwrap_or(ResidentGrpcCredentialSource::RuntimePsk),
-    })
-}
-
-/// Returns a copy of `args` with the value following `--resident-grpc-psk` replaced
+/// Returns a copy of `args` with the value following `--psk` replaced
 /// by `<redacted>` so startup diagnostic logs never capture the secret in plain text.
 fn redact_sensitive_args(args: Vec<String>) -> Vec<String> {
     let mut out = Vec::with_capacity(args.len());
     let mut i = 0;
     while i < args.len() {
-        if args[i] == "--resident-grpc-psk" {
+        if args[i] == "--psk" {
             out.push(args[i].clone());
             i += 1;
             if i < args.len() {
@@ -1072,7 +945,6 @@ set {DEV_ALLOW_INSECURE_STARTUP_ENV}=1 only in debug/dev runs if you need fallba
         "tze_hud runtime starting"
     );
 
-    let resident_grpc_portal = build_resident_grpc_portal_settings(&opts);
     let config = WindowedConfig {
         window: WindowConfig {
             mode: opts.window_mode,
@@ -1093,7 +965,6 @@ set {DEV_ALLOW_INSECURE_STARTUP_ENV}=1 only in debug/dev runs if you need fallba
         benchmark,
         quiescent_efficiency,
         bind_all_interfaces: opts.bind_all_interfaces,
-        resident_grpc_portal,
     };
 
     // Diagnostic: write resolved config to disk so we can verify args were parsed.
@@ -1145,11 +1016,6 @@ mod tests {
                 "TZE_HUD_BENCHMARK_FRAMES",
                 "TZE_HUD_BENCHMARK_WARMUP_FRAMES",
                 "TZE_HUD_QUIESCENT_EFFICIENCY_EMIT",
-                "TZE_HUD_RESIDENT_GRPC_PORTAL",
-                "TZE_HUD_RESIDENT_GRPC_ENDPOINT",
-                "TZE_HUD_RESIDENT_GRPC_AGENT_ID",
-                "TZE_HUD_RESIDENT_GRPC_LEASE_TTL_MS",
-                "TZE_HUD_RESIDENT_GRPC_PSK",
             ] {
                 std::env::remove_var(key);
             }
@@ -1850,301 +1716,41 @@ profile = "full-display"
         }
     }
 
-    // ── resident gRPC portal CLI/env surfacing (hud-ev2lr) ────────────────────
-
-    /// Default StartupOptions must have resident gRPC portal disabled.
-    #[test]
-    fn parse_options_default_resident_grpc_portal_is_off() {
-        let _guard = ENV_VAR_MUTEX.lock().unwrap();
-        clear_parse_options_env();
-        let opts = parse_options(&[]).unwrap();
-        assert!(
-            !opts.resident_grpc_portal_enabled,
-            "resident gRPC portal must be off by default"
-        );
-    }
-
-    /// `--resident-grpc-portal` flag enables the bridge with all defaults.
-    #[test]
-    fn parse_options_resident_grpc_portal_flag_enables_bridge() {
-        let _guard = ENV_VAR_MUTEX.lock().unwrap();
-        clear_parse_options_env();
-        let args: Vec<String> = vec!["--resident-grpc-portal".to_string()];
-        let opts = parse_options(&args).unwrap();
-        assert!(opts.resident_grpc_portal_enabled);
-        assert!(opts.resident_grpc_endpoint.is_none());
-        assert_eq!(
-            opts.resident_grpc_agent_id,
-            tze_hud_runtime::windowed::DEFAULT_RESIDENT_GRPC_AGENT_ID
-        );
-        assert_eq!(
-            opts.resident_grpc_lease_ttl_ms,
-            tze_hud_runtime::windowed::DEFAULT_RESIDENT_GRPC_LEASE_TTL_MS
-        );
-        assert!(opts.resident_grpc_psk.is_none());
-    }
-
-    /// `--resident-grpc-endpoint` sets the target endpoint and implies enable.
-    #[test]
-    fn parse_options_resident_grpc_endpoint_flag_implies_enable() {
-        let _guard = ENV_VAR_MUTEX.lock().unwrap();
-        clear_parse_options_env();
-        let args: Vec<String> = vec![
-            "--resident-grpc-endpoint".to_string(),
-            "http://10.0.0.4:50051".to_string(),
-        ];
-        let opts = parse_options(&args).unwrap();
-        assert!(opts.resident_grpc_portal_enabled);
-        assert_eq!(
-            opts.resident_grpc_endpoint.as_deref(),
-            Some("http://10.0.0.4:50051")
-        );
-    }
-
-    /// `--resident-grpc-agent-id` overrides the agent identity and implies enable.
-    #[test]
-    fn parse_options_resident_grpc_agent_id_flag_implies_enable() {
-        let _guard = ENV_VAR_MUTEX.lock().unwrap();
-        clear_parse_options_env();
-        let args: Vec<String> = vec![
-            "--resident-grpc-agent-id".to_string(),
-            "my-external-agent".to_string(),
-        ];
-        let opts = parse_options(&args).unwrap();
-        assert!(opts.resident_grpc_portal_enabled);
-        assert_eq!(opts.resident_grpc_agent_id, "my-external-agent");
-    }
-
-    /// `--resident-grpc-lease-ttl` overrides the TTL and implies enable.
-    #[test]
-    fn parse_options_resident_grpc_lease_ttl_flag_implies_enable() {
-        let _guard = ENV_VAR_MUTEX.lock().unwrap();
-        clear_parse_options_env();
-        let args: Vec<String> = vec![
-            "--resident-grpc-lease-ttl".to_string(),
-            "120000".to_string(),
-        ];
-        let opts = parse_options(&args).unwrap();
-        assert!(opts.resident_grpc_portal_enabled);
-        assert_eq!(opts.resident_grpc_lease_ttl_ms, 120_000);
-    }
-
-    /// `--resident-grpc-psk` sets an explicit credential and implies enable.
-    #[test]
-    fn parse_options_resident_grpc_psk_flag_implies_enable() {
-        let _guard = ENV_VAR_MUTEX.lock().unwrap();
-        clear_parse_options_env();
-        let args: Vec<String> = vec![
-            "--resident-grpc-psk".to_string(),
-            "external-secret".to_string(),
-        ];
-        let opts = parse_options(&args).unwrap();
-        assert!(opts.resident_grpc_portal_enabled);
-        assert_eq!(opts.resident_grpc_psk.as_deref(), Some("external-secret"));
-    }
-
-    /// All four sub-settings can be combined with the portal flag.
-    #[test]
-    fn parse_options_resident_grpc_all_sub_flags() {
-        let _guard = ENV_VAR_MUTEX.lock().unwrap();
-        clear_parse_options_env();
-        let args: Vec<String> = vec![
-            "--resident-grpc-portal".to_string(),
-            "--resident-grpc-endpoint".to_string(),
-            "http://192.168.1.20:50051".to_string(),
-            "--resident-grpc-agent-id".to_string(),
-            "external-portal".to_string(),
-            "--resident-grpc-lease-ttl".to_string(),
-            "90000".to_string(),
-            "--resident-grpc-psk".to_string(),
-            "ext-key".to_string(),
-        ];
-        let opts = parse_options(&args).unwrap();
-        assert!(opts.resident_grpc_portal_enabled);
-        assert_eq!(
-            opts.resident_grpc_endpoint.as_deref(),
-            Some("http://192.168.1.20:50051")
-        );
-        assert_eq!(opts.resident_grpc_agent_id, "external-portal");
-        assert_eq!(opts.resident_grpc_lease_ttl_ms, 90_000);
-        assert_eq!(opts.resident_grpc_psk.as_deref(), Some("ext-key"));
-    }
-
-    /// `TZE_HUD_RESIDENT_GRPC_PORTAL=1` env var enables the bridge with defaults.
-    #[test]
-    fn parse_options_resident_grpc_portal_env_enables_bridge() {
-        let _guard = ENV_VAR_MUTEX.lock().unwrap();
-        clear_parse_options_env();
-        unsafe {
-            std::env::set_var("TZE_HUD_RESIDENT_GRPC_PORTAL", "1");
-        }
-        let opts = parse_options(&[]).unwrap();
-        assert!(opts.resident_grpc_portal_enabled);
-        // Clean up.
-        unsafe {
-            std::env::remove_var("TZE_HUD_RESIDENT_GRPC_PORTAL");
-        }
-    }
-
-    /// `TZE_HUD_RESIDENT_GRPC_ENDPOINT` env var sets the endpoint and implies enable.
-    #[test]
-    fn parse_options_resident_grpc_endpoint_env_implies_enable() {
-        let _guard = ENV_VAR_MUTEX.lock().unwrap();
-        clear_parse_options_env();
-        unsafe {
-            std::env::set_var("TZE_HUD_RESIDENT_GRPC_ENDPOINT", "http://10.0.0.5:50051");
-        }
-        let opts = parse_options(&[]).unwrap();
-        assert!(opts.resident_grpc_portal_enabled);
-        assert_eq!(
-            opts.resident_grpc_endpoint.as_deref(),
-            Some("http://10.0.0.5:50051")
-        );
-        unsafe {
-            std::env::remove_var("TZE_HUD_RESIDENT_GRPC_ENDPOINT");
-        }
-    }
-
-    /// `TZE_HUD_RESIDENT_GRPC_LEASE_TTL_MS` env var with invalid value is an error.
-    #[test]
-    fn parse_options_resident_grpc_lease_ttl_env_invalid_is_error() {
-        let _guard = ENV_VAR_MUTEX.lock().unwrap();
-        clear_parse_options_env();
-        unsafe {
-            std::env::set_var("TZE_HUD_RESIDENT_GRPC_LEASE_TTL_MS", "not-a-number");
-        }
-        let err = parse_options(&[]).unwrap_err();
-        assert!(
-            err.contains("TZE_HUD_RESIDENT_GRPC_LEASE_TTL_MS"),
-            "error must name the env var, got: {err}"
-        );
-        unsafe {
-            std::env::remove_var("TZE_HUD_RESIDENT_GRPC_LEASE_TTL_MS");
-        }
-    }
-
-    /// `--resident-grpc-lease-ttl` with invalid value is an error.
-    #[test]
-    fn parse_options_resident_grpc_lease_ttl_flag_invalid_is_error() {
-        let _guard = ENV_VAR_MUTEX.lock().unwrap();
-        clear_parse_options_env();
-        let args: Vec<String> = vec![
-            "--resident-grpc-lease-ttl".to_string(),
-            "not-a-number".to_string(),
-        ];
-        let err = parse_options(&args).unwrap_err();
-        assert!(
-            err.contains("--resident-grpc-lease-ttl"),
-            "error must name the flag, got: {err}"
-        );
-    }
-
-    /// CLI flag overrides env var: endpoint from flag wins over env var.
-    #[test]
-    fn parse_options_resident_grpc_endpoint_flag_overrides_env() {
-        let _guard = ENV_VAR_MUTEX.lock().unwrap();
-        clear_parse_options_env();
-        unsafe {
-            std::env::set_var("TZE_HUD_RESIDENT_GRPC_ENDPOINT", "http://env-host:50051");
-        }
-        let args: Vec<String> = vec![
-            "--resident-grpc-endpoint".to_string(),
-            "http://flag-host:50051".to_string(),
-        ];
-        let opts = parse_options(&args).unwrap();
-        assert_eq!(
-            opts.resident_grpc_endpoint.as_deref(),
-            Some("http://flag-host:50051"),
-            "CLI flag must override env var"
-        );
-        unsafe {
-            std::env::remove_var("TZE_HUD_RESIDENT_GRPC_ENDPOINT");
-        }
-    }
-
-    /// Wire-through: portal-enabled with explicit endpoint maps to
-    /// `WindowedConfig::resident_grpc_portal = Some(..)` with `Psk` credential.
-    #[test]
-    fn parse_options_resident_grpc_wire_through_explicit_psk() {
-        let opts = StartupOptions {
-            resident_grpc_portal_enabled: true,
-            resident_grpc_endpoint: Some("http://192.168.1.20:50051".to_string()),
-            resident_grpc_agent_id: "ext-agent".to_string(),
-            resident_grpc_lease_ttl_ms: 30_000,
-            resident_grpc_psk: Some("ext-secret".to_string()),
-            ..StartupOptions::default()
-        };
-        let settings = build_resident_grpc_portal_settings(&opts)
-            .expect("portal settings must be Some when enabled");
-        assert_eq!(
-            settings.endpoint.as_deref(),
-            Some("http://192.168.1.20:50051")
-        );
-        assert_eq!(settings.agent_id, "ext-agent");
-        assert_eq!(settings.lease_ttl_ms, 30_000);
-        assert_eq!(
-            settings.credential,
-            ResidentGrpcCredentialSource::Psk("ext-secret".to_string())
-        );
-    }
-
-    /// Wire-through: portal-enabled without explicit PSK uses `RuntimePsk`.
-    #[test]
-    fn parse_options_resident_grpc_wire_through_runtime_psk() {
-        let opts = StartupOptions {
-            resident_grpc_portal_enabled: true,
-            ..StartupOptions::default()
-        };
-        let settings = build_resident_grpc_portal_settings(&opts)
-            .expect("portal settings must be Some when enabled");
-        assert_eq!(
-            settings.credential,
-            ResidentGrpcCredentialSource::RuntimePsk
-        );
-    }
-
-    /// Wire-through: portal disabled returns None.
-    #[test]
-    fn parse_options_resident_grpc_wire_through_disabled_is_none() {
-        let opts = StartupOptions::default();
-        assert!(build_resident_grpc_portal_settings(&opts).is_none());
-    }
-
     // ── redact_sensitive_args (hud-9bi85) ─────────────────────────────────────
 
-    /// `--resident-grpc-psk` value is replaced with `<redacted>`.
+    /// `--psk` value is replaced with `<redacted>`.
     #[test]
     fn redact_sensitive_args_redacts_psk_value() {
         let args = vec![
             "tze_hud".to_string(),
-            "--resident-grpc-psk".to_string(),
+            "--psk".to_string(),
             "super-secret".to_string(),
-            "--resident-grpc-portal".to_string(),
+            "--fps".to_string(),
         ];
         let redacted = redact_sensitive_args(args);
-        assert_eq!(redacted[1], "--resident-grpc-psk");
+        assert_eq!(redacted[1], "--psk");
         assert_eq!(redacted[2], "<redacted>");
-        assert_eq!(redacted[3], "--resident-grpc-portal");
+        assert_eq!(redacted[3], "--fps");
     }
 
-    /// Args without `--resident-grpc-psk` are returned unchanged.
+    /// Args without `--psk` are returned unchanged.
     #[test]
     fn redact_sensitive_args_passthrough_when_no_psk() {
         let args = vec![
             "tze_hud".to_string(),
-            "--resident-grpc-portal".to_string(),
-            "--resident-grpc-endpoint".to_string(),
-            "http://10.0.0.1:50051".to_string(),
+            "--fps".to_string(),
+            "--grpc-port".to_string(),
+            "50051".to_string(),
         ];
         let expected = args.clone();
         assert_eq!(redact_sensitive_args(args), expected);
     }
 
-    /// Trailing `--resident-grpc-psk` with no following value does not panic.
+    /// Trailing `--psk` with no following value does not panic.
     #[test]
     fn redact_sensitive_args_trailing_psk_flag_does_not_panic() {
-        let args = vec!["tze_hud".to_string(), "--resident-grpc-psk".to_string()];
+        let args = vec!["tze_hud".to_string(), "--psk".to_string()];
         let redacted = redact_sensitive_args(args);
-        assert_eq!(redacted, vec!["tze_hud", "--resident-grpc-psk"]);
+        assert_eq!(redacted, vec!["tze_hud", "--psk"]);
     }
 }

@@ -198,6 +198,8 @@ fn now_wall_us() -> u64 {
 struct SoakAgentSession {
     namespace: String,
     lease_id_bytes: Vec<u8>,
+    /// The tile granted by the connect-time `ClaimTile`.
+    tile_id: Vec<u8>,
     tx: tokio::sync::mpsc::Sender<session_proto::ClientMessage>,
     rx: tonic::codec::Streaming<session_proto::ServerMessage>,
     sequence: u64,
@@ -210,7 +212,7 @@ impl SoakAgentSession {
     }
 }
 
-/// Connect a soak agent, complete the handshake, and acquire a lease.
+/// Connect a soak agent, complete the handshake, and claim its one tile.
 async fn connect_soak_agent(
     agent_id: &str,
     lease_ttl_ms: u64,
@@ -279,29 +281,32 @@ async fn connect_soak_agent(
     tx.send(session_proto::ClientMessage {
         sequence: 2,
         timestamp_wall_us: now_wall_us(),
-        payload: Some(session_proto::client_message::Payload::LeaseRequest(
-            session_proto::LeaseRequest {
+        payload: Some(session_proto::client_message::Payload::ClaimTile(
+            session_proto::ClaimTile {
                 ttl_ms: lease_ttl_ms,
+                ..Default::default()
             },
         )),
     })
     .await?;
 
-    // Read LeaseResponse
+    // Read the ClaimTile result
     let msg = next_server_msg(&mut response_stream).await?;
-    let lease_id_bytes = match &msg.payload {
-        Some(session_proto::server_message::Payload::LeaseResponse(resp)) if resp.granted => {
-            resp.lease_id.clone()
-        }
-        other => return Err(format!(
-            "soak agent {agent_id} (soak_agent): Expected LeaseResponse(granted), got: {other:?}"
-        )
-        .into()),
-    };
+    let (lease_id_bytes, tile_id) =
+        match &msg.payload {
+            Some(session_proto::server_message::Payload::RequestResult(resp)) if resp.ok => {
+                (resp.lease_id.clone(), resp.ids[0].clone())
+            }
+            other => return Err(format!(
+                "soak agent {agent_id} (soak_agent): Expected a granted ClaimTile, got: {other:?}"
+            )
+            .into()),
+        };
 
     Ok(SoakAgentSession {
         namespace,
         lease_id_bytes,
+        tile_id,
         tx,
         rx: response_stream,
         sequence: 2,
@@ -315,58 +320,9 @@ async fn next_server_msg(
     Ok(stream.next().await.ok_or("stream ended unexpectedly")??)
 }
 
-/// Send a CreateTile mutation via gRPC and return the tile ID.
-async fn create_tile(
-    session: &mut SoakAgentSession,
-    bounds: [f32; 4],
-    z_order: u32,
-) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-    let batch_id: Vec<u8> = uuid::Uuid::now_v7().as_bytes().to_vec();
-    let seq = session.next_seq();
-
-    session
-        .tx
-        .send(session_proto::ClientMessage {
-            sequence: seq,
-            timestamp_wall_us: now_wall_us(),
-            payload: Some(session_proto::client_message::Payload::MutationBatch(
-                session_proto::MutationBatch {
-                    batch_id,
-                    lease_id: session.lease_id_bytes.clone(),
-                    mutations: vec![proto::MutationProto {
-                        mutation: Some(proto::mutation_proto::Mutation::CreateTile(
-                            proto::CreateTileMutation {
-                                tab_id: vec![],
-                                bounds: Some(proto::Rect {
-                                    x: bounds[0],
-                                    y: bounds[1],
-                                    width: bounds[2],
-                                    height: bounds[3],
-                                }),
-                                z_order,
-                            },
-                        )),
-                    }],
-                    timing: None,
-                },
-            )),
-        })
-        .await?;
-
-    // Read MutationResult
-    let msg = next_server_msg(&mut session.rx).await?;
-    match &msg.payload {
-        Some(session_proto::server_message::Payload::MutationResult(result)) if result.accepted => {
-            let tile_id = result.created_ids.first().cloned().unwrap_or_default();
-            Ok(tile_id)
-        }
-        Some(session_proto::server_message::Payload::MutationResult(result)) => Err(format!(
-            "CreateTile rejected: {} — {}",
-            result.error_code, result.error_message
-        )
-        .into()),
-        other => Err(format!("Expected MutationResult, got: {other:?}").into()),
-    }
+/// Return the tile the agent's connect-time `ClaimTile` granted.
+fn claimed_tile(session: &SoakAgentSession) -> Vec<u8> {
+    session.tile_id.clone()
 }
 
 /// Update a tile's root content via a `SetTileRoot` mutation.
@@ -380,7 +336,7 @@ async fn create_tile(
 /// distinct and detectable during post-run analysis.
 ///
 /// Returns `Ok(true)` if the runtime accepted the mutation, `Ok(false)` if the
-/// runtime rejected it (but sent a well-formed `MutationResult`). The caller
+/// runtime rejected it (but sent a well-formed `RequestResult`). The caller
 /// should record this via [`MutationAccountant`] so the acceptance rate can be
 /// asserted after the soak loop ends.
 async fn update_tile_content(
@@ -440,15 +396,13 @@ async fn update_tile_content(
         })
         .await?;
 
-    // Read the MutationResult and return whether the runtime accepted it.
+    // Read the RequestResult and return whether the runtime accepted it.
     // Callers record this via MutationAccountant so that a run where the
     // runtime rejects every mutation is caught as a test failure.
     let msg = next_server_msg(&mut session.rx).await?;
     match &msg.payload {
-        Some(session_proto::server_message::Payload::MutationResult(result)) => Ok(result.accepted),
-        other => {
-            Err(format!("update_tile_content: expected MutationResult, got: {other:?}").into())
-        }
+        Some(session_proto::server_message::Payload::RequestResult(result)) => Ok(result.ok),
+        other => Err(format!("update_tile_content: expected RequestResult, got: {other:?}").into()),
     }
 }
 
@@ -465,39 +419,33 @@ async fn publish_to_zone(
         .send(session_proto::ClientMessage {
             sequence: seq,
             timestamp_wall_us: now_wall_us(),
-            payload: Some(session_proto::client_message::Payload::ZonePublish(
-                session_proto::ZonePublish {
-                    zone_name: zone_name.to_string(),
+            payload: Some(session_proto::client_message::Payload::Publish(
+                session_proto::Publish {
+                    surface: format!("zone:{zone_name}"),
                     content: Some(proto::ZoneContent {
                         payload: Some(proto::zone_content::Payload::StreamText(text.to_string())),
                     }),
-                    ttl_us: 0,
-                    element_id: Vec::new(),
-                    merge_key: String::new(),
+                    ttl_ms: 0,
+                    key: String::new(),
                     breakpoints: Vec::new(),
-                    // Snapshot parity fields (WM-S2b session.proto delta §fields 7-9); 0/empty = no constraint.
-                    present_at_wall_us: 0,
-                    expires_at_wall_us: 0,
-                    content_classification: String::new(),
+                    present_at_us: 0,
+                    expires_at_us: 0,
+                    ..Default::default()
                 },
             )),
         })
         .await?;
 
-    // Read ZonePublishResult
+    // Read RequestResult
     let msg = session.rx.next().await.ok_or("no zone publish result")??;
     match &msg.payload {
-        Some(session_proto::server_message::Payload::ZonePublishResult(result))
-            if result.accepted =>
-        {
-            Ok(())
-        }
-        Some(session_proto::server_message::Payload::ZonePublishResult(result)) => Err(format!(
-            "ZonePublish to '{}' rejected: {} — {}",
-            zone_name, result.error_code, result.error_message
+        Some(session_proto::server_message::Payload::RequestResult(result)) if result.ok => Ok(()),
+        Some(session_proto::server_message::Payload::RequestResult(result)) => Err(format!(
+            "zone Publish to '{}' rejected: {} — {}",
+            zone_name, result.code, result.hint
         )
         .into()),
-        other => Err(format!("Expected ZonePublishResult, got: {other:?}").into()),
+        other => Err(format!("Expected RequestResult, got: {other:?}").into()),
     }
 }
 
@@ -674,10 +622,8 @@ async fn test_soak_resource_growth() -> Result<(), Box<dyn std::error::Error>> {
     // while still exercising continuous mutations.
 
     let mut agent_tile_ids: Vec<Vec<u8>> = Vec::new();
-    for (idx, agent) in agents.iter_mut().enumerate() {
-        let x = 50.0 + (idx as f32) * 300.0;
-        let tile_id = create_tile(agent, [x, 50.0, 280.0, 200.0], (idx + 1) as u32).await?;
-        agent_tile_ids.push(tile_id);
+    for agent in agents.iter() {
+        agent_tile_ids.push(claimed_tile(agent));
     }
 
     // ── Phase 2: Soak loop ─────────────────────────────────────────────────
@@ -896,9 +842,9 @@ async fn test_post_disconnect_cleanup() -> Result<(), Box<dyn std::error::Error>
 
     // ── Phase 2: Create tiles and zone entries ────────────────────────────
 
-    let _tile_a = create_tile(&mut agent_alpha, [0.0, 0.0, 200.0, 200.0], 1).await?;
-    let _tile_b = create_tile(&mut agent_beta, [200.0, 0.0, 200.0, 200.0], 2).await?;
-    let _tile_c = create_tile(&mut agent_gamma, [400.0, 0.0, 200.0, 200.0], 3).await?;
+    let _tile_a = claimed_tile(&agent_alpha);
+    let _tile_b = claimed_tile(&agent_beta);
+    let _tile_c = claimed_tile(&agent_gamma);
 
     let _ = publish_to_zone(&mut agent_alpha, "subtitle", "alpha-content").await;
     let _ = publish_to_zone(&mut agent_beta, "subtitle", "beta-content").await;
@@ -1083,7 +1029,7 @@ async fn test_lease_expiry_frees_resources() -> Result<(), Box<dyn std::error::E
 
     // ── Phase 2: Create tile and publish zone entry ───────────────────────
 
-    let _tile_id = create_tile(&mut agent, [0.0, 0.0, 400.0, 300.0], 1).await?;
+    let _tile_id = claimed_tile(&agent);
     let _ = publish_to_zone(&mut agent, "subtitle", "expiry-test").await;
 
     {
@@ -1226,29 +1172,32 @@ async fn connect_soak_agent_to(
     tx.send(session_proto::ClientMessage {
         sequence: 2,
         timestamp_wall_us: now_wall_us(),
-        payload: Some(session_proto::client_message::Payload::LeaseRequest(
-            session_proto::LeaseRequest {
+        payload: Some(session_proto::client_message::Payload::ClaimTile(
+            session_proto::ClaimTile {
                 ttl_ms: lease_ttl_ms,
+                ..Default::default()
             },
         )),
     })
     .await?;
 
     let msg = next_server_msg(&mut response_stream).await?;
-    let lease_id_bytes =
-        match &msg.payload {
-            Some(session_proto::server_message::Payload::LeaseResponse(resp)) if resp.granted => {
-                resp.lease_id.clone()
-            }
-            other => return Err(format!(
-                "soak agent {agent_id} (to_port): Expected LeaseResponse(granted), got: {other:?}"
+    let (lease_id_bytes, tile_id) = match &msg.payload {
+        Some(session_proto::server_message::Payload::RequestResult(resp)) if resp.ok => {
+            (resp.lease_id.clone(), resp.ids[0].clone())
+        }
+        other => {
+            return Err(format!(
+                "soak agent {agent_id} (to_port): Expected a granted ClaimTile, got: {other:?}"
             )
-            .into()),
-        };
+            .into());
+        }
+    };
 
     Ok(SoakAgentSession {
         namespace,
         lease_id_bytes,
+        tile_id,
         tx,
         rx: response_stream,
         sequence: 2,

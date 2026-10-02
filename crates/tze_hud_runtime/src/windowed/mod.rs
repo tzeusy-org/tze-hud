@@ -193,9 +193,7 @@ mod test_support;
 mod event_loop_harness;
 
 pub use self::config::{
-    DEFAULT_RESIDENT_GRPC_AGENT_ID, DEFAULT_RESIDENT_GRPC_LEASE_TTL_MS,
-    ResidentGrpcCredentialSource, ResidentGrpcPortalSettings, WindowedBenchmarkConfig,
-    WindowedConfig, WindowedQuiescentEfficiencyConfig,
+    WindowedBenchmarkConfig, WindowedConfig, WindowedQuiescentEfficiencyConfig,
 };
 use self::hittest::{refresh_interaction_hit_regions_after_render, sync_scene_display_area};
 use self::input_dispatch::{
@@ -601,17 +599,6 @@ struct WindowedRuntimeState {
     /// `pending_input_capture_commands` — bounded in practice by the number of
     /// keystrokes that arrive during a single lock-contention window.
     pending_keyboard_events: VecDeque<PendingKeyboardEvent>,
-    /// Resident gRPC portal bridge handle (hud-d7frs), present only when the
-    /// bridge is explicitly enabled (`TZE_HUD_RESIDENT_GRPC_PORTAL`) and the gRPC
-    /// server + PSK are configured. Aborted on teardown so its task/stream is not
-    /// leaked. `None` in the default configuration.
-    resident_grpc_bridge: Option<crate::resident_grpc_bridge::ResidentGrpcBridgeHandle>,
-    /// Inbound composer input routed back from the resident gRPC bridge (hud-omfqi).
-    /// Drained on each `about_to_wait` tick into the projection authority's
-    /// pending-input inbox — the same sink a non-bridged portal reaches. `None`
-    /// unless the bridge is enabled with input routing.
-    resident_grpc_input_rx:
-        Option<tokio::sync::mpsc::Receiver<crate::resident_grpc_bridge::ResidentBridgeInput>>,
     /// Cumulative count of interactive-feedback scene updates dropped because the
     /// main-thread `spin_acquire` timed out on the scene / shared-state lock
     /// during a guaranteed-feedback gesture (drag-move / live resize) — the exact
@@ -866,11 +853,6 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
         // ops enqueued in the same event-loop tick are fed into the cadence
         // coalescer and materialised by the immediately-following drain call.
         self.drain_portal_ops();
-        // Drain composer input routed back from the resident gRPC bridge
-        // (hud-omfqi). Runs alongside portal-op ingestion so bridged viewer
-        // submissions reach the authority's pending-input inbox before the
-        // immediately-following projection drain refreshes portal content.
-        self.drain_resident_grpc_input();
         // Drain the in-process portal projection authority (hud-2iup7).
         // Must run AFTER composer flush so draft state is settled before portal
         // content is refreshed.  Uses try_lock on the scene to avoid blocking
@@ -2361,21 +2343,6 @@ fn main_work_source_for_window_event(
     }
 }
 
-/// Move resident-bridge input onto the main-owned authority queue, then wake
-/// that owner to drain it. Queue ingress is deliberately not compositor work:
-/// the authority decides whether the drained input changes the scene.
-async fn forward_resident_bridge_input_to_main(
-    input: crate::resident_grpc_bridge::ResidentBridgeInput,
-    main_input_tx: &tokio::sync::mpsc::Sender<crate::resident_grpc_bridge::ResidentBridgeInput>,
-    portal_ingress_wake: &tze_hud_scene::render_wake::RenderWakeNotifier,
-) -> bool {
-    if main_input_tx.send(input).await.is_err() {
-        return false;
-    }
-    portal_ingress_wake.notify();
-    true
-}
-
 /// Schedule compositor work only when safe mode actually left its active state.
 /// Repeated Ctrl+Shift+Escape signals while inactive are side-effect-free.
 fn notify_after_safe_mode_exit(
@@ -2566,6 +2533,7 @@ impl WindowedRuntime {
             )
             .into_iter()
             .collect(),
+            tile_placement: tze_hud_config::tile_placement_from_tokens(&startup_compositor_tokens),
         }));
 
         let (frame_ready_tx, frame_ready_rx) = frame_ready_channel();
@@ -2791,147 +2759,7 @@ impl WindowedRuntime {
             None
         };
 
-        let mut portal_projection_driver = build_portal_projection_driver(&cfg)?;
-
-        // ── Resident gRPC portal bridge (hud-d7frs) ────────────────────────────
-        // Second adapter family for the RFC 0013 §7.2 gate: the resident gRPC
-        // text-stream portal adapter, served over a real authenticated gRPC
-        // `HudSession` stream and driven by the SAME `ProjectionAuthority` the
-        // in-process path hosts (via a non-blocking tee on the drain).
-        //
-        // Default OFF, fail-closed. Enabled when the operator either supplies a
-        // first-class `WindowedConfig::resident_grpc_portal` target (hud-x2e2v)
-        // or sets the legacy `TZE_HUD_RESIDENT_GRPC_PORTAL` env var (preserved as
-        // a force-enable override). Once enabled it still requires a resolvable
-        // endpoint, a live network runtime, and a non-empty resolved credential.
-        // Auth posture mirrors #944: the bridge presents the PSK and is
-        // capability-scoped (`create_tiles` + `modify_own_tiles`); the runtime
-        // remains the final authorizer. When OFF, the in-process path is
-        // unchanged.
-        //
-        // The first-class config decouples target/identity/credential from this
-        // runtime's own values so an EXTERNAL runtime can be addressed without
-        // env hacks. The env-only path keeps targeting this runtime's loopback
-        // gRPC server with the runtime PSK (its historical behaviour).
-        //
-        // NOTE (routing, resolved by hud-g7ool + hud-hfuxy): pointing the bridge
-        // at this runtime's own loopback gRPC server used to materialise the
-        // portal a second time in the same scene (duplicate tiles). hud-g7ool
-        // added a per-projection transport discriminant (`PortalTransport`,
-        // suppressing the in-process direct-scene path for bridge-routed
-        // projections) and hud-hfuxy wires it: `dispatch_portal_op`'s Attach
-        // handler routes newly attached projections onto the bridge whenever
-        // this channel is installed below, so each projection is materialised
-        // exactly once. The bridge's intended production target remains a
-        // separate runtime (the aspirational external authority deployment
-        // model); per-projection fan-out to DISTINCT external runtimes is still
-        // reserved for that epic — this runtime only ever has one global bridge
-        // endpoint.
-        // Return path for bridged composer input (hud-omfqi): when the bridge
-        // routes input, it forwards inbound composer submissions here; the winit
-        // thread drains this into the authority's pending-input inbox (the same
-        // sink a non-bridged portal reaches). `None` unless the bridge is enabled.
-        let mut resident_grpc_input_rx: Option<
-            tokio::sync::mpsc::Receiver<crate::resident_grpc_bridge::ResidentBridgeInput>,
-        > = None;
-        let resident_grpc_bridge = {
-            let env_enabled = std::env::var("TZE_HUD_RESIDENT_GRPC_PORTAL")
-                .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-                .unwrap_or(false);
-            let settings = cfg.resident_grpc_portal.clone();
-            if config::resident_grpc_bridge_enabled(settings.is_some(), env_enabled) {
-                // No explicit settings → env force-enable path: loopback
-                // self-target with the runtime PSK (unchanged legacy behaviour).
-                let settings = settings.unwrap_or_default();
-                let endpoint = config::resolve_resident_grpc_endpoint(
-                    settings.endpoint.as_deref(),
-                    cfg.grpc_port,
-                );
-                let psk = config::resolve_resident_grpc_credential(&settings.credential, &cfg.psk);
-                match (endpoint, network_rt.as_ref()) {
-                    _ if psk.trim().is_empty() => {
-                        tracing::warn!(
-                            "resident gRPC portal bridge enabled but resolved credential is \
-                             empty; bridge disabled (fail-closed)"
-                        );
-                        None
-                    }
-                    (None, _) => {
-                        tracing::warn!(
-                            "resident gRPC portal bridge enabled but no endpoint could be \
-                             resolved (no explicit endpoint and gRPC server disabled); bridge \
-                             disabled"
-                        );
-                        None
-                    }
-                    (Some(_), None) => {
-                        tracing::warn!(
-                            "resident gRPC portal bridge enabled but no network runtime; bridge \
-                             disabled"
-                        );
-                        None
-                    }
-                    (Some(endpoint), Some(rt)) => {
-                        let mut bridge_cfg =
-                            crate::resident_grpc_bridge::ResidentGrpcBridgeConfig::new(
-                                endpoint.clone(),
-                                psk,
-                                settings.agent_id.clone(),
-                            );
-                        bridge_cfg.lease_ttl_ms = settings.lease_ttl_ms;
-                        // Resolve the bridge's visual tokens from the runtime's
-                        // LOADED startup design tokens (`startup_compositor_tokens`
-                        // — canonical defaults merged with `[design_tokens]`), NOT
-                        // empty maps. This mirrors the in-process
-                        // driver's `resolve_visual_tokens`, which resolves against
-                        // the same startup token map (applied via
-                        // `apply_token_map(global_tokens)`), so a bridged portal is
-                        // visually identical to an in-process one instead of falling
-                        // back to unstyled canonical defaults (hud-ygtiy).
-                        let tokens = crate::portal_tokens::resolve_bridge_visual_tokens(
-                            &startup_compositor_tokens,
-                        );
-                        // Wire the bridged-composer-input return path (hud-omfqi):
-                        // the bridge requests the input capability + INPUT_EVENTS
-                        // subscription and forwards inbound composer input here.
-                        let (input_tx, mut bridge_input_rx) = tokio::sync::mpsc::channel(64);
-                        let (main_input_tx, main_input_rx) = tokio::sync::mpsc::channel(64);
-                        resident_grpc_input_rx = Some(main_input_rx);
-                        let bridge_input_wake = portal_ingress_wake.clone();
-                        network_handles.push(rt.rt.spawn(async move {
-                            while let Some(input) = bridge_input_rx.recv().await {
-                                if !forward_resident_bridge_input_to_main(
-                                    input,
-                                    &main_input_tx,
-                                    &bridge_input_wake,
-                                )
-                                .await
-                                {
-                                    break;
-                                }
-                            }
-                        }));
-                        let handle = crate::resident_grpc_bridge::spawn_resident_grpc_bridge(
-                            rt.rt.handle(),
-                            bridge_cfg,
-                            tokens,
-                            Some(input_tx),
-                        );
-                        portal_projection_driver
-                            .set_resident_grpc_bridge_tx(Some(handle.state_sender()));
-                        tracing::info!(
-                            endpoint = %endpoint,
-                            agent_id = %settings.agent_id,
-                            lease_ttl_ms = settings.lease_ttl_ms,
-                            "resident gRPC portal bridge enabled (two adapter families; hud-d7frs)"
-                        );
-                        Some(handle)
-                    }
-                }
-            } else {
-                None
-            }
-        };
+        let portal_projection_driver = build_portal_projection_driver(&cfg)?;
 
         let app_state = WindowedRuntimeState {
             config: cfg,
@@ -3004,8 +2832,6 @@ impl WindowedRuntime {
             portal_projection_driver,
             portal_op_rx: portal_op_rx_opt.take(),
             pending_keyboard_events: VecDeque::new(),
-            resident_grpc_bridge,
-            resident_grpc_input_rx,
             interaction_feedback_lock_misses: std::sync::atomic::AtomicU64::new(0),
         };
 
@@ -3059,12 +2885,6 @@ impl WindowedRuntime {
         // `shutdown_timeout` gives tasks 500 ms to exit cleanly after the
         // shutdown token was triggered above.  The MCP task exits promptly
         // because it polls the `ShutdownToken`; gRPC tasks were already aborted.
-        // Stop the resident gRPC portal bridge (hud-d7frs) before tearing down the
-        // network runtime so its task/stream is not leaked.
-        if let Some(bridge) = app.state.resident_grpc_bridge.take() {
-            tracing::info!("aborting resident gRPC portal bridge task...");
-            bridge.abort();
-        }
 
         if let Some(network_rt) = app.state.network_rt.take() {
             tracing::info!("shutting down network runtime (gRPC, MCP tasks)...");
@@ -3197,7 +3017,8 @@ mod wake_accounting_tests {
         use tze_hud_protocol::proto::session::hud_session_server::HudSessionServer;
         use tze_hud_protocol::proto::session::server_message::Payload as ServerPayload;
         use tze_hud_protocol::proto::session::{
-            ClientMessage, LeaseRequest, LeaseResponse, LeaseResult, ServerMessage, SessionInit,
+            ClaimTile, ClientMessage, ReclaimReason, Reclaimed, RequestResult, ServerMessage,
+            SessionInit,
         };
         use tze_hud_protocol::session_server::HudSessionImpl;
         use tze_hud_scene::types::{LeaseExpiry, LeaseState};
@@ -3270,7 +3091,10 @@ mod wake_accounting_tests {
         tx.send(ClientMessage {
             sequence: 2,
             timestamp_wall_us: now_wall_us(),
-            payload: Some(ClientPayload::LeaseRequest(LeaseRequest { ttl_ms: 60_000 })),
+            payload: Some(ClientPayload::ClaimTile(ClaimTile {
+                ttl_ms: 60_000,
+                ..Default::default()
+            })),
         })
         .await
         .unwrap();
@@ -3283,14 +3107,12 @@ mod wake_accounting_tests {
                 .expect("connected stream must remain open")
                 .expect("lease grant message must be valid");
             match message.payload {
-                Some(ServerPayload::LeaseResponse(LeaseResponse {
-                    granted,
+                Some(ServerPayload::RequestResult(RequestResult {
+                    ok: granted,
                     lease_id,
-                    result,
                     ..
                 })) => {
                     assert!(granted, "test lease must be granted");
-                    assert_eq!(result, LeaseResult::Granted as i32);
                     granted_lease_id = uuid::Uuid::from_slice(&lease_id)
                         .ok()
                         .map(tze_hud_scene::SceneId::from_uuid);
@@ -3344,17 +3166,13 @@ mod wake_accounting_tests {
                     .expect("connected stream must remain open")
                     .expect("terminal lease message must be valid");
             match message.payload {
-                Some(ServerPayload::LeaseResponse(LeaseResponse {
-                    granted,
+                Some(ServerPayload::Reclaimed(Reclaimed {
                     lease_id: response_lease_id,
-                    result,
-                    deny_code,
+                    why,
                     ..
                 })) => {
-                    assert!(!granted);
                     assert_eq!(response_lease_id, lease_id.as_uuid().as_bytes().to_vec());
-                    assert_eq!(result, LeaseResult::Expired as i32);
-                    assert_eq!(deny_code, "LEASE_EXPIRED");
+                    assert_eq!(why, ReclaimReason::Expired as i32);
                     assert!(
                         !terminal_response_seen,
                         "only one terminal response is allowed"

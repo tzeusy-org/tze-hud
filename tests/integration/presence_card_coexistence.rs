@@ -768,7 +768,7 @@ fn set_tile_root_is_namespace_isolated() {
 }
 
 // ─── gRPC helper types (file-local) ──────────────────────────────────────────
-// now_wall_us(), AgentSession, connect_agent, create_tile_via_grpc are provided
+// now_wall_us(), AgentSession, connect_agent, claim_tile_via_grpc are provided
 // by the shared common harness above. Only set_tile_text_via_grpc is unique here.
 
 /// Send a SetTileRoot mutation via gRPC, setting a TextMarkdownNode as the root.
@@ -842,14 +842,10 @@ async fn set_tile_text_via_grpc(
         .await
         .ok_or("no mutation result")??;
     match &msg.payload {
-        Some(session_proto::server_message::Payload::MutationResult(result)) if result.accepted => {
-            Ok(())
+        Some(session_proto::server_message::Payload::RequestResult(result)) if result.ok => Ok(()),
+        Some(session_proto::server_message::Payload::RequestResult(result)) => {
+            Err(format!("SetTileRoot rejected: {} — {}", result.code, result.hint).into())
         }
-        Some(session_proto::server_message::Payload::MutationResult(result)) => Err(format!(
-            "SetTileRoot rejected: {} — {}",
-            result.error_code, result.error_message
-        )
-        .into()),
         other => Err(format!("Expected MutationResult, got: {other:?}").into()),
     }
 }
@@ -912,20 +908,22 @@ async fn test_three_agents_presence_card_coexistence() -> Result<(), Box<dyn std
         "agent-alpha and agent-gamma must have distinct namespaces"
     );
 
-    // ── Phase 2: Each agent creates a presence card tile ─────────────────────
+    // ── Phase 2: Each agent claims a presence card tile ──────────────────────
     //
-    // Per spec:
-    //   Agent 0 (alpha): y = tab_height - 136, z_order = 100
-    //   Agent 1 (beta):  y = tab_height - 260, z_order = 101
-    //   Agent 2 (gamma): y = tab_height - 384, z_order = 102
-    let alpha_bounds = [LEFT_MARGIN, DISPLAY_H - 136.0, CARD_W, CARD_H];
-    let beta_bounds = [LEFT_MARGIN, DISPLAY_H - 260.0, CARD_W, CARD_H];
-    let gamma_bounds = [LEFT_MARGIN, DISPLAY_H - 384.0, CARD_W, CARD_H];
-
+    // All three claim the same anchor; the runtime stacks them without overlap.
     let (tile_alpha_id, tile_beta_id, tile_gamma_id) = tokio::try_join!(
-        create_tile_via_grpc(&mut alpha, alpha_bounds, 100),
-        create_tile_via_grpc(&mut beta, beta_bounds, 101),
-        create_tile_via_grpc(&mut gamma, gamma_bounds, 102),
+        claim_tile_via_grpc(
+            &mut alpha,
+            placement(TileAnchor::BottomLeft, TileSize::Small)
+        ),
+        claim_tile_via_grpc(
+            &mut beta,
+            placement(TileAnchor::BottomLeft, TileSize::Small)
+        ),
+        claim_tile_via_grpc(
+            &mut gamma,
+            placement(TileAnchor::BottomLeft, TileSize::Small)
+        ),
     )?;
 
     assert!(
@@ -1062,13 +1060,13 @@ async fn test_three_agents_presence_card_coexistence() -> Result<(), Box<dyn std
             "SceneSnapshot must contain exactly 3 tiles"
         );
 
-        // Verify z_orders are distinct (100, 101, 102).
+        // Verify z_orders are distinct and follow claim order (1, 2, 3).
         let mut z_orders: Vec<u32> = snap.tiles.values().map(|t| t.z_order).collect();
         z_orders.sort_unstable();
         assert_eq!(
             z_orders,
-            vec![100, 101, 102],
-            "z_orders must be [100, 101, 102] per spec"
+            vec![1, 2, 3],
+            "each claim must stack above the previous one"
         );
     }
 

@@ -961,8 +961,8 @@ impl ResidentGrpcPortalAdapter {
         ))
     }
 
-    /// Release the resident lease so the runtime removes stale projected tiles
-    /// through the normal lease cleanup path.
+    /// Clear the portal tile (`Clear{tile:<id>}`), releasing its lease so the
+    /// runtime removes it through the normal lease cleanup path.
     pub fn release_lease_message(
         &self,
         sequence: u64,
@@ -973,8 +973,12 @@ impl ResidentGrpcPortalAdapter {
             ResidentGrpcPortalCommandKind::ReleaseLease,
             sequence,
             timestamp_wall_us,
-            session_proto::client_message::Payload::LeaseRelease(session_proto::LeaseRelease {
-                lease_id: self.config.lease_id.clone(),
+            session_proto::client_message::Payload::Clear(session_proto::Clear {
+                surface: self
+                    .tile_id()
+                    .and_then(|id| <[u8; 16]>::try_from(id).ok())
+                    .map(|id| format!("tile:{}", uuid_string(id)))
+                    .unwrap_or_default(),
             }),
             started,
         )
@@ -2052,6 +2056,19 @@ impl ResidentGrpcPortalAdapter {
             budget: sample_budget(started, RESIDENT_PORTAL_UPDATE_BUILD_BUDGET_US),
         }
     }
+}
+
+/// Hyphenated lowercase UUID text for 16 big-endian id bytes.
+fn uuid_string(b: [u8; 16]) -> String {
+    let h: String = b.iter().map(|x| format!("{x:02x}")).collect();
+    format!(
+        "{}-{}-{}-{}-{}",
+        &h[0..8],
+        &h[8..12],
+        &h[12..16],
+        &h[16..20],
+        &h[20..32]
+    )
 }
 
 /// Render the portal body markdown with ambient per-turn timestamps OFF.

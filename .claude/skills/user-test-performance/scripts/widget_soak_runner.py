@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run a three-agent live WidgetPublish soak and emit a summary artifact."""
+"""Run a three-agent live widget Publish soak and emit a summary artifact."""
 
 from __future__ import annotations
 

@@ -223,8 +223,8 @@ pub struct CanonicalToken {
 /// specification (`openspec/changes/component-shape-language/specs/
 /// component-shape-language/spec.md`, §Requirement: Canonical Token Schema).
 ///
-/// Current count: 30 tokens (24 original + 3 border.radius variants + 3 spacing additions).
-/// Token groups: color (10), opacity (2), typography (9), spacing (4), stroke (2), border.radius (3).
+/// Token groups: color, opacity, typography, spacing, stroke, border.radius,
+/// portal divider, and claimed-tile placement (`tile.*`).
 pub static CANONICAL_TOKENS: &[CanonicalToken] = &[
     // Color — text
     CanonicalToken {
@@ -400,6 +400,67 @@ pub static CANONICAL_TOKENS: &[CanonicalToken] = &[
         key: "portal.divider.thickness_px",
         description: "Transcript turn separator (divider) thickness in pixels",
         default_value: "2",
+    },
+    // Claimed-tile placement (ClaimTile anchor + size class; docs/api.md).
+    CanonicalToken {
+        key: "tile.small.width",
+        description: "Claimed tile width, small size class (px)",
+        default_value: "240",
+    },
+    CanonicalToken {
+        key: "tile.small.height",
+        description: "Claimed tile height, small size class (px)",
+        default_value: "120",
+    },
+    CanonicalToken {
+        key: "tile.medium.width",
+        description: "Claimed tile width, medium size class (px)",
+        default_value: "360",
+    },
+    CanonicalToken {
+        key: "tile.medium.height",
+        description: "Claimed tile height, medium size class (px)",
+        default_value: "220",
+    },
+    CanonicalToken {
+        key: "tile.large.width",
+        description: "Claimed tile width, large size class (px)",
+        default_value: "560",
+    },
+    CanonicalToken {
+        key: "tile.large.height",
+        description: "Claimed tile height, large size class (px)",
+        default_value: "360",
+    },
+    CanonicalToken {
+        key: "tile.wide.width",
+        description: "Claimed tile width, wide size class (px)",
+        default_value: "720",
+    },
+    CanonicalToken {
+        key: "tile.wide.height",
+        description: "Claimed tile height, wide size class (px)",
+        default_value: "120",
+    },
+    CanonicalToken {
+        key: "tile.tall.width",
+        description: "Claimed tile width, tall size class (px)",
+        default_value: "300",
+    },
+    CanonicalToken {
+        key: "tile.tall.height",
+        description: "Claimed tile height, tall size class (px)",
+        default_value: "520",
+    },
+    CanonicalToken {
+        key: "tile.margin",
+        description: "Inset of claimed tiles from the display edge (px)",
+        default_value: "24",
+    },
+    CanonicalToken {
+        key: "tile.gap",
+        description: "Gap between claimed tiles stacked at one anchor (px)",
+        default_value: "12",
     },
 ];
 

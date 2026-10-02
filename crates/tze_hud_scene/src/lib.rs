@@ -10,10 +10,12 @@
 pub mod clock;
 pub mod diff;
 pub mod element_store;
+pub mod error_codes;
 pub mod graph;
 pub mod invariants;
 pub mod mutation;
 pub mod perf_budget;
+pub mod placement;
 pub mod render_wake;
 pub mod svg_tokens;
 pub mod test_scenes;

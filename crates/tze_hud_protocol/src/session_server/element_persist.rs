@@ -233,7 +233,7 @@ pub(super) async fn persist_element_store(request: Option<ElementStorePersistReq
     }
 }
 
-pub(super) fn touch_element_store_entry_by_id(
+fn touch_element_store_entry_by_id(
     st: &mut SharedState,
     element_id: SceneId,
     element_type: ElementType,

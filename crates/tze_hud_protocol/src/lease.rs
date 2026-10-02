@@ -22,24 +22,12 @@ pub const DEFAULT_LEASE_CORRELATION_CACHE_CAPACITY: usize = 256;
 
 // ─── Retransmit correlation (RFC 0005 §5.3) ──────────────────────────────────
 
-/// Cached server response to a single lease operation.
+/// Cached reply to a ClaimTile / Hold / Clear request.
 ///
 /// Keyed by the **client sequence number** that carried the original request.
-/// On retransmit the server looks up the sequence and replays the cached
-/// response without re-applying the operation.
-#[derive(Debug, Clone)]
-pub struct CachedLeaseResponse {
-    /// Whether the operation was granted.
-    pub granted: bool,
-    /// Granted lease ID bytes (16-byte UUIDv7).  Empty if denied.
-    pub lease_id: Vec<u8>,
-    /// Granted TTL in milliseconds.  Zero if denied.
-    pub granted_ttl_ms: u64,
-    /// Human-readable denial reason (empty if granted).
-    pub deny_reason: String,
-    /// Machine-readable denial code (empty if granted).
-    pub deny_code: String,
-}
+/// On retransmit the server replays the cached reply without re-applying the
+/// operation.
+pub type CachedLeaseResponse = crate::proto::session::RequestResult;
 
 /// Per-session cache of recent lease-operation responses, keyed by the
 /// client-side sequence number that originated the request.
@@ -116,16 +104,17 @@ mod tests {
     fn test_correlation_cache_hit_after_insert() {
         let mut cache = LeaseCorrelationCache::new(16);
         let resp = CachedLeaseResponse {
-            granted: true,
+            ok: true,
             lease_id: vec![0u8; 16],
-            granted_ttl_ms: 60_000,
-            deny_reason: String::new(),
-            deny_code: String::new(),
+            ttl_ms: 60_000,
+            hint: String::new(),
+            code: String::new(),
+            ..Default::default()
         };
         cache.insert(3, resp.clone());
         let hit = cache.get(3).unwrap();
-        assert!(hit.granted);
-        assert_eq!(hit.granted_ttl_ms, 60_000);
+        assert!(hit.ok);
+        assert_eq!(hit.ttl_ms, 60_000);
     }
 
     #[test]
@@ -136,11 +125,12 @@ mod tests {
             cache.insert(
                 seq,
                 CachedLeaseResponse {
-                    granted: true,
+                    ok: true,
                     lease_id: vec![seq as u8; 16],
-                    granted_ttl_ms: 1000,
-                    deny_reason: String::new(),
-                    deny_code: String::new(),
+                    ttl_ms: 1000,
+                    hint: String::new(),
+                    code: String::new(),
+                    ..Default::default()
                 },
             );
         }
@@ -153,11 +143,12 @@ mod tests {
         cache.insert(
             4,
             CachedLeaseResponse {
-                granted: true,
+                ok: true,
                 lease_id: vec![4u8; 16],
-                granted_ttl_ms: 1000,
-                deny_reason: String::new(),
-                deny_code: String::new(),
+                ttl_ms: 1000,
+                hint: String::new(),
+                code: String::new(),
+                ..Default::default()
             },
         );
 
@@ -173,11 +164,12 @@ mod tests {
         cache.insert(
             1,
             CachedLeaseResponse {
-                granted: true,
+                ok: true,
                 lease_id: vec![1u8; 16],
-                granted_ttl_ms: 1000,
-                deny_reason: String::new(),
-                deny_code: String::new(),
+                ttl_ms: 1000,
+                hint: String::new(),
+                code: String::new(),
+                ..Default::default()
             },
         );
         assert!(
@@ -194,21 +186,23 @@ mod tests {
         cache.insert(
             1,
             CachedLeaseResponse {
-                granted: true,
+                ok: true,
                 lease_id: vec![1u8; 16],
-                granted_ttl_ms: 1000,
-                deny_reason: String::new(),
-                deny_code: String::new(),
+                ttl_ms: 1000,
+                hint: String::new(),
+                code: String::new(),
+                ..Default::default()
             },
         );
         cache.insert(
             2,
             CachedLeaseResponse {
-                granted: true,
+                ok: true,
                 lease_id: vec![2u8; 16],
-                granted_ttl_ms: 1000,
-                deny_reason: String::new(),
-                deny_code: String::new(),
+                ttl_ms: 1000,
+                hint: String::new(),
+                code: String::new(),
+                ..Default::default()
             },
         );
 
@@ -216,17 +210,18 @@ mod tests {
         cache.insert(
             1,
             CachedLeaseResponse {
-                granted: false,
+                ok: false,
                 lease_id: Vec::new(),
-                granted_ttl_ms: 0,
-                deny_reason: "overwritten".to_string(),
-                deny_code: "TEST".to_string(),
+                ttl_ms: 0,
+                hint: "overwritten".to_string(),
+                code: "TEST".to_string(),
+                ..Default::default()
             },
         );
 
         // Updated value is returned
         let hit = cache.get(1).unwrap();
-        assert!(!hit.granted);
-        assert_eq!(hit.deny_reason, "overwritten");
+        assert!(!hit.ok);
+        assert_eq!(hit.hint, "overwritten");
     }
 }

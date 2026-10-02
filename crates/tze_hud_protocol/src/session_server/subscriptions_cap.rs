@@ -93,6 +93,7 @@ pub(super) async fn handle_list_elements_request(
     state: &Arc<Mutex<SharedState>>,
     session: &mut StreamSession,
     tx: &tokio::sync::mpsc::Sender<Result<ServerMessage, Status>>,
+    request_sequence: u64,
     request: ListElementsRequest,
 ) {
     if !capability_set_covers(&session.capabilities, "read_scene_topology") {
@@ -101,13 +102,11 @@ pub(super) async fn handle_list_elements_request(
             .send(Ok(ServerMessage {
                 sequence: seq,
                 timestamp_wall_us: now_wall_us(),
-                payload: Some(ServerPayload::RuntimeError(RuntimeError {
-                    error_code: "PERMISSION_DENIED".to_string(),
-                    message: "Missing capability: read_scene_topology".to_string(),
-                    context: "list_elements_request".to_string(),
-                    hint: r#"{"required_capability":"read_scene_topology"}"#.to_string(),
-                    error_code_enum: ErrorCode::PermissionDenied as i32,
-                })),
+                payload: Some(ServerPayload::RequestResult(super::verbs::fail(
+                    request_sequence,
+                    "NOT_ALLOWED",
+                    format!("needs \"tiles\" in [agents.{}] allow", session.agent_name),
+                ))),
             }))
             .await;
         return;
@@ -126,15 +125,13 @@ pub(super) async fn handle_list_elements_request(
                     .send(Ok(ServerMessage {
                         sequence: seq,
                         timestamp_wall_us: now_wall_us(),
-                        payload: Some(ServerPayload::RuntimeError(RuntimeError {
-                            error_code: "INVALID_ARGUMENT".to_string(),
-                            message: format!(
-                                "Unsupported element_type filter {element_type_filter:?}; expected tile|zone|widget"
+                        payload: Some(ServerPayload::RequestResult(super::verbs::fail(
+                            request_sequence,
+                            "INVALID_ARGUMENT",
+                            format!(
+                                "element_type {element_type_filter:?} is not tile, zone, or widget"
                             ),
-                            context: "list_elements_request.element_type".to_string(),
-                            hint: r#"{"supported":["tile","zone","widget"]}"#.to_string(),
-                            error_code_enum: ErrorCode::InvalidArgument as i32,
-                        })),
+                        ))),
                     }))
                     .await;
                 return;

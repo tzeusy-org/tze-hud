@@ -10,17 +10,17 @@
 //! Test scenarios:
 //! 1. Session establishment produces `SessionEstablished` with valid `session_id`
 //!    and namespace assignment.
-//! 2. Lease request with ttl_ms=60000 returns `LeaseResponse { granted: true }`
+//! 2. Lease request with ttl_ms=60000 returns `RequestResult { ok: true }`
 //!    with a 16-byte UUIDv7 `lease_id`.
 //! 3. MutationBatch submitted with a random (unknown) lease_id is rejected with
-//!    `MutationResult { accepted: false }` (MUTATION_REJECTED / LeaseNotFound).
+//!    `RequestResult { ok: false }` (MUTATION_REJECTED / LeaseNotFound).
 
 use tokio_stream::StreamExt;
 use tze_hud_protocol::proto::session::client_message::Payload as ClientPayload;
 use tze_hud_protocol::proto::session::hud_session_client::HudSessionClient;
 use tze_hud_protocol::proto::session::hud_session_server::HudSessionServer;
 use tze_hud_protocol::proto::session::server_message::Payload as ServerPayload;
-use tze_hud_protocol::proto::session::{ClientMessage, LeaseRequest, MutationBatch, SessionInit};
+use tze_hud_protocol::proto::session::{ClaimTile, ClientMessage, MutationBatch, SessionInit};
 use tze_hud_protocol::session_server::HudSessionImpl;
 use tze_hud_scene::graph::SceneGraph;
 
@@ -195,8 +195,8 @@ async fn exemplar_session_establishment_produces_session_established() {
 // ─── Scenario 2: Lease grant with valid capabilities ─────────────────────────
 
 /// GIVEN a successfully established session for "dashboard-agent",
-/// WHEN the agent sends LeaseRequest { ttl_ms: 60000 },
-/// THEN the server responds with LeaseResponse { granted: true } and a 16-byte
+/// WHEN the agent sends ClaimTile { ttl_ms: 60000 },
+/// THEN the server responds with RequestResult { ok: true } and a 16-byte
 ///   UUIDv7 lease_id that the agent MUST store for subsequent MutationBatch calls.
 ///
 /// spec.md §Requirement: Lease Request With AutoRenew — Scenario: Lease granted
@@ -213,7 +213,10 @@ async fn exemplar_lease_grant_returns_granted_true_and_uuidv7_lease_id() {
     tx.send(ClientMessage {
         sequence: 2,
         timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::LeaseRequest(LeaseRequest { ttl_ms: 60_000 })),
+        payload: Some(ClientPayload::ClaimTile(ClaimTile {
+            ttl_ms: 60_000,
+            ..Default::default()
+        })),
     })
     .await
     .unwrap();
@@ -221,9 +224,9 @@ async fn exemplar_lease_grant_returns_granted_true_and_uuidv7_lease_id() {
     let resp_msg = next_server_msg(&mut stream).await;
 
     let lease_id_bytes = match resp_msg.payload {
-        Some(ServerPayload::LeaseResponse(resp)) => {
+        Some(ServerPayload::RequestResult(resp)) => {
             // Granted flag must be true.
-            assert!(resp.granted, "LeaseResponse must have granted=true");
+            assert!(resp.ok, "LeaseResponse must have granted=true");
 
             // lease_id must be exactly 16 bytes (UUIDv7 as per SceneId spec).
             assert_eq!(
@@ -234,7 +237,7 @@ async fn exemplar_lease_grant_returns_granted_true_and_uuidv7_lease_id() {
 
             // Granted TTL must equal or exceed the requested TTL.
             assert_eq!(
-                resp.granted_ttl_ms, 60_000,
+                resp.ttl_ms, 60_000,
                 "granted_ttl_ms must match requested ttl_ms=60000"
             );
 
@@ -261,7 +264,7 @@ async fn exemplar_lease_grant_returns_granted_true_and_uuidv7_lease_id() {
 
 /// GIVEN a successfully established session with NO prior lease acquisition,
 /// WHEN the agent submits a MutationBatch referencing a random (unknown) lease_id,
-/// THEN the server responds with MutationResult { accepted: false } and a non-empty
+/// THEN the server responds with RequestResult { ok: false } and a non-empty
 ///   error_code (MUTATION_REJECTED or INVALID_ARGUMENT), indicating the lease was
 ///   not found or not active.
 ///
@@ -299,9 +302,9 @@ async fn exemplar_mutation_without_active_lease_is_rejected() {
     let result_msg = next_server_msg(&mut stream).await;
 
     match result_msg.payload {
-        Some(ServerPayload::MutationResult(result)) => {
+        Some(ServerPayload::RequestResult(result)) => {
             assert!(
-                !result.accepted,
+                !result.ok,
                 "MutationResult must NOT be accepted when no active lease exists"
             );
             // batch_id must always be echoed back (RFC 0005 §3.2).
@@ -311,7 +314,7 @@ async fn exemplar_mutation_without_active_lease_is_rejected() {
             );
             // Error code must be populated.
             assert!(
-                !result.error_code.is_empty(),
+                !result.code.is_empty(),
                 "error_code must be non-empty on rejection"
             );
         }

@@ -120,10 +120,3 @@ height = 96
 [agents.claude]
 psk_env = "TZE_HUD_PSK"
 allow = ["*"]
-
-# Resident gRPC portal bridge (hud-x2e2v / hud-osy3m). Default-OFF: it only
-# connects when enabled via TZE_HUD_RESIDENT_GRPC_PORTAL=1 or a
-# [resident_grpc_portal] block. It authenticates with the runtime PSK and the
-# id `resident-grpc-portal`, creates one portal tile, and mutates only that tile.
-[agents.resident-grpc-portal]
-allow = ["tiles"]

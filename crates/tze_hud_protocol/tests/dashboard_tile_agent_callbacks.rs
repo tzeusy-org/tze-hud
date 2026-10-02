@@ -24,7 +24,7 @@ use tze_hud_protocol::proto::session::hud_session_client::HudSessionClient;
 use tze_hud_protocol::proto::session::hud_session_server::HudSessionServer;
 use tze_hud_protocol::proto::session::server_message::Payload as ServerPayload;
 use tze_hud_protocol::proto::session::{
-    ClientMessage, LeaseRequest, MutationBatch, ServerMessage, SessionInit,
+    ClaimTile, ClientMessage, MutationBatch, ServerMessage, SessionInit,
 };
 use tze_hud_protocol::proto::{
     ClickEvent, CommandAction, CommandInputEvent, CommandSource, EventBatch, InputEnvelope,
@@ -149,21 +149,33 @@ async fn acquire_lease(
     stream: &mut tonic::Streaming<ServerMessage>,
     sequence: u64,
 ) -> Vec<u8> {
+    claim_tile(tx, stream, sequence).await.0
+}
+
+/// Claim a tile; returns `(lease_id, tile_id)`.
+async fn claim_tile(
+    tx: &tokio::sync::mpsc::Sender<ClientMessage>,
+    stream: &mut tonic::Streaming<ServerMessage>,
+    sequence: u64,
+) -> (Vec<u8>, Vec<u8>) {
     tx.send(ClientMessage {
         sequence,
         timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::LeaseRequest(LeaseRequest { ttl_ms: 60_000 })),
+        payload: Some(ClientPayload::ClaimTile(ClaimTile {
+            ttl_ms: 60_000,
+            ..Default::default()
+        })),
     })
     .await
     .unwrap();
 
     let resp = next_server_msg(stream).await;
     match resp.payload {
-        Some(ServerPayload::LeaseResponse(r)) => {
-            assert!(r.granted, "lease must be granted");
-            r.lease_id
+        Some(ServerPayload::RequestResult(r)) => {
+            assert!(r.ok, "ClaimTile must succeed");
+            (r.lease_id, r.ids[0].clone())
         }
-        other => panic!("Expected LeaseResponse(granted), got: {other:?}"),
+        other => panic!("Expected RequestResult, got: {other:?}"),
     }
 }
 
@@ -309,7 +321,7 @@ async fn click_on_refresh_delivers_click_event_with_refresh_interaction_id() {
     // responses confirming the agent's callback was dispatched).
     let result_msg = next_server_msg(&mut stream).await;
     match result_msg.payload {
-        Some(ServerPayload::MutationResult(r)) => {
+        Some(ServerPayload::RequestResult(r)) => {
             // batch_id echoed back (RFC 0005 §3.2).
             assert_eq!(r.batch_id, batch_id, "batch_id must be echoed");
         }
@@ -403,7 +415,7 @@ async fn dismiss_callback_triggers_lease_release_and_tile_removal() {
     let (mut client, _server, input_event_tx) = start_server().await;
     let (tx, mut stream) = perform_handshake(&mut client, "dismiss-release-agent").await;
 
-    let lease_id_bytes = acquire_lease(&tx, &mut stream, 2).await;
+    let (_lease_id_bytes, claimed_tile_id) = claim_tile(&tx, &mut stream, 2).await;
 
     // Synthetic tile_id and node_id for Dismiss button.
     let tile_id_bytes: Vec<u8> = uuid::Uuid::now_v7().as_bytes().to_vec();
@@ -442,27 +454,28 @@ async fn dismiss_callback_triggers_lease_release_and_tile_removal() {
         "received event must carry dismiss-button interaction_id"
     );
 
-    // Agent-side dismiss callback: send LeaseRelease.
+    // Agent-side dismiss callback: Clear the tile (releases its lease).
+    let tile_uuid = uuid::Uuid::from_slice(&claimed_tile_id).unwrap();
     tx.send(ClientMessage {
         sequence: 3,
         timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::LeaseRelease(
-            tze_hud_protocol::proto::session::LeaseRelease {
-                lease_id: lease_id_bytes.clone(),
+        payload: Some(ClientPayload::Clear(
+            tze_hud_protocol::proto::session::Clear {
+                surface: format!("tile:{tile_uuid}"),
             },
         )),
     })
     .await
     .unwrap();
 
-    // Runtime must respond with LeaseResponse(granted=true).
+    // Runtime must respond with RequestResult(ok).
     let release_resp = next_server_msg(&mut stream).await;
     match release_resp.payload {
-        Some(ServerPayload::LeaseResponse(r)) => {
-            assert!(r.granted, "LeaseRelease must succeed (tile removal)");
-            assert_eq!(r.lease_id, lease_id_bytes, "lease_id must match");
+        Some(ServerPayload::RequestResult(r)) => {
+            assert!(r.ok, "Clear must succeed (tile removal)");
+            assert_eq!(r.seq, 3, "result correlates to the Clear");
         }
-        other => panic!("Expected LeaseResponse(granted=true) for dismiss, got: {other:?}"),
+        other => panic!("Expected RequestResult for dismiss, got: {other:?}"),
     }
 
     drop(tx);
@@ -543,7 +556,7 @@ async fn refresh_callback_triggers_mutation_batch_content_update() {
     // Server must respond with MutationResult containing the echoed batch_id.
     let result_msg = next_server_msg(&mut stream).await;
     match result_msg.payload {
-        Some(ServerPayload::MutationResult(r)) => {
+        Some(ServerPayload::RequestResult(r)) => {
             assert_eq!(
                 r.batch_id, batch_id,
                 "batch_id must be echoed in MutationResult"

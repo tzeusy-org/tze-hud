@@ -163,7 +163,6 @@ fn run_windowed() -> Result<(), Box<dyn std::error::Error>> {
         benchmark: None,        // Demo mode is unbounded until the window closes.
         quiescent_efficiency: None, // Demo mode never self-terminates for CI evidence.
         bind_all_interfaces: false, // Demo binds loopback only (ports are 0 anyway).
-        resident_grpc_portal: None, // Resident gRPC portal bridge OFF for the demo (hud-x2e2v).
     };
 
     let runtime = WindowedRuntime::new(config);
@@ -376,37 +375,39 @@ async fn run_headless(dev_mode: bool) -> Result<(), Box<dyn std::error::Error>> 
         }
     }
 
-    // Request a lease. What the agent may do under it comes from its allow list.
+    // Claim a tile: one round trip grants the lease, places the tile from
+    // the anchor + size class, and returns its id. What the agent may do
+    // comes from its allow list.
     tx.send(session_proto::ClientMessage {
         sequence: 2,
         timestamp_wall_us: now_wall_us(),
-        payload: Some(session_proto::client_message::Payload::LeaseRequest(
-            session_proto::LeaseRequest { ttl_ms: 60_000 },
+        payload: Some(session_proto::client_message::Payload::ClaimTile(
+            session_proto::ClaimTile {
+                placement: Some(session_proto::TilePlacement {
+                    anchor: session_proto::TileAnchor::TopRight as i32,
+                    size: session_proto::TileSize::Small as i32,
+                }),
+                ttl_ms: 60_000,
+                root: None,
+            },
         )),
     })
     .await?;
 
     let msg = response_stream.next().await.unwrap()?;
-    let _lease_id_bytes = match &msg.payload {
-        Some(session_proto::server_message::Payload::LeaseResponse(resp)) if resp.granted => {
-            println!("  Lease granted: ttl={}ms", resp.granted_ttl_ms);
-            resp.lease_id.clone()
+    match &msg.payload {
+        Some(session_proto::server_message::Payload::RequestResult(r)) if r.ok => {
+            println!("  Tile claimed: ttl={}ms", r.ttl_ms);
         }
-        Some(session_proto::server_message::Payload::LeaseResponse(resp)) => {
-            // Lease denied — structured error:
-            //   deny_code:   machine-readable error code (e.g. CONFIG_UNKNOWN_CAPABILITY)
-            //   deny_reason: human-readable explanation
-            // See the structured error handling demo below for how to handle this.
-            return Err(format!(
-                "Lease denied: code={}, reason={}",
-                resp.deny_code, resp.deny_reason
-            )
-            .into());
+        Some(session_proto::server_message::Payload::RequestResult(r)) => {
+            // Every failure carries a code from the closed set shared with
+            // MCP (docs/api.md) and a hint naming the fix.
+            return Err(format!("ClaimTile failed: code={}, hint={}", r.code, r.hint).into());
         }
         other => {
-            return Err(format!("Expected LeaseResponse, got: {other:?}").into());
+            return Err(format!("Expected RequestResult, got: {other:?}").into());
         }
-    };
+    }
 
     // Heartbeat round-trip
     let hb_mono = 999_000u64;
@@ -432,22 +433,15 @@ async fn run_headless(dev_mode: bool) -> Result<(), Box<dyn std::error::Error>> 
         }
     }
 
-    println!("\n  Phase 1 PASSED: session established, lease active, heartbeat verified.\n");
+    println!("\n  Phase 1 PASSED: session established, tile claimed, heartbeat verified.\n");
 
     // ─────────────────────────────────────────────────────────────────────────
     // PHASE 1.5: Structured Error Handling
     //
-    // The runtime returns structured errors in two forms:
-    //
-    // 1. `LeaseResponse { granted: false, deny_code, deny_reason }` — when a
-    //    LeaseRequest is denied. `deny_code` is a machine-readable constant:
-    //    - CONFIG_UNKNOWN_CAPABILITY — one or more capability names are not in
-    //      the canonical vocabulary (legacy names like `create_tile` trigger this)
-    //    - CAPABILITY_DENIED — agent's policy doesn't permit the capability
-    //
-    // 2. `RuntimeError { error_code, message, hint }` — advisory errors sent
-    //    alongside a LeaseResponse denial when the server wants to give the
-    //    agent actionable hints (e.g. the canonical replacement for a legacy name).
+    // Every request gets `RequestResult { ok, code, hint }`. `code` is from
+    // the closed set shared with MCP (docs/api.md), for example:
+    //    - NOT_ALLOWED — the agent's allow list doesn't cover the surface
+    //    - BUDGET_EXCEEDED — the agent's tile/node budget is exhausted
     //
     // This section demonstrates the capability-denied and budget-exceeded paths
     // using direct scene graph calls (no second gRPC session needed).
@@ -456,7 +450,7 @@ async fn run_headless(dev_mode: bool) -> Result<(), Box<dyn std::error::Error>> 
 
     // 2. Budget exceeded: demonstrate that mutation batches are rejected
     //    when an agent's tile budget is exhausted.
-    //    Over gRPC this produces MutationResult { applied: false } with an error.
+    //    Over gRPC this produces RequestResult { ok: false, code: BUDGET_EXCEEDED }.
     {
         use tze_hud_scene::mutation::{MutationBatch as DemoBatch, SceneMutation as DemoMutation};
 

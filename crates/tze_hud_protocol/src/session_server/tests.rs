@@ -216,38 +216,31 @@ async fn short_ttl_expiry_reaches_owning_connected_agent_once_after_cleanup() {
     tx.send(ClientMessage {
         sequence: 2,
         timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::LeaseRequest(LeaseRequest { ttl_ms: 1 })),
+        payload: Some(ClientPayload::ClaimTile(ClaimTile {
+            ttl_ms: 1,
+            ..Default::default()
+        })),
     })
     .await
     .unwrap();
 
     let granted = next_server_msg(&mut stream).await;
-    let lease_id = match granted.payload {
-        Some(ServerPayload::LeaseResponse(LeaseResponse {
-            granted: true,
+    let (lease_id, tile_id) = match granted.payload {
+        Some(ServerPayload::RequestResult(RequestResult {
+            ok: true,
             lease_id,
-            result,
+            ids,
             ..
-        })) => {
-            assert_eq!(result, LeaseResult::Granted as i32);
-            bytes_to_scene_id(&lease_id).expect("lease grant must carry a SceneId")
-        }
-        other => panic!("expected granted LeaseResponse, got {other:?}"),
+        })) => (
+            bytes_to_scene_id(&lease_id).expect("lease grant must carry a SceneId"),
+            bytes_to_scene_id(&ids[0]).expect("claim must return the tile id"),
+        ),
+        other => panic!("expected a granted ClaimTile, got {other:?}"),
     };
 
     let expiry = {
         let shared = state.lock().await;
         let mut scene = shared.scene.lock().await;
-        let tab_id = scene.create_tab("Expiry", 0).unwrap();
-        let tile_id = scene
-            .create_tile(
-                tab_id,
-                "expiry-agent",
-                lease_id,
-                tze_hud_scene::Rect::new(0.0, 0.0, 120.0, 48.0),
-                1,
-            )
-            .unwrap();
         assert_eq!(
             scene.tile_count(),
             1,
@@ -291,19 +284,15 @@ async fn short_ttl_expiry_reaches_owning_connected_agent_once_after_cleanup() {
         .expect("connected stream must remain open")
         .expect("terminal LeaseResponse must be valid");
     match terminal_response.payload {
-        Some(ServerPayload::LeaseResponse(LeaseResponse {
-            granted,
+        Some(ServerPayload::Reclaimed(Reclaimed {
             lease_id: response_lease_id,
-            result,
-            deny_code,
+            why,
             ..
         })) => {
-            assert!(!granted);
             assert_eq!(response_lease_id, scene_id_to_bytes(lease_id));
-            assert_eq!(result, LeaseResult::Expired as i32);
-            assert_eq!(deny_code, "LEASE_EXPIRED");
+            assert_eq!(why, ReclaimReason::Expired as i32);
         }
-        other => panic!("expected terminal LeaseResponse, got {other:?}"),
+        other => panic!("expected Reclaimed, got {other:?}"),
     }
 
     assert!(
@@ -318,7 +307,7 @@ async fn short_ttl_expiry_reaches_owning_connected_agent_once_after_cleanup() {
 }
 
 #[tokio::test]
-async fn successful_lease_grant_wakes_before_capacity_one_response_send() {
+async fn successful_claim_tile_wakes_before_capacity_one_response_send() {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     let service = HudSessionImpl::new(SceneGraph::new(800.0, 600.0), "test-key");
@@ -337,12 +326,15 @@ async fn successful_lease_grant_wakes_before_capacity_one_response_send() {
     let render_wake = tze_hud_scene::render_wake::RenderWakeNotifier::new(move || {
         callback_wakes.fetch_add(1, Ordering::AcqRel);
     });
-    let grant = handle_lease_request(
+    let grant = super::verbs::handle_claim_tile(
         &state,
         &mut session,
         &outbound_tx,
         2,
-        LeaseRequest { ttl_ms: 60_000 },
+        ClaimTile {
+            ttl_ms: 60_000,
+            ..Default::default()
+        },
         &render_wake,
     );
     tokio::pin!(grant);
@@ -368,17 +360,10 @@ async fn successful_lease_grant_wakes_before_capacity_one_response_send() {
             let response = response
                 .expect("LeaseResponse sender remains connected")
                 .expect("LeaseResponse must be Ok");
-            assert!(
-                (&mut grant).await,
-                "handler should complete after its transactional state-change send"
-            );
+            (&mut grant).await;
             response
         }
-        completed = &mut grant => {
-            assert!(
-                completed,
-                "handler should report the successful lease state transition"
-            );
+        () = &mut grant => {
             outbound_rx
                 .recv()
                 .await
@@ -388,10 +373,7 @@ async fn successful_lease_grant_wakes_before_capacity_one_response_send() {
     };
     assert!(matches!(
         response.payload,
-        Some(ServerPayload::LeaseResponse(LeaseResponse {
-            granted: true,
-            ..
-        }))
+        Some(ServerPayload::RequestResult(RequestResult { ok: true, .. }))
     ));
 }
 
@@ -403,9 +385,18 @@ async fn successful_mutation_apply_wakes_before_capacity_one_response_send() {
     let mut scene = SceneGraph::new(800.0, 600.0);
     let tab_id = scene.create_tab("Main", 0).expect("create active tab");
     let lease_id = scene.grant_lease(namespace, 60_000);
+    let tile_id = scene
+        .create_tile(
+            tab_id,
+            namespace,
+            lease_id,
+            tze_hud_scene::Rect::new(10.0, 20.0, 200.0, 150.0),
+            1,
+        )
+        .expect("create tile");
     let service = HudSessionImpl::new(scene, "test-key");
     let state = Arc::clone(&service.state);
-    let mut session = direct_handler_test_session(namespace, vec!["create_tiles".to_string()]);
+    let mut session = direct_handler_test_session(namespace, vec!["modify_own_tiles".to_string()]);
     session.lease_ids.push(lease_id);
     let (outbound_tx, mut outbound_rx) =
         tokio::sync::mpsc::channel::<Result<ServerMessage, Status>>(1);
@@ -423,22 +414,16 @@ async fn successful_mutation_apply_wakes_before_capacity_one_response_send() {
         batch_id: uuid::Uuid::now_v7().as_bytes().to_vec(),
         lease_id: scene_id_to_bytes(lease_id),
         mutations: vec![crate::proto::MutationProto {
-            mutation: Some(crate::proto::mutation_proto::Mutation::CreateTile(
-                crate::proto::CreateTileMutation {
-                    tab_id: scene_id_to_bytes(tab_id),
-                    bounds: Some(crate::proto::Rect {
-                        x: 10.0,
-                        y: 20.0,
-                        width: 200.0,
-                        height: 150.0,
-                    }),
-                    z_order: 1,
+            mutation: Some(crate::proto::mutation_proto::Mutation::UpdateTileOpacity(
+                crate::proto::UpdateTileOpacityMutation {
+                    tile_id: scene_id_to_bytes(tile_id),
+                    opacity: 0.5,
                 },
             )),
         }],
         timing: None,
     };
-    let apply = handle_mutation_batch(&state, &mut session, &outbound_tx, batch, &render_wake);
+    let apply = handle_mutation_batch(&state, &mut session, &outbound_tx, 0, batch, &render_wake);
     tokio::pin!(apply);
 
     assert!(
@@ -456,8 +441,7 @@ async fn successful_mutation_apply_wakes_before_capacity_one_response_send() {
         let shared = state.lock().await;
         let scene = shared.scene.lock().await;
         assert_eq!(
-            scene.tiles.len(),
-            1,
+            scene.tiles[&tile_id].opacity, 0.5,
             "the scene mutation must already be visible while its result remains blocked"
         );
     }
@@ -474,10 +458,7 @@ async fn successful_mutation_apply_wakes_before_capacity_one_response_send() {
         .expect("MutationResult must be Ok");
     assert!(matches!(
         response.payload,
-        Some(ServerPayload::MutationResult(MutationResult {
-            accepted: true,
-            ..
-        }))
+        Some(ServerPayload::RequestResult(RequestResult { ok: true, .. }))
     ));
 }
 
@@ -877,14 +858,17 @@ async fn test_mutation_over_stream() {
     tx.send(ClientMessage {
         sequence: 2,
         timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::LeaseRequest(LeaseRequest { ttl_ms: 60_000 })),
+        payload: Some(ClientPayload::ClaimTile(ClaimTile {
+            ttl_ms: 60_000,
+            ..Default::default()
+        })),
     })
     .await
     .unwrap();
 
     let lease_msg = stream.next().await.unwrap().unwrap();
     let lease_id = match &lease_msg.payload {
-        Some(ServerPayload::LeaseResponse(resp)) if resp.granted => resp.lease_id.clone(),
+        Some(ServerPayload::RequestResult(resp)) if resp.ok => resp.lease_id.clone(),
         other => panic!("Expected LeaseResponse (granted), got: {other:?}"),
     };
 
@@ -923,7 +907,7 @@ async fn test_mutation_over_stream() {
 
     let result_msg = stream.next().await.unwrap().unwrap();
     match &result_msg.payload {
-        Some(ServerPayload::MutationResult(result)) => {
+        Some(ServerPayload::RequestResult(result)) => {
             // This will fail because no active tab exists, which is expected
             // in this isolated test. The important thing is that the protocol
             // round-trip works.
@@ -960,51 +944,21 @@ async fn test_create_tile_persists_element_store_entry() {
     tx.send(ClientMessage {
         sequence: 2,
         timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::LeaseRequest(LeaseRequest { ttl_ms: 60_000 })),
+        payload: Some(ClientPayload::ClaimTile(ClaimTile {
+            ttl_ms: 60_000,
+            ..Default::default()
+        })),
     })
     .await
     .expect("lease request");
 
-    let lease_msg = next_server_msg(&mut stream).await;
-    let lease_id = match &lease_msg.payload {
-        Some(ServerPayload::LeaseResponse(resp)) if resp.granted => resp.lease_id.clone(),
-        other => panic!("Expected granted LeaseResponse, got: {other:?}"),
-    };
-
-    tx.send(ClientMessage {
-        sequence: 3,
-        timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::MutationBatch(MutationBatch {
-            batch_id: uuid::Uuid::now_v7().as_bytes().to_vec(),
-            lease_id,
-            mutations: vec![crate::proto::MutationProto {
-                mutation: Some(crate::proto::mutation_proto::Mutation::CreateTile(
-                    crate::proto::CreateTileMutation {
-                        tab_id: vec![],
-                        bounds: Some(crate::proto::Rect {
-                            x: 8.0,
-                            y: 8.0,
-                            width: 200.0,
-                            height: 100.0,
-                        }),
-                        z_order: 1,
-                    },
-                )),
-            }],
-            timing: None,
-        })),
-    })
-    .await
-    .expect("mutation batch");
-
-    let result_msg = next_server_msg(&mut stream).await;
-    let created_tile_id = match &result_msg.payload {
-        Some(ServerPayload::MutationResult(result)) => {
-            assert!(result.accepted, "create tile must be accepted");
-            assert_eq!(result.created_ids.len(), 1, "one tile should be created");
-            bytes_to_scene_id(&result.created_ids[0]).expect("valid created tile id bytes")
+    let claim_msg = next_server_msg(&mut stream).await;
+    let created_tile_id = match &claim_msg.payload {
+        Some(ServerPayload::RequestResult(result)) => {
+            assert!(result.ok, "ClaimTile must be accepted");
+            bytes_to_scene_id(&result.ids[0]).expect("valid created tile id bytes")
         }
-        other => panic!("Expected MutationResult, got: {other:?}"),
+        other => panic!("Expected RequestResult, got: {other:?}"),
     };
 
     let store = load_element_store_for_test(&path).expect("load persisted element store");
@@ -1049,51 +1003,21 @@ async fn test_existing_tile_last_published_update_triggers_persist() {
     tx.send(ClientMessage {
         sequence: 2,
         timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::LeaseRequest(LeaseRequest { ttl_ms: 60_000 })),
+        payload: Some(ClientPayload::ClaimTile(ClaimTile {
+            ttl_ms: 60_000,
+            ..Default::default()
+        })),
     })
     .await
     .expect("lease request");
 
-    let lease_msg = next_server_msg(&mut stream).await;
-    let lease_id = match &lease_msg.payload {
-        Some(ServerPayload::LeaseResponse(resp)) if resp.granted => resp.lease_id.clone(),
-        other => panic!("Expected granted LeaseResponse, got: {other:?}"),
-    };
-
-    tx.send(ClientMessage {
-        sequence: 3,
-        timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::MutationBatch(MutationBatch {
-            batch_id: uuid::Uuid::now_v7().as_bytes().to_vec(),
-            lease_id,
-            mutations: vec![crate::proto::MutationProto {
-                mutation: Some(crate::proto::mutation_proto::Mutation::CreateTile(
-                    crate::proto::CreateTileMutation {
-                        tab_id: vec![],
-                        bounds: Some(crate::proto::Rect {
-                            x: 8.0,
-                            y: 8.0,
-                            width: 200.0,
-                            height: 100.0,
-                        }),
-                        z_order: 1,
-                    },
-                )),
-            }],
-            timing: None,
-        })),
-    })
-    .await
-    .expect("mutation batch");
-
-    let result_msg = next_server_msg(&mut stream).await;
-    let created_tile_id = match &result_msg.payload {
-        Some(ServerPayload::MutationResult(result)) => {
-            assert!(result.accepted, "create tile must be accepted");
-            assert_eq!(result.created_ids.len(), 1, "one tile should be created");
-            bytes_to_scene_id(&result.created_ids[0]).expect("valid created tile id bytes")
+    let claim_msg = next_server_msg(&mut stream).await;
+    let created_tile_id = match &claim_msg.payload {
+        Some(ServerPayload::RequestResult(result)) => {
+            assert!(result.ok, "ClaimTile must be accepted");
+            bytes_to_scene_id(&result.ids[0]).expect("valid created tile id bytes")
         }
-        other => panic!("Expected MutationResult, got: {other:?}"),
+        other => panic!("Expected RequestResult, got: {other:?}"),
     };
 
     let baseline_store = load_element_store_for_test(&path).expect("load baseline element store");
@@ -1462,342 +1386,6 @@ async fn test_list_elements_request_supports_filters_and_override_metadata() {
 }
 
 #[tokio::test]
-async fn test_publish_to_tile_by_element_id_applies_override_and_updates_timestamp() {
-    let (mut client, _server, shared_state) = setup_test_with_state().await;
-    let tile_id: SceneId;
-
-    {
-        let mut st = shared_state.lock().await;
-        st.element_store = tze_hud_scene::element_store::ElementStore::default();
-        let mut scene = st.scene.lock().await;
-        let tab_id = scene.create_tab("main", 0).expect("create tab");
-        let bootstrap_lease = scene.grant_lease("tile-publisher", 60_000);
-        tile_id = scene
-            .create_tile(
-                tab_id,
-                "tile-publisher",
-                bootstrap_lease,
-                Rect::new(20.0, 20.0, 100.0, 80.0),
-                1,
-            )
-            .expect("create tile");
-        drop(scene);
-
-        st.element_store.entries.insert(
-            tile_id,
-            tze_hud_scene::element_store::ElementStoreEntry {
-                element_type: tze_hud_scene::element_store::ElementType::Tile,
-                namespace: "tile-publisher".to_string(),
-                created_at: 1,
-                last_published_at: 1,
-                z_order: 0,
-                unseen_restarts: 0,
-                geometry_override: Some(GeometryPolicy::Relative {
-                    x_pct: 0.4,
-                    y_pct: 0.25,
-                    width_pct: 0.3,
-                    height_pct: 0.2,
-                }),
-            },
-        );
-    }
-
-    let (tx, _init_messages, mut stream) =
-        handshake_with_psk(&mut client, "tile-publisher", "test-key").await;
-
-    tx.send(ClientMessage {
-        sequence: 2,
-        timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::LeaseRequest(LeaseRequest { ttl_ms: 60_000 })),
-    })
-    .await
-    .expect("lease request");
-
-    let lease_msg = next_server_msg(&mut stream).await;
-    let lease_id = match lease_msg.payload {
-        Some(ServerPayload::LeaseResponse(resp)) if resp.granted => resp.lease_id,
-        other => panic!("Expected granted lease response, got: {other:?}"),
-    };
-
-    let node = Node {
-        layout: Default::default(),
-        id: SceneId::new(),
-        children: vec![],
-        data: NodeData::TextMarkdown(TextMarkdownNode {
-            content: "publish-to-tile".to_string(),
-            bounds: Rect::new(0.0, 0.0, 200.0, 100.0),
-            font_size_px: 16.0,
-            font_family: FontFamily::SystemSansSerif,
-            color: Rgba {
-                r: 1.0,
-                g: 1.0,
-                b: 1.0,
-                a: 1.0,
-            },
-            background: None,
-            alignment: TextAlign::Start,
-            overflow: TextOverflow::Clip,
-            color_runs: Box::default(),
-        }),
-    };
-
-    tx.send(ClientMessage {
-        sequence: 3,
-        timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::MutationBatch(MutationBatch {
-            batch_id: uuid::Uuid::now_v7().as_bytes().to_vec(),
-            lease_id,
-            mutations: vec![crate::proto::MutationProto {
-                mutation: Some(crate::proto::mutation_proto::Mutation::PublishToTile(
-                    crate::proto::PublishToTileMutation {
-                        element_id: scene_id_to_bytes(tile_id),
-                        bounds: Some(crate::proto::Rect {
-                            x: 5.0,
-                            y: 5.0,
-                            width: 20.0,
-                            height: 10.0,
-                        }),
-                        node: Some(crate::convert::scene_node_to_proto(&node)),
-                    },
-                )),
-            }],
-            timing: None,
-        })),
-    })
-    .await
-    .expect("publish-to-tile mutation");
-
-    let result_msg = next_server_msg(&mut stream).await;
-    match result_msg.payload {
-        Some(ServerPayload::MutationResult(result)) => {
-            assert!(result.accepted, "publish_to_tile should be accepted");
-        }
-        other => panic!("Expected MutationResult, got: {other:?}"),
-    }
-
-    {
-        let st = shared_state.lock().await;
-        let scene = st.scene.lock().await;
-        let tile = scene.tiles.get(&tile_id).expect("tile should exist");
-        assert!((tile.bounds.x - 320.0).abs() < 1e-3);
-        assert!((tile.bounds.y - 150.0).abs() < 1e-3);
-        assert!((tile.bounds.width - 240.0).abs() < 1e-3);
-        assert!((tile.bounds.height - 120.0).abs() < 1e-3);
-
-        let root_id = tile.root_node.expect("tile root should be set");
-        let root = scene
-            .nodes
-            .get(&root_id)
-            .expect("tile root node should exist");
-        match &root.data {
-            NodeData::TextMarkdown(markdown) => {
-                assert_eq!(markdown.content, "publish-to-tile");
-            }
-            other => panic!("expected markdown node, got {other:?}"),
-        }
-
-        let entry = st
-            .element_store
-            .entries
-            .get(&tile_id)
-            .expect("element store entry should exist");
-        assert!(
-            entry.last_published_at > 1,
-            "publish_to_tile should update last_published_at"
-        );
-    }
-}
-
-#[tokio::test]
-async fn test_publish_to_tile_by_element_id_rejects_invalid_node_even_with_bounds() {
-    let (mut client, _server, shared_state) = setup_test_with_state().await;
-    let tile_id: SceneId;
-
-    {
-        let mut st = shared_state.lock().await;
-        st.element_store = tze_hud_scene::element_store::ElementStore::default();
-        let mut scene = st.scene.lock().await;
-        let tab_id = scene.create_tab("main", 0).expect("create tab");
-        let bootstrap_lease = scene.grant_lease("tile-publisher-invalid-node", 60_000);
-        tile_id = scene
-            .create_tile(
-                tab_id,
-                "tile-publisher-invalid-node",
-                bootstrap_lease,
-                Rect::new(20.0, 20.0, 100.0, 80.0),
-                1,
-            )
-            .expect("create tile");
-        drop(scene);
-
-        st.element_store.entries.insert(
-            tile_id,
-            tze_hud_scene::element_store::ElementStoreEntry {
-                element_type: tze_hud_scene::element_store::ElementType::Tile,
-                namespace: "tile-publisher-invalid-node".to_string(),
-                created_at: 1,
-                last_published_at: 1,
-                z_order: 0,
-                unseen_restarts: 0,
-                geometry_override: None,
-            },
-        );
-    }
-
-    let (tx, _init_messages, mut stream) =
-        handshake_with_psk(&mut client, "tile-publisher-invalid-node", "test-key").await;
-
-    tx.send(ClientMessage {
-        sequence: 2,
-        timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::LeaseRequest(LeaseRequest { ttl_ms: 60_000 })),
-    })
-    .await
-    .expect("lease request");
-
-    let lease_msg = next_server_msg(&mut stream).await;
-    let lease_id = match lease_msg.payload {
-        Some(ServerPayload::LeaseResponse(resp)) if resp.granted => resp.lease_id,
-        other => panic!("Expected granted lease response, got: {other:?}"),
-    };
-
-    let mut invalid_node = crate::convert::scene_node_to_proto(&Node {
-        layout: Default::default(),
-        id: SceneId::new(),
-        children: vec![],
-        data: NodeData::SolidColor(SolidColorNode {
-            color: Rgba::WHITE,
-            bounds: Rect::new(0.0, 0.0, 16.0, 16.0),
-            radius: None,
-        }),
-    });
-    invalid_node.data = None;
-
-    tx.send(ClientMessage {
-        sequence: 3,
-        timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::MutationBatch(MutationBatch {
-            batch_id: uuid::Uuid::now_v7().as_bytes().to_vec(),
-            lease_id,
-            mutations: vec![crate::proto::MutationProto {
-                mutation: Some(crate::proto::mutation_proto::Mutation::PublishToTile(
-                    crate::proto::PublishToTileMutation {
-                        element_id: scene_id_to_bytes(tile_id),
-                        bounds: Some(crate::proto::Rect {
-                            x: 10.0,
-                            y: 10.0,
-                            width: 60.0,
-                            height: 40.0,
-                        }),
-                        node: Some(invalid_node),
-                    },
-                )),
-            }],
-            timing: None,
-        })),
-    })
-    .await
-    .expect("publish-to-tile invalid node mutation");
-
-    let result_msg = next_server_msg(&mut stream).await;
-    match result_msg.payload {
-        Some(ServerPayload::MutationResult(result)) => {
-            assert!(!result.accepted, "invalid node should be rejected");
-            assert_eq!(result.error_code, "INVALID_ARGUMENT");
-            assert!(
-                result
-                    .error_message
-                    .contains("publish_to_tile node content is invalid or missing data"),
-                "unexpected error message: {}",
-                result.error_message
-            );
-        }
-        other => panic!("Expected MutationResult, got: {other:?}"),
-    }
-}
-
-#[tokio::test]
-async fn test_publish_to_tile_by_element_id_returns_element_not_found() {
-    let (mut client, _server, shared_state) = setup_test_with_state().await;
-    {
-        let st = shared_state.lock().await;
-        st.scene
-            .lock()
-            .await
-            .create_tab("main", 0)
-            .expect("create tab");
-    }
-    let (tx, _init_messages, mut stream) =
-        handshake_with_psk(&mut client, "tile-publisher-missing", "test-key").await;
-
-    tx.send(ClientMessage {
-        sequence: 2,
-        timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::LeaseRequest(LeaseRequest { ttl_ms: 60_000 })),
-    })
-    .await
-    .expect("lease request");
-
-    let lease_msg = next_server_msg(&mut stream).await;
-    let lease_id = match lease_msg.payload {
-        Some(ServerPayload::LeaseResponse(resp)) if resp.granted => resp.lease_id,
-        other => panic!("Expected granted lease response, got: {other:?}"),
-    };
-
-    tx.send(ClientMessage {
-        sequence: 3,
-        timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::MutationBatch(MutationBatch {
-            batch_id: uuid::Uuid::now_v7().as_bytes().to_vec(),
-            lease_id,
-            mutations: vec![crate::proto::MutationProto {
-                mutation: Some(crate::proto::mutation_proto::Mutation::PublishToTile(
-                    crate::proto::PublishToTileMutation {
-                        element_id: scene_id_to_bytes(SceneId::new()),
-                        bounds: Some(crate::proto::Rect {
-                            x: 10.0,
-                            y: 10.0,
-                            width: 80.0,
-                            height: 40.0,
-                        }),
-                        node: None,
-                    },
-                )),
-            }],
-            timing: None,
-        })),
-    })
-    .await
-    .expect("publish-to-tile missing mutation");
-
-    let result_msg = next_server_msg(&mut stream).await;
-    match result_msg.payload {
-        Some(ServerPayload::MutationResult(result)) => {
-            assert!(!result.accepted, "missing element_id should be rejected");
-            assert_eq!(result.error_code, "ELEMENT_NOT_FOUND");
-            assert!(
-                result
-                    .error_message
-                    .contains("publish_to_tile element_id does not reference a known tile"),
-                "unexpected error message: {}",
-                result.error_message
-            );
-        }
-        other => panic!("Expected MutationResult, got: {other:?}"),
-    }
-}
-
-// ─── Regression tests for hud-wu32: batch_id correlation + lease_id propagation ──
-
-/// Regression: MutationResult.batch_id MUST echo the client-provided batch_id.
-///
-/// Before this fix, handle_mutation_batch generated a fresh SceneId for
-/// `SceneMutationBatch.batch_id`, which meant the client could not correlate
-/// rejection responses with their own batch_id values.
-///
-/// This test verifies that even when a mutation is rejected (here: "no active
-/// tab"), the MutationResult carries back the original client batch_id.
-#[tokio::test]
 async fn test_mutation_result_echoes_client_batch_id() {
     let (mut client, _server) = setup_test().await;
     let (tx, _init_messages, mut stream) =
@@ -1809,14 +1397,17 @@ async fn test_mutation_result_echoes_client_batch_id() {
     tx.send(ClientMessage {
         sequence: 2,
         timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::LeaseRequest(LeaseRequest { ttl_ms: 60_000 })),
+        payload: Some(ClientPayload::ClaimTile(ClaimTile {
+            ttl_ms: 60_000,
+            ..Default::default()
+        })),
     })
     .await
     .unwrap();
 
     let lease_msg = next_server_msg(&mut stream).await;
     let lease_id = match &lease_msg.payload {
-        Some(ServerPayload::LeaseResponse(resp)) if resp.granted => resp.lease_id.clone(),
+        Some(ServerPayload::RequestResult(resp)) if resp.ok => resp.lease_id.clone(),
         other => panic!("Expected LeaseResponse (granted), got: {other:?}"),
     };
 
@@ -1852,7 +1443,7 @@ async fn test_mutation_result_echoes_client_batch_id() {
     // Regardless of rejection, MutationResult.batch_id MUST equal client_batch_id.
     let result_msg = next_server_msg(&mut stream).await;
     match &result_msg.payload {
-        Some(ServerPayload::MutationResult(result)) => {
+        Some(ServerPayload::RequestResult(result)) => {
             assert_eq!(
                 result.batch_id, client_batch_id,
                 "MutationResult.batch_id must echo the client-provided batch_id \
@@ -1891,14 +1482,17 @@ async fn test_mutation_rejected_with_expired_lease_id() {
     tx.send(ClientMessage {
         sequence: 2,
         timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::LeaseRequest(LeaseRequest { ttl_ms: 60_000 })),
+        payload: Some(ClientPayload::ClaimTile(ClaimTile {
+            ttl_ms: 60_000,
+            ..Default::default()
+        })),
     })
     .await
     .unwrap();
 
     let lease_msg = next_server_msg(&mut stream).await;
     let lease_id_bytes = match &lease_msg.payload {
-        Some(ServerPayload::LeaseResponse(resp)) if resp.granted => resp.lease_id.clone(),
+        Some(ServerPayload::RequestResult(resp)) if resp.ok => resp.lease_id.clone(),
         other => panic!("Expected LeaseResponse (granted), got: {other:?}"),
     };
 
@@ -1947,9 +1541,9 @@ async fn test_mutation_rejected_with_expired_lease_id() {
     // batch_id must still be echoed back.
     let result_msg = next_server_msg(&mut stream).await;
     match &result_msg.payload {
-        Some(ServerPayload::MutationResult(result)) => {
+        Some(ServerPayload::RequestResult(result)) => {
             assert!(
-                !result.accepted,
+                !result.ok,
                 "Mutation with revoked lease_id must be rejected \
                      (regression for hud-wu32: lease_id=None previously bypassed validation)"
             );
@@ -1971,18 +1565,21 @@ async fn test_lease_over_stream() {
     tx.send(ClientMessage {
         sequence: 2,
         timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::LeaseRequest(LeaseRequest { ttl_ms: 30_000 })),
+        payload: Some(ClientPayload::ClaimTile(ClaimTile {
+            ttl_ms: 30_000,
+            ..Default::default()
+        })),
     })
     .await
     .unwrap();
 
     let msg = stream.next().await.unwrap().unwrap();
     match &msg.payload {
-        Some(ServerPayload::LeaseResponse(resp)) => {
-            assert!(resp.granted, "expected lease to be granted");
+        Some(ServerPayload::RequestResult(resp)) => {
+            assert!(resp.ok, "expected lease to be granted");
             assert!(!resp.lease_id.is_empty());
             assert_eq!(resp.lease_id.len(), 16);
-            assert_eq!(resp.granted_ttl_ms, 30_000);
+            assert_eq!(resp.ttl_ms, 30_000);
         }
         other => panic!("Expected LeaseResponse, got: {other:?}"),
     }
@@ -2093,21 +1690,19 @@ async fn test_zone_publish_result() {
     tx.send(ClientMessage {
         sequence: client_seq,
         timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::ZonePublish(ZonePublish {
-            zone_name: "status".to_string(),
+        payload: Some(ClientPayload::Publish(Publish {
+            surface: "zone:status".to_string(),
             content: Some(crate::proto::ZoneContent {
                 payload: Some(crate::proto::zone_content::Payload::StreamText(
                     "hello zone".to_string(),
                 )),
             }),
-            ttl_us: 0,
-            element_id: Vec::new(),
-            merge_key: String::new(),
+            ttl_ms: 0,
+            key: String::new(),
             breakpoints: Vec::new(),
-            // Snapshot parity fields (WM-S2b session.proto delta §fields 7-9); 0/empty = no constraint.
-            present_at_wall_us: 0,
-            expires_at_wall_us: 0,
-            content_classification: String::new(),
+            present_at_us: 0,
+            expires_at_us: 0,
+            ..Default::default()
         })),
     })
     .await
@@ -2115,18 +1710,18 @@ async fn test_zone_publish_result() {
 
     let msg = stream.next().await.unwrap().unwrap();
     match &msg.payload {
-        Some(ServerPayload::ZonePublishResult(result)) => {
+        Some(ServerPayload::RequestResult(result)) => {
             // request_sequence must echo the client envelope sequence
             assert_eq!(
-                result.request_sequence, client_seq,
+                result.seq, client_seq,
                 "ZonePublishResult.request_sequence must correlate with client ZonePublish sequence"
             );
             // Zone "status" doesn't exist in the default scene graph so it
             // will be rejected; we just verify the sequence correlation and
             // that error_code is populated on rejection.
-            if !result.accepted {
+            if !result.ok {
                 assert!(
-                    !result.error_code.is_empty(),
+                    !result.code.is_empty(),
                     "rejected result must carry an error_code"
                 );
             }
@@ -2569,26 +2164,29 @@ async fn test_safe_mode_rejects_mutations() {
     let (tx, _init_messages, mut stream) =
         handshake(&mut client, "safe-mode-agent", "test-key").await;
 
+    // Claim a tile before safe mode (ClaimTile creates a tile, so safe mode rejects it)
+    tx.send(ClientMessage {
+        sequence: 2,
+        timestamp_wall_us: now_wall_us(),
+        payload: Some(ClientPayload::ClaimTile(ClaimTile {
+            ttl_ms: 30_000,
+            ..Default::default()
+        })),
+    })
+    .await
+    .unwrap();
+    let lease_msg = stream.next().await.unwrap().unwrap();
+    let lease_id = match &lease_msg.payload {
+        Some(ServerPayload::RequestResult(resp)) if resp.ok => resp.lease_id.clone(),
+        other => panic!("Expected LeaseResponse (granted), got: {other:?}"),
+    };
+
     // Enable safe mode in shared state (simulates runtime entering safe mode)
     {
         let st = shared_state.lock().await;
         st.safe_mode_atomic
             .store(true, std::sync::atomic::Ordering::Release);
     }
-
-    // Request a lease first (this is transactional, not affected by safe mode)
-    tx.send(ClientMessage {
-        sequence: 2,
-        timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::LeaseRequest(LeaseRequest { ttl_ms: 30_000 })),
-    })
-    .await
-    .unwrap();
-    let lease_msg = stream.next().await.unwrap().unwrap();
-    let lease_id = match &lease_msg.payload {
-        Some(ServerPayload::LeaseResponse(resp)) if resp.granted => resp.lease_id.clone(),
-        other => panic!("Expected LeaseResponse (granted), got: {other:?}"),
-    };
 
     // Send MutationBatch while safe mode is active — should be rejected
     let batch_id = uuid::Uuid::now_v7().as_bytes().to_vec();
@@ -2607,11 +2205,11 @@ async fn test_safe_mode_rejects_mutations() {
 
     let msg = next_server_msg(&mut stream).await;
     match &msg.payload {
-        Some(ServerPayload::RuntimeError(err)) => {
+        Some(ServerPayload::RequestResult(err)) => {
             assert_eq!(
-                err.error_code, "SAFE_MODE_ACTIVE",
+                err.code, "SAFE_MODE_ACTIVE",
                 "Expected SAFE_MODE_ACTIVE, got: {}",
-                err.error_code
+                err.code
             );
         }
         other => panic!("Expected RuntimeError(SAFE_MODE_ACTIVE), got: {other:?}"),
@@ -2665,16 +2263,12 @@ async fn test_safe_mode_rejects_mutations() {
 
     let msg3 = stream.next().await.unwrap().unwrap();
     match &msg3.payload {
-        Some(ServerPayload::MutationResult(result)) => {
-            // We get MutationResult (not RuntimeError with SAFE_MODE_ACTIVE)
-            assert_eq!(result.batch_id, batch_id2);
-        }
-        Some(ServerPayload::RuntimeError(err)) => {
-            // Must NOT be SAFE_MODE_ACTIVE
+        Some(ServerPayload::RequestResult(result)) => {
             assert_ne!(
-                err.error_code, "SAFE_MODE_ACTIVE",
-                "Safe mode should be cleared, unexpected SAFE_MODE_ACTIVE"
+                result.code, "SAFE_MODE_ACTIVE",
+                "safe mode should be cleared"
             );
+            assert_eq!(result.batch_id, batch_id2);
         }
         other => panic!("Unexpected message after safe mode exit: {other:?}"),
     }
@@ -2702,19 +2296,23 @@ async fn test_freeze_queues_mutations_not_applied() {
     tx.send(ClientMessage {
         sequence: 2,
         timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::LeaseRequest(LeaseRequest { ttl_ms: 30_000 })),
+        payload: Some(ClientPayload::ClaimTile(ClaimTile {
+            ttl_ms: 30_000,
+            ..Default::default()
+        })),
     })
     .await
     .unwrap();
     let lease_msg = stream.next().await.unwrap().unwrap();
-    let lease_id = match &lease_msg.payload {
-        Some(ServerPayload::LeaseResponse(resp)) if resp.granted => resp.lease_id.clone(),
-        other => panic!("Expected LeaseResponse (granted), got: {other:?}"),
+    let (lease_id, tile_id) = match &lease_msg.payload {
+        Some(ServerPayload::RequestResult(resp)) if resp.ok => {
+            (resp.lease_id.clone(), resp.ids[0].clone())
+        }
+        other => panic!("Expected a granted ClaimTile, got: {other:?}"),
     };
     let (scene_version_before, tile_count_before) = {
         let st = shared_state.lock().await;
-        let mut scene = st.scene.lock().await;
-        scene.create_tab("Main", 0).unwrap();
+        let scene = st.scene.lock().await;
         (scene.version, scene.tiles.len())
     };
     let parked_checkpoint = generations.load(Ordering::Acquire);
@@ -2734,16 +2332,10 @@ async fn test_freeze_queues_mutations_not_applied() {
             batch_id: batch_id.clone(),
             lease_id: lease_id.clone(),
             mutations: vec![crate::proto::MutationProto {
-                mutation: Some(crate::proto::mutation_proto::Mutation::CreateTile(
-                    crate::proto::CreateTileMutation {
-                        tab_id: vec![],
-                        bounds: Some(crate::proto::Rect {
-                            x: 10.0,
-                            y: 20.0,
-                            width: 200.0,
-                            height: 150.0,
-                        }),
-                        z_order: 1,
+                mutation: Some(crate::proto::mutation_proto::Mutation::UpdateTileOpacity(
+                    crate::proto::UpdateTileOpacityMutation {
+                        tile_id: tile_id.clone(),
+                        opacity: 0.5,
                     },
                 )),
             }],
@@ -2755,18 +2347,15 @@ async fn test_freeze_queues_mutations_not_applied() {
 
     let msg = next_server_msg(&mut stream).await;
     match &msg.payload {
-        Some(ServerPayload::MutationResult(result)) => {
+        Some(ServerPayload::RequestResult(result)) => {
             // Accepted=true: mutation was queued, not rejected
             assert_eq!(result.batch_id, batch_id);
             assert!(
-                result.accepted,
+                result.ok,
                 "Mutation should be accepted (queued) during freeze, not rejected"
             );
             // Scene should NOT have been modified; error code should not be SAFE_MODE_ACTIVE
-            assert_ne!(result.error_code, "SAFE_MODE_ACTIVE");
-        }
-        Some(ServerPayload::RuntimeError(err)) => {
-            panic!("Mutation should be queued during freeze, not rejected with error: {err:?}");
+            assert_ne!(result.code, "SAFE_MODE_ACTIVE");
         }
         other => panic!("Expected MutationResult during freeze, got: {other:?}"),
     }
@@ -2811,7 +2400,7 @@ async fn test_freeze_queues_mutations_not_applied() {
                     got_heartbeat = true;
                     break;
                 }
-                Some(ServerPayload::MutationResult(_)) => {
+                Some(ServerPayload::RequestResult(_)) => {
                     // Drained mutation result — expected, continue
                 }
                 other => panic!("Unexpected message after unfreeze: {other:?}"),
@@ -2831,13 +2420,9 @@ async fn test_freeze_queues_mutations_not_applied() {
         let st = shared_state.lock().await;
         let scene = st.scene.lock().await;
         assert!(scene.version > scene_version_before);
-        assert_eq!(scene.tiles.len(), tile_count_before + 1);
-        assert!(scene.tiles.values().any(|tile| {
-            (tile.bounds.x - 10.0).abs() < 0.01
-                && (tile.bounds.y - 20.0).abs() < 0.01
-                && (tile.bounds.width - 200.0).abs() < 0.01
-                && (tile.bounds.height - 150.0).abs() < 0.01
-        }));
+        assert_eq!(scene.tiles.len(), tile_count_before);
+        let tile_id = bytes_to_scene_id(&tile_id).expect("claimed tile id");
+        assert_eq!(scene.tiles[&tile_id].opacity, 0.5);
     }
 }
 
@@ -2880,6 +2465,7 @@ async fn test_fifo_preserved_when_mutation_arrives_during_drain_window() {
         input_capture_tx: None,
         input_capture_wake: tze_hud_scene::render_wake::RenderWakeNotifier::default(),
         resolved_portal_tokens: std::collections::HashMap::new(),
+        tile_placement: Default::default(),
     }));
 
     // Build a session whose freeze_queue already has one entry (simulates the
@@ -2937,6 +2523,7 @@ async fn test_fifo_preserved_when_mutation_arrives_during_drain_window() {
         &state,
         &mut session,
         &outbound_tx,
+        0,
         new_batch,
         &tze_hud_scene::render_wake::RenderWakeNotifier::default(),
     )
@@ -2965,10 +2552,10 @@ async fn test_fifo_preserved_when_mutation_arrives_during_drain_window() {
         .expect("expected a MutationResult response")
         .expect("expected Ok response");
     match &response.payload {
-        Some(ServerPayload::MutationResult(r)) => {
+        Some(ServerPayload::RequestResult(r)) => {
             assert_eq!(r.batch_id, b"new-in-drain-window".to_vec());
             assert!(
-                r.accepted,
+                r.ok,
                 "New batch must be accepted (enqueued) during drain window, not rejected"
             );
         }
@@ -3016,6 +2603,7 @@ async fn test_freeze_retransmit_deduped_applied_exactly_once() {
         input_capture_tx: None,
         input_capture_wake: tze_hud_scene::render_wake::RenderWakeNotifier::default(),
         resolved_portal_tokens: std::collections::HashMap::new(),
+        tile_placement: Default::default(),
     }));
 
     let mut session = StreamSession {
@@ -3060,6 +2648,7 @@ async fn test_freeze_retransmit_deduped_applied_exactly_once() {
         &state,
         &mut session,
         &outbound_tx,
+        0,
         original_batch,
         &tze_hud_scene::render_wake::RenderWakeNotifier::default(),
     )
@@ -3078,9 +2667,9 @@ async fn test_freeze_retransmit_deduped_applied_exactly_once() {
         .expect("expected MutationResult for first send")
         .expect("expected Ok result");
     match &first_ack.payload {
-        Some(ServerPayload::MutationResult(r)) => {
+        Some(ServerPayload::RequestResult(r)) => {
             assert_eq!(r.batch_id, batch_id, "batch_id must match");
-            assert!(r.accepted, "first enqueue must be accepted");
+            assert!(r.ok, "first enqueue must be accepted");
         }
         other => panic!("Expected MutationResult for first send, got: {other:?}"),
     }
@@ -3096,6 +2685,7 @@ async fn test_freeze_retransmit_deduped_applied_exactly_once() {
         &state,
         &mut session,
         &outbound_tx,
+        0,
         retransmit_batch,
         &tze_hud_scene::render_wake::RenderWakeNotifier::default(),
     )
@@ -3108,9 +2698,9 @@ async fn test_freeze_retransmit_deduped_applied_exactly_once() {
         .expect("expected MutationResult for retransmit")
         .expect("expected Ok result");
     match &dedup_ack.payload {
-        Some(ServerPayload::MutationResult(r)) => {
+        Some(ServerPayload::RequestResult(r)) => {
             assert_eq!(r.batch_id, batch_id, "batch_id must match on retransmit");
-            assert!(r.accepted, "dedup hit must return cached accepted=true");
+            assert!(r.ok, "dedup hit must return cached accepted=true");
         }
         other => {
             panic!("Expected cached MutationResult on retransmit while frozen, got: {other:?}")
@@ -3154,13 +2744,16 @@ async fn test_safe_mode_takes_precedence_over_freeze() {
     tx.send(ClientMessage {
         sequence: 2,
         timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::LeaseRequest(LeaseRequest { ttl_ms: 30_000 })),
+        payload: Some(ClientPayload::ClaimTile(ClaimTile {
+            ttl_ms: 30_000,
+            ..Default::default()
+        })),
     })
     .await
     .unwrap();
     let lease_msg = stream.next().await.unwrap().unwrap();
     let lease_id = match &lease_msg.payload {
-        Some(ServerPayload::LeaseResponse(resp)) if resp.granted => resp.lease_id.clone(),
+        Some(ServerPayload::RequestResult(resp)) if resp.ok => resp.lease_id.clone(),
         other => panic!("Expected LeaseResponse (granted), got: {other:?}"),
     };
 
@@ -3189,8 +2782,8 @@ async fn test_safe_mode_takes_precedence_over_freeze() {
 
     let msg = next_server_msg(&mut stream).await;
     match &msg.payload {
-        Some(ServerPayload::RuntimeError(err)) => {
-            assert_eq!(err.error_code, "SAFE_MODE_ACTIVE");
+        Some(ServerPayload::RequestResult(err)) => {
+            assert_eq!(err.code, "SAFE_MODE_ACTIVE");
         }
         other => panic!("Expected SAFE_MODE_ACTIVE RuntimeError, got: {other:?}"),
     }
@@ -3411,11 +3004,11 @@ fn test_traffic_class_routing() {
         TrafficClass::Transactional,
     );
     assert_eq!(
-        classify_server_payload(&ServerPayload::MutationResult(MutationResult::default())),
+        classify_server_payload(&ServerPayload::RequestResult(RequestResult::default())),
         TrafficClass::Transactional,
     );
     assert_eq!(
-        classify_server_payload(&ServerPayload::LeaseResponse(LeaseResponse::default())),
+        classify_server_payload(&ServerPayload::RequestResult(RequestResult::default())),
         TrafficClass::Transactional,
     );
     assert_eq!(
@@ -3427,7 +3020,7 @@ fn test_traffic_class_routing() {
         TrafficClass::Transactional,
     );
     assert_eq!(
-        classify_server_payload(&ServerPayload::RuntimeError(RuntimeError::default())),
+        classify_server_payload(&ServerPayload::RequestResult(RequestResult::default())),
         TrafficClass::Transactional,
     );
     assert_eq!(
@@ -4456,13 +4049,16 @@ async fn test_mutation_dedup_returns_cached_result() {
     tx.send(ClientMessage {
         sequence: 2,
         timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::LeaseRequest(LeaseRequest { ttl_ms: 60_000 })),
+        payload: Some(ClientPayload::ClaimTile(ClaimTile {
+            ttl_ms: 60_000,
+            ..Default::default()
+        })),
     })
     .await
     .unwrap();
     let lease_msg = stream.next().await.unwrap().unwrap();
     let lease_id = match &lease_msg.payload {
-        Some(ServerPayload::LeaseResponse(resp)) if resp.granted => resp.lease_id.clone(),
+        Some(ServerPayload::RequestResult(resp)) if resp.ok => resp.lease_id.clone(),
         other => panic!("Expected LeaseResponse (granted), got: {other:?}"),
     };
 
@@ -4482,9 +4078,9 @@ async fn test_mutation_dedup_returns_cached_result() {
     .unwrap();
     let first_result = next_server_msg(&mut stream).await;
     let first_accepted = match &first_result.payload {
-        Some(ServerPayload::MutationResult(r)) => {
+        Some(ServerPayload::RequestResult(r)) => {
             assert_eq!(r.batch_id, batch_id);
-            r.accepted
+            r.ok
         }
         other => panic!("Expected MutationResult, got: {other:?}"),
     };
@@ -4504,13 +4100,13 @@ async fn test_mutation_dedup_returns_cached_result() {
     .unwrap();
     let dedup_result = stream.next().await.unwrap().unwrap();
     match &dedup_result.payload {
-        Some(ServerPayload::MutationResult(r)) => {
+        Some(ServerPayload::RequestResult(r)) => {
             assert_eq!(
                 r.batch_id, batch_id,
                 "batch_id must be echoed from cached result"
             );
             assert_eq!(
-                r.accepted, first_accepted,
+                r.ok, first_accepted,
                 "Dedup must return cached accepted flag"
             );
         }
@@ -4618,13 +4214,16 @@ async fn test_mutation_timing_too_old_rejected() {
     tx.send(ClientMessage {
         sequence: 2,
         timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::LeaseRequest(LeaseRequest { ttl_ms: 60_000 })),
+        payload: Some(ClientPayload::ClaimTile(ClaimTile {
+            ttl_ms: 60_000,
+            ..Default::default()
+        })),
     })
     .await
     .unwrap();
     let lease_msg = stream.next().await.unwrap().unwrap();
     let lease_id = match &lease_msg.payload {
-        Some(ServerPayload::LeaseResponse(resp)) if resp.granted => resp.lease_id.clone(),
+        Some(ServerPayload::RequestResult(resp)) if resp.ok => resp.lease_id.clone(),
         other => panic!("Expected LeaseResponse (granted), got: {other:?}"),
     };
 
@@ -4653,9 +4252,8 @@ async fn test_mutation_timing_too_old_rejected() {
 
     let result_msg = next_server_msg(&mut stream).await;
     match &result_msg.payload {
-        Some(ServerPayload::RuntimeError(err)) => {
-            assert_eq!(err.error_code, "TIMESTAMP_TOO_OLD");
-            assert_eq!(err.error_code_enum, ErrorCode::TimestampTooOld as i32);
+        Some(ServerPayload::RequestResult(err)) => {
+            assert_eq!(err.code, "TIMESTAMP_TOO_OLD");
         }
         other => panic!("Expected RuntimeError(TIMESTAMP_TOO_OLD), got: {other:?}"),
     }
@@ -4674,13 +4272,16 @@ async fn test_mutation_timing_expiry_before_present_rejected() {
     tx.send(ClientMessage {
         sequence: 2,
         timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::LeaseRequest(LeaseRequest { ttl_ms: 60_000 })),
+        payload: Some(ClientPayload::ClaimTile(ClaimTile {
+            ttl_ms: 60_000,
+            ..Default::default()
+        })),
     })
     .await
     .unwrap();
     let lease_msg = stream.next().await.unwrap().unwrap();
     let lease_id = match &lease_msg.payload {
-        Some(ServerPayload::LeaseResponse(resp)) if resp.granted => resp.lease_id.clone(),
+        Some(ServerPayload::RequestResult(resp)) if resp.ok => resp.lease_id.clone(),
         other => panic!("Expected LeaseResponse (granted), got: {other:?}"),
     };
 
@@ -4707,12 +4308,8 @@ async fn test_mutation_timing_expiry_before_present_rejected() {
 
     let result_msg = next_server_msg(&mut stream).await;
     match &result_msg.payload {
-        Some(ServerPayload::RuntimeError(err)) => {
-            assert_eq!(err.error_code, "TIMESTAMP_EXPIRY_BEFORE_PRESENT");
-            assert_eq!(
-                err.error_code_enum,
-                ErrorCode::TimestampExpiryBeforePresent as i32
-            );
+        Some(ServerPayload::RequestResult(err)) => {
+            assert_eq!(err.code, "TIMESTAMP_EXPIRY_BEFORE_PRESENT");
         }
         other => {
             panic!("Expected RuntimeError(TIMESTAMP_EXPIRY_BEFORE_PRESENT), got: {other:?}")
@@ -4789,20 +4386,19 @@ async fn test_ephemeral_zone_no_publish_result() {
     tx.send(ClientMessage {
         sequence: 2,
         timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::ZonePublish(ZonePublish {
-            zone_name: "live-caption".to_string(),
+        payload: Some(ClientPayload::Publish(Publish {
+            surface: "zone:live-caption".to_string(),
             content: Some(crate::proto::ZoneContent {
                 payload: Some(crate::proto::zone_content::Payload::StreamText(
                     "caption text".to_string(),
                 )),
             }),
-            ttl_us: 0,
-            element_id: Vec::new(),
-            merge_key: String::new(),
+            ttl_ms: 0,
+            key: String::new(),
             breakpoints: Vec::new(),
-            present_at_wall_us: 0,
-            expires_at_wall_us: 0,
-            content_classification: String::new(),
+            present_at_us: 0,
+            expires_at_us: 0,
+            ..Default::default()
         })),
     })
     .await
@@ -4824,7 +4420,7 @@ async fn test_ephemeral_zone_no_publish_result() {
     // NOT a ZonePublishResult (ephemeral zones are fire-and-forget)
     let next_msg = stream.next().await.unwrap().unwrap();
     match &next_msg.payload {
-        Some(ServerPayload::ZonePublishResult(_)) => {
+        Some(ServerPayload::RequestResult(_)) => {
             panic!("Ephemeral zone publish must NOT produce a ZonePublishResult")
         }
         Some(ServerPayload::Heartbeat(hb)) => {
@@ -4900,20 +4496,19 @@ async fn test_durable_zone_publish_result() {
     tx.send(ClientMessage {
         sequence: client_seq,
         timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::ZonePublish(ZonePublish {
-            zone_name: "status-text".to_string(),
+        payload: Some(ClientPayload::Publish(Publish {
+            surface: "zone:status-text".to_string(),
             content: Some(crate::proto::ZoneContent {
                 payload: Some(crate::proto::zone_content::Payload::StreamText(
                     "status: ok".to_string(),
                 )),
             }),
-            ttl_us: 0,
-            element_id: Vec::new(),
-            merge_key: String::new(),
+            ttl_ms: 0,
+            key: String::new(),
             breakpoints: Vec::new(),
-            present_at_wall_us: 0,
-            expires_at_wall_us: 0,
-            content_classification: String::new(),
+            present_at_us: 0,
+            expires_at_us: 0,
+            ..Default::default()
         })),
     })
     .await
@@ -4922,9 +4517,9 @@ async fn test_durable_zone_publish_result() {
     // Durable zone: should receive ZonePublishResult
     let msg = stream.next().await.unwrap().unwrap();
     match &msg.payload {
-        Some(ServerPayload::ZonePublishResult(result)) => {
-            assert_eq!(result.request_sequence, client_seq);
-            assert!(result.accepted, "durable zone publish should be accepted");
+        Some(ServerPayload::RequestResult(result)) => {
+            assert_eq!(result.seq, client_seq);
+            assert!(result.ok, "durable zone publish should be accepted");
         }
         other => panic!("Expected ZonePublishResult for durable zone, got: {other:?}"),
     }
@@ -5119,7 +4714,7 @@ async fn input_capture_bridge_wakes_only_after_successful_command_enqueue() {
     let rejected = next_server_msg(&mut stream).await;
     assert!(matches!(
         rejected.payload,
-        Some(ServerPayload::RuntimeError(_))
+        Some(ServerPayload::RequestResult(_))
     ));
     assert_eq!(wakes.load(Ordering::Acquire), 2);
 
@@ -5173,14 +4768,12 @@ async fn test_input_capture_release_rejects_invalid_device_id() {
 
     let msg = stream.next().await.unwrap().unwrap();
     match &msg.payload {
-        Some(ServerPayload::RuntimeError(err)) => {
-            assert_eq!(err.error_code, "INVALID_ARGUMENT");
-            assert_eq!(err.error_code_enum, ErrorCode::InvalidArgument as i32);
-            assert_eq!(err.context, "input_capture_release.device_id");
+        Some(ServerPayload::RequestResult(err)) => {
+            assert_eq!(err.code, "INVALID_ARGUMENT");
             assert!(
-                err.message.contains("invalid pointer device_id"),
+                err.hint.contains("invalid pointer device_id"),
                 "error should name the malformed device id, got: {}",
-                err.message
+                err.hint
             );
         }
         other => panic!("Expected RuntimeError, got: {other:?}"),
@@ -5283,7 +4876,10 @@ async fn test_lease_acquire_sends_lease_response() {
     tx.send(ClientMessage {
         sequence: 2,
         timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::LeaseRequest(LeaseRequest { ttl_ms: 30_000 })),
+        payload: Some(ClientPayload::ClaimTile(ClaimTile {
+            ttl_ms: 30_000,
+            ..Default::default()
+        })),
     })
     .await
     .unwrap();
@@ -5291,10 +4887,10 @@ async fn test_lease_acquire_sends_lease_response() {
     // First response: LeaseResponse(granted=true)
     let resp_msg = stream.next().await.unwrap().unwrap();
     match &resp_msg.payload {
-        Some(ServerPayload::LeaseResponse(resp)) => {
-            assert!(resp.granted, "Lease should be granted");
+        Some(ServerPayload::RequestResult(resp)) => {
+            assert!(resp.ok, "Lease should be granted");
             assert_eq!(resp.lease_id.len(), 16, "lease_id must be 16-byte UUIDv7");
-            assert_eq!(resp.granted_ttl_ms, 30_000);
+            assert_eq!(resp.ttl_ms, 30_000);
         }
         other => panic!("Expected LeaseResponse, got: {other:?}"),
     }
@@ -5313,7 +4909,10 @@ async fn test_lease_id_is_16_byte_uuidv7() {
     tx.send(ClientMessage {
         sequence: 2,
         timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::LeaseRequest(LeaseRequest { ttl_ms: 10_000 })),
+        payload: Some(ClientPayload::ClaimTile(ClaimTile {
+            ttl_ms: 10_000,
+            ..Default::default()
+        })),
     })
     .await
     .unwrap();
@@ -5321,8 +4920,8 @@ async fn test_lease_id_is_16_byte_uuidv7() {
     // LeaseResponse
     let resp_msg = stream.next().await.unwrap().unwrap();
     match &resp_msg.payload {
-        Some(ServerPayload::LeaseResponse(resp)) => {
-            assert!(resp.granted);
+        Some(ServerPayload::RequestResult(resp)) => {
+            assert!(resp.ok);
             assert_eq!(
                 resp.lease_id.len(),
                 16,
@@ -5330,100 +4929,6 @@ async fn test_lease_id_is_16_byte_uuidv7() {
             );
         }
         other => panic!("Expected LeaseResponse, got: {other:?}"),
-    }
-}
-
-/// Scenario: LeaseRenew responds with LeaseResponse(granted=true) carrying the
-/// updated TTL.
-#[tokio::test]
-async fn test_lease_renew_returns_lease_response() {
-    let (mut client, _server) = setup_test().await;
-    let (tx, _init_messages, mut stream) = handshake(&mut client, "renew-agent", "test-key").await;
-
-    // Acquire a lease
-    tx.send(ClientMessage {
-        sequence: 2,
-        timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::LeaseRequest(LeaseRequest { ttl_ms: 60_000 })),
-    })
-    .await
-    .unwrap();
-
-    // Consume LeaseResponse from acquire
-    let resp = stream.next().await.unwrap().unwrap();
-    let lease_id = match &resp.payload {
-        Some(ServerPayload::LeaseResponse(r)) if r.granted => r.lease_id.clone(),
-        other => panic!("Expected LeaseResponse(granted), got: {other:?}"),
-    };
-
-    // Renew the lease
-    tx.send(ClientMessage {
-        sequence: 3,
-        timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::LeaseRenew(LeaseRenew {
-            lease_id: lease_id.clone(),
-            new_ttl_ms: 120_000,
-        })),
-    })
-    .await
-    .unwrap();
-
-    // First: LeaseResponse(granted=true) with updated TTL
-    let renew_resp = stream.next().await.unwrap().unwrap();
-    match &renew_resp.payload {
-        Some(ServerPayload::LeaseResponse(resp)) => {
-            assert!(resp.granted, "Renewal should be granted");
-            assert_eq!(resp.lease_id, lease_id, "Same lease_id in renewal response");
-            assert_eq!(resp.granted_ttl_ms, 120_000, "TTL should reflect renewal");
-        }
-        other => panic!("Expected LeaseResponse(granted) on renew, got: {other:?}"),
-    }
-}
-
-/// Scenario: LeaseRelease is answered by LeaseResponse(granted=true).
-#[tokio::test]
-async fn test_lease_release_sends_lease_response() {
-    let (mut client, _server) = setup_test().await;
-    let (tx, _init_messages, mut stream) =
-        handshake(&mut client, "release-agent", "test-key").await;
-
-    // Acquire a lease
-    tx.send(ClientMessage {
-        sequence: 2,
-        timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::LeaseRequest(LeaseRequest { ttl_ms: 60_000 })),
-    })
-    .await
-    .unwrap();
-
-    let resp = stream.next().await.unwrap().unwrap();
-    let lease_id = match &resp.payload {
-        Some(ServerPayload::LeaseResponse(r)) if r.granted => r.lease_id.clone(),
-        other => panic!("Expected LeaseResponse(granted), got: {other:?}"),
-    };
-
-    // Release the lease
-    tx.send(ClientMessage {
-        sequence: 3,
-        timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::LeaseRelease(LeaseRelease {
-            lease_id: lease_id.clone(),
-        })),
-    })
-    .await
-    .unwrap();
-
-    // First: LeaseResponse(granted=true)
-    let release_resp = stream.next().await.unwrap().unwrap();
-    match &release_resp.payload {
-        Some(ServerPayload::LeaseResponse(r)) => {
-            assert!(
-                r.granted,
-                "LeaseRelease success must return LeaseResponse(granted=true)"
-            );
-            assert_eq!(r.lease_id, lease_id, "lease_id must match in LeaseResponse");
-        }
-        other => panic!("Expected LeaseResponse(granted) for release, got: {other:?}"),
     }
 }
 
@@ -5441,7 +4946,10 @@ async fn test_lease_retransmit_correlation_returns_cached_response() {
     let lease_req = ClientMessage {
         sequence: 2,
         timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::LeaseRequest(LeaseRequest { ttl_ms: 30_000 })),
+        payload: Some(ClientPayload::ClaimTile(ClaimTile {
+            ttl_ms: 30_000,
+            ..Default::default()
+        })),
     };
 
     // Original request
@@ -5450,8 +4958,8 @@ async fn test_lease_retransmit_correlation_returns_cached_response() {
     // Consume the original LeaseResponse
     let orig_resp = stream.next().await.unwrap().unwrap();
     let orig_lease_id = match &orig_resp.payload {
-        Some(ServerPayload::LeaseResponse(r)) => {
-            assert!(r.granted);
+        Some(ServerPayload::RequestResult(r)) => {
+            assert!(r.ok);
             r.lease_id.clone()
         }
         other => panic!("Expected LeaseResponse, got: {other:?}"),
@@ -5463,13 +4971,13 @@ async fn test_lease_retransmit_correlation_returns_cached_response() {
     // The retransmit should return the cached LeaseResponse (no duplicate lease created)
     let retx_resp = stream.next().await.unwrap().unwrap();
     match &retx_resp.payload {
-        Some(ServerPayload::LeaseResponse(r)) => {
-            assert!(r.granted, "Retransmit should return cached grant");
+        Some(ServerPayload::RequestResult(r)) => {
+            assert!(r.ok, "Retransmit should return cached grant");
             assert_eq!(
                 r.lease_id, orig_lease_id,
                 "Retransmit must return the same lease_id as the original response"
             );
-            assert_eq!(r.granted_ttl_ms, 30_000);
+            assert_eq!(r.ttl_ms, 30_000);
         }
         other => panic!("Expected LeaseResponse on retransmit, got: {other:?}"),
     }
@@ -5513,7 +5021,10 @@ async fn test_three_agents_lease_contention() {
         tx.send(ClientMessage {
             sequence: seq,
             timestamp_wall_us: now_wall_us(),
-            payload: Some(ClientPayload::LeaseRequest(LeaseRequest { ttl_ms: 30_000 })),
+            payload: Some(ClientPayload::ClaimTile(ClaimTile {
+                ttl_ms: 30_000,
+                ..Default::default()
+            })),
         })
         .await
         .unwrap();
@@ -5524,8 +5035,8 @@ async fn test_three_agents_lease_contention() {
     for stream in [&mut s1, &mut s2, &mut s3] {
         let msg = stream.next().await.unwrap().unwrap();
         match &msg.payload {
-            Some(ServerPayload::LeaseResponse(r)) => {
-                assert!(r.granted, "All agents should get leases granted");
+            Some(ServerPayload::RequestResult(r)) => {
+                assert!(r.ok, "All agents should get leases granted");
                 assert_eq!(r.lease_id.len(), 16);
                 lease_ids.push(r.lease_id.clone());
             }
@@ -5560,8 +5071,9 @@ async fn test_lease_expiry_scenario_initial_grant() {
     tx.send(ClientMessage {
         sequence: 2,
         timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::LeaseRequest(LeaseRequest {
-            ttl_ms: 100, // very short TTL for expiry testing
+        payload: Some(ClientPayload::ClaimTile(ClaimTile {
+            ttl_ms: 100,
+            ..Default::default()
         })),
     })
     .await
@@ -5569,10 +5081,10 @@ async fn test_lease_expiry_scenario_initial_grant() {
 
     let resp = stream.next().await.unwrap().unwrap();
     match &resp.payload {
-        Some(ServerPayload::LeaseResponse(r)) => {
-            assert!(r.granted);
+        Some(ServerPayload::RequestResult(r)) => {
+            assert!(r.ok);
             assert_eq!(
-                r.granted_ttl_ms, 100,
+                r.ttl_ms, 100,
                 "Short-TTL lease should be granted as requested"
             );
             assert_eq!(r.lease_id.len(), 16, "lease_id must be 16-byte SceneId");
@@ -5585,73 +5097,10 @@ async fn test_lease_expiry_scenario_initial_grant() {
 #[test]
 fn test_lease_response_is_transactional() {
     assert_eq!(
-        classify_server_payload(&ServerPayload::LeaseResponse(LeaseResponse::default())),
+        classify_server_payload(&ServerPayload::RequestResult(RequestResult::default())),
         TrafficClass::Transactional,
         "LeaseResponse must be Transactional (never dropped)"
     );
-}
-
-/// Scenario: Renew on non-existent lease returns denial.
-#[tokio::test]
-async fn test_lease_renew_unknown_lease_returns_denial() {
-    let (mut client, _server) = setup_test().await;
-    let (tx, _init_messages, mut stream) =
-        handshake(&mut client, "renew-unknown-agent", "test-key").await;
-
-    let fake_lease_id = uuid::Uuid::now_v7().as_bytes().to_vec();
-
-    tx.send(ClientMessage {
-        sequence: 2,
-        timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::LeaseRenew(LeaseRenew {
-            lease_id: fake_lease_id,
-            new_ttl_ms: 60_000,
-        })),
-    })
-    .await
-    .unwrap();
-
-    let msg = stream.next().await.unwrap().unwrap();
-    match &msg.payload {
-        Some(ServerPayload::LeaseResponse(resp)) => {
-            assert!(!resp.granted, "Renew on unknown lease must be denied");
-            assert!(!resp.deny_code.is_empty(), "deny_code must be populated");
-        }
-        other => {
-            panic!("Expected LeaseResponse(denied) for unknown lease renew, got: {other:?}")
-        }
-    }
-}
-
-/// Scenario: Release on non-existent lease returns denial.
-#[tokio::test]
-async fn test_lease_release_unknown_lease_returns_denial() {
-    let (mut client, _server) = setup_test().await;
-    let (tx, _init_messages, mut stream) =
-        handshake(&mut client, "release-unknown-agent", "test-key").await;
-
-    let fake_lease_id = uuid::Uuid::now_v7().as_bytes().to_vec();
-
-    tx.send(ClientMessage {
-        sequence: 2,
-        timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::LeaseRelease(LeaseRelease {
-            lease_id: fake_lease_id,
-        })),
-    })
-    .await
-    .unwrap();
-
-    let msg = stream.next().await.unwrap().unwrap();
-    match &msg.payload {
-        Some(ServerPayload::LeaseResponse(resp)) => {
-            assert!(!resp.granted, "Release on unknown lease must be denied");
-            assert!(!resp.deny_code.is_empty(), "deny_code must be populated");
-        }
-        other => {
-            panic!("Expected LeaseResponse(denied) for unknown lease release, got: {other:?}")
-        }
-    }
 }
 
 /// Scenario: Disconnect orphan behavior — session cleanup does not panic
@@ -5672,7 +5121,10 @@ async fn test_disconnect_with_active_leases_no_panic() {
     tx.send(ClientMessage {
         sequence: 2,
         timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::LeaseRequest(LeaseRequest { ttl_ms: 60_000 })),
+        payload: Some(ClientPayload::ClaimTile(ClaimTile {
+            ttl_ms: 60_000,
+            ..Default::default()
+        })),
     })
     .await
     .unwrap();
@@ -5865,9 +5317,8 @@ async fn test_durable_widget_publish_receives_result() {
     tx.send(ClientMessage {
         sequence: 2,
         timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::WidgetPublish(WidgetPublish {
-            widget_name: "gauge".to_string(),
-            instance_id: String::new(),
+        payload: Some(ClientPayload::Publish(Publish {
+            surface: "widget:gauge".to_string(),
             params: vec![crate::proto::WidgetParameterValueProto {
                 param_name: "level".to_string(),
                 value: Some(crate::proto::widget_parameter_value_proto::Value::F32Value(
@@ -5875,8 +5326,8 @@ async fn test_durable_widget_publish_receives_result() {
                 )),
             }],
             transition_ms: 0,
-            element_id: Vec::new(),
-            merge_key: String::new(),
+            key: String::new(),
+            ..Default::default()
         })),
     })
     .await
@@ -5884,18 +5335,14 @@ async fn test_durable_widget_publish_receives_result() {
 
     let result_msg = next_server_msg(&mut stream).await;
     match &result_msg.payload {
-        Some(ServerPayload::WidgetPublishResult(result)) => {
+        Some(ServerPayload::RequestResult(result)) => {
             assert!(
-                result.accepted,
+                result.ok,
                 "Durable widget publish must be accepted, got error: {}",
-                result.error_code
+                result.code
             );
-            assert_eq!(result.widget_name, "gauge");
-            assert!(result.error_code.is_empty(), "No error code on success");
-            assert_eq!(
-                result.request_sequence, 2,
-                "request_sequence must echo client sequence"
-            );
+            assert!(result.code.is_empty(), "No error code on success");
+            assert_eq!(result.seq, 2, "request_sequence must echo client sequence");
         }
         other => panic!("Expected WidgetPublishResult, got: {other:?}"),
     }
@@ -5915,13 +5362,12 @@ async fn test_widget_publish_missing_capability_rejected() {
     tx.send(ClientMessage {
         sequence: 2,
         timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::WidgetPublish(WidgetPublish {
-            widget_name: "gauge".to_string(),
-            instance_id: String::new(),
+        payload: Some(ClientPayload::Publish(Publish {
+            surface: "widget:gauge".to_string(),
             params: vec![],
             transition_ms: 0,
-            element_id: Vec::new(),
-            merge_key: String::new(),
+            key: String::new(),
+            ..Default::default()
         })),
     })
     .await
@@ -5929,12 +5375,12 @@ async fn test_widget_publish_missing_capability_rejected() {
 
     let result_msg = next_server_msg(&mut stream).await;
     match &result_msg.payload {
-        Some(ServerPayload::WidgetPublishResult(result)) => {
-            assert!(!result.accepted, "Expected rejection");
+        Some(ServerPayload::RequestResult(result)) => {
+            assert!(!result.ok, "Expected rejection");
             assert_eq!(
-                result.error_code, "WIDGET_CAPABILITY_MISSING",
-                "Expected WIDGET_CAPABILITY_MISSING, got: {}",
-                result.error_code
+                result.code, "NOT_ALLOWED",
+                "Expected NOT_ALLOWED, got: {}",
+                result.code
             );
         }
         other => panic!("Expected WidgetPublishResult(rejected), got: {other:?}"),
@@ -5959,13 +5405,12 @@ async fn test_widget_publish_wildcard_capability_allows_publish() {
     tx.send(ClientMessage {
         sequence: 2,
         timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::WidgetPublish(WidgetPublish {
-            widget_name: "gauge".to_string(),
-            instance_id: String::new(),
+        payload: Some(ClientPayload::Publish(Publish {
+            surface: "widget:gauge".to_string(),
             params: vec![],
             transition_ms: 0,
-            element_id: Vec::new(),
-            merge_key: String::new(),
+            key: String::new(),
+            ..Default::default()
         })),
     })
     .await
@@ -5973,12 +5418,11 @@ async fn test_widget_publish_wildcard_capability_allows_publish() {
 
     let result_msg = next_server_msg(&mut stream).await;
     match &result_msg.payload {
-        Some(ServerPayload::WidgetPublishResult(result)) => {
+        Some(ServerPayload::RequestResult(result)) => {
             assert!(
-                result.accepted,
+                result.ok,
                 "Expected wildcard capability to authorize publish"
             );
-            assert_eq!(result.widget_name, "gauge");
         }
         other => panic!("Expected WidgetPublishResult, got: {other:?}"),
     }
@@ -6002,13 +5446,12 @@ async fn test_widget_publish_not_found() {
     tx.send(ClientMessage {
         sequence: 2,
         timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::WidgetPublish(WidgetPublish {
-            widget_name: "nonexistent".to_string(),
-            instance_id: String::new(),
+        payload: Some(ClientPayload::Publish(Publish {
+            surface: "widget:nonexistent".to_string(),
             params: vec![],
             transition_ms: 0,
-            element_id: Vec::new(),
-            merge_key: String::new(),
+            key: String::new(),
+            ..Default::default()
         })),
     })
     .await
@@ -6016,12 +5459,12 @@ async fn test_widget_publish_not_found() {
 
     let result_msg = next_server_msg(&mut stream).await;
     match &result_msg.payload {
-        Some(ServerPayload::WidgetPublishResult(result)) => {
-            assert!(!result.accepted, "Expected rejection");
+        Some(ServerPayload::RequestResult(result)) => {
+            assert!(!result.ok, "Expected rejection");
             assert_eq!(
-                result.error_code, "WIDGET_NOT_FOUND",
+                result.code, "WIDGET_NOT_FOUND",
                 "Expected WIDGET_NOT_FOUND, got: {}",
-                result.error_code
+                result.code
             );
         }
         other => panic!("Expected WidgetPublishResult(WIDGET_NOT_FOUND), got: {other:?}"),
@@ -6046,9 +5489,8 @@ async fn test_widget_publish_unknown_parameter() {
     tx.send(ClientMessage {
         sequence: 2,
         timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::WidgetPublish(WidgetPublish {
-            widget_name: "gauge".to_string(),
-            instance_id: String::new(),
+        payload: Some(ClientPayload::Publish(Publish {
+            surface: "widget:gauge".to_string(),
             params: vec![crate::proto::WidgetParameterValueProto {
                 param_name: "bogus_param".to_string(),
                 value: Some(crate::proto::widget_parameter_value_proto::Value::F32Value(
@@ -6056,8 +5498,8 @@ async fn test_widget_publish_unknown_parameter() {
                 )),
             }],
             transition_ms: 0,
-            element_id: Vec::new(),
-            merge_key: String::new(),
+            key: String::new(),
+            ..Default::default()
         })),
     })
     .await
@@ -6065,12 +5507,12 @@ async fn test_widget_publish_unknown_parameter() {
 
     let result_msg = next_server_msg(&mut stream).await;
     match &result_msg.payload {
-        Some(ServerPayload::WidgetPublishResult(result)) => {
-            assert!(!result.accepted, "Expected rejection");
+        Some(ServerPayload::RequestResult(result)) => {
+            assert!(!result.ok, "Expected rejection");
             assert_eq!(
-                result.error_code, "WIDGET_UNKNOWN_PARAMETER",
-                "Expected WIDGET_UNKNOWN_PARAMETER, got: {}",
-                result.error_code
+                result.code, "WIDGET_PARAMETER_INVALID",
+                "Expected WIDGET_PARAMETER_INVALID, got: {}",
+                result.code
             );
         }
         other => {
@@ -6099,9 +5541,8 @@ async fn test_durable_widget_publish_repeated_requests_are_correlated() {
         tx.send(ClientMessage {
             sequence,
             timestamp_wall_us: now_wall_us(),
-            payload: Some(ClientPayload::WidgetPublish(WidgetPublish {
-                widget_name: "gauge".to_string(),
-                instance_id: String::new(),
+            payload: Some(ClientPayload::Publish(Publish {
+                surface: "widget:gauge".to_string(),
                 params: vec![crate::proto::WidgetParameterValueProto {
                     param_name: "level".to_string(),
                     value: Some(crate::proto::widget_parameter_value_proto::Value::F32Value(
@@ -6109,8 +5550,8 @@ async fn test_durable_widget_publish_repeated_requests_are_correlated() {
                     )),
                 }],
                 transition_ms: 0,
-                element_id: Vec::new(),
-                merge_key: String::new(),
+                key: String::new(),
+                ..Default::default()
             })),
         })
         .await
@@ -6118,12 +5559,11 @@ async fn test_durable_widget_publish_repeated_requests_are_correlated() {
 
         let result_msg = next_server_msg(&mut stream).await;
         match &result_msg.payload {
-            Some(ServerPayload::WidgetPublishResult(result)) => {
-                assert_eq!(result.request_sequence, sequence);
-                assert!(result.accepted, "expected durable publish to be accepted");
-                assert_eq!(result.widget_name, "gauge");
-                assert!(result.error_code.is_empty());
-                assert!(result.error_message.is_empty());
+            Some(ServerPayload::RequestResult(result)) => {
+                assert_eq!(result.seq, sequence);
+                assert!(result.ok, "expected durable publish to be accepted");
+                assert!(result.code.is_empty());
+                assert!(result.hint.is_empty());
             }
             other => panic!("Expected WidgetPublishResult, got: {other:?}"),
         }
@@ -6210,9 +5650,8 @@ async fn test_ephemeral_widget_no_publish_result() {
     tx.send(ClientMessage {
         sequence: 2,
         timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::WidgetPublish(WidgetPublish {
-            widget_name: "live-bar".to_string(),
-            instance_id: String::new(),
+        payload: Some(ClientPayload::Publish(Publish {
+            surface: "widget:live-bar".to_string(),
             params: vec![crate::proto::WidgetParameterValueProto {
                 param_name: "value".to_string(),
                 value: Some(crate::proto::widget_parameter_value_proto::Value::F32Value(
@@ -6220,8 +5659,8 @@ async fn test_ephemeral_widget_no_publish_result() {
                 )),
             }],
             transition_ms: 0,
-            element_id: Vec::new(),
-            merge_key: String::new(),
+            key: String::new(),
+            ..Default::default()
         })),
     })
     .await
@@ -6240,7 +5679,7 @@ async fn test_ephemeral_widget_no_publish_result() {
 
     let next_msg = stream.next().await.unwrap().unwrap();
     match &next_msg.payload {
-        Some(ServerPayload::WidgetPublishResult(_)) => {
+        Some(ServerPayload::RequestResult(_)) => {
             panic!("Ephemeral widget publish must NOT produce a WidgetPublishResult")
         }
         Some(ServerPayload::Heartbeat(hb)) => {
@@ -6740,9 +6179,8 @@ async fn test_widget_asset_register_updates_runtime_widget_lifecycle_for_publish
     tx.send(ClientMessage {
         sequence: 4,
         timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::WidgetPublish(WidgetPublish {
-            widget_name: "gauge".to_string(),
-            instance_id: String::new(),
+        payload: Some(ClientPayload::Publish(Publish {
+            surface: "widget:gauge".to_string(),
             params: vec![crate::proto::WidgetParameterValueProto {
                 param_name: "level".to_string(),
                 value: Some(crate::proto::widget_parameter_value_proto::Value::F32Value(
@@ -6750,8 +6188,8 @@ async fn test_widget_asset_register_updates_runtime_widget_lifecycle_for_publish
                 )),
             }],
             transition_ms: 0,
-            element_id: Vec::new(),
-            merge_key: String::new(),
+            key: String::new(),
+            ..Default::default()
         })),
     })
     .await
@@ -6759,11 +6197,8 @@ async fn test_widget_asset_register_updates_runtime_widget_lifecycle_for_publish
 
     let publish_msg = next_server_msg(&mut stream).await;
     match &publish_msg.payload {
-        Some(ServerPayload::WidgetPublishResult(result)) => {
-            assert!(
-                result.accepted,
-                "publish should remain usable after registration"
-            );
+        Some(ServerPayload::RequestResult(result)) => {
+            assert!(result.ok, "publish should remain usable after registration");
         }
         other => panic!("expected WidgetPublishResult, got: {other:?}"),
     }
@@ -7904,56 +7339,18 @@ async fn test_resident_upload_then_static_image_references_uploaded_resource_id(
     tx.send(ClientMessage {
         sequence: 3,
         timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::LeaseRequest(LeaseRequest { ttl_ms: 60_000 })),
-    })
-    .await
-    .unwrap();
-
-    let lease_msg = next_server_msg(&mut stream).await;
-    let lease_id = match lease_msg.payload {
-        Some(ServerPayload::LeaseResponse(resp)) if resp.granted => resp.lease_id,
-        other => panic!("expected granted LeaseResponse, got: {other:?}"),
-    };
-
-    let create_batch_id = uuid::Uuid::now_v7().as_bytes().to_vec();
-    tx.send(ClientMessage {
-        sequence: 4,
-        timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::MutationBatch(MutationBatch {
-            batch_id: create_batch_id.clone(),
-            lease_id: lease_id.clone(),
-            mutations: vec![crate::proto::MutationProto {
-                mutation: Some(crate::proto::mutation_proto::Mutation::CreateTile(
-                    crate::proto::CreateTileMutation {
-                        tab_id: vec![],
-                        bounds: Some(crate::proto::Rect {
-                            x: 0.0,
-                            y: 0.0,
-                            width: 120.0,
-                            height: 120.0,
-                        }),
-                        z_order: 1,
-                    },
-                )),
-            }],
-            timing: None,
+        payload: Some(ClientPayload::ClaimTile(ClaimTile {
+            ttl_ms: 60_000,
+            ..Default::default()
         })),
     })
     .await
     .unwrap();
 
-    let create_result = next_server_msg(&mut stream).await;
-    let tile_id_bytes = match create_result.payload {
-        Some(ServerPayload::MutationResult(result)) => {
-            assert!(result.accepted, "create tile mutation should be accepted");
-            assert_eq!(result.batch_id, create_batch_id);
-            result
-                .created_ids
-                .first()
-                .cloned()
-                .expect("create tile should return one created tile id")
-        }
-        other => panic!("expected MutationResult for create tile, got: {other:?}"),
+    let claim_msg = next_server_msg(&mut stream).await;
+    let (lease_id, tile_id_bytes) = match claim_msg.payload {
+        Some(ServerPayload::RequestResult(resp)) if resp.ok => (resp.lease_id, resp.ids[0].clone()),
+        other => panic!("expected a granted ClaimTile, got: {other:?}"),
     };
 
     let root_node = Node {
@@ -7993,8 +7390,8 @@ async fn test_resident_upload_then_static_image_references_uploaded_resource_id(
 
     let set_root_result = next_server_msg(&mut stream).await;
     match set_root_result.payload {
-        Some(ServerPayload::MutationResult(result)) => {
-            assert!(result.accepted, "set_tile_root should be accepted");
+        Some(ServerPayload::RequestResult(result)) => {
+            assert!(result.ok, "set_tile_root should be accepted");
             assert_eq!(result.batch_id, set_root_batch_id);
         }
         other => panic!("expected MutationResult for set_tile_root, got: {other:?}"),
@@ -8604,8 +8001,8 @@ async fn rejected_zone_publish_does_not_wake_the_compositor() {
     tx.send(ClientMessage {
         sequence: 2,
         timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::ZonePublish(ZonePublish {
-            zone_name: "missing-zone".to_string(),
+        payload: Some(ClientPayload::Publish(Publish {
+            surface: "zone:missing-zone".to_string(),
             content: None,
             ..Default::default()
         })),
@@ -8615,8 +8012,8 @@ async fn rejected_zone_publish_does_not_wake_the_compositor() {
     let result = next_server_msg(&mut stream).await;
     assert!(matches!(
         result.payload,
-        Some(ServerPayload::ZonePublishResult(ZonePublishResult {
-            accepted: false,
+        Some(ServerPayload::RequestResult(RequestResult {
+            ok: false,
             ..
         }))
     ));
@@ -8676,33 +8073,24 @@ async fn connect_hold_tile_and_disconnect(
     tx.send(ClientMessage {
         sequence: 2,
         timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::LeaseRequest(LeaseRequest {
+        payload: Some(ClientPayload::ClaimTile(ClaimTile {
             ttl_ms: 600_000,
+            ..Default::default()
         })),
     })
     .await
     .unwrap();
-    let lease_id = match next_server_msg(&mut stream).await.payload {
-        Some(ServerPayload::LeaseResponse(LeaseResponse {
-            granted: true,
+    let (lease_id, tile_id) = match next_server_msg(&mut stream).await.payload {
+        Some(ServerPayload::RequestResult(RequestResult {
+            ok: true,
             lease_id,
+            ids,
             ..
-        })) => bytes_to_scene_id(&lease_id).unwrap(),
-        other => panic!("expected granted LeaseResponse, got {other:?}"),
-    };
-    let tile_id = {
-        let st = state.lock().await;
-        let mut scene = st.scene.lock().await;
-        let tab_id = scene.create_tab("Main", 0).unwrap();
-        scene
-            .create_tile(
-                tab_id,
-                agent,
-                lease_id,
-                tze_hud_scene::Rect::new(0.0, 0.0, 120.0, 48.0),
-                1,
-            )
-            .unwrap()
+        })) => (
+            bytes_to_scene_id(&lease_id).unwrap(),
+            bytes_to_scene_id(&ids[0]).unwrap(),
+        ),
+        other => panic!("expected a granted ClaimTile, got {other:?}"),
     };
     drop(tx);
     drop(stream);
@@ -8818,21 +8206,18 @@ async fn grpc_grace_expiry_reclaims_orphaned_lease_and_rejects_resume() {
     server.abort();
 }
 
-fn subtitle_publish(text: &str, ttl_us: u64, present_at: u64, expires_at: u64) -> ZonePublish {
-    ZonePublish {
-        zone_name: "subtitle".to_string(),
+fn subtitle_publish(text: &str, ttl_ms: u64, present_at: u64, expires_at: u64) -> Publish {
+    Publish {
+        surface: "zone:subtitle".to_string(),
         content: Some(crate::proto::ZoneContent {
             payload: Some(crate::proto::zone_content::Payload::StreamText(
                 text.to_string(),
             )),
         }),
-        ttl_us,
-        merge_key: String::new(),
-        breakpoints: Vec::new(),
-        element_id: Vec::new(),
-        present_at_wall_us: present_at,
-        expires_at_wall_us: expires_at,
-        content_classification: String::new(),
+        ttl_ms,
+        present_at_us: present_at,
+        expires_at_us: expires_at,
+        ..Default::default()
     }
 }
 
@@ -8859,18 +8244,18 @@ async fn publish_and_ack(
     tx: &tokio::sync::mpsc::Sender<ClientMessage>,
     stream: &mut tonic::Streaming<ServerMessage>,
     sequence: u64,
-    publish: ZonePublish,
-) -> ZonePublishResult {
+    publish: Publish,
+) -> RequestResult {
     tx.send(ClientMessage {
         sequence,
         timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::ZonePublish(publish)),
+        payload: Some(ClientPayload::Publish(publish)),
     })
     .await
     .unwrap();
     match next_server_msg(stream).await.payload {
-        Some(ServerPayload::ZonePublishResult(r)) => r,
-        other => panic!("expected ZonePublishResult, got {other:?}"),
+        Some(ServerPayload::RequestResult(r)) => r,
+        other => panic!("expected RequestResult, got {other:?}"),
     }
 }
 
@@ -8888,21 +8273,15 @@ fn subtitle_texts(scene: &SceneGraph) -> Vec<String> {
         .collect()
 }
 
-/// Invariant 1: ZonePublish `ttl_us` sets a content expiry that the sweep
+/// Invariant 1: Publish `ttl_ms` sets a content expiry that the sweep
 /// honors without the agent returning.
 #[tokio::test]
 async fn grpc_zone_publish_ttl_sets_expiry_and_is_swept() {
     let clock = wall_aligned_clock();
     let (tx, mut stream, state, server, _client) = zone_publisher(clock.clone()).await;
 
-    let ack = publish_and_ack(
-        &tx,
-        &mut stream,
-        2,
-        subtitle_publish("brief", 8_000_000, 0, 0),
-    )
-    .await;
-    assert!(ack.accepted, "{ack:?}");
+    let ack = publish_and_ack(&tx, &mut stream, 2, subtitle_publish("brief", 8_000, 0, 0)).await;
+    assert!(ack.ok, "{ack:?}");
 
     let st = state.lock().await;
     let mut scene = st.scene.lock().await;
@@ -8938,7 +8317,7 @@ async fn grpc_zone_publish_expires_at_is_swept() {
         subtitle_publish("until", 0, 0, expires_at),
     )
     .await;
-    assert!(ack.accepted, "{ack:?}");
+    assert!(ack.ok, "{ack:?}");
 
     let st = state.lock().await;
     let mut scene = st.scene.lock().await;
@@ -8966,10 +8345,10 @@ async fn grpc_zone_publish_present_at_is_held_until_due() {
         &tx,
         &mut stream,
         2,
-        subtitle_publish("later", 2_000_000, present_at, 0),
+        subtitle_publish("later", 2_000, present_at, 0),
     )
     .await;
-    assert!(ack.accepted, "{ack:?}");
+    assert!(ack.ok, "{ack:?}");
 
     let st = state.lock().await;
     let mut scene = st.scene.lock().await;
@@ -9000,7 +8379,7 @@ async fn tile_agent(
     tonic::Streaming<ServerMessage>,
     Arc<tokio::sync::Mutex<crate::session::SharedState>>,
     tokio::task::JoinHandle<()>,
-    Vec<u8>,
+    (Vec<u8>, Vec<u8>),
     HudSessionClient<tonic::transport::Channel>,
 ) {
     let (mut client, server, state, _exp) = setup_test_with_lease_expiry_clock(clock).await;
@@ -9014,34 +8393,18 @@ async fn tile_agent(
     tx.send(ClientMessage {
         sequence: 2,
         timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::LeaseRequest(LeaseRequest {
+        payload: Some(ClientPayload::ClaimTile(ClaimTile {
             ttl_ms: 600_000,
+            ..Default::default()
         })),
     })
     .await
     .unwrap();
-    let lease_id = match next_server_msg(&mut stream).await.payload {
-        Some(ServerPayload::LeaseResponse(r)) if r.granted => r.lease_id,
-        other => panic!("expected granted LeaseResponse, got {other:?}"),
+    let claimed = match next_server_msg(&mut stream).await.payload {
+        Some(ServerPayload::RequestResult(r)) if r.ok => (r.lease_id, r.ids[0].clone()),
+        other => panic!("expected ClaimTile result, got {other:?}"),
     };
-    (tx, stream, state, server, lease_id, client)
-}
-
-fn create_tile_proto() -> crate::proto::MutationProto {
-    crate::proto::MutationProto {
-        mutation: Some(crate::proto::mutation_proto::Mutation::CreateTile(
-            crate::proto::CreateTileMutation {
-                tab_id: vec![],
-                bounds: Some(crate::proto::Rect {
-                    x: 0.0,
-                    y: 0.0,
-                    width: 120.0,
-                    height: 48.0,
-                }),
-                z_order: 1,
-            },
-        )),
-    }
+    (tx, stream, state, server, claimed, client)
 }
 
 fn set_root_proto(tile_id: &[u8]) -> crate::proto::MutationProto {
@@ -9093,21 +8456,8 @@ async fn send_batch(
 #[tokio::test]
 async fn grpc_batch_present_at_holds_content_until_due() {
     let clock = wall_aligned_clock();
-    let (tx, mut stream, state, server, lease_id, _client) = tile_agent(clock.clone()).await;
-    let tile_id_bytes = match send_batch(
-        &tx,
-        &mut stream,
-        3,
-        &lease_id,
-        vec![create_tile_proto()],
-        None,
-    )
-    .await
-    .payload
-    {
-        Some(ServerPayload::MutationResult(r)) if r.accepted => r.created_ids[0].clone(),
-        other => panic!("expected accepted MutationResult, got {other:?}"),
-    };
+    let (tx, mut stream, state, server, (lease_id, tile_id_bytes), _client) =
+        tile_agent(clock.clone()).await;
     let tile_id = bytes_to_scene_id(&tile_id_bytes).unwrap();
 
     let present_at = clock.now_us() + 5_000_000;
@@ -9126,7 +8476,7 @@ async fn grpc_batch_present_at_holds_content_until_due() {
     .await
     .payload
     {
-        Some(ServerPayload::MutationResult(r)) => assert!(r.accepted, "{r:?}"),
+        Some(ServerPayload::RequestResult(r)) => assert!(r.ok, "{r:?}"),
         other => panic!("expected MutationResult, got {other:?}"),
     }
 
@@ -9145,33 +8495,33 @@ async fn grpc_batch_present_at_holds_content_until_due() {
     server.abort();
 }
 
-/// Invariant 1: a MutationBatch `expires_at` stamps the tiles it creates, and
+/// Invariant 1: a MutationBatch `expires_at` stamps the tiles it targets, and
 /// the runtime sweep removes them on schedule.
 #[tokio::test]
 async fn grpc_batch_expires_at_sweeps_tile() {
     let clock = wall_aligned_clock();
-    let (tx, mut stream, state, server, lease_id, _client) = tile_agent(clock.clone()).await;
+    let (tx, mut stream, state, server, (lease_id, tile_id_bytes), _client) =
+        tile_agent(clock.clone()).await;
+    let tile_id = bytes_to_scene_id(&tile_id_bytes).unwrap();
     let expires_at = clock.now_us() + 8_000_000;
     let timing = Some(TimingHints {
         present_at_wall_us: 0,
         expires_at_wall_us: expires_at,
     });
-    let tile_id = match send_batch(
+    match send_batch(
         &tx,
         &mut stream,
         3,
         &lease_id,
-        vec![create_tile_proto()],
+        vec![set_root_proto(&tile_id_bytes)],
         timing,
     )
     .await
     .payload
     {
-        Some(ServerPayload::MutationResult(r)) if r.accepted => {
-            bytes_to_scene_id(&r.created_ids[0]).unwrap()
-        }
-        other => panic!("expected accepted MutationResult, got {other:?}"),
-    };
+        Some(ServerPayload::RequestResult(r)) => assert!(r.ok, "{r:?}"),
+        other => panic!("expected RequestResult, got {other:?}"),
+    }
 
     let st = state.lock().await;
     let mut scene = st.scene.lock().await;
@@ -9187,196 +8537,419 @@ async fn grpc_batch_expires_at_sweeps_tile() {
     server.abort();
 }
 
-/// A future `present_at` cannot be combined with CreateTile (created ids are
-/// returned synchronously); the rejection names the fix.
+// ─── Lifecycle verbs (docs/api.md) ──────────────────────────────────────────
+
+/// Send one client payload and return the next `RequestResult`.
+async fn request(
+    tx: &tokio::sync::mpsc::Sender<ClientMessage>,
+    stream: &mut tonic::Streaming<ServerMessage>,
+    sequence: u64,
+    payload: ClientPayload,
+) -> RequestResult {
+    tx.send(ClientMessage {
+        sequence,
+        timestamp_wall_us: now_wall_us(),
+        payload: Some(payload),
+    })
+    .await
+    .unwrap();
+    loop {
+        if let Some(ServerPayload::RequestResult(r)) = next_server_msg(stream).await.payload {
+            return r;
+        }
+    }
+}
+
+/// A connected agent on a scene with an active tab and the default zones.
+async fn verb_agent(
+    agent_id: &str,
+) -> (
+    tokio::sync::mpsc::Sender<ClientMessage>,
+    tonic::Streaming<ServerMessage>,
+    Arc<Mutex<SharedState>>,
+    tokio::task::JoinHandle<()>,
+    HudSessionClient<tonic::transport::Channel>,
+) {
+    let (mut client, server, state) = setup_test_with_state().await;
+    {
+        let st = state.lock().await;
+        let mut scene = st.scene.lock().await;
+        let tab = scene.create_tab("main", 0).expect("create tab");
+        scene.active_tab = Some(tab);
+        scene.zone_registry = tze_hud_scene::types::ZoneRegistry::with_defaults();
+    }
+    let (tx, _init, stream) = handshake(&mut client, agent_id, "test-key").await;
+    (tx, stream, state, server, client)
+}
+
+fn claim(
+    anchor: TileAnchor,
+    size: TileSize,
+    root: Option<crate::proto::NodeProto>,
+) -> ClientPayload {
+    ClientPayload::ClaimTile(ClaimTile {
+        placement: Some(TilePlacement {
+            anchor: anchor as i32,
+            size: size as i32,
+        }),
+        ttl_ms: 60_000,
+        root,
+    })
+}
+
+fn tile_surface_of(id: &[u8]) -> String {
+    super::verbs::tile_surface(bytes_to_scene_id(id).unwrap())
+}
+
+/// ClaimTile grants the lease, places the tile from tokens, and applies the
+/// initial tree in one round trip; client node ids come back in `ids`.
 #[tokio::test]
-async fn grpc_batch_present_at_with_create_is_rejected_with_hint() {
-    let clock = wall_aligned_clock();
-    let (tx, mut stream, _state, server, lease_id, _client) = tile_agent(clock.clone()).await;
-    let timing = Some(TimingHints {
-        present_at_wall_us: clock.now_us() + 5_000_000,
-        expires_at_wall_us: 0,
+async fn claim_tile_is_one_round_trip_with_root_and_ids() {
+    let (tx, mut stream, state, server, _client) = verb_agent("claim-agent").await;
+    let child_id = SceneId::new();
+    let mut root = crate::convert::scene_node_to_proto(&Node {
+        layout: Default::default(),
+        id: SceneId::new(),
+        children: vec![],
+        data: NodeData::SolidColor(SolidColorNode {
+            color: Rgba::new(0.1, 0.2, 0.3, 1.0),
+            bounds: Rect::new(0.0, 0.0, 100.0, 50.0),
+            radius: None,
+        }),
     });
-    match send_batch(
+    root.children
+        .push(crate::convert::scene_node_to_proto(&Node {
+            layout: Default::default(),
+            id: child_id,
+            children: vec![],
+            data: NodeData::SolidColor(SolidColorNode {
+                color: Rgba::new(0.4, 0.5, 0.6, 1.0),
+                bounds: Rect::new(0.0, 0.0, 10.0, 10.0),
+                radius: None,
+            }),
+        }));
+    let r = request(
+        &tx,
+        &mut stream,
+        2,
+        claim(TileAnchor::TopRight, TileSize::Small, Some(root)),
+    )
+    .await;
+    assert!(r.ok, "{r:?}");
+    assert_eq!(r.seq, 2);
+    assert_eq!(r.ids.len(), 3, "tile id, then root and child");
+    assert_eq!(r.lease_id.len(), 16);
+    assert_eq!(r.ttl_ms, 60_000);
+    assert_eq!(bytes_to_scene_id(&r.ids[2]).unwrap(), child_id);
+
+    let tile_id = bytes_to_scene_id(&r.ids[0]).unwrap();
+    let st = state.lock().await;
+    let scene = st.scene.lock().await;
+    let tile = &scene.tiles[&tile_id];
+    let tokens = tze_hud_scene::placement::TilePlacementTokens::default();
+    assert_eq!(tile.bounds.width, tokens.small.0);
+    assert_eq!(
+        tile.bounds.x,
+        scene.display_area.width - tokens.margin - tokens.small.0
+    );
+    assert_eq!(tile.bounds.y, tokens.margin);
+    assert!(tile.root_node.is_some(), "root applied in the same request");
+    drop(scene);
+    drop(st);
+    server.abort();
+}
+
+/// Tiles claimed at one anchor stack instead of overlapping.
+#[tokio::test]
+async fn claim_tile_stacks_at_shared_anchor() {
+    let (tx, mut stream, state, server, _client) = verb_agent("stack-agent").await;
+    let a = request(
+        &tx,
+        &mut stream,
+        2,
+        claim(TileAnchor::TopLeft, TileSize::Small, None),
+    )
+    .await;
+    let b = request(
         &tx,
         &mut stream,
         3,
-        &lease_id,
-        vec![create_tile_proto()],
-        timing,
+        claim(TileAnchor::TopLeft, TileSize::Small, None),
     )
-    .await
-    .payload
-    {
-        Some(ServerPayload::RuntimeError(e)) => {
-            assert_eq!(e.error_code, "PRESENT_AT_WITH_CREATE");
-            assert!(!e.hint.is_empty());
-        }
-        other => panic!("expected RuntimeError, got {other:?}"),
-    }
+    .await;
+    assert!(a.ok && b.ok);
+    let st = state.lock().await;
+    let scene = st.scene.lock().await;
+    let ta = &scene.tiles[&bytes_to_scene_id(&a.ids[0]).unwrap()];
+    let tb = &scene.tiles[&bytes_to_scene_id(&b.ids[0]).unwrap()];
+    assert!(
+        !ta.bounds.intersects(&tb.bounds),
+        "stacked, not overlapping"
+    );
+    assert!(tb.z_order > ta.z_order, "later claims sit above");
+    drop(scene);
+    drop(st);
+    server.abort();
+}
+
+/// A retransmitted ClaimTile replays its reply rather than claiming twice.
+#[tokio::test]
+async fn claim_tile_retransmit_replays_cached_result() {
+    let (tx, mut stream, state, server, _client) = verb_agent("retx-agent").await;
+    let first = request(
+        &tx,
+        &mut stream,
+        2,
+        claim(TileAnchor::Top, TileSize::Small, None),
+    )
+    .await;
+    let again = request(
+        &tx,
+        &mut stream,
+        2,
+        claim(TileAnchor::Top, TileSize::Small, None),
+    )
+    .await;
+    assert_eq!(first, again);
+    assert_eq!(state.lock().await.scene.lock().await.tile_count(), 1);
+    server.abort();
+}
+
+/// Hold renews a tile's lease; Clear releases it and removes the tile.
+#[tokio::test]
+async fn hold_and_clear_tile() {
+    let (tx, mut stream, state, server, _client) = verb_agent("hold-agent").await;
+    let c = request(
+        &tx,
+        &mut stream,
+        2,
+        claim(TileAnchor::Center, TileSize::Medium, None),
+    )
+    .await;
+    let surface = tile_surface_of(&c.ids[0]);
+    let held = request(
+        &tx,
+        &mut stream,
+        3,
+        ClientPayload::Hold(Hold {
+            surface: surface.clone(),
+            ttl_ms: 90_000,
+        }),
+    )
+    .await;
+    assert!(held.ok, "{held:?}");
+    assert_eq!(held.ttl_ms, 90_000);
+    assert_eq!(held.lease_id, c.lease_id);
+
+    let cleared = request(
+        &tx,
+        &mut stream,
+        4,
+        ClientPayload::Clear(Clear {
+            surface: surface.clone(),
+        }),
+    )
+    .await;
+    assert!(cleared.ok, "{cleared:?}");
+    assert_eq!(state.lock().await.scene.lock().await.tile_count(), 0);
+
+    let again = request(
+        &tx,
+        &mut stream,
+        5,
+        ClientPayload::Hold(Hold { surface, ttl_ms: 0 }),
+    )
+    .await;
+    assert_eq!(again.code, "NOT_HELD");
+    server.abort();
+}
+
+/// Hold on a zone extends the agent's publication; with nothing held it
+/// answers NOT_HELD.
+#[tokio::test]
+async fn hold_zone_publication() {
+    let (tx, mut stream, state, server, _client) = verb_agent("zone-hold-agent").await;
+    let hold = || {
+        ClientPayload::Hold(Hold {
+            surface: "zone:subtitle".to_string(),
+            ttl_ms: 0,
+        })
+    };
+    let r = request(&tx, &mut stream, 2, hold()).await;
+    assert_eq!(r.code, "NOT_HELD");
+    let p = request(
+        &tx,
+        &mut stream,
+        3,
+        ClientPayload::Publish(subtitle_publish("x", 5_000, 0, 0)),
+    )
+    .await;
+    assert!(p.ok, "{p:?}");
+    let r = request(&tx, &mut stream, 4, hold()).await;
+    assert!(r.ok, "{r:?}");
+    let st = state.lock().await;
+    let scene = st.scene.lock().await;
+    let record = &scene.zone_registry.active_publishes["subtitle"][0];
+    assert_eq!(
+        record.expires_at_wall_us, None,
+        "ttl_ms 0 holds until cleared"
+    );
+    drop(scene);
+    drop(st);
+    server.abort();
+}
+
+/// Publish then Clear on a zone surface.
+#[tokio::test]
+async fn clear_zone_publication() {
+    let (tx, mut stream, state, server, _client) = verb_agent("zone-clear-agent").await;
+    let p = request(
+        &tx,
+        &mut stream,
+        2,
+        ClientPayload::Publish(subtitle_publish("bye", 0, 0, 0)),
+    )
+    .await;
+    assert!(p.ok, "{p:?}");
+    let c = request(
+        &tx,
+        &mut stream,
+        3,
+        ClientPayload::Clear(Clear {
+            surface: "zone:subtitle".to_string(),
+        }),
+    )
+    .await;
+    assert!(c.ok, "{c:?}");
+    assert!(subtitle_texts(&*state.lock().await.scene.lock().await).is_empty());
+    server.abort();
+}
+
+/// Scene validation reasons reach the agent as the hint (no flattening).
+#[tokio::test]
+async fn publish_to_unknown_zone_names_the_zone() {
+    let (tx, mut stream, _state, server, _client) = verb_agent("unknown-zone-agent").await;
+    let mut publish = subtitle_publish("x", 0, 0, 0);
+    publish.surface = "zone:nope".to_string();
+    let r = request(&tx, &mut stream, 2, ClientPayload::Publish(publish)).await;
+    assert_eq!(r.code, "ZONE_NOT_FOUND");
+    assert!(r.hint.contains("nope"), "{r:?}");
     server.abort();
 }
 
 // ─── Allow-list boundary checks ─────────────────────────────────────────────
 
-fn subtitle_zone_publish() -> ZonePublish {
-    ZonePublish {
-        zone_name: "subtitle".to_string(),
-        content: Some(crate::proto::ZoneContent {
-            payload: Some(crate::proto::zone_content::Payload::StreamText(
-                "hello".to_string(),
-            )),
-        }),
-        ttl_us: 0,
-        element_id: Vec::new(),
-        merge_key: String::new(),
-        breakpoints: Vec::new(),
-        present_at_wall_us: 0,
-        expires_at_wall_us: 0,
-        content_classification: String::new(),
-    }
-}
-
-/// Lease, then submit one mutation; return the MutationResult.
-async fn submit_single_mutation(
-    agent_id: &str,
-    mutation: crate::proto::mutation_proto::Mutation,
-) -> MutationResult {
-    let (mut client, _server, shared_state) = setup_test_with_state().await;
-    shared_state
-        .lock()
-        .await
-        .scene
-        .lock()
-        .await
-        .create_tab("main", 0)
-        .expect("create tab");
-    let (tx, _init, mut stream) = handshake(&mut client, agent_id, "test-key").await;
-
-    tx.send(ClientMessage {
-        sequence: 2,
-        timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::LeaseRequest(LeaseRequest { ttl_ms: 60_000 })),
-    })
-    .await
-    .unwrap();
-    let lease_id = loop {
-        match next_server_msg(&mut stream).await.payload {
-            Some(ServerPayload::LeaseResponse(resp)) if resp.granted => break resp.lease_id,
-            Some(ServerPayload::LeaseResponse(resp)) => panic!("lease denied: {resp:?}"),
-            _ => continue,
-        }
-    };
-
-    tx.send(ClientMessage {
-        sequence: 3,
-        timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::MutationBatch(MutationBatch {
-            batch_id: uuid::Uuid::now_v7().as_bytes().to_vec(),
-            lease_id,
-            mutations: vec![crate::proto::MutationProto {
-                mutation: Some(mutation),
-            }],
-            timing: None,
-        })),
-    })
-    .await
-    .unwrap();
-    loop {
-        if let Some(ServerPayload::MutationResult(result)) =
-            next_server_msg(&mut stream).await.payload
-        {
-            return result;
-        }
-    }
-}
-
-fn create_tile_mutation() -> crate::proto::mutation_proto::Mutation {
-    crate::proto::mutation_proto::Mutation::CreateTile(crate::proto::CreateTileMutation {
-        tab_id: vec![],
-        bounds: Some(crate::proto::Rect {
-            x: 0.0,
-            y: 0.0,
-            width: 200.0,
-            height: 150.0,
-        }),
-        z_order: 1,
-    })
-}
-
-/// A ZonePublish to a zone outside the agent's allow list is rejected at the
+/// A Publish to a zone outside the agent's allow list is rejected at the
 /// boundary.
 #[tokio::test]
 async fn zone_publish_outside_allow_list_rejected() {
-    let (mut client, _server) = setup_test().await;
-    let (tx, _init, mut stream) = handshake(&mut client, "widget-no-cap-agent", "test-key").await;
+    let (tx, mut stream, _state, server, _client) = verb_agent("widget-no-cap-agent").await;
+    let r = request(
+        &tx,
+        &mut stream,
+        2,
+        ClientPayload::Publish(subtitle_publish("hello", 0, 0, 0)),
+    )
+    .await;
+    assert!(!r.ok);
+    assert_eq!(r.code, "NOT_ALLOWED");
+    assert!(r.hint.contains("zone:subtitle"));
+    server.abort();
+}
 
-    tx.send(ClientMessage {
-        sequence: 2,
-        timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::ZonePublish(subtitle_zone_publish())),
-    })
-    .await
-    .unwrap();
-
-    match next_server_msg(&mut stream).await.payload {
-        Some(ServerPayload::ZonePublishResult(result)) => {
-            assert!(!result.accepted);
-            assert_eq!(result.error_code, "CAPABILITY_MISSING");
-            assert!(result.error_message.contains("zone:subtitle"));
-        }
-        other => panic!("Expected ZonePublishResult, got: {other:?}"),
+/// Clear needs the surface in the allow list.
+#[tokio::test]
+async fn clear_outside_allow_list_rejected() {
+    let (tx, mut stream, _state, server, _client) = verb_agent("widget-no-cap-agent").await;
+    for (seq, surface, entry) in [
+        (2, "zone:subtitle", "zone:subtitle"),
+        (3, "widget:gauge", "widget:gauge"),
+    ] {
+        let r = request(
+            &tx,
+            &mut stream,
+            seq,
+            ClientPayload::Clear(Clear {
+                surface: surface.to_string(),
+            }),
+        )
+        .await;
+        assert_eq!(r.code, "NOT_ALLOWED");
+        assert!(r.hint.contains(entry), "{r:?}");
     }
+    server.abort();
 }
 
-/// A ClearZone mutation needs the zone in the allow list.
+/// ClaimTile needs `tiles` in the allow list.
 #[tokio::test]
-async fn clear_zone_mutation_outside_allow_list_rejected() {
-    let result = submit_single_mutation(
-        "widget-no-cap-agent",
-        crate::proto::mutation_proto::Mutation::ClearZone(crate::proto::ClearZoneMutation {
-            zone_name: "subtitle".to_string(),
-            publish_token: None,
-        }),
+async fn claim_tile_without_tiles_allow_rejected() {
+    let (tx, mut stream, _state, server, _client) = verb_agent("zone-only-agent").await;
+    let r = request(
+        &tx,
+        &mut stream,
+        2,
+        claim(TileAnchor::Top, TileSize::Small, None),
     )
     .await;
-    assert!(!result.accepted);
-    assert_eq!(result.error_code, "CAPABILITY_MISSING");
-    assert!(result.error_message.contains("zone:subtitle"));
+    assert_eq!(r.code, "NOT_ALLOWED");
+    assert!(r.hint.contains("tiles"));
+    server.abort();
 }
 
-/// A ClearWidget mutation needs the widget in the allow list.
+/// With `tiles` allowed, the same ClaimTile succeeds.
 #[tokio::test]
-async fn clear_widget_mutation_outside_allow_list_rejected() {
-    let result = submit_single_mutation(
-        "widget-no-cap-agent",
-        crate::proto::mutation_proto::Mutation::ClearWidget(crate::proto::ClearWidgetMutation {
-            widget_name: "gauge".to_string(),
-            instance_id: String::new(),
-        }),
+async fn claim_tile_with_tiles_allow_accepted() {
+    let (tx, mut stream, _state, server, _client) = verb_agent("widget-no-cap-agent").await;
+    let r = request(
+        &tx,
+        &mut stream,
+        2,
+        claim(TileAnchor::Top, TileSize::Small, None),
     )
     .await;
-    assert!(!result.accepted);
-    assert_eq!(result.error_code, "CAPABILITY_MISSING");
-    assert!(result.error_message.contains("widget:gauge"));
+    assert!(r.ok, "{}: {}", r.code, r.hint);
+    server.abort();
 }
 
-/// Tile mutations need `tiles` in the allow list.
+/// CreateTile and the portal mutations are runtime-internal: an agent batch
+/// carrying one is rejected with a hint naming the replacement.
 #[tokio::test]
-async fn create_tile_without_tiles_allow_rejected() {
-    let result = submit_single_mutation("zone-only-agent", create_tile_mutation()).await;
-    assert!(!result.accepted);
-    assert_eq!(result.error_code, "CAPABILITY_MISSING");
-    assert!(result.error_message.contains("tiles"));
-}
-
-/// With `create_tiles` granted, the same CreateTile is accepted.
-#[tokio::test]
-async fn create_tile_with_tiles_allow_accepted() {
-    let result = submit_single_mutation("widget-no-cap-agent", create_tile_mutation()).await;
-    assert!(
-        result.accepted,
-        "{}: {}",
-        result.error_code, result.error_message
+async fn internal_mutations_rejected_from_agents() {
+    let (tx, mut stream, _state, server, _client) = verb_agent("internal-agent").await;
+    let c = request(
+        &tx,
+        &mut stream,
+        2,
+        claim(TileAnchor::Top, TileSize::Small, None),
+    )
+    .await;
+    let create =
+        crate::proto::mutation_proto::Mutation::CreateTile(crate::proto::CreateTileMutation {
+            tab_id: vec![],
+            bounds: None,
+            z_order: 1,
+        });
+    let accent = crate::proto::mutation_proto::Mutation::SetTileUnreadCount(
+        crate::proto::SetTileUnreadCountMutation {
+            tile_id: c.ids[0].clone(),
+            count: 3,
+        },
     );
+    for (seq, m, needle) in [(3, create, "ClaimTile"), (4, accent, "runtime-internal")] {
+        let r = request(
+            &tx,
+            &mut stream,
+            seq,
+            ClientPayload::MutationBatch(MutationBatch {
+                batch_id: uuid::Uuid::now_v7().as_bytes().to_vec(),
+                lease_id: c.lease_id.clone(),
+                mutations: vec![crate::proto::MutationProto { mutation: Some(m) }],
+                timing: None,
+            }),
+        )
+        .await;
+        assert_eq!(r.code, "INVALID_ARGUMENT");
+        assert!(r.hint.contains(needle), "{r:?}");
+    }
+    server.abort();
 }

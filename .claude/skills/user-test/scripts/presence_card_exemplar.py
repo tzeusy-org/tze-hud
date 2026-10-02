@@ -37,7 +37,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from hud_grpc_client import HudClient, _make_node, make_avatar_png
-from proto_gen import types_pb2
+from proto_gen import session_pb2, types_pb2
 
 
 CARD_W = 320.0
@@ -486,7 +486,6 @@ async def start_agent(
         initial_subscriptions=["SCENE_TOPOLOGY", "INPUT_EVENTS"],
     )
     await client.connect()
-    lease_id = await client.request_lease(ttl_ms=120_000)
     avatar_png = make_avatar_png(
         (
             int(round(spec.rgba[0] * 255)),
@@ -495,14 +494,13 @@ async def start_agent(
         )
     )
     avatar_resource_id = await client.upload_avatar_png(avatar_png)
-    tile_id = await client.create_tile(
-        lease_id=lease_id,
-        x=LEFT_MARGIN,
-        y=card_y_offset(spec.index, tab_height),
-        w=CARD_W,
-        h=CARD_H,
-        z_order=spec.z_order,
+    # Every card claims the same anchor; the runtime stacks them upward.
+    claimed = await client.claim_tile(
+        anchor=session_pb2.TILE_ANCHOR_BOTTOM_LEFT,
+        size=session_pb2.TILE_SIZE_MEDIUM,
+        ttl_ms=120_000,
     )
+    lease_id, tile_id = claimed.lease_id, claimed.tile_id
     await client.apply_mutations(
         lease_id,
         build_presence_card_mutations(
