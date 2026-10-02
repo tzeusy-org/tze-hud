@@ -2,7 +2,7 @@
 
 The project is being cut back from a general "agent presence engine" to an
 MCP/gRPC layer for the HUD real-estate lifecycle (see [vision.md](vision.md)).
-Tranches T0–T4 remove what doesn't serve that; T5 redesigns the API that
+Tranches T0–T4 removed what doesn't serve that; T5 redesigned the API that
 remains. Each tranche must still build, pass tests, and boot the overlay.
 
 ## Keep
@@ -28,7 +28,7 @@ remains. Each tranche must still build, pass tests, and boot the overlay.
 | T2 | Media and cloud relay: GStreamer/`v2_preview` features, media ingress/admission, video surface, media signaling protobuf messages (field numbers reserved), media config and capability, real-decode and v2-preview CI, Python media exemplars | done |
 | T3 | Governance: attention budget, quiet hours, privacy redaction and viewer classes, `[privacy]`/`[degradation]`/`[chrome]` config, admission controller, budget ladder (now plain hard caps), unwired lease state machine and suspension manager, degradation ladder down to one fallback (Normal ↔ Simplified). **Kept** the lease lifecycle (request, TTL, renew, release, revoke, disconnect grace). Capability-scope shrink moved to T5: it changes the session-init and lease wire contract | done |
 | T4 | Scaffolding: `tze_hud_validation`, replay/trace recording, v1-thesis/Layer-4 artifact harness and their CI jobs; component profiles (flat `[design_tokens]` stay; profile sections are ignored); sync groups and clock-skew estimation (`compositor_timestamp_wall_us` stays for `present_at`/`expires_at`; wire fields reserved); hardware calibration (tests use a fixed `test_budget` slack; the benchmark keeps its CI factors); test scenes for removed features; reserved mobile display profile; unwired tab-switch trigger; redundant tests | done |
-| T5 | API design pass (target in [api.md](api.md)): one coherent verb set per lifecycle stage (discover, claim, fill, interact, hold, release, reclaim) across MCP and gRPC; measure token cost per stage; collapse accreted constructors and per-feature parameter threading in the session server; replace the 16-entry capability vocabulary with a per-agent zone/widget allowlist; trim the wire `DegradationLevel` enum to Normal/Simplified | pending |
+| T5 | API redesign ([api.md](api.md)): one verb set per lifecycle stage across MCP and gRPC (five MCP tools replace 22; gRPC `ClaimTile`/`Publish`/`Clear`/`Hold`/`Reclaimed`/`RequestResult`); per-agent PSK identity with an `allow` list replaces the capability vocabulary, resident principal, and portal owner token; one shared error-code set with hints; tile placement hints replace agent geometry; token budgets enforced in CI; dead wire removed and reserved; session-server constructors collapsed; invariant 1 and 4 breaks on the gRPC path fixed | done |
 
 ## Working rules
 
