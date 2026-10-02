@@ -106,6 +106,17 @@ pub(super) async fn handle_zone_publish(
                         zone_is_ephemeral,
                         None,
                     )
+                } else if let Some(timing_error) = zone_timing_error(
+                    &publish,
+                    scene.now_wall_us(),
+                    &resolved_zone_name,
+                    scene
+                        .zone_registry
+                        .get_by_name(&resolved_zone_name)
+                        .is_some(),
+                ) {
+                    let (code, message) = timing_error;
+                    (false, code, message, zone_is_ephemeral, None)
                 } else {
                     let merge_key = if publish.merge_key.is_empty() {
                         None
@@ -118,9 +129,9 @@ pub(super) async fn handle_zone_publish(
                         content,
                         publish_token: tze_hud_scene::types::ZonePublishToken { token: Vec::new() },
                         merge_key,
-                        // expires_at_wall_us and content_classification are not yet present in
-                        // the ZonePublish proto message (post-v1 wire extensions).
-                        expires_at_wall_us: None,
+                        // Content expiry (invariant 1): an absolute expires_at wins,
+                        // else ttl_us counts from presentation; 0 for both means none.
+                        expires_at_wall_us: zone_expires_at_wall_us(&publish, scene.now_wall_us()),
                         content_classification: None,
                         // Wire breakpoints from the ZonePublish proto for StreamText streaming reveal.
                         // Per spec §Subtitle Streaming Word-by-Word Reveal.
@@ -136,7 +147,22 @@ pub(super) async fn handle_zone_publish(
                         timing_hints: None,
                         lease_id: zone_publish_lease_id,
                     };
-                    let result = scene.apply_batch(&batch);
+                    // present_at in the future: hold the publish until due.
+                    let present_at = publish.present_at_wall_us;
+                    let result = if present_at > scene.now_wall_us() {
+                        scene.schedule_batch(present_at, batch.clone());
+                        tze_hud_scene::mutation::MutationResult {
+                            batch_id: batch.batch_id,
+                            applied: true,
+                            created_ids: Vec::new(),
+                            error: None,
+                            rejection: None,
+                            budget_warning: false,
+                            sequence_number: None,
+                        }
+                    } else {
+                        scene.apply_batch(&batch)
+                    };
                     drop(scene);
                     if result.applied {
                         let now = now_ms();
@@ -230,4 +256,50 @@ pub(super) async fn handle_zone_publish(
     }
     // Ephemeral zone: no ack sent (fire-and-forget per RFC 0005 §8.6), success or failure
     accepted
+}
+
+/// Absolute content expiry for a zone publish: `expires_at_wall_us` if set,
+/// else `ttl_us` counted from presentation (now, or `present_at` if later),
+/// else none.
+fn zone_expires_at_wall_us(publish: &ZonePublish, now_wall_us: u64) -> Option<u64> {
+    if publish.expires_at_wall_us > 0 {
+        Some(publish.expires_at_wall_us)
+    } else if publish.ttl_us > 0 {
+        let shown_at = publish.present_at_wall_us.max(now_wall_us);
+        Some(shown_at.saturating_add(publish.ttl_us))
+    } else {
+        None
+    }
+}
+
+/// Reject zone publish timing that can never display, and scheduled
+/// publishes to unknown zones (they would otherwise fail silently when due).
+fn zone_timing_error(
+    publish: &ZonePublish,
+    now_wall_us: u64,
+    zone_name: &str,
+    zone_exists: bool,
+) -> Option<(String, String)> {
+    let present = publish.present_at_wall_us;
+    if present > now_wall_us.saturating_add(super::DEFAULT_MAX_FUTURE_SCHEDULE_US) {
+        return Some((
+            "TIMESTAMP_TOO_FUTURE".to_string(),
+            format!("present_at_wall_us ({present}) is beyond the scheduling horizon"),
+        ));
+    }
+    if let Some(expires) = zone_expires_at_wall_us(publish, now_wall_us)
+        && expires <= present.max(now_wall_us)
+    {
+        return Some((
+            "TIMESTAMP_EXPIRY_BEFORE_PRESENT".to_string(),
+            format!("expires_at_wall_us ({expires}) must be after the presentation time"),
+        ));
+    }
+    if present > now_wall_us && !zone_exists {
+        return Some((
+            "ZONE_NOT_FOUND".to_string(),
+            format!("Zone not found: {zone_name}"),
+        ));
+    }
+    None
 }

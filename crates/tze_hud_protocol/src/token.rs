@@ -23,8 +23,9 @@
 use std::collections::HashMap;
 use tze_hud_scene::SceneId;
 
-/// Default reconnect grace period in milliseconds (RFC 0005 §6.1).
-pub const DEFAULT_GRACE_PERIOD_MS: u64 = 30_000;
+/// Reconnect grace period in milliseconds: the scene's orphan grace period,
+/// so a resume token and the leases it restores expire together.
+pub const DEFAULT_GRACE_PERIOD_MS: u64 = tze_hud_scene::lease::ORPHAN_GRACE_PERIOD_MS;
 
 /// A pending resume entry held for a disconnected agent.
 #[derive(Debug, Clone, PartialEq, Eq)]

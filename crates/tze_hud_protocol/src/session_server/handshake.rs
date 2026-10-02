@@ -357,14 +357,16 @@ pub(super) async fn handle_session_resume(
     }
 
     // Step 2: Validate the resume token.
-    let current_ms = now_ms();
+    // Token expiry is measured on the scene clock, the same clock that
+    // drives orphan grace expiry, so both end together.
     let resume_result = {
         let mut st = state.lock().await;
+        let current_ms = st.scene.lock().await.now_millis();
         st.token_store
             .consume(&resume.resume_token, &resume.agent_id, current_ms)
     };
 
-    let prior_entry = match resume_result {
+    let mut prior_entry = match resume_result {
         Ok(entry) => entry,
         Err(err) => {
             // Token invalid or expired — agent must perform a full SessionInit.
@@ -382,6 +384,23 @@ pub(super) async fn handle_session_resume(
             return None;
         }
     };
+
+    // Reconnect the orphaned leases (ORPHANED → ACTIVE, badge cleared). Leases
+    // the runtime already reclaimed are dropped from the restored set.
+    {
+        let st = state.lock().await;
+        let mut scene = st.scene.lock().await;
+        let now = scene.now_millis();
+        prior_entry.orphaned_lease_ids.retain(|lease_id| {
+            match scene.leases.get(lease_id).map(|l| l.state) {
+                Some(tze_hud_scene::LeaseState::Orphaned) => {
+                    scene.reconnect_lease(lease_id, now).is_ok()
+                }
+                Some(state) => !state.is_terminal(),
+                None => false,
+            }
+        });
+    }
 
     // Step 3: Build restored session.
     let session_uuid = uuid::Uuid::now_v7();

@@ -107,6 +107,9 @@ pub struct SceneGraph {
     /// Incremented by [`SceneGraph::next_sequence_number`] on every successful
     /// [`crate::mutation::MutationBatch`] commit. Per RFC 0001 §3.5.
     pub sequence_number: u64,
+    /// Batches held until their `present_at` time (see [`timed`]).
+    #[serde(skip, default)]
+    pub scheduled_batches: Vec<timed::ScheduledBatch>,
     /// Map of ResourceIds to their scene-node reference counts.
     ///
     /// A resource is available for use in [`NodeData::StaticImage`] nodes when it
@@ -172,6 +175,7 @@ pub mod resources;
 pub mod snapshot;
 pub mod tabs;
 pub mod tiles;
+pub mod timed;
 pub use tiles::validate_text_markdown_node_data;
 pub mod zone_ops;
 
@@ -209,6 +213,7 @@ impl SceneGraph {
             version: 0,
             geometry_epoch: 0,
             sequence_number: 0,
+            scheduled_batches: Vec::new(),
             registered_resources: HashMap::new(),
             overlay: RuntimeOverlayState::default(),
         }
@@ -255,6 +260,12 @@ impl SceneGraph {
     /// inconsistent.
     pub fn now_millis(&self) -> u64 {
         self.clock.now_millis()
+    }
+
+    /// Current wall-clock time in microseconds from the injected clock, the
+    /// domain `present_at` / `expires_at` deadlines are compared in.
+    pub fn now_wall_us(&self) -> u64 {
+        self.clock.now_us()
     }
 }
 
