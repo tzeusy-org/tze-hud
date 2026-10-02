@@ -145,17 +145,16 @@ impl JsonRpcError {
     /// - data.error_code: "CAPABILITY_REQUIRED"
     /// - data.context: "tool=<tool_name>"
     /// - data.hint: {"required_capability": "resident_mcp", "resolution": "..."}
-    pub fn capability_required(tool_name: &str) -> Self {
+    pub fn not_allowed(tool_name: &str, agent_id: &str, allow_entry: &str) -> Self {
         let data = serde_json::json!({
-            "error_code": "CAPABILITY_REQUIRED",
-            "message": "Capability required",
-            "context": format!("tool={tool_name}"),
-            "hint": {
-                "required_capability": "resident_mcp",
-                "resolution": "obtain resident_mcp capability via session handshake"
-            }
+            "error_code": "NOT_ALLOWED",
+            "message": "Not allowed",
+            "context": format!("tool={tool_name} agent={agent_id}"),
+            "hint": format!(
+                "add \"{allow_entry}\" to allow in [agents.{agent_id}] of the runtime config"
+            ),
         });
-        Self::new(codes::INTERNAL_ERROR, "Capability required").with_data(data)
+        Self::new(codes::INTERNAL_ERROR, "Not allowed").with_data(data)
     }
 }
 
@@ -186,11 +185,6 @@ pub enum McpError {
     #[error("internal error: {0}")]
     Internal(String),
 
-    /// Caller tried to invoke a resident tool without the `resident_mcp` capability.
-    /// Carries the tool name for the structured error response (spec §8.3).
-    #[error("capability required to call tool: {0}")]
-    CapabilityRequired(String),
-
     /// Authentication failed: bad or missing pre-shared key (spec §8.4).
     #[error("authentication required")]
     Unauthenticated,
@@ -220,7 +214,6 @@ impl From<McpError> for JsonRpcError {
             McpError::InvalidId(msg) => JsonRpcError::invalid_id(msg),
             McpError::MethodNotFound(method) => JsonRpcError::method_not_found(&method),
             McpError::Internal(msg) => JsonRpcError::internal(msg),
-            McpError::CapabilityRequired(tool) => JsonRpcError::capability_required(&tool),
             McpError::Unauthenticated => JsonRpcError::unauthenticated(),
             McpError::ProjectionRejected {
                 error_code,

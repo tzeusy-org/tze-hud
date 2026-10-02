@@ -162,25 +162,11 @@ async fn test_three_agents_contention() -> Result<(), Box<dyn std::error::Error>
 
     // ── Phase 1: Connect three agents concurrently ──────────────────────────
 
-    let standard_caps = vec!["create_tiles".to_string(), "modify_own_tiles".to_string()];
-
     // All three connect concurrently.
     let (mut agent_a, mut agent_b, mut agent_c) = tokio::try_join!(
-        connect_agent(
-            TEST_PSK,
-            GRPC_PORT,
-            "agent-weather",
-            1,
-            standard_caps.clone()
-        ),
-        connect_agent(
-            TEST_PSK,
-            GRPC_PORT,
-            "agent-notifications",
-            2,
-            standard_caps.clone()
-        ),
-        connect_agent(TEST_PSK, GRPC_PORT, "agent-media", 3, standard_caps.clone()),
+        connect_agent(TEST_PSK, GRPC_PORT, "agent-weather"),
+        connect_agent(TEST_PSK, GRPC_PORT, "agent-notifications"),
+        connect_agent(TEST_PSK, GRPC_PORT, "agent-media"),
     )?;
 
     // Verify all three namespaces are distinct

@@ -207,8 +207,8 @@ profile = "headless"
 name = "Vertical Flow Pixel Proof"
 default_tab = true
 
-[agents.registered.vertical-flow-proof]
-capabilities = ["create_tiles", "modify_own_tiles"]
+[agents.vertical-flow-proof]
+allow = ["tiles"]
 "#
     .to_string()
 }

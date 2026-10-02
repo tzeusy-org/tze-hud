@@ -8,34 +8,34 @@
     "vocab_fingerprint": "sha256:446a9538cb6c348e3516120d7c08b09f57c36495e2acfffe59a5bf8b0cfb1a2d",
     "counting_policy": "each canonical JSON-RPC body independently; UTF-8 bytes; encode_with_special_tokens; operation and flow totals are integer sums"
   },
-  "fixture_fingerprint": "blake3:86774ba0b39a5d1e812a9705fe0221d3071425d3b73a2ad07aada041530c1601",
+  "fixture_fingerprint": "blake3:b3460166adb6d2e12826f4846d48822387a922115abb580ee0c45c5be5df9ffa",
   "flows": {
     "portal_projection": {
       "flow_version": 1,
-      "flow_fingerprint": "blake3:a0286e519a10f45b00ff6e578c6c81b95e9e2690d523293df89fc4c2c55273b3",
+      "flow_fingerprint": "blake3:f58250e74986ca1466be7f0795b0c18d9b9f08c0c8cc4031684b7246cbbe1309",
       "operations": {
         "portal_projection_acknowledge_input": {
-          "request": {"bytes": 419, "tokens": 114},
+          "request": {"bytes": 387, "tokens": 106},
           "response": {"bytes": 89, "tokens": 25},
-          "total": {"bytes": 508, "tokens": 139}
+          "total": {"bytes": 476, "tokens": 131}
         },
         "portal_projection_attach": {
           "request": {"bytes": 535, "tokens": 148},
-          "response": {"bytes": 120, "tokens": 33},
-          "total": {"bytes": 655, "tokens": 181}
+          "response": {"bytes": 90, "tokens": 25},
+          "total": {"bytes": 625, "tokens": 173}
         },
         "portal_projection_get_pending_input": {
-          "request": {"bytes": 368, "tokens": 107},
+          "request": {"bytes": 336, "tokens": 99},
           "response": {"bytes": 416, "tokens": 103},
-          "total": {"bytes": 784, "tokens": 210}
+          "total": {"bytes": 752, "tokens": 202}
         },
         "portal_projection_publish": {
-          "request": {"bytes": 489, "tokens": 125},
+          "request": {"bytes": 457, "tokens": 117},
           "response": {"bytes": 105, "tokens": 28},
-          "total": {"bytes": 594, "tokens": 153}
+          "total": {"bytes": 562, "tokens": 145}
         }
       },
-      "total": {"bytes": 2541, "tokens": 683}
+      "total": {"bytes": 2415, "tokens": 651}
     },
     "publish_to_widget": {
       "flow_version": 1,
@@ -65,6 +65,6 @@
   "approval": {
     "status": "owner_approved",
     "decision_reference": "hud-ht1k7",
-    "basis": "owner decision hud-ht1k7 approved the revised audited candidate v1 packet; every measured integer, flow and fixture fingerprint, and tokenizer identity is comparison authority"
+    "basis": "owner decision hud-ht1k7 approved the revised audited candidate v1 packet; every measured integer, flow and fixture fingerprint, and tokenizer identity is comparison authority; T5 S2 (2026-10-02) re-recorded the portal_projection flow and fixture fingerprint after owner_token left the MCP surface (identity is the PSK); publish_to_widget and publish_to_zone are byte-identical"
   }
 }

@@ -29,7 +29,7 @@ pub const CAPABILITY_UPLOAD_RESOURCE: &str = "upload_resource";
 pub fn check_capability(agent_capabilities: &[String]) -> Result<(), ResourceError> {
     if agent_capabilities
         .iter()
-        .any(|c| c == CAPABILITY_UPLOAD_RESOURCE)
+        .any(|c| c == CAPABILITY_UPLOAD_RESOURCE || c == "*")
     {
         Ok(())
     } else {

@@ -167,9 +167,9 @@ pub struct WindowedConfig {
     /// Raw TOML content of the configuration file, if one was loaded.
     ///
     /// When `Some`, the windowed runtime parses this at startup and applies the
-    /// capability grants from `[agents.registered]` to the `RuntimeContext`.
+    /// each `[agents.<id>]` allow list and PSK to the `RuntimeContext`.
     /// When `None`, the runtime falls back to `RuntimeContext::headless_default()`
-    /// (all agents treated as guests).
+    /// with every agent unrestricted (dev).
     ///
     /// ## Source
     ///

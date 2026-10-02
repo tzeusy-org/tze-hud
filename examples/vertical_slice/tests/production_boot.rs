@@ -209,14 +209,10 @@ async fn production_config_grants_registered_agent_capabilities() {
         payload: Some(session_proto::client_message::Payload::SessionInit(
             session_proto::SessionInit {
                 agent_id: "vertical-slice-agent".to_string(),
-                requested_capabilities: vec![
-                    "create_tiles".to_string(),
-                    "modify_own_tiles".to_string(),
-                    "access_input_events".to_string(),
-                    "read_scene_topology".to_string(),
-                    "publish_zone:status-bar".to_string(),
+                initial_subscriptions: vec![
+                    "LEASE_CHANGES".to_string(),
+                    "SCENE_TOPOLOGY".to_string(),
                 ],
-                initial_subscriptions: vec!["LEASE_CHANGES".to_string()],
                 resume_token: Vec::new(),
                 min_protocol_version: 1000,
                 max_protocol_version: 1001,
@@ -243,33 +239,17 @@ async fn production_config_grants_registered_agent_capabilities() {
 
     match &msg.payload {
         Some(session_proto::server_message::Payload::SessionEstablished(established)) => {
-            let granted = &established.granted_capabilities;
-            println!("Granted capabilities: {granted:?}");
-
-            // The registered agent must receive all 5 declared capabilities.
-            // If governance is broken (e.g., config not loaded), the agent
-            // gets guest policy (empty capabilities), and this fails.
+            // The configured agent's allow list grants read_scene_topology,
+            // so the gated SCENE_TOPOLOGY subscription is activated. If the
+            // config were not loaded the agent would get nothing and this fails.
             assert!(
-                granted.contains(&"create_tiles".to_string()),
-                "expected create_tiles in granted capabilities, got: {granted:?}"
+                established
+                    .active_subscriptions
+                    .contains(&"SCENE_TOPOLOGY".to_string()),
+                "configured agent must get SCENE_TOPOLOGY, got: {:?}",
+                established.active_subscriptions
             );
-            assert!(
-                granted.contains(&"modify_own_tiles".to_string()),
-                "expected modify_own_tiles in granted capabilities, got: {granted:?}"
-            );
-            assert!(
-                granted.contains(&"access_input_events".to_string()),
-                "expected access_input_events in granted capabilities, got: {granted:?}"
-            );
-            assert!(
-                granted.contains(&"read_scene_topology".to_string()),
-                "expected read_scene_topology in granted capabilities, got: {granted:?}"
-            );
-            assert!(
-                granted.contains(&"publish_zone:status-bar".to_string()),
-                "expected publish_zone:status-bar in granted capabilities, got: {granted:?}"
-            );
-            println!("PASS: registered agent received all 5 declared capabilities");
+            println!("PASS: configured agent received its allow-list permissions");
         }
         other => {
             panic!("Expected SessionEstablished, got: {other:?}");
@@ -330,14 +310,10 @@ async fn production_config_denies_unregistered_agent() {
             session_proto::SessionInit {
                 agent_id: "unknown-rogue-agent".to_string(),
                 // Requests all capabilities — must receive none.
-                requested_capabilities: vec![
-                    "create_tiles".to_string(),
-                    "modify_own_tiles".to_string(),
-                    "access_input_events".to_string(),
-                    "read_scene_topology".to_string(),
-                    "publish_zone:status-bar".to_string(),
+                initial_subscriptions: vec![
+                    "LEASE_CHANGES".to_string(),
+                    "SCENE_TOPOLOGY".to_string(),
                 ],
-                initial_subscriptions: vec!["LEASE_CHANGES".to_string()],
                 resume_token: Vec::new(),
                 min_protocol_version: 1000,
                 max_protocol_version: 1001,
@@ -364,18 +340,16 @@ async fn production_config_denies_unregistered_agent() {
 
     match &msg.payload {
         Some(session_proto::server_message::Payload::SessionEstablished(established)) => {
-            let granted = &established.granted_capabilities;
-            println!("Granted capabilities for unregistered agent: {granted:?}");
-
-            // Guest policy: no capabilities should be granted.
+            // No [agents.<id>] table: no permissions, so the gated
+            // SCENE_TOPOLOGY subscription is denied.
             assert!(
-                granted.is_empty(),
-                "unregistered agent must receive no capabilities (guest policy), \
-                 but got: {granted:?}"
+                established
+                    .denied_subscriptions
+                    .contains(&"SCENE_TOPOLOGY".to_string()),
+                "unconfigured agent must be denied SCENE_TOPOLOGY, got: {:?}",
+                established.active_subscriptions
             );
-            println!(
-                "PASS: unregistered agent received empty capabilities (guest policy enforced)"
-            );
+            println!("PASS: unconfigured agent received no permissions");
         }
         other => {
             panic!("Expected SessionEstablished, got: {other:?}");

@@ -6,8 +6,8 @@ Projection control facades belong to the projection daemon. They are not the run
 
 - Accept only the cooperative operation contract from `operation-examples.md`.
 - Authenticate callers through daemon-local authority, an MCP bearer token, OS-protected IPC, or another unguessable credential.
-- Bind owner-scoped non-attach operations to `projection_id` plus `owner_token`; bind operator cleanup to separate explicit operator authority.
-- Return bounded operation responses only: no unbounded transcript, unbounded inbox history, `owner_token` outside a successful `attach` response, owner-token verifier, or raw runtime scene graph.
+- Bind owner-scoped non-attach operations to `projection_id` plus the caller's agent identity: the MCP server keeps the owner token server-side, keyed by (agent, projection), and injects it; bind operator cleanup to separate explicit operator authority.
+- Return bounded operation responses only: no unbounded transcript, unbounded inbox history, `owner_token` (the MCP server strips it from attach), owner-token verifier, or raw runtime scene graph.
 - Emit audit records without transcript text, HUD input text, or owner tokens.
 
 ## In-Repo Stdio Daemon CLI

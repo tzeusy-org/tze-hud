@@ -22,12 +22,9 @@ fn canonical_app_production_toml_matches_loader_schema() {
     );
 }
 
-/// The resident gRPC portal bridge (default-off) must be pre-registered as a
-/// principal with exactly the least-privilege capabilities it needs, so that
-/// enabling it under production config does not fail the fail-closed handshake
-/// with CapabilityNotGranted. See hud-osy3m; the bridge presents identity
-/// `resident-grpc-portal` and requires PORTAL_CAPABILITIES
-/// (`create_tiles` + `modify_own_tiles`).
+/// The resident gRPC portal bridge (default-off) must be pre-registered with
+/// `allow = ["tiles"]` only, so enabling it under production config works
+/// without granting it zones, widgets, or the portal tools.
 #[test]
 fn canonical_app_production_registers_resident_grpc_portal_principal() {
     let toml = include_str!("../config/production.toml");
@@ -39,14 +36,18 @@ fn canonical_app_production_registers_resident_grpc_portal_principal() {
     let caps = resolved
         .agent_capabilities
         .get("resident-grpc-portal")
-        .expect("resident-grpc-portal must be a registered principal under production config");
+        .expect("resident-grpc-portal must be a registered agent under production config");
 
-    // Exactly the bridge's PORTAL_CAPABILITIES — least privilege, no more.
-    let mut sorted = caps.clone();
-    sorted.sort();
-    assert_eq!(
-        sorted,
-        vec!["create_tiles".to_string(), "modify_own_tiles".to_string()],
-        "resident-grpc-portal must be granted exactly its least-privilege capabilities, got: {caps:?}"
+    for needed in ["create_tiles", "modify_own_tiles"] {
+        assert!(
+            caps.iter().any(|c| c == needed),
+            "resident-grpc-portal needs {needed}, got: {caps:?}"
+        );
+    }
+    assert!(
+        !caps
+            .iter()
+            .any(|c| c == "*" || c == "resident_mcp" || c.starts_with("publish_")),
+        "resident-grpc-portal must be limited to tiles, got: {caps:?}"
     );
 }

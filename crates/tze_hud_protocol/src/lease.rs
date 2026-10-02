@@ -7,8 +7,6 @@
 //!   correlation key (RFC 0005 §5.3): if an agent retransmits with the same
 //!   sequence number the server returns the previously cached response without
 //!   re-applying the operation.
-//!
-//! - Priority enforcement helpers per the lease-governance spec.
 
 use std::collections::HashMap;
 
@@ -37,10 +35,6 @@ pub struct CachedLeaseResponse {
     pub lease_id: Vec<u8>,
     /// Granted TTL in milliseconds.  Zero if denied.
     pub granted_ttl_ms: u64,
-    /// Granted priority level.
-    pub granted_priority: u32,
-    /// Granted capability strings.
-    pub granted_capabilities: Vec<String>,
     /// Human-readable denial reason (empty if granted).
     pub deny_reason: String,
     /// Machine-readable denial code (empty if granted).
@@ -101,36 +95,6 @@ impl LeaseCorrelationCache {
         }
     }
 }
-
-// ─── Priority enforcement (lease-governance spec §Priority Assignment) ───────
-
-/// Maximum valid agent-assignable priority (inclusive).  Values > 4 are
-/// clamped to 4 at the enforcement boundary.
-pub const MAX_LEASE_PRIORITY: u32 = 4;
-
-/// Compute the effective lease priority to grant, enforcing spec rules:
-///
-/// - Priority 0 is reserved for system/chrome; agents requesting 0 receive 2.
-/// - Priority 1 requires the `lease:priority:1` capability; without it the
-///   agent receives 2.
-/// - Priorities 2–4 are granted as-is.
-/// - Any value > 4 is clamped to 4 (lowest priority) before evaluation.
-///
-/// This is a pure function; it does not access the session registry.
-pub fn effective_priority(requested: u32, granted_capabilities: &[String]) -> u32 {
-    // Clamp out-of-range values to the lowest valid agent priority.
-    let requested = requested.min(MAX_LEASE_PRIORITY);
-    match requested {
-        0 => 2, // Priority 0 reserved for runtime-internal leases
-        1 => {
-            // Requires explicit capability grant
-            let has_prio1 = granted_capabilities.iter().any(|c| c == "lease:priority:1");
-            if has_prio1 { 1 } else { 2 }
-        }
-        p => p,
-    }
-}
-
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -155,8 +119,6 @@ mod tests {
             granted: true,
             lease_id: vec![0u8; 16],
             granted_ttl_ms: 60_000,
-            granted_priority: 2,
-            granted_capabilities: vec!["create_tile".to_string()],
             deny_reason: String::new(),
             deny_code: String::new(),
         };
@@ -177,8 +139,6 @@ mod tests {
                     granted: true,
                     lease_id: vec![seq as u8; 16],
                     granted_ttl_ms: 1000,
-                    granted_priority: 2,
-                    granted_capabilities: Vec::new(),
                     deny_reason: String::new(),
                     deny_code: String::new(),
                 },
@@ -196,8 +156,6 @@ mod tests {
                 granted: true,
                 lease_id: vec![4u8; 16],
                 granted_ttl_ms: 1000,
-                granted_priority: 2,
-                granted_capabilities: Vec::new(),
                 deny_reason: String::new(),
                 deny_code: String::new(),
             },
@@ -218,8 +176,6 @@ mod tests {
                 granted: true,
                 lease_id: vec![1u8; 16],
                 granted_ttl_ms: 1000,
-                granted_priority: 2,
-                granted_capabilities: Vec::new(),
                 deny_reason: String::new(),
                 deny_code: String::new(),
             },
@@ -241,8 +197,6 @@ mod tests {
                 granted: true,
                 lease_id: vec![1u8; 16],
                 granted_ttl_ms: 1000,
-                granted_priority: 2,
-                granted_capabilities: Vec::new(),
                 deny_reason: String::new(),
                 deny_code: String::new(),
             },
@@ -253,8 +207,6 @@ mod tests {
                 granted: true,
                 lease_id: vec![2u8; 16],
                 granted_ttl_ms: 1000,
-                granted_priority: 2,
-                granted_capabilities: Vec::new(),
                 deny_reason: String::new(),
                 deny_code: String::new(),
             },
@@ -267,8 +219,6 @@ mod tests {
                 granted: false,
                 lease_id: Vec::new(),
                 granted_ttl_ms: 0,
-                granted_priority: 2,
-                granted_capabilities: Vec::new(),
                 deny_reason: "overwritten".to_string(),
                 deny_code: "TEST".to_string(),
             },
@@ -278,60 +228,5 @@ mod tests {
         let hit = cache.get(1).unwrap();
         assert!(!hit.granted);
         assert_eq!(hit.deny_reason, "overwritten");
-    }
-
-    // ─── Priority enforcement tests ──────────────────────────────────────────
-
-    #[test]
-    fn test_priority_zero_downgraded_to_two() {
-        // Priority 0 is reserved for system/chrome; agent requests must receive 2.
-        assert_eq!(effective_priority(0, &[]), 2);
-        assert_eq!(
-            effective_priority(0, &["lease:priority:1".to_string()]),
-            2,
-            "Even with prio-1 cap, priority=0 requests must be downgraded to 2"
-        );
-    }
-
-    #[test]
-    fn test_priority_one_without_capability_downgraded_to_two() {
-        // Agent requests priority 1 but lacks the capability.
-        assert_eq!(effective_priority(1, &[]), 2);
-        assert_eq!(
-            effective_priority(1, &["create_tile".to_string()]),
-            2,
-            "Priority 1 without lease:priority:1 cap should give priority 2"
-        );
-    }
-
-    #[test]
-    fn test_priority_one_with_capability_granted() {
-        assert_eq!(effective_priority(1, &["lease:priority:1".to_string()]), 1);
-    }
-
-    #[test]
-    fn test_priority_two_and_above_passed_through() {
-        for p in [2u32, 3, 4] {
-            assert_eq!(
-                effective_priority(p, &[]),
-                p,
-                "Priority {p} should be passed through unchanged"
-            );
-        }
-    }
-
-    #[test]
-    fn test_priority_out_of_range_clamped_to_four() {
-        // Values > 4 are out of spec range and should be clamped to 4.
-        assert_eq!(
-            effective_priority(5, &[]),
-            4,
-            "Priority 5 (out of range) must be clamped to 4"
-        );
-        assert_eq!(
-            effective_priority(u32::MAX, &[]),
-            4,
-            "u32::MAX must be clamped to 4"
-        );
     }
 }

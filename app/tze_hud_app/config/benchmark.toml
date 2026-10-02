@@ -7,9 +7,9 @@
 #
 # Production safety:
 # - does not change the default production config
-# - registers only named benchmark/demo agents
-# - grants widget publish only for the committed widget instances below
-# - keeps unregistered agents on guest policy
+# - configures only named benchmark/demo agents
+# - allows widget publish only for the committed widget instances below
+# - agents without a table get nothing
 
 [runtime]
 profile = "full-display"
@@ -67,53 +67,41 @@ width = 252
 height = 96
 
 # Canonical Rust publish-load harness identity.
-[agents.registered.widget-publish-load-harness]
-capabilities = [
-    "publish_widget:main-progress",
-    "read_telemetry",
-]
+[agents.widget-publish-load-harness]
+allow = ["widget:main-progress"]
 
 # Three-agent live soak identities. These retain the manual raw-tile/demo grants
 # used by existing Windows user-tests and add only the publish scopes needed by
 # widget and MCP zone performance runs.
-[agents.registered.agent-alpha]
-capabilities = [
-    "create_tiles",
-    "modify_own_tiles",
-    "access_input_events",
-    "publish_widget:main-progress",
-    "publish_widget:main-gauge",
-    "publish_widget:main-status",
-    "publish_zone:subtitle",
-    "publish_zone:notification-area",
-    "publish_zone:status-bar",
-    "read_telemetry",
+[agents.agent-alpha]
+allow = [
+    "tiles",
+    "widget:main-progress",
+    "widget:main-gauge",
+    "widget:main-status",
+    "zone:subtitle",
+    "zone:notification-area",
+    "zone:status-bar",
 ]
 
-[agents.registered.agent-beta]
-capabilities = [
-    "create_tiles",
-    "modify_own_tiles",
-    "access_input_events",
-    "publish_widget:main-progress",
-    "publish_widget:main-gauge",
-    "publish_widget:main-status",
-    "publish_zone:subtitle",
-    "publish_zone:notification-area",
-    "publish_zone:status-bar",
-    "read_telemetry",
+[agents.agent-beta]
+allow = [
+    "tiles",
+    "widget:main-progress",
+    "widget:main-gauge",
+    "widget:main-status",
+    "zone:subtitle",
+    "zone:notification-area",
+    "zone:status-bar",
 ]
 
-[agents.registered.agent-gamma]
-capabilities = [
-    "create_tiles",
-    "modify_own_tiles",
-    "access_input_events",
-    "publish_widget:main-progress",
-    "publish_widget:main-gauge",
-    "publish_widget:main-status",
-    "publish_zone:subtitle",
-    "publish_zone:notification-area",
-    "publish_zone:status-bar",
-    "read_telemetry",
+[agents.agent-gamma]
+allow = [
+    "tiles",
+    "widget:main-progress",
+    "widget:main-gauge",
+    "widget:main-status",
+    "zone:subtitle",
+    "zone:notification-area",
+    "zone:status-bar",
 ]

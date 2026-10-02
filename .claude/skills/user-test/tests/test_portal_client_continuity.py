@@ -61,7 +61,6 @@ def publish_args(
 
 @pytest.fixture(autouse=True)
 def private_state_dirs(tmp_path: Path) -> None:
-    portal_client.TOKEN_DIR = str(tmp_path / "tokens")
     portal_client.CONTINUITY_DIR = str(tmp_path / "continuity")
 
 
@@ -292,7 +291,6 @@ def test_corrupt_quarantine_count_is_bounded() -> None:
 
 
 def test_published_record_preserves_semantics_without_persisting_owner_token() -> None:
-    portal_client.save_token("continuity-session", "owner-token-must-not-leak")
     response = {"result": {"accepted": True, "status_summary": "published"}}
 
     with (
@@ -406,7 +404,7 @@ def test_fresh_runtime_attach_replays_authored_tail_with_original_semantics() ->
         for item in fresh_runtime
     ]
     assert replayed == retained
-    assert all(item["owner_token"] == "fresh-runtime-token" for item in fresh_runtime)
+    assert all("owner_token" not in item for item in fresh_runtime)
 
 
 def test_rejected_publish_rolls_back_prepared_local_record() -> None:
@@ -416,7 +414,6 @@ def test_rejected_publish_rolls_back_prepared_local_record() -> None:
         "records": [record("turn-1", "committed")],
     }
     portal_client.save_continuity("continuity-session", initial)
-    portal_client.save_token("continuity-session", "owner-token")
 
     with (
         mock.patch.object(
@@ -442,7 +439,6 @@ def test_ambiguous_transport_failure_retains_record_for_idempotent_replay(
         "records": [record("turn-1", "committed")],
     }
     portal_client.save_continuity("continuity-session", initial)
-    portal_client.save_token("continuity-session", "owner-token")
 
     with (
         mock.patch.object(portal_client, "call_tool", side_effect=SystemExit(1)),
@@ -576,7 +572,6 @@ def test_definitive_http_rejection_rolls_back_prepared_record() -> None:
         "records": [record("turn-1", "committed")],
     }
     portal_client.save_continuity("continuity-session", initial)
-    portal_client.save_token("continuity-session", "owner-token")
     rejection = portal_client.PortalClientExit(1, definitive_rejection=True)
 
     with (
@@ -630,7 +625,6 @@ def test_local_continuity_cleanup_is_explicit_and_idempotent() -> None:
     os.name == "nt", reason="fork barrier exercises POSIX process locks"
 )
 def test_concurrent_accepted_publishes_preserve_both_records() -> None:
-    portal_client.save_token("continuity-session", "owner-token")
     portal_client.save_continuity(
         "continuity-session",
         {
@@ -671,7 +665,6 @@ def test_concurrent_accepted_publishes_preserve_both_records() -> None:
     os.name == "nt", reason="fork barrier exercises POSIX process locks"
 )
 def test_rejected_writer_rollback_cannot_erase_concurrent_accepted_publish() -> None:
-    portal_client.save_token("continuity-session", "owner-token")
     portal_client.save_continuity(
         "continuity-session",
         {
@@ -751,7 +744,6 @@ def test_attach_replay_serializes_with_concurrent_publish() -> None:
     os.name == "nt", reason="fork barrier exercises POSIX process locks"
 )
 def test_clear_serializes_before_concurrent_publish() -> None:
-    portal_client.save_token("continuity-session", "owner-token")
     portal_client.save_continuity(
         "continuity-session",
         {

@@ -48,7 +48,7 @@ facade generates that metadata, so call it with an empty arguments object:
 The result contains at most eight `projections` entries. Each entry has only
 `projection_id`, `display_name`, `lifecycle_state`, `unread_output_count`, and
 `pending_input_count`. It never returns transcript text, pending-input text,
-owner tokens, lease data, or another resident principal's sessions, and it does
+owner tokens, lease data, or another agent's sessions, and it does
 not attach, detach, clean up, rotate a token, or change lifecycle state.
 
 ## Attach
@@ -108,15 +108,14 @@ opencode:
 }
 ```
 
-Successful attach responses include `owner_token`, `request_id`, `projection_id`, `accepted`, `error_code`, `server_timestamp_wall_us`, bounded `status_summary`, and lifecycle state. The `owner_token` is returned only by successful `attach`; later operation responses must not return it. Repeating attach for a live projection through the authenticated Resident MCP surface with the same non-empty `idempotency_key` rotates and returns a fresh token, invalidates the prior token, and preserves the original expiry deadline. Missing or unrelated keys do not rotate ownership.
+Successful attach responses include `request_id`, `projection_id`, `accepted`, `error_code`, `server_timestamp_wall_us`, bounded `status_summary`, and lifecycle state. Over MCP no operation takes or returns `owner_token`: the server keeps it, keyed by the caller's agent and `projection_id`, and adds it to later calls. (The stdio harness still exchanges it explicitly.) Repeating attach for a live projection with the same non-empty `idempotency_key` rotates the server-held token, invalidates the prior token, and preserves the original expiry deadline. Missing or unrelated keys do not rotate ownership.
 
 The preferred `portal_client.py` persists that original idempotency key and a
 bounded client-authored tail at
 `~/.local/state/tze_hud/portal-continuity/<projection_id>.json`. The private
 state file is not a runtime snapshot: it contains no owner token, pending
 input, acknowledgement, or viewer-authored turn. After successful attach, the
-client stores the new owner token separately and replays the tail before
-returning.
+client replays the tail before returning.
 
 ## Publish Output
 
@@ -130,7 +129,6 @@ Any other value is rejected. Omit `output_kind` to get the `assistant` default.
   "projection_id": "codex-rig-hud-ggntn4",
   "request_id": "req-output-001",
   "client_timestamp_wall_us": 1777400001000000,
-  "owner_token": "<owner-token-from-attach>",
   "output_text": "Implemented the HUD projection skill package and mirror docs.",
   "output_kind": "assistant",
   "content_classification": "private",
@@ -171,7 +169,6 @@ Accepted `lifecycle_state` values: `attached`, `active`, `degraded`, `hud_unavai
   "projection_id": "codex-rig-hud-ggntn4",
   "request_id": "req-status-001",
   "client_timestamp_wall_us": 1777400002000000,
-  "owner_token": "<owner-token-from-attach>",
   "lifecycle_state": "active",
   "status_text": "Verifying mirror consistency"
 }
@@ -185,7 +182,6 @@ Accepted `lifecycle_state` values: `attached`, `active`, `degraded`, `hud_unavai
   "projection_id": "codex-rig-hud-ggntn4",
   "request_id": "req-input-001",
   "client_timestamp_wall_us": 1777400003000000,
-  "owner_token": "<owner-token-from-attach>",
   "max_items": 4,
   "max_bytes": 4096,
   "wait_ms": 15000
@@ -206,7 +202,6 @@ Handled:
   "projection_id": "codex-rig-hud-ggntn4",
   "request_id": "req-ack-001",
   "client_timestamp_wall_us": 1777400004000000,
-  "owner_token": "<owner-token-from-attach>",
   "input_id": "input-0007",
   "ack_state": "handled",
   "ack_message": "Applied the requested edit."
@@ -221,7 +216,6 @@ Deferred:
   "projection_id": "codex-rig-hud-ggntn4",
   "request_id": "req-ack-002",
   "client_timestamp_wall_us": 1777400005000000,
-  "owner_token": "<owner-token-from-attach>",
   "input_id": "input-0008",
   "ack_state": "deferred",
   "ack_message": "Will revisit after tests finish.",
@@ -239,7 +233,6 @@ Use `not_before_wall_us` only when `ack_state` is `deferred`; it must be before 
   "projection_id": "codex-rig-hud-ggntn4",
   "request_id": "req-detach-001",
   "client_timestamp_wall_us": 1777400006000000,
-  "owner_token": "<owner-token-from-attach>",
   "reason": "session complete"
 }
 ```
@@ -254,7 +247,6 @@ Owner cleanup:
   "projection_id": "codex-rig-hud-ggntn4",
   "request_id": "req-cleanup-001",
   "client_timestamp_wall_us": 1777400007000000,
-  "owner_token": "<owner-token-from-attach>",
   "reason": "remove stale portal after normal detach"
 }
 ```

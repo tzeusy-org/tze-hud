@@ -194,11 +194,6 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
 
     benchmark_name = args.benchmark_name or default_benchmark_name(args)
 
-    capability = f"publish_widget:{args.widget_name}"
-    requested_capabilities = [capability]
-    if args.request_wildcard:
-        requested_capabilities.append("*")
-
     async with SessionClient(resolved_target) as client:
         await client.send(
             session_init=session_pb2.SessionInit(
@@ -206,7 +201,6 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                 auth_credential=session_pb2.AuthCredential(
                     pre_shared_key=session_pb2.PreSharedKeyCredential(key=psk),
                 ),
-                requested_capabilities=requested_capabilities,
                 initial_subscriptions=[],
                 min_protocol_version=1000,
                 max_protocol_version=1000,
@@ -343,7 +337,6 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
             "expect_results": args.expect_results,
             "session": {
                 "namespace": established.session_established.namespace,
-                "granted_capabilities": list(established.session_established.granted_capabilities),
             },
             "timing": {
                 "e2e_latency_ms": round(total_ms, 2),
@@ -470,7 +463,6 @@ def parse_args() -> argparse.Namespace:
     parser.set_defaults(expect_results=True)
 
     parser.add_argument("--result-timeout-ms", type=int, default=8000, help="Result drain timeout")
-    parser.add_argument("--request-wildcard", action="store_true", help="Also request '*' capability")
 
     parser.add_argument("--benchmark-name", default=None, help="Stable benchmark label")
     parser.add_argument("--results-csv", default=DEFAULT_RESULTS_CSV, help="Append-only results CSV")

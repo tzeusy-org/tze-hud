@@ -29,6 +29,7 @@ use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 use tze_hud_mcp::{McpConfig, McpServer};
+use tze_hud_scene::config::AgentDirectory;
 use tze_hud_scene::graph::SceneGraph;
 
 use crate::threads::ShutdownToken;
@@ -46,31 +47,10 @@ pub struct McpServerConfig {
     /// Conventionally `0.0.0.0:<port>` or `127.0.0.1:<port>`.
     pub bind_addr: SocketAddr,
 
-    /// Pre-shared key for MCP authentication.
-    ///
-    /// Every MCP request must supply a matching key via HTTP `Authorization:
-    /// Bearer <key>` or the JSON-RPC `_auth` param.  When empty, a client
-    /// sending an empty bearer token will authenticate — use a non-empty key
-    /// in production.  To reject all calls unconditionally, do not start the
-    /// MCP server (set `mcp_port = 0` in `WindowedConfig`).
-    pub psk: String,
-
-    /// Optional **resident principal** PSK (config-gated grant, hud-nu65o).
-    ///
-    /// When `Some(non-empty)`, a caller whose bearer token matches this value
-    /// (constant-time) is minted with the `resident_mcp` capability, so
-    /// resident tools (notably `portal_projection_*`) are reachable without a
-    /// separate session handshake.  When `None`, behaviour is unchanged: every
-    /// caller is a guest and resident tools return `CAPABILITY_REQUIRED`.
-    ///
-    /// PSK authentication stays mandatory in every path — this only attaches
-    /// capability to an already-authenticated, config-listed principal.  In the
-    /// single-PSK model an operator opts a principal in by setting this to the
-    /// **same secret** as [`Self::psk`].
-    ///
-    /// Surfaced operationally via the `TZE_HUD_MCP_RESIDENT_PRINCIPAL`
-    /// environment variable (see `windowed`).
-    pub resident_principal: Option<String>,
+    /// Credential → agent directory for MCP authentication and the `allow`
+    /// gate. The bearer token (or JSON-RPC `_auth`) must be the runtime PSK or
+    /// an agent's own PSK; the agent's namespace is its id.
+    pub agents: AgentDirectory,
 }
 
 /// Start the MCP HTTP server task on the calling Tokio runtime.
@@ -136,10 +116,7 @@ pub async fn start_mcp_http_server_with_render_wake(
     );
 
     let mut server_builder = McpServer::with_shared_scene(scene)
-        .with_config(
-            McpConfig::with_psk(&config.psk)
-                .with_resident_principal(config.resident_principal.clone()),
-        )
+        .with_config(McpConfig::with_agents(config.agents.clone()))
         .with_render_wake_notifier(render_wake)
         .with_portal_ingress_wake_notifier(portal_ingress_wake);
     if let Some(tx) = paste_inject_tx {
@@ -336,8 +313,7 @@ mod tests {
     fn make_config(port: u16, psk: &str) -> McpServerConfig {
         McpServerConfig {
             bind_addr: format!("127.0.0.1:{port}").parse().unwrap(),
-            psk: psk.to_string(),
-            resident_principal: None,
+            agents: AgentDirectory::unrestricted(psk),
         }
     }
 
@@ -395,8 +371,7 @@ mod tests {
         let scene = make_scene();
         let config = McpServerConfig {
             bind_addr: addr,
-            psk: "test-key".to_string(),
-            resident_principal: None,
+            agents: AgentDirectory::unrestricted("test-key"),
         };
         let shutdown = ShutdownToken::new();
 
@@ -436,8 +411,7 @@ mod tests {
         let scene = make_scene();
         let config = McpServerConfig {
             bind_addr: addr,
-            psk: "real-key".to_string(),
-            resident_principal: None,
+            agents: AgentDirectory::unrestricted("real-key"),
         };
         let shutdown = ShutdownToken::new();
 
@@ -472,8 +446,7 @@ mod tests {
         let scene = make_scene();
         let config = McpServerConfig {
             bind_addr: addr,
-            psk: "correct-key".to_string(),
-            resident_principal: None,
+            agents: AgentDirectory::unrestricted("correct-key"),
         };
         let shutdown = ShutdownToken::new();
 
@@ -541,8 +514,7 @@ mod tests {
 
         let config = McpServerConfig {
             bind_addr: addr,
-            psk: "test-key".to_string(),
-            resident_principal: None,
+            agents: AgentDirectory::unrestricted("test-key"),
         };
         let shutdown = ShutdownToken::new();
 
@@ -578,8 +550,7 @@ mod tests {
         let scene = make_scene();
         let config = McpServerConfig {
             bind_addr: addr,
-            psk: "key".to_string(),
-            resident_principal: None,
+            agents: AgentDirectory::unrestricted("key"),
         };
         let shutdown = ShutdownToken::new();
 
@@ -597,115 +568,5 @@ mod tests {
             result.is_ok(),
             "MCP server task did not exit within 2s after shutdown"
         );
-    }
-
-    // ── Config-gated resident principal over the production HTTP path (hud-nu65o)
-
-    /// Bind a server on a free loopback port and return its address.
-    fn free_loopback_addr() -> SocketAddr {
-        use std::net::TcpListener as StdListener;
-        let std_listener = StdListener::bind("127.0.0.1:0").unwrap();
-        let addr = std_listener.local_addr().unwrap();
-        drop(std_listener);
-        addr
-    }
-
-    #[tokio::test]
-    async fn mcp_http_resident_principal_reaches_resident_tool() {
-        // PSK == resident principal: an authenticated caller is minted with
-        // resident_mcp and can call a resident tool (create_tab) with no
-        // CAPABILITY_REQUIRED — the live failure mode from hud-kylt0.
-        let addr = free_loopback_addr();
-        let scene = make_scene();
-        let config = McpServerConfig {
-            bind_addr: addr,
-            psk: "resident-psk".to_string(),
-            resident_principal: Some("resident-psk".to_string()),
-        };
-        let shutdown = ShutdownToken::new();
-        let (handle, _mcp_addr) =
-            start_mcp_http_server(scene, config, shutdown.clone(), None, None)
-                .await
-                .expect("bind");
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-
-        let body =
-            r#"{"jsonrpc":"2.0","method":"create_tab","params":{"name":"Resident"},"id":80}"#;
-        let resp = http_post(addr, body, Some("resident-psk")).await;
-
-        assert!(resp.contains("HTTP/1.1 200"));
-        assert!(
-            !resp.contains("CAPABILITY_REQUIRED"),
-            "resident principal must not get CAPABILITY_REQUIRED, got: {resp}"
-        );
-        assert!(
-            resp.contains("\"result\""),
-            "expected a successful result, got: {resp}"
-        );
-
-        shutdown.trigger(crate::threads::ShutdownReason::Clean);
-        handle.await.expect("task");
-    }
-
-    #[tokio::test]
-    async fn mcp_http_no_resident_principal_still_gates_resident_tool() {
-        // No resident principal configured → unchanged: an authenticated guest
-        // still gets CAPABILITY_REQUIRED on a resident tool.
-        let addr = free_loopback_addr();
-        let scene = make_scene();
-        let config = McpServerConfig {
-            bind_addr: addr,
-            psk: "plain-psk".to_string(),
-            resident_principal: None,
-        };
-        let shutdown = ShutdownToken::new();
-        let (handle, _mcp_addr) =
-            start_mcp_http_server(scene, config, shutdown.clone(), None, None)
-                .await
-                .expect("bind");
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-
-        let body = r#"{"jsonrpc":"2.0","method":"create_tab","params":{"name":"X"},"id":81}"#;
-        let resp = http_post(addr, body, Some("plain-psk")).await;
-
-        assert!(resp.contains("HTTP/1.1 200"));
-        assert!(
-            resp.contains("CAPABILITY_REQUIRED"),
-            "default config must still gate resident tools, got: {resp}"
-        );
-
-        shutdown.trigger(crate::threads::ShutdownReason::Clean);
-        handle.await.expect("task");
-    }
-
-    #[tokio::test]
-    async fn mcp_http_resident_principal_does_not_weaken_psk_auth() {
-        // PSK stays mandatory even when a resident principal is configured: a
-        // wrong bearer token is rejected before any tool runs.
-        let addr = free_loopback_addr();
-        let scene = make_scene();
-        let config = McpServerConfig {
-            bind_addr: addr,
-            psk: "resident-psk".to_string(),
-            resident_principal: Some("resident-psk".to_string()),
-        };
-        let shutdown = ShutdownToken::new();
-        let (handle, _mcp_addr) =
-            start_mcp_http_server(scene, config, shutdown.clone(), None, None)
-                .await
-                .expect("bind");
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-
-        let body = r#"{"jsonrpc":"2.0","method":"list_zones","params":{},"id":82}"#;
-        let resp = http_post(addr, body, Some("wrong-key")).await;
-
-        assert!(resp.contains("HTTP/1.1 200"));
-        assert!(
-            resp.contains("\"error\""),
-            "wrong PSK must still be rejected, got: {resp}"
-        );
-
-        shutdown.trigger(crate::threads::ShutdownReason::Clean);
-        handle.await.expect("task");
     }
 }

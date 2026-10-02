@@ -146,10 +146,11 @@ const PORTAL_LINE_HEIGHT_MULTIPLIER: f32 = 1.4;
 /// It is distinct from any agent-facing namespace.
 pub const PORTAL_DRIVER_NAMESPACE: &str = "tze_hud_portal_driver";
 
-/// Current authenticated resident-principal identity at the projection seam.
+/// Projection caller identity at the authority seam.
 ///
-/// The MCP configuration supports one resident principal today, so all
-/// resident projection operations share this stable non-secret identity. The
+/// MCP passes one stable non-secret identity for every caller today;
+/// per-agent ownership is enforced in the MCP server, which keys each
+/// projection's owner token by (agent id, projection id). The
 /// authority still enforces its caller-scoped filter, allowing a future
 /// authenticated multi-principal transport to pass distinct identities without
 /// broadening this list operation's visibility.

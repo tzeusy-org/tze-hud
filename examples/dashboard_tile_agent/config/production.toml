@@ -1,9 +1,7 @@
 # Dashboard Tile Agent — Production Configuration
 #
-# Enforces capability governance: only the registered agent
-# ("dashboard-tile-agent") may connect, with the capability set required
-# for the raw tile API exemplar (create_tiles, modify_own_tiles,
-# access_input_events).
+# Only the configured agent ("dashboard-tile-agent") gets permissions:
+# `tiles` covers the raw tile API exemplar (create, modify, input).
 #
 # Usage (headless, production config — no feature flags):
 #   cargo run -p dashboard_tile_agent -- --headless
@@ -18,11 +16,5 @@ profile = "headless"
 name = "Main"
 default_tab = true
 
-[agents.registered.dashboard-tile-agent]
-# Canonical v1 capability vocabulary (configuration/spec.md §Capability Vocabulary).
-# Only these capabilities are granted to this agent; all others are denied.
-capabilities = [
-    "create_tiles",
-    "modify_own_tiles",
-    "access_input_events",
-]
+[agents.dashboard-tile-agent]
+allow = ["tiles"]

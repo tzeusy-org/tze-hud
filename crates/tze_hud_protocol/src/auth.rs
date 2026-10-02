@@ -1,12 +1,8 @@
-//! Authentication and capability negotiation for the session handshake.
-//!
-//! Implements RFC 0005 §1.4 (Authentication) and the capability gating
-//! policy described in RFC 0005 §5.3. This module is responsible for:
+//! Authentication and agent identity for the session handshake.
 //!
 //! - Evaluating `AuthCredential` during `SessionInit` / `SessionResume`
-//! - Filtering requested capabilities against an agent authorization policy
-//! - Evaluating mid-session `CapabilityRequest` against the same policy
-//! - Filtering initial subscriptions by granted capabilities
+//! - Resolving the credential to an agent and its `allow`-derived permissions
+//!   ([`identify_session`])
 //!
 //! # V1 Auth Implementations
 //!
@@ -25,7 +21,7 @@
 use std::net::IpAddr;
 
 use subtle::ConstantTimeEq;
-use tze_hud_scene::config::{CANONICAL_CAPABILITIES, is_canonical_capability};
+use tze_hud_scene::config::{AgentDirectory, AgentIdentity, AuthRejection};
 
 use crate::proto::session::{AuthCredential, auth_credential::Credential};
 
@@ -157,6 +153,47 @@ pub fn authenticate_session_init(
     }
 }
 
+/// Resolve a handshake credential to an agent identity.
+///
+/// A PSK credential (structured, or the legacy plain string on resume) is
+/// resolved through [`AgentDirectory::resolve`]: an agent's own PSK identifies
+/// that agent, the runtime PSK identifies `claimed_agent_id`. An accepted
+/// loopback `LocalSocketCredential` is treated like the runtime PSK.
+pub fn identify_session(
+    agents: &AgentDirectory,
+    auth_credential: Option<&AuthCredential>,
+    legacy_psk: &str,
+    claimed_agent_id: &str,
+    peer_addr: Option<IpAddr>,
+) -> Result<AgentIdentity, AuthRejection> {
+    let key = match auth_credential.and_then(|c| c.credential.as_ref()) {
+        Some(Credential::PreSharedKey(cred)) => cred.key.as_str(),
+        Some(_) => {
+            let cred = auth_credential.expect("credential checked above");
+            match evaluate_auth_credential(cred, &agents.runtime_psk, peer_addr) {
+                AuthResult::Accepted => agents.runtime_psk.as_str(),
+                AuthResult::Failed(message) => {
+                    return Err(AuthRejection {
+                        code: "AUTH_FAILED",
+                        message,
+                        hint: String::new(),
+                    });
+                }
+                AuthResult::Unimplemented(message) => {
+                    return Err(AuthRejection {
+                        code: "AUTH_FAILED",
+                        message,
+                        hint: r#"{"supported_v1": ["PreSharedKeyCredential", "LocalSocketCredential"]}"#
+                            .to_string(),
+                    });
+                }
+            }
+        }
+        None => legacy_psk,
+    };
+    agents.resolve(key, claimed_agent_id)
+}
+
 // ─── Protocol version negotiation (RFC 0005 §4.1) ────────────────────────────
 
 /// Runtime's supported version range.
@@ -196,197 +233,6 @@ pub fn negotiate_version(agent_min: u32, agent_max: u32) -> Result<u32, String> 
     } else {
         Ok(high) // pick the highest mutual version
     }
-}
-
-// ─── Capability policy (RFC 0005 §5.3) ───────────────────────────────────────
-
-/// Authorization policy for a single agent.
-///
-/// In v1 the policy is derived from the agent's registration (configured
-/// PSK-based identity → allowed capability set). In a future release this
-/// will consult a per-agent config file or dynamic approval flow.
-///
-/// # V1 policy rules
-///
-/// - Any capability listed in `allowed` is grantable.
-/// - Any capability NOT in `allowed` is denied.
-/// - Partial grants are denied entirely (RFC 0005 §5.3 scenario 4).
-#[derive(Debug, Clone)]
-pub struct CapabilityPolicy {
-    /// The full set of capabilities this agent is authorized to hold.
-    /// An empty set means the agent has no special capabilities (guest).
-    allowed: Vec<String>,
-}
-
-impl CapabilityPolicy {
-    /// Create a policy that allows exactly the given set of capabilities.
-    pub fn new(allowed: Vec<String>) -> Self {
-        Self { allowed }
-    }
-
-    /// Unrestricted policy — allows any capability.
-    ///
-    /// Used for PSK-authenticated agents in v1 where the PSK holder is
-    /// implicitly trusted for all capabilities.
-    pub fn unrestricted() -> Self {
-        // Sentinel: `"*"` in `allowed` indicates an allow-all policy.
-        // `is_unrestricted()` and `permits()` both rely on this `"*"` marker.
-        Self {
-            allowed: vec!["*".to_string()],
-        }
-    }
-
-    /// Guest policy — no capabilities granted.
-    pub fn guest() -> Self {
-        Self {
-            allowed: Vec::new(),
-        }
-    }
-
-    /// Returns `true` if this policy is unrestricted (permits any capability).
-    pub fn is_unrestricted(&self) -> bool {
-        self.allowed.iter().any(|a| a == "*")
-    }
-
-    /// Returns `true` if this policy grants the given capability.
-    fn permits(&self, capability: &str) -> bool {
-        self.allowed.iter().any(|a| a == "*" || a == capability)
-    }
-
-    /// Evaluate a capability grant request (RFC 0005 §5.3).
-    ///
-    /// Returns `Ok(Vec<String>)` with the granted capabilities on success, or
-    /// `Err(Vec<String>)` listing the unauthorized capabilities if any are
-    /// denied (the entire request is denied on any partial failure).
-    pub fn evaluate_capability_request(
-        &self,
-        requested: &[String],
-    ) -> Result<Vec<String>, Vec<String>> {
-        let denied: Vec<String> = requested
-            .iter()
-            .filter(|cap| !self.permits(cap))
-            .cloned()
-            .collect();
-
-        if denied.is_empty() {
-            Ok(requested.to_vec())
-        } else {
-            // Deny the entire request on partial failure (RFC 0005 §5.3 scenario 4).
-            Err(denied)
-        }
-    }
-
-    /// Filter a set of requested capabilities into (granted, denied) lists
-    /// for reporting in `SessionEstablished`.
-    ///
-    /// Unlike `evaluate_capability_request`, this does NOT deny the entire
-    /// batch on partial failure; it partitions the set. Used only at handshake
-    /// where individual grants/denials are reported separately.
-    pub fn partition_capabilities(&self, requested: &[String]) -> (Vec<String>, Vec<String>) {
-        let mut granted = Vec::new();
-        let mut denied = Vec::new();
-        for cap in requested {
-            if self.permits(cap) {
-                granted.push(cap.clone());
-            } else {
-                denied.push(cap.clone());
-            }
-        }
-        (granted, denied)
-    }
-
-    /// Derive an unrestricted capability policy.
-    ///
-    /// Used for legacy/dev fallback-unrestricted mode where identity is not
-    /// constrained by per-agent registration.
-    pub fn for_psk_agent() -> Self {
-        Self::unrestricted()
-    }
-}
-
-// ─── Canonical capability vocabulary (configuration/spec.md §Capability Vocabulary) ──
-
-/// Error produced when an unrecognized capability name is encountered.
-///
-/// Carries the wire-level fields surfaced in `CONFIG_UNKNOWN_CAPABILITY` errors
-/// (`unknown` + `hint`). This is a subset of the full Structured Validation
-/// Error collection shape defined in configuration/spec.md §Requirement:
-/// Structured Validation Error Collection (which additionally requires
-/// `field_path`, `expected`, and `got`); those fields are not included here
-/// because capability name validation happens at the wire layer before any
-/// field-path context is available.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct UnknownCapabilityError {
-    /// The unrecognized capability name.
-    pub unknown: String,
-    /// A hint naming the closest canonical replacement, if any.
-    pub hint: String,
-}
-
-/// Validate that every capability in `requested` is a canonical v1 name.
-///
-/// Returns `Ok(())` if all names are canonical, or `Err(Vec<UnknownCapabilityError>)`
-/// listing each unrecognized name with a hint for the canonical replacement.
-///
-/// The vocabulary is `tze_hud_scene::config::is_canonical_capability`.
-///
-/// Rejected forms include: pre-Round-14 names (`read_scene`, `receive_input`,
-/// `zone_publish`), legacy names (`create_tile`, `update_tile`, `delete_tile`,
-/// `create_node`, `update_node`, `delete_node`), camelCase, kebab-case, etc.
-pub fn validate_canonical_capabilities(
-    requested: &[String],
-) -> Result<(), Vec<UnknownCapabilityError>> {
-    let mut errors = Vec::new();
-    for cap in requested {
-        if !is_canonical_capability(cap) {
-            errors.push(UnknownCapabilityError {
-                unknown: cap.clone(),
-                hint: canonical_hint(cap),
-            });
-        }
-    }
-    if errors.is_empty() {
-        Ok(())
-    } else {
-        Err(errors)
-    }
-}
-
-/// Return a hint string for a non-canonical capability name, pointing to
-/// the canonical replacement where known.
-///
-/// The hint JSON format matches the spec example:
-/// `{"unknown": "createTiles", "hint": "did you mean create_tiles?"}`
-fn canonical_hint(cap: &str) -> String {
-    // Pre-Round-14 names revised by RFC 0005 Round 14 (policy-arbitration/spec.md §281-292).
-    if cap == "receive_input" {
-        return r#"did you mean "access_input_events"? (pre-Round-14 name superseded by RFC 0005 Round 14)"#.to_string();
-    }
-    if cap == "read_scene" {
-        return r#"did you mean "read_scene_topology"? (pre-Round-14 name superseded by RFC 0005 Round 14)"#.to_string();
-    }
-    if cap.starts_with("zone_publish:") {
-        let zone = cap.strip_prefix("zone_publish:").unwrap_or("*");
-        return format!(
-            r#"did you mean "publish_zone:{zone}"? (pre-Round-14 name superseded by RFC 0005 Round 14)"#
-        );
-    }
-    // Legacy single-object names (create_tile → create_tiles, etc.).
-    if cap == "create_tile" {
-        return r#"did you mean "create_tiles"? (legacy name; use plural canonical form)"#
-            .to_string();
-    }
-    if cap == "update_tile" || cap == "delete_tile" {
-        return r#"did you mean "modify_own_tiles"? (legacy name; use canonical form)"#.to_string();
-    }
-    if cap == "create_node" || cap == "update_node" || cap == "delete_node" {
-        return r#"did you mean "modify_own_tiles"? (legacy node-level name; use canonical tile-level form)"#.to_string();
-    }
-    // Generic fallback.
-    format!(
-        "unknown capability; valid names: {}, publish_zone:<zone>, publish_widget:<widget>, lease:priority:<n>",
-        CANONICAL_CAPABILITIES.join(", ")
-    )
 }
 
 // ─── Tests ─────────────────────────────────────────────────────────────────────
@@ -689,198 +535,5 @@ mod tests {
     fn test_version_negotiation_agent_below_runtime() {
         // Agent only supports 999 which is below RUNTIME_MIN_VERSION=1000
         assert!(negotiate_version(900, 999).is_err());
-    }
-
-    // ── Capability policy tests ────────────────────────────────────────────────
-
-    #[test]
-    fn test_policy_unrestricted_allows_any() {
-        let policy = CapabilityPolicy::unrestricted();
-        assert!(policy.permits("create_tiles"));
-        assert!(policy.permits("read_telemetry"));
-        assert!(policy.permits("manage_tabs"));
-    }
-
-    #[test]
-    fn test_policy_guest_denies_all() {
-        let policy = CapabilityPolicy::guest();
-        assert!(!policy.permits("create_tiles"));
-        assert!(!policy.permits("read_telemetry"));
-    }
-
-    #[test]
-    fn test_policy_specific_allows_listed() {
-        let policy = CapabilityPolicy::new(vec!["read_telemetry".to_string()]);
-        assert!(policy.permits("read_telemetry"));
-        assert!(!policy.permits("manage_tabs"));
-    }
-
-    #[test]
-    fn test_capability_request_all_authorized() {
-        let policy = CapabilityPolicy::unrestricted();
-        let result = policy.evaluate_capability_request(&["read_telemetry".to_string()]);
-        assert_eq!(result, Ok(vec!["read_telemetry".to_string()]));
-    }
-
-    #[test]
-    fn test_capability_request_unauthorized_denied() {
-        let policy = CapabilityPolicy::guest();
-        let result = policy.evaluate_capability_request(&["manage_tabs".to_string()]);
-        assert!(result.is_err());
-    }
-
-    /// Scenario: Partial grant of mixed capabilities is denied entirely
-    /// (RFC 0005 §5.3 scenario 4)
-    #[test]
-    fn test_capability_request_partial_grant_denied_entirely() {
-        let policy = CapabilityPolicy::new(vec!["read_telemetry".to_string()]);
-        // read_telemetry authorized, manage_tabs not — deny entire request
-        let result = policy.evaluate_capability_request(&[
-            "read_telemetry".to_string(),
-            "manage_tabs".to_string(),
-        ]);
-        match result {
-            Err(denied) => {
-                assert!(denied.contains(&"manage_tabs".to_string()));
-                // read_telemetry should NOT appear in the denied list
-                // (the error lists only the unauthorized ones, not the whole request)
-            }
-            Ok(_) => panic!("Expected denial for mixed capabilities"),
-        }
-    }
-
-    #[test]
-    fn test_partition_capabilities() {
-        let policy = CapabilityPolicy::new(vec![
-            "read_telemetry".to_string(),
-            "create_tiles".to_string(), // canonical: plural
-        ]);
-        let (granted, denied) = policy.partition_capabilities(&[
-            "read_telemetry".to_string(),
-            "manage_tabs".to_string(),
-            "create_tiles".to_string(), // canonical: plural
-        ]);
-        assert_eq!(granted, vec!["read_telemetry", "create_tiles"]);
-        assert_eq!(denied, vec!["manage_tabs"]);
-    }
-
-    // ── Canonical capability validation tests ──────────────────────────────────
-
-    /// Scenario: Valid capability grants accepted
-    /// (configuration/spec.md Requirement: Capability Vocabulary, line 154-156)
-    #[test]
-    fn test_canonical_caps_all_valid() {
-        let caps = vec![
-            "create_tiles".to_string(),
-            "modify_own_tiles".to_string(),
-            "manage_tabs".to_string(),
-            "upload_resource".to_string(),
-            "register_widget_asset".to_string(),
-            "read_scene_topology".to_string(),
-            "access_input_events".to_string(),
-            "read_telemetry".to_string(),
-            "resident_mcp".to_string(),
-            "publish_zone:subtitle".to_string(),
-            "publish_zone:*".to_string(),
-            "lease:priority:1".to_string(),
-        ];
-        assert!(validate_canonical_capabilities(&caps).is_ok());
-    }
-
-    /// Scenario: Non-canonical capability name rejected
-    /// (configuration/spec.md Requirement: Capability Vocabulary, line 162-164)
-    #[test]
-    fn test_legacy_create_tile_rejected() {
-        let caps = vec!["create_tile".to_string()];
-        let err = validate_canonical_capabilities(&caps).unwrap_err();
-        assert_eq!(err.len(), 1);
-        assert_eq!(err[0].unknown, "create_tile");
-        assert!(err[0].hint.contains("create_tiles"));
-    }
-
-    /// Scenario: Pre-Round-14 name receive_input rejected with hint
-    /// (policy-arbitration/spec.md §281-292)
-    #[test]
-    fn test_pre_round14_receive_input_rejected() {
-        let caps = vec!["receive_input".to_string()];
-        let err = validate_canonical_capabilities(&caps).unwrap_err();
-        assert_eq!(err.len(), 1);
-        assert_eq!(err[0].unknown, "receive_input");
-        assert!(err[0].hint.contains("access_input_events"));
-    }
-
-    /// Scenario: Pre-Round-14 name read_scene rejected with hint
-    #[test]
-    fn test_pre_round14_read_scene_rejected() {
-        let caps = vec!["read_scene".to_string()];
-        let err = validate_canonical_capabilities(&caps).unwrap_err();
-        assert_eq!(err[0].unknown, "read_scene");
-        assert!(err[0].hint.contains("read_scene_topology"));
-    }
-
-    /// Scenario: Pre-Round-14 name zone_publish rejected with hint
-    #[test]
-    fn test_pre_round14_zone_publish_rejected() {
-        let caps = vec!["zone_publish:subtitle".to_string()];
-        let err = validate_canonical_capabilities(&caps).unwrap_err();
-        assert_eq!(err[0].unknown, "zone_publish:subtitle");
-        assert!(err[0].hint.contains("publish_zone:subtitle"));
-    }
-
-    /// Multiple legacy names in one request → all reported.
-    #[test]
-    fn test_multiple_unknown_caps_reported() {
-        let caps = vec![
-            "create_tile".to_string(),
-            "receive_input".to_string(),
-            "read_scene_topology".to_string(), // valid — should not appear in errors
-        ];
-        let err = validate_canonical_capabilities(&caps).unwrap_err();
-        assert_eq!(err.len(), 2);
-        let unknown: Vec<&str> = err.iter().map(|e| e.unknown.as_str()).collect();
-        assert!(unknown.contains(&"create_tile"));
-        assert!(unknown.contains(&"receive_input"));
-    }
-
-    /// Empty capability list is valid.
-    #[test]
-    fn test_empty_capabilities_valid() {
-        assert!(validate_canonical_capabilities(&[]).is_ok());
-    }
-
-    /// publish_zone with empty zone name is invalid.
-    #[test]
-    fn test_publish_zone_empty_suffix_invalid() {
-        let caps = vec!["publish_zone:".to_string()];
-        assert!(validate_canonical_capabilities(&caps).is_err());
-    }
-
-    /// publish_widget with non-empty widget name is valid.
-    #[test]
-    fn test_publish_widget_valid() {
-        let caps = vec!["publish_widget:gauge".to_string()];
-        assert!(validate_canonical_capabilities(&caps).is_ok());
-    }
-
-    /// publish_widget with empty widget name is invalid.
-    #[test]
-    fn test_publish_widget_empty_suffix_invalid() {
-        let caps = vec!["publish_widget:".to_string()];
-        assert!(validate_canonical_capabilities(&caps).is_err());
-    }
-
-    /// camelCase variant is rejected.
-    #[test]
-    fn test_camel_case_rejected() {
-        let caps = vec!["createTiles".to_string()];
-        let err = validate_canonical_capabilities(&caps).unwrap_err();
-        assert!(!err[0].hint.is_empty());
-    }
-
-    /// kebab-case variant is rejected.
-    #[test]
-    fn test_kebab_case_rejected() {
-        let caps = vec!["create-tiles".to_string()];
-        assert!(validate_canonical_capabilities(&caps).is_err());
     }
 }

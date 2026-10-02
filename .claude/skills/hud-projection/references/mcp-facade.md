@@ -2,7 +2,7 @@
 
 The production projection ingress routes cooperative projection operations into the runtime's in-process `ProjectionAuthority`. It is **not** a standalone external daemon and **not** the runtime v1 MCP zone/widget publishing bridge.
 
-**Current status:** The ingress is **fully wired**. All eight operations are served by the runtime MCP server's per-operation tools (`portal_projection_list`, `portal_projection_attach`, `portal_projection_publish` for `publish_output`, `portal_projection_publish_status`, `portal_projection_get_pending_input`, `portal_projection_acknowledge_input`, `portal_projection_detach`, and `portal_projection_cleanup`), which forward to the in-process authority over `portal_op_tx`. The tools are classified Resident and require `resident_mcp`; an external session obtains that capability as the **resident principal** — the runtime mints `resident_mcp` only when the MCP bearer matches BOTH the configured `TZE_HUD_MCP_RESIDENT_PRINCIPAL` AND the PSK, each compared constant-time. Wire it by setting `TZE_HUD_MCP_RESIDENT_PRINCIPAL` equal to the PSK and sending the PSK as the bearer. Published output renders on screen for both portal adapter families (exemplar gRPC and the in-process cooperative driver). The boundary requirements below describe the contract this ingress satisfies.
+**Current status:** The ingress is **fully wired**. All eight operations are served by the runtime MCP server's per-operation tools (`portal_projection_list`, `portal_projection_attach`, `portal_projection_publish` for `publish_output`, `portal_projection_publish_status`, `portal_projection_get_pending_input`, `portal_projection_acknowledge_input`, `portal_projection_detach`, and `portal_projection_cleanup`), which forward to the in-process authority over `portal_op_tx`. The MCP bearer PSK identifies the calling agent (constant-time compare against the runtime PSK and each agent's own PSK); the tools require `portal` (or `*`) in that agent's `[agents.<id>] allow` list, else they return `NOT_ALLOWED` with a hint naming the entry to add. Published output renders on screen for both portal adapter families (exemplar gRPC and the in-process cooperative driver). The boundary requirements below describe the contract this ingress satisfies.
 
 Implementation sources: `crates/tze_hud_mcp/src/server.rs` classifies and
 routes the Resident tool; `crates/tze_hud_mcp/src/tools.rs` defines its empty
@@ -15,10 +15,10 @@ sorts, and caps caller-owned summaries.
 The production ingress must:
 - Accept only the cooperative operation contract from `operation-examples.md`.
 - Authenticate callers through an MCP bearer token, OS-protected IPC, or another unguessable credential.
-- Serve `portal_projection_list` only to the resident principal; return at most the configured count of that principal's content-free summaries and do not use it to manage lifecycle, leases, or tokens.
-- Bind owner-scoped non-attach operations to `projection_id` plus `owner_token`; bind operator cleanup to separate explicit operator authority.
-- Treat a matching-key attach replay as authenticated token rotation: return a fresh token, atomically replace the sole verifier, invalidate every prior token, and preserve the original expiry deadline. The idempotency key never substitutes for Resident MCP authorization.
-- Return bounded operation responses only: no unbounded transcript, unbounded inbox history, `owner_token` outside a successful `attach` response, owner-token verifier, or raw runtime scene graph.
+- Serve `portal_projection_list` only to agents allowed `portal`; return at most the configured count of that agent's content-free summaries and do not use it to manage lifecycle, leases, or tokens.
+- Bind owner-scoped non-attach operations to `projection_id` plus the caller's agent identity: the MCP server keeps the owner token server-side, keyed by (agent, projection), and injects it; bind operator cleanup to separate explicit operator authority.
+- Treat a matching-key attach replay as authenticated token rotation: return a fresh token, atomically replace the sole verifier, invalidate every prior token, and preserve the original expiry deadline. The idempotency key never substitutes for the `portal` allow entry.
+- Return bounded operation responses only: no unbounded transcript, unbounded inbox history, `owner_token` (the MCP server strips it from attach), owner-token verifier, or raw runtime scene graph.
 - Emit audit records without transcript text, HUD input text, or owner tokens.
 - Route operations to the in-process `ProjectionAuthority` in `tze_hud_runtime`, not to a separate projection process.
 
@@ -59,7 +59,7 @@ The facade ships as **eight per-operation tools** — `portal_projection_list`, 
 
 ## Claude-Style MCP Configuration
 
-The production MCP ingress is live; adapt `settings.template.json` to point at it (set `TZE_HUD_MCP_RESIDENT_PRINCIPAL` equal to the PSK on the runtime, and send the PSK as the bearer):
+The production MCP ingress is live; adapt `settings.template.json` to point at it (send your agent's PSK as the bearer; that agent's `allow` list must include `portal`):
 
 ```json
 {
@@ -77,9 +77,8 @@ The production MCP ingress is live; adapt `settings.template.json` to point at i
 
 The endpoint is the **runtime's** MCP server (the same server that serves the v1
 zone/widget publishing tools) — the projection facade is in-process, not a
-separate daemon. The bearer is the runtime PSK; the runtime must also be started
-with `TZE_HUD_MCP_RESIDENT_PRINCIPAL` set equal to that PSK so the caller is
-minted `resident_mcp`. The projection facade and the zone-publishing bridge are
+separate daemon. The bearer is your agent's PSK (the shipped `[agents.claude]`
+reads `TZE_HUD_PSK`, i.e. the runtime PSK, with `allow = ["*"]`). The projection facade and the zone-publishing bridge are
 distinguished by which tools you call (`portal_projection_*` vs the zone/widget
 tools), not by separate servers.
 

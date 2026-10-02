@@ -52,10 +52,11 @@
 //! and returns a `String` (the JSON-RPC response body). Callers can wire this
 //! to HTTP, stdio, or any other transport.
 
+use std::collections::HashMap;
 use std::sync::Arc;
-use subtle::ConstantTimeEq;
 use tokio::sync::Mutex;
 use tracing::{debug, error, warn};
+use tze_hud_scene::config::AgentDirectory;
 use tze_hud_scene::graph::SceneGraph;
 
 use crate::{
@@ -78,16 +79,12 @@ use crate::{
 #[derive(Clone, Debug, Default)]
 pub struct CallerContext {
     /// Pre-shared key extracted from the transport (e.g. Bearer token from an
-    /// HTTP header).  If `None`, only in-params auth is attempted.
+    /// HTTP header).  If `None`, only in-params `_auth` is attempted.
     pub bearer_token: Option<String>,
-
-    /// Capabilities granted to this caller.  The only capability that affects
-    /// tool routing in v1 is `resident_mcp`.
-    pub capabilities: Vec<String>,
 }
 
 impl CallerContext {
-    /// Create an unauthenticated context with no capabilities.
+    /// Create an unauthenticated context.
     pub fn guest() -> Self {
         Self::default()
     }
@@ -96,19 +93,7 @@ impl CallerContext {
     pub fn with_bearer(token: impl Into<String>) -> Self {
         Self {
             bearer_token: Some(token.into()),
-            capabilities: vec![],
         }
-    }
-
-    /// Grant the `resident_mcp` capability, allowing resident tool access.
-    pub fn with_resident_mcp(mut self) -> Self {
-        self.capabilities.push("resident_mcp".to_string());
-        self
-    }
-
-    /// Returns `true` if this context has the `resident_mcp` capability.
-    pub fn has_resident_mcp(&self) -> bool {
-        self.capabilities.iter().any(|c| c == "resident_mcp")
     }
 }
 
@@ -137,56 +122,38 @@ impl CallerContext {
 /// that integrates this server.
 #[derive(Clone, Debug, Default)]
 pub struct McpConfig {
-    /// Pre-shared key for MCP authentication.  When `Some`, every call must
-    /// supply a matching key via bearer token or `_auth` param.  When `None`,
-    /// every call is rejected (no bypass — sovereignty enforced by mechanism).
-    pub pre_shared_key: Option<String>,
-
-    /// Optional **resident principal** PSK (config-gated, hud-nu65o).
-    ///
-    /// When `Some(non-empty)` and the bearer token a caller presents matches
-    /// this value (constant-time), [`McpServer::caller_context`] mints the call
-    /// with the `resident_mcp` capability so resident tools (e.g.
-    /// `portal_projection_*`) are reachable without a separate session
-    /// handshake.  When `None`, behaviour is unchanged — every caller is a
-    /// guest and resident tools return `CAPABILITY_REQUIRED`.
-    ///
-    /// This does **not** weaken authentication: PSK auth is still enforced
-    /// independently in [`McpServer::dispatch`], so the resident grant only
-    /// has effect for a caller whose token also passes the PSK check.  In the
-    /// single-PSK model that means an operator opts a principal in by setting
-    /// this to the **same secret** as `pre_shared_key`.
-    pub resident_principal: Option<String>,
+    /// The trusted agents. A caller's PSK resolves to an agent id (its
+    /// namespace) and its allow-list permissions. With no runtime PSK and no
+    /// agent PSKs, every call is rejected (no bypass).
+    pub agents: AgentDirectory,
 }
 
 impl McpConfig {
-    /// Require authentication with the given PSK.
+    /// Accept the given runtime PSK with unrestricted permissions (dev/test).
     pub fn with_psk(key: impl Into<String>) -> Self {
         Self {
-            pre_shared_key: Some(key.into()),
-            resident_principal: None,
+            agents: AgentDirectory::unrestricted(key),
         }
     }
 
-    /// Load PSK from the `MCP_TEST_PSK` environment variable.
+    /// Use a configured agent directory.
+    pub fn with_agents(agents: AgentDirectory) -> Self {
+        Self { agents }
+    }
+
+    /// Load the runtime PSK from the `MCP_TEST_PSK` environment variable.
     ///
-    /// Intended for test harnesses that need a valid PSK without hard-coding
-    /// secrets in source.  If the variable is unset, returns a config with
-    /// `pre_shared_key = None` (all calls rejected).
+    /// Intended for test harnesses. If the variable is unset, every call is
+    /// rejected.
     pub fn from_env() -> Self {
-        Self {
-            pre_shared_key: std::env::var("MCP_TEST_PSK").ok(),
-            resident_principal: None,
+        match std::env::var("MCP_TEST_PSK") {
+            Ok(k) => Self::with_psk(k),
+            Err(_) => Self::default(),
         }
     }
 
-    /// Configure the optional resident-principal PSK (config-gated grant).
-    ///
-    /// An empty value is treated as "unset" so a misconfigured blank secret
-    /// can never silently grant `resident_mcp` to every authenticated caller.
-    pub fn with_resident_principal(mut self, principal: Option<String>) -> Self {
-        self.resident_principal = principal.filter(|p| !p.is_empty());
-        self
+    fn has_credentials(&self) -> bool {
+        !self.agents.runtime_psk.is_empty() || !self.agents.agent_psks.is_empty()
     }
 }
 
@@ -235,46 +202,76 @@ fn tools_call_error_result(err: &crate::McpError) -> serde_json::Value {
     })
 }
 
-/// Tool categories per spec §8.1.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ToolClass {
-    /// Accessible to any authenticated caller, no capability required.
-    Guest,
-    /// Requires the `resident_mcp` capability.
-    Resident,
-    /// Unrecognised method.
-    Unknown,
+/// Tools whose params carry a server-set `namespace` (the caller's agent id).
+const NAMESPACED_TOOLS: &[&str] = &[
+    "publish_to_zone",
+    "publish_to_widget",
+    "clear_widget",
+    "publish_to_element",
+    "create_tile",
+];
+
+fn is_known_tool(method: &str) -> bool {
+    matches!(
+        method,
+        "publish_to_zone"
+            | "list_zones"
+            | "list_scene"
+            | "list_elements"
+            | "publish_to_widget"
+            | "list_widgets"
+            | "clear_widget"
+            | "register_widget_asset"
+            | "publish_to_element"
+            | "create_tab"
+            | "create_tile"
+            | "set_content"
+            | "dismiss"
+            | "inject_composer_paste"
+    ) || method.starts_with("portal_projection_")
+        && matches!(
+            method,
+            "portal_projection_list"
+                | "portal_projection_attach"
+                | "portal_projection_publish"
+                | "portal_projection_publish_status"
+                | "portal_projection_get_pending_input"
+                | "portal_projection_acknowledge_input"
+                | "portal_projection_detach"
+                | "portal_projection_cleanup"
+        )
 }
 
-fn classify_tool(method: &str) -> ToolClass {
+/// The permission a call needs, and the allow entry that grants it.
+/// `None` means any authenticated agent may call it.
+fn required_permission(method: &str, params: &serde_json::Value) -> Option<(String, String)> {
+    let str_param = |k: &str| {
+        params
+            .get(k)
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("")
+            .to_string()
+    };
     match method {
-        // Guest tools — unconditionally accessible (auth still required)
-        "publish_to_zone"
-        | "list_zones"
-        | "list_scene"
-        | "list_elements"
-        | "publish_to_widget"
-        | "list_widgets"
-        | "clear_widget"
-        | "register_widget_asset"
-        | "publish_to_element" => ToolClass::Guest,
-        // Resident tools — require resident_mcp capability
-        "create_tab"
-        | "create_tile"
-        | "set_content"
-        | "dismiss"
-        | "inject_composer_paste"
-        // Portal projection tools (hud-bq0gl.2): resident-only to limit access
-        // to trusted callers that already hold the resident_mcp capability.
-        | "portal_projection_list"
-        | "portal_projection_attach"
-        | "portal_projection_publish"
-        | "portal_projection_publish_status"
-        | "portal_projection_get_pending_input"
-        | "portal_projection_acknowledge_input"
-        | "portal_projection_detach"
-        | "portal_projection_cleanup" => ToolClass::Resident,
-        _ => ToolClass::Unknown,
+        "publish_to_zone" => {
+            let zone = str_param("zone_name");
+            Some((format!("publish_zone:{zone}"), format!("zone:{zone}")))
+        }
+        "publish_to_widget" | "clear_widget" => {
+            let widget = str_param("widget_name");
+            Some((
+                format!("publish_widget:{widget}"),
+                format!("widget:{widget}"),
+            ))
+        }
+        "register_widget_asset" => Some(("register_widget_asset".into(), "widget:*".into())),
+        "create_tab" | "create_tile" | "set_content" | "dismiss" => {
+            Some(("create_tiles".into(), "tiles".into()))
+        }
+        m if m == "inject_composer_paste" || m.starts_with("portal_projection_") => {
+            Some(("resident_mcp".into(), "portal".into()))
+        }
+        _ => None,
     }
 }
 
@@ -296,6 +293,9 @@ pub struct McpServer {
     /// the `InProcessPortalDriver`.  When `None`, those tools return an
     /// `Internal` error (authority not wired).
     portal_op_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::portal_op::PortalOp>>,
+    /// Portal owner tokens bound to (agent id, projection id). The model never
+    /// sees them: the server injects them into portal calls by identity.
+    portal_owner_tokens: Arc<std::sync::Mutex<HashMap<(String, String), String>>>,
 }
 
 impl McpServer {
@@ -315,6 +315,7 @@ impl McpServer {
             config: McpConfig::default(),
             paste_inject_tx: None,
             portal_op_tx: None,
+            portal_owner_tokens: Arc::default(),
         }
     }
 
@@ -332,6 +333,7 @@ impl McpServer {
             config: McpConfig::default(),
             paste_inject_tx: None,
             portal_op_tx: None,
+            portal_owner_tokens: Arc::default(),
         }
     }
 
@@ -384,58 +386,12 @@ impl McpServer {
     }
 
     /// Build the per-call [`CallerContext`] from a transport-supplied bearer
-    /// token, applying the config-gated **resident principal** grant (hud-nu65o).
-    ///
-    /// This is the single, auditable place where `resident_mcp` is minted for
-    /// the HTTP transports:
-    ///
-    /// - No bearer token → a guest context (no capabilities).
-    /// - Bearer token present, no resident principal configured (or it is
-    ///   empty) → a plain bearer context (unchanged behaviour; resident tools
-    ///   still return `CAPABILITY_REQUIRED`).
-    /// - Bearer token present, matching the configured resident principal AND
-    ///   the PSK (both constant-time) → a bearer context carrying `resident_mcp`.
-    ///
-    /// PSK authentication is **not** performed here — it is enforced
-    /// independently in [`Self::dispatch`].  Attaching `resident_mcp` only
-    /// grants capability; a caller whose token fails the PSK check is still
-    /// rejected with `Unauthenticated` before any tool runs, so this can never
-    /// weaken auth.
-    ///
-    /// The grant is deliberately tied to a bearer credential that *also* equals
-    /// the PSK.  `dispatch` accepts either the bearer token **or** the in-params
-    /// `_auth` field as valid PSK auth, so granting on a principal match alone
-    /// would let a caller present `Authorization: Bearer <principal>` together
-    /// with body `_auth=<psk>` and reach resident tools off a bearer credential
-    /// that never authenticated (a confused deputy).  In the supported
-    /// single-PSK model `principal == psk`, so this still only requires the one
-    /// operator-listed secret; a *differing* principal simply fails safe (no
-    /// grant) rather than relying on the dispatch auth gate to catch the misuse.
+    /// token. Identity and permissions are resolved in [`Self::dispatch`].
     pub fn caller_context(&self, bearer_token: Option<String>) -> CallerContext {
-        let Some(token) = bearer_token else {
-            return CallerContext::guest();
-        };
-
-        if let Some(principal) = self.config.resident_principal.as_deref() {
-            // `with_resident_principal` already strips empty values, but guard
-            // again so a directly-constructed config cannot grant on "".
-            if !principal.is_empty() {
-                let matches_principal: bool = token.as_bytes().ct_eq(principal.as_bytes()).into();
-                // Require the bearer to also be the PSK so the grant rides only
-                // a credential that genuinely authenticates (see doc above).
-                let bearer_is_psk: bool = self
-                    .config
-                    .pre_shared_key
-                    .as_deref()
-                    .map(|psk| token.as_bytes().ct_eq(psk.as_bytes()).into())
-                    .unwrap_or(false);
-                if matches_principal && bearer_is_psk {
-                    return CallerContext::with_bearer(token).with_resident_mcp();
-                }
-            }
+        match bearer_token {
+            Some(token) => CallerContext::with_bearer(token),
+            None => CallerContext::guest(),
         }
-
-        CallerContext::with_bearer(token)
     }
 
     /// Dispatch a raw JSON-RPC 2.0 request body and return the response body.
@@ -479,7 +435,7 @@ impl McpServer {
         // Constant-time comparison (via `subtle`) prevents timing side-channels.
         // When no PSK is configured, reject immediately with a single warning
         // (avoids emitting two warn entries for the same event).
-        if self.config.pre_shared_key.is_none() {
+        if !self.config.has_credentials() {
             warn!(method = %request.method, "MCP: authentication rejected (no PSK configured)");
             let resp = McpResponse::err(
                 request.id.clone(),
@@ -488,35 +444,27 @@ impl McpServer {
             return serde_json::to_string(&resp).unwrap_or_default();
         }
 
-        let expected = self.config.pre_shared_key.as_deref().unwrap();
-        let bearer_key = ctx.bearer_token.as_deref();
         let param_key = request
             .params
             .as_object()
             .and_then(|o| o.get("_auth"))
-            .and_then(|v| v.as_str());
-
-        let expected_bytes = expected.as_bytes();
-        let authenticated = bearer_key
-            .map(|k| k.as_bytes().ct_eq(expected_bytes).into())
-            .unwrap_or(false)
-            || param_key
-                .map(|k| k.as_bytes().ct_eq(expected_bytes).into())
-                .unwrap_or(false);
-
-        if authenticated {
-            // Authenticated. Strip _auth from params so handlers never
-            // see it (avoids unknown-field errors in typed params structs).
-            if let Some(obj) = request.params.as_object_mut() {
-                obj.remove("_auth");
-            }
-        } else {
+            .and_then(|v| v.as_str())
+            .map(str::to_string);
+        let identity = [ctx.bearer_token.clone(), param_key]
+            .into_iter()
+            .flatten()
+            .find_map(|key| self.config.agents.resolve(&key, "").ok());
+        let Some(identity) = identity else {
             warn!(method = %request.method, "MCP: authentication failed");
             let resp = McpResponse::err(
                 request.id.clone(),
                 JsonRpcError::from(McpError::Unauthenticated),
             );
             return serde_json::to_string(&resp).unwrap_or_default();
+        };
+        // Strip _auth so handlers never see it (typed params reject unknown fields).
+        if let Some(obj) = request.params.as_object_mut() {
+            obj.remove("_auth");
         }
 
         // ── MCP lifecycle + introspection methods ────────────────────────────
@@ -581,32 +529,12 @@ impl McpServer {
             _ => {}
         }
 
-        // ── Auto-grant widget capabilities to authenticated callers ──────────
-        //
-        // PSK-authenticated callers are trusted principals.  Grant
-        // `publish_widget:<name>` for every registered widget instance so
-        // they can publish without per-caller capability configuration.
-        // This keeps the capability gate meaningful (unauthenticated callers
-        // still cannot publish) while avoiding the need for per-widget ACLs
-        // in the v1 single-PSK model.
-        let mut capabilities = ctx.capabilities.clone();
-        {
-            let scene = self.scene.lock().await;
-            for instance_name in scene.widget_registry.instances.keys() {
-                capabilities.push(format!("publish_widget:{instance_name}"));
-            }
-        }
+        debug!(method = %request.method, agent = %identity.agent_id, "MCP: dispatching tool call");
 
-        debug!(method = %request.method, "MCP: dispatching tool call");
-
-        // ── Guest / Resident capability gate (spec §8.1, §8.3) ──────────────
-        let tool_class = classify_tool(&request.method);
-
-        if tool_class == ToolClass::Unknown {
+        if !is_known_tool(&request.method) {
             // Via `tools/call` the METHOD (`tools/call`) exists — it is the tool
             // NAME that is unknown, so return Invalid Params, not Method Not Found
-            // (a raw -32601 would wrongly tell the client `tools/call` is
-            // unsupported). The bare-method path keeps its -32601 (hud-09emd).
+            // (hud-09emd). The bare-method path keeps its -32601.
             let error = if is_tools_call {
                 JsonRpcError::invalid_params(format!("Unknown tool: {}", request.method))
             } else {
@@ -616,23 +544,65 @@ impl McpServer {
             return serde_json::to_string(&resp).unwrap_or_default();
         }
 
-        if tool_class == ToolClass::Resident && !ctx.has_resident_mcp() {
-            // Return structured CAPABILITY_REQUIRED error per spec §8.3.
-            warn!(
-                method = %request.method,
-                "MCP: resident tool called without resident_mcp capability"
-            );
-            let resp = McpResponse::err(
-                request.id.clone(),
-                JsonRpcError::capability_required(&request.method),
-            );
-            return serde_json::to_string(&resp).unwrap_or_default();
+        // ── Allow-list gate: one check per call, at the boundary ────────────
+        let mut capabilities = identity.permissions.clone();
+        if let Some((permission, allow_entry)) =
+            required_permission(&request.method, &request.params)
+        {
+            if !identity.allows(&permission) {
+                warn!(method = %request.method, agent = %identity.agent_id, "MCP: not allowed");
+                let resp = McpResponse::err(
+                    request.id.clone(),
+                    JsonRpcError::not_allowed(&request.method, &identity.agent_id, &allow_entry),
+                );
+                return serde_json::to_string(&resp).unwrap_or_default();
+            }
+            // Tool handlers match exact permission strings.
+            capabilities.push(permission);
+        }
+        if request.method == "publish_to_element" {
+            let scene = self.scene.lock().await;
+            for instance_name in scene.widget_registry.instances.keys() {
+                let permission = format!("publish_widget:{instance_name}");
+                if identity.allows(&permission) {
+                    capabilities.push(permission);
+                }
+            }
         }
 
+        // ── Identity-bound params: namespace and portal owner token ─────────
+        if let Some(obj) = request.params.as_object_mut() {
+            if NAMESPACED_TOOLS.contains(&request.method.as_str()) {
+                obj.insert(
+                    "namespace".into(),
+                    serde_json::Value::String(identity.agent_id.clone()),
+                );
+            }
+            if request.method.starts_with("portal_projection_")
+                && request.method != "portal_projection_attach"
+                && !obj.contains_key("owner_token")
+                && let Some(pid) = obj.get("projection_id").and_then(|v| v.as_str())
+                && let Some(token) = self.portal_owner_tokens.lock().ok().and_then(|m| {
+                    m.get(&(identity.agent_id.clone(), pid.to_string()))
+                        .cloned()
+                })
+            {
+                obj.insert("owner_token".into(), serde_json::Value::String(token));
+            }
+        }
+        let projection_id = request
+            .params
+            .get("projection_id")
+            .and_then(|v| v.as_str())
+            .map(str::to_string);
+
         let id = request.id.clone();
-        let result = self
+        let mut result = self
             .invoke_tool(&request.method, request.params, &capabilities)
             .await;
+        if let (Ok(value), Some(pid)) = (&mut result, projection_id) {
+            self.bind_portal_owner_token(&request.method, &identity.agent_id, &pid, value);
+        }
         if let Ok(value) = &result {
             if request.method == "inject_composer_paste"
                 && value.get("injected").and_then(serde_json::Value::as_bool) == Some(true)
@@ -686,6 +656,36 @@ impl McpServer {
             error!(error = %e, "MCP: failed to serialize response");
             r#"{"jsonrpc":"2.0","error":{"code":-32603,"message":"Internal serialization error"},"id":null}"#.to_string()
         })
+    }
+
+    /// Keep portal owner tokens server-side: remember the token an attach
+    /// returns (and strip it from the reply), forget it on detach/cleanup.
+    fn bind_portal_owner_token(
+        &self,
+        method: &str,
+        agent_id: &str,
+        projection_id: &str,
+        value: &mut serde_json::Value,
+    ) {
+        let Ok(mut tokens) = self.portal_owner_tokens.lock() else {
+            return;
+        };
+        let key = (agent_id.to_string(), projection_id.to_string());
+        match method {
+            "portal_projection_attach" => {
+                if let Some(obj) = value.as_object_mut()
+                    && let Some(serde_json::Value::String(token)) = obj.remove("owner_token")
+                {
+                    tokens.insert(key, token);
+                }
+            }
+            "portal_projection_detach" | "portal_projection_cleanup"
+                if value.get("accepted").and_then(serde_json::Value::as_bool) == Some(true) =>
+            {
+                tokens.remove(&key);
+            }
+            _ => {}
+        }
     }
 
     /// Invoke the named tool with the given parameters.
@@ -1043,10 +1043,9 @@ mod tests {
         CallerContext::with_bearer(psk)
     }
 
-    /// Authenticated resident context (has resident_mcp capability).
+    /// Authenticated context for portal/tile tools (unrestricted test PSK).
     fn resident() -> CallerContext {
-        let psk = std::env::var("MCP_TEST_PSK").unwrap_or_else(|_| TEST_PSK.to_string());
-        CallerContext::with_bearer(psk).with_resident_mcp()
+        guest()
     }
 
     // ── JSON-RPC protocol compliance ─────────────────────────────────────────
@@ -1366,71 +1365,6 @@ mod tests {
     // ── Guest / Resident access control (spec §8.1, §8.3) ───────────────────
 
     #[tokio::test]
-    async fn test_guest_cannot_call_resident_tool_create_tile() {
-        let (server, _) = server_with_tab().await;
-        let raw = server
-            .dispatch(
-                r#"{"jsonrpc":"2.0","method":"create_tile","params":{"namespace":"a","bounds":{"x":0,"y":0,"width":200,"height":200}},"id":10}"#,
-                &guest(),
-            )
-            .await;
-        let resp = parse_response(&raw);
-        // code must be -32603 per spec §8.3
-        assert_eq!(resp["error"]["code"], -32603);
-        assert_eq!(resp["error"]["data"]["error_code"], "CAPABILITY_REQUIRED");
-        assert_eq!(resp["error"]["data"]["context"], "tool=create_tile");
-        assert_eq!(
-            resp["error"]["data"]["hint"]["required_capability"],
-            "resident_mcp"
-        );
-    }
-
-    #[tokio::test]
-    async fn test_guest_cannot_call_resident_tool_portal_projection_cleanup() {
-        let server = test_server(SceneGraph::new(1920.0, 1080.0));
-        let raw = server
-            .dispatch(
-                r#"{"jsonrpc":"2.0","method":"portal_projection_cleanup","params":{"projection_id":"p1","cleanup_authority":"operator","operator_authority":"op","reason":"override"},"id":15}"#,
-                &guest(),
-            )
-            .await;
-        let resp = parse_response(&raw);
-        assert_eq!(resp["error"]["code"], -32603);
-        assert_eq!(resp["error"]["data"]["error_code"], "CAPABILITY_REQUIRED");
-        assert_eq!(
-            resp["error"]["data"]["context"],
-            "tool=portal_projection_cleanup"
-        );
-    }
-
-    #[tokio::test]
-    async fn test_nonresident_callers_cannot_reach_projection_attach_token_issuance() {
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<crate::portal_op::PortalOp>();
-        let server = test_server(SceneGraph::new(1920.0, 1080.0)).with_portal_op_tx(tx);
-        let request = r#"{"jsonrpc":"2.0","method":"portal_projection_attach","params":{"projection_id":"p1","display_name":"Projection","idempotency_key":"stable-key"},"id":15}"#;
-
-        let guest_raw = server.dispatch(request, &guest()).await;
-        let guest_response = parse_response(&guest_raw);
-        assert_eq!(guest_response["error"]["code"], -32603);
-        assert_eq!(
-            guest_response["error"]["data"]["error_code"],
-            "CAPABILITY_REQUIRED"
-        );
-        assert!(matches!(
-            rx.try_recv(),
-            Err(tokio::sync::mpsc::error::TryRecvError::Empty)
-        ));
-
-        let unauthenticated_raw = server.dispatch(request, &CallerContext::guest()).await;
-        let unauthenticated_response = parse_response(&unauthenticated_raw);
-        assert_eq!(unauthenticated_response["error"]["code"], -32004);
-        assert!(matches!(
-            rx.try_recv(),
-            Err(tokio::sync::mpsc::error::TryRecvError::Empty)
-        ));
-    }
-
-    #[tokio::test]
     async fn test_resident_portal_projection_cleanup_dispatches_to_op_channel() {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<crate::portal_op::PortalOp>();
         let server = test_server(SceneGraph::new(1920.0, 1080.0)).with_portal_op_tx(tx);
@@ -1568,6 +1502,52 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn portal_owner_token_is_stripped_from_attach_and_injected_later() {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<crate::portal_op::PortalOp>();
+        let server = test_server(SceneGraph::new(1920.0, 1080.0)).with_portal_op_tx(tx);
+        let responder = tokio::spawn(async move {
+            match rx.recv().await.expect("attach op") {
+                crate::portal_op::PortalOp::Attach { reply, .. } => {
+                    reply.send(Ok("server-held-token".to_string())).unwrap();
+                }
+                other => panic!("unexpected portal op: {other:?}"),
+            }
+            match rx.recv().await.expect("poll op") {
+                crate::portal_op::PortalOp::GetPendingInput {
+                    owner_token, reply, ..
+                } => {
+                    assert_eq!(owner_token, "server-held-token");
+                    reply
+                        .send(Err(crate::portal_op::PortalOpRejection::new(
+                            tze_hud_projection::ProjectionErrorCode::ProjectionUnauthorized,
+                            "stop here",
+                        )))
+                        .unwrap();
+                }
+                other => panic!("unexpected portal op: {other:?}"),
+            }
+        });
+
+        let attach = server
+            .dispatch(
+                r#"{"jsonrpc":"2.0","method":"portal_projection_attach","params":{"projection_id":"p1","display_name":"P1"},"id":1}"#,
+                &resident(),
+            )
+            .await;
+        assert!(
+            !attach.contains("server-held-token"),
+            "attach response must not carry the owner token: {attach}"
+        );
+        server
+            .dispatch(
+                r#"{"jsonrpc":"2.0","method":"portal_projection_get_pending_input","params":{"projection_id":"p1","wait_ms":0},"id":2}"#,
+                &resident(),
+            )
+            .await;
+        responder.await.expect("server injected the bound token");
+    }
+
+    #[tokio::test]
     async fn test_tools_call_projection_unauthorized_keeps_structured_recovery() {
         use tze_hud_projection::ProjectionErrorCode;
 
@@ -1649,68 +1629,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_guest_cannot_call_create_tab() {
-        let server = test_server(SceneGraph::new(1920.0, 1080.0));
-        let raw = server
-            .dispatch(
-                r#"{"jsonrpc":"2.0","method":"create_tab","params":{"name":"X"},"id":11}"#,
-                &guest(),
-            )
-            .await;
-        let resp = parse_response(&raw);
-        assert_eq!(resp["error"]["code"], -32603);
-        assert_eq!(resp["error"]["data"]["error_code"], "CAPABILITY_REQUIRED");
-        assert_eq!(resp["error"]["data"]["context"], "tool=create_tab");
-    }
-
-    #[tokio::test]
-    async fn test_guest_cannot_call_set_content() {
-        let server = test_server(SceneGraph::new(1920.0, 1080.0));
-        let fake_id = SceneId::new().to_string();
-        let req = json!({
-            "jsonrpc": "2.0",
-            "method": "set_content",
-            "params": {"tile_id": fake_id, "content": "hi"},
-            "id": 12
-        });
-        let raw = server.dispatch(&req.to_string(), &guest()).await;
-        let resp = parse_response(&raw);
-        assert_eq!(resp["error"]["code"], -32603);
-        assert_eq!(resp["error"]["data"]["error_code"], "CAPABILITY_REQUIRED");
-    }
-
-    #[tokio::test]
-    async fn test_guest_cannot_call_dismiss() {
-        let server = test_server(SceneGraph::new(1920.0, 1080.0));
-        let fake_id = SceneId::new().to_string();
-        let req = json!({
-            "jsonrpc": "2.0",
-            "method": "dismiss",
-            "params": {"tile_id": fake_id},
-            "id": 13
-        });
-        let raw = server.dispatch(&req.to_string(), &guest()).await;
-        let resp = parse_response(&raw);
-        assert_eq!(resp["error"]["code"], -32603);
-        assert_eq!(resp["error"]["data"]["error_code"], "CAPABILITY_REQUIRED");
-    }
-
-    #[tokio::test]
     async fn test_structured_error_has_hint_field() {
-        let (server, _) = server_with_tab().await;
+        let server = restricted_server();
         let raw = server
             .dispatch(
-                r#"{"jsonrpc":"2.0","method":"create_tile","params":{"namespace":"a","bounds":{"x":0,"y":0,"width":200,"height":200}},"id":14}"#,
-                &guest(),
+                r#"{"jsonrpc":"2.0","method":"create_tile","params":{"bounds":{"x":0,"y":0,"width":200,"height":200}},"id":14}"#,
+                &CallerContext::with_bearer("bot-key"),
             )
             .await;
         let resp = parse_response(&raw);
-        let hint = &resp["error"]["data"]["hint"];
-        assert_eq!(hint["required_capability"], "resident_mcp");
-        assert_eq!(
-            hint["resolution"],
-            "obtain resident_mcp capability via session handshake"
-        );
+        assert_eq!(resp["error"]["data"]["error_code"], "NOT_ALLOWED");
+        let hint = resp["error"]["data"]["hint"]
+            .as_str()
+            .expect("hint is a string");
+        assert!(hint.contains("\"tiles\""), "{hint}");
     }
 
     #[tokio::test]
@@ -1913,166 +1845,82 @@ mod tests {
         );
     }
 
-    // ── Config-gated resident principal (hud-nu65o) ──────────────────────────
-    //
-    // These prove the PSK-gated `resident_mcp` grant: a bearer token matching
-    // the configured resident principal mints `resident_mcp`; the default
-    // (no principal configured) is unchanged; and the grant never bypasses the
-    // independent PSK check in `dispatch`.
+    // ── Identity and allow lists ─────────────────────────────────────────────
 
-    #[tokio::test]
-    async fn test_caller_context_no_resident_principal_is_guest_bearer() {
-        // Default: no resident principal configured → authenticated callers
-        // remain guests (resident tools stay gated).
-        let server =
-            McpServer::new(SceneGraph::new(1920.0, 1080.0)).with_config(McpConfig::with_psk("k"));
-        let ctx = server.caller_context(Some("k".to_string()));
-        assert!(
-            !ctx.has_resident_mcp(),
-            "no resident principal configured must not grant resident_mcp"
-        );
-        assert_eq!(ctx.bearer_token.as_deref(), Some("k"));
+    fn restricted_server() -> McpServer {
+        let mut scene = SceneGraph::new(1920.0, 1080.0);
+        scene.zone_registry = tze_hud_scene::types::ZoneRegistry::with_defaults();
+        let agents = AgentDirectory {
+            runtime_psk: "runtime".into(),
+            agent_psks: [("bot".to_string(), "bot-key".to_string())].into(),
+            permissions: [("bot".to_string(), vec!["publish_zone:subtitle".to_string()])].into(),
+            fallback_permissions: vec![],
+        };
+        McpServer::new(scene).with_config(McpConfig::with_agents(agents))
     }
 
     #[tokio::test]
-    async fn test_caller_context_matching_principal_grants_resident_mcp() {
-        let server = McpServer::new(SceneGraph::new(1920.0, 1080.0))
-            .with_config(McpConfig::with_psk("k").with_resident_principal(Some("k".to_string())));
-        let ctx = server.caller_context(Some("k".to_string()));
-        assert!(
-            ctx.has_resident_mcp(),
-            "bearer token matching resident principal must grant resident_mcp"
-        );
-    }
-
-    #[tokio::test]
-    async fn test_caller_context_nonmatching_token_no_grant() {
-        let server = McpServer::new(SceneGraph::new(1920.0, 1080.0)).with_config(
-            McpConfig::with_psk("k").with_resident_principal(Some("resident-secret".to_string())),
-        );
-        // A token that is not the resident principal gets no capability.
-        let ctx = server.caller_context(Some("k".to_string()));
-        assert!(
-            !ctx.has_resident_mcp(),
-            "non-matching token must not be granted resident_mcp"
-        );
-    }
-
-    #[tokio::test]
-    async fn test_caller_context_no_token_is_guest() {
-        let server = McpServer::new(SceneGraph::new(1920.0, 1080.0))
-            .with_config(McpConfig::with_psk("k").with_resident_principal(Some("k".to_string())));
-        let ctx = server.caller_context(None);
-        assert!(!ctx.has_resident_mcp());
-        assert!(ctx.bearer_token.is_none());
-    }
-
-    #[tokio::test]
-    async fn test_empty_resident_principal_never_grants() {
-        // A blank principal must be treated as unset — it can never grant
-        // resident_mcp to a caller presenting an empty token.
-        let server = McpServer::new(SceneGraph::new(1920.0, 1080.0))
-            .with_config(McpConfig::with_psk("k").with_resident_principal(Some(String::new())));
-        let ctx = server.caller_context(Some(String::new()));
-        assert!(
-            !ctx.has_resident_mcp(),
-            "empty resident principal must never grant resident_mcp"
-        );
-    }
-
-    #[tokio::test]
-    async fn test_resident_principal_reaches_resident_tool_via_dispatch() {
-        // End-to-end: principal == PSK, caller presents it → resident tool
-        // (create_tab) succeeds with no CAPABILITY_REQUIRED.
-        let server = McpServer::new(SceneGraph::new(1920.0, 1080.0))
-            .with_config(McpConfig::with_psk("k").with_resident_principal(Some("k".to_string())));
-        let ctx = server.caller_context(Some("k".to_string()));
+    async fn allowed_zone_publish_succeeds_and_uses_agent_namespace() {
+        let server = restricted_server();
         let raw = server
             .dispatch(
-                r#"{"jsonrpc":"2.0","method":"create_tab","params":{"name":"Resident"},"id":70}"#,
-                &ctx,
+                r#"{"jsonrpc":"2.0","method":"publish_to_zone","params":{"zone_name":"subtitle","content":"hi","namespace":"spoofed"},"id":70}"#,
+                &CallerContext::with_bearer("bot-key"),
             )
             .await;
         let resp = parse_response(&raw);
-        assert!(
-            resp["error"].is_null(),
-            "resident principal must reach resident tool, got: {resp:#}"
+        assert!(resp["error"].is_null(), "{resp:#}");
+        let scene = server.scene.lock().await;
+        let publisher = scene.zone_registry.active_publishes["subtitle"][0]
+            .publisher_namespace
+            .clone();
+        assert_eq!(
+            publisher, "bot",
+            "namespace comes from identity, not params"
         );
-        assert_eq!(resp["result"]["name"], "Resident");
     }
 
     #[tokio::test]
-    async fn test_default_still_gates_resident_tool_via_dispatch() {
-        // No resident principal configured → same caller is gated (unchanged).
-        let server =
-            McpServer::new(SceneGraph::new(1920.0, 1080.0)).with_config(McpConfig::with_psk("k"));
-        let ctx = server.caller_context(Some("k".to_string()));
+    async fn disallowed_tool_returns_not_allowed_with_hint() {
+        let server = restricted_server();
         let raw = server
             .dispatch(
                 r#"{"jsonrpc":"2.0","method":"create_tab","params":{"name":"X"},"id":71}"#,
-                &ctx,
+                &CallerContext::with_bearer("bot-key"),
             )
             .await;
         let resp = parse_response(&raw);
-        assert_eq!(resp["error"]["code"], -32603);
-        assert_eq!(resp["error"]["data"]["error_code"], "CAPABILITY_REQUIRED");
-    }
-
-    #[tokio::test]
-    async fn test_resident_grant_never_bypasses_psk_auth() {
-        // Principal differs from the PSK: because the grant is tied to a bearer
-        // that ALSO equals the PSK, caller_context refuses to mint resident_mcp
-        // off the principal-only token — closing the `_auth` confused deputy
-        // (bearer=<principal> + body _auth=<psk>).  And even with the capability
-        // absent, dispatch still rejects the non-PSK token with Unauthenticated.
-        // PSK auth remains mandatory in every path.
-        let server = McpServer::new(SceneGraph::new(1920.0, 1080.0)).with_config(
-            McpConfig::with_psk("real-psk")
-                .with_resident_principal(Some("resident-token".to_string())),
-        );
-        let ctx = server.caller_context(Some("resident-token".to_string()));
+        assert_eq!(resp["error"]["data"]["error_code"], "NOT_ALLOWED");
+        let hint = resp["error"]["data"]["hint"].as_str().unwrap();
         assert!(
-            !ctx.has_resident_mcp(),
-            "a bearer that is not the PSK must never be granted resident_mcp, \
-             even when it matches a differing resident principal"
-        );
-        let raw = server
-            .dispatch(
-                r#"{"jsonrpc":"2.0","method":"create_tab","params":{"name":"X"},"id":72}"#,
-                &ctx,
-            )
-            .await;
-        let resp = parse_response(&raw);
-        assert_eq!(
-            resp["error"]["code"], -32004,
-            "PSK auth must still reject a token that is not the configured PSK"
+            hint.contains("\"tiles\"") && hint.contains("[agents.bot]"),
+            "{hint}"
         );
     }
 
     #[tokio::test]
-    async fn test_resident_grant_rejects_auth_confused_deputy() {
-        // Directly exercise the confused deputy the hardening closes: a
-        // differing-principal config, bearer=<principal> (not the PSK) plus a
-        // valid body `_auth=<psk>`.  dispatch authenticates via `_auth`, but the
-        // resident grant must NOT ride the non-PSK bearer, so the resident tool
-        // stays gated with CAPABILITY_REQUIRED.
-        let server = McpServer::new(SceneGraph::new(1920.0, 1080.0)).with_config(
-            McpConfig::with_psk("real-psk")
-                .with_resident_principal(Some("resident-token".to_string())),
-        );
-        let ctx = server.caller_context(Some("resident-token".to_string()));
-        assert!(!ctx.has_resident_mcp());
+    async fn runtime_psk_without_agent_table_gets_no_permissions() {
+        let server = restricted_server();
         let raw = server
             .dispatch(
-                r#"{"jsonrpc":"2.0","method":"create_tab","params":{"name":"X","_auth":"real-psk"},"id":73}"#,
-                &ctx,
+                r#"{"jsonrpc":"2.0","method":"publish_to_zone","params":{"zone_name":"subtitle","content":"hi"},"id":72}"#,
+                &CallerContext::with_bearer("runtime"),
             )
             .await;
         let resp = parse_response(&raw);
-        assert_eq!(
-            resp["error"]["data"]["error_code"], "CAPABILITY_REQUIRED",
-            "valid _auth must authenticate but must NOT confer resident_mcp via a non-PSK bearer"
-        );
+        assert_eq!(resp["error"]["data"]["error_code"], "NOT_ALLOWED");
+    }
+
+    #[tokio::test]
+    async fn unknown_psk_is_unauthenticated() {
+        let server = restricted_server();
+        let raw = server
+            .dispatch(
+                r#"{"jsonrpc":"2.0","method":"list_zones","params":{},"id":73}"#,
+                &CallerContext::with_bearer("nope"),
+            )
+            .await;
+        assert_eq!(parse_response(&raw)["error"]["code"], -32004);
     }
 
     #[tokio::test]
@@ -2090,8 +1938,7 @@ mod tests {
         };
 
         let psk = std::env::var("MCP_TEST_PSK").unwrap_or_else(|_| TEST_PSK.to_string());
-        let mut ctx = CallerContext::with_bearer(psk);
-        ctx.capabilities.push("register_widget_asset".to_string());
+        let ctx = CallerContext::with_bearer(psk);
 
         let upload_req = json!({
             "jsonrpc": "2.0",
@@ -2753,7 +2600,10 @@ mod tests {
             .map(|v| v.as_str().unwrap())
             .collect();
         assert!(gpi_required.contains(&"projection_id"));
-        assert!(gpi_required.contains(&"owner_token"));
+        assert!(
+            gpi["properties"]["owner_token"].is_null(),
+            "owner_token is bound server-side, never in model context"
+        );
 
         // AC(3): publish schema includes the output_kind field.
         let pub_schema = &by_name["portal_projection_publish"]["inputSchema"];

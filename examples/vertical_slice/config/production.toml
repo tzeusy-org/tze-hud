@@ -1,9 +1,8 @@
 # Vertical Slice — Production Configuration
 #
 # This is the canonical runtime config for the vertical_slice example.
-# It enforces capability governance: only the registered agent
-# ("vertical-slice-agent") may connect and only with the capability
-# set listed below.  Unknown agents receive guest policy (no capabilities).
+# Only the configured agent ("vertical-slice-agent") gets permissions, from
+# its `allow` list below. Agents without a table get nothing.
 #
 # Usage (headless, production path — no feature flags needed):
 #   cargo run -p vertical_slice -- --headless
@@ -18,16 +17,8 @@ profile = "headless"
 name = "Main"
 default_tab = true
 
-[agents.registered.vertical-slice-agent]
-# Canonical v1 capability vocabulary (configuration/spec.md §Capability Vocabulary).
-# Only these capabilities are granted to this agent; all others are denied.
-capabilities = [
-    "create_tiles",
-    "modify_own_tiles",
-    "access_input_events",
-    "read_scene_topology",
-    "publish_zone:status-bar",
-]
+[agents.vertical-slice-agent]
+allow = ["tiles", "zone:status-bar"]
 
 # Design tokens: overrides of the canonical defaults, shared by every zone,
 # widget SVG, and the portal.

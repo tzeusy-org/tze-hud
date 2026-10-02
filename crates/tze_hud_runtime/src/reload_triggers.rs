@@ -73,8 +73,8 @@ impl RuntimeService for RuntimeServiceImpl {
     /// Reload hot-reloadable config sections from a new TOML string.
     ///
     /// Per RFC 0006 §9: the entire config is re-validated; only the
-    /// hot-reloadable sections ([agents.dynamic_policy]) are applied on success. Frozen sections
-    /// ([runtime], [[tabs]], [agents.registered]) are silently ignored.
+    /// hot-reloadable sections (currently none) are applied on success. Frozen sections
+    /// ([runtime], [[tabs]], [agents]) are silently ignored.
     async fn reload_config(
         &self,
         request: Request<ReloadConfigRequest>,
@@ -244,8 +244,6 @@ mod tests {
     use super::*;
     use crate::runtime_context::RuntimeContext;
     use std::sync::Arc;
-    use tze_hud_config::HotReloadableConfig;
-    use tze_hud_config::raw::RawDynamicPolicy;
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -262,8 +260,6 @@ profile = "headless"
 name = "Main"
 default_tab = true
 
-[agents.dynamic_policy]
-allow_dynamic_agents = true
 "#
         .to_string()
     }
@@ -299,13 +295,6 @@ name = "Main"
         let svc = RuntimeServiceImpl::new(Arc::clone(&ctx));
 
         // Before reload: defaults (all None).
-        assert!(
-            ctx.hot_config()
-                .dynamic_policy
-                .as_ref()
-                .map(|p| p.allow_dynamic_agents)
-                .is_none()
-        );
 
         let req = Request::new(ReloadConfigRequest {
             config_toml: valid_toml(),
@@ -324,14 +313,6 @@ name = "Main"
         assert!(body.reloaded_at_wall_us > 0, "timestamp must be set");
 
         // After reload: new value is visible.
-        assert_eq!(
-            ctx.hot_config()
-                .dynamic_policy
-                .as_ref()
-                .map(|p| p.allow_dynamic_agents),
-            Some(true),
-            "hot-reloadable section must be applied"
-        );
     }
 
     // ── RuntimeServiceImpl: parse error path ─────────────────────────────────
@@ -341,22 +322,6 @@ name = "Main"
     #[tokio::test]
     async fn reload_config_rpc_invalid_toml_returns_errors_without_applying() {
         let ctx = make_ctx();
-
-        // Set a known hot config value before the failed reload.
-        ctx.reload_hot_config(HotReloadableConfig {
-            dynamic_policy: Some(RawDynamicPolicy {
-                allow_dynamic_agents: true,
-                ..Default::default()
-            }),
-        });
-        assert_eq!(
-            ctx.hot_config()
-                .dynamic_policy
-                .as_ref()
-                .map(|p| p.allow_dynamic_agents),
-            Some(true),
-            "setup: initial hot config should be applied"
-        );
 
         let svc = RuntimeServiceImpl::new(Arc::clone(&ctx));
         let req = Request::new(ReloadConfigRequest {
@@ -375,14 +340,6 @@ name = "Main"
         );
 
         // Running config must be unchanged.
-        assert_eq!(
-            ctx.hot_config()
-                .dynamic_policy
-                .as_ref()
-                .map(|p| p.allow_dynamic_agents),
-            Some(true),
-            "running config must NOT be modified on parse failure"
-        );
     }
 
     // ── RuntimeServiceImpl: validation error path ────────────────────────────
@@ -410,14 +367,6 @@ name = "Main"
         );
 
         // Running config is still default.
-        assert!(
-            ctx.hot_config()
-                .dynamic_policy
-                .as_ref()
-                .map(|p| p.allow_dynamic_agents)
-                .is_none(),
-            "running config must remain default after validation failure"
-        );
     }
 
     // ── RuntimeServiceImpl: timestamp ────────────────────────────────────────
@@ -465,14 +414,6 @@ name = "Main"
         use std::io::Write;
 
         let ctx = Arc::new(RuntimeContext::headless_default());
-        assert!(
-            ctx.hot_config()
-                .dynamic_policy
-                .as_ref()
-                .map(|p| p.allow_dynamic_agents)
-                .is_none(),
-            "initial defaults"
-        );
 
         // Write a valid config file to a temp path.
         let tmp = std::env::temp_dir().join("tze_hud_sighup_test_config.toml");
@@ -483,8 +424,6 @@ profile = "headless"
 [[tabs]]
 name = "Main"
 
-[agents.dynamic_policy]
-allow_dynamic_agents = true
 "#;
         {
             let mut f = std::fs::File::create(&tmp).expect("create temp file");
@@ -498,15 +437,6 @@ allow_dynamic_agents = true
                 ctx_clone.reload_hot_config(hot);
             })
             .expect("trigger_reload must succeed with valid config");
-
-        assert_eq!(
-            ctx.hot_config()
-                .dynamic_policy
-                .as_ref()
-                .map(|p| p.allow_dynamic_agents),
-            Some(true),
-            "after SIGHUP-triggered reload, hot config must be updated"
-        );
 
         let _ = std::fs::remove_file(&tmp);
     }

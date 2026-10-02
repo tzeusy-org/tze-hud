@@ -89,7 +89,6 @@ async fn perform_handshake_with_input(
         timestamp_wall_us: now_wall_us(),
         payload: Some(ClientPayload::SessionInit(SessionInit {
             agent_id: agent_id.to_string(),
-            requested_capabilities: vec!["access_input_events".to_string()],
             initial_subscriptions: vec!["INPUT_EVENTS".to_string()],
             resume_token: Vec::new(),
             min_protocol_version: 1000,
@@ -129,7 +128,6 @@ async fn perform_handshake_no_input(
         payload: Some(ClientPayload::SessionInit(SessionInit {
             agent_id: agent_id.to_string(),
             // No capabilities → no input events.
-            requested_capabilities: vec![],
             initial_subscriptions: vec![],
             resume_token: Vec::new(),
             min_protocol_version: 1000,

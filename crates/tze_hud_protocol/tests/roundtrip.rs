@@ -891,10 +891,6 @@ fn roundtrip_event_batch() {
 fn roundtrip_session_init_all_fields() {
     let orig = SessionInit {
         agent_id: "weather-agent".to_string(),
-        requested_capabilities: vec![
-            "resident_mcp".to_string(),
-            "read_scene_topology".to_string(),
-        ],
         initial_subscriptions: vec!["SCENE_TOPOLOGY".to_string()],
         resume_token: vec![],
         min_protocol_version: 1000,
@@ -907,7 +903,6 @@ fn roundtrip_session_init_all_fields() {
     };
     let decoded = round_trip(&orig);
     assert_eq!(orig.agent_id, decoded.agent_id);
-    assert_eq!(orig.requested_capabilities, decoded.requested_capabilities);
     assert_eq!(orig.min_protocol_version, decoded.min_protocol_version);
     assert_eq!(orig.max_protocol_version, decoded.max_protocol_version);
     match &decoded.auth_credential {
@@ -924,12 +919,10 @@ fn roundtrip_session_init_empty_capabilities() {
     // WHEN SessionInit has empty requested_capabilities THEN valid (no capabilities requested)
     let orig = SessionInit {
         agent_id: "guest-agent".to_string(),
-        requested_capabilities: vec![],
         initial_subscriptions: vec![],
         ..Default::default()
     };
     let decoded = round_trip(&orig);
-    assert!(decoded.requested_capabilities.is_empty());
     assert_eq!(decoded.agent_id, "guest-agent");
 }
 
@@ -963,7 +956,6 @@ fn roundtrip_session_established() {
     let orig = SessionEstablished {
         session_id: vec![0u8; 16],
         namespace: "weather-agent".to_string(),
-        granted_capabilities: vec!["resident_mcp".to_string()],
         resume_token: vec![0xFF; 16],
         heartbeat_interval_ms: 5000,
         server_sequence: 1,
@@ -1019,7 +1011,6 @@ fn roundtrip_session_resume_result() {
         new_session_token: vec![0xAB; 16],
         new_server_sequence: 42,
         negotiated_protocol_version: 1001,
-        granted_capabilities: vec!["resident_mcp".to_string()],
         active_subscriptions: vec!["DEGRADATION_NOTICES".to_string()],
         denied_subscriptions: vec![],
     };
@@ -1088,21 +1079,14 @@ fn roundtrip_mutation_batch() {
 
 #[test]
 fn roundtrip_lease_request_response() {
-    let req = LeaseRequest {
-        ttl_ms: 30_000,
-        capabilities: vec!["resident_mcp".to_string()],
-        lease_priority: 2,
-    };
+    let req = LeaseRequest { ttl_ms: 30_000 };
     let d_req = round_trip(&req);
     assert_eq!(d_req.ttl_ms, 30_000);
-    assert_eq!(d_req.lease_priority, 2);
 
     let resp = LeaseResponse {
         granted: true,
         lease_id: vec![0xDE; 16],
         granted_ttl_ms: 30_000,
-        granted_priority: 2,
-        granted_capabilities: vec!["resident_mcp".to_string()],
         deny_reason: String::new(),
         deny_code: String::new(),
         result: LeaseResult::Granted as i32,

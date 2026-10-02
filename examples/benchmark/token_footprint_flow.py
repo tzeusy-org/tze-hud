@@ -159,12 +159,10 @@ def main():
             "hud_target": "default",
         },
     )
-    owner_token = attach["owner_token"]
     invoke_portal_tool(
         "portal_projection_publish",
         {
             "projection_id": "token-calibration-portal",
-            "owner_token": owner_token,
             "output_text": "Canonical append-only portal payload.",
             "logical_unit_id": "token-calibration-output-0001",
             "output_kind": "assistant",
@@ -176,7 +174,6 @@ def main():
         "portal_projection_get_pending_input",
         {
             "projection_id": "token-calibration-portal",
-            "owner_token": owner_token,
             "max_items": 1,
             "max_bytes": 4096,
             "wait_ms": 1_000,
@@ -187,7 +184,6 @@ def main():
         "portal_projection_acknowledge_input",
         {
             "projection_id": "token-calibration-portal",
-            "owner_token": owner_token,
             "input_id": input_id,
             "ack_state": "handled",
             "ack_message": "Canonical input handled.",

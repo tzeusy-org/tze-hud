@@ -638,11 +638,11 @@ name = "T"
     );
 }
 
-// ── Spec §Capability Vocabulary ───────────────────────────────────────────────
+// ── Agent allow lists ─────────────────────────────────────────────────────────
 
-/// WHEN non-canonical capability in agent config THEN CONFIG_UNKNOWN_CAPABILITY.
+/// WHEN an agent lists an unknown allow entry THEN CONFIG error with a hint.
 #[test]
-fn spec_unknown_capability_rejected() {
+fn unknown_allow_entry_rejected_with_hint() {
     let toml = r#"
 [runtime]
 profile = "full-display"
@@ -650,24 +650,21 @@ profile = "full-display"
 [[tabs]]
 name = "Main"
 
-[agents.registered.agent_a]
-capabilities = ["createTiles"]
+[agents.agent_a]
+allow = ["create_tiles"]
 "#;
-    let loader = parse_ok(toml);
-    let errors = loader.validate();
-    let has_cap_error = errors
+    let errors = TzeHudConfig::parse(toml).unwrap().validate();
+    let err = errors
         .iter()
-        .any(|e| matches!(e.code, ConfigErrorCode::UnknownCapability));
-    assert!(
-        has_cap_error,
-        "non-canonical capability 'createTiles' should produce UNKNOWN_CAPABILITY"
-    );
+        .find(|e| matches!(e.code, ConfigErrorCode::UnknownAllowEntry))
+        .expect("unknown allow entry should be rejected");
+    assert_eq!(err.field_path, "agents.agent_a.allow");
+    assert!(err.hint.contains("valid entries"), "{}", err.hint);
 }
 
-/// WHEN canonical capabilities ["create_tiles", "publish_zone:subtitle", "lease:priority:1"]
-/// THEN accepted (spec scenario lines 155-156).
+/// WHEN agents list valid allow entries THEN freeze expands them to permissions.
 #[test]
-fn spec_valid_canonical_capability_list_accepted() {
+fn valid_allow_list_freezes_to_permissions() {
     let toml = r#"
 [runtime]
 profile = "full-display"
@@ -675,24 +672,24 @@ profile = "full-display"
 [[tabs]]
 name = "Main"
 
-[agents.registered.agent_a]
-capabilities = ["create_tiles", "publish_zone:subtitle", "lease:priority:1"]
+[agents.agent_a]
+psk_env = "AGENT_A_PSK"
+allow = ["zone:subtitle", "widget:*", "portal", "tiles"]
 "#;
-    let loader = parse_ok(toml);
-    let errors = loader.validate();
-    let cap_errors: Vec<_> = errors
-        .iter()
-        .filter(|e| matches!(e.code, ConfigErrorCode::UnknownCapability))
-        .collect();
-    assert!(
-        cap_errors.is_empty(),
-        "canonical capability list should produce no errors, got: {cap_errors:?}"
-    );
+    let loader = TzeHudConfig::parse(toml).unwrap();
+    assert!(loader.validate().is_empty());
+    let resolved = loader.freeze().expect("freeze");
+    let perms = &resolved.agent_capabilities["agent_a"];
+    assert!(perms.contains(&"publish_zone:subtitle".to_string()));
+    assert!(perms.contains(&"publish_widget:*".to_string()));
+    assert!(perms.contains(&"resident_mcp".to_string()));
+    assert!(perms.contains(&"create_tiles".to_string()));
+    assert_eq!(resolved.agent_psk_env["agent_a"], "AGENT_A_PSK");
 }
 
-/// WHEN createTiles (camelCase) used THEN error hint mentions create_tiles.
+/// WHEN a config still uses the removed `[agents.registered]` form THEN parse fails.
 #[test]
-fn spec_unknown_capability_hint_mentions_canonical_match() {
+fn legacy_registered_agents_form_is_rejected() {
     let toml = r#"
 [runtime]
 profile = "full-display"
@@ -700,141 +697,10 @@ profile = "full-display"
 [[tabs]]
 name = "Main"
 
-[agents.registered.agent_a]
-capabilities = ["createTiles"]
+[agents.agent_a]
+capabilities = ["create_tiles"]
 "#;
-    let loader = parse_ok(toml);
-    let errors = loader.validate();
-    let cap_error = errors
-        .iter()
-        .find(|e| matches!(e.code, ConfigErrorCode::UnknownCapability))
-        .expect("should have UNKNOWN_CAPABILITY error");
-    assert!(
-        cap_error.hint.contains("create_tiles"),
-        "hint should suggest create_tiles, got: {:?}",
-        cap_error.hint
-    );
-}
-
-/// WHEN legacy name read_scene used THEN CONFIG_UNKNOWN_CAPABILITY with hint for read_scene_topology.
-#[test]
-fn spec_legacy_read_scene_rejected_with_hint() {
-    let toml = r#"
-[runtime]
-profile = "full-display"
-
-[[tabs]]
-name = "Main"
-
-[agents.registered.agent_a]
-capabilities = ["read_scene"]
-"#;
-    let loader = parse_ok(toml);
-    let errors = loader.validate();
-    let cap_error = errors
-        .iter()
-        .find(|e| matches!(e.code, ConfigErrorCode::UnknownCapability))
-        .expect("should have UNKNOWN_CAPABILITY error for legacy read_scene");
-    assert!(
-        cap_error.hint.contains("read_scene_topology"),
-        "hint should point to canonical replacement, got: {:?}",
-        cap_error.hint
-    );
-}
-
-/// WHEN legacy name receive_input used THEN CONFIG_UNKNOWN_CAPABILITY with hint for access_input_events.
-#[test]
-fn spec_legacy_receive_input_rejected_with_hint() {
-    let toml = r#"
-[runtime]
-profile = "full-display"
-
-[[tabs]]
-name = "Main"
-
-[agents.registered.agent_a]
-capabilities = ["receive_input"]
-"#;
-    let loader = parse_ok(toml);
-    let errors = loader.validate();
-    let cap_error = errors
-        .iter()
-        .find(|e| matches!(e.code, ConfigErrorCode::UnknownCapability))
-        .expect("should have UNKNOWN_CAPABILITY error for legacy receive_input");
-    assert!(
-        cap_error.hint.contains("access_input_events"),
-        "hint should point to canonical replacement, got: {:?}",
-        cap_error.hint
-    );
-}
-
-/// WHEN legacy name zone_publish used THEN CONFIG_UNKNOWN_CAPABILITY with hint for publish_zone.
-#[test]
-fn spec_legacy_zone_publish_rejected_with_hint() {
-    let toml = r#"
-[runtime]
-profile = "full-display"
-
-[[tabs]]
-name = "Main"
-
-[agents.registered.agent_a]
-capabilities = ["zone_publish"]
-"#;
-    let loader = parse_ok(toml);
-    let errors = loader.validate();
-    let cap_error = errors
-        .iter()
-        .find(|e| matches!(e.code, ConfigErrorCode::UnknownCapability))
-        .expect("should have UNKNOWN_CAPABILITY error for legacy zone_publish");
-    assert!(
-        cap_error.hint.contains("publish_zone"),
-        "hint should point to canonical replacement, got: {:?}",
-        cap_error.hint
-    );
-}
-
-/// WHEN all flat canonical capabilities in agent config THEN no errors.
-#[test]
-fn spec_all_flat_canonical_capabilities_accepted() {
-    let caps = [
-        "create_tiles",
-        "modify_own_tiles",
-        "manage_tabs",
-        "upload_resource",
-        "register_widget_asset",
-        "read_scene_topology",
-        "access_input_events",
-        "read_telemetry",
-        "resident_mcp",
-    ];
-    let cap_list = caps
-        .iter()
-        .map(|c| format!("{c:?}"))
-        .collect::<Vec<_>>()
-        .join(", ");
-    let toml = format!(
-        r#"
-[runtime]
-profile = "full-display"
-
-[[tabs]]
-name = "Main"
-
-[agents.registered.agent_a]
-capabilities = [{cap_list}]
-"#
-    );
-    let loader = parse_ok(&toml);
-    let errors = loader.validate();
-    let cap_errors: Vec<_> = errors
-        .iter()
-        .filter(|e| matches!(e.code, ConfigErrorCode::UnknownCapability))
-        .collect();
-    assert!(
-        cap_errors.is_empty(),
-        "all flat canonical capabilities should be accepted, got errors: {cap_errors:?}"
-    );
+    assert!(TzeHudConfig::parse(toml).is_err());
 }
 
 // ── freeze / ResolvedConfig ───────────────────────────────────────────────────
@@ -1046,7 +912,7 @@ profile = "full-display"
 [[tabs]]
 name = "Main"
 
-[agents.registered.my_agent]
+[agents.my_agent]
 max_tiles = 4
 "#;
     let loader = parse_ok(toml);
@@ -1070,7 +936,7 @@ profile = "full-display"
 [[tabs]]
 name = "Main"
 
-[agents.registered.my_agent]
+[agents.my_agent]
 max_tiles = 4
 max_texture_mb = 32
 max_update_hz = 10
@@ -1097,7 +963,7 @@ profile = "full-display"
 [[tabs]]
 name = "Main"
 
-[agents.registered.big_agent]
+[agents.big_agent]
 max_tiles = 2048
 "#;
     let loader = parse_ok(toml);
@@ -1132,59 +998,24 @@ max_tiles = 2048
     );
 }
 
-// ── Spec §Dynamic Agent Policy (rig-mop4) ────────────────────────────────────
+// ── Agent PSK indirection ────────────────────────────────────────────────────
 
-/// WHEN no [agents.dynamic_policy] section present THEN connections from
-/// unregistered agents rejected (dynamic_agents_allowed = false).
+/// WHEN an agent sets psk_env and the variable is unset THEN a warning is produced.
 #[test]
-fn spec_no_dynamic_policy_dynamic_agents_disabled() {
-    use crate::agents::dynamic_agents_allowed;
-    use crate::raw::RawAgents;
-
-    let agents = RawAgents::default();
-    assert!(
-        !dynamic_agents_allowed(&agents),
-        "no [agents.dynamic_policy] should mean dynamic agents are disabled"
-    );
-}
-
-// ── Spec §Authentication Secret Indirection (rig-mop4) ───────────────────────
-
-/// WHEN agent sets auth_psk_env and env var is unset THEN warning logged.
-#[test]
-fn spec_auth_psk_unset_env_produces_warning() {
-    use crate::agents::check_agent_auth_env_vars_with_lookup;
-    use crate::raw::{RawAgents, RawRegisteredAgent};
+fn agent_psk_unset_env_produces_warning() {
+    use crate::agents::resolve_agent_psks_with_lookup;
     use std::collections::HashMap;
 
-    let env_var = "SPEC_TEST_AGENT_KEY_UNSET_MOP4_ABC999";
-
-    let mut registered = HashMap::new();
-    registered.insert(
-        "spec_agent".to_string(),
-        RawRegisteredAgent {
-            auth_psk_env: Some(env_var.into()),
-            ..Default::default()
-        },
-    );
-    let agents = RawAgents {
-        registered: Some(registered),
-        ..Default::default()
-    };
-    // Use mock env lookup to avoid unsafe env mutation.
-    let mock_lookup = |_var_name: &str| -> Option<String> { None };
-    let warnings = check_agent_auth_env_vars_with_lookup(&agents, mock_lookup);
-    assert!(
-        !warnings.is_empty(),
-        "unset auth_psk_env should produce a warning"
-    );
-    assert_eq!(warnings[0].env_var_name, env_var);
+    let env: HashMap<String, String> =
+        [("spec_agent".to_string(), "SPEC_AGENT_PSK".to_string())].into();
+    let (psks, warnings) = resolve_agent_psks_with_lookup(&env, |_| None);
+    assert!(psks.is_empty());
+    assert_eq!(warnings[0].env_var_name, "SPEC_AGENT_PSK");
 }
 
 // ── Spec §Configuration Reload (rig-mop4) ────────────────────────────────────
 
-/// WHEN SIGHUP received and updated config changes a hot-reloadable section THEN
-/// the new value takes effect without restart.
+/// WHEN SIGHUP received with a valid config THEN the reload succeeds.
 #[test]
 fn spec_reload_hot_section_change() {
     use crate::reload::reload_config;
@@ -1196,17 +1027,11 @@ profile = "full-display"
 [[tabs]]
 name = "Main"
 
-[agents.dynamic_policy]
-allow_dynamic_agents = true
+[agents.claude]
+allow = ["*"]
 "#;
     let result = reload_config(new_toml);
     assert!(result.is_ok(), "valid reload config should succeed");
-    let hot = result.unwrap();
-    assert_eq!(
-        hot.dynamic_policy.as_ref().map(|p| p.allow_dynamic_agents),
-        Some(true),
-        "reload should apply new degradation threshold"
-    );
 }
 
 /// WHEN SIGHUP received and updated config has validation errors THEN
@@ -1253,7 +1078,7 @@ profile = "full-display"
 [[tabs]]
 name = "Main"
 
-[agents.registered.agent_a]
+[agents.agent_a]
 max_update_hz = 30
 "#;
     let loader = parse_ok(toml);
@@ -1281,7 +1106,7 @@ profile = "full-display"
 [[tabs]]
 name = "Main"
 
-[agents.registered.agent_a]
+[agents.agent_a]
 max_update_hz = 120
 "#;
     let loader = parse_ok(toml);
@@ -1322,7 +1147,7 @@ profile = "full-display"
 [[tabs]]
 name = "Main"
 
-[agents.registered.agent_a]
+[agents.agent_a]
 max_update_hz = 60
 "#;
     let loader = parse_ok(toml);
@@ -1350,7 +1175,7 @@ profile = "headless"
 [[tabs]]
 name = "Main"
 
-[agents.registered.ci_agent]
+[agents.ci_agent]
 max_update_hz = 60
 "#;
     let loader = parse_ok(toml);
@@ -1375,7 +1200,7 @@ profile = "headless"
 [[tabs]]
 name = "Main"
 
-[agents.registered.ci_agent]
+[agents.ci_agent]
 max_update_hz = 61
 "#;
     let loader = parse_ok(toml);
@@ -1467,7 +1292,7 @@ max_agent_update_hz = 30
 [[tabs]]
 name = "Main"
 
-[agents.registered.fast_agent]
+[agents.fast_agent]
 max_update_hz = 45
 "#;
     let loader = parse_ok(toml);

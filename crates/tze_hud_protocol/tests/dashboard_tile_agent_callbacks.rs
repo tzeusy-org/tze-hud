@@ -110,11 +110,6 @@ async fn perform_handshake(
         payload: Some(ClientPayload::SessionInit(SessionInit {
             agent_id: agent_id.to_string(),
             // access_input_events capability gates INPUT_EVENTS subscription.
-            requested_capabilities: vec![
-                "create_tiles".to_string(),
-                "modify_own_tiles".to_string(),
-                "access_input_events".to_string(),
-            ],
             // Subscribe to INPUT_EVENTS at handshake time so ClickEvent /
             // CommandInputEvent batches are delivered without a follow-up
             // SubscriptionChange round-trip.
@@ -157,11 +152,7 @@ async fn acquire_lease(
     tx.send(ClientMessage {
         sequence,
         timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::LeaseRequest(LeaseRequest {
-            ttl_ms: 60_000,
-            capabilities: vec!["create_tiles".to_string(), "modify_own_tiles".to_string()],
-            lease_priority: 2,
-        })),
+        payload: Some(ClientPayload::LeaseRequest(LeaseRequest { ttl_ms: 60_000 })),
     })
     .await
     .unwrap();
@@ -744,7 +735,6 @@ async fn event_batch_not_delivered_without_input_events_subscription() {
         payload: Some(ClientPayload::SessionInit(SessionInit {
             agent_id: "no-input-sub-agent".to_string(),
             // No access_input_events → INPUT_EVENTS subscription not available.
-            requested_capabilities: vec!["create_tiles".to_string()],
             initial_subscriptions: vec![],
             resume_token: Vec::new(),
             min_protocol_version: 1000,

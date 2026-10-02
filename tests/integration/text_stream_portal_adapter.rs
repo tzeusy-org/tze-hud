@@ -316,7 +316,6 @@ impl PortalAdapter for RelayChatAdapter {
 struct AgentSession {
     session_id: Vec<u8>,
     namespace: String,
-    granted_capabilities: Vec<String>,
     lease_id: Vec<u8>,
     tx: tokio::sync::mpsc::Sender<session_proto::ClientMessage>,
     rx: tonic::codec::Streaming<session_proto::ServerMessage>,
@@ -452,10 +451,6 @@ async fn connect_agent(
         payload: Some(session_proto::client_message::Payload::SessionInit(
             session_proto::SessionInit {
                 agent_id: agent_id.to_string(),
-                requested_capabilities: vec![
-                    "create_tiles".to_string(),
-                    "modify_own_tiles".to_string(),
-                ],
                 initial_subscriptions: vec!["SCENE_TOPOLOGY".to_string()],
                 resume_token: Vec::new(),
                 min_protocol_version: RUNTIME_MIN_VERSION,
@@ -469,9 +464,9 @@ async fn connect_agent(
     let mut rx = client.session(stream).await?.into_inner();
 
     let established = rx.next().await.ok_or("missing SessionEstablished")??;
-    let (session_id, namespace, granted_capabilities) = match established.payload {
+    let (session_id, namespace) = match established.payload {
         Some(session_proto::server_message::Payload::SessionEstablished(est)) => {
-            (est.session_id, est.namespace, est.granted_capabilities)
+            (est.session_id, est.namespace)
         }
         other => {
             return Err(format!("expected SessionEstablished, got: {other:?}").into());
@@ -495,11 +490,7 @@ async fn connect_agent(
         sequence: 2,
         timestamp_wall_us: now_wall_us(),
         payload: Some(session_proto::client_message::Payload::LeaseRequest(
-            session_proto::LeaseRequest {
-                ttl_ms: 120_000,
-                capabilities: vec!["create_tiles".to_string(), "modify_own_tiles".to_string()],
-                lease_priority: 2,
-            },
+            session_proto::LeaseRequest { ttl_ms: 120_000 },
         )),
     })
     .await?;
@@ -507,7 +498,6 @@ async fn connect_agent(
     let mut session = AgentSession {
         session_id,
         namespace,
-        granted_capabilities,
         lease_id: Vec::new(),
         tx,
         rx,
@@ -1052,7 +1042,9 @@ async fn cooperative_projection_resident_grpc_adapter_drives_projected_portal_li
         HudConnectionMetadata {
             connection_id: "resident-grpc-headless".to_string(),
             authenticated_session_id: bytes_hex(&session.session_id),
-            granted_capabilities: session.granted_capabilities.clone(),
+            // The runtime no longer reports grants; the test agent runs
+            // unrestricted (no config), so it holds at least these.
+            granted_capabilities: vec!["create_tiles".to_string(), "modify_own_tiles".to_string()],
             connected_at_wall_us: 12,
             last_reconnect_wall_us: 12,
         },

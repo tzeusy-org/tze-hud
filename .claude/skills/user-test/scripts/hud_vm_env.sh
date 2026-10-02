@@ -7,7 +7,7 @@
 # Usage:
 #   eval "$(.claude/skills/user-test/scripts/hud_vm_env.sh)"
 #     -> exports TZE_HUD_TEST_HOST, HUD_MCP_URL, HUD_MCP_PSK, MCP_TEST_PSK,
-#        TZE_HUD_MCP_RESIDENT_PRINCIPAL (all skills' expected env names)
+#        TZE_HUD_PSK (all skills' expected env names)
 #   hud_vm_env.sh --host-only   -> print the bare IP
 #
 # Self-heal ladder (each step only if needed):
@@ -105,4 +105,4 @@ echo "export TZE_HUD_TEST_HOST='$ip'"
 echo "export HUD_MCP_URL='http://$ip:$MCP_PORT'"
 echo "export HUD_MCP_PSK='$psk'"
 echo "export MCP_TEST_PSK='$psk'"
-echo "export TZE_HUD_MCP_RESIDENT_PRINCIPAL='$psk'"
+echo "export TZE_HUD_PSK='$psk'"

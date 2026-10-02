@@ -94,13 +94,32 @@ async fn next_server_msg(
     stream.next().await.unwrap().unwrap()
 }
 
+/// Agents whose `allow` list is deliberately narrow, for the denial tests.
+/// Every other agent id falls back to unrestricted (no `[agents]` configured).
+fn restricted_test_agents() -> HashMap<String, Vec<String>> {
+    let agents: [(&str, &[&str]); 4] = [
+        ("no-input-agent", &["create_tiles", "read_scene_topology"]),
+        ("widget-no-cap-agent", &["create_tiles"]),
+        ("asset-no-cap", &["create_tiles"]),
+        ("resource-no-cap", &["create_tiles"]),
+    ];
+    agents
+        .into_iter()
+        .map(|(id, perms)| {
+            let perms = perms.iter().map(|p| p.to_string()).collect();
+            (id.to_string(), perms)
+        })
+        .collect()
+}
+
 /// Start a test server and return a connected client.
 async fn setup_test() -> (
     HudSessionClient<tonic::transport::Channel>,
     tokio::task::JoinHandle<()>,
 ) {
     let scene = SceneGraph::new(800.0, 600.0);
-    let service = HudSessionImpl::new(scene, "test-key");
+    let service =
+        HudSessionImpl::new(scene, "test-key").with_agent_permissions(restricted_test_agents());
 
     let listener = tokio::net::TcpListener::bind("[::1]:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -155,7 +174,6 @@ fn direct_handler_test_session(namespace: &str, capabilities: Vec<String>) -> St
         session_id: format!("{namespace}-direct-handler"),
         namespace: namespace.to_string(),
         agent_name: namespace.to_string(),
-        policy_capabilities: capabilities.clone(),
         capabilities,
         lease_ids: Vec::new(),
         scene_session_id: SceneId::new(),
@@ -197,11 +215,7 @@ async fn short_ttl_expiry_reaches_owning_connected_agent_once_after_cleanup() {
     tx.send(ClientMessage {
         sequence: 2,
         timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::LeaseRequest(LeaseRequest {
-            ttl_ms: 1,
-            capabilities: vec!["create_tiles".to_string()],
-            lease_priority: 2,
-        })),
+        payload: Some(ClientPayload::LeaseRequest(LeaseRequest { ttl_ms: 1 })),
     })
     .await
     .unwrap();
@@ -327,11 +341,7 @@ async fn successful_lease_grant_wakes_before_capacity_one_response_send() {
         &mut session,
         &outbound_tx,
         2,
-        LeaseRequest {
-            ttl_ms: 60_000,
-            capabilities: vec!["create_tiles".to_string()],
-            lease_priority: 2,
-        },
+        LeaseRequest { ttl_ms: 60_000 },
         &render_wake,
     );
     tokio::pin!(grant);
@@ -472,40 +482,6 @@ async fn successful_mutation_apply_wakes_before_capacity_one_response_send() {
             ..
         }))
     ));
-}
-
-/// Start a test server with explicit agent capability policy settings.
-async fn setup_test_with_policy(
-    agent_capabilities: HashMap<String, Vec<String>>,
-    fallback_unrestricted: bool,
-) -> (
-    HudSessionClient<tonic::transport::Channel>,
-    tokio::task::JoinHandle<()>,
-) {
-    let scene = SceneGraph::new(800.0, 600.0);
-    let base = HudSessionImpl::new(scene, "test-key");
-    let service = HudSessionImpl::from_shared_state_with_config(
-        base.state.clone(),
-        "test-key",
-        agent_capabilities,
-        fallback_unrestricted,
-    );
-
-    let listener = tokio::net::TcpListener::bind("[::1]:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-
-    let handle = tokio::spawn(async move {
-        let incoming = tokio_stream::wrappers::TcpListenerStream::new(listener);
-        tonic::transport::Server::builder()
-            .add_service(HudSessionServer::new(service))
-            .serve_with_incoming(incoming)
-            .await
-            .unwrap();
-    });
-
-    let client = connect_test_client_with_retry(addr.port()).await;
-
-    (client, handle)
 }
 
 async fn setup_test_with_input_capture_channel(
@@ -668,11 +644,6 @@ async fn handshake(
         timestamp_wall_us: now_wall_us(),
         payload: Some(ClientPayload::SessionInit(SessionInit {
             agent_id: agent_id.to_string(),
-            requested_capabilities: vec![
-                "create_tiles".to_string(),
-                "access_input_events".to_string(),
-                "read_scene_topology".to_string(),
-            ],
             initial_subscriptions: vec!["SCENE_TOPOLOGY".to_string()],
             resume_token: Vec::new(),
             min_protocol_version: 1000,
@@ -697,11 +668,10 @@ async fn handshake(
 }
 
 /// Helper: perform SessionInit with an explicit requested capability list.
-async fn handshake_with_requested_capabilities(
+async fn handshake_with_psk(
     client: &mut HudSessionClient<tonic::transport::Channel>,
     agent_id: &str,
     psk: &str,
-    requested_capabilities: Vec<String>,
 ) -> (
     tokio::sync::mpsc::Sender<ClientMessage>,
     Vec<ServerMessage>,
@@ -715,7 +685,6 @@ async fn handshake_with_requested_capabilities(
         timestamp_wall_us: now_wall_us(),
         payload: Some(ClientPayload::SessionInit(SessionInit {
             agent_id: agent_id.to_string(),
-            requested_capabilities,
             initial_subscriptions: vec!["SCENE_TOPOLOGY".to_string()],
             resume_token: Vec::new(),
             min_protocol_version: 1000,
@@ -748,21 +717,6 @@ async fn test_handshake_init_established_and_snapshot() {
         Some(ServerPayload::SessionEstablished(established)) => {
             assert!(!established.session_id.is_empty());
             assert_eq!(established.namespace, "test-agent");
-            assert!(
-                established
-                    .granted_capabilities
-                    .contains(&"create_tiles".to_string())
-            );
-            assert!(
-                established
-                    .granted_capabilities
-                    .contains(&"access_input_events".to_string())
-            );
-            assert!(
-                established
-                    .granted_capabilities
-                    .contains(&"read_scene_topology".to_string())
-            );
             assert!(!established.resume_token.is_empty());
             assert_eq!(
                 established.heartbeat_interval_ms,
@@ -900,7 +854,6 @@ async fn test_handshake_auth_failure() {
             timestamp_wall_us: now_wall_us(),
             payload: Some(ClientPayload::SessionInit(SessionInit {
                 agent_id: "bad-agent".to_string(),
-                requested_capabilities: Vec::new(),
                 initial_subscriptions: Vec::new(),
                 resume_token: Vec::new(),
                 min_protocol_version: 1000,
@@ -934,11 +887,7 @@ async fn test_mutation_over_stream() {
     tx.send(ClientMessage {
         sequence: 2,
         timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::LeaseRequest(LeaseRequest {
-            ttl_ms: 60_000,
-            capabilities: vec!["create_tiles".to_string()],
-            lease_priority: 2,
-        })),
+        payload: Some(ClientPayload::LeaseRequest(LeaseRequest { ttl_ms: 60_000 })),
     })
     .await
     .unwrap();
@@ -1021,11 +970,7 @@ async fn test_create_tile_persists_element_store_entry() {
     tx.send(ClientMessage {
         sequence: 2,
         timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::LeaseRequest(LeaseRequest {
-            ttl_ms: 60_000,
-            capabilities: vec!["create_tiles".to_string()],
-            lease_priority: 2,
-        })),
+        payload: Some(ClientPayload::LeaseRequest(LeaseRequest { ttl_ms: 60_000 })),
     })
     .await
     .expect("lease request");
@@ -1114,11 +1059,7 @@ async fn test_existing_tile_last_published_update_triggers_persist() {
     tx.send(ClientMessage {
         sequence: 2,
         timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::LeaseRequest(LeaseRequest {
-            ttl_ms: 60_000,
-            capabilities: vec!["create_tiles".to_string()],
-            lease_priority: 2,
-        })),
+        payload: Some(ClientPayload::LeaseRequest(LeaseRequest { ttl_ms: 60_000 })),
     })
     .await
     .expect("lease request");
@@ -1587,26 +1528,13 @@ async fn test_publish_to_tile_by_element_id_applies_override_and_updates_timesta
         );
     }
 
-    let (tx, _init_messages, mut stream) = handshake_with_requested_capabilities(
-        &mut client,
-        "tile-publisher",
-        "test-key",
-        vec![
-            "create_tiles".to_string(),
-            "modify_own_tiles".to_string(),
-            "read_scene_topology".to_string(),
-        ],
-    )
-    .await;
+    let (tx, _init_messages, mut stream) =
+        handshake_with_psk(&mut client, "tile-publisher", "test-key").await;
 
     tx.send(ClientMessage {
         sequence: 2,
         timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::LeaseRequest(LeaseRequest {
-            ttl_ms: 60_000,
-            capabilities: vec!["modify_own_tiles".to_string()],
-            lease_priority: 2,
-        })),
+        payload: Some(ClientPayload::LeaseRequest(LeaseRequest { ttl_ms: 60_000 })),
     })
     .await
     .expect("lease request");
@@ -1746,26 +1674,13 @@ async fn test_publish_to_tile_by_element_id_rejects_invalid_node_even_with_bound
         );
     }
 
-    let (tx, _init_messages, mut stream) = handshake_with_requested_capabilities(
-        &mut client,
-        "tile-publisher-invalid-node",
-        "test-key",
-        vec![
-            "create_tiles".to_string(),
-            "modify_own_tiles".to_string(),
-            "read_scene_topology".to_string(),
-        ],
-    )
-    .await;
+    let (tx, _init_messages, mut stream) =
+        handshake_with_psk(&mut client, "tile-publisher-invalid-node", "test-key").await;
 
     tx.send(ClientMessage {
         sequence: 2,
         timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::LeaseRequest(LeaseRequest {
-            ttl_ms: 60_000,
-            capabilities: vec!["modify_own_tiles".to_string()],
-            lease_priority: 2,
-        })),
+        payload: Some(ClientPayload::LeaseRequest(LeaseRequest { ttl_ms: 60_000 })),
     })
     .await
     .expect("lease request");
@@ -1842,26 +1757,13 @@ async fn test_publish_to_tile_by_element_id_returns_element_not_found() {
             .create_tab("main", 0)
             .expect("create tab");
     }
-    let (tx, _init_messages, mut stream) = handshake_with_requested_capabilities(
-        &mut client,
-        "tile-publisher-missing",
-        "test-key",
-        vec![
-            "create_tiles".to_string(),
-            "modify_own_tiles".to_string(),
-            "read_scene_topology".to_string(),
-        ],
-    )
-    .await;
+    let (tx, _init_messages, mut stream) =
+        handshake_with_psk(&mut client, "tile-publisher-missing", "test-key").await;
 
     tx.send(ClientMessage {
         sequence: 2,
         timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::LeaseRequest(LeaseRequest {
-            ttl_ms: 60_000,
-            capabilities: vec!["modify_own_tiles".to_string()],
-            lease_priority: 2,
-        })),
+        payload: Some(ClientPayload::LeaseRequest(LeaseRequest { ttl_ms: 60_000 })),
     })
     .await
     .expect("lease request");
@@ -1937,11 +1839,7 @@ async fn test_mutation_result_echoes_client_batch_id() {
     tx.send(ClientMessage {
         sequence: 2,
         timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::LeaseRequest(LeaseRequest {
-            ttl_ms: 60_000,
-            capabilities: vec!["create_tiles".to_string()],
-            lease_priority: 2,
-        })),
+        payload: Some(ClientPayload::LeaseRequest(LeaseRequest { ttl_ms: 60_000 })),
     })
     .await
     .unwrap();
@@ -2023,11 +1921,7 @@ async fn test_mutation_rejected_with_expired_lease_id() {
     tx.send(ClientMessage {
         sequence: 2,
         timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::LeaseRequest(LeaseRequest {
-            ttl_ms: 60_000,
-            capabilities: vec!["create_tiles".to_string()],
-            lease_priority: 2,
-        })),
+        payload: Some(ClientPayload::LeaseRequest(LeaseRequest { ttl_ms: 60_000 })),
     })
     .await
     .unwrap();
@@ -2107,14 +2001,7 @@ async fn test_lease_over_stream() {
     tx.send(ClientMessage {
         sequence: 2,
         timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::LeaseRequest(LeaseRequest {
-            ttl_ms: 30_000,
-            capabilities: vec![
-                "create_tiles".to_string(),
-                "access_input_events".to_string(),
-            ],
-            lease_priority: 2,
-        })),
+        payload: Some(ClientPayload::LeaseRequest(LeaseRequest { ttl_ms: 30_000 })),
     })
     .await
     .unwrap();
@@ -2126,10 +2013,6 @@ async fn test_lease_over_stream() {
             assert!(!resp.lease_id.is_empty());
             assert_eq!(resp.lease_id.len(), 16);
             assert_eq!(resp.granted_ttl_ms, 30_000);
-            assert!(
-                resp.granted_capabilities
-                    .contains(&"create_tiles".to_string())
-            );
         }
         other => panic!("Expected LeaseResponse, got: {other:?}"),
     }
@@ -2298,10 +2181,6 @@ async fn test_subscription_change_result() {
         payload: Some(ClientPayload::SessionInit(SessionInit {
             agent_id: "subscriber".to_string(),
             auth_credential: Some(crate::auth::psk_credential("test-key".to_string())),
-            requested_capabilities: vec![
-                "read_scene_topology".to_string(),
-                "access_input_events".to_string(),
-            ],
             initial_subscriptions: vec!["SCENE_TOPOLOGY".to_string()],
             resume_token: Vec::new(),
             ..Default::default()
@@ -2392,7 +2271,6 @@ async fn test_subscription_change_with_filter_prefix() {
         payload: Some(ClientPayload::SessionInit(SessionInit {
             agent_id: "filter-agent".to_string(),
             auth_credential: Some(crate::auth::psk_credential("test-key".to_string())),
-            requested_capabilities: vec!["read_scene_topology".to_string()],
             initial_subscriptions: Vec::new(),
             resume_token: Vec::new(),
             ..Default::default()
@@ -2531,7 +2409,6 @@ async fn test_subscription_denied_without_capability() {
         payload: Some(ClientPayload::SessionInit(SessionInit {
             agent_id: "no-input-agent".to_string(),
             auth_credential: Some(crate::auth::psk_credential("test-key".to_string())),
-            requested_capabilities: vec!["read_scene_topology".to_string()],
             // Request INPUT_EVENTS without access_input_events capability
             initial_subscriptions: vec!["SCENE_TOPOLOGY".to_string(), "INPUT_EVENTS".to_string()],
             resume_token: Vec::new(),
@@ -2733,11 +2610,7 @@ async fn test_safe_mode_rejects_mutations() {
     tx.send(ClientMessage {
         sequence: 2,
         timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::LeaseRequest(LeaseRequest {
-            ttl_ms: 30_000,
-            capabilities: vec!["create_tiles".to_string()],
-            lease_priority: 2,
-        })),
+        payload: Some(ClientPayload::LeaseRequest(LeaseRequest { ttl_ms: 30_000 })),
     })
     .await
     .unwrap();
@@ -2859,11 +2732,7 @@ async fn test_freeze_queues_mutations_not_applied() {
     tx.send(ClientMessage {
         sequence: 2,
         timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::LeaseRequest(LeaseRequest {
-            ttl_ms: 30_000,
-            capabilities: vec!["create_tiles".to_string()],
-            lease_priority: 2,
-        })),
+        payload: Some(ClientPayload::LeaseRequest(LeaseRequest { ttl_ms: 30_000 })),
     })
     .await
     .unwrap();
@@ -3063,7 +2932,6 @@ async fn test_fifo_preserved_when_mutation_arrives_during_drain_window() {
         namespace: "test-ns".to_string(),
         agent_name: "test-agent".to_string(),
         capabilities: Vec::new(),
-        policy_capabilities: Vec::new(),
         lease_ids: Vec::new(),
         scene_session_id: SceneId::new(),
         resource_budget: ResourceBudget::default(),
@@ -3185,7 +3053,6 @@ async fn test_freeze_retransmit_deduped_applied_exactly_once() {
         namespace: "test-ns".to_string(),
         agent_name: "test-agent".to_string(),
         capabilities: Vec::new(),
-        policy_capabilities: Vec::new(),
         lease_ids: Vec::new(),
         scene_session_id: SceneId::new(),
         resource_budget: ResourceBudget::default(),
@@ -3317,11 +3184,7 @@ async fn test_safe_mode_takes_precedence_over_freeze() {
     tx.send(ClientMessage {
         sequence: 2,
         timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::LeaseRequest(LeaseRequest {
-            ttl_ms: 30_000,
-            capabilities: vec!["create_tiles".to_string()],
-            lease_priority: 2,
-        })),
+        payload: Some(ClientPayload::LeaseRequest(LeaseRequest { ttl_ms: 30_000 })),
     })
     .await
     .unwrap();
@@ -3493,7 +3356,6 @@ async fn test_state_machine_auth_failure_to_closed() {
             timestamp_wall_us: now_wall_us(),
             payload: Some(ClientPayload::SessionInit(SessionInit {
                 agent_id: "state-fail-agent".to_string(),
-                requested_capabilities: Vec::new(),
                 initial_subscriptions: Vec::new(),
                 resume_token: Vec::new(),
                 min_protocol_version: 1000,
@@ -3646,7 +3508,6 @@ fn test_validate_sequence_unit() {
         namespace: "test".to_string(),
         agent_name: "test".to_string(),
         capabilities: Vec::new(),
-        policy_capabilities: Vec::new(),
         lease_ids: Vec::new(),
         scene_session_id: SceneId::new(),
         resource_budget: ResourceBudget::default(),
@@ -3716,7 +3577,6 @@ async fn test_auth_structured_psk_credential_accepted() {
         timestamp_wall_us: now_wall_us(),
         payload: Some(ClientPayload::SessionInit(SessionInit {
             agent_id: "psk-agent".to_string(),
-            requested_capabilities: Vec::new(),
             initial_subscriptions: Vec::new(),
             resume_token: Vec::new(),
             min_protocol_version: 1000,
@@ -3758,7 +3618,6 @@ async fn test_auth_structured_psk_credential_wrong_key() {
         timestamp_wall_us: now_wall_us(),
         payload: Some(ClientPayload::SessionInit(SessionInit {
             agent_id: "bad-psk-agent".to_string(),
-            requested_capabilities: Vec::new(),
             initial_subscriptions: Vec::new(),
             resume_token: Vec::new(),
             min_protocol_version: 1000,
@@ -3802,7 +3661,6 @@ async fn test_auth_local_socket_credential_accepted() {
         timestamp_wall_us: now_wall_us(),
         payload: Some(ClientPayload::SessionInit(SessionInit {
             agent_id: "local-agent".to_string(),
-            requested_capabilities: Vec::new(),
             initial_subscriptions: Vec::new(),
             resume_token: Vec::new(),
             min_protocol_version: 1000,
@@ -3840,7 +3698,6 @@ async fn test_auth_local_socket_credential_accepted() {
 fn local_socket_session_init(agent_id: &str) -> SessionInit {
     SessionInit {
         agent_id: agent_id.to_string(),
-        requested_capabilities: Vec::new(),
         initial_subscriptions: Vec::new(),
         resume_token: Vec::new(),
         min_protocol_version: 1000,
@@ -3872,7 +3729,6 @@ async fn test_handle_session_init_local_socket_non_loopback_auth_failed() {
     let scene = SceneGraph::new(800.0, 600.0);
     let service = HudSessionImpl::new(scene, "test-key");
     let state = service.state.clone();
-    let caps: HashMap<String, Vec<String>> = HashMap::new();
 
     let (tx, mut rx) = tokio::sync::mpsc::channel::<Result<ServerMessage, Status>>(16);
 
@@ -3881,14 +3737,12 @@ async fn test_handle_session_init_local_socket_non_loopback_auth_failed() {
 
     let session = handle_session_init(
         &state,
-        "test-key",
+        &tze_hud_scene::config::AgentDirectory::unrestricted("test-key"),
         &tx,
         &init,
-        &caps,
         &HashMap::new(),
         &ResourceBudget::default(),
         None,
-        true, // fallback_unrestricted — irrelevant, auth fires first
         Some(non_loopback_ip),
     )
     .await;
@@ -3938,7 +3792,6 @@ async fn test_handle_session_resume_local_socket_non_loopback_auth_failed() {
     let scene = SceneGraph::new(800.0, 600.0);
     let service = HudSessionImpl::new(scene, "test-key");
     let state = service.state.clone();
-    let caps: HashMap<String, Vec<String>> = HashMap::new();
 
     let (tx, mut rx) = tokio::sync::mpsc::channel::<Result<ServerMessage, Status>>(16);
 
@@ -3967,14 +3820,12 @@ async fn test_handle_session_resume_local_socket_non_loopback_auth_failed() {
 
     let session = handle_session_resume(
         &state,
-        "test-key",
+        &tze_hud_scene::config::AgentDirectory::unrestricted("test-key"),
         &tx,
         &resume,
-        &caps,
         &HashMap::new(),
         &ResourceBudget::default(),
         None,
-        true, // fallback_unrestricted
         Some(non_loopback_ip),
     )
     .await;
@@ -4020,7 +3871,6 @@ async fn test_version_negotiation_success() {
         timestamp_wall_us: now_wall_us(),
         payload: Some(ClientPayload::SessionInit(SessionInit {
             agent_id: "version-agent".to_string(),
-            requested_capabilities: Vec::new(),
             initial_subscriptions: Vec::new(),
             resume_token: Vec::new(),
             min_protocol_version: 1000,
@@ -4059,7 +3909,6 @@ async fn test_version_negotiation_unsupported() {
         timestamp_wall_us: now_wall_us(),
         payload: Some(ClientPayload::SessionInit(SessionInit {
             agent_id: "old-agent".to_string(),
-            requested_capabilities: Vec::new(),
             initial_subscriptions: Vec::new(),
             resume_token: Vec::new(),
             min_protocol_version: 2000,
@@ -4086,201 +3935,6 @@ async fn test_version_negotiation_unsupported() {
             );
         }
         other => panic!("Expected SessionError(UNSUPPORTED_PROTOCOL_VERSION), got: {other:?}"),
-    }
-}
-
-/// Scenario: Non-canonical capability name rejected with CONFIG_UNKNOWN_CAPABILITY
-/// (configuration/spec.md Requirement: Capability Vocabulary, line 162-164)
-/// WHEN agent sends SessionInit with a legacy/non-canonical capability name,
-/// THEN runtime responds with SessionError(CONFIG_UNKNOWN_CAPABILITY) and a hint.
-#[tokio::test]
-async fn test_legacy_capability_rejected_with_hint() {
-    let (mut client, _server) = setup_test().await;
-
-    let (tx, rx) = tokio::sync::mpsc::channel::<ClientMessage>(64);
-    let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
-
-    tx.send(ClientMessage {
-        sequence: 1,
-        timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::SessionInit(SessionInit {
-            agent_id: "legacy-agent".to_string(),
-            // Legacy names — must be rejected
-            requested_capabilities: vec![
-                "create_tile".to_string(),   // legacy: should be create_tiles
-                "receive_input".to_string(), // legacy: should be access_input_events
-            ],
-            initial_subscriptions: Vec::new(),
-            resume_token: Vec::new(),
-            min_protocol_version: 1000,
-            max_protocol_version: 1001,
-            auth_credential: Some(crate::auth::psk_credential("test-key".to_string())),
-        })),
-    })
-    .await
-    .unwrap();
-
-    let mut response_stream = client.session(stream).await.unwrap().into_inner();
-    use tokio_stream::StreamExt;
-    let msg = response_stream.next().await.unwrap().unwrap();
-    match &msg.payload {
-        Some(ServerPayload::SessionError(err)) => {
-            assert_eq!(
-                err.code, "CONFIG_UNKNOWN_CAPABILITY",
-                "Expected CONFIG_UNKNOWN_CAPABILITY, got: {:?}",
-                err.code
-            );
-            // Hint should contain JSON with canonical replacements
-            assert!(
-                !err.hint.is_empty(),
-                "Hint must be non-empty and point to canonical replacements"
-            );
-            // Both legacy names must be reported (spec: collect all, not fail-fast)
-            assert!(
-                err.hint.contains("create_tiles") || err.hint.contains("create_tile"),
-                "Hint must reference create_tiles: {:?}",
-                err.hint
-            );
-            assert!(
-                err.hint.contains("access_input_events"),
-                "Hint must reference access_input_events: {:?}",
-                err.hint
-            );
-        }
-        other => panic!("Expected SessionError(CONFIG_UNKNOWN_CAPABILITY), got: {other:?}"),
-    }
-}
-
-/// Scenario: Pre-Round-14 name read_scene rejected with hint
-/// (policy-arbitration/spec.md §Requirement: Capability Registry Canonical Names, lines 281-292)
-#[tokio::test]
-async fn test_pre_round14_capability_name_rejected() {
-    let (mut client, _server) = setup_test().await;
-
-    let (tx, rx) = tokio::sync::mpsc::channel::<ClientMessage>(64);
-    let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
-
-    tx.send(ClientMessage {
-        sequence: 1,
-        timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::SessionInit(SessionInit {
-            agent_id: "old-vocab-agent".to_string(),
-            requested_capabilities: vec![
-                "read_scene".to_string(), // pre-Round-14: should be read_scene_topology
-                "zone_publish:subtitle".to_string(), // pre-Round-14: should be publish_zone:subtitle
-            ],
-            initial_subscriptions: Vec::new(),
-            resume_token: Vec::new(),
-            min_protocol_version: 1000,
-            max_protocol_version: 1001,
-            auth_credential: Some(crate::auth::psk_credential("test-key".to_string())),
-        })),
-    })
-    .await
-    .unwrap();
-
-    let mut response_stream = client.session(stream).await.unwrap().into_inner();
-    use tokio_stream::StreamExt;
-    let msg = response_stream.next().await.unwrap().unwrap();
-    match &msg.payload {
-        Some(ServerPayload::SessionError(err)) => {
-            assert_eq!(err.code, "CONFIG_UNKNOWN_CAPABILITY");
-            assert!(
-                err.hint.contains("read_scene_topology"),
-                "Hint must reference read_scene_topology"
-            );
-            assert!(
-                err.hint.contains("publish_zone:subtitle"),
-                "Hint must reference publish_zone:subtitle"
-            );
-        }
-        other => panic!("Expected SessionError(CONFIG_UNKNOWN_CAPABILITY), got: {other:?}"),
-    }
-}
-
-/// Scenario: LeaseRequest with non-canonical capability rejected
-/// (configuration/spec.md Requirement: Capability Vocabulary)
-#[tokio::test]
-async fn test_lease_request_with_legacy_capability_rejected() {
-    let (mut client, _server) = setup_test().await;
-    let (tx, _messages, mut response_stream) =
-        handshake(&mut client, "cap-test-agent", "test-key").await;
-
-    // Request a lease with a legacy (non-canonical) capability name
-    tx.send(ClientMessage {
-        sequence: 2,
-        timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::LeaseRequest(LeaseRequest {
-            ttl_ms: 60_000,
-            capabilities: vec!["create_tile".to_string()], // legacy: should be create_tiles
-            lease_priority: 2,
-        })),
-    })
-    .await
-    .unwrap();
-
-    // Expect a LeaseResponse with granted=false and CONFIG_UNKNOWN_CAPABILITY
-    let msg = next_server_msg(&mut response_stream).await;
-    match &msg.payload {
-        Some(ServerPayload::LeaseResponse(resp)) => {
-            assert!(
-                !resp.granted,
-                "Lease must be denied for non-canonical capability"
-            );
-            assert_eq!(
-                resp.deny_code, "CONFIG_UNKNOWN_CAPABILITY",
-                "deny_code must be CONFIG_UNKNOWN_CAPABILITY, got: {:?}",
-                resp.deny_code
-            );
-        }
-        other => panic!("Expected LeaseResponse(denied), got: {other:?}"),
-    }
-}
-
-/// Scenario: LeaseRequest scope must not exceed current session grants
-/// (lease-governance/spec.md Requirement: Lease State Machine).
-///
-/// WHEN lease request includes capabilities outside `SessionEstablished.granted_capabilities`,
-/// THEN runtime denies the entire lease request (no silent subset grant).
-#[tokio::test]
-async fn test_lease_request_scope_exceeding_session_grants_is_denied() {
-    let (mut client, _server) = setup_test().await;
-    let (tx, _messages, mut response_stream) =
-        handshake(&mut client, "lease-scope-agent", "test-key").await;
-
-    // Handshake helper grants create_tiles/access_input_events/read_scene_topology.
-    // Requesting modify_own_tiles exceeds the current session-granted scope.
-    tx.send(ClientMessage {
-        sequence: 2,
-        timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::LeaseRequest(LeaseRequest {
-            ttl_ms: 60_000,
-            capabilities: vec!["create_tiles".to_string(), "modify_own_tiles".to_string()],
-            lease_priority: 2,
-        })),
-    })
-    .await
-    .unwrap();
-
-    let msg = next_server_msg(&mut response_stream).await;
-    match &msg.payload {
-        Some(ServerPayload::LeaseResponse(resp)) => {
-            assert!(
-                !resp.granted,
-                "Lease must be denied when requested scope exceeds session grants"
-            );
-            assert_eq!(resp.deny_code, "PERMISSION_DENIED");
-            assert!(
-                resp.deny_reason.contains("modify_own_tiles"),
-                "deny_reason should identify unauthorized capability; got {:?}",
-                resp.deny_reason
-            );
-            assert!(
-                resp.granted_capabilities.is_empty(),
-                "Denied lease must not return granted_capabilities subset"
-            );
-        }
-        other => panic!("Expected LeaseResponse(denied), got: {other:?}"),
     }
 }
 
@@ -4314,7 +3968,6 @@ async fn test_psk_with_capability_allows_input_events_subscription() {
         timestamp_wall_us: now_wall_us(),
         payload: Some(ClientPayload::SessionInit(SessionInit {
             agent_id: "sub-test-agent".to_string(),
-            requested_capabilities: vec!["access_input_events".to_string()],
             initial_subscriptions: vec!["INPUT_EVENTS".to_string()],
             resume_token: Vec::new(),
             min_protocol_version: 1000,
@@ -4345,542 +3998,6 @@ async fn test_psk_with_capability_allows_input_events_subscription() {
             );
         }
         other => panic!("Expected SessionEstablished, got: {other:?}"),
-    }
-}
-
-/// Scenario: Capability granted mid-session (RFC 0005 §5.3)
-/// WHEN agent sends CapabilityRequest with authorized capabilities,
-/// THEN runtime responds with CapabilityNotice(granted=requested_capabilities).
-#[tokio::test]
-async fn test_mid_session_capability_request_granted() {
-    let (mut client, _server) = setup_test().await;
-    let (tx, _init_messages, mut stream) =
-        handshake(&mut client, "cap-req-agent", "test-key").await;
-
-    // Request a capability mid-session (PSK agents can request any capability)
-    tx.send(ClientMessage {
-        sequence: 2,
-        timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::CapabilityRequest(CapabilityRequest {
-            capabilities: vec!["read_telemetry".to_string()],
-            reason: "monitoring".to_string(),
-        })),
-    })
-    .await
-    .unwrap();
-
-    let msg = stream.next().await.unwrap().unwrap();
-    match &msg.payload {
-        Some(ServerPayload::CapabilityNotice(notice)) => {
-            assert!(
-                notice.granted.contains(&"read_telemetry".to_string()),
-                "Expected read_telemetry to be granted; got: {:?}",
-                notice.granted
-            );
-            assert!(
-                notice.revoked.is_empty(),
-                "No capabilities should be revoked"
-            );
-            assert!(
-                notice.effective_at_server_seq > 0,
-                "effective_at_server_seq must be non-zero"
-            );
-        }
-        other => panic!("Expected CapabilityNotice, got: {other:?}"),
-    }
-}
-
-/// Scenario: PSK (unrestricted) agent receives CapabilityNotice for any capability (RFC 0005 §5.3)
-/// WHEN a PSK-authenticated agent requests any capability mid-session,
-/// THEN runtime responds with CapabilityNotice (not RuntimeError).
-///
-/// `setup_test()` runs with fallback-unrestricted policy, so no capability
-/// request can be denied through this integration path. The denied path
-/// (PERMISSION_DENIED) is exercised in
-/// test_capability_request_denied_for_guest_session and
-/// test_capability_request_partial_grant_denied_entirely below.
-#[tokio::test]
-async fn test_mid_session_capability_request_unrestricted_succeeds() {
-    let (mut client, _server) = setup_test().await;
-    let (tx, _init_messages, mut stream) =
-        handshake(&mut client, "deny-test-agent", "test-key").await;
-
-    // PSK agent requesting a valid capability — should succeed (PSK is unrestricted).
-    tx.send(ClientMessage {
-        sequence: 2,
-        timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::CapabilityRequest(CapabilityRequest {
-            capabilities: vec!["manage_tabs".to_string()],
-            reason: "test".to_string(),
-        })),
-    })
-    .await
-    .unwrap();
-
-    let msg = stream.next().await.unwrap().unwrap();
-    // PSK agents (unrestricted) should get CapabilityNotice, not an error.
-    match &msg.payload {
-        Some(ServerPayload::CapabilityNotice(notice)) => {
-            assert!(
-                notice.granted.contains(&"manage_tabs".to_string()),
-                "PSK unrestricted agent should get manage_tabs granted"
-            );
-        }
-        other => panic!("Expected CapabilityNotice for unrestricted PSK agent, got: {other:?}"),
-    }
-}
-
-/// Unit test: handle_capability_request with guest (restricted) session
-/// to verify RuntimeError(PERMISSION_DENIED) is returned for unauthorized caps.
-///
-/// Scenario: Guest agent denied resident tools via capability escalation (RFC 0005 §5.3)
-/// WHEN a guest-level agent sends CapabilityRequest for resident-level operations,
-/// THEN runtime denies with RuntimeError(PERMISSION_DENIED).
-#[tokio::test]
-async fn test_capability_request_denied_for_guest_session() {
-    // Set up the outbound channel
-    let (tx, mut rx) = tokio::sync::mpsc::channel::<Result<ServerMessage, Status>>(16);
-
-    // Build a guest session (no policy capabilities = no authorization)
-    let mut session = StreamSession {
-        session_id: "guest-session".to_string(),
-        namespace: "guest".to_string(),
-        agent_name: "guest".to_string(),
-        capabilities: Vec::new(),
-        policy_capabilities: Vec::new(), // guest: no authorization
-        lease_ids: Vec::new(),
-        scene_session_id: SceneId::new(),
-        resource_budget: ResourceBudget::default(),
-        budget_enforcer: None,
-        subscriptions: Vec::new(),
-        subscription_filters: std::collections::HashMap::new(),
-        server_sequence: 0,
-        resume_token: Vec::new(),
-        last_heartbeat_ms: 0,
-        state: SessionState::Active,
-        last_client_sequence: 1,
-        safe_mode_active: false,
-        freeze_queue: SessionFreezeQueue::new(FREEZE_QUEUE_CAPACITY),
-        session_open_at_wall_us: 0,
-        dedup_window: DedupWindow::new(1000, 60),
-        lease_correlation_cache: LeaseCorrelationCache::new(
-            DEFAULT_LEASE_CORRELATION_CACHE_CAPACITY,
-        ),
-        resource_upload_rate_limiter: UploadByteRateLimiter::with_limit(
-            tze_hud_resource::DEFAULT_UPLOAD_RATE_LIMIT_BYTES_PER_SEC,
-        ),
-    };
-
-    handle_capability_request(
-        &mut session,
-        &tx,
-        CapabilityRequest {
-            capabilities: vec!["create_tiles".to_string(), "modify_own_tiles".to_string()],
-            reason: "escalation attempt".to_string(),
-        },
-    )
-    .await;
-
-    let msg = rx.recv().await.unwrap().unwrap();
-    match &msg.payload {
-        Some(ServerPayload::RuntimeError(err)) => {
-            assert_eq!(err.error_code, "PERMISSION_DENIED");
-            assert_eq!(err.error_code_enum, ErrorCode::PermissionDenied as i32);
-            assert!(
-                !err.context.is_empty(),
-                "Context should list denied capabilities"
-            );
-            assert!(
-                err.hint.contains("unauthorized_capabilities"),
-                "Hint should contain unauthorized_capabilities: {}",
-                err.hint
-            );
-        }
-        other => panic!("Expected RuntimeError(PERMISSION_DENIED), got: {other:?}"),
-    }
-}
-
-/// Scenario: Partial grant of mixed capabilities is denied entirely (RFC 0005 §5.3)
-/// WHEN agent requests capabilities=["read_telemetry", "manage_tabs"] and is
-/// authorized for only read_telemetry,
-/// THEN runtime denies entire request with PERMISSION_DENIED.
-#[tokio::test]
-async fn test_capability_request_partial_grant_denied_entirely() {
-    let (tx, mut rx) = tokio::sync::mpsc::channel::<Result<ServerMessage, Status>>(16);
-
-    // Session with only read_telemetry authorized
-    let mut session = StreamSession {
-        session_id: "partial-grant-session".to_string(),
-        namespace: "restricted-agent".to_string(),
-        agent_name: "restricted-agent".to_string(),
-        capabilities: vec!["read_telemetry".to_string()],
-        policy_capabilities: vec!["read_telemetry".to_string()], // only read_telemetry
-        lease_ids: Vec::new(),
-        scene_session_id: SceneId::new(),
-        resource_budget: ResourceBudget::default(),
-        budget_enforcer: None,
-        subscriptions: Vec::new(),
-        subscription_filters: std::collections::HashMap::new(),
-        server_sequence: 0,
-        resume_token: Vec::new(),
-        last_heartbeat_ms: 0,
-        state: SessionState::Active,
-        last_client_sequence: 1,
-        safe_mode_active: false,
-        freeze_queue: SessionFreezeQueue::new(FREEZE_QUEUE_CAPACITY),
-        session_open_at_wall_us: 0,
-        dedup_window: DedupWindow::new(1000, 60),
-        lease_correlation_cache: LeaseCorrelationCache::new(
-            DEFAULT_LEASE_CORRELATION_CACHE_CAPACITY,
-        ),
-        resource_upload_rate_limiter: UploadByteRateLimiter::with_limit(
-            tze_hud_resource::DEFAULT_UPLOAD_RATE_LIMIT_BYTES_PER_SEC,
-        ),
-    };
-
-    // Request both an authorized and an unauthorized capability
-    handle_capability_request(
-        &mut session,
-        &tx,
-        CapabilityRequest {
-            capabilities: vec!["read_telemetry".to_string(), "manage_tabs".to_string()],
-            reason: "mixed request".to_string(),
-        },
-    )
-    .await;
-
-    let msg = rx.recv().await.unwrap().unwrap();
-    match &msg.payload {
-        Some(ServerPayload::RuntimeError(err)) => {
-            assert_eq!(
-                err.error_code, "PERMISSION_DENIED",
-                "Entire request should be denied, not just manage_tabs"
-            );
-            assert_eq!(err.error_code_enum, ErrorCode::PermissionDenied as i32);
-            assert!(
-                err.context.contains("manage_tabs"),
-                "Context should mention the unauthorized capability: {}",
-                err.context
-            );
-            // read_telemetry should NOT have been granted
-            assert!(
-                !session.capabilities.contains(&"manage_tabs".to_string()),
-                "manage_tabs must not have been added to session capabilities"
-            );
-        }
-        other => {
-            panic!("Expected RuntimeError(PERMISSION_DENIED) for partial grant, got: {other:?}")
-        }
-    }
-}
-
-/// Scenario: Session grants, lease grants, and mid-session escalation stay aligned.
-///
-/// 1) LeaseRequest asking for capability scope beyond current session grants is denied.
-/// 2) After CapabilityRequest grants additional authorized scope, the same LeaseRequest
-///    is accepted.
-#[tokio::test]
-async fn test_lease_scope_requires_session_grant_or_escalation() {
-    let mut policy = HashMap::new();
-    policy.insert(
-        "scope-agent".to_string(),
-        vec![
-            "create_tiles".to_string(),
-            "modify_own_tiles".to_string(),
-            "read_scene_topology".to_string(),
-        ],
-    );
-    let (mut client, _server) = setup_test_with_policy(policy, false).await;
-    let (tx, _init_messages, mut stream) = handshake_with_requested_capabilities(
-        &mut client,
-        "scope-agent",
-        "test-key",
-        vec!["create_tiles".to_string()],
-    )
-    .await;
-
-    // Request lease scope broader than current session grants: must be denied.
-    tx.send(ClientMessage {
-        sequence: 2,
-        timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::LeaseRequest(LeaseRequest {
-            ttl_ms: 30_000,
-            capabilities: vec!["create_tiles".to_string(), "modify_own_tiles".to_string()],
-            lease_priority: 2,
-        })),
-    })
-    .await
-    .unwrap();
-
-    let denied = next_server_msg(&mut stream).await;
-    match denied.payload {
-        Some(ServerPayload::LeaseResponse(resp)) => {
-            assert!(!resp.granted, "lease must be denied before escalation");
-            assert_eq!(resp.deny_code, "PERMISSION_DENIED");
-            assert!(
-                resp.deny_reason.contains("modify_own_tiles"),
-                "deny_reason should name the out-of-scope capability"
-            );
-        }
-        other => panic!("Expected denied LeaseResponse, got: {other:?}"),
-    }
-
-    // Escalate mid-session using the configured authorization scope.
-    tx.send(ClientMessage {
-        sequence: 3,
-        timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::CapabilityRequest(CapabilityRequest {
-            capabilities: vec!["modify_own_tiles".to_string()],
-            reason: "need edit capability".to_string(),
-        })),
-    })
-    .await
-    .unwrap();
-
-    let granted = next_server_msg(&mut stream).await;
-    match granted.payload {
-        Some(ServerPayload::CapabilityNotice(notice)) => {
-            assert!(
-                notice.granted.contains(&"modify_own_tiles".to_string()),
-                "expected modify_own_tiles grant after escalation"
-            );
-        }
-        other => panic!("Expected CapabilityNotice, got: {other:?}"),
-    }
-
-    // Retry the same lease request: should now succeed.
-    tx.send(ClientMessage {
-        sequence: 4,
-        timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::LeaseRequest(LeaseRequest {
-            ttl_ms: 30_000,
-            capabilities: vec!["create_tiles".to_string(), "modify_own_tiles".to_string()],
-            lease_priority: 2,
-        })),
-    })
-    .await
-    .unwrap();
-
-    let granted_lease = next_server_msg(&mut stream).await;
-    match granted_lease.payload {
-        Some(ServerPayload::LeaseResponse(resp)) => {
-            assert!(resp.granted, "lease must be granted after escalation");
-            assert!(
-                resp.granted_capabilities
-                    .contains(&"modify_own_tiles".to_string())
-            );
-        }
-        other => panic!("Expected granted LeaseResponse, got: {other:?}"),
-    }
-}
-
-/// Scenario: Reconnect/resume preserves current grants but keeps policy scope
-/// for future CapabilityRequest evaluation.
-#[tokio::test]
-async fn test_capability_request_after_resume_uses_policy_scope() {
-    let mut policy = HashMap::new();
-    policy.insert(
-        "resume-scope-agent".to_string(),
-        vec![
-            "create_tiles".to_string(),
-            "read_telemetry".to_string(),
-            "read_scene_topology".to_string(),
-        ],
-    );
-    let (mut client, _server) = setup_test_with_policy(policy, false).await;
-    let (tx, init_messages, stream) = handshake_with_requested_capabilities(
-        &mut client,
-        "resume-scope-agent",
-        "test-key",
-        vec!["create_tiles".to_string()],
-    )
-    .await;
-
-    let resume_token = match &init_messages[0].payload {
-        Some(ServerPayload::SessionEstablished(established)) => {
-            assert!(
-                established
-                    .granted_capabilities
-                    .contains(&"create_tiles".to_string())
-            );
-            assert!(
-                !established
-                    .granted_capabilities
-                    .contains(&"read_telemetry".to_string()),
-                "read_telemetry should not be initially granted when not requested"
-            );
-            established.resume_token.clone()
-        }
-        other => panic!("Expected SessionEstablished, got: {other:?}"),
-    };
-    drop(tx);
-    drop(stream);
-    tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
-
-    // Reconnect using SessionResume.
-    let (resume_tx, resume_rx) = tokio::sync::mpsc::channel::<ClientMessage>(64);
-    let resume_stream = tokio_stream::wrappers::ReceiverStream::new(resume_rx);
-    resume_tx
-        .send(ClientMessage {
-            sequence: 1,
-            timestamp_wall_us: now_wall_us(),
-            payload: Some(ClientPayload::SessionResume(SessionResume {
-                agent_id: "resume-scope-agent".to_string(),
-                resume_token,
-                last_seen_server_sequence: 2,
-                pre_shared_key: "test-key".to_string(),
-                auth_credential: None,
-            })),
-        })
-        .await
-        .unwrap();
-
-    let mut resumed = client.session(resume_stream).await.unwrap().into_inner();
-    let resume_result = resumed.next().await.unwrap().unwrap();
-    match &resume_result.payload {
-        Some(ServerPayload::SessionResumeResult(result)) => {
-            assert!(result.accepted);
-            assert!(
-                result
-                    .granted_capabilities
-                    .contains(&"create_tiles".to_string())
-            );
-            assert!(
-                !result
-                    .granted_capabilities
-                    .contains(&"read_telemetry".to_string()),
-                "resume restores prior grants; it must not auto-grant untouched policy scope"
-            );
-        }
-        other => panic!("Expected SessionResumeResult, got: {other:?}"),
-    }
-    let snapshot = resumed.next().await.unwrap().unwrap();
-    match snapshot.payload {
-        Some(ServerPayload::SceneSnapshot(_)) => {}
-        other => panic!("Expected SceneSnapshot after resume, got: {other:?}"),
-    }
-    let current_degradation = resumed.next().await.unwrap().unwrap();
-    match current_degradation.payload {
-        Some(ServerPayload::DegradationNotice(notice)) => {
-            assert_eq!(notice.level, DegradationLevel::Normal as i32);
-        }
-        other => panic!("Expected current degradation after snapshot, got: {other:?}"),
-    }
-
-    // Authorized post-resume escalation must succeed.
-    resume_tx
-        .send(ClientMessage {
-            sequence: 2,
-            timestamp_wall_us: now_wall_us(),
-            payload: Some(ClientPayload::CapabilityRequest(CapabilityRequest {
-                capabilities: vec!["read_telemetry".to_string()],
-                reason: "need telemetry feed".to_string(),
-            })),
-        })
-        .await
-        .unwrap();
-
-    let granted = resumed.next().await.unwrap().unwrap();
-    match granted.payload {
-        Some(ServerPayload::CapabilityNotice(notice)) => {
-            assert!(notice.granted.contains(&"read_telemetry".to_string()));
-        }
-        other => panic!("Expected CapabilityNotice, got: {other:?}"),
-    }
-
-    // Mixed request still denies the entire batch after resume.
-    resume_tx
-        .send(ClientMessage {
-            sequence: 3,
-            timestamp_wall_us: now_wall_us(),
-            payload: Some(ClientPayload::CapabilityRequest(CapabilityRequest {
-                capabilities: vec!["read_telemetry".to_string(), "manage_tabs".to_string()],
-                reason: "mixed escalation".to_string(),
-            })),
-        })
-        .await
-        .unwrap();
-
-    let denied = resumed.next().await.unwrap().unwrap();
-    match denied.payload {
-        Some(ServerPayload::RuntimeError(err)) => {
-            assert_eq!(err.error_code, "PERMISSION_DENIED");
-            assert!(
-                err.context.contains("manage_tabs"),
-                "mixed denial context should list unauthorized capability"
-            );
-        }
-        other => panic!("Expected RuntimeError(PERMISSION_DENIED), got: {other:?}"),
-    }
-}
-
-/// Verify RuntimeError structure matches spec (RFC 0005 §3.5)
-/// error_code, message, context, hint, error_code_enum all populated.
-#[tokio::test]
-async fn test_runtime_error_structure_complete() {
-    let (tx, mut rx) = tokio::sync::mpsc::channel::<Result<ServerMessage, Status>>(16);
-
-    let mut session = StreamSession {
-        session_id: "err-test".to_string(),
-        namespace: "err-agent".to_string(),
-        agent_name: "err-agent".to_string(),
-        capabilities: Vec::new(),
-        policy_capabilities: Vec::new(),
-        lease_ids: Vec::new(),
-        scene_session_id: SceneId::new(),
-        resource_budget: ResourceBudget::default(),
-        budget_enforcer: None,
-        subscriptions: Vec::new(),
-        subscription_filters: std::collections::HashMap::new(),
-        server_sequence: 0,
-        resume_token: Vec::new(),
-        last_heartbeat_ms: 0,
-        state: SessionState::Active,
-        last_client_sequence: 1,
-        safe_mode_active: false,
-        freeze_queue: SessionFreezeQueue::new(FREEZE_QUEUE_CAPACITY),
-        session_open_at_wall_us: 0,
-        dedup_window: DedupWindow::new(1000, 60),
-        lease_correlation_cache: LeaseCorrelationCache::new(
-            DEFAULT_LEASE_CORRELATION_CACHE_CAPACITY,
-        ),
-        resource_upload_rate_limiter: UploadByteRateLimiter::with_limit(
-            tze_hud_resource::DEFAULT_UPLOAD_RATE_LIMIT_BYTES_PER_SEC,
-        ),
-    };
-
-    handle_capability_request(
-        &mut session,
-        &tx,
-        CapabilityRequest {
-            capabilities: vec!["some_cap".to_string()],
-            reason: "test".to_string(),
-        },
-    )
-    .await;
-
-    let msg = rx.recv().await.unwrap().unwrap();
-    match &msg.payload {
-        Some(ServerPayload::RuntimeError(err)) => {
-            // error_code: stable string
-            assert!(!err.error_code.is_empty(), "error_code must be set");
-            // message: human-readable
-            assert!(!err.message.is_empty(), "message must be set");
-            // error_code_enum: typed enum (non-zero for known codes)
-            assert!(
-                err.error_code_enum != 0,
-                "error_code_enum must be non-zero for known codes"
-            );
-            // hint: machine-readable JSON
-            if !err.hint.is_empty() {
-                assert!(
-                    serde_json::from_str::<serde_json::Value>(&err.hint).is_ok(),
-                    "hint must be valid JSON: {}",
-                    err.hint
-                );
-            }
-        }
-        other => panic!("Expected RuntimeError, got: {other:?}"),
     }
 }
 
@@ -5175,11 +4292,6 @@ async fn test_resume_result_carries_subscription_state() {
         payload: Some(ClientPayload::SessionInit(SessionInit {
             agent_id: "sub-resume-agent".to_string(),
             // Include required capabilities for both subscriptions (canonical names)
-            requested_capabilities: vec![
-                "create_tiles".to_string(),
-                "read_scene_topology".to_string(),
-                "access_input_events".to_string(),
-            ],
             initial_subscriptions: vec!["SCENE_TOPOLOGY".to_string(), "INPUT_EVENTS".to_string()],
             resume_token: Vec::new(),
             min_protocol_version: 1000,
@@ -5225,12 +4337,6 @@ async fn test_resume_result_carries_subscription_state() {
         Some(ServerPayload::SessionResumeResult(result)) => {
             assert!(result.accepted);
             // Capabilities must be restored.
-            assert!(
-                result
-                    .granted_capabilities
-                    .contains(&"create_tiles".to_string()),
-                "create_tiles capability must be restored on resume"
-            );
             // Subscriptions must be restored.
             assert!(
                 result
@@ -5376,11 +4482,7 @@ async fn test_mutation_dedup_returns_cached_result() {
     tx.send(ClientMessage {
         sequence: 2,
         timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::LeaseRequest(LeaseRequest {
-            ttl_ms: 60_000,
-            capabilities: vec!["create_tiles".to_string()],
-            lease_priority: 2,
-        })),
+        payload: Some(ClientPayload::LeaseRequest(LeaseRequest { ttl_ms: 60_000 })),
     })
     .await
     .unwrap();
@@ -5542,11 +4644,7 @@ async fn test_mutation_timing_too_old_rejected() {
     tx.send(ClientMessage {
         sequence: 2,
         timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::LeaseRequest(LeaseRequest {
-            ttl_ms: 60_000,
-            capabilities: vec!["create_tiles".to_string()],
-            lease_priority: 2,
-        })),
+        payload: Some(ClientPayload::LeaseRequest(LeaseRequest { ttl_ms: 60_000 })),
     })
     .await
     .unwrap();
@@ -5602,11 +4700,7 @@ async fn test_mutation_timing_expiry_before_present_rejected() {
     tx.send(ClientMessage {
         sequence: 2,
         timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::LeaseRequest(LeaseRequest {
-            ttl_ms: 60_000,
-            capabilities: vec!["create_tiles".to_string()],
-            lease_priority: 2,
-        })),
+        payload: Some(ClientPayload::LeaseRequest(LeaseRequest { ttl_ms: 60_000 })),
     })
     .await
     .unwrap();
@@ -6141,7 +5235,6 @@ async fn test_input_capture_release_delivers_event() {
         payload: Some(ClientPayload::SessionInit(SessionInit {
             agent_id: "capture-release-agent".to_string(),
             auth_credential: Some(crate::auth::psk_credential("test-key".to_string())),
-            requested_capabilities: vec!["access_input_events".to_string()],
             initial_subscriptions: vec!["INPUT_EVENTS".to_string(), "FOCUS_EVENTS".to_string()],
             resume_token: Vec::new(),
             ..Default::default()
@@ -6216,11 +5309,7 @@ async fn test_lease_acquire_sends_lease_response() {
     tx.send(ClientMessage {
         sequence: 2,
         timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::LeaseRequest(LeaseRequest {
-            ttl_ms: 30_000,
-            capabilities: vec!["create_tiles".to_string()],
-            lease_priority: 2,
-        })),
+        payload: Some(ClientPayload::LeaseRequest(LeaseRequest { ttl_ms: 30_000 })),
     })
     .await
     .unwrap();
@@ -6232,11 +5321,6 @@ async fn test_lease_acquire_sends_lease_response() {
             assert!(resp.granted, "Lease should be granted");
             assert_eq!(resp.lease_id.len(), 16, "lease_id must be 16-byte UUIDv7");
             assert_eq!(resp.granted_ttl_ms, 30_000);
-            assert_eq!(resp.granted_priority, 2);
-            assert!(
-                resp.granted_capabilities
-                    .contains(&"create_tiles".to_string())
-            );
         }
         other => panic!("Expected LeaseResponse, got: {other:?}"),
     }
@@ -6255,11 +5339,7 @@ async fn test_lease_id_is_16_byte_uuidv7() {
     tx.send(ClientMessage {
         sequence: 2,
         timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::LeaseRequest(LeaseRequest {
-            ttl_ms: 10_000,
-            capabilities: Vec::new(),
-            lease_priority: 2,
-        })),
+        payload: Some(ClientPayload::LeaseRequest(LeaseRequest { ttl_ms: 10_000 })),
     })
     .await
     .unwrap();
@@ -6289,11 +5369,7 @@ async fn test_lease_priority_zero_downgraded() {
     tx.send(ClientMessage {
         sequence: 2,
         timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::LeaseRequest(LeaseRequest {
-            ttl_ms: 10_000,
-            capabilities: Vec::new(),
-            lease_priority: 0, // Priority 0 reserved for system — must be downgraded
-        })),
+        payload: Some(ClientPayload::LeaseRequest(LeaseRequest { ttl_ms: 10_000 })),
     })
     .await
     .unwrap();
@@ -6302,10 +5378,6 @@ async fn test_lease_priority_zero_downgraded() {
     match &resp_msg.payload {
         Some(ServerPayload::LeaseResponse(resp)) => {
             assert!(resp.granted);
-            assert_eq!(
-                resp.granted_priority, 2,
-                "Priority 0 request must be downgraded to priority 2"
-            );
         }
         other => panic!("Expected LeaseResponse, got: {other:?}"),
     }
@@ -6321,11 +5393,7 @@ async fn test_lease_priority_one_without_capability_downgraded() {
     tx.send(ClientMessage {
         sequence: 2,
         timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::LeaseRequest(LeaseRequest {
-            ttl_ms: 10_000,
-            capabilities: Vec::new(),
-            lease_priority: 1, // Requires lease:priority:1 cap — not granted
-        })),
+        payload: Some(ClientPayload::LeaseRequest(LeaseRequest { ttl_ms: 10_000 })),
     })
     .await
     .unwrap();
@@ -6334,10 +5402,6 @@ async fn test_lease_priority_one_without_capability_downgraded() {
     match &resp_msg.payload {
         Some(ServerPayload::LeaseResponse(resp)) => {
             assert!(resp.granted);
-            assert_eq!(
-                resp.granted_priority, 2,
-                "Priority 1 without lease:priority:1 capability must be downgraded to 2"
-            );
         }
         other => panic!("Expected LeaseResponse, got: {other:?}"),
     }
@@ -6354,11 +5418,7 @@ async fn test_lease_renew_returns_lease_response() {
     tx.send(ClientMessage {
         sequence: 2,
         timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::LeaseRequest(LeaseRequest {
-            ttl_ms: 60_000,
-            capabilities: vec!["create_tiles".to_string()],
-            lease_priority: 2,
-        })),
+        payload: Some(ClientPayload::LeaseRequest(LeaseRequest { ttl_ms: 60_000 })),
     })
     .await
     .unwrap();
@@ -6405,11 +5465,7 @@ async fn test_lease_release_sends_lease_response() {
     tx.send(ClientMessage {
         sequence: 2,
         timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::LeaseRequest(LeaseRequest {
-            ttl_ms: 60_000,
-            capabilities: Vec::new(),
-            lease_priority: 2,
-        })),
+        payload: Some(ClientPayload::LeaseRequest(LeaseRequest { ttl_ms: 60_000 })),
     })
     .await
     .unwrap();
@@ -6459,11 +5515,7 @@ async fn test_lease_retransmit_correlation_returns_cached_response() {
     let lease_req = ClientMessage {
         sequence: 2,
         timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::LeaseRequest(LeaseRequest {
-            ttl_ms: 30_000,
-            capabilities: vec!["create_tiles".to_string()],
-            lease_priority: 2,
-        })),
+        payload: Some(ClientPayload::LeaseRequest(LeaseRequest { ttl_ms: 30_000 })),
     };
 
     // Original request
@@ -6535,11 +5587,7 @@ async fn test_three_agents_lease_contention() {
         tx.send(ClientMessage {
             sequence: seq,
             timestamp_wall_us: now_wall_us(),
-            payload: Some(ClientPayload::LeaseRequest(LeaseRequest {
-                ttl_ms: 30_000,
-                capabilities: vec!["create_tiles".to_string()],
-                lease_priority: 2,
-            })),
+            payload: Some(ClientPayload::LeaseRequest(LeaseRequest { ttl_ms: 30_000 })),
         })
         .await
         .unwrap();
@@ -6588,8 +5636,6 @@ async fn test_lease_expiry_scenario_initial_grant() {
         timestamp_wall_us: now_wall_us(),
         payload: Some(ClientPayload::LeaseRequest(LeaseRequest {
             ttl_ms: 100, // very short TTL for expiry testing
-            capabilities: vec!["create_tiles".to_string()],
-            lease_priority: 2,
         })),
     })
     .await
@@ -6700,11 +5746,7 @@ async fn test_disconnect_with_active_leases_no_panic() {
     tx.send(ClientMessage {
         sequence: 2,
         timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::LeaseRequest(LeaseRequest {
-            ttl_ms: 60_000,
-            capabilities: vec!["create_tiles".to_string()],
-            lease_priority: 2,
-        })),
+        payload: Some(ClientPayload::LeaseRequest(LeaseRequest { ttl_ms: 60_000 })),
     })
     .await
     .unwrap();
@@ -6723,305 +5765,6 @@ async fn test_disconnect_with_active_leases_no_panic() {
 
 // ─── Live capability revocation tests (RFC 0001 §3.3, GAP-G3-4) ────────────
 
-/// Set up a test server that also returns the capability-revocation broadcast sender
-/// (so tests can call `revoke_capability_on_lease` via the sender directly).
-async fn setup_test_with_revocation_tx() -> (
-    HudSessionClient<tonic::transport::Channel>,
-    tokio::task::JoinHandle<()>,
-    Arc<Mutex<SharedState>>,
-    tokio::sync::broadcast::Sender<CapabilityRevocationEvent>,
-) {
-    let scene = SceneGraph::new(800.0, 600.0);
-    let service = HudSessionImpl::new(scene, "test-key");
-    let shared_state = service.state.clone();
-    let revocation_tx = service.capability_revocation_tx.clone();
-
-    let listener = tokio::net::TcpListener::bind("[::1]:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-
-    let handle = tokio::spawn(async move {
-        let incoming = tokio_stream::wrappers::TcpListenerStream::new(listener);
-        tonic::transport::Server::builder()
-            .add_service(HudSessionServer::new(service))
-            .serve_with_incoming(incoming)
-            .await
-            .unwrap();
-    });
-
-    tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-
-    let client = HudSessionClient::connect(format!("http://[::1]:{}", addr.port()))
-        .await
-        .unwrap();
-
-    (client, handle, shared_state, revocation_tx)
-}
-
-/// Helper: do a full handshake with publish_zone:subtitle capability and acquire a lease.
-/// Returns (tx, stream, lease_id_bytes).
-async fn handshake_with_publish_zone_lease(
-    client: &mut HudSessionClient<tonic::transport::Channel>,
-) -> (
-    tokio::sync::mpsc::Sender<ClientMessage>,
-    tonic::Streaming<ServerMessage>,
-    Vec<u8>,
-    tze_hud_scene::SceneId,
-) {
-    let (tx, rx) = tokio::sync::mpsc::channel::<ClientMessage>(64);
-    let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
-
-    tx.send(ClientMessage {
-        sequence: 1,
-        timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::SessionInit(SessionInit {
-            agent_id: "revoke-test-agent".to_string(),
-            requested_capabilities: vec![
-                "publish_zone:subtitle".to_string(),
-                "create_tiles".to_string(),
-            ],
-            initial_subscriptions: vec![],
-            resume_token: Vec::new(),
-            min_protocol_version: 1000,
-            max_protocol_version: 1001,
-            auth_credential: Some(crate::auth::psk_credential("test-key".to_string())),
-        })),
-    })
-    .await
-    .unwrap();
-
-    let mut response_stream = client.session(stream).await.unwrap().into_inner();
-
-    // Drain SessionEstablished + SceneSnapshot + current degradation state.
-    let _established = response_stream.next().await.unwrap().unwrap();
-    let _snapshot = response_stream.next().await.unwrap().unwrap();
-    let _degradation = response_stream.next().await.unwrap().unwrap();
-
-    // Request a lease with publish_zone:subtitle + create_tiles
-    tx.send(ClientMessage {
-        sequence: 2,
-        timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::LeaseRequest(LeaseRequest {
-            ttl_ms: 60_000,
-            capabilities: vec![
-                "publish_zone:subtitle".to_string(),
-                "create_tiles".to_string(),
-            ],
-            lease_priority: 2,
-        })),
-    })
-    .await
-    .unwrap();
-
-    // LeaseResponse
-    let lease_resp_msg = response_stream.next().await.unwrap().unwrap();
-    let lease_id_bytes = match &lease_resp_msg.payload {
-        Some(ServerPayload::LeaseResponse(lr)) => {
-            assert!(lr.granted, "Lease must be granted");
-            lr.lease_id.clone()
-        }
-        other => panic!("Expected LeaseResponse, got: {other:?}"),
-    };
-
-    // Parse lease_id back to SceneId.
-    // scene_id_to_bytes() uses as_uuid().as_bytes() (big-endian UUID bytes),
-    // so we must decode with from_uuid(Uuid::from_bytes()) to match.
-    let lease_arr: [u8; 16] = lease_id_bytes
-        .as_slice()
-        .try_into()
-        .expect("lease_id must be 16 bytes");
-    let lease_scene_id = tze_hud_scene::SceneId::from_uuid(uuid::Uuid::from_bytes(lease_arr));
-
-    (tx, response_stream, lease_id_bytes, lease_scene_id)
-}
-
-/// WHEN the runtime revokes a capability from an active lease,
-/// THEN the agent receives CapabilityNotice(revoked=[cap_name]).
-#[tokio::test]
-async fn test_revoke_capability_sends_capability_notice() {
-    let (mut client, _server, _state, revocation_tx) = setup_test_with_revocation_tx().await;
-
-    let (_tx, mut stream, _lease_id_bytes, lease_scene_id) =
-        handshake_with_publish_zone_lease(&mut client).await;
-
-    // Revoke publish_zone:subtitle
-    let _ = revocation_tx.send(CapabilityRevocationEvent {
-        lease_id: lease_scene_id,
-        capability_name: "publish_zone:subtitle".to_string(),
-    });
-
-    // The agent should receive a CapabilityNotice with revoked=[publish_zone:subtitle]
-    let msg = stream.next().await.unwrap().unwrap();
-    match msg.payload {
-        Some(ServerPayload::CapabilityNotice(notice)) => {
-            assert!(
-                notice
-                    .revoked
-                    .contains(&"publish_zone:subtitle".to_string()),
-                "CapabilityNotice.revoked must contain publish_zone:subtitle"
-            );
-            assert!(
-                notice.granted.is_empty(),
-                "CapabilityNotice.granted must be empty for a revocation"
-            );
-        }
-        other => panic!("Expected CapabilityNotice, got: {other:?}"),
-    }
-}
-
-/// WHEN a capability is revoked from a lease, THEN the lease scope is narrowed
-/// in the scene graph and the capability is absent from the live scope.
-#[tokio::test]
-async fn test_revoke_capability_narrows_scene_graph_scope() {
-    let (mut client, _server, state, revocation_tx) = setup_test_with_revocation_tx().await;
-
-    let (_tx, mut stream, _lease_id_bytes, lease_scene_id) =
-        handshake_with_publish_zone_lease(&mut client).await;
-
-    // Before revocation: verify the capability is present
-    {
-        let st = state.lock().await;
-        let scene = st.scene.lock().await;
-        let caps = scene
-            .lease_capabilities(&lease_scene_id)
-            .expect("lease must exist");
-        assert!(
-            caps.iter().any(
-                |c| matches!(c, tze_hud_scene::types::Capability::PublishZone(z) if z == "subtitle")
-            ),
-            "publish_zone:subtitle must be in the live scope before revocation"
-        );
-    }
-
-    // Revoke
-    let _ = revocation_tx.send(CapabilityRevocationEvent {
-        lease_id: lease_scene_id,
-        capability_name: "publish_zone:subtitle".to_string(),
-    });
-
-    // Drain protocol messages
-    let _notice = stream.next().await.unwrap().unwrap();
-
-    // After revocation: the capability must be absent from the live scope
-    {
-        let st = state.lock().await;
-        let scene = st.scene.lock().await;
-        let caps = scene
-            .lease_capabilities(&lease_scene_id)
-            .expect("lease must still exist after capability revocation");
-        assert!(
-            !caps.iter().any(
-                |c| matches!(c, tze_hud_scene::types::Capability::PublishZone(z) if z == "subtitle")
-            ),
-            "publish_zone:subtitle must be removed from the live scope after revocation"
-        );
-    }
-}
-
-/// WHEN a capability is revoked, THEN the lease remains in ACTIVE state.
-#[tokio::test]
-async fn test_revoke_capability_preserves_lease_active_state() {
-    let (mut client, _server, state, revocation_tx) = setup_test_with_revocation_tx().await;
-
-    let (_tx, mut stream, _lease_id_bytes, lease_scene_id) =
-        handshake_with_publish_zone_lease(&mut client).await;
-
-    // Revoke one capability
-    let _ = revocation_tx.send(CapabilityRevocationEvent {
-        lease_id: lease_scene_id,
-        capability_name: "create_tiles".to_string(),
-    });
-    let _notice = stream.next().await.unwrap().unwrap();
-
-    // Lease must still be ACTIVE in the scene graph
-    let st = state.lock().await;
-    let scene = st.scene.lock().await;
-    let lease = scene
-        .leases
-        .get(&lease_scene_id)
-        .expect("lease must still exist");
-    assert_eq!(
-        lease.state,
-        tze_hud_scene::types::LeaseState::Active,
-        "Lease must remain ACTIVE after capability revocation"
-    );
-}
-
-/// WHEN an unknown capability name is used in a revocation,
-/// THEN the agent receives RuntimeError(INVALID_ARGUMENT) and the lease is unchanged.
-#[tokio::test]
-async fn test_revoke_unknown_capability_returns_error() {
-    let (mut client, _server, state, revocation_tx) = setup_test_with_revocation_tx().await;
-
-    let (_tx, mut stream, _lease_id_bytes, lease_scene_id) =
-        handshake_with_publish_zone_lease(&mut client).await;
-
-    // Try to revoke a capability that doesn't exist in the vocabulary
-    let _ = revocation_tx.send(CapabilityRevocationEvent {
-        lease_id: lease_scene_id,
-        capability_name: "totally_unknown_capability".to_string(),
-    });
-
-    // Should get a RuntimeError
-    let msg = stream.next().await.unwrap().unwrap();
-    match msg.payload {
-        Some(ServerPayload::RuntimeError(e)) => {
-            assert_eq!(e.error_code, "CAPABILITY_NOT_PRESENT");
-        }
-        other => panic!("Expected RuntimeError, got: {other:?}"),
-    }
-
-    // Lease scope unchanged (still has both original capabilities)
-    let st = state.lock().await;
-    let scene = st.scene.lock().await;
-    let caps = scene
-        .lease_capabilities(&lease_scene_id)
-        .expect("lease must exist");
-    assert_eq!(
-        caps.len(),
-        2,
-        "Lease scope must be unchanged after failed revocation"
-    );
-}
-
-/// WHEN a capability that is not in the lease scope is revoked (noop),
-/// THEN the agent receives RuntimeError(CAPABILITY_NOT_PRESENT).
-#[tokio::test]
-async fn test_revoke_absent_capability_returns_not_present() {
-    let (mut client, _server, _state, revocation_tx) = setup_test_with_revocation_tx().await;
-
-    let (_tx, mut stream, _lease_id_bytes, lease_scene_id) =
-        handshake_with_publish_zone_lease(&mut client).await;
-
-    // manage_tabs is not in this lease's scope
-    let _ = revocation_tx.send(CapabilityRevocationEvent {
-        lease_id: lease_scene_id,
-        capability_name: "manage_tabs".to_string(),
-    });
-
-    // Should get a RuntimeError for capability not present
-    let msg = stream.next().await.unwrap().unwrap();
-    match msg.payload {
-        Some(ServerPayload::RuntimeError(e)) => {
-            assert_eq!(e.error_code, "CAPABILITY_NOT_PRESENT");
-        }
-        other => panic!("Expected RuntimeError for absent capability, got: {other:?}"),
-    }
-}
-
-/// WHEN revoke_capability_on_lease is called for a lease not owned by any session,
-/// THEN the broadcast produces 0 receivers and no error.
-#[tokio::test]
-async fn test_revoke_capability_noop_for_unknown_lease_id() {
-    let scene = SceneGraph::new(800.0, 600.0);
-    let service = HudSessionImpl::new(scene, "test-key");
-
-    // An unknown lease ID not owned by any session
-    let unknown_lease_id = tze_hud_scene::SceneId::new();
-    // No session is connected, so this should return 0 receivers
-    let n = service.revoke_capability_on_lease(unknown_lease_id, "create_tiles");
-    assert_eq!(n, 0, "No active sessions means 0 receivers");
-}
-
 // ─── Widget publish tests (widget-system spec §Requirement: Widget Publishing via gRPC) ──
 
 /// Helper: create a test service with a durable widget registered.
@@ -7032,7 +5775,8 @@ async fn setup_widget_service() -> HudSessionImpl {
     };
 
     let scene = SceneGraph::new(800.0, 600.0);
-    let service = HudSessionImpl::new(scene, "test-key");
+    let service =
+        HudSessionImpl::new(scene, "test-key").with_agent_permissions(restricted_test_agents());
     {
         let st = service.state.lock().await;
         let mut s = st.scene.lock().await;
@@ -9235,11 +7979,7 @@ async fn test_resident_upload_then_static_image_references_uploaded_resource_id(
     tx.send(ClientMessage {
         sequence: 3,
         timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::LeaseRequest(LeaseRequest {
-            ttl_ms: 60_000,
-            capabilities: vec!["create_tiles".to_string(), "modify_own_tiles".to_string()],
-            lease_priority: 2,
-        })),
+        payload: Some(ClientPayload::LeaseRequest(LeaseRequest { ttl_ms: 60_000 })),
     })
     .await
     .unwrap();
@@ -9421,7 +8161,6 @@ async fn handshake_with_capabilities(
         timestamp_wall_us: now_wall_us(),
         payload: Some(ClientPayload::SessionInit(SessionInit {
             agent_id: agent_id.to_string(),
-            requested_capabilities: caps,
             initial_subscriptions: vec![],
             resume_token: Vec::new(),
             min_protocol_version: 1000,
@@ -9676,7 +8415,6 @@ async fn test_element_repositioned_not_delivered_without_scene_topology_subscrip
         timestamp_wall_us: now_wall_us(),
         payload: Some(ClientPayload::SessionInit(SessionInit {
             agent_id: "no-topology-agent".to_string(),
-            requested_capabilities: vec!["create_tiles".to_string()],
             initial_subscriptions: vec![],
             resume_token: Vec::new(),
             min_protocol_version: 1000,
@@ -9782,7 +8520,6 @@ async fn handshake_telemetry(
         timestamp_wall_us: now_wall_us(),
         payload: Some(ClientPayload::SessionInit(SessionInit {
             agent_id: agent_id.to_string(),
-            requested_capabilities: vec!["read_telemetry".to_string()],
             initial_subscriptions,
             resume_token: Vec::new(),
             min_protocol_version: 1000,
@@ -10016,8 +8753,6 @@ async fn connect_hold_tile_and_disconnect(
         timestamp_wall_us: now_wall_us(),
         payload: Some(ClientPayload::LeaseRequest(LeaseRequest {
             ttl_ms: 600_000,
-            capabilities: vec!["create_tiles".to_string()],
-            lease_priority: 2,
         })),
     })
     .await
@@ -10191,13 +8926,7 @@ async fn zone_publisher(
         let st = state.lock().await;
         st.scene.lock().await.zone_registry = tze_hud_scene::types::ZoneRegistry::with_defaults();
     }
-    let (tx, _init, stream) = handshake_with_requested_capabilities(
-        &mut client,
-        "zone-agent",
-        "test-key",
-        vec!["publish_zone:*".to_string()],
-    )
-    .await;
+    let (tx, _init, stream) = handshake_with_psk(&mut client, "zone-agent", "test-key").await;
     (tx, stream, state, server, client)
 }
 
@@ -10356,20 +9085,12 @@ async fn tile_agent(
         let tab = scene.create_tab("Main", 0).unwrap();
         scene.active_tab = Some(tab);
     }
-    let (tx, _init, mut stream) = handshake_with_requested_capabilities(
-        &mut client,
-        "tile-agent",
-        "test-key",
-        vec!["create_tiles".to_string(), "modify_own_tiles".to_string()],
-    )
-    .await;
+    let (tx, _init, mut stream) = handshake_with_psk(&mut client, "tile-agent", "test-key").await;
     tx.send(ClientMessage {
         sequence: 2,
         timestamp_wall_us: now_wall_us(),
         payload: Some(ClientPayload::LeaseRequest(LeaseRequest {
             ttl_ms: 600_000,
-            capabilities: vec!["create_tiles".to_string(), "modify_own_tiles".to_string()],
-            lease_priority: 2,
         })),
     })
     .await

@@ -39,7 +39,6 @@ pub fn classify_server_payload(payload: &ServerPayload) -> TrafficClass {
         // Mutation / lease responses — transactional
         ServerPayload::MutationResult(_)
         | ServerPayload::LeaseResponse(_)
-        | ServerPayload::CapabilityNotice(_)
         | ServerPayload::SubscriptionChangeResult(_)
         | ServerPayload::ZonePublishResult(_)
         | ServerPayload::InputFocusResponse(_)

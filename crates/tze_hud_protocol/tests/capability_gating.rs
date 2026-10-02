@@ -1,131 +1,88 @@
-//! Capability gating tests.
+//! Handshake authentication and identity tests.
 //!
-//! Tests guest vs resident tool access, subscription category-to-capability
-//! mapping, and fine-grained capability enforcement.
-//!
-//! Based on session-protocol/spec.md lines 487-510 and auth.rs CapabilityPolicy.
-//!
-//! Test count target: ≥10 tests.
+//! Credential evaluation, PSK → agent identity resolution, and version
+//! negotiation.
 
 use std::net::IpAddr;
 
 use tze_hud_protocol::auth::AuthResult;
 use tze_hud_protocol::auth::{
-    CapabilityPolicy, RUNTIME_MAX_VERSION, RUNTIME_MIN_VERSION, authenticate_session_init,
+    RUNTIME_MAX_VERSION, RUNTIME_MIN_VERSION, authenticate_session_init, identify_session,
     negotiate_version,
 };
 use tze_hud_protocol::proto::session::auth_credential::Credential;
 use tze_hud_protocol::proto::session::{
     AuthCredential, LocalSocketCredential, PreSharedKeyCredential,
 };
+use tze_hud_scene::config::AgentDirectory;
 
 fn loopback() -> Option<IpAddr> {
     Some("127.0.0.1".parse().unwrap())
 }
 
-// ─── Capability Policy ───────────────────────────────────────────────────────
+// ─── Identity ────────────────────────────────────────────────────────────────
 
-/// WHEN agent has resident_mcp capability THEN evaluate_capability_request succeeds.
-#[test]
-fn resident_mcp_capability_granted_when_allowed() {
-    let policy = CapabilityPolicy::new(vec!["resident_mcp".to_string()]);
-    let result = policy.evaluate_capability_request(&["resident_mcp".to_string()]);
-    assert!(
-        result.is_ok(),
-        "resident_mcp must be granted when in allowed set"
+fn directory() -> AgentDirectory {
+    let mut dir = AgentDirectory {
+        runtime_psk: "runtime".to_string(),
+        ..Default::default()
+    };
+    dir.agent_psks
+        .insert("claude".to_string(), "claude-psk".to_string());
+    dir.permissions.insert(
+        "claude".to_string(),
+        vec!["publish_zone:subtitle".to_string()],
     );
-    assert_eq!(result.unwrap(), vec!["resident_mcp"]);
+    dir
 }
 
-/// WHEN agent requests capability not in allowed set THEN entire request denied.
-#[test]
-fn capability_request_denied_when_not_allowed() {
-    let policy = CapabilityPolicy::new(vec!["read_scene_topology".to_string()]);
-    let result = policy.evaluate_capability_request(&["resident_mcp".to_string()]);
-    assert!(
-        result.is_err(),
-        "resident_mcp must be denied when not in allowed set"
-    );
-    let denied = result.unwrap_err();
-    assert!(denied.contains(&"resident_mcp".to_string()));
+fn psk(key: &str) -> AuthCredential {
+    AuthCredential {
+        credential: Some(Credential::PreSharedKey(PreSharedKeyCredential {
+            key: key.to_string(),
+        })),
+    }
 }
 
-/// WHEN agent is a guest (no capabilities) THEN resident tool request denied.
+/// An agent's own PSK identifies it and yields its allow-derived permissions.
 #[test]
-fn guest_policy_denies_all_capabilities() {
-    let policy = CapabilityPolicy::guest();
-    let result = policy
-        .evaluate_capability_request(&["resident_mcp".to_string(), "create_tile".to_string()]);
-    assert!(
-        result.is_err(),
-        "guest policy must deny all capability requests"
-    );
+fn own_psk_identifies_agent_with_allow_permissions() {
+    let id = identify_session(&directory(), Some(&psk("claude-psk")), "", "claude", None).unwrap();
+    assert_eq!(id.agent_id, "claude");
+    assert!(id.allows("publish_zone:subtitle"));
+    assert!(!id.allows("create_tiles"));
 }
 
-/// WHEN unrestricted policy THEN any capability request succeeds.
+/// An agent's PSK cannot be used to claim a different agent id.
 #[test]
-fn unrestricted_policy_allows_any_capability() {
-    let policy = CapabilityPolicy::unrestricted();
-    let result = policy.evaluate_capability_request(&[
-        "resident_mcp".to_string(),
-        "read_scene_topology".to_string(),
-        "access_input_events".to_string(),
-        "publish_zone:subtitle".to_string(),
-    ]);
-    assert!(
-        result.is_ok(),
-        "unrestricted policy must allow any capability"
-    );
-    assert!(policy.is_unrestricted());
+fn own_psk_cannot_claim_other_agent() {
+    let err =
+        identify_session(&directory(), Some(&psk("claude-psk")), "", "other", None).unwrap_err();
+    assert_eq!(err.code, "AUTH_FAILED");
+    assert!(!err.hint.is_empty());
 }
 
-/// WHEN partial capability request (some allowed, some not) THEN entire batch denied.
+/// An agent with its own PSK cannot be claimed with the runtime PSK.
 #[test]
-fn partial_capability_request_entirely_denied() {
-    // RFC 0005 §5.3 scenario 4: partial grants are denied entirely
-    let policy = CapabilityPolicy::new(vec!["read_scene_topology".to_string()]);
-    let result = policy.evaluate_capability_request(&[
-        "read_scene_topology".to_string(),
-        "resident_mcp".to_string(), // not in allowed set
-    ]);
-    assert!(
-        result.is_err(),
-        "partial capability request must be entirely denied"
-    );
-    let denied = result.unwrap_err();
-    assert!(
-        denied.contains(&"resident_mcp".to_string()),
-        "denied list must include the unauthorized capability"
-    );
+fn runtime_psk_cannot_claim_agent_with_own_psk() {
+    assert!(identify_session(&directory(), Some(&psk("runtime")), "", "claude", None).is_err());
 }
 
-/// WHEN guest policy created THEN is_unrestricted returns false.
+/// An agent without a table gets the fallback permissions (none here).
 #[test]
-fn guest_policy_is_not_unrestricted() {
-    let policy = CapabilityPolicy::guest();
-    assert!(!policy.is_unrestricted());
+fn unconfigured_agent_gets_fallback_permissions() {
+    let id = identify_session(&directory(), Some(&psk("runtime")), "", "stranger", None).unwrap();
+    assert!(id.permissions.is_empty());
 }
 
-/// WHEN fine-grained publish_zone capability with specific zone name THEN allowed.
+/// Loopback LocalSocketCredential is treated like the runtime PSK.
 #[test]
-fn fine_grained_publish_zone_capability_matches_specific_zone() {
-    let policy = CapabilityPolicy::new(vec!["publish_zone:subtitle".to_string()]);
-    let result = policy.evaluate_capability_request(&["publish_zone:subtitle".to_string()]);
-    assert!(
-        result.is_ok(),
-        "publish_zone:subtitle must be granted when in allowed set"
-    );
-}
-
-/// WHEN agent requests publish_zone:other with only publish_zone:subtitle THEN denied.
-#[test]
-fn fine_grained_publish_zone_capability_does_not_match_other_zone() {
-    let policy = CapabilityPolicy::new(vec!["publish_zone:subtitle".to_string()]);
-    let result = policy.evaluate_capability_request(&["publish_zone:notification".to_string()]);
-    assert!(
-        result.is_err(),
-        "publish_zone:notification must not be granted when only publish_zone:subtitle is allowed"
-    );
+fn local_socket_from_loopback_resolves_claimed_agent() {
+    let cred = AuthCredential {
+        credential: Some(Credential::LocalSocket(LocalSocketCredential::default())),
+    };
+    let id = identify_session(&directory(), Some(&cred), "", "stranger", loopback()).unwrap();
+    assert_eq!(id.agent_id, "stranger");
 }
 
 // ─── Authentication ───────────────────────────────────────────────────────────

@@ -907,12 +907,11 @@ async fn test_three_agents_presence_card_coexistence() -> Result<(), Box<dyn std
     let _server_handle = runtime.start_grpc_server().await?;
 
     // ── Phase 1: Three agents connect concurrently ────────────────────────────
-    let caps = vec!["create_tiles".to_string(), "modify_own_tiles".to_string()];
 
     let (mut alpha, mut beta, mut gamma) = tokio::try_join!(
-        connect_agent(TEST_PSK, GRPC_PORT, "agent-alpha", 2, caps.clone()),
-        connect_agent(TEST_PSK, GRPC_PORT, "agent-beta", 2, caps.clone()),
-        connect_agent(TEST_PSK, GRPC_PORT, "agent-gamma", 2, caps.clone()),
+        connect_agent(TEST_PSK, GRPC_PORT, "agent-alpha"),
+        connect_agent(TEST_PSK, GRPC_PORT, "agent-beta"),
+        connect_agent(TEST_PSK, GRPC_PORT, "agent-gamma"),
     )?;
 
     // Verify all three namespaces are distinct (AC 5.1: namespace isolation).

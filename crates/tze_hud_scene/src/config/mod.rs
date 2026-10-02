@@ -5,6 +5,9 @@
 //! and related requirements.  This module defines **only** the trait contract
 //! and supporting types — no implementation is provided here.
 
+pub mod agents;
+pub use agents::{AgentDirectory, AgentIdentity, AuthRejection, DEFAULT_MCP_AGENT_ID};
+
 // ─── Error Codes ─────────────────────────────────────────────────────────────
 
 /// Stable configuration error codes.
@@ -25,7 +28,7 @@ pub enum ConfigErrorCode {
     ProfileResidentBudgetInvalid,
     ProfileCapabilityEscalation,
     UnknownZoneType,
-    UnknownCapability,
+    UnknownAllowEntry,
     InvalidEventName,
     AgentBudgetExceedsProfile,
     InvalidReservedFraction,
@@ -186,7 +189,10 @@ pub struct RegisteredAgentBudgetOverrides {
 pub struct ResolvedConfig {
     pub profile: DisplayProfile,
     pub tab_names: Vec<String>,
+    /// Internal permissions per configured agent, expanded from its `allow` list.
     pub agent_capabilities: std::collections::HashMap<String, Vec<String>>,
+    /// Per-agent PSK environment variable names (`[agents.<id>] psk_env`).
+    pub agent_psk_env: std::collections::HashMap<String, String>,
     /// Per-agent budget overrides keyed by registered agent name.
     pub agent_budget_overrides: std::collections::HashMap<String, RegisteredAgentBudgetOverrides>,
     /// Sourced TOML file path.
@@ -202,7 +208,7 @@ pub struct ResolvedConfig {
 /// - Search configuration file chain (CLI → env → cwd → XDG) in order.
 /// - Enforce built-in profile budget values exactly.
 /// - Prevent budget escalation in custom profiles.
-/// - Validate capability names against the canonical v1 vocabulary.
+/// - Validate `[agents.<id>] allow` entries.
 /// - Collect ALL validation errors before reporting.
 /// - Reject `includes` fields (post-v1 reserved).
 pub trait ConfigLoader {
@@ -233,60 +239,6 @@ pub trait ConfigLoader {
     fn resolve_config_path(cli_path: Option<&str>) -> Result<String, Vec<String>>
     where
         Self: Sized;
-
-    /// Returns `true` if the capability name is in the canonical v1 vocabulary.
-    ///
-    /// From spec §Requirement: Capability Vocabulary.
-    fn is_known_capability(name: &str) -> bool
-    where
-        Self: Sized;
-}
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
-/// Canonical v1 capability names (from spec §Requirement: Capability Vocabulary).
-pub const CANONICAL_CAPABILITIES: &[&str] = &[
-    "create_tiles",
-    "modify_own_tiles",
-    "manage_tabs",
-    "upload_resource",
-    "register_widget_asset",
-    "read_scene_topology",
-    "access_input_events",
-    "read_telemetry",
-    "resident_mcp",
-    // Parameterized — wildcard or specific zone.
-    "publish_zone:*",
-    // Parameterized — wildcard or specific widget.
-    "publish_widget:*",
-    // "publish_zone:<zone_name>", "publish_widget:<widget_name>", and
-    // "lease:priority:<N>" are validated by prefix pattern, not exact match.
-];
-
-/// Returns `true` if `name` is a valid v1 capability per the canonical vocabulary.
-///
-/// Parameterized forms are validated:
-/// - `publish_zone:<name>`: suffix must be non-empty.
-/// - `lease:priority:<N>`: suffix must be a non-empty numeric value.
-pub fn is_canonical_capability(name: &str) -> bool {
-    // Exact matches.
-    if CANONICAL_CAPABILITIES.contains(&name) {
-        return true;
-    }
-    // Parameterized forms with validation.
-    if let Some(zone_name) = name.strip_prefix("publish_zone:") {
-        return !zone_name.is_empty();
-    }
-    if let Some(widget_name) = name.strip_prefix("publish_widget:") {
-        return !widget_name.is_empty();
-    }
-    if let Some(priority_str) = name.strip_prefix("lease:priority:") {
-        if priority_str.is_empty() {
-            return false;
-        }
-        return priority_str.parse::<u32>().is_ok();
-    }
-    false
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
@@ -295,48 +247,8 @@ pub fn is_canonical_capability(name: &str) -> bool {
 mod tests {
     use super::*;
 
-    // These tests exercise logic that lives in this module (capability validation
-    // and DisplayProfile constants).  ConfigLoader conformance tests live in
+    // These tests exercise DisplayProfile constants.  ConfigLoader conformance tests live in
     // tze_hud_config/src/tests.rs alongside the TzeHudConfig implementation.
-
-    /// WHEN valid canonical capability names used THEN no error.
-    #[test]
-    fn test_canonical_capability_names_valid() {
-        assert!(is_canonical_capability("create_tiles"));
-        assert!(is_canonical_capability("read_scene_topology"));
-        assert!(is_canonical_capability("access_input_events"));
-        assert!(is_canonical_capability("register_widget_asset"));
-        assert!(is_canonical_capability("publish_zone:subtitle"));
-        assert!(is_canonical_capability("lease:priority:1"));
-        assert!(is_canonical_capability("resident_mcp"));
-    }
-
-    /// WHEN non-canonical capability names used THEN validation rejects them.
-    #[test]
-    fn test_non_canonical_capability_names_invalid() {
-        // Pre-Round-14 names.
-        assert!(
-            !is_canonical_capability("read_scene"),
-            "read_scene is pre-Round-14"
-        );
-        assert!(
-            !is_canonical_capability("receive_input"),
-            "receive_input is pre-Round-14"
-        );
-        assert!(
-            !is_canonical_capability("zone_publish:subtitle"),
-            "zone_publish is pre-Round-14"
-        );
-        // Wrong case / format.
-        assert!(
-            !is_canonical_capability("CREATE_TILE"),
-            "uppercase not allowed"
-        );
-        assert!(
-            !is_canonical_capability("create-tiles"),
-            "kebab-case not allowed"
-        );
-    }
 
     /// WHEN profile = "full-display" THEN correct budget values resolved.
     #[test]

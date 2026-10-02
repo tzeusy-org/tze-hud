@@ -73,8 +73,6 @@ impl AgentSession {
 /// - `port`: gRPC port the runtime is listening on.
 /// - `agent_id`: unique agent identifier string.
 /// - `display_name_suffix`: appended to `"{agent_id} ({suffix})"` in SessionInit.
-/// - `lease_priority`: lease priority (lower = higher priority; 1 is highest in tests).
-/// - `capabilities`: list of capability strings to request in SessionInit and LeaseRequest.
 ///
 /// The returned [`AgentSession`] has `sequence` pre-set to `2` (the sequence
 /// of the LeaseRequest) so the next `next_seq()` call returns `3`.
@@ -82,8 +80,6 @@ pub async fn connect_agent(
     psk: &str,
     port: u16,
     agent_id: &str,
-    lease_priority: u32,
-    capabilities: Vec<String>,
 ) -> Result<AgentSession, Box<dyn std::error::Error>> {
     let mut client = HudSessionClient::connect(format!("http://[::1]:{port}")).await?;
 
@@ -99,7 +95,6 @@ pub async fn connect_agent(
         payload: Some(session_proto::client_message::Payload::SessionInit(
             session_proto::SessionInit {
                 agent_id: agent_id.to_string(),
-                requested_capabilities: capabilities.clone(),
                 initial_subscriptions: vec!["SCENE_TOPOLOGY".to_string()],
                 resume_token: Vec::new(),
                 min_protocol_version: RUNTIME_MIN_VERSION,
@@ -150,11 +145,7 @@ pub async fn connect_agent(
         sequence: 2,
         timestamp_wall_us: now_wall_us(),
         payload: Some(session_proto::client_message::Payload::LeaseRequest(
-            session_proto::LeaseRequest {
-                ttl_ms: 120_000,
-                capabilities,
-                lease_priority,
-            },
+            session_proto::LeaseRequest { ttl_ms: 120_000 },
         )),
     })
     .await?;

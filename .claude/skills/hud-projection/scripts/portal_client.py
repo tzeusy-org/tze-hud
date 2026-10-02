@@ -5,22 +5,20 @@
 # ///
 """Deterministic CLI for the tze_hud `portal_projection_*` MCP facade.
 
-One subcommand per projection operation, with owner-token custody handled for
-you: the token returned by `attach` is written to a 0600 file OUTSIDE the repo
-(default `~/.local/state/tze_hud/portal-tokens/<projection_id>.token`, override
-with PORTAL_TOKEN_DIR) and is never printed — every response is recursively
-redacted before it reaches stdout.
+One subcommand per projection operation. Ownership is the caller's agent
+identity (the bearer PSK): the runtime keeps the projection owner token
+server-side, so this client never sends or stores one.
 
 The client also retains a bounded tail of content authored through `publish`
 under `~/.local/state/tze_hud/portal-continuity/<projection_id>.json` (override
 with PORTAL_CONTINUITY_DIR). Attach reuses the original idempotency key, rotates
-the owner token, and replays that tail before returning. Continuity files never
-contain owner tokens or viewer-authored HUD input.
+server-held ownership, and replays that tail before returning. Continuity files
+never contain viewer-authored HUD input.
 
 Environment:
   HUD_MCP_URL   MCP endpoint, with or without the /mcp suffix (required).
-  HUD_PSK       bearer PSK; falls back to MCP_TEST_PSK, HUD_MCP_PSK,
-                TZE_HUD_MCP_RESIDENT_PRINCIPAL (required via one of them).
+  HUD_PSK       bearer PSK (your agent's PSK); falls back to MCP_TEST_PSK,
+                HUD_MCP_PSK, TZE_HUD_PSK (required via one of them).
   Resolve both with:  eval "$(.claude/skills/user-test/scripts/tzehouse_env.sh)"
   (or hud_vm_env.sh for the autonomous VM testhost).
 
@@ -29,7 +27,7 @@ shape. This client uses it first and falls back to the legacy bare-method
 dialect only when an older server reports `tools/call` as method-not-found.
 
 Subcommands:
-  list     (bounded, caller-scoped projection summaries; no owner token)
+  list     (bounded, caller-scoped projection summaries)
   attach   --projection-id ID [--display-name S] [--provider-kind claude]
            [--workspace-hint S] [--repository-hint S] [--icon-profile S]
            [--classification private] [--idempotency-key S]
@@ -42,9 +40,8 @@ Subcommands:
            Exit 0 = items received, 3 = no items (deterministic signal).
   ack      --projection-id ID --input-id I --state handled|deferred|rejected
            [--message S] [--not-before-us N]
-  detach   --projection-id ID [--reason S]     (removes the token file)
-  cleanup  --projection-id ID [--reason S]     (removes the token file)
-  token-path --projection-id ID                (prints the token file path)
+  detach   --projection-id ID [--reason S]
+  cleanup  --projection-id ID [--reason S]
   continuity-path --projection-id ID           (prints the continuity file path)
   continuity-clear --projection-id ID          (deletes local continuity state)
 
@@ -73,10 +70,6 @@ else:
 STATE_ROOT = os.path.join(
     os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"),
     "tze_hud",
-)
-TOKEN_DIR = os.environ.get("PORTAL_TOKEN_DIR") or os.path.join(
-    STATE_ROOT,
-    "portal-tokens",
 )
 CONTINUITY_DIR = os.environ.get("PORTAL_CONTINUITY_DIR") or os.path.join(
     STATE_ROOT,
@@ -107,9 +100,8 @@ CONTINUITY_REQUIRED_RECORD_KEYS = frozenset(
 CONTINUITY_STATE_KEYS = frozenset({"version", "idempotency_key", "records"})
 OUTPUT_KINDS = frozenset({"assistant", "tool", "status", "error", "other"})
 
-# Projection IDs become token filenames; reject anything not filename-safe
-# BEFORE any RPC so a successful attach can never lose its one-time token to
-# a failed save (and `..`/`/` can never escape the token directory).
+# Projection IDs become continuity filenames; reject anything not
+# filename-safe BEFORE any RPC (`..`/`/` can never escape the state directory).
 PROJECTION_ID_SAFE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
 
@@ -138,17 +130,13 @@ def psk():
         "HUD_PSK",
         "MCP_TEST_PSK",
         "HUD_MCP_PSK",
-        "TZE_HUD_MCP_RESIDENT_PRINCIPAL",
+        "TZE_HUD_PSK",
     ):
         if os.environ.get(var):
             return os.environ[var]
     die(
-        "no PSK in env (HUD_PSK / MCP_TEST_PSK / HUD_MCP_PSK / TZE_HUD_MCP_RESIDENT_PRINCIPAL)"
+        "no PSK in env (HUD_PSK / MCP_TEST_PSK / HUD_MCP_PSK / TZE_HUD_PSK)"
     )
-
-
-def token_path(projection_id):
-    return os.path.join(TOKEN_DIR, f"{projection_id}.token")
 
 
 def continuity_path(projection_id):
@@ -239,24 +227,6 @@ def continuity_lock(projection_id):
             else:
                 fcntl.flock(fd, fcntl.LOCK_UN)
         os.close(fd)
-
-
-def save_token(projection_id, token):
-    _atomic_write_private(token_path(projection_id), token)
-
-
-def load_token(projection_id):
-    path = token_path(projection_id)
-    try:
-        with open(path, encoding="utf-8") as f:
-            return f.read().strip()
-    except FileNotFoundError:
-        die(
-            f"no owner token on file at {path} — attach first; for a live projection, "
-            "repeat attach with the original idempotency key to rotate ownership"
-        )
-    except OSError as e:
-        die(f"cannot read owner token at {path}: {e}")
 
 
 def empty_continuity():
@@ -489,7 +459,7 @@ def new_logical_unit_id(_projection_id):
 
 
 def redact(node):
-    """Strip owner_token from any response structure before it is printed."""
+    """Defensively strip any owner_token before a response is printed."""
     if isinstance(node, dict):
         if "owner_token" in node:
             node["owner_token"] = "<REDACTED>"
@@ -592,14 +562,13 @@ def _idempotency_key_for_attach(projection_id, requested, continuity):
     return f"client-{projection_hash}-{date}"
 
 
-def replay_continuity(projection_id, owner_token, continuity):
+def replay_continuity(projection_id, continuity):
     """Replay only locally authored records with their stable identity keys."""
     replayed = 0
     for record in continuity["records"]:
         args = {
             "operation": "publish_output",
             "projection_id": projection_id,
-            "owner_token": owner_token,
             **record,
         }
         result_or_die(call_tool("portal_projection_publish", args))
@@ -613,7 +582,7 @@ def cmd_attach(a):
 
 
 def cmd_list(_a):
-    """List only the resident caller's bounded, content-free summaries."""
+    """List only the caller's bounded, content-free summaries."""
     emit(
         result_or_die(
             call_tool(
@@ -645,21 +614,9 @@ def _cmd_attach_locked(a):
         args["icon_profile_hint"] = a.icon_profile
     resp = call_tool("portal_projection_attach", args)
     result = result_or_die(resp)
-    token = result.get("owner_token")
-    if token:
-        save_token(a.projection_id, token)
-    else:
-        die(
-            "attach accepted without owner_token — protocol violation; the prior token "
-            "must not be assumed valid after a replay",
-            2,
-        )
     continuity["idempotency_key"] = idempotency_key
     save_continuity(a.projection_id, continuity)
-    result["continuity_replayed_count"] = replay_continuity(
-        a.projection_id, token, continuity
-    )
-    result["token_file"] = token_path(a.projection_id)
+    result["continuity_replayed_count"] = replay_continuity(a.projection_id, continuity)
     result["continuity_file"] = continuity_path(a.projection_id)
     emit(result)
 
@@ -691,7 +648,6 @@ def _cmd_publish_locked(a):
     args = {
         "operation": "publish_output",
         "projection_id": a.projection_id,
-        "owner_token": load_token(a.projection_id),
         **record,
     }
     previous_exists = os.path.exists(continuity_path(a.projection_id))
@@ -721,7 +677,6 @@ def cmd_status(a):
     args = {
         "operation": "publish_status",
         "projection_id": a.projection_id,
-        "owner_token": load_token(a.projection_id),
         "lifecycle_state": a.state,
     }
     if a.text:
@@ -733,7 +688,6 @@ def do_ack(projection_id, input_id, state, message, not_before_us=None):
     args = {
         "operation": "acknowledge_input",
         "projection_id": projection_id,
-        "owner_token": load_token(projection_id),
         "input_id": input_id,
         "ack_state": state,
     }
@@ -753,7 +707,6 @@ def cmd_poll(a):
                 {
                     "operation": "get_pending_input",
                     "projection_id": a.projection_id,
-                    "owner_token": load_token(a.projection_id),
                     "max_items": a.max_items,
                     "max_bytes": a.max_bytes,
                     "wait_ms": min(a.wait_ms, 30000),
@@ -789,17 +742,10 @@ def _terminal(a, op, tool, extra=None):
     args = {
         "operation": op,
         "projection_id": a.projection_id,
-        "owner_token": load_token(a.projection_id),
         "reason": a.reason,
     }
     args.update(extra or {})
-    result = result_or_die(call_tool(tool, args))
-    try:
-        os.remove(token_path(a.projection_id))
-        result["token_file_removed"] = True
-    except FileNotFoundError:
-        pass
-    emit(result)
+    emit(result_or_die(call_tool(tool, args)))
 
 
 def main():
@@ -883,17 +829,14 @@ def main():
 
     sp = base(sub.add_parser("cleanup"))
     sp.add_argument("--reason", default="remove stale portal")
-    # The MCP cleanup handler requires cleanup_authority; this client only
-    # holds the owner token, so it always acts with owner authority
+    # The MCP cleanup handler requires cleanup_authority; this client acts
+    # with owner authority (the runtime supplies the server-held token)
     # (operator cleanup uses separate daemon authority, out of scope here).
     sp.set_defaults(
         fn=lambda a: _terminal(
             a, "cleanup", "portal_projection_cleanup", {"cleanup_authority": "owner"}
         )
     )
-
-    sp = base(sub.add_parser("token-path"))
-    sp.set_defaults(fn=lambda a: print(token_path(a.projection_id)))
 
     sp = base(sub.add_parser("continuity-path"))
     sp.set_defaults(fn=lambda a: print(continuity_path(a.projection_id)))
@@ -907,7 +850,7 @@ def main():
     ):
         die(
             f"unsafe projection id {args.projection_id!r} — must match {PROJECTION_ID_SAFE.pattern} "
-            "(it becomes the token filename)"
+            "(it becomes the continuity filename)"
         )
     args.fn(args)
 

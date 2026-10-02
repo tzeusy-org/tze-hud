@@ -9,10 +9,9 @@
 use tze_hud_protocol::proto::EventBatch;
 use tze_hud_protocol::proto::session::server_message::Payload as ServerPayload;
 use tze_hud_protocol::proto::session::{
-    CapabilityNotice, DegradationNotice, InputCaptureResponse, InputFocusResponse, LeaseResponse,
-    MutationResult, RuntimeError, SceneSnapshot, SessionError, SessionEstablished,
-    SessionResumeResult, SessionResumed, SessionSuspended, SubscriptionChangeResult,
-    ZonePublishResult,
+    DegradationNotice, InputCaptureResponse, InputFocusResponse, LeaseResponse, MutationResult,
+    RuntimeError, SceneSnapshot, SessionError, SessionEstablished, SessionResumeResult,
+    SessionResumed, SessionSuspended, SubscriptionChangeResult, ZonePublishResult,
 };
 use tze_hud_protocol::session_server::{SessionState, TrafficClass, classify_server_payload};
 use tze_hud_protocol::token::{DEFAULT_GRACE_PERIOD_MS, TokenStore};
@@ -304,7 +303,6 @@ fn session_lifecycle_payloads_are_transactional() {
         ServerPayload::RuntimeError(RuntimeError::default()),
         ServerPayload::MutationResult(MutationResult::default()),
         ServerPayload::LeaseResponse(LeaseResponse::default()),
-        ServerPayload::CapabilityNotice(CapabilityNotice::default()),
         ServerPayload::SubscriptionChangeResult(SubscriptionChangeResult::default()),
         ServerPayload::ZonePublishResult(ZonePublishResult::default()),
         ServerPayload::InputFocusResponse(InputFocusResponse::default()),

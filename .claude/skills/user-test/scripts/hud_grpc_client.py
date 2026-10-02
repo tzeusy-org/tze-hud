@@ -522,18 +522,11 @@ class HudClient:
         target: str,
         psk: str,
         agent_id: str = "user-test-agent",
-        capabilities: Optional[list[str]] = None,
         initial_subscriptions: Optional[list[str]] = None,
     ):
         self.target = target
         self.psk = psk
         self.agent_id = agent_id
-        self.capabilities = capabilities or [
-            "create_tiles",
-            "modify_own_tiles",
-            "access_input_events",
-            "upload_resource",
-        ]
         self.initial_subscriptions = initial_subscriptions or ["SCENE_TOPOLOGY"]
         self._channel: Optional[grpc.aio.Channel] = None
         self._stream = None
@@ -547,7 +540,6 @@ class HudClient:
         # the lease expires — otherwise the runtime rejects mutations with
         # MUTATION_REJECTED / "lease expired" mid-run (hud-hk8kl).
         self.last_granted_lease_ttl_ms: int = 0
-        self.granted_capabilities: list[str] = []
         # Runtime-resolved portal design tokens from the handshake (hud-16um0);
         # populated by connect(), empty when the runtime does not expose them.
         self.resolved_portal_tokens: dict[str, str] = {}
@@ -624,7 +616,6 @@ class HudClient:
                 auth_credential=session_pb2.AuthCredential(
                     pre_shared_key=session_pb2.PreSharedKeyCredential(key=self.psk),
                 ),
-                requested_capabilities=self.capabilities,
                 initial_subscriptions=self.initial_subscriptions,
                 min_protocol_version=1000,
                 max_protocol_version=1000,
@@ -641,7 +632,9 @@ class HudClient:
         self.session_id = est.session_id
         self.namespace = est.namespace
         self.heartbeat_interval_ms = est.heartbeat_interval_ms
-        self.granted_capabilities = list(est.granted_capabilities)
+        # Permissions come from the agent's allow list in the runtime config;
+        # gated subscriptions it lacks show up in denied_subscriptions.
+        self.active_subscriptions = list(est.active_subscriptions)
         # Runtime-resolved portal design tokens (hud-16um0). When the runtime
         # exposes them, this is the ACTIVE profile's fully-resolved portal token
         # map ({key: value_string}); empty when the runtime predates the field,
@@ -651,7 +644,7 @@ class HudClient:
         else:
             self.resolved_portal_tokens = {}
         print(f"  [grpc] Session established: namespace={self.namespace}, "
-              f"caps={self.granted_capabilities}", flush=True)
+              f"subscriptions={self.active_subscriptions}", flush=True)
 
         snapshot_resp = await self._wait_for("scene_snapshot", timeout=5.0)
         self.scene_snapshot_json = snapshot_resp.scene_snapshot.snapshot_json
@@ -876,15 +869,11 @@ class HudClient:
 
     # ─── Lease management ─────────────────────────────────────────────────
 
-    async def request_lease(
-        self, ttl_ms: int = 60000, priority: int = 2
-    ) -> bytes:
+    async def request_lease(self, ttl_ms: int = 60000) -> bytes:
         """Request a lease and return the granted lease_id."""
         await self._send(
             lease_request=session_pb2.LeaseRequest(
                 ttl_ms=ttl_ms,
-                capabilities=self.capabilities,
-                lease_priority=priority,
             )
         )
         resp = await self._wait_for("lease_response", timeout=5.0)
@@ -896,8 +885,7 @@ class HudClient:
                 raise RuntimeError(f"Lease denied [{deny_code}]: {deny_reason}")
             raise RuntimeError(f"Lease denied: {deny_reason}")
         self.last_granted_lease_ttl_ms = lr.granted_ttl_ms
-        print(f"  [grpc] Lease granted: ttl={lr.granted_ttl_ms}ms, "
-              f"priority={lr.granted_priority}", flush=True)
+        print(f"  [grpc] Lease granted: ttl={lr.granted_ttl_ms}ms", flush=True)
         return lr.lease_id
 
     async def renew_lease(self, lease_id: bytes, new_ttl_ms: int = 0) -> int:

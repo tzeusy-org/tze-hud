@@ -22,7 +22,6 @@
 //! - Resuming → Active (valid resume token)
 //! - Resuming → Closed (expired/invalid token)
 
-use crate::auth::CapabilityPolicy;
 use crate::convert;
 // DedupWindow is used transitively in `mod tests { use super::* }`.
 #[allow(unused_imports)]
@@ -99,12 +98,8 @@ use leases::{handle_lease_release, handle_lease_renew, handle_lease_request};
 pub use lifecycle::SessionState;
 use mutations::{apply_queued_batch_to_scene, handle_mutation_batch};
 pub use service::HudSessionImpl;
-pub use stream_session::CapabilityRevocationEvent;
 use stream_session::StreamSession;
-use subscriptions_cap::{
-    handle_capability_request, handle_capability_revocation, handle_list_elements_request,
-    handle_subscription_change,
-};
+use subscriptions_cap::{handle_list_elements_request, handle_subscription_change};
 pub use traffic::{TrafficClass, classify_server_payload};
 use upload::{UploadWorkerCommand, UploadWorkerEvent, run_upload_worker};
 use widgets::{handle_widget_asset_register, handle_widget_publish};
@@ -457,8 +452,8 @@ pub(super) fn touch_element_store_entry_by_namespace(
 
 /// Broadcast channel capacity for transactional server-push messages.
 ///
-/// Runtime-injected input events use this channel as well as degradation and
-/// revocation notices. Keep enough headroom for short key/pointer bursts while
+/// Runtime-injected input events use this channel as well as degradation
+/// notices. Keep enough headroom for short key/pointer bursts while
 /// a session handler is also processing mutation responses.
 const BROADCAST_CHANNEL_CAPACITY: usize = 1024;
 
@@ -483,23 +478,15 @@ impl HudSession for HudSessionImpl {
 
         let mut inbound = request.into_inner();
         let state = self.state.clone();
-        let psk = self.psk.clone();
-        // Clone the capability registry for use inside the session task.
-        let agent_capabilities = self.agent_capabilities.clone();
+        let agents = self.agents.clone();
         let agent_resource_budgets = self.agent_resource_budgets.clone();
         let fallback_resource_budget = self.fallback_resource_budget.clone();
         let budget_enforcer = self.budget_enforcer.clone();
-        let fallback_unrestricted = self.fallback_unrestricted;
         let render_wake = self.render_wake.clone();
         let degradation_notices = self.degradation_notices.clone();
         // This durable lane is subscribed before the handler task starts so a
         // terminal transition cannot race a newly-connected session's setup.
         let mut lease_expiry_rx = self.lease_expirations.subscribe();
-        // Subscribe to the capability revocation broadcast channel.
-        // Subscribing here ensures the session handler receives revocations issued
-        // immediately after it is spawned (before the task subscribes itself).
-        let mut capability_revocation_rx = self.capability_revocation_tx.subscribe();
-
         // Clone the input-event sender into the task. The durable subscription
         // is created only after authentication establishes the namespace.
         let input_event_tx = self.input_event_tx.clone();
@@ -576,14 +563,12 @@ impl HudSession for HudSessionImpl {
                 Some(ClientPayload::SessionInit(init)) => {
                     handle_session_init(
                         &state,
-                        &psk,
+                        &agents,
                         &tx,
                         &init,
-                        &agent_capabilities,
                         &agent_resource_budgets,
                         &fallback_resource_budget,
                         budget_enforcer.as_ref(),
-                        fallback_unrestricted,
                         peer_ip,
                     )
                     .await
@@ -591,14 +576,12 @@ impl HudSession for HudSessionImpl {
                 Some(ClientPayload::SessionResume(resume)) => {
                     handle_session_resume(
                         &state,
-                        &psk,
+                        &agents,
                         &tx,
                         &resume,
-                        &agent_capabilities,
                         &agent_resource_budgets,
                         &fallback_resource_budget,
                         budget_enforcer.as_ref(),
-                        fallback_unrestricted,
                         peer_ip,
                     )
                     .await
@@ -771,22 +754,6 @@ impl HudSession for HudSessionImpl {
                     // regardless of subscription config. Never dropped.
                     degradation_notice = degradation_rx.recv() => {
                         if let LoopAction::Break = session.on_degradation(degradation_notice, &tx).await {
-                            break;
-                        }
-                    }
-
-                    // ── Capability revocation broadcast ──────────────────────────────
-                    //
-                    // The runtime can narrow an active lease's capability scope without
-                    // revoking the lease itself. The session handler applies the change
-                    // to the scene graph and notifies the agent with CapabilityNotice
-                    // (transactional — never dropped).
-                    revocation_result = capability_revocation_rx.recv() => {
-                        if let LoopAction::Break = session.on_capability_revocation(
-                            revocation_result,
-                            &state,
-                            &tx,
-                        ).await {
                             break;
                         }
                     }
@@ -965,9 +932,6 @@ async fn handle_client_message(
         }
         ClientPayload::SessionClose(_close) => {
             // Graceful disconnect: the main loop ends the stream after this returns.
-        }
-        ClientPayload::CapabilityRequest(req) => {
-            handle_capability_request(session, tx, req).await;
         }
         // Widget publishing (widget-system spec §Requirement: Widget Publishing via gRPC).
         // Durable-widget publishes receive WidgetPublishResult (ServerMessage field 47).
@@ -1236,43 +1200,6 @@ impl StreamSession {
             }
             None => {
                 // Treat as ungraceful disconnect.
-                self.transition(SessionState::Closed);
-                LoopAction::Break
-            }
-        }
-    }
-
-    /// Handle a capability revocation broadcast result (RFC 0001 §3.3, GAP-G3-4).
-    ///
-    /// The runtime can narrow an active lease's capability scope without
-    /// revoking the lease itself. The session handler applies the change
-    /// to the scene graph and notifies the agent with CapabilityNotice
-    /// (transactional — never dropped).
-    async fn on_capability_revocation(
-        &mut self,
-        revocation_result: Result<
-            CapabilityRevocationEvent,
-            tokio::sync::broadcast::error::RecvError,
-        >,
-        state: &Arc<Mutex<SharedState>>,
-        tx: &tokio::sync::mpsc::Sender<Result<ServerMessage, tonic::Status>>,
-    ) -> LoopAction {
-        match revocation_result {
-            Ok(event) => {
-                // Only this session's leases are affected.
-                if self.lease_ids.contains(&event.lease_id) {
-                    handle_capability_revocation(state, self, tx, event).await;
-                }
-                LoopAction::Continue
-            }
-            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
-                // Missed revocation events. Log and continue; the capability
-                // scope may be stale for those dropped events.
-                // In production: emit a metric and re-query the live scope.
-                LoopAction::Continue
-            }
-            Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                // Runtime shutting down — treat as ungraceful disconnect.
                 self.transition(SessionState::Closed);
                 LoopAction::Break
             }

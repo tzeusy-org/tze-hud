@@ -192,6 +192,13 @@ profile = "full-display"
 [[tabs]]
 name        = "Main"
 default_tab = true
+
+# Identity comes from the PSK; `allow` is the whole permission model.
+# psk_env = "TZE_HUD_PSK" means "the runtime PSK", so the MCP bearer you send
+# (the PSK) is this agent.
+[agents.claude]
+psk_env = "TZE_HUD_PSK"
+allow   = ["*"]
 TOML
 else
   info "Using existing config: ${CONFIG_PATH}"
@@ -230,11 +237,8 @@ if [[ "$PSK" == "tze-hud-key" ]]; then
   warn "Pass --psk <strong-key> or delete tze_hud.psk to regenerate."
 fi
 
-# The resident principal MUST equal the PSK: the runtime mints the resident_mcp
-# capability (which reaches the portal_projection_* tools) only for a caller whose
-# bearer matches BOTH the configured principal AND the PSK (constant-time).
+# The PSK identifies the [agents.claude] table in the generated config.
 export TZE_HUD_PSK="$PSK"
-export TZE_HUD_MCP_RESIDENT_PRINCIPAL="$PSK"
 
 MCP_URL="http://${HOST}:${MCP_PORT}/mcp"
 
@@ -366,12 +370,9 @@ ${config_line}
  Auth: every MCP request must send the pre-shared key (PSK) as a bearer token:
      Authorization: Bearer <your PSK — the value of TZE_HUD_PSK>
 
- Resident projection (the portal_projection_* tools):
-   The runtime grants the portal_projection_* tools only to a caller whose bearer
-   matches BOTH the configured resident principal AND the PSK. So set the runtime
-   env var TZE_HUD_MCP_RESIDENT_PRINCIPAL EQUAL to your PSK, and send that same PSK
-   as the MCP Authorization: Bearer. PSK auth stays mandatory; this only attaches
-   the resident_mcp capability.
+ Projection (the portal_projection_* tools):
+   The bearer PSK identifies your agent; its [agents.<id>] allow list must
+   include "portal" (the generated config gives [agents.claude] allow = ["*"]).
    (This block never prints the PSK value itself.)
 
  Paste-ready MCP client config (e.g. .mcp.json / settings.json):
@@ -381,7 +382,7 @@ ${config_line}
          "type": "url",
          "url": "${MCP_URL}",
          "headers": {
-           "Authorization": "Bearer <PSK from TZE_HUD_MCP_RESIDENT_PRINCIPAL>"
+           "Authorization": "Bearer <PSK from TZE_HUD_PSK>"
          }
        }
      }
@@ -400,19 +401,18 @@ if [[ "$EMIT_MCP_CONFIG" == "1" ]]; then
   emit_mcp_config
 fi
 
-# This script already exported TZE_HUD_PSK and TZE_HUD_MCP_RESIDENT_PRINCIPAL
-# (both equal to your PSK, stored chmod 600 in ${PSK_FILE}) for the launch below,
-# so you do not need to set them by hand for this session.
+# This script already exported TZE_HUD_PSK (stored chmod 600 in ${PSK_FILE})
+# for the launch below, so you do not need to set it by hand for this session.
 
 if [[ "$LAUNCH" == "0" ]]; then
   if [[ -n "$BIN_PATH" ]]; then
     info "--print-attach-info set; not launching. Start the runtime yourself with:"
-    echo "  TZE_HUD_PSK=<psk> TZE_HUD_MCP_RESIDENT_PRINCIPAL=<psk> \\"
+    echo "  TZE_HUD_PSK=<psk> \\"
     echo "    ${BIN_PATH} --config ${CONFIG_PATH} --window-mode ${WINDOW_MODE} --mcp-port ${MCP_PORT} --grpc-port ${GRPC_PORT}"
   else
     info "--print-attach-info set; no binary yet. Build it, then launch:"
     echo "  cargo build --bin tze_hud --release"
-    echo "  TZE_HUD_PSK=<psk> TZE_HUD_MCP_RESIDENT_PRINCIPAL=<psk> \\"
+    echo "  TZE_HUD_PSK=<psk> \\"
     echo "    ./target/release/tze_hud --config ${CONFIG_PATH} --window-mode ${WINDOW_MODE} --mcp-port ${MCP_PORT} --grpc-port ${GRPC_PORT}"
   fi
   exit 0

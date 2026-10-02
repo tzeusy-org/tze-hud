@@ -21,7 +21,6 @@
 //! | `--mcp-port <port>` | `TZE_HUD_MCP_PORT`     | `9090`       | MCP HTTP listen port (0 to disable).     |
 //! | `--psk <key>`       | `TZE_HUD_PSK`          | `tze-hud-key`| Pre-shared key for session authentication.|
 //! | —                    | `TZE_HUD_PROJECTION_OPERATOR_AUTHORITY` | unset | Operator credential for projection cleanup. |
-//! | —                    | `TZE_HUD_MCP_RESIDENT_PRINCIPAL` | unset | PSK-gated resident principal: a caller presenting this token is granted `resident_mcp` (reaches `portal_projection_*`). Set to the same value as `TZE_HUD_PSK`. PSK auth stays mandatory. |
 //! | `--fps <n>`         | `TZE_HUD_FPS`          | `60`         | Target frames per second.                |
 //! | `--bind-all-interfaces` | `TZE_HUD_BIND_ALL_INTERFACES` | `false` | Bind gRPC+MCP on `0.0.0.0` (LAN/remote opt-in; default is loopback). |
 //! | `--benchmark-emit <path>` | `TZE_HUD_BENCHMARK_EMIT` | — | Emit bounded windowed benchmark JSON and exit. |
@@ -1450,8 +1449,8 @@ mod tests {
             "gRPC addr missing:\n{block}"
         );
         assert!(
-            block.contains("TZE_HUD_MCP_RESIDENT_PRINCIPAL"),
-            "resident-principal rule missing:\n{block}"
+            block.contains("allow list must include"),
+            "allow-list rule missing:\n{block}"
         );
         assert!(
             block.contains("\"mcpServers\""),

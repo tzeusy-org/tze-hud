@@ -70,7 +70,7 @@ fn benchmark_config_registers_publish_load_harness_agent() {
     assert_caps(
         &resolved,
         "widget-publish-load-harness",
-        &["publish_widget:main-progress", "read_telemetry"],
+        &["publish_widget:main-progress", "register_widget_asset"],
     );
 }
 

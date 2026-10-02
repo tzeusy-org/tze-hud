@@ -1,177 +1,84 @@
-//! Agent registration configuration validation — rig-mop4.
+//! `[agents.<id>]` validation and PSK resolution.
 //!
-//! Implements spec `configuration/spec.md` requirements:
-//!
-//! - **Agent Registration with Per-Agent Budget Overrides** (lines 136-147, v1-mandatory)
-//!   Per-agent `max_tiles`, `max_texture_mb`, `max_update_hz` MUST NOT exceed
-//!   the active profile's ceiling. Violations → `CONFIG_AGENT_BUDGET_EXCEEDS_PROFILE`.
-//! - **Dynamic Agent Policy** (lines 302-309, v1-mandatory)
-//!   `[agents.dynamic_policy]` with `allow_dynamic_agents` (default: false).
-//!   Without this section, unregistered agent connections are rejected.
-//! - **Authentication Secret Indirection** (lines 311-322, v1-mandatory)
-//!   Agent PSK MUST reference an env var via `auth_psk_env`. If the env var is
-//!   unset, a warning is logged and the agent cannot authenticate.
-//!
-//! ## Immutability Contract
-//!
-//! `[agents.registered]` is frozen at startup. Dynamic policy (`[agents.dynamic_policy]`)
-//! is hot-reloadable (see `reload.rs`).
+//! Each agent table names the environment variable holding that agent's PSK
+//! (`psk_env`) and the surfaces it may use (`allow`). Budget overrides are
+//! checked against the profile ceiling in `loader.rs`.
 
-use tze_hud_scene::config::{ConfigError, ConfigErrorCode, DisplayProfile};
+use std::collections::HashMap;
 
+use tze_hud_scene::config::{ConfigError, ConfigErrorCode};
+
+use crate::allow::validate_allow_entry;
 use crate::raw::RawAgents;
 
-// ─── Budget field descriptors ─────────────────────────────────────────────────
-
-/// A per-agent budget field that must be checked against the profile ceiling.
-struct AgentBudgetField<'a> {
-    /// Field name in the config (for error messages).
-    field_name: &'a str,
-    /// The agent's declared override value (if any).
-    agent_value: Option<u32>,
-    /// The profile ceiling.
-    profile_ceiling: u32,
-    /// Config path to the field.
-    field_path: String,
-}
-
-// ─── Validation ───────────────────────────────────────────────────────────────
-
-/// Validate `[agents]` section against the active display profile.
-///
-/// Checks:
-/// 1. Per-agent budget overrides do not exceed profile ceilings
-///    (`max_tiles`, `max_texture_mb`).
-///
-/// Note: Auth PSK env-var indirection and dynamic agent policy structural checks
-/// are intentionally separate concerns handled by `check_agent_auth_env_vars()`
-/// and `dynamic_agents_allowed()` respectively. They are not startup-blocking
-/// validation errors; the caller invokes them independently.
-pub fn validate_agents(
-    agents: &RawAgents,
-    profile: &DisplayProfile,
-    errors: &mut Vec<ConfigError>,
-) {
-    if let Some(registered) = &agents.registered {
-        for (agent_name, agent) in registered {
-            // Collect per-agent budget fields.
-            let budget_fields = [
-                AgentBudgetField {
-                    field_name: "max_tiles",
-                    agent_value: agent.max_tiles,
-                    profile_ceiling: profile.max_tiles,
-                    field_path: format!("agents.registered.{agent_name}.max_tiles"),
-                },
-                AgentBudgetField {
-                    field_name: "max_texture_mb",
-                    agent_value: agent.max_texture_mb,
-                    profile_ceiling: profile.max_texture_mb,
-                    field_path: format!("agents.registered.{agent_name}.max_texture_mb"),
-                },
-                // max_update_hz maps to profile.max_agent_update_hz.
-                // The profile currently doesn't expose max_agent_update_hz, but spec
-                // requires validation. We use u32::MAX as a sentinel when the profile
-                // does not set an explicit ceiling (meaning no restriction).
-                // NOTE: DisplayProfile may gain max_agent_update_hz in a future bead.
-            ];
-
-            for f in &budget_fields {
-                if let Some(agent_val) = f.agent_value
-                    && agent_val > f.profile_ceiling
-                {
-                    errors.push(ConfigError {
-                        code: ConfigErrorCode::AgentBudgetExceedsProfile,
-                        field_path: f.field_path.clone(),
-                        expected: format!(
-                            "{} <= profile ceiling {}",
-                            f.field_name, f.profile_ceiling
-                        ),
-                        got: format!("{agent_val}"),
-                        hint: format!(
-                            "agent {:?} sets {}={} which exceeds the active profile ceiling of {}; \
-                                 reduce the agent's {} to at most {}",
-                            agent_name,
-                            f.field_name,
-                            agent_val,
-                            f.profile_ceiling,
-                            f.field_name,
-                            f.profile_ceiling
-                        ),
-                    });
-                }
+/// Validate every agent's `allow` entries and `psk_env` name.
+pub fn validate_agents(agents: &RawAgents, errors: &mut Vec<ConfigError>) {
+    for (agent_id, agent) in agents {
+        for entry in &agent.allow {
+            if let Err(hint) = validate_allow_entry(entry) {
+                errors.push(ConfigError {
+                    code: ConfigErrorCode::UnknownAllowEntry,
+                    field_path: format!("agents.{agent_id}.allow"),
+                    expected: "zone:<name|*>, widget:<name|*>, portal, tiles, or *".into(),
+                    got: entry.clone(),
+                    hint,
+                });
             }
+        }
+        if agent.psk_env.as_deref() == Some("") {
+            errors.push(ConfigError {
+                code: ConfigErrorCode::UnknownAllowEntry,
+                field_path: format!("agents.{agent_id}.psk_env"),
+                expected: "an environment variable name".into(),
+                got: "\"\"".into(),
+                hint: "set psk_env to the name of the variable holding this agent's PSK, \
+                       or remove it to use the runtime PSK"
+                    .into(),
+            });
         }
     }
 }
 
-/// Check agent authentication PSK env var indirection with injectable env lookup.
+/// Resolve each agent's PSK from its `psk_env`, using `env_lookup`.
 ///
-/// For each registered agent that sets `auth_psk_env`, checks whether the
-/// referenced environment variable is set using the provided env lookup function.
-/// Returns a list of warning messages for unset env vars (the caller should log them as warnings).
-///
-/// Per spec: if env var is unset → warning logged, agent cannot authenticate.
-/// This does NOT produce a `ConfigError` — it is a runtime warning, not a
-/// startup-blocking error.
-///
-/// # Arguments
-///
-/// * `agents` - The agents configuration to check
-/// * `env_lookup` - A closure that takes an env var name and returns `Option<String>`.
-///   In production, pass a closure like `|k| std::env::var(k).ok()`, and in tests, a mock.
-pub fn check_agent_auth_env_vars_with_lookup<F>(
-    agents: &RawAgents,
+/// Agents whose variable is unset or empty are left out (they cannot
+/// authenticate) and reported as warnings.
+pub fn resolve_agent_psks_with_lookup<F>(
+    agent_psk_env: &HashMap<String, String>,
     env_lookup: F,
-) -> Vec<AuthEnvWarning>
+) -> (HashMap<String, String>, Vec<AuthEnvWarning>)
 where
     F: Fn(&str) -> Option<String>,
 {
+    let mut psks = HashMap::new();
     let mut warnings = Vec::new();
-
-    if let Some(registered) = &agents.registered {
-        for (agent_name, agent) in registered {
-            if let Some(env_var_name) = &agent.auth_psk_env {
-                match env_lookup(env_var_name) {
-                    Some(val) if !val.is_empty() => {
-                        // Env var is set and non-empty — agent can authenticate.
-                    }
-                    _ => {
-                        // Env var unset or empty — agent cannot authenticate.
-                        warnings.push(AuthEnvWarning {
-                            agent_name: agent_name.clone(),
-                            env_var_name: env_var_name.clone(),
-                        });
-                    }
-                }
+    for (agent_id, env_var_name) in agent_psk_env {
+        match env_lookup(env_var_name) {
+            Some(val) if !val.is_empty() => {
+                psks.insert(agent_id.clone(), val);
             }
+            _ => warnings.push(AuthEnvWarning {
+                agent_name: agent_id.clone(),
+                env_var_name: env_var_name.clone(),
+            }),
         }
     }
-
-    warnings
+    (psks, warnings)
 }
 
-/// Check agent authentication PSK env var indirection.
-///
-/// For each registered agent that sets `auth_psk_env`, check whether the
-/// referenced environment variable is currently set. Returns a list of
-/// warning messages for unset env vars (the caller should log them as warnings).
-///
-/// Per spec: if env var is unset → warning logged, agent cannot authenticate.
-/// This does NOT produce a `ConfigError` — it is a runtime warning, not a
-/// startup-blocking error.
-///
-/// This is a convenience wrapper around `check_agent_auth_env_vars_with_lookup`
-/// that uses `std::env::var` for the environment lookup.
-pub fn check_agent_auth_env_vars(agents: &RawAgents) -> Vec<AuthEnvWarning> {
-    check_agent_auth_env_vars_with_lookup(agents, |var_name| std::env::var(var_name).ok())
+/// [`resolve_agent_psks_with_lookup`] against the process environment.
+pub fn resolve_agent_psks(
+    agent_psk_env: &HashMap<String, String>,
+) -> (HashMap<String, String>, Vec<AuthEnvWarning>) {
+    resolve_agent_psks_with_lookup(agent_psk_env, |k| std::env::var(k).ok())
 }
 
-/// A warning about an unset auth PSK env var.
+/// A warning about an unset agent PSK variable.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuthEnvWarning {
-    /// The agent whose PSK env var is unset.
+    /// The agent whose PSK variable is unset.
     pub agent_name: String,
-    /// The env var that is unset.
+    /// The unset variable.
     pub env_var_name: String,
 }
 
@@ -179,332 +86,47 @@ impl AuthEnvWarning {
     /// Produces a human-readable warning message suitable for logging.
     pub fn to_log_message(&self) -> String {
         format!(
-            "WARNING: agent {:?} sets auth_psk_env = {:?} but the environment variable \
-             {:?} is not set; the agent cannot authenticate until the variable is set",
-            self.agent_name, self.env_var_name, self.env_var_name
+            "WARNING: agent {:?} sets psk_env = {:?} but that variable is not set; \
+             the agent cannot authenticate until it is",
+            self.agent_name, self.env_var_name
         )
     }
 }
 
-/// Returns `true` if dynamic agents are allowed per the `[agents.dynamic_policy]` section.
-///
-/// Per spec: if no `[agents.dynamic_policy]` section is present → `false` (connections
-/// from unregistered agents are rejected by default).
-pub fn dynamic_agents_allowed(agents: &RawAgents) -> bool {
-    agents
-        .dynamic_policy
-        .as_ref()
-        .map(|dp| dp.allow_dynamic_agents)
-        .unwrap_or(false)
-}
-
-// ─── Unit tests ───────────────────────────────────────────────────────────────
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::raw::{RawAgents, RawDynamicPolicy, RawRegisteredAgent};
-    use std::collections::HashMap;
-    use tze_hud_scene::config::DisplayProfile;
-
-    fn full_display_profile() -> DisplayProfile {
-        DisplayProfile::full_display()
-    }
-
-    // ── Agent budget validation ───────────────────────────────────────────────
+    use crate::raw::RawAgent;
 
     #[test]
-    fn test_agent_budget_within_profile_ceiling_accepted() {
-        // Spec scenario: agent sets max_tiles = 4, profile has max_tiles = 1024 → accepted.
-        let mut registered = HashMap::new();
-        registered.insert(
-            "agent_a".to_string(),
-            RawRegisteredAgent {
-                max_tiles: Some(4),
+    fn unknown_allow_entry_is_a_config_error_with_hint() {
+        let mut agents = RawAgents::new();
+        agents.insert(
+            "a".into(),
+            RawAgent {
+                allow: vec!["create_tiles".into(), "zone:subtitle".into()],
                 ..Default::default()
             },
         );
-        let agents = RawAgents {
-            registered: Some(registered),
-            ..Default::default()
-        };
         let mut errors = Vec::new();
-        validate_agents(&agents, &full_display_profile(), &mut errors);
-        assert!(
-            errors.is_empty(),
-            "max_tiles=4 within profile ceiling should be accepted"
-        );
+        validate_agents(&agents, &mut errors);
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].code, ConfigErrorCode::UnknownAllowEntry);
+        assert!(errors[0].hint.contains("valid entries"));
     }
 
     #[test]
-    fn test_agent_budget_exceeds_profile_ceiling_rejected() {
-        // Spec scenario: agent sets max_tiles = 2048, profile has max_tiles = 1024
-        // → CONFIG_AGENT_BUDGET_EXCEEDS_PROFILE identifying agent, field, and ceiling.
-        let mut registered = HashMap::new();
-        registered.insert(
-            "agent_b".to_string(),
-            RawRegisteredAgent {
-                max_tiles: Some(2048),
-                ..Default::default()
-            },
-        );
-        let agents = RawAgents {
-            registered: Some(registered),
-            ..Default::default()
-        };
-        let mut errors = Vec::new();
-        validate_agents(&agents, &full_display_profile(), &mut errors);
-        assert!(
-            errors
-                .iter()
-                .any(|e| matches!(e.code, ConfigErrorCode::AgentBudgetExceedsProfile)),
-            "max_tiles=2048 exceeding profile ceiling 1024 should produce CONFIG_AGENT_BUDGET_EXCEEDS_PROFILE"
-        );
-        let err = errors
-            .iter()
-            .find(|e| matches!(e.code, ConfigErrorCode::AgentBudgetExceedsProfile))
-            .unwrap();
-        // Error must identify the agent.
-        assert!(
-            err.hint.contains("agent_b"),
-            "error should identify agent name, got hint: {:?}",
-            err.hint
-        );
-        // Error must identify the field.
-        assert!(
-            err.field_path.contains("max_tiles"),
-            "error should identify max_tiles field, got field_path: {:?}",
-            err.field_path
-        );
-        // Error must identify the ceiling.
-        assert!(
-            err.expected.contains("1024"),
-            "error should identify profile ceiling 1024, got expected: {:?}",
-            err.expected
-        );
-    }
-
-    #[test]
-    fn test_agent_max_texture_mb_exceeds_ceiling_rejected() {
-        let mut registered = HashMap::new();
-        registered.insert(
-            "agent_c".to_string(),
-            RawRegisteredAgent {
-                max_texture_mb: Some(4096), // exceeds full-display ceiling of 2048
-                ..Default::default()
-            },
-        );
-        let agents = RawAgents {
-            registered: Some(registered),
-            ..Default::default()
-        };
-        let mut errors = Vec::new();
-        validate_agents(&agents, &full_display_profile(), &mut errors);
-        assert!(
-            errors.iter().any(|e| {
-                matches!(e.code, ConfigErrorCode::AgentBudgetExceedsProfile)
-                    && e.field_path.contains("max_texture_mb")
-            }),
-            "max_texture_mb=4096 exceeding ceiling 2048 should produce error, got: {errors:?}"
-        );
-    }
-
-    // ── Budget ceiling boundary (agent_val > profile_ceiling is strict >) ────
-
-    // Boundary: agent budget at EXACTLY the profile ceiling is accepted.
-    //
-    // The condition is `agent_val > profile_ceiling` (strict greater-than).
-    // At exactly the ceiling value the condition is false → no error.
-    // full_display() has max_tiles = 1024.
-    #[test]
-    fn test_agent_max_tiles_at_exactly_profile_ceiling_accepted() {
-        let mut registered = HashMap::new();
-        registered.insert(
-            "agent_boundary".to_string(),
-            RawRegisteredAgent {
-                max_tiles: Some(1024), // exactly equal to full_display() ceiling
-                ..Default::default()
-            },
-        );
-        let agents = RawAgents {
-            registered: Some(registered),
-            ..Default::default()
-        };
-        let mut errors = Vec::new();
-        validate_agents(&agents, &full_display_profile(), &mut errors);
-        assert!(
-            errors.is_empty(),
-            "max_tiles exactly at profile ceiling (1024) must be accepted (condition is strict >)"
-        );
-    }
-
-    // Boundary: agent budget one above the profile ceiling is rejected.
-    //
-    // At ceiling + 1 = 1025, `agent_val > profile_ceiling` is true → error.
-    #[test]
-    fn test_agent_max_tiles_one_above_ceiling_rejected() {
-        let mut registered = HashMap::new();
-        registered.insert(
-            "agent_over".to_string(),
-            RawRegisteredAgent {
-                max_tiles: Some(1025), // exactly one above full_display() ceiling
-                ..Default::default()
-            },
-        );
-        let agents = RawAgents {
-            registered: Some(registered),
-            ..Default::default()
-        };
-        let mut errors = Vec::new();
-        validate_agents(&agents, &full_display_profile(), &mut errors);
-        assert!(
-            errors.iter().any(
-                |e| matches!(e.code, ConfigErrorCode::AgentBudgetExceedsProfile)
-                    && e.field_path.contains("max_tiles")
-            ),
-            "max_tiles one above ceiling (1025 > 1024) must be rejected"
-        );
-    }
-
-    // Boundary: max_texture_mb at EXACTLY the profile ceiling is accepted.
-    //
-    // full_display() has max_texture_mb = 2048.
-    #[test]
-    fn test_agent_max_texture_mb_at_exactly_profile_ceiling_accepted() {
-        let mut registered = HashMap::new();
-        registered.insert(
-            "agent_texture_boundary".to_string(),
-            RawRegisteredAgent {
-                max_texture_mb: Some(2048), // exactly equal to full_display() ceiling
-                ..Default::default()
-            },
-        );
-        let agents = RawAgents {
-            registered: Some(registered),
-            ..Default::default()
-        };
-        let mut errors = Vec::new();
-        validate_agents(&agents, &full_display_profile(), &mut errors);
-        assert!(
-            errors.is_empty(),
-            "max_texture_mb exactly at profile ceiling (2048) must be accepted (condition is strict >)"
-        );
-    }
-
-    #[test]
-    fn test_no_agents_section_no_errors() {
-        let agents = RawAgents::default();
-        let mut errors = Vec::new();
-        validate_agents(&agents, &full_display_profile(), &mut errors);
-        assert!(
-            errors.is_empty(),
-            "absent agents section should not produce errors"
-        );
-    }
-
-    // ── Dynamic agent policy ──────────────────────────────────────────────────
-
-    #[test]
-    fn test_no_dynamic_policy_section_dynamic_agents_disabled() {
-        // Spec scenario: no [agents.dynamic_policy] → connections from unregistered
-        // agents rejected.
-        let agents = RawAgents {
-            dynamic_policy: None,
-            ..Default::default()
-        };
-        assert!(
-            !dynamic_agents_allowed(&agents),
-            "no dynamic_policy section should mean dynamic agents are disabled"
-        );
-    }
-
-    #[test]
-    fn test_dynamic_policy_allow_dynamic_agents_false() {
-        let agents = RawAgents {
-            dynamic_policy: Some(RawDynamicPolicy {
-                allow_dynamic_agents: false,
-                ..Default::default()
-            }),
-            ..Default::default()
-        };
-        assert!(!dynamic_agents_allowed(&agents));
-    }
-
-    #[test]
-    fn test_dynamic_policy_allow_dynamic_agents_true() {
-        let agents = RawAgents {
-            dynamic_policy: Some(RawDynamicPolicy {
-                allow_dynamic_agents: true,
-                ..Default::default()
-            }),
-            ..Default::default()
-        };
-        assert!(dynamic_agents_allowed(&agents));
-    }
-
-    // ── Auth PSK env var indirection ──────────────────────────────────────────
-
-    #[test]
-    fn test_auth_psk_env_set_no_warning() {
-        // Spec scenario: agent sets auth_psk_env = "TEST_AGENT_KEY_SET" and env var is set
-        // → agent can authenticate (no warning).
-        // Use mock env lookup to avoid unsafe env mutation.
-        let mut registered = HashMap::new();
-        registered.insert(
-            "agent_a".to_string(),
-            RawRegisteredAgent {
-                auth_psk_env: Some("TEST_AGENT_KEY_SET".into()),
-                ..Default::default()
-            },
-        );
-        let agents = RawAgents {
-            registered: Some(registered),
-            ..Default::default()
-        };
-        let mock_lookup = |var_name: &str| -> Option<String> {
-            if var_name == "TEST_AGENT_KEY_SET" {
-                Some("mysecret".to_string())
-            } else {
-                None
-            }
-        };
-        let warnings = check_agent_auth_env_vars_with_lookup(&agents, mock_lookup);
-        assert!(
-            warnings.is_empty(),
-            "set env var should produce no auth warnings, got: {warnings:?}"
-        );
-    }
-
-    #[test]
-    fn test_auth_psk_env_unset_produces_warning() {
-        // Spec scenario: agent sets auth_psk_env = "AGENT_KEY" and env var AGENT_KEY is not set
-        // → warning logged, agent cannot authenticate.
-        let env_var = "TEST_AGENT_KEY_UNSET";
-        let mut registered = HashMap::new();
-        registered.insert(
-            "agent_b".to_string(),
-            RawRegisteredAgent {
-                auth_psk_env: Some(env_var.into()),
-                ..Default::default()
-            },
-        );
-        let agents = RawAgents {
-            registered: Some(registered),
-            ..Default::default()
-        };
-        // Mock env lookup that always returns None (unset).
-        let mock_lookup = |_var_name: &str| -> Option<String> { None };
-        let warnings = check_agent_auth_env_vars_with_lookup(&agents, mock_lookup);
-        assert!(
-            !warnings.is_empty(),
-            "unset env var should produce auth warning"
-        );
-        let w = &warnings[0];
-        assert_eq!(w.agent_name, "agent_b");
-        assert_eq!(w.env_var_name, env_var);
-        // Warning message must be informative.
-        let msg = w.to_log_message();
-        assert!(msg.contains("agent_b"), "warning should mention agent name");
-        assert!(msg.contains(env_var), "warning should mention env var name");
+    fn psks_resolve_from_env_and_unset_vars_warn() {
+        let env: HashMap<String, String> = [
+            ("a".to_string(), "A_PSK".to_string()),
+            ("b".to_string(), "B_PSK".to_string()),
+        ]
+        .into();
+        let (psks, warnings) =
+            resolve_agent_psks_with_lookup(&env, |k| (k == "A_PSK").then(|| "secret".into()));
+        assert_eq!(psks.get("a").map(String::as_str), Some("secret"));
+        assert!(!psks.contains_key("b"));
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].agent_name, "b");
     }
 }

@@ -297,8 +297,7 @@ mod calibration {
         let shutdown = ShutdownToken::new();
         let config = McpServerConfig {
             bind_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
-            psk: PSK.to_string(),
-            resident_principal: Some(PSK.to_string()),
+            agents: tze_hud_scene::config::AgentDirectory::unrestricted(PSK),
         };
         let (server_task, address) = start_mcp_http_server(
             scene,

@@ -1,7 +1,6 @@
 //! Per-session state types for the streaming session server.
 //!
-//! This module contains `StreamSession` (all per-session fields) and
-//! `CapabilityRevocationEvent` (runtime-broadcast revocation command).
+//! This module contains `StreamSession` (all per-session fields).
 //! Moved from `session_server/mod.rs` as Step SS-4 of the module split
 //! (docs/design/session-server-renderer-module-split-plan.md §3.4).
 
@@ -21,13 +20,8 @@ pub(super) struct StreamSession {
     pub(super) session_id: String,
     pub(super) namespace: String,
     pub(super) agent_name: String,
-    /// Capabilities explicitly granted at handshake (from `requested_capabilities`).
+    /// Permissions from the agent's `allow` list, fixed at handshake.
     pub(super) capabilities: Vec<String>,
-    /// Authorization scope for subscription and capability-request checks.
-    /// For unrestricted PSK sessions this is `vec!["*"]`; for restricted agents
-    /// it mirrors `capabilities`. Used for gating subscriptions and mid-session
-    /// CapabilityRequest evaluation.
-    pub(super) policy_capabilities: Vec<String>,
     pub(super) lease_ids: Vec<tze_hud_scene::SceneId>,
     pub(super) scene_session_id: SceneId,
     pub(super) resource_budget: ResourceBudget,
@@ -133,23 +127,4 @@ impl StreamSession {
         self.last_client_sequence = seq;
         Ok(())
     }
-}
-
-// ─── Capability Revocation Event ─────────────────────────────────────────────
-
-/// A runtime-initiated capability revocation command broadcast to all session handlers.
-///
-/// When the runtime calls [`super::HudSessionImpl::revoke_capability_on_lease`], it broadcasts
-/// this event. Each session handler checks whether any of its leases match `lease_id`
-/// and, if so, applies the revocation to the scene graph and notifies the agent via
-/// `CapabilityNotice(revoked=[capability_name])`.
-///
-/// RFC 0001 §3.3: capability checks are enforced at mutation time against the live scope,
-/// not merely at grant time.
-#[derive(Clone, Debug)]
-pub struct CapabilityRevocationEvent {
-    /// The lease to narrow, or null for an explicit runtime-global session-capability revocation.
-    pub lease_id: tze_hud_scene::SceneId,
-    /// Canonical name of the capability to remove (e.g. `"create_tiles"`, `"publish_zone:subtitle"`).
-    pub capability_name: String,
 }
