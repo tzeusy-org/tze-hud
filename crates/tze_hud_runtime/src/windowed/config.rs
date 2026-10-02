@@ -32,76 +32,6 @@ pub struct WindowedQuiescentEfficiencyConfig {
     pub build: String,
 }
 
-/// Default agent identity presented for the resident gRPC portal session.
-///
-/// Kept in sync with the historical env-only enablement path, which hard-coded
-/// this identity (see [`ResidentGrpcPortalSettings`]).
-pub const DEFAULT_RESIDENT_GRPC_AGENT_ID: &str = "resident-grpc-portal";
-
-/// Default lease TTL (ms) requested for the resident gRPC portal session.
-///
-/// Mirrors the bridge-side default so config-driven and env-driven enablement
-/// request the same TTL when the operator does not override it.
-pub const DEFAULT_RESIDENT_GRPC_LEASE_TTL_MS: u64 = 60_000;
-
-/// Credential source for the resident gRPC portal bridge (hud-x2e2v).
-///
-/// The bridge may target a **separate** runtime (the external-authority
-/// deployment model), so its authentication credential is decoupled from the
-/// hosting runtime's own [`WindowedConfig::psk`]. The default reuses the
-/// runtime PSK, preserving the loopback self-target behaviour from the env-only
-/// enablement path.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub enum ResidentGrpcCredentialSource {
-    /// Reuse the hosting runtime's [`WindowedConfig::psk`] (loopback default).
-    #[default]
-    RuntimePsk,
-    /// An explicit pre-shared key for the (possibly external) target runtime.
-    Psk(String),
-}
-
-/// First-class configuration for the resident gRPC portal bridge (hud-x2e2v).
-///
-/// Promotes the env-only enablement (`TZE_HUD_RESIDENT_GRPC_PORTAL`) to a
-/// structured, operator-settable target so an **external-runtime** `HudSession`
-/// can be addressed without env-var hacks — consistent with how `psk` and
-/// `grpc_port` are already surfaced on [`WindowedConfig`].
-///
-/// Presence of this value (`Some`) enables the bridge, subject to the same
-/// fail-closed gates as before: a resolvable endpoint, a live network runtime,
-/// and a non-empty resolved credential. The `TZE_HUD_RESIDENT_GRPC_PORTAL` env
-/// var remains a supported override that force-enables the bridge against this
-/// runtime's own loopback gRPC server when this field is `None`.
-///
-/// Default-off is preserved because [`WindowedConfig::resident_grpc_portal`]
-/// defaults to `None`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ResidentGrpcPortalSettings {
-    /// gRPC endpoint of the target `HudSession` server, e.g.
-    /// `http://10.0.0.4:50051`.
-    ///
-    /// When `None`, the bridge derives `http://127.0.0.1:<grpc_port>` from the
-    /// hosting runtime's own gRPC port (the historical loopback self-target).
-    pub endpoint: Option<String>,
-    /// Provider-neutral agent identity presented for the resident session.
-    pub agent_id: String,
-    /// Requested lease TTL in milliseconds.
-    pub lease_ttl_ms: u64,
-    /// Credential used to authenticate the resident session.
-    pub credential: ResidentGrpcCredentialSource,
-}
-
-impl Default for ResidentGrpcPortalSettings {
-    fn default() -> Self {
-        Self {
-            endpoint: None,
-            agent_id: DEFAULT_RESIDENT_GRPC_AGENT_ID.to_string(),
-            lease_ttl_ms: DEFAULT_RESIDENT_GRPC_LEASE_TTL_MS,
-            credential: ResidentGrpcCredentialSource::RuntimePsk,
-        }
-    }
-}
-
 /// Configuration for the windowed runtime.
 #[derive(Debug, Clone)]
 pub struct WindowedConfig {
@@ -204,13 +134,6 @@ pub struct WindowedConfig {
     pub benchmark: Option<WindowedBenchmarkConfig>,
     /// Optional bounded, event-driven quiescent-efficiency measurement.
     pub quiescent_efficiency: Option<WindowedQuiescentEfficiencyConfig>,
-    /// First-class resident gRPC portal bridge configuration (hud-x2e2v).
-    ///
-    /// `None` (default) keeps the bridge **off** unless the
-    /// `TZE_HUD_RESIDENT_GRPC_PORTAL` env var force-enables the loopback
-    /// self-target path. `Some(..)` enables the bridge against the configured
-    /// (possibly external) target, subject to the same fail-closed gates.
-    pub resident_grpc_portal: Option<ResidentGrpcPortalSettings>,
 }
 
 impl Default for WindowedConfig {
@@ -230,7 +153,6 @@ impl Default for WindowedConfig {
             benchmark: None,
             quiescent_efficiency: None,
             bind_all_interfaces: false,
-            resident_grpc_portal: None,
         }
     }
 }
@@ -247,52 +169,6 @@ pub(super) fn select_grpc_bind_host(bind_all_interfaces: bool) -> &'static str {
         "0.0.0.0"
     } else {
         "127.0.0.1"
-    }
-}
-
-/// Decide whether the resident gRPC portal bridge is enabled (hud-x2e2v).
-///
-/// Default-off: enabled only when the operator supplied
-/// [`WindowedConfig::resident_grpc_portal`] (`settings_present`) **or** set the
-/// `TZE_HUD_RESIDENT_GRPC_PORTAL` env var (`env_enabled`). Extracted pure so the
-/// enablement contract can be unit-tested without constructing a runtime.
-pub(super) fn resident_grpc_bridge_enabled(settings_present: bool, env_enabled: bool) -> bool {
-    settings_present || env_enabled
-}
-
-/// Resolve the resident gRPC portal bridge endpoint (hud-x2e2v).
-///
-/// A non-empty explicit operator-configured endpoint wins. An explicit endpoint
-/// that is empty or whitespace-only is rejected (`None`) so the bridge fails
-/// closed rather than dialing an invalid URI. Otherwise the loopback self-target
-/// `http://127.0.0.1:<grpc_port>` is derived from the hosting runtime's own gRPC
-/// port — but only when that port is non-zero. Returns `None` when there is no
-/// usable explicit endpoint and no local gRPC server to derive one from (the
-/// bridge then fails closed rather than dialing a dead port).
-pub(super) fn resolve_resident_grpc_endpoint(
-    explicit: Option<&str>,
-    grpc_port: u16,
-) -> Option<String> {
-    match explicit {
-        Some(endpoint) if !endpoint.trim().is_empty() => Some(endpoint.to_string()),
-        Some(_) => None,
-        None if grpc_port != 0 => Some(format!("http://127.0.0.1:{grpc_port}")),
-        None => None,
-    }
-}
-
-/// Resolve the credential the resident gRPC portal bridge presents (hud-x2e2v).
-///
-/// [`ResidentGrpcCredentialSource::RuntimePsk`] reuses the hosting runtime's
-/// `psk` (loopback default); [`ResidentGrpcCredentialSource::Psk`] supplies a
-/// separate secret for an external target runtime.
-pub(super) fn resolve_resident_grpc_credential(
-    source: &ResidentGrpcCredentialSource,
-    runtime_psk: &str,
-) -> String {
-    match source {
-        ResidentGrpcCredentialSource::RuntimePsk => runtime_psk.to_string(),
-        ResidentGrpcCredentialSource::Psk(psk) => psk.clone(),
     }
 }
 
@@ -550,130 +426,5 @@ mod tests {
         };
         assert_eq!(cfg.window.width, 3840);
         assert_eq!(cfg.window.height, 2160);
-    }
-
-    // ── Resident gRPC portal bridge config plumbing (hud-x2e2v) ─────────────
-
-    /// Default-off contract: a default `WindowedConfig` must not configure the
-    /// resident gRPC portal bridge.
-    #[test]
-    fn windowed_config_default_resident_grpc_portal_is_none() {
-        let cfg = WindowedConfig::default();
-        assert!(
-            cfg.resident_grpc_portal.is_none(),
-            "resident gRPC portal bridge must default to OFF (None)"
-        );
-    }
-
-    /// `ResidentGrpcPortalSettings::default()` pins the historical env-only
-    /// values: loopback-derived endpoint (None), the canonical agent identity,
-    /// the 60s lease TTL, and the runtime-PSK credential source.
-    #[test]
-    fn resident_grpc_portal_settings_default_values() {
-        let s = ResidentGrpcPortalSettings::default();
-        assert!(
-            s.endpoint.is_none(),
-            "default endpoint must be None (loopback self-target derived from grpc_port)"
-        );
-        assert_eq!(s.agent_id, DEFAULT_RESIDENT_GRPC_AGENT_ID);
-        assert_eq!(s.lease_ttl_ms, DEFAULT_RESIDENT_GRPC_LEASE_TTL_MS);
-        assert_eq!(s.credential, ResidentGrpcCredentialSource::RuntimePsk);
-    }
-
-    /// The enablement decision is OFF only when neither config settings nor the
-    /// env var are present, and ON when either is.
-    #[test]
-    fn resident_grpc_bridge_enabled_truth_table() {
-        assert!(
-            !resident_grpc_bridge_enabled(false, false),
-            "neither settings nor env → OFF (default)"
-        );
-        assert!(
-            resident_grpc_bridge_enabled(true, false),
-            "first-class settings → ON"
-        );
-        assert!(
-            resident_grpc_bridge_enabled(false, true),
-            "env override → ON"
-        );
-        assert!(resident_grpc_bridge_enabled(true, true), "both → ON");
-    }
-
-    /// An explicit operator endpoint is used verbatim (external-runtime target).
-    #[test]
-    fn resolve_resident_grpc_endpoint_prefers_explicit() {
-        let resolved = resolve_resident_grpc_endpoint(Some("http://10.0.0.4:50051"), 50051);
-        assert_eq!(resolved.as_deref(), Some("http://10.0.0.4:50051"));
-    }
-
-    /// With no explicit endpoint, the loopback self-target is derived from the
-    /// runtime's own non-zero gRPC port (legacy env-path behaviour).
-    #[test]
-    fn resolve_resident_grpc_endpoint_derives_loopback_from_port() {
-        let resolved = resolve_resident_grpc_endpoint(None, 50051);
-        assert_eq!(resolved.as_deref(), Some("http://127.0.0.1:50051"));
-    }
-
-    /// With no explicit endpoint and the gRPC server disabled (`grpc_port == 0`)
-    /// there is nothing to dial — resolution returns None so the bridge fails
-    /// closed instead of targeting a dead port.
-    #[test]
-    fn resolve_resident_grpc_endpoint_none_when_no_port_and_no_explicit() {
-        assert!(resolve_resident_grpc_endpoint(None, 0).is_none());
-    }
-
-    /// An explicit endpoint that is empty or whitespace-only is rejected so the
-    /// bridge fails closed rather than dialing an invalid URI — even when a
-    /// loopback fallback port is available.
-    #[test]
-    fn resolve_resident_grpc_endpoint_rejects_blank_explicit() {
-        assert!(resolve_resident_grpc_endpoint(Some(""), 50051).is_none());
-        assert!(resolve_resident_grpc_endpoint(Some("   "), 50051).is_none());
-    }
-
-    /// `RuntimePsk` reuses the hosting runtime's PSK.
-    #[test]
-    fn resolve_resident_grpc_credential_runtime_psk() {
-        let psk = resolve_resident_grpc_credential(
-            &ResidentGrpcCredentialSource::RuntimePsk,
-            "runtime-secret",
-        );
-        assert_eq!(psk, "runtime-secret");
-    }
-
-    /// An explicit `Psk` credential is used independently of the runtime PSK,
-    /// enabling authentication against a separate external runtime.
-    #[test]
-    fn resolve_resident_grpc_credential_explicit_psk_is_independent() {
-        let psk = resolve_resident_grpc_credential(
-            &ResidentGrpcCredentialSource::Psk("external-secret".to_string()),
-            "runtime-secret",
-        );
-        assert_eq!(psk, "external-secret");
-    }
-
-    /// The settings are carried on `WindowedConfig` and survive struct-update
-    /// construction (the wiring reads them back).
-    #[test]
-    fn windowed_config_carries_resident_grpc_portal_settings() {
-        let cfg = WindowedConfig {
-            resident_grpc_portal: Some(ResidentGrpcPortalSettings {
-                endpoint: Some("http://192.168.1.20:50051".to_string()),
-                agent_id: "external-portal".to_string(),
-                lease_ttl_ms: 120_000,
-                credential: ResidentGrpcCredentialSource::Psk("ext".to_string()),
-            }),
-            ..WindowedConfig::default()
-        };
-        let s = cfg
-            .resident_grpc_portal
-            .expect("settings must be present after construction");
-        assert_eq!(s.endpoint.as_deref(), Some("http://192.168.1.20:50051"));
-        assert_eq!(s.agent_id, "external-portal");
-        assert_eq!(s.lease_ttl_ms, 120_000);
-        assert_eq!(
-            s.credential,
-            ResidentGrpcCredentialSource::Psk("ext".to_string())
-        );
     }
 }

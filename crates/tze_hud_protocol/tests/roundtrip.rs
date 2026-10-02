@@ -17,19 +17,17 @@ use tze_hud_protocol::proto::session::auth_credential::Credential;
 use tze_hud_protocol::proto::session::client_message::Payload as ClientPayload;
 use tze_hud_protocol::proto::session::server_message::Payload as ServerPayload;
 use tze_hud_protocol::proto::session::{
-    AuthCredential,
-    // session.proto
+    AuthCredential, // session.proto
+    ClaimTile,
     ClientMessage,
-    ErrorCode,
     Heartbeat,
-    LeaseRequest,
-    LeaseResponse,
-    LeaseResult,
     LocalSocketCredential,
     MutationBatch,
     PreSharedKeyCredential,
+    ReclaimReason,
+    Reclaimed,
+    RequestResult,
     ResolvedPortalTokens,
-    RuntimeError,
     SceneSnapshot,
     ServerMessage,
     SessionClose,
@@ -46,8 +44,6 @@ use tze_hud_protocol::proto::zone_content::Payload as ZonePayload;
 use tze_hud_protocol::proto::{
     CaptureReleasedEvent,
     CaptureReleasedReason,
-    ClearWidgetMutation,
-    ClearZoneMutation,
     CommandAction,
     CommandInputEvent,
     CommandSource,
@@ -75,9 +71,7 @@ use tze_hud_protocol::proto::{
     NotificationPayload,
     PointerDownEvent,
     PointerMoveEvent,
-    PointerUpEvent,
-    PublishToZoneMutation,
-    // types.proto
+    PointerUpEvent, // types.proto
     Rect,
     RelativeGeometryPolicy,
     RenderingPolicyProto,
@@ -476,44 +470,6 @@ fn roundtrip_mutation_proto_all_variants() {
     };
     let d2 = round_trip(&m2);
     assert!(matches!(d2.mutation, Some(Mutation::SetTileRoot(_))));
-
-    // PublishToZone
-    let m3 = MutationProto {
-        mutation: Some(Mutation::PublishToZone(PublishToZoneMutation {
-            zone_name: "subtitle".to_string(),
-            content: Some(ZoneContent {
-                payload: Some(ZonePayload::StreamText("hello".to_string())),
-            }),
-            publish_token: None,
-            element_id: Vec::new(),
-            merge_key: String::new(),
-        })),
-    };
-    let d3 = round_trip(&m3);
-    assert!(matches!(d3.mutation, Some(Mutation::PublishToZone(_))));
-
-    // ClearZone
-    let m4 = MutationProto {
-        mutation: Some(Mutation::ClearZone(ClearZoneMutation {
-            zone_name: "notification".to_string(),
-            publish_token: None,
-        })),
-    };
-    let d4 = round_trip(&m4);
-    assert!(matches!(d4.mutation, Some(Mutation::ClearZone(_))));
-
-    // ClearWidget
-    let m5 = MutationProto {
-        mutation: Some(Mutation::ClearWidget(ClearWidgetMutation {
-            widget_name: "gauge".to_string(),
-            instance_id: String::new(),
-        })),
-    };
-    let d5 = round_trip(&m5);
-    assert!(matches!(d5.mutation, Some(Mutation::ClearWidget(_))));
-    if let Some(Mutation::ClearWidget(cw)) = d5.mutation {
-        assert_eq!(cw.widget_name, "gauge");
-    }
 }
 
 #[test]
@@ -1020,36 +976,6 @@ fn roundtrip_session_resume_result() {
 }
 
 #[test]
-fn roundtrip_runtime_error_all_codes() {
-    for code in &[
-        ErrorCode::Unspecified,
-        ErrorCode::Unknown,
-        ErrorCode::LeaseExpired,
-        ErrorCode::LeaseNotFound,
-        ErrorCode::ZoneTypeMismatch,
-        ErrorCode::ZoneNotFound,
-        ErrorCode::BudgetExceeded,
-        ErrorCode::MutationRejected,
-        ErrorCode::PermissionDenied,
-        ErrorCode::InvalidArgument,
-        ErrorCode::SafeModeActive,
-        ErrorCode::TimestampTooOld,
-        ErrorCode::TimestampTooFuture,
-        ErrorCode::TimestampExpiryBeforePresent,
-    ] {
-        let orig = RuntimeError {
-            error_code: format!("{code:?}"),
-            message: "test error".to_string(),
-            context: "field=value".to_string(),
-            hint: "{}".to_string(),
-            error_code_enum: *code as i32,
-        };
-        let decoded = round_trip(&orig);
-        assert_eq!(orig.error_code_enum, decoded.error_code_enum);
-    }
-}
-
-#[test]
 fn roundtrip_mutation_batch() {
     let orig = MutationBatch {
         batch_id: vec![0u8; 16],
@@ -1079,33 +1005,34 @@ fn roundtrip_mutation_batch() {
 
 #[test]
 fn roundtrip_lease_request_response() {
-    let req = LeaseRequest { ttl_ms: 30_000 };
+    let req = ClaimTile {
+        ttl_ms: 30_000,
+        ..Default::default()
+    };
     let d_req = round_trip(&req);
     assert_eq!(d_req.ttl_ms, 30_000);
 
-    let resp = LeaseResponse {
-        granted: true,
+    let resp = RequestResult {
+        ok: true,
         lease_id: vec![0xDE; 16],
-        granted_ttl_ms: 30_000,
-        deny_reason: String::new(),
-        deny_code: String::new(),
-        result: LeaseResult::Granted as i32,
+        ttl_ms: 30_000,
+        hint: String::new(),
+        code: String::new(),
+        ..Default::default()
     };
     let d_resp = round_trip(&resp);
-    assert!(d_resp.granted);
-    assert_eq!(d_resp.granted_ttl_ms, 30_000);
-    assert_eq!(d_resp.result, LeaseResult::Granted as i32);
+    assert!(d_resp.ok);
+    assert_eq!(d_resp.ttl_ms, 30_000);
 
-    let denied = LeaseResponse {
-        granted: false,
-        deny_reason: "budget exceeded".to_string(),
-        deny_code: "BUDGET_EXCEEDED".to_string(),
-        result: LeaseResult::Denied as i32,
+    let denied = RequestResult {
+        ok: false,
+        hint: "budget exceeded".to_string(),
+        code: "BUDGET_EXCEEDED".to_string(),
         ..Default::default()
     };
     let d_denied = round_trip(&denied);
-    assert!(!d_denied.granted);
-    assert_eq!(d_denied.deny_code, "BUDGET_EXCEEDED");
+    assert!(!d_denied.ok);
+    assert_eq!(d_denied.code, "BUDGET_EXCEEDED");
 }
 
 #[test]
@@ -2035,4 +1962,16 @@ fn convert_text_markdown_node_overflow_scene_to_proto_roundtrip() {
         }
         _ => panic!("expected TextMarkdown node data after round-trip"),
     }
+}
+
+#[test]
+fn roundtrip_reclaimed() {
+    let orig = Reclaimed {
+        surface: "tile:0190a1b2-0000-7000-8000-000000000001".to_string(),
+        why: ReclaimReason::Expired as i32,
+        lease_id: vec![0xAB; 16],
+    };
+    let decoded = round_trip(&orig);
+    assert_eq!(decoded.surface, orig.surface);
+    assert_eq!(decoded.why, ReclaimReason::Expired as i32);
 }

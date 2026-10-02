@@ -1,8 +1,7 @@
 # API
 
-**Status:** the MCP section is implemented (T5 S3) and is the reference. The
-gRPC section is still a proposal: each remaining slice in "Plan" moves code
-toward it.
+**Status:** the MCP section (T5 S3) and the gRPC section (T5 S4b) are
+implemented and are the reference. S5 in "Plan" remains.
 
 ## Shape
 
@@ -111,9 +110,10 @@ Only an unusable request (bad JSON, unknown method or tool, missing or
 unknown PSK) is a JSON-RPC error.
 
 - The message isn't repeated. The hint names the next call.
-- Codes are a closed set (invariant 8; `crates/tze_hud_mcp/src/error.rs`
-  `ERROR_CODES`, kept in sync with this list by a test). S4 moves gRPC onto
-  the same set.
+- Codes are a closed set shared by both planes (invariant 8;
+  `crates/tze_hud_scene/src/error_codes.rs` `ERROR_CODES`, kept in sync with
+  this list by a test). gRPC `RequestResult.code` uses the same set, checked
+  by `grpc_codes_are_in_the_shared_set`.
 
 | Code | Meaning |
 |---|---|
@@ -127,32 +127,52 @@ unknown PSK) is a JSON-RPC error.
 | `LEASE_NOT_ACTIVE` | The agent's lease lapsed mid-call; retry |
 | `SAFE_MODE_ACTIVE` | The human paused agents |
 | `TIMESTAMP_TOO_FUTURE` | `delay_ms` beyond the scheduling horizon |
+| `TIMESTAMP_TOO_OLD` | gRPC timing hint further in the past than the staleness window |
+| `TIMESTAMP_EXPIRY_BEFORE_PRESENT` | gRPC `expires_at_us` is not after `present_at_us` |
+| `BUDGET_EXCEEDED` | gRPC batch or claim over the session's resource budget; the hint names the limit |
 | `UNAVAILABLE` | The portal service isn't running |
 | `INTERNAL` | Runtime fault |
 | `PROJECTION_NOT_FOUND`, `PROJECTION_ALREADY_ATTACHED`, `PROJECTION_UNAUTHORIZED`, `PROJECTION_TOKEN_EXPIRED`, `PROJECTION_INVALID_ARGUMENT`, `PROJECTION_OUTPUT_TOO_LARGE`, `PROJECTION_INPUT_TOO_LARGE`, `PROJECTION_INPUT_QUEUE_FULL`, `PROJECTION_RATE_LIMITED`, `PROJECTION_STATE_CONFLICT`, `PROJECTION_HUD_UNAVAILABLE`, `PROJECTION_INTERNAL_ERROR` | Portal authority rejections, passed through |
 
 ## gRPC (resident sessions)
 
-There is one bidirectional `Session` stream, and its message set is cut down
-to the lifecycle.
+There is one bidirectional `Session` stream
+(`crates/tze_hud_protocol/proto/session.proto`), and its message set is cut
+down to the lifecycle.
 
 | Client → server | Server → client |
 |---|---|
-| `Hello{auth, subscriptions, resume_token?}` | `Welcome{session_id, resume_token, heartbeat_ms, wall_clock_us, surfaces}` |
-| `Publish{surface, content \| params, ttl_ms, present_at_us?, expires_at_us?}` | `Result{seq, ok, code?, hint?, ids?}` (one shape for every request) |
-| `Clear{surface}` | `EventBatch{…}` (input, focus, element moved) |
-| `ClaimTile{placement, ttl_ms, root?}` → tile id, lease, and content in one round trip | `Reclaimed{surface, why: expired \| disconnected \| override}` |
-| `MutationBatch{tile, mutations}` (node tree updates, latest wins) | `Suspended` / `Resumed` (safe mode) |
-| `Hold{surface \| tile, ttl_ms}` | `Heartbeat` |
-| `Upload*` (images), `Heartbeat`, `Bye` | `DegradationNotice{level: NORMAL \| SIMPLIFIED}` |
+| `SessionInit{agent_id, pre_shared_key, subscriptions, …}` / `SessionResume{resume_token}` | `SessionEstablished{session_id, namespace, resume_token, heartbeat_interval_ms, …}` + `SceneSnapshot` |
+| `Publish{surface, content \| params, ttl_ms, present_at_us?, expires_at_us?, key?}` | `RequestResult{seq, ok, code?, hint?, ids?, lease_id?, ttl_ms?, batch_id?}` (one shape for every request) |
+| `Clear{surface}` (`tile:<id>` releases the tile and its lease) | `EventBatch{…}` (input, focus, element moved) |
+| `ClaimTile{placement, ttl_ms, root?}` → tile id, lease, and content in one round trip | `Reclaimed{surface, why: EXPIRED \| DISCONNECTED \| OVERRIDE, lease_id}` |
+| `MutationBatch{lease_id, mutations}` (node tree updates on own tiles) | `SessionSuspended` / `SessionResumed` (safe mode) |
+| `Hold{surface, ttl_ms}` (zone, widget, or `tile:<id>`) | `Heartbeat` |
+| `ResourceUpload*` (images), `Heartbeat`, `SessionClose` | `DegradationNotice{level: NORMAL \| SIMPLIFIED}` |
 
-- **Init to a visible, filled tile takes 2 round trips**, down from 4.
-  `ClaimTile` takes the initial node tree; client temp ids map to runtime ids
-  in `Result.ids`.
-- **Every `Result` carries `code` + `hint`.** Scene validation hints reach the
-  agent rather than being flattened to `MUTATION_REJECTED`.
+- **Init to a visible, filled tile takes 2 round trips** (handshake, then
+  `ClaimTile` with `root`), down from 4 (handshake, `LeaseRequest`,
+  `CreateTile`, `SetTileRoot`). `RequestResult.ids` is the tile id followed
+  by the root tree's node ids in pre-order.
+- **Placement is a hint the runtime resolves.** `TilePlacement{anchor, size}`
+  names one of nine anchors (default top-right) and a size class (`SMALL`,
+  `MEDIUM` (default), `LARGE`, `WIDE`, `TALL`). Sizes, the screen margin, and
+  the stacking gap come from `[design_tokens]` `tile.<size>.width|height`,
+  `tile.margin`, and `tile.gap`. Claims at the same anchor stack away from
+  the edge (down from top and middle anchors, up from bottom anchors) and
+  are clamped to the display. Z-order follows claim order. Agents never send
+  bounds or z-order.
+- **Every `RequestResult` carries `code` + `hint`.** Scene validation hints
+  reach the agent rather than being flattened to `MUTATION_REJECTED`.
+  `seq` echoes the request's `sequence`; ephemeral zone publishes get no
+  reply. `ClaimTile`, `Hold`, and `Clear` retransmits replay the cached reply.
 - **Timing hints are honored**, not just validated: `present_at_us` holds
-  content, and `expires_at_us` sweeps it (invariant 1).
+  content, and `expires_at_us` sweeps it (invariant 1). On `Publish`,
+  `expires_at_us` wins over `ttl_ms`, which counts from presentation.
+- **Runtime-internal mutations.** `CreateTile`, `PublishToTile`, and the
+  portal mutations (`MutationProto` 13–17) are applied only by the runtime's
+  in-process portal driver. The session server rejects them from agents with
+  `INVALID_ARGUMENT`.
 
 ## Plan
 
@@ -166,7 +186,7 @@ are no compatibility shims; removed proto fields are `reserved`.
 | S1 | **Remove dead wire.** Messages that are never sent or never handled: `SceneDelta`, `BackpressureSignal`, `RuntimeTelemetryFrame`, `TelemetryFrame`, `SetImePosition`, `EmitSceneEvent` (never delivered), and `Zone/WidgetRegistry*`. Also `events_legacy.proto`, fields that are never read, duplicate `LeaseStateChange`, deprecated `pre_shared_key`, `DegradationLevel` cut to two values, error enum values that are never set, the dead `SessionConfig`, and three copies of the capability vocabulary. |
 | S2 | **Identity and allowlist.** Per-agent PSK; `allow` replaces the 16-entry capability vocabulary and the resident principal; namespace comes from identity; the portal owner token leaves model context. |
 | S3 | **MCP verbs.** Done: five tools replace 22. One error shape. The token-footprint benchmark adds `tools/list`, discovery, and errors. |
-| S4 | **gRPC verbs.** `Publish`/`Clear`/`Hold`/`ClaimTile`/`Reclaimed`/one `Result`. Collapse the six `HudSessionImpl` constructors into one deps struct (done in S4a, with scene capabilities and lease priority removed). |
+| S4 | **gRPC verbs.** Done: `Publish`/`Clear`/`Hold`/`ClaimTile`/`Reclaimed`/one `RequestResult`. Collapse the six `HudSessionImpl` constructors into one deps struct (done in S4a, with scene capabilities and lease priority removed). |
 | S5 | This file loses "proposal"; `scope.md` marks T5 done. |
 
 **S2 notes (landed).** Config is `[agents.<id>]` with `psk_env` and `allow`;

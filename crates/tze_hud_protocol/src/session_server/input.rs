@@ -45,13 +45,11 @@ async fn send_input_capture_invalid_argument(
         .send(Ok(ServerMessage {
             sequence: seq,
             timestamp_wall_us: now_wall_us(),
-            payload: Some(ServerPayload::RuntimeError(RuntimeError {
-                error_code: "INVALID_ARGUMENT".to_string(),
-                message,
-                context: context.to_string(),
-                hint: r#"{"check_field":"device_id"}"#.to_string(),
-                error_code_enum: ErrorCode::InvalidArgument as i32,
-            })),
+            payload: Some(ServerPayload::RequestResult(super::verbs::fail(
+                0,
+                "INVALID_ARGUMENT",
+                format!("{context}: {message}"),
+            ))),
         }))
         .await;
 }

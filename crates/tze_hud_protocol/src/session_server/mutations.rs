@@ -1,7 +1,6 @@
 //! Mutation batch handler for the session server.
 //!
 //! This module contains:
-//! - `ConvertedBatch`: output type of the proto→scene conversion.
 //! - `convert_proto_mutations`: single canonical conversion path shared by the
 //!   live and freeze-drain paths; it also checks the agent's allow list.
 //! - `handle_mutation_batch`: live-path handler (called from the dispatcher).
@@ -12,9 +11,7 @@ use std::sync::Arc;
 
 use tokio::sync::Mutex;
 use tonic::Status;
-use tze_hud_scene::element_store::{ElementStoreEntry, ElementType};
 use tze_hud_scene::mutation::{MutationBatch as SceneMutationBatch, SceneMutation};
-use tze_hud_scene::types::*;
 
 use crate::convert;
 use crate::dedup::CachedResult;
@@ -25,21 +22,11 @@ use crate::session::SharedState;
 use super::MutationBudgetDecision;
 use super::freeze_queue::FreezeEnqueueResult;
 use super::stream_session::StreamSession;
+use super::verbs::{batch_result, fail};
 use super::{
-    DEFAULT_MAX_FUTURE_SCHEDULE_US, ElementStorePersistRequest, bytes_to_scene_id,
-    capability_set_covers, now_ms, now_wall_us, persist_created_tile_entries,
-    persist_element_store, scene_id_to_bytes, validate_timing_hints,
+    DEFAULT_MAX_FUTURE_SCHEDULE_US, bytes_to_scene_id, capability_set_covers, now_wall_us,
+    scene_id_to_bytes, validate_timing_hints,
 };
-
-/// Output of [`convert_proto_mutations`]: the converted scene mutations and the
-/// element-store bookkeeping side-effects needed after a successful apply.
-struct ConvertedBatch {
-    scene_mutations: Vec<SceneMutation>,
-    /// Elements that should have `last_published_at` updated, keyed by ID.
-    pending_touch_ids: Vec<(SceneId, ElementType)>,
-    /// Elements that should have `last_published_at` updated, keyed by namespace string.
-    pending_touch_names: Vec<(ElementType, String)>,
-}
 
 /// The permission a mutation needs, and the `allow` entry that grants it.
 fn required_permission(mutation: &SceneMutation) -> (String, String) {
@@ -67,7 +54,7 @@ fn check_mutation_permissions(
         let (permission, allow_entry) = required_permission(mutation);
         if !capability_set_covers(permissions, &permission) {
             return Err((
-                "CAPABILITY_MISSING".to_string(),
+                "NOT_ALLOWED".to_string(),
                 format!("agent allow list lacks {allow_entry}"),
             ));
         }
@@ -75,7 +62,7 @@ fn check_mutation_permissions(
     Ok(())
 }
 
-/// Convert a slice of proto [`MutationProto`] into a [`ConvertedBatch`].
+/// Convert a slice of proto [`MutationProto`] into scene mutations.
 ///
 /// This is the single authoritative conversion path used by both the live path
 /// ([`handle_mutation_batch`]) and the freeze-drain path
@@ -85,40 +72,22 @@ fn check_mutation_permissions(
 ///
 /// Returns `Err((error_code, message))` if any mutation cannot be converted
 /// and the batch should be rejected. In that case the caller is responsible for
-/// deciding what to do with the error (send a `MutationResult` on the live
+/// deciding what to do with the error (send a `RequestResult` on the live
 /// path; log-and-skip on the drain path).
 fn convert_proto_mutations(
     mutations: &[crate::proto::MutationProto],
-    element_store: &tze_hud_scene::element_store::ElementStore,
-    tab_id: SceneId,
-    lease_id: SceneId,
-    display_area: tze_hud_scene::Rect,
     session: &StreamSession,
     log_suffix: &str,
-) -> Result<ConvertedBatch, (String, String)> {
-    let namespace = session.namespace.as_str();
+) -> Result<Vec<SceneMutation>, (String, String)> {
     let mut scene_mutations = Vec::new();
-    let mut pending_touch_ids: Vec<(SceneId, ElementType)> = Vec::new();
-    let mut pending_touch_names: Vec<(ElementType, String)> = Vec::new();
 
     for m in mutations {
         match &m.mutation {
-            Some(crate::proto::mutation_proto::Mutation::CreateTile(ct)) => {
-                let requested_bounds = ct
-                    .bounds
-                    .as_ref()
-                    .map(convert::proto_rect_to_scene)
-                    .unwrap_or(tze_hud_scene::Rect::new(0.0, 0.0, 200.0, 150.0));
-                let bounds =
-                    resolve_tile_bounds_with_override(None, Some(requested_bounds), display_area)
-                        .unwrap_or(requested_bounds);
-                scene_mutations.push(SceneMutation::CreateTile {
-                    tab_id,
-                    namespace: namespace.to_string(),
-                    lease_id,
-                    bounds,
-                    z_order: ct.z_order,
-                });
+            Some(crate::proto::mutation_proto::Mutation::CreateTile(_)) => {
+                return Err((
+                    "INVALID_ARGUMENT".to_string(),
+                    "create_tile is runtime-internal; claim tiles with ClaimTile".to_string(),
+                ));
             }
             Some(crate::proto::mutation_proto::Mutation::SetTileRoot(str_)) => {
                 // tile_id is encoded as uuid::Uuid::as_bytes() (big-endian RFC 4122 bytes),
@@ -149,146 +118,11 @@ fn convert_proto_mutations(
                     }
                 }
             }
-            Some(crate::proto::mutation_proto::Mutation::PublishToZone(pz)) => {
-                let content = pz
-                    .content
-                    .as_ref()
-                    .and_then(convert::proto_zone_content_to_scene);
-                if let Some(content) = content {
-                    let resolved_zone_name = if !pz.element_id.is_empty() {
-                        match bytes_to_scene_id(&pz.element_id) {
-                            Ok(element_id) => match element_store.entries.get(&element_id) {
-                                Some(entry) if entry.element_type == ElementType::Zone => {
-                                    pending_touch_ids.push((element_id, ElementType::Zone));
-                                    entry.namespace.clone()
-                                }
-                                _ => {
-                                    return Err((
-                                        "ELEMENT_NOT_FOUND".to_string(),
-                                        "publish_to_zone element_id does not reference a known zone"
-                                            .to_string(),
-                                    ));
-                                }
-                            },
-                            Err(_) => {
-                                return Err((
-                                    "INVALID_ARGUMENT".to_string(),
-                                    "publish_to_zone element_id must be 16 bytes".to_string(),
-                                ));
-                            }
-                        }
-                    } else {
-                        pending_touch_names.push((ElementType::Zone, pz.zone_name.clone()));
-                        pz.zone_name.clone()
-                    };
-                    let token = tze_hud_scene::types::ZonePublishToken {
-                        token: pz
-                            .publish_token
-                            .as_ref()
-                            .map(|t| t.token.clone())
-                            .unwrap_or_default(),
-                    };
-                    let merge_key = if pz.merge_key.is_empty() {
-                        None
-                    } else {
-                        Some(pz.merge_key.clone())
-                    };
-                    scene_mutations.push(SceneMutation::PublishToZone {
-                        zone_name: resolved_zone_name,
-                        content,
-                        publish_token: token,
-                        merge_key,
-                        // expires_at_wall_us and content_classification are not yet present
-                        // in the PublishToZoneMutation proto (post-v1 wire extensions).
-                        expires_at_wall_us: None,
-                        content_classification: None,
-                        // breakpoints are not in the MutationBatch PublishToZoneMutation proto
-                        // (post-v1 wire extension); use ZonePublish path for streaming.
-                        breakpoints: Vec::new(),
-                    });
-                }
-            }
-            Some(crate::proto::mutation_proto::Mutation::PublishToTile(pt)) => {
-                let element_id = match bytes_to_scene_id(&pt.element_id) {
-                    Ok(id) => id,
-                    Err(_) => {
-                        return Err((
-                            "INVALID_ARGUMENT".to_string(),
-                            "publish_to_tile element_id must be 16 bytes".to_string(),
-                        ));
-                    }
-                };
-
-                let entry = match element_store.entries.get(&element_id) {
-                    Some(entry) if entry.element_type == ElementType::Tile => entry.clone(),
-                    _ => {
-                        return Err((
-                            "ELEMENT_NOT_FOUND".to_string(),
-                            "publish_to_tile element_id does not reference a known tile"
-                                .to_string(),
-                        ));
-                    }
-                };
-
-                let requested_bounds = pt.bounds.as_ref().map(convert::proto_rect_to_scene);
-                if let Some(resolved_bounds) =
-                    resolve_tile_bounds_with_override(Some(&entry), requested_bounds, display_area)
-                {
-                    scene_mutations.push(SceneMutation::UpdateTileBounds {
-                        tile_id: element_id,
-                        bounds: resolved_bounds,
-                    });
-                }
-
-                let mut had_content = false;
-                if let Some(ref node_proto) = pt.node {
-                    // Inline-subtree materialization (hud-ga4md): see the
-                    // SetTileRoot arm above — flat list split into root +
-                    // descendants on one coalescible mutation.
-                    if let Some(mut nodes) = convert::proto_node_tree_to_scene(node_proto) {
-                        let node = nodes.remove(0);
-                        scene_mutations.push(SceneMutation::SetTileRoot {
-                            tile_id: element_id,
-                            node,
-                            descendants: nodes,
-                        });
-                        had_content = true;
-                    } else {
-                        return Err((
-                            "INVALID_ARGUMENT".to_string(),
-                            "publish_to_tile node content is invalid or missing data".to_string(),
-                        ));
-                    }
-                }
-
-                if !had_content && requested_bounds.is_none() {
-                    return Err((
-                        "INVALID_ARGUMENT".to_string(),
-                        "publish_to_tile requires at least one of bounds or node".to_string(),
-                    ));
-                }
-
-                pending_touch_ids.push((element_id, ElementType::Tile));
-            }
-            Some(crate::proto::mutation_proto::Mutation::ClearZone(cz)) => {
-                let token = tze_hud_scene::types::ZonePublishToken {
-                    token: cz
-                        .publish_token
-                        .as_ref()
-                        .map(|t| t.token.clone())
-                        .unwrap_or_default(),
-                };
-                scene_mutations.push(SceneMutation::ClearZone {
-                    zone_name: cz.zone_name.clone(),
-                    publish_token: token,
-                });
-            }
-            Some(crate::proto::mutation_proto::Mutation::ClearWidget(cw)) => {
-                let instance_id = (!cw.instance_id.is_empty()).then_some(cw.instance_id.clone());
-                scene_mutations.push(SceneMutation::ClearWidget {
-                    widget_name: cw.widget_name.clone(),
-                    instance_id,
-                });
+            Some(crate::proto::mutation_proto::Mutation::PublishToTile(_)) => {
+                return Err((
+                    "INVALID_ARGUMENT".to_string(),
+                    "publish_to_tile is runtime-internal; use set_tile_root on a tile from ClaimTile".to_string(),
+                ));
             }
             Some(crate::proto::mutation_proto::Mutation::UpdateNodeContent(unc)) => {
                 match (
@@ -447,162 +281,34 @@ fn convert_proto_mutations(
                     }
                 }
             }
-            Some(crate::proto::mutation_proto::Mutation::SetTileLifecycleAccent(sla)) => {
-                match bytes_to_scene_id(&sla.tile_id) {
-                    Ok(tile_id) => {
-                        // Absent/zero-alpha color or non-positive width = clear.
-                        let accent = sla.color.as_ref().and_then(|c| {
-                            if sla.width_px > 0.0 && c.a > 0.0 {
-                                Some(LifecycleAccent {
-                                    color: convert::proto_rgba_to_scene(c),
-                                    width_px: sla.width_px,
-                                })
-                            } else {
-                                None
-                            }
-                        });
-                        scene_mutations
-                            .push(SceneMutation::SetTileLifecycleAccent { tile_id, accent });
-                        // No `pending_touch_ids` entry: the accent is runtime
-                        // overlay state, not a published element, so it must not
-                        // bump the tile's element-store `last_published_at`. The
-                        // #943 present-gate redraw is armed by the version bump in
-                        // `set/clear_tile_lifecycle_accent` (overlay.rs), which
-                        // fires for any accent transition independent of whether a
-                        // content mutation co-travels.
-                    }
-                    Err(_) => {
-                        tracing::warn!(
-                            tile_id_len = sla.tile_id.len(),
-                            "SetTileLifecycleAccent{log_suffix}: invalid tile_id length \
-                             (expected 16 bytes); mutation skipped — SDK bug or wire corruption"
-                        );
-                    }
-                }
+            Some(
+                crate::proto::mutation_proto::Mutation::SetTileLifecycleAccent(_)
+                | crate::proto::mutation_proto::Mutation::SetTileUnreadCount(_)
+                | crate::proto::mutation_proto::Mutation::SetTileComposerInteraction(_)
+                | crate::proto::mutation_proto::Mutation::SetPortalSurface(_)
+                | crate::proto::mutation_proto::Mutation::UpdatePortalSurfaceState(_),
+            ) => {
+                return Err((
+                    "INVALID_ARGUMENT".to_string(),
+                    "portal mutations are runtime-internal; drive a portal with hud_publish"
+                        .to_string(),
+                ));
             }
-            Some(crate::proto::mutation_proto::Mutation::SetTileUnreadCount(stuc)) => {
-                match bytes_to_scene_id(&stuc.tile_id) {
-                    Ok(tile_id) => {
-                        scene_mutations.push(SceneMutation::SetTileUnreadCount {
-                            tile_id,
-                            count: stuc.count as usize,
-                        });
-                        // No `pending_touch_ids` entry: the badge count is runtime
-                        // overlay state, not a published element, so it must not
-                        // bump the tile's element-store `last_published_at`
-                        // (mirrors SetTileLifecycleAccent). The count always rides
-                        // alongside a co-travelling `PublishToTile` content mutation
-                        // in the portal render batch, whose repaint carries it.
-                    }
-                    Err(_) => {
-                        tracing::warn!(
-                            tile_id_len = stuc.tile_id.len(),
-                            "SetTileUnreadCount{log_suffix}: invalid tile_id length \
-                             (expected 16 bytes); mutation skipped — SDK bug or wire corruption"
-                        );
-                    }
-                }
-            }
-            Some(crate::proto::mutation_proto::Mutation::SetTileComposerInteraction(stci)) => {
-                match bytes_to_scene_id(&stci.tile_id) {
-                    Ok(tile_id) => {
-                        // Absent composer = clear (interaction disabled), mirroring
-                        // the accent's absent-color clear.
-                        let region = stci
-                            .composer
-                            .as_ref()
-                            .map(convert::proto_hit_region_to_scene);
-                        scene_mutations
-                            .push(SceneMutation::SetTileComposerInteraction { tile_id, region });
-                        // No `pending_touch_ids` entry: the composer hit region is
-                        // runtime overlay state, not a published element, so it must
-                        // not bump the tile's element-store `last_published_at`
-                        // (mirrors SetTileLifecycleAccent). The present-gate redraw is
-                        // armed by the version bump in
-                        // `set/clear_tile_composer_interaction` (overlay.rs).
-                    }
-                    Err(_) => {
-                        tracing::warn!(
-                            tile_id_len = stci.tile_id.len(),
-                            "SetTileComposerInteraction{log_suffix}: invalid tile_id length \
-                             (expected 16 bytes); mutation skipped — SDK bug or wire corruption"
-                        );
-                    }
-                }
-            }
-            Some(crate::proto::mutation_proto::Mutation::SetPortalSurface(sps)) => {
-                match bytes_to_scene_id(&sps.tile_id) {
-                    Ok(tile_id) => {
-                        if let Some(ref surface_proto) = sps.surface {
-                            match convert::proto_portal_surface_to_scene(surface_proto) {
-                                Ok(surface) => {
-                                    scene_mutations
-                                        .push(SceneMutation::SetPortalSurface { tile_id, surface });
-                                    // No `pending_touch_ids`: the portal surface is
-                                    // runtime overlay state, not a published element
-                                    // (mirrors SetTileLifecycleAccent). The present-gate
-                                    // redraw is armed by the version bump in
-                                    // `set_portal_surface` (overlay.rs).
-                                }
-                                Err(reason) => {
-                                    tracing::warn!(
-                                        "SetPortalSurface{log_suffix}: invalid surface \
-                                         ({reason}); mutation skipped"
-                                    );
-                                }
-                            }
-                        } else {
-                            tracing::warn!(
-                                "SetPortalSurface{log_suffix}: missing surface; mutation skipped"
-                            );
-                        }
-                    }
-                    Err(_) => {
-                        tracing::warn!(
-                            tile_id_len = sps.tile_id.len(),
-                            "SetPortalSurface{log_suffix}: invalid tile_id length (expected 16 \
-                             bytes); mutation skipped — SDK bug or wire corruption"
-                        );
-                    }
-                }
-            }
-            Some(crate::proto::mutation_proto::Mutation::UpdatePortalSurfaceState(ups)) => {
-                match bytes_to_scene_id(&ups.tile_id) {
-                    Ok(tile_id) => {
-                        scene_mutations.push(SceneMutation::UpdatePortalSurfaceState {
-                            tile_id,
-                            lifecycle: convert::proto_portal_lifecycle_to_scene(ups.lifecycle),
-                            display_state: convert::proto_portal_display_state_to_scene(
-                                ups.display_state,
-                            ),
-                        });
-                    }
-                    Err(_) => {
-                        tracing::warn!(
-                            tile_id_len = ups.tile_id.len(),
-                            "UpdatePortalSurfaceState{log_suffix}: invalid tile_id length \
-                             (expected 16 bytes); mutation skipped — SDK bug or wire corruption"
-                        );
-                    }
-                }
-            }
+
             None => {}
         }
     }
 
     check_mutation_permissions(&scene_mutations, &session.capabilities)?;
 
-    Ok(ConvertedBatch {
-        scene_mutations,
-        pending_touch_ids,
-        pending_touch_names,
-    })
+    Ok(scene_mutations)
 }
 
 pub(super) async fn handle_mutation_batch(
     state: &Arc<Mutex<SharedState>>,
     session: &mut StreamSession,
     tx: &tokio::sync::mpsc::Sender<Result<ServerMessage, Status>>,
+    client_sequence: u64,
     batch: MutationBatch,
     render_wake: &tze_hud_scene::render_wake::RenderWakeNotifier,
 ) {
@@ -625,14 +331,11 @@ pub(super) async fn handle_mutation_batch(
                 .send(Ok(ServerMessage {
                     sequence: seq,
                     timestamp_wall_us: now_wall_us(),
-                    payload: Some(ServerPayload::RuntimeError(RuntimeError {
-                        error_code: "SAFE_MODE_ACTIVE".to_string(),
-                        message: "Mutations are not accepted while the runtime is in safe mode."
-                            .to_string(),
-                        context: String::new(),
-                        hint: r#"{"wait_for": "SessionResumed"}"#.to_string(),
-                        error_code_enum: ErrorCode::SafeModeActive as i32,
-                    })),
+                    payload: Some(ServerPayload::RequestResult(fail(
+                        client_sequence,
+                        "SAFE_MODE_ACTIVE",
+                        "the human paused agents; retry after SessionResumed",
+                    ))),
                 }))
                 .await;
             return;
@@ -668,7 +371,7 @@ pub(super) async fn handle_mutation_batch(
             //
             // We cache accepted=true (empty created_ids) here because that is the
             // response the client receives for a queued batch; drain does not send
-            // a second MutationResult.
+            // a second RequestResult.
             if !batch.batch_id.is_empty() {
                 if let Some(cached) = session.dedup_window.lookup(&batch.batch_id) {
                     let seq = session.next_server_seq();
@@ -677,13 +380,14 @@ pub(super) async fn handle_mutation_batch(
                         .send(Ok(ServerMessage {
                             sequence: seq,
                             timestamp_wall_us: now_wall_us(),
-                            payload: Some(ServerPayload::MutationResult(MutationResult {
-                                batch_id: batch.batch_id,
-                                accepted: cached.accepted,
-                                created_ids: cached.created_ids,
-                                error_code: cached.error_code,
-                                error_message: cached.error_message,
-                            })),
+                            payload: Some(batch_result(
+                                client_sequence,
+                                batch.batch_id,
+                                cached.accepted,
+                                cached.created_ids,
+                                cached.error_code,
+                                cached.error_message,
+                            )),
                         }))
                         .await;
                     return;
@@ -719,15 +423,15 @@ pub(super) async fn handle_mutation_batch(
                             .send(Ok(ServerMessage {
                                 sequence: seq,
                                 timestamp_wall_us: now_wall_us(),
-                                payload: Some(ServerPayload::MutationResult(MutationResult {
-                                    batch_id: batch.batch_id,
-                                    accepted: true,
-                                    created_ids: Vec::new(),
-                                    error_code: "MUTATION_QUEUE_PRESSURE".to_string(),
-                                    error_message:
-                                        "Mutation queue is under pressure (>= 80% capacity)."
-                                            .to_string(),
-                                })),
+                                payload: Some(batch_result(
+                                    client_sequence,
+                                    batch.batch_id,
+                                    true,
+                                    Vec::new(),
+                                    "UNAVAILABLE".to_string(),
+                                    "Mutation queue is under pressure (>= 80% capacity)."
+                                        .to_string(),
+                                )),
                             }))
                             .await;
                     } else {
@@ -737,13 +441,14 @@ pub(super) async fn handle_mutation_batch(
                             .send(Ok(ServerMessage {
                                 sequence: seq,
                                 timestamp_wall_us: now_wall_us(),
-                                payload: Some(ServerPayload::MutationResult(MutationResult {
-                                    batch_id: batch.batch_id,
-                                    accepted: true,
-                                    created_ids: Vec::new(),
-                                    error_code: String::new(),
-                                    error_message: String::new(),
-                                })),
+                                payload: Some(batch_result(
+                                    client_sequence,
+                                    batch.batch_id,
+                                    true,
+                                    Vec::new(),
+                                    String::new(),
+                                    String::new(),
+                                )),
                             }))
                             .await;
                     }
@@ -767,13 +472,14 @@ pub(super) async fn handle_mutation_batch(
                         .send(Ok(ServerMessage {
                             sequence: seq,
                             timestamp_wall_us: now_wall_us(),
-                            payload: Some(ServerPayload::MutationResult(MutationResult {
-                                batch_id: batch.batch_id,
-                                accepted: true,
-                                created_ids: Vec::new(),
-                                error_code: String::new(),
-                                error_message: String::new(),
-                            })),
+                            payload: Some(batch_result(
+                                client_sequence,
+                                batch.batch_id,
+                                true,
+                                Vec::new(),
+                                String::new(),
+                                String::new(),
+                            )),
                         }))
                         .await;
                 }
@@ -803,7 +509,7 @@ pub(super) async fn handle_mutation_batch(
                             CachedResult {
                                 accepted: false,
                                 created_ids: Vec::new(),
-                                error_code: "MUTATION_DROPPED".to_string(),
+                                error_code: "UNAVAILABLE".to_string(),
                                 error_message:
                                     "Mutation evicted from queue due to capacity pressure."
                                         .to_string(),
@@ -816,15 +522,14 @@ pub(super) async fn handle_mutation_batch(
                         .send(Ok(ServerMessage {
                             sequence: seq_evicted,
                             timestamp_wall_us: now_wall_us(),
-                            payload: Some(ServerPayload::MutationResult(MutationResult {
-                                batch_id: evicted_batch_id,
-                                accepted: false,
-                                created_ids: Vec::new(),
-                                error_code: "MUTATION_DROPPED".to_string(),
-                                error_message:
-                                    "Mutation evicted from queue due to capacity pressure."
-                                        .to_string(),
-                            })),
+                            payload: Some(batch_result(
+                                client_sequence,
+                                evicted_batch_id,
+                                false,
+                                Vec::new(),
+                                "UNAVAILABLE".to_string(),
+                                "Mutation evicted from queue due to capacity pressure.".to_string(),
+                            )),
                         }))
                         .await;
                     // New batch was queued — send accepted.
@@ -833,13 +538,14 @@ pub(super) async fn handle_mutation_batch(
                         .send(Ok(ServerMessage {
                             sequence: seq_new,
                             timestamp_wall_us: now_wall_us(),
-                            payload: Some(ServerPayload::MutationResult(MutationResult {
-                                batch_id: batch.batch_id,
-                                accepted: true,
-                                created_ids: Vec::new(),
-                                error_code: String::new(),
-                                error_message: String::new(),
-                            })),
+                            payload: Some(batch_result(
+                                client_sequence,
+                                batch.batch_id,
+                                true,
+                                Vec::new(),
+                                String::new(),
+                                String::new(),
+                            )),
                         }))
                         .await;
                 }
@@ -853,14 +559,14 @@ pub(super) async fn handle_mutation_batch(
                         .send(Ok(ServerMessage {
                             sequence: seq,
                             timestamp_wall_us: now_wall_us(),
-                            payload: Some(ServerPayload::MutationResult(MutationResult {
-                                batch_id: batch.batch_id,
-                                accepted: false,
-                                created_ids: Vec::new(),
-                                error_code: "MUTATION_QUEUE_PRESSURE".to_string(),
-                                error_message: "Mutation queue full; backpressure applied."
-                                    .to_string(),
-                            })),
+                            payload: Some(batch_result(
+                                client_sequence,
+                                batch.batch_id,
+                                false,
+                                Vec::new(),
+                                "UNAVAILABLE".to_string(),
+                                "Mutation queue full; backpressure applied.".to_string(),
+                            )),
                         }))
                         .await;
                 }
@@ -872,14 +578,14 @@ pub(super) async fn handle_mutation_batch(
                         .send(Ok(ServerMessage {
                             sequence: seq,
                             timestamp_wall_us: now_wall_us(),
-                            payload: Some(ServerPayload::MutationResult(MutationResult {
-                                batch_id: batch.batch_id,
-                                accepted: false,
-                                created_ids: Vec::new(),
-                                error_code: "MUTATION_DROPPED".to_string(),
-                                error_message: "Ephemeral mutation dropped; queue at capacity."
-                                    .to_string(),
-                            })),
+                            payload: Some(batch_result(
+                                client_sequence,
+                                batch.batch_id,
+                                false,
+                                Vec::new(),
+                                "UNAVAILABLE".to_string(),
+                                "Ephemeral mutation dropped; queue at capacity.".to_string(),
+                            )),
                         }))
                         .await;
                 }
@@ -900,13 +606,14 @@ pub(super) async fn handle_mutation_batch(
                 .send(Ok(ServerMessage {
                     sequence: seq,
                     timestamp_wall_us: now_wall_us(),
-                    payload: Some(ServerPayload::MutationResult(MutationResult {
-                        batch_id: batch.batch_id,
-                        accepted: cached.accepted,
-                        created_ids: cached.created_ids,
-                        error_code: cached.error_code,
-                        error_message: cached.error_message,
-                    })),
+                    payload: Some(batch_result(
+                        client_sequence,
+                        batch.batch_id,
+                        cached.accepted,
+                        cached.created_ids,
+                        cached.error_code,
+                        cached.error_message,
+                    )),
                 }))
                 .await;
             return;
@@ -920,36 +627,23 @@ pub(super) async fn handle_mutation_batch(
             session.session_open_at_wall_us,
             DEFAULT_MAX_FUTURE_SCHEDULE_US,
         ) {
-            let error_code_enum = match error_code {
-                "TIMESTAMP_TOO_OLD" => ErrorCode::TimestampTooOld as i32,
-                "TIMESTAMP_TOO_FUTURE" => ErrorCode::TimestampTooFuture as i32,
-                "TIMESTAMP_EXPIRY_BEFORE_PRESENT" => ErrorCode::TimestampExpiryBeforePresent as i32,
-                _ => ErrorCode::InvalidArgument as i32,
-            };
-            // context points at the specific field that caused the rejection.
-            let context = match error_code {
-                "TIMESTAMP_EXPIRY_BEFORE_PRESENT" => "timing.expires_at_wall_us",
-                _ => "timing.present_at_wall_us",
-            };
             let seq = session.next_server_seq();
             let _ = tx
                 .send(Ok(ServerMessage {
                     sequence: seq,
                     timestamp_wall_us: now_wall_us(),
-                    payload: Some(ServerPayload::RuntimeError(RuntimeError {
-                        error_code: error_code.to_string(),
+                    payload: Some(ServerPayload::RequestResult(fail(
+                        client_sequence,
+                        error_code,
                         message,
-                        context: context.to_string(),
-                        hint: r#"{"check_field": "timing"}"#.to_string(),
-                        error_code_enum,
-                    })),
+                    ))),
                 }))
                 .await;
             return;
         }
     }
 
-    let mut st = state.lock().await;
+    let st = state.lock().await;
 
     let lease_id = match bytes_to_scene_id(&batch.lease_id) {
         Ok(id) => id,
@@ -972,53 +666,14 @@ pub(super) async fn handle_mutation_batch(
                 .send(Ok(ServerMessage {
                     sequence: seq,
                     timestamp_wall_us: now_wall_us(),
-                    payload: Some(ServerPayload::MutationResult(MutationResult {
-                        batch_id: batch.batch_id,
-                        accepted: false,
-                        created_ids: Vec::new(),
-                        error_code: cached.error_code,
-                        error_message: cached.error_message,
-                    })),
-                }))
-                .await;
-            return;
-        }
-    };
-
-    // Read both active_tab and display_area from the scene in a single lock
-    // acquisition to avoid acquiring the scene lock twice in succession.
-    let (active_tab_opt, display_area) = {
-        let scene = st.scene.lock().await;
-        (scene.active_tab, scene.display_area)
-    };
-    let tab_id = match active_tab_opt {
-        Some(id) => id,
-        None => {
-            let cached = CachedResult {
-                accepted: false,
-                created_ids: Vec::new(),
-                error_code: "PRECONDITION_FAILED".to_string(),
-                error_message: "No active tab".to_string(),
-            };
-            if !batch.batch_id.is_empty() {
-                session
-                    .dedup_window
-                    .insert(batch.batch_id.clone(), cached.clone());
-            }
-            let seq = session.next_server_seq();
-            // Drop lock before awaiting send to avoid holding mutex across await point.
-            drop(st);
-            let _ = tx
-                .send(Ok(ServerMessage {
-                    sequence: seq,
-                    timestamp_wall_us: now_wall_us(),
-                    payload: Some(ServerPayload::MutationResult(MutationResult {
-                        batch_id: batch.batch_id,
-                        accepted: false,
-                        created_ids: Vec::new(),
-                        error_code: cached.error_code,
-                        error_message: cached.error_message,
-                    })),
+                    payload: Some(batch_result(
+                        client_sequence,
+                        batch.batch_id,
+                        false,
+                        Vec::new(),
+                        cached.error_code,
+                        cached.error_message,
+                    )),
                 }))
                 .await;
             return;
@@ -1027,15 +682,7 @@ pub(super) async fn handle_mutation_batch(
 
     // Convert proto mutations to scene mutations (single canonical path shared
     // with the freeze-drain path; only the log suffix differs between the two).
-    let converted = match convert_proto_mutations(
-        &batch.mutations,
-        &st.element_store,
-        tab_id,
-        lease_id,
-        display_area,
-        session,
-        "",
-    ) {
+    let converted = match convert_proto_mutations(&batch.mutations, session, "") {
         Ok(c) => c,
         Err((error_code, error_message)) => {
             let cached = CachedResult {
@@ -1055,23 +702,20 @@ pub(super) async fn handle_mutation_batch(
                 .send(Ok(ServerMessage {
                     sequence: seq,
                     timestamp_wall_us: now_wall_us(),
-                    payload: Some(ServerPayload::MutationResult(MutationResult {
-                        batch_id: batch.batch_id,
-                        accepted: false,
-                        created_ids: Vec::new(),
-                        error_code: cached.error_code,
-                        error_message: cached.error_message,
-                    })),
+                    payload: Some(batch_result(
+                        client_sequence,
+                        batch.batch_id,
+                        false,
+                        Vec::new(),
+                        cached.error_code,
+                        cached.error_message,
+                    )),
                 }))
                 .await;
             return;
         }
     };
-    let ConvertedBatch {
-        scene_mutations,
-        pending_touch_ids,
-        pending_touch_names,
-    } = converted;
+    let scene_mutations = converted;
 
     let scene_batch_id = proto_batch_id_to_scene_id(&batch.batch_id);
     let timing_hints = scene_timing_hints(batch.timing.as_ref());
@@ -1088,37 +732,11 @@ pub(super) async fn handle_mutation_batch(
         lease_id: Some(lease_id),
     };
 
-    // present_at in the future: hold the batch until due (invariant 1). Created
-    // ids must come back synchronously, so a scheduled batch cannot create tiles.
+    // present_at in the future: hold the batch until due (invariant 1).
     let scheduled_at = {
         let now_us = st.scene.lock().await.now_wall_us();
         present_at_wall_us.filter(|&t| t > now_us)
     };
-    if scheduled_at.is_some()
-        && scene_batch
-            .mutations
-            .iter()
-            .any(|m| matches!(m, SceneMutation::CreateTile { .. }))
-    {
-        let seq = session.next_server_seq();
-        drop(st);
-        let _ = tx
-            .send(Ok(ServerMessage {
-                sequence: seq,
-                timestamp_wall_us: now_wall_us(),
-                payload: Some(ServerPayload::RuntimeError(RuntimeError {
-                    error_code: "PRESENT_AT_WITH_CREATE".to_string(),
-                    message: "a batch with a future present_at cannot create tiles".to_string(),
-                    context: "timing.present_at_wall_us".to_string(),
-                    hint: "create the tile in an immediate batch, then send its content \
-                           with present_at"
-                        .to_string(),
-                    error_code_enum: ErrorCode::InvalidArgument as i32,
-                })),
-            }))
-            .await;
-        return;
-    }
     let budget_delta = st
         .scene
         .lock()
@@ -1139,8 +757,8 @@ pub(super) async fn handle_mutation_batch(
                 let cached = CachedResult {
                     accepted: false,
                     created_ids: Vec::new(),
-                    error_code: error_code.to_string(),
-                    error_message: message,
+                    error_code: "BUDGET_EXCEEDED".to_string(),
+                    error_message: format!("{error_code}: {message}"),
                 };
                 if !batch.batch_id.is_empty() {
                     session
@@ -1153,13 +771,14 @@ pub(super) async fn handle_mutation_batch(
                     .send(Ok(ServerMessage {
                         sequence: seq,
                         timestamp_wall_us: now_wall_us(),
-                        payload: Some(ServerPayload::MutationResult(MutationResult {
-                            batch_id: batch.batch_id,
-                            accepted: false,
-                            created_ids: Vec::new(),
-                            error_code: cached.error_code,
-                            error_message: cached.error_message,
-                        })),
+                        payload: Some(batch_result(
+                            client_sequence,
+                            batch.batch_id,
+                            false,
+                            Vec::new(),
+                            cached.error_code,
+                            cached.error_message,
+                        )),
                     }))
                     .await;
                 return;
@@ -1191,13 +810,14 @@ pub(super) async fn handle_mutation_batch(
             .send(Ok(ServerMessage {
                 sequence: seq,
                 timestamp_wall_us: now_wall_us(),
-                payload: Some(ServerPayload::MutationResult(MutationResult {
-                    batch_id: batch.batch_id,
-                    accepted: true,
-                    created_ids: Vec::new(),
-                    error_code: String::new(),
-                    error_message: String::new(),
-                })),
+                payload: Some(batch_result(
+                    client_sequence,
+                    batch.batch_id,
+                    true,
+                    Vec::new(),
+                    String::new(),
+                    String::new(),
+                )),
             }))
             .await;
         return;
@@ -1225,40 +845,6 @@ pub(super) async fn handle_mutation_batch(
         );
     }
     if result.applied {
-        let mut persist_request = persist_created_tile_entries(&mut st, &result.created_ids).await;
-        let now = now_ms();
-        let mut touched = false;
-        for (element_id, element_type) in pending_touch_ids {
-            if let Some(entry) = st.element_store.entries.get_mut(&element_id) {
-                if entry.element_type == element_type {
-                    entry.last_published_at = now;
-                    touched = true;
-                }
-            }
-        }
-        for (element_type, namespace) in pending_touch_names {
-            if let Some(id) = st
-                .element_store
-                .find_id_by_type_namespace(element_type, namespace.as_str())
-            {
-                if let Some(entry) = st.element_store.entries.get_mut(&id) {
-                    if entry.element_type == element_type {
-                        entry.last_published_at = now;
-                        touched = true;
-                    }
-                }
-            }
-        }
-        if touched {
-            persist_request =
-                st.element_store_path
-                    .clone()
-                    .map(|path| ElementStorePersistRequest {
-                        store: st.element_store.clone(),
-                        path,
-                    });
-        }
-
         let created_ids: Vec<Vec<u8>> = result
             .created_ids
             .iter()
@@ -1281,25 +867,29 @@ pub(super) async fn handle_mutation_batch(
         // Drop lock before awaiting send to avoid holding mutex across await point.
         drop(st);
         render_wake.notify();
-        persist_element_store(persist_request).await;
         let _ = tx
             .send(Ok(ServerMessage {
                 sequence: seq,
                 timestamp_wall_us: now_wall_us(),
-                payload: Some(ServerPayload::MutationResult(MutationResult {
-                    batch_id: batch.batch_id,
-                    accepted: true,
+                payload: Some(batch_result(
+                    client_sequence,
+                    batch.batch_id,
+                    true,
                     created_ids,
-                    error_code: String::new(),
-                    error_message: String::new(),
-                })),
+                    String::new(),
+                    String::new(),
+                )),
             }))
             .await;
     } else {
-        let error_message = result
-            .error
-            .map(|e| e.to_string())
-            .unwrap_or_else(|| "unknown error".to_string());
+        // The scene's own reason reaches the agent as the hint.
+        let (error_code, error_message) = match result.error {
+            Some(e) => (
+                tze_hud_scene::error_codes::validation_error_code(&e),
+                e.to_string(),
+            ),
+            None => ("INTERNAL", "batch was not applied".to_string()),
+        };
 
         // Cache rejection result before sending.
         if !batch.batch_id.is_empty() {
@@ -1308,7 +898,7 @@ pub(super) async fn handle_mutation_batch(
                 CachedResult {
                     accepted: false,
                     created_ids: Vec::new(),
-                    error_code: "MUTATION_REJECTED".to_string(),
+                    error_code: error_code.to_string(),
                     error_message: error_message.clone(),
                 },
             );
@@ -1320,22 +910,23 @@ pub(super) async fn handle_mutation_batch(
             .send(Ok(ServerMessage {
                 sequence: seq,
                 timestamp_wall_us: now_wall_us(),
-                payload: Some(ServerPayload::MutationResult(MutationResult {
-                    batch_id: batch.batch_id,
-                    accepted: false,
-                    created_ids: Vec::new(),
-                    error_code: "MUTATION_REJECTED".to_string(),
+                payload: Some(batch_result(
+                    client_sequence,
+                    batch.batch_id,
+                    false,
+                    Vec::new(),
+                    error_code.to_string(),
                     error_message,
-                })),
+                )),
             }))
             .await;
     }
 }
 
 /// Apply a previously-queued mutation batch to the scene without sending a
-/// `MutationResult` response.
+/// `RequestResult` response.
 ///
-/// This is called during the unfreeze drain. The initial `MutationResult`
+/// This is called during the unfreeze drain. The initial `RequestResult`
 /// (with `accepted = true`) was already sent when the batch was enqueued;
 /// sending a second one would violate the "one response per request" contract
 /// (RFC 0005 §2.1).
@@ -1348,35 +939,16 @@ pub(super) async fn apply_queued_batch_to_scene(
     session: &mut StreamSession,
     batch: MutationBatch,
 ) -> bool {
-    let mut st = state.lock().await;
+    let st = state.lock().await;
 
     let lease_id = match bytes_to_scene_id(&batch.lease_id) {
         Ok(id) => id,
         Err(_) => return false, // invalid lease_id — silently skip (already acked)
     };
 
-    // Read both active_tab and display_area from the scene in a single lock
-    // acquisition to avoid acquiring the scene lock twice in succession.
-    let (active_tab_opt, display_area) = {
-        let scene = st.scene.lock().await;
-        (scene.active_tab, scene.display_area)
-    };
-    let tab_id = match active_tab_opt {
-        Some(id) => id,
-        None => return false, // no active tab — skip silently
-    };
-
     // Convert proto mutations to scene mutations (single canonical path shared
     // with the live path; the " (queued)" suffix distinguishes drain-path logs).
-    let converted = match convert_proto_mutations(
-        &batch.mutations,
-        &st.element_store,
-        tab_id,
-        lease_id,
-        display_area,
-        session,
-        " (queued)",
-    ) {
+    let converted = match convert_proto_mutations(&batch.mutations, session, " (queued)") {
         Ok(c) => c,
         Err((error_code, error_message)) => {
             tracing::warn!(
@@ -1387,11 +959,7 @@ pub(super) async fn apply_queued_batch_to_scene(
             return false;
         }
     };
-    let ConvertedBatch {
-        scene_mutations,
-        pending_touch_ids,
-        pending_touch_names,
-    } = converted;
+    let scene_mutations = converted;
     let scene_batch_id = proto_batch_id_to_scene_id(&batch.batch_id);
     let timing_hints = scene_timing_hints(batch.timing.as_ref());
     let present_at_wall_us = timing_hints
@@ -1407,8 +975,7 @@ pub(super) async fn apply_queued_batch_to_scene(
         lease_id: Some(lease_id),
     };
 
-    // present_at in the future: hold the batch until due (invariant 1). Created
-    // ids must come back synchronously, so a scheduled batch cannot create tiles.
+    // present_at in the future: hold the batch until due (invariant 1).
     let scheduled_at = {
         let now_us = st.scene.lock().await.now_wall_us();
         present_at_wall_us.filter(|&t| t > now_us)
@@ -1475,41 +1042,7 @@ pub(super) async fn apply_queued_batch_to_scene(
         }
     }
     if result.applied {
-        let mut persist_request = persist_created_tile_entries(&mut st, &result.created_ids).await;
-        let now = now_ms();
-        let mut touched = false;
-        for (element_id, element_type) in pending_touch_ids {
-            if let Some(entry) = st.element_store.entries.get_mut(&element_id) {
-                if entry.element_type == element_type {
-                    entry.last_published_at = now;
-                    touched = true;
-                }
-            }
-        }
-        for (element_type, namespace) in pending_touch_names {
-            if let Some(id) = st
-                .element_store
-                .find_id_by_type_namespace(element_type, namespace.as_str())
-            {
-                if let Some(entry) = st.element_store.entries.get_mut(&id) {
-                    if entry.element_type == element_type {
-                        entry.last_published_at = now;
-                        touched = true;
-                    }
-                }
-            }
-        }
-        if touched {
-            persist_request =
-                st.element_store_path
-                    .clone()
-                    .map(|path| ElementStorePersistRequest {
-                        store: st.element_store.clone(),
-                        path,
-                    });
-        }
         drop(st);
-        persist_element_store(persist_request).await;
         true
     } else {
         false
@@ -1521,7 +1054,7 @@ pub(super) async fn apply_queued_batch_to_scene(
 /// Map proto `batch_id` bytes to a `SceneId` for rejection-correlation semantics.
 ///
 /// If the client supplied a valid 16-byte UUID, use it directly so that any
-/// `BatchRejected` or `MutationResult` echoes the client's own `batch_id`.
+/// `BatchRejected` or `RequestResult` echoes the client's own `batch_id`.
 /// Note: `bytes_to_scene_id` validates only the byte length (16 bytes); UUID
 /// version/variant are not checked because the spec (RFC 0005 §3.2) requires
 /// only that `batch_id` is a 16-byte RFC 4122 UUID (big-endian, matching
@@ -1542,20 +1075,6 @@ fn proto_batch_id_to_scene_id(batch_id: &[u8]) -> tze_hud_scene::SceneId {
             tze_hud_scene::SceneId::new()
         }
     }
-}
-
-fn resolve_tile_bounds_with_override(
-    entry: Option<&ElementStoreEntry>,
-    agent_bounds: Option<Rect>,
-    display_area: Rect,
-) -> Option<Rect> {
-    let user_override = entry.and_then(|e| e.geometry_override);
-    let agent_requested = agent_bounds.map(|bounds| {
-        rect_to_relative_geometry_policy(bounds, display_area.width, display_area.height)
-    });
-    resolve_geometry_override_chain(user_override, agent_requested, None, None).map(|policy| {
-        geometry_policy_to_absolute_rect(policy, display_area.width, display_area.height)
-    })
 }
 
 /// Convert wire timing hints to scene hints; zero fields mean "not set".

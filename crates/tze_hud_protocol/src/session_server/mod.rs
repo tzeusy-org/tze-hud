@@ -66,7 +66,6 @@ pub mod handshake;
 pub mod input;
 pub mod input_event_bus;
 pub mod lease_expiry_bus;
-pub mod leases;
 pub mod lifecycle;
 pub mod mutations;
 pub mod service;
@@ -74,8 +73,8 @@ pub mod stream_session;
 pub mod subscriptions_cap;
 pub mod traffic;
 pub mod upload;
+pub mod verbs;
 pub mod widgets;
-pub mod zone_publish;
 
 pub use budget_gate::{
     MutationBudgetDecision, MutationBudgetEnforcer, MutationBudgetUsage,
@@ -86,7 +85,7 @@ pub use degradation_notice_bus::{DegradationNoticeReceiver, DegradationNoticeSen
 // transitively in `mod tests { use super::* }`.
 use element_persist::{
     ElementStorePersistRequest, persist_created_tile_entries, persist_element_store,
-    touch_element_store_entry_by_id, touch_element_store_entry_by_namespace,
+    touch_element_store_entry_by_namespace,
 };
 #[allow(unused_imports)]
 use freeze_queue::{FREEZE_QUEUE_CAPACITY, FreezeEnqueueResult, SessionFreezeQueue};
@@ -99,7 +98,6 @@ use input::{
 use input::scene_node_contains;
 pub use input_event_bus::{InputEventReceiver, InputEventRecvError, InputEventSender};
 pub use lease_expiry_bus::{LeaseExpiryNotice, LeaseExpiryReceiver, LeaseExpirySender};
-use leases::{handle_lease_release, handle_lease_renew, handle_lease_request};
 pub use lifecycle::SessionState;
 use mutations::{apply_queued_batch_to_scene, handle_mutation_batch};
 pub use service::{HudSessionImpl, SessionDeps};
@@ -107,8 +105,8 @@ use stream_session::StreamSession;
 use subscriptions_cap::{handle_list_elements_request, handle_subscription_change};
 pub use traffic::{TrafficClass, classify_server_payload};
 use upload::{UploadWorkerCommand, UploadWorkerEvent, run_upload_worker};
-use widgets::{handle_widget_asset_register, handle_widget_publish};
-use zone_publish::handle_zone_publish;
+use verbs::{handle_claim_tile, handle_clear, handle_hold, handle_publish};
+use widgets::handle_widget_asset_register;
 // UploadByteRateLimiter is used transitively in `mod tests { use super::* }`.
 #[allow(unused_imports)]
 use upload::UploadByteRateLimiter;
@@ -166,19 +164,6 @@ pub(super) fn now_ms() -> u64 {
 
 pub(super) fn scene_id_to_bytes(id: tze_hud_scene::SceneId) -> Vec<u8> {
     id.as_uuid().as_bytes().to_vec()
-}
-
-fn lease_state_wire_name(state: LeaseState) -> &'static str {
-    match state {
-        LeaseState::Requested => "REQUESTED",
-        LeaseState::Active => "ACTIVE",
-        LeaseState::Suspended => "SUSPENDED",
-        LeaseState::Orphaned => "ORPHANED",
-        LeaseState::Denied => "DENIED",
-        LeaseState::Revoked => "REVOKED",
-        LeaseState::Expired => "EXPIRED",
-        LeaseState::Released => "RELEASED",
-    }
 }
 
 #[allow(clippy::result_large_err)] // tonic::Status is large by design; boxing it would add indirection on every call
@@ -613,29 +598,25 @@ async fn handle_client_message(
 
     match payload {
         ClientPayload::MutationBatch(batch) => {
-            handle_mutation_batch(state, session, tx, batch, render_wake).await;
+            handle_mutation_batch(state, session, tx, client_sequence, batch, render_wake).await;
         }
-        ClientPayload::LeaseRequest(req) => {
-            let _ =
-                handle_lease_request(state, session, tx, client_sequence, req, render_wake).await;
+        ClientPayload::ClaimTile(claim) => {
+            handle_claim_tile(state, session, tx, client_sequence, claim, render_wake).await;
         }
-        ClientPayload::LeaseRenew(renew) => {
-            let _ =
-                handle_lease_renew(state, session, tx, client_sequence, renew, render_wake).await;
+        ClientPayload::Publish(publish) => {
+            handle_publish(state, session, tx, client_sequence, publish, render_wake).await;
         }
-        ClientPayload::LeaseRelease(release) => {
-            let _ = handle_lease_release(state, session, tx, client_sequence, release, render_wake)
-                .await;
+        ClientPayload::Clear(clear) => {
+            handle_clear(state, session, tx, client_sequence, clear, render_wake).await;
+        }
+        ClientPayload::Hold(hold) => {
+            handle_hold(state, session, tx, client_sequence, hold, render_wake).await;
         }
         ClientPayload::SubscriptionChange(change) => {
             handle_subscription_change(session, tx, change).await;
         }
         ClientPayload::ListElementsRequest(request) => {
-            handle_list_elements_request(state, session, tx, request).await;
-        }
-        ClientPayload::ZonePublish(publish) => {
-            let _ = handle_zone_publish(state, session, tx, client_sequence, publish, render_wake)
-                .await;
+            handle_list_elements_request(state, session, tx, client_sequence, request).await;
         }
         ClientPayload::Heartbeat(hb) => {
             handle_heartbeat(session, tx, hb).await;
@@ -656,14 +637,6 @@ async fn handle_client_message(
         }
         ClientPayload::SessionClose(_close) => {
             // Graceful disconnect: the main loop ends the stream after this returns.
-        }
-        // Widget publishing (widget-system spec §Requirement: Widget Publishing via gRPC).
-        // Durable-widget publishes receive WidgetPublishResult (ServerMessage field 47).
-        // Ephemeral-widget publishes are fire-and-forget (no result).
-        ClientPayload::WidgetPublish(publish) => {
-            let _ =
-                handle_widget_publish(state, session, tx, client_sequence, publish, render_wake)
-                    .await;
         }
         // Widget asset register/upload (session-protocol spec §Requirement: Widget Asset Registration via Session Stream).
         // Always transactional; every request receives WidgetAssetRegisterResult.
@@ -758,9 +731,9 @@ impl StreamSession {
                 // regression).
                 let is_lease_op = matches!(
                     &msg.payload,
-                    Some(ClientPayload::LeaseRequest(_))
-                        | Some(ClientPayload::LeaseRenew(_))
-                        | Some(ClientPayload::LeaseRelease(_))
+                    Some(ClientPayload::ClaimTile(_))
+                        | Some(ClientPayload::Hold(_))
+                        | Some(ClientPayload::Clear(_))
                 );
                 if is_lease_op
                     && msg.sequence > 0
@@ -952,46 +925,37 @@ impl StreamSession {
         self.lease_ids
             .retain(|lease_id| *lease_id != notice.lease_id);
         let lease_id = scene_id_to_bytes(notice.lease_id);
-        let (result, reason, deny_code) = match notice.terminal_state {
-            LeaseState::Expired => (
-                LeaseResult::Expired as i32,
-                "Lease TTL or reconnect grace period elapsed".to_string(),
-                "LEASE_EXPIRED".to_string(),
-            ),
-            LeaseState::Revoked => (
-                LeaseResult::Revoked as i32,
-                "Lease suspension timeout elapsed".to_string(),
-                "LEASE_REVOKED".to_string(),
-            ),
-            state => (
-                LeaseResult::Unspecified as i32,
-                format!(
-                    "Lease reached terminal state {}",
-                    lease_state_wire_name(state)
-                ),
-                "LEASE_TERMINAL".to_string(),
-            ),
+        let why = match notice.terminal_state {
+            LeaseState::Expired => ReclaimReason::Expired,
+            _ => ReclaimReason::Override,
+        } as i32;
+        let surfaces: Vec<String> = if notice.removed_tiles.is_empty() {
+            vec![String::new()]
+        } else {
+            notice
+                .removed_tiles
+                .iter()
+                .map(|t| verbs::tile_surface(*t))
+                .collect()
         };
-
-        let response_seq = self.next_server_seq();
-        if tx
-            .send(Ok(ServerMessage {
-                sequence: response_seq,
-                timestamp_wall_us: now_wall_us(),
-                payload: Some(ServerPayload::LeaseResponse(LeaseResponse {
-                    granted: false,
-                    lease_id: lease_id.clone(),
-                    deny_reason: reason,
-                    deny_code,
-                    result,
-                    ..Default::default()
-                })),
-            }))
-            .await
-            .is_err()
-        {
-            self.transition(SessionState::Closed);
-            return LoopAction::Break;
+        for surface in surfaces {
+            let seq = self.next_server_seq();
+            if tx
+                .send(Ok(ServerMessage {
+                    sequence: seq,
+                    timestamp_wall_us: now_wall_us(),
+                    payload: Some(ServerPayload::Reclaimed(Reclaimed {
+                        surface,
+                        why,
+                        lease_id: lease_id.clone(),
+                    })),
+                }))
+                .await
+                .is_err()
+            {
+                self.transition(SessionState::Closed);
+                return LoopAction::Break;
+            }
         }
 
         LoopAction::Continue

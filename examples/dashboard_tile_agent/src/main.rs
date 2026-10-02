@@ -651,7 +651,7 @@ async fn do_content_update_with_host(
         .await
         .ok_or("stream closed before MutationResult (content update)")??;
     match msg.payload {
-        Some(session_proto::server_message::Payload::MutationResult(result)) => {
+        Some(session_proto::server_message::Payload::RequestResult(result)) => {
             if result.batch_id != batch_id {
                 return Err(format!(
                     "MutationResult batch_id mismatch for content update: \
@@ -660,16 +660,16 @@ async fn do_content_update_with_host(
                 )
                 .into());
             }
-            if !result.accepted {
+            if !result.ok {
                 return Err(format!(
                     "Content update batch rejected: code={}, msg={}",
-                    result.error_code, result.error_message
+                    result.code, result.hint
                 )
                 .into());
             }
             println!(
                 "  Content update cycle {cycle}: accepted=true, {} new nodes",
-                result.created_ids.len()
+                result.ids.len()
             );
             Ok(())
         }
@@ -1134,52 +1134,45 @@ async fn request_lease_with_host(
         }
     }
 
-    // ── 2. Send LeaseRequest (tasks.md §2.1) ──────────────────────────────
+    // ── 2. Claim a tile (tasks.md §2.1) ───────────────────────────────────
     //
-    // Spec §Requirement: Lease Request With AutoRenew:
-    //   ttl_ms = 60000.
-    //
-    // Note: renewal policy (AutoRenew) and resource budgets are server-side concerns;
-    // they are not fields on the LeaseRequest proto.
+    // ClaimTile grants the lease (ttl_ms = 60000) and places the tile in one
+    // round trip; renewal policy and budgets are server-side concerns.
     tx.send(session_proto::ClientMessage {
         sequence: 2,
         timestamp_wall_us: now_wall_us(),
-        payload: Some(session_proto::client_message::Payload::LeaseRequest(
-            session_proto::LeaseRequest { ttl_ms: 60_000 },
+        payload: Some(session_proto::client_message::Payload::ClaimTile(
+            session_proto::ClaimTile {
+                placement: Some(tile_placement()),
+                ttl_ms: 60_000,
+                root: None,
+            },
         )),
     })
     .await?;
 
-    // ── 3–4. Receive LeaseResponse and verify granted = true (tasks.md §2.2) ──
-    //
+    // ── 3–4. Receive RequestResult and verify ok = true (tasks.md §2.2) ────
     let msg = response_stream
         .next()
         .await
-        .ok_or("stream closed before LeaseResponse")??;
+        .ok_or("stream closed before RequestResult")??;
     match msg.payload {
-        Some(session_proto::server_message::Payload::LeaseResponse(resp)) => {
-            if !resp.granted {
+        Some(session_proto::server_message::Payload::RequestResult(r)) => {
+            if !r.ok {
+                return Err(format!("ClaimTile failed: code={}, hint={}", r.code, r.hint).into());
+            }
+            if r.lease_id.len() != 16 {
                 return Err(format!(
-                    "LeaseResponse denied: code={}, reason={}",
-                    resp.deny_code, resp.deny_reason
+                    "ClaimTile ok but lease_id is {} bytes (must be 16-byte UUIDv7)",
+                    r.lease_id.len()
                 )
                 .into());
             }
-            if resp.lease_id.len() != 16 {
-                return Err(format!(
-                    "LeaseResponse granted but lease_id is {} bytes (must be 16-byte UUIDv7)",
-                    resp.lease_id.len()
-                )
-                .into());
-            }
-            println!(
-                "  LeaseResponse: granted=true, ttl={}ms",
-                resp.granted_ttl_ms
-            );
+            println!("  ClaimTile: ok, ttl={}ms", r.ttl_ms);
             // ── 5. Return lease_id ────────────────────────────────────
-            Ok(resp.lease_id)
+            Ok(r.lease_id)
         }
-        other => Err(format!("Expected LeaseResponse, got: {other:?}").into()),
+        other => Err(format!("Expected RequestResult, got: {other:?}").into()),
     }
 }
 
@@ -1284,13 +1277,30 @@ pub struct TileCreationState {
     pub resume_token: Vec<u8>,
 }
 
-/// Dashboard tile geometry per spec §Decision 6 / §Dashboard Tile Composition.
-const TILE_X: f32 = 50.0;
-const TILE_Y: f32 = 50.0;
+/// Dashboard tile content area per spec §Dashboard Tile Composition. The
+/// runtime places the tile from [`tile_placement`]; the large size class
+/// (560×360 by default) holds this 400×300 layout.
 const TILE_W: f32 = 400.0;
 const TILE_H: f32 = 300.0;
-/// Agent-owned band z_order (< ZONE_TILE_Z_MIN = 0x8000_0000).
-const TILE_Z_ORDER: u32 = 100;
+
+/// Where the runtime puts the first claimed tile for [`tile_placement`] with
+/// default `tile.*` tokens (top-left, inset by `tile.margin`). Tests that
+/// build the tile directly in the scene reuse this geometry.
+#[cfg(test)]
+const TILE_X: f32 = 24.0;
+#[cfg(test)]
+const TILE_Y: f32 = 24.0;
+/// z-order the runtime gives the first claimed tile on a tab.
+#[cfg(test)]
+const TILE_Z_ORDER: u32 = 1;
+
+/// Where the dashboard tile goes: top-left, large.
+fn tile_placement() -> session_proto::TilePlacement {
+    session_proto::TilePlacement {
+        anchor: session_proto::TileAnchor::TopLeft as i32,
+        size: session_proto::TileSize::Large as i32,
+    }
+}
 
 /// Submit the atomic tile creation batch over gRPC and return the created state.
 ///
@@ -1401,121 +1411,49 @@ async fn create_tile_batch_with_host(
             .ok_or("stream closed during handshake")??;
     }
 
-    // ── 3. Request lease ───────────────────────────────────────────────────
+    // ── 3–4. ClaimTile: lease + tile in one round trip ─────────────────────
+    //
+    // tasks.md §4.1: the runtime resolves the placement hint (top-left, large)
+    // from design tokens. Opacity and input mode ride Batch B.
     tx.send(session_proto::ClientMessage {
         sequence: 2,
         timestamp_wall_us: now_wall_us(),
-        payload: Some(session_proto::client_message::Payload::LeaseRequest(
-            session_proto::LeaseRequest { ttl_ms: 60_000 },
-        )),
-    })
-    .await?;
-
-    // Drain lease state changes; expect LeaseResponse.
-    let msg = response_stream
-        .next()
-        .await
-        .ok_or("stream closed before LeaseResponse")??;
-    let lease_id_bytes: Vec<u8> = match msg.payload {
-        Some(session_proto::server_message::Payload::LeaseResponse(resp)) => {
-            if !resp.granted {
-                return Err(format!(
-                    "LeaseResponse denied: code={}, reason={}",
-                    resp.deny_code, resp.deny_reason
-                )
-                .into());
-            }
-            if resp.lease_id.len() != 16 {
-                return Err(format!(
-                    "lease_id must be 16 bytes (UUIDv7), got {} bytes",
-                    resp.lease_id.len()
-                )
-                .into());
-            }
-            println!("  Lease granted: {} bytes", resp.lease_id.len());
-            resp.lease_id
-        }
-        other => {
-            return Err(format!("Expected LeaseResponse, got: {other:?}").into());
-        }
-    };
-
-    // ── 4. Batch A: CreateTile (400×300 at (50,50), z_order=100) ──────────
-    //
-    // tasks.md §4.1: CreateTile with spec-mandated geometry.
-    // Note: opacity and input_mode cannot be set here; they require separate
-    // mutations (UpdateTileOpacity, UpdateTileInputMode) per proto design.
-    let batch_a_id = uuid::Uuid::now_v7().as_bytes().to_vec();
-    tx.send(session_proto::ClientMessage {
-        sequence: 3,
-        timestamp_wall_us: now_wall_us(),
-        payload: Some(session_proto::client_message::Payload::MutationBatch(
-            session_proto::MutationBatch {
-                batch_id: batch_a_id.clone(),
-                lease_id: lease_id_bytes.clone(),
-                mutations: vec![tze_hud_protocol::proto::MutationProto {
-                    mutation: Some(
-                        tze_hud_protocol::proto::mutation_proto::Mutation::CreateTile(
-                            tze_hud_protocol::proto::CreateTileMutation {
-                                tab_id: vec![], // empty = server infers active tab
-                                bounds: Some(tze_hud_protocol::proto::Rect {
-                                    x: TILE_X,
-                                    y: TILE_Y,
-                                    width: TILE_W,
-                                    height: TILE_H,
-                                }),
-                                z_order: TILE_Z_ORDER,
-                            },
-                        ),
-                    ),
-                }],
-                timing: None,
+        payload: Some(session_proto::client_message::Payload::ClaimTile(
+            session_proto::ClaimTile {
+                placement: Some(tile_placement()),
+                ttl_ms: 60_000,
+                root: None,
             },
         )),
     })
     .await?;
 
-    // Expect MutationResult for Batch A.
-    // tasks.md §4.2: verify echoed batch_id and 16-byte tile_id before proceeding.
+    // tasks.md §4.2: verify a 16-byte tile_id and lease_id before proceeding.
     let msg = response_stream
         .next()
         .await
-        .ok_or("stream closed before MutationResult (CreateTile)")??;
-    let tile_id_bytes: Vec<u8> = match msg.payload {
-        Some(session_proto::server_message::Payload::MutationResult(result)) => {
-            if result.batch_id != batch_a_id {
+        .ok_or("stream closed before RequestResult (ClaimTile)")??;
+    let (tile_id_bytes, lease_id_bytes): (Vec<u8>, Vec<u8>) = match msg.payload {
+        Some(session_proto::server_message::Payload::RequestResult(r)) => {
+            if !r.ok {
+                return Err(format!("ClaimTile failed: code={}, hint={}", r.code, r.hint).into());
+            }
+            let Some(id) = r.ids.first().cloned() else {
+                return Err("RequestResult for ClaimTile must include the tile id".into());
+            };
+            if id.len() != 16 || r.lease_id.len() != 16 {
                 return Err(format!(
-                    "MutationResult batch_id mismatch for Batch A: expected {:?}, got {:?}",
-                    batch_a_id, result.batch_id
+                    "tile_id and lease_id must be 16 bytes, got {} and {} — tasks.md §4.2",
+                    id.len(),
+                    r.lease_id.len()
                 )
                 .into());
             }
-            if !result.accepted {
-                return Err(format!(
-                    "CreateTile batch rejected: code={}, msg={}",
-                    result.error_code, result.error_message
-                )
-                .into());
-            }
-            if result.created_ids.is_empty() {
-                return Err("MutationResult for CreateTile must include created_ids".into());
-            }
-            let id = result.created_ids[0].clone();
-            if id.len() != 16 {
-                return Err(format!(
-                    "tile_id must be 16 bytes (UUIDv7 SceneId), got {} bytes — tasks.md §4.2",
-                    id.len()
-                )
-                .into());
-            }
-            println!(
-                "  Batch A (CreateTile): accepted=true, tile_id={} bytes",
-                id.len()
-            );
-            id
+            println!("  ClaimTile: ok, tile_id={} bytes", id.len());
+            (id, r.lease_id)
         }
         other => {
-            return Err(format!("Expected MutationResult (CreateTile), got: {other:?}").into());
+            return Err(format!("Expected RequestResult (ClaimTile), got: {other:?}").into());
         }
     };
 
@@ -1808,7 +1746,7 @@ async fn create_tile_batch_with_host(
         .await
         .ok_or("stream closed before MutationResult (node batch)")??;
     let node_ids: Vec<Vec<u8>> = match msg.payload {
-        Some(session_proto::server_message::Payload::MutationResult(result)) => {
+        Some(session_proto::server_message::Payload::RequestResult(result)) => {
             if result.batch_id != batch_b_id {
                 return Err(format!(
                     "MutationResult batch_id mismatch for Batch B: expected {:?}, got {:?}",
@@ -1816,27 +1754,27 @@ async fn create_tile_batch_with_host(
                 )
                 .into());
             }
-            if !result.accepted {
+            if !result.ok {
                 return Err(format!(
                     "Node batch rejected: code={}, msg={}",
-                    result.error_code, result.error_message
+                    result.code, result.hint
                 )
                 .into());
             }
-            if result.created_ids.len() != 6 {
+            if result.ids.len() != 6 {
                 return Err(format!(
                     "Batch B must create exactly 6 nodes (bg + 5 children), \
                      got {} created_ids — tasks.md §4.2",
-                    result.created_ids.len()
+                    result.ids.len()
                 )
                 .into());
             }
             println!(
                 "  Batch B (6-node tree + opacity + input_mode): accepted=true, \
                  {} node_ids",
-                result.created_ids.len()
+                result.ids.len()
             );
-            result.created_ids
+            result.ids
         }
         other => {
             return Err(format!("Expected MutationResult (node batch), got: {other:?}").into());
@@ -2281,253 +2219,6 @@ mod tests {
         server.abort();
     }
 
-    /// Task 4.4 — partial batch failure rejects entire batch atomically.
-    ///
-    /// Spec §Requirement: Atomic Tile Creation Batch
-    /// Scenario: Partial failure rejects entire batch
-    /// tasks.md §4.4: a batch containing one valid CreateTile and one CreateTile with
-    ///   width=0 (invalid bounds per RFC 0001 §2.3) is rejected atomically —
-    ///   no tiles from the failed batch appear in the scene.
-    #[tokio::test]
-    async fn test_partial_batch_failure_rejects_atomically() {
-        use tokio_stream::StreamExt as _;
-        use tze_hud_protocol::proto::session as sp;
-
-        let port = ephemeral_port();
-        let (server, state) = start_test_runtime_with_state(port)
-            .await
-            .expect("runtime start");
-
-        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-
-        // Create a tab (CreateTile requires an active tab); skip resource upload
-        // since the batch will be rejected before any StaticImageNode is processed.
-        {
-            let st = state.lock().await;
-            let mut scene = st.scene.lock().await;
-            let tab_id = scene.create_tab("Test Tab", 0).expect("create_tab");
-            scene.active_tab = Some(tab_id);
-        }
-
-        // Open a session and acquire a lease.
-        #[allow(deprecated)]
-        let mut session_client =
-            sp::hud_session_client::HudSessionClient::connect(format!("http://[::1]:{port}"))
-                .await
-                .expect("connect");
-
-        let (tx, rx) = tokio::sync::mpsc::channel::<sp::ClientMessage>(64);
-        let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
-        let mut response_stream = session_client
-            .session(stream)
-            .await
-            .expect("session rpc")
-            .into_inner();
-
-        let now_us = crate::now_wall_us();
-        tx.send(sp::ClientMessage {
-            sequence: 1,
-            timestamp_wall_us: now_us,
-            payload: Some(sp::client_message::Payload::SessionInit(sp::SessionInit {
-                agent_id: "partial-fail-test-agent".to_string(),
-                initial_subscriptions: vec!["LEASE_CHANGES".to_string()],
-                resume_token: vec![],
-                min_protocol_version: 1000,
-                max_protocol_version: 1001,
-                auth_credential: Some(sp::AuthCredential {
-                    credential: Some(sp::auth_credential::Credential::PreSharedKey(
-                        sp::PreSharedKeyCredential {
-                            key: TEST_PSK.to_string(),
-                        },
-                    )),
-                }),
-            })),
-        })
-        .await
-        .unwrap();
-
-        // Drain SessionEstablished + SceneSnapshot + current DegradationNotice.
-        for _ in 0..3 {
-            response_stream
-                .next()
-                .await
-                .expect("stream open")
-                .expect("no error");
-        }
-
-        // Acquire lease.
-        tx.send(sp::ClientMessage {
-            sequence: 2,
-            timestamp_wall_us: crate::now_wall_us(),
-            payload: Some(sp::client_message::Payload::LeaseRequest(
-                sp::LeaseRequest { ttl_ms: 60_000 },
-            )),
-        })
-        .await
-        .unwrap();
-
-        let lease_id_bytes: Vec<u8> = loop {
-            let msg = next_server_msg(&mut response_stream).await;
-            if let Some(sp::server_message::Payload::LeaseResponse(resp)) = msg.payload {
-                assert!(resp.granted, "lease must be granted for partial-fail test");
-                break resp.lease_id;
-            }
-        };
-
-        // Batch A: CreateTile (valid)
-        let batch_a_id = uuid::Uuid::now_v7().as_bytes().to_vec();
-        tx.send(sp::ClientMessage {
-            sequence: 3,
-            timestamp_wall_us: crate::now_wall_us(),
-            payload: Some(sp::client_message::Payload::MutationBatch(
-                sp::MutationBatch {
-                    batch_id: batch_a_id,
-                    lease_id: lease_id_bytes.clone(),
-                    mutations: vec![tze_hud_protocol::proto::MutationProto {
-                        mutation: Some(
-                            tze_hud_protocol::proto::mutation_proto::Mutation::CreateTile(
-                                tze_hud_protocol::proto::CreateTileMutation {
-                                    tab_id: vec![],
-                                    bounds: Some(tze_hud_protocol::proto::Rect {
-                                        x: 50.0,
-                                        y: 50.0,
-                                        width: 400.0,
-                                        height: 300.0,
-                                    }),
-                                    z_order: 100,
-                                },
-                            ),
-                        ),
-                    }],
-                    timing: None,
-                },
-            )),
-        })
-        .await
-        .unwrap();
-
-        let tile_id_bytes: Vec<u8> = loop {
-            let msg = next_server_msg(&mut response_stream).await;
-            if let Some(sp::server_message::Payload::MutationResult(result)) = msg.payload {
-                assert!(result.accepted, "CreateTile must succeed; got: {result:?}");
-                break result.created_ids[0].clone();
-            }
-        };
-
-        // Record tile count before the failing batch.
-        let tile_count_before = {
-            let st = state.lock().await;
-            st.scene.lock().await.tile_count()
-        };
-
-        // Batch B: two CreateTile mutations — the second has width=0 (invalid tile bounds).
-        // RFC 0001 §2.3: tile width and height must be > 0. The entire batch must be
-        // rejected atomically (tasks.md §4.4: all-or-nothing).
-        let batch_b_id = uuid::Uuid::now_v7().as_bytes().to_vec();
-        tx.send(sp::ClientMessage {
-            sequence: 4,
-            timestamp_wall_us: crate::now_wall_us(),
-            payload: Some(sp::client_message::Payload::MutationBatch(
-                sp::MutationBatch {
-                    batch_id: batch_b_id.clone(),
-                    lease_id: lease_id_bytes.clone(),
-                    mutations: vec![
-                        // Valid CreateTile
-                        tze_hud_protocol::proto::MutationProto {
-                            mutation: Some(
-                                tze_hud_protocol::proto::mutation_proto::Mutation::CreateTile(
-                                    tze_hud_protocol::proto::CreateTileMutation {
-                                        tab_id: vec![],
-                                        bounds: Some(tze_hud_protocol::proto::Rect {
-                                            x: 50.0,
-                                            y: 200.0,
-                                            width: 200.0,
-                                            height: 100.0,
-                                        }),
-                                        z_order: 101,
-                                    },
-                                ),
-                            ),
-                        },
-                        // Invalid CreateTile: width=0 → bounds validation fails (RFC 0001 §2.3)
-                        tze_hud_protocol::proto::MutationProto {
-                            mutation: Some(
-                                tze_hud_protocol::proto::mutation_proto::Mutation::CreateTile(
-                                    tze_hud_protocol::proto::CreateTileMutation {
-                                        tab_id: vec![],
-                                        bounds: Some(tze_hud_protocol::proto::Rect {
-                                            x: 0.0,
-                                            y: 0.0,
-                                            width: 0.0, // INVALID: width must be > 0
-                                            height: 50.0,
-                                        }),
-                                        z_order: 102,
-                                    },
-                                ),
-                            ),
-                        },
-                    ],
-                    timing: None,
-                },
-            )),
-        })
-        .await
-        .unwrap();
-
-        // Expect MutationResult with accepted=false (entire batch rejected).
-        let result_msg = next_server_msg(&mut response_stream).await;
-        match result_msg.payload {
-            Some(sp::server_message::Payload::MutationResult(result)) => {
-                assert_eq!(
-                    result.batch_id, batch_b_id,
-                    "batch_id must be echoed back — tasks.md §4.2"
-                );
-                assert!(
-                    !result.accepted,
-                    "batch with width=0 CreateTile must be rejected atomically — tasks.md §4.4; \
-                     got: accepted={}, error_code={}, msg={}",
-                    result.accepted, result.error_code, result.error_message
-                );
-            }
-            other => panic!(
-                "Expected MutationResult (rejected) for partial batch failure, got: {other:?}"
-            ),
-        }
-
-        // tasks.md §4.4: tile count must not change — no tiles from Batch B were committed.
-        // (The tile itself was created in Batch A and is still present.)
-        let tile_count_after = {
-            let st = state.lock().await;
-            st.scene.lock().await.tile_count()
-        };
-        assert_eq!(
-            tile_count_after, tile_count_before,
-            "tile count must not change after rejected CreateTile batch — tasks.md §4.4"
-        );
-
-        // The tile from Batch A must have no root node (Batch B was fully rolled back).
-        {
-            let tile_id_arr: [u8; 16] = tile_id_bytes
-                .as_slice()
-                .try_into()
-                .expect("tile_id must be 16 bytes");
-            let tile_uuid = uuid::Uuid::from_bytes(tile_id_arr);
-            let tile_scene_id = tze_hud_scene::SceneId::from_uuid(tile_uuid);
-            let st = state.lock().await;
-            let scene = st.scene.lock().await;
-            let tile = scene
-                .tiles
-                .get(&tile_scene_id)
-                .expect("tile must still exist (created in Batch A)");
-            assert!(
-                tile.root_node.is_none(),
-                "tile root must be None after rejected node batch (atomicity) — tasks.md §4.4"
-            );
-        }
-
-        server.abort();
-    }
-
     /// Task 4.4 (node batch atomicity) — 6-node batch rejected when resource is unregistered.
     ///
     /// Spec §Requirement: Atomic Tile Creation Batch
@@ -2606,61 +2297,20 @@ mod tests {
         tx.send(sp::ClientMessage {
             sequence: 2,
             timestamp_wall_us: crate::now_wall_us(),
-            payload: Some(sp::client_message::Payload::LeaseRequest(
-                sp::LeaseRequest { ttl_ms: 60_000 },
-            )),
+            payload: Some(sp::client_message::Payload::ClaimTile(sp::ClaimTile {
+                placement: Some(crate::tile_placement()),
+                ttl_ms: 60_000,
+                root: None,
+            })),
         })
         .await
         .unwrap();
 
-        let lease_id_bytes: Vec<u8> = loop {
+        let (tile_id_bytes, lease_id_bytes): (Vec<u8>, Vec<u8>) = loop {
             let msg = next_server_msg(&mut response_stream).await;
-            if let Some(sp::server_message::Payload::LeaseResponse(resp)) = msg.payload {
-                assert!(
-                    resp.granted,
-                    "lease must be granted for node-atomicity test"
-                );
-                break resp.lease_id;
-            }
-        };
-
-        // Batch A: CreateTile (valid)
-        let batch_a_id = uuid::Uuid::now_v7().as_bytes().to_vec();
-        tx.send(sp::ClientMessage {
-            sequence: 3,
-            timestamp_wall_us: crate::now_wall_us(),
-            payload: Some(sp::client_message::Payload::MutationBatch(
-                sp::MutationBatch {
-                    batch_id: batch_a_id,
-                    lease_id: lease_id_bytes.clone(),
-                    mutations: vec![tze_hud_protocol::proto::MutationProto {
-                        mutation: Some(
-                            tze_hud_protocol::proto::mutation_proto::Mutation::CreateTile(
-                                tze_hud_protocol::proto::CreateTileMutation {
-                                    tab_id: vec![],
-                                    bounds: Some(tze_hud_protocol::proto::Rect {
-                                        x: 50.0,
-                                        y: 50.0,
-                                        width: 400.0,
-                                        height: 300.0,
-                                    }),
-                                    z_order: 100,
-                                },
-                            ),
-                        ),
-                    }],
-                    timing: None,
-                },
-            )),
-        })
-        .await
-        .unwrap();
-
-        let tile_id_bytes: Vec<u8> = loop {
-            let msg = next_server_msg(&mut response_stream).await;
-            if let Some(sp::server_message::Payload::MutationResult(result)) = msg.payload {
-                assert!(result.accepted, "CreateTile must succeed");
-                break result.created_ids[0].clone();
+            if let Some(sp::server_message::Payload::RequestResult(r)) = msg.payload {
+                assert!(r.ok, "ClaimTile must succeed; got: {r:?}");
+                break (r.ids[0].clone(), r.lease_id);
             }
         };
 
@@ -2762,16 +2412,16 @@ mod tests {
         // Expect rejected batch (entire batch must be refused atomically).
         let result_msg = next_server_msg(&mut response_stream).await;
         match result_msg.payload {
-            Some(sp::server_message::Payload::MutationResult(result)) => {
+            Some(sp::server_message::Payload::RequestResult(result)) => {
                 assert_eq!(
                     result.batch_id, batch_b_id,
                     "batch_id must be echoed back — tasks.md §4.2"
                 );
                 assert!(
-                    !result.accepted,
+                    !result.ok,
                     "batch with unregistered StaticImageNode resource_id must be rejected \
                      atomically — tasks.md §4.4; got: accepted={}, error_code={}, msg={}",
-                    result.accepted, result.error_code, result.error_message
+                    result.ok, result.code, result.hint
                 );
             }
             other => panic!(
@@ -3088,15 +2738,15 @@ mod tests {
         // Expect MutationResult rejected — expired/unknown lease.
         let result_msg = next_server_msg(&mut response_stream).await;
         match result_msg.payload {
-            Some(sp::server_message::Payload::MutationResult(result)) => {
+            Some(sp::server_message::Payload::RequestResult(result)) => {
                 assert!(
-                    !result.accepted,
+                    !result.ok,
                     "SetTileRoot with expired/unknown lease must be rejected — tasks.md §6.3; \
                      got accepted=true, code={}, msg={}",
-                    result.error_code, result.error_message
+                    result.code, result.hint
                 );
                 assert!(
-                    !result.error_code.is_empty(),
+                    !result.code.is_empty(),
                     "error_code must be non-empty for rejected content update — tasks.md §6.3"
                 );
             }

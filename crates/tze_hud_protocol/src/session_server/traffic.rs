@@ -11,7 +11,7 @@ use crate::proto::session::server_message::Payload as ServerPayload;
 /// - Ephemeral: at-most-once, latest-wins, dropped under backpressure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrafficClass {
-    /// Reliable, ordered, never dropped. MutationResult, LeaseResponse, SessionEstablished, etc.
+    /// Reliable, ordered, never dropped. RequestResult, Reclaimed, SessionEstablished, etc.
     Transactional,
     /// Coalesced under pressure; intermediate states may be skipped. SceneSnapshot, EventBatch.
     StateStream,
@@ -21,8 +21,8 @@ pub enum TrafficClass {
 
 /// Classify an outbound `ServerMessage` payload into its traffic class.
 ///
-/// - Session lifecycle responses, MutationResult, LeaseResponse,
-///   SubscriptionChangeResult, ZonePublishResult, RuntimeError,
+/// - Session lifecycle responses, RequestResult, Reclaimed,
+///   SubscriptionChangeResult, Reclaimed,
 ///   SessionSuspended, SessionResumed, and input-control responses are Transactional.
 /// - SceneSnapshot and EventBatch are StateStream.
 /// - Heartbeat echoes are Ephemeral.
@@ -33,20 +33,17 @@ pub fn classify_server_payload(payload: &ServerPayload) -> TrafficClass {
         | ServerPayload::SessionError(_)
         | ServerPayload::SessionResumeResult(_)
         | ServerPayload::SessionSuspended(_)
-        | ServerPayload::SessionResumed(_)
-        | ServerPayload::RuntimeError(_) => TrafficClass::Transactional,
+        | ServerPayload::SessionResumed(_) => TrafficClass::Transactional,
 
         // Mutation / lease responses — transactional
-        ServerPayload::MutationResult(_)
-        | ServerPayload::LeaseResponse(_)
+        ServerPayload::RequestResult(_)
+        | ServerPayload::Reclaimed(_)
         | ServerPayload::SubscriptionChangeResult(_)
-        | ServerPayload::ZonePublishResult(_)
         | ServerPayload::InputFocusResponse(_)
         | ServerPayload::InputCaptureResponse(_) => TrafficClass::Transactional,
 
         // Widget and resource-upload responses — transactional.
-        ServerPayload::WidgetPublishResult(_)
-        | ServerPayload::WidgetAssetRegisterResult(_)
+        ServerPayload::WidgetAssetRegisterResult(_)
         | ServerPayload::ResourceUploadAccepted(_)
         | ServerPayload::ResourceStored(_)
         | ServerPayload::ResourceErrorResponse(_) => TrafficClass::Transactional,
@@ -93,10 +90,7 @@ pub(super) fn classify_inbound_batch(batch: &MutationBatch) -> TrafficClass {
                 Mutation::SetTileRoot(_) => {}
                 Mutation::UpdateTileOpacity(_) => {}
                 Mutation::UpdateTileInputMode(_) => {}
-                Mutation::PublishToZone(_) => {}
                 Mutation::PublishToTile(_) => {}
-                Mutation::ClearZone(_) => {}
-                Mutation::ClearWidget(_) => {}
                 // UpdateNodeContent is a content update — StateStream
                 Mutation::UpdateNodeContent(_) => {}
                 // Scroll mutations: config register is Transactional (structural),

@@ -184,15 +184,20 @@ async fn test_three_agents_contention() -> Result<(), Box<dyn std::error::Error>
 
     // ── Phase 2: Agent A creates weather dashboard tiles ────────────────────
 
-    // Current conditions tile (z=10, highest priority within agent)
-    let tile_a1_id = create_tile_via_grpc(&mut agent_a, [50.0, 50.0, 600.0, 400.0], 10).await?;
+    // Current conditions tile
+    let tile_a1_id = claim_tile_via_grpc(
+        &mut agent_a,
+        placement(TileAnchor::TopLeft, TileSize::Large),
+    )
+    .await?;
     assert!(
         !tile_a1_id.is_empty(),
         "agent-weather tile-1 must be created"
     );
 
-    // Forecast tile (z=9)
-    let tile_a2_id = create_tile_via_grpc(&mut agent_a, [50.0, 470.0, 600.0, 200.0], 9).await?;
+    // Forecast tile (stacks below the first at the same anchor)
+    let tile_a2_id =
+        claim_tile_via_grpc(&mut agent_a, placement(TileAnchor::TopLeft, TileSize::Wide)).await?;
     assert!(
         !tile_a2_id.is_empty(),
         "agent-weather tile-2 must be created"
@@ -418,15 +423,13 @@ async fn test_three_agents_contention() -> Result<(), Box<dyn std::error::Error>
                 match agent_b.next_server_msg().await {
                     Some(Ok(msg)) => {
                         match &msg.payload {
-                            Some(session_proto::server_message::Payload::MutationResult(
-                                result,
-                            )) => {
+                            Some(session_proto::server_message::Payload::RequestResult(result)) => {
                                 // The mutation must be rejected (not accepted).
-                                let rejected = !result.accepted;
+                                let rejected = !result.ok;
                                 eprintln!(
                                     "    Cross-agent mutation rejected={rejected} \
                                      (error_code='{}', error_message='{}')",
-                                    result.error_code, result.error_message
+                                    result.code, result.hint
                                 );
                                 rejected
                             }
@@ -462,8 +465,8 @@ async fn test_three_agents_contention() -> Result<(), Box<dyn std::error::Error>
         "compositor must see at least 2 tiles from agent-weather"
     );
     assert!(
-        frame.active_leases >= 3,
-        "compositor must see at least 3 active leases (one per agent)"
+        frame.active_leases >= 2,
+        "compositor must see one active lease per claimed tile"
     );
 
     // Record frame time for telemetry (informational — not a calibrated pass/fail).
@@ -676,21 +679,23 @@ async fn test_three_agents_contention() -> Result<(), Box<dyn std::error::Error>
         let state = runtime.shared_state().lock().await;
         let scene = state.scene.lock().await;
 
-        // All three agents' leases must still be Active
-        for (ns, label) in [
-            (&agent_a.namespace, "agent-weather"),
-            (&agent_b.namespace, "agent-notifications"),
-            (&agent_c.namespace, "agent-media"),
-        ] {
-            let lease = scene
-                .leases
-                .values()
-                .find(|l| &l.namespace == ns)
-                .unwrap_or_else(|| panic!("lease for {label} must exist"));
+        // agent-weather's leases (one per claimed tile) must still be Active;
+        // zone-only agents hold no lease.
+        let weather_leases: Vec<_> = scene
+            .leases
+            .values()
+            .filter(|l| l.namespace == agent_a.namespace)
+            .collect();
+        assert_eq!(
+            weather_leases.len(),
+            2,
+            "agent-weather holds one lease per tile"
+        );
+        for lease in weather_leases {
             assert_eq!(
                 lease.state,
                 LeaseState::Active,
-                "{label} lease must be Active at end of test"
+                "agent-weather lease must be Active at end of test"
             );
         }
 

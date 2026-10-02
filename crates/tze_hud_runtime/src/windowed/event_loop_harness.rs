@@ -57,7 +57,7 @@ impl WindowedRuntimeState {
     /// - `window` / `window_surface` / `compositor` / `compositor_handle` — `None`.
     /// - `network_rt` / `network_handles` — no gRPC/MCP servers are spawned.
     /// - the broadcast/op channels (`element_repositioned_tx`, `input_event_tx`,
-    ///   `portal_op_rx`, `safe_mode_exit_tx`, `resident_grpc_bridge`) — `None`.
+    ///   `portal_op_rx`, `safe_mode_exit_tx`) — `None`.
     ///
     /// The `safe_mode_atomic` and `active_tab_mirror` `Arc`s are shared between
     /// the state and its embedded [`SharedState`] exactly as production does, so
@@ -152,8 +152,6 @@ impl WindowedRuntimeState {
             portal_op_rx: None,
             pending_keyboard_events: VecDeque::new(),
             interaction_feedback_lock_misses: std::sync::atomic::AtomicU64::new(0),
-            resident_grpc_bridge: None,
-            resident_grpc_input_rx: None,
         }
     }
 }
@@ -187,6 +185,7 @@ impl SharedStateBuilder {
             input_capture_tx: None,
             input_capture_wake: tze_hud_scene::render_wake::RenderWakeNotifier::default(),
             resolved_portal_tokens: std::collections::HashMap::new(),
+            tile_placement: Default::default(),
         }
     }
 }

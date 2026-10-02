@@ -21,6 +21,7 @@ except ModuleNotFoundError:  # pragma: no cover - environment dependent
     Image = None
 
 from hud_grpc_client import (
+    ClaimedTile,
     HudClient,
     _blake3_digest_bytes,
     _resource_id_bytes,
@@ -38,6 +39,7 @@ from hud_grpc_client import (
     build_presence_card_name_node,
     build_presence_card_sheen_node,
     build_presence_card_text_node,
+    tile_surface,
     make_avatar_png,
 )
 from proto_gen import session_pb2, types_pb2
@@ -234,26 +236,25 @@ class HudGrpcClientTests(unittest.IsolatedAsyncioTestCase):
     async def test_wait_for_does_not_drop_unmatched_messages(self):
         client = HudClient("example.invalid:50051", psk="test-key")
         client._response_queue = asyncio.Queue()
-        mutation = session_pb2.ServerMessage(
-            mutation_result=session_pb2.MutationResult(
+        result = session_pb2.ServerMessage(
+            request_result=session_pb2.RequestResult(
                 batch_id=b"\x01" * 16,
-                accepted=True,
+                ok=True,
             )
         )
-        lease = session_pb2.ServerMessage(
-            lease_response=session_pb2.LeaseResponse(
-                granted=True,
-                lease_id=b"\x02" * 16,
-                granted_ttl_ms=60_000,
+        reclaimed = session_pb2.ServerMessage(
+            reclaimed=session_pb2.Reclaimed(
+                surface="tile:00000000-0000-0000-0000-000000000002",
+                why=session_pb2.RECLAIM_REASON_EXPIRED,
             )
         )
-        await client._response_queue.put(mutation)
-        await client._response_queue.put(lease)
+        await client._response_queue.put(result)
+        await client._response_queue.put(reclaimed)
 
-        lease_resp = await client._wait_for("lease_response", timeout=0.1)
-        self.assertTrue(lease_resp.lease_response.granted)
-        mutation_resp = await client._wait_for("mutation_result", timeout=0.1)
-        self.assertEqual(mutation_resp.mutation_result.batch_id, b"\x01" * 16)
+        reclaimed_resp = await client._wait_for("reclaimed", timeout=0.1)
+        self.assertEqual(reclaimed_resp.reclaimed.why, session_pb2.RECLAIM_REASON_EXPIRED)
+        result_resp = await client._wait_for("request_result", timeout=0.1)
+        self.assertEqual(result_resp.request_result.batch_id, b"\x01" * 16)
 
     async def test_wait_for_matcher_does_not_replay_wrong_deferred_payload(self):
         client = HudClient("example.invalid:50051", psk="test-key")
@@ -261,28 +262,28 @@ class HudGrpcClientTests(unittest.IsolatedAsyncioTestCase):
         for marker in (b"\x41", b"\x42"):
             await client._response_queue.put(
                 session_pb2.ServerMessage(
-                    mutation_result=session_pb2.MutationResult(batch_id=marker * 16)
+                    request_result=session_pb2.RequestResult(batch_id=marker * 16)
                 )
             )
 
         resp = await client._wait_for(
-            "mutation_result",
+            "request_result",
             timeout=0.1,
-            matcher=lambda msg: msg.mutation_result.batch_id == b"\x42" * 16,
+            matcher=lambda msg: msg.request_result.batch_id == b"\x42" * 16,
         )
 
-        self.assertEqual(resp.mutation_result.batch_id, b"\x42" * 16)
-        deferred_resp = await client._wait_for("mutation_result", timeout=0.1)
-        self.assertEqual(deferred_resp.mutation_result.batch_id, b"\x41" * 16)
+        self.assertEqual(resp.request_result.batch_id, b"\x42" * 16)
+        deferred_resp = await client._wait_for("request_result", timeout=0.1)
+        self.assertEqual(deferred_resp.request_result.batch_id, b"\x41" * 16)
 
     async def test_await_resource_upload_result_does_not_drop_other_responses(self):
         client = HudClient("example.invalid:50051", psk="test-key")
         client._response_queue = asyncio.Queue()
         await client._response_queue.put(
             session_pb2.ServerMessage(
-                mutation_result=session_pb2.MutationResult(
+                request_result=session_pb2.RequestResult(
                     batch_id=b"\x11" * 16,
-                    accepted=True,
+                    ok=True,
                 )
             )
         )
@@ -300,8 +301,8 @@ class HudGrpcClientTests(unittest.IsolatedAsyncioTestCase):
             timeout=0.1,
         )
         self.assertEqual(stored.request_sequence, 5)
-        mutation_resp = await client._wait_for("mutation_result", timeout=0.1)
-        self.assertEqual(mutation_resp.mutation_result.batch_id, b"\x11" * 16)
+        mutation_resp = await client._wait_for("request_result", timeout=0.1)
+        self.assertEqual(mutation_resp.request_result.batch_id, b"\x11" * 16)
 
     async def test_upload_png_resource_rejects_payload_over_inline_limit(self):
         client = HudClient("example.invalid:50051", psk="test-key")
@@ -311,39 +312,27 @@ class HudGrpcClientTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_create_presence_card_tile_sequences_helper_calls(self):
         client = HudClient("example.invalid:50051", psk="test-key")
-        client.create_tile = AsyncMock(return_value=b"tile-id")
-        client.update_tile_opacity = AsyncMock()
+        lease_id = b"\x22" * 16
+        client.claim_tile = AsyncMock(
+            return_value=ClaimedTile(lease_id=lease_id, tile_id=b"tile-id", node_ids=[])
+        )
         client.update_tile_input_mode = AsyncMock()
         client.set_tile_root = AsyncMock()
         client.add_node = AsyncMock(side_effect=[f"node-{idx}".encode() for idx in range(12)])
 
-        lease_id = b"\x22" * 16
-        tab_id = b"\x33" * 16
         avatar_resource_id = b"\x44" * 32
 
-        tile_id = await client.create_presence_card_tile(
-            lease_id,
-            tab_id=tab_id,
+        claimed = await client.create_presence_card_tile(
             agent_name="agent-alpha",
             avatar_resource_id=avatar_resource_id,
-            x=24.0,
-            y=44.0,
-            w=320.0,
-            h=112.0,
-            z_order=100,
         )
 
-        self.assertEqual(tile_id, b"tile-id")
-        client.create_tile.assert_awaited_once_with(
-            lease_id,
-            tab_id=tab_id,
-            x=24.0,
-            y=44.0,
-            w=320.0,
-            h=112.0,
-            z_order=100,
+        self.assertEqual(claimed.tile_id, b"tile-id")
+        client.claim_tile.assert_awaited_once_with(
+            anchor=session_pb2.TILE_ANCHOR_BOTTOM_LEFT,
+            size=session_pb2.TILE_SIZE_MEDIUM,
+            ttl_ms=60000,
         )
-        client.update_tile_opacity.assert_awaited_once_with(lease_id, b"tile-id", 1.0)
         client.update_tile_input_mode.assert_awaited_once_with(
             lease_id,
             b"tile-id",
@@ -414,24 +403,52 @@ class HudGrpcClientTests(unittest.IsolatedAsyncioTestCase):
         client._shutdown_transport.assert_awaited_once()
         client._send.assert_not_called()
 
-    async def test_request_lease_reports_proto_deny_reason(self):
+    async def test_claim_tile_reports_code_and_hint(self):
         client = HudClient("example.invalid:50051", psk="test-key")
-        client._send = AsyncMock()
+        client._send = AsyncMock(return_value=2)
         client._wait_for = AsyncMock(
             return_value=session_pb2.ServerMessage(
-                lease_response=session_pb2.LeaseResponse(
-                    granted=False,
-                    deny_reason="requested lease scope exceeds session-granted capabilities",
-                    deny_code="PERMISSION_DENIED",
+                request_result=session_pb2.RequestResult(
+                    seq=2,
+                    ok=False,
+                    code="NOT_ALLOWED",
+                    hint='needs "tiles" in [agents.test] allow',
                 )
             )
         )
 
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "PERMISSION_DENIED.*requested lease scope exceeds session-granted capabilities",
-        ):
-            await client.request_lease(ttl_ms=120_000)
+        with self.assertRaisesRegex(RuntimeError, r"NOT_ALLOWED.*needs \"tiles\""):
+            await client.claim_tile(ttl_ms=120_000)
+
+    async def test_claim_tile_returns_lease_tile_and_node_ids(self):
+        client = HudClient("example.invalid:50051", psk="test-key")
+        client._send = AsyncMock(return_value=2)
+        client._wait_for = AsyncMock(
+            return_value=session_pb2.ServerMessage(
+                request_result=session_pb2.RequestResult(
+                    seq=2,
+                    ok=True,
+                    ids=[b"\x01" * 16, b"\x02" * 16],
+                    lease_id=b"\x03" * 16,
+                    ttl_ms=60_000,
+                )
+            )
+        )
+
+        claimed = await client.claim_tile(root={"solid_color": {"r": 1, "g": 0, "b": 0, "a": 1}})
+
+        self.assertEqual(claimed.tile_id, b"\x01" * 16)
+        self.assertEqual(claimed.node_ids, [b"\x02" * 16])
+        self.assertEqual(claimed.lease_id, b"\x03" * 16)
+        self.assertEqual(client.last_granted_lease_ttl_ms, 60_000)
+        sent = client._send.await_args.kwargs["claim_tile"]
+        self.assertTrue(sent.HasField("root"))
+
+    def test_tile_surface_is_hyphenated_uuid(self):
+        self.assertEqual(
+            tile_surface(bytes(range(16))),
+            "tile:00010203-0405-0607-0809-0a0b0c0d0e0f",
+        )
 
     # ── Bounded mutation-ack retry (hud-n5bqp) ────────────────────────────────
     def _mutation_retry_client(self):
@@ -458,9 +475,9 @@ class HudGrpcClientTests(unittest.IsolatedAsyncioTestCase):
     @staticmethod
     def _accepted_result(batch_id: bytes):
         return session_pb2.ServerMessage(
-            mutation_result=session_pb2.MutationResult(
+            request_result=session_pb2.RequestResult(
                 batch_id=batch_id,
-                accepted=True,
+                ok=True,
             )
         )
 
@@ -563,7 +580,7 @@ class HudGrpcClientTests(unittest.IsolatedAsyncioTestCase):
         async def flaky_wait(payload_name, timeout, matcher=None):
             calls["n"] += 1
             if calls["n"] == 1:
-                raise TimeoutError("Timed out waiting for mutation_result")
+                raise TimeoutError("Timed out waiting for request_result")
             return self._accepted_result(sent_batch_ids[-1])
 
         set_wait(flaky_wait)
@@ -574,7 +591,7 @@ class HudGrpcClientTests(unittest.IsolatedAsyncioTestCase):
                 b"\x01" * 16, [], timeout=0.05, retries=3, retry_backoff_s=0.0,
             )
 
-        self.assertTrue(mr.accepted)
+        self.assertTrue(mr.ok)
         # Original send + exactly one resubmit, each with a distinct batch id.
         self.assertEqual(len(sent_batch_ids), 2)
         self.assertNotEqual(sent_batch_ids[0], sent_batch_ids[1])
@@ -588,7 +605,7 @@ class HudGrpcClientTests(unittest.IsolatedAsyncioTestCase):
         client, sent_batch_ids, set_wait = self._mutation_retry_client()
 
         async def always_timeout(payload_name, timeout, matcher=None):
-            raise TimeoutError("Timed out waiting for mutation_result")
+            raise TimeoutError("Timed out waiting for request_result")
 
         set_wait(always_timeout)
 
@@ -609,7 +626,7 @@ class HudGrpcClientTests(unittest.IsolatedAsyncioTestCase):
         client, sent_batch_ids, set_wait = self._mutation_retry_client()
 
         async def always_timeout(payload_name, timeout, matcher=None):
-            raise TimeoutError("Timed out waiting for mutation_result")
+            raise TimeoutError("Timed out waiting for request_result")
 
         set_wait(always_timeout)
 
@@ -629,7 +646,7 @@ class HudGrpcClientTests(unittest.IsolatedAsyncioTestCase):
         async def flaky_wait(payload_name, timeout, matcher=None):
             calls["n"] += 1
             if calls["n"] == 1:
-                raise TimeoutError("Timed out waiting for mutation_result")
+                raise TimeoutError("Timed out waiting for request_result")
             return self._accepted_result(sent_batch_ids[-1])
 
         set_wait(flaky_wait)
@@ -638,7 +655,7 @@ class HudGrpcClientTests(unittest.IsolatedAsyncioTestCase):
         with contextlib.redirect_stdout(buf):
             mr = await client.submit_mutation_batch(b"\x01" * 16, [], timeout=0.05)
 
-        self.assertTrue(mr.accepted)
+        self.assertTrue(mr.ok)
         self.assertEqual(len(sent_batch_ids), 2)
         # Resetting the policy to 0 restores fail-fast.
         client.configure_mutation_retry(0)
@@ -655,17 +672,17 @@ class HudGrpcClientTests(unittest.IsolatedAsyncioTestCase):
 
         async def reject_wait(payload_name, timeout, matcher=None):
             return session_pb2.ServerMessage(
-                mutation_result=session_pb2.MutationResult(
+                request_result=session_pb2.RequestResult(
                     batch_id=sent_batch_ids[-1],
-                    accepted=False,
-                    error_code="MUTATION_REJECTED",
-                    error_message="lease expired",
+                    ok=False,
+                    code="LEASE_EXPIRED",
+                    hint="lease expired",
                 )
             )
 
         set_wait(reject_wait)
 
-        with self.assertRaisesRegex(RuntimeError, "MUTATION_REJECTED"):
+        with self.assertRaisesRegex(RuntimeError, "LEASE_EXPIRED"):
             await client.submit_mutation_batch(
                 b"\x01" * 16, [], timeout=0.05, retries=3, retry_backoff_s=0.0,
             )

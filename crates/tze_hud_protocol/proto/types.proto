@@ -262,9 +262,6 @@ message MutationProto {
   oneof mutation {
     CreateTileMutation          create_tile            = 1;
     SetTileRootMutation         set_tile_root          = 2;
-    PublishToZoneMutation       publish_to_zone        = 3;
-    ClearZoneMutation           clear_zone             = 4;
-    ClearWidgetMutation         clear_widget           = 5;
     UpdateNodeContentMutation   update_node_content    = 6;
     AddNodeMutation             add_node               = 7;
     UpdateTileOpacityMutation   update_tile_opacity    = 8;
@@ -278,6 +275,13 @@ message MutationProto {
     SetTileUnreadCountMutation  set_tile_unread_count  = 16;
     SetTileComposerInteractionMutation set_tile_composer_interaction = 17;
   }
+  // Agents may send set_tile_root (2) and 6–9, 11, 12 on their own tiles.
+  // create_tile (1), publish_to_tile (10), and the portal mutations (13–17)
+  // are runtime-internal (the in-process portal driver); the session server
+  // rejects them from agents — claim tiles with ClaimTile.
+  // Removed in T5 S4b: zone/widget publishing is the Publish/Clear verbs.
+  reserved 3, 4, 5;
+  reserved "publish_to_zone", "clear_zone", "clear_widget";
 }
 
 // Set (or clear) the composer interaction hit region an interaction-enabled
@@ -505,10 +509,6 @@ message ZoneContent {
   reserved 6;  // video_surface_ref, removed in the 2026-10 scope reset
 }
 
-message ZonePublishToken {
-  bytes token = 1;  // Opaque capability token issued at session auth
-}
-
 // Geometry policy variants for zone placement.
 enum DisplayEdge {
   DISPLAY_EDGE_UNSPECIFIED = 0;
@@ -631,20 +631,8 @@ message ZoneRegistrySnapshotProto {
   repeated ZonePublishRecordProto active_publishes = 2;
 }
 
-// ─── Zone Mutation Messages ───────────────────────────────────────────────────
 
-message PublishToZoneMutation {
-  string           zone_name     = 1;
-  ZoneContent      content       = 2;
-  ZonePublishToken publish_token = 3;
-  string           merge_key     = 4;  // For MergeByKey contention; empty otherwise
-  bytes            element_id    = 5;  // Optional zone element ID addressing (16 bytes)
-}
 
-message ClearZoneMutation {
-  string           zone_name     = 1;
-  ZonePublishToken publish_token = 2;
-}
 
 // ─── Element Discovery ───────────────────────────────────────────────────────
 
@@ -801,16 +789,4 @@ message WidgetRegistrySnapshotProto {
   repeated WidgetDefinitionProto     widget_types     = 1;
   repeated WidgetInstanceProto       widget_instances = 2;
   repeated WidgetPublishRecordProto  active_publishes = 3;
-}
-
-// ─── Widget Mutation Messages ─────────────────────────────────────────────────
-
-// Note: widget publish mutations are sent via session.proto WidgetPublish
-// (ClientMessage field 35).  PublishToWidgetMutation was removed because it
-// was an exact duplicate of WidgetPublish; use WidgetPublish instead.
-
-// Clear all publications by the calling agent on the given widget instance.
-message ClearWidgetMutation {
-  string widget_name = 1;  // Instance addressing key
-  string instance_id = 2;  // Optional disambiguation
 }

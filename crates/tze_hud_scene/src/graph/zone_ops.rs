@@ -677,6 +677,57 @@ impl SceneGraph {
         Ok(())
     }
 
+    /// Set the expiry of every publication `publisher_namespace` holds on
+    /// `zone` (`None` = until cleared). Returns whether it held any.
+    pub fn hold_zone_publications(
+        &mut self,
+        zone: &str,
+        publisher_namespace: &str,
+        expires_at_wall_us: Option<u64>,
+    ) -> bool {
+        let mut held = false;
+        for r in self
+            .zone_registry
+            .active_publishes
+            .get_mut(zone)
+            .into_iter()
+            .flatten()
+            .filter(|r| r.publisher_namespace == publisher_namespace)
+        {
+            r.expires_at_wall_us = expires_at_wall_us;
+            held = true;
+        }
+        if held {
+            self.version += 1;
+        }
+        held
+    }
+
+    /// Widget counterpart of [`Self::hold_zone_publications`].
+    pub fn hold_widget_publications(
+        &mut self,
+        widget: &str,
+        publisher_namespace: &str,
+        expires_at_wall_us: Option<u64>,
+    ) -> bool {
+        let mut held = false;
+        for r in self
+            .widget_registry
+            .active_publishes
+            .get_mut(widget)
+            .into_iter()
+            .flatten()
+            .filter(|r| r.publisher_namespace == publisher_namespace)
+        {
+            r.expires_at_wall_us = expires_at_wall_us;
+            held = true;
+        }
+        if held {
+            self.version += 1;
+        }
+        held
+    }
+
     /// Clear all active publishes for a zone made by a specific publisher.
     ///
     /// Per spec: "ClearZone clears all publications by the agent in the specified zone."

@@ -26,34 +26,9 @@ pub mod codes {
     pub const UNAUTHENTICATED: i64 = -32004;
 }
 
-/// The closed set of tool error codes (invariant 8). `docs/api.md` lists
-/// each with its meaning; a test keeps the two in sync.
-pub const ERROR_CODES: &[&str] = &[
-    "INVALID_ARGUMENT",
-    "NOT_ALLOWED",
-    "NOT_HELD",
-    "ZONE_NOT_FOUND",
-    "WIDGET_NOT_FOUND",
-    "WIDGET_PARAMETER_INVALID",
-    "CONTENT_REJECTED",
-    "LEASE_NOT_ACTIVE",
-    "SAFE_MODE_ACTIVE",
-    "TIMESTAMP_TOO_FUTURE",
-    "UNAVAILABLE",
-    "INTERNAL",
-    "PROJECTION_NOT_FOUND",
-    "PROJECTION_ALREADY_ATTACHED",
-    "PROJECTION_UNAUTHORIZED",
-    "PROJECTION_TOKEN_EXPIRED",
-    "PROJECTION_INVALID_ARGUMENT",
-    "PROJECTION_OUTPUT_TOO_LARGE",
-    "PROJECTION_INPUT_TOO_LARGE",
-    "PROJECTION_INPUT_QUEUE_FULL",
-    "PROJECTION_RATE_LIMITED",
-    "PROJECTION_STATE_CONFLICT",
-    "PROJECTION_HUD_UNAVAILABLE",
-    "PROJECTION_INTERNAL_ERROR",
-];
+/// The closed set of tool error codes (invariant 8), shared with gRPC.
+/// `docs/api.md` lists each with its meaning; a test keeps the two in sync.
+pub use tze_hud_scene::error_codes::ERROR_CODES;
 
 /// A JSON-RPC 2.0 protocol error object.
 #[derive(Clone, Debug, Serialize, Deserialize)]

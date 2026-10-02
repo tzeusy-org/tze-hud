@@ -366,7 +366,7 @@ cargo test -p integration --test multi_agent -- --nocapture
 
 ### A. Explicit server publish path (gRPC session server)
 
-This test sends `ZonePublish` to the session server and checks `ZonePublishResult` behavior:
+This test sends a zone `Publish` to the session server and checks its `RequestResult`:
 
 ```bash
 cargo test -p tze_hud_protocol test_durable_zone_publish_result -- --nocapture

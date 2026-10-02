@@ -70,7 +70,6 @@ pub mod portal_cadence;
 pub mod portal_projection_driver;
 pub mod portal_tokens;
 pub mod reload_triggers;
-pub mod resident_grpc_bridge;
 pub mod runtime_context;
 pub mod scene_startup;
 pub mod shell;

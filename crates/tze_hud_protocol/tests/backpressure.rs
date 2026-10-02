@@ -6,7 +6,7 @@
 
 use tze_hud_protocol::proto::EventBatch;
 use tze_hud_protocol::proto::session::{
-    Heartbeat, LeaseResponse, MutationResult, SceneSnapshot, SessionEstablished,
+    Heartbeat, RequestResult, SceneSnapshot, SessionEstablished,
     server_message::Payload as ServerPayload,
 };
 use tze_hud_protocol::session_server::{TrafficClass, classify_server_payload};
@@ -16,8 +16,8 @@ use tze_hud_protocol::session_server::{TrafficClass, classify_server_payload};
 fn transactional_messages_never_dropped() {
     let payloads = vec![
         ServerPayload::SessionEstablished(SessionEstablished::default()),
-        ServerPayload::MutationResult(MutationResult::default()),
-        ServerPayload::LeaseResponse(LeaseResponse::default()),
+        ServerPayload::RequestResult(RequestResult::default()),
+        ServerPayload::RequestResult(RequestResult::default()),
     ];
     for payload in &payloads {
         assert_eq!(
@@ -60,7 +60,7 @@ fn state_stream_messages_are_coalesced_class() {
 /// Transactional and Ephemeral are distinct classes.
 #[test]
 fn transactional_not_droppable_different_from_ephemeral() {
-    let tc = classify_server_payload(&ServerPayload::MutationResult(MutationResult::default()));
+    let tc = classify_server_payload(&ServerPayload::RequestResult(RequestResult::default()));
     let te = classify_server_payload(&ServerPayload::Heartbeat(Heartbeat::default()));
     assert_ne!(tc, te);
     assert_eq!(tc, TrafficClass::Transactional);

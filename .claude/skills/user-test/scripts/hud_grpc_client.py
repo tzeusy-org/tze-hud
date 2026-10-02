@@ -21,15 +21,13 @@ Usage:
     async with HudClient("windows-host.example:50051",
                           psk="tze-hud-key",
                           agent_id="test-agent") as client:
-        lease_id = await client.request_lease(ttl_ms=60000)
         avatar_png = make_avatar_png((66, 133, 244))
         avatar_resource_id = await client.upload_avatar_png(avatar_png)
-        tile_id = await client.create_presence_card_tile(
-            lease_id,
-            tab_id=None,
+        claimed = await client.create_presence_card_tile(
             agent_name="agent-alpha",
             avatar_resource_id=avatar_resource_id,
         )
+        await client.release_tile(claimed.tile_id)
         await client.session_close()
 """
 
@@ -42,6 +40,7 @@ import os
 import sys
 import time
 import uuid
+from dataclasses import dataclass
 from collections.abc import Callable
 from typing import Any, Optional
 
@@ -62,6 +61,26 @@ from proto_gen import session_pb2, session_pb2_grpc, types_pb2  # noqa: E402  # 
 def _now_wall_us() -> int:
     """Current UTC wall-clock in microseconds since epoch."""
     return int(time.time() * 1_000_000)
+
+
+@dataclass(frozen=True)
+class ClaimedTile:
+    """A tile granted by ``ClaimTile``: its lease, id, and root node ids."""
+
+    lease_id: bytes
+    tile_id: bytes
+    node_ids: list[bytes]
+
+
+def tile_surface(tile_id: bytes) -> str:
+    """Return the ``tile:<uuid>`` surface name for a 16-byte tile id."""
+    return f"tile:{uuid.UUID(bytes=bytes(tile_id))}"
+
+
+def _raise_unless_ok(what: str, result: Any) -> None:
+    """Raise ``RuntimeError`` naming the code and hint of a failed result."""
+    if not result.ok:
+        raise RuntimeError(f"{what} rejected [{result.code}]: {result.hint}")
 
 
 def _uuid_bytes() -> bytes:
@@ -535,10 +554,9 @@ class HudClient:
         self.session_id: Optional[bytes] = None
         self.namespace: Optional[str] = None
         self.heartbeat_interval_ms: Optional[int] = None
-        # TTL (ms) granted by the most recent request_lease/renew_lease. Long-lived
-        # callers (soak, sustained streaming) read this to schedule renewals before
-        # the lease expires — otherwise the runtime rejects mutations with
-        # MUTATION_REJECTED / "lease expired" mid-run (hud-hk8kl).
+        # TTL (ms) granted by the most recent claim_tile/hold_tile. Long-lived
+        # callers (soak, sustained streaming) read this to schedule holds before
+        # the lease expires — otherwise the runtime rejects mutations mid-run.
         self.last_granted_lease_ttl_ms: int = 0
         # Runtime-resolved portal design tokens from the handshake (hud-16um0);
         # populated by connect(), empty when the runtime does not expose them.
@@ -850,13 +868,13 @@ class HudClient:
         else:
             await self.drop_connection()
 
-    async def release_lease(self, lease_id: bytes):
-        """Release a lease, removing all its tiles immediately."""
-        await self._send(
-            lease_release=session_pb2.LeaseRelease(lease_id=lease_id)
+    async def release_tile(self, tile_id: bytes):
+        """Release a claimed tile (``Clear tile:<id>``), removing it immediately."""
+        result = await self._request(
+            clear=session_pb2.Clear(surface=tile_surface(tile_id))
         )
-        await self._wait_for("lease_response", timeout=5.0)
-        print("  [grpc] Lease released", flush=True)
+        _raise_unless_ok("Clear", result)
+        print("  [grpc] Tile released", flush=True)
 
     async def close(self, reason: str = "test complete"):
         """Gracefully close the session."""
@@ -867,51 +885,65 @@ class HudClient:
             pass
         await self._shutdown_transport()
 
-    # ─── Lease management ─────────────────────────────────────────────────
+    # ─── Tile lifecycle ───────────────────────────────────────────────────
 
-    async def request_lease(self, ttl_ms: int = 60000) -> bytes:
-        """Request a lease and return the granted lease_id."""
-        await self._send(
-            lease_request=session_pb2.LeaseRequest(
-                ttl_ms=ttl_ms,
-            )
+    async def _request(self, timeout: float = 5.0, **payload) -> Any:
+        """Send one request and return its correlated ``RequestResult``."""
+        seq = await self._send(**payload)
+        resp = await self._wait_for(
+            "request_result",
+            timeout=timeout,
+            matcher=lambda msg: msg.request_result.seq == seq,
         )
-        resp = await self._wait_for("lease_response", timeout=5.0)
-        lr = resp.lease_response
-        if not lr.granted:
-            deny_reason = getattr(lr, "deny_reason", "") or "unspecified denial"
-            deny_code = getattr(lr, "deny_code", "")
-            if deny_code:
-                raise RuntimeError(f"Lease denied [{deny_code}]: {deny_reason}")
-            raise RuntimeError(f"Lease denied: {deny_reason}")
-        self.last_granted_lease_ttl_ms = lr.granted_ttl_ms
-        print(f"  [grpc] Lease granted: ttl={lr.granted_ttl_ms}ms", flush=True)
-        return lr.lease_id
+        return resp.request_result
 
-    async def renew_lease(self, lease_id: bytes, new_ttl_ms: int = 0) -> int:
-        """Renew an existing lease's TTL and return the newly granted TTL (ms).
+    async def claim_tile(
+        self,
+        anchor: int = session_pb2.TILE_ANCHOR_TOP_RIGHT,
+        size: int = session_pb2.TILE_SIZE_MEDIUM,
+        ttl_ms: int = 60000,
+        root: Any = None,
+    ) -> ClaimedTile:
+        """Claim a tile in one round trip; the runtime picks its geometry.
 
-        ``new_ttl_ms=0`` asks the runtime to re-grant the lease's original TTL
-        (see ``LeaseRenew.new_ttl_ms`` in session.proto). Sustained callers renew
-        before ~75% of the granted TTL elapses so the lease never expires mid-run.
+        ``anchor``/``size`` are ``session_pb2.TILE_ANCHOR_*``/``TILE_SIZE_*``
+        values. ``root`` is an optional dict spec or ``NodeProto``.
         """
-        await self._send(
-            lease_renew=session_pb2.LeaseRenew(
-                lease_id=lease_id,
-                new_ttl_ms=new_ttl_ms,
-            )
+        claim = session_pb2.ClaimTile(
+            placement=session_pb2.TilePlacement(anchor=anchor, size=size),
+            ttl_ms=ttl_ms,
         )
-        resp = await self._wait_for("lease_response", timeout=5.0)
-        lr = resp.lease_response
-        if not lr.granted:
-            deny_reason = getattr(lr, "deny_reason", "") or "unspecified denial"
-            deny_code = getattr(lr, "deny_code", "")
-            if deny_code:
-                raise RuntimeError(f"Lease renew denied [{deny_code}]: {deny_reason}")
-            raise RuntimeError(f"Lease renew denied: {deny_reason}")
-        self.last_granted_lease_ttl_ms = lr.granted_ttl_ms
-        print(f"  [grpc] Lease renewed: ttl={lr.granted_ttl_ms}ms", flush=True)
-        return lr.granted_ttl_ms
+        if root is not None:
+            claim.root.CopyFrom(
+                root if isinstance(root, types_pb2.NodeProto) else _make_node(root)
+            )
+        result = await self._request(claim_tile=claim)
+        _raise_unless_ok("ClaimTile", result)
+        self.last_granted_lease_ttl_ms = result.ttl_ms
+        tile_id = result.ids[0]
+        print(
+            f"  [grpc] Tile claimed: {tile_id.hex()[:16]}... ttl={result.ttl_ms}ms",
+            flush=True,
+        )
+        return ClaimedTile(
+            lease_id=result.lease_id,
+            tile_id=tile_id,
+            node_ids=list(result.ids[1:]),
+        )
+
+    async def hold_tile(self, tile_id: bytes, ttl_ms: int = 0) -> int:
+        """Renew a claimed tile's lease and return the granted TTL (ms).
+
+        ``ttl_ms=0`` re-grants the lease's original TTL. Sustained callers hold
+        before ~75% of the granted TTL elapses so the lease never expires.
+        """
+        result = await self._request(
+            hold=session_pb2.Hold(surface=tile_surface(tile_id), ttl_ms=ttl_ms)
+        )
+        _raise_unless_ok("Hold", result)
+        self.last_granted_lease_ttl_ms = result.ttl_ms
+        print(f"  [grpc] Tile held: ttl={result.ttl_ms}ms", flush=True)
+        return result.ttl_ms
 
     async def _await_resource_upload_result(
         self,
@@ -964,11 +996,6 @@ class HudClient:
                         f"{msg.session_error.code} — {msg.session_error.message} "
                         f"(hint: {msg.session_error.hint})"
                     )
-                if which == "runtime_error":
-                    raise RuntimeError(
-                        f"Runtime error while waiting for upload result: "
-                        f"{msg.runtime_error.error_code} — {msg.runtime_error.message}"
-                    )
 
     def _pop_deferred_response(
         self,
@@ -1000,7 +1027,7 @@ class HudClient:
             return msg.resource_stored.request_sequence == request_sequence
         if which == "resource_error_response":
             return msg.resource_error_response.request_sequence == request_sequence
-        return which in {"session_error", "runtime_error"}
+        return which == "session_error"
 
     async def upload_png_resource(
         self,
@@ -1070,7 +1097,7 @@ class HudClient:
         self,
         lease_id: bytes,
         mutations: list[types_pb2.MutationProto],
-    ) -> session_pb2.MutationResult:
+    ) -> session_pb2.RequestResult:
         """Submit a raw mutation batch and return the acknowledged result."""
         batch_id = _uuid_bytes()
         await self._pace_batch_send()
@@ -1081,13 +1108,14 @@ class HudClient:
                 mutations=mutations,
             )
         )
-        resp = await self._wait_for("mutation_result", timeout=5.0)
-        mr = resp.mutation_result
-        if not mr.accepted:
-            raise RuntimeError(
-                f"Mutation batch rejected: {mr.error_code} — {mr.error_message}"
-            )
-        return mr
+        resp = await self._wait_for(
+            "request_result",
+            timeout=5.0,
+            matcher=lambda msg: msg.request_result.batch_id == batch_id,
+        )
+        result = resp.request_result
+        _raise_unless_ok("Mutation batch", result)
+        return result
 
     # ─── Tile operations ──────────────────────────────────────────────────
 
@@ -1112,10 +1140,10 @@ class HudClient:
         timeout: float = 5.0,
         retries: Optional[int] = None,
         retry_backoff_s: Optional[float] = None,
-    ) -> session_pb2.MutationResult:
+    ) -> session_pb2.RequestResult:
         """Submit a mutation batch and return the accepted result.
 
-        A mutation-ack (``mutation_result``) that fails to arrive within
+        A mutation-ack (``request_result``) that fails to arrive within
         ``timeout`` raises ``TimeoutError``. For sustained runs (the portal
         soak) a single transient ack blip should not abort the whole run, so
         an optional bounded retry resubmits the batch — with a fresh
@@ -1161,10 +1189,10 @@ class HudClient:
         lease_id: bytes,
         mutations: list[types_pb2.MutationProto],
         timeout: float,
-    ) -> session_pb2.MutationResult:
+    ) -> session_pb2.RequestResult:
         """Submit one mutation batch and wait for its ack (single attempt).
 
-        Raises ``TimeoutError`` if no matching ``mutation_result`` arrives
+        Raises ``TimeoutError`` if no matching ``request_result`` arrives
         within ``timeout``; the bounded-retry wrapper in
         ``submit_mutation_batch`` decides whether to resubmit.
         """
@@ -1182,44 +1210,14 @@ class HudClient:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise TimeoutError(
-                    "Timed out waiting for mutation_result for submitted batch"
+                    "Timed out waiting for request_result for submitted batch"
                 )
-            resp = await self._wait_for("mutation_result", timeout=remaining)
-            mr = resp.mutation_result
-            if mr.batch_id != batch_id:
+            resp = await self._wait_for("request_result", timeout=remaining)
+            result = resp.request_result
+            if result.batch_id != batch_id:
                 continue
-            if not mr.accepted:
-                raise RuntimeError(
-                    f"Mutation batch rejected: {mr.error_code} — {mr.error_message}"
-                )
-            return mr
-
-    async def create_tile(
-        self,
-        lease_id: bytes,
-        tab_id: Optional[bytes] = None,
-        x: float = 50,
-        y: float = 50,
-        w: float = 400,
-        h: float = 300,
-        z_order: int = 100,
-    ) -> bytes:
-        """Create a tile and return its SceneId."""
-        mr = await self.submit_mutation_batch(
-            lease_id,
-            [
-                types_pb2.MutationProto(
-                    create_tile=types_pb2.CreateTileMutation(
-                        tab_id=tab_id or b"",
-                        bounds=types_pb2.Rect(x=x, y=y, width=w, height=h),
-                        z_order=z_order,
-                    )
-                )
-            ],
-        )
-        tile_id = mr.created_ids[0]
-        print(f"  [grpc] Tile created: {tile_id.hex()[:16]}...", flush=True)
-        return tile_id
+            _raise_unless_ok("Mutation batch", result)
+            return result
 
     async def update_tile_opacity(
         self,
@@ -1303,7 +1301,7 @@ class HudClient:
                 )
             ],
         )
-        node_id = mr.created_ids[0]
+        node_id = mr.ids[0]
         print(f"  [grpc] Node added: {node_id.hex()[:16]}...", flush=True)
         return node_id
 
@@ -1332,29 +1330,18 @@ class HudClient:
 
     async def create_presence_card_tile(
         self,
-        lease_id: bytes,
-        tab_id: Optional[bytes],
         agent_name: str,
         avatar_resource_id: Any,
         *,
         accent_rgba: tuple[float, float, float, float] = (66 / 255.0, 133 / 255.0, 244 / 255.0, 1.0),
-        x: float = 24.0,
-        y: float = 0.0,
-        w: float = 320.0,
-        h: float = 112.0,
-        z_order: int = 100,
-    ) -> bytes:
-        """Create a full Presence Card tile and return the tile id."""
-        tile_id = await self.create_tile(
-            lease_id,
-            tab_id=tab_id,
-            x=x,
-            y=y,
-            w=w,
-            h=h,
-            z_order=z_order,
+        anchor: int = session_pb2.TILE_ANCHOR_BOTTOM_LEFT,
+        ttl_ms: int = 60000,
+    ) -> ClaimedTile:
+        """Claim a medium tile and fill it with a full Presence Card."""
+        claimed = await self.claim_tile(
+            anchor=anchor, size=session_pb2.TILE_SIZE_MEDIUM, ttl_ms=ttl_ms
         )
-        await self.update_tile_opacity(lease_id, tile_id, 1.0)
+        lease_id, tile_id = claimed.lease_id, claimed.tile_id
         await self.update_tile_input_mode(
             lease_id,
             tile_id,
@@ -1365,13 +1352,11 @@ class HudClient:
             resource_id=avatar_resource_id,
             agent_name=agent_name,
             accent_rgba=accent_rgba,
-            card_width=w,
-            card_height=h,
         )
         await self.set_tile_root(lease_id, tile_id, root)
         for node in children:
             await self.add_node(lease_id, tile_id, node, parent_id=root.id)
-        return tile_id
+        return claimed
 
     async def send_heartbeat(self):
         """Send a keepalive heartbeat."""
@@ -1409,26 +1394,19 @@ async def _self_test():
 
     print(f"Connecting to {args.target}...", flush=True)
     async with HudClient(args.target, psk=args.psk, agent_id="grpc-self-test") as client:
-        lease_id = await client.request_lease(ttl_ms=30000)
         avatar_png = make_avatar_png((255, 0, 0))
         avatar_resource_id = await client.upload_avatar_png(avatar_png)
-        tile_id = await client.create_presence_card_tile(
-            lease_id,
-            tab_id=None,
+        claimed = await client.create_presence_card_tile(
             agent_name="grpc-self-test",
             avatar_resource_id=avatar_resource_id,
-            x=500,
-            y=300,
-            w=320,
-            h=112,
-            z_order=100,
+            ttl_ms=30000,
         )
         print(
-            f"  Presence card tile {tile_id.hex()[:16]}... visible for 10 seconds...",
+            f"  Presence card tile {claimed.tile_id.hex()[:16]}... visible for 10 seconds...",
             flush=True,
         )
         await asyncio.sleep(10)
-        await client.release_lease(lease_id)
+        await client.release_tile(claimed.tile_id)
         print("  Closing session.", flush=True)
 
 

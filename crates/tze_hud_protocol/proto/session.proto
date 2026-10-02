@@ -40,28 +40,15 @@ message ClientMessage {
     // Scene mutations
     MutationBatch     mutation_batch     = 20;
 
-    // Lease management (RFC 0008)
-    LeaseRequest      lease_request      = 21;
-    LeaseRenew        lease_renew        = 22;
-    LeaseRelease      lease_release      = 23;
-
     // Subscriptions
     SubscriptionChange subscription_change = 24;
-
-    // Zone publishing (RFC 0005 §3.1, §8.6)
-    // Durable-zone publishes receive ZonePublishResult; ephemeral are fire-and-forget.
-    ZonePublish       zone_publish        = 25;
 
     // Input control (RFC 0004 §8.3.1, RFC 0005 §3.8)
     InputFocusRequest    input_focus_request    = 27;
     InputCaptureRequest  input_capture_request  = 28;
     InputCaptureRelease  input_capture_release  = 29;
 
-    // Keepalive (moved from field 25 to field 31 to align with spec §3.8; field 25 reallocated to zone_publish)
-    // NOTE: This is a deliberate wire-breaking change from the pre-spec layout.
-    // Any client built against the old field assignment (heartbeat=25) is incompatible.
-    // Both the name "heartbeat" and the number 25 are being actively reused, so no
-    // proto `reserved` declaration is possible here. Document in changelog instead.
+    // Keepalive
     Heartbeat         heartbeat          = 31;
 
 
@@ -69,11 +56,6 @@ message ClientMessage {
     // Two-stage flow: metadata preflight + optional payload upload.
     // Requires allow entry "tiles" or "widget:<name>".
     WidgetAssetRegister widget_asset_register = 34;
-
-    // Widget publishing (widget-system spec §Requirement: Widget Publishing via gRPC).
-    // Durable-widget publishes receive WidgetPublishResult; ephemeral are fire-and-forget.
-    // Requires allow entry "widget:<widget_name>".
-    WidgetPublish widget_publish = 35;
 
     // Resident scene-resource upload (RFC 0011; session-protocol spec §Resident Upload Handshake).
     // Scene resources MUST use this family instead of WidgetAssetRegister.
@@ -83,6 +65,13 @@ message ClientMessage {
 
     // Element discovery over session stream (persistent-movable-elements change).
     tze_hud.protocol.v1.ListElementsRequest list_elements_request = 39;
+
+    // Lifecycle verbs (docs/api.md). Each request gets one RequestResult,
+    // except publishes to ephemeral zones/widgets (fire-and-forget).
+    ClaimTile claim_tile = 40;  // Lease + tile + initial content, one round trip
+    Publish   publish    = 41;  // zone:<name> or widget:<name>
+    Clear     clear      = 42;  // zone:<name>, widget:<name>, or tile:<id> (releases the lease)
+    Hold      hold       = 43;  // Renew a holding without resending content
   }
 
   // Fields 60–66 and 80–81 carried media signaling and cloud relay, removed in
@@ -97,6 +86,11 @@ message ClientMessage {
   // mid-session requests.
   reserved 32;
   reserved "capability_request";
+  // Removed in T5 S4b: lease and publish messages replaced by the lifecycle
+  // verbs (ClaimTile grants, Hold renews, Clear releases; Publish).
+  reserved 21, 22, 23, 25, 35;
+  reserved "lease_request", "lease_renew", "lease_release", "zone_publish",
+    "widget_publish";
 }
 
 // ─── Server -> Client envelope ────────────────────────────────────────────────
@@ -118,16 +112,6 @@ message ServerMessage {
     SessionSuspended      session_suspended      = 13;
     SessionResumed        session_resumed        = 14;
 
-    // Structured runtime error (RFC 0005 §3.5)
-    // Sent in response to any operation that fails with a well-known error condition.
-    RuntimeError          runtime_error          = 15;
-
-    // Mutation responses
-    MutationResult        mutation_result        = 20;
-
-    // Lease lifecycle (RFC 0008)
-    LeaseResponse         lease_response         = 21;
-
     // Scene state
     SceneSnapshot         scene_snapshot         = 30;
 
@@ -142,10 +126,6 @@ message ServerMessage {
     // Subscription acknowledgement (RFC 0005 §7.3)
     SubscriptionChangeResult subscription_change_result = 39;
 
-    // Zone publish result (RFC 0005 §3.1): sent only for durable-zone publishes.
-    // Ephemeral-zone publishes are fire-and-forget; no ZonePublishResult is sent.
-    ZonePublishResult     zone_publish_result    = 40;
-
     // Scene-resource upload responses (RFC 0011 resident upload flow).
     ResourceUploadAccepted resource_upload_accepted = 41;
     ResourceStored         resource_stored          = 42;
@@ -158,11 +138,6 @@ message ServerMessage {
     // Transactional — never dropped. Delivered to ALL active sessions unconditionally
     // on degradation level change, regardless of subscription configuration.
     DegradationNotice     degradation_notice      = 46;
-
-    // Widget publish result (widget-system spec §Requirement: Widget Publish Result).
-    // Sent only for durable-widget publishes. Ephemeral-widget publishes are
-    // fire-and-forget; no WidgetPublishResult is sent.
-    WidgetPublishResult   widget_publish_result   = 47;
 
     // Widget asset register result (session-protocol spec §Requirement: Widget Asset Registration via Session Stream).
     // Sent for every WidgetAssetRegister request (transactional).
@@ -186,6 +161,14 @@ message ServerMessage {
     // Subscription: TELEMETRY_FRAMES (requires allow entry "tiles").
     // Message class: State-stream (coalesced/droppable under backpressure).
     tze_hud.protocol.v1.FramePresented frame_presented = 52;
+
+    // The one reply shape for requests (MutationBatch, ClaimTile, Publish,
+    // Clear, Hold). Transactional.
+    RequestResult request_result = 53;
+
+    // The runtime took a holding back (expiry, disconnect grace, human
+    // override). Transactional.
+    Reclaimed reclaimed = 54;
   }
 
   // Field 22 (lease_denial) was removed in the v1 vocabulary rename.
@@ -211,6 +194,11 @@ message ServerMessage {
   reserved "capability_notice";
   reserved "lease_state_change", "scene_delta", "backpressure_signal",
     "runtime_telemetry", "emit_scene_event_result";
+  // Removed in T5 S4b: per-request reply messages replaced by RequestResult;
+  // lease terminal pushes replaced by Reclaimed.
+  reserved 15, 20, 21, 40, 47;
+  reserved "runtime_error", "mutation_result", "lease_response",
+    "zone_publish_result", "widget_publish_result";
 }
 
 // ─── Authentication credentials (RFC 0005 §1.4) ──────────────────────────────
@@ -408,46 +396,8 @@ message SessionResumed {
   uint64 timestamp_wall_us = 1; // Wall-clock time of resumption (UTC us since epoch)
 }
 
-// ─── Runtime error messages (RFC 0005 §3.5) ───────────────────────────────────
 
-// Typed error codes for well-known runtime error conditions (RFC 0005 §3.5, DR-SP5).
-// Sent as RuntimeError.error_code_enum alongside the string error_code.
-enum ErrorCode {
-  ERROR_CODE_UNSPECIFIED         = 0;
-  ERROR_CODE_UNKNOWN             = 1;  // Code not in this enum version; inspect string error_code
-  LEASE_EXPIRED                  = 2;
-  LEASE_NOT_FOUND                = 3;
-  ZONE_TYPE_MISMATCH             = 4;
-  ZONE_NOT_FOUND                 = 5;
-  BUDGET_EXCEEDED                = 6;
-  MUTATION_REJECTED              = 7;
-  PERMISSION_DENIED              = 8;
-  INVALID_ARGUMENT               = 10;
-  // 12, 13 were CLOCK_SKEW_HIGH / CLOCK_SKEW_EXCESSIVE (removed in the reset).
-  reserved 12, 13;
-  reserved "CLOCK_SKEW_HIGH", "CLOCK_SKEW_EXCESSIVE";
-  SAFE_MODE_ACTIVE               = 14;
-  TIMESTAMP_TOO_OLD              = 15;
-  TIMESTAMP_TOO_FUTURE           = 16;
-  TIMESTAMP_EXPIRY_BEFORE_PRESENT = 17;
-  // Removed in T5 S1: never set (rate limiting, session expiry) or tied to
-  // agent scene-event emission, which was never delivered.
-  reserved 9, 11, 18 to 22;
-  reserved "RATE_LIMITED", "SESSION_EXPIRED", "AGENT_EVENT_RATE_EXCEEDED",
-    "AGENT_EVENT_PAYLOAD_TOO_LARGE", "AGENT_EVENT_CAPABILITY_MISSING",
-    "AGENT_EVENT_INVALID_NAME", "AGENT_EVENT_RESERVED_PREFIX";
-}
 
-// Structured error response following the common error model (RFC 0005 §3.5).
-// Sent in response to any operation that fails with a well-known error condition.
-// Also used as the error shape for MCP JSON-RPC error.data (RFC 0005 §8.5).
-message RuntimeError {
-  string    error_code      = 1;  // Canonical, stable string code (e.g. "LEASE_EXPIRED")
-  string    message         = 2;  // Human-readable explanation
-  string    context         = 3;  // Invalid field/value context (e.g. "lease_id=<id>")
-  string    hint            = 4;  // Machine-readable correction suggestion as JSON
-  ErrorCode error_code_enum = 5;  // Typed enum for well-known codes; ERROR_CODE_UNKNOWN if not in enum
-}
 
 // ─── Mutation messages ────────────────────────────────────────────────────────
 
@@ -475,69 +425,112 @@ message MutationBatch {
   TimingHints timing = 4;  // Optional timing semantics (RFC 0003 §3.5)
 }
 
-// Server response to MutationBatch.
-message MutationResult {
-  bytes  batch_id       = 1;  // Echo of request batch_id
-  bool   accepted       = 2;
-  repeated bytes created_ids = 3;  // SceneIds assigned to CreateTile/CreateNode
-  string error_code     = 4;  // Populated if accepted = false
-  string error_message  = 5;
+
+
+
+
+
+
+
+
+// ─── Lifecycle verbs (docs/api.md) ───────────────────────────────────────────
+//
+// Surfaces are the same strings MCP uses: `zone:<name>`, `widget:<name>`, and
+// `tile:<uuid>` for a tile from ClaimTile. Times are milliseconds (`*_ms`);
+// absolute wall-clock times are UTC µs (`*_us`).
+
+// Where a claimed tile goes. The runtime resolves anchor + size class to a
+// rect from `[design_tokens]` (`tile.*`), stacks tiles that share an anchor,
+// and clamps to the display. Agents never send geometry or z-order.
+enum TileAnchor {
+  TILE_ANCHOR_UNSPECIFIED = 0;  // = TOP_RIGHT
+  TILE_ANCHOR_TOP_LEFT     = 1;
+  TILE_ANCHOR_TOP          = 2;
+  TILE_ANCHOR_TOP_RIGHT    = 3;
+  TILE_ANCHOR_LEFT         = 4;
+  TILE_ANCHOR_CENTER       = 5;
+  TILE_ANCHOR_RIGHT        = 6;
+  TILE_ANCHOR_BOTTOM_LEFT  = 7;
+  TILE_ANCHOR_BOTTOM       = 8;
+  TILE_ANCHOR_BOTTOM_RIGHT = 9;
 }
 
-// ─── Lease messages (RFC 0008) ────────────────────────────────────────────────
-
-// Client requests a new lease.
-message LeaseRequest {
-  uint64 ttl_ms                  = 1;  // Requested TTL; 0 = server default
-  // Fields 2 (capabilities) and 3 (lease_priority) removed in T5 S2: leases
-  // carry the session's allow-list permissions, and there is one priority.
-  reserved 2, 3;
-  reserved "capabilities", "lease_priority";
+enum TileSize {
+  TILE_SIZE_UNSPECIFIED = 0;  // = MEDIUM
+  TILE_SIZE_SMALL  = 1;
+  TILE_SIZE_MEDIUM = 2;
+  TILE_SIZE_LARGE  = 3;
+  TILE_SIZE_WIDE   = 4;  // Short and wide (a ticker or status strip)
+  TILE_SIZE_TALL   = 5;  // Narrow and tall (a side panel)
 }
 
-// Client renews an existing lease.
-message LeaseRenew {
-  bytes  lease_id   = 1;  // Lease to renew
-  uint64 new_ttl_ms = 2;  // New TTL; 0 = same as original
+message TilePlacement {
+  TileAnchor anchor = 1;
+  TileSize   size   = 2;
 }
 
-// Client voluntarily releases a lease.
-message LeaseRelease {
-  bytes lease_id = 1;  // Lease to release
+// Claim a tile: grants a lease, creates the tile, and applies `root` (if set)
+// in one round trip. The RequestResult carries ids[0] = tile id, then the ids
+// of the root's nodes in pre-order (client-chosen NodeProto.id values are kept;
+// empty ids are assigned), plus lease_id and ttl_ms.
+message ClaimTile {
+  TilePlacement placement = 1;
+  uint64 ttl_ms = 2;  // 0 = runtime default (60 s)
+  tze_hud.protocol.v1.NodeProto root = 3;  // Optional initial node tree
 }
 
-// Server response to a lease operation (request, renew, or release).
-// Unified grant/denial response per v1 vocabulary.
-enum LeaseResult {
-  LEASE_RESULT_UNSPECIFIED = 0;
-  LEASE_RESULT_GRANTED = 1;
-  LEASE_RESULT_DENIED = 2;
-  LEASE_RESULT_RELEASED = 3;
-  LEASE_RESULT_REVOKED = 4;
-  LEASE_RESULT_EXPIRED = 5;
+// Publish to a zone or widget. Durable surfaces reply with RequestResult;
+// ephemeral ones are fire-and-forget.
+message Publish {
+  string surface = 1;                              // zone:<name> or widget:<name>
+  tze_hud.protocol.v1.ZoneContent content = 2;     // Zones
+  repeated tze_hud.protocol.v1.WidgetParameterValueProto params = 3;  // Widgets
+  uint64 ttl_ms = 4;         // 0 = surface default; counts from presentation
+  uint64 present_at_us = 5;  // Hold until this wall-clock time (0 = now)
+  uint64 expires_at_us = 6;  // Absolute expiry (0 = none); wins over ttl_ms
+  string key = 7;            // Merge key for stack zones / keyed widgets
+  repeated uint64 breakpoints = 8;  // StreamText reveal byte offsets (zones)
+  uint32 transition_ms = 9;  // Widget parameter transition (0 = instant)
 }
 
-message LeaseResponse {
-  // Whether the lease was granted or denied.
-  bool   granted              = 1;
-
-  // Populated when granted = true.
-  bytes  lease_id             = 2;  // Granted lease ID (UUIDv7)
-  uint64 granted_ttl_ms       = 3;  // Actual TTL granted
-  // Fields 4 (granted_priority) and 5 (granted_capabilities) removed in T5 S2.
-  reserved 4, 5;
-  reserved "granted_priority", "granted_capabilities";
-
-  // Populated when granted = false.
-  string deny_reason          = 6;  // Human-readable denial reason
-  string deny_code            = 7;  // Machine-readable denial code
-
-  // Canonical terminal/operation result. `granted` remains for backwards
-  // compatibility; clients should use this enum to distinguish a release,
-  // revocation, or expiry from an ordinary denial.
-  LeaseResult result          = 8;
+// Release a zone publication, a widget publication, or a tile (its lease).
+message Clear {
+  string surface = 1;
 }
 
+// Extend a holding without resending content.
+message Hold {
+  string surface = 1;  // zone:<name>, widget:<name>, or tile:<id>
+  uint64 ttl_ms = 2;   // Zones/widgets: 0 = until cleared. Tiles: 0 = default.
+}
+
+// The one reply shape for requests. `seq` echoes the request envelope's
+// sequence. On failure, `code` is from the closed set shared with MCP
+// (docs/api.md) and `hint` names the fix.
+message RequestResult {
+  uint64 seq = 1;
+  bool   ok = 2;
+  string code = 3;
+  string hint = 4;
+  repeated bytes ids = 5;  // Created ids (ClaimTile: tile first; MutationBatch: created ids)
+  bytes  lease_id = 6;     // ClaimTile / Hold on a tile
+  uint64 ttl_ms = 7;       // Granted or renewed TTL
+  bytes  batch_id = 8;     // MutationBatch: echo of batch_id
+}
+
+enum ReclaimReason {
+  RECLAIM_REASON_UNSPECIFIED = 0;
+  RECLAIM_REASON_EXPIRED      = 1;  // TTL elapsed
+  RECLAIM_REASON_DISCONNECTED = 2;  // Reconnect grace elapsed
+  RECLAIM_REASON_OVERRIDE     = 3;  // Human override or suspension timeout
+}
+
+// Pushed when the runtime takes a holding back. One per reclaimed tile.
+message Reclaimed {
+  string surface = 1;   // tile:<id>; empty if the lease held no tile
+  ReclaimReason why = 2;
+  bytes lease_id = 3;
+}
 
 // ─── Subscription messages ────────────────────────────────────────────────────
 
@@ -568,68 +561,11 @@ message SubscriptionChangeResult {
   repeated string denied_subscriptions = 2;  // Requested but denied (not in allow list)
 }
 
-// ─── Zone publishing messages ──────────────────────────────────────────────────
 
-// Client publishes content to a named zone (RFC 0005 §3.1, §8.6).
-// Distinct from mutation-based PublishToZoneMutation path.
-// Durable-zone publishes receive ZonePublishResult; ephemeral are fire-and-forget.
-message ZonePublish {
-  string                         zone_name   = 1;  // Name of the target zone
-  tze_hud.protocol.v1.ZoneContent content    = 2;  // Content to publish
-  uint64                         ttl_us      = 3;  // Duration in µs; 0 = zone default
-  string                         merge_key   = 4;  // For MergeByKey contention policy; empty otherwise
-  // Byte-offset breakpoints for StreamText word-by-word reveal (spec §Subtitle Streaming).
-  // Only valid for StreamText content. Empty = reveal all at once.
-  repeated uint64                breakpoints = 5;
-  bytes                          element_id  = 6;  // Optional zone element ID addressing
 
-  // Snapshot parity fields (WM-S2b session.proto delta; RFC 0005 Amendment A1
-  // §"Implementation Notes" items 3-4). Field 6 (element_id) was added by
-  // hud-bs2q.3 after the delta doc was authored; fields 7-9 start here per
-  // the amendment erratum. Do NOT use field 6 for these fields.
-  uint64 present_at_wall_us     = 7;  // Wall-clock presentation time UTC µs (0 = immediate)
-  uint64 expires_at_wall_us     = 8;  // Absolute expiry UTC µs (0 = no expiry)
-  string content_classification = 9;  // Empty = unclassified (RFC 0009 A1 viewer-class filter)
-}
 
-// Server response to a durable-zone ZonePublish (RFC 0005 §3.1).
-// Correlated by request_sequence matching the ZonePublish envelope's sequence.
-// NOT sent for ephemeral-zone publishes (those are fire-and-forget).
-message ZonePublishResult {
-  uint64 request_sequence = 1;  // Sequence of the ZonePublish that triggered this
-  bool   accepted         = 2;  // true = published; false = rejected
-  string error_code       = 3;  // Machine-readable error code (if accepted=false)
-  string error_message    = 4;  // Human-readable reason (if accepted=false)
-}
 
-// ─── Widget publishing messages ───────────────────────────────────────────────
 
-// Client publishes parameter values to a named widget instance (widget-system spec).
-// Durable-widget publishes receive WidgetPublishResult; ephemeral are fire-and-forget.
-// Requires allow entry "widget:<widget_name>".
-// Encoded at ClientMessage field 35.
-message WidgetPublish {
-  string widget_name   = 1;  // Instance addressing key (instance_id or widget_type_name)
-  string instance_id   = 2;  // Optional disambiguation for multi-instance tabs
-  repeated tze_hud.protocol.v1.WidgetParameterValueProto params = 3;
-  uint32 transition_ms = 4;  // 0 = instant
-  reserved 5;           // ttl_us, never read (removed in T5 S1)
-  reserved "ttl_us";
-  string merge_key     = 6;  // For MergeByKey contention policy; empty otherwise
-  bytes  element_id    = 7;  // Optional widget element ID addressing
-}
-
-// Server response to a durable-widget WidgetPublish (widget-system spec).
-// Correlated by request_sequence matching the WidgetPublish envelope's sequence.
-// NOT sent for ephemeral-widget publishes.
-// Encoded at ServerMessage field 47.
-message WidgetPublishResult {
-  bool   accepted         = 1;  // true = applied; false = rejected
-  string widget_name      = 2;  // Echoed from WidgetPublish
-  string error_code       = 3;  // Machine-readable error code (if accepted=false)
-  string error_message    = 4;  // Human-readable reason (if accepted=false)
-  uint64 request_sequence = 5;  // Sequence of the WidgetPublish that triggered this
-}
 
 // ─── Widget asset registration messages ─────────────────────────────────────
 

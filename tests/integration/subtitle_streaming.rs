@@ -2,19 +2,19 @@
 //!
 //! Implements acceptance criteria for `hud-hzub.4`:
 //! - Breakpoints are gRPC-only (the MCP surface has no breakpoints field)
-//! - gRPC ZonePublish with stream_text + breakpoints: breakpoints forwarded to compositor
+//! - gRPC zone `Publish` with stream_text + breakpoints: breakpoints forwarded to compositor
 //! - Stream-text without breakpoints reveals full text immediately
 //! - list_zones reports subtitle zone with correct contention_policy and accepted_media_types
 //!
 //! ## Test inventory
 //!
-//! ### gRPC path (via ZonePublish session message)
+//! ### gRPC path (via zone `Publish` session message)
 //!
 //! - [`test_grpc_zone_publish_with_breakpoints_forwarded`]
-//!   gRPC ZonePublish with stream_text + breakpoints → breakpoints stored in publish record.
+//!   gRPC zone `Publish` with stream_text + breakpoints → breakpoints stored in publish record.
 //!
 //! - [`test_grpc_zone_publish_empty_breakpoints_reveals_immediately`]
-//!   gRPC ZonePublish with empty breakpoints → publish record has empty breakpoints.
+//!   gRPC zone `Publish` with empty breakpoints → publish record has empty breakpoints.
 //!
 //! - [`test_grpc_zone_publish_replacement_cancels_breakpoints`]
 //!   Second gRPC publish replaces first — latest-wins cancels previous streaming record.
@@ -168,8 +168,11 @@ async fn connect_agent_with_zone_publish_cap(
     tx.send(session_proto::ClientMessage {
         sequence: 2,
         timestamp_wall_us: common::now_wall_us(),
-        payload: Some(session_proto::client_message::Payload::LeaseRequest(
-            session_proto::LeaseRequest { ttl_ms: 120_000 },
+        payload: Some(session_proto::client_message::Payload::ClaimTile(
+            session_proto::ClaimTile {
+                ttl_ms: 120_000,
+                ..Default::default()
+            },
         )),
     })
     .await?;
@@ -180,19 +183,19 @@ async fn connect_agent_with_zone_publish_cap(
         sequence: 2,
     };
 
-    // Consume LeaseResponse
+    // Consume the ClaimTile result
     let msg = session.rx.next().await.ok_or("no lease response")??;
     match &msg.payload {
-        Some(session_proto::server_message::Payload::LeaseResponse(resp)) if resp.granted => {}
+        Some(session_proto::server_message::Payload::RequestResult(resp)) if resp.ok => {}
         other => {
-            return Err(format!("Expected LeaseResponse(granted), got: {other:?}").into());
+            return Err(format!("Expected a granted ClaimTile, got: {other:?}").into());
         }
     }
 
     Ok(session)
 }
 
-/// Send a ZonePublish with stream_text content and optional breakpoints.
+/// Send a zone `Publish` with stream_text content and optional breakpoints.
 /// Returns Ok(()) on accepted, Err on rejection.
 async fn zone_publish_stream_text(
     session: &mut AgentSession,
@@ -206,47 +209,43 @@ async fn zone_publish_stream_text(
         .send(session_proto::ClientMessage {
             sequence: seq,
             timestamp_wall_us: common::now_wall_us(),
-            payload: Some(session_proto::client_message::Payload::ZonePublish(
-                session_proto::ZonePublish {
-                    zone_name: zone_name.to_string(),
+            payload: Some(session_proto::client_message::Payload::Publish(
+                session_proto::Publish {
+                    surface: format!("zone:{zone_name}"),
                     content: Some(proto::ZoneContent {
                         payload: Some(proto::zone_content::Payload::StreamText(text.to_string())),
                     }),
-                    ttl_us: 0,
-                    element_id: Vec::new(),
-                    merge_key: String::new(),
+                    ttl_ms: 0,
+                    key: String::new(),
                     breakpoints,
-                    // Snapshot parity fields (WM-S2b session.proto delta §fields 7-9); 0/empty = no constraint.
-                    present_at_wall_us: 0,
-                    expires_at_wall_us: 0,
-                    content_classification: String::new(),
+                    present_at_us: 0,
+                    expires_at_us: 0,
+                    ..Default::default()
                 },
             )),
         })
         .await?;
 
-    let msg = session.rx.next().await.ok_or("no ZonePublishResult")??;
+    let msg = session.rx.next().await.ok_or("no RequestResult")??;
     match &msg.payload {
-        Some(session_proto::server_message::Payload::ZonePublishResult(r)) if r.accepted => Ok(()),
-        Some(session_proto::server_message::Payload::ZonePublishResult(r)) => Err(format!(
-            "ZonePublish rejected: {} — {}",
-            r.error_code, r.error_message
-        )
-        .into()),
-        other => Err(format!("Expected ZonePublishResult, got: {other:?}").into()),
+        Some(session_proto::server_message::Payload::RequestResult(r)) if r.ok => Ok(()),
+        Some(session_proto::server_message::Payload::RequestResult(r)) => {
+            Err(format!("zone Publish rejected: {} — {}", r.code, r.hint).into())
+        }
+        other => Err(format!("Expected RequestResult, got: {other:?}").into()),
     }
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
-/// gRPC ZonePublish with stream_text + breakpoints forwards breakpoints to the compositor.
+/// gRPC zone `Publish` with stream_text + breakpoints forwards breakpoints to the compositor.
 ///
 /// Spec §"Stream-text with breakpoints reveals word-by-word":
 /// "The compositor MUST reveal the text progressively: first "The", then
 ///  "The quick", then "The quick brown", then "The quick brown fox"."
 ///
 /// At the scene layer, this is verified by checking that breakpoints are stored
-/// in the ZonePublishRecord exactly as received.
+/// in the zone publish record exactly as received.
 #[tokio::test]
 async fn test_grpc_zone_publish_with_breakpoints_forwarded()
 -> Result<(), Box<dyn std::error::Error>> {
@@ -290,13 +289,13 @@ async fn test_grpc_zone_publish_with_breakpoints_forwarded()
     assert_eq!(
         bps,
         vec![3u64, 9, 15],
-        "gRPC ZonePublish breakpoints must be forwarded to ZonePublishRecord; got {bps:?}"
+        "gRPC zone `Publish` breakpoints must be forwarded to zone publish record; got {bps:?}"
     );
 
     Ok(())
 }
 
-/// gRPC ZonePublish with empty breakpoints list reveals full text immediately.
+/// gRPC zone `Publish` with empty breakpoints list reveals full text immediately.
 ///
 /// Spec §"Stream-text without breakpoints reveals all at once":
 /// "THEN the compositor MUST display the full text immediately (no progressive reveal)."
@@ -322,7 +321,7 @@ async fn test_grpc_zone_publish_empty_breakpoints_reveals_immediately()
 
     assert!(
         bps.is_empty(),
-        "empty breakpoints in ZonePublish must result in empty breakpoints in the record"
+        "empty breakpoints in zone `Publish` must result in empty breakpoints in the record"
     );
 
     Ok(())
@@ -388,7 +387,7 @@ async fn test_grpc_zone_publish_replacement_cancels_breakpoints()
 /// "MCP (JSON-RPC guest path) and gRPC (protobuf resident path) must produce identical visual results."
 ///
 /// Verification: publish via gRPC with the same payload as subtitle-streaming.json fixture,
-/// verify the resulting ZonePublishRecord matches what the MCP path would store.
+/// verify the resulting zone publish record matches what the MCP path would store.
 #[tokio::test]
 async fn test_grpc_zone_publish_breakpoints_match_mcp_behavior()
 -> Result<(), Box<dyn std::error::Error>> {

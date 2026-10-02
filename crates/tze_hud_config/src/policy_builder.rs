@@ -546,3 +546,57 @@ mod tests {
         assert_eq!(policy, RenderingPolicy::default());
     }
 }
+
+/// Claimed-tile placement sizes from the resolved `tile.*` tokens; missing or
+/// unparseable entries keep the defaults.
+pub fn tile_placement_from_tokens(
+    tokens: &DesignTokenMap,
+) -> tze_hud_scene::placement::TilePlacementTokens {
+    let mut t = tze_hud_scene::placement::TilePlacementTokens::default();
+    for (class, slot) in [
+        ("small", &mut t.small),
+        ("medium", &mut t.medium),
+        ("large", &mut t.large),
+        ("wide", &mut t.wide),
+        ("tall", &mut t.tall),
+    ] {
+        if let Some(w) = token_f32(tokens, &format!("tile.{class}.width")).filter(|v| *v > 0.0) {
+            slot.0 = w;
+        }
+        if let Some(h) = token_f32(tokens, &format!("tile.{class}.height")).filter(|v| *v > 0.0) {
+            slot.1 = h;
+        }
+    }
+    if let Some(m) = token_f32(tokens, "tile.margin").filter(|v| *v >= 0.0) {
+        t.margin = m;
+    }
+    if let Some(g) = token_f32(tokens, "tile.gap").filter(|v| *v >= 0.0) {
+        t.gap = g;
+    }
+    t
+}
+
+#[cfg(test)]
+mod tile_placement_tests {
+    use super::*;
+
+    #[test]
+    fn canonical_tile_tokens_match_placement_defaults() {
+        let resolved =
+            crate::tokens::resolve_tokens(&DesignTokenMap::new(), &DesignTokenMap::new());
+        assert_eq!(
+            tile_placement_from_tokens(&resolved),
+            tze_hud_scene::placement::TilePlacementTokens::default()
+        );
+    }
+
+    #[test]
+    fn tile_tokens_override_sizes() {
+        let mut tokens = DesignTokenMap::new();
+        tokens.insert("tile.small.width".into(), "100".into());
+        tokens.insert("tile.gap".into(), "4".into());
+        let t = tile_placement_from_tokens(&tokens);
+        assert_eq!(t.small.0, 100.0);
+        assert_eq!(t.gap, 4.0);
+    }
+}

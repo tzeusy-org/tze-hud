@@ -191,6 +191,7 @@ impl HudSessionImpl {
             input_capture_tx: None,
             input_capture_wake: tze_hud_scene::render_wake::RenderWakeNotifier::default(),
             resolved_portal_tokens: std::collections::HashMap::new(),
+            tile_placement: Default::default(),
         }));
         Self::from_deps(SessionDeps::new(state, AgentDirectory::unrestricted(psk)))
     }

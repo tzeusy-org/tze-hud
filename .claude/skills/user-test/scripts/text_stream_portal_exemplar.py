@@ -6410,14 +6410,19 @@ def main() -> int:
     args = parse_args()
     if args.self_test:
         return run_composer_self_test()
-    try:
-        return asyncio.run(run_scenario(args))
-    except KeyboardInterrupt:
-        print(json.dumps({"error": "interrupted"}), file=sys.stderr)
-        return 130
-    except Exception as exc:
-        print(json.dumps({"error": "exception", "detail": str(exc)}), file=sys.stderr)
-        return 1
+    # The live scenario builds the portal from agent-created raw tiles
+    # (CreateTile + portal mutations 13-17). Since T5 S4b those are
+    # runtime-internal, so the runtime rejects them; the portal is the MCP
+    # `portal:` surface (hud-projection skill). Only --self-test still runs.
+    print(
+        json.dumps({
+            "error": "unsupported",
+            "detail": "live mode needs the pre-T5 raw-tile wire; use the MCP "
+            "portal: surface (hud-projection skill) or --self-test",
+        }),
+        file=sys.stderr,
+    )
+    return 2
 
 
 if __name__ == "__main__":

@@ -660,9 +660,13 @@ async fn send_publish(
     let seq = *next_seq;
     let value = cli.param_start + (index as f32 * cli.param_step);
 
-    let publish = session_proto::WidgetPublish {
-        widget_name: cli.widget_name.clone(),
-        instance_id: cli.instance_id.clone(),
+    let widget = if cli.instance_id.is_empty() {
+        &cli.widget_name
+    } else {
+        &cli.instance_id
+    };
+    let publish = session_proto::Publish {
+        surface: format!("widget:{widget}"),
         params: vec![WidgetParameterValueProto {
             param_name: cli.param_name.clone(),
             value: Some(
@@ -670,14 +674,13 @@ async fn send_publish(
             ),
         }],
         transition_ms: cli.transition_ms,
-        merge_key: String::new(),
-        element_id: Vec::new(),
+        ..Default::default()
     };
 
     let msg = session_proto::ClientMessage {
         sequence: seq,
         timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::WidgetPublish(publish)),
+        payload: Some(ClientPayload::Publish(publish)),
     };
 
     let payload_bytes_out = msg.encoded_len() as u64;
@@ -767,52 +770,37 @@ async fn record_stream_terminal(run_state: &RunState, warning: String) {
 }
 
 async fn apply_server_message(message: &session_proto::ServerMessage, run_state: &RunState) {
-    match &message.payload {
-        Some(ServerPayload::WidgetPublishResult(result)) => {
-            run_state.ack_count.fetch_add(1, Ordering::Relaxed);
-            let rtt_start = {
-                let mut inflight = run_state.inflight.lock().await;
-                inflight.remove(&result.request_sequence)
-            };
+    if let Some(ServerPayload::RequestResult(result)) = &message.payload {
+        run_state.ack_count.fetch_add(1, Ordering::Relaxed);
+        let rtt_start = {
+            let mut inflight = run_state.inflight.lock().await;
+            inflight.remove(&result.seq)
+        };
 
-            let mut stats = run_state.stats.lock().await;
-            stats.payload_bytes_in += message.encoded_len() as u64;
+        let mut stats = run_state.stats.lock().await;
+        stats.payload_bytes_in += message.encoded_len() as u64;
 
-            if result.accepted {
-                stats.success_count += 1;
-            } else {
-                stats.error_count += 1;
-                let detail = if result.error_code.is_empty() {
-                    result.error_message.clone()
-                } else {
-                    format!("{}: {}", result.error_code, result.error_message)
-                };
-                stats.warnings.push(format!(
-                    "publish rejected for request_sequence={}: {}",
-                    result.request_sequence, detail
-                ));
-            }
-
-            if let Some(start) = rtt_start {
-                stats.rtt_us.push(elapsed_us(start, Instant::now()));
-            } else {
-                stats.warnings.push(format!(
-                    "received ack for unknown request_sequence={}",
-                    result.request_sequence
-                ));
-            }
-            drop(stats);
-            run_state.ack_notify.notify_waiters();
-        }
-        Some(ServerPayload::RuntimeError(err)) => {
-            let mut stats = run_state.stats.lock().await;
+        if result.ok {
+            stats.success_count += 1;
+        } else {
             stats.error_count += 1;
+            let detail = format!("{}: {}", result.code, result.hint);
             stats.warnings.push(format!(
-                "runtime_error while draining acks: {} ({})",
-                err.error_code, err.message
+                "publish rejected for request_sequence={}: {}",
+                result.seq, detail
             ));
         }
-        _ => {}
+
+        if let Some(start) = rtt_start {
+            stats.rtt_us.push(elapsed_us(start, Instant::now()));
+        } else {
+            stats.warnings.push(format!(
+                "received ack for unknown request_sequence={}",
+                result.seq
+            ));
+        }
+        drop(stats);
+        run_state.ack_notify.notify_waiters();
     }
 }
 
@@ -1017,15 +1005,13 @@ mod tests {
         let message = session_proto::ServerMessage {
             sequence: 9,
             timestamp_wall_us: now_wall_us(),
-            payload: Some(ServerPayload::WidgetPublishResult(
-                session_proto::WidgetPublishResult {
-                    request_sequence: 42,
-                    accepted: true,
-                    widget_name: "main-progress".to_string(),
-                    error_code: String::new(),
-                    error_message: String::new(),
-                },
-            )),
+            payload: Some(ServerPayload::RequestResult(session_proto::RequestResult {
+                seq: 42,
+                ok: true,
+                code: String::new(),
+                hint: String::new(),
+                ..Default::default()
+            })),
         };
 
         apply_server_message(&message, &state).await;
@@ -1047,15 +1033,13 @@ mod tests {
         let message = session_proto::ServerMessage {
             sequence: 10,
             timestamp_wall_us: now_wall_us(),
-            payload: Some(ServerPayload::WidgetPublishResult(
-                session_proto::WidgetPublishResult {
-                    request_sequence: 7,
-                    accepted: false,
-                    widget_name: "main-progress".to_string(),
-                    error_code: "WIDGET_PARAMETER_INVALID_VALUE".to_string(),
-                    error_message: "bad progress".to_string(),
-                },
-            )),
+            payload: Some(ServerPayload::RequestResult(session_proto::RequestResult {
+                seq: 7,
+                ok: false,
+                code: "WIDGET_PARAMETER_INVALID".to_string(),
+                hint: "bad progress".to_string(),
+                ..Default::default()
+            })),
         };
 
         apply_server_message(&message, &state).await;
@@ -1066,7 +1050,7 @@ mod tests {
         assert_eq!(stats.error_count, 1);
         assert!(stats.warnings.iter().any(|warning| {
             warning.contains("publish rejected for request_sequence=7")
-                && warning.contains("WIDGET_PARAMETER_INVALID_VALUE")
+                && warning.contains("WIDGET_PARAMETER_INVALID")
         }));
     }
 
