@@ -1,0 +1,183 @@
+# tze_hud — weekly performance-budget lane.
+#
+# These jobs take ~10 minutes each, past the merge-gate target (<8 min), so
+# they run weekly, on demand, and on PRs labelled `perf-assert` instead of on
+# every PR. They are not required checks.
+#
+#   windows-performance-budget  — headless Windows benchmark + locked budget gate,
+#     plus a real constrained WARP overlay quiescent-efficiency artifact gate
+#   constrained-envelope-budget — llvmpipe proxy, exactly two logical CPUs,
+#     same normalized ceilings
+
+name: Performance budget
+
+on:
+  schedule:
+    - cron: "0 3 * * 1"  # Monday 03:00 UTC
+  workflow_dispatch:
+  pull_request:
+    types: [labeled]
+
+env:
+  # apt retries and network timeouts: a stalled mirror fails fast instead of
+  # hanging the job (a 51-minute mingw-w64 install once timed out the merge queue).
+  APT_OPTS: "-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30"
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  # Force software GPU (llvmpipe on Linux, WARP on Windows) for headless rendering.
+  # Tests that call HeadlessRuntime::new() will use a software adapter.
+  HEADLESS_FORCE_SOFTWARE: "1"
+
+jobs:
+  windows-performance-budget:
+    name: Windows performance budget
+    runs-on: windows-latest
+    if: github.event_name != 'pull_request' || github.event.label.name == 'perf-assert'
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.88"
+      - uses: Swatinem/rust-cache@v2.9.1
+        timeout-minutes: 10
+      - name: Ensure protobuf compiler is available
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          if (-not (Get-Command protoc -ErrorAction SilentlyContinue)) {
+            choco install protoc -y --no-progress
+          }
+          protoc --version
+      - name: Run headless benchmark artifact
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          New-Item -ItemType Directory -Force -Path test_results/windows-performance-budget | Out-Null
+          cargo run -p benchmark --features headless -- `
+            --emit test_results/windows-performance-budget/benchmark.json `
+            --frames 180
+      - name: Enforce locked Windows budgets
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          python scripts/ci/check_windows_perf_budgets.py `
+            --benchmark-json test_results/windows-performance-budget/benchmark.json `
+            --output-json test_results/windows-performance-budget/budget-gate.json
+      - name: Build canonical windowed runtime for quiescent evidence
+        shell: pwsh
+        run: cargo build -p tze_hud_app --release
+      - name: Prove static overlay idle efficiency on WARP / two CPUs
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          .\scripts\ci\windows\run-quiescent-efficiency.ps1 `
+            -ExePath target\release\tze_hud.exe `
+            -OutputDir test_results\windows-performance-budget\quiescent-efficiency
+      # ── Cross-run telemetry trend (informational; hud-kkx15, hud-bp3c3) ──────
+      #
+      # The gate above is a hard PASS/FAIL against the checked-in baseline; it
+      # does not retain prior numeric values, so within-budget drift is
+      # invisible. This step surfaces the numeric deltas.
+      #
+      # RETENTION/SCOPE POLICY (hud-bp3c3): the trend baseline is MAIN-PINNED,
+      # not branch-scoped. Every run compares against the budget-gate summary
+      # published as an artifact by the latest SUCCESSFUL `main` run. This gives
+      # a stable baseline immune to per-branch cache divergence — a PR no longer
+      # drifts against its own prior PR runs, and the headline "vs main" delta is
+      # what a reviewer actually wants. The previous branch-scoped actions/cache
+      # approach was replaced because it made each branch its own moving target.
+      #
+      # We fetch the main artifact with `gh run download` (cross-run, so plain
+      # actions/download-artifact does not apply): pick the latest successful run
+      # of this workflow on `main` and pull its `windows-perf-baseline-main`
+      # artifact. On the first main run there may be no prior green main yet -> the
+      # reporter handles the no-baseline case gracefully (prints a notice).
+      - name: Download main-pinned Windows perf baseline
+        id: perf-baseline
+        if: always()
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          New-Item -ItemType Directory -Force -Path perf-baseline-main | Out-Null
+          # Latest successful CI run on main (exclude this run if we ARE main).
+          $runId = gh run list --workflow perf-budget.yml --branch main --status success `
+            --limit 1 --json databaseId --jq '.[0].databaseId' 2>$null
+          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($runId)) {
+            Write-Host "No successful main run found yet; no baseline to download."
+          } else {
+            Write-Host "Downloading perf baseline artifact from main run $runId"
+            # Non-fatal: a green run may predate this artifact name.
+            gh run download $runId `
+              --name windows-perf-baseline-main `
+              --dir perf-baseline-main 2>$null
+            if ($LASTEXITCODE -ne 0) {
+              Write-Host "Baseline artifact not present on run $runId; treating as no baseline."
+            }
+          }
+          # Missing baseline is the expected bootstrap state, not a step failure.
+          # GitHub's pwsh shell appends `exit $LASTEXITCODE`, so clear any
+          # non-zero code left by the probing `gh` calls above.
+          $global:LASTEXITCODE = 0
+      - name: Report Windows perf trend deltas (vs main baseline)
+        if: always()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $baseline = "perf-baseline-main/budget-gate.json"
+          $baselineArg = @()
+          if (Test-Path $baseline) { $baselineArg = @("--baseline", $baseline) }
+          python scripts/ci/report_telemetry_trend.py `
+            --current test_results/windows-performance-budget/budget-gate.json `
+            @baselineArg
+      # Publish this run's summary as the main-pinned baseline artifact. Only
+      # scheduled/manual runs on main update the baseline (PR runs must not overwrite it),
+      # and only when the run is green up to here — a failed gate must not become
+      # the baseline future runs trend against.
+      - name: Publish main-pinned Windows perf baseline
+        if: success() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v6
+        with:
+          name: windows-perf-baseline-main
+          path: test_results/windows-performance-budget/budget-gate.json
+          if-no-files-found: error
+          retention-days: 90
+      - name: Upload Windows performance artifact
+        uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: windows-performance-budget
+          path: test_results/windows-performance-budget/
+          if-no-files-found: error
+
+  constrained-envelope-budget:
+    name: Constrained-envelope budget (llvmpipe / 2 CPUs)
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || github.event.label.name == 'perf-assert'
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.88"
+      - uses: Swatinem/rust-cache@v2.9.1
+        timeout-minutes: 10
+      - name: Install benchmark dependencies
+        timeout-minutes: 5
+        run: |
+          sudo apt-get $APT_OPTS update -q
+          sudo apt-get $APT_OPTS install -y --no-install-recommends \
+            mesa-vulkan-drivers \
+            protobuf-compiler \
+            util-linux
+      - name: Run constrained-envelope benchmark and unchanged normalized budget gate
+        run: scripts/ci/run_constrained_envelope.sh
+      - name: Upload constrained-envelope artifact
+        uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: constrained-envelope-budget
+          path: test_results/constrained-envelope-budget/
+          if-no-files-found: error

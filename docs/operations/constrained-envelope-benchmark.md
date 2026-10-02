@@ -1,6 +1,6 @@
 # Constrained-Envelope Benchmark Lane
 
-The `constrained-envelope-budget` CI job is a low-power proxy for catching
+The weekly `constrained-envelope-budget` job (`perf-budget.yml`) is a low-power proxy for catching
 regressions under a deliberately small execution envelope. It is not glasses,
 VR, wearable-device, or production-hardware qualification. Windows remains the
 only product target; this Linux lane exists solely as a repeatable CI proxy.

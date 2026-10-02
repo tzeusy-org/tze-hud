@@ -68,7 +68,7 @@ python3 scripts/ci/test_check_idle_efficiency.py
 
 ## Runner policy
 
-The required `windows-performance-budget` CI job builds the canonical
+The weekly `windows-performance-budget` job (`perf-budget.yml`) builds the canonical
 `tze_hud.exe` and runs `scripts/ci/windows/run-quiescent-efficiency.ps1`. That
 harness requests an overlay, forces the windowed compositor's fallback adapter,
 and applies the two-logical-CPU affinity while creating `tze_hud.exe` (before

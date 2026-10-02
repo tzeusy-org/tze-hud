@@ -9,14 +9,12 @@ REPO_ROOT = Path(__file__).parents[2]
 RUNNER = (REPO_ROOT / "scripts/ci/run_constrained_envelope.sh").read_text(
     encoding="utf-8"
 )
-WORKFLOW = (REPO_ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+WORKFLOW = (REPO_ROOT / ".github/workflows/perf-budget.yml").read_text(encoding="utf-8")
 
 
 class ConstrainedEnvelopeRunnerTests(unittest.TestCase):
     def test_ci_uses_ubuntu_mesa_and_the_canonical_runner(self) -> None:
-        job = WORKFLOW.split("  constrained-envelope-budget:", 1)[1].split(
-            "\n  # ── Integration", 1
-        )[0]
+        job = WORKFLOW.split("  constrained-envelope-budget:", 1)[1]
         self.assertIn("runs-on: ubuntu-latest", job)
         self.assertIn("mesa-vulkan-drivers", job)
         self.assertIn("scripts/ci/run_constrained_envelope.sh", job)
