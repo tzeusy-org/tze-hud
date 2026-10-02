@@ -138,7 +138,7 @@ are no compatibility shims; removed proto fields are `reserved`.
 | S4 | **gRPC verbs.** `Publish`/`Clear`/`Hold`/`ClaimTile`/`Reclaimed`/one `Result`. Collapse the six `HudSessionImpl` constructors into one deps struct. |
 | S5 | This file loses "proposal"; `scope.md` marks T5 done. |
 
-S0 and S1 don't depend on the open decisions below and can start now.
+
 
 ## Token budgets
 
@@ -153,21 +153,15 @@ S0 and S1 don't depend on the open decisions below and can start now.
 | Portal: attach, publish, poll+ack, detach | ~575 over 5 round trips | ≤ 250 over 3 |
 | Any error | up to ~212 | ≤ 60 |
 
-## Open decisions
+## Decisions (2026-10-02)
 
-1. **MCP tile tools.** Remove `create_tile`, `set_content`, `dismiss`,
-   `create_tab`, and `publish_to_element` from MCP, so tiles are gRPC only?
-   *Recommended: yes.* They are geometry-heavy, resident-gated, and the vision
-   puts tiles on gRPC.
-2. **Tile geometry.** Should `ClaimTile` take a `placement` hint
-   (anchor + size class, runtime-resolved) instead of `bounds` + `z_order`?
-   *Recommended: placement hint*, since the vision says models never send
-   coordinates. Resident programs that need exact layout can still ask for a
-   size class; the runtime may clamp.
-3. **Lease priority.** Drop the 0–4 priority now that shedding and the
-   budget ladder are gone? It only orders chrome versus agents and breaks
-   z-order ties. *Recommended: drop it; chrome is already structurally above.*
-4. **Portal-specific tile mutations** (accent, unread count, composer
-   interaction, portal surface state). Keep them as internal runtime
-   mutations and off the agent wire? *Recommended: yes.* The portal is
-   driven through `hud_publish`, not through tile mutations.
+1. **Tiles are gRPC only.** MCP loses `create_tile`, `set_content`,
+   `dismiss`, `create_tab`, and `publish_to_element`.
+2. **Tiles take a placement hint.** `ClaimTile` gets a `placement` hint
+   (anchor + size class) that the runtime resolves, in place of `bounds`
+   and `z_order`.
+3. **Lease priority is dropped.** Chrome is structurally above agent
+   content, and ties go to claim order.
+4. **Portal tile mutations are internal.** Accent, unread count, composer
+   interaction, and portal surface state stay inside the runtime; agents
+   drive the portal through `hud_publish`.
