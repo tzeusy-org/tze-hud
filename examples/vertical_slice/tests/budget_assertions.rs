@@ -88,7 +88,7 @@ async fn test_frame_time_p99_within_budget() {
         height: 600,
         grpc_port: 0,
         bind_all_interfaces: false,
-        psk: "test".to_string(),
+        agents: tze_hud_scene::config::AgentDirectory::unrestricted("test"),
         config_toml: None,
     };
     let mut runtime = HeadlessRuntime::new(config).await.expect("runtime init");
@@ -158,7 +158,7 @@ async fn test_input_to_local_ack_p99_within_budget() {
         height: 600,
         grpc_port: 0,
         bind_all_interfaces: false,
-        psk: "test".to_string(),
+        agents: tze_hud_scene::config::AgentDirectory::unrestricted("test"),
         config_toml: None,
     };
     let mut runtime = HeadlessRuntime::new(config).await.expect("runtime init");
@@ -273,7 +273,7 @@ async fn test_input_to_scene_commit_p99_within_budget() {
         height: 600,
         grpc_port: 0,
         bind_all_interfaces: false,
-        psk: "test".to_string(),
+        agents: tze_hud_scene::config::AgentDirectory::unrestricted("test"),
         config_toml: None,
     };
     let mut runtime = HeadlessRuntime::new(config).await.expect("runtime init");
@@ -342,7 +342,7 @@ async fn test_input_to_next_present_p99_within_budget() {
         height: 600,
         grpc_port: 0,
         bind_all_interfaces: false,
-        psk: "test".to_string(),
+        agents: tze_hud_scene::config::AgentDirectory::unrestricted("test"),
         config_toml: None,
     };
     let mut runtime = HeadlessRuntime::new(config).await.expect("runtime init");
@@ -419,7 +419,7 @@ async fn test_hit_test_p99_within_budget() {
         height: 600,
         grpc_port: 0,
         bind_all_interfaces: false,
-        psk: "test".to_string(),
+        agents: tze_hud_scene::config::AgentDirectory::unrestricted("test"),
         config_toml: None,
     };
     let mut runtime = HeadlessRuntime::new(config).await.expect("runtime init");
@@ -657,7 +657,7 @@ async fn test_texture_upload_p99_within_budget() {
         height: 300,
         grpc_port: 0,
         bind_all_interfaces: false,
-        psk: "tex-upload-test".to_string(),
+        agents: tze_hud_scene::config::AgentDirectory::unrestricted("tex-upload-test"),
         config_toml: None,
     };
     let runtime = HeadlessRuntime::new(config).await.expect("runtime init");
@@ -829,7 +829,7 @@ async fn test_stage6_render_encode_p99_within_budget() {
         height: 600,
         grpc_port: 0,
         bind_all_interfaces: false,
-        psk: "stage6-bench".to_string(),
+        agents: tze_hud_scene::config::AgentDirectory::unrestricted("stage6-bench"),
         config_toml: None,
     };
     let mut runtime = HeadlessRuntime::new(config).await.expect("runtime init");
@@ -965,7 +965,7 @@ async fn test_layer1_pixel_readback_background() {
         height: 600,
         grpc_port: 0,
         bind_all_interfaces: false,
-        psk: "test".to_string(),
+        agents: tze_hud_scene::config::AgentDirectory::unrestricted("test"),
         config_toml: None,
     };
     let mut runtime = HeadlessRuntime::new(config).await.expect("runtime init");
@@ -1006,7 +1006,7 @@ async fn test_layer1_pixel_readback_tile_color() {
         height: 600,
         grpc_port: 0,
         bind_all_interfaces: false,
-        psk: "test".to_string(),
+        agents: tze_hud_scene::config::AgentDirectory::unrestricted("test"),
         config_toml: None,
     };
     let mut runtime = HeadlessRuntime::new(config).await.expect("runtime init");
@@ -1084,7 +1084,7 @@ async fn test_layer1_pixel_readback_z_order() {
         height: 600,
         grpc_port: 0,
         bind_all_interfaces: false,
-        psk: "test".to_string(),
+        agents: tze_hud_scene::config::AgentDirectory::unrestricted("test"),
         config_toml: None,
     };
     let mut runtime = HeadlessRuntime::new(config).await.expect("runtime init");
@@ -1203,7 +1203,7 @@ async fn make_scene_runtime() -> tze_hud_runtime::HeadlessRuntime {
         height: SCENE_H,
         grpc_port: 0,
         bind_all_interfaces: false,
-        psk: "test".to_string(),
+        agents: tze_hud_scene::config::AgentDirectory::unrestricted("test"),
         config_toml: None,
     })
     .await

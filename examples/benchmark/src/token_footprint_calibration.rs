@@ -86,7 +86,7 @@ mod calibration {
             height: 1080,
             grpc_port: 0,
             bind_all_interfaces: false,
-            psk: PSK.to_string(),
+            agents: tze_hud_scene::config::AgentDirectory::unrestricted(PSK),
             config_toml: Some(String::new()),
         }
     }

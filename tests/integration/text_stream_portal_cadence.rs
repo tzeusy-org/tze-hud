@@ -82,7 +82,7 @@ fn cadence_bench_config() -> HeadlessConfig {
         height: DISPLAY_H,
         grpc_port: 0,
         bind_all_interfaces: false,
-        psk: "cadence-test-key".to_string(),
+        agents: tze_hud_scene::config::AgentDirectory::unrestricted("cadence-test-key"),
         config_toml: None,
     }
 }

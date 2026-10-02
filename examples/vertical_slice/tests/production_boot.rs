@@ -5,10 +5,9 @@
 //!
 //! 1. Startup succeeds without error — the config is valid and parseable.
 //! 2. The runtime initialises the full pipeline (scene, compositor, telemetry).
-//! 3. An unregistered agent connecting over gRPC receives **guest policy**
-//!    (zero capabilities granted) — sovereignty-by-mechanism is active.
-//! 4. The registered agent (`vertical-slice-agent`) receives its declared
-//!    capabilities from the config file.
+//! 3. An unpaired PSK connecting over gRPC is rejected with `AUTH_FAILED`.
+//! 4. The paired agent (`vertical-slice-agent`, `config/agents.toml`)
+//!    receives its declared `allow` permissions.
 //!
 //! ## Why this test exists
 //!
@@ -40,6 +39,18 @@ use tze_hud_runtime::headless::HeadlessConfig;
 /// If the file is missing or malformed, this const will cause a compile error —
 /// which is intentional (the config must always be present and syntactically valid).
 const PRODUCTION_CONFIG: &str = include_str!("../config/production.toml");
+
+/// The paired agents that ship beside the production config.
+const PRODUCTION_AGENTS: &str = include_str!("../config/agents.toml");
+
+/// The demo PSK whose SHA-256 `config/agents.toml` stores.
+const AGENT_PSK: &str = "vertical-slice-key";
+
+fn production_agents() -> tze_hud_scene::config::AgentDirectory {
+    tze_hud_config::AgentsFile::parse(PRODUCTION_AGENTS)
+        .and_then(|file| file.directory())
+        .expect("config/agents.toml must be valid")
+}
 
 /// Test-scoped writable directory for runtime widget asset store probes.
 struct RuntimeWidgetAssetStoreTestDir {
@@ -139,7 +150,7 @@ async fn production_config_boot_succeeds() {
         height: 240,
         grpc_port: 0, // No gRPC server — pure boot test.
         bind_all_interfaces: false,
-        psk: "production-boot-test".to_string(),
+        agents: production_agents(),
         config_toml: Some(config_toml),
     };
 
@@ -176,7 +187,7 @@ async fn production_config_grants_registered_agent_capabilities() {
         height: 240,
         grpc_port: free_port,
         bind_all_interfaces: false,
-        psk: "production-boot-test".to_string(),
+        agents: production_agents(),
         config_toml: Some(config_toml),
     };
 
@@ -216,9 +227,7 @@ async fn production_config_grants_registered_agent_capabilities() {
                 resume_token: Vec::new(),
                 min_protocol_version: 1000,
                 max_protocol_version: 1001,
-                auth_credential: Some(tze_hud_protocol::auth::psk_credential(
-                    "production-boot-test".to_string(),
-                )),
+                auth_credential: Some(tze_hud_protocol::auth::psk_credential(AGENT_PSK)),
             },
         )),
     })
@@ -257,12 +266,12 @@ async fn production_config_grants_registered_agent_capabilities() {
     }
 }
 
-/// Verify that an unregistered agent receives guest policy (no capabilities).
+/// Verify that an unpaired PSK is rejected at the handshake.
 ///
-/// This is the sovereignty-by-mechanism gate: agents not declared in the config
-/// must never receive capabilities, regardless of what they request.
+/// This is the sovereignty-by-mechanism gate: only agents paired in
+/// `agents.toml` may connect, whatever id or subscriptions they request.
 #[tokio::test]
-async fn production_config_denies_unregistered_agent() {
+async fn production_config_rejects_unpaired_psk() {
     use tokio_stream::StreamExt;
     use tze_hud_protocol::proto::session as session_proto;
     use tze_hud_protocol::proto::session::hud_session_client::HudSessionClient;
@@ -278,7 +287,7 @@ async fn production_config_denies_unregistered_agent() {
         height: 240,
         grpc_port: free_port,
         bind_all_interfaces: false,
-        psk: "production-boot-test".to_string(),
+        agents: production_agents(),
         config_toml: Some(config_toml),
     };
 
@@ -302,7 +311,7 @@ async fn production_config_denies_unregistered_agent() {
         .unwrap()
         .as_micros() as u64;
 
-    // An agent not declared in production.toml — must receive guest policy.
+    // A PSK not paired in agents.toml — must be rejected.
     tx.send(session_proto::ClientMessage {
         sequence: 1,
         timestamp_wall_us: now_us,
@@ -317,9 +326,7 @@ async fn production_config_denies_unregistered_agent() {
                 resume_token: Vec::new(),
                 min_protocol_version: 1000,
                 max_protocol_version: 1001,
-                auth_credential: Some(tze_hud_protocol::auth::psk_credential(
-                    "production-boot-test".to_string(),
-                )),
+                auth_credential: Some(tze_hud_protocol::auth::psk_credential("unpaired-rogue-key")),
             },
         )),
     })
@@ -339,20 +346,12 @@ async fn production_config_denies_unregistered_agent() {
         .expect("must not error");
 
     match &msg.payload {
-        Some(session_proto::server_message::Payload::SessionEstablished(established)) => {
-            // No [agents.<id>] table: no permissions, so the gated
-            // SCENE_TOPOLOGY subscription is denied.
-            assert!(
-                established
-                    .denied_subscriptions
-                    .contains(&"SCENE_TOPOLOGY".to_string()),
-                "unconfigured agent must be denied SCENE_TOPOLOGY, got: {:?}",
-                established.active_subscriptions
-            );
-            println!("PASS: unconfigured agent received no permissions");
+        Some(session_proto::server_message::Payload::SessionError(error)) => {
+            assert_eq!(error.code, "AUTH_FAILED");
+            println!("PASS: unpaired PSK rejected");
         }
         other => {
-            panic!("Expected SessionEstablished, got: {other:?}");
+            panic!("Expected SessionError(AUTH_FAILED), got: {other:?}");
         }
     }
 }

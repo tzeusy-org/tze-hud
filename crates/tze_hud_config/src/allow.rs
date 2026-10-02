@@ -1,4 +1,4 @@
-//! Per-agent allow lists (`[agents.<id>] allow = [...]`).
+//! Per-agent allow lists (`[agents.<id>] allow = [...]` in `agents.toml`).
 //!
 //! The allow list is the whole permission model: each entry names a surface
 //! class the agent may use. Entries:

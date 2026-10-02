@@ -156,9 +156,10 @@ pub fn authenticate_session_init(
 /// Resolve a handshake credential to an agent identity.
 ///
 /// A PSK credential (structured, or the legacy plain string on resume) is
-/// resolved through [`AgentDirectory::resolve`]: an agent's own PSK identifies
-/// that agent, the runtime PSK identifies `claimed_agent_id`. An accepted
-/// loopback `LocalSocketCredential` is treated like the runtime PSK.
+/// resolved through [`AgentDirectory::resolve`]: a paired agent's PSK
+/// identifies that agent. An accepted loopback `LocalSocketCredential` is
+/// treated like the dev PSK ([`AgentDirectory::resolve_local`]), so it
+/// identifies no one in production.
 pub fn identify_session(
     agents: &AgentDirectory,
     auth_credential: Option<&AuthCredential>,
@@ -170,24 +171,22 @@ pub fn identify_session(
         Some(Credential::PreSharedKey(cred)) => cred.key.as_str(),
         Some(_) => {
             let cred = auth_credential.expect("credential checked above");
-            match evaluate_auth_credential(cred, &agents.runtime_psk, peer_addr) {
-                AuthResult::Accepted => agents.runtime_psk.as_str(),
-                AuthResult::Failed(message) => {
-                    return Err(AuthRejection {
-                        code: "AUTH_FAILED",
-                        message,
-                        hint: String::new(),
-                    });
-                }
-                AuthResult::Unimplemented(message) => {
-                    return Err(AuthRejection {
-                        code: "AUTH_FAILED",
-                        message,
-                        hint: r#"{"supported_v1": ["PreSharedKeyCredential", "LocalSocketCredential"]}"#
+            // The PSK argument is unused for non-PSK credentials.
+            return match evaluate_auth_credential(cred, "", peer_addr) {
+                AuthResult::Accepted => agents.resolve_local(claimed_agent_id),
+                AuthResult::Failed(message) => Err(AuthRejection {
+                    code: "AUTH_FAILED",
+                    message,
+                    hint: String::new(),
+                }),
+                AuthResult::Unimplemented(message) => Err(AuthRejection {
+                    code: "AUTH_FAILED",
+                    message,
+                    hint:
+                        r#"{"supported_v1": ["PreSharedKeyCredential", "LocalSocketCredential"]}"#
                             .to_string(),
-                    });
-                }
-            }
+                }),
+            };
         }
         None => legacy_psk,
     };

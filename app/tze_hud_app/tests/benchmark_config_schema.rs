@@ -16,19 +16,6 @@ fn freeze_benchmark_config() -> tze_hud_scene::config::ResolvedConfig {
     loader.freeze().expect("benchmark.toml should freeze")
 }
 
-fn assert_caps(resolved: &tze_hud_scene::config::ResolvedConfig, agent: &str, expected: &[&str]) {
-    let caps = resolved
-        .agent_capabilities
-        .get(agent)
-        .unwrap_or_else(|| panic!("expected registered benchmark agent {agent}"));
-    for cap in expected {
-        assert!(
-            caps.iter().any(|actual| actual == cap),
-            "expected {agent} to have {cap}, got {caps:?}"
-        );
-    }
-}
-
 fn benchmark_config_for_headless() -> String {
     let mut config: toml::Value = BENCHMARK_CONFIG
         .parse()
@@ -49,7 +36,7 @@ fn benchmark_headless_config() -> HeadlessConfig {
         height: 240,
         grpc_port: 0,
         bind_all_interfaces: false,
-        psk: "benchmark-config-test".to_string(),
+        agents: tze_hud_scene::config::AgentDirectory::unrestricted("benchmark-config-test"),
         config_toml: Some(benchmark_config_for_headless()),
     }
 }
@@ -62,39 +49,6 @@ fn benchmark_config_matches_loader_schema() {
         resolved.tab_names.iter().any(|name| name == "Main"),
         "benchmark config must declare the Main tab"
     );
-}
-
-#[test]
-fn benchmark_config_registers_publish_load_harness_agent() {
-    let resolved = freeze_benchmark_config();
-    assert_caps(
-        &resolved,
-        "widget-publish-load-harness",
-        &["publish_widget:main-progress", "register_widget_asset"],
-    );
-}
-
-#[test]
-fn benchmark_config_registers_three_soak_agents_with_widget_and_zone_caps() {
-    let resolved = freeze_benchmark_config();
-    for agent in ["agent-alpha", "agent-beta", "agent-gamma"] {
-        assert_caps(
-            &resolved,
-            agent,
-            &[
-                "create_tiles",
-                "modify_own_tiles",
-                "access_input_events",
-                "publish_widget:main-progress",
-                "publish_widget:main-gauge",
-                "publish_widget:main-status",
-                "publish_zone:subtitle",
-                "publish_zone:notification-area",
-                "publish_zone:status-bar",
-                "read_telemetry",
-            ],
-        );
-    }
 }
 
 #[tokio::test]

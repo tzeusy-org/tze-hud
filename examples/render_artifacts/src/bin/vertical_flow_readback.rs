@@ -164,7 +164,7 @@ async fn capture(
         height: REFERENCE_HEIGHT,
         grpc_port: 0,
         bind_all_interfaces: false,
-        psk: "vertical-flow-readback-proof".to_string(),
+        agents: Default::default(),
         config_toml: Some(readback_config_toml()),
     })
     .await?;
@@ -206,9 +206,6 @@ profile = "headless"
 [[tabs]]
 name = "Vertical Flow Pixel Proof"
 default_tab = true
-
-[agents.vertical-flow-proof]
-allow = ["tiles"]
 "#
     .to_string()
 }

@@ -29,21 +29,20 @@
 //!
 //! ## Config flow (production — default)
 //!
-//! The headless path loads `config/production.toml` (embedded at compile time).
-//! This enforces capability governance: only the registered agent
-//! (`vertical-slice-agent`) may connect, with the capability set declared in
-//! that file.  Unknown agents receive guest policy (no capabilities).
+//! The headless path loads `config/production.toml` and `config/agents.toml`
+//! (embedded at compile time).  Only the paired agent (`vertical-slice-agent`)
+//! may connect, with its `allow` list; any other PSK is rejected.
 //!
 //! The production config is the **default documented path** — it requires no
 //! feature flags at build time.
 //!
-//! The agent gets its permissions from `[agents.vertical-slice-agent] allow`;
-//! agents without a table get nothing.
+//! The agent gets its permissions from `[agents.vertical-slice-agent] allow`
+//! in `config/agents.toml`, which stores only its PSK's SHA-256.
 //!
 //! ## Dev mode (opt-in, test/dev only)
 //!
-//! Pass `--dev` to bypass config governance: all capabilities are granted to any
-//! agent (`fallback_unrestricted = true`).  This also requires the `dev-mode`
+//! Pass `--dev` to bypass governance: the demo PSK claims any agent id with
+//! all capabilities.  This also requires the `dev-mode`
 //! Cargo feature; production builds without it will refuse `--dev` with an error.
 //!
 //! **NEVER use `--dev` in production deployments.**
@@ -78,6 +77,12 @@ use tze_hud_scene::types::*;
 /// always active by default.  The file lives at `config/production.toml`
 /// relative to this source file and is baked into the binary at compile time.
 const PRODUCTION_CONFIG: &str = include_str!("../config/production.toml");
+
+/// Paired agents for the production config (`config/agents.toml`).
+const PRODUCTION_AGENTS: &str = include_str!("../config/agents.toml");
+
+/// Demo PSK whose SHA-256 `config/agents.toml` stores.
+const AGENT_PSK: &str = "vertical-slice-key";
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().collect();
@@ -153,7 +158,7 @@ fn run_windowed() -> Result<(), Box<dyn std::error::Error>> {
         overlay_auto_size,
         grpc_port: 0, // Disabled for the standalone windowed demo.
         mcp_port: 0,  // Disabled for the standalone windowed demo.
-        psk: "vertical-slice-key".to_string(),
+        agents: Default::default(),
         projection_operator_authority: None,
         target_fps: 60,
         config_toml: None,      // No configuration file for the standalone demo.
@@ -187,16 +192,16 @@ fn now_ms() -> u64 {
 ///
 /// # Production path (default, `dev_mode = false`)
 ///
-/// Loads `config/production.toml` (embedded at compile time via `include_str!`).
-/// Only the registered agent (`vertical-slice-agent`) may connect, with the
-/// capability set declared in that file.  No Cargo feature flags are required.
+/// Loads `config/production.toml` and `config/agents.toml` (embedded at compile
+/// time via `include_str!`). Only the paired agent (`vertical-slice-agent`) may
+/// connect, with its `allow` list.  No Cargo feature flags are required.
 ///
 ///   cargo run -p vertical_slice -- --headless
 ///
 /// # Dev mode (opt-in, `dev_mode = true`, TEST/DEV ONLY)
 ///
-/// Bypasses config governance: all capabilities granted to any agent
-/// (`fallback_unrestricted = true`).  Requires the `dev-mode` Cargo feature.
+/// Bypasses governance: the demo PSK claims any agent id with all
+/// capabilities.  Requires the `dev-mode` Cargo feature.
 /// Pass `--dev` on the command line to activate.
 ///
 ///   cargo run -p vertical_slice --features dev-mode -- --headless --dev
@@ -212,15 +217,21 @@ async fn run_headless(dev_mode: bool) -> Result<(), Box<dyn std::error::Error>> 
 
     // ─── Initialize runtime ────────────────────────────────────────────────
     //
-    // Production path (default): load config/production.toml, which enforces
-    // the allow list in [agents.vertical-slice-agent].
+    // Production path (default): load config/production.toml and pair the
+    // agent from config/agents.toml, which enforces its allow list.
     //
-    // Dev mode (--dev, TEST/DEV ONLY): config_toml = None makes every agent
-    // unrestricted.  Requires --features dev-mode at build time.
-    let config_toml = if dev_mode {
-        None // dev-mode: requires --features dev-mode at build time
+    // Dev mode (--dev, TEST/DEV ONLY): config_toml = None and the demo PSK
+    // claims any agent unrestricted.  Requires --features dev-mode at build time.
+    let (config_toml, agents) = if dev_mode {
+        (
+            None,
+            tze_hud_scene::config::AgentDirectory::unrestricted(AGENT_PSK),
+        )
     } else {
-        Some(PRODUCTION_CONFIG.to_string())
+        (
+            Some(PRODUCTION_CONFIG.to_string()),
+            tze_hud_config::AgentsFile::parse(PRODUCTION_AGENTS)?.directory()?,
+        )
     };
 
     let config = HeadlessConfig {
@@ -230,7 +241,7 @@ async fn run_headless(dev_mode: bool) -> Result<(), Box<dyn std::error::Error>> 
         // This example is a demo entrypoint where external agents connect;
         // opt in to all-interfaces binding so connections from outside loopback work.
         bind_all_interfaces: true,
-        psk: "vertical-slice-key".to_string(),
+        agents,
         config_toml,
     };
 
@@ -285,7 +296,7 @@ async fn run_headless(dev_mode: bool) -> Result<(), Box<dyn std::error::Error>> 
                 auth_credential: Some(session_proto::AuthCredential {
                     credential: Some(session_proto::auth_credential::Credential::PreSharedKey(
                         session_proto::PreSharedKeyCredential {
-                            key: "vertical-slice-key".to_string(),
+                            key: AGENT_PSK.to_string(),
                         },
                     )),
                 }),
@@ -299,8 +310,8 @@ async fn run_headless(dev_mode: bool) -> Result<(), Box<dyn std::error::Error>> 
     // Read SessionEstablished.
     //
     // The PSK identifies the agent; its `[agents.<id>] allow` list decides
-    // what it may do. In dev mode (--dev, TEST/DEV ONLY) an agent without a
-    // table may do anything (fallback_unrestricted = true).
+    // what it may do. In dev mode (--dev, TEST/DEV ONLY) the demo PSK may do
+    // anything.
     // `active_subscriptions` lists which subscription categories are live.
     use tokio_stream::StreamExt;
     let msg = response_stream.next().await.unwrap()?;
@@ -1258,7 +1269,7 @@ mod tests {
         let free_port = listener.local_addr().unwrap().port();
         drop(listener);
 
-        // Use an explicit config that registers "test-agent" with create_tiles.
+        // Use an explicit config and pair "test-agent" with `tiles`.
         // This mirrors the production path: capability governance is always active.
         // (config_toml: None requires the dev-mode feature or cfg(test) in the
         // runtime crate itself — not available when the runtime is a dependency.)
@@ -1269,9 +1280,6 @@ profile = "headless"
 [[tabs]]
 name = "Main"
 default_tab = true
-
-[agents.test-agent]
-allow = ["tiles"]
 "#;
 
         let config = HeadlessConfig {
@@ -1279,7 +1287,10 @@ allow = ["tiles"]
             height: 240,
             grpc_port: free_port,
             bind_all_interfaces: false,
-            psk: "test-key".to_string(),
+            agents: tze_hud_config::AgentsFile::default()
+                .with_agent("test-agent", "test-key", &["tiles"])
+                .directory()
+                .unwrap(),
             config_toml: Some(toml.to_string()),
         };
         let runtime = HeadlessRuntime::new(config).await.unwrap();
@@ -1823,8 +1834,6 @@ allow = ["tiles"]
     /// - LEASE_CHANGES is mandatory: always active regardless of capabilities
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_gated_subscriptions_denied_without_required_capabilities() {
-        // Use config_toml to restrict the agent's capabilities.
-        // Without this, dev mode (config_toml = None) grants all capabilities.
         let toml = r#"
 [runtime]
 profile = "headless"
@@ -1832,10 +1841,6 @@ profile = "headless"
 [[tabs]]
 name = "Main"
 default_tab = true
-
-[agents.restricted-agent]
-# Widget-only: no scene topology, no zones.
-allow = ["widget:gauge"]
 "#;
         // Bind to port 0 to get an ephemeral port, then release the listener
         // before tonic binds. Avoids hardcoded ports that may conflict in CI.
@@ -1848,7 +1853,11 @@ allow = ["widget:gauge"]
             height: 240,
             grpc_port: free_port,
             bind_all_interfaces: false,
-            psk: "test-key".to_string(),
+            // Pair a widget-only agent: no scene topology, no zones.
+            agents: tze_hud_config::AgentsFile::default()
+                .with_agent("restricted-agent", "test-key", &["widget:gauge"])
+                .directory()
+                .unwrap(),
             config_toml: Some(toml.to_string()),
         };
         let runtime = HeadlessRuntime::new(config).await.unwrap();

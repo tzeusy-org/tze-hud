@@ -30,11 +30,10 @@
 //!
 //! ### rig-mop4 (Zone registry, agent registration, hot-reload)
 //! - Zone Registry Configuration (v1-mandatory)
-//! - Agent Registration with Per-Agent Budget Overrides (v1-mandatory)
-//! - Per-agent PSK (`psk_env`) and allow lists
+//! - Paired agents (`agents.toml`: PSK hashes and allow lists)
 //! - Configuration Reload (v1-mandatory)
 
-pub mod agents;
+pub mod agents_file;
 pub mod allow;
 pub mod loader;
 pub mod policy_builder;
@@ -51,8 +50,8 @@ pub mod tokens;
 pub mod widgets;
 pub mod zones;
 
-pub use agents::{
-    AuthEnvWarning, resolve_agent_psks, resolve_agent_psks_with_lookup, validate_agents,
+pub use agents_file::{
+    AGENTS_FILE_NAME, AgentRecord, AgentsFile, AgentsFileError, agents_path_for,
 };
 pub use allow::{allow_to_permissions, validate_allow_entry};
 pub use loader::TzeHudConfig;

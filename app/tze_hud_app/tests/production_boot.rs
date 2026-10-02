@@ -53,7 +53,9 @@ fn canonical_headless_config() -> HeadlessConfig {
         height: 240,
         grpc_port: 0,
         bind_all_interfaces: false,
-        psk: "canonical-app-production-boot-test".to_string(),
+        agents: tze_hud_scene::config::AgentDirectory::unrestricted(
+            "canonical-app-production-boot-test",
+        ),
         config_toml: Some(canonical_config_for_headless()),
     }
 }

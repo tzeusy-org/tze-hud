@@ -32,12 +32,9 @@
 use std::collections::HashMap;
 
 use tze_hud_scene::config::{
-    ConfigError, ConfigErrorCode, ConfigLoader, ParseError, RegisteredAgentBudgetOverrides,
-    ResolvedConfig,
+    ConfigError, ConfigErrorCode, ConfigLoader, ParseError, ResolvedConfig,
 };
 
-use crate::agents;
-use crate::allow::allow_to_permissions;
 use crate::profile;
 use crate::raw::RawConfig;
 use crate::resolver;
@@ -249,13 +246,18 @@ impl ConfigLoader for TzeHudConfig {
             zones::validate_zones(zone_registry, &mut errors);
         }
 
-        // ── (11) Agent allow lists and PSK variable names ─────────────────────
-        if let Some(raw_agents) = &self.raw.agents {
-            agents::validate_agents(raw_agents, &mut errors);
+        // ── (11) Agents live in agents.toml, never in the config file ─────────
+        if self.raw.agents.is_some() {
+            errors.push(ConfigError {
+                code: ConfigErrorCode::AgentsInConfigFile,
+                field_path: "agents".into(),
+                expected: "no [agents] table".into(),
+                got: "[agents] present".into(),
+                hint: "remove [agents]; agents are added by pairing and stored as PSK hashes \
+                       in agents.toml next to this config"
+                    .into(),
+            });
         }
-
-        // ── (10) Per-agent budget ceiling validation ───────────────────────────
-        validate_agents(&self.raw, &mut errors);
 
         // ── (13) Widget bundle path existence validation ───────────────────────
         // We validate bundle path existence and per-tab widget instance references
@@ -318,34 +320,11 @@ impl ConfigLoader for TzeHudConfig {
             .filter_map(|t| t.name.clone())
             .collect();
 
-        let mut agent_capabilities: HashMap<String, Vec<String>> = HashMap::new();
-        let mut agent_psk_env: HashMap<String, String> = HashMap::new();
-        let mut agent_budget_overrides = HashMap::new();
-        if let Some(agents) = &self.raw.agents {
-            for (name, agent) in agents {
-                agent_capabilities.insert(name.clone(), allow_to_permissions(&agent.allow));
-                if let Some(env) = &agent.psk_env {
-                    agent_psk_env.insert(name.clone(), env.clone());
-                }
-                agent_budget_overrides.insert(
-                    name.clone(),
-                    RegisteredAgentBudgetOverrides {
-                        max_tiles: agent.max_tiles,
-                        max_texture_mb: agent.max_texture_mb,
-                        max_update_hz: agent.max_update_hz,
-                    },
-                );
-            }
-        }
-
         let source_path = None; // Set by caller after file load.
 
         Ok(ResolvedConfig {
             profile,
             tab_names,
-            agent_capabilities,
-            agent_psk_env,
-            agent_budget_overrides,
             source_path,
         })
     }
@@ -562,77 +541,6 @@ fn validate_fps_range(
                 "target_fps must be >= min_fps; set target_fps >= {min} or lower min_fps"
             ),
         });
-    }
-}
-
-fn validate_agents(raw: &RawConfig, errors: &mut Vec<ConfigError>) {
-    let ceiling = match profile::profile_ceiling_for_validation(raw) {
-        Some(p) => p,
-        None => return, // Unresolvable profile — other checks will report the error.
-    };
-
-    let agents = match raw.agents.as_ref() {
-        Some(agents) => agents,
-        None => return,
-    };
-
-    for (agent_name, agent) in agents {
-        // max_tiles ceiling.
-        if let Some(agent_max_tiles) = agent.max_tiles {
-            if agent_max_tiles > ceiling.max_tiles {
-                errors.push(ConfigError {
-                    code: ConfigErrorCode::AgentBudgetExceedsProfile,
-                    field_path: format!("agents.{agent_name}.max_tiles"),
-                    expected: format!("<= {} (active profile ceiling)", ceiling.max_tiles),
-                    got: format!("{agent_max_tiles}"),
-                    hint: format!(
-                        "agent {agent_name:?} max_tiles={agent_max_tiles} exceeds \
-                         the active profile ceiling of {}; reduce max_tiles or \
-                         use a profile with a higher ceiling",
-                        ceiling.max_tiles
-                    ),
-                });
-            }
-        }
-
-        // max_texture_mb ceiling.
-        if let Some(agent_max_texture_mb) = agent.max_texture_mb {
-            if agent_max_texture_mb > ceiling.max_texture_mb {
-                errors.push(ConfigError {
-                    code: ConfigErrorCode::AgentBudgetExceedsProfile,
-                    field_path: format!("agents.{agent_name}.max_texture_mb"),
-                    expected: format!("<= {} (active profile ceiling)", ceiling.max_texture_mb),
-                    got: format!("{agent_max_texture_mb}"),
-                    hint: format!(
-                        "agent {agent_name:?} max_texture_mb={agent_max_texture_mb} exceeds \
-                         the active profile ceiling of {}; reduce max_texture_mb or \
-                         use a profile with a higher ceiling",
-                        ceiling.max_texture_mb
-                    ),
-                });
-            }
-        }
-
-        // max_update_hz ceiling (checked against profile.max_agent_update_hz).
-        if let Some(agent_max_update_hz) = agent.max_update_hz {
-            if agent_max_update_hz > ceiling.max_agent_update_hz {
-                errors.push(ConfigError {
-                    code: ConfigErrorCode::AgentBudgetExceedsProfile,
-                    field_path: format!("agents.{agent_name}.max_update_hz"),
-                    expected: format!(
-                        "<= {} (active profile max_agent_update_hz ceiling)",
-                        ceiling.max_agent_update_hz
-                    ),
-                    got: format!("{agent_max_update_hz}"),
-                    hint: format!(
-                        "agent {agent_name:?} max_update_hz={agent_max_update_hz} exceeds \
-                         the active profile max_agent_update_hz ceiling of {}; \
-                         reduce max_update_hz or use a profile with a higher ceiling",
-                        ceiling.max_agent_update_hz
-                    ),
-                });
-            }
-        }
     }
 }
 

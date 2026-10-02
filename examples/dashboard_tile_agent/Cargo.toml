@@ -17,6 +17,7 @@ dev-mode = ["tze_hud_runtime/dev-mode"]
 
 [dependencies]
 tze_hud_scene = { path = "../../crates/tze_hud_scene", version = "0.1.0" }
+tze_hud_config = { path = "../../crates/tze_hud_config", version = "0.1.0" }
 tze_hud_runtime = { path = "../../crates/tze_hud_runtime", version = "0.1.0" }
 tze_hud_protocol = { path = "../../crates/tze_hud_protocol", version = "0.1.0" }
 tze_hud_resource = { path = "../../crates/tze_hud_resource", version = "0.1.0" }

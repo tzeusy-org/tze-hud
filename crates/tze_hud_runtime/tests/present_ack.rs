@@ -32,7 +32,7 @@ async fn make_runtime() -> HeadlessRuntime {
         height: 240,
         grpc_port: 0,
         bind_all_interfaces: false,
-        psk: "test".to_string(),
+        agents: tze_hud_scene::config::AgentDirectory::unrestricted("test"),
         config_toml: None,
     };
     HeadlessRuntime::new(config).await.expect("runtime init")

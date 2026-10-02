@@ -638,33 +638,11 @@ name = "T"
     );
 }
 
-// ── Agent allow lists ─────────────────────────────────────────────────────────
+// ── Agents live in agents.toml ────────────────────────────────────────────────
 
-/// WHEN an agent lists an unknown allow entry THEN CONFIG error with a hint.
+/// WHEN a config file still has `[agents]` THEN a config error points at pairing.
 #[test]
-fn unknown_allow_entry_rejected_with_hint() {
-    let toml = r#"
-[runtime]
-profile = "full-display"
-
-[[tabs]]
-name = "Main"
-
-[agents.agent_a]
-allow = ["create_tiles"]
-"#;
-    let errors = TzeHudConfig::parse(toml).unwrap().validate();
-    let err = errors
-        .iter()
-        .find(|e| matches!(e.code, ConfigErrorCode::UnknownAllowEntry))
-        .expect("unknown allow entry should be rejected");
-    assert_eq!(err.field_path, "agents.agent_a.allow");
-    assert!(err.hint.contains("valid entries"), "{}", err.hint);
-}
-
-/// WHEN agents list valid allow entries THEN freeze expands them to permissions.
-#[test]
-fn valid_allow_list_freezes_to_permissions() {
+fn agents_table_in_config_is_rejected_with_pairing_hint() {
     let toml = r#"
 [runtime]
 profile = "full-display"
@@ -674,33 +652,15 @@ name = "Main"
 
 [agents.agent_a]
 psk_env = "AGENT_A_PSK"
-allow = ["zone:subtitle", "widget:*", "portal", "tiles"]
+allow = ["*"]
 "#;
-    let loader = TzeHudConfig::parse(toml).unwrap();
-    assert!(loader.validate().is_empty());
-    let resolved = loader.freeze().expect("freeze");
-    let perms = &resolved.agent_capabilities["agent_a"];
-    assert!(perms.contains(&"publish_zone:subtitle".to_string()));
-    assert!(perms.contains(&"publish_widget:*".to_string()));
-    assert!(perms.contains(&"resident_mcp".to_string()));
-    assert!(perms.contains(&"create_tiles".to_string()));
-    assert_eq!(resolved.agent_psk_env["agent_a"], "AGENT_A_PSK");
-}
-
-/// WHEN a config still uses the removed `[agents.registered]` form THEN parse fails.
-#[test]
-fn legacy_registered_agents_form_is_rejected() {
-    let toml = r#"
-[runtime]
-profile = "full-display"
-
-[[tabs]]
-name = "Main"
-
-[agents.agent_a]
-capabilities = ["create_tiles"]
-"#;
-    assert!(TzeHudConfig::parse(toml).is_err());
+    let errors = TzeHudConfig::parse(toml).unwrap().validate();
+    let err = errors
+        .iter()
+        .find(|e| matches!(e.code, ConfigErrorCode::AgentsInConfigFile))
+        .expect("[agents] in config.toml should be rejected");
+    assert_eq!(err.field_path, "agents");
+    assert!(err.hint.contains("pairing"), "{}", err.hint);
 }
 
 // ── freeze / ResolvedConfig ───────────────────────────────────────────────────
@@ -900,119 +860,6 @@ fn spec_builtin_zone_type_subtitle_accepted() {
     );
 }
 
-// ── Spec §Agent Registration with Per-Agent Budget Overrides (rig-mop4) ───────
-
-/// WHEN agent sets max_tiles = 4 and profile has max_tiles = 1024 THEN accepted.
-#[test]
-fn spec_agent_budget_within_ceiling_accepted() {
-    let toml = r#"
-[runtime]
-profile = "full-display"
-
-[[tabs]]
-name = "Main"
-
-[agents.my_agent]
-max_tiles = 4
-"#;
-    let loader = parse_ok(toml);
-    let errors = loader.validate();
-    let budget_errors: Vec<_> = errors
-        .iter()
-        .filter(|e| matches!(e.code, ConfigErrorCode::AgentBudgetExceedsProfile))
-        .collect();
-    assert!(
-        budget_errors.is_empty(),
-        "max_tiles=4 within profile ceiling should be accepted, got: {budget_errors:?}"
-    );
-}
-
-#[test]
-fn freeze_retains_registered_agent_budget_overrides() {
-    let toml = r#"
-[runtime]
-profile = "full-display"
-
-[[tabs]]
-name = "Main"
-
-[agents.my_agent]
-max_tiles = 4
-max_texture_mb = 32
-max_update_hz = 10
-"#;
-
-    let resolved = parse_ok(toml).freeze().expect("valid config freezes");
-    let overrides = resolved
-        .agent_budget_overrides
-        .get("my_agent")
-        .expect("registered override retained");
-    assert_eq!(overrides.max_tiles, Some(4));
-    assert_eq!(overrides.max_texture_mb, Some(32));
-    assert_eq!(overrides.max_update_hz, Some(10));
-}
-
-/// WHEN agent sets max_tiles = 2048 and profile has max_tiles = 1024 THEN
-/// CONFIG_AGENT_BUDGET_EXCEEDS_PROFILE identifying agent, field, and ceiling.
-#[test]
-fn spec_agent_budget_exceeds_ceiling_rejected() {
-    let toml = r#"
-[runtime]
-profile = "full-display"
-
-[[tabs]]
-name = "Main"
-
-[agents.big_agent]
-max_tiles = 2048
-"#;
-    let loader = parse_ok(toml);
-    let errors = loader.validate();
-    assert!(
-        errors
-            .iter()
-            .any(|e| matches!(e.code, ConfigErrorCode::AgentBudgetExceedsProfile)),
-        "max_tiles=2048 exceeding profile ceiling 1024 should produce CONFIG_AGENT_BUDGET_EXCEEDS_PROFILE"
-    );
-    let err = errors
-        .iter()
-        .find(|e| matches!(e.code, ConfigErrorCode::AgentBudgetExceedsProfile))
-        .unwrap();
-    // Must identify the agent.
-    assert!(
-        err.hint.contains("big_agent"),
-        "error hint should identify agent, got: {:?}",
-        err.hint
-    );
-    // Must identify the field.
-    assert!(
-        err.field_path.contains("max_tiles"),
-        "error path should identify field, got: {:?}",
-        err.field_path
-    );
-    // Must identify the ceiling.
-    assert!(
-        err.expected.contains("1024"),
-        "error should identify ceiling 1024, got: {:?}",
-        err.expected
-    );
-}
-
-// ── Agent PSK indirection ────────────────────────────────────────────────────
-
-/// WHEN an agent sets psk_env and the variable is unset THEN a warning is produced.
-#[test]
-fn agent_psk_unset_env_produces_warning() {
-    use crate::agents::resolve_agent_psks_with_lookup;
-    use std::collections::HashMap;
-
-    let env: HashMap<String, String> =
-        [("spec_agent".to_string(), "SPEC_AGENT_PSK".to_string())].into();
-    let (psks, warnings) = resolve_agent_psks_with_lookup(&env, |_| None);
-    assert!(psks.is_empty());
-    assert_eq!(warnings[0].env_var_name, "SPEC_AGENT_PSK");
-}
-
 // ── Spec §Configuration Reload (rig-mop4) ────────────────────────────────────
 
 /// WHEN SIGHUP received with a valid config THEN the reload succeeds.
@@ -1026,9 +873,6 @@ profile = "full-display"
 
 [[tabs]]
 name = "Main"
-
-[agents.claude]
-allow = ["*"]
 "#;
     let result = reload_config(new_toml);
     assert!(result.is_ok(), "valid reload config should succeed");
@@ -1063,156 +907,6 @@ name = "Main"
             .iter()
             .any(|e| matches!(e.code, ConfigErrorCode::InvalidFpsRange)),
         "should return validation error from reload, got: {errors:?}"
-    );
-}
-
-// ── Spec §Agent Registration — max_update_hz ceiling (hud-7sku) ───────────────
-
-/// WHEN agent max_update_hz is within profile ceiling THEN configuration accepted.
-#[test]
-fn spec_agent_max_update_hz_within_ceiling_accepted() {
-    let toml = r#"
-[runtime]
-profile = "full-display"
-
-[[tabs]]
-name = "Main"
-
-[agents.agent_a]
-max_update_hz = 30
-"#;
-    let loader = parse_ok(toml);
-    let errors = loader.validate();
-    let has_budget_error = errors
-        .iter()
-        .any(|e| matches!(e.code, ConfigErrorCode::AgentBudgetExceedsProfile));
-    assert!(
-        !has_budget_error,
-        "max_update_hz=30 within full-display ceiling of 60 should be accepted, got: {:?}",
-        errors
-            .iter()
-            .map(|e| (&e.code, &e.field_path))
-            .collect::<Vec<_>>()
-    );
-}
-
-/// WHEN agent max_update_hz exceeds profile ceiling THEN CONFIG_AGENT_BUDGET_EXCEEDS_PROFILE.
-#[test]
-fn spec_agent_max_update_hz_exceeds_ceiling_rejected() {
-    let toml = r#"
-[runtime]
-profile = "full-display"
-
-[[tabs]]
-name = "Main"
-
-[agents.agent_a]
-max_update_hz = 120
-"#;
-    let loader = parse_ok(toml);
-    let errors = loader.validate();
-    let budget_error = errors.iter().find(|e| {
-        matches!(e.code, ConfigErrorCode::AgentBudgetExceedsProfile)
-            && e.field_path.contains("max_update_hz")
-    });
-    assert!(
-        budget_error.is_some(),
-        "max_update_hz=120 exceeding full-display ceiling of 60 should produce \
-         CONFIG_AGENT_BUDGET_EXCEEDS_PROFILE, got: {:?}",
-        errors
-            .iter()
-            .map(|e| (&e.code, &e.field_path))
-            .collect::<Vec<_>>()
-    );
-    let err = budget_error.unwrap();
-    assert!(
-        err.field_path.contains("agent_a"),
-        "error field_path should identify the agent name, got: {:?}",
-        err.field_path
-    );
-    assert!(
-        err.field_path.contains("max_update_hz"),
-        "error field_path should identify the field, got: {:?}",
-        err.field_path
-    );
-}
-
-/// WHEN agent max_update_hz equals profile ceiling THEN accepted (equality is within ceiling).
-#[test]
-fn spec_agent_max_update_hz_equal_to_ceiling_accepted() {
-    let toml = r#"
-[runtime]
-profile = "full-display"
-
-[[tabs]]
-name = "Main"
-
-[agents.agent_a]
-max_update_hz = 60
-"#;
-    let loader = parse_ok(toml);
-    let errors = loader.validate();
-    let has_budget_error = errors
-        .iter()
-        .any(|e| matches!(e.code, ConfigErrorCode::AgentBudgetExceedsProfile));
-    assert!(
-        !has_budget_error,
-        "max_update_hz=60 equal to full-display ceiling of 60 should be accepted, got: {:?}",
-        errors
-            .iter()
-            .map(|e| (&e.code, &e.field_path))
-            .collect::<Vec<_>>()
-    );
-}
-
-/// WHEN agent max_update_hz equals the headless profile ceiling THEN accepted.
-#[test]
-fn spec_agent_max_update_hz_equal_to_headless_ceiling_accepted() {
-    let toml = r#"
-[runtime]
-profile = "headless"
-
-[[tabs]]
-name = "Main"
-
-[agents.ci_agent]
-max_update_hz = 60
-"#;
-    let loader = parse_ok(toml);
-    let errors = loader.validate();
-    assert!(
-        errors.is_empty(),
-        "max_update_hz=60 equal to headless ceiling should validate cleanly, got: {:?}",
-        errors
-            .iter()
-            .map(|e| (&e.code, &e.field_path))
-            .collect::<Vec<_>>()
-    );
-}
-
-/// WHEN agent max_update_hz exceeds headless profile ceiling THEN rejected.
-#[test]
-fn spec_agent_max_update_hz_exceeds_headless_ceiling_rejected() {
-    let toml = r#"
-[runtime]
-profile = "headless"
-
-[[tabs]]
-name = "Main"
-
-[agents.ci_agent]
-max_update_hz = 61
-"#;
-    let loader = parse_ok(toml);
-    let errors = loader.validate();
-    let has_budget_error = errors.iter().any(|e| {
-        matches!(e.code, ConfigErrorCode::AgentBudgetExceedsProfile)
-            && e.field_path.contains("max_update_hz")
-    });
-    assert!(
-        has_budget_error,
-        "max_update_hz=61 exceeding headless ceiling of 60 should produce \
-         CONFIG_AGENT_BUDGET_EXCEEDS_PROFILE"
     );
 }
 
@@ -1271,44 +965,6 @@ name = "Main"
         resolved.profile.max_tiles,
         tze_hud_scene::config::DisplayProfile::full_display().max_tiles,
         "non-overridden fields use base values"
-    );
-}
-
-/// WHEN custom profile lowers max_agent_update_hz to 30 and agent sets max_update_hz=45
-/// THEN CONFIG_AGENT_BUDGET_EXCEEDS_PROFILE (agent exceeds the tightened custom ceiling).
-///
-/// Regression test: profile_ceiling_for_validation must apply custom overrides, not just
-/// use the base profile ceiling.
-#[test]
-fn spec_agent_max_update_hz_exceeds_custom_tightened_ceiling_rejected() {
-    let toml = r#"
-[runtime]
-profile = "custom"
-
-[display_profile]
-extends = "full-display"
-max_agent_update_hz = 30
-
-[[tabs]]
-name = "Main"
-
-[agents.fast_agent]
-max_update_hz = 45
-"#;
-    let loader = parse_ok(toml);
-    let errors = loader.validate();
-    let budget_error = errors.iter().find(|e| {
-        matches!(e.code, ConfigErrorCode::AgentBudgetExceedsProfile)
-            && e.field_path.contains("max_update_hz")
-    });
-    assert!(
-        budget_error.is_some(),
-        "max_update_hz=45 exceeding custom ceiling of 30 should produce \
-         CONFIG_AGENT_BUDGET_EXCEEDS_PROFILE, got: {:?}",
-        errors
-            .iter()
-            .map(|e| (&e.code, &e.field_path))
-            .collect::<Vec<_>>()
     );
 }
 

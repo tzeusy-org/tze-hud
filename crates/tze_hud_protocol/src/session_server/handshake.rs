@@ -12,7 +12,6 @@ use crate::proto::session::server_message::Payload as ServerPayload;
 use crate::proto::session::*;
 use crate::session::SharedState;
 use crate::subscriptions;
-use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tonic::Status;
@@ -46,9 +45,9 @@ async fn send_auth_failed(
 #[derive(Clone, Copy)]
 pub(super) struct HandshakeCtx<'a> {
     pub state: &'a Arc<Mutex<SharedState>>,
+    /// The agent directory as of this handshake.
     pub agents: &'a AgentDirectory,
-    pub agent_resource_budgets: &'a HashMap<String, ResourceBudget>,
-    pub fallback_resource_budget: &'a ResourceBudget,
+    pub resource_budget: &'a ResourceBudget,
     pub budget_enforcer: Option<&'a super::SharedMutationBudgetEnforcer>,
     /// Peer address, for loopback gating of local-socket credentials.
     pub peer_ip: Option<std::net::IpAddr>,
@@ -63,8 +62,7 @@ pub(super) async fn handle_session_init(
     let HandshakeCtx {
         state,
         agents,
-        agent_resource_budgets,
-        fallback_resource_budget,
+        resource_budget,
         budget_enforcer,
         peer_ip,
     } = ctx;
@@ -122,10 +120,7 @@ pub(super) async fn handle_session_init(
     let namespace = identity.agent_id.clone();
     let resume_token = uuid::Uuid::now_v7().as_bytes().to_vec();
     let scene_session_id = tze_hud_scene::SceneId::from_uuid(session_uuid);
-    let resource_budget = agent_resource_budgets
-        .get(&namespace)
-        .cloned()
-        .unwrap_or_else(|| fallback_resource_budget.clone());
+    let resource_budget = resource_budget.clone();
     if let Some(enforcer) = budget_enforcer {
         if let super::MutationBudgetDecision::Reject {
             error_code,
@@ -134,7 +129,7 @@ pub(super) async fn handle_session_init(
             scene_session_id,
             namespace.clone(),
             resource_budget.clone(),
-            agent_resource_budgets.contains_key(&namespace),
+            agents.contains(&namespace),
             super::MutationBudgetUsage::default(),
         ) {
             let _ = tx
@@ -155,9 +150,7 @@ pub(super) async fn handle_session_init(
     // Register session in the session registry and capture upload rate config.
     let upload_rate_limit_bytes_per_sec = {
         let mut st = state.lock().await;
-        let _ = st
-            .sessions
-            .authenticate(&namespace, &agents.runtime_psk, &granted_capabilities);
+        let _ = st.sessions.register(&namespace, &granted_capabilities);
         st.resource_store.upload_rate_limit_bytes_per_sec()
     };
     let session_open_at = now_wall_us();
@@ -237,8 +230,7 @@ pub(super) async fn handle_session_resume(
     let HandshakeCtx {
         state,
         agents,
-        agent_resource_budgets,
-        fallback_resource_budget,
+        resource_budget,
         budget_enforcer,
         peer_ip,
     } = ctx;
@@ -311,10 +303,7 @@ pub(super) async fn handle_session_resume(
     // Issue a fresh single-use token for the resumed session (RFC 0005 §6.3).
     let new_resume_token = uuid::Uuid::now_v7().as_bytes().to_vec();
     let scene_session_id = tze_hud_scene::SceneId::from_uuid(session_uuid);
-    let resource_budget = agent_resource_budgets
-        .get(&namespace)
-        .cloned()
-        .unwrap_or_else(|| fallback_resource_budget.clone());
+    let resource_budget = resource_budget.clone();
     let restored_usage = {
         let st = state.lock().await;
         let scene = st.scene.lock().await;
@@ -336,7 +325,7 @@ pub(super) async fn handle_session_resume(
             scene_session_id,
             namespace.clone(),
             resource_budget.clone(),
-            agent_resource_budgets.contains_key(&namespace),
+            agents.contains(&namespace),
             restored_usage,
         ) {
             let _ = tx
@@ -359,9 +348,7 @@ pub(super) async fn handle_session_resume(
     // current upload-rate configuration for this session.
     let upload_rate_limit_bytes_per_sec = {
         let mut st = state.lock().await;
-        let _ = st
-            .sessions
-            .authenticate(&namespace, &agents.runtime_psk, &identity.permissions);
+        let _ = st.sessions.register(&namespace, &identity.permissions);
         st.resource_store.upload_rate_limit_bytes_per_sec()
     };
 

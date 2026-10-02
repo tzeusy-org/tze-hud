@@ -45,7 +45,7 @@ use crate::element_store::bootstrap_scene_element_store;
 use crate::idle_efficiency::{IdleEfficiencyCounters, IdleEfficiencySnapshot, RuntimeWakeupSource};
 use crate::pipeline::{FramePipeline, HitTestSnapshot};
 use crate::reload_triggers::{RuntimeServiceImpl, spawn_sighup_listener};
-use crate::runtime_context::{FallbackPolicy, RuntimeContext};
+use crate::runtime_context::RuntimeContext;
 use crate::scene_startup::run_scene_startup;
 use crate::widget_runtime_registration::process_pending_widget_svgs;
 use std::sync::Arc;
@@ -64,6 +64,7 @@ use tze_hud_resource::{
 };
 use tze_hud_scene::HitResult;
 use tze_hud_scene::config::ConfigLoader;
+use tze_hud_scene::config::{AgentDirectory, SharedAgents};
 use tze_hud_scene::graph::SceneGraph;
 use tze_hud_scene::types::ZoneInteractionKind;
 use tze_hud_telemetry::{FrameTelemetry, TelemetryCollector};
@@ -95,28 +96,27 @@ pub struct HeadlessConfig {
     ///
     /// Default: `false`.
     pub bind_all_interfaces: bool,
-    /// Pre-shared key for session authentication.
-    pub psk: String,
+    /// The agents that may connect: paired agents (from `agents.toml`, see
+    /// `tze_hud_config::AgentsFile`) and, for tests and dev, an
+    /// [`AgentDirectory::unrestricted`] dev PSK.
+    pub agents: AgentDirectory,
     /// Optional TOML config string to load.
     ///
     /// When `Some(toml)`, the runtime parses and validates it, building a
-    /// `RuntimeContext` that drives per-agent capability grants and profile
-    /// budgets.  If parsing or validation fails, falls back to headless-default
-    /// with `fallback_unrestricted = false` (guest policy / fail-safe).
+    /// `RuntimeContext` with the profile budgets. If parsing or validation
+    /// fails, falls back to headless-default.
     ///
     /// When `None`:
     /// - Under `cfg(any(test, feature = "dev-mode"))`: a headless-profile
-    ///   `RuntimeContext` is used with `fallback_unrestricted = true` (dev mode,
-    ///   all agents get unrestricted capabilities).
+    ///   `RuntimeContext` is used.
     /// - In production builds (without `dev-mode` feature): startup **fails**
-    ///   with an error. The runtime requires explicit config to enforce capability
-    ///   governance.
+    ///   with an error.
     pub config_toml: Option<String>,
 }
 
 /// `HeadlessConfig::default()` is only available under `cfg(test)` or with the
 /// `dev-mode` feature enabled, because the default sets `config_toml: None`
-/// which bypasses config governance (unrestricted capability grants).
+/// and an unrestricted dev PSK (`test-key`).
 ///
 /// Production code must construct `HeadlessConfig` explicitly and supply a
 /// `config_toml` value.
@@ -128,7 +128,7 @@ impl Default for HeadlessConfig {
             height: 1080,
             grpc_port: 50051,
             bind_all_interfaces: false,
-            psk: "test-key".to_string(),
+            agents: AgentDirectory::unrestricted("test-key"),
             config_toml: None,
         }
     }
@@ -137,40 +137,25 @@ impl Default for HeadlessConfig {
 impl HeadlessConfig {
     /// Build a `RuntimeContext` from the optional TOML config.
     ///
-    /// Returns `Ok((context, fallback_unrestricted))` on success.
-    ///
     /// If `config_toml` is `None`:
     /// - Under `cfg(any(test, feature = "dev-mode"))`: returns a headless-default
-    ///   context with `fallback_unrestricted = true` (all agents allowed, dev-mode).
-    /// - In production builds: returns `Err` — config is required to enforce
-    ///   capability governance.
+    ///   context.
+    /// - In production builds: returns `Err` — config is required.
     ///
     /// If `config_toml` is `Some(toml)` but parsing, validation, or freezing
-    /// fails, logs warnings and falls back to the headless default with
-    /// `fallback_unrestricted = false` (guest policy / fail-safe). A caller
-    /// that supplied a config string intended to run with restricted capabilities;
-    /// silently upgrading to unrestricted on parse failure would be a security
-    /// regression.
-    pub fn build_runtime_context(
-        &self,
-    ) -> Result<(RuntimeContext, bool), Box<dyn std::error::Error>> {
+    /// fails, logs warnings and falls back to the headless default.
+    pub fn build_runtime_context(&self) -> Result<RuntimeContext, Box<dyn std::error::Error>> {
         match &self.config_toml {
             None => {
                 #[cfg(any(test, feature = "dev-mode"))]
                 {
-                    Ok((
-                        RuntimeContext::headless_default().with_fallback_policy(
-                            crate::runtime_context::FallbackPolicy::Unrestricted,
-                        ),
-                        true,
-                    ))
+                    Ok(RuntimeContext::headless_default())
                 }
                 #[cfg(not(any(test, feature = "dev-mode")))]
                 {
                     Err(
                         "HeadlessConfig: config_toml is None but the `dev-mode` feature is not \
-                         enabled. Production builds require an explicit config to enforce \
-                         capability governance. Supply a TOML config string via \
+                         enabled. Production builds require an explicit config. Supply a TOML config string via \
                          `HeadlessConfig { config_toml: Some(toml), .. }` or enable the \
                          `dev-mode` feature for development use."
                             .into(),
@@ -183,9 +168,9 @@ impl HeadlessConfig {
                         parse_error = %e.message,
                         line = e.line,
                         column = e.column,
-                        "HeadlessConfig: TOML parse error; using headless-default RuntimeContext (guest fallback)"
+                        "HeadlessConfig: TOML parse error; using headless-default RuntimeContext"
                     );
-                    Ok((RuntimeContext::headless_default(), false))
+                    Ok(RuntimeContext::headless_default())
                 }
                 Ok(mut loader) => {
                     loader.normalize();
@@ -193,26 +178,24 @@ impl HeadlessConfig {
                     if !errors.is_empty() {
                         tracing::warn!(
                             error_count = errors.len(),
-                            "HeadlessConfig: config validation errors; using headless-default RuntimeContext (guest fallback)"
+                            "HeadlessConfig: config validation errors; using headless-default RuntimeContext"
                         );
-                        return Ok((RuntimeContext::headless_default(), false));
+                        return Ok(RuntimeContext::headless_default());
                     }
                     match loader.freeze() {
                         Ok(resolved) => {
                             tracing::info!(
                                 profile = %resolved.profile.name,
-                                agent_count = resolved.agent_capabilities.len(),
                                 "HeadlessConfig: loaded RuntimeContext from config"
                             );
-                            let ctx = RuntimeContext::from_config(resolved, FallbackPolicy::Guest);
-                            Ok((ctx, false))
+                            Ok(RuntimeContext::from_config(resolved))
                         }
                         Err(errors) => {
                             tracing::warn!(
                                 error_count = errors.len(),
-                                "HeadlessConfig: config freeze errors; using headless-default RuntimeContext (guest fallback)"
+                                "HeadlessConfig: config freeze errors; using headless-default RuntimeContext"
                             );
-                            Ok((RuntimeContext::headless_default(), false))
+                            Ok(RuntimeContext::headless_default())
                         }
                     }
                 }
@@ -238,10 +221,11 @@ pub struct HeadlessRuntime {
     pub pipeline: FramePipeline,
     /// Immutable runtime context built from validated config at startup.
     ///
-    /// Holds profile budgets and per-agent capability grants.
+    /// Holds profile budgets.
     pub runtime_context: Arc<RuntimeContext>,
-    /// Whether unknown agents get unrestricted capabilities (true = dev mode).
-    fallback_unrestricted: bool,
+    /// The live agent directory the gRPC server authenticates against; store
+    /// a new directory to pair or remove agents without a restart.
+    pub agents: SharedAgents,
     /// Keeps the durable runtime widget asset store alive for runtime lifetime.
     _runtime_widget_store: Option<RuntimeWidgetStore>,
     /// Broadcast sender for batch-correlated present acknowledgments (hud-91uu6).
@@ -266,21 +250,18 @@ impl HeadlessRuntime {
     /// selection uses `force_fallback_adapter = true` (spec line 211).
     ///
     /// If `config.config_toml` is provided, the runtime builds an immutable
-    /// `RuntimeContext` from the loaded config (profile budgets, per-agent
-    /// capability grants). If config is present but fails to parse/validate,
-    /// falls back to headless-default with `fallback_unrestricted = false`
-    /// (guest policy).
+    /// `RuntimeContext` from the loaded config (profile budgets). If config is
+    /// present but fails to parse/validate, falls back to headless-default.
     ///
     /// If `config.config_toml` is `None`:
-    /// - Under `cfg(any(test, feature = "dev-mode"))`: uses headless-default
-    ///   with `fallback_unrestricted = true` (dev mode, all agents unrestricted).
+    /// - Under `cfg(any(test, feature = "dev-mode"))`: uses headless-default.
     /// - In production builds (without `dev-mode`): returns `Err` immediately —
     ///   the runtime refuses to start without an explicit config.
     pub async fn new(config: HeadlessConfig) -> Result<Self, Box<dyn std::error::Error>> {
         // Build RuntimeContext at startup from loaded config (or default).
         // Returns Err if config_toml is None in a production build (dev-mode not enabled).
-        let (runtime_ctx, fallback_unrestricted) = config.build_runtime_context()?;
-        let runtime_context = Arc::new(runtime_ctx);
+        let runtime_context = Arc::new(config.build_runtime_context()?);
+        let agents = config.agents.clone().shared();
 
         let mut compositor = Compositor::new_headless(config.width, config.height).await?;
         let surface = HeadlessSurface::new(&compositor.device, config.width, config.height);
@@ -365,7 +346,7 @@ impl HeadlessRuntime {
 
         let element_store_bootstrap = bootstrap_scene_element_store(&mut scene);
         let scene = Arc::new(Mutex::new(scene));
-        let sessions = tze_hud_protocol::session::SessionRegistry::new(&config.psk);
+        let sessions = tze_hud_protocol::session::SessionRegistry::new();
         let resident_limits = runtime_context.resident_store_limits();
         let state = Arc::new(Mutex::new(SharedState {
             scene,
@@ -412,7 +393,7 @@ impl HeadlessRuntime {
             config,
             pipeline: FramePipeline::new(),
             runtime_context,
-            fallback_unrestricted,
+            agents,
             _runtime_widget_store: runtime_widget_store,
             frame_presented_tx: None,
             degradation_controller: DegradationController::with_envelope(
@@ -748,18 +729,8 @@ impl HeadlessRuntime {
             .map_err(|e| format!("gRPC server: failed to bind {bind_addr}: {e}"))?;
         tracing::info!(addr = %bind_addr, "gRPC server listener bound");
 
-        // Wire config-driven agent identity: `allow`-derived permissions and
-        // per-agent PSKs. Agents without a table get nothing unless
-        // fallback_unrestricted is true (dev mode).
-        let mut agents = self.runtime_context.agent_directory(&self.config.psk);
-        agents.fallback_permissions = if self.fallback_unrestricted {
-            vec!["*".to_string()]
-        } else {
-            Vec::new()
-        };
         let service = HudSessionImpl::from_deps(SessionDeps {
-            agent_resource_budgets: self.runtime_context.snapshot_agent_resource_budgets(),
-            fallback_resource_budget: self.runtime_context.fallback_resource_budget(),
+            resource_budget: self.runtime_context.resource_budget(),
             budget_enforcer: Some(std::sync::Arc::new(
                 crate::RuntimeMutationBudgetEnforcer::with_limits(
                     self.runtime_context
@@ -772,7 +743,7 @@ impl HeadlessRuntime {
                 ),
             )),
             degradation_notices: self.degradation_notices.clone(),
-            ..SessionDeps::new(self.state.clone(), agents)
+            ..SessionDeps::new(self.state.clone(), self.agents.clone())
         });
 
         let handle = tokio::spawn(async move {
@@ -1062,7 +1033,7 @@ mod tests {
             height: 64,
             grpc_port: 0,
             bind_all_interfaces: false,
-            psk: "idle-efficiency-test".into(),
+            agents: AgentDirectory::unrestricted("idle-efficiency-test"),
             config_toml: None,
         })
         .await
@@ -1100,7 +1071,7 @@ mod tests {
             height: 500,
             grpc_port: 0,
             bind_all_interfaces: false,
-            psk: "transparent-overlap-efficiency-test".into(),
+            agents: AgentDirectory::unrestricted("transparent-overlap-efficiency-test"),
             config_toml: None,
         };
         let pixel_width = config.width as usize;
@@ -1110,7 +1081,7 @@ mod tests {
             height: config.height,
             grpc_port: config.grpc_port,
             bind_all_interfaces: config.bind_all_interfaces,
-            psk: config.psk.clone(),
+            agents: config.agents.clone(),
             config_toml: config.config_toml.clone(),
         })
         .await
@@ -1344,7 +1315,7 @@ mod tests {
             height: 500,
             grpc_port: 0,
             bind_all_interfaces: false,
-            psk: "transparent-overlap-intruding-grip-test".into(),
+            agents: AgentDirectory::unrestricted("transparent-overlap-intruding-grip-test"),
             config_toml: None,
         })
         .await
@@ -1422,7 +1393,7 @@ mod tests {
             height: 500,
             grpc_port: 0,
             bind_all_interfaces: false,
-            psk: "change-efficiency-test".into(),
+            agents: AgentDirectory::unrestricted("change-efficiency-test"),
             config_toml: None,
         })
         .await
@@ -1748,7 +1719,7 @@ mod tests {
             height: 64,
             grpc_port: 0,
             bind_all_interfaces: false,
-            psk: "test".to_string(),
+            agents: AgentDirectory::unrestricted("test"),
             config_toml: None,
         };
         let _runtime_guard = crate::test_support::lock_headless_runtime().await;
@@ -1766,7 +1737,7 @@ mod tests {
             height: 96,
             grpc_port: 0,
             bind_all_interfaces: false,
-            psk: "test".to_string(),
+            agents: AgentDirectory::unrestricted("test"),
             config_toml: None,
         };
         let _runtime_guard = crate::test_support::lock_headless_runtime().await;
@@ -1797,7 +1768,7 @@ mod tests {
             height: 64,
             grpc_port: 0,
             bind_all_interfaces: false,
-            psk: "test".to_string(),
+            agents: AgentDirectory::unrestricted("test"),
             config_toml: None,
         };
         let _runtime_guard = crate::test_support::lock_headless_runtime().await;
@@ -1847,7 +1818,7 @@ mod tests {
             height: 64,
             grpc_port: free_port,
             bind_all_interfaces: false,
-            psk: "test".to_string(),
+            agents: AgentDirectory::unrestricted("test"),
             config_toml: None,
         };
         let _runtime_guard = crate::test_support::lock_headless_runtime().await;
@@ -1866,112 +1837,46 @@ mod tests {
         _server.abort();
     }
 
-    /// Verify that config_toml = None produces a headless-default RuntimeContext
-    /// with fallback_unrestricted = true (dev mode).
+    /// Verify that config_toml = None produces a headless-default RuntimeContext.
     ///
     /// This path is only reachable under cfg(test) or the `dev-mode` feature;
     /// in production builds, `build_runtime_context()` returns `Err` when
     /// `config_toml` is `None`.
     #[test]
-    fn test_build_runtime_context_none_is_dev_mode() {
+    fn test_build_runtime_context_none_is_headless_default() {
         let config = HeadlessConfig {
             width: 64,
             height: 64,
             grpc_port: 0,
             bind_all_interfaces: false,
-            psk: "test".to_string(),
+            agents: AgentDirectory::unrestricted("test"),
             config_toml: None,
         };
-        let (ctx, fallback) = config
+        let ctx = config
             .build_runtime_context()
             .expect("build_runtime_context with None should succeed under cfg(test)");
         assert_eq!(ctx.profile.name, "headless");
-        assert!(
-            fallback,
-            "config_toml = None should set fallback_unrestricted = true"
-        );
     }
 
-    /// Verify that a valid TOML config produces a proper RuntimeContext with
-    /// per-agent capabilities and fallback_unrestricted = false.
-    ///
-    /// This test verifies the config-driven capability gating path
-    /// (configuration/spec.md §Requirement: Agent Registration, lines 136-147).
+    /// A valid config drives the profile; a malformed one falls back to the
+    /// headless default rather than failing startup.
     #[test]
-    fn test_build_runtime_context_from_valid_toml() {
-        let toml = r#"
-[runtime]
-profile = "headless"
-
-[[tabs]]
-name = "Main"
-default_tab = true
-
-[agents.weather-agent]
-allow = ["tiles"]
-
-[agents.monitor-agent]
-allow = ["zone:subtitle"]
-"#;
-
-        let config = HeadlessConfig {
-            width: 64,
-            height: 64,
-            grpc_port: 0,
-            bind_all_interfaces: false,
-            psk: "test".to_string(),
-            config_toml: Some(toml.to_string()),
-        };
-
-        let (ctx, fallback) = config
+    fn test_build_runtime_context_uses_config_profile_or_falls_back() {
+        let build = |toml: &str| {
+            HeadlessConfig {
+                width: 64,
+                height: 64,
+                grpc_port: 0,
+                bind_all_interfaces: false,
+                agents: AgentDirectory::default(),
+                config_toml: Some(toml.to_string()),
+            }
             .build_runtime_context()
-            .expect("build_runtime_context should succeed with valid TOML");
-        assert_eq!(ctx.profile.name, "headless");
-        assert!(
-            !fallback,
-            "valid config should set fallback_unrestricted = false"
-        );
-
-        let agents = ctx.agent_directory("test");
-        let weather = agents.resolve("test", "weather-agent").unwrap();
-        assert!(
-            weather.allows("create_tiles"),
-            "tiles expands to create_tiles"
-        );
-        assert!(!weather.allows("publish_zone:subtitle"));
-
-        let monitor = agents.resolve("test", "monitor-agent").unwrap();
-        assert!(monitor.allows("publish_zone:subtitle"));
-        assert!(!monitor.allows("create_tiles"));
-
-        // An agent without a table gets nothing (fallback = Guest).
-        let unknown = agents.resolve("test", "unknown-agent").unwrap();
-        assert!(unknown.permissions.is_empty());
-    }
-
-    /// Verify that a malformed TOML falls back to the guest (fail-safe) policy, NOT dev mode.
-    ///
-    /// When a config string is provided but cannot be parsed, the caller intended
-    /// to run with restricted capabilities. Silently upgrading to unrestricted on
-    /// parse failure would be a security regression.
-    #[test]
-    fn test_build_runtime_context_malformed_toml_falls_back_to_guest() {
-        let config = HeadlessConfig {
-            width: 64,
-            height: 64,
-            grpc_port: 0,
-            bind_all_interfaces: false,
-            psk: "test".to_string(),
-            config_toml: Some("this is not valid TOML %%%".to_string()),
+            .expect("build_runtime_context returns Ok for any config string")
         };
-        let (ctx, fallback) = config.build_runtime_context().expect(
-            "build_runtime_context should return Ok (guest fallback) even for malformed TOML",
-        );
-        assert_eq!(ctx.profile.name, "headless");
-        assert!(
-            !fallback,
-            "malformed TOML should fall back to guest policy (fallback_unrestricted = false), not dev mode"
-        );
+        let valid = "[runtime]\nprofile = \"full-display\"\n\n[[tabs]]\nname = \"Main\"\n";
+        assert_eq!(build(valid).profile.name, "full-display");
+        assert_eq!(build("this is not valid TOML %%%").profile.name, "headless");
     }
 
     /// Verify that design tokens from config_toml are applied to the compositor
@@ -2033,7 +1938,7 @@ default_tab = true
             height: 64,
             grpc_port: 0,
             bind_all_interfaces: false,
-            psk: "test".to_string(),
+            agents: AgentDirectory::unrestricted("test"),
             config_toml: Some(toml.to_string()),
         };
         let _runtime_guard = crate::test_support::lock_headless_runtime().await;
@@ -2173,7 +2078,7 @@ default_tab = true
             height: 64,
             grpc_port: 0,
             bind_all_interfaces: false,
-            psk: "test".to_string(),
+            agents: AgentDirectory::unrestricted("test"),
             config_toml: None,
         };
         // We only need input_processor which has no GPU dependency.
@@ -2368,7 +2273,7 @@ default_tab = true
             height: 64,
             grpc_port: 0,
             bind_all_interfaces: false,
-            psk: "test".to_string(),
+            agents: AgentDirectory::unrestricted("test"),
             config_toml: None,
         };
         let _runtime_guard = crate::test_support::lock_headless_runtime().await;
@@ -2427,7 +2332,7 @@ default_tab = true
             height: 64,
             grpc_port: free_port,
             bind_all_interfaces: false, // explicit default
-            psk: "test".to_string(),
+            agents: AgentDirectory::unrestricted("test"),
             config_toml: None,
         };
         let _runtime_guard = crate::test_support::lock_headless_runtime().await;
@@ -2463,7 +2368,7 @@ default_tab = true
             height: 64,
             grpc_port: free_port,
             bind_all_interfaces: true, // opt-in
-            psk: "test".to_string(),
+            agents: AgentDirectory::unrestricted("test"),
             config_toml: None,
         };
         let _runtime_guard = crate::test_support::lock_headless_runtime().await;
@@ -2499,7 +2404,7 @@ default_tab = true
             height: 64,
             grpc_port: free_port,
             bind_all_interfaces: false, // config says no, but env var overrides
-            psk: "test".to_string(),
+            agents: AgentDirectory::unrestricted("test"),
             config_toml: None,
         };
         let _runtime_guard = crate::test_support::lock_headless_runtime().await;

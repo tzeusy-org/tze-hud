@@ -252,7 +252,7 @@ mod headless_impl {
             height: BENCHMARK_HEIGHT,
             grpc_port: 0,
             bind_all_interfaces: false,
-            psk: psk.to_string(),
+            agents: tze_hud_scene::config::AgentDirectory::unrestricted(psk),
             config_toml: Some(String::new()),
         }
     }

@@ -1,6 +1,6 @@
 # Dashboard Tile Agent — Production Configuration
 #
-# Only the configured agent ("dashboard-tile-agent") gets permissions:
+# Only the agent paired in agents.toml ("dashboard-tile-agent") may connect;
 # `tiles` covers the raw tile API exemplar (create, modify, input).
 #
 # Usage (headless, production config — no feature flags):
@@ -15,6 +15,3 @@ profile = "headless"
 [[tabs]]
 name = "Main"
 default_tab = true
-
-[agents.dashboard-tile-agent]
-allow = ["tiles"]

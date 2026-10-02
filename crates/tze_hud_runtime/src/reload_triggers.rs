@@ -74,7 +74,7 @@ impl RuntimeService for RuntimeServiceImpl {
     ///
     /// Per RFC 0006 §9: the entire config is re-validated; only the
     /// hot-reloadable sections (currently none) are applied on success. Frozen sections
-    /// ([runtime], [[tabs]], [agents]) are silently ignored.
+    /// ([runtime], [[tabs]]) are silently ignored.
     async fn reload_config(
         &self,
         request: Request<ReloadConfigRequest>,

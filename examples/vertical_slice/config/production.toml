@@ -1,8 +1,8 @@
 # Vertical Slice — Production Configuration
 #
 # This is the canonical runtime config for the vertical_slice example.
-# Only the configured agent ("vertical-slice-agent") gets permissions, from
-# its `allow` list below. Agents without a table get nothing.
+# Only the agent paired in agents.toml ("vertical-slice-agent") may connect,
+# with its `allow` list there; any other PSK is rejected.
 #
 # Usage (headless, production path — no feature flags needed):
 #   cargo run -p vertical_slice -- --headless
@@ -16,9 +16,6 @@ profile = "headless"
 [[tabs]]
 name = "Main"
 default_tab = true
-
-[agents.vertical-slice-agent]
-allow = ["tiles", "zone:status-bar"]
 
 # Design tokens: overrides of the canonical defaults, shared by every zone,
 # widget SVG, and the portal.

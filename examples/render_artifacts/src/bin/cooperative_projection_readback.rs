@@ -88,7 +88,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         height: args.height,
         grpc_port: 0,
         bind_all_interfaces: false,
-        psk: "readback-proof".to_string(),
+        agents: Default::default(),
         config_toml: Some(readback_config_toml()),
     })
     .await?;
@@ -162,9 +162,6 @@ profile = "headless"
 [[tabs]]
 name = "Cooperative Projection Proof"
 default_tab = true
-
-[agents.agent-alpha]
-allow = ["tiles"]
 "#
     .to_string()
 }

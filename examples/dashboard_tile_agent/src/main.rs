@@ -48,6 +48,9 @@ use tze_hud_runtime::headless::HeadlessConfig;
 /// File lives at `config/production.toml` relative to this source file.
 const PRODUCTION_CONFIG: &str = include_str!("../config/production.toml");
 
+/// Paired agents for the production config (`config/agents.toml`).
+const PRODUCTION_AGENTS: &str = include_str!("../config/agents.toml");
+
 /// Agent identifier registered in `config/production.toml`.
 const AGENT_ID: &str = "dashboard-tile-agent";
 
@@ -85,8 +88,9 @@ fn now_wall_us() -> u64 {
 ///
 /// # Production path (default, `dev_mode = false`)
 ///
-/// Loads `config/production.toml` (embedded at compile time).  Only
-/// `dashboard-tile-agent` may connect, with the declared capabilities.
+/// Loads `config/production.toml` and `config/agents.toml` (embedded at
+/// compile time).  Only the paired `dashboard-tile-agent` may connect, with
+/// its `allow` list.
 /// No Cargo feature flags required at build time for this path.
 ///
 /// # Dev mode (opt-in, TEST/DEV ONLY)
@@ -102,10 +106,17 @@ async fn run_headless(dev_mode: bool) -> Result<(), Box<dyn std::error::Error>> 
     }
 
     // ─── Initialize runtime ────────────────────────────────────────────────
-    let config_toml = if dev_mode {
-        None // dev-mode: requires --features dev-mode
+    let (config_toml, agents) = if dev_mode {
+        // dev-mode: requires --features dev-mode
+        (
+            None,
+            tze_hud_scene::config::AgentDirectory::unrestricted(AGENT_PSK),
+        )
     } else {
-        Some(PRODUCTION_CONFIG.to_string())
+        (
+            Some(PRODUCTION_CONFIG.to_string()),
+            tze_hud_config::AgentsFile::parse(PRODUCTION_AGENTS)?.directory()?,
+        )
     };
 
     let config = HeadlessConfig {
@@ -115,7 +126,7 @@ async fn run_headless(dev_mode: bool) -> Result<(), Box<dyn std::error::Error>> 
         // This example is a demo entrypoint where external agents connect;
         // opt in to all-interfaces binding so connections from outside loopback work.
         bind_all_interfaces: true,
-        psk: AGENT_PSK.to_string(),
+        agents,
         config_toml,
     };
 
@@ -1854,7 +1865,7 @@ mod tests {
             grpc_port: port,
             // Loopback-only ([::1]) — tests connect via "[::1]" to match.
             bind_all_interfaces: false,
-            psk: TEST_PSK.to_string(),
+            agents: tze_hud_scene::config::AgentDirectory::unrestricted(TEST_PSK),
             config_toml: None, // dev-mode: unrestricted capabilities
         };
         let _runtime_guard = HEADLESS_RUNTIME_MUTEX.lock().await;
@@ -2005,7 +2016,7 @@ mod tests {
             grpc_port: port,
             // Loopback-only ([::1]) — tests connect via "[::1]" to match.
             bind_all_interfaces: false,
-            psk: TEST_PSK.to_string(),
+            agents: tze_hud_scene::config::AgentDirectory::unrestricted(TEST_PSK),
             config_toml: None, // dev-mode: unrestricted capabilities
         };
         let _runtime_guard = HEADLESS_RUNTIME_MUTEX.lock().await;

@@ -129,7 +129,7 @@ pub use idle_efficiency::{
 };
 pub use mcp::{McpServerConfig, start_mcp_http_server};
 pub use mutation_budget_bridge::RuntimeMutationBudgetEnforcer;
-pub use runtime_context::{FallbackPolicy, RuntimeContext, SharedRuntimeContext};
+pub use runtime_context::{RuntimeContext, SharedRuntimeContext};
 pub use shell::chrome::{
     AgentVisibleTopology, AuditPayload, AuditTrigger, ChromeLayout, ChromeRenderer, ChromeShortcut,
     ChromeState, ChromeTab, CollectingAuditSink, DiagnosticSnapshot, DismissTileResult,

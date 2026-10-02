@@ -6,6 +6,7 @@ use crate::portal_op::{
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use tze_hud_projection::ProjectionErrorCode;
+use tze_hud_scene::config::hash_psk;
 use tze_hud_scene::{
     PendingAction, SceneId, TestClock,
     types::{
@@ -102,20 +103,16 @@ fn server() -> (McpServer, TestClock) {
 /// A server whose only agent `bot` may use `zone:subtitle` and `widget:gauge`.
 fn restricted_server() -> McpServer {
     let clock = TestClock::new(1_000);
-    let agents = AgentDirectory {
-        runtime_psk: "runtime".into(),
-        agent_psks: [("bot".to_string(), "bot-key".to_string())].into(),
-        permissions: [(
-            "bot".to_string(),
-            vec![
-                "publish_zone:subtitle".to_string(),
-                "publish_widget:gauge".to_string(),
-            ],
-        )]
-        .into(),
-        fallback_permissions: vec![],
-    };
-    McpServer::new(scene(&clock)).with_config(McpConfig::with_agents(agents))
+    let mut agents = AgentDirectory::default();
+    agents.insert(
+        "bot",
+        hash_psk("bot-key"),
+        vec![
+            "publish_zone:subtitle".to_string(),
+            "publish_widget:gauge".to_string(),
+        ],
+    );
+    McpServer::new(scene(&clock)).with_config(McpConfig::with_agents(agents.shared()))
 }
 
 async fn rpc(server: &McpServer, ctx: &CallerContext, method: &str, params: Value) -> Value {
@@ -228,6 +225,24 @@ async fn missing_or_unknown_psk_is_unauthenticated() {
     let unconfigured = McpServer::new(SceneGraph::new(10.0, 10.0));
     let resp = rpc(&unconfigured, &ctx(), "tools/list", json!({})).await;
     assert_eq!(resp["error"]["code"], -32004);
+}
+
+/// Pairing swaps the shared directory; the next request sees the new agent
+/// without a restart.
+#[tokio::test]
+async fn swapping_shared_agents_admits_a_new_psk_on_the_next_request() {
+    let agents = AgentDirectory::default().shared();
+    let server = McpServer::new(SceneGraph::new(10.0, 10.0))
+        .with_config(McpConfig::with_agents(agents.clone()));
+    let new_agent = CallerContext::with_bearer("new-key");
+    let resp = rpc(&server, &new_agent, "tools/list", json!({})).await;
+    assert_eq!(resp["error"]["code"], -32004);
+
+    let mut paired = AgentDirectory::default();
+    paired.insert("new", hash_psk("new-key"), vec!["*".to_string()]);
+    agents.store(std::sync::Arc::new(paired));
+    let resp = rpc(&server, &new_agent, "tools/list", json!({})).await;
+    assert!(resp["result"]["tools"].is_array(), "{resp}");
 }
 
 #[tokio::test]

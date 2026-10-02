@@ -1,0 +1,5 @@
+# Paired agents for config/production.toml. Only each PSK's SHA-256 is stored;
+# this one is SHA-256("vertical-slice-key"), the example's demo PSK.
+[agents.vertical-slice-agent]
+psk_sha256 = "c9fe2517ba750385018d1e818e9d1a6dcf06a01151b1c46f7b7d39e149ca121e"
+allow = ["tiles", "zone:status-bar"]
