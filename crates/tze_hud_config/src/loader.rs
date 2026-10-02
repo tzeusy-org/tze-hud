@@ -37,7 +37,7 @@ use tze_hud_scene::config::{
 };
 
 use crate::agents;
-use crate::capability::{capability_hint, has_reserved_event_prefix};
+use crate::capability::capability_hint;
 use crate::profile;
 use crate::raw::RawConfig;
 use crate::resolver;
@@ -274,25 +274,9 @@ impl ConfigLoader for TzeHudConfig {
                 if let Some(caps) = &agent.capabilities {
                     for cap in caps {
                         if !is_canonical_capability(cap) {
-                            // Distinguish reserved event prefix from unknown.
-                            let code = if has_reserved_event_prefix(cap) {
-                                ConfigErrorCode::ReservedEventPrefix
-                            } else {
-                                ConfigErrorCode::UnknownCapability
-                            };
-                            let hint = if code == ConfigErrorCode::ReservedEventPrefix {
-                                let suffix = &cap["emit_scene_event:".len()..];
-                                format!(
-                                    "event prefix {:?} is reserved; \
-                                         system.* and scene.* prefixes are runtime-internal \
-                                         and cannot be granted to agents",
-                                    suffix.split('.').next().unwrap_or(suffix)
-                                )
-                            } else {
-                                capability_hint(cap)
-                            };
+                            let hint = capability_hint(cap);
                             errors.push(ConfigError {
-                                code,
+                                code: ConfigErrorCode::UnknownCapability,
                                 field_path: format!("agents.registered.{agent_name}.capabilities"),
                                 expected: "canonical v1 capability name".into(),
                                 got: cap.clone(),

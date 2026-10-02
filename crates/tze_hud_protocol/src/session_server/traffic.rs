@@ -3,7 +3,7 @@
 use crate::proto::session::MutationBatch;
 use crate::proto::session::server_message::Payload as ServerPayload;
 
-/// Traffic class for outbound server messages (RFC 0005 §3.1, §3.2).
+/// Traffic class for outbound server messages.
 ///
 /// Each class has different delivery guarantees:
 /// - Transactional: at-least-once, ordered, never dropped.
@@ -13,7 +13,7 @@ use crate::proto::session::server_message::Payload as ServerPayload;
 pub enum TrafficClass {
     /// Reliable, ordered, never dropped. MutationResult, LeaseResponse, SessionEstablished, etc.
     Transactional,
-    /// Coalesced under pressure; intermediate states may be skipped. SceneSnapshot, TelemetryFrame.
+    /// Coalesced under pressure; intermediate states may be skipped. SceneSnapshot, EventBatch.
     StateStream,
     /// Droppable under backpressure; latest value wins. Heartbeat echo, ephemeral ZonePublish.
     Ephemeral,
@@ -21,11 +21,10 @@ pub enum TrafficClass {
 
 /// Classify an outbound `ServerMessage` payload into its traffic class.
 ///
-/// Per RFC 0005 §3.1 and §3.2:
-/// - Session lifecycle responses, MutationResult, LeaseResponse, LeaseStateChange,
-///   SubscriptionChangeResult, ZonePublishResult, RuntimeError, BackpressureSignal,
+/// - Session lifecycle responses, MutationResult, LeaseResponse,
+///   SubscriptionChangeResult, ZonePublishResult, RuntimeError,
 ///   SessionSuspended, SessionResumed, and input-control responses are Transactional.
-/// - SceneSnapshot, SceneDelta, EventBatch, TelemetryFrame are StateStream.
+/// - SceneSnapshot and EventBatch are StateStream.
 /// - Heartbeat echoes are Ephemeral.
 pub fn classify_server_payload(payload: &ServerPayload) -> TrafficClass {
     match payload {
@@ -40,7 +39,6 @@ pub fn classify_server_payload(payload: &ServerPayload) -> TrafficClass {
         // Mutation / lease responses — transactional
         ServerPayload::MutationResult(_)
         | ServerPayload::LeaseResponse(_)
-        | ServerPayload::LeaseStateChange(_)
         | ServerPayload::CapabilityNotice(_)
         | ServerPayload::SubscriptionChangeResult(_)
         | ServerPayload::ZonePublishResult(_)
@@ -54,28 +52,21 @@ pub fn classify_server_payload(payload: &ServerPayload) -> TrafficClass {
         | ServerPayload::ResourceStored(_)
         | ServerPayload::ResourceErrorResponse(_) => TrafficClass::Transactional,
 
-        // Backpressure signal — transactional (must not be dropped)
-        ServerPayload::BackpressureSignal(_) => TrafficClass::Transactional,
-
-        // Degradation notice — transactional (RFC 0005 §3.4; never dropped)
+        // Degradation notice — transactional (never dropped)
         ServerPayload::DegradationNotice(_) => TrafficClass::Transactional,
 
-        // Scene state / events / runtime telemetry — state-stream
+        // Scene state / events — state-stream
         // FramePresented rides the telemetry class: coalesced/droppable under
         // backpressure (a present-latency probe samples it; hud-91uu6).
         ServerPayload::SceneSnapshot(_)
-        | ServerPayload::SceneDelta(_)
         | ServerPayload::EventBatch(_)
-        | ServerPayload::RuntimeTelemetry(_)
         | ServerPayload::FramePresented(_) => TrafficClass::StateStream,
 
         // Heartbeat echo — ephemeral (droppable, latest-wins)
         ServerPayload::Heartbeat(_) => TrafficClass::Ephemeral,
 
-        // Agent event emission result — transactional (always delivered)
-        ServerPayload::EmitSceneEventResult(_) | ServerPayload::ListElementsResponse(_) => {
-            TrafficClass::Transactional
-        }
+        // Element discovery response — transactional
+        ServerPayload::ListElementsResponse(_) => TrafficClass::Transactional,
 
         // Element repositioned event — transactional (drag completion / reset-to-default)
         ServerPayload::ElementRepositioned(_) => TrafficClass::Transactional,
@@ -90,7 +81,7 @@ pub fn classify_server_payload(payload: &ServerPayload) -> TrafficClass {
 ///
 /// Any structural/identity-changing mutation makes the batch Transactional;
 /// otherwise content mutations are StateStream; empty batch is Ephemeral.
-/// Uses the same `TrafficClass` enum as outbound classification (RFC 0005 §3).
+/// Uses the same `TrafficClass` enum as outbound classification.
 pub(super) fn classify_inbound_batch(batch: &MutationBatch) -> TrafficClass {
     for m in &batch.mutations {
         if let Some(ref mutation) = m.mutation {
@@ -136,7 +127,7 @@ pub(super) fn classify_inbound_batch(batch: &MutationBatch) -> TrafficClass {
                 // path (hud-mzk74 / hud-iofav).
                 Mutation::SetTileComposerInteraction(_) => {}
                 // Declaring/replacing the first-class portal surface is structural
-                // (identity + parts) — Transactional (RFC 0013 §7.2 promotion).
+                // (identity + parts) — Transactional.
                 Mutation::SetPortalSurface(_) => return TrafficClass::Transactional,
                 // Patching portal lifecycle/display state is a coalescible content
                 // update — StateStream, exactly like the lifecycle accent above. It

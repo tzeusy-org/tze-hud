@@ -571,7 +571,7 @@ async def stop_agent(agent: AgentRuntime, reason: str) -> None:
         except asyncio.CancelledError:
             pass
         agent.dismiss_task = None
-    await agent.client.close(reason=reason, expect_resume=False)
+    await agent.client.close(reason=reason)
 
 
 async def cleanup_agents(agents: list[AgentRuntime]) -> None:

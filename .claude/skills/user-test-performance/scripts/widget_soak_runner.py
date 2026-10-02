@@ -196,8 +196,6 @@ def harness_command(
         f"{param_step:.9f}",
         "--transition-ms",
         str(args.transition_ms),
-        "--ttl-us",
-        str(args.ttl_us),
         "--timeout-s",
         str(args.timeout_s),
         "--agent-id",
@@ -619,7 +617,6 @@ def main() -> int:
     parser.add_argument("--duration-s", type=float, default=DEFAULT_DURATION_S)
     parser.add_argument("--rate-rps", type=float, default=DEFAULT_RATE_RPS)
     parser.add_argument("--transition-ms", type=int, default=0)
-    parser.add_argument("--ttl-us", type=int, default=65_000_000)
     parser.add_argument("--timeout-s", type=float, default=30.0)
     parser.add_argument("--target-p99-rtt-us", type=int, default=None)
     parser.add_argument("--target-throughput-rps", type=float, default=None)

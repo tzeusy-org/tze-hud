@@ -4,7 +4,6 @@ package tze_hud.protocol.v1.session;
 
 import "types.proto";
 import "events.proto";
-import "events_legacy.proto";  // DEPRECATED legacy messages used by SceneDelta
 
 // ─── Session Protocol ─────────────────────────────────────────────────────────
 //
@@ -53,14 +52,10 @@ message ClientMessage {
     // Durable-zone publishes receive ZonePublishResult; ephemeral are fire-and-forget.
     ZonePublish       zone_publish        = 25;
 
-    // Telemetry (RFC 0005 §3.8: field 26)
-    TelemetryFrame    telemetry_frame    = 26;
-
     // Input control (RFC 0004 §8.3.1, RFC 0005 §3.8)
     InputFocusRequest    input_focus_request    = 27;
     InputCaptureRequest  input_capture_request  = 28;
     InputCaptureRelease  input_capture_release  = 29;
-    SetImePosition       set_ime_position       = 30;
 
     // Keepalive (moved from field 25 to field 31 to align with spec §3.8; field 25 reallocated to zone_publish)
     // NOTE: This is a deliberate wire-breaking change from the pre-spec layout.
@@ -72,10 +67,6 @@ message ClientMessage {
     // Capability management (RFC 0005 §5.3)
     // At most one CapabilityRequest SHOULD be in flight per session at a time.
     CapabilityRequest capability_request = 32;
-
-    // Agent scene event emission (scene-events/spec.md §5.1, §5.2).
-    // Requires emit_scene_event:<event_name> capability.
-    EmitSceneEvent emit_scene_event = 33;
 
     // Widget asset registration/upload (session-protocol spec §Requirement: Widget Asset Registration via Session Stream).
     // Two-stage flow: metadata preflight + optional payload upload.
@@ -100,6 +91,11 @@ message ClientMessage {
   // Fields 60–66 and 80–81 carried media signaling and cloud relay, removed in
   // the 2026-10 scope reset. Reserved to prevent reuse.
   reserved 60 to 66, 80, 81;
+
+  // Removed in T5 S1: agent telemetry (no-op), IME positioning (no-op), and
+  // agent scene-event emission (never delivered).
+  reserved 26, 30, 33;
+  reserved "telemetry_frame", "set_ime_position", "emit_scene_event";
 }
 
 // ─── Server -> Client envelope ────────────────────────────────────────────────
@@ -130,14 +126,12 @@ message ServerMessage {
 
     // Lease lifecycle (RFC 0008)
     LeaseResponse         lease_response         = 21;
-    LeaseStateChange      lease_state_change     = 23;
 
     // Capability grant/revocation notice (RFC 0005 §5.3)
     CapabilityNotice      capability_notice      = 25;
 
     // Scene state
     SceneSnapshot         scene_snapshot         = 30;
-    SceneDelta            scene_delta            = 31;
 
     // Keepalive
     Heartbeat             heartbeat              = 33;
@@ -146,13 +140,6 @@ message ServerMessage {
     // Carries per-frame InputEnvelope variants (pointer, keyboard, focus, capture, gesture,
     // IME, scroll, command events). Variants are filtered per RFC 0005 §7.1 before delivery.
     tze_hud.protocol.v1.EventBatch event_batch   = 34;
-
-    // Backpressure
-    BackpressureSignal    backpressure_signal    = 35;
-
-    // Runtime telemetry delivered to agents subscribed to TELEMETRY_FRAMES (RFC 0005 §9).
-    // State-stream class: coalesced under backpressure; requires read_telemetry capability.
-    RuntimeTelemetryFrame runtime_telemetry     = 36;
 
     // Subscription acknowledgement (RFC 0005 §7.3)
     SubscriptionChangeResult subscription_change_result = 39;
@@ -168,9 +155,6 @@ message ServerMessage {
     // Input control responses (RFC 0004 §8.3.1, RFC 0005 §3.8)
     InputFocusResponse    input_focus_response    = 43;
     InputCaptureResponse  input_capture_response  = 44;
-
-    // Agent scene event emission result (scene-events/spec.md §5.1).
-    EmitSceneEventResult  emit_scene_event_result = 45;
 
     // Degradation notice (RFC 0005 §3.4, §7.1).
     // Transactional — never dropped. Delivered to ALL active sessions unconditionally
@@ -219,6 +203,13 @@ message ServerMessage {
   // Fields 60–68 and 80–82 carried media signaling and cloud relay, removed in
   // the 2026-10 scope reset. Reserved to prevent reuse.
   reserved 60 to 68, 80 to 82;
+
+  // Removed in T5 S1: lease_state_change duplicated lease_response; scene
+  // deltas, backpressure signals, and runtime telemetry were never sent;
+  // emit_scene_event_result went with agent scene events.
+  reserved 23, 31, 35, 36, 45;
+  reserved "lease_state_change", "scene_delta", "backpressure_signal",
+    "runtime_telemetry", "emit_scene_event_result";
 }
 
 // ─── Authentication credentials (RFC 0005 §1.4) ──────────────────────────────
@@ -267,13 +258,11 @@ message AuthCredential {
 // Must arrive within handshake_timeout (default 5000ms) or stream is closed.
 message SessionInit {
   string agent_id               = 1;  // Stable agent identifier (e.g. "weather-agent")
-  string agent_display_name     = 2;  // Human-readable label
 
-  // Authentication credential (RFC 0005 §1.4).
-  // V1 supports: PreSharedKeyCredential, LocalSocketCredential.
-  // Field 3 (pre_shared_key string) was replaced by auth_credential at field 13.
-  // Kept for backward-compat but auth_credential takes precedence if set.
-  string pre_shared_key         = 3;  // Deprecated: use auth_credential instead
+  // Fields 2 (agent_display_name, never read) and 3 (pre_shared_key, replaced
+  // by auth_credential) removed in T5 S1.
+  reserved 2, 3;
+  reserved "agent_display_name", "pre_shared_key";
 
   // Capabilities requested by the agent
   repeated string requested_capabilities = 4;
@@ -295,8 +284,7 @@ message SessionInit {
   uint32 min_protocol_version   = 8;  // Minimum version agent can speak (0 = unset → treated as 1000)
   uint32 max_protocol_version   = 9;  // Maximum version agent can speak (0 = unset → treated as 1000)
 
-  // Structured auth credential (RFC 0005 §1.4).
-  // Takes precedence over pre_shared_key (field 3) if set.
+  // Auth credential. V1 supports PreSharedKeyCredential and LocalSocketCredential.
   AuthCredential auth_credential = 13;
 }
 
@@ -316,7 +304,8 @@ message SessionResume {
 // Graceful disconnect from client.
 message SessionClose {
   string reason        = 1;  // Optional human-readable reason
-  bool   expect_resume = 2;  // Hint: agent intends to reconnect shortly
+  reserved 2;
+  reserved "expect_resume";
 }
 
 // Server response: session established (handshake accepted).
@@ -387,7 +376,9 @@ message SessionResumeResult {
   uint64 new_server_sequence             = 3;   // Current server-side sequence
   uint32 negotiated_protocol_version     = 4;   // Protocol version in use
   repeated string granted_capabilities   = 5;   // Capabilities confirmed for resumed session
-  string error                           = 6;   // Human-readable rejection reason (if accepted=false)
+  // Field 6 (error) removed in T5 S1: rejections are sent as SessionError.
+  reserved 6;
+  reserved "error";
   // Confirmed subscription state after resume. Agents MUST use these values.
   repeated string active_subscriptions   = 7;   // Confirmed active subscription set
   repeated string denied_subscriptions   = 8;   // Denied (missing capability)
@@ -424,9 +415,7 @@ enum ErrorCode {
   BUDGET_EXCEEDED                = 6;
   MUTATION_REJECTED              = 7;
   PERMISSION_DENIED              = 8;
-  RATE_LIMITED                   = 9;
   INVALID_ARGUMENT               = 10;
-  SESSION_EXPIRED                = 11;
   // 12, 13 were CLOCK_SKEW_HIGH / CLOCK_SKEW_EXCESSIVE (removed in the reset).
   reserved 12, 13;
   reserved "CLOCK_SKEW_HIGH", "CLOCK_SKEW_EXCESSIVE";
@@ -434,12 +423,12 @@ enum ErrorCode {
   TIMESTAMP_TOO_OLD              = 15;
   TIMESTAMP_TOO_FUTURE           = 16;
   TIMESTAMP_EXPIRY_BEFORE_PRESENT = 17;
-  // Agent event emission errors (scene-events/spec.md §5)
-  AGENT_EVENT_RATE_EXCEEDED      = 18;  // Sliding-window rate limit exceeded (spec line 133)
-  AGENT_EVENT_PAYLOAD_TOO_LARGE  = 19;  // Payload exceeds 4 KB limit (spec line 122)
-  AGENT_EVENT_CAPABILITY_MISSING = 20;  // emit_scene_event:<name> capability not granted (spec line 113)
-  AGENT_EVENT_INVALID_NAME       = 21;  // Bare name failed regex validation
-  AGENT_EVENT_RESERVED_PREFIX    = 22;  // Bare name starts with "system." or "scene."
+  // Removed in T5 S1: never set (rate limiting, session expiry) or tied to
+  // agent scene-event emission, which was never delivered.
+  reserved 9, 11, 18 to 22;
+  reserved "RATE_LIMITED", "SESSION_EXPIRED", "AGENT_EVENT_RATE_EXCEEDED",
+    "AGENT_EVENT_PAYLOAD_TOO_LARGE", "AGENT_EVENT_CAPABILITY_MISSING",
+    "AGENT_EVENT_INVALID_NAME", "AGENT_EVENT_RESERVED_PREFIX";
 }
 
 // Structured error response following the common error model (RFC 0005 §3.5).
@@ -559,14 +548,6 @@ message LeaseResponse {
   LeaseResult result          = 8;
 }
 
-// Server notifies of lease state change (revocation, expiry, suspension, etc.)
-message LeaseStateChange {
-  bytes  lease_id       = 1;  // Affected lease
-  string previous_state = 2;  // e.g. "ACTIVE"
-  string new_state      = 3;  // e.g. "REVOKED", "EXPIRED", "SUSPENDED"
-  string reason         = 4;  // Human-readable reason
-  uint64 timestamp_wall_us = 5; // When the transition occurred (UTC us)
-}
 
 // ─── Subscription messages ────────────────────────────────────────────────────
 
@@ -642,7 +623,8 @@ message WidgetPublish {
   string instance_id   = 2;  // Optional disambiguation for multi-instance tabs
   repeated tze_hud.protocol.v1.WidgetParameterValueProto params = 3;
   uint32 transition_ms = 4;  // 0 = instant
-  uint64 ttl_us        = 5;  // 0 = use widget instance default
+  reserved 5;           // ttl_us, never read (removed in T5 S1)
+  reserved "ttl_us";
   string merge_key     = 6;  // For MergeByKey contention policy; empty otherwise
   bytes  element_id    = 7;  // Optional widget element ID addressing
 }
@@ -778,30 +760,7 @@ message Heartbeat {
   uint64 timestamp_mono_us = 1;  // Monotonic clock (us); echoed for RTT calculation
 }
 
-// ─── Telemetry ────────────────────────────────────────────────────────────────
 
-// Agent-side metrics pushed to the runtime.
-message TelemetryFrame {
-  uint64 sample_timestamp_wall_us = 1;  // Wall-clock UTC (us since epoch)
-  uint32 mutations_sent           = 2;  // Mutations sent since last frame
-  uint32 mutations_acked          = 3;  // Mutations acknowledged since last frame
-  uint64 rtt_estimate_us          = 4;  // Latest RTT estimate (us)
-}
-
-// Runtime-to-agent compositor telemetry (RFC 0005 §9, §3.2).
-// Delivered on ServerMessage field 36 to agents subscribed to TELEMETRY_FRAMES.
-// State-stream traffic class: coalesced under backpressure, latest-wins.
-// Requires the read_telemetry capability AND TELEMETRY_FRAMES subscription.
-message RuntimeTelemetryFrame {
-  uint64 sample_timestamp_wall_us = 1;  // Wall-clock UTC (us since epoch)
-  float  compositor_frame_rate    = 2;  // Frames per second (recent average)
-  uint64 compositor_frame_budget_us = 3;  // Target frame budget (us)
-  uint64 compositor_frame_time_us  = 4;  // Actual last frame time (us)
-  uint32 active_sessions          = 5;  // Number of active agent sessions
-  uint32 active_leases            = 6;  // Number of active leases
-  uint64 heap_used_bytes          = 7;  // Heap memory used (bytes)
-  float  gpu_utilization_pct      = 8;  // GPU utilization 0.0–100.0
-}
 
 // ─── Scene state messages ─────────────────────────────────────────────────────
 
@@ -859,15 +818,6 @@ message SceneSnapshot {
   reserved "scene_json", "version";
 }
 
-// Incremental scene update for subscribed events.
-message SceneDelta {
-  oneof delta {
-    tze_hud.protocol.v1.TileCreatedEvent tile_created = 1;
-    tze_hud.protocol.v1.TileDeletedEvent tile_deleted = 2;
-    tze_hud.protocol.v1.TileUpdatedEvent tile_updated = 3;
-    tze_hud.protocol.v1.LeaseEvent       lease_event  = 4;
-  }
-}
 
 // ─── Input control messages (RFC 0004 §8.3.1, RFC 0005 §3.8) ─────────────────
 
@@ -910,103 +860,23 @@ message InputCaptureRelease {
   string device_id   = 3;  // Optional pointer device id; empty = primary pointer
 }
 
-// Client repositions the IME (Input Method Editor) candidate window.
-// Fire-and-forget: no response sent by the runtime.
-message SetImePosition {
-  bytes tile_id = 1;  // Tile context for the IME (16-byte UUIDv7)
-  float x       = 2;  // Display-space X coordinate (pixels)
-  float y       = 3;  // Display-space Y coordinate (pixels)
-}
 
-// ─── Backpressure ─────────────────────────────────────────────────────────────
 
-// Server signals queue pressure to the client.
-message BackpressureSignal {
-  float  queue_pressure    = 1;  // 0.0 = empty, 1.0 = full
-  string suggested_action  = 2;  // "reduce_rate", "coalesce", etc.
-}
 
-// ─── Agent Scene Event Emission (scene-events/spec.md §5.1, §5.2) ─────────────
-
-// Client emits a scene event from an agent source.
-//
-// Emission requires the `emit_scene_event:<event_name>` capability, where
-// `<event_name>` is the bare name (e.g., "doorbell.ring"), not the fully-prefixed
-// delivered event_type.
-//
-// The runtime will:
-//   1. Validate the bare name against [a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+
-//   2. Check that "system." and "scene." prefixes are not present
-//   3. Check the emit_scene_event:<bare_name> capability
-//   4. Enforce the 4 KB payload size limit
-//   5. Enforce the per-session sliding-window rate limit (default 10/s)
-//   6. Namespace-prefix the event as agent.<namespace>.<bare_name> before delivery
-//
-// Correlated by the enclosing ClientMessage.sequence field.
-// Always receives an EmitSceneEventResult response.
-message EmitSceneEvent {
-  // Bare event name supplied by the agent (e.g., "doorbell.ring").
-  // Runtime prefixes this as agent.<namespace>.<bare_name> for delivery.
-  // Must match: [a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+
-  // Must not start with "system." or "scene." (reserved).
-  string bare_name = 1;
-
-  // Encoded event payload (proto-serialised bytes).
-  // Maximum 4096 bytes (4 KB). Exceeding this limit rejects the emission.
-  bytes  payload   = 2;
-
-  // Reserved / advisory field for future attention-policy integration.
-  // Currently not used by the runtime to affect event delivery semantics.
-  // Will be wired to zone-ceiling enforcement and CRITICAL downgrade in bead #3.
-  // Uses wire values matching the InterruptionClass enum in the scene data model:
-  //   0=CRITICAL, 1=HIGH, 2=NORMAL (default), 3=LOW, 4=SILENT
-  uint32 interruption_class_hint = 3;
-}
-
-// Server response to EmitSceneEvent.
-// Correlated by request_sequence matching the EmitSceneEvent message's
-// enclosing ClientMessage.sequence.
-message EmitSceneEventResult {
-  // Sequence of the EmitSceneEvent ClientMessage that triggered this.
-  uint64  request_sequence  = 1;
-
-  // true = event accepted, namespace-prefixed, and dispatched to subscribers.
-  // false = emission rejected; inspect error_code and error_message.
-  bool    accepted          = 2;
-
-  // Fully-prefixed event type as delivered to subscribers (populated when accepted=true).
-  // Example: "agent.doorbell_agent.doorbell.ring"
-  string  delivered_event_type = 3;
-
-  // Machine-readable rejection code (populated when accepted=false).
-  // Uses ErrorCode enum names as strings:
-  //   "AGENT_EVENT_CAPABILITY_MISSING"  — missing emit_scene_event:<bare_name>
-  //   "AGENT_EVENT_RATE_EXCEEDED"       — sliding-window rate limit exceeded
-  //   "AGENT_EVENT_PAYLOAD_TOO_LARGE"   — payload > 4 KB
-  //   "AGENT_EVENT_INVALID_NAME"        — bare name fails regex validation
-  //   "AGENT_EVENT_RESERVED_PREFIX"     — bare name starts with "system." or "scene."
-  string  error_code        = 4;
-
-  // Human-readable rejection reason (populated when accepted=false).
-  string  error_message     = 5;
-}
 
 // ─── Degradation (RFC 0005 §3.4, §7.1) ───────────────────────────────────────
 
-// Degradation severity levels reported by the runtime.
-// NORMAL means all systems operating at full capability.
-// Higher levels indicate progressively deeper capacity reduction.
+// Degradation level reported by the runtime: full rendering, or the single
+// Simplified fallback (downscaled textures, opaque fills, snapped animations).
 enum DegradationLevel {
   DEGRADATION_LEVEL_UNSPECIFIED     = 0;  // Sentinel / unknown
-  NORMAL                            = 1;  // Full capability; no degradation
-  COALESCING_MORE                   = 2;  // State-stream updates are coalesced more aggressively
-  MEDIA_QUALITY_REDUCED             = 3;  // AV stream quality/bitrate reduced
-  STREAMS_REDUCED                   = 4;  // Some media streams suspended
-  RENDERING_SIMPLIFIED              = 5;  // Compositor drops non-critical render passes
-  SHEDDING_TILES                    = 6;  // Low-priority tiles actively shed
-  AUDIO_ONLY_FALLBACK               = 7;  // Video disabled; audio-only mode
-  TEXTURE_QUALITY_REDUCED           = 8;  // Static texture resolution reduced
-  EMERGENCY_RENDERING               = 9;  // Chrome plus one highest-priority tile
+  NORMAL                            = 1;  // Full rendering
+  RENDERING_SIMPLIFIED              = 5;  // Simplified rendering under load
+  // Values of the old degradation ladder, removed in the reset.
+  reserved 2 to 4, 6 to 9;
+  reserved "COALESCING_MORE", "MEDIA_QUALITY_REDUCED", "STREAMS_REDUCED",
+    "SHEDDING_TILES", "AUDIO_ONLY_FALLBACK", "TEXTURE_QUALITY_REDUCED",
+    "EMERGENCY_RENDERING";
 }
 
 // Runtime notifies all active sessions of a change in degradation level.
@@ -1016,7 +886,8 @@ enum DegradationLevel {
 message DegradationNotice {
   DegradationLevel level              = 1;  // Current degradation level
   string           reason             = 2;  // Human-readable reason for the change
-  repeated string  affected_capabilities = 3;  // Capabilities impacted at this level
+  reserved 3;  // affected_capabilities, always empty (removed in T5 S1)
+  reserved "affected_capabilities";
   uint64           timestamp_wall_us  = 4;  // Wall-clock time of the level change (UTC µs)
 }
 

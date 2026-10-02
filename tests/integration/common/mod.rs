@@ -53,35 +53,14 @@ impl AgentSession {
         self.sequence
     }
 
-    /// Receive the next server message that is NOT a `LeaseStateChange`.
-    ///
-    /// `LeaseStateChange` notifications are server-initiated and can arrive at
-    /// any time — including between a client request and the server's
-    /// `MutationResult`/`ZonePublishResult`/`LeaseResponse` reply. Draining
-    /// these here prevents the race condition where the test sees a
-    /// `LeaseStateChange` where it expected a transactional response.
+    /// Receive the next server message.
     ///
     /// Returns `None` if the stream has ended, or `Some(Ok(msg))` / `Some(Err(…))`
     /// otherwise. Callers typically chain `.ok_or("…")?` to convert to a `Result`.
-    pub async fn next_non_state_change(
+    pub async fn next_server_msg(
         &mut self,
     ) -> Option<Result<session_proto::ServerMessage, tonic::Status>> {
-        loop {
-            let item = self.rx.next().await?;
-            match &item {
-                Ok(msg) => {
-                    if let Some(session_proto::server_message::Payload::LeaseStateChange(_)) =
-                        &msg.payload
-                    {
-                        // Discard and loop — this is a server-push notification,
-                        // not the transactional reply we are waiting for.
-                        continue;
-                    }
-                    return Some(item);
-                }
-                Err(_) => return Some(item),
-            }
-        }
+        self.rx.next().await
     }
 }
 
@@ -103,7 +82,6 @@ pub async fn connect_agent(
     psk: &str,
     port: u16,
     agent_id: &str,
-    display_name_suffix: &str,
     lease_priority: u32,
     capabilities: Vec<String>,
 ) -> Result<AgentSession, Box<dyn std::error::Error>> {
@@ -121,14 +99,12 @@ pub async fn connect_agent(
         payload: Some(session_proto::client_message::Payload::SessionInit(
             session_proto::SessionInit {
                 agent_id: agent_id.to_string(),
-                agent_display_name: format!("{agent_id} ({display_name_suffix})"),
-                pre_shared_key: psk.to_string(),
                 requested_capabilities: capabilities.clone(),
                 initial_subscriptions: vec!["SCENE_TOPOLOGY".to_string()],
                 resume_token: Vec::new(),
                 min_protocol_version: RUNTIME_MIN_VERSION,
                 max_protocol_version: RUNTIME_MAX_VERSION,
-                auth_credential: None,
+                auth_credential: Some(tze_hud_protocol::auth::psk_credential(psk.to_string())),
             },
         )),
     })
@@ -183,8 +159,7 @@ pub async fn connect_agent(
     })
     .await?;
 
-    // Wrap the stream in a temporary AgentSession so we can use next_non_state_change.
-    // (LeaseStateChange can arrive between the LeaseRequest and its LeaseResponse.)
+    // Wrap the stream in a temporary AgentSession so we can use next_server_msg.
     let mut partial_session = AgentSession {
         namespace,
         lease_id_bytes: vec![],
@@ -193,9 +168,9 @@ pub async fn connect_agent(
         sequence: 2,
     };
 
-    // Read LeaseResponse — skip any interleaved LeaseStateChange messages.
+    // Read LeaseResponse.
     let msg = partial_session
-        .next_non_state_change()
+        .next_server_msg()
         .await
         .ok_or("no lease response")??;
     let (lease_id_bytes, response_stream) = match &msg.payload {
@@ -264,9 +239,9 @@ pub async fn create_tile_via_grpc(
         })
         .await?;
 
-    // Read MutationResult — skip any interleaved LeaseStateChange messages.
+    // Read MutationResult.
     let msg = session
-        .next_non_state_change()
+        .next_server_msg()
         .await
         .ok_or("no mutation result")??;
     match &msg.payload {
@@ -321,9 +296,9 @@ pub async fn publish_zone_content_via_grpc(
         })
         .await?;
 
-    // Read ZonePublishResult — skip any interleaved LeaseStateChange messages.
+    // Read ZonePublishResult.
     let msg = session
-        .next_non_state_change()
+        .next_server_msg()
         .await
         .ok_or("no zone publish result")??;
     match &msg.payload {

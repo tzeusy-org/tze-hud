@@ -109,8 +109,6 @@ async fn perform_handshake(
         timestamp_wall_us: now_wall_us(),
         payload: Some(ClientPayload::SessionInit(SessionInit {
             agent_id: agent_id.to_string(),
-            agent_display_name: format!("{agent_id} (callback test)"),
-            pre_shared_key: "test-psk".to_string(),
             // access_input_events capability gates INPUT_EVENTS subscription.
             requested_capabilities: vec![
                 "create_tiles".to_string(),
@@ -124,7 +122,9 @@ async fn perform_handshake(
             resume_token: Vec::new(),
             min_protocol_version: 1000,
             max_protocol_version: 1001,
-            auth_credential: None,
+            auth_credential: Some(tze_hud_protocol::auth::psk_credential(
+                "test-psk".to_string(),
+            )),
         })),
     })
     .await
@@ -140,16 +140,9 @@ async fn perform_handshake(
     (tx, stream)
 }
 
-/// Drain any interleaved `LeaseStateChange` messages before asserting a
-/// specific response type.  Mirrors the helper pattern used in session_server.rs.
-async fn next_non_state_change(stream: &mut tonic::Streaming<ServerMessage>) -> ServerMessage {
-    loop {
-        let msg = stream.next().await.unwrap().unwrap();
-        if let Some(ServerPayload::LeaseStateChange(_)) = &msg.payload {
-            continue;
-        }
-        return msg;
-    }
+/// Return the next server message.
+async fn next_server_msg(stream: &mut tonic::Streaming<ServerMessage>) -> ServerMessage {
+    stream.next().await.unwrap().unwrap()
 }
 
 /// Acquire a lease and return the 16-byte `lease_id` bytes.
@@ -173,7 +166,7 @@ async fn acquire_lease(
     .await
     .unwrap();
 
-    let resp = next_non_state_change(stream).await;
+    let resp = next_server_msg(stream).await;
     match resp.payload {
         Some(ServerPayload::LeaseResponse(r)) => {
             assert!(r.granted, "lease must be granted");
@@ -256,8 +249,6 @@ async fn click_on_refresh_delivers_click_event_with_refresh_interaction_id() {
     let (tx, mut stream) = perform_handshake(&mut client, "refresh-click-agent").await;
 
     let lease_id_bytes = acquire_lease(&tx, &mut stream, 2).await;
-    // Drain REQUESTED→ACTIVE state change
-    let _ = stream.next().await;
 
     // Synthetic tile_id and node_id (16-byte blobs).
     let tile_id_bytes: Vec<u8> = uuid::Uuid::now_v7().as_bytes().to_vec();
@@ -325,7 +316,7 @@ async fn click_on_refresh_delivers_click_event_with_refresh_interaction_id() {
     // Server must respond with MutationResult (accepted or rejected — accepted
     // when lease is active, rejected when no tiles exist yet — both are valid
     // responses confirming the agent's callback was dispatched).
-    let result_msg = next_non_state_change(&mut stream).await;
+    let result_msg = next_server_msg(&mut stream).await;
     match result_msg.payload {
         Some(ServerPayload::MutationResult(r)) => {
             // batch_id echoed back (RFC 0005 §3.2).
@@ -354,8 +345,6 @@ async fn activate_on_dismiss_delivers_command_input_event_with_activate_and_keyb
     let (tx, mut stream) = perform_handshake(&mut client, "dismiss-activate-agent").await;
 
     let _lease_id_bytes = acquire_lease(&tx, &mut stream, 2).await;
-    // Drain REQUESTED→ACTIVE state change
-    let _ = stream.next().await;
 
     // Synthetic tile_id and node_id for Dismiss button.
     let tile_id_bytes: Vec<u8> = uuid::Uuid::now_v7().as_bytes().to_vec();
@@ -424,8 +413,6 @@ async fn dismiss_callback_triggers_lease_release_and_tile_removal() {
     let (tx, mut stream) = perform_handshake(&mut client, "dismiss-release-agent").await;
 
     let lease_id_bytes = acquire_lease(&tx, &mut stream, 2).await;
-    // Drain REQUESTED→ACTIVE state change
-    let _ = stream.next().await;
 
     // Synthetic tile_id and node_id for Dismiss button.
     let tile_id_bytes: Vec<u8> = uuid::Uuid::now_v7().as_bytes().to_vec();
@@ -478,24 +465,13 @@ async fn dismiss_callback_triggers_lease_release_and_tile_removal() {
     .unwrap();
 
     // Runtime must respond with LeaseResponse(granted=true).
-    let release_resp = next_non_state_change(&mut stream).await;
+    let release_resp = next_server_msg(&mut stream).await;
     match release_resp.payload {
         Some(ServerPayload::LeaseResponse(r)) => {
             assert!(r.granted, "LeaseRelease must succeed (tile removal)");
             assert_eq!(r.lease_id, lease_id_bytes, "lease_id must match");
         }
         other => panic!("Expected LeaseResponse(granted=true) for dismiss, got: {other:?}"),
-    }
-
-    // Runtime must follow with LeaseStateChange(ACTIVE→RELEASED).
-    let sc_msg = stream.next().await.unwrap().unwrap();
-    match sc_msg.payload {
-        Some(ServerPayload::LeaseStateChange(sc)) => {
-            assert_eq!(sc.previous_state, "ACTIVE");
-            assert_eq!(sc.new_state, "RELEASED");
-            assert_eq!(sc.lease_id, lease_id_bytes);
-        }
-        other => panic!("Expected LeaseStateChange(RELEASED), got: {other:?}"),
     }
 
     drop(tx);
@@ -518,8 +494,6 @@ async fn refresh_callback_triggers_mutation_batch_content_update() {
     let (tx, mut stream) = perform_handshake(&mut client, "refresh-update-agent").await;
 
     let lease_id_bytes = acquire_lease(&tx, &mut stream, 2).await;
-    // Drain REQUESTED→ACTIVE state change
-    let _ = stream.next().await;
 
     // Synthetic tile_id and node_id for Refresh button.
     let tile_id_bytes: Vec<u8> = uuid::Uuid::now_v7().as_bytes().to_vec();
@@ -576,7 +550,7 @@ async fn refresh_callback_triggers_mutation_batch_content_update() {
     .unwrap();
 
     // Server must respond with MutationResult containing the echoed batch_id.
-    let result_msg = next_non_state_change(&mut stream).await;
+    let result_msg = next_server_msg(&mut stream).await;
     match result_msg.payload {
         Some(ServerPayload::MutationResult(r)) => {
             assert_eq!(
@@ -613,8 +587,6 @@ async fn pointer_free_navigate_next_then_activate_delivers_same_callback_as_clic
     let (tx, mut stream) = perform_handshake(&mut client, "pointer-free-agent").await;
 
     let _lease_id_bytes = acquire_lease(&tx, &mut stream, 2).await;
-    // Drain REQUESTED→ACTIVE state change
-    let _ = stream.next().await;
 
     let tile_id_bytes: Vec<u8> = uuid::Uuid::now_v7().as_bytes().to_vec();
     let refresh_node_id_bytes: Vec<u8> = uuid::Uuid::now_v7().as_bytes().to_vec();
@@ -694,12 +666,8 @@ async fn event_batch_not_delivered_to_wrong_namespace_session() {
     let (tx_b, mut stream_b) = perform_handshake(&mut client, "namespace-b-agent").await;
 
     let _la = acquire_lease(&tx_a, &mut stream_a, 2).await;
-    // Drain REQUESTED→ACTIVE state change for session A
-    let _ = stream_a.next().await;
 
     let _lb = acquire_lease(&tx_b, &mut stream_b, 2).await;
-    // Drain REQUESTED→ACTIVE state change for session B
-    let _ = stream_b.next().await;
 
     let tile_id_bytes: Vec<u8> = uuid::Uuid::now_v7().as_bytes().to_vec();
     let node_id_bytes: Vec<u8> = uuid::Uuid::now_v7().as_bytes().to_vec();
@@ -775,15 +743,15 @@ async fn event_batch_not_delivered_without_input_events_subscription() {
         timestamp_wall_us: now_wall_us(),
         payload: Some(ClientPayload::SessionInit(SessionInit {
             agent_id: "no-input-sub-agent".to_string(),
-            agent_display_name: "no-input-sub-agent".to_string(),
-            pre_shared_key: "test-psk".to_string(),
             // No access_input_events → INPUT_EVENTS subscription not available.
             requested_capabilities: vec!["create_tiles".to_string()],
             initial_subscriptions: vec![],
             resume_token: Vec::new(),
             min_protocol_version: 1000,
             max_protocol_version: 1001,
-            auth_credential: None,
+            auth_credential: Some(tze_hud_protocol::auth::psk_credential(
+                "test-psk".to_string(),
+            )),
         })),
     })
     .await

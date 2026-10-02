@@ -1,28 +1,17 @@
 //! Capability vocabulary validation for tze_hud configuration.
 //!
 //! This module implements the canonical v1 capability vocabulary from
-//! `configuration/spec.md §Requirement: Capability Vocabulary`.
+//! `tze_hud_scene::config::CANONICAL_CAPABILITIES`.
 //!
-//! ## Canonical v1 Capabilities (16 entries)
+//! ## Canonical v1 Capabilities
 //!
-//! Flat names (exact match):
-//! - `create_tiles`
-//! - `modify_own_tiles`
-//! - `manage_tabs`
-//! - `upload_resource`
-//! - `register_widget_asset`
-//! - `read_scene_topology`
-//! - `subscribe_scene_events`
-//! - `overlay_privileges`
-//! - `access_input_events`
-//! - `high_priority_z_order`
-//! - `exceed_default_budgets`
-//! - `read_telemetry`
-//! - `resident_mcp`
+//! Flat names (exact match): `create_tiles`, `modify_own_tiles`, `manage_tabs`,
+//! `upload_resource`, `register_widget_asset`, `read_scene_topology`,
+//! `access_input_events`, `read_telemetry`, `resident_mcp`.
 //!
 //! Parameterized (prefix + non-empty suffix):
 //! - `publish_zone:<zone_name>` or `publish_zone:*`
-//! - `emit_scene_event:<event_name>` (suffix must not start with `scene.` or `system.`)
+//! - `publish_widget:<widget_name>` or `publish_widget:*`
 //! - `lease:priority:<N>` (N must be a non-negative integer)
 //!
 //! ## Immutability Contract
@@ -47,14 +36,6 @@ const LEGACY_NAMES: &[(&str, &str)] = &[
     ("receive_input", "access_input_events"),
     ("zone_publish", "publish_zone:*"),
 ];
-
-// ─── Reserved event prefixes ──────────────────────────────────────────────────
-
-/// Reserved event prefixes for `emit_scene_event:<name>`.
-///
-/// Any capability grant where the event name starts with one of these prefixes
-/// MUST be rejected with `CONFIG_RESERVED_EVENT_PREFIX`.
-pub const RESERVED_EVENT_PREFIXES: &[&str] = &["scene.", "system."];
 
 // ─── Hint generation ──────────────────────────────────────────────────────────
 
@@ -88,20 +69,9 @@ pub fn capability_hint(unknown: &str) -> String {
 
     // 4. Generic fallback.
     format!(
-        "\"{unknown}\" is not a canonical v1 capability; see configuration/spec.md §Capability Vocabulary"
+        "\"{unknown}\" is not a canonical v1 capability; valid names: {}",
+        CANONICAL_CAPABILITIES.join(", ")
     )
-}
-
-/// Returns `true` if the capability name starts with a reserved event prefix.
-///
-/// Only meaningful for names that start with `emit_scene_event:`.
-pub fn has_reserved_event_prefix(cap: &str) -> bool {
-    if let Some(suffix) = cap.strip_prefix("emit_scene_event:") {
-        return RESERVED_EVENT_PREFIXES
-            .iter()
-            .any(|p| suffix.starts_with(p));
-    }
-    false
 }
 
 // ─── Closest canonical match ─────────────────────────────────────────────────
@@ -155,11 +125,6 @@ fn parameterized_prefix_hint(name: &str) -> Option<String> {
         return Some("use \"publish_widget:<widget_name>\" or \"publish_widget:*\"".to_string());
     }
 
-    // emit_scene_event variants.
-    if norm.starts_with("emit_scene_event") || norm.starts_with("emitsceneevent") {
-        return Some("use \"emit_scene_event:<event_name>\"".to_string());
-    }
-
     // lease:priority variants.
     if norm.starts_with("lease_priority") || norm.starts_with("lease:priority") {
         return Some("use \"lease:priority:<N>\" where N is a non-negative integer".to_string());
@@ -203,7 +168,7 @@ mod tests {
 
     /// All v1 canonical capability forms must be recognized.
     /// The spec lists 17 forms; parameterized forms (publish_zone, publish_widget,
-    /// emit_scene_event, lease:priority) are tested with concrete examples, so the
+    /// publish_widget, lease:priority) are tested with concrete examples, so the
     /// array below contains 19 entries.
     #[test]
     fn all_canonical_capabilities_recognized() {
@@ -214,17 +179,12 @@ mod tests {
             "upload_resource",
             "register_widget_asset",
             "read_scene_topology",
-            "subscribe_scene_events",
-            "overlay_privileges",
             "access_input_events",
-            "high_priority_z_order",
-            "exceed_default_budgets",
             "read_telemetry",
             "resident_mcp",
             "publish_zone:*",
             "publish_zone:subtitle",
             "publish_widget:clock",
-            "emit_scene_event:doorbell.ring",
             "lease:priority:1",
             "lease:priority:0",
         ];
@@ -252,19 +212,6 @@ mod tests {
         assert!(!is_canonical_capability("publish_zone:"));
     }
 
-    /// emit_scene_event:<event_name> accepted for non-reserved names.
-    #[test]
-    fn emit_scene_event_accepted() {
-        assert!(is_canonical_capability("emit_scene_event:doorbell.ring"));
-        assert!(is_canonical_capability("emit_scene_event:app.ready"));
-    }
-
-    /// emit_scene_event: with empty suffix rejected.
-    #[test]
-    fn emit_scene_event_empty_suffix_rejected() {
-        assert!(!is_canonical_capability("emit_scene_event:"));
-    }
-
     /// lease:priority:<N> accepted for valid non-negative integer N.
     #[test]
     fn lease_priority_accepted() {
@@ -281,30 +228,6 @@ mod tests {
     }
 
     // ── Reserved prefix rejection ─────────────────────────────────────────────
-
-    /// emit_scene_event:system.* rejected as reserved.
-    #[test]
-    fn reserved_system_prefix_rejected() {
-        assert!(!is_canonical_capability("emit_scene_event:system.shutdown"));
-        assert!(!is_canonical_capability("emit_scene_event:system.reboot"));
-        assert!(has_reserved_event_prefix(
-            "emit_scene_event:system.shutdown"
-        ));
-    }
-
-    /// emit_scene_event:scene.* rejected as reserved.
-    #[test]
-    fn reserved_scene_prefix_rejected() {
-        assert!(!is_canonical_capability("emit_scene_event:scene.render"));
-        assert!(has_reserved_event_prefix("emit_scene_event:scene.render"));
-    }
-
-    /// Non-emit_scene_event prefixes do not trigger reserved prefix check.
-    #[test]
-    fn has_reserved_event_prefix_only_for_emit() {
-        assert!(!has_reserved_event_prefix("create_tiles"));
-        assert!(!has_reserved_event_prefix("publish_zone:system.test"));
-    }
 
     // ── Legacy name rejection with hints ─────────────────────────────────────
 

@@ -664,31 +664,7 @@ capabilities = ["createTiles"]
     );
 }
 
-/// WHEN emit_scene_event:system.shutdown used THEN CONFIG_RESERVED_EVENT_PREFIX.
-#[test]
-fn spec_reserved_event_prefix_in_capability_rejected() {
-    let toml = r#"
-[runtime]
-profile = "full-display"
-
-[[tabs]]
-name = "Main"
-
-[agents.registered.agent_a]
-capabilities = ["emit_scene_event:system.shutdown"]
-"#;
-    let loader = parse_ok(toml);
-    let errors = loader.validate();
-    let has_reserved = errors
-        .iter()
-        .any(|e| matches!(e.code, ConfigErrorCode::ReservedEventPrefix));
-    assert!(
-        has_reserved,
-        "emit_scene_event:system.* should produce CONFIG_RESERVED_EVENT_PREFIX"
-    );
-}
-
-/// WHEN canonical capabilities ["create_tiles", "publish_zone:subtitle", "emit_scene_event:doorbell.ring"]
+/// WHEN canonical capabilities ["create_tiles", "publish_zone:subtitle", "lease:priority:1"]
 /// THEN accepted (spec scenario lines 155-156).
 #[test]
 fn spec_valid_canonical_capability_list_accepted() {
@@ -700,18 +676,13 @@ profile = "full-display"
 name = "Main"
 
 [agents.registered.agent_a]
-capabilities = ["create_tiles", "publish_zone:subtitle", "emit_scene_event:doorbell.ring"]
+capabilities = ["create_tiles", "publish_zone:subtitle", "lease:priority:1"]
 "#;
     let loader = parse_ok(toml);
     let errors = loader.validate();
     let cap_errors: Vec<_> = errors
         .iter()
-        .filter(|e| {
-            matches!(
-                e.code,
-                ConfigErrorCode::UnknownCapability | ConfigErrorCode::ReservedEventPrefix
-            )
-        })
+        .filter(|e| matches!(e.code, ConfigErrorCode::UnknownCapability))
         .collect();
     assert!(
         cap_errors.is_empty(),
@@ -742,29 +713,6 @@ capabilities = ["createTiles"]
         cap_error.hint.contains("create_tiles"),
         "hint should suggest create_tiles, got: {:?}",
         cap_error.hint
-    );
-}
-
-/// WHEN emit_scene_event:scene.render used THEN CONFIG_RESERVED_EVENT_PREFIX.
-#[test]
-fn spec_scene_prefix_in_capability_rejected() {
-    let toml = r#"
-[runtime]
-profile = "full-display"
-
-[[tabs]]
-name = "Main"
-
-[agents.registered.agent_a]
-capabilities = ["emit_scene_event:scene.render"]
-"#;
-    let loader = parse_ok(toml);
-    let errors = loader.validate();
-    assert!(
-        errors
-            .iter()
-            .any(|e| matches!(e.code, ConfigErrorCode::ReservedEventPrefix)),
-        "emit_scene_event:scene.* should produce CONFIG_RESERVED_EVENT_PREFIX"
     );
 }
 
@@ -856,11 +804,7 @@ fn spec_all_flat_canonical_capabilities_accepted() {
         "upload_resource",
         "register_widget_asset",
         "read_scene_topology",
-        "subscribe_scene_events",
-        "overlay_privileges",
         "access_input_events",
-        "high_priority_z_order",
-        "exceed_default_budgets",
         "read_telemetry",
         "resident_mcp",
     ];
@@ -885,12 +829,7 @@ capabilities = [{cap_list}]
     let errors = loader.validate();
     let cap_errors: Vec<_> = errors
         .iter()
-        .filter(|e| {
-            matches!(
-                e.code,
-                ConfigErrorCode::UnknownCapability | ConfigErrorCode::ReservedEventPrefix
-            )
-        })
+        .filter(|e| matches!(e.code, ConfigErrorCode::UnknownCapability))
         .collect();
     assert!(
         cap_errors.is_empty(),

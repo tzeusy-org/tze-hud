@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use tokio::sync::Mutex as TokioMutex;
 use tze_hud_input::{FocusManager, FocusRequest};
-use tze_hud_protocol::session::{RuntimeDegradationLevel, SessionRegistry, SharedState};
+use tze_hud_protocol::session::{SessionRegistry, SharedState};
 use tze_hud_protocol::token::TokenStore;
 use tze_hud_scene::graph::SceneGraph;
 use tze_hud_scene::types::{
@@ -68,7 +68,6 @@ pub(super) fn make_shared_state() -> Arc<TokioMutex<SharedState>> {
         active_tab_mirror: Arc::new(std::sync::Mutex::new(None)),
         token_store: TokenStore::new(),
         freeze_active: false,
-        degradation_level: RuntimeDegradationLevel::Normal,
         input_capture_tx: None,
         input_capture_wake: tze_hud_scene::render_wake::RenderWakeNotifier::default(),
         resolved_portal_tokens: std::collections::HashMap::new(),

@@ -269,8 +269,6 @@ async fn run_headless(dev_mode: bool) -> Result<(), Box<dyn std::error::Error>> 
         payload: Some(session_proto::client_message::Payload::SessionInit(
             session_proto::SessionInit {
                 agent_id: "vertical-slice-agent".to_string(),
-                agent_display_name: "Vertical Slice Agent".to_string(),
-                pre_shared_key: String::new(),
                 // Canonical v1 capability names. The runtime validates these against
                 // the canonical vocabulary; non-canonical names are rejected with a
                 // CONFIG_UNKNOWN_CAPABILITY error and a hint pointing to the canonical
@@ -471,18 +469,6 @@ async fn run_headless(dev_mode: bool) -> Result<(), Box<dyn std::error::Error>> 
             return Err(format!("Expected LeaseResponse, got: {other:?}").into());
         }
     };
-
-    // Drain the LeaseStateChange(REQUESTED→ACTIVE) notification that follows every
-    // lease grant (per spec §Lease Management RPCs / lease-governance §State Machine).
-    let msg = response_stream.next().await.unwrap()?;
-    match &msg.payload {
-        Some(session_proto::server_message::Payload::LeaseStateChange(_)) => {}
-        other => {
-            return Err(
-                format!("Expected LeaseStateChange after lease grant, got: {other:?}").into(),
-            );
-        }
-    }
 
     // Heartbeat round-trip
     let hb_mono = 999_000u64;
@@ -1019,22 +1005,6 @@ async fn run_headless(dev_mode: bool) -> Result<(), Box<dyn std::error::Error>> 
     assert_eq!(pixels.len(), 800 * 600 * 4, "pixel buffer size mismatch");
     println!("  Pixel readback: {} bytes (800x600 RGBA)", pixels.len());
 
-    // Send TelemetryFrame over the session stream
-    tx.send(session_proto::ClientMessage {
-        sequence: 4,
-        timestamp_wall_us: now_wall_us(),
-        payload: Some(session_proto::client_message::Payload::TelemetryFrame(
-            session_proto::TelemetryFrame {
-                sample_timestamp_wall_us: now_wall_us(),
-                mutations_sent: 3,
-                mutations_acked: 3,
-                rtt_estimate_us: 500,
-            },
-        )),
-    })
-    .await?;
-    println!("  TelemetryFrame sent over session stream (mutations=3, rtt=500us)");
-
     // Emit session summary JSON
     let summary = runtime.telemetry.summary();
     println!("  Session summary:");
@@ -1246,7 +1216,6 @@ async fn run_headless(dev_mode: bool) -> Result<(), Box<dyn std::error::Error>> 
         payload: Some(session_proto::client_message::Payload::SessionClose(
             session_proto::SessionClose {
                 reason: "Vertical slice complete".to_string(),
-                expect_resume: false,
             },
         )),
     })
@@ -1438,8 +1407,6 @@ capabilities = ["create_tiles"]
             payload: Some(session_proto::client_message::Payload::SessionInit(
                 session_proto::SessionInit {
                     agent_id: "test-agent".to_string(),
-                    agent_display_name: "Test".to_string(),
-                    pre_shared_key: String::new(),
                     requested_capabilities: vec!["create_tiles".to_string()],
                     initial_subscriptions: vec![],
                     resume_token: Vec::new(),
@@ -2075,8 +2042,6 @@ capabilities = ["create_tiles", "modify_own_tiles"]
             payload: Some(session_proto::client_message::Payload::SessionInit(
                 session_proto::SessionInit {
                     agent_id: "restricted-agent".to_string(),
-                    agent_display_name: "Restricted Agent".to_string(),
-                    pre_shared_key: String::new(),
                     // Request SCENE_TOPOLOGY and ZONE_EVENTS without the required capabilities.
                     // This demonstrates the subscription gating behaviour: the agent will
                     // receive LEASE_CHANGES (mandatory) but not the gated categories.

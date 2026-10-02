@@ -66,7 +66,6 @@ struct Cli {
     param_start: f32,
     param_step: f32,
     transition_ms: u32,
-    ttl_us: u64,
     timeout_s: f64,
     output: PathBuf,
     agent_id: String,
@@ -209,11 +208,6 @@ impl Cli {
                 .map(|v| parse_u32(v, "transition-ms"))
                 .transpose()?
                 .unwrap_or(0),
-            ttl_us: kv
-                .get("ttl-us")
-                .map(|v| parse_u64(v, "ttl-us"))
-                .transpose()?
-                .unwrap_or(0),
             timeout_s,
             output,
             agent_id: kv
@@ -244,7 +238,6 @@ const SUPPORTED_KV_ARGS: &[&str] = &[
     "param-start",
     "param-step",
     "transition-ms",
-    "ttl-us",
     "timeout-s",
     "output",
     "agent-id",
@@ -458,7 +451,6 @@ async fn main() -> Result<(), DynError> {
         timestamp_wall_us: now_wall_us(),
         payload: Some(ClientPayload::SessionClose(session_proto::SessionClose {
             reason: "publish-load complete".to_string(),
-            expect_resume: false,
         })),
     };
     let _ = tx.send(close).await;
@@ -623,8 +615,6 @@ fn build_session_init(cli: &Cli, psk: &str, sequence: u64) -> session_proto::Cli
         timestamp_wall_us: now_wall_us(),
         payload: Some(ClientPayload::SessionInit(session_proto::SessionInit {
             agent_id: cli.agent_id.clone(),
-            agent_display_name: cli.agent_id.clone(),
-            pre_shared_key: String::new(),
             requested_capabilities: vec![format!("publish_widget:{}", cli.widget_name)],
             initial_subscriptions: Vec::new(),
             resume_token: Vec::new(),
@@ -681,7 +671,6 @@ async fn send_publish(
             ),
         }],
         transition_ms: cli.transition_ms,
-        ttl_us: cli.ttl_us,
         merge_key: String::new(),
         element_id: Vec::new(),
     };
@@ -992,7 +981,6 @@ fn print_usage() {
            --param-start <f32>                       (default: 0)\n\
            --param-step <f32>                        (default: 1)\n\
            --transition-ms <u32>                     (default: 0)\n\
-           --ttl-us <u64>                            (default: 0)\n\
            --timeout-s <seconds>                     (default: 30)\n\
            --target-p99-rtt-us <us>\n\
            --target-throughput-rps <rps>\n\

@@ -298,10 +298,6 @@ fn freeze_path_uses_generic_backpressure_signal_not_portal_specific_signal() {
 
     let proto = include_str!("../../crates/tze_hud_protocol/proto/session.proto");
     assert!(
-        proto.contains("message BackpressureSignal"),
-        "protocol must expose generic queue pressure signal shape"
-    );
-    assert!(
         !proto.contains("PORTAL_FREEZE"),
         "protocol must not expose a portal-specific freeze signal"
     );
@@ -706,13 +702,8 @@ fn freeze_path_governs_first_class_surface_via_generic_queue() {
         "surface state patches must coalesce latest-wins on the generic freeze queue"
     );
 
-    // The protocol exposes only the generic backpressure shape — no portal- or
-    // surface-specific freeze signal was minted for the promotion.
+    // No portal- or surface-specific freeze signal was minted for the promotion.
     let proto = include_str!("../../crates/tze_hud_protocol/proto/session.proto");
-    assert!(
-        proto.contains("message BackpressureSignal"),
-        "protocol must expose generic queue pressure signal shape"
-    );
     assert!(
         !proto.contains("PORTAL_FREEZE") && !proto.contains("SURFACE_FREEZE"),
         "protocol must not expose a portal/surface-specific freeze signal"

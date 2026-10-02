@@ -43,7 +43,6 @@ impl DegradationNoticeSender {
                 current: DegradationNotice {
                     level: DegradationLevel::Normal as i32,
                     reason: "runtime operating normally".to_string(),
-                    affected_capabilities: Vec::new(),
                     timestamp_wall_us: 0,
                 },
                 next_subscriber_id: 0,
@@ -173,7 +172,6 @@ mod tests {
         DegradationNotice {
             level: level as i32,
             reason: format!("{level:?}"),
-            affected_capabilities: Vec::new(),
             timestamp_wall_us: 0,
         }
     }
@@ -182,18 +180,16 @@ mod tests {
     async fn subscribe_captures_current_before_future_transitions() {
         let sender = DegradationNoticeSender::new(2);
         sender
-            .publish(notice(DegradationLevel::CoalescingMore))
+            .publish(notice(DegradationLevel::RenderingSimplified))
             .await;
 
         let (mut receiver, current) = sender.subscribe_with_current();
-        assert_eq!(current.level, DegradationLevel::CoalescingMore as i32);
+        assert_eq!(current.level, DegradationLevel::RenderingSimplified as i32);
 
-        sender
-            .publish(notice(DegradationLevel::TextureQualityReduced))
-            .await;
+        sender.publish(notice(DegradationLevel::Normal)).await;
         assert_eq!(
             receiver.recv().await.unwrap().level,
-            DegradationLevel::TextureQualityReduced as i32
+            DegradationLevel::Normal as i32
         );
     }
 
@@ -202,16 +198,12 @@ mod tests {
         let sender = DegradationNoticeSender::new(1);
         let (mut receiver, _) = sender.subscribe_with_current();
         sender
-            .publish(notice(DegradationLevel::CoalescingMore))
+            .publish(notice(DegradationLevel::RenderingSimplified))
             .await;
 
         let publisher = {
             let sender = sender.clone();
-            tokio::spawn(async move {
-                sender
-                    .publish(notice(DegradationLevel::TextureQualityReduced))
-                    .await
-            })
+            tokio::spawn(async move { sender.publish(notice(DegradationLevel::Normal)).await })
         };
         tokio::task::yield_now().await;
         assert!(
@@ -221,12 +213,12 @@ mod tests {
 
         assert_eq!(
             receiver.recv().await.unwrap().level,
-            DegradationLevel::CoalescingMore as i32
+            DegradationLevel::RenderingSimplified as i32
         );
         assert_eq!(publisher.await.unwrap(), 1);
         assert_eq!(
             receiver.recv().await.unwrap().level,
-            DegradationLevel::TextureQualityReduced as i32
+            DegradationLevel::Normal as i32
         );
     }
 
@@ -235,7 +227,7 @@ mod tests {
         let sender = DegradationNoticeSender::new(1);
         assert!(sender.should_emit_state_stream(1));
         sender
-            .publish(notice(DegradationLevel::CoalescingMore))
+            .publish(notice(DegradationLevel::RenderingSimplified))
             .await;
         assert!(!sender.should_emit_state_stream(1));
         assert!(sender.should_emit_state_stream(2));
@@ -279,14 +271,14 @@ mod tests {
 
         assert_eq!(
             sender
-                .publish(notice(DegradationLevel::CoalescingMore))
+                .publish(notice(DegradationLevel::RenderingSimplified))
                 .await,
             1,
             "the remaining live receiver must still receive future transitions"
         );
         assert_eq!(
             remaining_receiver.recv().await.unwrap().level,
-            DegradationLevel::CoalescingMore as i32
+            DegradationLevel::RenderingSimplified as i32
         );
     }
 }

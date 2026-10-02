@@ -860,7 +860,7 @@ mod tests {
             result.is_ok(),
             "registered agent should be granted create_tiles"
         );
-        let result = policy.evaluate_capability_request(&["overlay_privileges".to_string()]);
+        let result = policy.evaluate_capability_request(&["manage_tabs".to_string()]);
         assert!(
             result.is_err(),
             "registered agent should be denied unconfigured capability"
@@ -962,7 +962,7 @@ mod tests {
         );
         assert!(
             policy
-                .evaluate_capability_request(&["overlay_privileges".to_string()])
+                .evaluate_capability_request(&["manage_tabs".to_string()])
                 .is_err()
         );
     }

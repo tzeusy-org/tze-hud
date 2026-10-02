@@ -4,7 +4,7 @@
 //! session owns the ordered server stream to its agent. This small bridge keeps
 //! the compositor out of per-session transport state and preserves terminal
 //! events until the relevant session handler can emit its transactional
-//! `LeaseResponse` and `LeaseStateChange` messages.
+//! `LeaseResponse` messages.
 
 use std::sync::{Arc, Mutex};
 

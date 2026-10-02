@@ -26,7 +26,6 @@ pub enum ConfigErrorCode {
     ProfileCapabilityEscalation,
     UnknownZoneType,
     UnknownCapability,
-    ReservedEventPrefix,
     InvalidEventName,
     AgentBudgetExceedsProfile,
     InvalidReservedFraction,
@@ -253,28 +252,21 @@ pub const CANONICAL_CAPABILITIES: &[&str] = &[
     "upload_resource",
     "register_widget_asset",
     "read_scene_topology",
-    "subscribe_scene_events",
-    "overlay_privileges",
     "access_input_events",
-    "high_priority_z_order",
-    "exceed_default_budgets",
     "read_telemetry",
     "resident_mcp",
     // Parameterized — wildcard or specific zone.
     "publish_zone:*",
     // Parameterized — wildcard or specific widget.
     "publish_widget:*",
-    // "publish_zone:<zone_name>", "publish_widget:<widget_name>",
-    // "emit_scene_event:<name>", and "lease:priority:<N>"
-    // are validated by prefix pattern, not exact match.
+    // "publish_zone:<zone_name>", "publish_widget:<widget_name>", and
+    // "lease:priority:<N>" are validated by prefix pattern, not exact match.
 ];
 
 /// Returns `true` if `name` is a valid v1 capability per the canonical vocabulary.
 ///
 /// Parameterized forms are validated:
 /// - `publish_zone:<name>`: suffix must be non-empty.
-/// - `emit_scene_event:<event>`: suffix must be non-empty and must not start with reserved
-///   prefixes (`scene.` or `system.`).
 /// - `lease:priority:<N>`: suffix must be a non-empty numeric value.
 pub fn is_canonical_capability(name: &str) -> bool {
     // Exact matches.
@@ -287,16 +279,6 @@ pub fn is_canonical_capability(name: &str) -> bool {
     }
     if let Some(widget_name) = name.strip_prefix("publish_widget:") {
         return !widget_name.is_empty();
-    }
-    if let Some(event_name) = name.strip_prefix("emit_scene_event:") {
-        if event_name.is_empty() {
-            return false;
-        }
-        // Reserved event prefixes must not be usable as capability grants.
-        if event_name.starts_with("scene.") || event_name.starts_with("system.") {
-            return false;
-        }
-        return true;
     }
     if let Some(priority_str) = name.strip_prefix("lease:priority:") {
         if priority_str.is_empty() {
@@ -325,7 +307,6 @@ mod tests {
         assert!(is_canonical_capability("access_input_events"));
         assert!(is_canonical_capability("register_widget_asset"));
         assert!(is_canonical_capability("publish_zone:subtitle"));
-        assert!(is_canonical_capability("emit_scene_event:doorbell.ring"));
         assert!(is_canonical_capability("lease:priority:1"));
         assert!(is_canonical_capability("resident_mcp"));
     }

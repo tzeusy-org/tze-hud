@@ -8,42 +8,28 @@
 //! fields (validated via raw bytes), but prost does not preserve them on re-encode.
 //!
 //! Test count target: ≥30 functions.
-//!
-//! NOTE: This file imports deprecated legacy proto types (`InputEvent`,
-//! `TileCreatedEvent`, `TileDeletedEvent`, `TileUpdatedEvent`, `LeaseEvent`,
-//! `LeaseEventKind`, `SceneEvent`) from `events_legacy.proto` for
-//! backwards-compatibility wire round-trip coverage only. New code MUST NOT
-//! use these types; use `InputEnvelope` / `EventBatch` (RFC 0004) instead.
 
 use prost::Message;
 use tze_hud_protocol::proto::input_envelope::Event as InputEnvelopeEvent;
 use tze_hud_protocol::proto::mutation_proto::Mutation;
 use tze_hud_protocol::proto::node_proto::Data as NodeData;
-use tze_hud_protocol::proto::scene_event::Event as SceneEventPayload;
 use tze_hud_protocol::proto::session::auth_credential::Credential;
 use tze_hud_protocol::proto::session::client_message::Payload as ClientPayload;
-use tze_hud_protocol::proto::session::scene_delta::Delta;
 use tze_hud_protocol::proto::session::server_message::Payload as ServerPayload;
 use tze_hud_protocol::proto::session::{
     AuthCredential,
-    BackpressureSignal,
     // session.proto
     ClientMessage,
-    EmitSceneEvent,
-    EmitSceneEventResult,
     ErrorCode,
     Heartbeat,
     LeaseRequest,
     LeaseResponse,
     LeaseResult,
-    LeaseStateChange,
     LocalSocketCredential,
     MutationBatch,
     PreSharedKeyCredential,
     ResolvedPortalTokens,
     RuntimeError,
-    RuntimeTelemetryFrame,
-    SceneDelta,
     SceneSnapshot,
     ServerMessage,
     SessionClose,
@@ -54,7 +40,6 @@ use tze_hud_protocol::proto::session::{
     SessionResumeResult,
     SubscriptionChange,
     SubscriptionEntry,
-    TelemetryFrame,
     TimingHints,
 };
 use tze_hud_protocol::proto::zone_content::Payload as ZonePayload;
@@ -82,13 +67,8 @@ use tze_hud_protocol::proto::{
     ImeCompositionStartEvent,
     ImeCompositionUpdateEvent,
     InputEnvelope,
-    // events.proto
-    InputEvent,
-    InputEventKind,
     KeyDownEvent,
     KeyUpEvent,
-    LeaseEvent,
-    LeaseEventKind,
     MutationProto,
     NodeProto,
     NotificationActionProto,
@@ -102,7 +82,6 @@ use tze_hud_protocol::proto::{
     RelativeGeometryPolicy,
     RenderingPolicyProto,
     Rgba,
-    SceneEvent,
     ScrollOffsetChangedEvent,
     SetTileRootMutation,
     SolidColorNodeProto,
@@ -111,9 +90,6 @@ use tze_hud_protocol::proto::{
     TextAlignProto,
     TextMarkdownNodeProto,
     TextOverflowProto,
-    TileCreatedEvent,
-    TileDeletedEvent,
-    TileUpdatedEvent,
     ZoneContent,
     ZoneDefinitionProto,
 };
@@ -658,157 +634,6 @@ fn roundtrip_zone_definition_proto() {
 // ─── events.proto ─────────────────────────────────────────────────────────────
 
 #[test]
-fn roundtrip_input_event_all_kinds() {
-    for &kind in &[
-        InputEventKind::Unspecified,
-        InputEventKind::PointerMove,
-        InputEventKind::PointerDown,
-        InputEventKind::PointerUp,
-        InputEventKind::PointerEnter,
-        InputEventKind::PointerLeave,
-        InputEventKind::Activated,
-    ] {
-        let orig = InputEvent {
-            tile_id: "tile-a".to_string(),
-            node_id: "node-b".to_string(),
-            interaction_id: "btn".to_string(),
-            local_x: 10.0,
-            local_y: 20.0,
-            display_x: 100.0,
-            display_y: 200.0,
-            kind: kind as i32,
-            timestamp_mono_us: 1_700_000_000_000,
-        };
-        let decoded = round_trip(&orig);
-        assert_eq!(orig.kind, decoded.kind);
-        assert_eq!(decoded.local_x, 10.0);
-    }
-}
-
-#[test]
-fn roundtrip_tile_created_event() {
-    let orig = TileCreatedEvent {
-        tile_id: "tile-001".to_string(),
-        namespace: "weather-agent".to_string(),
-        timestamp_wall_us: 999_999,
-    };
-    let decoded = round_trip(&orig);
-    assert_eq!(orig.tile_id, decoded.tile_id);
-    assert_eq!(orig.namespace, decoded.namespace);
-    assert_eq!(orig.timestamp_wall_us, decoded.timestamp_wall_us);
-}
-
-#[test]
-fn roundtrip_tile_deleted_event() {
-    let orig = TileDeletedEvent {
-        tile_id: "tile-002".to_string(),
-        timestamp_wall_us: 1234,
-    };
-    let decoded = round_trip(&orig);
-    assert_eq!(orig.tile_id, decoded.tile_id);
-}
-
-#[test]
-fn roundtrip_tile_updated_event() {
-    let orig = TileUpdatedEvent {
-        tile_id: "tile-003".to_string(),
-        timestamp_wall_us: 5678,
-    };
-    let decoded = round_trip(&orig);
-    assert_eq!(orig.tile_id, decoded.tile_id);
-}
-
-#[test]
-fn roundtrip_lease_event_all_kinds() {
-    for &kind in &[
-        LeaseEventKind::Unspecified,
-        LeaseEventKind::LeaseGranted,
-        LeaseEventKind::LeaseRenewed,
-        LeaseEventKind::LeaseRevoked,
-        LeaseEventKind::LeaseExpired,
-    ] {
-        let orig = LeaseEvent {
-            lease_id: "lease-abc".to_string(),
-            namespace: "agent-1".to_string(),
-            kind: kind as i32,
-            timestamp_wall_us: 42,
-        };
-        let decoded = round_trip(&orig);
-        assert_eq!(orig.kind, decoded.kind);
-    }
-}
-
-#[test]
-fn roundtrip_scene_event_all_variants() {
-    // tile_created
-    let s1 = SceneEvent {
-        timestamp_wall_us: 100,
-        event: Some(SceneEventPayload::TileCreated(TileCreatedEvent {
-            tile_id: "t1".to_string(),
-            namespace: "ns".to_string(),
-            timestamp_wall_us: 100,
-        })),
-    };
-    let d1 = round_trip(&s1);
-    assert!(matches!(d1.event, Some(SceneEventPayload::TileCreated(_))));
-
-    // tile_deleted
-    let s2 = SceneEvent {
-        timestamp_wall_us: 200,
-        event: Some(SceneEventPayload::TileDeleted(TileDeletedEvent {
-            tile_id: "t2".to_string(),
-            timestamp_wall_us: 200,
-        })),
-    };
-    assert!(matches!(
-        round_trip(&s2).event,
-        Some(SceneEventPayload::TileDeleted(_))
-    ));
-
-    // tile_updated
-    let s3 = SceneEvent {
-        timestamp_wall_us: 300,
-        event: Some(SceneEventPayload::TileUpdated(TileUpdatedEvent {
-            tile_id: "t3".to_string(),
-            timestamp_wall_us: 300,
-        })),
-    };
-    assert!(matches!(
-        round_trip(&s3).event,
-        Some(SceneEventPayload::TileUpdated(_))
-    ));
-
-    // input
-    let s4 = SceneEvent {
-        timestamp_wall_us: 400,
-        event: Some(SceneEventPayload::Input(InputEvent {
-            tile_id: "t4".to_string(),
-            kind: InputEventKind::PointerDown as i32,
-            ..Default::default()
-        })),
-    };
-    assert!(matches!(
-        round_trip(&s4).event,
-        Some(SceneEventPayload::Input(_))
-    ));
-
-    // lease
-    let s5 = SceneEvent {
-        timestamp_wall_us: 500,
-        event: Some(SceneEventPayload::Lease(LeaseEvent {
-            lease_id: "l1".to_string(),
-            namespace: "ns".to_string(),
-            kind: LeaseEventKind::LeaseGranted as i32,
-            timestamp_wall_us: 500,
-        })),
-    };
-    assert!(matches!(
-        round_trip(&s5).event,
-        Some(SceneEventPayload::Lease(_))
-    ));
-}
-
-#[test]
 fn roundtrip_pointer_move_event() {
     let orig = PointerMoveEvent {
         tile_id: vec![1u8; 16],
@@ -1066,8 +891,6 @@ fn roundtrip_event_batch() {
 fn roundtrip_session_init_all_fields() {
     let orig = SessionInit {
         agent_id: "weather-agent".to_string(),
-        agent_display_name: "Weather Agent".to_string(),
-        pre_shared_key: "".to_string(),
         requested_capabilities: vec![
             "resident_mcp".to_string(),
             "read_scene_topology".to_string(),
@@ -1197,7 +1020,6 @@ fn roundtrip_session_resume_result() {
         new_server_sequence: 42,
         negotiated_protocol_version: 1001,
         granted_capabilities: vec!["resident_mcp".to_string()],
-        error: String::new(),
         active_subscriptions: vec!["DEGRADATION_NOTICES".to_string()],
         denied_subscriptions: vec![],
     };
@@ -1218,18 +1040,11 @@ fn roundtrip_runtime_error_all_codes() {
         ErrorCode::BudgetExceeded,
         ErrorCode::MutationRejected,
         ErrorCode::PermissionDenied,
-        ErrorCode::RateLimited,
         ErrorCode::InvalidArgument,
-        ErrorCode::SessionExpired,
         ErrorCode::SafeModeActive,
         ErrorCode::TimestampTooOld,
         ErrorCode::TimestampTooFuture,
         ErrorCode::TimestampExpiryBeforePresent,
-        ErrorCode::AgentEventRateExceeded,
-        ErrorCode::AgentEventPayloadTooLarge,
-        ErrorCode::AgentEventCapabilityMissing,
-        ErrorCode::AgentEventInvalidName,
-        ErrorCode::AgentEventReservedPrefix,
     ] {
         let orig = RuntimeError {
             error_code: format!("{code:?}"),
@@ -1310,20 +1125,6 @@ fn roundtrip_lease_request_response() {
 }
 
 #[test]
-fn roundtrip_lease_state_change() {
-    let orig = LeaseStateChange {
-        lease_id: vec![0xAA; 16],
-        previous_state: "ACTIVE".to_string(),
-        new_state: "REVOKED".to_string(),
-        reason: "budget policy".to_string(),
-        timestamp_wall_us: 1_700_000_000_000_000,
-    };
-    let decoded = round_trip(&orig);
-    assert_eq!(orig.new_state, decoded.new_state);
-    assert_eq!(orig.timestamp_wall_us, decoded.timestamp_wall_us);
-}
-
-#[test]
 fn roundtrip_heartbeat() {
     let orig = Heartbeat {
         timestamp_mono_us: u64::MAX,
@@ -1345,7 +1146,7 @@ fn roundtrip_heartbeat_zero() {
 fn roundtrip_subscription_change() {
     let orig = SubscriptionChange {
         subscribe: vec!["SCENE_TOPOLOGY".to_string()],
-        unsubscribe: vec!["ZONE_EVENTS".to_string()],
+        unsubscribe: vec!["FOCUS_EVENTS".to_string()],
         subscribe_filter: Vec::new(),
     };
     let decoded = round_trip(&orig);
@@ -1369,51 +1170,6 @@ fn roundtrip_subscription_change_with_filter() {
     assert_eq!(decoded.subscribe_filter.len(), 1);
     assert_eq!(decoded.subscribe_filter[0].category, "SCENE_TOPOLOGY");
     assert_eq!(decoded.subscribe_filter[0].filter_prefix, "scene.zone.");
-}
-
-#[test]
-fn roundtrip_backpressure_signal() {
-    let orig = BackpressureSignal {
-        queue_pressure: 0.85,
-        suggested_action: "reduce_rate".to_string(),
-    };
-    let decoded = round_trip(&orig);
-    assert_eq!(decoded.suggested_action, "reduce_rate");
-    // float comparison with tolerance
-    assert!((decoded.queue_pressure - 0.85).abs() < 1e-5);
-}
-
-#[test]
-fn roundtrip_emit_scene_event() {
-    let orig = EmitSceneEvent {
-        bare_name: "doorbell.ring".to_string(),
-        payload: vec![0xDE, 0xAD],
-        interruption_class_hint: 2,
-    };
-    let decoded = round_trip(&orig);
-    assert_eq!(orig.bare_name, decoded.bare_name);
-    assert_eq!(orig.payload, decoded.payload);
-    assert_eq!(
-        orig.interruption_class_hint,
-        decoded.interruption_class_hint
-    );
-}
-
-#[test]
-fn roundtrip_emit_scene_event_result() {
-    let orig = EmitSceneEventResult {
-        request_sequence: 42,
-        accepted: true,
-        delivered_event_type: "agent.doorbell_agent.doorbell.ring".to_string(),
-        error_code: String::new(),
-        error_message: String::new(),
-    };
-    let decoded = round_trip(&orig);
-    assert!(decoded.accepted);
-    assert_eq!(
-        decoded.delivered_event_type,
-        "agent.doorbell_agent.doorbell.ring"
-    );
 }
 
 #[test]
@@ -1450,7 +1206,6 @@ fn roundtrip_client_message_all_payload_variants() {
             timestamp_wall_us: 4_000_000,
             payload: Some(ClientPayload::SessionClose(SessionClose {
                 reason: "done".to_string(),
-                expect_resume: false,
             })),
         },
     ];
@@ -1486,14 +1241,6 @@ fn roundtrip_server_message_all_payload_variants() {
                 timestamp_mono_us: 99,
             })),
         },
-        ServerMessage {
-            sequence: 4,
-            timestamp_wall_us: 4_000_000,
-            payload: Some(ServerPayload::BackpressureSignal(BackpressureSignal {
-                queue_pressure: 0.9,
-                suggested_action: "coalesce".to_string(),
-            })),
-        },
     ];
     for msg in &msgs {
         let decoded = round_trip(msg);
@@ -1515,66 +1262,6 @@ fn roundtrip_scene_snapshot() {
     assert_eq!(orig.snapshot_wall_us, decoded.snapshot_wall_us);
     assert_eq!(orig.snapshot_mono_us, decoded.snapshot_mono_us);
     assert_eq!(orig.blake3_checksum, decoded.blake3_checksum);
-}
-
-#[test]
-fn roundtrip_scene_delta_variants() {
-    let d1 = SceneDelta {
-        delta: Some(Delta::TileCreated(TileCreatedEvent {
-            tile_id: "t1".to_string(),
-            namespace: "ns".to_string(),
-            timestamp_wall_us: 0,
-        })),
-    };
-    assert!(matches!(round_trip(&d1).delta, Some(Delta::TileCreated(_))));
-
-    let d2 = SceneDelta {
-        delta: Some(Delta::TileDeleted(TileDeletedEvent {
-            tile_id: "t2".to_string(),
-            timestamp_wall_us: 0,
-        })),
-    };
-    assert!(matches!(round_trip(&d2).delta, Some(Delta::TileDeleted(_))));
-
-    let d3 = SceneDelta {
-        delta: Some(Delta::LeaseEvent(LeaseEvent {
-            lease_id: "l1".to_string(),
-            namespace: "ns".to_string(),
-            kind: LeaseEventKind::LeaseGranted as i32,
-            timestamp_wall_us: 0,
-        })),
-    };
-    assert!(matches!(round_trip(&d3).delta, Some(Delta::LeaseEvent(_))));
-}
-
-#[test]
-fn roundtrip_telemetry_frame() {
-    let orig = TelemetryFrame {
-        sample_timestamp_wall_us: 1_700_000_000_000_000,
-        mutations_sent: 100,
-        mutations_acked: 95,
-        rtt_estimate_us: 2500,
-    };
-    let decoded = round_trip(&orig);
-    assert_eq!(orig.mutations_sent, decoded.mutations_sent);
-    assert_eq!(orig.rtt_estimate_us, decoded.rtt_estimate_us);
-}
-
-#[test]
-fn roundtrip_runtime_telemetry_frame() {
-    let orig = RuntimeTelemetryFrame {
-        sample_timestamp_wall_us: 1_700_000_000_000_000,
-        compositor_frame_rate: 59.94,
-        compositor_frame_budget_us: 16_667,
-        compositor_frame_time_us: 14_000,
-        active_sessions: 3,
-        active_leases: 7,
-        heap_used_bytes: 256 * 1024 * 1024,
-        gpu_utilization_pct: 42.5,
-    };
-    let decoded = round_trip(&orig);
-    assert_eq!(orig.active_sessions, decoded.active_sessions);
-    assert_eq!(orig.heap_used_bytes, decoded.heap_used_bytes);
 }
 
 /// Proto3 forward-compatibility: unknown fields are silently ignored by prost.

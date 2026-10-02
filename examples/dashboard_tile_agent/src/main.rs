@@ -51,9 +51,6 @@ const PRODUCTION_CONFIG: &str = include_str!("../config/production.toml");
 /// Agent identifier registered in `config/production.toml`.
 const AGENT_ID: &str = "dashboard-tile-agent";
 
-/// Human-readable label shown in runtime admin panels.
-const AGENT_DISPLAY_NAME: &str = "Dashboard Tile Agent";
-
 /// Pre-shared key — must match the runtime's configured PSK.
 const AGENT_PSK: &str = "dashboard-tile-key";
 
@@ -173,7 +170,7 @@ async fn run_headless(dev_mode: bool) -> Result<(), Box<dyn std::error::Error>> 
     // ─────────────────────────────────────────────────────────────────────────
     println!("\n=== Phase 2: Lease Acquisition ===\n");
 
-    let lease_id = request_lease(GRPC_PORT, AGENT_PSK, AGENT_ID, AGENT_DISPLAY_NAME).await?;
+    let lease_id = request_lease(GRPC_PORT, AGENT_PSK, AGENT_ID).await?;
 
     println!("  Phase 2 PASSED: lease granted.");
     println!("    lease_id   = {} bytes (UUIDv7)", lease_id.len());
@@ -243,14 +240,8 @@ async fn run_headless(dev_mode: bool) -> Result<(), Box<dyn std::error::Error>> 
         scene.register_resource(scene_resource_id);
     }
 
-    let mut tile_state = create_tile_batch(
-        GRPC_PORT,
-        AGENT_PSK,
-        AGENT_ID,
-        AGENT_DISPLAY_NAME,
-        resource_id.clone(),
-    )
-    .await?;
+    let mut tile_state =
+        create_tile_batch(GRPC_PORT, AGENT_PSK, AGENT_ID, resource_id.clone()).await?;
 
     println!("  Phase 4 PASSED: tile created with all 6 nodes.");
     println!(
@@ -657,41 +648,34 @@ async fn do_content_update_with_host(
     .await?;
 
     // Wait for MutationResult confirming the update.
-    loop {
-        let msg = response_stream
-            .next()
-            .await
-            .ok_or("stream closed before MutationResult (content update)")??;
-        match msg.payload {
-            Some(session_proto::server_message::Payload::LeaseStateChange(_)) => continue,
-            Some(session_proto::server_message::Payload::MutationResult(result)) => {
-                if result.batch_id != batch_id {
-                    return Err(format!(
-                        "MutationResult batch_id mismatch for content update: \
-                         expected {:?}, got {:?}",
-                        batch_id, result.batch_id
-                    )
-                    .into());
-                }
-                if !result.accepted {
-                    return Err(format!(
-                        "Content update batch rejected: code={}, msg={}",
-                        result.error_code, result.error_message
-                    )
-                    .into());
-                }
-                println!(
-                    "  Content update cycle {cycle}: accepted=true, {} new nodes",
-                    result.created_ids.len()
-                );
-                return Ok(());
+    let msg = response_stream
+        .next()
+        .await
+        .ok_or("stream closed before MutationResult (content update)")??;
+    match msg.payload {
+        Some(session_proto::server_message::Payload::MutationResult(result)) => {
+            if result.batch_id != batch_id {
+                return Err(format!(
+                    "MutationResult batch_id mismatch for content update: \
+                     expected {:?}, got {:?}",
+                    batch_id, result.batch_id
+                )
+                .into());
             }
-            other => {
-                return Err(
-                    format!("Expected MutationResult (content update), got: {other:?}").into(),
-                );
+            if !result.accepted {
+                return Err(format!(
+                    "Content update batch rejected: code={}, msg={}",
+                    result.error_code, result.error_message
+                )
+                .into());
             }
+            println!(
+                "  Content update cycle {cycle}: accepted=true, {} new nodes",
+                result.created_ids.len()
+            );
+            Ok(())
         }
+        other => Err(format!("Expected MutationResult (content update), got: {other:?}").into()),
     }
 }
 
@@ -827,7 +811,7 @@ pub struct SessionState {
 /// - configuration/spec.md §Capability Vocabulary (lines 149-164)
 /// - openspec/changes/exemplar-dashboard-tile/tasks.md §1.1, §1.2
 pub async fn establish_session() -> Result<SessionState, Box<dyn std::error::Error>> {
-    establish_session_with(GRPC_PORT, AGENT_PSK, AGENT_ID, AGENT_DISPLAY_NAME).await
+    establish_session_with(GRPC_PORT, AGENT_PSK, AGENT_ID).await
 }
 
 /// Parameterized session-establishment helper used by tests and the public API.
@@ -843,9 +827,8 @@ async fn establish_session_with(
     port: u16,
     psk: &str,
     agent_id: &str,
-    agent_display_name: &str,
 ) -> Result<SessionState, Box<dyn std::error::Error>> {
-    establish_session_with_host("127.0.0.1", port, psk, agent_id, agent_display_name).await
+    establish_session_with_host("127.0.0.1", port, psk, agent_id).await
 }
 
 /// Like [`establish_session_with`] but accepts an explicit `host` address.
@@ -858,7 +841,6 @@ async fn establish_session_with_host(
     port: u16,
     psk: &str,
     agent_id: &str,
-    agent_display_name: &str,
 ) -> Result<SessionState, Box<dyn std::error::Error>> {
     use tokio_stream::StreamExt as _;
 
@@ -900,8 +882,6 @@ async fn establish_session_with_host(
         payload: Some(session_proto::client_message::Payload::SessionInit(
             session_proto::SessionInit {
                 agent_id: agent_id.to_string(),
-                agent_display_name: agent_display_name.to_string(),
-                pre_shared_key: String::new(),
                 // Canonical v1 capability names — non-canonical names are
                 // rejected with CONFIG_UNKNOWN_CAPABILITY.
                 requested_capabilities: vec![
@@ -1069,11 +1049,10 @@ pub async fn request_lease(
     port: u16,
     psk: &str,
     agent_id: &str,
-    agent_display_name: &str,
 ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     // The server in run_headless uses bind_all_interfaces: true (dual-stack [::]),
     // which accepts IPv4-mapped connections on 127.0.0.1.
-    request_lease_with_host("127.0.0.1", port, psk, agent_id, agent_display_name).await
+    request_lease_with_host("127.0.0.1", port, psk, agent_id).await
 }
 
 /// Like [`request_lease`] but accepts an explicit `host` address.
@@ -1086,7 +1065,6 @@ async fn request_lease_with_host(
     port: u16,
     psk: &str,
     agent_id: &str,
-    agent_display_name: &str,
 ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     use tokio_stream::StreamExt as _;
 
@@ -1112,8 +1090,6 @@ async fn request_lease_with_host(
         payload: Some(session_proto::client_message::Payload::SessionInit(
             session_proto::SessionInit {
                 agent_id: agent_id.to_string(),
-                agent_display_name: agent_display_name.to_string(),
-                pre_shared_key: String::new(),
                 requested_capabilities: vec![
                     "create_tiles".to_string(),
                     "modify_own_tiles".to_string(),
@@ -1200,46 +1176,36 @@ async fn request_lease_with_host(
 
     // ── 3–4. Receive LeaseResponse and verify granted = true (tasks.md §2.2) ──
     //
-    // Drain any interleaved LeaseStateChange messages (REQUESTED→ACTIVE)
-    // before asserting the LeaseResponse, consistent with the test-suite pattern.
-    loop {
-        let msg = response_stream
-            .next()
-            .await
-            .ok_or("stream closed before LeaseResponse")??;
-        match msg.payload {
-            Some(session_proto::server_message::Payload::LeaseStateChange(_)) => {
-                // Drain — not the response we're waiting for.
-                continue;
+    let msg = response_stream
+        .next()
+        .await
+        .ok_or("stream closed before LeaseResponse")??;
+    match msg.payload {
+        Some(session_proto::server_message::Payload::LeaseResponse(resp)) => {
+            if !resp.granted {
+                return Err(format!(
+                    "LeaseResponse denied: code={}, reason={}",
+                    resp.deny_code, resp.deny_reason
+                )
+                .into());
             }
-            Some(session_proto::server_message::Payload::LeaseResponse(resp)) => {
-                if !resp.granted {
-                    return Err(format!(
-                        "LeaseResponse denied: code={}, reason={}",
-                        resp.deny_code, resp.deny_reason
-                    )
-                    .into());
-                }
-                if resp.lease_id.len() != 16 {
-                    return Err(format!(
-                        "LeaseResponse granted but lease_id is {} bytes (must be 16-byte UUIDv7)",
-                        resp.lease_id.len()
-                    )
-                    .into());
-                }
-                println!(
-                    "  LeaseResponse: granted=true, ttl={}ms",
-                    resp.granted_ttl_ms
-                );
-                println!("    granted_capabilities = {:?}", resp.granted_capabilities);
-                println!("    granted_priority     = {}", resp.granted_priority);
-                // ── 5. Return lease_id ────────────────────────────────────
-                return Ok(resp.lease_id);
+            if resp.lease_id.len() != 16 {
+                return Err(format!(
+                    "LeaseResponse granted but lease_id is {} bytes (must be 16-byte UUIDv7)",
+                    resp.lease_id.len()
+                )
+                .into());
             }
-            other => {
-                return Err(format!("Expected LeaseResponse, got: {other:?}").into());
-            }
+            println!(
+                "  LeaseResponse: granted=true, ttl={}ms",
+                resp.granted_ttl_ms
+            );
+            println!("    granted_capabilities = {:?}", resp.granted_capabilities);
+            println!("    granted_priority     = {}", resp.granted_priority);
+            // ── 5. Return lease_id ────────────────────────────────────
+            Ok(resp.lease_id)
         }
+        other => Err(format!("Expected LeaseResponse, got: {other:?}").into()),
     }
 }
 
@@ -1385,20 +1351,11 @@ pub async fn create_tile_batch(
     port: u16,
     psk: &str,
     agent_id: &str,
-    agent_display_name: &str,
     resource_id_bytes: Vec<u8>,
 ) -> Result<TileCreationState, Box<dyn std::error::Error>> {
     // The server in run_headless uses bind_all_interfaces: true (dual-stack [::]),
     // which accepts IPv4-mapped connections on 127.0.0.1.
-    create_tile_batch_with_host(
-        "127.0.0.1",
-        port,
-        psk,
-        agent_id,
-        agent_display_name,
-        resource_id_bytes,
-    )
-    .await
+    create_tile_batch_with_host("127.0.0.1", port, psk, agent_id, resource_id_bytes).await
 }
 
 /// Like [`create_tile_batch`] but accepts an explicit `host` address.
@@ -1411,7 +1368,6 @@ async fn create_tile_batch_with_host(
     port: u16,
     psk: &str,
     agent_id: &str,
-    agent_display_name: &str,
     resource_id_bytes: Vec<u8>,
 ) -> Result<TileCreationState, Box<dyn std::error::Error>> {
     use tokio_stream::StreamExt as _;
@@ -1435,8 +1391,6 @@ async fn create_tile_batch_with_host(
         payload: Some(session_proto::client_message::Payload::SessionInit(
             session_proto::SessionInit {
                 agent_id: agent_id.to_string(),
-                agent_display_name: agent_display_name.to_string(),
-                pre_shared_key: String::new(),
                 requested_capabilities: vec![
                     "create_tiles".to_string(),
                     "modify_own_tiles".to_string(),
@@ -1492,34 +1446,31 @@ async fn create_tile_batch_with_host(
     .await?;
 
     // Drain lease state changes; expect LeaseResponse.
-    let lease_id_bytes: Vec<u8> = loop {
-        let msg = response_stream
-            .next()
-            .await
-            .ok_or("stream closed before LeaseResponse")??;
-        match msg.payload {
-            Some(session_proto::server_message::Payload::LeaseStateChange(_)) => continue,
-            Some(session_proto::server_message::Payload::LeaseResponse(resp)) => {
-                if !resp.granted {
-                    return Err(format!(
-                        "LeaseResponse denied: code={}, reason={}",
-                        resp.deny_code, resp.deny_reason
-                    )
-                    .into());
-                }
-                if resp.lease_id.len() != 16 {
-                    return Err(format!(
-                        "lease_id must be 16 bytes (UUIDv7), got {} bytes",
-                        resp.lease_id.len()
-                    )
-                    .into());
-                }
-                println!("  Lease granted: {} bytes", resp.lease_id.len());
-                break resp.lease_id;
+    let msg = response_stream
+        .next()
+        .await
+        .ok_or("stream closed before LeaseResponse")??;
+    let lease_id_bytes: Vec<u8> = match msg.payload {
+        Some(session_proto::server_message::Payload::LeaseResponse(resp)) => {
+            if !resp.granted {
+                return Err(format!(
+                    "LeaseResponse denied: code={}, reason={}",
+                    resp.deny_code, resp.deny_reason
+                )
+                .into());
             }
-            other => {
-                return Err(format!("Expected LeaseResponse, got: {other:?}").into());
+            if resp.lease_id.len() != 16 {
+                return Err(format!(
+                    "lease_id must be 16 bytes (UUIDv7), got {} bytes",
+                    resp.lease_id.len()
+                )
+                .into());
             }
+            println!("  Lease granted: {} bytes", resp.lease_id.len());
+            resp.lease_id
+        }
+        other => {
+            return Err(format!("Expected LeaseResponse, got: {other:?}").into());
         }
     };
 
@@ -1558,50 +1509,47 @@ async fn create_tile_batch_with_host(
     })
     .await?;
 
-    // Drain any LeaseStateChange; expect MutationResult for Batch A.
+    // Expect MutationResult for Batch A.
     // tasks.md §4.2: verify echoed batch_id and 16-byte tile_id before proceeding.
-    let tile_id_bytes: Vec<u8> = loop {
-        let msg = response_stream
-            .next()
-            .await
-            .ok_or("stream closed before MutationResult (CreateTile)")??;
-        match msg.payload {
-            Some(session_proto::server_message::Payload::LeaseStateChange(_)) => continue,
-            Some(session_proto::server_message::Payload::MutationResult(result)) => {
-                if result.batch_id != batch_a_id {
-                    return Err(format!(
-                        "MutationResult batch_id mismatch for Batch A: expected {:?}, got {:?}",
-                        batch_a_id, result.batch_id
-                    )
-                    .into());
-                }
-                if !result.accepted {
-                    return Err(format!(
-                        "CreateTile batch rejected: code={}, msg={}",
-                        result.error_code, result.error_message
-                    )
-                    .into());
-                }
-                if result.created_ids.is_empty() {
-                    return Err("MutationResult for CreateTile must include created_ids".into());
-                }
-                let id = result.created_ids[0].clone();
-                if id.len() != 16 {
-                    return Err(format!(
-                        "tile_id must be 16 bytes (UUIDv7 SceneId), got {} bytes — tasks.md §4.2",
-                        id.len()
-                    )
-                    .into());
-                }
-                println!(
-                    "  Batch A (CreateTile): accepted=true, tile_id={} bytes",
+    let msg = response_stream
+        .next()
+        .await
+        .ok_or("stream closed before MutationResult (CreateTile)")??;
+    let tile_id_bytes: Vec<u8> = match msg.payload {
+        Some(session_proto::server_message::Payload::MutationResult(result)) => {
+            if result.batch_id != batch_a_id {
+                return Err(format!(
+                    "MutationResult batch_id mismatch for Batch A: expected {:?}, got {:?}",
+                    batch_a_id, result.batch_id
+                )
+                .into());
+            }
+            if !result.accepted {
+                return Err(format!(
+                    "CreateTile batch rejected: code={}, msg={}",
+                    result.error_code, result.error_message
+                )
+                .into());
+            }
+            if result.created_ids.is_empty() {
+                return Err("MutationResult for CreateTile must include created_ids".into());
+            }
+            let id = result.created_ids[0].clone();
+            if id.len() != 16 {
+                return Err(format!(
+                    "tile_id must be 16 bytes (UUIDv7 SceneId), got {} bytes — tasks.md §4.2",
                     id.len()
-                );
-                break id;
+                )
+                .into());
             }
-            other => {
-                return Err(format!("Expected MutationResult (CreateTile), got: {other:?}").into());
-            }
+            println!(
+                "  Batch A (CreateTile): accepted=true, tile_id={} bytes",
+                id.len()
+            );
+            id
+        }
+        other => {
+            return Err(format!("Expected MutationResult (CreateTile), got: {other:?}").into());
         }
     };
 
@@ -1889,46 +1837,43 @@ async fn create_tile_batch_with_host(
 
     // Drain any interleaved state messages; expect MutationResult for Batch B.
     // tasks.md §4.2: verify echoed batch_id and exactly 6 created_ids (1 bg + 5 children).
-    let node_ids: Vec<Vec<u8>> = loop {
-        let msg = response_stream
-            .next()
-            .await
-            .ok_or("stream closed before MutationResult (node batch)")??;
-        match msg.payload {
-            Some(session_proto::server_message::Payload::LeaseStateChange(_)) => continue,
-            Some(session_proto::server_message::Payload::MutationResult(result)) => {
-                if result.batch_id != batch_b_id {
-                    return Err(format!(
-                        "MutationResult batch_id mismatch for Batch B: expected {:?}, got {:?}",
-                        batch_b_id, result.batch_id
-                    )
-                    .into());
-                }
-                if !result.accepted {
-                    return Err(format!(
-                        "Node batch rejected: code={}, msg={}",
-                        result.error_code, result.error_message
-                    )
-                    .into());
-                }
-                if result.created_ids.len() != 6 {
-                    return Err(format!(
-                        "Batch B must create exactly 6 nodes (bg + 5 children), \
-                         got {} created_ids — tasks.md §4.2",
-                        result.created_ids.len()
-                    )
-                    .into());
-                }
-                println!(
-                    "  Batch B (6-node tree + opacity + input_mode): accepted=true, \
-                     {} node_ids",
+    let msg = response_stream
+        .next()
+        .await
+        .ok_or("stream closed before MutationResult (node batch)")??;
+    let node_ids: Vec<Vec<u8>> = match msg.payload {
+        Some(session_proto::server_message::Payload::MutationResult(result)) => {
+            if result.batch_id != batch_b_id {
+                return Err(format!(
+                    "MutationResult batch_id mismatch for Batch B: expected {:?}, got {:?}",
+                    batch_b_id, result.batch_id
+                )
+                .into());
+            }
+            if !result.accepted {
+                return Err(format!(
+                    "Node batch rejected: code={}, msg={}",
+                    result.error_code, result.error_message
+                )
+                .into());
+            }
+            if result.created_ids.len() != 6 {
+                return Err(format!(
+                    "Batch B must create exactly 6 nodes (bg + 5 children), \
+                     got {} created_ids — tasks.md §4.2",
                     result.created_ids.len()
-                );
-                break result.created_ids;
+                )
+                .into());
             }
-            other => {
-                return Err(format!("Expected MutationResult (node batch), got: {other:?}").into());
-            }
+            println!(
+                "  Batch B (6-node tree + opacity + input_mode): accepted=true, \
+                 {} node_ids",
+                result.created_ids.len()
+            );
+            result.created_ids
+        }
+        other => {
+            return Err(format!("Expected MutationResult (node batch), got: {other:?}").into());
         }
     };
 
@@ -1982,7 +1927,6 @@ mod tests {
 
     const TEST_PSK: &str = "dashboard-tile-test-key";
     const TEST_AGENT_ID: &str = "test-dashboard-agent";
-    const TEST_AGENT_DISPLAY_NAME: &str = "Test Dashboard Agent";
 
     /// Bind an ephemeral port and return it.  The listener is dropped before
     /// the gRPC server starts; there is a brief TOCTOU window, but this is the
@@ -2017,24 +1961,16 @@ mod tests {
 
     // ── Phase 2 helpers ───────────────────────────────────────────────────────
 
-    /// Drain messages from `stream` until the first non-`LeaseStateChange` message.
-    async fn next_non_state_change(
+    /// Return the next server message.
+    async fn next_server_msg(
         stream: &mut tonic::Streaming<tze_hud_protocol::proto::session::ServerMessage>,
     ) -> tze_hud_protocol::proto::session::ServerMessage {
         use tokio_stream::StreamExt as _;
-        loop {
-            let msg = stream
-                .next()
-                .await
-                .expect("stream closed before LeaseResponse")
-                .expect("stream error");
-            match &msg.payload {
-                Some(
-                    tze_hud_protocol::proto::session::server_message::Payload::LeaseStateChange(_),
-                ) => continue,
-                _ => return msg,
-            }
-        }
+        stream
+            .next()
+            .await
+            .expect("stream closed before response")
+            .expect("stream error")
     }
 
     /// Task 1.2 — verify session_id is non-empty after successful handshake.
@@ -2049,15 +1985,9 @@ mod tests {
         // Allow the server a moment to bind before the client connects.
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 
-        let state = crate::establish_session_with_host(
-            "[::1]",
-            port,
-            TEST_PSK,
-            TEST_AGENT_ID,
-            TEST_AGENT_DISPLAY_NAME,
-        )
-        .await
-        .expect("establish_session_with_host");
+        let state = crate::establish_session_with_host("[::1]", port, TEST_PSK, TEST_AGENT_ID)
+            .await
+            .expect("establish_session_with_host");
 
         assert!(
             !state.session_id.is_empty(),
@@ -2078,15 +2008,9 @@ mod tests {
 
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 
-        let state = crate::establish_session_with_host(
-            "[::1]",
-            port,
-            TEST_PSK,
-            TEST_AGENT_ID,
-            TEST_AGENT_DISPLAY_NAME,
-        )
-        .await
-        .expect("establish_session_with_host");
+        let state = crate::establish_session_with_host("[::1]", port, TEST_PSK, TEST_AGENT_ID)
+            .await
+            .expect("establish_session_with_host");
 
         assert!(
             !state.namespace.is_empty(),
@@ -2112,15 +2036,9 @@ mod tests {
 
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 
-        let lease_id_bytes = crate::request_lease_with_host(
-            "[::1]",
-            port,
-            TEST_PSK,
-            TEST_AGENT_ID,
-            TEST_AGENT_DISPLAY_NAME,
-        )
-        .await
-        .expect("request_lease_with_host");
+        let lease_id_bytes = crate::request_lease_with_host("[::1]", port, TEST_PSK, TEST_AGENT_ID)
+            .await
+            .expect("request_lease_with_host");
 
         // tasks.md §2.2: lease_id MUST be exactly 16 bytes (UUIDv7 SceneId).
         assert_eq!(
@@ -2177,8 +2095,6 @@ mod tests {
             timestamp_wall_us: now_us,
             payload: Some(sp::client_message::Payload::SessionInit(sp::SessionInit {
                 agent_id: "bad-cap-test-agent".to_string(),
-                agent_display_name: "Bad Cap Test".to_string(),
-                pre_shared_key: String::new(),
                 requested_capabilities: vec![
                     "create_tiles".to_string(),
                     "modify_own_tiles".to_string(),
@@ -2227,7 +2143,7 @@ mod tests {
         .unwrap();
 
         // ── 3. Assert denial ──────────────────────────────────────────────────
-        let resp_msg = next_non_state_change(&mut resp_stream).await;
+        let resp_msg = next_server_msg(&mut resp_stream).await;
         match resp_msg.payload {
             Some(sp::server_message::Payload::LeaseResponse(resp)) => {
                 assert!(
@@ -2360,7 +2276,6 @@ mod tests {
             port,
             TEST_PSK,
             TEST_AGENT_ID,
-            TEST_AGENT_DISPLAY_NAME,
             resource_id_bytes,
         )
         .await
@@ -2415,7 +2330,6 @@ mod tests {
             port,
             TEST_PSK,
             TEST_AGENT_ID,
-            TEST_AGENT_DISPLAY_NAME,
             resource_id_bytes,
         )
         .await
@@ -2570,8 +2484,6 @@ mod tests {
             timestamp_wall_us: now_us,
             payload: Some(sp::client_message::Payload::SessionInit(sp::SessionInit {
                 agent_id: "partial-fail-test-agent".to_string(),
-                agent_display_name: "Partial Fail Test".to_string(),
-                pre_shared_key: String::new(),
                 requested_capabilities: vec![
                     "create_tiles".to_string(),
                     "modify_own_tiles".to_string(),
@@ -2617,7 +2529,7 @@ mod tests {
         .unwrap();
 
         let lease_id_bytes: Vec<u8> = loop {
-            let msg = next_non_state_change(&mut response_stream).await;
+            let msg = next_server_msg(&mut response_stream).await;
             if let Some(sp::server_message::Payload::LeaseResponse(resp)) = msg.payload {
                 assert!(resp.granted, "lease must be granted for partial-fail test");
                 break resp.lease_id;
@@ -2657,7 +2569,7 @@ mod tests {
         .unwrap();
 
         let tile_id_bytes: Vec<u8> = loop {
-            let msg = next_non_state_change(&mut response_stream).await;
+            let msg = next_server_msg(&mut response_stream).await;
             if let Some(sp::server_message::Payload::MutationResult(result)) = msg.payload {
                 assert!(result.accepted, "CreateTile must succeed; got: {result:?}");
                 break result.created_ids[0].clone();
@@ -2725,7 +2637,7 @@ mod tests {
         .unwrap();
 
         // Expect MutationResult with accepted=false (entire batch rejected).
-        let result_msg = next_non_state_change(&mut response_stream).await;
+        let result_msg = next_server_msg(&mut response_stream).await;
         match result_msg.payload {
             Some(sp::server_message::Payload::MutationResult(result)) => {
                 assert_eq!(
@@ -2829,8 +2741,6 @@ mod tests {
             timestamp_wall_us: now_us,
             payload: Some(sp::client_message::Payload::SessionInit(sp::SessionInit {
                 agent_id: "node-atomicity-test-agent".to_string(),
-                agent_display_name: "Node Atomicity Test".to_string(),
-                pre_shared_key: String::new(),
                 requested_capabilities: vec![
                     "create_tiles".to_string(),
                     "modify_own_tiles".to_string(),
@@ -2874,7 +2784,7 @@ mod tests {
         .unwrap();
 
         let lease_id_bytes: Vec<u8> = loop {
-            let msg = next_non_state_change(&mut response_stream).await;
+            let msg = next_server_msg(&mut response_stream).await;
             if let Some(sp::server_message::Payload::LeaseResponse(resp)) = msg.payload {
                 assert!(
                     resp.granted,
@@ -2917,7 +2827,7 @@ mod tests {
         .unwrap();
 
         let tile_id_bytes: Vec<u8> = loop {
-            let msg = next_non_state_change(&mut response_stream).await;
+            let msg = next_server_msg(&mut response_stream).await;
             if let Some(sp::server_message::Payload::MutationResult(result)) = msg.payload {
                 assert!(result.accepted, "CreateTile must succeed");
                 break result.created_ids[0].clone();
@@ -3020,7 +2930,7 @@ mod tests {
         .unwrap();
 
         // Expect rejected batch (entire batch must be refused atomically).
-        let result_msg = next_non_state_change(&mut response_stream).await;
+        let result_msg = next_server_msg(&mut response_stream).await;
         match result_msg.payload {
             Some(sp::server_message::Payload::MutationResult(result)) => {
                 assert_eq!(
@@ -3137,7 +3047,6 @@ mod tests {
             port,
             TEST_PSK,
             TEST_AGENT_ID,
-            TEST_AGENT_DISPLAY_NAME,
             resource_id_bytes.clone(),
         )
         .await
@@ -3242,7 +3151,6 @@ mod tests {
             port,
             TEST_PSK,
             TEST_AGENT_ID,
-            TEST_AGENT_DISPLAY_NAME,
             resource_id_bytes.clone(),
         )
         .await
@@ -3271,8 +3179,6 @@ mod tests {
             timestamp_wall_us: now_us,
             payload: Some(sp::client_message::Payload::SessionInit(sp::SessionInit {
                 agent_id: "expired-lease-update-agent".to_string(),
-                agent_display_name: "Expired Lease Test".to_string(),
-                pre_shared_key: String::new(),
                 requested_capabilities: vec![
                     "create_tiles".to_string(),
                     "modify_own_tiles".to_string(),
@@ -3355,7 +3261,7 @@ mod tests {
         .unwrap();
 
         // Expect MutationResult rejected — expired/unknown lease.
-        let result_msg = next_non_state_change(&mut response_stream).await;
+        let result_msg = next_server_msg(&mut response_stream).await;
         match result_msg.payload {
             Some(sp::server_message::Payload::MutationResult(result)) => {
                 assert!(
@@ -3942,8 +3848,6 @@ mod tests {
             timestamp_wall_us: now_us,
             payload: Some(sp::client_message::Payload::SessionInit(sp::SessionInit {
                 agent_id: agent_id.to_string(),
-                agent_display_name: agent_id.to_string(),
-                pre_shared_key: String::new(),
                 requested_capabilities: vec![
                     "create_tiles".to_string(),
                     "modify_own_tiles".to_string(),
@@ -4039,7 +3943,7 @@ mod tests {
         inject_fn(namespace.clone(), batch);
 
         // Agent must receive EventBatch with the ClickEvent.
-        // Drain messages; skip non-EventBatch messages (e.g. LeaseStateChange).
+        // Drain messages; skip non-EventBatch messages (e.g. heartbeats).
         let received_batch = loop {
             let msg = tokio::time::timeout(tokio::time::Duration::from_millis(500), stream.next())
                 .await
@@ -4981,7 +4885,7 @@ mod tests {
     /// Layer 0 test using `SceneGraph::revoke_lease` which models the runtime's cleanup
     /// on receiving a `LeaseRelease` message.  The lease state is set to REVOKED (the
     /// scene graph uses REVOKED for explicit release — there is no separate RELEASED state
-    /// in the scene model; the session layer emits a LeaseStateChange(RELEASED) on the wire).
+    /// in the scene model; the session layer answers with LeaseResponse on the wire).
     ///
     /// Verification:
     ///   - Tile must be removed from the scene.
@@ -5107,7 +5011,6 @@ mod tests {
             port,
             TEST_PSK,
             TEST_AGENT_ID,
-            TEST_AGENT_DISPLAY_NAME,
             resource_id_bytes.clone(),
         )
         .await

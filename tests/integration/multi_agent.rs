@@ -170,7 +170,6 @@ async fn test_three_agents_contention() -> Result<(), Box<dyn std::error::Error>
             TEST_PSK,
             GRPC_PORT,
             "agent-weather",
-            "integration test",
             1,
             standard_caps.clone()
         ),
@@ -178,18 +177,10 @@ async fn test_three_agents_contention() -> Result<(), Box<dyn std::error::Error>
             TEST_PSK,
             GRPC_PORT,
             "agent-notifications",
-            "integration test",
             2,
             standard_caps.clone()
         ),
-        connect_agent(
-            TEST_PSK,
-            GRPC_PORT,
-            "agent-media",
-            "integration test",
-            3,
-            standard_caps.clone()
-        ),
+        connect_agent(TEST_PSK, GRPC_PORT, "agent-media", 3, standard_caps.clone()),
     )?;
 
     // Verify all three namespaces are distinct
@@ -481,8 +472,8 @@ async fn test_three_agents_contention() -> Result<(), Box<dyn std::error::Error>
             .await
             .is_ok()
             && {
-                // Receive the MutationResult, skipping any interleaved LeaseStateChange events.
-                match agent_b.next_non_state_change().await {
+                // Receive the MutationResult.
+                match agent_b.next_server_msg().await {
                     Some(Ok(msg)) => {
                         match &msg.payload {
                             Some(session_proto::server_message::Payload::MutationResult(

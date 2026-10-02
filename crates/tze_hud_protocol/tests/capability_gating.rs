@@ -198,7 +198,7 @@ fn local_socket_authentication_rejected_from_lan_peer() {
 #[test]
 fn legacy_psk_fallback_accepted() {
     let server_psk = "legacy-key";
-    // No auth_credential — falls back to legacy pre_shared_key string
+    // No auth_credential — falls back to the plain PSK (SessionResume.pre_shared_key)
     let result = authenticate_session_init(None, "legacy-key", server_psk, loopback());
     assert_eq!(result, AuthResult::Accepted);
 }

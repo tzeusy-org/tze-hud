@@ -173,8 +173,6 @@ pub(super) async fn handle_capability_request(
 /// 1. Converts the capability name to a [`Capability`] enum value.
 /// 2. Calls [`SceneGraph::revoke_capability`] to narrow the live scope.
 /// 3. Emits `CapabilityNotice(revoked=[cap_name])` to the agent (transactional).
-/// 4. Emits `LeaseStateChange` with a `CAPABILITY_REVOKED:<cap_name>` reason
-///    (transactional audit event; lease state remains ACTIVE).
 ///
 /// RFC 0001 §3.3: Capability enforcement happens at mutation time against the live scope.
 /// After this function returns, any mutation that requires `capability_name` will be
@@ -226,14 +224,13 @@ pub(super) async fn handle_capability_revocation(
     };
 
     match result {
-        Ok((cap_name, revoked_at_us)) => {
+        Ok((cap_name, _revoked_at_us)) => {
             // Also remove from the session-level capability list so that
             // mid-session CapabilityRequest re-grants are not polluted.
             // (The session.capabilities list is used for CapabilityNotice.granted
             // filtering; removing the revoked entry keeps the audit trail clean.)
             session.capabilities.retain(|c| c != &event.capability_name);
 
-            let lease_id_bytes = scene_id_to_bytes(event.lease_id);
             let reason = format!("CAPABILITY_REVOKED:{cap_name}");
 
             // ── CapabilityNotice (transactional, RFC 0005 §5.3) ──────────────
@@ -249,26 +246,6 @@ pub(super) async fn handle_capability_revocation(
                         revoked: vec![event.capability_name.clone()],
                         reason: reason.clone(),
                         effective_at_server_seq: seq,
-                    })),
-                }))
-                .await;
-
-            // ── LeaseStateChange audit event (transactional) ─────────────────
-            // Carries the audit trail for the capability revocation. The lease
-            // state remains ACTIVE; only the capability scope is narrowed.
-            // RFC 0001 §3.3: "The lease remains in its current state; only the
-            // capability scope is narrowed."
-            let state_seq = session.next_server_seq();
-            let _ = tx
-                .send(Ok(ServerMessage {
-                    sequence: state_seq,
-                    timestamp_wall_us: now_wall_us(),
-                    payload: Some(ServerPayload::LeaseStateChange(LeaseStateChange {
-                        lease_id: lease_id_bytes,
-                        previous_state: "ACTIVE".to_string(),
-                        new_state: "ACTIVE".to_string(),
-                        reason,
-                        timestamp_wall_us: revoked_at_us,
                     })),
                 }))
                 .await;

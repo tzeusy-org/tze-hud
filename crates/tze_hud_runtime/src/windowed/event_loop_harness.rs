@@ -186,7 +186,6 @@ impl SharedStateBuilder {
             active_tab_mirror,
             token_store: tze_hud_protocol::token::TokenStore::new(),
             freeze_active: false,
-            degradation_level: tze_hud_protocol::session::RuntimeDegradationLevel::Normal,
             input_capture_tx: None,
             input_capture_wake: tze_hud_scene::render_wake::RenderWakeNotifier::default(),
             resolved_portal_tokens: std::collections::HashMap::new(),

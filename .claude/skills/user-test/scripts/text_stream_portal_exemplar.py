@@ -6044,7 +6044,7 @@ async def run_scenario(args: argparse.Namespace) -> int:
                     "expected_visual": "portal may remain until runtime orphan cleanup or HUD restart",
                 }, error=detail)
         try:
-            await client.close(reason="portal-exemplar done", expect_resume=False)
+            await client.close(reason="portal-exemplar done")
         except Exception:
             pass
         if args.transcript_out:

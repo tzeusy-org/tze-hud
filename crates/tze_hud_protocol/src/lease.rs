@@ -9,9 +9,6 @@
 //!   re-applying the operation.
 //!
 //! - Priority enforcement helpers per the lease-governance spec.
-//!
-//! - State-change payload builders so that both `session_server.rs` and future
-//!   lease-expiry tasks share a single canonical representation.
 
 use std::collections::HashMap;
 
@@ -22,7 +19,7 @@ use std::collections::HashMap;
 /// Holds the last 256 lease-operation responses per session.  An agent
 /// sending more than 256 lease requests without receiving ACKs is operating
 /// far outside normal patterns; oldest entries are evicted when the cap is
-/// hit.  This constant can be overridden via `SessionConfig` in the future.
+/// hit.
 pub const DEFAULT_LEASE_CORRELATION_CACHE_CAPACITY: usize = 256;
 
 // ─── Retransmit correlation (RFC 0005 §5.3) ──────────────────────────────────
@@ -127,9 +124,7 @@ pub fn effective_priority(requested: u32, granted_capabilities: &[String]) -> u3
         0 => 2, // Priority 0 reserved for runtime-internal leases
         1 => {
             // Requires explicit capability grant
-            let has_prio1 = granted_capabilities
-                .iter()
-                .any(|c| c == "lease:priority:1" || c == "lease_priority_high");
+            let has_prio1 = granted_capabilities.iter().any(|c| c == "lease:priority:1");
             if has_prio1 { 1 } else { 2 }
         }
         p => p,
@@ -312,11 +307,6 @@ mod tests {
     #[test]
     fn test_priority_one_with_capability_granted() {
         assert_eq!(effective_priority(1, &["lease:priority:1".to_string()]), 1);
-        // Legacy alias should also work.
-        assert_eq!(
-            effective_priority(1, &["lease_priority_high".to_string()]),
-            1
-        );
     }
 
     #[test]

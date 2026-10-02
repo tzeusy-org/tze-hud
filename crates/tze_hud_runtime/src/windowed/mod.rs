@@ -224,7 +224,6 @@ fn publish_degradation_transition(
     controller: &crate::degradation::DegradationController,
     event: tze_hud_telemetry::DegradationEvent,
     notices: Option<&tze_hud_protocol::session_server::DegradationNoticeSender>,
-    shared_state: &Arc<Mutex<tze_hud_protocol::session::SharedState>>,
 ) {
     tracing::warn!(
         previous_level = event.previous_level,
@@ -239,8 +238,6 @@ fn publish_degradation_transition(
         recovery_source = ?event.recovery_source,
         "runtime degradation transition"
     );
-    let (runtime_level, _) = controller.protocol_level();
-    shared_state.blocking_lock().degradation_level = runtime_level;
     if let Some(notices) = notices {
         let wall_us = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -1390,7 +1387,6 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
         // same connected gRPC session, so taking them would drop later delivery.
         let (frame_presented_tx, degradation_notices, lease_expirations) =
             self.state.compositor_runtime_senders();
-        let degradation_shared_state = Arc::clone(&self.state.shared_state);
         let shutdown = self.state.shutdown.clone();
         let benchmark_failed = self.state.benchmark_failed.clone();
         let terminal_surface_recovery_failed = self.state.terminal_surface_recovery_failed.clone();
@@ -1736,7 +1732,6 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                                     &degradation_controller,
                                     event,
                                     degradation_notices.as_ref(),
-                                    &degradation_shared_state,
                                 );
                             }
                             if let Some(recover_at_us) =
@@ -1920,7 +1915,6 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                                     &degradation_controller,
                                     event,
                                     degradation_notices.as_ref(),
-                                    &degradation_shared_state,
                                 );
                             }
 
@@ -2566,7 +2560,6 @@ impl WindowedRuntime {
             active_tab_mirror: Arc::clone(&active_tab_mirror),
             token_store: TokenStore::new(),
             freeze_active: false,
-            degradation_level: tze_hud_protocol::session::RuntimeDegradationLevel::Normal,
             input_capture_tx: Some(input_capture_tx),
             input_capture_wake: wake.main_work_notifier(),
             // Expose the runtime's ACTIVE-profile resolved portal tokens over the
@@ -3229,8 +3222,7 @@ mod wake_accounting_tests {
         use tze_hud_protocol::proto::session::hud_session_server::HudSessionServer;
         use tze_hud_protocol::proto::session::server_message::Payload as ServerPayload;
         use tze_hud_protocol::proto::session::{
-            ClientMessage, LeaseRequest, LeaseResponse, LeaseResult, LeaseStateChange,
-            ServerMessage, SessionInit,
+            ClientMessage, LeaseRequest, LeaseResponse, LeaseResult, ServerMessage, SessionInit,
         };
         use tze_hud_protocol::session_server::HudSessionImpl;
         use tze_hud_scene::types::{LeaseExpiry, LeaseState};
@@ -3274,14 +3266,14 @@ mod wake_accounting_tests {
             timestamp_wall_us: now_wall_us(),
             payload: Some(ClientPayload::SessionInit(SessionInit {
                 agent_id: "restart-expiry-agent".to_string(),
-                agent_display_name: "restart-expiry-agent".to_string(),
-                pre_shared_key: "test-key".to_string(),
                 requested_capabilities: vec!["create_tiles".to_string()],
                 initial_subscriptions: Vec::new(),
                 resume_token: Vec::new(),
                 min_protocol_version: 1000,
                 max_protocol_version: 1001,
-                auth_credential: None,
+                auth_credential: Some(tze_hud_protocol::auth::psk_credential(
+                    "test-key".to_string(),
+                )),
             })),
         })
         .await
@@ -3314,8 +3306,7 @@ mod wake_accounting_tests {
         .unwrap();
 
         let mut granted_lease_id = None;
-        let mut active_transition_seen = false;
-        while granted_lease_id.is_none() || !active_transition_seen {
+        while granted_lease_id.is_none() {
             let message = tokio::time::timeout(Duration::from_secs(1), stream.next())
                 .await
                 .expect("lease grant must arrive promptly")
@@ -3333,15 +3324,6 @@ mod wake_accounting_tests {
                     granted_lease_id = uuid::Uuid::from_slice(&lease_id)
                         .ok()
                         .map(tze_hud_scene::SceneId::from_uuid);
-                }
-                Some(ServerPayload::LeaseStateChange(LeaseStateChange {
-                    previous_state,
-                    new_state,
-                    ..
-                })) => {
-                    assert_eq!(previous_state, "REQUESTED");
-                    assert_eq!(new_state, "ACTIVE");
-                    active_transition_seen = true;
                 }
                 other => panic!("expected lease grant traffic, got {other:?}"),
             }
@@ -3384,8 +3366,7 @@ mod wake_accounting_tests {
         publish_lease_expiries(restarted_generation.2.as_ref(), vec![expiry]);
 
         let mut terminal_response_seen = false;
-        let mut terminal_transition_seen = false;
-        for _ in 0..2 {
+        {
             let message: ServerMessage =
                 tokio::time::timeout(Duration::from_secs(1), stream.next())
                     .await
@@ -3410,31 +3391,15 @@ mod wake_accounting_tests {
                     );
                     terminal_response_seen = true;
                 }
-                Some(ServerPayload::LeaseStateChange(LeaseStateChange {
-                    lease_id: state_lease_id,
-                    previous_state,
-                    new_state,
-                    ..
-                })) => {
-                    assert_eq!(state_lease_id, lease_id.as_uuid().as_bytes().to_vec());
-                    assert_eq!(previous_state, "ACTIVE");
-                    assert_eq!(new_state, "EXPIRED");
-                    assert!(
-                        !terminal_transition_seen,
-                        "only one terminal state transition is allowed"
-                    );
-                    terminal_transition_seen = true;
-                }
                 other => panic!("expected terminal lease traffic, got {other:?}"),
             }
         }
         assert!(terminal_response_seen);
-        assert!(terminal_transition_seen);
         assert!(
             tokio::time::timeout(Duration::from_millis(50), stream.next())
                 .await
                 .is_err(),
-            "duplicate runtime notices must not emit a second terminal pair"
+            "duplicate runtime notices must not emit a second terminal response"
         );
 
         drop(tx);

@@ -55,12 +55,10 @@
 //! library and `cfg(test)` is set by the compiler. Integration test binaries
 //! (in `tests/` directories) require `features = ["dev-mode"]` explicitly.
 //!
-pub mod agent_events;
 pub mod channels;
 pub mod degradation;
 pub mod diag;
 pub mod element_store;
-pub mod event_bus;
 pub mod font_loader;
 pub mod gpu_lock;
 pub mod headless;
@@ -76,7 +74,6 @@ pub mod resident_grpc_bridge;
 pub mod runtime_context;
 pub mod scene_startup;
 pub mod shell;
-pub mod subscriptions;
 #[cfg(test)]
 pub(crate) mod test_support;
 pub mod threads;
@@ -86,11 +83,6 @@ pub mod widget_startup;
 pub mod window;
 pub mod windowed;
 
-pub use agent_events::rate_limiter::AgentEventRateLimiter;
-pub use agent_events::{
-    AgentEventHandler, DEFAULT_MAX_EVENTS_PER_SECOND, EmissionError, EmissionOutcome,
-    EmissionResult, MAX_PAYLOAD_BYTES,
-};
 pub use channels::{
     BackpressureReceiver,
     // Backpressure channel types
@@ -132,10 +124,6 @@ pub use channels::{
     frame_ready_channel,
 };
 pub use degradation::{DegradationConfig, DegradationController, DegradationLevel};
-pub use event_bus::{
-    AGGREGATE_RATE_CAP, AggregateRateLimiter, ClassifiedEvent, EventBus, InterruptionClass,
-    SubscriberQueue,
-};
 pub use headless::HeadlessRuntime;
 pub use idle_efficiency::{
     IdleEfficiencyCounters, IdleEfficiencyDeltaError, IdleEfficiencySnapshot, RuntimeWakeupSource,
@@ -153,13 +141,6 @@ pub use shell::chrome::{
 pub use shell::safe_mode::{
     LeaseResumeInfo, SafeModeController, SafeModeEntryResult, SafeModeExitResult, SafeModeInput,
     SafeModeInputResult, ShellOverrideState, classify_safe_mode_input,
-};
-pub use subscriptions::{
-    AgentSubscriptions, CATEGORY_AGENT_EVENTS, CATEGORY_ATTENTION_EVENTS,
-    CATEGORY_DEGRADATION_NOTICES, CATEGORY_FOCUS_EVENTS, CATEGORY_INPUT_EVENTS,
-    CATEGORY_LEASE_CHANGES, CATEGORY_SCENE_TOPOLOGY, CATEGORY_TELEMETRY_FRAMES,
-    CATEGORY_ZONE_EVENTS, MANDATORY_CATEGORIES, MAX_SUBSCRIPTIONS_PER_AGENT, Subscription,
-    SubscriptionChangeOutcome, SubscriptionRegistry, category_prefix, required_capability,
 };
 pub use widget_runtime_registration::{RuntimeWidgetAssetError, register_runtime_widget_svg_asset};
 pub use windowed::{WindowedConfig, WindowedRuntime};

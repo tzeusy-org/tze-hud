@@ -60,9 +60,7 @@ use tze_hud_widget::{RuntimeWidgetAssetError, register_runtime_widget_svg_asset}
 // ─── Submodules (SS-1..SS-7h) ────────────────────────────────────────────────
 
 pub mod budget_gate;
-pub mod config;
 pub mod degradation_notice_bus;
-pub mod emit_scene_event;
 pub mod freeze_queue;
 pub mod handshake;
 pub mod input;
@@ -83,11 +81,9 @@ pub use budget_gate::{
     MutationBudgetDecision, MutationBudgetEnforcer, MutationBudgetUsage,
     SharedMutationBudgetEnforcer,
 };
-pub use config::SessionConfig;
 pub use degradation_notice_bus::{DegradationNoticeReceiver, DegradationNoticeSender};
 // FreezeEnqueueResult, FREEZE_QUEUE_CAPACITY, and SessionFreezeQueue are used
 // transitively in `mod tests { use super::* }`.
-use emit_scene_event::handle_emit_scene_event;
 #[allow(unused_imports)]
 use freeze_queue::{FREEZE_QUEUE_CAPACITY, FreezeEnqueueResult, SessionFreezeQueue};
 use handshake::{handle_session_init, handle_session_resume};
@@ -459,15 +455,6 @@ pub(super) fn touch_element_store_entry_by_namespace(
     touch_element_store_entry_by_id(st, id, element_type, now)
 }
 
-// ─── Shared agent event emission types ───────────────────────────────────────
-
-// MAX_PAYLOAD_BYTES and DEFAULT_MAX_EVENTS_PER_SECOND live in
-// tze_hud_scene::events::emission and are shared with tze_hud_runtime.
-use tze_hud_scene::events::emission::{DEFAULT_MAX_EVENTS_PER_SECOND, MAX_PAYLOAD_BYTES};
-// AgentEventRateLimiter is used transitively in `mod tests { use super::* }`.
-#[allow(unused_imports)]
-use tze_hud_scene::events::emission::AgentEventRateLimiter;
-
 /// Broadcast channel capacity for transactional server-push messages.
 ///
 /// Runtime-injected input events use this channel as well as degradation and
@@ -788,12 +775,12 @@ impl HudSession for HudSessionImpl {
                         }
                     }
 
-                    // ── Capability revocation broadcast (RFC 0001 §3.3, GAP-G3-4) ────
+                    // ── Capability revocation broadcast ──────────────────────────────
                     //
                     // The runtime can narrow an active lease's capability scope without
                     // revoking the lease itself. The session handler applies the change
                     // to the scene graph and notifies the agent with CapabilityNotice
-                    // + LeaseStateChange (both transactional — never dropped).
+                    // (transactional — never dropped).
                     revocation_result = capability_revocation_rx.recv() => {
                         if let LoopAction::Break = session.on_capability_revocation(
                             revocation_result,
@@ -962,9 +949,6 @@ async fn handle_client_message(
         ClientPayload::Heartbeat(hb) => {
             handle_heartbeat(session, tx, hb).await;
         }
-        ClientPayload::TelemetryFrame(_tf) => {
-            // Accept agent-side telemetry frames silently (logging/storage deferred to post-v1)
-        }
         ClientPayload::InputFocusRequest(req) => {
             // Synchronous focus request (RFC 0005 §3.8).
             // v1 grants focus unconditionally (arbitration deferred to post-v1).
@@ -979,20 +963,11 @@ async fn handle_client_message(
             // Confirmed by CaptureReleasedEvent in EventBatch (field 34).
             handle_input_capture_release(state, session, tx, rel).await;
         }
-        ClientPayload::SetImePosition(_pos) => {
-            // IME position hint (RFC 0005 §3.8): fire-and-forget, no response sent.
-        }
-        ClientPayload::SessionClose(close) => {
-            // Graceful disconnect (RFC 0005 §1.5).
-            // Record the expect_resume hint; the main loop transitions state after this returns.
-            session.expect_resume = close.expect_resume;
+        ClientPayload::SessionClose(_close) => {
+            // Graceful disconnect: the main loop ends the stream after this returns.
         }
         ClientPayload::CapabilityRequest(req) => {
             handle_capability_request(session, tx, req).await;
-        }
-        // Agent scene event emission (scene-events/spec.md §5.1, §5.2).
-        ClientPayload::EmitSceneEvent(emit) => {
-            handle_emit_scene_event(state, session, tx, client_sequence, emit).await;
         }
         // Widget publishing (widget-system spec §Requirement: Widget Publishing via gRPC).
         // Durable-widget publishes receive WidgetPublishResult (ServerMessage field 47).
@@ -1272,7 +1247,7 @@ impl StreamSession {
     /// The runtime can narrow an active lease's capability scope without
     /// revoking the lease itself. The session handler applies the change
     /// to the scene graph and notifies the agent with CapabilityNotice
-    /// + LeaseStateChange (both transactional — never dropped).
+    /// (transactional — never dropped).
     async fn on_capability_revocation(
         &mut self,
         revocation_result: Result<
@@ -1308,7 +1283,7 @@ impl StreamSession {
     ///
     /// The compositor has already applied cleanup by the time it publishes the
     /// notice. Removing the id before sending makes duplicate runtime notices
-    /// harmless and guarantees at most one terminal response/state pair for a
+    /// harmless and guarantees at most one terminal response for a
     /// connected session.
     async fn on_lease_expiry(
         &mut self,
@@ -1355,30 +1330,10 @@ impl StreamSession {
                 payload: Some(ServerPayload::LeaseResponse(LeaseResponse {
                     granted: false,
                     lease_id: lease_id.clone(),
-                    deny_reason: reason.clone(),
+                    deny_reason: reason,
                     deny_code,
                     result,
                     ..Default::default()
-                })),
-            }))
-            .await
-            .is_err()
-        {
-            self.transition(SessionState::Closed);
-            return LoopAction::Break;
-        }
-
-        let state_change_seq = self.next_server_seq();
-        if tx
-            .send(Ok(ServerMessage {
-                sequence: state_change_seq,
-                timestamp_wall_us: now_wall_us(),
-                payload: Some(ServerPayload::LeaseStateChange(LeaseStateChange {
-                    lease_id,
-                    previous_state: lease_state_wire_name(notice.previous_state).to_string(),
-                    new_state: lease_state_wire_name(notice.terminal_state).to_string(),
-                    reason,
-                    timestamp_wall_us: now_wall_us(),
                 })),
             }))
             .await
@@ -1483,8 +1438,8 @@ impl StreamSession {
     ///
     /// Batch-correlated present acknowledgment. Delivered to agents subscribed to
     /// TELEMETRY_FRAMES (requires the read_telemetry capability, enforced at
-    /// subscribe time — so checking the active subscription here is sufficient
-    /// and matches the RuntimeTelemetryFrame gate). State-stream class:
+    /// subscribe time — so checking the active subscription here is sufficient).
+    /// State-stream class:
     /// coalesced/droppable under backpressure. Agent cannot reject.
     async fn on_frame_presented(
         &mut self,
@@ -1605,11 +1560,7 @@ pub(super) fn canonical_name_to_capability(name: &str) -> Option<Capability> {
         "manage_tabs" => Some(Capability::ManageTabs),
         "upload_resource" => Some(Capability::UploadResource),
         "read_scene_topology" => Some(Capability::ReadSceneTopology),
-        "subscribe_scene_events" => Some(Capability::SubscribeSceneEvents),
-        "overlay_privileges" => Some(Capability::OverlayPrivileges),
         "access_input_events" => Some(Capability::AccessInputEvents),
-        "high_priority_z_order" => Some(Capability::HighPriorityZOrder),
-        "exceed_default_budgets" => Some(Capability::ExceedDefaultBudgets),
         "read_telemetry" => Some(Capability::ReadTelemetry),
         "resident_mcp" => Some(Capability::ResidentMcp),
         "lease:priority:1" => Some(Capability::LeasePriority1),
@@ -1620,10 +1571,6 @@ pub(super) fn canonical_name_to_capability(name: &str) -> Option<Capability> {
         _ if name.starts_with("publish_widget:") => {
             let widget = name.strip_prefix("publish_widget:").unwrap_or("*");
             Some(Capability::PublishWidget(widget.to_string()))
-        }
-        _ if name.starts_with("emit_scene_event:") => {
-            let event = name.strip_prefix("emit_scene_event:").unwrap_or("");
-            Some(Capability::EmitSceneEvent(event.to_string()))
         }
         // Higher-priority lease variants beyond priority 1 are not yet represented
         // in the enum; skip them without error (forward compat).
@@ -1638,7 +1585,6 @@ pub(super) fn capability_grant_covers(granted: &str, requested: &str) -> bool {
 
     (granted == "publish_zone:*" && requested.starts_with("publish_zone:"))
         || (granted == "publish_widget:*" && requested.starts_with("publish_widget:"))
-        || (granted == "emit_scene_event:*" && requested.starts_with("emit_scene_event:"))
 }
 
 pub(super) fn capability_set_covers(granted: &[String], requested: &str) -> bool {

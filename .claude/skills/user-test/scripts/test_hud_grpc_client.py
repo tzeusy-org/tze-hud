@@ -395,11 +395,10 @@ class HudGrpcClientTests(unittest.IsolatedAsyncioTestCase):
         client._send = AsyncMock()
         client._shutdown_transport = AsyncMock()
 
-        await client.session_close(expect_resume=False)
+        await client.session_close()
         client._send.assert_awaited_once()
         close_kwargs = client._send.await_args.kwargs
         self.assertIn("session_close", close_kwargs)
-        self.assertFalse(close_kwargs["session_close"].expect_resume)
 
         client._send.reset_mock()
         client._shutdown_transport.reset_mock()
