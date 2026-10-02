@@ -15,7 +15,6 @@ use tze_hud_compositor::CompositorDegradationPolicy;
 use tze_hud_protocol::proto::session::{
     DegradationLevel as ProtocolDegradationLevel, DegradationNotice,
 };
-use tze_hud_protocol::session::RuntimeDegradationLevel;
 use tze_hud_telemetry::{DegradationDirection, DegradationEvent};
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -399,25 +398,18 @@ impl DegradationController {
     }
 
     /// Runtime-to-wire mapping. Simplified maps to `RENDERING_SIMPLIFIED`.
-    pub fn protocol_level(&self) -> (RuntimeDegradationLevel, ProtocolDegradationLevel) {
+    pub fn protocol_level(&self) -> ProtocolDegradationLevel {
         match self.level {
-            DegradationLevel::Normal => (
-                RuntimeDegradationLevel::Normal,
-                ProtocolDegradationLevel::Normal,
-            ),
-            DegradationLevel::Simplified => (
-                RuntimeDegradationLevel::RenderingSimplified,
-                ProtocolDegradationLevel::RenderingSimplified,
-            ),
+            DegradationLevel::Normal => ProtocolDegradationLevel::Normal,
+            DegradationLevel::Simplified => ProtocolDegradationLevel::RenderingSimplified,
         }
     }
 
     pub fn protocol_notice(&self, timestamp_wall_us: u64) -> DegradationNotice {
-        let (_, level) = self.protocol_level();
+        let level = self.protocol_level();
         DegradationNotice {
             level: level as i32,
             reason: format!("runtime degradation level changed to {}", self.level),
-            affected_capabilities: Vec::new(),
             timestamp_wall_us,
         }
     }
@@ -713,7 +705,7 @@ mod tests {
             ctrl.compositor_policy().level,
             tze_hud_scene::DegradationLevel::Nominal
         );
-        assert_eq!(ctrl.protocol_level().1, ProtocolDegradationLevel::Normal);
+        assert_eq!(ctrl.protocol_level(), ProtocolDegradationLevel::Normal);
 
         push_frames(&mut ctrl, 20_000, TRIGGER_WINDOW);
         assert_eq!(
@@ -721,10 +713,9 @@ mod tests {
             tze_hud_scene::DegradationLevel::Simplified
         );
         assert_eq!(
-            ctrl.protocol_level().1,
+            ctrl.protocol_level(),
             ProtocolDegradationLevel::RenderingSimplified
         );
-        assert!(ctrl.protocol_notice(1).affected_capabilities.is_empty());
     }
 
     #[test]

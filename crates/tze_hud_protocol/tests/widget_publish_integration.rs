@@ -54,7 +54,6 @@ fn widget_publish_roundtrip_preserves_all_fields() {
             },
         ],
         transition_ms: 500,
-        ttl_us: 5_000_000,
         element_id: Vec::new(),
         merge_key: "key_42".to_string(),
     };
@@ -65,7 +64,6 @@ fn widget_publish_roundtrip_preserves_all_fields() {
     assert_eq!(decoded.widget_name, "gauge_01");
     assert_eq!(decoded.instance_id, "tab_42");
     assert_eq!(decoded.transition_ms, 500);
-    assert_eq!(decoded.ttl_us, 5_000_000);
     assert_eq!(decoded.merge_key, "key_42");
     assert_eq!(decoded.params.len(), 2);
     assert_eq!(decoded.params[0].param_name, "value");
@@ -226,7 +224,6 @@ fn client_message_widget_publish_envelope_roundtrip() {
             instance_id: "inst_1".to_string(),
             params: vec![],
             transition_ms: 100,
-            ttl_us: 10_000,
             element_id: Vec::new(),
             merge_key: String::new(),
         })),
@@ -241,7 +238,6 @@ fn client_message_widget_publish_envelope_roundtrip() {
             assert_eq!(publish.widget_name, "test_widget");
             assert_eq!(publish.instance_id, "inst_1");
             assert_eq!(publish.transition_ms, 100);
-            assert_eq!(publish.ttl_us, 10_000);
         }
         other => panic!("Expected WidgetPublish in ClientMessage, got: {other:?}"),
     }
@@ -319,7 +315,6 @@ fn widget_publish_empty_params_roundtrip() {
         instance_id: String::new(),
         params: vec![],
         transition_ms: 0,
-        ttl_us: 0,
         element_id: Vec::new(),
         merge_key: String::new(),
     };
@@ -332,7 +327,7 @@ fn widget_publish_empty_params_roundtrip() {
     assert!(decoded.merge_key.is_empty());
 }
 
-/// WidgetPublish with max u32 and u64 values.
+/// WidgetPublish with max u32 values.
 #[test]
 fn widget_publish_max_values_roundtrip() {
     let publish = WidgetPublish {
@@ -340,7 +335,6 @@ fn widget_publish_max_values_roundtrip() {
         instance_id: String::new(),
         params: vec![],
         transition_ms: u32::MAX,
-        ttl_us: u64::MAX,
         element_id: Vec::new(),
         merge_key: String::new(),
     };
@@ -348,7 +342,6 @@ fn widget_publish_max_values_roundtrip() {
     let decoded = round_trip(&publish);
 
     assert_eq!(decoded.transition_ms, u32::MAX);
-    assert_eq!(decoded.ttl_us, u64::MAX);
 }
 
 /// ClientMessage sequence values: monotonically increasing starting at 1.
@@ -366,7 +359,6 @@ fn client_message_sequence_roundtrip_boundary_values() {
                 instance_id: String::new(),
                 params: vec![],
                 transition_ms: 0,
-                ttl_us: 0,
                 element_id: Vec::new(),
                 merge_key: String::new(),
             })),

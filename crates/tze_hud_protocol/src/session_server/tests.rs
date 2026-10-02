@@ -87,23 +87,11 @@ fn load_element_store_for_test(
     }
 }
 
-/// Consume the next non-LeaseStateChange message from a stream.
-///
-/// Some test scenarios interleave LeaseStateChange events (e.g.,
-/// REQUESTED→ACTIVE after lease grant) with MutationResult/RuntimeError
-/// messages. This helper drains those state-change events so tests can
-/// assert on the first substantive message without order-dependency.
-async fn next_non_state_change(
+/// Consume the next message from a stream.
+async fn next_server_msg(
     stream: &mut tonic::Streaming<crate::proto::session::ServerMessage>,
 ) -> crate::proto::session::ServerMessage {
-    use crate::proto::session::server_message::Payload as P;
-    loop {
-        let msg = stream.next().await.unwrap().unwrap();
-        if let Some(P::LeaseStateChange(_)) = &msg.payload {
-            continue;
-        }
-        return msg;
-    }
+    stream.next().await.unwrap().unwrap()
 }
 
 /// Start a test server and return a connected client.
@@ -181,8 +169,6 @@ fn direct_handler_test_session(namespace: &str, capabilities: Vec<String>) -> St
         state: SessionState::Active,
         last_client_sequence: 1,
         safe_mode_active: false,
-        expect_resume: false,
-        agent_event_rate_limiter: AgentEventRateLimiter::new(),
         freeze_queue: SessionFreezeQueue::new(FREEZE_QUEUE_CAPACITY),
         session_open_at_wall_us: now_wall_us(),
         dedup_window: DedupWindow::new(1000, 60),
@@ -220,7 +206,7 @@ async fn short_ttl_expiry_reaches_owning_connected_agent_once_after_cleanup() {
     .await
     .unwrap();
 
-    let granted = next_non_state_change(&mut stream).await;
+    let granted = next_server_msg(&mut stream).await;
     let lease_id = match granted.payload {
         Some(ServerPayload::LeaseResponse(LeaseResponse {
             granted: true,
@@ -233,18 +219,6 @@ async fn short_ttl_expiry_reaches_owning_connected_agent_once_after_cleanup() {
         }
         other => panic!("expected granted LeaseResponse, got {other:?}"),
     };
-
-    // Consume the initial REQUESTED→ACTIVE state transition before driving the
-    // terminal transition, so the assertions below prove exactly one new pair.
-    let granted_state = stream.next().await.unwrap().unwrap();
-    assert!(matches!(
-        granted_state.payload,
-        Some(ServerPayload::LeaseStateChange(LeaseStateChange {
-            previous_state,
-            new_state,
-            ..
-        })) if previous_state == "REQUESTED" && new_state == "ACTIVE"
-    ));
 
     let expiry = {
         let shared = state.lock().await;
@@ -317,28 +291,11 @@ async fn short_ttl_expiry_reaches_owning_connected_agent_once_after_cleanup() {
         other => panic!("expected terminal LeaseResponse, got {other:?}"),
     }
 
-    let terminal_state = tokio::time::timeout(Duration::from_secs(1), stream.next())
-        .await
-        .expect("terminal LeaseStateChange must arrive promptly")
-        .expect("connected stream must remain open")
-        .expect("terminal LeaseStateChange must be valid");
-    assert!(matches!(
-        terminal_state.payload,
-        Some(ServerPayload::LeaseStateChange(LeaseStateChange {
-            lease_id: state_lease_id,
-            previous_state,
-            new_state,
-            ..
-        })) if state_lease_id == scene_id_to_bytes(lease_id)
-            && previous_state == "ACTIVE"
-            && new_state == "EXPIRED"
-    ));
-
     assert!(
         tokio::time::timeout(Duration::from_millis(50), stream.next())
             .await
             .is_err(),
-        "one terminal lease must emit exactly one response/state pair even if its runtime notice is duplicated"
+        "one terminal lease must emit exactly one response even if its runtime notice is duplicated"
     );
 
     drop(tx);
@@ -711,8 +668,6 @@ async fn handshake(
         timestamp_wall_us: now_wall_us(),
         payload: Some(ClientPayload::SessionInit(SessionInit {
             agent_id: agent_id.to_string(),
-            agent_display_name: agent_id.to_string(),
-            pre_shared_key: psk.to_string(),
             requested_capabilities: vec![
                 "create_tiles".to_string(),
                 "access_input_events".to_string(),
@@ -722,7 +677,7 @@ async fn handshake(
             resume_token: Vec::new(),
             min_protocol_version: 1000,
             max_protocol_version: 1001,
-            auth_credential: None,
+            auth_credential: Some(crate::auth::psk_credential(psk.to_string())),
         })),
     })
     .await
@@ -760,14 +715,12 @@ async fn handshake_with_requested_capabilities(
         timestamp_wall_us: now_wall_us(),
         payload: Some(ClientPayload::SessionInit(SessionInit {
             agent_id: agent_id.to_string(),
-            agent_display_name: agent_id.to_string(),
-            pre_shared_key: psk.to_string(),
             requested_capabilities,
             initial_subscriptions: vec!["SCENE_TOPOLOGY".to_string()],
             resume_token: Vec::new(),
             min_protocol_version: 1000,
             max_protocol_version: 1001,
-            auth_credential: None,
+            auth_credential: Some(crate::auth::psk_credential(psk.to_string())),
         })),
     })
     .await
@@ -947,14 +900,12 @@ async fn test_handshake_auth_failure() {
             timestamp_wall_us: now_wall_us(),
             payload: Some(ClientPayload::SessionInit(SessionInit {
                 agent_id: "bad-agent".to_string(),
-                agent_display_name: "bad-agent".to_string(),
-                pre_shared_key: "wrong-key".to_string(),
                 requested_capabilities: Vec::new(),
                 initial_subscriptions: Vec::new(),
                 resume_token: Vec::new(),
                 min_protocol_version: 1000,
                 max_protocol_version: 1001,
-                auth_credential: None,
+                auth_credential: Some(crate::auth::psk_credential("wrong-key".to_string())),
             })),
         })
         .await
@@ -1031,15 +982,7 @@ async fn test_mutation_over_stream() {
     .await
     .unwrap();
 
-    // Drain any interleaved LeaseStateChange events before expecting MutationResult.
-    // A LeaseStateChange(REQUESTED -> ACTIVE) may be emitted after lease grant.
-    let result_msg = loop {
-        let msg = stream.next().await.unwrap().unwrap();
-        if let Some(ServerPayload::LeaseStateChange(_)) = &msg.payload {
-            continue; // skip lease state events
-        }
-        break msg;
-    };
+    let result_msg = stream.next().await.unwrap().unwrap();
     match &result_msg.payload {
         Some(ServerPayload::MutationResult(result)) => {
             // This will fail because no active tab exists, which is expected
@@ -1087,7 +1030,7 @@ async fn test_create_tile_persists_element_store_entry() {
     .await
     .expect("lease request");
 
-    let lease_msg = next_non_state_change(&mut stream).await;
+    let lease_msg = next_server_msg(&mut stream).await;
     let lease_id = match &lease_msg.payload {
         Some(ServerPayload::LeaseResponse(resp)) if resp.granted => resp.lease_id.clone(),
         other => panic!("Expected granted LeaseResponse, got: {other:?}"),
@@ -1119,7 +1062,7 @@ async fn test_create_tile_persists_element_store_entry() {
     .await
     .expect("mutation batch");
 
-    let result_msg = next_non_state_change(&mut stream).await;
+    let result_msg = next_server_msg(&mut stream).await;
     let created_tile_id = match &result_msg.payload {
         Some(ServerPayload::MutationResult(result)) => {
             assert!(result.accepted, "create tile must be accepted");
@@ -1180,7 +1123,7 @@ async fn test_existing_tile_last_published_update_triggers_persist() {
     .await
     .expect("lease request");
 
-    let lease_msg = next_non_state_change(&mut stream).await;
+    let lease_msg = next_server_msg(&mut stream).await;
     let lease_id = match &lease_msg.payload {
         Some(ServerPayload::LeaseResponse(resp)) if resp.granted => resp.lease_id.clone(),
         other => panic!("Expected granted LeaseResponse, got: {other:?}"),
@@ -1212,7 +1155,7 @@ async fn test_existing_tile_last_published_update_triggers_persist() {
     .await
     .expect("mutation batch");
 
-    let result_msg = next_non_state_change(&mut stream).await;
+    let result_msg = next_server_msg(&mut stream).await;
     let created_tile_id = match &result_msg.payload {
         Some(ServerPayload::MutationResult(result)) => {
             assert!(result.accepted, "create tile must be accepted");
@@ -1532,7 +1475,7 @@ async fn test_list_elements_request_supports_filters_and_override_metadata() {
     .await
     .expect("send list-elements request");
 
-    let tile_only = next_non_state_change(&mut stream).await;
+    let tile_only = next_server_msg(&mut stream).await;
     match tile_only.payload {
         Some(ServerPayload::ListElementsResponse(resp)) => {
             assert_eq!(
@@ -1580,7 +1523,7 @@ async fn test_list_elements_request_supports_filters_and_override_metadata() {
     .await
     .expect("send list-elements zone filter request");
 
-    let zone_only = next_non_state_change(&mut stream).await;
+    let zone_only = next_server_msg(&mut stream).await;
     match zone_only.payload {
         Some(ServerPayload::ListElementsResponse(resp)) => {
             assert_eq!(
@@ -1668,7 +1611,7 @@ async fn test_publish_to_tile_by_element_id_applies_override_and_updates_timesta
     .await
     .expect("lease request");
 
-    let lease_msg = next_non_state_change(&mut stream).await;
+    let lease_msg = next_server_msg(&mut stream).await;
     let lease_id = match lease_msg.payload {
         Some(ServerPayload::LeaseResponse(resp)) if resp.granted => resp.lease_id,
         other => panic!("Expected granted lease response, got: {other:?}"),
@@ -1722,7 +1665,7 @@ async fn test_publish_to_tile_by_element_id_applies_override_and_updates_timesta
     .await
     .expect("publish-to-tile mutation");
 
-    let result_msg = next_non_state_change(&mut stream).await;
+    let result_msg = next_server_msg(&mut stream).await;
     match result_msg.payload {
         Some(ServerPayload::MutationResult(result)) => {
             assert!(result.accepted, "publish_to_tile should be accepted");
@@ -1827,7 +1770,7 @@ async fn test_publish_to_tile_by_element_id_rejects_invalid_node_even_with_bound
     .await
     .expect("lease request");
 
-    let lease_msg = next_non_state_change(&mut stream).await;
+    let lease_msg = next_server_msg(&mut stream).await;
     let lease_id = match lease_msg.payload {
         Some(ServerPayload::LeaseResponse(resp)) if resp.granted => resp.lease_id,
         other => panic!("Expected granted lease response, got: {other:?}"),
@@ -1871,7 +1814,7 @@ async fn test_publish_to_tile_by_element_id_rejects_invalid_node_even_with_bound
     .await
     .expect("publish-to-tile invalid node mutation");
 
-    let result_msg = next_non_state_change(&mut stream).await;
+    let result_msg = next_server_msg(&mut stream).await;
     match result_msg.payload {
         Some(ServerPayload::MutationResult(result)) => {
             assert!(!result.accepted, "invalid node should be rejected");
@@ -1923,7 +1866,7 @@ async fn test_publish_to_tile_by_element_id_returns_element_not_found() {
     .await
     .expect("lease request");
 
-    let lease_msg = next_non_state_change(&mut stream).await;
+    let lease_msg = next_server_msg(&mut stream).await;
     let lease_id = match lease_msg.payload {
         Some(ServerPayload::LeaseResponse(resp)) if resp.granted => resp.lease_id,
         other => panic!("Expected granted lease response, got: {other:?}"),
@@ -1955,7 +1898,7 @@ async fn test_publish_to_tile_by_element_id_returns_element_not_found() {
     .await
     .expect("publish-to-tile missing mutation");
 
-    let result_msg = next_non_state_change(&mut stream).await;
+    let result_msg = next_server_msg(&mut stream).await;
     match result_msg.payload {
         Some(ServerPayload::MutationResult(result)) => {
             assert!(!result.accepted, "missing element_id should be rejected");
@@ -2003,7 +1946,7 @@ async fn test_mutation_result_echoes_client_batch_id() {
     .await
     .unwrap();
 
-    let lease_msg = next_non_state_change(&mut stream).await;
+    let lease_msg = next_server_msg(&mut stream).await;
     let lease_id = match &lease_msg.payload {
         Some(ServerPayload::LeaseResponse(resp)) if resp.granted => resp.lease_id.clone(),
         other => panic!("Expected LeaseResponse (granted), got: {other:?}"),
@@ -2039,7 +1982,7 @@ async fn test_mutation_result_echoes_client_batch_id() {
 
     // The batch will be rejected (no active tab in setup_test).
     // Regardless of rejection, MutationResult.batch_id MUST equal client_batch_id.
-    let result_msg = next_non_state_change(&mut stream).await;
+    let result_msg = next_server_msg(&mut stream).await;
     match &result_msg.payload {
         Some(ServerPayload::MutationResult(result)) => {
             assert_eq!(
@@ -2089,7 +2032,7 @@ async fn test_mutation_rejected_with_expired_lease_id() {
     .await
     .unwrap();
 
-    let lease_msg = next_non_state_change(&mut stream).await;
+    let lease_msg = next_server_msg(&mut stream).await;
     let lease_id_bytes = match &lease_msg.payload {
         Some(ServerPayload::LeaseResponse(resp)) if resp.granted => resp.lease_id.clone(),
         other => panic!("Expected LeaseResponse (granted), got: {other:?}"),
@@ -2138,7 +2081,7 @@ async fn test_mutation_rejected_with_expired_lease_id() {
 
     // The batch MUST be rejected (lease is revoked; validation pipeline runs).
     // batch_id must still be echoed back.
-    let result_msg = next_non_state_change(&mut stream).await;
+    let result_msg = next_server_msg(&mut stream).await;
     match &result_msg.payload {
         Some(ServerPayload::MutationResult(result)) => {
             assert!(
@@ -2354,8 +2297,7 @@ async fn test_subscription_change_result() {
         timestamp_wall_us: now_wall_us(),
         payload: Some(ClientPayload::SessionInit(SessionInit {
             agent_id: "subscriber".to_string(),
-            agent_display_name: "subscriber".to_string(),
-            pre_shared_key: "test-key".to_string(),
+            auth_credential: Some(crate::auth::psk_credential("test-key".to_string())),
             requested_capabilities: vec![
                 "read_scene_topology".to_string(),
                 "access_input_events".to_string(),
@@ -2449,8 +2391,7 @@ async fn test_subscription_change_with_filter_prefix() {
         timestamp_wall_us: now_wall_us(),
         payload: Some(ClientPayload::SessionInit(SessionInit {
             agent_id: "filter-agent".to_string(),
-            agent_display_name: "filter-agent".to_string(),
-            pre_shared_key: "test-key".to_string(),
+            auth_credential: Some(crate::auth::psk_credential("test-key".to_string())),
             requested_capabilities: vec!["read_scene_topology".to_string()],
             initial_subscriptions: Vec::new(),
             resume_token: Vec::new(),
@@ -2589,8 +2530,7 @@ async fn test_subscription_denied_without_capability() {
         timestamp_wall_us: now_wall_us(),
         payload: Some(ClientPayload::SessionInit(SessionInit {
             agent_id: "no-input-agent".to_string(),
-            agent_display_name: "no-input-agent".to_string(),
-            pre_shared_key: "test-key".to_string(),
+            auth_credential: Some(crate::auth::psk_credential("test-key".to_string())),
             requested_capabilities: vec!["read_scene_topology".to_string()],
             // Request INPUT_EVENTS without access_input_events capability
             initial_subscriptions: vec!["SCENE_TOPOLOGY".to_string(), "INPUT_EVENTS".to_string()],
@@ -2822,7 +2762,7 @@ async fn test_safe_mode_rejects_mutations() {
     .await
     .unwrap();
 
-    let msg = next_non_state_change(&mut stream).await;
+    let msg = next_server_msg(&mut stream).await;
     match &msg.payload {
         Some(ServerPayload::RuntimeError(err)) => {
             assert_eq!(
@@ -2974,7 +2914,7 @@ async fn test_freeze_queues_mutations_not_applied() {
     .await
     .unwrap();
 
-    let msg = next_non_state_change(&mut stream).await;
+    let msg = next_server_msg(&mut stream).await;
     match &msg.payload {
         Some(ServerPayload::MutationResult(result)) => {
             // Accepted=true: mutation was queued, not rejected
@@ -3098,7 +3038,6 @@ async fn test_fifo_preserved_when_mutation_arrives_during_drain_window() {
         active_tab_mirror: Arc::new(std::sync::Mutex::new(None)),
         token_store: crate::token::TokenStore::new(),
         freeze_active: false, // <-- already unfrozen
-        degradation_level: crate::session::RuntimeDegradationLevel::Normal,
         input_capture_tx: None,
         input_capture_wake: tze_hud_scene::render_wake::RenderWakeNotifier::default(),
         resolved_portal_tokens: std::collections::HashMap::new(),
@@ -3137,8 +3076,6 @@ async fn test_fifo_preserved_when_mutation_arrives_during_drain_window() {
         state: SessionState::Active,
         last_client_sequence: 1,
         safe_mode_active: false,
-        expect_resume: false,
-        agent_event_rate_limiter: AgentEventRateLimiter::new(),
         freeze_queue,
         session_open_at_wall_us: 0,
         dedup_window: DedupWindow::new(1000, 60),
@@ -3238,7 +3175,6 @@ async fn test_freeze_retransmit_deduped_applied_exactly_once() {
         active_tab_mirror: Arc::new(std::sync::Mutex::new(None)),
         token_store: crate::token::TokenStore::new(),
         freeze_active: true, // <-- scene is frozen
-        degradation_level: crate::session::RuntimeDegradationLevel::Normal,
         input_capture_tx: None,
         input_capture_wake: tze_hud_scene::render_wake::RenderWakeNotifier::default(),
         resolved_portal_tokens: std::collections::HashMap::new(),
@@ -3262,8 +3198,6 @@ async fn test_freeze_retransmit_deduped_applied_exactly_once() {
         state: SessionState::Active,
         last_client_sequence: 1,
         safe_mode_active: false,
-        expect_resume: false,
-        agent_event_rate_limiter: AgentEventRateLimiter::new(),
         freeze_queue: SessionFreezeQueue::new(FREEZE_QUEUE_CAPACITY),
         session_open_at_wall_us: 0,
         dedup_window: DedupWindow::new(1000, 60),
@@ -3420,7 +3354,7 @@ async fn test_safe_mode_takes_precedence_over_freeze() {
     .await
     .unwrap();
 
-    let msg = next_non_state_change(&mut stream).await;
+    let msg = next_server_msg(&mut stream).await;
     match &msg.payload {
         Some(ServerPayload::RuntimeError(err)) => {
             assert_eq!(err.error_code, "SAFE_MODE_ACTIVE");
@@ -3559,14 +3493,12 @@ async fn test_state_machine_auth_failure_to_closed() {
             timestamp_wall_us: now_wall_us(),
             payload: Some(ClientPayload::SessionInit(SessionInit {
                 agent_id: "state-fail-agent".to_string(),
-                agent_display_name: "state-fail-agent".to_string(),
-                pre_shared_key: "wrong-key".to_string(),
                 requested_capabilities: Vec::new(),
                 initial_subscriptions: Vec::new(),
                 resume_token: Vec::new(),
                 min_protocol_version: 1000,
                 max_protocol_version: 1001,
-                auth_credential: None,
+                auth_credential: Some(crate::auth::psk_credential("wrong-key".to_string())),
             })),
         })
         .await
@@ -3591,13 +3523,12 @@ async fn test_graceful_disconnect_session_close() {
     let (mut client, _server) = setup_test().await;
     let (tx, _init_messages, mut stream) = handshake(&mut client, "close-agent", "test-key").await;
 
-    // Send SessionClose with expect_resume=false
+    // Send SessionClose
     tx.send(ClientMessage {
         sequence: 2,
         timestamp_wall_us: now_wall_us(),
         payload: Some(ClientPayload::SessionClose(SessionClose {
             reason: "test shutdown".to_string(),
-            expect_resume: false,
         })),
     })
     .await
@@ -3633,77 +3564,7 @@ async fn test_graceful_disconnect_session_close() {
     );
 }
 
-/// Scenario: Graceful disconnect with expect_resume=true hint (RFC 0005 §1.5).
-/// The runtime should record the hint (tested via no error returned to client).
-#[tokio::test]
-async fn test_graceful_disconnect_with_resume_hint() {
-    let (mut client, _server) = setup_test().await;
-    let (tx, _init_messages, _stream) =
-        handshake(&mut client, "resume-hint-agent", "test-key").await;
-
-    // Send SessionClose with expect_resume=true
-    tx.send(ClientMessage {
-        sequence: 2,
-        timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::SessionClose(SessionClose {
-            reason: "updating agent".to_string(),
-            expect_resume: true,
-        })),
-    })
-    .await
-    .unwrap();
-
-    // If no error is returned, the hint was processed successfully.
-    // The test verifies protocol acceptance, not the lease hold behavior
-    // (which requires multi-session coordination tested in integration tests).
-    tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-    drop(tx);
-}
-
-// ─── SessionConfig default values test (RFC 0005 §10) ────────────────────
-
-/// Verify SessionConfig defaults match the spec-specified values.
-#[test]
-fn test_session_config_defaults() {
-    let config = SessionConfig::default();
-    assert_eq!(
-        config.handshake_timeout_ms, 5000,
-        "handshake_timeout_ms default"
-    );
-    assert_eq!(
-        config.heartbeat_interval_ms, 5000,
-        "heartbeat_interval_ms default"
-    );
-    assert_eq!(
-        config.heartbeat_missed_threshold, 3,
-        "heartbeat_missed_threshold default"
-    );
-    assert_eq!(
-        config.reconnect_grace_period_ms, 30_000,
-        "reconnect_grace_period_ms default"
-    );
-    assert_eq!(
-        config.retransmit_timeout_ms, 5000,
-        "retransmit_timeout_ms default"
-    );
-    assert_eq!(config.dedup_window_size, 1000, "dedup_window_size default");
-    assert_eq!(config.dedup_window_ttl_s, 60, "dedup_window_ttl_s default");
-    assert_eq!(config.max_sequence_gap, 100, "max_sequence_gap default");
-    assert_eq!(
-        config.ephemeral_buffer_max, 16,
-        "ephemeral_buffer_max default"
-    );
-    assert_eq!(
-        config.max_concurrent_resident_sessions, 16,
-        "max_concurrent_resident_sessions default"
-    );
-    assert_eq!(
-        config.max_concurrent_guest_sessions, 64,
-        "max_concurrent_guest_sessions default"
-    );
-}
-
-// ─── Traffic class classification tests (RFC 0005 §3.1, §3.2) ───────────
+// ─── Traffic class classification tests ─────────────────────────────────
 
 /// Verify traffic class routing for server payloads.
 #[test]
@@ -3759,10 +3620,6 @@ fn test_traffic_class_routing() {
         classify_server_payload(&ServerPayload::SceneSnapshot(SceneSnapshot::default())),
         TrafficClass::StateStream,
     );
-    assert_eq!(
-        classify_server_payload(&ServerPayload::SceneDelta(SceneDelta::default())),
-        TrafficClass::StateStream,
-    );
 
     // DegradationNotice — transactional (RFC 0005 §3.4)
     assert_eq!(
@@ -3802,8 +3659,6 @@ fn test_validate_sequence_unit() {
         state: SessionState::Active,
         last_client_sequence: 1,
         safe_mode_active: false,
-        expect_resume: false,
-        agent_event_rate_limiter: AgentEventRateLimiter::new(),
         freeze_queue: SessionFreezeQueue::new(FREEZE_QUEUE_CAPACITY),
         session_open_at_wall_us: now_wall_us(),
         dedup_window: DedupWindow::new(1000, 60),
@@ -3861,8 +3716,6 @@ async fn test_auth_structured_psk_credential_accepted() {
         timestamp_wall_us: now_wall_us(),
         payload: Some(ClientPayload::SessionInit(SessionInit {
             agent_id: "psk-agent".to_string(),
-            agent_display_name: "psk-agent".to_string(),
-            pre_shared_key: String::new(), // intentionally empty — use auth_credential
             requested_capabilities: Vec::new(),
             initial_subscriptions: Vec::new(),
             resume_token: Vec::new(),
@@ -3905,8 +3758,6 @@ async fn test_auth_structured_psk_credential_wrong_key() {
         timestamp_wall_us: now_wall_us(),
         payload: Some(ClientPayload::SessionInit(SessionInit {
             agent_id: "bad-psk-agent".to_string(),
-            agent_display_name: "bad-psk-agent".to_string(),
-            pre_shared_key: String::new(),
             requested_capabilities: Vec::new(),
             initial_subscriptions: Vec::new(),
             resume_token: Vec::new(),
@@ -3951,8 +3802,6 @@ async fn test_auth_local_socket_credential_accepted() {
         timestamp_wall_us: now_wall_us(),
         payload: Some(ClientPayload::SessionInit(SessionInit {
             agent_id: "local-agent".to_string(),
-            agent_display_name: "local-agent".to_string(),
-            pre_shared_key: String::new(),
             requested_capabilities: Vec::new(),
             initial_subscriptions: Vec::new(),
             resume_token: Vec::new(),
@@ -3991,8 +3840,6 @@ async fn test_auth_local_socket_credential_accepted() {
 fn local_socket_session_init(agent_id: &str) -> SessionInit {
     SessionInit {
         agent_id: agent_id.to_string(),
-        agent_display_name: agent_id.to_string(),
-        pre_shared_key: String::new(),
         requested_capabilities: Vec::new(),
         initial_subscriptions: Vec::new(),
         resume_token: Vec::new(),
@@ -4173,14 +4020,12 @@ async fn test_version_negotiation_success() {
         timestamp_wall_us: now_wall_us(),
         payload: Some(ClientPayload::SessionInit(SessionInit {
             agent_id: "version-agent".to_string(),
-            agent_display_name: "version-agent".to_string(),
-            pre_shared_key: "test-key".to_string(),
             requested_capabilities: Vec::new(),
             initial_subscriptions: Vec::new(),
             resume_token: Vec::new(),
             min_protocol_version: 1000,
             max_protocol_version: 1001,
-            auth_credential: None,
+            auth_credential: Some(crate::auth::psk_credential("test-key".to_string())),
         })),
     })
     .await
@@ -4214,14 +4059,12 @@ async fn test_version_negotiation_unsupported() {
         timestamp_wall_us: now_wall_us(),
         payload: Some(ClientPayload::SessionInit(SessionInit {
             agent_id: "old-agent".to_string(),
-            agent_display_name: "old-agent".to_string(),
-            pre_shared_key: "test-key".to_string(),
             requested_capabilities: Vec::new(),
             initial_subscriptions: Vec::new(),
             resume_token: Vec::new(),
             min_protocol_version: 2000,
             max_protocol_version: 2001,
-            auth_credential: None,
+            auth_credential: Some(crate::auth::psk_credential("test-key".to_string())),
         })),
     })
     .await
@@ -4262,8 +4105,6 @@ async fn test_legacy_capability_rejected_with_hint() {
         timestamp_wall_us: now_wall_us(),
         payload: Some(ClientPayload::SessionInit(SessionInit {
             agent_id: "legacy-agent".to_string(),
-            agent_display_name: "legacy-agent".to_string(),
-            pre_shared_key: "test-key".to_string(),
             // Legacy names — must be rejected
             requested_capabilities: vec![
                 "create_tile".to_string(),   // legacy: should be create_tiles
@@ -4273,7 +4114,7 @@ async fn test_legacy_capability_rejected_with_hint() {
             resume_token: Vec::new(),
             min_protocol_version: 1000,
             max_protocol_version: 1001,
-            auth_credential: None,
+            auth_credential: Some(crate::auth::psk_credential("test-key".to_string())),
         })),
     })
     .await
@@ -4324,8 +4165,6 @@ async fn test_pre_round14_capability_name_rejected() {
         timestamp_wall_us: now_wall_us(),
         payload: Some(ClientPayload::SessionInit(SessionInit {
             agent_id: "old-vocab-agent".to_string(),
-            agent_display_name: "old-vocab-agent".to_string(),
-            pre_shared_key: "test-key".to_string(),
             requested_capabilities: vec![
                 "read_scene".to_string(), // pre-Round-14: should be read_scene_topology
                 "zone_publish:subtitle".to_string(), // pre-Round-14: should be publish_zone:subtitle
@@ -4334,7 +4173,7 @@ async fn test_pre_round14_capability_name_rejected() {
             resume_token: Vec::new(),
             min_protocol_version: 1000,
             max_protocol_version: 1001,
-            auth_credential: None,
+            auth_credential: Some(crate::auth::psk_credential("test-key".to_string())),
         })),
     })
     .await
@@ -4381,7 +4220,7 @@ async fn test_lease_request_with_legacy_capability_rejected() {
     .unwrap();
 
     // Expect a LeaseResponse with granted=false and CONFIG_UNKNOWN_CAPABILITY
-    let msg = next_non_state_change(&mut response_stream).await;
+    let msg = next_server_msg(&mut response_stream).await;
     match &msg.payload {
         Some(ServerPayload::LeaseResponse(resp)) => {
             assert!(
@@ -4423,7 +4262,7 @@ async fn test_lease_request_scope_exceeding_session_grants_is_denied() {
     .await
     .unwrap();
 
-    let msg = next_non_state_change(&mut response_stream).await;
+    let msg = next_server_msg(&mut response_stream).await;
     match &msg.payload {
         Some(ServerPayload::LeaseResponse(resp)) => {
             assert!(
@@ -4447,17 +4286,9 @@ async fn test_lease_request_scope_exceeding_session_grants_is_denied() {
 
 #[test]
 fn test_capability_set_covers_wildcard_grants() {
-    let caps = vec![
-        "publish_zone:*".to_string(),
-        "publish_widget:*".to_string(),
-        "emit_scene_event:*".to_string(),
-    ];
+    let caps = vec!["publish_zone:*".to_string(), "publish_widget:*".to_string()];
     assert!(capability_set_covers(&caps, "publish_zone:subtitle"));
     assert!(capability_set_covers(&caps, "publish_widget:gauge"));
-    assert!(capability_set_covers(
-        &caps,
-        "emit_scene_event:status_update"
-    ));
     assert!(!capability_set_covers(&caps, "create_tiles"));
 }
 
@@ -4483,14 +4314,12 @@ async fn test_psk_with_capability_allows_input_events_subscription() {
         timestamp_wall_us: now_wall_us(),
         payload: Some(ClientPayload::SessionInit(SessionInit {
             agent_id: "sub-test-agent".to_string(),
-            agent_display_name: "sub-test-agent".to_string(),
-            pre_shared_key: "test-key".to_string(),
             requested_capabilities: vec!["access_input_events".to_string()],
             initial_subscriptions: vec!["INPUT_EVENTS".to_string()],
             resume_token: Vec::new(),
             min_protocol_version: 1000,
             max_protocol_version: 1001,
-            auth_credential: None,
+            auth_credential: Some(crate::auth::psk_credential("test-key".to_string())),
         })),
     })
     .await
@@ -4581,7 +4410,7 @@ async fn test_mid_session_capability_request_unrestricted_succeeds() {
         sequence: 2,
         timestamp_wall_us: now_wall_us(),
         payload: Some(ClientPayload::CapabilityRequest(CapabilityRequest {
-            capabilities: vec!["overlay_privileges".to_string()],
+            capabilities: vec!["manage_tabs".to_string()],
             reason: "test".to_string(),
         })),
     })
@@ -4593,8 +4422,8 @@ async fn test_mid_session_capability_request_unrestricted_succeeds() {
     match &msg.payload {
         Some(ServerPayload::CapabilityNotice(notice)) => {
             assert!(
-                notice.granted.contains(&"overlay_privileges".to_string()),
-                "PSK unrestricted agent should get overlay_privileges granted"
+                notice.granted.contains(&"manage_tabs".to_string()),
+                "PSK unrestricted agent should get manage_tabs granted"
             );
         }
         other => panic!("Expected CapabilityNotice for unrestricted PSK agent, got: {other:?}"),
@@ -4631,8 +4460,6 @@ async fn test_capability_request_denied_for_guest_session() {
         state: SessionState::Active,
         last_client_sequence: 1,
         safe_mode_active: false,
-        expect_resume: false,
-        agent_event_rate_limiter: AgentEventRateLimiter::new(),
         freeze_queue: SessionFreezeQueue::new(FREEZE_QUEUE_CAPACITY),
         session_open_at_wall_us: 0,
         dedup_window: DedupWindow::new(1000, 60),
@@ -4674,7 +4501,7 @@ async fn test_capability_request_denied_for_guest_session() {
 }
 
 /// Scenario: Partial grant of mixed capabilities is denied entirely (RFC 0005 §5.3)
-/// WHEN agent requests capabilities=["read_telemetry", "overlay_privileges"] and is
+/// WHEN agent requests capabilities=["read_telemetry", "manage_tabs"] and is
 /// authorized for only read_telemetry,
 /// THEN runtime denies entire request with PERMISSION_DENIED.
 #[tokio::test]
@@ -4700,8 +4527,6 @@ async fn test_capability_request_partial_grant_denied_entirely() {
         state: SessionState::Active,
         last_client_sequence: 1,
         safe_mode_active: false,
-        expect_resume: false,
-        agent_event_rate_limiter: AgentEventRateLimiter::new(),
         freeze_queue: SessionFreezeQueue::new(FREEZE_QUEUE_CAPACITY),
         session_open_at_wall_us: 0,
         dedup_window: DedupWindow::new(1000, 60),
@@ -4718,10 +4543,7 @@ async fn test_capability_request_partial_grant_denied_entirely() {
         &mut session,
         &tx,
         CapabilityRequest {
-            capabilities: vec![
-                "read_telemetry".to_string(),
-                "overlay_privileges".to_string(),
-            ],
+            capabilities: vec!["read_telemetry".to_string(), "manage_tabs".to_string()],
             reason: "mixed request".to_string(),
         },
     )
@@ -4732,20 +4554,18 @@ async fn test_capability_request_partial_grant_denied_entirely() {
         Some(ServerPayload::RuntimeError(err)) => {
             assert_eq!(
                 err.error_code, "PERMISSION_DENIED",
-                "Entire request should be denied, not just overlay_privileges"
+                "Entire request should be denied, not just manage_tabs"
             );
             assert_eq!(err.error_code_enum, ErrorCode::PermissionDenied as i32);
             assert!(
-                err.context.contains("overlay_privileges"),
+                err.context.contains("manage_tabs"),
                 "Context should mention the unauthorized capability: {}",
                 err.context
             );
             // read_telemetry should NOT have been granted
             assert!(
-                !session
-                    .capabilities
-                    .contains(&"overlay_privileges".to_string()),
-                "overlay_privileges must not have been added to session capabilities"
+                !session.capabilities.contains(&"manage_tabs".to_string()),
+                "manage_tabs must not have been added to session capabilities"
             );
         }
         other => {
@@ -4792,7 +4612,7 @@ async fn test_lease_scope_requires_session_grant_or_escalation() {
     .await
     .unwrap();
 
-    let denied = next_non_state_change(&mut stream).await;
+    let denied = next_server_msg(&mut stream).await;
     match denied.payload {
         Some(ServerPayload::LeaseResponse(resp)) => {
             assert!(!resp.granted, "lease must be denied before escalation");
@@ -4817,7 +4637,7 @@ async fn test_lease_scope_requires_session_grant_or_escalation() {
     .await
     .unwrap();
 
-    let granted = next_non_state_change(&mut stream).await;
+    let granted = next_server_msg(&mut stream).await;
     match granted.payload {
         Some(ServerPayload::CapabilityNotice(notice)) => {
             assert!(
@@ -4841,7 +4661,7 @@ async fn test_lease_scope_requires_session_grant_or_escalation() {
     .await
     .unwrap();
 
-    let granted_lease = next_non_state_change(&mut stream).await;
+    let granted_lease = next_server_msg(&mut stream).await;
     match granted_lease.payload {
         Some(ServerPayload::LeaseResponse(resp)) => {
             assert!(resp.granted, "lease must be granted after escalation");
@@ -4974,10 +4794,7 @@ async fn test_capability_request_after_resume_uses_policy_scope() {
             sequence: 3,
             timestamp_wall_us: now_wall_us(),
             payload: Some(ClientPayload::CapabilityRequest(CapabilityRequest {
-                capabilities: vec![
-                    "read_telemetry".to_string(),
-                    "overlay_privileges".to_string(),
-                ],
+                capabilities: vec!["read_telemetry".to_string(), "manage_tabs".to_string()],
                 reason: "mixed escalation".to_string(),
             })),
         })
@@ -4989,7 +4806,7 @@ async fn test_capability_request_after_resume_uses_policy_scope() {
         Some(ServerPayload::RuntimeError(err)) => {
             assert_eq!(err.error_code, "PERMISSION_DENIED");
             assert!(
-                err.context.contains("overlay_privileges"),
+                err.context.contains("manage_tabs"),
                 "mixed denial context should list unauthorized capability"
             );
         }
@@ -5021,8 +4838,6 @@ async fn test_runtime_error_structure_complete() {
         state: SessionState::Active,
         last_client_sequence: 1,
         safe_mode_active: false,
-        expect_resume: false,
-        agent_event_rate_limiter: AgentEventRateLimiter::new(),
         freeze_queue: SessionFreezeQueue::new(FREEZE_QUEUE_CAPACITY),
         session_open_at_wall_us: 0,
         dedup_window: DedupWindow::new(1000, 60),
@@ -5359,8 +5174,6 @@ async fn test_resume_result_carries_subscription_state() {
         timestamp_wall_us: now_wall_us(),
         payload: Some(ClientPayload::SessionInit(SessionInit {
             agent_id: "sub-resume-agent".to_string(),
-            agent_display_name: "sub-resume-agent".to_string(),
-            pre_shared_key: "test-key".to_string(),
             // Include required capabilities for both subscriptions (canonical names)
             requested_capabilities: vec![
                 "create_tiles".to_string(),
@@ -5371,7 +5184,7 @@ async fn test_resume_result_carries_subscription_state() {
             resume_token: Vec::new(),
             min_protocol_version: 1000,
             max_protocol_version: 1001,
-            auth_credential: None,
+            auth_credential: Some(crate::auth::psk_credential("test-key".to_string())),
         })),
     })
     .await
@@ -5457,9 +5270,8 @@ async fn new_session_receives_existing_degradation_after_snapshot() {
     service
         .degradation_notices
         .publish(DegradationNotice {
-            level: DegradationLevel::SheddingTiles as i32,
+            level: DegradationLevel::RenderingSimplified as i32,
             reason: "existing load".to_string(),
-            affected_capabilities: Vec::new(),
             timestamp_wall_us: now_wall_us(),
         })
         .await;
@@ -5486,7 +5298,7 @@ async fn new_session_receives_existing_degradation_after_snapshot() {
     ));
     match &messages[2].payload {
         Some(ServerPayload::DegradationNotice(notice)) => {
-            assert_eq!(notice.level, DegradationLevel::SheddingTiles as i32);
+            assert_eq!(notice.level, DegradationLevel::RenderingSimplified as i32);
         }
         other => panic!("expected current degradation third, got {other:?}"),
     }
@@ -5499,7 +5311,6 @@ async fn test_degradation_notice_broadcast_to_active_session() {
     let scene = SceneGraph::new(800.0, 600.0);
     let service = HudSessionImpl::new(scene, "test-key");
     let degradation_notices = service.degradation_notices.clone();
-    let state_ref = service.state.clone();
 
     let listener = tokio::net::TcpListener::bind("[::1]:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -5522,20 +5333,13 @@ async fn test_degradation_notice_broadcast_to_active_session() {
     // Give the session task a brief moment to subscribe to the broadcast channel.
     tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
 
-    // Broadcast a COALESCING_MORE degradation notice from the "compositor side".
+    // Broadcast a RENDERING_SIMPLIFIED degradation notice from the "compositor side".
     let notice = DegradationNotice {
-        level: DegradationLevel::CoalescingMore as i32,
+        level: DegradationLevel::RenderingSimplified as i32,
         reason: "high load".to_string(),
-        affected_capabilities: vec!["state_stream".to_string()],
         timestamp_wall_us: now_wall_us(),
     };
     assert_eq!(degradation_notices.publish(notice.clone()).await, 1);
-
-    // Update shared state level (mirrors what broadcast_degradation() does).
-    {
-        let mut st = state_ref.lock().await;
-        st.degradation_level = crate::session::RuntimeDegradationLevel::CoalescingMore;
-    }
 
     // The session should receive DegradationNotice next.
     let timeout = tokio::time::Duration::from_millis(500);
@@ -5549,14 +5353,10 @@ async fn test_degradation_notice_broadcast_to_active_session() {
         Some(ServerPayload::DegradationNotice(dn)) => {
             assert_eq!(
                 dn.level,
-                DegradationLevel::CoalescingMore as i32,
-                "Expected COALESCING_MORE"
+                DegradationLevel::RenderingSimplified as i32,
+                "Expected RENDERING_SIMPLIFIED"
             );
             assert_eq!(dn.reason, "high load");
-            assert!(
-                dn.affected_capabilities
-                    .contains(&"state_stream".to_string())
-            );
         }
         other => panic!("Expected DegradationNotice, got: {other:?}"),
     }
@@ -5604,7 +5404,7 @@ async fn test_mutation_dedup_returns_cached_result() {
     })
     .await
     .unwrap();
-    let first_result = next_non_state_change(&mut stream).await;
+    let first_result = next_server_msg(&mut stream).await;
     let first_accepted = match &first_result.payload {
         Some(ServerPayload::MutationResult(r)) => {
             assert_eq!(r.batch_id, batch_id);
@@ -5779,7 +5579,7 @@ async fn test_mutation_timing_too_old_rejected() {
     .await
     .unwrap();
 
-    let result_msg = next_non_state_change(&mut stream).await;
+    let result_msg = next_server_msg(&mut stream).await;
     match &result_msg.payload {
         Some(ServerPayload::RuntimeError(err)) => {
             assert_eq!(err.error_code, "TIMESTAMP_TOO_OLD");
@@ -5837,7 +5637,7 @@ async fn test_mutation_timing_expiry_before_present_rejected() {
     .await
     .unwrap();
 
-    let result_msg = next_non_state_change(&mut stream).await;
+    let result_msg = next_server_msg(&mut stream).await;
     match &result_msg.payload {
         Some(ServerPayload::RuntimeError(err)) => {
             assert_eq!(err.error_code, "TIMESTAMP_EXPIRY_BEFORE_PRESENT");
@@ -6206,7 +6006,7 @@ async fn input_capture_bridge_wakes_only_after_successful_command_enqueue() {
     })
     .await
     .unwrap();
-    let response = next_non_state_change(&mut stream).await;
+    let response = next_server_msg(&mut stream).await;
     assert!(matches!(
         response.payload,
         Some(ServerPayload::InputCaptureResponse(InputCaptureResponse {
@@ -6248,7 +6048,7 @@ async fn input_capture_bridge_wakes_only_after_successful_command_enqueue() {
     })
     .await
     .unwrap();
-    let rejected = next_non_state_change(&mut stream).await;
+    let rejected = next_server_msg(&mut stream).await;
     assert!(matches!(
         rejected.payload,
         Some(ServerPayload::RuntimeError(_))
@@ -6269,7 +6069,7 @@ async fn input_capture_bridge_wakes_only_after_successful_command_enqueue() {
     })
     .await
     .unwrap();
-    let unavailable = next_non_state_change(&mut stream).await;
+    let unavailable = next_server_msg(&mut stream).await;
     assert!(matches!(
         unavailable.payload,
         Some(ServerPayload::InputCaptureResponse(InputCaptureResponse {
@@ -6340,8 +6140,7 @@ async fn test_input_capture_release_delivers_event() {
         timestamp_wall_us: now_wall_us(),
         payload: Some(ClientPayload::SessionInit(SessionInit {
             agent_id: "capture-release-agent".to_string(),
-            agent_display_name: "capture-release-agent".to_string(),
-            pre_shared_key: "test-key".to_string(),
+            auth_credential: Some(crate::auth::psk_credential("test-key".to_string())),
             requested_capabilities: vec!["access_input_events".to_string()],
             initial_subscriptions: vec!["INPUT_EVENTS".to_string(), "FOCUS_EVENTS".to_string()],
             resume_token: Vec::new(),
@@ -6401,58 +6200,15 @@ async fn test_input_capture_release_delivers_event() {
     drop(tx);
 }
 
-/// Scenario: SetImePosition is fire-and-forget — no response sent.
-#[tokio::test]
-async fn test_set_ime_position_no_response() {
-    let (mut client, _server) = setup_test().await;
-    let (tx, _init_messages, mut stream) = handshake(&mut client, "ime-agent", "test-key").await;
-
-    // Send SetImePosition (fire-and-forget)
-    tx.send(ClientMessage {
-        sequence: 2,
-        timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::SetImePosition(SetImePosition {
-            tile_id: vec![4u8; 16],
-            x: 100.0,
-            y: 200.0,
-        })),
-    })
-    .await
-    .unwrap();
-
-    // Send a heartbeat immediately after — should receive heartbeat echo, NOT any IME response
-    tx.send(ClientMessage {
-        sequence: 3,
-        timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::Heartbeat(Heartbeat {
-            timestamp_mono_us: 88888,
-        })),
-    })
-    .await
-    .unwrap();
-
-    let msg = stream.next().await.unwrap().unwrap();
-    match &msg.payload {
-        Some(ServerPayload::Heartbeat(hb)) => {
-            assert_eq!(
-                hb.timestamp_mono_us, 88888,
-                "expected heartbeat echo after SetImePosition"
-            );
-        }
-        other => panic!("Expected Heartbeat (no IME response), got: {other:?}"),
-    }
-}
-
 // ─── Lease management tests (rig-7bho) ───────────────────────────────────
 
 /// Scenario: Lease acquisition via session stream (spec §Lease Management RPCs,
 /// lease-governance spec §Lease State Machine).
 ///
 /// WHEN agent sends LeaseRequest(action=ACQUIRE) on session stream,
-/// THEN runtime responds with LeaseResponse(granted=true) AND
-///      a LeaseStateChange(REQUESTED→ACTIVE) notification.
+/// THEN runtime responds with a single LeaseResponse(granted=true).
 #[tokio::test]
-async fn test_lease_acquire_sends_lease_response_and_state_change() {
+async fn test_lease_acquire_sends_lease_response() {
     let (mut client, _server) = setup_test().await;
     let (tx, _init_messages, mut stream) =
         handshake(&mut client, "lease-acquire-agent", "test-key").await;
@@ -6471,7 +6227,7 @@ async fn test_lease_acquire_sends_lease_response_and_state_change() {
 
     // First response: LeaseResponse(granted=true)
     let resp_msg = stream.next().await.unwrap().unwrap();
-    let lease_id = match &resp_msg.payload {
+    match &resp_msg.payload {
         Some(ServerPayload::LeaseResponse(resp)) => {
             assert!(resp.granted, "Lease should be granted");
             assert_eq!(resp.lease_id.len(), 16, "lease_id must be 16-byte UUIDv7");
@@ -6481,24 +6237,8 @@ async fn test_lease_acquire_sends_lease_response_and_state_change() {
                 resp.granted_capabilities
                     .contains(&"create_tiles".to_string())
             );
-            resp.lease_id.clone()
         }
         other => panic!("Expected LeaseResponse, got: {other:?}"),
-    };
-
-    // Second response: LeaseStateChange(REQUESTED→ACTIVE)
-    let change_msg = stream.next().await.unwrap().unwrap();
-    match &change_msg.payload {
-        Some(ServerPayload::LeaseStateChange(change)) => {
-            assert_eq!(
-                change.lease_id, lease_id,
-                "LeaseStateChange must reference same lease"
-            );
-            assert_eq!(change.previous_state, "REQUESTED");
-            assert_eq!(change.new_state, "ACTIVE");
-            assert!(change.timestamp_wall_us > 0);
-        }
-        other => panic!("Expected LeaseStateChange, got: {other:?}"),
     }
 }
 
@@ -6536,19 +6276,6 @@ async fn test_lease_id_is_16_byte_uuidv7() {
             );
         }
         other => panic!("Expected LeaseResponse, got: {other:?}"),
-    }
-
-    // LeaseStateChange — also carries lease_id
-    let change_msg = stream.next().await.unwrap().unwrap();
-    match &change_msg.payload {
-        Some(ServerPayload::LeaseStateChange(change)) => {
-            assert_eq!(
-                change.lease_id.len(),
-                16,
-                "lease_id in LeaseStateChange must be 16 bytes"
-            );
-        }
-        other => panic!("Expected LeaseStateChange, got: {other:?}"),
     }
 }
 
@@ -6616,13 +6343,10 @@ async fn test_lease_priority_one_without_capability_downgraded() {
     }
 }
 
-/// Scenario: LeaseRenew responds with LeaseResponse(granted=true) AND LeaseStateChange.
-///
-/// Spec §Lease Management RPCs: "runtime SHALL respond with LeaseResponse".
-/// On renewal, LeaseResponse with granted=true and the updated TTL is expected,
-/// followed by a LeaseStateChange(ACTIVE→ACTIVE) notification.
+/// Scenario: LeaseRenew responds with LeaseResponse(granted=true) carrying the
+/// updated TTL.
 #[tokio::test]
-async fn test_lease_renew_returns_lease_response_and_state_change() {
+async fn test_lease_renew_returns_lease_response() {
     let (mut client, _server) = setup_test().await;
     let (tx, _init_messages, mut stream) = handshake(&mut client, "renew-agent", "test-key").await;
 
@@ -6639,13 +6363,12 @@ async fn test_lease_renew_returns_lease_response_and_state_change() {
     .await
     .unwrap();
 
-    // Consume LeaseResponse and LeaseStateChange from acquire
+    // Consume LeaseResponse from acquire
     let resp = stream.next().await.unwrap().unwrap();
     let lease_id = match &resp.payload {
         Some(ServerPayload::LeaseResponse(r)) if r.granted => r.lease_id.clone(),
         other => panic!("Expected LeaseResponse(granted), got: {other:?}"),
     };
-    let _state_change = stream.next().await.unwrap().unwrap(); // consume REQUESTED→ACTIVE
 
     // Renew the lease
     tx.send(ClientMessage {
@@ -6669,26 +6392,11 @@ async fn test_lease_renew_returns_lease_response_and_state_change() {
         }
         other => panic!("Expected LeaseResponse(granted) on renew, got: {other:?}"),
     }
-
-    // Second: LeaseStateChange(ACTIVE→ACTIVE)
-    let change = stream.next().await.unwrap().unwrap();
-    match &change.payload {
-        Some(ServerPayload::LeaseStateChange(sc)) => {
-            assert_eq!(sc.lease_id, lease_id);
-            assert_eq!(sc.previous_state, "ACTIVE");
-            assert_eq!(sc.new_state, "ACTIVE");
-        }
-        other => panic!("Expected LeaseStateChange on renew, got: {other:?}"),
-    }
 }
 
-/// Scenario: LeaseRelease sends LeaseResponse(granted=true) then LeaseStateChange(ACTIVE→RELEASED).
-///
-/// WHEN agent sends LeaseRelease,
-/// THEN runtime first sends LeaseResponse(granted=true) (spec: every lease op answered by LeaseResponse),
-///      then LeaseStateChange(new_state=RELEASED) (transactional notification).
+/// Scenario: LeaseRelease is answered by LeaseResponse(granted=true).
 #[tokio::test]
-async fn test_lease_release_sends_state_change_released() {
+async fn test_lease_release_sends_lease_response() {
     let (mut client, _server) = setup_test().await;
     let (tx, _init_messages, mut stream) =
         handshake(&mut client, "release-agent", "test-key").await;
@@ -6711,7 +6419,6 @@ async fn test_lease_release_sends_state_change_released() {
         Some(ServerPayload::LeaseResponse(r)) if r.granted => r.lease_id.clone(),
         other => panic!("Expected LeaseResponse(granted), got: {other:?}"),
     };
-    let _sc = stream.next().await.unwrap().unwrap(); // consume REQUESTED→ACTIVE
 
     // Release the lease
     tx.send(ClientMessage {
@@ -6735,18 +6442,6 @@ async fn test_lease_release_sends_state_change_released() {
             assert_eq!(r.lease_id, lease_id, "lease_id must match in LeaseResponse");
         }
         other => panic!("Expected LeaseResponse(granted) for release, got: {other:?}"),
-    }
-
-    // Second: LeaseStateChange(ACTIVE→RELEASED).
-    let sc_msg = stream.next().await.unwrap().unwrap();
-    match &sc_msg.payload {
-        Some(ServerPayload::LeaseStateChange(sc)) => {
-            assert_eq!(sc.lease_id, lease_id);
-            assert_eq!(sc.previous_state, "ACTIVE");
-            assert_eq!(sc.new_state, "RELEASED");
-            assert!(sc.timestamp_wall_us > 0);
-        }
-        other => panic!("Expected LeaseStateChange(RELEASED), got: {other:?}"),
     }
 }
 
@@ -6774,7 +6469,7 @@ async fn test_lease_retransmit_correlation_returns_cached_response() {
     // Original request
     tx.send(lease_req.clone()).await.unwrap();
 
-    // Consume the original LeaseResponse + LeaseStateChange
+    // Consume the original LeaseResponse
     let orig_resp = stream.next().await.unwrap().unwrap();
     let orig_lease_id = match &orig_resp.payload {
         Some(ServerPayload::LeaseResponse(r)) => {
@@ -6783,7 +6478,6 @@ async fn test_lease_retransmit_correlation_returns_cached_response() {
         }
         other => panic!("Expected LeaseResponse, got: {other:?}"),
     };
-    let _orig_sc = stream.next().await.unwrap().unwrap(); // REQUESTED→ACTIVE
 
     // Retransmit with same sequence number (simulates no-ack / lost response)
     tx.send(lease_req).await.unwrap();
@@ -6915,17 +6609,9 @@ async fn test_lease_expiry_scenario_initial_grant() {
     }
 }
 
-/// Scenario: LeaseStateChange notification traffic class is Transactional.
-///
-/// LEASE_CHANGES are always subscribed and never dropped under backpressure
-/// (spec §Subscription Management, §Lease Management RPCs).
+/// LeaseResponse is Transactional (never dropped under backpressure).
 #[test]
-fn test_lease_state_change_is_transactional() {
-    assert_eq!(
-        classify_server_payload(&ServerPayload::LeaseStateChange(LeaseStateChange::default())),
-        TrafficClass::Transactional,
-        "LeaseStateChange must be Transactional (never dropped)"
-    );
+fn test_lease_response_is_transactional() {
     assert_eq!(
         classify_server_payload(&ServerPayload::LeaseResponse(LeaseResponse::default())),
         TrafficClass::Transactional,
@@ -7023,9 +6709,8 @@ async fn test_disconnect_with_active_leases_no_panic() {
     .await
     .unwrap();
 
-    // Consume LeaseResponse + LeaseStateChange
+    // Consume LeaseResponse
     let _r = stream.next().await.unwrap().unwrap();
-    let _sc = stream.next().await.unwrap().unwrap();
 
     // Drop both tx and stream to simulate ungraceful disconnect
     drop(tx);
@@ -7090,8 +6775,6 @@ async fn handshake_with_publish_zone_lease(
         timestamp_wall_us: now_wall_us(),
         payload: Some(ClientPayload::SessionInit(SessionInit {
             agent_id: "revoke-test-agent".to_string(),
-            agent_display_name: "revoke-test-agent".to_string(),
-            pre_shared_key: "test-key".to_string(),
             requested_capabilities: vec![
                 "publish_zone:subtitle".to_string(),
                 "create_tiles".to_string(),
@@ -7100,7 +6783,7 @@ async fn handshake_with_publish_zone_lease(
             resume_token: Vec::new(),
             min_protocol_version: 1000,
             max_protocol_version: 1001,
-            auth_credential: None,
+            auth_credential: Some(crate::auth::psk_credential("test-key".to_string())),
         })),
     })
     .await
@@ -7138,9 +6821,6 @@ async fn handshake_with_publish_zone_lease(
         }
         other => panic!("Expected LeaseResponse, got: {other:?}"),
     };
-
-    // LeaseStateChange (REQUESTED → ACTIVE)
-    let _sc = response_stream.next().await.unwrap().unwrap();
 
     // Parse lease_id back to SceneId.
     // scene_id_to_bytes() uses as_uuid().as_bytes() (big-endian UUID bytes),
@@ -7188,42 +6868,6 @@ async fn test_revoke_capability_sends_capability_notice() {
     }
 }
 
-/// WHEN the runtime revokes a capability from an active lease,
-/// THEN the agent receives LeaseStateChange with previous_state=ACTIVE, new_state=ACTIVE.
-#[tokio::test]
-async fn test_revoke_capability_sends_lease_state_change() {
-    let (mut client, _server, _state, revocation_tx) = setup_test_with_revocation_tx().await;
-
-    let (_tx, mut stream, _lease_id_bytes, lease_scene_id) =
-        handshake_with_publish_zone_lease(&mut client).await;
-
-    // Revoke create_tiles
-    let _ = revocation_tx.send(CapabilityRevocationEvent {
-        lease_id: lease_scene_id,
-        capability_name: "create_tiles".to_string(),
-    });
-
-    // CapabilityNotice first
-    let _notice = stream.next().await.unwrap().unwrap();
-
-    // Then LeaseStateChange
-    let msg = stream.next().await.unwrap().unwrap();
-    match msg.payload {
-        Some(ServerPayload::LeaseStateChange(sc)) => {
-            assert_eq!(sc.previous_state, "ACTIVE", "Lease must stay ACTIVE");
-            assert_eq!(
-                sc.new_state, "ACTIVE",
-                "Lease must stay ACTIVE after capability revocation"
-            );
-            assert!(
-                sc.reason.contains("CAPABILITY_REVOKED"),
-                "LeaseStateChange reason must contain CAPABILITY_REVOKED"
-            );
-        }
-        other => panic!("Expected LeaseStateChange, got: {other:?}"),
-    }
-}
-
 /// WHEN a capability is revoked from a lease, THEN the lease scope is narrowed
 /// in the scene graph and the capability is absent from the live scope.
 #[tokio::test]
@@ -7256,7 +6900,6 @@ async fn test_revoke_capability_narrows_scene_graph_scope() {
 
     // Drain protocol messages
     let _notice = stream.next().await.unwrap().unwrap();
-    let _sc = stream.next().await.unwrap().unwrap();
 
     // After revocation: the capability must be absent from the live scope
     {
@@ -7288,7 +6931,6 @@ async fn test_revoke_capability_preserves_lease_active_state() {
         capability_name: "create_tiles".to_string(),
     });
     let _notice = stream.next().await.unwrap().unwrap();
-    let _sc = stream.next().await.unwrap().unwrap();
 
     // Lease must still be ACTIVE in the scene graph
     let st = state.lock().await;
@@ -7563,7 +7205,6 @@ async fn test_durable_widget_publish_receives_result() {
                 )),
             }],
             transition_ms: 0,
-            ttl_us: 0,
             element_id: Vec::new(),
             merge_key: String::new(),
         })),
@@ -7571,7 +7212,7 @@ async fn test_durable_widget_publish_receives_result() {
     .await
     .unwrap();
 
-    let result_msg = next_non_state_change(&mut stream).await;
+    let result_msg = next_server_msg(&mut stream).await;
     match &result_msg.payload {
         Some(ServerPayload::WidgetPublishResult(result)) => {
             assert!(
@@ -7609,7 +7250,6 @@ async fn test_widget_publish_missing_capability_rejected() {
             instance_id: String::new(),
             params: vec![],
             transition_ms: 0,
-            ttl_us: 0,
             element_id: Vec::new(),
             merge_key: String::new(),
         })),
@@ -7617,7 +7257,7 @@ async fn test_widget_publish_missing_capability_rejected() {
     .await
     .unwrap();
 
-    let result_msg = next_non_state_change(&mut stream).await;
+    let result_msg = next_server_msg(&mut stream).await;
     match &result_msg.payload {
         Some(ServerPayload::WidgetPublishResult(result)) => {
             assert!(!result.accepted, "Expected rejection");
@@ -7654,7 +7294,6 @@ async fn test_widget_publish_wildcard_capability_allows_publish() {
             instance_id: String::new(),
             params: vec![],
             transition_ms: 0,
-            ttl_us: 0,
             element_id: Vec::new(),
             merge_key: String::new(),
         })),
@@ -7662,7 +7301,7 @@ async fn test_widget_publish_wildcard_capability_allows_publish() {
     .await
     .unwrap();
 
-    let result_msg = next_non_state_change(&mut stream).await;
+    let result_msg = next_server_msg(&mut stream).await;
     match &result_msg.payload {
         Some(ServerPayload::WidgetPublishResult(result)) => {
             assert!(
@@ -7698,7 +7337,6 @@ async fn test_widget_publish_not_found() {
             instance_id: String::new(),
             params: vec![],
             transition_ms: 0,
-            ttl_us: 0,
             element_id: Vec::new(),
             merge_key: String::new(),
         })),
@@ -7706,7 +7344,7 @@ async fn test_widget_publish_not_found() {
     .await
     .unwrap();
 
-    let result_msg = next_non_state_change(&mut stream).await;
+    let result_msg = next_server_msg(&mut stream).await;
     match &result_msg.payload {
         Some(ServerPayload::WidgetPublishResult(result)) => {
             assert!(!result.accepted, "Expected rejection");
@@ -7748,7 +7386,6 @@ async fn test_widget_publish_unknown_parameter() {
                 )),
             }],
             transition_ms: 0,
-            ttl_us: 0,
             element_id: Vec::new(),
             merge_key: String::new(),
         })),
@@ -7756,7 +7393,7 @@ async fn test_widget_publish_unknown_parameter() {
     .await
     .unwrap();
 
-    let result_msg = next_non_state_change(&mut stream).await;
+    let result_msg = next_server_msg(&mut stream).await;
     match &result_msg.payload {
         Some(ServerPayload::WidgetPublishResult(result)) => {
             assert!(!result.accepted, "Expected rejection");
@@ -7802,7 +7439,6 @@ async fn test_durable_widget_publish_repeated_requests_are_correlated() {
                     )),
                 }],
                 transition_ms: 0,
-                ttl_us: 0,
                 element_id: Vec::new(),
                 merge_key: String::new(),
             })),
@@ -7810,7 +7446,7 @@ async fn test_durable_widget_publish_repeated_requests_are_correlated() {
         .await
         .unwrap();
 
-        let result_msg = next_non_state_change(&mut stream).await;
+        let result_msg = next_server_msg(&mut stream).await;
         match &result_msg.payload {
             Some(ServerPayload::WidgetPublishResult(result)) => {
                 assert_eq!(result.request_sequence, sequence);
@@ -7914,7 +7550,6 @@ async fn test_ephemeral_widget_no_publish_result() {
                 )),
             }],
             transition_ms: 0,
-            ttl_us: 0,
             element_id: Vec::new(),
             merge_key: String::new(),
         })),
@@ -7970,7 +7605,7 @@ async fn test_widget_asset_register_missing_capability_rejected() {
     .await
     .unwrap();
 
-    let msg = next_non_state_change(&mut stream).await;
+    let msg = next_server_msg(&mut stream).await;
     match &msg.payload {
         Some(ServerPayload::WidgetAssetRegisterResult(result)) => {
             assert!(!result.accepted);
@@ -8013,7 +7648,7 @@ async fn test_widget_asset_register_metadata_preflight_dedup_hit() {
     .await
     .unwrap();
 
-    let first = next_non_state_change(&mut stream).await;
+    let first = next_server_msg(&mut stream).await;
     match &first.payload {
         Some(ServerPayload::WidgetAssetRegisterResult(result)) => {
             assert!(result.accepted);
@@ -8038,7 +7673,7 @@ async fn test_widget_asset_register_metadata_preflight_dedup_hit() {
     .await
     .unwrap();
 
-    let second = next_non_state_change(&mut stream).await;
+    let second = next_server_msg(&mut stream).await;
     match &second.payload {
         Some(ServerPayload::WidgetAssetRegisterResult(result)) => {
             assert!(result.accepted);
@@ -8083,7 +7718,7 @@ async fn test_widget_asset_register_durable_store_dedups_after_restart() {
     })
     .await
     .unwrap();
-    let first = next_non_state_change(&mut stream_a).await;
+    let first = next_server_msg(&mut stream_a).await;
     match &first.payload {
         Some(ServerPayload::WidgetAssetRegisterResult(result)) => {
             assert!(result.accepted);
@@ -8116,7 +7751,7 @@ async fn test_widget_asset_register_durable_store_dedups_after_restart() {
     })
     .await
     .unwrap();
-    let second = next_non_state_change(&mut stream_b).await;
+    let second = next_server_msg(&mut stream_b).await;
     match &second.payload {
         Some(ServerPayload::WidgetAssetRegisterResult(result)) => {
             assert!(result.accepted);
@@ -8158,7 +7793,7 @@ async fn test_widget_asset_register_unknown_hash_requires_payload_and_hash_valid
     .await
     .unwrap();
 
-    let missing_payload = next_non_state_change(&mut stream).await;
+    let missing_payload = next_server_msg(&mut stream).await;
     match &missing_payload.payload {
         Some(ServerPayload::WidgetAssetRegisterResult(result)) => {
             assert!(!result.accepted);
@@ -8184,7 +7819,7 @@ async fn test_widget_asset_register_unknown_hash_requires_payload_and_hash_valid
     .await
     .unwrap();
 
-    let hash_mismatch = next_non_state_change(&mut stream).await;
+    let hash_mismatch = next_server_msg(&mut stream).await;
     match &hash_mismatch.payload {
         Some(ServerPayload::WidgetAssetRegisterResult(result)) => {
             assert!(!result.accepted);
@@ -8210,7 +7845,7 @@ async fn test_widget_asset_register_unknown_hash_requires_payload_and_hash_valid
     .await
     .unwrap();
 
-    let uploaded = next_non_state_change(&mut stream).await;
+    let uploaded = next_server_msg(&mut stream).await;
     match &uploaded.payload {
         Some(ServerPayload::WidgetAssetRegisterResult(result)) => {
             assert!(result.accepted);
@@ -8250,7 +7885,7 @@ async fn test_widget_asset_register_checksum_svg_and_type_validation() {
     })
     .await
     .unwrap();
-    let invalid_type = next_non_state_change(&mut stream).await;
+    let invalid_type = next_server_msg(&mut stream).await;
     match &invalid_type.payload {
         Some(ServerPayload::WidgetAssetRegisterResult(result)) => {
             assert!(!result.accepted);
@@ -8276,7 +7911,7 @@ async fn test_widget_asset_register_checksum_svg_and_type_validation() {
     })
     .await
     .unwrap();
-    let checksum_mismatch = next_non_state_change(&mut stream).await;
+    let checksum_mismatch = next_server_msg(&mut stream).await;
     match &checksum_mismatch.payload {
         Some(ServerPayload::WidgetAssetRegisterResult(result)) => {
             assert!(!result.accepted);
@@ -8302,7 +7937,7 @@ async fn test_widget_asset_register_checksum_svg_and_type_validation() {
     })
     .await
     .unwrap();
-    let invalid_svg = next_non_state_change(&mut stream).await;
+    let invalid_svg = next_server_msg(&mut stream).await;
     match &invalid_svg.payload {
         Some(ServerPayload::WidgetAssetRegisterResult(result)) => {
             assert!(!result.accepted);
@@ -8343,7 +7978,7 @@ async fn test_widget_asset_register_budget_exceeded_rejected() {
     .await
     .unwrap();
 
-    let budget_denied = next_non_state_change(&mut stream).await;
+    let budget_denied = next_server_msg(&mut stream).await;
     match &budget_denied.payload {
         Some(ServerPayload::WidgetAssetRegisterResult(result)) => {
             assert!(!result.accepted);
@@ -8396,7 +8031,7 @@ async fn test_widget_asset_register_updates_runtime_widget_lifecycle_for_publish
     .await
     .unwrap();
 
-    let asset_handle = match next_non_state_change(&mut stream).await.payload {
+    let asset_handle = match next_server_msg(&mut stream).await.payload {
         Some(ServerPayload::WidgetAssetRegisterResult(result)) => {
             assert!(result.accepted);
             assert!(!result.was_deduplicated);
@@ -8421,7 +8056,7 @@ async fn test_widget_asset_register_updates_runtime_widget_lifecycle_for_publish
     })
     .await
     .unwrap();
-    let no_enqueue = next_non_state_change(&mut stream).await;
+    let no_enqueue = next_server_msg(&mut stream).await;
     assert!(matches!(
         no_enqueue.payload,
         Some(ServerPayload::WidgetAssetRegisterResult(
@@ -8446,7 +8081,6 @@ async fn test_widget_asset_register_updates_runtime_widget_lifecycle_for_publish
                 )),
             }],
             transition_ms: 0,
-            ttl_us: 0,
             element_id: Vec::new(),
             merge_key: String::new(),
         })),
@@ -8454,7 +8088,7 @@ async fn test_widget_asset_register_updates_runtime_widget_lifecycle_for_publish
     .await
     .unwrap();
 
-    let publish_msg = next_non_state_change(&mut stream).await;
+    let publish_msg = next_server_msg(&mut stream).await;
     match &publish_msg.payload {
         Some(ServerPayload::WidgetPublishResult(result)) => {
             assert!(
@@ -8569,7 +8203,7 @@ async fn test_resource_upload_chunk_transport_backpressure_from_rate_limit() {
     .await
     .unwrap();
 
-    let accepted = next_non_state_change(&mut stream).await;
+    let accepted = next_server_msg(&mut stream).await;
     let upload_id = match &accepted.payload {
         Some(ServerPayload::ResourceUploadAccepted(accepted)) => {
             assert_eq!(accepted.request_sequence, 2);
@@ -8616,7 +8250,7 @@ async fn test_resource_upload_chunk_transport_backpressure_from_rate_limit() {
 
     let early = tokio::time::timeout(
         tokio::time::Duration::from_millis(300),
-        next_non_state_change(&mut stream),
+        next_server_msg(&mut stream),
     )
     .await;
     assert!(
@@ -8626,7 +8260,7 @@ async fn test_resource_upload_chunk_transport_backpressure_from_rate_limit() {
 
     let stored = tokio::time::timeout(
         tokio::time::Duration::from_secs(3),
-        next_non_state_change(&mut stream),
+        next_server_msg(&mut stream),
     )
     .await
     .expect("expected ResourceStored after backpressure interval");
@@ -8677,7 +8311,7 @@ async fn test_resource_upload_backpressure_keeps_heartbeat_responsive() {
     .await
     .unwrap();
 
-    let accepted = next_non_state_change(&mut stream).await;
+    let accepted = next_server_msg(&mut stream).await;
     let upload_id = match &accepted.payload {
         Some(ServerPayload::ResourceUploadAccepted(accepted)) => accepted.upload_id.clone(),
         other => panic!("expected ResourceUploadAccepted, got: {other:?}"),
@@ -8732,7 +8366,7 @@ async fn test_resource_upload_backpressure_keeps_heartbeat_responsive() {
 
     let heartbeat_echo = tokio::time::timeout(
         tokio::time::Duration::from_millis(300),
-        next_non_state_change(&mut stream),
+        next_server_msg(&mut stream),
     )
     .await
     .expect("heartbeat should not be blocked by upload backpressure");
@@ -8746,7 +8380,7 @@ async fn test_resource_upload_backpressure_keeps_heartbeat_responsive() {
 
     let stored = tokio::time::timeout(
         tokio::time::Duration::from_secs(3),
-        next_non_state_change(&mut stream),
+        next_server_msg(&mut stream),
     )
     .await
     .expect("expected ResourceStored after backpressure interval");
@@ -8815,7 +8449,7 @@ async fn test_resource_upload_backpressure_preserves_transactional_chunk_order()
     .await
     .unwrap();
 
-    let accepted_a = next_non_state_change(&mut stream).await;
+    let accepted_a = next_server_msg(&mut stream).await;
     let upload_a = match &accepted_a.payload {
         Some(ServerPayload::ResourceUploadAccepted(accepted)) => {
             assert_eq!(accepted.request_sequence, 2);
@@ -8824,7 +8458,7 @@ async fn test_resource_upload_backpressure_preserves_transactional_chunk_order()
         other => panic!("expected ResourceUploadAccepted for upload A, got: {other:?}"),
     };
 
-    let accepted_b = next_non_state_change(&mut stream).await;
+    let accepted_b = next_server_msg(&mut stream).await;
     let upload_b = match &accepted_b.payload {
         Some(ServerPayload::ResourceUploadAccepted(accepted)) => {
             assert_eq!(accepted.request_sequence, 3);
@@ -8883,7 +8517,7 @@ async fn test_resource_upload_backpressure_preserves_transactional_chunk_order()
 
     let first_stored = tokio::time::timeout(
         tokio::time::Duration::from_millis(300),
-        next_non_state_change(&mut stream),
+        next_server_msg(&mut stream),
     )
     .await
     .expect("first upload should complete before rate limiter delays second upload");
@@ -8899,7 +8533,7 @@ async fn test_resource_upload_backpressure_preserves_transactional_chunk_order()
 
     let early_second = tokio::time::timeout(
         tokio::time::Duration::from_millis(300),
-        next_non_state_change(&mut stream),
+        next_server_msg(&mut stream),
     )
     .await;
     assert!(
@@ -8909,7 +8543,7 @@ async fn test_resource_upload_backpressure_preserves_transactional_chunk_order()
 
     let second_stored = tokio::time::timeout(
         tokio::time::Duration::from_secs(3),
-        next_non_state_change(&mut stream),
+        next_server_msg(&mut stream),
     )
     .await
     .expect("second upload should complete once backpressure window clears");
@@ -8987,7 +8621,7 @@ async fn test_resource_upload_inline_transport_backpressure_from_rate_limit() {
     // First upload should complete quickly (no prior debt in window).
     let first_stored = tokio::time::timeout(
         tokio::time::Duration::from_millis(300),
-        next_non_state_change(&mut stream),
+        next_server_msg(&mut stream),
     )
     .await
     .expect("first inline upload should complete before rate limiter delays second");
@@ -9007,7 +8641,7 @@ async fn test_resource_upload_inline_transport_backpressure_from_rate_limit() {
     // Second upload result must be delayed by the rate window.
     let early_second = tokio::time::timeout(
         tokio::time::Duration::from_millis(300),
-        next_non_state_change(&mut stream),
+        next_server_msg(&mut stream),
     )
     .await;
     assert!(
@@ -9017,7 +8651,7 @@ async fn test_resource_upload_inline_transport_backpressure_from_rate_limit() {
 
     let second_stored = tokio::time::timeout(
         tokio::time::Duration::from_secs(3),
-        next_non_state_change(&mut stream),
+        next_server_msg(&mut stream),
     )
     .await
     .expect("second inline upload should complete once rate-limit window clears");
@@ -9059,7 +8693,7 @@ async fn test_resource_upload_start_requires_upload_resource_capability() {
     .await
     .unwrap();
 
-    let msg = next_non_state_change(&mut stream).await;
+    let msg = next_server_msg(&mut stream).await;
     match &msg.payload {
         Some(ServerPayload::ResourceErrorResponse(err)) => {
             assert_eq!(err.request_sequence, 2);
@@ -9100,7 +8734,7 @@ async fn test_resource_upload_inline_and_dedup_short_circuit() {
     .await
     .unwrap();
 
-    let first = next_non_state_change(&mut stream).await;
+    let first = next_server_msg(&mut stream).await;
     match &first.payload {
         Some(ServerPayload::ResourceStored(stored)) => {
             assert_eq!(stored.request_sequence, 2);
@@ -9124,7 +8758,7 @@ async fn test_resource_upload_inline_and_dedup_short_circuit() {
     .await
     .unwrap();
 
-    let second = next_non_state_change(&mut stream).await;
+    let second = next_server_msg(&mut stream).await;
     match &second.payload {
         Some(ServerPayload::ResourceStored(stored)) => {
             assert_eq!(stored.request_sequence, 3);
@@ -9165,7 +8799,7 @@ async fn test_resource_upload_chunked_ack_then_complete() {
     .await
     .unwrap();
 
-    let accepted = next_non_state_change(&mut stream).await;
+    let accepted = next_server_msg(&mut stream).await;
     let upload_id = match &accepted.payload {
         Some(ServerPayload::ResourceUploadAccepted(accepted)) => {
             assert_eq!(accepted.request_sequence, 2);
@@ -9199,7 +8833,7 @@ async fn test_resource_upload_chunked_ack_then_complete() {
     .await
     .unwrap();
 
-    let stored = next_non_state_change(&mut stream).await;
+    let stored = next_server_msg(&mut stream).await;
     match &stored.payload {
         Some(ServerPayload::ResourceStored(stored)) => {
             assert_eq!(stored.request_sequence, 2);
@@ -9245,7 +8879,7 @@ async fn test_resource_upload_chunked_concurrent_limit_rejected() {
         .await
         .unwrap();
 
-        let msg = next_non_state_change(&mut stream).await;
+        let msg = next_server_msg(&mut stream).await;
         if offset < 4 {
             match &msg.payload {
                 Some(ServerPayload::ResourceUploadAccepted(accepted)) => {
@@ -9307,7 +8941,7 @@ async fn test_resource_upload_chunked_success_correlates_by_request_sequence() {
 
     let mut upload_id_by_request = HashMap::new();
     for _ in 0..2 {
-        let msg = next_non_state_change(&mut stream).await;
+        let msg = next_server_msg(&mut stream).await;
         match &msg.payload {
             Some(ServerPayload::ResourceUploadAccepted(accepted)) => {
                 upload_id_by_request.insert(accepted.request_sequence, accepted.upload_id.clone());
@@ -9374,7 +9008,7 @@ async fn test_resource_upload_chunked_success_correlates_by_request_sequence() {
 
     let mut stored_by_request = HashMap::new();
     for _ in 0..2 {
-        let msg = next_non_state_change(&mut stream).await;
+        let msg = next_server_msg(&mut stream).await;
         match &msg.payload {
             Some(ServerPayload::ResourceStored(stored)) => {
                 let bytes = stored
@@ -9448,7 +9082,7 @@ async fn test_resource_upload_chunked_zero_size_rejected() {
     .await
     .unwrap();
 
-    let msg = next_non_state_change(&mut stream).await;
+    let msg = next_server_msg(&mut stream).await;
     match &msg.payload {
         Some(ServerPayload::ResourceErrorResponse(err)) => {
             assert_eq!(err.request_sequence, 2);
@@ -9494,7 +9128,7 @@ async fn test_resource_upload_chunk_error_aborts_inflight_tracking() {
     .await
     .unwrap();
 
-    let accepted = next_non_state_change(&mut stream).await;
+    let accepted = next_server_msg(&mut stream).await;
     let upload_id = match &accepted.payload {
         Some(ServerPayload::ResourceUploadAccepted(accepted)) => accepted.upload_id.clone(),
         other => panic!("expected ResourceUploadAccepted, got: {other:?}"),
@@ -9512,7 +9146,7 @@ async fn test_resource_upload_chunk_error_aborts_inflight_tracking() {
     .await
     .unwrap();
 
-    let first_error = next_non_state_change(&mut stream).await;
+    let first_error = next_server_msg(&mut stream).await;
     match &first_error.payload {
         Some(ServerPayload::ResourceErrorResponse(err)) => {
             assert_eq!(err.request_sequence, 2);
@@ -9532,7 +9166,7 @@ async fn test_resource_upload_chunk_error_aborts_inflight_tracking() {
     .await
     .unwrap();
 
-    let second_error = next_non_state_change(&mut stream).await;
+    let second_error = next_server_msg(&mut stream).await;
     match &second_error.payload {
         Some(ServerPayload::ResourceErrorResponse(err)) => {
             assert_eq!(err.request_sequence, 4);
@@ -9573,7 +9207,7 @@ async fn test_resident_upload_then_static_image_references_uploaded_resource_id(
     .await
     .unwrap();
 
-    let stored = next_non_state_change(&mut stream).await;
+    let stored = next_server_msg(&mut stream).await;
     let resource_id_bytes = match stored.payload {
         Some(ServerPayload::ResourceStored(stored)) => {
             stored
@@ -9610,7 +9244,7 @@ async fn test_resident_upload_then_static_image_references_uploaded_resource_id(
     .await
     .unwrap();
 
-    let lease_msg = next_non_state_change(&mut stream).await;
+    let lease_msg = next_server_msg(&mut stream).await;
     let lease_id = match lease_msg.payload {
         Some(ServerPayload::LeaseResponse(resp)) if resp.granted => resp.lease_id,
         other => panic!("expected granted LeaseResponse, got: {other:?}"),
@@ -9643,7 +9277,7 @@ async fn test_resident_upload_then_static_image_references_uploaded_resource_id(
     .await
     .unwrap();
 
-    let create_result = next_non_state_change(&mut stream).await;
+    let create_result = next_server_msg(&mut stream).await;
     let tile_id_bytes = match create_result.payload {
         Some(ServerPayload::MutationResult(result)) => {
             assert!(result.accepted, "create tile mutation should be accepted");
@@ -9692,7 +9326,7 @@ async fn test_resident_upload_then_static_image_references_uploaded_resource_id(
     .await
     .unwrap();
 
-    let set_root_result = next_non_state_change(&mut stream).await;
+    let set_root_result = next_server_msg(&mut stream).await;
     match set_root_result.payload {
         Some(ServerPayload::MutationResult(result)) => {
             assert!(result.accepted, "set_tile_root should be accepted");
@@ -9787,14 +9421,12 @@ async fn handshake_with_capabilities(
         timestamp_wall_us: now_wall_us(),
         payload: Some(ClientPayload::SessionInit(SessionInit {
             agent_id: agent_id.to_string(),
-            agent_display_name: agent_id.to_string(),
-            pre_shared_key: psk.to_string(),
             requested_capabilities: caps,
             initial_subscriptions: vec![],
             resume_token: Vec::new(),
             min_protocol_version: 1000,
             max_protocol_version: 1001,
-            auth_credential: None,
+            auth_credential: Some(crate::auth::psk_credential(psk.to_string())),
         })),
     })
     .await
@@ -10044,14 +9676,12 @@ async fn test_element_repositioned_not_delivered_without_scene_topology_subscrip
         timestamp_wall_us: now_wall_us(),
         payload: Some(ClientPayload::SessionInit(SessionInit {
             agent_id: "no-topology-agent".to_string(),
-            agent_display_name: "no-topology-agent".to_string(),
-            pre_shared_key: "test-key".to_string(),
             requested_capabilities: vec!["create_tiles".to_string()],
             initial_subscriptions: vec![],
             resume_token: Vec::new(),
             min_protocol_version: 1000,
             max_protocol_version: 1001,
-            auth_credential: None,
+            auth_credential: Some(crate::auth::psk_credential("test-key".to_string())),
         })),
     })
     .await
@@ -10152,14 +9782,12 @@ async fn handshake_telemetry(
         timestamp_wall_us: now_wall_us(),
         payload: Some(ClientPayload::SessionInit(SessionInit {
             agent_id: agent_id.to_string(),
-            agent_display_name: agent_id.to_string(),
-            pre_shared_key: psk.to_string(),
             requested_capabilities: vec!["read_telemetry".to_string()],
             initial_subscriptions,
             resume_token: Vec::new(),
             min_protocol_version: 1000,
             max_protocol_version: 1001,
-            auth_credential: None,
+            auth_credential: Some(crate::auth::psk_credential(psk.to_string())),
         })),
     })
     .await
@@ -10322,7 +9950,7 @@ async fn rejected_zone_publish_does_not_wake_the_compositor() {
     })
     .await
     .unwrap();
-    let result = next_non_state_change(&mut stream).await;
+    let result = next_server_msg(&mut stream).await;
     assert!(matches!(
         result.payload,
         Some(ServerPayload::ZonePublishResult(ZonePublishResult {
@@ -10394,7 +10022,7 @@ async fn connect_hold_tile_and_disconnect(
     })
     .await
     .unwrap();
-    let lease_id = match next_non_state_change(&mut stream).await.payload {
+    let lease_id = match next_server_msg(&mut stream).await.payload {
         Some(ServerPayload::LeaseResponse(LeaseResponse {
             granted: true,
             lease_id,
@@ -10586,7 +10214,7 @@ async fn publish_and_ack(
     })
     .await
     .unwrap();
-    match next_non_state_change(stream).await.payload {
+    match next_server_msg(stream).await.payload {
         Some(ServerPayload::ZonePublishResult(r)) => r,
         other => panic!("expected ZonePublishResult, got {other:?}"),
     }
@@ -10746,7 +10374,7 @@ async fn tile_agent(
     })
     .await
     .unwrap();
-    let lease_id = match next_non_state_change(&mut stream).await.payload {
+    let lease_id = match next_server_msg(&mut stream).await.payload {
         Some(ServerPayload::LeaseResponse(r)) if r.granted => r.lease_id,
         other => panic!("expected granted LeaseResponse, got {other:?}"),
     };
@@ -10811,7 +10439,7 @@ async fn send_batch(
     })
     .await
     .unwrap();
-    next_non_state_change(stream).await
+    next_server_msg(stream).await
 }
 
 /// Invariant 1: a MutationBatch with a future `present_at` is accepted but

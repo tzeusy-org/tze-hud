@@ -101,7 +101,7 @@ fn create_presence_card_tile(
 /// Note: `grant_lease` in SceneGraph encapsulates REQUESTED → ACTIVE atomically,
 /// which is the correct model (the scene graph has no separate "pending" state;
 /// the state machine starts Active upon successful grant). The protocol layer
-/// sends a `LeaseStateChange(REQUESTED → ACTIVE)` to the client.
+/// answers with `LeaseResponse(granted=true)`.
 #[test]
 fn test_presence_card_lease_request_granted() {
     let clock = Arc::new(TestClock::new(1_000));

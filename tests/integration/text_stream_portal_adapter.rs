@@ -329,20 +329,14 @@ impl AgentSession {
         self.sequence
     }
 
-    async fn next_non_state_change(
+    async fn next_server_msg(
         &mut self,
     ) -> Result<session_proto::ServerMessage, Box<dyn std::error::Error>> {
-        loop {
-            let msg = self
-                .rx
-                .next()
-                .await
-                .ok_or("server stream ended unexpectedly")??;
-            if let Some(session_proto::server_message::Payload::LeaseStateChange(_)) = msg.payload {
-                continue;
-            }
-            return Ok(msg);
-        }
+        Ok(self
+            .rx
+            .next()
+            .await
+            .ok_or("server stream ended unexpectedly")??)
     }
 }
 
@@ -458,8 +452,6 @@ async fn connect_agent(
         payload: Some(session_proto::client_message::Payload::SessionInit(
             session_proto::SessionInit {
                 agent_id: agent_id.to_string(),
-                agent_display_name: format!("{agent_id} (portal adapter test)"),
-                pre_shared_key: TEST_PSK.to_string(),
                 requested_capabilities: vec![
                     "create_tiles".to_string(),
                     "modify_own_tiles".to_string(),
@@ -468,7 +460,7 @@ async fn connect_agent(
                 resume_token: Vec::new(),
                 min_protocol_version: RUNTIME_MIN_VERSION,
                 max_protocol_version: RUNTIME_MAX_VERSION,
-                auth_credential: None,
+                auth_credential: Some(tze_hud_protocol::auth::psk_credential(TEST_PSK.to_string())),
             },
         )),
     })
@@ -522,7 +514,7 @@ async fn connect_agent(
         sequence: 2,
     };
 
-    let msg = session.next_non_state_change().await?;
+    let msg = session.next_server_msg().await?;
     match msg.payload {
         Some(session_proto::server_message::Payload::LeaseResponse(resp)) if resp.granted => {
             session.lease_id = resp.lease_id;
@@ -543,7 +535,7 @@ async fn send_resident_command(
         command.budget
     );
     session.tx.send(command.message).await?;
-    session.next_non_state_change().await
+    session.next_server_msg().await
 }
 
 fn expect_created_tile(
@@ -650,7 +642,7 @@ async fn create_tile(
         })
         .await?;
 
-    let msg = session.next_non_state_change().await?;
+    let msg = session.next_server_msg().await?;
     match msg.payload {
         Some(session_proto::server_message::Payload::MutationResult(result)) if result.accepted => {
             Ok(result
@@ -727,7 +719,7 @@ async fn set_tile_root_text(
         })
         .await?;
 
-    let msg = session.next_non_state_change().await?;
+    let msg = session.next_server_msg().await?;
     match msg.payload {
         Some(session_proto::server_message::Payload::MutationResult(result)) if result.accepted => {
             Ok(())

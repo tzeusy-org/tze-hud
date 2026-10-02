@@ -646,17 +646,6 @@ message ClearZoneMutation {
   ZonePublishToken publish_token = 2;
 }
 
-// ─── Zone Query Messages ──────────────────────────────────────────────────────
-
-message ZoneRegistryRequest {
-  string session_id = 1;
-}
-
-message ZoneRegistryResponse {
-  ZoneRegistrySnapshotProto registry = 1;
-  string error = 2;
-}
-
 // ─── Element Discovery ───────────────────────────────────────────────────────
 
 message ListElementsRequest {
@@ -824,15 +813,4 @@ message WidgetRegistrySnapshotProto {
 message ClearWidgetMutation {
   string widget_name = 1;  // Instance addressing key
   string instance_id = 2;  // Optional disambiguation
-}
-
-// ─── Widget Query Messages ────────────────────────────────────────────────────
-
-message WidgetRegistryRequest {
-  string session_id = 1;
-}
-
-message WidgetRegistryResponse {
-  WidgetRegistrySnapshotProto registry = 1;
-  string error = 2;
 }

@@ -1,9 +1,4 @@
 //! Agent session management — authentication, capabilities, session state.
-//!
-//! NOTE: This module uses `proto::SceneEvent` (from `events_legacy.proto`) in
-//! channel types for backwards-compatibility. New event dispatch code should
-//! migrate to `InputEnvelope` / `EventBatch` (RFC 0004). The `SceneEvent`
-//! usage here is retained for compatibility until that migration completes.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -16,7 +11,6 @@ use tze_hud_scene::SceneId;
 use tze_hud_scene::element_store::ElementStore;
 use tze_hud_scene::graph::SceneGraph;
 
-use crate::proto::SceneEvent;
 use crate::proto::session::ServerMessage;
 use crate::token::TokenStore;
 
@@ -38,65 +32,6 @@ pub enum InputCaptureCommand {
     ComposerPasteInject {
         text: String,
     },
-}
-
-/// Current degradation level of the runtime (RFC 0005 §3.4).
-///
-/// Mirrors `DegradationLevel` from `session.proto` as a plain Rust enum so that
-/// the compositor and other non-proto code can track the level without depending
-/// on generated proto types.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RuntimeDegradationLevel {
-    Normal = 1,
-    CoalescingMore = 2,
-    MediaQualityReduced = 3,
-    StreamsReduced = 4,
-    RenderingSimplified = 5,
-    SheddingTiles = 6,
-    AudioOnlyFallback = 7,
-    TextureQualityReduced = 8,
-    EmergencyRendering = 9,
-}
-
-impl RuntimeDegradationLevel {
-    /// Convert to the proto enum integer value.
-    pub fn to_proto_i32(self) -> i32 {
-        self as i32
-    }
-
-    /// Decode only assigned append-only values. Unspecified and future values
-    /// fail closed instead of being interpreted as Normal.
-    pub fn from_proto_i32(value: i32) -> Option<Self> {
-        match value {
-            1 => Some(Self::Normal),
-            2 => Some(Self::CoalescingMore),
-            3 => Some(Self::MediaQualityReduced),
-            4 => Some(Self::StreamsReduced),
-            5 => Some(Self::RenderingSimplified),
-            6 => Some(Self::SheddingTiles),
-            7 => Some(Self::AudioOnlyFallback),
-            8 => Some(Self::TextureQualityReduced),
-            9 => Some(Self::EmergencyRendering),
-            _ => None,
-        }
-    }
-}
-
-#[cfg(test)]
-mod degradation_level_tests {
-    use super::RuntimeDegradationLevel;
-
-    #[test]
-    fn append_only_mapping_rejects_unspecified_and_future_values() {
-        for value in 1..=9 {
-            let level = RuntimeDegradationLevel::from_proto_i32(value)
-                .expect("assigned degradation value must decode");
-            assert_eq!(level.to_proto_i32(), value);
-        }
-        assert_eq!(RuntimeDegradationLevel::from_proto_i32(0), None);
-        assert_eq!(RuntimeDegradationLevel::from_proto_i32(10), None);
-        assert_eq!(RuntimeDegradationLevel::from_proto_i32(-1), None);
-    }
 }
 
 /// Stored runtime widget SVG asset metadata/content keyed by strong hash.
@@ -259,9 +194,6 @@ pub struct SharedState {
     /// `freeze_active = false`. Safe mode entry cancels freeze
     /// and discards all per-session freeze queues.
     pub freeze_active: bool,
-    /// Current degradation level (RFC 0005 §3.4).
-    /// Default: Normal (no degradation).
-    pub degradation_level: RuntimeDegradationLevel,
     /// Optional bridge for session-plane pointer capture requests. Windowed
     /// runtime installs this so gRPC InputCaptureRequest/InputCaptureRelease
     /// mutates the same InputProcessor used for OS pointer routing.
@@ -325,9 +257,6 @@ pub struct AgentSession {
     pub capabilities: Vec<String>,
     pub lease_ids: Vec<SceneId>,
     pub event_subscribed: bool,
-    /// Sender half of the per-session event channel.
-    /// Present once the agent calls SubscribeEvents; None before that.
-    pub event_tx: Option<mpsc::Sender<SceneEvent>>,
     /// Sender half of the per-session ServerMessage channel.
     ///
     /// Used by the safe mode controller to deliver `SessionSuspended` and
@@ -339,7 +268,7 @@ pub struct AgentSession {
 
 impl Clone for AgentSession {
     fn clone(&self) -> Self {
-        // event_tx and server_message_tx are not cloned — channels are owned by the session record.
+        // server_message_tx is not cloned — the channel is owned by the session record.
         Self {
             session_id: self.session_id.clone(),
             namespace: self.namespace.clone(),
@@ -347,7 +276,6 @@ impl Clone for AgentSession {
             capabilities: self.capabilities.clone(),
             lease_ids: self.lease_ids.clone(),
             event_subscribed: self.event_subscribed,
-            event_tx: None,
             server_message_tx: None,
         }
     }
@@ -390,7 +318,6 @@ impl SessionRegistry {
             capabilities: requested_caps.to_vec(),
             lease_ids: Vec::new(),
             event_subscribed: false,
-            event_tx: None,
             server_message_tx: None,
         };
 
@@ -417,28 +344,6 @@ impl SessionRegistry {
     /// Find the session that owns the given namespace (agent name).
     pub fn session_for_namespace(&self, namespace: &str) -> Option<&AgentSession> {
         self.sessions.values().find(|s| s.namespace == namespace)
-    }
-
-    /// Send a SceneEvent to the agent owning `namespace`.
-    /// Returns `true` if the event was enqueued, `false` if the agent has no
-    /// active subscription or the channel is full.
-    pub fn dispatch_to_namespace(&self, namespace: &str, event: SceneEvent) -> bool {
-        if let Some(session) = self.session_for_namespace(namespace) {
-            if let Some(tx) = &session.event_tx {
-                return tx.try_send(event).is_ok();
-            }
-        }
-        false
-    }
-
-    /// Broadcast a SceneEvent to ALL subscribed sessions.
-    /// Used for scene-wide events (e.g., tile lifecycle if needed by multiple agents).
-    pub fn broadcast(&self, event: SceneEvent) {
-        for session in self.sessions.values() {
-            if let Some(tx) = &session.event_tx {
-                let _ = tx.try_send(event.clone());
-            }
-        }
     }
 
     /// Broadcast a `ServerMessage` to all connected sessions via their direct server channels.

@@ -248,16 +248,14 @@ impl SceneGraph {
     /// - If `cap` is not in the lease scope → `Err(InvalidField { "capability_not_present" })`.
     /// - On success → `Ok((capability_name, revoked_at_wall_us))`.  The caller MUST emit a
     ///   [`LeaseEventKind::CapabilityRevoked`] audit event using the returned name and
-    ///   timestamp to populate its fields, then deliver it via `LeaseStateChange` on the
-    ///   `lease_changes` subscription.
+    ///   timestamp to populate its fields, then notify the agent with `CapabilityNotice`.
     ///
     /// # Audit events
     ///
     /// This method does **not** push a [`LeaseAuditEvent`] directly (the lease module's
     /// audit channel is separate from the scene graph's mutation pipeline). Callers that
-    /// route events through the `lease_changes` subscription MUST emit a `LeaseStateChange`
-    /// message after a successful call, using the returned `(capability_name, revoked_at_wall_us)`
-    /// to populate the [`LeaseEventKind::CapabilityRevoked`] fields.
+    /// audit revocations use the returned `(capability_name, revoked_at_wall_us)` to
+    /// populate the [`LeaseEventKind::CapabilityRevoked`] fields.
     pub fn revoke_capability(
         &mut self,
         lease_id: SceneId,

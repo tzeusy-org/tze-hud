@@ -230,8 +230,6 @@ async fn connect_soak_agent(
         payload: Some(session_proto::client_message::Payload::SessionInit(
             session_proto::SessionInit {
                 agent_id: agent_id.to_string(),
-                agent_display_name: format!("{agent_id} (soak test)"),
-                pre_shared_key: SOAK_PSK.to_string(),
                 requested_capabilities: vec![
                     "create_tiles".to_string(),
                     "modify_own_tiles".to_string(),
@@ -240,7 +238,7 @@ async fn connect_soak_agent(
                 resume_token: Vec::new(),
                 min_protocol_version: 0,
                 max_protocol_version: 0,
-                auth_credential: None,
+                auth_credential: Some(tze_hud_protocol::auth::psk_credential(SOAK_PSK.to_string())),
             },
         )),
     })
@@ -296,8 +294,8 @@ async fn connect_soak_agent(
     })
     .await?;
 
-    // Read LeaseResponse (drain any LeaseStateChange events first)
-    let msg = next_non_state_change(&mut response_stream).await?;
+    // Read LeaseResponse
+    let msg = next_server_msg(&mut response_stream).await?;
     let lease_id_bytes = match &msg.payload {
         Some(session_proto::server_message::Payload::LeaseResponse(resp)) if resp.granted => {
             resp.lease_id.clone()
@@ -317,25 +315,11 @@ async fn connect_soak_agent(
     })
 }
 
-/// Drain `LeaseStateChange` payloads, returning the next non-state-change message.
-///
-/// The runtime may emit `LeaseStateChange` events before the `LeaseResponse`
-/// or `MutationResult` (e.g., when a previous lease transitions to active).
-/// This helper drains those interleaved events so callers can assert the
-/// expected response type.
-async fn next_non_state_change(
+/// Return the next server message, failing if the stream ended.
+async fn next_server_msg(
     stream: &mut tonic::codec::Streaming<session_proto::ServerMessage>,
 ) -> Result<session_proto::ServerMessage, Box<dyn std::error::Error>> {
-    loop {
-        let msg = stream.next().await.ok_or("stream ended unexpectedly")??;
-        match &msg.payload {
-            Some(session_proto::server_message::Payload::LeaseStateChange(_)) => {
-                // Drain and continue
-                continue;
-            }
-            _ => return Ok(msg),
-        }
-    }
+    Ok(stream.next().await.ok_or("stream ended unexpectedly")??)
 }
 
 /// Send a CreateTile mutation via gRPC and return the tile ID.
@@ -376,8 +360,8 @@ async fn create_tile(
         })
         .await?;
 
-    // Read MutationResult, draining any interleaved LeaseStateChange events
-    let msg = next_non_state_change(&mut session.rx).await?;
+    // Read MutationResult
+    let msg = next_server_msg(&mut session.rx).await?;
     match &msg.payload {
         Some(session_proto::server_message::Payload::MutationResult(result)) if result.accepted => {
             let tile_id = result.created_ids.first().cloned().unwrap_or_default();
@@ -466,7 +450,7 @@ async fn update_tile_content(
     // Read the MutationResult and return whether the runtime accepted it.
     // Callers record this via MutationAccountant so that a run where the
     // runtime rejects every mutation is caught as a test failure.
-    let msg = next_non_state_change(&mut session.rx).await?;
+    let msg = next_server_msg(&mut session.rx).await?;
     match &msg.payload {
         Some(session_proto::server_message::Payload::MutationResult(result)) => Ok(result.accepted),
         other => {
@@ -1204,8 +1188,6 @@ async fn connect_soak_agent_to(
         payload: Some(session_proto::client_message::Payload::SessionInit(
             session_proto::SessionInit {
                 agent_id: agent_id.to_string(),
-                agent_display_name: format!("{agent_id} (soak test)"),
-                pre_shared_key: SOAK_PSK.to_string(),
                 requested_capabilities: vec![
                     "create_tiles".to_string(),
                     "modify_own_tiles".to_string(),
@@ -1214,7 +1196,7 @@ async fn connect_soak_agent_to(
                 resume_token: Vec::new(),
                 min_protocol_version: 0,
                 max_protocol_version: 0,
-                auth_credential: None,
+                auth_credential: Some(tze_hud_protocol::auth::psk_credential(SOAK_PSK.to_string())),
             },
         )),
     })
@@ -1267,7 +1249,7 @@ async fn connect_soak_agent_to(
     })
     .await?;
 
-    let msg = next_non_state_change(&mut response_stream).await?;
+    let msg = next_server_msg(&mut response_stream).await?;
     let lease_id_bytes =
         match &msg.payload {
             Some(session_proto::server_message::Payload::LeaseResponse(resp)) if resp.granted => {

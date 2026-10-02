@@ -209,8 +209,6 @@ async fn production_config_grants_registered_agent_capabilities() {
         payload: Some(session_proto::client_message::Payload::SessionInit(
             session_proto::SessionInit {
                 agent_id: "vertical-slice-agent".to_string(),
-                agent_display_name: "Vertical Slice Agent".to_string(),
-                pre_shared_key: "production-boot-test".to_string(),
                 requested_capabilities: vec![
                     "create_tiles".to_string(),
                     "modify_own_tiles".to_string(),
@@ -222,7 +220,9 @@ async fn production_config_grants_registered_agent_capabilities() {
                 resume_token: Vec::new(),
                 min_protocol_version: 1000,
                 max_protocol_version: 1001,
-                auth_credential: None,
+                auth_credential: Some(tze_hud_protocol::auth::psk_credential(
+                    "production-boot-test".to_string(),
+                )),
             },
         )),
     })
@@ -329,8 +329,6 @@ async fn production_config_denies_unregistered_agent() {
         payload: Some(session_proto::client_message::Payload::SessionInit(
             session_proto::SessionInit {
                 agent_id: "unknown-rogue-agent".to_string(),
-                agent_display_name: "Unknown Agent".to_string(),
-                pre_shared_key: "production-boot-test".to_string(),
                 // Requests all capabilities — must receive none.
                 requested_capabilities: vec![
                     "create_tiles".to_string(),
@@ -343,7 +341,9 @@ async fn production_config_denies_unregistered_agent() {
                 resume_token: Vec::new(),
                 min_protocol_version: 1000,
                 max_protocol_version: 1001,
-                auth_credential: None,
+                auth_credential: Some(tze_hud_protocol::auth::psk_credential(
+                    "production-boot-test".to_string(),
+                )),
             },
         )),
     })

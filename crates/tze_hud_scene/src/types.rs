@@ -1525,8 +1525,8 @@ pub struct Lease {
 /// Canonical names per configuration/spec.md §Requirement: Capability Vocabulary.
 /// RFC 0001 §3.1, §3.3 defines the canonical capability names.
 ///
-/// The `String`-bearing variants (`PublishZone`, `EmitSceneEvent`) carry their
-/// parameterized argument (zone name or event name).
+/// The `String`-bearing variants (`PublishZone`, `PublishWidget`) carry their
+/// parameterized argument (zone or widget name).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Capability {
     // ── Canonical v1 capability vocabulary ────────────────────────────────────
@@ -1540,24 +1540,14 @@ pub enum Capability {
     UploadResource,
     /// `read_scene_topology` — agent may read the scene graph topology.
     ReadSceneTopology,
-    /// `subscribe_scene_events` — agent may subscribe to scene events.
-    SubscribeSceneEvents,
-    /// `overlay_privileges` — agent may use overlay/chrome privileges.
-    OverlayPrivileges,
     /// `access_input_events` — agent may receive input events.
     AccessInputEvents,
-    /// `high_priority_z_order` — agent may request high z-order tiles.
-    HighPriorityZOrder,
-    /// `exceed_default_budgets` — agent may exceed default resource budgets.
-    ExceedDefaultBudgets,
     /// `read_telemetry` — agent may read telemetry data.
     ReadTelemetry,
     /// `publish_zone:<zone_name>` or `publish_zone:*` — agent may publish to a zone.
     PublishZone(String),
     /// `publish_widget:<widget_name>` — agent may publish parameter values to a widget.
     PublishWidget(String),
-    /// `emit_scene_event:<event_name>` — agent may emit a named scene event.
-    EmitSceneEvent(String),
     /// `resident_mcp` — agent is a resident MCP agent.
     ResidentMcp,
     /// `lease:priority:1` — agent may request lease priority 1 (high).

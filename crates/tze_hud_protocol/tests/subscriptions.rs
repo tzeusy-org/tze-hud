@@ -64,24 +64,6 @@ fn input_and_focus_events_require_access_input_events() {
     assert!(granted.denied.is_empty());
 }
 
-/// ZONE_EVENTS requires any publish_zone:<zone> capability.
-#[test]
-fn zone_events_requires_any_publish_zone_capability() {
-    // Without any publish_zone capability: denied
-    let denied = filter_subscriptions(&[category::ZONE_EVENTS.to_string()], &[]);
-    assert!(denied.denied.contains(&category::ZONE_EVENTS.to_string()));
-
-    // With publish_zone:subtitle: granted
-    let caps = vec!["publish_zone:subtitle".to_string()];
-    let granted = filter_subscriptions(&[category::ZONE_EVENTS.to_string()], &caps);
-    assert!(granted.active.contains(&category::ZONE_EVENTS.to_string()));
-
-    // With publish_zone:notification (different zone): also granted
-    let caps2 = vec!["publish_zone:notification".to_string()];
-    let granted2 = filter_subscriptions(&[category::ZONE_EVENTS.to_string()], &caps2);
-    assert!(granted2.active.contains(&category::ZONE_EVENTS.to_string()));
-}
-
 /// TELEMETRY_FRAMES → read_telemetry.
 #[test]
 fn telemetry_frames_requires_read_telemetry() {
@@ -99,17 +81,6 @@ fn telemetry_frames_requires_read_telemetry() {
             .active
             .contains(&category::TELEMETRY_FRAMES.to_string())
     );
-}
-
-/// AGENT_EVENTS → subscribe_scene_events.
-#[test]
-fn agent_events_requires_subscribe_scene_events() {
-    let denied = filter_subscriptions(&[category::AGENT_EVENTS.to_string()], &[]);
-    assert!(denied.denied.contains(&category::AGENT_EVENTS.to_string()));
-
-    let caps = vec!["subscribe_scene_events".to_string()];
-    let granted = filter_subscriptions(&[category::AGENT_EVENTS.to_string()], &caps);
-    assert!(granted.active.contains(&category::AGENT_EVENTS.to_string()));
 }
 
 /// DEGRADATION_NOTICES is always active — mandatory subscription.

@@ -89,14 +89,14 @@ async fn perform_handshake_with_input(
         timestamp_wall_us: now_wall_us(),
         payload: Some(ClientPayload::SessionInit(SessionInit {
             agent_id: agent_id.to_string(),
-            agent_display_name: format!("{agent_id} (scroll test)"),
-            pre_shared_key: "test-psk".to_string(),
             requested_capabilities: vec!["access_input_events".to_string()],
             initial_subscriptions: vec!["INPUT_EVENTS".to_string()],
             resume_token: Vec::new(),
             min_protocol_version: 1000,
             max_protocol_version: 1001,
-            auth_credential: None,
+            auth_credential: Some(tze_hud_protocol::auth::psk_credential(
+                "test-psk".to_string(),
+            )),
         })),
     })
     .await
@@ -128,15 +128,15 @@ async fn perform_handshake_no_input(
         timestamp_wall_us: now_wall_us(),
         payload: Some(ClientPayload::SessionInit(SessionInit {
             agent_id: agent_id.to_string(),
-            agent_display_name: format!("{agent_id} (no-input scroll test)"),
-            pre_shared_key: "test-psk".to_string(),
             // No capabilities → no input events.
             requested_capabilities: vec![],
             initial_subscriptions: vec![],
             resume_token: Vec::new(),
             min_protocol_version: 1000,
             max_protocol_version: 1001,
-            auth_credential: None,
+            auth_credential: Some(tze_hud_protocol::auth::psk_credential(
+                "test-psk".to_string(),
+            )),
         })),
     })
     .await

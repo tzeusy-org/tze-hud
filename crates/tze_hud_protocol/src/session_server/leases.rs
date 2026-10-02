@@ -280,24 +280,6 @@ pub(super) async fn handle_lease_request(
         }))
         .await;
 
-    // Send LeaseStateChange notification (REQUESTED→ACTIVE).
-    // LeaseStateChange is transactional and delivered unconditionally —
-    // LEASE_CHANGES subscriptions are always active (spec §Subscription Management,
-    // lines 459-461).
-    let change_seq = session.next_server_seq();
-    let _ = tx
-        .send(Ok(ServerMessage {
-            sequence: change_seq,
-            timestamp_wall_us: now_wall_us(),
-            payload: Some(ServerPayload::LeaseStateChange(LeaseStateChange {
-                lease_id: lease_id_bytes,
-                previous_state: "REQUESTED".to_string(),
-                new_state: "ACTIVE".to_string(),
-                reason: format!("Lease granted with TTL {ttl}ms and priority {granted_priority}"),
-                timestamp_wall_us: now_wall_us(),
-            })),
-        }))
-        .await;
     true
 }
 
@@ -440,23 +422,6 @@ pub(super) async fn handle_lease_renew(
                 }))
                 .await;
 
-            // Also send LeaseStateChange notification: ACTIVE→ACTIVE (renewal).
-            // LeaseStateChange is transactional and always delivered (LEASE_CHANGES
-            // subscription is unconditional per spec §Subscription Management).
-            let change_seq = session.next_server_seq();
-            let _ = tx
-                .send(Ok(ServerMessage {
-                    sequence: change_seq,
-                    timestamp_wall_us: now_wall_us(),
-                    payload: Some(ServerPayload::LeaseStateChange(LeaseStateChange {
-                        lease_id: lease_id_bytes,
-                        previous_state: "ACTIVE".to_string(),
-                        new_state: "ACTIVE".to_string(),
-                        reason: format!("Renewed with TTL {ttl}ms"),
-                        timestamp_wall_us: now_wall_us(),
-                    })),
-                }))
-                .await;
             true
         }
         Err(e) => {
@@ -506,8 +471,7 @@ pub(super) async fn handle_lease_release(
     // Retransmit dedup (RFC 0005 §5.3).
     // Replay the cached LeaseResponse for both success and denial paths so the
     // client always receives a LeaseResponse on retransmit (consistent with the
-    // original send).  Emitting a new LeaseStateChange on retransmit would
-    // produce duplicate state-change notifications.
+    // original send).
     if client_sequence > 0 {
         if let Some(cached) = session
             .lease_correlation_cache
@@ -590,9 +554,7 @@ pub(super) async fn handle_lease_release(
             // Remove from session's tracked leases
             session.lease_ids.retain(|&id| id != lease_id);
 
-            // Spec: every lease operation SHALL be answered with LeaseResponse.
-            // Send LeaseResponse(granted=true) first (transactional), then
-            // LeaseStateChange(ACTIVE→RELEASED) (also transactional).
+            // Every lease operation is answered with exactly one LeaseResponse.
             let release_response = LeaseResponse {
                 granted: true,
                 lease_id: lease_id_bytes.clone(),
@@ -623,22 +585,6 @@ pub(super) async fn handle_lease_release(
                 }))
                 .await;
 
-            // LeaseStateChange notification: ACTIVE→RELEASED.
-            // Transactional and always delivered (LEASE_CHANGES is unconditional).
-            let change_seq = session.next_server_seq();
-            let _ = tx
-                .send(Ok(ServerMessage {
-                    sequence: change_seq,
-                    timestamp_wall_us: now_wall_us(),
-                    payload: Some(ServerPayload::LeaseStateChange(LeaseStateChange {
-                        lease_id: lease_id_bytes,
-                        previous_state: "ACTIVE".to_string(),
-                        new_state: "RELEASED".to_string(),
-                        reason: "Agent released lease".to_string(),
-                        timestamp_wall_us: now_wall_us(),
-                    })),
-                }))
-                .await;
             true
         }
         Err(e) => {

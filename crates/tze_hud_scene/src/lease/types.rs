@@ -86,8 +86,7 @@ pub struct LeaseIdentity {
 /// An auditable event emitted on every lease state transition.
 ///
 /// Spec requirement: "Each transition produces an auditable event."
-/// These events are emitted on the `lease_changes` subscription category
-/// via `LeaseStateChange` messages.
+/// The wire conveys lease state through `LeaseResponse`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct LeaseAuditEvent {
     /// The lease this event applies to.

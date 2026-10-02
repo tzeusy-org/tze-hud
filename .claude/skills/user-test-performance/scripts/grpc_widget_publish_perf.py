@@ -203,7 +203,6 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         await client.send(
             session_init=session_pb2.SessionInit(
                 agent_id=args.agent_id,
-                agent_display_name=args.agent_id,
                 auth_credential=session_pb2.AuthCredential(
                     pre_shared_key=session_pb2.PreSharedKeyCredential(key=psk),
                 ),
@@ -244,7 +243,6 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                         types_pb2.WidgetParameterValueProto(param_name="label", string_value=label),
                     ],
                     transition_ms=int(args.transition_ms),
-                    ttl_us=int(args.ttl_us),
                     merge_key=args.merge_key,
                 )
             )
@@ -311,7 +309,6 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
             "widget_name": args.widget_name,
             "count": args.count,
             "duration_ms_requested": args.duration_ms,
-            "ttl_us": int(args.ttl_us),
             "transition_ms": int(args.transition_ms),
             "start_value": args.start_value,
             "end_value": args.end_value,
@@ -421,7 +418,6 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                 "bytes_out_per_success": round(bytes_out_per_success, 2) if bytes_out_per_success is not None else "",
                 "bytes_in_per_success": round(bytes_in_per_success, 2) if bytes_in_per_success is not None else "",
                 "transition_ms": args.transition_ms,
-                "ttl_us": args.ttl_us,
                 "start_value": args.start_value,
                 "end_value": args.end_value,
                 "merge_key": args.merge_key,
@@ -462,7 +458,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--count", type=int, default=100, help="Publish count")
     parser.add_argument("--duration-ms", type=int, default=0, help="Target total send duration")
     parser.add_argument("--transition-ms", type=int, default=0, help="Widget transition duration")
-    parser.add_argument("--ttl-us", type=int, default=60_000_000, help="Widget publish TTL")
     parser.add_argument("--merge-key", default="", help="Merge key for merge-by-key contention")
 
     parser.add_argument("--start-value", type=float, default=0.01, help="Start value for progress")

@@ -498,14 +498,12 @@ impl ResidentGrpcPortalBridge {
             timestamp_wall_us: now_wall_us(),
             payload: Some(ClientPayload::SessionInit(SessionInit {
                 agent_id: config.agent_id.clone(),
-                agent_display_name: format!("{} (resident gRPC portal)", config.agent_id),
-                pre_shared_key: config.psk.clone(),
                 requested_capabilities,
                 initial_subscriptions,
                 resume_token: vec![],
                 min_protocol_version: 1000,
                 max_protocol_version: 1001,
-                auth_credential: None,
+                auth_credential: Some(tze_hud_protocol::auth::psk_credential(config.psk.clone())),
             })),
         };
         tx.send(init)
@@ -889,7 +887,7 @@ impl ResidentGrpcPortalBridge {
                     self.forward_event_batch(&batch);
                     continue;
                 }
-                // LeaseStateChange / SceneSnapshot may interleave; keep reading.
+                // SceneSnapshot and other pushes may interleave; keep reading.
                 _ => continue,
             }
         }

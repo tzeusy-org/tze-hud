@@ -19,7 +19,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tonic::Status;
-use tze_hud_scene::events::emission::AgentEventRateLimiter;
 use tze_hud_scene::types::ResourceBudget;
 
 use super::freeze_queue::{FREEZE_QUEUE_CAPACITY, SessionFreezeQueue};
@@ -91,12 +90,7 @@ pub(super) async fn handle_session_init(
     // ── Step 2: Authentication (RFC 0005 §1.4) ───────────────────────────────
     // Authentication is evaluated synchronously before SessionEstablished is sent.
     // peer_ip is passed for LocalSocketCredential loopback gating (hud-1aswu.1).
-    let auth_result = authenticate_session_init(
-        init.auth_credential.as_ref(),
-        &init.pre_shared_key,
-        psk,
-        peer_ip,
-    );
+    let auth_result = authenticate_session_init(init.auth_credential.as_ref(), "", psk, peer_ip);
 
     match auth_result {
         AuthResult::Accepted => {}
@@ -263,8 +257,6 @@ pub(super) async fn handle_session_init(
         state: SessionState::Handshaking,
         last_client_sequence: 1, // SessionInit is sequence 1; start validation from next
         safe_mode_active: false,
-        expect_resume: false,
-        agent_event_rate_limiter: AgentEventRateLimiter::new(),
         freeze_queue: SessionFreezeQueue::new(FREEZE_QUEUE_CAPACITY),
         session_open_at_wall_us: session_open_at,
         dedup_window: DedupWindow::new(1000, 60),
@@ -494,8 +486,6 @@ pub(super) async fn handle_session_resume(
         state: SessionState::Resuming,
         last_client_sequence: 1, // SessionResume is sequence 1; start validation from next
         safe_mode_active: false,
-        expect_resume: false,
-        agent_event_rate_limiter: AgentEventRateLimiter::new(),
         freeze_queue: SessionFreezeQueue::new(FREEZE_QUEUE_CAPACITY),
         session_open_at_wall_us: session_open_at,
         dedup_window: DedupWindow::new(1000, 60),
@@ -524,7 +514,6 @@ pub(super) async fn handle_session_resume(
                 granted_capabilities: prior_entry.capabilities,
                 active_subscriptions: prior_entry.subscriptions,
                 denied_subscriptions: Vec::new(),
-                error: String::new(),
             })),
         }))
         .await;

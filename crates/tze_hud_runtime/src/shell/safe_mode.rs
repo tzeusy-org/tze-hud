@@ -701,7 +701,6 @@ mod tests {
     fn make_shared_state() -> Arc<Mutex<SharedState>> {
         use std::sync::Arc;
         use std::sync::atomic::AtomicBool;
-        use tze_hud_protocol::session::RuntimeDegradationLevel;
         Arc::new(Mutex::new(SharedState {
             scene: Arc::new(Mutex::new(SceneGraph::new(1920.0, 1080.0))),
             sessions: SessionRegistry::new("test-key"),
@@ -716,7 +715,6 @@ mod tests {
             active_tab_mirror: Arc::new(std::sync::Mutex::new(None)),
             freeze_active: false,
             token_store: TokenStore::new(),
-            degradation_level: RuntimeDegradationLevel::Normal,
             input_capture_tx: None,
             input_capture_wake: tze_hud_scene::render_wake::RenderWakeNotifier::default(),
             resolved_portal_tokens: std::collections::HashMap::new(),

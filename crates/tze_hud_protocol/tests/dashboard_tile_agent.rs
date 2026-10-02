@@ -93,14 +93,14 @@ async fn perform_handshake(
         timestamp_wall_us: now_wall_us(),
         payload: Some(ClientPayload::SessionInit(SessionInit {
             agent_id: agent_id.to_string(),
-            agent_display_name: format!("{agent_id} (exemplar)"),
-            pre_shared_key: "test-psk".to_string(),
             requested_capabilities: capabilities,
             initial_subscriptions: vec![],
             resume_token: vec![],
             min_protocol_version: 1000,
             max_protocol_version: 1001,
-            auth_credential: None,
+            auth_credential: Some(tze_hud_protocol::auth::psk_credential(
+                "test-psk".to_string(),
+            )),
         })),
     })
     .await
@@ -131,19 +131,11 @@ async fn perform_handshake(
     (tx, established, stream)
 }
 
-/// Drain any interleaved `LeaseStateChange` messages and return the first
-/// non-state-change response. Matches the helper pattern used in session_server.rs
-/// tests to avoid order-dependent assertions.
-async fn next_non_state_change(
+/// Return the next server message.
+async fn next_server_msg(
     stream: &mut tonic::Streaming<tze_hud_protocol::proto::session::ServerMessage>,
 ) -> tze_hud_protocol::proto::session::ServerMessage {
-    loop {
-        let msg = stream.next().await.unwrap().unwrap();
-        if let Some(ServerPayload::LeaseStateChange(_)) = &msg.payload {
-            continue;
-        }
-        return msg;
-    }
+    stream.next().await.unwrap().unwrap()
 }
 
 // ─── Scenario 1: Session establishment ────────────────────────────────────────
@@ -256,8 +248,7 @@ async fn exemplar_lease_grant_returns_granted_true_and_uuidv7_lease_id() {
     .await
     .unwrap();
 
-    // Drain LeaseStateChange (REQUESTED→ACTIVE) that may precede LeaseResponse.
-    let resp_msg = next_non_state_change(&mut stream).await;
+    let resp_msg = next_server_msg(&mut stream).await;
 
     let lease_id_bytes = match resp_msg.payload {
         Some(ServerPayload::LeaseResponse(resp)) => {
@@ -343,10 +334,7 @@ async fn exemplar_lease_request_with_invalid_capability_is_denied() {
     .await
     .unwrap();
 
-    // Drain any interleaved state-change messages before asserting the denial.
-    // A denial does not normally produce a LeaseStateChange, but draining
-    // defensively here is consistent with the rest of the test suite.
-    let resp_msg = next_non_state_change(&mut stream).await;
+    let resp_msg = next_server_msg(&mut stream).await;
 
     match resp_msg.payload {
         Some(ServerPayload::LeaseResponse(resp)) => {
@@ -415,7 +403,7 @@ async fn exemplar_mutation_without_active_lease_is_rejected() {
 
     // Drain any interleaved lease state changes (none expected here since no lease
     // was acquired, but drain defensively for robustness).
-    let result_msg = next_non_state_change(&mut stream).await;
+    let result_msg = next_server_msg(&mut stream).await;
 
     match result_msg.payload {
         Some(ServerPayload::MutationResult(result)) => {

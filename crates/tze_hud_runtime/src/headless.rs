@@ -386,7 +386,6 @@ impl HeadlessRuntime {
             active_tab_mirror: Arc::new(std::sync::Mutex::new(None)),
             token_store: tze_hud_protocol::token::TokenStore::new(),
             freeze_active: false,
-            degradation_level: tze_hud_protocol::session::RuntimeDegradationLevel::Normal,
             input_capture_tx: None,
             input_capture_wake: tze_hud_scene::render_wake::RenderWakeNotifier::default(),
             resolved_portal_tokens: std::collections::HashMap::new(),
@@ -666,8 +665,6 @@ impl HeadlessRuntime {
                 recovery_source = ?event.recovery_source,
                 "runtime degradation transition"
             );
-            let (runtime_level, _) = self.degradation_controller.protocol_level();
-            self.state.lock().await.degradation_level = runtime_level;
             let notice = self.degradation_controller.protocol_notice(
                 SystemTime::now()
                     .duration_since(UNIX_EPOCH)

@@ -39,17 +39,10 @@ message ElementRepositionedEvent {
   GeometryPolicyProto previous_geometry = 3;
 }
 
-// NOTE: Deprecated legacy wire messages (InputEvent, InputEventKind,
-// TileCreatedEvent, TileDeletedEvent, TileUpdatedEvent, LeaseEvent,
-// LeaseEventKind, SceneEvent) have been moved to events_legacy.proto.
-// Do not import or use those types in new code.
-
-// ─── Input Event Types (RFC 0004) ─────────────────────────────────────────────
+// ─── Input Event Types ────────────────────────────────────────────────────────
 //
-// The RFC 0004 input event messages below encode tile_id and node_id as raw 16-byte
-// UUIDv7 (bytes). This is the authoritative wire format. The older legacy messages
-// in events_legacy.proto used string IDs; those are deprecated.
-// The bytes encoding matches RFC 0006 §9.1 and the SceneId convention in types.proto.
+// The input event messages below encode tile_id and node_id as raw 16-byte
+// UUIDv7 (bytes), matching the SceneId convention in types.proto.
 //
 // All hardware timestamps use the _mono_us suffix (monotonic domain per RFC 0005 §2.4).
 
@@ -436,7 +429,7 @@ message EventBatch {
 // true present latency (distinct from the transport-RTT proxy).
 //
 // Delivered on ServerMessage field 52 to agents subscribed to TELEMETRY_FRAMES
-// (requires the read_telemetry capability — same gate as RuntimeTelemetryFrame).
+// (requires the read_telemetry capability).
 // Message class: State-stream (coalesced/droppable under backpressure; RFC 0005 §3.2).
 // A consumer measuring present latency samples these — it MUST NOT assume every
 // accepted batch yields exactly one FramePresented under sustained backpressure.

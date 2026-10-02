@@ -9,14 +9,12 @@
 use tze_hud_protocol::proto::EventBatch;
 use tze_hud_protocol::proto::session::server_message::Payload as ServerPayload;
 use tze_hud_protocol::proto::session::{
-    BackpressureSignal, CapabilityNotice, DegradationNotice, EmitSceneEventResult,
-    InputCaptureResponse, InputFocusResponse, LeaseResponse, LeaseStateChange, MutationResult,
-    RuntimeError, SceneDelta, SceneSnapshot, SessionError, SessionEstablished, SessionResumeResult,
-    SessionResumed, SessionSuspended, SubscriptionChangeResult, ZonePublishResult,
+    CapabilityNotice, DegradationNotice, InputCaptureResponse, InputFocusResponse, LeaseResponse,
+    MutationResult, RuntimeError, SceneSnapshot, SessionError, SessionEstablished,
+    SessionResumeResult, SessionResumed, SessionSuspended, SubscriptionChangeResult,
+    ZonePublishResult,
 };
-use tze_hud_protocol::session_server::{
-    SessionConfig, SessionState, TrafficClass, classify_server_payload,
-};
+use tze_hud_protocol::session_server::{SessionState, TrafficClass, classify_server_payload};
 use tze_hud_protocol::token::{DEFAULT_GRACE_PERIOD_MS, TokenStore};
 
 // ─── Legal Transitions ───────────────────────────────────────────────────────
@@ -183,51 +181,6 @@ fn all_states_have_labels() {
     }
 }
 
-// ─── Session Configuration Defaults ─────────────────────────────────────────
-
-/// Verify session config defaults match spec (spec §10).
-#[test]
-fn session_config_defaults_match_spec() {
-    let cfg = SessionConfig::default();
-    // spec: handshake_timeout = 5000ms
-    assert_eq!(
-        cfg.handshake_timeout_ms, 5000,
-        "handshake timeout must be 5000ms per session-protocol/spec.md lines 123-134"
-    );
-    // spec: heartbeat_interval = 5000ms
-    assert_eq!(
-        cfg.heartbeat_interval_ms, 5000,
-        "heartbeat interval must be 5000ms"
-    );
-    // spec: missed_threshold = 3 → orphan after 3×5000 = 15000ms
-    assert_eq!(
-        cfg.heartbeat_missed_threshold, 3,
-        "missed threshold must be 3"
-    );
-    // spec: reconnect grace period = 30000ms
-    assert_eq!(
-        cfg.reconnect_grace_period_ms, 30_000,
-        "grace period must be 30000ms"
-    );
-    // spec: max_sequence_gap = 100
-    assert_eq!(
-        cfg.max_sequence_gap, 100,
-        "max sequence gap must be 100 per spec lines 212-223"
-    );
-}
-
-/// Orphan timeout = heartbeat_interval_ms * heartbeat_missed_threshold = 15000ms.
-#[test]
-fn orphan_detection_timeout_is_three_times_interval() {
-    let cfg = SessionConfig::default();
-    let orphan_timeout_ms = cfg.heartbeat_interval_ms * cfg.heartbeat_missed_threshold;
-    assert_eq!(
-        orphan_timeout_ms, 15_000,
-        "orphan detection must be 3x heartbeat_interval = 15000ms \
-         (lease-governance/spec.md lines 132-155)"
-    );
-}
-
 // ─── Token Store (resume within / after grace period) ────────────────────────
 
 /// WHEN session token stored and queried within grace period THEN valid.
@@ -351,14 +304,11 @@ fn session_lifecycle_payloads_are_transactional() {
         ServerPayload::RuntimeError(RuntimeError::default()),
         ServerPayload::MutationResult(MutationResult::default()),
         ServerPayload::LeaseResponse(LeaseResponse::default()),
-        ServerPayload::LeaseStateChange(LeaseStateChange::default()),
         ServerPayload::CapabilityNotice(CapabilityNotice::default()),
         ServerPayload::SubscriptionChangeResult(SubscriptionChangeResult::default()),
         ServerPayload::ZonePublishResult(ZonePublishResult::default()),
         ServerPayload::InputFocusResponse(InputFocusResponse::default()),
         ServerPayload::InputCaptureResponse(InputCaptureResponse::default()),
-        ServerPayload::BackpressureSignal(BackpressureSignal::default()),
-        ServerPayload::EmitSceneEventResult(EmitSceneEventResult::default()),
         ServerPayload::DegradationNotice(DegradationNotice::default()),
     ];
     for payload in &transactional_payloads {
@@ -371,16 +321,12 @@ fn session_lifecycle_payloads_are_transactional() {
     }
 }
 
-/// WHEN scene state/event/telemetry payloads THEN classified as StateStream.
+/// WHEN scene state/event payloads THEN classified as StateStream.
 #[test]
 fn scene_state_payloads_are_state_stream() {
     let state_stream_payloads = vec![
         ServerPayload::SceneSnapshot(SceneSnapshot::default()),
-        ServerPayload::SceneDelta(SceneDelta::default()),
         ServerPayload::EventBatch(EventBatch::default()),
-        ServerPayload::RuntimeTelemetry(
-            tze_hud_protocol::proto::session::RuntimeTelemetryFrame::default(),
-        ),
     ];
     for payload in &state_stream_payloads {
         assert_eq!(

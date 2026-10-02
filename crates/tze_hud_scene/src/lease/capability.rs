@@ -190,7 +190,7 @@ impl std::error::Error for CapabilityRevocationError {}
 /// - If `cap` is not currently in the scope → `Err(CapabilityNotPresent)`.
 /// - Otherwise, removes the capability in-place and returns `Ok(capability_name_string)`.
 ///   The caller is responsible for emitting a [`LeaseEventKind::CapabilityRevoked`] audit
-///   event and notifying the agent via `LeaseStateChange`.
+///   event and notifying the agent via `CapabilityNotice`.
 ///
 /// # State preservation
 ///

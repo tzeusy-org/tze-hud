@@ -89,26 +89,6 @@ impl AgentSession {
         self.sequence += 1;
         self.sequence
     }
-
-    /// Skip LeaseStateChange server-push messages and return the next transactional reply.
-    async fn next_non_state_change(
-        &mut self,
-    ) -> Option<Result<session_proto::ServerMessage, tonic::Status>> {
-        loop {
-            let item = self.rx.next().await?;
-            match &item {
-                Ok(msg) => {
-                    if let Some(session_proto::server_message::Payload::LeaseStateChange(_)) =
-                        &msg.payload
-                    {
-                        continue;
-                    }
-                    return Some(item);
-                }
-                Err(_) => return Some(item),
-            }
-        }
-    }
 }
 
 /// Start a headless runtime on the given port with default zones.
@@ -157,14 +137,12 @@ async fn connect_agent_with_zone_publish_cap(
         payload: Some(session_proto::client_message::Payload::SessionInit(
             session_proto::SessionInit {
                 agent_id: agent_id.to_string(),
-                agent_display_name: format!("{agent_id} (subtitle-streaming-test)"),
-                pre_shared_key: TEST_PSK.to_string(),
                 requested_capabilities: vec![cap.clone()],
                 initial_subscriptions: vec!["SCENE_TOPOLOGY".to_string()],
                 resume_token: Vec::new(),
                 min_protocol_version: RUNTIME_MIN_VERSION,
                 max_protocol_version: RUNTIME_MAX_VERSION,
-                auth_credential: None,
+                auth_credential: Some(tze_hud_protocol::auth::psk_credential(TEST_PSK.to_string())),
             },
         )),
     })
@@ -209,11 +187,8 @@ async fn connect_agent_with_zone_publish_cap(
         sequence: 2,
     };
 
-    // Consume LeaseResponse (skipping any LeaseStateChange)
-    let msg = session
-        .next_non_state_change()
-        .await
-        .ok_or("no lease response")??;
+    // Consume LeaseResponse
+    let msg = session.rx.next().await.ok_or("no lease response")??;
     match &msg.payload {
         Some(session_proto::server_message::Payload::LeaseResponse(resp)) if resp.granted => {}
         other => {
@@ -257,10 +232,7 @@ async fn zone_publish_stream_text(
         })
         .await?;
 
-    let msg = session
-        .next_non_state_change()
-        .await
-        .ok_or("no ZonePublishResult")??;
+    let msg = session.rx.next().await.ok_or("no ZonePublishResult")??;
     match &msg.payload {
         Some(session_proto::server_message::Payload::ZonePublishResult(r)) if r.accepted => Ok(()),
         Some(session_proto::server_message::Payload::ZonePublishResult(r)) => Err(format!(

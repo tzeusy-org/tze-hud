@@ -30,7 +30,7 @@ Usage:
             agent_name="agent-alpha",
             avatar_resource_id=avatar_resource_id,
         )
-        await client.session_close(expect_resume=False)
+        await client.session_close()
 """
 
 from __future__ import annotations
@@ -621,7 +621,6 @@ class HudClient:
             timestamp_wall_us=_now_wall_us(),
             session_init=session_pb2.SessionInit(
                 agent_id=self.agent_id,
-                agent_display_name=self.agent_id,
                 auth_credential=session_pb2.AuthCredential(
                     pre_shared_key=session_pb2.PreSharedKeyCredential(key=self.psk),
                 ),
@@ -833,15 +832,12 @@ class HudClient:
         if self._channel:
             await self._channel.close()
 
-    async def session_close(self, reason: str = "test complete", expect_resume: bool = False):
+    async def session_close(self, reason: str = "test complete"):
         """Request a graceful session close, but leave the transport open."""
         if self._session_close_sent or self._transport_closed:
             return
         await self._send(
-            session_close=session_pb2.SessionClose(
-                reason=reason,
-                expect_resume=expect_resume,
-            )
+            session_close=session_pb2.SessionClose(reason=reason)
         )
         self._session_close_sent = True
 
@@ -853,11 +849,10 @@ class HudClient:
         self,
         graceful: bool = True,
         reason: str = "test complete",
-        expect_resume: bool = False,
     ):
         """Disconnect the session by graceful close or by dropping transport."""
         if graceful:
-            await self.session_close(reason=reason, expect_resume=expect_resume)
+            await self.session_close(reason=reason)
             await self._shutdown_transport()
         else:
             await self.drop_connection()
@@ -870,11 +865,11 @@ class HudClient:
         await self._wait_for("lease_response", timeout=5.0)
         print("  [grpc] Lease released", flush=True)
 
-    async def close(self, reason: str = "test complete", expect_resume: bool = False):
+    async def close(self, reason: str = "test complete"):
         """Gracefully close the session."""
         try:
             if not self._session_close_sent and not self._transport_closed:
-                await self.session_close(reason=reason, expect_resume=expect_resume)
+                await self.session_close(reason=reason)
         except Exception:
             pass
         await self._shutdown_transport()

@@ -854,7 +854,7 @@ async fn set_tile_text_via_grpc(
         .await?;
 
     let msg = session
-        .next_non_state_change()
+        .next_server_msg()
         .await
         .ok_or("no mutation result")??;
     match &msg.payload {
@@ -910,30 +910,9 @@ async fn test_three_agents_presence_card_coexistence() -> Result<(), Box<dyn std
     let caps = vec!["create_tiles".to_string(), "modify_own_tiles".to_string()];
 
     let (mut alpha, mut beta, mut gamma) = tokio::try_join!(
-        connect_agent(
-            TEST_PSK,
-            GRPC_PORT,
-            "agent-alpha",
-            "coexistence test",
-            2,
-            caps.clone()
-        ),
-        connect_agent(
-            TEST_PSK,
-            GRPC_PORT,
-            "agent-beta",
-            "coexistence test",
-            2,
-            caps.clone()
-        ),
-        connect_agent(
-            TEST_PSK,
-            GRPC_PORT,
-            "agent-gamma",
-            "coexistence test",
-            2,
-            caps.clone()
-        ),
+        connect_agent(TEST_PSK, GRPC_PORT, "agent-alpha", 2, caps.clone()),
+        connect_agent(TEST_PSK, GRPC_PORT, "agent-beta", 2, caps.clone()),
+        connect_agent(TEST_PSK, GRPC_PORT, "agent-gamma", 2, caps.clone()),
     )?;
 
     // Verify all three namespaces are distinct (AC 5.1: namespace isolation).

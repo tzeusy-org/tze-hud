@@ -21,10 +21,7 @@
 //! | FOCUS_EVENTS          | access_input_events             |
 //! | DEGRADATION_NOTICES   | (mandatory — no requirement)    |
 //! | LEASE_CHANGES         | (mandatory — no requirement)    |
-//! | ZONE_EVENTS           | publish_zone:<zone> (any)       |
 //! | TELEMETRY_FRAMES      | read_telemetry                  |
-//! | ATTENTION_EVENTS      | read_scene_topology             |
-//! | AGENT_EVENTS          | subscribe_scene_events          |
 //!
 //! # EventBatch variant filtering
 //!
@@ -58,16 +55,8 @@ pub mod category {
     pub const DEGRADATION_NOTICES: &str = "DEGRADATION_NOTICES";
     /// Lease state changes for this agent. Always active; not filterable.
     pub const LEASE_CHANGES: &str = "LEASE_CHANGES";
-    /// Zone publish events. Requires `publish_zone:<zone>` (any zone capability).
-    pub const ZONE_EVENTS: &str = "ZONE_EVENTS";
     /// Compositor performance telemetry. Requires `read_telemetry`.
     pub const TELEMETRY_FRAMES: &str = "TELEMETRY_FRAMES";
-    /// Attention/eye-gaze events (RFC 0010 §1.2, enum value 8).
-    /// Requires `read_scene_topology`.
-    pub const ATTENTION_EVENTS: &str = "ATTENTION_EVENTS";
-    /// Scene-level agent events (RFC 0010 §1.2, enum value 9).
-    /// Requires `subscribe_scene_events`.
-    pub const AGENT_EVENTS: &str = "AGENT_EVENTS";
 
     /// Mandatory subscriptions — always active, cannot be removed.
     pub const MANDATORY: &[&str] = &[DEGRADATION_NOTICES, LEASE_CHANGES];
@@ -78,9 +67,6 @@ pub mod category {
 ///
 /// `DEGRADATION_NOTICES` and `LEASE_CHANGES` return `None` because they are
 /// always active and cannot be filtered out.
-///
-/// For `ZONE_EVENTS` the check is whether the agent has **any** `publish_zone:`
-/// capability; the specific zone name is not validated here.
 fn required_capability(cat: &str) -> Option<&'static str> {
     match cat {
         category::SCENE_TOPOLOGY => Some("read_scene_topology"),
@@ -88,10 +74,7 @@ fn required_capability(cat: &str) -> Option<&'static str> {
         category::FOCUS_EVENTS => Some("access_input_events"),
         category::DEGRADATION_NOTICES => None, // mandatory
         category::LEASE_CHANGES => None,       // mandatory
-        category::ZONE_EVENTS => Some("publish_zone:"), // prefix match below
         category::TELEMETRY_FRAMES => Some("read_telemetry"),
-        category::ATTENTION_EVENTS => Some("read_scene_topology"),
-        category::AGENT_EVENTS => Some("subscribe_scene_events"),
         _ => Some("__unknown__"), // Unknown category: always denied
     }
 }
@@ -106,9 +89,6 @@ pub fn is_mandatory(category: &str) -> bool {
 
 /// Returns `true` if the agent has the capability required for `category`.
 ///
-/// ZONE_EVENTS uses prefix matching: any capability that starts with
-/// `publish_zone:` satisfies the requirement.
-///
 /// Unknown categories are unconditionally denied regardless of the agent's
 /// capabilities, preventing a malicious agent from activating unknown
 /// subscription categories by requesting a synthetic `"__unknown__"` capability.
@@ -116,7 +96,6 @@ fn has_required_capability(category: &str, capabilities: &[String]) -> bool {
     match required_capability(category) {
         None => true,                 // mandatory — no capability check
         Some("__unknown__") => false, // unknown category — unconditionally denied
-        Some("publish_zone:") => capabilities.iter().any(|c| c.starts_with("publish_zone:")),
         Some(req) => capabilities.iter().any(|c| c == req),
     }
 }
@@ -419,21 +398,6 @@ mod tests {
         let result = filter_subscriptions(&["TELEMETRY_FRAMES".to_string()], &[]);
         assert!(!result.active.contains(&"TELEMETRY_FRAMES".to_string()));
         assert!(result.denied.contains(&"TELEMETRY_FRAMES".to_string()));
-    }
-
-    #[test]
-    fn test_zone_events_granted_with_publish_zone_capability() {
-        let caps = vec!["publish_zone:subtitle".to_string()];
-        let result = filter_subscriptions(&["ZONE_EVENTS".to_string()], &caps);
-        assert!(result.active.contains(&"ZONE_EVENTS".to_string()));
-        assert!(result.denied.is_empty());
-    }
-
-    #[test]
-    fn test_zone_events_denied_without_publish_zone_capability() {
-        let result = filter_subscriptions(&["ZONE_EVENTS".to_string()], &[]);
-        assert!(!result.active.contains(&"ZONE_EVENTS".to_string()));
-        assert!(result.denied.contains(&"ZONE_EVENTS".to_string()));
     }
 
     #[test]

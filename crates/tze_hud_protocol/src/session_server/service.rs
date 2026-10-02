@@ -12,7 +12,6 @@
 use super::SharedMutationBudgetEnforcer;
 use super::stream_session::CapabilityRevocationEvent;
 use crate::convert;
-use crate::proto::session::DegradationNotice;
 use crate::session::SharedState;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -69,14 +68,14 @@ pub struct HudSessionImpl {
     ///
     /// The compositor publishes each `SceneGraph::expire_leases()` result here
     /// after releasing the scene lock. The handler that owns the lease emits
-    /// the wire `LeaseResponse` and `LeaseStateChange` transactionally.
+    /// the wire `LeaseResponse` transactionally.
     pub lease_expirations: super::LeaseExpirySender,
     /// Broadcast sender for live capability revocation commands (RFC 0001 §3.3, GAP-G3-4).
     ///
     /// When the runtime calls `revoke_capability_on_lease`, it broadcasts a
     /// `CapabilityRevocationEvent` here. Each active session handler subscribes
     /// and processes revocations for leases it owns, applying the scene-graph
-    /// mutation and delivering the `CapabilityNotice` + `LeaseStateChange` responses.
+    /// mutation and delivering the `CapabilityNotice`.
     pub capability_revocation_tx: tokio::sync::broadcast::Sender<CapabilityRevocationEvent>,
 
     /// Traffic-class-aware sender for runtime-injected input event batches (hud-i6yd.6).
@@ -146,7 +145,6 @@ impl HudSessionImpl {
                 active_tab_mirror: Arc::new(std::sync::Mutex::new(None)),
                 token_store: crate::token::TokenStore::new(),
                 freeze_active: false,
-                degradation_level: crate::session::RuntimeDegradationLevel::Normal,
                 input_capture_tx: None,
                 input_capture_wake: tze_hud_scene::render_wake::RenderWakeNotifier::default(),
                 resolved_portal_tokens: std::collections::HashMap::new(),
@@ -279,46 +277,13 @@ impl HudSessionImpl {
         self
     }
 
-    /// Broadcast a `DegradationNotice` to all currently-active sessions.
-    ///
-    /// Updates `SharedState::degradation_level` so that newly-joining sessions
-    /// can observe the current level. Then sends the notice on the broadcast
-    /// channel so every active session handler delivers it transactionally.
-    ///
-    /// Returns the number of active sessions that received the notice (0 if
-    /// no sessions are connected).
-    pub async fn broadcast_degradation(
-        &self,
-        level: crate::session::RuntimeDegradationLevel,
-        reason: &str,
-        affected_capabilities: Vec<String>,
-    ) -> usize {
-        // Update shared state.
-        {
-            let mut st = self.state.lock().await;
-            st.degradation_level = level;
-        }
-
-        let notice = DegradationNotice {
-            level: level.to_proto_i32(),
-            reason: reason.to_string(),
-            affected_capabilities,
-            timestamp_wall_us: super::now_wall_us(),
-        };
-
-        // Broadcast returns an error only when there are no active subscribers
-        // (no sessions connected). That is not an error condition.
-        self.degradation_notices.publish(notice).await
-    }
-
-    /// Revoke a named capability from an active lease at runtime (RFC 0001 §3.3, GAP-G3-4).
+    /// Revoke a named capability from an active lease at runtime.
     ///
     /// This is the end-to-end API for live capability revocation. It:
     /// 1. Broadcasts a [`CapabilityRevocationEvent`] to all active session handlers.
     /// 2. The session handler that owns `lease_id` receives the event, calls
     ///    [`tze_hud_scene::graph::SceneGraph::revoke_capability`] to narrow the live scope,
-    ///    then delivers `CapabilityNotice(revoked=[capability_name])` and a `LeaseStateChange`
-    ///    audit event to the affected agent.
+    ///    then delivers `CapabilityNotice(revoked=[capability_name])` to the affected agent.
     ///
     /// After revocation, any attempt to use `capability_name` under `lease_id` will be
     /// rejected by the existing capability-check path in the mutation pipeline.

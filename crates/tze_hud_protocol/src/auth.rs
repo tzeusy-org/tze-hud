@@ -25,6 +25,7 @@
 use std::net::IpAddr;
 
 use subtle::ConstantTimeEq;
+use tze_hud_scene::config::{CANONICAL_CAPABILITIES, is_canonical_capability};
 
 use crate::proto::session::{AuthCredential, auth_credential::Credential};
 
@@ -40,27 +41,6 @@ use crate::proto::session::{AuthCredential, auth_credential::Credential};
 // This is NOT a cryptographic HMAC; for v1 PSK the surface is local gRPC only.
 fn ct_eq_str(a: &str, b: &str) -> bool {
     a.as_bytes().ct_eq(b.as_bytes()).into()
-}
-
-// ─── Subscription capability requirements ────────────────────────────────────
-
-/// Returns the capability required to subscribe to the given subscription
-/// category (RFC 0005 §7.1). Returns `None` for categories that are always
-/// allowed regardless of capabilities (DEGRADATION_NOTICES, LEASE_CHANGES).
-pub fn required_capability_for_subscription(category: &str) -> Option<&'static str> {
-    match category {
-        "SCENE_TOPOLOGY" => Some("read_scene_topology"),
-        "INPUT_EVENTS" => Some("access_input_events"),
-        "FOCUS_EVENTS" => Some("access_input_events"),
-        "ZONE_EVENTS" => Some("publish_zone"), // publish_zone:<zone> in full spec
-        "TELEMETRY_FRAMES" => Some("read_telemetry"),
-        "ATTENTION_EVENTS" => Some("read_scene_topology"),
-        "AGENT_EVENTS" => Some("subscribe_scene_events"),
-        // Always subscribed; capability not required:
-        "DEGRADATION_NOTICES" => None,
-        "LEASE_CHANGES" => None,
-        _ => None, // Unknown categories: allow by default (forward compat)
-    }
 }
 
 // ─── Credential evaluation ────────────────────────────────────────────────────
@@ -139,11 +119,19 @@ pub fn evaluate_auth_credential(
     }
 }
 
-/// Authenticate from a `SessionInit` message.
+/// Build a pre-shared-key `AuthCredential` for `SessionInit`.
+pub fn psk_credential(key: impl Into<String>) -> AuthCredential {
+    AuthCredential {
+        credential: Some(Credential::PreSharedKey(
+            crate::proto::session::PreSharedKeyCredential { key: key.into() },
+        )),
+    }
+}
+
+/// Authenticate a session from its structured `auth_credential`.
 ///
-/// Checks the structured `auth_credential` field first; falls back to the
-/// deprecated `pre_shared_key` string field for backward compatibility with
-/// agents built before the `AuthCredential` oneof was added.
+/// `legacy_psk` is the plain-string PSK still carried by `SessionResume`;
+/// `SessionInit` passes an empty string.
 ///
 /// `peer_addr` is forwarded to `evaluate_auth_credential` for
 /// `LocalSocketCredential` loopback gating (hud-1aswu.1).
@@ -335,39 +323,12 @@ pub struct UnknownCapabilityError {
     pub hint: String,
 }
 
-/// Static list of fixed (non-parameterized) canonical v1 capability names.
-///
-/// Source: configuration/spec.md Requirement: Capability Vocabulary (lines 149-164),
-/// RFC 0006 §6.3 (canonical authority), RFC 0005 Round 14 (wire-format amendments).
-pub const CANONICAL_FIXED_CAPS: &[&str] = &[
-    "create_tiles",
-    "modify_own_tiles",
-    "manage_tabs",
-    "upload_resource",
-    "register_widget_asset",
-    "read_scene_topology",
-    "subscribe_scene_events",
-    "overlay_privileges",
-    "access_input_events",
-    "high_priority_z_order",
-    "exceed_default_budgets",
-    "read_telemetry",
-    "resident_mcp",
-    "lease:priority:1",
-    // publish_zone:* is a parameterized form but * is a valid literal suffix.
-    "publish_zone:*",
-];
-
 /// Validate that every capability in `requested` is a canonical v1 name.
 ///
 /// Returns `Ok(())` if all names are canonical, or `Err(Vec<UnknownCapabilityError>)`
 /// listing each unrecognized name with a hint for the canonical replacement.
 ///
-/// Recognized forms:
-/// - Fixed names in `CANONICAL_FIXED_CAPS`
-/// - `publish_zone:<zone_name>` (non-empty zone name)
-/// - `publish_widget:<widget_name>` (non-empty widget name)
-/// - `emit_scene_event:<event_name>` (non-empty event name)
+/// The vocabulary is `tze_hud_scene::config::is_canonical_capability`.
 ///
 /// Rejected forms include: pre-Round-14 names (`read_scene`, `receive_input`,
 /// `zone_publish`), legacy names (`create_tile`, `update_tile`, `delete_tile`,
@@ -391,42 +352,6 @@ pub fn validate_canonical_capabilities(
     }
 }
 
-/// Returns `true` if `cap` is a canonical v1 capability name.
-fn is_canonical_capability(cap: &str) -> bool {
-    // Fixed names.
-    if CANONICAL_FIXED_CAPS.contains(&cap) {
-        return true;
-    }
-    // Parameterized: publish_zone:<non-empty>
-    if let Some(rest) = cap.strip_prefix("publish_zone:") {
-        return !rest.is_empty();
-    }
-    // Parameterized: publish_widget:<non-empty>
-    if let Some(rest) = cap.strip_prefix("publish_widget:") {
-        return !rest.is_empty();
-    }
-    // Parameterized: emit_scene_event:<non-empty>, but system. and scene. prefixes
-    // are reserved per configuration/spec.md §Capability Vocabulary — those names
-    // must be rejected with CONFIG_RESERVED_EVENT_PREFIX, not CONFIG_UNKNOWN_CAPABILITY.
-    // We reject them here (returning false) so the caller can report them as unknown;
-    // the session_server distinguishes the two error codes in its own validation step.
-    if let Some(rest) = cap.strip_prefix("emit_scene_event:") {
-        if rest.is_empty() {
-            return false;
-        }
-        // Reserved prefixes: system. and scene.
-        if rest.starts_with("system.") || rest.starts_with("scene.") {
-            return false;
-        }
-        return true;
-    }
-    // lease:priority:<N> (any non-empty ASCII digit string, including 0)
-    if let Some(rest) = cap.strip_prefix("lease:priority:") {
-        return !rest.is_empty() && rest.chars().all(|c| c.is_ascii_digit());
-    }
-    false
-}
-
 /// Return a hint string for a non-canonical capability name, pointing to
 /// the canonical replacement where known.
 ///
@@ -446,12 +371,6 @@ fn canonical_hint(cap: &str) -> String {
             r#"did you mean "publish_zone:{zone}"? (pre-Round-14 name superseded by RFC 0005 Round 14)"#
         );
     }
-    // Reserved emit_scene_event prefixes: system. and scene. are not allowed.
-    if let Some(rest) = cap.strip_prefix("emit_scene_event:") {
-        if rest.starts_with("system.") || rest.starts_with("scene.") {
-            return r#"emit_scene_event names with "system." or "scene." prefix are reserved; use a non-reserved event name (CONFIG_RESERVED_EVENT_PREFIX)"#.to_string();
-        }
-    }
     // Legacy single-object names (create_tile → create_tiles, etc.).
     if cap == "create_tile" {
         return r#"did you mean "create_tiles"? (legacy name; use plural canonical form)"#
@@ -464,44 +383,10 @@ fn canonical_hint(cap: &str) -> String {
         return r#"did you mean "modify_own_tiles"? (legacy node-level name; use canonical tile-level form)"#.to_string();
     }
     // Generic fallback.
-    "unknown capability; see configuration/spec.md §Capability Vocabulary for the canonical v1 list"
-        .to_string()
-}
-
-// ─── Subscription filtering ───────────────────────────────────────────────────
-
-/// Filter an agent's requested initial subscriptions against their granted capabilities.
-///
-/// Returns `(active, denied)` where:
-/// - `active` are subscriptions the agent is allowed to receive.
-/// - `denied` are subscriptions that require a capability the agent wasn't granted.
-pub fn filter_subscriptions(
-    requested: &[String],
-    granted_capabilities: &[String],
-) -> (Vec<String>, Vec<String>) {
-    let mut active = Vec::new();
-    let mut denied = Vec::new();
-
-    for sub in requested {
-        match required_capability_for_subscription(sub) {
-            None => {
-                // No capability required (or always subscribed) — allow.
-                active.push(sub.clone());
-            }
-            Some(required) => {
-                let has_cap = granted_capabilities
-                    .iter()
-                    .any(|c| c == "*" || c == required);
-                if has_cap {
-                    active.push(sub.clone());
-                } else {
-                    denied.push(sub.clone());
-                }
-            }
-        }
-    }
-
-    (active, denied)
+    format!(
+        "unknown capability; valid names: {}, publish_zone:<zone>, publish_widget:<widget>, lease:priority:<n>",
+        CANONICAL_CAPABILITIES.join(", ")
+    )
 }
 
 // ─── Tests ─────────────────────────────────────────────────────────────────────
@@ -750,7 +635,7 @@ mod tests {
 
     #[test]
     fn test_session_init_legacy_psk_fallback() {
-        // No structured credential → falls back to legacy pre_shared_key field
+        // No structured credential → falls back to the plain PSK (SessionResume.pre_shared_key)
         assert_eq!(
             authenticate_session_init(None, "correct", "correct", loopback_v4()),
             AuthResult::Accepted
@@ -813,7 +698,7 @@ mod tests {
         let policy = CapabilityPolicy::unrestricted();
         assert!(policy.permits("create_tiles"));
         assert!(policy.permits("read_telemetry"));
-        assert!(policy.permits("overlay_privileges"));
+        assert!(policy.permits("manage_tabs"));
     }
 
     #[test]
@@ -827,7 +712,7 @@ mod tests {
     fn test_policy_specific_allows_listed() {
         let policy = CapabilityPolicy::new(vec!["read_telemetry".to_string()]);
         assert!(policy.permits("read_telemetry"));
-        assert!(!policy.permits("overlay_privileges"));
+        assert!(!policy.permits("manage_tabs"));
     }
 
     #[test]
@@ -840,7 +725,7 @@ mod tests {
     #[test]
     fn test_capability_request_unauthorized_denied() {
         let policy = CapabilityPolicy::guest();
-        let result = policy.evaluate_capability_request(&["overlay_privileges".to_string()]);
+        let result = policy.evaluate_capability_request(&["manage_tabs".to_string()]);
         assert!(result.is_err());
     }
 
@@ -849,14 +734,14 @@ mod tests {
     #[test]
     fn test_capability_request_partial_grant_denied_entirely() {
         let policy = CapabilityPolicy::new(vec!["read_telemetry".to_string()]);
-        // read_telemetry authorized, overlay_privileges not — deny entire request
+        // read_telemetry authorized, manage_tabs not — deny entire request
         let result = policy.evaluate_capability_request(&[
             "read_telemetry".to_string(),
-            "overlay_privileges".to_string(),
+            "manage_tabs".to_string(),
         ]);
         match result {
             Err(denied) => {
-                assert!(denied.contains(&"overlay_privileges".to_string()));
+                assert!(denied.contains(&"manage_tabs".to_string()));
                 // read_telemetry should NOT appear in the denied list
                 // (the error lists only the unauthorized ones, not the whole request)
             }
@@ -872,78 +757,11 @@ mod tests {
         ]);
         let (granted, denied) = policy.partition_capabilities(&[
             "read_telemetry".to_string(),
-            "overlay_privileges".to_string(),
+            "manage_tabs".to_string(),
             "create_tiles".to_string(), // canonical: plural
         ]);
         assert_eq!(granted, vec!["read_telemetry", "create_tiles"]);
-        assert_eq!(denied, vec!["overlay_privileges"]);
-    }
-
-    // ── Subscription filtering tests ───────────────────────────────────────────
-
-    /// Scenario: Denied subscription for missing capability
-    /// (RFC 0005 §7.1 scenario)
-    #[test]
-    fn test_subscription_denied_without_capability() {
-        let (active, denied) = filter_subscriptions(
-            &["INPUT_EVENTS".to_string()],
-            &[/* no access_input_events */],
-        );
-        assert!(active.is_empty());
-        assert_eq!(denied, vec!["INPUT_EVENTS"]);
-    }
-
-    #[test]
-    fn test_subscription_allowed_with_capability() {
-        let (active, denied) = filter_subscriptions(
-            &["INPUT_EVENTS".to_string()],
-            &["access_input_events".to_string()],
-        );
-        assert_eq!(active, vec!["INPUT_EVENTS"]);
-        assert!(denied.is_empty());
-    }
-
-    #[test]
-    fn test_subscription_always_allowed() {
-        // DEGRADATION_NOTICES and LEASE_CHANGES need no capability
-        let (active, denied) = filter_subscriptions(
-            &[
-                "DEGRADATION_NOTICES".to_string(),
-                "LEASE_CHANGES".to_string(),
-            ],
-            &[/* no capabilities */],
-        );
-        assert_eq!(active.len(), 2);
-        assert!(denied.is_empty());
-    }
-
-    #[test]
-    fn test_subscription_unrestricted_allows_all() {
-        let (active, denied) = filter_subscriptions(
-            &[
-                "SCENE_TOPOLOGY".to_string(),
-                "INPUT_EVENTS".to_string(),
-                "TELEMETRY_FRAMES".to_string(),
-            ],
-            &["*".to_string()],
-        );
-        assert_eq!(active.len(), 3);
-        assert!(denied.is_empty());
-    }
-
-    #[test]
-    fn test_subscription_mixed_capabilities() {
-        let (active, denied) = filter_subscriptions(
-            &[
-                "SCENE_TOPOLOGY".to_string(),      // requires read_scene_topology
-                "INPUT_EVENTS".to_string(),        // requires access_input_events
-                "DEGRADATION_NOTICES".to_string(), // always allowed
-            ],
-            &["read_scene_topology".to_string()], // only has read_scene_topology
-        );
-        assert!(active.contains(&"SCENE_TOPOLOGY".to_string()));
-        assert!(active.contains(&"DEGRADATION_NOTICES".to_string()));
-        assert!(denied.contains(&"INPUT_EVENTS".to_string()));
+        assert_eq!(denied, vec!["manage_tabs"]);
     }
 
     // ── Canonical capability validation tests ──────────────────────────────────
@@ -959,16 +777,11 @@ mod tests {
             "upload_resource".to_string(),
             "register_widget_asset".to_string(),
             "read_scene_topology".to_string(),
-            "subscribe_scene_events".to_string(),
-            "overlay_privileges".to_string(),
             "access_input_events".to_string(),
-            "high_priority_z_order".to_string(),
-            "exceed_default_budgets".to_string(),
             "read_telemetry".to_string(),
             "resident_mcp".to_string(),
             "publish_zone:subtitle".to_string(),
             "publish_zone:*".to_string(),
-            "emit_scene_event:doorbell.ring".to_string(),
             "lease:priority:1".to_string(),
         ];
         assert!(validate_canonical_capabilities(&caps).is_ok());
@@ -1056,13 +869,6 @@ mod tests {
         assert!(validate_canonical_capabilities(&caps).is_err());
     }
 
-    /// emit_scene_event with non-empty name is valid.
-    #[test]
-    fn test_emit_scene_event_valid() {
-        let caps = vec!["emit_scene_event:my.event".to_string()];
-        assert!(validate_canonical_capabilities(&caps).is_ok());
-    }
-
     /// camelCase variant is rejected.
     #[test]
     fn test_camel_case_rejected() {
@@ -1075,39 +881,6 @@ mod tests {
     #[test]
     fn test_kebab_case_rejected() {
         let caps = vec!["create-tiles".to_string()];
-        assert!(validate_canonical_capabilities(&caps).is_err());
-    }
-
-    /// emit_scene_event with system. prefix is rejected (CONFIG_RESERVED_EVENT_PREFIX path).
-    /// (configuration/spec.md §Capability Vocabulary: "system." and "scene." prefixes are reserved)
-    #[test]
-    fn test_emit_scene_event_system_prefix_rejected() {
-        let caps = vec!["emit_scene_event:system.shutdown".to_string()];
-        let err = validate_canonical_capabilities(&caps).unwrap_err();
-        assert_eq!(err.len(), 1);
-        assert_eq!(err[0].unknown, "emit_scene_event:system.shutdown");
-        assert!(
-            err[0].hint.contains("reserved"),
-            "hint must mention reserved prefix"
-        );
-    }
-
-    /// emit_scene_event with scene. prefix is rejected (CONFIG_RESERVED_EVENT_PREFIX path).
-    #[test]
-    fn test_emit_scene_event_scene_prefix_rejected() {
-        let caps = vec!["emit_scene_event:scene.refresh".to_string()];
-        let err = validate_canonical_capabilities(&caps).unwrap_err();
-        assert_eq!(err[0].unknown, "emit_scene_event:scene.refresh");
-        assert!(
-            err[0].hint.contains("reserved"),
-            "hint must mention reserved prefix"
-        );
-    }
-
-    /// emit_scene_event with empty event name is rejected.
-    #[test]
-    fn test_emit_scene_event_empty_suffix_rejected() {
-        let caps = vec!["emit_scene_event:".to_string()];
         assert!(validate_canonical_capabilities(&caps).is_err());
     }
 }

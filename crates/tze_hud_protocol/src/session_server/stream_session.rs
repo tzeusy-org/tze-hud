@@ -10,7 +10,6 @@ use super::lifecycle::SessionState;
 use super::upload::UploadByteRateLimiter;
 use crate::dedup::DedupWindow;
 use crate::lease::LeaseCorrelationCache;
-use tze_hud_scene::events::emission::AgentEventRateLimiter;
 use tze_hud_scene::types::{ResourceBudget, SceneId};
 
 use super::budget_gate::SharedMutationBudgetEnforcer;
@@ -56,17 +55,6 @@ pub(super) struct StreamSession {
     /// Whether safe mode is active for this session (RFC 0005 §3.7).
     /// When true, MutationBatch messages are rejected with SAFE_MODE_ACTIVE.
     pub(super) safe_mode_active: bool,
-
-    /// Whether the agent indicated `expect_resume=true` in SessionClose (RFC 0005 §1.5).
-    /// When true, leases are held for the full reconnect grace period.
-    pub(super) expect_resume: bool,
-
-    /// Sliding-window rate limiter for agent scene event emission.
-    ///
-    /// Tracks per-session event timestamps for the 1-second sliding window.
-    /// Default limit: [`DEFAULT_MAX_EVENTS_PER_SECOND`] events/second
-    /// (spec: scene-events/spec.md §5.4).
-    pub(super) agent_event_rate_limiter: AgentEventRateLimiter,
 
     /// Per-session mutation queue for freeze semantics (system-shell/spec.md §Freeze Scene).
     ///
@@ -154,7 +142,7 @@ impl StreamSession {
 /// When the runtime calls [`super::HudSessionImpl::revoke_capability_on_lease`], it broadcasts
 /// this event. Each session handler checks whether any of its leases match `lease_id`
 /// and, if so, applies the revocation to the scene graph and notifies the agent via
-/// `CapabilityNotice(revoked=[capability_name])` and a `LeaseStateChange` audit event.
+/// `CapabilityNotice(revoked=[capability_name])`.
 ///
 /// RFC 0001 §3.3: capability checks are enforced at mutation time against the live scope,
 /// not merely at grant time.
