@@ -17,6 +17,8 @@ dashboard: an agent can say "show this for 8 seconds" in one call.
 - `tze_hud_compositor` `test_publication_ttl_ms_uses_expires_at_wall_us`
 - Gap: `present_at` has parse/resolution tests (`timing::hints`) but no
   end-to-end "held until due" test.
+- Gap: the gRPC path validates `TimingHints` and then drops them, and
+  `ZonePublish` ignores `ttl_us`/`present_at`/`expires_at` (T5 S0).
 
 ## 2. Three message classes, kept distinct
 
@@ -53,6 +55,9 @@ ends, the runtime reclaims everything with no agent help.
   `grace_period_expiry_removes_tile_and_nodes`
 - `tze_hud_runtime` `disconnect_then_reconnect_within_grace_resumes_same_surface_without_duplication`,
   `resumed_session_restores_usage_before_accepting_new_mutations`
+- Gap: a gRPC stream ending never calls `disconnect_lease`, so there is no
+  orphan badge or grace-expiry reclaim on that path; the tests above drive the
+  scene or the portal driver directly (T5 S0).
 
 ## 5. Leases hold time; safe mode pauses it
 

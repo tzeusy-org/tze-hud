@@ -28,7 +28,7 @@ remains. Each tranche must still build, pass tests, and boot the overlay.
 | T2 | Media and cloud relay: GStreamer/`v2_preview` features, media ingress/admission, video surface, media signaling protobuf messages (field numbers reserved), media config and capability, real-decode and v2-preview CI, Python media exemplars | done |
 | T3 | Governance: attention budget, quiet hours, privacy redaction and viewer classes, `[privacy]`/`[degradation]`/`[chrome]` config, admission controller, budget ladder (now plain hard caps), unwired lease state machine and suspension manager, degradation ladder down to one fallback (Normal ↔ Simplified). **Kept** the lease lifecycle (request, TTL, renew, release, revoke, disconnect grace). Capability-scope shrink moved to T5: it changes the session-init and lease wire contract | done |
 | T4 | Scaffolding: `tze_hud_validation`, replay/trace recording, v1-thesis/Layer-4 artifact harness and their CI jobs; component profiles (flat `[design_tokens]` stay; profile sections are ignored); sync groups and clock-skew estimation (`compositor_timestamp_wall_us` stays for `present_at`/`expires_at`; wire fields reserved); hardware calibration (tests use a fixed `test_budget` slack; the benchmark keeps its CI factors); test scenes for removed features; reserved mobile display profile; unwired tab-switch trigger; redundant tests | done |
-| T5 | API design pass: one coherent verb set per lifecycle stage (discover, claim, fill, interact, hold, release, reclaim) across MCP and gRPC; measure token cost per stage; collapse accreted constructors and per-feature parameter threading in the session server; replace the 16-entry capability vocabulary with a per-agent zone/widget allowlist; trim the wire `DegradationLevel` enum to Normal/Simplified | pending |
+| T5 | API design pass (target in [api.md](api.md)): one coherent verb set per lifecycle stage (discover, claim, fill, interact, hold, release, reclaim) across MCP and gRPC; measure token cost per stage; collapse accreted constructors and per-feature parameter threading in the session server; replace the 16-entry capability vocabulary with a per-agent zone/widget allowlist; trim the wire `DegradationLevel` enum to Normal/Simplified | pending |
 
 ## Working rules
 
@@ -36,5 +36,5 @@ remains. Each tranche must still build, pass tests, and boot the overlay.
 - Tests guard behavior a user would notice, not internal structure.
 - Removals and redesigns must keep every contract in `invariants.md`; changing
   one is a deliberate decision recorded there, with its tests.
-- `docs/` holds only this file, `vision.md`, `invariants.md`, `QUICKSTART.md`,
-  and `operations/` runbooks. Investigation notes go in PR descriptions.
+- `docs/` holds only this file, `vision.md`, `invariants.md`, `api.md`,
+  `QUICKSTART.md`, and `operations/` runbooks. Investigation notes go in PR descriptions.
