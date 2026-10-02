@@ -436,7 +436,7 @@ mod tests {
         // Spec §Requirement: Hit-Test Performance, line 268-270:
         // Hit-test for 50 tiles must complete in < 100µs.
         use std::time::Instant;
-        use tze_hud_scene::calibration::{budgets, test_budget};
+        use tze_hud_scene::perf_budget::{budgets, test_budget};
 
         let (scene, _, _) = make_scene_with_hit_regions(50);
         let budget_us = test_budget(budgets::HIT_TEST_BUDGET_US);

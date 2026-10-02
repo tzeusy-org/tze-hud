@@ -314,7 +314,7 @@ mod tests {
     #[test]
     fn test_assemble_frame_under_2ms() {
         use std::time::Instant;
-        use tze_hud_scene::calibration::{budgets, test_budget};
+        use tze_hud_scene::perf_budget::{budgets, test_budget};
 
         let mut assembler = EventBatchAssembler::new();
         // Simulate a dense frame: 50 agents × 8 events each
@@ -332,7 +332,7 @@ mod tests {
 
         assert_eq!(batches.len(), 50);
 
-        // 2ms = 2000µs budget; scale with hardware calibration factor
+        // 2ms = 2000µs budget, widened by the test slack factor
         let dispatch_budget = test_budget(budgets::EVENT_DISPATCH_BUDGET_US);
         assert!(
             elapsed_us < dispatch_budget,

@@ -205,8 +205,6 @@ def harness_command(
         "--output",
         str(output),
     ]
-    if args.layer4_output_root:
-        cmd.extend(["--layer4-output-root", args.layer4_output_root])
     if args.target_p99_rtt_us is not None:
         cmd.extend(["--target-p99-rtt-us", str(args.target_p99_rtt_us)])
     if args.target_throughput_rps is not None:
@@ -627,7 +625,6 @@ def main() -> int:
     parser.add_argument("--target-throughput-rps", type=float, default=None)
     parser.add_argument("--normalization-mapping-approved", action="store_true")
     parser.add_argument("--output-root", default="")
-    parser.add_argument("--layer4-output-root", default="")
     parser.add_argument("--skip-build", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument(

@@ -26,7 +26,7 @@ use tze_hud_scene::{
     Capability, HitRegionNode, HitResult, InputMode, Node, NodeData, Rect, Rgba, SceneId,
     SolidColorNode,
     graph::SceneGraph,
-    test_scenes::{ClockMs, TestSceneRegistry, assert_layer0_invariants},
+    test_scenes::{ClockMs, TestSceneRegistry},
     types::{CursorStyle, EventMask},
 };
 
@@ -767,66 +767,6 @@ fn hit_region_node_new_fields_accessible() {
 }
 
 // ─── Layer 0 invariants on hit-test test scenes ───────────────────────────────
-
-#[test]
-fn layer0_invariants_input_highlight() {
-    let registry = TestSceneRegistry::default();
-    if let Some((graph, _spec)) = registry.build("input_highlight", ClockMs::FIXED) {
-        let violations = assert_layer0_invariants(&graph);
-        assert!(
-            violations.is_empty(),
-            "input_highlight: Layer 0 violations: {violations:?}"
-        );
-    }
-}
-
-#[test]
-fn layer0_invariants_overlay_passthrough_regions() {
-    let registry = TestSceneRegistry::default();
-    if let Some((graph, _spec)) = registry.build("overlay_passthrough_regions", ClockMs::FIXED) {
-        let violations = assert_layer0_invariants(&graph);
-        assert!(
-            violations.is_empty(),
-            "overlay_passthrough_regions: Layer 0 violations: {violations:?}"
-        );
-    }
-}
-
-#[test]
-fn layer0_invariants_overlapping_tiles_zorder() {
-    let registry = TestSceneRegistry::default();
-    if let Some((graph, _spec)) = registry.build("overlapping_tiles_zorder", ClockMs::FIXED) {
-        let violations = assert_layer0_invariants(&graph);
-        assert!(
-            violations.is_empty(),
-            "overlapping_tiles_zorder: Layer 0 violations: {violations:?}"
-        );
-    }
-}
-
-#[test]
-fn layer0_invariants_chatty_dashboard_touch() {
-    let registry = TestSceneRegistry::default();
-    if let Some((graph, _spec)) = registry.build("chatty_dashboard_touch", ClockMs::FIXED) {
-        let violations = assert_layer0_invariants(&graph);
-        assert!(
-            violations.is_empty(),
-            "chatty_dashboard_touch: Layer 0 violations: {violations:?}"
-        );
-    }
-}
-
-#[test]
-fn layer0_invariants_three_agents_contention() {
-    let registry = TestSceneRegistry::default();
-    if let Some((graph, _spec)) = registry.build("three_agents_contention", ClockMs::FIXED) {
-        let violations = assert_layer0_invariants(&graph);
-        assert!(
-            violations.is_empty(),
-            "three_agents_contention: Layer 0 violations: {violations:?}"
-        );
-    }
-}
 
 // ─── Hit-test on spec test scenes ─────────────────────────────────────────────
 

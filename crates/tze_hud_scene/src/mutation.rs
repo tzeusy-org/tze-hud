@@ -118,11 +118,6 @@ pub enum SceneMutation {
         tile_id: SceneId,
         input_mode: InputMode,
     },
-    /// Update tile sync group membership. RFC 0001 §2.3.
-    UpdateTileSyncGroup {
-        tile_id: SceneId,
-        sync_group: Option<SceneId>,
-    },
     /// Update tile expiry timestamp. RFC 0001 §2.3.
     UpdateTileExpiry {
         tile_id: SceneId,
@@ -209,24 +204,6 @@ pub enum SceneMutation {
         /// Optional disambiguation when multiple instances share the same name.
         instance_id: Option<String>,
     },
-    // ── Sync group mutations ──────────────────────────────────────────────
-    /// Create a new sync group.
-    CreateSyncGroup {
-        /// Optional human-readable label (max 128 UTF-8 bytes).
-        name: Option<String>,
-        /// Namespace creating this group (typically the agent namespace).
-        owner_namespace: String,
-        /// Commit policy: AllOrDefer or AvailableMembers.
-        commit_policy: SyncCommitPolicy,
-        /// Max deferral frames before force-commit (AllOrDefer only).
-        max_deferrals: u32,
-    },
-    /// Delete a sync group by ID. All member tiles are released automatically.
-    DeleteSyncGroup { group_id: SceneId },
-    /// Add a tile to a sync group. Replaces any previous group membership.
-    JoinSyncGroup { tile_id: SceneId, group_id: SceneId },
-    /// Remove a tile from its current sync group. No-op if not in a group.
-    LeaveSyncGroup { tile_id: SceneId },
     // ── Scroll mutations (require ModifyOwnTiles) ──────────────────────
     /// Register or replace local-first scroll config for a tile.
     /// Enables adapter-driven scroll via `SetScrollOffset`.
@@ -315,7 +292,6 @@ impl SceneMutation {
             SceneMutation::UpdateTileZOrder { .. } => "UpdateTileZOrder",
             SceneMutation::UpdateTileOpacity { .. } => "UpdateTileOpacity",
             SceneMutation::UpdateTileInputMode { .. } => "UpdateTileInputMode",
-            SceneMutation::UpdateTileSyncGroup { .. } => "UpdateTileSyncGroup",
             SceneMutation::UpdateTileExpiry { .. } => "UpdateTileExpiry",
             SceneMutation::DeleteTile { .. } => "DeleteTile",
             SceneMutation::SetTileRoot { .. } => "SetTileRoot",
@@ -324,10 +300,6 @@ impl SceneMutation {
             SceneMutation::PublishToZone { .. } => "PublishToZone",
             SceneMutation::ClearZone { .. } => "ClearZone",
             SceneMutation::ClearWidget { .. } => "ClearWidget",
-            SceneMutation::CreateSyncGroup { .. } => "CreateSyncGroup",
-            SceneMutation::DeleteSyncGroup { .. } => "DeleteSyncGroup",
-            SceneMutation::JoinSyncGroup { .. } => "JoinSyncGroup",
-            SceneMutation::LeaveSyncGroup { .. } => "LeaveSyncGroup",
             SceneMutation::RegisterTileScroll { .. } => "RegisterTileScroll",
             SceneMutation::SetScrollOffset { .. } => "SetScrollOffset",
             SceneMutation::SetTileLifecycleAccent { .. } => "SetTileLifecycleAccent",
@@ -385,7 +357,7 @@ impl SceneGraph {
     ///    mutations and tile lookups. Expired lease is caught here before budget.
     /// 3. **Stage 2: Budget check** — projected resource usage fits within budget.
     /// 4. **Stage 3: Bounds check** — bounds have positive width/height, finite coords.
-    /// 5. **Stage 4: Type check** — referenced tabs/tiles/nodes/groups exist.
+    /// 5. **Stage 4: Type check** — referenced tabs/tiles/nodes exist.
     /// 6. **Stage 5: Invariant check (post-mutation simulation)** — apply to a clone
     ///    and verify no cycles, no z-order conflicts, no broken internal references.
     ///
@@ -609,9 +581,8 @@ impl SceneGraph {
     ///
     /// For `CreateTile` the lease_id is embedded in the mutation directly.
     /// For tile-targeting mutations (`UpdateTileBounds`, `UpdateTileZOrder`,
-    /// `UpdateTileOpacity`, `UpdateTileInputMode`, `UpdateTileSyncGroup`,
-    /// `UpdateTileExpiry`, `DeleteTile`, `SetTileRoot`, `AddNode`,
-    /// `UpdateNodeContent`, `JoinSyncGroup`, `LeaveSyncGroup`) the lease is
+    /// `UpdateTileOpacity`, `UpdateTileInputMode`, `UpdateTileExpiry`,
+    /// `DeleteTile`, `SetTileRoot`, `AddNode`, `UpdateNodeContent`) the lease is
     /// derived from the tile in the graph. This enables Stage 1 to catch
     /// expired/revoked leases for all mutation types, not just `CreateTile`.
     fn lease_id_for_mutation(
@@ -625,14 +596,11 @@ impl SceneGraph {
             | SceneMutation::UpdateTileZOrder { tile_id, .. }
             | SceneMutation::UpdateTileOpacity { tile_id, .. }
             | SceneMutation::UpdateTileInputMode { tile_id, .. }
-            | SceneMutation::UpdateTileSyncGroup { tile_id, .. }
             | SceneMutation::UpdateTileExpiry { tile_id, .. }
             | SceneMutation::DeleteTile { tile_id }
             | SceneMutation::SetTileRoot { tile_id, .. }
             | SceneMutation::AddNode { tile_id, .. }
             | SceneMutation::UpdateNodeContent { tile_id, .. }
-            | SceneMutation::JoinSyncGroup { tile_id, .. }
-            | SceneMutation::LeaveSyncGroup { tile_id }
             | SceneMutation::RegisterTileScroll { tile_id, .. }
             | SceneMutation::SetScrollOffset { tile_id, .. }
             | SceneMutation::SetTileLifecycleAccent { tile_id, .. }
@@ -641,8 +609,7 @@ impl SceneGraph {
             | SceneMutation::UpdatePortalSurfaceState { tile_id, .. } => {
                 tiles.get(tile_id).map(|t| t.lease_id)
             }
-            // Tab mutations, zone mutations, sync group mutations other than
-            // tile-targeting ones: no per-mutation lease check at Stage 1.
+            // Tab and zone mutations: no per-mutation lease check at Stage 1.
             _ => None,
         }
     }
@@ -798,19 +765,6 @@ impl SceneGraph {
                 self.update_tile_input_mode(*tile_id, *input_mode, namespace)?;
                 Ok(vec![])
             }
-            SceneMutation::UpdateTileSyncGroup {
-                tile_id,
-                sync_group,
-            } => {
-                if let Some(group_id) = sync_group {
-                    // Use checked variant to enforce ownership: agent must own both tile and group.
-                    self.join_sync_group_checked(*tile_id, *group_id, namespace)?;
-                } else {
-                    // Clear the sync group
-                    let _ = self.leave_sync_group(*tile_id);
-                }
-                Ok(vec![])
-            }
             SceneMutation::UpdateTileExpiry {
                 tile_id,
                 expires_at,
@@ -909,34 +863,6 @@ impl SceneGraph {
                     .filter(|s| !s.is_empty())
                     .unwrap_or(widget_name.as_str());
                 self.clear_widget_for_publisher(resolved_name, namespace)?;
-                Ok(vec![])
-            }
-            // ── Sync group mutations ──────────────────────────────────────────
-            SceneMutation::CreateSyncGroup {
-                name,
-                owner_namespace,
-                commit_policy,
-                max_deferrals,
-            } => {
-                let id = self.create_sync_group(
-                    name.clone(),
-                    owner_namespace,
-                    *commit_policy,
-                    *max_deferrals,
-                )?;
-                Ok(vec![id])
-            }
-            SceneMutation::DeleteSyncGroup { group_id } => {
-                self.delete_sync_group(*group_id)?;
-                Ok(vec![])
-            }
-            SceneMutation::JoinSyncGroup { tile_id, group_id } => {
-                // Use checked variant to enforce ownership: agent must own both tile and group.
-                self.join_sync_group_checked(*tile_id, *group_id, namespace)?;
-                Ok(vec![])
-            }
-            SceneMutation::LeaveSyncGroup { tile_id } => {
-                self.leave_sync_group(*tile_id)?;
                 Ok(vec![])
             }
             // ── Scroll mutations ─────────────────────────────────────────
@@ -2345,120 +2271,6 @@ mod tests {
             rej.primary_code(),
             Some(ValidationErrorCode::ZOrderConflict)
         );
-    }
-
-    #[test]
-    fn test_mutation_create_and_delete_sync_group() {
-        let mut scene = SceneGraph::new(1920.0, 1080.0);
-
-        // Create a sync group via mutation batch
-        let create_batch = make_batch(
-            "agent",
-            vec![SceneMutation::CreateSyncGroup {
-                name: Some("my-group".to_string()),
-                owner_namespace: "agent".to_string(),
-                commit_policy: SyncCommitPolicy::AllOrDefer,
-                max_deferrals: 3,
-            }],
-        );
-        let result = scene.apply_batch(&create_batch);
-        assert!(result.applied);
-        assert_eq!(result.created_ids.len(), 1);
-        let group_id = result.created_ids[0];
-        assert_eq!(scene.sync_group_count(), 1);
-
-        // Delete via mutation batch
-        let delete_batch = make_batch("agent", vec![SceneMutation::DeleteSyncGroup { group_id }]);
-        let result = scene.apply_batch(&delete_batch);
-        assert!(result.applied);
-        assert_eq!(scene.sync_group_count(), 0);
-    }
-
-    #[test]
-    fn test_mutation_join_leave_sync_group() {
-        let mut scene = SceneGraph::new(1920.0, 1080.0);
-        let tab_id = scene.create_tab("Main", 0).unwrap();
-        let lease_id = scene.grant_lease(
-            "agent",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
-        let tile_id = scene
-            .create_tile(
-                tab_id,
-                "agent",
-                lease_id,
-                Rect::new(0.0, 0.0, 100.0, 100.0),
-                1,
-            )
-            .unwrap();
-
-        // Create group and join tile in one batch
-        let batch = make_batch(
-            "agent",
-            vec![SceneMutation::CreateSyncGroup {
-                name: None,
-                owner_namespace: "agent".to_string(),
-                commit_policy: SyncCommitPolicy::AvailableMembers,
-                max_deferrals: 0,
-            }],
-        );
-        let result = scene.apply_batch(&batch);
-        assert!(result.applied);
-        let group_id = result.created_ids[0];
-
-        // Join tile to group
-        let join_batch = make_batch(
-            "agent",
-            vec![SceneMutation::JoinSyncGroup { tile_id, group_id }],
-        );
-        let result = scene.apply_batch(&join_batch);
-        assert!(result.applied);
-        assert_eq!(scene.tiles[&tile_id].sync_group, Some(group_id));
-        assert!(scene.sync_groups[&group_id].members.contains(&tile_id));
-
-        // Leave sync group
-        let leave_batch = make_batch("agent", vec![SceneMutation::LeaveSyncGroup { tile_id }]);
-        let result = scene.apply_batch(&leave_batch);
-        assert!(result.applied);
-        assert_eq!(scene.tiles[&tile_id].sync_group, None);
-        assert!(!scene.sync_groups[&group_id].members.contains(&tile_id));
-    }
-
-    #[test]
-    fn test_mutation_batch_rollback_on_bad_sync_group_join() {
-        let mut scene = SceneGraph::new(1920.0, 1080.0);
-        let tab_id = scene.create_tab("Main", 0).unwrap();
-        let lease_id = scene.grant_lease(
-            "agent",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
-        let tile_id = scene
-            .create_tile(
-                tab_id,
-                "agent",
-                lease_id,
-                Rect::new(0.0, 0.0, 100.0, 100.0),
-                1,
-            )
-            .unwrap();
-
-        let nonexistent_group = SceneId::new();
-
-        // Batch that tries to join a non-existent group — should fail and rollback
-        let batch = make_batch(
-            "agent",
-            vec![SceneMutation::JoinSyncGroup {
-                tile_id,
-                group_id: nonexistent_group,
-            }],
-        );
-        let result = scene.apply_batch(&batch);
-        assert!(!result.applied);
-        assert!(result.rejection.is_some());
-        // Tile should remain without a sync group
-        assert_eq!(scene.tiles[&tile_id].sync_group, None);
     }
 
     // ── UpdateNodeContent tests ──────────────────────────────────────────

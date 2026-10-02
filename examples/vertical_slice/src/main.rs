@@ -291,7 +291,6 @@ async fn run_headless(dev_mode: bool) -> Result<(), Box<dyn std::error::Error>> 
                     "ZONE_EVENTS".to_string(),    // requires publish_zone:<zone> capability
                 ],
                 resume_token: Vec::new(),
-                agent_timestamp_wall_us: now_us,
                 min_protocol_version: 1000,
                 max_protocol_version: 1001,
                 auth_credential: Some(session_proto::AuthCredential {
@@ -336,10 +335,6 @@ async fn run_headless(dev_mode: bool) -> Result<(), Box<dyn std::error::Error>> 
             println!(
                 "    active_subscriptions  = {:?}",
                 established.active_subscriptions
-            );
-            println!(
-                "    clock_skew            = {}us",
-                established.estimated_skew_us
             );
 
             // Capability negotiation: verify the expected capabilities were granted.
@@ -1448,7 +1443,6 @@ capabilities = ["create_tiles"]
                     requested_capabilities: vec!["create_tiles".to_string()],
                     initial_subscriptions: vec![],
                     resume_token: Vec::new(),
-                    agent_timestamp_wall_us: now_wall_us(),
                     min_protocol_version: 1000,
                     max_protocol_version: 1001,
                     auth_credential: Some(session_proto::AuthCredential {
@@ -2098,7 +2092,6 @@ capabilities = ["create_tiles", "modify_own_tiles"]
                         "ZONE_EVENTS".to_string(),    // gated: denied (no publish_zone:*)
                     ],
                     resume_token: Vec::new(),
-                    agent_timestamp_wall_us: now_wall_us(),
                     min_protocol_version: 1000,
                     max_protocol_version: 1001,
                     auth_credential: Some(session_proto::AuthCredential {

@@ -29,24 +29,22 @@ capabilities = [
     "publish_zone:status-bar",
 ]
 
-# Component profile bundle directories scanned at startup.
-# Each path is resolved relative to this config file's parent directory
-# (examples/vertical_slice/config/). The runtime scans subdirectories of each
-# listed path for profile.toml files.
-#
-# profiles/ is the monorepo-root profiles directory:
-#   examples/vertical_slice/config/ → ../../../profiles/
-[component_profile_bundles]
-paths = ["../../../profiles"]
-
-# Active component profile selection.
-# Maps component type → profile name. Only profiles discovered via
-# [component_profile_bundles].paths can be referenced here.
-# Unknown profiles are logged and skipped (non-fatal).
-[component_profiles]
-subtitle      = "exemplar-subtitle"
-alert-banner  = "exemplar-alert-banner"
-notification  = "notification-stack-exemplar"
+# Design tokens: overrides of the canonical defaults, shared by every zone,
+# widget SVG, and the portal.
+[design_tokens]
+"color.text.primary"                   = "#F5F7FA"
+"color.border.default"                 = "#6E7A91"
+"opacity.backdrop.opaque"              = "0.80"
+"typography.body.size"                 = "15"
+"typography.body.weight"               = "500"
+"spacing.padding.medium"               = "10"
+"border.radius.medium"                 = "14"
+"color.notification.urgency.low"       = "#000000"
+"color.notification.urgency.normal"    = "#0C1426"
+"color.notification.urgency.urgent"    = "#2A1E08"
+"color.notification.urgency.critical"  = "#450612"
+"typography.notification.body.scale"   = "0.90"
+"typography.notification.title.weight" = "700"
 
 # Widget bundle directories scanned at startup.
 # Paths are resolved relative to this config file's parent directory

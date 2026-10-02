@@ -57,7 +57,6 @@
 //!
 pub mod agent_events;
 pub mod channels;
-pub mod component_startup;
 pub mod degradation;
 pub mod diag;
 pub mod element_store;
@@ -75,13 +74,12 @@ pub mod portal_tokens;
 pub mod reload_triggers;
 pub mod resident_grpc_bridge;
 pub mod runtime_context;
+pub mod scene_startup;
 pub mod shell;
 pub mod subscriptions;
-pub mod tab_switch_trigger;
 #[cfg(test)]
 pub(crate) mod test_support;
 pub mod threads;
-pub mod trace_capture;
 mod widget_hover;
 pub mod widget_runtime_registration;
 pub mod widget_startup;
@@ -171,10 +169,6 @@ pub use shell::{
     FreezeQueue, FreezeState, MutationTrafficClass, QUEUE_PRESSURE_FRACTION, QueuedMutation,
     classify_mutation_batch,
 };
-pub use tab_switch_trigger::{
-    ACTIVE_TAB_CHANGED_EVENT_TYPE, AttentionGate, BlockingGate, PermissiveGate, TabSwitchOutcome,
-    TabSwitchTrigger,
-};
 pub use tze_hud_compositor::ChromeDrawCmd;
 
 pub use pipeline::{
@@ -199,9 +193,6 @@ pub use window::{
     FallbackReason, HitRegion, OverlaySupport, WindowConfig, WindowMode, check_overlay_support,
     resolve_window_mode, should_capture_pointer_event,
 };
-
-// ── Record/Replay Trace capture ───────────────────────────────────────────────
-pub use trace_capture::{TraceRecorder, build_regression_trace};
 
 // ── Font loader (resource store → compositor bridge) ─────────────────────────
 pub use font_loader::FontLoader;

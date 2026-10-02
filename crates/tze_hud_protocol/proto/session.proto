@@ -284,10 +284,9 @@ message SessionInit {
   // Optional resume token from a previous session
   bytes  resume_token           = 6;  // Empty = new session; non-empty = resume attempt
 
-  // Agent's wall-clock at handshake time (UTC us since epoch)
-  // Used for initial clock-skew estimation (RFC 0003 SS1.3)
-  // Clock domain: wall-clock. See RFC 0005 SS2.4.
-  uint64 agent_timestamp_wall_us = 7;
+  // Field 7 (agent_timestamp_wall_us, clock-skew estimation) removed in the reset.
+  reserved 7;
+  reserved "agent_timestamp_wall_us";
 
   // Protocol version negotiation (RFC 0005 §4.1).
   // version = major * 1000 + minor (e.g. 1000 = v1.0, 1001 = v1.1).
@@ -330,10 +329,12 @@ message SessionEstablished {
   uint64 heartbeat_interval_ms    = 5;  // How often client must send Heartbeat (default 5000)
   uint64 server_sequence          = 6;  // Starting server-side sequence number
 
-  // Clock sync (RFC 0003 SS1.3)
-  // Clock domain: wall-clock (UTC us since epoch). See RFC 0005 SS2.4.
+  // Compositor wall-clock at handshake (UTC us since epoch). Agents can use it
+  // as the reference for present_at_wall_us / expires_at_wall_us.
   uint64 compositor_timestamp_wall_us = 7;
-  int64  estimated_skew_us            = 8;  // agent_ts - compositor_ts (signed)
+  // Field 8 (estimated_skew_us) removed in the reset.
+  reserved 8;
+  reserved "estimated_skew_us";
 
   // Subscription confirmation
   repeated string active_subscriptions = 9;
@@ -426,8 +427,9 @@ enum ErrorCode {
   RATE_LIMITED                   = 9;
   INVALID_ARGUMENT               = 10;
   SESSION_EXPIRED                = 11;
-  CLOCK_SKEW_HIGH                = 12;
-  CLOCK_SKEW_EXCESSIVE           = 13;
+  // 12, 13 were CLOCK_SKEW_HIGH / CLOCK_SKEW_EXCESSIVE (removed in the reset).
+  reserved 12, 13;
+  reserved "CLOCK_SKEW_HIGH", "CLOCK_SKEW_EXCESSIVE";
   SAFE_MODE_ACTIVE               = 14;
   TIMESTAMP_TOO_OLD              = 15;
   TIMESTAMP_TOO_FUTURE           = 16;

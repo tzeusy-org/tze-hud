@@ -58,7 +58,6 @@ mod common;
 // Other tests use:
 //   50052  multi_agent
 //   50053  soak
-//   50054  v1_thesis
 //   50055  presence_card_coexistence
 //   50056-50060 reserved for this file
 //
@@ -163,7 +162,6 @@ async fn connect_agent_with_zone_publish_cap(
                 requested_capabilities: vec![cap.clone()],
                 initial_subscriptions: vec!["SCENE_TOPOLOGY".to_string()],
                 resume_token: Vec::new(),
-                agent_timestamp_wall_us: now_us,
                 min_protocol_version: RUNTIME_MIN_VERSION,
                 max_protocol_version: RUNTIME_MAX_VERSION,
                 auth_credential: None,

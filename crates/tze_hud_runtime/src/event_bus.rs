@@ -42,16 +42,15 @@ use suppression::is_suppressed;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(u8)]
 pub enum InterruptionClass {
-    /// Overrides everything; bypasses quiet hours and budget.
-    /// Runtime-only — agents cannot emit CRITICAL events directly.
+    /// Highest urgency. Runtime-only — agents cannot emit CRITICAL events directly.
     Critical = 0,
-    /// May override quiet hours (subject to pass_through_class config).
+    /// Urgent.
     High = 1,
-    /// Standard; filtered by attention budget.
+    /// Standard.
     Normal = 2,
-    /// Batched/deferred; blocked during quiet hours.
+    /// Low urgency.
     Low = 3,
-    /// Never interrupts; always passes quiet hours.
+    /// Never interrupts.
     Silent = 4,
 }
 

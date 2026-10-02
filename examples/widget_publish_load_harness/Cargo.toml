@@ -12,7 +12,6 @@ path = "src/main.rs"
 [dependencies]
 tze_hud_protocol = { path = "../../crates/tze_hud_protocol", version = "0.1.0" }
 tze_hud_telemetry = { path = "../../crates/tze_hud_telemetry", version = "0.1.0" }
-tze_hud_validation = { path = "../../crates/tze_hud_validation", version = "0.1.0" }
 tokio = { workspace = true }
 tokio-stream = { workspace = true }
 tonic = { workspace = true }

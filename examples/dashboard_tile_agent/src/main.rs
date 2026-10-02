@@ -396,7 +396,6 @@ async fn do_content_update_with_host(
                 ],
                 initial_subscriptions: vec!["LEASE_CHANGES".to_string()],
                 resume_token: Vec::new(),
-                agent_timestamp_wall_us: now_us,
                 min_protocol_version: 1000,
                 max_protocol_version: 1001,
                 auth_credential: Some(session_proto::AuthCredential {
@@ -940,7 +939,6 @@ async fn establish_session_with_host(
                 // LEASE_CHANGES is mandatory; listing it explicitly is idiomatic.
                 initial_subscriptions: vec!["LEASE_CHANGES".to_string()],
                 resume_token: Vec::new(), // new session, no prior resume token
-                agent_timestamp_wall_us: now_us,
                 min_protocol_version: 1000, // v1.0
                 max_protocol_version: 1001, // v1.1
                 auth_credential: Some(session_proto::AuthCredential {
@@ -991,7 +989,6 @@ async fn establish_session_with_host(
             println!("  heartbeat_ms         = {}", e.heartbeat_interval_ms);
             println!("  granted_capabilities = {:?}", e.granted_capabilities);
             println!("  active_subscriptions = {:?}", e.active_subscriptions);
-            println!("  clock_skew           = {}us", e.estimated_skew_us);
             println!(
                 "  protocol_version     = v{}.{}",
                 e.negotiated_protocol_version / 1000,
@@ -1151,7 +1148,6 @@ async fn request_lease_with_host(
                 ],
                 initial_subscriptions: vec!["LEASE_CHANGES".to_string()],
                 resume_token: Vec::new(),
-                agent_timestamp_wall_us: now_us,
                 min_protocol_version: 1000,
                 max_protocol_version: 1001,
                 auth_credential: Some(session_proto::AuthCredential {
@@ -1470,7 +1466,6 @@ async fn create_tile_batch_with_host(
                 ],
                 initial_subscriptions: vec!["LEASE_CHANGES".to_string()],
                 resume_token: Vec::new(),
-                agent_timestamp_wall_us: now_us,
                 min_protocol_version: 1000,
                 max_protocol_version: 1001,
                 auth_credential: Some(session_proto::AuthCredential {
@@ -2200,7 +2195,6 @@ mod tests {
                 ],
                 initial_subscriptions: vec!["LEASE_CHANGES".to_string()],
                 resume_token: Vec::new(),
-                agent_timestamp_wall_us: now_us,
                 min_protocol_version: 1000,
                 max_protocol_version: 1001,
                 auth_credential: Some(sp::AuthCredential {
@@ -2594,7 +2588,6 @@ mod tests {
                 ],
                 initial_subscriptions: vec!["LEASE_CHANGES".to_string()],
                 resume_token: vec![],
-                agent_timestamp_wall_us: now_us,
                 min_protocol_version: 1000,
                 max_protocol_version: 1001,
                 auth_credential: Some(sp::AuthCredential {
@@ -2854,7 +2847,6 @@ mod tests {
                 ],
                 initial_subscriptions: vec!["LEASE_CHANGES".to_string()],
                 resume_token: vec![],
-                agent_timestamp_wall_us: now_us,
                 min_protocol_version: 1000,
                 max_protocol_version: 1001,
                 auth_credential: Some(sp::AuthCredential {
@@ -3298,7 +3290,6 @@ mod tests {
                 ],
                 initial_subscriptions: vec!["LEASE_CHANGES".to_string()],
                 resume_token: vec![],
-                agent_timestamp_wall_us: now_us,
                 min_protocol_version: 1000,
                 max_protocol_version: 1001,
                 auth_credential: Some(sp::AuthCredential {
@@ -3604,24 +3595,23 @@ mod tests {
         let result = processor.process(&event, &mut scene);
         let elapsed_us = t0.elapsed().as_micros() as u64;
 
-        // tasks.md §7.2: local_ack_us must be within the calibrated 4ms budget.
-        // Use tze_hud_scene::calibration::test_budget() to scale the raw budget
-        // by the measured hardware speed factor, preventing flakiness on slower CI
-        // machines while still enforcing the intended latency contract.
-        use tze_hud_scene::calibration::{budgets, test_budget};
+        // tasks.md §7.2: local_ack_us must be within the 4ms budget.
+        // test_budget() widens the raw budget by the test slack factor so slow
+        // CI machines don't flake.
+        use tze_hud_scene::perf_budget::{budgets, test_budget};
         let ack_budget = test_budget(budgets::INPUT_ACK_BUDGET_US);
         assert!(
             result.local_ack_us < ack_budget,
-            "local_ack_us must be < {}µs (calibrated 4ms p99 budget) — tasks.md §7.2; \
+            "local_ack_us must be < {}µs (4ms budget with test slack) — tasks.md §7.2; \
              got {}µs",
             ack_budget,
             result.local_ack_us
         );
 
-        // Also assert wall-clock elapsed time is within calibrated budget.
+        // Also assert wall-clock elapsed time is within the budget.
         assert!(
             elapsed_us < ack_budget,
-            "wall-clock elapsed must be < {ack_budget}µs (calibrated) — tasks.md §7.2; got {elapsed_us}µs"
+            "wall-clock elapsed must be < {ack_budget}µs — tasks.md §7.2; got {elapsed_us}µs"
         );
 
         // Verify pressed state is set in the scene graph.
@@ -3976,7 +3966,6 @@ mod tests {
                     "INPUT_EVENTS".to_string(),
                 ],
                 resume_token: vec![],
-                agent_timestamp_wall_us: now_us,
                 min_protocol_version: 1000,
                 max_protocol_version: 1001,
                 auth_credential: Some(sp::AuthCredential {
@@ -5074,7 +5063,7 @@ mod tests {
     //       test_disconnect_during_lifecycle_triggers_orphan_path (§12.2)
     //
     //   Gaps / coverage notes:
-    //     - §7.2 p99 < 4ms budget: tested via calibrated headless budget (passes on CI)
+    //     - §7.2 p99 < 4ms budget: tested via a slack-scaled headless budget (passes on CI)
     //     - §10.1 auto-renewal: tested at the TtlState layer (no 45s wall-clock wait)
     //     - §5.2/5.3 chrome rendering above: tested via z-order arithmetic only
     //       (no GPU compositing test — GPU path is explicitly excluded from Layer 0 scope)

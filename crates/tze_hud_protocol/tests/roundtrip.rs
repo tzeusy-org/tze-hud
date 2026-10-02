@@ -1074,7 +1074,6 @@ fn roundtrip_session_init_all_fields() {
         ],
         initial_subscriptions: vec!["SCENE_TOPOLOGY".to_string()],
         resume_token: vec![],
-        agent_timestamp_wall_us: 1_700_000_000_000_000,
         min_protocol_version: 1000,
         max_protocol_version: 1001,
         auth_credential: Some(AuthCredential {
@@ -1088,10 +1087,6 @@ fn roundtrip_session_init_all_fields() {
     assert_eq!(orig.requested_capabilities, decoded.requested_capabilities);
     assert_eq!(orig.min_protocol_version, decoded.min_protocol_version);
     assert_eq!(orig.max_protocol_version, decoded.max_protocol_version);
-    assert_eq!(
-        orig.agent_timestamp_wall_us,
-        decoded.agent_timestamp_wall_us
-    );
     match &decoded.auth_credential {
         Some(ac) => match &ac.credential {
             Some(Credential::PreSharedKey(psk)) => assert_eq!(psk.key, "test-key"),
@@ -1150,7 +1145,6 @@ fn roundtrip_session_established() {
         heartbeat_interval_ms: 5000,
         server_sequence: 1,
         compositor_timestamp_wall_us: 1_700_000_000_000_000,
-        estimated_skew_us: -500,
         active_subscriptions: vec![
             "DEGRADATION_NOTICES".to_string(),
             "LEASE_CHANGES".to_string(),
@@ -1167,7 +1161,6 @@ fn roundtrip_session_established() {
     let decoded = round_trip(&orig);
     assert_eq!(orig.heartbeat_interval_ms, decoded.heartbeat_interval_ms);
     assert_eq!(orig.server_sequence, decoded.server_sequence);
-    assert_eq!(orig.estimated_skew_us, decoded.estimated_skew_us);
     assert_eq!(orig.denied_subscriptions, decoded.denied_subscriptions);
     assert_eq!(
         orig.negotiated_protocol_version,
@@ -1228,8 +1221,6 @@ fn roundtrip_runtime_error_all_codes() {
         ErrorCode::RateLimited,
         ErrorCode::InvalidArgument,
         ErrorCode::SessionExpired,
-        ErrorCode::ClockSkewHigh,
-        ErrorCode::ClockSkewExcessive,
         ErrorCode::SafeModeActive,
         ErrorCode::TimestampTooOld,
         ErrorCode::TimestampTooFuture,

@@ -98,7 +98,6 @@ async fn perform_handshake(
             requested_capabilities: capabilities,
             initial_subscriptions: vec![],
             resume_token: vec![],
-            agent_timestamp_wall_us: now_wall_us(),
             min_protocol_version: 1000,
             max_protocol_version: 1001,
             auth_credential: None,

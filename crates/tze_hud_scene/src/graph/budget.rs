@@ -469,10 +469,6 @@ impl SceneGraph {
                     .filter(|t| t.lease_id == spec.lease_id)
                     .map(|t| t.id)
                     .collect();
-                // Leave sync groups before removing tiles to avoid dangling member entries.
-                for tid in &tile_ids {
-                    let _ = self.leave_sync_group(*tid);
-                }
                 for tid in tile_ids {
                     self.remove_tile_and_nodes(tid);
                 }

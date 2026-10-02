@@ -54,9 +54,9 @@ pub const CI_BLEND_TOLERANCE: u8 = 8;
 /// sRGB ≈ (64, 64, 89, 255).
 pub const BG_SRGB: [u8; 4] = [64, 64, 89, 255];
 
-// ─── Dimensions used across all 25-scene tests ────────────────────────────────
+// ─── Dimensions used across all scene tests ────────────────────────────────
 
-/// Display width used for all 25-scene pixel tests.
+/// Display width used for all scene pixel tests.
 ///
 /// Must match `TestSceneRegistry::new()` default (1920×1080).  Scenes are
 /// built with `TestSceneRegistry::new()` whose tile bounds are relative to a
@@ -64,12 +64,12 @@ pub const BG_SRGB: [u8; 4] = [64, 64, 89, 255];
 /// errors during scene construction.
 pub const SCENE_W: u32 = 1920;
 
-/// Display height used for all 25-scene pixel tests.
+/// Display height used for all scene pixel tests.
 pub const SCENE_H: u32 = 1080;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-/// Build a [`HeadlessRuntime`] sized for the 25-scene tests (1920×1080).
+/// Build a [`HeadlessRuntime`] sized for the scene tests (1920×1080).
 ///
 /// Uses 1920×1080 to match [`tze_hud_scene::test_scenes::TestSceneRegistry::new`]'s
 /// default display area.  Scenes are built with tile bounds relative to 1920×1080;

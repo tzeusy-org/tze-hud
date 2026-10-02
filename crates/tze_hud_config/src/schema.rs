@@ -65,14 +65,6 @@ mod tests {
             "schema should contain design_tokens field"
         );
         assert!(
-            json_str.contains("component_profile_bundles"),
-            "schema should contain component_profile_bundles field"
-        );
-        assert!(
-            json_str.contains("component_profiles"),
-            "schema should contain component_profiles field"
-        );
-        assert!(
             json_str.contains("widget_runtime_assets"),
             "schema should contain widget_runtime_assets field"
         );

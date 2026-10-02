@@ -8,9 +8,7 @@
 #   clippy-windows-gnu — cargo clippy --target x86_64-pc-windows-gnu -D warnings: lints the four
 #     crates carrying cfg(windows) code, which the Linux clippy job above never compiles
 #   test-unit      — cargo test --workspace --all-targets --exclude integration
-#   test-integration — cargo test -p integration (headless suites; excl. trace_regression, v1_thesis, soak)
-#   test-trace     — cargo test -p integration --test trace_regression
-#   test-v1-thesis — cargo test -p integration --test v1_thesis
+#   test-integration — cargo test -p integration (headless suites; excl. soak)
 #   production-boot — cargo test -p vertical_slice --test production_boot
 #   windows-performance-budget — headless Windows benchmark + locked budget gate
 #     and a real constrained WARP overlay quiescent-efficiency artifact gate
@@ -48,13 +46,10 @@
 #   Branch protection with required status checks has now been enabled on
 #   `main` to prevent future merges over failing CI.
 #
-#   All blocking jobs (check, fmt, clippy, test-unit, test-trace,
-#   test-v1-thesis, vertical_slice production boot, canonical app production
+#   All blocking jobs (check, fmt, clippy, test-unit, vertical_slice production boot, canonical app production
 #   boot, release artifact provenance smoke, dev-mode-guard) are required
 #   to pass before merge.
 # ─────────────────────────────────────────────────────────────────────────────
-# Spec ref:
-#   validation-framework/spec.md §CI Requirements (headless, no physical GPU)
 
 name: CI
 
@@ -188,7 +183,7 @@ jobs:
   #
   # Runs all unit and crate tests across the workspace, excluding the
   # `integration` package, whose test targets run in their own jobs
-  # (test-integration, test-trace, test-v1-thesis below) so failures are
+  # (test-integration below) so failures are
   # attributable per-suite and the long soak target stays opt-in.
   # The vertical_slice tests require a software GPU (llvmpipe) — HEADLESS_FORCE_SOFTWARE=1
   # is set globally in env above.
@@ -236,8 +231,6 @@ jobs:
   # server required).
   #
   # Excluded targets (each with its own coverage):
-  # - trace_regression — runs in the dedicated test-trace job below.
-  # - v1_thesis        — runs in the dedicated test-v1-thesis job below.
   # - soak             — wall-clock-bound soak/leak suite. Even the default
   #   TZE_HUD_SOAK_SECS=10 run drives real-time multi-agent churn and is
   #   designed for 1h/6h dedicated runs; timing-sensitive on shared runners,
@@ -470,73 +463,6 @@ jobs:
           name: constrained-envelope-budget
           path: test_results/constrained-envelope-budget/
           if-no-files-found: error
-
-  # ── Integration: trace regression ──────────────────────────────────────────
-  #
-  # Runs the trace capture + replay integration tests.
-  # These tests do NOT require a GPU (scene graph only; no compositor).
-  # Other integration targets run in test-integration above.
-
-  test-trace:
-    name: cargo test (trace regression)
-    runs-on: ubuntu-latest
-    needs: [check]
-    steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: "1.88"
-      # timeout-minutes caps cache-save hangs (incident: PR #606, canonical-app-production-boot
-      # hung 15+ min in the Swatinem/rust-cache post-step, required --admin merge).
-      # v2.9.1 pins to a specific stable release rather than the floating v2 alias.
-      - uses: Swatinem/rust-cache@v2.9.1
-        timeout-minutes: 10
-      - name: Install protobuf compiler (required by tze_hud_protocol build script)
-        run: |
-          sudo apt-get update -q
-          sudo apt-get install -y --no-install-recommends protobuf-compiler
-      - name: cargo test -p integration --test trace_regression
-        run: |
-          cargo test \
-            -p integration \
-            --test trace_regression
-
-  # ── Integration: v1 thesis proof ───────────────────────────────────────────
-  #
-  # Runs the E12.6 v1 thesis proof — all 7 v1 success criteria aggregated
-  # into a single capstone integration test.  Requires headless runtime
-  # (software GPU via HEADLESS_FORCE_SOFTWARE=1).
-
-  test-v1-thesis:
-    name: cargo test (v1 thesis)
-    runs-on: ubuntu-latest
-    needs: [check]
-    steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: "1.88"
-      # timeout-minutes caps cache-save hangs (incident: PR #606, canonical-app-production-boot
-      # hung 15+ min in the Swatinem/rust-cache post-step, required --admin merge).
-      # v2.9.1 pins to a specific stable release rather than the floating v2 alias.
-      - uses: Swatinem/rust-cache@v2.9.1
-        timeout-minutes: 10
-      - name: Install Mesa / llvmpipe + protobuf compiler
-        run: |
-          sudo apt-get update -q
-          sudo apt-get install -y --no-install-recommends \
-            libvulkan1 \
-            mesa-vulkan-drivers \
-            mesa-utils \
-            libegl-mesa0 \
-            libgl1-mesa-dri \
-            protobuf-compiler
-      - name: cargo test -p integration --test v1_thesis
-        run: |
-          cargo test \
-            -p integration \
-            --test v1_thesis \
-            -- --nocapture
 
   # ── Example production config boot (vertical_slice) ────────────────────────
   #

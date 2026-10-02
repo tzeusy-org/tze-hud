@@ -7,11 +7,8 @@
 //! - **Display Profile headless** (lines 58-69, v1-mandatory)
 //!   Budget: max_tiles=256, max_texture_mb=512, max_agents=8, target_fps=60, min_fps=1
 //!   headless MUST NOT be extendable via `[display_profile].extends`
-//! - **Mobile Profile Schema-Reserved** (lines 71-82, v1-mandatory)
-//!   `profile = "mobile"` → `CONFIG_MOBILE_PROFILE_NOT_EXERCISED` hard error
-//!   `extends = "mobile"` → valid (custom profile uses mobile budgets, no MPN paths)
 //! - **Profile Auto-Detection** (lines 84-99, v1-mandatory)
-//!   `profile = "auto"` → detect headless/full-display; mobile never auto-selected
+//!   `profile = "auto"` → detect headless/full-display
 //! - **Profile Budget Escalation Prevention** (lines 101-112, v1-mandatory)
 //!   Custom profiles MUST NOT exceed base budget values
 //! - **Profile Extends Conflict Detection** (lines 114-121, v1-mandatory)
@@ -24,41 +21,9 @@
 //! Profile selection is frozen at startup. The resolved profile is immutable
 //! once validated. Profile changes require restart. Auto-detection runs once.
 
-use tze_hud_scene::config::{
-    ConfigError, ConfigErrorCode, DEFAULT_MAX_TRUNCATION_INPUT_BYTES, DisplayProfile,
-};
+use tze_hud_scene::config::{ConfigError, ConfigErrorCode, DisplayProfile};
 
 use crate::raw::{RawConfig, RawDisplayProfile};
-
-// ─── Mobile profile budget values ────────────────────────────────────────────
-
-/// Mobile built-in budget values (used when `extends = "mobile"`; MPN path NOT activated).
-///
-/// These values are not publicly documented as a built-in profile — the mobile profile
-/// is schema-reserved for post-v1 MPN display path activation.
-fn mobile_budget() -> DisplayProfile {
-    DisplayProfile {
-        name: "mobile".into(),
-        // Mobile budget values are intentionally conservative.
-        max_tiles: 128,
-        max_texture_mb: 256,
-        // Mobile is schema-reserved and has no v1 execution path. Reuse the
-        // active headless operational envelope until mobile receives approved
-        // post-v1 values; do not infer device-specific budgets here.
-        max_runtime_resident_mb: 512,
-        max_resource_resident_mb: 256,
-        max_widget_asset_resident_mb: 64,
-        max_widget_raster_cache_mb: 128,
-        max_font_resident_mb: 64,
-        max_agents: 4,
-        max_agent_update_hz: 30,
-        target_fps: 60,
-        min_fps: 15,
-        allow_background_zones: false,
-        allow_chrome_zones: false,
-        max_truncation_input_bytes: DEFAULT_MAX_TRUNCATION_INPUT_BYTES,
-    }
-}
 
 // ─── Auto-detection signals ───────────────────────────────────────────────────
 
@@ -145,7 +110,6 @@ fn base_profile_for(name: &str) -> Option<DisplayProfile> {
     match name {
         "full-display" => Some(DisplayProfile::full_display()),
         "headless" => Some(DisplayProfile::headless()),
-        "mobile" => Some(mobile_budget()),
         _ => None,
     }
 }
@@ -229,7 +193,7 @@ pub(crate) fn profile_ceiling_for_validation(raw: &RawConfig) -> Option<DisplayP
             };
             Some(ceiling)
         }
-        _ => None, // Unknown/mobile — other checks will report errors.
+        _ => None, // Unknown — other checks will report errors.
     }
 }
 
@@ -262,7 +226,7 @@ pub fn validate_display_profile(raw: &RawConfig, errors: &mut Vec<ConfigError>) 
         errors.push(ConfigError {
             code: ConfigErrorCode::HeadlessNotExtendable,
             field_path: "display_profile.extends".into(),
-            expected: "\"full-display\" or \"mobile\" (headless is not extendable)".into(),
+            expected: "\"full-display\" (headless is not extendable)".into(),
             got: "\"headless\"".into(),
             hint: "the headless profile cannot be extended; use full-display or remove extends"
                 .into(),
@@ -275,10 +239,10 @@ pub fn validate_display_profile(raw: &RawConfig, errors: &mut Vec<ConfigError>) 
         errors.push(ConfigError {
             code: ConfigErrorCode::UnknownProfile,
             field_path: "display_profile.extends".into(),
-            expected: "\"full-display\" or \"mobile\"".into(),
+            expected: "\"full-display\"".into(),
             got: format!("{extends:?}"),
             hint: format!(
-                "unknown profile {extends:?} in extends; valid extendable built-ins: full-display, mobile"
+                "unknown profile {extends:?} in extends; the only extendable built-in is full-display"
             ),
         });
         return;
@@ -479,7 +443,7 @@ pub fn resolve_profile(
 
         "custom" => resolve_custom_profile(raw),
 
-        // "mobile" and unknown profiles are rejected by validate_profile() before freeze().
+        // Unknown profiles are rejected by validate_profile() before freeze().
         // If we reach here, it means resolve_profile() was called without prior validation —
         // this is a programming error. Panic in debug builds; return a structured error in release.
         other => {
@@ -609,6 +573,7 @@ pub fn resolve_headless_dimensions(raw: &RawConfig) -> (u32, u32) {
 mod tests {
     use super::*;
     use crate::raw::{RawConfig, RawDisplayProfile, RawRuntime};
+    use tze_hud_scene::config::DEFAULT_MAX_TRUNCATION_INPUT_BYTES;
 
     // ── Spec §Display Profile full-display ───────────────────────────────────
 
@@ -790,76 +755,6 @@ mod tests {
                 .any(|e| matches!(e.code, ConfigErrorCode::HeadlessNotExtendable)),
             "extends=headless must produce CONFIG_HEADLESS_NOT_EXTENDABLE, got: {:?}",
             errors.iter().map(|e| &e.code).collect::<Vec<_>>()
-        );
-    }
-
-    // ── Spec §Mobile Profile Schema-Reserved ─────────────────────────────────
-
-    /// WHEN extends = "mobile" and profile = "custom" THEN accepted (lines 81-82).
-    #[test]
-    fn spec_extends_mobile_is_valid_for_custom() {
-        let raw = RawConfig {
-            runtime: Some(RawRuntime {
-                profile: Some("custom".into()),
-                ..Default::default()
-            }),
-            display_profile: Some(RawDisplayProfile {
-                extends: Some("mobile".into()),
-                ..Default::default()
-            }),
-            tabs: vec![crate::raw::RawTab {
-                name: Some("Main".into()),
-                ..Default::default()
-            }],
-            ..Default::default()
-        };
-        let mut errors = Vec::new();
-        validate_display_profile(&raw, &mut errors);
-        // No HEADLESS_NOT_EXTENDABLE or UNKNOWN_PROFILE errors.
-        let relevant_errors: Vec<_> = errors
-            .iter()
-            .filter(|e| {
-                matches!(
-                    e.code,
-                    ConfigErrorCode::HeadlessNotExtendable
-                        | ConfigErrorCode::UnknownProfile
-                        | ConfigErrorCode::ProfileExtendsConflictsWithProfile
-                )
-            })
-            .collect();
-        assert!(
-            relevant_errors.is_empty(),
-            "extends=mobile with profile=custom should be accepted, got: {relevant_errors:?}"
-        );
-    }
-
-    /// WHEN extends = "mobile" THEN resolved profile uses mobile budget values (lines 81-82).
-    #[test]
-    fn spec_extends_mobile_uses_mobile_budget() {
-        let raw = RawConfig {
-            runtime: Some(RawRuntime {
-                profile: Some("custom".into()),
-                ..Default::default()
-            }),
-            display_profile: Some(RawDisplayProfile {
-                extends: Some("mobile".into()),
-                ..Default::default()
-            }),
-            tabs: vec![crate::raw::RawTab {
-                name: Some("Main".into()),
-                ..Default::default()
-            }],
-            ..Default::default()
-        };
-        let resolved = resolve_custom_profile(&raw).expect("should resolve");
-        let mobile = mobile_budget();
-        assert_eq!(
-            resolved.max_tiles, mobile.max_tiles,
-            "custom extends mobile should use mobile max_tiles"
-        );
-        assert_eq!(
-            resolved.max_texture_mb, mobile.max_texture_mb,
-            "custom extends mobile should use mobile max_texture_mb"
         );
     }
 
@@ -1069,37 +964,6 @@ mod tests {
         );
     }
 
-    /// WHEN custom profile sets allow_background_zones = true over headless base (false)
-    /// THEN CONFIG_PROFILE_CAPABILITY_ESCALATION (lines 111-112).
-    ///
-    /// Note: Since headless is not extendable, we test with a simulated base that has
-    /// allow_background_zones = false (mobile budget).
-    #[test]
-    fn spec_capability_escalation_allow_background_zones_rejected() {
-        // mobile has allow_background_zones = false
-        let raw = RawConfig {
-            runtime: Some(RawRuntime {
-                profile: Some("custom".into()),
-                ..Default::default()
-            }),
-            display_profile: Some(RawDisplayProfile {
-                extends: Some("mobile".into()),
-                allow_background_zones: Some(true),
-                ..Default::default()
-            }),
-            ..Default::default()
-        };
-        let mut errors = Vec::new();
-        validate_display_profile(&raw, &mut errors);
-        assert!(
-            errors
-                .iter()
-                .any(|e| matches!(e.code, ConfigErrorCode::ProfileCapabilityEscalation)),
-            "allow_background_zones=true over mobile base must produce CONFIG_PROFILE_CAPABILITY_ESCALATION, got: {:?}",
-            errors.iter().map(|e| &e.code).collect::<Vec<_>>()
-        );
-    }
-
     /// WHEN custom profile is within base budget THEN no escalation errors.
     #[test]
     fn spec_budget_within_ceiling_accepted() {
@@ -1142,14 +1006,14 @@ mod tests {
     /// To test the conflict path cleanly, use two different valid built-ins.
     #[test]
     fn spec_extends_conflicts_with_profile() {
-        // profile = "full-display", extends = "mobile" → conflict (full-display is a built-in).
+        // profile = "headless", extends = "full-display" → conflict (headless is a built-in).
         let raw = RawConfig {
             runtime: Some(RawRuntime {
-                profile: Some("full-display".into()),
+                profile: Some("headless".into()),
                 ..Default::default()
             }),
             display_profile: Some(RawDisplayProfile {
-                extends: Some("mobile".into()),
+                extends: Some("full-display".into()),
                 ..Default::default()
             }),
             ..Default::default()
@@ -1160,7 +1024,7 @@ mod tests {
             errors
                 .iter()
                 .any(|e| matches!(e.code, ConfigErrorCode::ProfileExtendsConflictsWithProfile)),
-            "profile=full-display + extends=mobile must produce CONFIG_PROFILE_EXTENDS_CONFLICTS, got: {:?}",
+            "profile=headless + extends=full-display must produce CONFIG_PROFILE_EXTENDS_CONFLICTS, got: {:?}",
             errors.iter().map(|e| &e.code).collect::<Vec<_>>()
         );
     }

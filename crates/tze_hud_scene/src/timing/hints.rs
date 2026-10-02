@@ -60,8 +60,7 @@ pub enum DeliveryPolicy {
     /// Drop if it arrives late.
     ///
     /// **Only valid with `MessageClass::EphemeralRealtime`.**  Setting this on
-    /// any other class MUST be rejected with
-    /// [`TimingError::InvalidDeliveryPolicy`][crate::timing::TimingError].
+    /// any other class MUST be rejected (`INVALID_DELIVERY_POLICY`).
     DropIfLate,
 }
 
@@ -132,8 +131,8 @@ impl Schedule {
 /// # Mutual exclusion
 ///
 /// The `schedule` field is a `oneof`-style enum. If the caller provides a
-/// `Schedule::PresentAt` alongside any relative primitive, validation (see
-/// [`validate_timing_hints`][crate::timing::validate_timing_hints]) MUST reject it with `RELATIVE_SCHEDULE_CONFLICT`.
+/// `Schedule::PresentAt` alongside any relative primitive, validation MUST
+/// reject it with `RELATIVE_SCHEDULE_CONFLICT`.
 ///
 /// # Timestamp precedence
 ///
@@ -167,9 +166,6 @@ pub struct TimingHints {
 
     /// State-stream deduplication key. Empty = no coalescing.
     pub coalesce_key: Option<String>,
-
-    /// Sync group this payload belongs to. `None` = no group.
-    pub sync_group: Option<crate::types::SceneId>,
 
     /// Message class governing delivery semantics.
     pub message_class: MessageClass,
@@ -217,7 +213,7 @@ impl TimingHints {
     /// an enum (not multiple optional fields), this invariant is trivially
     /// maintained by the Rust type system. However, when deserializing from
     /// wire format where the original proto `oneof` allows setting multiple
-    /// fields, callers should use [`validate_timing_hints`][crate::timing::validate_timing_hints].
+    /// fields, callers must check for conflicts during decode.
     pub fn has_relative_schedule(&self) -> bool {
         matches!(
             self.schedule,

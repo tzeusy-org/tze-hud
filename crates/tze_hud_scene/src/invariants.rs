@@ -140,9 +140,6 @@ pub fn check_all(graph: &SceneGraph) -> Vec<InvariantViolation> {
 
     // ── Area 7: Timing semantics ──────────────────────────────────────────────
     v.extend(check_tile_expires_at_after_present_at(graph));
-    v.extend(check_sync_group_id_key_consistency(graph));
-    v.extend(check_sync_group_member_back_refs(graph));
-    v.extend(check_sync_group_commit_policy_valid(graph));
     v.extend(check_zone_publish_record_expires_at_valid(graph));
     v.extend(check_version_non_decreasing(graph));
 
@@ -1484,73 +1481,6 @@ pub fn check_tile_expires_at_after_present_at(graph: &SceneGraph) -> Vec<Invaria
     violations
 }
 
-/// For every entry in `sync_groups`, the HashMap key must match `sync_group.id`.
-pub fn check_sync_group_id_key_consistency(graph: &SceneGraph) -> Vec<InvariantViolation> {
-    graph
-        .sync_groups
-        .iter()
-        .filter(|(key, sg)| **key != sg.id)
-        .map(|(key, sg)| {
-            InvariantViolation::new(
-                "sync_group_id_key_mismatch",
-                format!(
-                    "sync_groups map key {} does not match SyncGroup.id {}",
-                    key, sg.id
-                ),
-            )
-        })
-        .collect()
-}
-
-/// Every tile_id in a sync group's `members` set must reference a tile that
-/// exists in the graph AND whose `sync_group` field points back to this group.
-pub fn check_sync_group_member_back_refs(graph: &SceneGraph) -> Vec<InvariantViolation> {
-    let mut violations = Vec::new();
-    for (group_id, sg) in &graph.sync_groups {
-        for member_id in &sg.members {
-            match graph.tiles.get(member_id) {
-                None => violations.push(InvariantViolation::new(
-                    "sync_group_member_tile_missing",
-                    format!("sync group {group_id} member {member_id} does not exist in tiles map"),
-                )),
-                Some(tile) if tile.sync_group != Some(*group_id) => {
-                    violations.push(InvariantViolation::new(
-                        "sync_group_member_back_ref_mismatch",
-                        format!(
-                            "sync group {} member {}: tile.sync_group = {:?}, expected Some({})",
-                            group_id, member_id, tile.sync_group, group_id
-                        ),
-                    ))
-                }
-                _ => {}
-            }
-        }
-    }
-    violations
-}
-
-/// SyncGroup with AllOrDefer policy must have max_deferrals ≥ 1.
-///
-/// An AllOrDefer group with max_deferrals == 0 would force-commit on the very
-/// first frame — effectively making it AvailableMembers, which is confusing.
-pub fn check_sync_group_commit_policy_valid(graph: &SceneGraph) -> Vec<InvariantViolation> {
-    use crate::types::SyncCommitPolicy;
-    graph
-        .sync_groups
-        .values()
-        .filter(|sg| sg.commit_policy == SyncCommitPolicy::AllOrDefer && sg.max_deferrals == 0)
-        .map(|sg| {
-            InvariantViolation::new(
-                "sync_group_allordefer_max_deferrals_zero",
-                format!(
-                    "sync group {} has AllOrDefer policy but max_deferrals=0",
-                    sg.id
-                ),
-            )
-        })
-        .collect()
-}
-
 /// Zone publish records: if `expires_at_wall_us` is set, it must be > `published_at_wall_us`.
 ///
 /// Spec: timing-model/spec.md lines 107-122.
@@ -1729,7 +1659,6 @@ mod tests {
                 z_order: 5, // duplicate
                 opacity: 1.0,
                 input_mode: InputMode::Capture,
-                sync_group: None,
                 present_at: None,
                 expires_at: None,
                 resource_budget: ResourceBudget::default(),
@@ -2306,11 +2235,11 @@ mod tests {
         assert_eq!(v[0].code, "version_not_incremented");
     }
 
-    // ── All 25 test scenes pass ────────────────────────────────────────────
+    // ── All test scenes pass ───────────────────────────────────────────────
 
-    /// WHEN all 25 canonical test scenes are built THEN check_all returns no violations.
+    /// WHEN all registered test scenes are built THEN check_all returns no violations.
     #[test]
-    fn all_25_scenes_pass_check_all() {
+    fn all_scenes_pass_check_all() {
         let registry = TestSceneRegistry::new();
         let mut all_violations: Vec<String> = Vec::new();
         for name in TestSceneRegistry::scene_names() {
@@ -2328,7 +2257,7 @@ mod tests {
         }
     }
 
-    /// check_all and assert_layer0_invariants (legacy) must agree on all 25 scenes.
+    /// check_all and assert_layer0_invariants (legacy) must agree on every registered scene.
     #[test]
     fn check_all_agrees_with_legacy_assert_layer0_invariants() {
         let registry = TestSceneRegistry::new();
@@ -2555,7 +2484,6 @@ mod tests {
                 z_order: 99,
                 opacity: 1.0,
                 input_mode: InputMode::Capture,
-                sync_group: None,
                 present_at: None,
                 expires_at: None,
                 resource_budget: ResourceBudget::default(),
@@ -2641,7 +2569,6 @@ mod tests {
                     z_order: (i as u32) + 1,
                     opacity: 1.0,
                     input_mode: InputMode::Capture,
-                    sync_group: None,
                     present_at: None,
                     expires_at: None,
                     resource_budget: ResourceBudget::default(),
@@ -2934,30 +2861,6 @@ mod tests {
         let v = check_tile_bounds_within_display(&graph);
         assert!(!v.is_empty());
         assert_eq!(v[0].code, "tile_out_of_display");
-    }
-
-    // ── Sync group ─────────────────────────────────────────────────────────
-
-    /// WHEN sync group member tile doesn't exist THEN sync_group_member_tile_missing fires.
-    #[test]
-    fn sync_group_member_tile_missing_detected() {
-        use crate::types::{SyncCommitPolicy, SyncGroup, SyncGroupId};
-        let mut graph = make_graph();
-        let sg_id = SyncGroupId::new();
-        let phantom_tile_id = SceneId::new();
-        let mut sg = SyncGroup::new(
-            sg_id,
-            None,
-            "agent".into(),
-            SyncCommitPolicy::AllOrDefer,
-            3,
-            1_000_000,
-        );
-        sg.members.insert(phantom_tile_id);
-        graph.sync_groups.insert(sg_id, sg);
-        let v = check_sync_group_member_back_refs(&graph);
-        assert!(!v.is_empty());
-        assert_eq!(v[0].code, "sync_group_member_tile_missing");
     }
 
     // ── TextColorRun invariant tests [hud-r52v] ───────────────────────────────

@@ -5,7 +5,7 @@
 # (the runtime's CWD auto-resolution picks up ./tze_hud.toml first).
 #
 # On Windows, copy both tze_hud.exe and this file as tze_hud.toml to C:\tze_hud\.
-# The asset directories (widget_bundles/ and profiles/) must also be deployed there:
+# The widget_bundles/ directory must also be deployed there:
 #
 #   C:\tze_hud\
 #     tze_hud.exe
@@ -14,8 +14,6 @@
 #       gauge\
 #       progress-bar\
 #       status-indicator\
-#     profiles\
-#       notification-stack-exemplar\
 #
 # Usage:
 #   tze_hud --window-mode overlay
@@ -47,16 +45,23 @@ profile = "full-display"
 [widget_bundles]
 paths = ["widget_bundles"]
 
-# Component profile bundle directories scanned at startup.
-# The notification profile is isolated here so notification styling can evolve
-# without changing global token defaults for other zones.
-[component_profile_bundles]
-paths = ["profiles"]
-
-# Active component profile selection.
-# Only notification is selected for this app config.
-[component_profiles]
-notification = "notification-stack-exemplar"
+# Design tokens: overrides of the canonical defaults, shared by every zone,
+# widget SVG, and the portal. Rounded black-tinted notification cards with a
+# stronger type hierarchy.
+[design_tokens]
+"color.text.primary"                   = "#F5F7FA"
+"color.border.default"                 = "#6E7A91"
+"opacity.backdrop.opaque"              = "0.80"
+"typography.body.size"                 = "15"
+"typography.body.weight"               = "500"
+"spacing.padding.medium"               = "10"
+"border.radius.medium"                 = "14"
+"color.notification.urgency.low"       = "#000000"
+"color.notification.urgency.normal"    = "#0C1426"
+"color.notification.urgency.urgent"    = "#2A1E08"
+"color.notification.urgency.critical"  = "#450612"
+"typography.notification.body.scale"   = "0.90"
+"typography.notification.title.weight" = "700"
 
 # Main display tab — hosts all widget instances.
 [[tabs]]

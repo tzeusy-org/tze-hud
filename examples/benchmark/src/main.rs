@@ -14,7 +14,7 @@
 //!
 //! ## Calibration workloads
 //!
-//! 1. **CPU** — scene-graph mutations via `tze_hud_scene::calibration::calibrate()`.
+//! 1. **CPU** — scene-graph mutations via [`cpu_calibration::calibrate`].
 //! 2. **GPU** — fill/composition: render a fixed multi-tile scene at target
 //!    resolution, measure frames per second over a warmup + timed window.
 //! 3. **Upload** — texture upload: create and update texture-backed tiles
@@ -35,7 +35,9 @@
 // Shared types and serialization structures — always compiled.
 use serde::{Deserialize, Serialize};
 
-use tze_hud_scene::calibration::CalibrationResult;
+mod cpu_calibration;
+
+use cpu_calibration::CpuCalibrationResult;
 use tze_hud_telemetry::{HardwareFactors, SessionSummary, ValidationReport};
 
 #[cfg(feature = "headless")]
@@ -169,7 +171,7 @@ pub struct ScenarioResult {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CalibrationOutput {
     /// CPU scene-graph calibration result.
-    pub cpu: CalibrationResult,
+    pub cpu: CpuCalibrationResult,
     /// GPU fill/composition calibration result.  None if --cpu-only.
     pub gpu: Option<GpuCalibrationResult>,
     /// Upload calibration result.  None if --cpu-only.
@@ -207,9 +209,9 @@ mod headless_impl {
 
     use tze_hud_telemetry::FrameTelemetry;
 
+    use crate::cpu_calibration::calibrate as calibrate_cpu;
     use tze_hud_input::{PointerEvent, PointerEventKind};
     use tze_hud_runtime::headless::{HeadlessConfig, HeadlessRuntime};
-    use tze_hud_scene::calibration::calibrate as calibrate_cpu;
     use tze_hud_scene::graph::SceneGraph;
     use tze_hud_scene::mutation::{MutationBatch, SceneMutation};
     use tze_hud_scene::types::{
@@ -1880,12 +1882,10 @@ mod tests {
 
     #[test]
     fn test_benchmark_output_serializes_round_trip() {
-        let cpu = CalibrationResult {
+        let cpu = CpuCalibrationResult {
             speed_factor: 1.0,
             scene_ops_per_sec: 550_000.0,
             hash_throughput_mbps: 800.0,
-            gpu_fill_factor: None,
-            texture_upload_factor: None,
             timestamp: 1_700_000_000,
             calibration_duration_us: 100_000,
         };

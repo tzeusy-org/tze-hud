@@ -10,7 +10,6 @@ members = [
     "crates/tze_hud_mcp",
     "crates/tze_hud_config",
     "crates/tze_hud_resource",
-    "crates/tze_hud_validation",
     "crates/tze_hud_widget",
     "crates/tze_hud_projection",
     "app/tze_hud_app",

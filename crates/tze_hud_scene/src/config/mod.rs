@@ -18,7 +18,6 @@ pub enum ConfigErrorCode {
     MultipleDefaultTabs,
     UnknownLayout,
     UnknownProfile,
-    MobileProfileNotExercised,
     HeadlessNotExtendable,
     ProfileExtendsConflictsWithProfile,
     ProfileBudgetEscalation,
@@ -45,28 +44,6 @@ pub enum ConfigErrorCode {
     InvalidTokenKey,
     /// A token value string could not be parsed into the expected format.
     TokenValueParseError,
-    /// A profile's `component_type` field does not match any known v1 component type.
-    ProfileUnknownComponentType,
-    /// Two profile directories declare the same profile name.
-    ConfigProfileDuplicateName,
-    /// A configured component profile bundle path does not exist on disk.
-    ConfigProfilePathNotFound,
-    /// A profile's zone override file governs a zone not owned by the profile's component type.
-    ProfileZoneOverrideMismatch,
-    /// A zone override field has an invalid value or type.
-    ProfileInvalidZoneOverride,
-    /// A `{{token.key}}` reference in a zone override field could not be resolved.
-    ProfileUnresolvedToken,
-    /// A profile's effective RenderingPolicy fails the component type's readability check.
-    ///
-    /// Wire code: `PROFILE_READABILITY_VIOLATION`
-    ProfileReadabilityViolation,
-    /// A `[component_profiles]` key is not a recognized v1 component type name.
-    ConfigUnknownComponentType,
-    /// A `[component_profiles]` value does not match any loaded profile.
-    ConfigUnknownComponentProfile,
-    /// A `[component_profiles]` entry maps a component type to a profile of a different type.
-    ConfigProfileTypeMismatch,
     Other(String),
 }
 
@@ -225,7 +202,6 @@ pub struct ResolvedConfig {
 /// - Accept only TOML with parse errors including line/column.
 /// - Search configuration file chain (CLI → env → cwd → XDG) in order.
 /// - Enforce built-in profile budget values exactly.
-/// - Reject `profile = "mobile"` with `CONFIG_MOBILE_PROFILE_NOT_EXERCISED`.
 /// - Prevent budget escalation in custom profiles.
 /// - Validate capability names against the canonical v1 vocabulary.
 /// - Collect ALL validation errors before reporting.
@@ -274,7 +250,6 @@ pub const CANONICAL_CAPABILITIES: &[&str] = &[
     "create_tiles",
     "modify_own_tiles",
     "manage_tabs",
-    "manage_sync_groups",
     "upload_resource",
     "register_widget_asset",
     "read_scene_topology",

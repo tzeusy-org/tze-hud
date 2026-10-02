@@ -547,7 +547,7 @@ mod tests {
     /// ACTIVATE local_ack_us must be within the 4ms budget.
     #[test]
     fn activate_local_ack_within_4ms() {
-        use tze_hud_scene::calibration::{budgets, test_budget};
+        use tze_hud_scene::perf_budget::{budgets, test_budget};
 
         let (mut scene, _, tile_id, node_id) = setup_scene_with_focused_node();
         let focus = FocusOwner::Node { tile_id, node_id };

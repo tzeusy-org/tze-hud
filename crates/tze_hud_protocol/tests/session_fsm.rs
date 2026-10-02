@@ -9,7 +9,7 @@
 use tze_hud_protocol::proto::EventBatch;
 use tze_hud_protocol::proto::session::server_message::Payload as ServerPayload;
 use tze_hud_protocol::proto::session::{
-    BackpressureSignal, CapabilityNotice, DegradationNotice, EmitSceneEventResult, Heartbeat,
+    BackpressureSignal, CapabilityNotice, DegradationNotice, EmitSceneEventResult,
     InputCaptureResponse, InputFocusResponse, LeaseResponse, LeaseStateChange, MutationResult,
     RuntimeError, SceneDelta, SceneSnapshot, SessionError, SessionEstablished, SessionResumeResult,
     SessionResumed, SessionSuspended, SubscriptionChangeResult, ZonePublishResult,
@@ -389,17 +389,4 @@ fn scene_state_payloads_are_state_stream() {
             "payload should be StateStream"
         );
     }
-}
-
-/// WHEN Heartbeat payload THEN classified as Ephemeral.
-#[test]
-fn heartbeat_is_ephemeral() {
-    let payload = ServerPayload::Heartbeat(Heartbeat {
-        timestamp_mono_us: 12345,
-    });
-    assert_eq!(
-        classify_server_payload(&payload),
-        TrafficClass::Ephemeral,
-        "Heartbeat must be Ephemeral (droppable, latest-wins)"
-    );
 }

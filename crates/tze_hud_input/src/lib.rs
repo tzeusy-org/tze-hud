@@ -2271,7 +2271,7 @@ mod tests {
 
     #[test]
     fn test_local_ack_under_4ms() {
-        use tze_hud_scene::calibration::{budgets, test_budget};
+        use tze_hud_scene::perf_budget::{budgets, test_budget};
 
         let (mut scene, _, _) = setup_scene_with_hit_region();
         let mut processor = InputProcessor::new();

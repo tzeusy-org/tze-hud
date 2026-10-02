@@ -75,8 +75,7 @@ then add more (for example, a remote MacBook target) under new `target_id` keys.
 - `examples/widget_publish_load_harness` (Rust — **canonical gRPC widget benchmark**)
   - Compiled Rust binary; build with `cargo build --release -p widget_publish_load_harness`.
   - Supports `--mode burst|paced`, `--publish-count`, `--duration-s`, `--target-rate-rps`,
-    `--target-p99-rtt-us`, `--target-throughput-rps`, `--normalization-mapping-approved`,
-    `--layer4-output-root` (Layer 4 artifact emission), and full target registry via
+    `--target-p99-rtt-us`, `--target-throughput-rps`, `--normalization-mapping-approved`, and full target registry via
     `--targets-file` (default: `./targets/publish_load_targets.toml`).
   - Outputs a JSON artifact to `benchmarks/publish-load/` by default.
 - `scripts/grpc_widget_publish_perf.py` (Python — secondary alternative)
@@ -220,8 +219,7 @@ These fields are persisted in `results.csv` for auditable historical comparisons
 
 The Rust harness (`examples/widget_publish_load_harness`) uses structured thresholds via
 `--target-p99-rtt-us` and `--target-throughput-rps`, with traceability embedded in the
-emitted JSON artifact (RFC-0005 / `publish-load-harness` spec ID) and Layer 4 artifact
-output (via `--layer4-output-root`).
+emitted JSON artifact.
 
 ## Notes
 

@@ -227,7 +227,7 @@ fn pointer_down_at_refresh_returns_node_hit_with_refresh_interaction_id() {
 /// Returns `true` when wall-clock / p99 latency hard assertions should run.
 ///
 /// Set `TZE_HUD_PERF_ASSERT=1` to enable.  On the standard `test-unit` / blocking
-/// CI lane this is unset; calibrated budget assertions are skipped to avoid
+/// CI lane this is unset; budget assertions are skipped to avoid
 /// flakes from scheduler noise on shared runners.
 fn perf_assert_enabled() -> bool {
     std::env::var("TZE_HUD_PERF_ASSERT")
@@ -242,7 +242,7 @@ fn perf_assert_enabled() -> bool {
 #[test]
 fn pressed_state_set_within_4ms_p99_on_refresh() {
     use std::time::Instant;
-    use tze_hud_scene::calibration::{budgets, test_budget};
+    use tze_hud_scene::perf_budget::{budgets, test_budget};
 
     let ack_budget = test_budget(budgets::INPUT_ACK_BUDGET_US);
 
@@ -292,11 +292,11 @@ fn pressed_state_set_within_4ms_p99_on_refresh() {
     durations.sort_unstable();
     let p99 = durations[98]; // 99th percentile of 100 samples
 
-    // Timing assertion: gated — calibrated wall-clock budget.  (hud-94vm5)
+    // Timing assertion: gated — wall-clock budget.  (hud-94vm5)
     if perf_assert_enabled() {
         assert!(
             p99 < ack_budget,
-            "pressed state local_ack p99 was {}µs; calibrated budget is {}µs (base: {}µs)",
+            "pressed state local_ack p99 was {}µs; budget is {}µs (base: {}µs)",
             p99,
             ack_budget,
             budgets::INPUT_ACK_BUDGET_US,
@@ -304,7 +304,7 @@ fn pressed_state_set_within_4ms_p99_on_refresh() {
     } else {
         eprintln!(
             "[SKIP-TIMING] pressed_state local_ack p99={p99}µs; \
-             set TZE_HUD_PERF_ASSERT=1 to enforce calibrated budget"
+             set TZE_HUD_PERF_ASSERT=1 to enforce budget"
         );
     }
 }

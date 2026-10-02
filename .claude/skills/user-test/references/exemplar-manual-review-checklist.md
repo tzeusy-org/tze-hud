@@ -26,7 +26,6 @@ Reviewed: 2026-04-09
 **Type:** Zone | **Contention:** latest-wins | **Position:** bottom-center
 
 **Spec:** `openspec/changes/exemplar-subtitle/`
-**Profile:** `profiles/exemplar-subtitle/`
 
 ### Design Review
 
@@ -57,7 +56,6 @@ Reviewed: 2026-04-09
 **Type:** Zone | **Contention:** stack | **Position:** top of screen
 
 **Spec:** `openspec/changes/exemplar-alert-banner/`
-**Profile:** `profiles/exemplar-alert-banner/`
 
 ### Design Review
 
@@ -85,7 +83,6 @@ Reviewed: 2026-04-09
 **Type:** Zone | **Contention:** stack | **Position:** configurable
 
 **Spec:** `openspec/changes/exemplar-notification/`
-**Profile:** `profiles/notification-stack-exemplar/`
 
 ### Design Review
 
@@ -117,7 +114,6 @@ Basic rendering confirmed working (colored backdrops, text, stacking, TTL expiry
 **Type:** Zone | **Contention:** merge-by-key | **Position:** bottom edge
 
 **Spec:** `openspec/changes/exemplar-status-bar/`
-**Profile:** `profiles/exemplar-status-bar/`
 
 ### Design Review
 

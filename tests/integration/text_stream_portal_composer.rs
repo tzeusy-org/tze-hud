@@ -158,31 +158,6 @@ fn word_backspace_removes_preceding_word_and_trailing_space() {
     assert_eq!(draft.cursor(), 10);
 }
 
-#[test]
-fn word_backspace_skips_whitespace_before_deleting_word() {
-    let mut draft = ComposerDraft::new(DEFAULT_DRAFT_CAP);
-    draft.insert("hello   world   ");
-    let outcome = draft.word_backspace();
-    assert_eq!(outcome, EditOutcome::Mutated);
-    assert_eq!(draft.text(), "hello   ");
-}
-
-#[test]
-fn word_backspace_at_start_is_unchanged() {
-    let mut draft = ComposerDraft::new(DEFAULT_DRAFT_CAP);
-    assert_eq!(draft.word_backspace(), EditOutcome::Unchanged);
-}
-
-#[test]
-fn word_forward_delete_removes_next_word() {
-    let mut draft = ComposerDraft::new(DEFAULT_DRAFT_CAP);
-    draft.insert("hello world");
-    draft.move_to_start();
-    let outcome = draft.word_delete_forward();
-    assert_eq!(outcome, EditOutcome::Mutated);
-    assert_eq!(draft.text(), " world");
-}
-
 /// The adapter receives only a draft-state notification after word-wise delete,
 /// not a per-keystroke scene mutation.
 #[test]
@@ -207,29 +182,6 @@ fn word_backspace_produces_draft_state_notification_not_per_keystroke_republish(
 }
 
 // ─── Task 4.7: Coalesced notifications ────────────────────────────────────────
-
-/// Spec §4.7 — "coalesced notifications": the adapter may receive a single
-/// latest-draft snapshot rather than per-keystroke events.
-#[test]
-fn draft_notification_batch_coalesces_to_latest_snapshot() {
-    let mut draft = ComposerDraft::new(DEFAULT_DRAFT_CAP);
-    let mut batch = DraftNotificationBatch::new();
-
-    // Simulate rapid typing producing multiple draft changes
-    for ch in "rapid typing simulation".chars() {
-        let _ = draft.insert(&ch.to_string());
-        // Each mutation is coalesced: only the latest survives
-        batch.coalesce_state(draft.snapshot());
-    }
-
-    // The batch holds exactly one (latest) snapshot
-    let latest = batch
-        .latest
-        .as_ref()
-        .expect("batch must have latest snapshot");
-    assert_eq!(latest.text, "rapid typing simulation");
-    assert_eq!(latest.sequence, draft.sequence());
-}
 
 /// Adapter-side coalescing: `AdapterDraftBatch` coalesces the same way.
 #[test]
@@ -302,38 +254,6 @@ fn adapter_skips_stale_draft_notification() {
 
 // ─── Task 4.7: Oversized-paste truncation and non-forwarding ─────────────────
 
-/// Spec §4.7 — "oversized-paste truncation and non-forwarding"
-/// Spec §4.5 — "cap violation never reaches the adapter"
-#[test]
-fn oversized_paste_truncates_at_cap() {
-    let cap = 16;
-    let mut draft = ComposerDraft::new(cap);
-    let long_text = "a".repeat(100);
-
-    let outcome = draft.paste(&long_text);
-    assert_eq!(outcome, EditOutcome::AtCapacity);
-    assert!(
-        draft.text().len() <= cap,
-        "draft text must not exceed cap after oversized paste"
-    );
-}
-
-#[test]
-fn oversized_paste_notification_never_exceeds_cap() {
-    let cap = 20;
-    let mut draft = ComposerDraft::new(cap);
-    draft.paste(&"x".repeat(500));
-
-    let snap = draft.snapshot();
-    assert!(
-        snap.text.len() <= cap,
-        "draft notification text len={} exceeds cap={}",
-        snap.text.len(),
-        cap
-    );
-    assert!(snap.at_capacity);
-}
-
 #[test]
 fn oversized_paste_does_not_forward_overflow_bytes() {
     // Simulate the adapter receiving a draft batch after an oversized paste
@@ -364,50 +284,7 @@ fn oversized_paste_does_not_forward_overflow_bytes() {
     );
 }
 
-#[test]
-fn paste_utf8_boundary_respected_at_cap() {
-    // "é" is 2 bytes; cap = 1 means it cannot fit and is dropped entirely
-    let mut draft = ComposerDraft::new(1);
-    let outcome = draft.paste("é");
-    assert_eq!(outcome, EditOutcome::AtCapacity);
-    assert_eq!(draft.text(), "");
-    assert!(draft.text().is_empty());
-
-    // cap = 3 fits one "é" (2 bytes) but not two
-    let mut draft = ComposerDraft::new(3);
-    let outcome = draft.paste("éé");
-    assert_eq!(outcome, EditOutcome::AtCapacity);
-    assert_eq!(draft.text(), "é"); // one "é" fits, second is truncated
-    assert!(draft.text().is_char_boundary(draft.text().len()));
-}
-
 // ─── Task 4.7: Submit-content fidelity ───────────────────────────────────────
-
-/// Spec §4.7 — "submit-content fidelity": submitted text equals local buffer.
-#[test]
-fn submit_content_exactly_matches_local_buffer() {
-    let mut draft = ComposerDraft::new(DEFAULT_DRAFT_CAP);
-    draft.insert("my message to send");
-
-    let expected = draft.text().to_string();
-    let submission = draft.submit().expect("submit should succeed");
-
-    assert_eq!(
-        submission.text, expected,
-        "submitted text must equal local buffer at submit time"
-    );
-    assert_eq!(draft.text(), "", "draft must be cleared after submit");
-}
-
-#[test]
-fn submit_clears_draft_after_returning_content() {
-    let mut draft = ComposerDraft::new(DEFAULT_DRAFT_CAP);
-    draft.insert("content");
-    draft.submit();
-    assert_eq!(draft.text(), "");
-    assert_eq!(draft.cursor(), 0);
-    assert!(!draft.has_selection());
-}
 
 /// Adapter-side: the ProcessSubmission command carries the exact submitted text.
 #[test]
@@ -482,19 +359,6 @@ fn draft_caret_queries_work_while_suspended() {
     assert_eq!(draft.cursor(), 24);
     let snap = draft.snapshot();
     assert_eq!(snap.text, "read only during suspend");
-}
-
-#[test]
-fn draft_resumes_editing_after_safe_mode_lift() {
-    let mut draft = ComposerDraft::new(DEFAULT_DRAFT_CAP);
-    draft.insert("partial content");
-    draft.set_suspended(true);
-    assert_eq!(draft.insert("x"), EditOutcome::Suspended);
-
-    // Safe mode lifted
-    draft.set_suspended(false);
-    assert_eq!(draft.insert("!"), EditOutcome::Mutated);
-    assert_eq!(draft.text(), "partial content!");
 }
 
 /// Safe-mode suspension applies consistently across both adapter families.

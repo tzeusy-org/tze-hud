@@ -17,7 +17,6 @@
 //!
 //! **rig-umgy** (Display profile resolution):
 //! - `extends = "headless"` rejection (§Display Profile headless)
-//! - Mobile profile rejection (§Mobile Profile Schema-Reserved)
 //! - Profile budget escalation prevention (§Profile Budget Escalation Prevention)
 //! - Profile capability escalation prevention (§Profile Budget Escalation Prevention)
 //! - Profile/extends conflict detection (§Profile Extends Conflict Detection)
@@ -334,29 +333,6 @@ impl ConfigLoader for TzeHudConfig {
         // ── (14) Design token key validation ──────────────────────────────────
         tokens::validate_design_tokens(&self.raw, &mut errors);
 
-        // ── (15) [component_profiles] key validation ──────────────────────────
-        // At parse/validation time we can only check that the keys are known
-        // component type names. Profile name resolution (look up by name,
-        // check type match) requires loaded profiles and is deferred to startup.
-        if let Some(ref cp) = self.raw.component_profiles {
-            use crate::component_types::ComponentType;
-            for ct_name in cp.0.keys() {
-                if ComponentType::from_name(ct_name).is_none() {
-                    errors.push(ConfigError {
-                        code: ConfigErrorCode::ConfigUnknownComponentType,
-                        field_path: format!("component_profiles.{ct_name}"),
-                        expected: "a recognized v1 component type name (e.g. 'subtitle', 'notification', 'status-bar', 'alert-banner', 'ambient-background', 'pip')".into(),
-                        got: ct_name.clone(),
-                        hint: format!(
-                            "'{ct_name}' is not a recognized v1 component type; \
-                             valid names are: subtitle, notification, status-bar, \
-                             alert-banner, ambient-background, pip"
-                        ),
-                    });
-                }
-            }
-        }
-
         errors
     }
 
@@ -477,24 +453,14 @@ fn parse_toml_location(msg: &str) -> (u32, u32) {
 fn validate_profile(profile: &str, errors: &mut Vec<ConfigError>) {
     match profile {
         "full-display" | "headless" | "auto" | "custom" => {}
-        "mobile" => {
-            errors.push(ConfigError {
-                code: ConfigErrorCode::MobileProfileNotExercised,
-                field_path: "runtime.profile".into(),
-                expected: "\"full-display\", \"headless\", \"auto\", or \"custom\"".into(),
-                got: "\"mobile\"".into(),
-                hint: "mobile profile is schema-reserved; use \"full-display\" or \"headless\""
-                    .into(),
-            });
-        }
         other => {
             errors.push(ConfigError {
                 code: ConfigErrorCode::UnknownProfile,
                 field_path: "runtime.profile".into(),
-                expected: "\"full-display\", \"headless\", \"auto\", \"custom\", or \"mobile\"".into(),
+                expected: "\"full-display\", \"headless\", \"auto\", or \"custom\"".into(),
                 got: format!("{other:?}"),
                 hint: format!(
-                    "unknown profile {other:?}; valid values: full-display, headless, auto, custom (mobile is schema-reserved)"
+                    "unknown profile {other:?}; valid values: full-display, headless, auto, custom"
                 ),
             });
         }
@@ -782,14 +748,11 @@ mod unit_tests {
     // ── profile validation ────────────────────────────────────────────────────
 
     #[test]
-    fn test_validate_profile_mobile_gives_mobile_error() {
+    fn test_validate_profile_mobile_is_unknown() {
         let mut errors = Vec::new();
         validate_profile("mobile", &mut errors);
         assert_eq!(errors.len(), 1);
-        assert!(matches!(
-            errors[0].code,
-            ConfigErrorCode::MobileProfileNotExercised
-        ));
+        assert!(matches!(errors[0].code, ConfigErrorCode::UnknownProfile));
     }
 
     #[test]
