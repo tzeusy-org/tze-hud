@@ -1,8 +1,7 @@
 [
   {
-    "zone_name": "subtitle",
+    "zone": "subtitle",
     "content": "This subtitle expires in 3 seconds",
-    "ttl_us": 3000000,
-    "namespace": "exemplar-test"
+    "ttl_ms": 3000
   }
 ]

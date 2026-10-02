@@ -53,30 +53,22 @@ PROJECTION_ID="${PROJECTION_ID:-portal-trial-$(date +%Y%m%d-%H%M%S)}"
 GREETING="${GREETING:-Portal connectivity trial '$PROJECTION_ID' is live on $TZE_HUD_TEST_HOST. Type in the composer; input is picked up and auto-acked.}"
 
 echo "portal_trial: attaching projection '$PROJECTION_ID' to $HUD_MCP_URL" >&2
-python3 "$PORTAL_CLIENT" attach \
-  --projection-id "$PROJECTION_ID" \
+python3 "$PORTAL_CLIENT" publish \
+  --id "$PROJECTION_ID" \
   --display-name "Portal trial ($PROJECTION_ID)" \
-  --workspace-hint "$(pwd)" \
-  --repository-hint tze_hud \
-  --icon-profile claude >&2
-
-python3 "$PORTAL_CLIENT" publish --projection-id "$PROJECTION_ID" \
-  --text "$GREETING" --logical-unit-id trial-greeting >&2
-python3 "$PORTAL_CLIENT" status --projection-id "$PROJECTION_ID" \
-  --state active --text "Awaiting operator input" >&2
+  --state active \
+  --expects-reply \
+  --text "$GREETING" >&2
 
 rc=0
 if [ -z "$NO_POLL" ]; then
   echo "portal_trial: polling for operator input ($ROUNDS x ${WAIT_MS}ms)" >&2
-  python3 "$PORTAL_CLIENT" poll --projection-id "$PROJECTION_ID" \
-    --rounds "$ROUNDS" --wait-ms "$WAIT_MS" --ack handled \
-    --ack-message "received by portal_trial" || rc=$?
+  python3 "$PORTAL_CLIENT" poll --rounds "$ROUNDS" --wait-ms "$WAIT_MS" --ack || rc=$?
 fi
 
 if [ -n "$DETACH_AFTER" ]; then
-  python3 "$PORTAL_CLIENT" detach --projection-id "$PROJECTION_ID" \
-    --reason "portal_trial complete" >&2
+  python3 "$PORTAL_CLIENT" clear --id "$PROJECTION_ID" --reason "portal_trial complete" >&2
 else
-  echo "portal_trial: projection '$PROJECTION_ID' left attached — continue with portal_client.py, detach when done" >&2
+  echo "portal_trial: projection '$PROJECTION_ID' left attached — continue with portal_client.py, clear when done" >&2
 fi
 exit "$rc"

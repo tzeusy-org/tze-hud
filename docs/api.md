@@ -1,8 +1,8 @@
 # API
 
-**Status: proposal (T5).** This is the target API. Each slice in "Plan"
-moves code toward it, and this file becomes the reference once the slices
-land. The PR that introduced it holds the measurements of today's surface.
+**Status:** the MCP section is implemented (T5 S3) and is the reference. The
+gRPC section is still a proposal: each remaining slice in "Plan" moves code
+toward it.
 
 ## Shape
 
@@ -31,14 +31,17 @@ MCP `tools/list` has five tools. The resident tile API is gRPC only.
 
 ## MCP tools
 
-Agents never send geometry, styling, or z-order. Times are milliseconds,
-named `*_ms`, everywhere.
+Standard MCP over JSON-RPC 2.0 (HTTP POST): `initialize`,
+`notifications/initialized` (no response), `tools/list`, and `tools/call`.
+There are no other methods. A result is one text content block of compact
+JSON. Agents never send geometry, styling, or z-order. Times are
+milliseconds, named `*_ms`, everywhere.
 
 **`hud_surfaces`** has no params. It returns one compact entry per surface:
 
 ```json
 {"surfaces":[
-  {"s":"zone:subtitle","accepts":"text","held":false},
+  {"s":"zone:subtitle","accepts":"text"},
   {"s":"zone:notification","accepts":"notification","held":true,"expires_in_ms":4200},
   {"s":"widget:gauge","params":{"level":"f32 0..1","label":"string"}},
   {"s":"portal:claude-main","state":"attached","pending_input":1}
@@ -46,22 +49,30 @@ named `*_ms`, everywhere.
 ```
 
 It includes nothing the model doesn't act on: no UUIDs, geometry, or
-timestamps. Holdings are the entries with `held: true`.
+timestamps. Holdings are the entries with `held: true`; `held` is omitted
+otherwise.
 
-**`hud_publish`** `{surface*, content | params, ttl_ms?, key?, status?, expects_reply?}`
+**`hud_publish`** `{surface*, content | params, ttl_ms?, delay_ms?, key?, status?, expects_reply?, display_name?}`
 
 - Zone: `content` is a string, or a typed object for structured zones
-  (`notification` with `title`, `body`, `urgency`, `actions`). `key` is the
-  merge key for stack zones.
+  (`notification` with `title`, `body`, `urgency`, `actions`). `type` may be
+  omitted; the runtime infers it from what the zone accepts. `key` is the
+  merge key.
 - Widget: `params` is the typed parameter map.
 - Portal: the first publish to `portal:<id>` attaches (`display_name` is
   optional). `content` is the output text, `status` is the lifecycle state,
-  and `expects_reply` arms the composer.
-- `ttl_ms` defaults per surface type. 0 means held until cleared or until the
-  agent disconnects.
+  and `expects_reply` arms the composer. `key` is the portal coalesce key.
+- `ttl_ms` defaults to 60000 for zones; widgets are durable unless given one.
+  0 means held until cleared.
+- `delay_ms` (zones, ≤ 300000) holds the content until then (invariant 1);
+  the expiry counts from presentation.
 - Returns `{"ok":true,"expires_in_ms":8000}`. It doesn't echo the request.
 
 **`hud_hold`** `{surface*, ttl_ms*}` extends a holding, for any surface type.
+On a portal, `ttl_ms` keeps it (and its transcript) attached for that long,
+or until `hud_clear` when 0, even with no other calls. Without a hold, a
+portal is degraded after 30 s with no publish, poll, or hold, and reclaimed
+30 s later.
 
 **`hud_clear`** `{surface*, reason?}` releases a zone publication, a widget
 instance, or a portal (detach).
@@ -94,11 +105,31 @@ allow = ["zone:*", "widget:gauge", "portal", "tiles"]
 
 ### Errors
 
-Every failure is a tool result with `isError: true` and
-`{"code":"ZONE_NOT_FOUND","hint":"call hud_surfaces; known zones: subtitle, notification"}`.
+Every tool failure is a tool result with `isError: true` whose text is
+`{"code":"ZONE_NOT_FOUND","hint":"no zone subtitles; known: notification-area, subtitle"}`.
+Only an unusable request (bad JSON, unknown method or tool, missing or
+unknown PSK) is a JSON-RPC error.
 
-- Codes are a closed, documented set shared with gRPC (invariant 8).
 - The message isn't repeated. The hint names the next call.
+- Codes are a closed set (invariant 8; `crates/tze_hud_mcp/src/error.rs`
+  `ERROR_CODES`, kept in sync with this list by a test). S4 moves gRPC onto
+  the same set.
+
+| Code | Meaning |
+|---|---|
+| `INVALID_ARGUMENT` | Unknown field, wrong type, or bad surface string |
+| `NOT_ALLOWED` | The agent's `allow` list doesn't cover the surface |
+| `NOT_HELD` | `hud_hold` with nothing to extend, or `hud_clear` on a portal that isn't attached |
+| `ZONE_NOT_FOUND` | No such zone |
+| `WIDGET_NOT_FOUND` | No such widget instance |
+| `WIDGET_PARAMETER_INVALID` | Unknown widget param, or a value of the wrong type or range |
+| `CONTENT_REJECTED` | The zone doesn't accept this content, or is full |
+| `LEASE_NOT_ACTIVE` | The agent's lease lapsed mid-call; retry |
+| `SAFE_MODE_ACTIVE` | The human paused agents |
+| `TIMESTAMP_TOO_FUTURE` | `delay_ms` beyond the scheduling horizon |
+| `UNAVAILABLE` | The portal service isn't running |
+| `INTERNAL` | Runtime fault |
+| `PROJECTION_NOT_FOUND`, `PROJECTION_ALREADY_ATTACHED`, `PROJECTION_UNAUTHORIZED`, `PROJECTION_TOKEN_EXPIRED`, `PROJECTION_INVALID_ARGUMENT`, `PROJECTION_OUTPUT_TOO_LARGE`, `PROJECTION_INPUT_TOO_LARGE`, `PROJECTION_INPUT_QUEUE_FULL`, `PROJECTION_RATE_LIMITED`, `PROJECTION_STATE_CONFLICT`, `PROJECTION_HUD_UNAVAILABLE`, `PROJECTION_INTERNAL_ERROR` | Portal authority rejections, passed through |
 
 ## gRPC (resident sessions)
 
@@ -134,7 +165,7 @@ are no compatibility shims; removed proto fields are `reserved`.
 | S0 | **Fix invariant breaks found by the audit.** (a) A gRPC disconnect never calls `disconnect_lease`, so there is no orphan badge and no grace-expiry reclaim; only the TTL frees the lease (invariant 4; the tests drive the scene directly). (b) gRPC drops `TimingHints` after validating them, and `ZonePublish` ignores `ttl_us`, `present_at`, and `expires_at` (invariant 1). Add end-to-end tests over the gRPC path. |
 | S1 | **Remove dead wire.** Messages that are never sent or never handled: `SceneDelta`, `BackpressureSignal`, `RuntimeTelemetryFrame`, `TelemetryFrame`, `SetImePosition`, `EmitSceneEvent` (never delivered), and `Zone/WidgetRegistry*`. Also `events_legacy.proto`, fields that are never read, duplicate `LeaseStateChange`, deprecated `pre_shared_key`, `DegradationLevel` cut to two values, error enum values that are never set, the dead `SessionConfig`, and three copies of the capability vocabulary. |
 | S2 | **Identity and allowlist.** Per-agent PSK; `allow` replaces the 16-entry capability vocabulary and the resident principal; namespace comes from identity; the portal owner token leaves model context. |
-| S3 | **MCP verbs.** Five tools replace 22. One error shape. The token-footprint benchmark adds `tools/list`, discovery, and errors. |
+| S3 | **MCP verbs.** Done: five tools replace 22. One error shape. The token-footprint benchmark adds `tools/list`, discovery, and errors. |
 | S4 | **gRPC verbs.** `Publish`/`Clear`/`Hold`/`ClaimTile`/`Reclaimed`/one `Result`. Collapse the six `HudSessionImpl` constructors into one deps struct. |
 | S5 | This file loses "proposal"; `scope.md` marks T5 done. |
 
@@ -155,16 +186,25 @@ slices:
 
 ## Token budgets
 
-`token_footprint` enforces these in CI (o200k tokens, request + response):
+`token_footprint` (CI) records o200k tokens per flow two ways: **wire** (the
+full JSON-RPC request and response bodies) and **model-visible** (the tool
+name and arguments plus the result text: what enters the model's context).
+The budgets are enforced on model-visible tokens; the JSON-RPC envelope adds
+about 50 tokens per call that the model never sees. Both measures are
+baselined against regressions.
 
-| Measure | Today | Target |
-|---|---|---|
-| `tools/list` | 4,418 | ≤ 900 |
-| Discover (default scene) | ~430 (`list_zones`) | ≤ 150 |
-| Zone publish | ~197 | ≤ 80 |
-| Widget publish | ~168 | ≤ 80 |
-| Portal: attach, publish, poll+ack, detach | ~575 over 5 round trips | ≤ 250 over 3 |
-| Any error | up to ~212 | ≤ 60 |
+| Measure | Before T5 (wire) | Wire now | Model-visible now | Budget (model-visible) |
+|---|---|---|---|---|
+| `tools/list` | 4,418 | 495 | 458 | ≤ 900 |
+| Discover (default scene) | ~430 (`list_zones`) | 181 | 113 | ≤ 150 |
+| Zone publish | ~197 | 90 | 39 | ≤ 80 |
+| Widget publish | ~168 | 73 | 22 | ≤ 80 |
+| Portal: attach+publish, poll, ack, clear | ~575 over 5 round trips | 319 over 4 | 113 over 4 | ≤ 250 |
+| Error | up to ~212 | 101 | 45 | ≤ 60 |
+
+The portal flow takes 4 round trips in the canonical fixture because the
+first poll has nothing to ack; in a steady loop each `hud_input` both acks
+the previous items and polls, so poll+ack is one round trip.
 
 ## Decisions (2026-10-02)
 

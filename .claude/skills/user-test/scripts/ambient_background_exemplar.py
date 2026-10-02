@@ -76,13 +76,22 @@ RAPID_COLORS: list[tuple[str, dict[str, float]]] = [
 def rpc_call(
     url: str,
     token: str,
-    method: str,
-    params: dict[str, Any],
+    tool: str,
+    arguments: dict[str, Any],
     request_id: int,
 ) -> dict[str, Any]:
-    """Send a single JSON-RPC 2.0 request and return the parsed response."""
+    """Call one MCP tool (``tools/call``).
+
+    Returns ``{"result": <decoded result>}`` or ``{"error": <decoded error>}``;
+    a tool error decodes to ``{"code": ..., "hint": ...}``.
+    """
     body = json.dumps(
-        {"jsonrpc": "2.0", "id": request_id, "method": method, "params": params}
+        {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "method": "tools/call",
+            "params": {"name": tool, "arguments": arguments},
+        }
     ).encode("utf-8")
     req = urllib.request.Request(
         url=url,
@@ -94,7 +103,12 @@ def rpc_call(
         method="POST",
     )
     with urllib.request.urlopen(req, timeout=20) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+        envelope = json.loads(resp.read().decode("utf-8"))
+    if "error" in envelope:
+        return {"error": envelope["error"]}
+    result = envelope["result"]
+    decoded = json.loads(result["content"][0]["text"])
+    return {"error": decoded} if result.get("isError") else {"result": decoded}
 
 
 # ---------------------------------------------------------------------------
@@ -111,16 +125,15 @@ def publish_solid_color(
     ttl_us: int = 0,
     namespace: str = "ambient-bg-test",
 ) -> dict[str, Any]:
-    """Publish a solid_color background via MCP publish_to_zone."""
+    """Publish a solid_color background via MCP hud_publish."""
     content: dict[str, Any] = {"type": "solid_color", **color}
     params: dict[str, Any] = {
-        "zone_name": ZONE_NAME,
+        "surface": f"zone:{ZONE_NAME}",
         "content": content,
-        "namespace": namespace,
     }
     if ttl_us > 0:
-        params["ttl_us"] = ttl_us
-    response = rpc_call(url, token, "publish_to_zone", params, req_id)
+        params["ttl_ms"] = ttl_us // 1000
+    response = rpc_call(url, token, "hud_publish", params, req_id)
     ok = "error" not in response
     status = "ok" if ok else f"ERR: {response.get('error')}"
     r, g, b, a = color["r"], color["g"], color["b"], color["a"]
@@ -138,14 +151,13 @@ def publish_static_image(
     resource_id: str,
     namespace: str = "ambient-bg-test",
 ) -> dict[str, Any]:
-    """Publish a static_image background via MCP publish_to_zone."""
+    """Publish a static_image background via MCP hud_publish."""
     content: dict[str, Any] = {"type": "static_image", "resource_id": resource_id}
     params: dict[str, Any] = {
-        "zone_name": ZONE_NAME,
+        "surface": f"zone:{ZONE_NAME}",
         "content": content,
-        "namespace": namespace,
     }
-    response = rpc_call(url, token, "publish_to_zone", params, req_id)
+    response = rpc_call(url, token, "hud_publish", params, req_id)
     ok = "error" not in response
     status = "ok" if ok else f"ERR: {response.get('error')}"
     print(
@@ -156,8 +168,8 @@ def publish_static_image(
 
 
 def list_zones(url: str, token: str, req_id: int) -> dict[str, Any]:
-    """Query the list_zones endpoint and return the parsed response."""
-    return rpc_call(url, token, "list_zones", {}, req_id)
+    """Query the hud_surfaces tool and return the parsed response."""
+    return rpc_call(url, token, "hud_surfaces", {}, req_id)
 
 
 # ---------------------------------------------------------------------------
@@ -302,7 +314,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Ambient-background exemplar user-test: exercises the ambient-background"
-            " zone on a live HUD via MCP publish_to_zone across 4 phases:"
+            " zone on a live HUD via MCP hud_publish across 4 phases:"
             " dark-blue set, warm-amber replacement, static-image placeholder,"
             " and rapid-replacement stress (10 colors)."
         ),

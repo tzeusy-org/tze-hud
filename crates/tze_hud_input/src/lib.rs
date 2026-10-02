@@ -932,20 +932,6 @@ impl InputProcessor {
         self.composer_draft_manager.route_character(character)
     }
 
-    /// Inject text into the active composer draft buffer via the runtime paste API.
-    ///
-    /// Sanitises the input (strips CR, LF, control characters) and routes through
-    /// `ComposerDraftManager::inject_paste`. Returns `(EditOutcome::Unchanged, None)`
-    /// when no composer region is focused.
-    ///
-    /// Spec: §4.4 — runtime clipboard-injection path (hud-k1uun).
-    pub fn inject_paste_to_composer(
-        &mut self,
-        text: &str,
-    ) -> (EditOutcome, Option<DraftNotificationBatch>) {
-        self.composer_draft_manager.inject_paste(text)
-    }
-
     /// Route a pointer-down event to the composer draft manager to position
     /// the cursor in the active draft buffer.
     ///

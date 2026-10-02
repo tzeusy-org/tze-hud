@@ -1,8 +1,7 @@
 [
   {
-    "zone_name": "notification-area",
-    "namespace": "gamut-low",
-    "ttl_us": 18000000,
+    "zone": "notification-area",
+    "ttl_ms": 18000,
     "content": {
       "type": "notification",
       "title": "Low / Smoke Black",
@@ -12,9 +11,8 @@
     }
   },
   {
-    "zone_name": "notification-area",
-    "namespace": "gamut-normal",
-    "ttl_us": 18000000,
+    "zone": "notification-area",
+    "ttl_ms": 18000,
     "content": {
       "type": "notification",
       "title": "Normal / Blue-Black",
@@ -24,9 +22,8 @@
     }
   },
   {
-    "zone_name": "notification-area",
-    "namespace": "gamut-urgent",
-    "ttl_us": 22000000,
+    "zone": "notification-area",
+    "ttl_ms": 22000,
     "content": {
       "type": "notification",
       "title": "Urgent / Amber-Black",
@@ -46,9 +43,8 @@
     }
   },
   {
-    "zone_name": "notification-area",
-    "namespace": "gamut-critical",
-    "ttl_us": 24000000,
+    "zone": "notification-area",
+    "ttl_ms": 24000,
     "content": {
       "type": "notification",
       "title": "Critical / Red-Black",

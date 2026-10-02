@@ -2141,7 +2141,6 @@ mod tests {
         let cfg = WindowedConfig::default();
         let shared_state = make_shared_state();
         let (input_capture_tx, input_capture_rx) = tokio::sync::mpsc::unbounded_channel();
-        let (_paste_inject_tx, paste_inject_rx) = tokio::sync::mpsc::unbounded_channel();
         let (frame_ready_tx, frame_ready_rx) = frame_ready_channel();
         let input_event_tx = tze_hud_protocol::session_server::InputEventSender::new(8);
         let input_event_rx = input_event_tx.subscribe_all();
@@ -2193,7 +2192,6 @@ mod tests {
             input_processor,
             input_capture_rx,
             pending_input_capture_commands: std::collections::VecDeque::new(),
-            paste_inject_rx,
             focus_manager,
             keyboard_processor: KeyboardProcessor::new(),
             telemetry: TelemetryCollector::new(),
@@ -3929,95 +3927,6 @@ mod tests {
             scene.tile_follow_tail_at_tail(tile_id),
             "typing into the focused composer must snap the input-pane history \
              back to the tail"
-        );
-    }
-
-    /// MCP-injected paste text (`drain_paste_inject`) while the input-pane
-    /// history is scrolled back must ALSO snap the scroll offset back to the
-    /// tail — the same reset-to-tail treatment the KeyDown/Character typing
-    /// paths get from hud-qbcp8 (hud-sq2ss: `drain_paste_inject` had no
-    /// `tile_id` in scope, so paste-injected composer text left a scrolled-back
-    /// viewer stranded).
-    #[test]
-    fn paste_inject_while_scrolled_back_resets_history_scroll_to_tail() {
-        let (mut scene, tab_id, tile_id, composer_id, _control_id) = portal_scene_with_control();
-        let mut processor = InputProcessor::new();
-        let mut focus_manager = FocusManager::new();
-        focus_manager.add_tab(tab_id);
-        processor.navigate_focus(&mut focus_manager, &mut scene, tab_id, false);
-        assert_eq!(
-            focus_manager.current_owner(tab_id).node_id(),
-            Some(composer_id),
-            "test setup: focus must rest on the composer"
-        );
-
-        let (mut app, _input_event_rx) =
-            make_windowed_keyboard_test_app(scene, focus_manager, processor);
-
-        // Seed an overflowing history and scroll away from the tail (same setup
-        // as `typing_while_scrolled_back_resets_history_scroll_to_tail`).
-        let text = (0..20)
-            .map(|i| format!("line {i}"))
-            .collect::<Vec<_>>()
-            .join("\n");
-        let mut batch = tze_hud_input::DraftNotificationBatch::new();
-        batch.record_submission(tze_hud_input::DraftSubmission { text, sequence: 1 });
-        app.route_and_deliver_composer_batch(viewer_echo_context(tile_id), batch);
-        {
-            let shared = app.state.shared_state.try_lock().unwrap();
-            let mut scene = shared.scene.try_lock().unwrap();
-            let _ = app.state.input_processor.process_scroll_event(
-                &tze_hud_input::ScrollEvent {
-                    x: 300.0,
-                    y: 250.0,
-                    delta_x: 0.0,
-                    delta_y: -50.0,
-                },
-                &mut scene,
-            );
-            assert!(
-                !scene.tile_follow_tail_at_tail(tile_id),
-                "test setup: scrolling up must leave the tile ScrolledBack"
-            );
-        }
-
-        // Replace the harness's disconnected paste_inject channel with a fresh
-        // one pre-loaded with pasted text, then drain it exactly as the
-        // production `about_to_wait` loop does.
-        let (paste_inject_tx, paste_inject_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
-        app.state.paste_inject_rx = paste_inject_rx;
-        paste_inject_tx.send("pasted text".to_string()).unwrap();
-
-        assert!(
-            app.drain_paste_inject(),
-            "a focused composer changed by pasted text must request render work after the drain"
-        );
-
-        let shared = app.state.shared_state.try_lock().unwrap();
-        let scene = shared.scene.try_lock().unwrap();
-        assert!(
-            scene.tile_follow_tail_at_tail(tile_id),
-            "paste-injecting composer text must snap the input-pane history \
-             back to the tail, matching the typing reset-to-tail path"
-        );
-    }
-
-    #[test]
-    fn paste_inject_without_a_focused_composer_does_not_request_render_work() {
-        let (mut app, _input_event_rx) = make_windowed_keyboard_test_app(
-            tze_hud_scene::graph::SceneGraph::new(1920.0, 1080.0),
-            FocusManager::new(),
-            InputProcessor::new(),
-        );
-        let (paste_inject_tx, paste_inject_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
-        app.state.paste_inject_rx = paste_inject_rx;
-        paste_inject_tx
-            .send("no focused composer".to_string())
-            .expect("test sender remains connected");
-
-        assert!(
-            !app.drain_paste_inject(),
-            "a queued paste that leaves the composer unchanged must not wake the compositor"
         );
     }
 

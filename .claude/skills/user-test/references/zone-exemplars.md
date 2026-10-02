@@ -1,6 +1,6 @@
 # Zone Exemplar Scenarios
 
-Per-zone live-HUD exemplar scenarios published via MCP `publish_to_zone`. Each
+Per-zone live-HUD exemplar scenarios published via MCP `hud_publish`. Each
 section is self-contained: CLI, phases/sequence, visual checklist, and payload
 shape. Referenced from [../SKILL.md](../SKILL.md).
 
@@ -22,7 +22,7 @@ python3 .claude/skills/user-test/scripts/subtitle_exemplar.py \
 
 Required: `--url`. Optional: `--psk-env` (default `TZE_HUD_PSK`), `--ttl` (ms, default 10000).
 
-All messages are published to `zone_name: "subtitle"` with `namespace: "exemplar-test"`.
+All messages are published to `zone:subtitle` under the PSK's agent namespace.
 
 ### Phases
 
@@ -62,11 +62,11 @@ python3 .claude/skills/user-test/scripts/publish_zone_batch.py \
   --psk-env MCP_TEST_PSK \
   --messages-file .claude/skills/user-test/scripts/subtitle-full-sequence.json \
   --delay-ms 4000 \
-  --list-zones
+  --list-surfaces
 ```
 
 The sequence runs: single line → multi-line → rapid replacement (×3) → TTL expiry → streaming.
-All messages use `namespace: "exemplar-test"`.
+All messages use the PSK's agent namespace.
 
 Use `--delay-ms 100` when running `subtitle-rapid-replace.json` alone to exercise
 contention at a speed that actually triggers the latest-wins logic.
@@ -74,18 +74,17 @@ contention at a speed that actually triggers the latest-wins logic.
 ### Subtitle payload shape
 
 ```json
-{"zone_name": "subtitle", "content": "Hello world", "ttl_us": 10000000, "namespace": "exemplar-test"}
+{"zone": "subtitle", "content": "Hello world", "ttl_ms": 10000}
 ```
 
 For streaming with word-by-word breakpoints:
 
 ```json
 {
-  "zone_name": "subtitle",
+  "zone": "subtitle",
   "content": "The quick brown fox jumps over the lazy dog",
   "breakpoints": [3, 9, 15, 19, 25, 30, 34, 38],
-  "ttl_us": 10000000,
-  "namespace": "exemplar-test"
+  "ttl_ms": 10000
 }
 ```
 
@@ -151,8 +150,8 @@ is gone with no fade — evicted instantly. "Burst C6" is at top.
 }
 ```
 
-Published via MCP `publish_to_zone` to `notification-area` zone with `ttl_us`
-derived from `--ttl` and `namespace` set to the simulated agent namespace
+Published via MCP `hud_publish` to `zone:notification-area` with `ttl_ms`
+from `--ttl`; the simulated agents share the PSK's namespace and differ by label
 (`alpha`, `beta`, or `gamma`).
 
 ### Notification Full-Gamut Pass
@@ -167,7 +166,7 @@ python3 .claude/skills/user-test/scripts/publish_zone_batch.py \
   --psk-env TZE_HUD_PSK \
   --messages-file .claude/skills/user-test/scripts/notification-full-gamut.json \
   --delay-ms 250 \
-  --list-zones
+  --list-surfaces
 ```
 
 Coverage in `notification-full-gamut.json`:
@@ -227,8 +226,8 @@ amber for warning (urgency=2), red for critical (urgency=3).
 {"type": "notification", "text": "...", "icon": "", "urgency": 1}
 ```
 
-Published via MCP `publish_to_zone` to `alert-banner` zone with `ttl_us`
-set to `--ttl` (ms) × 1000 (e.g. `--ttl 15000` → `ttl_us = 15000000`), and `namespace` set to `alert-<level>` (e.g. `alert-critical`).
+Published via MCP `hud_publish` to `zone:alert-banner` with `ttl_ms` set to
+`--ttl` (e.g. `--ttl 15000` → `ttl_ms = 15000`).
 
 ## Status-Bar Exemplar Scenario
 
@@ -298,17 +297,16 @@ All six criteria must pass for the status-bar exemplar to be accepted.
 
 ```json
 {
-  "zone_name": "status-bar",
+  "zone": "status-bar",
   "content": {"type": "status_bar", "entries": {"weather": "72F Sunny"}},
-  "merge_key": "weather",
-  "ttl_us": 60000000,
-  "namespace": "agent-weather"
+  "key": "weather",
+  "ttl_ms": 60000
 }
 ```
 
-Each agent uses a distinct `namespace` (`agent-weather`, `agent-power`,
+Each simulated agent uses a distinct merge `key` (`agent-weather`, `agent-power`,
 `agent-clock`). The `merge_key` matches the single entry key in `entries`.
-Published via MCP `publish_to_zone`.
+Published via MCP `hud_publish`.
 
 ---
 
@@ -335,7 +333,7 @@ Required: `--url`. Optional: `--psk-env` (default `TZE_HUD_PSK`).
 | 1 — Dark blue | Publish `solid_color` dark navy blue (r=0.05, g=0.05, b=0.2) | 3s |
 | 2 — Warm amber | Replace with warm amber (r=0.9, g=0.6, b=0.2); latest-wins Replace policy evicts dark blue | 3s |
 | 3 — Static image | Publish `static_image` content type (64-char hex resource_id); runtime renders warm-gray placeholder in v1 | 2s |
-| 4 — Rapid replace | 10 different solid colors in sequence without delay; query `list_zones` to confirm `has_content=true` and visually confirm the final color is bright green | — |
+| 4 — Rapid replace | 10 different solid colors in sequence without delay; query `hud_surfaces` to confirm `held: true` and visually confirm the final color is bright green | — |
 
 ### Visual Checklist
 
@@ -351,7 +349,7 @@ error.
 
 **Phase 4:** After all 10 rapid publishes, the background should settle on
 bright green (last of the 10 colors). No other colors from the burst should
-bleed through. `list_zones` must report `has_content=true` for the
+bleed through. `hud_surfaces` must report `held: true` for the
 `ambient-background` zone.
 
 ### Background payload shapes
@@ -362,6 +360,6 @@ bleed through. `list_zones` must report `has_content=true` for the
 {"type": "static_image", "resource_id": "<64-char-hex-blake3-hash>"}
 ```
 
-All published via MCP `publish_to_zone` to `ambient-background` zone with
+All published via MCP `hud_publish` to `ambient-background` zone with
 `namespace` set to `ambient-test-p<N>` per phase. TTL is omitted (defaults to
 persistent — `auto_clear_ms=None` on this zone) for phases 1–3.

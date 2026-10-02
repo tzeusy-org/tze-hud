@@ -3574,7 +3574,6 @@ version = "0.1.0"
 dependencies = [
  "blake3",
  "quick-xml 0.41.0",
- "schemars",
  "serde",
  "serde_json",
  "subtle",

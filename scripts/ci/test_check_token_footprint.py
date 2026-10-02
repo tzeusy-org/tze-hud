@@ -19,6 +19,7 @@ def fixture(value=100):
         "request": {"bytes": value, "tokens": value},
         "response": {"bytes": value, "tokens": value},
         "total": {"bytes": value * 2, "tokens": value * 2},
+        "model_visible": {"bytes": value, "tokens": value},
     }
     return {
         "schema_version": 1,
@@ -35,27 +36,33 @@ def fixture(value=100):
                 "flow_fingerprint": "sha256:zone",
                 "operations": {"publish_to_zone": copy.deepcopy(metric)},
                 "total": copy.deepcopy(metric["total"]),
+                "model_visible": copy.deepcopy(metric["model_visible"]),
             },
             "portal_projection": {
                 "flow_version": 1,
                 "flow_fingerprint": "sha256:portal",
                 "operations": {"attach": copy.deepcopy(metric)},
                 "total": copy.deepcopy(metric["total"]),
+                "model_visible": copy.deepcopy(metric["model_visible"]),
             },
             "publish_to_widget": {
                 "flow_version": 1,
                 "flow_fingerprint": "sha256:widget",
                 "operations": {"publish_to_widget": copy.deepcopy(metric)},
                 "total": copy.deepcopy(metric["total"]),
+                "model_visible": copy.deepcopy(metric["model_visible"]),
             },
         },
     }
 
 
-def approve(document):
+def approve(document, budget=10_000):
     document["approval"] = {
         "status": "owner_approved",
         "decision_reference": "hud-test-decision",
+    }
+    document["budgets"] = {
+        "flows": {name: budget for name in document["flows"]},
     }
 
 
@@ -156,10 +163,52 @@ class GateTests(unittest.TestCase):
                     report["incompatibilities"],
                 )
 
+    def test_model_visible_tokens_over_budget_fail(self):
+        baseline = fixture()
+        approve(baseline, budget=100)
+        self.assertEqual(checker.compare(fixture(), baseline)["status"], "passed")
+        over = fixture()
+        over["flows"]["publish_to_zone"]["operations"]["publish_to_zone"]["model_visible"][
+            "tokens"
+        ] = 101
+        over["flows"]["publish_to_zone"]["model_visible"]["tokens"] = 101
+        report = checker.compare(over, baseline)
+        self.assertEqual(report["status"], "failed")
+        self.assertEqual(
+            report["budget_violations"],
+            [{"flow": "publish_to_zone", "budget": 100, "measured": 101}],
+        )
+
+    def test_missing_budgets_fail_closed(self):
+        baseline = fixture()
+        approve(baseline)
+        del baseline["budgets"]
+        report = checker.compare(fixture(), baseline)
+        self.assertEqual(report["status"], "baseline_incompatible")
+        self.assertIn("budgets", " ".join(report["incompatibilities"]))
+
     def test_unapproved_baseline_fails_closed(self):
         report = checker.compare(fixture(), fixture())
         self.assertEqual(report["status"], "baseline_incompatible")
         self.assertIn("owner-approved", " ".join(report["incompatibilities"]))
+
+    def test_pending_review_baseline_warns_but_compares(self):
+        baseline = fixture()
+        approve(baseline)
+        baseline["approval"]["status"] = "pending_owner_review"
+        report = checker.compare(fixture(), baseline)
+        self.assertEqual(report["status"], "warning")
+        self.assertEqual(report["approval"], "pending_owner_review")
+        approve(baseline, budget=1)
+        baseline["approval"]["status"] = "pending_owner_review"
+        self.assertEqual(checker.compare(fixture(), baseline)["status"], "failed")
+
+    def test_unknown_approval_status_fails_closed(self):
+        baseline = fixture()
+        approve(baseline)
+        baseline["approval"]["status"] = "approved"
+        report = checker.compare(fixture(), baseline)
+        self.assertEqual(report["status"], "baseline_incompatible")
 
     def test_missing_metric_fails_closed_as_incompatible(self):
         baseline = fixture()
@@ -205,22 +254,38 @@ class CandidatePacketTests(unittest.TestCase):
     def setUp(self):
         self.root = SCRIPT.parents[2]
         self.candidate = json.loads(
-            (self.root / "scripts/ci/token_footprint_candidate_v1.json").read_text(
+            (self.root / "scripts/ci/token_footprint_baseline.json").read_text(
                 encoding="utf-8"
             )
         )
 
-    def test_candidate_records_revised_owner_approval(self):
+    def test_candidate_is_owner_approved(self):
         self.assertEqual(self.candidate["approval"]["status"], "owner_approved")
+
+    def test_baseline_budgets_match_api_targets(self):
         self.assertEqual(
-            self.candidate["approval"]["decision_reference"],
-            "hud-ht1k7",
+            self.candidate["budgets"]["flows"],
+            {
+                "tools_list": 900,
+                "discover": 150,
+                "zone_publish": 80,
+                "widget_publish": 80,
+                "portal": 250,
+                "error": 60,
+            },
         )
 
-    def test_approved_candidate_is_accepted_by_fail_closed_gate(self):
+    def test_candidate_is_accepted_by_fail_closed_gate(self):
         report = checker.compare(copy.deepcopy(self.candidate), self.candidate)
         self.assertEqual(report["status"], "passed")
         self.assertFalse(report["incompatibilities"])
+        self.assertFalse(report["warnings"] or report["regressions"])
+
+    def test_owner_approval_makes_candidate_pass(self):
+        approved = copy.deepcopy(self.candidate)
+        approved["approval"]["status"] = "owner_approved"
+        report = checker.compare(copy.deepcopy(self.candidate), approved)
+        self.assertEqual(report["status"], "passed")
 
 
 if __name__ == "__main__":

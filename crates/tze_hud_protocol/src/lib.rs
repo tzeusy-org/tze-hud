@@ -7,7 +7,6 @@ pub mod auth;
 pub mod convert;
 pub mod dedup;
 pub mod lease;
-pub mod mcp_bridge;
 pub mod session;
 pub mod session_server;
 pub mod subscriptions;

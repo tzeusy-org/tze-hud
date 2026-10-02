@@ -1,12 +1,10 @@
 [
   {
     "action": "clear",
-    "widget_name": "main-progress",
-    "namespace": "user-test"
+    "widget": "main-progress"
   },
   {
     "action": "clear",
-    "widget_name": "main-status",
-    "namespace": "user-test"
+    "widget": "main-status"
   }
 ]

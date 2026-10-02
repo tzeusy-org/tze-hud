@@ -10,14 +10,13 @@
       "Background frame uses token-driven backdrop color (dark, not white)",
       "No animation — immediate render from idle state"
     ],
-    "widget_name": "gauge",
+    "widget": "gauge",
     "params": {
       "level": 0.0,
       "label": "System",
       "severity": "info"
     },
-    "ttl_us": 30000000,
-    "namespace": "user-test"
+    "ttl_ms": 30000
   },
   {
     "_comment": "Step 2: Animate to 75% — smooth fill-up animation over 300ms.",
@@ -30,13 +29,11 @@
       "Label still reads System",
       "Animation completes and rests at 75%"
     ],
-    "widget_name": "gauge",
+    "widget": "gauge",
     "params": {
       "level": 0.75
     },
-    "transition_ms": 300,
-    "ttl_us": 30000000,
-    "namespace": "user-test"
+    "ttl_ms": 30000
   },
   {
     "_comment": "Step 3: Severity snap info to warning — indicator snaps to #FFB800 amber immediately. Fill stays at 75%.",
@@ -49,12 +46,11 @@
       "Label still reads System",
       "Change is immediate — no delay after publish"
     ],
-    "widget_name": "gauge",
+    "widget": "gauge",
     "params": {
       "severity": "warning"
     },
-    "ttl_us": 30000000,
-    "namespace": "user-test"
+    "ttl_ms": 30000
   },
   {
     "_comment": "Step 4: Animate to 95% — near-full, tension builds. Smooth rise from 75% to 95% over 300ms with amber indicator.",
@@ -67,13 +63,11 @@
       "Animation is smooth — no stutter",
       "At rest: fill bar is clearly near-full (very small gap at top)"
     ],
-    "widget_name": "gauge",
+    "widget": "gauge",
     "params": {
       "level": 0.95
     },
-    "transition_ms": 300,
-    "ttl_us": 30000000,
-    "namespace": "user-test"
+    "ttl_ms": 30000
   },
   {
     "_comment": "Step 5: Critical alarm — both severity=error and label=CRITICAL snap simultaneously. Fill stays at 95%.",
@@ -86,12 +80,11 @@
       "Fill bar remains at 95% (level unchanged from step 4)",
       "Final state: 95% fill, red indicator, CRITICAL label — maximum alarm visual"
     ],
-    "widget_name": "gauge",
+    "widget": "gauge",
     "params": {
       "severity": "error",
       "label": "CRITICAL"
     },
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   }
 ]

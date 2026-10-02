@@ -1,10 +1,10 @@
 {
   "mcpServers": {
-    "hud-projection-daemon": {
-      "type": "url",
-      "url": "http://<PROJECTION_DAEMON_HOST>:<PORT>/mcp",
+    "tze-hud-runtime": {
+      "type": "http",
+      "url": "http://<TZE_HUD_RUNTIME_HOST>:<MCP_PORT>/mcp",
       "headers": {
-        "Authorization": "Bearer ${HUD_PROJECTION_DAEMON_TOKEN}"
+        "Authorization": "Bearer ${TZE_HUD_PSK}"
       }
     }
   }

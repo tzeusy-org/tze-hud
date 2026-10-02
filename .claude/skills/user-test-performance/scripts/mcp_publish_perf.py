@@ -68,31 +68,26 @@ def build_widget_params(i: int, count: int, args: argparse.Namespace) -> tuple[s
     label = args.label_template.format(i=i, count=count, value=value, pct=pct)
 
     params: dict[str, Any] = {
-        "widget_name": args.widget_name,
+        "surface": f"widget:{args.widget_name}",
         "params": {
             "progress": value,
             "label": label,
         },
-        "namespace": args.namespace,
-        "ttl_us": int(args.ttl_us),
-        "transition_ms": int(args.transition_ms),
+        "ttl_ms": int(args.ttl_us) // 1000,
     }
-    if args.instance_id:
-        params["instance_id"] = args.instance_id
-    return "publish_to_widget", params
+    return "hud_publish", params
 
 
 def build_zone_params(i: int, count: int, args: argparse.Namespace) -> tuple[str, dict[str, Any]]:
     content = args.zone_text_template.format(i=i, count=count)
     params: dict[str, Any] = {
-        "zone_name": args.zone_name,
+        "surface": f"zone:{args.zone_name}",
         "content": content,
-        "namespace": args.namespace,
-        "ttl_us": int(args.ttl_us),
+        "ttl_ms": int(args.ttl_us) // 1000,
     }
     if args.merge_key:
-        params["merge_key"] = args.merge_key
-    return "publish_to_zone", params
+        params["key"] = args.merge_key
+    return "hud_publish", params
 
 
 def invoke_rpc(
@@ -106,8 +101,8 @@ def invoke_rpc(
     payload = {
         "jsonrpc": "2.0",
         "id": request_id,
-        "method": method,
-        "params": params,
+        "method": "tools/call",
+        "params": {"name": method, "arguments": params},
     }
     body = json.dumps(payload, ensure_ascii=True).encode("utf-8")
     req_bytes = len(body)
@@ -127,9 +122,10 @@ def invoke_rpc(
             raw = resp.read()
         resp_bytes = len(raw)
         parsed = json.loads(raw.decode("utf-8"))
-        if "error" in parsed:
-            err = parsed.get("error", {})
-            message = err.get("message") if isinstance(err, dict) else str(err)
+        result = parsed.get("result") or {}
+        if "error" in parsed or result.get("isError"):
+            err = parsed.get("error") or json.loads(result["content"][0]["text"])
+            message = (err.get("message") or err.get("code")) if isinstance(err, dict) else str(err)
             return {
                 "ok": False,
                 "req_bytes": req_bytes,
@@ -196,8 +192,7 @@ def run_once(
 def maybe_preflight(args: argparse.Namespace, url: str, token: str) -> dict[str, Any] | None:
     if not args.preflight:
         return None
-    method = "list_widgets" if args.mode == "widget" else "list_zones"
-    return invoke_rpc(url=url, token=token, method=method, params={}, request_id=1)
+    return invoke_rpc(url=url, token=token, method="hud_surfaces", params={}, request_id=1)
 
 
 def default_benchmark_name(args: argparse.Namespace) -> str:
@@ -221,7 +216,7 @@ def main() -> int:
     parser.add_argument("--duration-ms", type=int, default=0, help="Target total duration (sequential pacing only)")
     parser.add_argument("--namespace", default="user-test-performance", help="Publish namespace")
     parser.add_argument("--ttl-us", type=int, default=60_000_000, help="TTL in microseconds")
-    parser.add_argument("--preflight", action="store_true", help="Call list_widgets/list_zones before benchmark")
+    parser.add_argument("--preflight", action="store_true", help="Call hud_surfaces before benchmark")
 
     parser.add_argument("--widget-name", default="main-progress", help="Widget instance name")
     parser.add_argument("--instance-id", default="", help="Optional widget instance_id override")

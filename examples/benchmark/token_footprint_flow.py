@@ -1,204 +1,116 @@
 #!/usr/bin/env python3
-"""Drive canonical MCP flows through the production portal client transport."""
+"""Drive the canonical MCP flows and record each request/response body.
 
-import importlib.util
+Every call is standard MCP JSON-RPC (`tools/list`, `tools/call`). The Rust
+calibration binary tokenizes the recorded bodies; each transaction carries
+the flow it belongs to and an operation label unique within that flow.
+"""
+
 import json
 import os
-import pathlib
 import sys
 import urllib.error
 import urllib.request
 
-
-OWNER_TOKEN_SENTINEL = "<OWNER_TOKEN>"
-CLIENT_TIMESTAMP = 1_700_000_000_000_000
-PORTAL_OPERATIONS = {
-    "portal_projection_attach": "attach",
-    "portal_projection_publish": "publish_output",
-    "portal_projection_get_pending_input": "get_pending_input",
-    "portal_projection_acknowledge_input": "acknowledge_input",
-}
+PORTAL = "portal:claude-main"
 transactions = []
+_next_id = 0
 
 
-def load_portal_client():
-    path = pathlib.Path(os.environ["PORTAL_CLIENT_PATH"])
-    spec = importlib.util.spec_from_file_location("portal_client", path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-portal_client = load_portal_client()
-
-
-def replace_owner_token(node):
-    if isinstance(node, dict):
-        return {
-            key: OWNER_TOKEN_SENTINEL if key == "owner_token" else replace_owner_token(value)
-            for key, value in node.items()
-        }
-    if isinstance(node, list):
-        return [replace_owner_token(value) for value in node]
-    return node
-
-
-def recording_rpc(method, params, transaction_method=None):
-    request_message = {
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": method,
-        "params": params,
-    }
-    body = json.dumps(request_message).encode()
+def rpc(method, params):
+    global _next_id
+    _next_id += 1
+    message = {"jsonrpc": "2.0", "id": _next_id, "method": method, "params": params}
     request = urllib.request.Request(
-        portal_client.mcp_url(),
-        data=body,
+        os.environ["HUD_MCP_URL"],
+        data=json.dumps(message).encode(),
         headers={
-            "Authorization": f"Bearer {portal_client.psk()}",
+            "Authorization": f"Bearer {os.environ['HUD_PSK']}",
             "Content-Type": "application/json",
-            "Accept": "application/json, text/event-stream",
         },
     )
     try:
         with urllib.request.urlopen(request, timeout=60) as response:
-            raw = response.read()
+            raw = response.read().decode("utf-8")
     except (urllib.error.HTTPError, urllib.error.URLError) as error:
         raise RuntimeError(f"MCP transport failed: {error}") from error
-    raw_text = raw.decode("utf-8")
-    parsed = json.loads(raw_text)
-    if raw_text != json.dumps(parsed, separators=(",", ":")):
+    parsed = json.loads(raw)
+    if raw != json.dumps(parsed, separators=(",", ":")):
         raise RuntimeError("MCP response body is not canonical compact JSON")
-    canonical_request = json.dumps(replace_owner_token(request_message))
-    canonical_response = json.dumps(
-        replace_owner_token(parsed), separators=(",", ":")
-    )
-    if portal_client.psk() in canonical_request or portal_client.psk() in canonical_response:
+    request_body = json.dumps(message, separators=(",", ":"))
+    if os.environ["HUD_PSK"] in request_body or os.environ["HUD_PSK"] in raw:
         raise RuntimeError("canonical body retained a bearer credential")
+    return message, request_body, raw, parsed
+
+
+def record(flow, operation, method, params, expect_error=False):
+    _, request_body, response_body, parsed = rpc(method, params)
+    if parsed.get("error"):
+        raise RuntimeError(f"{flow}/{operation} protocol error: {parsed['error']}")
+    result = parsed["result"]
+    if method == "tools/call":
+        if bool(result.get("isError")) != expect_error:
+            raise RuntimeError(f"{flow}/{operation} unexpected result: {result}")
+        content = result.get("content")
+        if not isinstance(content, list) or len(content) != 1 or content[0].get("type") != "text":
+            raise RuntimeError(f"{flow}/{operation} returned an invalid content envelope")
+        result = json.loads(content[0]["text"])
     transactions.append(
         {
-            "method": transaction_method or method,
-            "request_body": canonical_request,
-            "response_body": canonical_response,
+            "flow": flow,
+            "operation": operation,
+            "request_body": request_body,
+            "response_body": response_body,
         }
     )
-    return parsed
+    return result
 
 
-portal_client.rpc = recording_rpc
-
-
-def add_common_fields(method, params):
-    params = params.copy()
-    params["client_timestamp_wall_us"] = CLIENT_TIMESTAMP
-    params["request_id"] = f"token-calibration-{method}"
-    return params
-
-
-def invoke_portal_tool(method, params):
-    params = add_common_fields(method, params)
-    params["operation"] = PORTAL_OPERATIONS[method]
-    # Pin the v1 fixture to the production client's bare-method compatibility
-    # transport rather than its policy-selected default dialect.
-    response = portal_client.rpc(method, params)
-    if response.get("error"):
-        raise RuntimeError(f"{method} rejected: {response['error']}")
-    return response["result"]
-
-
-def invoke_mcp_tool(method, params):
-    params = add_common_fields(method, params)
-    response = recording_rpc(
-        "tools/call",
-        {"name": method, "arguments": params},
-        transaction_method=method,
+def tool(flow, operation, name, arguments, expect_error=False):
+    return record(
+        flow, operation, "tools/call", {"name": name, "arguments": arguments}, expect_error
     )
-    if response.get("error"):
-        raise RuntimeError(f"{method} rejected: {response['error']}")
-    result = response.get("result", {})
-    if result.get("isError"):
-        raise RuntimeError(f"{method} execution failed")
-    content = result.get("content")
-    if not isinstance(content, list) or len(content) != 1:
-        raise RuntimeError(f"{method} returned an invalid MCP content envelope")
-    block = content[0]
-    if block.get("type") != "text" or not isinstance(block.get("text"), str):
-        raise RuntimeError(f"{method} returned a non-text MCP content block")
-    return json.loads(block["text"])
 
 
 def main():
-    invoke_mcp_tool(
-        "publish_to_zone",
+    record("tools_list", "tools/list", "tools/list", {})
+    tool("discover", "hud_surfaces", "hud_surfaces", {})
+    tool(
+        "zone_publish",
+        "hud_publish",
+        "hud_publish",
         {
-            "zone_name": "notification-area",
-            "content": {
-                "type": "notification",
-                "title": "Calibration",
-                "text": "Canonical zone calibration payload.",
-                "icon": "info",
-                "urgency": 1,
-            },
-            "namespace": "token-calibration-zone",
-            "ttl_us": 60_000_000,
-            "merge_key": "token-calibration-zone-0001",
+            "surface": "zone:notification-area",
+            "content": {"title": "Build", "body": "All tests passed.", "urgency": 1},
         },
     )
-
-    attach = invoke_portal_tool(
-        "portal_projection_attach",
-        {
-            "projection_id": "token-calibration-portal",
-            "display_name": "Token Calibration Portal",
-            "idempotency_key": "token-calibration-attach-0001",
-            "provider_kind": "codex",
-            "content_classification": "private",
-            "workspace_hint": "/workspace/tze_hud",
-            "repository_hint": "tze_hud",
-            "icon_profile_hint": "codex",
-            "hud_target": "default",
-        },
+    tool(
+        "widget_publish",
+        "hud_publish",
+        "hud_publish",
+        {"surface": "widget:gauge", "params": {"level": 0.625}},
     )
-    invoke_portal_tool(
-        "portal_projection_publish",
+    tool(
+        "portal",
+        "1_publish_attach",
+        "hud_publish",
         {
-            "projection_id": "token-calibration-portal",
-            "output_text": "Canonical append-only portal payload.",
-            "logical_unit_id": "token-calibration-output-0001",
-            "output_kind": "assistant",
-            "content_classification": "private",
+            "surface": PORTAL,
+            "content": "Tests pass. Ship it?",
+            "status": "active",
             "expects_reply": True,
         },
     )
-    pending = invoke_portal_tool(
-        "portal_projection_get_pending_input",
-        {
-            "projection_id": "token-calibration-portal",
-            "max_items": 1,
-            "max_bytes": 4096,
-            "wait_ms": 1_000,
-        },
-    )
-    input_id = pending["items"][0]["input_id"]
-    invoke_portal_tool(
-        "portal_projection_acknowledge_input",
-        {
-            "projection_id": "token-calibration-portal",
-            "input_id": input_id,
-            "ack_state": "handled",
-            "ack_message": "Canonical input handled.",
-        },
-    )
-
-    invoke_mcp_tool(
-        "publish_to_widget",
-        {
-            "widget_name": "token-calibration-gauge",
-            "params": {"level": 0.625},
-            "transition_ms": 0,
-            "namespace": "token-calibration-widget",
-            "ttl_us": 60_000_000,
-        },
+    polled = tool("portal", "2_input_poll", "hud_input", {"wait_ms": 1000})
+    input_id = polled["items"][0]["id"]
+    tool("portal", "3_input_ack", "hud_input", {"ack": [input_id]})
+    tool("portal", "4_clear", "hud_clear", {"surface": PORTAL})
+    tool(
+        "error",
+        "hud_publish",
+        "hud_publish",
+        {"surface": "zone:subtitles", "content": "hello"},
+        expect_error=True,
     )
     json.dump({"transactions": transactions}, sys.stdout, separators=(",", ":"))
     sys.stdout.write("\n")

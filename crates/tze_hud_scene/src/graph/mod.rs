@@ -110,6 +110,10 @@ pub struct SceneGraph {
     /// Batches held until their `present_at` time (see [`timed`]).
     #[serde(skip, default)]
     pub scheduled_batches: Vec<timed::ScheduledBatch>,
+    /// Notification action presses waiting for their publisher to collect
+    /// them (MCP `hud_input`). Bounded; oldest dropped first.
+    #[serde(skip, default)]
+    pub pending_actions: std::collections::VecDeque<PendingAction>,
     /// Map of ResourceIds to their scene-node reference counts.
     ///
     /// A resource is available for use in [`NodeData::StaticImage`] nodes when it
@@ -179,6 +183,19 @@ pub mod timed;
 pub use tiles::validate_text_markdown_node_data;
 pub mod zone_ops;
 
+/// A notification action the human pressed, addressed to the agent that
+/// published the notification.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PendingAction {
+    pub publisher_namespace: String,
+    pub zone_name: String,
+    pub callback_id: String,
+}
+
+/// Cap on queued action presses; a publisher that never collects them can't
+/// grow the queue without bound.
+pub const MAX_PENDING_ACTIONS: usize = 256;
+
 impl SceneGraph {
     // ─── Notification auto-dismiss TTL constants ─────────────────────────
     /// Default auto-dismiss TTL (µs) for low/normal notifications (urgency 0, 1).
@@ -214,9 +231,28 @@ impl SceneGraph {
             geometry_epoch: 0,
             sequence_number: 0,
             scheduled_batches: Vec::new(),
+            pending_actions: std::collections::VecDeque::new(),
             registered_resources: HashMap::new(),
             overlay: RuntimeOverlayState::default(),
         }
+    }
+
+    /// Queue a notification action press for its publisher.
+    pub fn push_pending_action(&mut self, action: PendingAction) {
+        if self.pending_actions.len() >= MAX_PENDING_ACTIONS {
+            self.pending_actions.pop_front();
+        }
+        self.pending_actions.push_back(action);
+    }
+
+    /// Remove and return the queued action presses for `namespace`, oldest first.
+    pub fn take_pending_actions(&mut self, namespace: &str) -> Vec<PendingAction> {
+        let (mine, rest): (Vec<_>, Vec<_>) = self
+            .pending_actions
+            .drain(..)
+            .partition(|a| a.publisher_namespace == namespace);
+        self.pending_actions = rest.into();
+        mine
     }
 
     // ─── Sequence number (RFC 0001 §3.5) ────────────────────────────────

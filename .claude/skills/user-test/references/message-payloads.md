@@ -11,48 +11,48 @@ Message shape — `content` is either a plain string (StreamText) or a typed JSO
 ```json
 [
   {
-    "zone_name": "alert-banner",
+    "zone": "alert-banner",
     "content": "Deploy v2.1.0 started",
-    "ttl_us": 30000000,
-    "namespace": "butler-test"
+    "ttl_ms": 30000
   },
   {
-    "zone_name": "subtitle",
+    "zone": "subtitle",
     "content": "Running integration tests...",
-    "ttl_us": 60000000
+    "ttl_ms": 60000
   },
   {
-    "zone_name": "status-bar",
+    "zone": "status-bar",
     "content": {"type": "status_bar", "entries": {"build": "passing", "agent": "butler", "target": "windows"}},
-    "merge_key": "build-status",
-    "ttl_us": 120000000,
-    "namespace": "butler-test"
+    "key": "build-status",
+    "ttl_ms": 120000
   },
   {
-    "zone_name": "notification-area",
+    "zone": "notification-area",
     "content": {"type": "notification", "text": "Build complete", "icon": "", "urgency": 1},
-    "ttl_us": 10000000
+    "ttl_ms": 10000
   },
   {
-    "zone_name": "ambient-background",
+    "zone": "ambient-background",
     "content": {"type": "solid_color", "r": 0.1, "g": 0.15, "b": 0.4, "a": 0.05},
-    "ttl_us": 300000000
+    "ttl_ms": 300000
   },
   {
-    "zone_name": "pip",
+    "zone": "pip",
     "content": {"type": "solid_color", "r": 0.2, "g": 0.8, "b": 0.2, "a": 0.05},
-    "ttl_us": 60000000
+    "ttl_ms": 60000
   }
 ]
 ```
 
 **Content types by zone:**
 - `alert-banner`, `subtitle`: plain string (StreamText)
-- `status-bar`: `{"type":"status_bar","entries":{"key":"value",...}}` with `merge_key`
+- `status-bar`: `{"type":"status_bar","entries":{"key":"value",...}}` with `key`
 - `notification-area`: `{"type":"notification","text":"...","icon":"","urgency":0-3,"title":"...","actions":[...]}` (`title` and `actions` optional)
 - `ambient-background`, `pip`: `{"type":"solid_color","r":0-1,"g":0-1,"b":0-1,"a":0-1}`
 
-`merge_key`, `ttl_us`, and `namespace` are optional per message.
+`key` and `ttl_ms` are optional per message. The publisher namespace is the
+agent the PSK belongs to; a message cannot set it. `type` may be omitted: the
+runtime infers it from what the zone accepts.
 
 - `widget_messages`: array of widget publishes (optional)
 
@@ -61,16 +61,13 @@ Widget message shape:
 ```json
 [
   {
-    "widget_name": "gauge",
+    "widget": "gauge",
     "params": {"level": 0.75, "label": "CPU Usage"},
-    "transition_ms": 500,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
     "action": "clear",
-    "widget_name": "gauge",
-    "namespace": "user-test"
+    "widget": "gauge"
   }
 ]
 ```
@@ -81,27 +78,27 @@ Widget message shape:
 - `color`: JSON object `{"r": 0-1, "g": 0-1, "b": 0-1, "a": 0-1}`
 - `enum`: JSON string from allowed values (e.g. `"warning"`)
 
-`transition_ms`, `ttl_us`, `namespace`, and `instance_id` are optional per message.
+`ttl_ms` is optional per message (widgets are durable by default).
 
-**`widget_name` semantics: instance name, not type name**
+**`widget` semantics: instance name, not type name**
 
-`widget_name` in `publish_to_widget` identifies a *widget instance*, not a widget type.
+`widget` (the surface `widget:<name>`) identifies a *widget instance*, not a widget type.
 When the HUD starts, instances are created from `[[tabs.widgets]]` entries in the config,
-each with an `instance_id`. That `instance_id` is the string you pass as `widget_name`.
+each with an `instance_id`. That `instance_id` is the name you pass as `widget`.
 
 For the production `tze_hud_app` deployment (see `app/tze_hud_app/config/production.toml`):
 
-| `widget_name` | Widget type | What it shows |
+| `widget` | Widget type | What it shows |
 |---|---|---|
 | `main-gauge` | `gauge` | Vertical fill gauge (level, label, severity) |
 | `main-progress` | `progress-bar` | Horizontal progress bar (progress, label) |
 | `main-status` | `status-indicator` | Status circle with label (online/away/busy/offline) |
 
-Use `list_widgets` to discover available instances:
+Use `hud_surfaces` to discover available instances:
 ```bash
 python3 .claude/skills/user-test/scripts/publish_widget_batch.py \
   --url "$MCP_HTTP_URL" --psk-env MCP_TEST_PSK \
-  --messages-file /dev/null --list-widgets
+  --messages-file /dev/null --list-surfaces
 ```
-`list_widgets` returns `widget_instances` (with `instance_name`) — use those names as `widget_name`.
-If `list_widgets` returns no instances, the HUD binary is running without a config that declares instances.
+`hud_surfaces` returns `widget:<name>` entries with their params — use those names as `widget`.
+If `hud_surfaces` returns no widget entries, the HUD binary is running without a config that declares instances.

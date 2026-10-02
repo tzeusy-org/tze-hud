@@ -63,10 +63,9 @@ pub struct McpServerConfig {
 /// * `scene`           — shared scene graph for MCP tool dispatch.
 /// * `config`          — MCP server configuration (bind address, PSK).
 /// * `shutdown`        — token that stops the accept loop when triggered.
-/// * `paste_inject_tx` — optional channel for injecting paste text into the composer.
 /// * `portal_op_tx` — optional channel sender for portal projection operations
-///   (hud-bq0gl.2).  When `Some`, the MCP server forwards `portal_projection_*`
-///   tool calls through this channel to the winit event-loop thread where the
+///   (hud-bq0gl.2).  When `Some`, the MCP server forwards portal surface
+///   operations through this channel to the winit event-loop thread where the
 ///   `InProcessPortalDriver` lives.
 ///
 /// # Returns
@@ -83,14 +82,12 @@ pub async fn start_mcp_http_server(
     scene: Arc<Mutex<SceneGraph>>,
     config: McpServerConfig,
     shutdown: ShutdownToken,
-    paste_inject_tx: Option<tokio::sync::mpsc::UnboundedSender<String>>,
     portal_op_tx: Option<tokio::sync::mpsc::UnboundedSender<tze_hud_mcp::portal_op::PortalOp>>,
 ) -> std::io::Result<(tokio::task::JoinHandle<()>, SocketAddr)> {
     start_mcp_http_server_with_render_wake(
         scene,
         config,
         shutdown,
-        paste_inject_tx,
         portal_op_tx,
         tze_hud_scene::render_wake::RenderWakeNotifier::default(),
         tze_hud_scene::render_wake::RenderWakeNotifier::default(),
@@ -102,7 +99,6 @@ pub async fn start_mcp_http_server_with_render_wake(
     scene: Arc<Mutex<SceneGraph>>,
     config: McpServerConfig,
     shutdown: ShutdownToken,
-    paste_inject_tx: Option<tokio::sync::mpsc::UnboundedSender<String>>,
     portal_op_tx: Option<tokio::sync::mpsc::UnboundedSender<tze_hud_mcp::portal_op::PortalOp>>,
     render_wake: tze_hud_scene::render_wake::RenderWakeNotifier,
     portal_ingress_wake: tze_hud_scene::render_wake::RenderWakeNotifier,
@@ -119,9 +115,6 @@ pub async fn start_mcp_http_server_with_render_wake(
         .with_config(McpConfig::with_agents(config.agents.clone()))
         .with_render_wake_notifier(render_wake)
         .with_portal_ingress_wake_notifier(portal_ingress_wake);
-    if let Some(tx) = paste_inject_tx {
-        server_builder = server_builder.with_paste_inject_tx(tx);
-    }
     if let Some(tx) = portal_op_tx {
         server_builder = server_builder.with_portal_op_tx(tx);
     }
@@ -346,10 +339,9 @@ mod tests {
         let config = make_config(0, "test-psk");
         let shutdown = ShutdownToken::new();
 
-        let (handle, _mcp_addr) =
-            start_mcp_http_server(scene, config, shutdown.clone(), None, None)
-                .await
-                .expect("bind should succeed");
+        let (handle, _mcp_addr) = start_mcp_http_server(scene, config, shutdown.clone(), None)
+            .await
+            .expect("bind should succeed");
 
         // Give the task a moment to start its accept loop.
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
@@ -360,7 +352,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn mcp_http_list_zones_authenticated() {
+    async fn mcp_http_tools_list_authenticated() {
         use std::net::TcpListener as StdListener;
 
         // Bind to find a free port, then drop to release it for the server.
@@ -375,15 +367,14 @@ mod tests {
         };
         let shutdown = ShutdownToken::new();
 
-        let (handle, _mcp_addr) =
-            start_mcp_http_server(scene, config, shutdown.clone(), None, None)
-                .await
-                .expect("bind");
+        let (handle, _mcp_addr) = start_mcp_http_server(scene, config, shutdown.clone(), None)
+            .await
+            .expect("bind");
 
         // Give the task time to enter accept loop.
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
 
-        let body = r#"{"jsonrpc":"2.0","method":"list_zones","params":{},"id":1}"#;
+        let body = r#"{"jsonrpc":"2.0","method":"tools/list","params":{},"id":1}"#;
         let resp = http_post(addr, body, Some("test-key")).await;
 
         // Response should be HTTP 200 with a JSON-RPC result.
@@ -415,15 +406,14 @@ mod tests {
         };
         let shutdown = ShutdownToken::new();
 
-        let (handle, _mcp_addr) =
-            start_mcp_http_server(scene, config, shutdown.clone(), None, None)
-                .await
-                .expect("bind");
+        let (handle, _mcp_addr) = start_mcp_http_server(scene, config, shutdown.clone(), None)
+            .await
+            .expect("bind");
 
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
 
         // Send request with NO bearer token — should get an error response.
-        let body = r#"{"jsonrpc":"2.0","method":"list_zones","params":{},"id":2}"#;
+        let body = r#"{"jsonrpc":"2.0","method":"tools/list","params":{},"id":2}"#;
         let resp = http_post(addr, body, None).await;
 
         // HTTP status is always 200 (JSON-RPC over HTTP carries errors in body).
@@ -450,15 +440,14 @@ mod tests {
         };
         let shutdown = ShutdownToken::new();
 
-        let (handle, _mcp_addr) =
-            start_mcp_http_server(scene, config, shutdown.clone(), None, None)
-                .await
-                .expect("bind");
+        let (handle, _mcp_addr) = start_mcp_http_server(scene, config, shutdown.clone(), None)
+            .await
+            .expect("bind");
 
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
 
         // Send with wrong bearer token.
-        let body = r#"{"jsonrpc":"2.0","method":"list_zones","params":{},"id":3}"#;
+        let body = r#"{"jsonrpc":"2.0","method":"tools/list","params":{},"id":3}"#;
         let resp = http_post(addr, body, Some("wrong-key")).await;
 
         assert!(resp.contains("HTTP/1.1 200"));
@@ -472,7 +461,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn mcp_http_publish_to_zone_authenticated() {
+    async fn mcp_http_hud_publish_authenticated() {
         use std::net::TcpListener as StdListener;
         use tze_hud_scene::SceneId;
         use tze_hud_scene::types::{
@@ -484,7 +473,7 @@ mod tests {
         let addr: SocketAddr = std_listener.local_addr().unwrap();
         drop(std_listener);
 
-        // Seed the scene with a zone so publish_to_zone has somewhere to write.
+        // Seed the scene with a zone so hud_publish has somewhere to write.
         let scene = make_scene();
         {
             let mut s = scene.lock().await;
@@ -518,21 +507,19 @@ mod tests {
         };
         let shutdown = ShutdownToken::new();
 
-        let (handle, _mcp_addr) =
-            start_mcp_http_server(scene, config, shutdown.clone(), None, None)
-                .await
-                .expect("bind");
+        let (handle, _mcp_addr) = start_mcp_http_server(scene, config, shutdown.clone(), None)
+            .await
+            .expect("bind");
 
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
 
-        let body = r#"{"jsonrpc":"2.0","method":"publish_to_zone","params":{"zone_name":"test-zone","content":"hello from MCP"},"id":4}"#;
+        let body = r#"{"jsonrpc":"2.0","method":"tools/call","params":{"name":"hud_publish","arguments":{"surface":"zone:test-zone","content":"hello from MCP"}},"id":4}"#;
         let resp = http_post(addr, body, Some("test-key")).await;
 
         assert!(resp.contains("HTTP/1.1 200"));
-        // Either success or a known publish error — not an auth error.
         assert!(
-            !resp.contains("Unauthenticated"),
-            "should not get auth error, got: {resp}"
+            resp.contains(r#"{\"expires_in_ms\":60000,\"ok\":true}"#),
+            "expected a successful publish, got: {resp}"
         );
 
         shutdown.trigger(crate::threads::ShutdownReason::Clean);
@@ -554,10 +541,9 @@ mod tests {
         };
         let shutdown = ShutdownToken::new();
 
-        let (handle, _mcp_addr) =
-            start_mcp_http_server(scene, config, shutdown.clone(), None, None)
-                .await
-                .expect("bind");
+        let (handle, _mcp_addr) = start_mcp_http_server(scene, config, shutdown.clone(), None)
+            .await
+            .expect("bind");
 
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
 

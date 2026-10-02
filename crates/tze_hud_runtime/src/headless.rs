@@ -879,6 +879,12 @@ impl HeadlessRuntime {
                         );
                     }
                     ZoneInteractionKind::Action { callback_id } => {
+                        // Delivered to the publisher via MCP `hud_input`.
+                        scene.push_pending_action(tze_hud_scene::PendingAction {
+                            publisher_namespace: publisher_namespace.clone(),
+                            zone_name: zone_name.clone(),
+                            callback_id: callback_id.clone(),
+                        });
                         tracing::debug!(
                             zone = %zone_name,
                             published_at_wall_us,

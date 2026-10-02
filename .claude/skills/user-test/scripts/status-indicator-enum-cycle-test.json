@@ -1,34 +1,30 @@
 [
   {
-    "widget_name": "main-status",
+    "widget": "main-status",
     "params": {
       "status": "online"
     },
-    "ttl_us": 10000000,
-    "namespace": "user-test"
+    "ttl_ms": 10000
   },
   {
-    "widget_name": "main-status",
+    "widget": "main-status",
     "params": {
       "status": "away"
     },
-    "ttl_us": 10000000,
-    "namespace": "user-test"
+    "ttl_ms": 10000
   },
   {
-    "widget_name": "main-status",
+    "widget": "main-status",
     "params": {
       "status": "busy"
     },
-    "ttl_us": 10000000,
-    "namespace": "user-test"
+    "ttl_ms": 10000
   },
   {
-    "widget_name": "main-status",
+    "widget": "main-status",
     "params": {
       "status": "offline"
     },
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   }
 ]

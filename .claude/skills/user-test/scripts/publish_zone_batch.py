@@ -4,31 +4,19 @@
 # dependencies = []
 # ///
 """
-Publish a batch of MCP `publish_to_zone` messages to a running HUD endpoint.
+Publish a batch of zone messages to a running HUD with MCP `hud_publish`.
 
 Message file format (JSON array):
 [
-  {
-    "zone_name": "status-bar",
-    "content": "Agent online",
-    "merge_key": "agent-status",
-    "ttl_us": 60000000,
-    "namespace": "butler-test"
-  },
-  {
-    "zone_name": "subtitle",
-    "content": "The quick brown fox",
-    "breakpoints": [3, 9, 15],
-    "ttl_us": 10000000,
-    "namespace": "exemplar-test"
-  }
+  {"zone": "status-bar", "content": {"entries": {"agent": "online"}}, "key": "agent-status", "ttl_ms": 60000},
+  {"zone": "subtitle", "content": "The quick brown fox", "ttl_ms": 10000}
 ]
 
 Optional fields per message:
-  merge_key   -- coalesce key for latest-wins contention
-  breakpoints -- list of byte offsets for stream-text word-by-word reveal
-  namespace   -- overrides --namespace default
-  ttl_us      -- overrides --ttl-us default
+  key     -- merge key: a publish with the same key replaces the earlier one
+  ttl_ms  -- overrides --ttl-ms (0 = until cleared)
+
+The namespace is the agent the PSK belongs to; messages cannot override it.
 """
 
 from __future__ import annotations
@@ -43,13 +31,14 @@ import urllib.request
 from typing import Any
 
 
-def rpc_call(url: str, token: str, method: str, params: dict[str, Any], request_id: int) -> dict[str, Any]:
+def rpc_call(url: str, token: str, tool: str, arguments: dict[str, Any], request_id: int) -> dict[str, Any]:
+    """Call one MCP tool; returns {"result": ...} or {"error": ...}."""
     body = json.dumps(
         {
             "jsonrpc": "2.0",
             "id": request_id,
-            "method": method,
-            "params": params,
+            "method": "tools/call",
+            "params": {"name": tool, "arguments": arguments},
         }
     ).encode("utf-8")
     req = urllib.request.Request(
@@ -62,8 +51,12 @@ def rpc_call(url: str, token: str, method: str, params: dict[str, Any], request_
         method="POST",
     )
     with urllib.request.urlopen(req, timeout=20) as resp:
-        payload = resp.read().decode("utf-8")
-    return json.loads(payload)
+        envelope = json.loads(resp.read().decode("utf-8"))
+    if "error" in envelope:
+        return {"error": envelope["error"]}
+    result = envelope["result"]
+    decoded = json.loads(result["content"][0]["text"])
+    return {"error": decoded} if result.get("isError") else {"result": decoded}
 
 
 def load_messages(path: str) -> list[dict[str, Any]]:
@@ -75,16 +68,14 @@ def load_messages(path: str) -> list[dict[str, Any]]:
     for idx, item in enumerate(data):
         if not isinstance(item, dict):
             raise ValueError(f"message[{idx}] must be an object")
-        zone_name = item.get("zone_name")
+        zone = item.get("zone")
         content = item.get("content")
-        if not isinstance(zone_name, str) or not zone_name.strip():
-            raise ValueError(f"message[{idx}].zone_name must be a non-empty string")
+        if not isinstance(zone, str) or not zone.strip():
+            raise ValueError(f"message[{idx}].zone must be a non-empty string")
         if content is None:
             raise ValueError(f"message[{idx}].content is required")
         if isinstance(content, str) and not content:
             raise ValueError(f"message[{idx}].content must be non-empty")
-        if isinstance(content, dict) and "type" not in content:
-            raise ValueError(f"message[{idx}].content object must have a \"type\" field")
         out.append(item)
     return out
 
@@ -94,10 +85,9 @@ def main() -> int:
     parser.add_argument("--url", required=True, help="MCP HTTP URL, e.g. http://host:9090")
     parser.add_argument("--psk-env", default="MCP_TEST_PSK", help="Environment variable containing PSK")
     parser.add_argument("--messages-file", required=True, help="Path to JSON array of message objects")
-    parser.add_argument("--namespace", default="butler-test", help="Default namespace if message namespace missing")
-    parser.add_argument("--ttl-us", type=int, default=60_000_000, help="Default TTL in microseconds")
+    parser.add_argument("--ttl-ms", type=int, default=60_000, help="Default TTL in milliseconds")
     parser.add_argument("--delay-ms", type=int, default=0, help="Delay between publishes")
-    parser.add_argument("--list-zones", action="store_true", help="Call list_zones before publishing")
+    parser.add_argument("--list-surfaces", action="store_true", help="Call hud_surfaces before publishing")
     args = parser.parse_args()
 
     token = os.getenv(args.psk_env, "")
@@ -106,30 +96,27 @@ def main() -> int:
         return 2
 
     try:
-        if args.list_zones:
-            zones = rpc_call(args.url, token, "list_zones", {}, 1)
-            print(json.dumps({"list_zones": zones}, ensure_ascii=True))
+        if args.list_surfaces:
+            surfaces = rpc_call(args.url, token, "hud_surfaces", {}, 1)
+            print(json.dumps({"hud_surfaces": surfaces}, ensure_ascii=True))
 
         messages = load_messages(args.messages_file)
         results: list[dict[str, Any]] = []
         req_id = 10
         for msg in messages:
             params: dict[str, Any] = {
-                "zone_name": msg["zone_name"],
+                "surface": f"zone:{msg['zone']}",
                 "content": msg["content"],
-                "namespace": msg.get("namespace", args.namespace),
-                "ttl_us": int(msg.get("ttl_us", args.ttl_us)),
+                "ttl_ms": int(msg.get("ttl_ms", args.ttl_ms)),
             }
-            if msg.get("merge_key") is not None:
-                params["merge_key"] = msg["merge_key"]
-            if msg.get("breakpoints") is not None:
-                params["breakpoints"] = msg["breakpoints"]
+            if msg.get("key") is not None:
+                params["key"] = msg["key"]
 
-            response = rpc_call(args.url, token, "publish_to_zone", params, req_id)
+            response = rpc_call(args.url, token, "hud_publish", params, req_id)
             results.append(
                 {
                     "request_id": req_id,
-                    "zone_name": params["zone_name"],
+                    "surface": params["surface"],
                     "response": response,
                 }
             )

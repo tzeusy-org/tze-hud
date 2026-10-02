@@ -20,7 +20,7 @@ Options:
   --quiet            Suppress all output (use exit code only)
 
 Output (human, on success):
-  MCP reachable: http://host:9090  (list_zones ok, <N> zones)
+  MCP reachable: http://host:9090  (hud_surfaces ok, <N> zones)
 
 Output (human, on failure):
   MCP unreachable: <detail>
@@ -49,9 +49,14 @@ from typing import Any
 
 
 def _probe(url: str, token: str, timeout: int) -> dict[str, Any]:
-    """Send a `list_zones` JSON-RPC probe and return the parsed response body."""
+    """Send a `hud_surfaces` tool call and return the parsed response body."""
     body = json.dumps(
-        {"jsonrpc": "2.0", "id": 1, "method": "list_zones", "params": {}}
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {"name": "hud_surfaces", "arguments": {}},
+        }
     ).encode("utf-8")
     req = urllib.request.Request(
         url=url,
@@ -132,11 +137,12 @@ def check(url: str, token: str, timeout: int) -> dict[str, Any]:
 
     if "result" in data:
         result["authenticated"] = True
-        zones_raw = data["result"]
-        if isinstance(zones_raw, list):
-            result["zones"] = zones_raw
-        elif isinstance(zones_raw, dict) and "zones" in zones_raw:
-            result["zones"] = zones_raw["zones"]
+        try:
+            surfaces = json.loads(data["result"]["content"][0]["text"])["surfaces"]
+        except (KeyError, IndexError, TypeError, ValueError):
+            surfaces = None
+        if isinstance(surfaces, list):
+            result["zones"] = [s["s"] for s in surfaces if str(s.get("s", "")).startswith("zone:")]
         else:
             result["zones"] = []
         return result
@@ -187,7 +193,7 @@ def main() -> int:
             print(f"  detail: {result['detail']}", file=sys.stderr)
         else:
             zones = result.get("zones") or []
-            print(f"MCP reachable: {args.url}  (list_zones ok, {len(zones)} zones)")
+            print(f"MCP reachable: {args.url}  (hud_surfaces ok, {len(zones)} zones)")
 
     if result["error"] == "connection_error":
         return 2

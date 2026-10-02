@@ -83,7 +83,6 @@ impl WindowedRuntimeState {
         // the fields require a receiver. Drop the senders — a disconnected
         // receiver is harmless here.
         let (_input_capture_tx, input_capture_rx) = tokio::sync::mpsc::unbounded_channel();
-        let (_paste_inject_tx, paste_inject_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
 
         WindowedRuntimeState {
             wake: super::wake::WindowedWake::disconnected(),
@@ -112,7 +111,6 @@ impl WindowedRuntimeState {
             input_processor: InputProcessor::new(),
             input_capture_rx,
             pending_input_capture_commands: VecDeque::new(),
-            paste_inject_rx,
             focus_manager: FocusManager::new(),
             keyboard_processor: KeyboardProcessor::new(),
             telemetry: tze_hud_telemetry::TelemetryCollector::new(),

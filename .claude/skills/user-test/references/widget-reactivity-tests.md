@@ -22,7 +22,7 @@ The gauge should visually cycle through: blue 25% "Low" → yellow 50% "Medium" 
 
 ### Step 6: Widget Reactivity Test (Status Indicator)
 
-After the gauge cycle, confirm that a `status-indicator` widget instance is registered before proceeding. Use the `--list-widgets` output from Step 4 (or re-run it) to verify that a widget named `status-indicator` appears in the list. If no such instance is present, skip the sub-steps below and report that the status-indicator widget is not deployed.
+After the gauge cycle, confirm that a `status-indicator` widget instance is registered before proceeding. Use the `--list-surfaces` output from Step 4 (or re-run it) to verify that a widget named `status-indicator` appears in the list. If no such instance is present, skip the sub-steps below and report that the status-indicator widget is not deployed.
 
 Run the status-indicator enum cycle to verify discrete color binding and re-rasterization on param change.
 
@@ -89,7 +89,7 @@ Expected result: MCP returns an error response (`WIDGET_PARAMETER_INVALID_VALUE`
 
 ### Step 7: Widget Reactivity Test (Progress Bar)
 
-After the status-indicator tests, confirm that a `progress-bar` widget instance is registered before proceeding. Use the `--list-widgets` output from Step 4 (or re-run it) to verify that a widget named `progress-bar` appears in the list. If no such instance is present, skip the sub-steps below and report that the progress-bar widget is not deployed.
+After the status-indicator tests, confirm that a `progress-bar` widget instance is registered before proceeding. Use the `--list-surfaces` output from Step 4 (or re-run it) to verify that a widget named `progress-bar` appears in the list. If no such instance is present, skip the sub-steps below and report that the progress-bar widget is not deployed.
 
 This is the **progress-bar-widget** user-test scenario. It animates a thin horizontal bar from 0 to 100% and confirms visual quality at each step.
 

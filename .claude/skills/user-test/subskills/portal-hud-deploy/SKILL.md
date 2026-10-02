@@ -118,7 +118,7 @@ failure (no JSON-RPC body) fails the gate. Observed positive response:
 {"jsonrpc":"2.0","error":{"code":-32601,"message":"Method not found: tools/list"},"id":"deploy-gate"}
 ```
 
-(The real publish methods like `publish_to_zone` / `publish_widget` ARE
+(The real publish methods like `hud_publish` / `hud_publish` ARE
 implemented — see the parent skill's batch publishers — but the bare deploy gate
 only needs a reachability+auth signal, which `-32601` already provides.)
 

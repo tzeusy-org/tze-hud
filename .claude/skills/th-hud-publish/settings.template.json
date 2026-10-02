@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "tze-hud": {
-      "type": "url",
-      "url": "http://<HUD_HOST>:9090",
+      "type": "http",
+      "url": "http://<HUD_HOST>:9090/mcp",
       "headers": {
         "Authorization": "Bearer ${HUD_MCP_PSK}"
       }

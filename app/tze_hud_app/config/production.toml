@@ -19,13 +19,13 @@
 #   tze_hud --window-mode overlay
 #   tze_hud --config /path/to/tze_hud.toml --window-mode overlay
 #
-# Widget instance names (for MCP publish_to_widget):
-#   widget_name: "main-gauge"      → gauge widget (level, label, fill_color, severity)
-#   widget_name: "main-progress"   → progress-bar widget (progress, label, fill_color)
-#   widget_name: "main-status"     → status-indicator widget (status, label, reason)
+# Widget instance names (MCP surfaces widget:<name>):
+#   widget:main-gauge      → gauge widget (level, label, fill_color, severity)
+#   widget:main-progress   → progress-bar widget (progress, label, fill_color)
+#   widget:main-status     → status-indicator widget (status, label, reason)
 #
-# See publish_to_widget semantics in .claude/skills/user-test/SKILL.md:
-# widget_name addresses a widget *instance* (not a type). The instance name is
+# See widget semantics in .claude/skills/user-test/SKILL.md:
+# a widget surface addresses a widget *instance* (not a type). The instance name is
 # the instance_id declared below — not the widget_type name.
 
 # Runtime profile selection (required by loader schema).

@@ -1,4 +1,4 @@
 interface:
   display_name: "HUD Projection"
   short_description: "Cooperatively project an active LLM session into a tze_hud text-stream portal"
-  default_prompt: "Attach this already-running LLM session to the HUD through the in-process projection authority using MCP-standard tools/call (legacy bare methods are fallback only), publish bounded output/status, poll pending HUD input, acknowledge input items, and detach or clean up without terminal capture or PTY attachment."
+  default_prompt: "Project this already-running LLM session onto the HUD with the MCP hud_* tools (standard tools/call): hud_publish to portal:<id> to attach and publish output fragments, hud_input to collect and ack replies, and hud_clear to detach. No terminal capture or PTY attachment."

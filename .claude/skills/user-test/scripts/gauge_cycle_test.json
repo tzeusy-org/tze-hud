@@ -1,24 +1,22 @@
 [
   {
-    "widget_name": "main-gauge",
+    "widget": "main-gauge",
     "params": {
       "level": 0.25,
       "label": "Low",
       "readout": "25/100 (25%)",
       "fill_color": {
         "r": 0.46,
-        "g": 0.60,
+        "g": 0.6,
         "b": 0.78,
         "a": 1.0
       },
       "severity": "info"
     },
-    "transition_ms": 650,
-    "ttl_us": 10000000,
-    "namespace": "user-test"
+    "ttl_ms": 10000
   },
   {
-    "widget_name": "main-gauge",
+    "widget": "main-gauge",
     "params": {
       "level": 0.5,
       "label": "Medium",
@@ -31,12 +29,10 @@
       },
       "severity": "warning"
     },
-    "transition_ms": 650,
-    "ttl_us": 10000000,
-    "namespace": "user-test"
+    "ttl_ms": 10000
   },
   {
-    "widget_name": "main-gauge",
+    "widget": "main-gauge",
     "params": {
       "level": 0.95,
       "label": "Critical!",
@@ -49,12 +45,10 @@
       },
       "severity": "error"
     },
-    "transition_ms": 650,
-    "ttl_us": 10000000,
-    "namespace": "user-test"
+    "ttl_ms": 10000
   },
   {
-    "widget_name": "main-gauge",
+    "widget": "main-gauge",
     "params": {
       "level": 0.42,
       "label": "Normal",
@@ -67,8 +61,6 @@
       },
       "severity": "info"
     },
-    "transition_ms": 650,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   }
 ]

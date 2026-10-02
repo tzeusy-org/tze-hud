@@ -4,9 +4,9 @@
 # dependencies = []
 # ///
 """
-MCP publish_to_zone stress test with performance telemetry.
+MCP hud_publish stress test with performance telemetry.
 
-Exercises the MCP publish_to_zone endpoint at varying load levels while
+Exercises the MCP hud_publish endpoint at varying load levels while
 collecting latency percentiles and host resource telemetry via SSH.
 
 Connection defaults:
@@ -233,7 +233,7 @@ def build_content(
 
 
 # ---------------------------------------------------------------------------
-# RPC helper (same pattern as publish_zone_batch.py)
+# RPC helper: one MCP tools/call (same pattern as publish_zone_batch.py)
 # ---------------------------------------------------------------------------
 
 
@@ -249,8 +249,8 @@ def rpc_call(
         {
             "jsonrpc": "2.0",
             "id": request_id,
-            "method": method,
-            "params": params,
+            "method": "tools/call",
+            "params": {"name": method, "arguments": params},
         }
     ).encode("utf-8")
     req = urllib.request.Request(
@@ -263,8 +263,12 @@ def rpc_call(
         method="POST",
     )
     with urllib.request.urlopen(req, timeout=timeout) as resp:
-        payload = resp.read().decode("utf-8")
-    return json.loads(payload)
+        envelope = json.loads(resp.read().decode("utf-8"))
+    if "error" in envelope:
+        return {"error": envelope["error"]}
+    result = envelope["result"]
+    decoded = json.loads(result["content"][0]["text"])
+    return {"error": decoded} if result.get("isError") else {"result": decoded}
 
 
 # ---------------------------------------------------------------------------
@@ -820,14 +824,14 @@ class ProfileResult:
 
 def preflight_check(url: str, token: str) -> set[str] | None:
     """
-    Call list_zones to verify the MCP endpoint is reachable and discover available zones.
+    Call hud_surfaces to verify the MCP endpoint is reachable and discover available zones.
 
     Returns a set of zone names on success, or None on any failure (connection
     refused, DNS error, HTTP non-200, JSON-RPC error, or timeout). Callers
     should filter the ZONES list against the returned set and warn/skip missing zones.
     """
     try:
-        resp = rpc_call(url, token, "list_zones", {}, request_id=0, timeout=5.0)
+        resp = rpc_call(url, token, "hud_surfaces", {}, request_id=0, timeout=5.0)
     except urllib.error.URLError as exc:
         print(
             f"MCP endpoint unreachable at {url}: {exc.reason}",
@@ -855,8 +859,12 @@ def preflight_check(url: str, token: str) -> set[str] | None:
         )
         return None
 
-    zones_data = resp.get("result", {}).get("zones", [])
-    return {z["name"] for z in zones_data if isinstance(z, dict) and "name" in z}
+    surfaces = resp.get("result", {}).get("surfaces", [])
+    return {
+        s["s"].removeprefix("zone:")
+        for s in surfaces
+        if isinstance(s, dict) and str(s.get("s", "")).startswith("zone:")
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -886,7 +894,7 @@ class RateController:
 
 def run_network_baseline(url: str, token: str) -> dict[str, Any]:
     """
-    Run 100 sequential list_zones JSON-RPC calls at 1/s to measure bare HTTP round-trip.
+    Run 100 sequential hud_surfaces JSON-RPC calls at 1/s to measure bare HTTP round-trip.
 
     No concurrent load, no SSH telemetry. Isolates network + server dispatch
     latency from publish overhead. Results appear as top-level key
@@ -900,13 +908,13 @@ def run_network_baseline(url: str, token: str) -> dict[str, Any]:
     latencies_ms: list[float] = []
     errors = 0
 
-    print("--- Network baseline: 100x list_zones at 1/s ---", flush=True)
+    print("--- Network baseline: 100x hud_surfaces at 1/s ---", flush=True)
     controller = RateController(RATE)
     for i in range(CALLS):
         controller.wait_for_next()
         t0 = time.monotonic()
         try:
-            resp = rpc_call(url, token, "list_zones", {}, request_id=i, timeout=10.0)
+            resp = rpc_call(url, token, "hud_surfaces", {}, request_id=i, timeout=10.0)
             if "error" in resp:
                 errors += 1
                 print(f"  network_baseline call {i} error: JSON-RPC error {resp['error']}", file=sys.stderr)
@@ -939,7 +947,7 @@ def run_network_baseline(url: str, token: str) -> dict[str, Any]:
 
 def run_publish_baseline(url: str, token: str) -> dict[str, Any]:
     """
-    Run 10 sequential publish_to_zone calls at 1/s across all 6 default zones.
+    Run 10 sequential hud_publish calls at 1/s across all 6 default zones.
 
     One call per second, one zone per call (cycling through ZONES), no
     concurrent load. Measures single-publish latency without load-profile
@@ -954,21 +962,20 @@ def run_publish_baseline(url: str, token: str) -> dict[str, Any]:
     latencies_ms: list[float] = []
     errors = 0
 
-    print("--- Publish baseline: 100x publish_to_zone at 1/s ---", flush=True)
+    print("--- Publish baseline: 100x hud_publish at 1/s ---", flush=True)
     controller = RateController(RATE)
     for i in range(CALLS):
         controller.wait_for_next()
         zone = ZONES[i % len(ZONES)]
         params: dict[str, Any] = {
-            "zone_name": zone["zone_name"],
+            "surface": f"zone:{zone['zone_name']}",
             "content": build_content(zone, req_id=i, large_payload_index=None, total_requests_in_profile=CALLS, req_index=i),
-            "namespace": DEFAULT_NAMESPACE,
-            "ttl_us": DEFAULT_TTL_US,
-            "merge_key": zone["merge_key"],
+            "ttl_ms": DEFAULT_TTL_US // 1000,
+            "key": zone["merge_key"],
         }
         t0 = time.monotonic()
         try:
-            resp = rpc_call(url, token, "publish_to_zone", params, request_id=i, timeout=10.0)
+            resp = rpc_call(url, token, "hud_publish", params, request_id=i, timeout=10.0)
             if "error" in resp:
                 raise RuntimeError(f"JSON-RPC error: {resp['error']}")
             latencies_ms.append((time.monotonic() - t0) * 1000.0)
@@ -1012,7 +1019,7 @@ def _dispatch_one(
     req_index: int,
 ) -> tuple[float | None, bool, float]:
     """
-    Dispatch a single publish_to_zone request and return (latency_ms, success, completed_at).
+    Dispatch a single hud_publish request and return (latency_ms, success, completed_at).
 
     Thread-safe: uses only immutable arguments and the thread-local stack.
     ``completed_at`` is a monotonic timestamp captured immediately after the
@@ -1041,15 +1048,14 @@ def _dispatch_one(
         req_index=req_index,
     )
     params: dict[str, Any] = {
-        "zone_name": zone["zone_name"],
+        "surface": f"zone:{zone['zone_name']}",
         "content": content,
-        "namespace": DEFAULT_NAMESPACE,
-        "ttl_us": ttl_us,
-        "merge_key": zone["merge_key"],
+        "ttl_ms": ttl_us // 1000,
+        "key": zone["merge_key"],
     }
     t0 = time.monotonic()
     try:
-        resp = rpc_call(url, token, "publish_to_zone", params, req_id, timeout=5.0)
+        resp = rpc_call(url, token, "hud_publish", params, req_id, timeout=5.0)
         completed_at = time.monotonic()
         if "error" in resp:
             raise RuntimeError(f"JSON-RPC error: {resp['error']}")
@@ -1314,7 +1320,7 @@ def _default_output_path() -> str:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="MCP publish_to_zone stress test with performance telemetry",
+        description="MCP hud_publish stress test with performance telemetry",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )

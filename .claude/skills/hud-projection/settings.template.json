@@ -1,7 +1,7 @@
 {
   "mcpServers": {
     "tze-hud-runtime": {
-      "type": "url",
+      "type": "http",
       "url": "http://<TZE_HUD_RUNTIME_HOST>:<MCP_PORT>/mcp",
       "headers": {
         "Authorization": "Bearer ${TZE_HUD_PSK}"

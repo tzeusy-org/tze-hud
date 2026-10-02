@@ -8,18 +8,23 @@ import sys
 
 
 METRIC_NAMES = ("bytes", "tokens")
-SIDES = ("request", "response", "total")
+SIDES = ("request", "response", "total", "model_visible")
+# A baseline the owner has approved, or one awaiting their review in its PR.
+# A pending baseline is compared in full but never reports better than
+# "warning". Any other status fails closed.
+APPROVAL_STATUSES = ("owner_approved", "pending_owner_review")
+FLOW_SIDES = ("total", "model_visible")
 
 
 def _incompatibility_checks(measurement, baseline):
     reasons = []
     approval = baseline.get("approval", {})
-    if approval.get("status") != "owner_approved":
-        reasons.append("baseline is not owner-approved")
+    if approval.get("status") not in APPROVAL_STATUSES:
+        reasons.append("baseline is not owner-approved or pending owner review")
     elif not isinstance(approval.get("decision_reference"), str) or not approval[
         "decision_reference"
     ].strip():
-        reasons.append("owner-approved baseline is missing a decision reference")
+        reasons.append("baseline approval is missing a decision reference")
     for field in ("schema_version", "tokenizer", "fixture_fingerprint"):
         if field not in measurement or field not in baseline:
             reasons.append(f"missing compatibility field: {field}")
@@ -90,8 +95,16 @@ def _incompatibility_checks(measurement, baseline):
                         )
                     )
         for label, flow in (("measurement", measured), ("baseline", expected)):
-            reasons.extend(_validate_counts(flow.get("total"), f"{label}:{flow_name}.total"))
+            for side in FLOW_SIDES:
+                reasons.extend(
+                    _validate_counts(flow.get(side), f"{label}:{flow_name}.{side}")
+                )
             reasons.extend(_validate_flow_total(flow, f"{label}:{flow_name}"))
+    budgets = baseline.get("budgets")
+    if not isinstance(budgets, dict) or not isinstance(budgets.get("flows"), dict):
+        reasons.append("baseline is missing budgets")
+    elif set(budgets["flows"]) != set(baseline_flows):
+        reasons.append("budget flow set does not match baseline flows")
     return reasons
 
 
@@ -141,20 +154,22 @@ def _validate_flow_total(flow, path):
     if not isinstance(flow, dict) or not isinstance(flow.get("operations"), dict):
         return []
     reasons = []
-    for metric in METRIC_NAMES:
-        total = _metric(flow.get("total"), metric)
-        operation_totals = [
-            _metric(operation.get("total"), metric)
-            for operation in flow["operations"].values()
-            if isinstance(operation, dict)
-        ]
-        if (
-            total is not None
-            and len(operation_totals) == len(flow["operations"])
-            and all(value is not None for value in operation_totals)
-            and total != sum(operation_totals)
-        ):
-            reasons.append(f"flow total mismatch: {path}.{metric}")
+    for side in FLOW_SIDES:
+        for metric in METRIC_NAMES:
+            total = _metric(flow.get(side), metric)
+            operation_totals = [
+                _metric(operation.get(side), metric)
+                for operation in flow["operations"].values()
+                if isinstance(operation, dict)
+            ]
+            if (
+                total is not None
+                and len(operation_totals) == len(flow["operations"])
+                and all(value is not None for value in operation_totals)
+                and total != sum(operation_totals)
+            ):
+                label = "flow total" if side == "total" else f"flow {side}"
+                reasons.append(f"{label} mismatch: {path}.{metric}")
     return reasons
 
 
@@ -165,8 +180,21 @@ def _metric_values(document):
                 for metric in METRIC_NAMES:
                     path = f"{flow_name}.operations.{operation_name}.{side}.{metric}"
                     yield path, operation[side][metric]
-        for metric in METRIC_NAMES:
-            yield f"{flow_name}.total.{metric}", flow["total"][metric]
+        for side in FLOW_SIDES:
+            for metric in METRIC_NAMES:
+                yield f"{flow_name}.{side}.{metric}", flow[side][metric]
+
+
+def _budget_violations(measurement, baseline):
+    """Hard ceilings on each flow's model-visible tokens (docs/api.md)."""
+    violations = []
+    for flow_name, ceiling in sorted(baseline["budgets"]["flows"].items()):
+        measured = measurement["flows"][flow_name]["model_visible"]["tokens"]
+        if measured > ceiling:
+            violations.append(
+                {"flow": flow_name, "budget": ceiling, "measured": measured}
+            )
+    return violations
 
 
 def compare(measurement, baseline):
@@ -178,6 +206,7 @@ def compare(measurement, baseline):
             "status": "baseline_incompatible",
             "threshold_percent": 5,
             "incompatibilities": incompatibilities,
+            "budget_violations": [],
             "regressions": [],
             "warnings": [],
             "improvements": [],
@@ -191,6 +220,7 @@ def compare(measurement, baseline):
             "status": "baseline_incompatible",
             "threshold_percent": 5,
             "incompatibilities": ["metric set changed"],
+            "budget_violations": [],
             "regressions": [],
             "warnings": [],
             "improvements": [],
@@ -222,12 +252,20 @@ def compare(measurement, baseline):
         elif measured_value < baseline_value:
             improvements.append(entry)
 
-    status = "failed" if regressions else "warning" if warnings else "passed"
+    budget_violations = _budget_violations(measurement, baseline)
+    approval = baseline["approval"]["status"]
+    status = (
+        "failed"
+        if regressions or budget_violations
+        else "warning" if warnings or approval != "owner_approved" else "passed"
+    )
     return {
         "schema_version": 1,
         "status": status,
+        "approval": approval,
         "threshold_percent": 5,
         "incompatibilities": [],
+        "budget_violations": budget_violations,
         "regressions": regressions,
         "warnings": warnings,
         "improvements": improvements,

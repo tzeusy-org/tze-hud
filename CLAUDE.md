@@ -48,12 +48,12 @@ pixel-readback GPU test deadlocks headless without Mesa llvmpipe.
 
 To project this session onto the HUD, use the **`hud-projection`** skill
 (`.claude/skills/hud-projection/SKILL.md`). It is cooperative opt-in
-projection via the `portal_projection_*` MCP tools (attach, publish,
-publish_status, get_pending_input, acknowledge_input, detach, cleanup). Send
-your agent's PSK as the MCP bearer; its `[agents.<id>] allow` list must include
-`portal` (the shipped configs give `[agents.claude]`, which reads `TZE_HUD_PSK`,
-`allow = ["*"]`). For one-shot zone publishing, use
-**`th-hud-publish`**.
+projection through the MCP verbs on `portal:<id>`: `hud_publish` (the first
+publish attaches), `hud_input` (replies, acked in the same call), and
+`hud_clear` (detach). Send your agent's PSK as the MCP bearer; its
+`[agents.<id>] allow` list must include `portal` (the shipped configs give
+`[agents.claude]`, which reads `TZE_HUD_PSK`, `allow = ["*"]`). For one-shot
+zone publishing, use **`th-hud-publish`**.
 
 ## Issue Tracking
 

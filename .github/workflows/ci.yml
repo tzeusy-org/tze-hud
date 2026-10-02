@@ -298,7 +298,7 @@ jobs:
             test_results/token-footprint/repeat.json
           python3 scripts/ci/check_token_footprint.py \
             --measurement test_results/token-footprint/measurement.json \
-            --baseline scripts/ci/token_footprint_candidate_v1.json \
+            --baseline scripts/ci/token_footprint_baseline.json \
             --output test_results/token-footprint/gate-report.json
       - name: Upload token-footprint calibration artifact
         if: always()

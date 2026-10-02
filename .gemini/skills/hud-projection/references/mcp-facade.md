@@ -1,56 +1,43 @@
-# External Projection-Daemon Control Facades
+# Portal over MCP: wiring and boundary
 
-Projection control facades belong to the projection daemon. They are not the runtime v1 MCP bridge and should not expose raw scene state, zone publishing shortcuts, PTY attachment, terminal capture, or process lifecycle controls.
-
-## Required Boundary
-
-- Accept only the cooperative operation contract from `operation-examples.md`.
-- Authenticate callers through daemon-local authority, an MCP bearer token, OS-protected IPC, or another unguessable credential.
-- Bind owner-scoped non-attach operations to `projection_id` plus the caller's agent identity: the MCP server keeps the owner token server-side, keyed by (agent, projection), and injects it; bind operator cleanup to separate explicit operator authority.
-- Return bounded operation responses only: no unbounded transcript, unbounded inbox history, `owner_token` (the MCP server strips it from attach), owner-token verifier, or raw runtime scene graph.
-- Emit audit records without transcript text, HUD input text, or owner tokens.
-
-## In-Repo Stdio Daemon CLI
-
-The repo ships a daemon-local stdio control surface in `crates/tze_hud_projection`:
-
-```bash
-cargo run -p tze_hud_projection --bin tze_hud_projection_authority -- --stdio --caller-identity codex-local
-```
-
-Send one operation JSON object per stdin line. The process writes one JSON result per stdout line:
+Agents drive a portal with the standard MCP verbs on the surface
+`portal:<projection_id>` (`docs/api.md`). Every call is `tools/call`:
 
 ```json
-{"response":{"request_id":"req-attach","projection_id":"codex-rig","accepted":true,"server_timestamp_wall_us":1777400000000000,"status_summary":"projection attached","owner_token":"<attach-only>","lifecycle_state":"attached","pending_remaining_count":0,"pending_remaining_bytes":0,"portal_update_ready":false,"coalesced_output_count":0},"audit_records":[{"timestamp_wall_us":1777400000000000,"operation":"attach","projection_id":"codex-rig","caller_identity":"codex-local","request_id":"req-attach","accepted":true,"reason":"attach accepted","category":"attach"}]}
+{"jsonrpc":"2.0","id":1,"method":"tools/call",
+ "params":{"name":"hud_publish","arguments":{"surface":"portal:my-session","content":"hello"}}}
 ```
 
-The CLI keeps projection state in memory only for the lifetime of that process. Restarting it purges transcript text, pending input text, owner tokens, and cached lease identity, so sessions must attach again after restart. Operator cleanup can be enabled with `--operator-authority-env HUD_PROJECTION_OPERATOR_AUTHORITY`; owner operations still require the owner token issued by `attach`.
+There is no other dialect: bare tool-name methods return `-32601`.
 
-## Tool Shape
+## Wiring
 
-Either shape is acceptable if the payload schema remains the same:
+- `crates/tze_hud_mcp/src/tools.rs` turns each verb into `PortalOp`
+  messages: the first `hud_publish` sends `Attach` (idempotency key
+  `<agent>:<projection_id>`), then `PublishOutput` / `PublishStatus`;
+  `hud_input` sends `GetPendingInput` and `AcknowledgeInput`; `hud_clear`
+  sends `Detach`. `hud_publish`'s `key` is the portal `coalesce_key`.
+- `PortalOp` crosses an unbounded channel to the winit thread, where
+  `crates/tze_hud_runtime/src/portal_projection_driver.rs` calls the
+  in-process `ProjectionAuthority` (`crates/tze_hud_projection/`).
+- The bearer PSK identifies the agent. Portal surfaces need `portal` (or `*`)
+  in that agent's `[agents.<id>] allow` list; otherwise `NOT_ALLOWED`.
 
-- One dispatcher tool, for example `projection_operation(payload)`.
-- Seven operation tools: `attach`, `publish_output`, `publish_status`, `get_pending_input`, `acknowledge_input`, `detach`, and `cleanup`.
+## Boundary rules
 
-The skill examples use operation JSON payloads so they work with either facade shape.
+- The owner token never reaches the model. The MCP server holds it per
+  (agent, projection) and re-attaches once with the same idempotency key if
+  the authority reports it stale.
+- Responses stay bounded: no transcript history, no tokens, no scene state.
+  Delivered input is held server-side until acked, then acked to the
+  authority as `handled`.
+- The authority's transcript window is in-memory presentation state; durable
+  history belongs to the session.
+- Operator cleanup, accent, unread counts, and composer state are runtime
+  internals with no MCP surface (decision 4 in `docs/api.md`).
 
-## Claude-Style MCP Configuration
+## Component harness (testing only)
 
-Use `settings.template.json` as a starting point:
-
-```json
-{
-  "mcpServers": {
-    "hud-projection-daemon": {
-      "type": "url",
-      "url": "http://<PROJECTION_DAEMON_HOST>:<PORT>/mcp",
-      "headers": {
-        "Authorization": "Bearer ${HUD_PROJECTION_DAEMON_TOKEN}"
-      }
-    }
-  }
-}
-```
-
-Keep the server name explicit. Avoid names such as `tze-hud` that can be confused with the runtime v1 MCP zone publishing bridge.
+`cargo run -p tze_hud_projection --bin tze_hud_projection_authority -- --stdio --caller-identity codex-local`
+runs the authority in an isolated process for protocol tests and audit-record
+inspection. Its output never reaches the screen.

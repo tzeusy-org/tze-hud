@@ -4,27 +4,19 @@
 # dependencies = []
 # ///
 """
-Publish a batch of MCP `publish_to_widget` messages to a running HUD endpoint.
+Publish a batch of widget messages to a running HUD with MCP `hud_publish`.
 
 Message file format (JSON array):
 [
-  {
-    "widget_name": "gauge",
-    "params": {"level": 0.75, "label": "CPU Usage"},
-    "transition_ms": 500,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
-  }
+  {"widget": "gauge", "params": {"level": 0.75, "label": "CPU Usage"}, "ttl_ms": 60000}
 ]
 
-Also supports clear operations:
+Also supports clear operations (`hud_clear`):
 [
-  {
-    "action": "clear",
-    "widget_name": "gauge",
-    "namespace": "user-test"
-  }
+  {"action": "clear", "widget": "gauge"}
 ]
+
+The namespace is the agent the PSK belongs to; messages cannot override it.
 """
 
 from __future__ import annotations
@@ -39,13 +31,14 @@ import urllib.request
 from typing import Any
 
 
-def rpc_call(url: str, token: str, method: str, params: dict[str, Any], request_id: int) -> dict[str, Any]:
+def rpc_call(url: str, token: str, tool: str, arguments: dict[str, Any], request_id: int) -> dict[str, Any]:
+    """Call one MCP tool; returns {"result": ...} or {"error": ...}."""
     body = json.dumps(
         {
             "jsonrpc": "2.0",
             "id": request_id,
-            "method": method,
-            "params": params,
+            "method": "tools/call",
+            "params": {"name": tool, "arguments": arguments},
         }
     ).encode("utf-8")
     req = urllib.request.Request(
@@ -58,8 +51,12 @@ def rpc_call(url: str, token: str, method: str, params: dict[str, Any], request_
         method="POST",
     )
     with urllib.request.urlopen(req, timeout=20) as resp:
-        payload = resp.read().decode("utf-8")
-    return json.loads(payload)
+        envelope = json.loads(resp.read().decode("utf-8"))
+    if "error" in envelope:
+        return {"error": envelope["error"]}
+    result = envelope["result"]
+    decoded = json.loads(result["content"][0]["text"])
+    return {"error": decoded} if result.get("isError") else {"result": decoded}
 
 
 def load_messages(path: str) -> list[dict[str, Any]]:
@@ -72,9 +69,9 @@ def load_messages(path: str) -> list[dict[str, Any]]:
         if not isinstance(item, dict):
             raise ValueError(f"message[{idx}] must be an object")
         action = item.get("action", "publish")
-        widget_name = item.get("widget_name")
+        widget_name = item.get("widget")
         if not isinstance(widget_name, str) or not widget_name.strip():
-            raise ValueError(f"message[{idx}].widget_name must be a non-empty string")
+            raise ValueError(f"message[{idx}].widget must be a non-empty string")
         if action == "publish":
             params = item.get("params")
             if not isinstance(params, dict) or not params:
@@ -100,25 +97,22 @@ def message_widget_names(messages: list[dict[str, Any]]) -> list[str]:
     names: list[str] = []
     seen: set[str] = set()
     for msg in messages:
-        name = msg.get("widget_name")
+        name = msg.get("widget")
         if isinstance(name, str) and name and name not in seen:
             names.append(name)
             seen.add(name)
     return names
 
 
-def clear_widgets(url: str, token: str, widgets: list[str], namespace: str, starting_request_id: int) -> list[dict[str, Any]]:
+def clear_widgets(url: str, token: str, widgets: list[str], starting_request_id: int) -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
     req_id = starting_request_id
     for widget_name in widgets:
         response = rpc_call(
             url,
             token,
-            "clear_widget",
-            {
-                "widget_name": widget_name,
-                "namespace": namespace,
-            },
+            "hud_clear",
+            {"surface": f"widget:{widget_name}"},
             req_id,
         )
         results.append(
@@ -138,10 +132,9 @@ def main() -> int:
     parser.add_argument("--url", required=True, help="MCP HTTP URL, e.g. http://host:9090")
     parser.add_argument("--psk-env", default="MCP_TEST_PSK", help="Environment variable containing PSK")
     parser.add_argument("--messages-file", required=True, help="Path to JSON array of widget message objects")
-    parser.add_argument("--namespace", default="user-test", help="Default namespace if message namespace missing")
-    parser.add_argument("--ttl-us", type=int, default=60_000_000, help="Default TTL in microseconds")
+    parser.add_argument("--ttl-ms", type=int, default=60_000, help="Default TTL in milliseconds (0 = until cleared)")
     parser.add_argument("--delay-ms", type=int, default=0, help="Delay between publishes")
-    parser.add_argument("--list-widgets", action="store_true", help="Call list_widgets before publishing")
+    parser.add_argument("--list-surfaces", action="store_true", help="Call hud_surfaces before publishing")
     parser.add_argument(
         "--cleanup-on-exit",
         action="store_true",
@@ -163,9 +156,9 @@ def main() -> int:
     messages: list[dict[str, Any]] = []
     exit_code = 0
     try:
-        if args.list_widgets:
-            widgets = rpc_call(args.url, token, "list_widgets", {}, 1)
-            print(json.dumps({"list_widgets": widgets}, ensure_ascii=True))
+        if args.list_surfaces:
+            surfaces = rpc_call(args.url, token, "hud_surfaces", {}, 1)
+            print(json.dumps({"hud_surfaces": surfaces}, ensure_ascii=True))
 
         messages = load_messages(args.messages_file)
         results: list[dict[str, Any]] = []
@@ -173,32 +166,22 @@ def main() -> int:
         for msg in messages:
             action = msg.get("action", "publish")
 
+            surface = f"widget:{msg['widget']}"
             if action == "clear":
-                params: dict[str, Any] = {
-                    "widget_name": msg["widget_name"],
-                    "namespace": msg.get("namespace", args.namespace),
-                }
-                if msg.get("instance_id") is not None:
-                    params["instance_id"] = msg["instance_id"]
-                response = rpc_call(args.url, token, "clear_widget", params, req_id)
+                response = rpc_call(args.url, token, "hud_clear", {"surface": surface}, req_id)
             else:
-                params = {
-                    "widget_name": msg["widget_name"],
+                params: dict[str, Any] = {
+                    "surface": surface,
                     "params": msg["params"],
-                    "namespace": msg.get("namespace", args.namespace),
-                    "ttl_us": int(msg.get("ttl_us", args.ttl_us)),
+                    "ttl_ms": int(msg.get("ttl_ms", args.ttl_ms)),
                 }
-                if msg.get("transition_ms") is not None:
-                    params["transition_ms"] = int(msg["transition_ms"])
-                if msg.get("instance_id") is not None:
-                    params["instance_id"] = msg["instance_id"]
-                response = rpc_call(args.url, token, "publish_to_widget", params, req_id)
+                response = rpc_call(args.url, token, "hud_publish", params, req_id)
 
             results.append(
                 {
                     "request_id": req_id,
                     "action": action,
-                    "widget_name": msg["widget_name"],
+                    "widget": msg["widget"],
                     "response": response,
                 }
             )
@@ -238,7 +221,7 @@ def main() -> int:
                 if args.cleanup_delay_ms > 0:
                     time.sleep(args.cleanup_delay_ms / 1000.0)
                 try:
-                    cleanup_results = clear_widgets(args.url, token, cleanup_widgets, args.namespace, 1000)
+                    cleanup_results = clear_widgets(args.url, token, cleanup_widgets, 1000)
                     print(json.dumps({"cleanup": cleanup_results}, ensure_ascii=True))
                 except Exception as e:
                     print(json.dumps({"error": "cleanup_failed", "detail": str(e)}, ensure_ascii=True), file=sys.stderr)

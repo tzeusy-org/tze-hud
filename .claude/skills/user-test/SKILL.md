@@ -1,6 +1,6 @@
 ---
 name: user-test
-description: Use when validating a cross-machine HUD flow where Butler deploys/runs the full Windows app over SSH+SCP (tailnet default host), then publishes configurable test messages to HUD zones via MCP `publish_to_zone`.
+description: Use when validating a cross-machine HUD flow where Butler deploys/runs the full Windows app over SSH+SCP (tailnet default host), then publishes configurable test messages to HUD zones via MCP `hud_publish`.
 metadata:
   owner: tze
   authors:
@@ -40,8 +40,8 @@ Collect these before executing:
 - `widget_messages`: array of widget publishes (optional)
 
 For the exact `messages` / `widget_messages` payload shapes, content types by
-zone, widget parameter types, and `widget_name` instance-discovery semantics
-(`list_widgets`), see
+zone, widget parameter types, and `widget` instance-discovery semantics
+(`hud_surfaces`), see
 [references/message-payloads.md](references/message-payloads.md).
 
 ## Autonomous Testhost (hud-windows VM)
@@ -129,11 +129,11 @@ scenarios live in `references/`. Load the one matching the task:
 
 - [references/message-payloads.md](references/message-payloads.md) — zone message
   and widget payload shapes, content types by zone, widget parameter types, and
-  `widget_name` instance discovery (`list_widgets`).
+  `widget` instance discovery (`hud_surfaces`).
 - [references/widget-reactivity-tests.md](references/widget-reactivity-tests.md) —
   Workflow Steps 5–7: gauge cycling, status-indicator (enum/theme/label/validation),
   and progress-bar (7-step, color sweep, rapid-fire) reactivity tests.
-- [references/zone-exemplars.md](references/zone-exemplars.md) — MCP `publish_to_zone`
+- [references/zone-exemplars.md](references/zone-exemplars.md) — MCP `hud_publish`
   exemplar scenarios: subtitle, notification stack, alert-banner, status-bar, and
   ambient-background.
 - [references/resident-exemplars.md](references/resident-exemplars.md) — resident
@@ -255,7 +255,7 @@ Use `scripts/publish_zone_batch.py` from this skill.
 Recommended sequence:
 
 1. Generate a temporary JSON file with user-provided messages.
-2. List zones first (`--list-zones`) for visibility.
+2. List zones first (`--list-surfaces`) for visibility.
 3. Publish the full message batch.
 4. Return per-message results (success/failure, ids, and errors).
 
@@ -266,7 +266,7 @@ python3 .claude/skills/user-test/scripts/publish_zone_batch.py \
   --url "$MCP_HTTP_URL" \
   --psk-env MCP_TEST_PSK \
   --messages-file /tmp/hud-zone-messages.json \
-  --list-zones
+  --list-surfaces
 ```
 
 ### Step 4: Publish Configurable Widget Messages
@@ -276,7 +276,7 @@ Use `scripts/publish_widget_batch.py` from this skill.
 Recommended sequence:
 
 1. Generate a temporary JSON file with user-provided widget messages.
-2. List widgets first (`--list-widgets`) to discover available widget types and instances.
+2. List widgets first (`--list-surfaces`) to discover available widget types and instances.
 3. Publish the full widget message batch.
 4. Return per-message results (success/failure, applied params, and errors).
 5. For manual user-test runs that touch durable widget instances, clear them at the end with `--cleanup-on-exit` or the cleanup fixture below. This prevents stale widget state from remaining on the HUD after interrupted or partial tests.
@@ -288,11 +288,11 @@ python3 .claude/skills/user-test/scripts/publish_widget_batch.py \
   --url "$MCP_HTTP_URL" \
   --psk-env MCP_TEST_PSK \
   --messages-file /tmp/hud-widget-messages.json \
-  --list-widgets \
+  --list-surfaces \
   --cleanup-on-exit
 ```
 
-If `list_widgets` returns no instances, skip widget publishing and report that no widgets are registered (the HUD binary may predate widget support).
+If `hud_surfaces` returns no instances, skip widget publishing and report that no widgets are registered (the HUD binary may predate widget support).
 
 To clear stale widget state explicitly, run:
 
@@ -316,7 +316,7 @@ Beyond the core deploy/publish loop, this skill bundles per-surface exemplar
 scenarios. Each lives in a reference file with its own CLI, phases/sequence,
 visual checklist, and payload shape:
 
-- **Zone exemplars** (MCP `publish_to_zone`): subtitle, notification stack,
+- **Zone exemplars** (MCP `hud_publish`): subtitle, notification stack,
   alert-banner, status-bar, ambient-background —
   [references/zone-exemplars.md](references/zone-exemplars.md).
 - **Resident gRPC exemplars**: Presence Card and Text Stream Portals —

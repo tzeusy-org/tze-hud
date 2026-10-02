@@ -1,71 +1,62 @@
 [
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.0,
       "label": ""
     },
-    "transition_ms": 0,
-    "ttl_us": 10000000,
-    "namespace": "user-test"
+    "ttl_ms": 10000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.25,
       "label": "25/100 (25%)"
     },
-    "transition_ms": 200,
-    "ttl_us": 10000000,
-    "namespace": "user-test"
+    "ttl_ms": 10000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.5,
       "label": "50/100 (50%)"
     },
-    "transition_ms": 200,
-    "ttl_us": 10000000,
-    "namespace": "user-test"
+    "ttl_ms": 10000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.75,
       "label": "75/100 (75%)"
     },
-    "transition_ms": 200,
-    "ttl_us": 10000000,
-    "namespace": "user-test"
+    "ttl_ms": 10000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 1.0,
       "label": "100/100 (100%)"
     },
-    "transition_ms": 200,
-    "ttl_us": 10000000,
-    "namespace": "user-test"
+    "ttl_ms": 10000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
-      "fill_color": {"r": 0.0, "g": 0.784, "b": 0.325, "a": 1.0}
+      "fill_color": {
+        "r": 0.0,
+        "g": 0.784,
+        "b": 0.325,
+        "a": 1.0
+      }
     },
-    "transition_ms": 300,
-    "ttl_us": 10000000,
-    "namespace": "user-test"
+    "ttl_ms": 10000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.0,
       "label": ""
     },
-    "transition_ms": 0,
-    "ttl_us": 10000000,
-    "namespace": "user-test"
+    "ttl_ms": 10000
   }
 ]

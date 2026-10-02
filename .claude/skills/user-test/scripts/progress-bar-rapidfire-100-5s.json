@@ -1,1002 +1,802 @@
 [
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.01,
       "label": "1%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.02,
       "label": "2%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.03,
       "label": "3%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.04,
       "label": "4%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.05,
       "label": "5%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.06,
       "label": "6%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.07,
       "label": "7%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.08,
       "label": "8%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.09,
       "label": "9%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.1,
       "label": "10%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.11,
       "label": "11%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.12,
       "label": "12%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.13,
       "label": "13%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.14,
       "label": "14%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.15,
       "label": "15%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.16,
       "label": "16%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.17,
       "label": "17%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.18,
       "label": "18%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.19,
       "label": "19%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.2,
       "label": "20%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.21,
       "label": "21%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.22,
       "label": "22%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.23,
       "label": "23%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.24,
       "label": "24%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.25,
       "label": "25%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.26,
       "label": "26%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.27,
       "label": "27%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.28,
       "label": "28%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.29,
       "label": "29%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.3,
       "label": "30%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.31,
       "label": "31%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.32,
       "label": "32%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.33,
       "label": "33%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.34,
       "label": "34%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.35,
       "label": "35%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.36,
       "label": "36%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.37,
       "label": "37%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.38,
       "label": "38%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.39,
       "label": "39%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.4,
       "label": "40%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.41,
       "label": "41%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.42,
       "label": "42%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.43,
       "label": "43%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.44,
       "label": "44%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.45,
       "label": "45%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.46,
       "label": "46%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.47,
       "label": "47%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.48,
       "label": "48%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.49,
       "label": "49%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.5,
       "label": "50%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.51,
       "label": "51%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.52,
       "label": "52%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.53,
       "label": "53%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.54,
       "label": "54%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.55,
       "label": "55%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.56,
       "label": "56%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.57,
       "label": "57%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.58,
       "label": "58%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.59,
       "label": "59%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.6,
       "label": "60%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.61,
       "label": "61%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.62,
       "label": "62%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.63,
       "label": "63%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.64,
       "label": "64%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.65,
       "label": "65%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.66,
       "label": "66%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.67,
       "label": "67%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.68,
       "label": "68%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.69,
       "label": "69%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.7,
       "label": "70%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.71,
       "label": "71%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.72,
       "label": "72%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.73,
       "label": "73%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.74,
       "label": "74%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.75,
       "label": "75%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.76,
       "label": "76%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.77,
       "label": "77%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.78,
       "label": "78%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.79,
       "label": "79%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.8,
       "label": "80%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.81,
       "label": "81%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.82,
       "label": "82%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.83,
       "label": "83%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.84,
       "label": "84%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.85,
       "label": "85%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.86,
       "label": "86%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.87,
       "label": "87%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.88,
       "label": "88%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.89,
       "label": "89%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.9,
       "label": "90%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.91,
       "label": "91%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.92,
       "label": "92%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.93,
       "label": "93%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.94,
       "label": "94%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.95,
       "label": "95%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.96,
       "label": "96%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.97,
       "label": "97%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.98,
       "label": "98%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 0.99,
       "label": "99%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-progress",
+    "widget": "main-progress",
     "params": {
       "progress": 1.0,
       "label": "100%"
     },
-    "transition_ms": 45,
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   }
 ]

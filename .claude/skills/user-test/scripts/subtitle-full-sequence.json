@@ -1,61 +1,44 @@
 [
   {
     "_comment": "Group 1: Single line - verifies basic rendering",
-    "zone_name": "subtitle",
+    "zone": "subtitle",
     "content": "Hello world — exemplar subtitle test",
-    "ttl_us": 10000000,
-    "namespace": "exemplar-test"
+    "ttl_ms": 10000
   },
   {
     "_comment": "Group 2: Multi-line - verifies word-wrap and backdrop sizing",
-    "zone_name": "subtitle",
+    "zone": "subtitle",
     "content": "This is a much longer subtitle message designed to test word wrapping behavior across multiple lines. The compositor should wrap this text cleanly within the zone bounds and truncate with ellipsis if it exceeds the vertical space available.",
-    "ttl_us": 10000000,
-    "namespace": "exemplar-test"
+    "ttl_ms": 10000
   },
   {
     "_comment": "Group 3: Rapid replacement (1/3) - verifies latest-wins contention",
-    "zone_name": "subtitle",
+    "zone": "subtitle",
     "content": "First subtitle — should be replaced immediately",
-    "ttl_us": 5000000,
-    "namespace": "exemplar-test"
+    "ttl_ms": 5000
   },
   {
     "_comment": "Group 3: Rapid replacement (2/3)",
-    "zone_name": "subtitle",
+    "zone": "subtitle",
     "content": "Second subtitle — also replaced",
-    "ttl_us": 5000000,
-    "namespace": "exemplar-test"
+    "ttl_ms": 5000
   },
   {
     "_comment": "Group 3: Rapid replacement (3/3) - this one stays",
-    "zone_name": "subtitle",
+    "zone": "subtitle",
     "content": "Third subtitle — this one stays",
-    "ttl_us": 5000000,
-    "namespace": "exemplar-test"
+    "ttl_ms": 5000
   },
   {
     "_comment": "Group 4: TTL expiry - verifies auto-clear after 3 seconds",
-    "zone_name": "subtitle",
+    "zone": "subtitle",
     "content": "This subtitle expires in 3 seconds",
-    "ttl_us": 3000000,
-    "namespace": "exemplar-test"
+    "ttl_ms": 3000
   },
   {
     "_comment": "Group 5: Streaming with breakpoints - verifies word-by-word reveal",
-    "zone_name": "subtitle",
+    "zone": "subtitle",
     "content": "The quick brown fox jumps over the lazy dog",
-    "breakpoints": [
-      3,
-      9,
-      15,
-      19,
-      25,
-      30,
-      34,
-      38
-    ],
-    "ttl_us": 10000000,
-    "namespace": "exemplar-test"
+    "ttl_ms": 10000
   }
 ]
