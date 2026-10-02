@@ -4,7 +4,8 @@ mcp_reachability_check.py — Verify that an MCP HTTP endpoint is reachable and 
 
 Exits with:
   0  endpoint is reachable and responds to a valid MCP probe
-  1  endpoint is reachable but authentication failed (bad/missing PSK)
+  1  endpoint is reachable but authentication failed (PSK missing or not paired
+     in the HUD's agents.toml)
   2  endpoint is not reachable (connection refused, timeout, DNS failure)
   3  endpoint returned an unexpected / malformed response
   4  usage error (bad arguments)
@@ -172,7 +173,7 @@ def main() -> int:
         if not args.quiet:
             print(
                 f"ERROR: env var '{args.psk_env}' is unset or empty. "
-                "Set it to the MCP pre-shared key.",
+                "Set it to the agent's paired PSK (the HUD's agents.toml holds its SHA-256).",
                 file=sys.stderr,
             )
         return 4

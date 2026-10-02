@@ -36,7 +36,6 @@ $stdoutPath = Join-Path $OutputDir "runtime.stdout.log"
 $stderrPath = Join-Path $OutputDir "runtime.stderr.log"
 $configPath = Join-Path $repoRoot "app\tze_hud_app\config\benchmark.toml"
 
-$psk = "quiescent-efficiency-$([Guid]::NewGuid().ToString('N'))"
 $affinityMask = "3"
 $arguments = @(
     "--config", $configPath,
@@ -45,7 +44,6 @@ $arguments = @(
     "--height", "360",
     "--grpc-port", "0",
     "--mcp-port", "0",
-    "--psk", $psk,
     "--quiescent-efficiency-emit", $artifactPath
 )
 

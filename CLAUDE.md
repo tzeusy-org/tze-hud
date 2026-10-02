@@ -51,8 +51,9 @@ To project this session onto the HUD, use the **`hud-projection`** skill
 projection through the MCP verbs on `portal:<id>`: `hud_publish` (the first
 publish attaches), `hud_input` (replies, acked in the same call), and
 `hud_clear` (detach). Send your agent's PSK as the MCP bearer; its
-`[agents.<id>] allow` list must include `portal` (the shipped configs give
-`[agents.claude]`, which reads `TZE_HUD_PSK`, `allow = ["*"]`). For one-shot
+`[agents.<id>] allow` list in the HUD's `agents.toml` (PSK hashes only, beside
+the config) must include `portal` (`scripts/quickstart.sh` pairs
+`[agents.claude]` with `allow = ["*"]`). For one-shot
 zone publishing, use **`th-hud-publish`**.
 
 ## Issue Tracking

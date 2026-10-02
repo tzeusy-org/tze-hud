@@ -88,14 +88,19 @@ instance, or a portal (detach).
 ### Identity and permissions
 
 Identity comes from the PSK. Agents never name themselves, so tool calls
-carry no namespace or owner token.
+carry no namespace or owner token. Each agent has its own PSK; the HUD keeps
+only its SHA-256, in `agents.toml` next to the config file:
 
 ```toml
 [agents.claude-main]
-psk_env = "TZE_HUD_PSK_CLAUDE_MAIN"
+psk_sha256 = "<64 hex: SHA-256 of the agent's PSK>"
 allow = ["zone:*", "widget:gauge", "portal", "tiles"]
 ```
 
+- The runtime loads `agents.toml` at startup and shares it live between MCP
+  and gRPC, so pairing (T6) can add an agent without a restart. Until pairing
+  lands, `scripts/quickstart.sh` writes the file; edits need a restart.
+  `[agents]` in the config file is a config error.
 - `allow` is the whole permission model. It is checked at publish and claim,
   and `hud_surfaces` lists only allowed surfaces.
 - An agent has whatever the allowlist says. There is no capability

@@ -6,6 +6,9 @@ build. Proves the shipped binary boots the overlay with the production config
 and that each lifecycle stage answers over MCP: discover, publish to a zone,
 attach/poll/detach a portal, and a structured error.
 
+The config is copied to a temp dir with a seeded agents.toml beside it holding
+only the SHA-256 of a fresh random PSK, the way pairing stores agents.
+
 Stdlib only. Exits non-zero on the first failed check and prints the HUD log.
 
     python scripts/ci/windows_smoke.py --exe target/release/tze_hud.exe \
@@ -15,9 +18,10 @@ Stdlib only. Exits non-zero on the first failed check and prints the HUD log.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
-import os
 import secrets
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -111,6 +115,18 @@ def run_checks(smoke: Smoke) -> None:
     print("ok  unknown zone -> ZONE_NOT_FOUND with hint")
 
 
+def seed_config(config: Path, psk: str) -> Path:
+    """Copy `config` to a temp dir and pair one agent for `psk` beside it."""
+    config_dir = Path(tempfile.mkdtemp(prefix="tze_hud_smoke_"))
+    seeded = config_dir / config.name
+    shutil.copyfile(config, seeded)
+    digest = hashlib.sha256(psk.encode()).hexdigest()
+    (config_dir / "agents.toml").write_text(
+        f'[agents.ci-smoke]\npsk_sha256 = "{digest}"\nallow = ["*"]\n', encoding="utf-8"
+    )
+    return seeded
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--exe", required=True, type=Path)
@@ -121,17 +137,17 @@ def main() -> int:
     args = ap.parse_args()
 
     psk = secrets.token_hex(32)
-    env = dict(os.environ, TZE_HUD_PSK=psk)
+    config = seed_config(args.config, psk)
     log_path = Path(tempfile.gettempdir()) / "tze_hud_smoke.log"
     cmd = [
         str(args.exe),
-        "--config", str(args.config),
+        "--config", str(config),
         "--window-mode", "fullscreen",
         "--mcp-port", str(args.mcp_port),
     ]
     print("launch:", " ".join(cmd))
     with open(log_path, "wb") as log:
-        proc = subprocess.Popen(cmd, env=env, stdout=log, stderr=subprocess.STDOUT)
+        proc = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT)
     smoke = Smoke(f"http://127.0.0.1:{args.mcp_port}/", psk)
     try:
         wait_for_mcp(smoke, proc, args.startup_timeout)

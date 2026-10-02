@@ -114,8 +114,8 @@ After the recovery checks pass, use the benchmark launch and soak procedure in
 `docs/reports/windows_benchmark_config_launch_2026-05.md`. First generate the
 bounded windowed live-metrics artifact described there with
 `--benchmark-emit C:\tze_hud\perf\hud-nfl7n\windowed_live_metrics.json`.
-From an interactive Windows shell with `TZE_HUD_PSK` already set to the
-non-default HUD PSK:
+From an interactive Windows shell (the bounded run binds no ports, so it needs
+no paired agent):
 
 ```powershell
 New-Item -ItemType Directory -Force C:\tze_hud\perf\hud-nfl7n | Out-Null

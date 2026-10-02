@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 import shlex
@@ -204,18 +205,18 @@ class QuickstartMcpConfigTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("ATTACH INFO", result.stdout)
-        self.assertIn("Authorization: Bearer <your PSK", result.stdout)
+        self.assertIn("Authorization: Bearer <your agent's PSK>", result.stdout)
         self.assertNotIn(secret, result.stdout)
         self.assertNotIn(secret, result.stderr)
 
-    def test_existing_launch_mode_still_forwards_runtime_args_and_secret_env(self) -> None:
+    def test_launch_mode_forwards_runtime_args_and_pairs_only_the_psk_hash(self) -> None:
         args_path = self.temp_dir / "runtime.args"
         psk_path = self.temp_dir / "runtime.psk"
         fake_binary = self.temp_dir / "fake-tze-hud"
         fake_binary.write_text(
             "#!/usr/bin/env bash\n"
             f"printf '%s\\n' \"$@\" > {shlex.quote(str(args_path))}\n"
-            f"printf '%s' \"$TZE_HUD_PSK\" > {shlex.quote(str(psk_path))}\n",
+            f"printf '%s' \"${{TZE_HUD_PSK:-}}\" > {shlex.quote(str(psk_path))}\n",
             encoding="utf-8",
         )
         fake_binary.chmod(0o700)
@@ -248,7 +249,11 @@ class QuickstartMcpConfigTests(unittest.TestCase):
                 "5252",
             ],
         )
-        self.assertEqual(psk_path.read_text(encoding="utf-8"), secret)
+        # The runtime gets no PSK; agents.toml beside the config pairs its hash.
+        self.assertEqual(psk_path.read_text(encoding="utf-8"), "")
+        agents = (self.temp_dir / "agents.toml").read_text(encoding="utf-8")
+        self.assertIn(hashlib.sha256(secret.encode()).hexdigest(), agents)
+        self.assertNotIn(secret, agents)
         self.assertNotIn(secret, result.stdout)
         self.assertNotIn(secret, result.stderr)
 

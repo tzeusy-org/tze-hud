@@ -65,7 +65,6 @@ $fullscreenPath = Join-Path $OutputDir "fullscreen.json"
 $overlayPath = Join-Path $OutputDir "overlay.json"
 $reportPath = Join-Path $OutputDir "windowed_fullscreen_vs_overlay_report.json"
 $logDir = Join-Path $OutputDir "logs"
-$psk = "windowed-benchmark-$([Guid]::NewGuid().ToString('N'))"
 
 $config = @"
 [runtime]
@@ -95,7 +94,6 @@ function Invoke-WindowedBenchmarkMode {
         "--window-mode", $Mode,
         "--grpc-port", "0",
         "--mcp-port", "0",
-        "--psk", $psk,
         "--benchmark-emit", $EmitPath,
         "--benchmark-frames", "$Frames",
         "--benchmark-warmup-frames", "$WarmupFrames"

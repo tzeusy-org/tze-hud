@@ -171,9 +171,7 @@ impl AgentDirectory {
             permissions: agent.permissions.clone(),
         })
     }
-}
 
-impl AgentDirectory {
     /// Resolve a loopback local-socket caller: identified like the dev PSK,
     /// and rejected when there is none (production).
     pub fn resolve_local(&self, claimed_id: &str) -> Result<AgentIdentity, AuthRejection> {

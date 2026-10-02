@@ -214,9 +214,10 @@ echo "  ports bound OK (gRPC ${GRPC_PORT} + MCP ${MCP_PORT} Listening, pid=${LAU
 # ── 6. MCP HTTP reachability gate ────────────────────────────────────────────
 if [[ "$DO_VERIFY" -eq 1 ]]; then
   echo "[6/6] MCP HTTP reachability gate"
-  # Fetch the PSK over SSH into a local var ONLY for this curl call. The runtime
-  # uses the same single PSK for --psk and the Bearer token; it is read from the
-  # admin user's TZE_HUD_MCP_RESIDENT_PRINCIPAL. Never echoed, never persisted.
+  # Fetch the PSK over SSH into a local var ONLY for this curl call. The launch
+  # helper paired its SHA-256 in agents.toml; the PSK itself is the Bearer token,
+  # read from the admin user's TZE_HUD_MCP_RESIDENT_PRINCIPAL. Never echoed,
+  # never persisted.
   PSK="$(run_admin_ps "
     \$p=[Environment]::GetEnvironmentVariable('TZE_HUD_MCP_RESIDENT_PRINCIPAL','User')
     if([string]::IsNullOrEmpty(\$p)){ \$p=\$env:TZE_HUD_MCP_RESIDENT_PRINCIPAL }
