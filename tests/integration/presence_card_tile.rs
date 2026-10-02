@@ -29,7 +29,7 @@ use tze_hud_resource::{
     UploadId, UploadStartRequest,
 };
 use tze_hud_scene::{
-    Capability, SceneId, ZONE_TILE_Z_MIN,
+    SceneId, ZONE_TILE_Z_MIN,
     graph::SceneGraph,
     mutation::{MutationBatch, SceneMutation},
     types::{
@@ -685,11 +685,7 @@ fn create_tile_batch_accepted_with_opacity_and_input_mode() {
     let mut scene = SceneGraph::new(DISPLAY_W, DISPLAY_H);
     let tab_id = scene.create_tab("Main", 0).unwrap();
     scene.active_tab = Some(tab_id);
-    let lease_id = scene.grant_lease(
-        "agent-0",
-        120_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("agent-0", 120_000);
 
     let agent_index = 0usize;
     let bounds = card_bounds(agent_index, DISPLAY_H);
@@ -780,11 +776,7 @@ async fn node_tree_builder_glass_card_nodes() {
     scene.active_tab = Some(tab_id);
     // Register the uploaded resource so agent-submitted StaticImageNode mutations succeed.
     scene.register_resource(resource_id);
-    let lease_id = scene.grant_lease(
-        "agent-0",
-        120_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("agent-0", 120_000);
 
     // Create tile
     let create_batch = make_batch(
@@ -994,11 +986,7 @@ async fn full_presence_card_batch_visible_in_snapshot() {
     scene.active_tab = Some(tab_id);
     // Register the uploaded resource so agent-submitted StaticImageNode mutations succeed.
     scene.register_resource(resource_id);
-    let lease_id = scene.grant_lease(
-        "presence-agent",
-        120_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("presence-agent", 120_000);
 
     let agent_index = 0usize;
     let expected_bounds = card_bounds(agent_index, DISPLAY_H);
@@ -1136,11 +1124,7 @@ fn three_agents_non_overlapping_presence_cards() {
     let mut tile_ids = Vec::new();
 
     for (i, &agent) in agents.iter().enumerate() {
-        let lease_id = scene.grant_lease(
-            agent,
-            120_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id = scene.grant_lease(agent, 120_000);
         let bounds = card_bounds(i, DISPLAY_H);
         let z_order = Z_ORDER_BASE + i as u32;
         let batch = make_batch(
@@ -1209,11 +1193,7 @@ async fn snapshot_is_deterministic_after_presence_card_assembly() {
     scene.active_tab = Some(tab_id);
     // Register the uploaded resource so agent-submitted StaticImageNode mutations succeed.
     scene.register_resource(resource_id);
-    let lease_id = scene.grant_lease(
-        "agent-det",
-        120_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("agent-det", 120_000);
 
     // Create tile
     let b1 = make_batch(

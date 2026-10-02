@@ -41,10 +41,7 @@ use tze_hud_scene::{
     graph::SceneGraph,
     mutation::{MutationBatch, SceneMutation},
     test_scenes::{ClockMs, TestSceneRegistry, assert_layer0_invariants},
-    types::{
-        Capability, LayerAttachment, LeaseState, Node, NodeData, Rect, Rgba, SceneId,
-        SolidColorNode,
-    },
+    types::{LayerAttachment, LeaseState, Node, NodeData, Rect, Rgba, SceneId, SolidColorNode},
 };
 
 // ─── Test helper: TransitionLog ──────────────────────────────────────────────
@@ -174,11 +171,7 @@ fn test_full_session_lifecycle_state_transitions() {
 
     // ── Step 1: Connect + Auth ─────────────────────────────────────────────
     let tab_id = scene.create_tab("Main", 0).expect("create_tab");
-    let lease_id = scene.grant_lease(
-        "agent.alpha",
-        60_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("agent.alpha", 60_000);
     assert_eq!(scene.leases[&lease_id].state, LeaseState::Active);
     log.record(
         "connect_auth",
@@ -403,11 +396,7 @@ fn test_reconnect_within_grace_period_delivers_snapshot() {
     let mut scene = SceneGraph::new_with_clock(1920.0, 1080.0, clock.clone());
 
     let tab_id = scene.create_tab("Workspace", 0).expect("create_tab");
-    let lease_id = scene.grant_lease(
-        "agent.bravo",
-        120_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("agent.bravo", 120_000);
 
     // Establish 3 tiles before disconnect
     let tile_a = apply_create_tile(
@@ -527,11 +516,7 @@ fn test_reconnect_after_grace_period_expiry_clears_state() {
 
     let tab_id = scene.create_tab("Workspace", 0).expect("create_tab");
     // Use a long TTL; this test exercises grace-period expiry, not TTL expiry
-    let lease_id = scene.grant_lease(
-        "agent.charlie",
-        9_000_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("agent.charlie", 9_000_000);
 
     apply_create_tile(
         &mut scene,
@@ -596,11 +581,7 @@ fn test_reconnect_after_grace_period_expiry_clears_state() {
     );
 
     // Agent can start a fresh session (new lease on same namespace)
-    let fresh_lease_id = scene.grant_lease(
-        "agent.charlie",
-        60_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let fresh_lease_id = scene.grant_lease("agent.charlie", 60_000);
     assert_eq!(scene.leases[&fresh_lease_id].state, LeaseState::Active);
     let fresh_tile = apply_create_tile(
         &mut scene,
@@ -634,21 +615,9 @@ fn test_safe_mode_suspends_all_leases() {
     let tab_id = scene.create_tab("Main", 0).expect("create_tab");
 
     // Three agents with active leases
-    let lease_a = scene.grant_lease(
-        "agent.a",
-        60_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
-    let lease_b = scene.grant_lease(
-        "agent.b",
-        60_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
-    let lease_c = scene.grant_lease(
-        "agent.c",
-        60_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_a = scene.grant_lease("agent.a", 60_000);
+    let lease_b = scene.grant_lease("agent.b", 60_000);
+    let lease_c = scene.grant_lease("agent.c", 60_000);
 
     apply_create_tile(
         &mut scene,
@@ -750,11 +719,7 @@ fn test_safe_mode_exit_resumes_leases_and_accepts_mutations() {
     let mut scene = SceneGraph::new_with_clock(1920.0, 1080.0, clock.clone());
 
     let tab_id = scene.create_tab("Main", 0).expect("create_tab");
-    let lease_id = scene.grant_lease(
-        "agent.delta",
-        60_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("agent.delta", 60_000);
     apply_create_tile(
         &mut scene,
         tab_id,
@@ -834,16 +799,8 @@ fn test_freeze_plus_safe_mode_interaction() {
     let mut scene = SceneGraph::new_with_clock(1920.0, 1080.0, clock.clone());
 
     let tab_id = scene.create_tab("Main", 0).expect("create_tab");
-    let lease_active = scene.grant_lease(
-        "agent.echo",
-        60_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
-    let lease_frozen = scene.grant_lease(
-        "agent.echo.frozen",
-        30_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_active = scene.grant_lease("agent.echo", 60_000);
+    let lease_frozen = scene.grant_lease("agent.echo.frozen", 30_000);
 
     apply_create_tile(
         &mut scene,
@@ -1165,11 +1122,7 @@ fn test_zero_resource_footprint_after_disconnect_and_expiry() {
     let mut scene = SceneGraph::new_with_clock(1920.0, 1080.0, clock.clone());
 
     let tab_id = scene.create_tab("Main", 0).expect("create_tab");
-    let lease_id = scene.grant_lease(
-        "agent.foxtrot",
-        9_000_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("agent.foxtrot", 9_000_000);
 
     // Create multiple tiles with nodes
     let tile_a = apply_create_tile(
@@ -1230,11 +1183,7 @@ fn test_zero_resource_footprint_after_disconnect_and_expiry() {
     assert_eq!(scene.node_count(), 3, "one node per tile");
 
     // Also create a second (unrelated) agent — its resources must survive expiry
-    let lease_other = scene.grant_lease(
-        "agent.golf",
-        9_000_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_other = scene.grant_lease("agent.golf", 9_000_000);
     let tile_other = apply_create_tile(
         &mut scene,
         tab_id,
@@ -1349,7 +1298,7 @@ fn test_lease_lifecycle_timeline_artifact() {
     let mut scene = SceneGraph::new_with_clock(1920.0, 1080.0, clock.clone());
 
     scene.create_tab("Main", 0).expect("create_tab");
-    let lease_id = scene.grant_lease("timeline.agent", 60_000, vec![]);
+    let lease_id = scene.grant_lease("timeline.agent", 60_000);
 
     let mut timeline: Vec<TimelineEntry> = Vec::new();
 
@@ -1473,11 +1422,7 @@ fn test_resource_footprint_measurements() {
     let mut scene = SceneGraph::new_with_clock(1920.0, 1080.0, clock.clone());
 
     let tab_id = scene.create_tab("Main", 0).expect("create_tab");
-    let lease_id = scene.grant_lease(
-        "footprint.agent",
-        9_000_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("footprint.agent", 9_000_000);
 
     let active_leases = |scene: &SceneGraph| {
         scene
@@ -1608,11 +1553,7 @@ fn test_disconnection_badge_set_on_orphan() {
     let mut scene = SceneGraph::new_with_clock(1920.0, 1080.0, clock.clone());
 
     let tab_id = scene.create_tab("Main", 0).expect("create_tab");
-    let lease_id = scene.grant_lease(
-        "agent.hotel",
-        60_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("agent.hotel", 60_000);
 
     let tile_a = apply_create_tile(
         &mut scene,
@@ -1699,11 +1640,7 @@ fn test_zone_publications_cleared_on_lease_expiry() {
     scene.register_zone(make_stream_text_zone("subtitle"));
 
     // Grant a lease with a short TTL for agent.india
-    let lease_id = scene.grant_lease(
-        "agent.india",
-        5_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("agent.india", 5_000);
 
     // Agent publishes to subtitle zone
     scene
@@ -1784,11 +1721,7 @@ fn test_zone_publish_rejected_when_lease_orphaned() {
     scene.create_tab("Main", 0).expect("create_tab");
     scene.register_zone(make_stream_text_zone("subtitle"));
 
-    let lease_id = scene.grant_lease(
-        "agent.juliet",
-        60_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("agent.juliet", 60_000);
 
     // Publish while active — must succeed
     scene
@@ -1852,11 +1785,7 @@ fn test_budget_revocation_bypasses_grace_and_zero_footprint() {
     let mut scene = SceneGraph::new_with_clock(1920.0, 1080.0, clock.clone());
 
     let tab_id = scene.create_tab("Main", 0).expect("create_tab");
-    let lease_id = scene.grant_lease(
-        "agent.kilo",
-        60_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("agent.kilo", 60_000);
 
     let tile_a = apply_create_tile(
         &mut scene,
@@ -1877,11 +1806,7 @@ fn test_budget_revocation_bypasses_grace_and_zero_footprint() {
     assert_eq!(scene.tile_count(), 2);
 
     // Also grant a second agent that must be unaffected
-    let other_lease = scene.grant_lease(
-        "agent.lima",
-        60_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let other_lease = scene.grant_lease("agent.lima", 60_000);
     let tile_other = apply_create_tile(
         &mut scene,
         tab_id,
@@ -1999,7 +1924,7 @@ fn test_grace_period_timer_precision_integration() {
     let clock = Arc::new(TestClock::new(0));
     let mut scene = SceneGraph::new_with_clock(1920.0, 1080.0, clock.clone());
     let _tab_id = scene.create_tab("Main", 0).expect("create_tab");
-    let lease_id = scene.grant_lease("agent.mike", 600_000, vec![]);
+    let lease_id = scene.grant_lease("agent.mike", 600_000);
 
     // Orphan the lease at t=0
     scene.disconnect_lease(&lease_id, 0).expect("disconnect");
@@ -2031,7 +1956,7 @@ fn test_zone_publications_cleared_on_revoke_lease() {
     scene.create_tab("Main", 0).expect("create_tab");
     scene.register_zone(make_stream_text_zone("status"));
 
-    let lease_id = scene.grant_lease("agent.november", 60_000, vec![]);
+    let lease_id = scene.grant_lease("agent.november", 60_000);
 
     // Publish while active
     scene
@@ -2085,7 +2010,7 @@ fn test_ttl_continues_during_orphan_state() {
 
     scene.create_tab("Main", 0).expect("create_tab");
     // Short TTL of 10,000ms
-    let lease_id = scene.grant_lease("agent.oscar", 10_000, vec![]);
+    let lease_id = scene.grant_lease("agent.oscar", 10_000);
 
     // Advance 2,000ms (TTL now 8,000ms remaining)
     clock.advance(2_000);

@@ -215,7 +215,7 @@ mod headless_impl {
     use tze_hud_scene::graph::SceneGraph;
     use tze_hud_scene::mutation::{MutationBatch, SceneMutation};
     use tze_hud_scene::types::{
-        Capability, HitRegionNode, Node, NodeData, Rect, Rgba, SceneId, SolidColorNode,
+        HitRegionNode, Node, NodeData, Rect, Rgba, SceneId, SolidColorNode,
     };
 
     // ── Budget constants ─────────────────────────────────────────────────────
@@ -575,11 +575,7 @@ mod headless_impl {
                 }
             };
 
-            let lease_id = scene.grant_lease(
-                "gpu_calibration",
-                300_000,
-                vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-            );
+            let lease_id = scene.grant_lease("gpu_calibration", 300_000);
             if let Some(lease) = scene.leases.get_mut(&lease_id) {
                 lease.resource_budget.max_tiles = (GPU_CALIBRATION_TILES + 5) as u32;
             }
@@ -677,11 +673,7 @@ mod headless_impl {
                     };
                 }
             };
-            lease_id = scene.grant_lease(
-                "upload_calibration",
-                300_000,
-                vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-            );
+            lease_id = scene.grant_lease("upload_calibration", 300_000);
             if let Some(lease) = scene.leases.get_mut(&lease_id) {
                 lease.resource_budget.max_tiles = (UPLOAD_TILES_PER_CYCLE + 5) as u32;
             }
@@ -793,11 +785,7 @@ mod headless_impl {
             let scene_arc = scene_handle(&runtime).await;
             let mut scene = scene_arc.lock().await;
             let tab_id = scene.create_tab("bench", 0).expect("create_tab");
-            let lease_id = scene.grant_lease(
-                "bench",
-                300_000,
-                vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-            );
+            let lease_id = scene.grant_lease("bench", 300_000);
             if let Some(lease) = scene.leases.get_mut(&lease_id) {
                 lease.resource_budget.max_tiles = 15;
             }
@@ -925,11 +913,7 @@ mod headless_impl {
             let scene_arc = scene_handle(&runtime).await;
             let mut scene = scene_arc.lock().await;
             tab_id = scene.create_tab("mutation_bench", 0).expect("create_tab");
-            lease_id = scene.grant_lease(
-                "mutation_bench",
-                300_000,
-                vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-            );
+            lease_id = scene.grant_lease("mutation_bench", 300_000);
             if let Some(lease) = scene.leases.get_mut(&lease_id) {
                 lease.resource_budget.max_tiles = 15;
             }
@@ -1248,11 +1232,7 @@ mod headless_impl {
             let scene_arc = scene_handle(&runtime).await;
             let mut scene = scene_arc.lock().await;
             tab_id = scene.create_tab("contention_bench", 0).expect("create_tab");
-            lease_id = scene.grant_lease(
-                "contention_bench",
-                300_000,
-                vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-            );
+            lease_id = scene.grant_lease("contention_bench", 300_000);
             if let Some(lease) = scene.leases.get_mut(&lease_id) {
                 lease.resource_budget.max_tiles = 15;
             }
@@ -1456,11 +1436,7 @@ mod headless_impl {
             tab_id = scene
                 .create_tab("paced_contention_bench", 0)
                 .expect("create_tab");
-            lease_id = scene.grant_lease(
-                "paced_contention_bench",
-                300_000,
-                vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-            );
+            lease_id = scene.grant_lease("paced_contention_bench", 300_000);
             if let Some(lease) = scene.leases.get_mut(&lease_id) {
                 lease.resource_budget.max_tiles = 15;
             }

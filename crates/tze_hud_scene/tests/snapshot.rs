@@ -13,7 +13,7 @@
 //! - BTreeMap used for all map types (determinism guaranteed at compile time)
 
 use tze_hud_scene::{
-    Capability, Node, NodeData, Rect, ResourceId, SceneGraphSnapshot, SceneGraphWidgetRegistry,
+    Node, NodeData, Rect, ResourceId, SceneGraphSnapshot, SceneGraphWidgetRegistry,
     SceneGraphZoneRegistry, SceneId, StaticImageNode,
     graph::SceneGraph,
     test_scenes::{ClockMs, TestSceneRegistry},
@@ -34,11 +34,7 @@ fn empty_scene() -> SceneGraph {
 fn simple_scene() -> SceneGraph {
     let mut g = SceneGraph::new(1920.0, 1080.0);
     let tab = g.create_tab("Main", 0).unwrap();
-    let lease = g.grant_lease(
-        "agent.test",
-        60_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease = g.grant_lease("agent.test", 60_000);
     g.create_tile(
         tab,
         "agent.test",
@@ -300,11 +296,7 @@ fn snapshot_includes_zone_publications_not_effective_geometry() {
 fn snapshot_references_resource_ids_not_blob_data() {
     let mut g = SceneGraph::new(1920.0, 1080.0);
     let tab = g.create_tab("Main", 0).unwrap();
-    let lease = g.grant_lease(
-        "agent.test",
-        60_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease = g.grant_lease("agent.test", 60_000);
 
     let tile = g
         .create_tile(
@@ -457,11 +449,7 @@ fn snapshot_tiles_and_nodes_use_btreemap() {
     // Build a scene with multiple tiles and verify iteration order is stable
     let mut g = SceneGraph::new(1920.0, 1080.0);
     let tab = g.create_tab("Main", 0).unwrap();
-    let lease = g.grant_lease(
-        "agent.test",
-        60_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease = g.grant_lease("agent.test", 60_000);
     for i in 0..10 {
         g.create_tile(
             tab,
@@ -572,11 +560,7 @@ mod proptest_suite {
             return g;
         }
         let tab = g.create_tab("Tab", 0).unwrap();
-        let lease = g.grant_lease(
-            "agent.proptest",
-            600_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease = g.grant_lease("agent.proptest", 600_000);
         for i in 0..tile_count {
             let _ = g.create_tile(
                 tab,

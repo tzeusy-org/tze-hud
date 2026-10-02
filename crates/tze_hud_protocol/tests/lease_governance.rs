@@ -36,7 +36,7 @@ use std::sync::Arc;
 use tze_hud_scene::clock::TestClock;
 use tze_hud_scene::graph::SceneGraph;
 use tze_hud_scene::lease::TileVisualHint;
-use tze_hud_scene::types::{Capability, InputMode, LeaseState, Rect, SceneId};
+use tze_hud_scene::types::{InputMode, LeaseState, Rect, SceneId};
 use tze_hud_scene::validation::ValidationError;
 // Clock trait must be in scope for `now_millis()` to resolve via Deref on Arc<TestClock>.
 use tze_hud_scene::Clock;
@@ -59,12 +59,7 @@ fn setup_active_tab(scene: &mut SceneGraph) -> SceneId {
 
 /// Grant a 60-second lease in namespace `ns` and return its ID.
 fn grant_lease(scene: &mut SceneGraph, ns: &str) -> SceneId {
-    scene.grant_lease_with_priority(
-        ns,
-        60_000,
-        2,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    )
+    scene.grant_lease(ns, 60_000)
 }
 
 /// Create a tile for `ns` under `lease_id` and return its ID.
@@ -685,12 +680,7 @@ fn second_agent_cannot_mutate_dashboard_tile() {
     let tile_id = create_tile(&mut scene, tab_id, "dashboard-agent", dashboard_lease);
 
     // Second agent has its own lease.
-    let second_lease = scene.grant_lease_with_priority(
-        "intruder-agent",
-        60_000,
-        2,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let second_lease = scene.grant_lease("intruder-agent", 60_000);
     let _ = second_lease; // has a lease but for a different namespace
 
     // Attempt: intruder-agent tries to set_tile_root on dashboard-agent's tile.
@@ -779,12 +769,7 @@ fn dashboard_agent_cannot_mutate_other_namespace_tiles() {
     let tab_id = setup_active_tab(&mut scene);
 
     // "Other agent" creates its tile.
-    let other_lease = scene.grant_lease_with_priority(
-        "other-agent",
-        60_000,
-        2,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let other_lease = scene.grant_lease("other-agent", 60_000);
     let other_tile = create_tile(&mut scene, tab_id, "other-agent", other_lease);
 
     // Dashboard agent has its own lease.
@@ -820,12 +805,7 @@ fn dashboard_agent_cannot_update_opacity_of_other_tile() {
     let (mut scene, _clock) = make_scene(0);
     let tab_id = setup_active_tab(&mut scene);
 
-    let other_lease = scene.grant_lease_with_priority(
-        "other-agent",
-        60_000,
-        2,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let other_lease = scene.grant_lease("other-agent", 60_000);
     let other_tile = create_tile(&mut scene, tab_id, "other-agent", other_lease);
 
     let _dashboard_lease = grant_lease(&mut scene, "dashboard-agent");
@@ -844,12 +824,7 @@ fn dashboard_agent_cannot_update_input_mode_of_other_tile() {
     let (mut scene, _clock) = make_scene(0);
     let tab_id = setup_active_tab(&mut scene);
 
-    let other_lease = scene.grant_lease_with_priority(
-        "other-agent",
-        60_000,
-        2,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let other_lease = scene.grant_lease("other-agent", 60_000);
     let other_tile = create_tile(&mut scene, tab_id, "other-agent", other_lease);
 
     let _dashboard_lease = grant_lease(&mut scene, "dashboard-agent");
@@ -878,12 +853,7 @@ fn ttl_expires_while_orphaned_removes_tile() {
     scene.switch_active_tab(tab_id).unwrap();
 
     // Short 5s TTL lease.
-    let lease_id = scene.grant_lease_with_priority(
-        "short-ttl-agent",
-        5_000, // 5 seconds
-        2,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("short-ttl-agent", 5_000);
     let tile_id = create_tile(&mut scene, tab_id, "short-ttl-agent", lease_id);
 
     // Disconnect at t=2_000ms (2s into the 5s TTL).

@@ -3,10 +3,10 @@ use super::*;
 impl SceneGraph {
     // ─── Tab operations ──────────────────────────────────────────────────
 
-    /// Create a new tab. Requires `ManageTabs` capability when `lease_id` is provided.
+    /// Create a new tab. Requires an active lease when `lease_id` is provided.
     ///
-    /// RFC 0001 §2.2: Tab name must be non-empty, ≤ 128 UTF-8 bytes.
-    /// Scene must not already have 256 tabs (MAX_TABS). RFC 0001 §2.1.
+    /// Tab name must be non-empty, ≤ 128 UTF-8 bytes.
+    /// Scene must not already have 256 tabs (MAX_TABS).
     pub fn create_tab(
         &mut self,
         name: &str,
@@ -15,10 +15,10 @@ impl SceneGraph {
         self.create_tab_checked(name, display_order, None)
     }
 
-    /// Create a tab with an optional capability check against a lease.
+    /// Create a tab under an active lease.
     ///
-    /// Pass `Some(lease_id)` to enforce `ManageTabs` capability. Pass `None` to skip
-    /// the capability check (used by internal scene construction and tests).
+    /// Pass `Some(lease_id)` to require an active lease. Pass `None` to skip
+    /// the lease check (used by internal scene construction and tests).
     pub fn create_tab_with_lease(
         &mut self,
         name: &str,
@@ -34,11 +34,11 @@ impl SceneGraph {
         display_order: u32,
         lease_id: Option<SceneId>,
     ) -> Result<SceneId, ValidationError> {
-        // Capability check
+        // Lease check
         if let Some(lid) = lease_id {
-            self.require_capability(lid, Capability::ManageTabs)?;
+            self.require_active_lease(lid)?;
         }
-        // Name validation: non-empty, ≤ 128 UTF-8 bytes (RFC 0001 §2.2)
+        // Name validation: non-empty, ≤ 128 UTF-8 bytes
         if name.is_empty() {
             return Err(ValidationError::InvalidField {
                 field: "name".into(),
@@ -55,7 +55,7 @@ impl SceneGraph {
                 ),
             });
         }
-        // Scene-level tab count limit (RFC 0001 §2.1)
+        // Scene-level tab count limit
         if self.tabs.len() >= MAX_TABS {
             return Err(ValidationError::BudgetExceeded {
                 resource: format!("tabs (limit {MAX_TABS})"),
@@ -88,12 +88,12 @@ impl SceneGraph {
 
     /// Delete a tab. All tiles in the tab are also removed.
     ///
-    /// RFC 0001 §2.2. Requires `ManageTabs` capability when lease is provided.
+    /// Requires an active lease when one is provided.
     pub fn delete_tab(&mut self, tab_id: SceneId) -> Result<(), ValidationError> {
         self.delete_tab_checked(tab_id, None)
     }
 
-    /// Delete a tab with capability enforcement.
+    /// Delete a tab with lease enforcement.
     pub fn delete_tab_with_lease(
         &mut self,
         tab_id: SceneId,
@@ -108,7 +108,7 @@ impl SceneGraph {
         lease_id: Option<SceneId>,
     ) -> Result<(), ValidationError> {
         if let Some(lid) = lease_id {
-            self.require_capability(lid, Capability::ManageTabs)?;
+            self.require_active_lease(lid)?;
         }
         if !self.tabs.contains_key(&tab_id) {
             return Err(ValidationError::TabNotFound { id: tab_id });
@@ -136,12 +136,12 @@ impl SceneGraph {
         Ok(())
     }
 
-    /// Rename a tab. RFC 0001 §2.2. Requires `ManageTabs` capability when lease is provided.
+    /// Rename a tab. Requires an active lease when one is provided.
     pub fn rename_tab(&mut self, tab_id: SceneId, new_name: &str) -> Result<(), ValidationError> {
         self.rename_tab_checked(tab_id, new_name, None)
     }
 
-    /// Rename a tab with capability enforcement.
+    /// Rename a tab with lease enforcement.
     pub fn rename_tab_with_lease(
         &mut self,
         tab_id: SceneId,
@@ -158,7 +158,7 @@ impl SceneGraph {
         lease_id: Option<SceneId>,
     ) -> Result<(), ValidationError> {
         if let Some(lid) = lease_id {
-            self.require_capability(lid, Capability::ManageTabs)?;
+            self.require_active_lease(lid)?;
         }
         if new_name.is_empty() {
             return Err(ValidationError::InvalidField {
@@ -185,12 +185,12 @@ impl SceneGraph {
         Ok(())
     }
 
-    /// Change the display_order of a tab. RFC 0001 §2.2.
+    /// Change the display_order of a tab.
     pub fn reorder_tab(&mut self, tab_id: SceneId, new_order: u32) -> Result<(), ValidationError> {
         self.reorder_tab_checked(tab_id, new_order, None)
     }
 
-    /// Change the display_order of a tab with capability enforcement.
+    /// Change the display_order of a tab with lease enforcement.
     pub fn reorder_tab_with_lease(
         &mut self,
         tab_id: SceneId,
@@ -207,7 +207,7 @@ impl SceneGraph {
         lease_id: Option<SceneId>,
     ) -> Result<(), ValidationError> {
         if let Some(lid) = lease_id {
-            self.require_capability(lid, Capability::ManageTabs)?;
+            self.require_active_lease(lid)?;
         }
         if !self.tabs.contains_key(&tab_id) {
             return Err(ValidationError::TabNotFound { id: tab_id });
@@ -233,7 +233,7 @@ impl SceneGraph {
         self.switch_active_tab_checked(tab_id, None)
     }
 
-    /// Switch active tab with capability enforcement.
+    /// Switch active tab with lease enforcement.
     pub fn switch_active_tab_with_lease(
         &mut self,
         tab_id: SceneId,
@@ -248,7 +248,7 @@ impl SceneGraph {
         lease_id: Option<SceneId>,
     ) -> Result<(), ValidationError> {
         if let Some(lid) = lease_id {
-            self.require_capability(lid, Capability::ManageTabs)?;
+            self.require_active_lease(lid)?;
         }
         if !self.tabs.contains_key(&tab_id) {
             return Err(ValidationError::TabNotFound { id: tab_id });
@@ -258,45 +258,7 @@ impl SceneGraph {
         Ok(())
     }
 
-    // ─── Capability helpers ──────────────────────────────────────────────
-
-    /// Check that the lease exists, is active (not expired, not suspended), and has the given capability.
-    ///
-    /// Returns `CapabilityMissing` if the capability is absent, `LeaseExpired`
-    /// if the lease TTL has elapsed, `LeaseNotFound` if the ID is unknown,
-    /// or `InvalidField` if the lease is in a non-Active state that disallows mutations.
-    pub(super) fn require_capability(
-        &self,
-        lease_id: SceneId,
-        cap: Capability,
-    ) -> Result<(), ValidationError> {
-        let lease = self
-            .leases
-            .get(&lease_id)
-            .ok_or(ValidationError::LeaseNotFound { id: lease_id })?;
-        // Capability check before expiry: the spec says lease must be valid
-        if !lease.has_capability(cap.clone()) {
-            return Err(ValidationError::CapabilityMissing {
-                capability: format!("{cap:?}"),
-            });
-        }
-        // Check lease is not expired
-        let now = self.clock.now_millis();
-        if lease.is_expired(now) {
-            return Err(ValidationError::LeaseExpired { id: lease_id });
-        }
-        // Check lease state allows mutations (Active only; Suspended/Orphaned block mutations)
-        if !lease.is_mutations_allowed() {
-            return Err(ValidationError::InvalidField {
-                field: "lease_state".into(),
-                reason: format!(
-                    "lease {} is in {:?} state; mutations require Active state",
-                    lease_id, lease.state
-                ),
-            });
-        }
-        Ok(())
-    }
+    // ─── Lease helpers ───────────────────────────────────────────────────
 
     /// Check that the lease is currently active (not expired, not suspended).
     pub(super) fn require_active_lease(&self, lease_id: SceneId) -> Result<(), ValidationError> {
@@ -332,7 +294,6 @@ impl SceneGraph {
     /// - Not start with `"system."` or `"scene."` (reserved prefixes that
     ///   can never be emitted by agents and would never trigger).
     ///
-    /// Spec: scene-events/spec.md §9.1–§9.4.
     pub fn set_tab_switch_on_event(
         &mut self,
         tab_id: SceneId,

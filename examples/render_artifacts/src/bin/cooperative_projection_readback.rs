@@ -12,8 +12,7 @@ use std::path::{Path, PathBuf};
 use tze_hud_runtime::headless::{HeadlessConfig, HeadlessRuntime};
 use tze_hud_scene::graph::SceneGraph;
 use tze_hud_scene::types::{
-    Capability, FontFamily, Node, NodeData, Rect, Rgba, SceneId, TextAlign, TextMarkdownNode,
-    TextOverflow,
+    FontFamily, Node, NodeData, Rect, Rgba, SceneId, TextAlign, TextMarkdownNode, TextOverflow,
 };
 
 const DEFAULT_WIDTH: u32 = 1280;
@@ -179,11 +178,7 @@ fn build_projection_scene(
     let tab = scene
         .active_tab
         .ok_or_else(|| artifact_error("scene has no active tab after create_tab"))?;
-    let lease = scene.grant_lease(
-        "agent-alpha",
-        120_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease = scene.grant_lease("agent-alpha", 120_000);
     let tile = scene.create_tile(
         tab,
         "agent-alpha",

@@ -17,7 +17,7 @@ use tze_hud_protocol::proto::FramePresented;
 use tze_hud_runtime::HeadlessRuntime;
 use tze_hud_runtime::headless::HeadlessConfig;
 use tze_hud_scene::mutation::{MutationBatch, SceneMutation};
-use tze_hud_scene::types::{Capability, Rect};
+use tze_hud_scene::types::Rect;
 
 fn wall_us_now() -> u64 {
     SystemTime::now()
@@ -45,11 +45,7 @@ async fn apply_create_tile_batch(runtime: &HeadlessRuntime) -> tze_hud_scene::Sc
     let state = runtime.shared_state().lock().await;
     let mut scene = state.scene.lock().await;
     let tab = scene.create_tab("Main", 0).unwrap();
-    let lease = scene.grant_lease(
-        "test-agent",
-        60_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease = scene.grant_lease("test-agent", 60_000);
     let batch = MutationBatch {
         batch_id: tze_hud_scene::SceneId::new(),
         agent_namespace: "test-agent".to_string(),
@@ -154,11 +150,7 @@ async fn multiple_batches_share_one_presented_frame() {
         let state = runtime.shared_state().lock().await;
         let mut scene = state.scene.lock().await;
         let tab = scene.create_tab("Main", 0).unwrap();
-        let lease = scene.grant_lease(
-            "test-agent",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease = scene.grant_lease("test-agent", 60_000);
         for i in 0..3u32 {
             let batch = MutationBatch {
                 batch_id: tze_hud_scene::SceneId::new(),

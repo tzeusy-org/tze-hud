@@ -35,7 +35,7 @@ use tze_hud_scene::{
     lease::{AutoRenewalArm, DisarmReason, TtlCheck, TtlState},
     mutation::{MutationBatch, SceneMutation},
     test_scenes::assert_layer0_invariants,
-    types::{Capability, LeaseState, Node, NodeData, Rect, Rgba, SceneId, SolidColorNode},
+    types::{LeaseState, Node, NodeData, Rect, Rgba, SceneId, SolidColorNode},
     validation::ValidationError,
 };
 
@@ -110,11 +110,7 @@ fn test_presence_card_lease_request_granted() {
     let _tab_id = scene.create_tab("Main", 0).expect("create_tab");
 
     // Request a lease with the canonical presence-card TTL and capabilities.
-    let lease_id = scene.grant_lease(
-        "agent.presence",
-        PRESENCE_CARD_TTL_MS,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("agent.presence", PRESENCE_CARD_TTL_MS);
 
     // Lease is immediately Active (REQUESTED → ACTIVE in the scene model).
     assert_eq!(
@@ -133,17 +129,6 @@ fn test_presence_card_lease_request_granted() {
     assert_eq!(
         scene.leases[&lease_id].ttl_ms, PRESENCE_CARD_TTL_MS,
         "granted TTL must match requested ttl_ms"
-    );
-
-    // Capabilities present.
-    let caps = &scene.leases[&lease_id].capabilities;
-    assert!(
-        caps.contains(&Capability::CreateTiles),
-        "create_tiles capability must be granted"
-    );
-    assert!(
-        caps.contains(&Capability::ModifyOwnTiles),
-        "modify_own_tiles capability must be granted"
     );
 
     let violations = assert_layer0_invariants(&scene);
@@ -310,11 +295,7 @@ fn test_mutation_rejected_with_expired_lease() {
     let tab_id = scene.create_tab("Main", 0).expect("create_tab");
 
     // Grant a short-lived lease.
-    let lease_id = scene.grant_lease(
-        "agent.presence",
-        PRESENCE_CARD_TTL_MS,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("agent.presence", PRESENCE_CARD_TTL_MS);
     assert_eq!(scene.leases[&lease_id].state, LeaseState::Active);
 
     // Revoke the lease (simulates expiry as seen by the validation pipeline).
@@ -364,11 +345,7 @@ fn test_mutation_rejected_after_ttl_expiry() {
 
     // Grant a short TTL lease for this test.
     let short_ttl_ms: u64 = 5_000;
-    let lease_id = scene.grant_lease(
-        "agent.presence.ttl",
-        short_ttl_ms,
-        vec![Capability::CreateTiles],
-    );
+    let lease_id = scene.grant_lease("agent.presence.ttl", short_ttl_ms);
 
     // Create one tile while active — must succeed.
     let tile_id = create_presence_card_tile(
@@ -500,11 +477,7 @@ fn test_presence_card_tile_binds_to_lease() {
 
     let tab_id = scene.create_tab("Main", 0).expect("create_tab");
 
-    let lease_id = scene.grant_lease(
-        "agent.presence",
-        PRESENCE_CARD_TTL_MS,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("agent.presence", PRESENCE_CARD_TTL_MS);
 
     // Create presence card tile (200x80 per spec).
     let tile_id = create_presence_card_tile(
@@ -613,11 +586,7 @@ fn test_presence_card_lease_state_machine_transitions() {
     }
 
     // ── Step 1: Grant lease (REQUESTED → ACTIVE) ──────────────────────────
-    let lease_id = scene.grant_lease(
-        "agent.presence",
-        PRESENCE_CARD_TTL_MS,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("agent.presence", PRESENCE_CARD_TTL_MS);
     assert_eq!(scene.leases[&lease_id].state, LeaseState::Active);
     record!("grant REQUESTED→ACTIVE", lease_id);
 
@@ -715,21 +684,9 @@ fn test_presence_card_namespace_isolation() {
     let tab_id = scene.create_tab("Presence Roster", 0).expect("create_tab");
 
     // Three agents, each with a presence card lease.
-    let lease_a = scene.grant_lease(
-        "agent.alpha",
-        PRESENCE_CARD_TTL_MS,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
-    let lease_b = scene.grant_lease(
-        "agent.bravo",
-        PRESENCE_CARD_TTL_MS,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
-    let lease_c = scene.grant_lease(
-        "agent.charlie",
-        PRESENCE_CARD_TTL_MS,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_a = scene.grant_lease("agent.alpha", PRESENCE_CARD_TTL_MS);
+    let lease_b = scene.grant_lease("agent.bravo", PRESENCE_CARD_TTL_MS);
+    let lease_c = scene.grant_lease("agent.charlie", PRESENCE_CARD_TTL_MS);
 
     // Create stacked presence card tiles (200x80, 8px gap per spec).
     let tile_a = create_presence_card_tile(
@@ -930,11 +887,7 @@ fn test_presence_card_full_lifecycle_integration() {
     let tab_id = scene.create_tab("Presence Roster", 0).expect("create_tab");
 
     // 1. Grant lease.
-    let lease_id = scene.grant_lease(
-        "agent.presence.full",
-        PRESENCE_CARD_TTL_MS,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("agent.presence.full", PRESENCE_CARD_TTL_MS);
     assert_eq!(scene.leases[&lease_id].state, LeaseState::Active);
     assert!(!lease_id.is_nil(), "lease_id must be non-nil");
 

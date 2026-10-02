@@ -822,10 +822,6 @@ pub(super) async fn handle_widget_publish(
                     "WIDGET_PARAMETER_INVALID_VALUE".to_string(),
                     format!("parameter '{param}' in widget '{widget}': {reason}"),
                 ),
-                tze_hud_scene::ValidationError::WidgetCapabilityMissing { widget } => (
-                    "WIDGET_CAPABILITY_MISSING".to_string(),
-                    format!("Missing capability: publish_widget:{widget}"),
-                ),
                 other => ("WIDGET_PUBLISH_FAILED".to_string(), other.to_string()),
             };
 

@@ -63,7 +63,7 @@ use tze_hud_resource::{
     UploadId, UploadStartRequest,
 };
 use tze_hud_scene::{
-    Capability, Clock, HitResult, LeaseState, ResourceId, SceneGraph, SceneId, TestClock,
+    Clock, HitResult, LeaseState, ResourceId, SceneGraph, SceneId, TestClock,
     lease::{ORPHAN_GRACE_PERIOD_MS, TileVisualHint},
     mutation::{MutationBatch, SceneMutation},
     types::{
@@ -333,11 +333,7 @@ fn setup_scene() -> (SceneGraph, SceneId, SceneId) {
     let mut scene = SceneGraph::new(DISPLAY_W, DISPLAY_H);
     let tab_id = scene.create_tab("Main", 0).unwrap();
     scene.active_tab = Some(tab_id);
-    let lease_id = scene.grant_lease(
-        DASHBOARD_NS,
-        120_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease(DASHBOARD_NS, 120_000);
     (scene, tab_id, lease_id)
 }
 
@@ -348,11 +344,7 @@ fn setup_scene_with_clock() -> (SceneGraph, TestClock, SceneId, SceneId) {
     let mut scene = SceneGraph::new_with_clock(DISPLAY_W, DISPLAY_H, Arc::new(clock.clone()));
     let tab_id = scene.create_tab("Main", 0).unwrap();
     scene.active_tab = Some(tab_id);
-    let lease_id = scene.grant_lease(
-        DASHBOARD_NS,
-        60_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease(DASHBOARD_NS, 60_000);
     (scene, clock, tab_id, lease_id)
 }
 
@@ -512,14 +504,6 @@ async fn full_lifecycle_connect_lease_upload_create_update_refresh_dismiss() {
         lease.state,
         LeaseState::Active,
         "Phase 1: lease must be ACTIVE after grant"
-    );
-    assert!(
-        lease.capabilities.contains(&Capability::CreateTiles),
-        "Phase 1: lease must have CreateTiles capability"
-    );
-    assert!(
-        lease.capabilities.contains(&Capability::ModifyOwnTiles),
-        "Phase 1: lease must have ModifyOwnTiles capability"
     );
 
     // ── Phase 2: Resource Upload ──────────────────────────────────────────────
@@ -924,11 +908,7 @@ fn second_agent_cannot_mutate_dashboard_tile() {
 
     // Second agent acquires a separate lease.
     let intruder_ns = "intruder-agent";
-    let intruder_lease = scene.grant_lease(
-        intruder_ns,
-        120_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let intruder_lease = scene.grant_lease(intruder_ns, 120_000);
 
     // Intruder attempts to add a node to the dashboard agent's tile.
     let intrusion_result = scene.apply_batch(&make_batch(
@@ -981,11 +961,7 @@ fn dashboard_agent_cannot_mutate_foreign_namespace_tile() {
 
     // Another agent creates a tile.
     let other_ns = "other-agent";
-    let other_lease = scene.grant_lease(
-        other_ns,
-        120_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let other_lease = scene.grant_lease(other_ns, 120_000);
     let other_create = scene.apply_batch(&make_batch(
         other_ns,
         Some(other_lease),
@@ -1256,11 +1232,7 @@ fn headless_lease_expiry_advances_to_expired_and_removes_tile() {
 
     // Grant a short-TTL lease (500 ms) so we can advance past it cheaply.
     const SHORT_TTL_MS: u64 = 500;
-    let lease_id = scene.grant_lease(
-        DASHBOARD_NS,
-        SHORT_TTL_MS,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease(DASHBOARD_NS, SHORT_TTL_MS);
 
     // Create a tile under this lease.
     let create_result = scene.apply_batch(&make_batch(

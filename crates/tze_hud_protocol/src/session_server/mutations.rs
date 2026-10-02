@@ -1,9 +1,9 @@
-//! Mutation batch handler for the session server (RFC 0005 §3.3, §3.7, §5.2).
+//! Mutation batch handler for the session server.
 //!
 //! This module contains:
 //! - `ConvertedBatch`: output type of the proto→scene conversion.
 //! - `convert_proto_mutations`: single canonical conversion path shared by the
-//!   live and freeze-drain paths.
+//!   live and freeze-drain paths; it also checks the agent's allow list.
 //! - `handle_mutation_batch`: live-path handler (called from the dispatcher).
 //! - `apply_queued_batch_to_scene`: drain-path handler (called from the session
 //!   loop when the scene is unfrozen).
@@ -26,9 +26,9 @@ use super::MutationBudgetDecision;
 use super::freeze_queue::FreezeEnqueueResult;
 use super::stream_session::StreamSession;
 use super::{
-    DEFAULT_MAX_FUTURE_SCHEDULE_US, ElementStorePersistRequest, bytes_to_scene_id, now_ms,
-    now_wall_us, persist_created_tile_entries, persist_element_store, scene_id_to_bytes,
-    validate_timing_hints,
+    DEFAULT_MAX_FUTURE_SCHEDULE_US, ElementStorePersistRequest, bytes_to_scene_id,
+    capability_set_covers, now_ms, now_wall_us, persist_created_tile_entries,
+    persist_element_store, scene_id_to_bytes, validate_timing_hints,
 };
 
 /// Output of [`convert_proto_mutations`]: the converted scene mutations and the
@@ -39,6 +39,40 @@ struct ConvertedBatch {
     pending_touch_ids: Vec<(SceneId, ElementType)>,
     /// Elements that should have `last_published_at` updated, keyed by namespace string.
     pending_touch_names: Vec<(ElementType, String)>,
+}
+
+/// The permission a mutation needs, and the `allow` entry that grants it.
+fn required_permission(mutation: &SceneMutation) -> (String, String) {
+    match mutation {
+        SceneMutation::CreateTile { .. } => ("create_tiles".to_string(), "tiles".to_string()),
+        SceneMutation::PublishToZone { zone_name, .. }
+        | SceneMutation::ClearZone { zone_name, .. } => (
+            format!("publish_zone:{zone_name}"),
+            format!("zone:{zone_name}"),
+        ),
+        SceneMutation::ClearWidget { widget_name, .. } => (
+            format!("publish_widget:{widget_name}"),
+            format!("widget:{widget_name}"),
+        ),
+        _ => ("modify_own_tiles".to_string(), "tiles".to_string()),
+    }
+}
+
+/// Reject the batch unless the agent's allow list covers every mutation.
+fn check_mutation_permissions(
+    mutations: &[SceneMutation],
+    permissions: &[String],
+) -> Result<(), (String, String)> {
+    for mutation in mutations {
+        let (permission, allow_entry) = required_permission(mutation);
+        if !capability_set_covers(permissions, &permission) {
+            return Err((
+                "CAPABILITY_MISSING".to_string(),
+                format!("agent allow list lacks {allow_entry}"),
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Convert a slice of proto [`MutationProto`] into a [`ConvertedBatch`].
@@ -59,9 +93,10 @@ fn convert_proto_mutations(
     tab_id: SceneId,
     lease_id: SceneId,
     display_area: tze_hud_scene::Rect,
-    namespace: &str,
+    session: &StreamSession,
     log_suffix: &str,
 ) -> Result<ConvertedBatch, (String, String)> {
+    let namespace = session.namespace.as_str();
     let mut scene_mutations = Vec::new();
     let mut pending_touch_ids: Vec<(SceneId, ElementType)> = Vec::new();
     let mut pending_touch_names: Vec<(ElementType, String)> = Vec::new();
@@ -555,6 +590,8 @@ fn convert_proto_mutations(
         }
     }
 
+    check_mutation_permissions(&scene_mutations, &session.capabilities)?;
+
     Ok(ConvertedBatch {
         scene_mutations,
         pending_touch_ids,
@@ -996,7 +1033,7 @@ pub(super) async fn handle_mutation_batch(
         tab_id,
         lease_id,
         display_area,
-        &session.namespace,
+        session,
         "",
     ) {
         Ok(c) => c,
@@ -1337,7 +1374,7 @@ pub(super) async fn apply_queued_batch_to_scene(
         tab_id,
         lease_id,
         display_area,
-        &session.namespace,
+        session,
         " (queued)",
     ) {
         Ok(c) => c,

@@ -21,7 +21,7 @@ use tze_hud_scene::{
     mutation::{MutationBatch, SceneMutation},
     render_wake::RenderWakeNotifier,
     types::{
-        Capability, LeaseState, NotificationAction, NotificationPayload, Rgba, StatusBarPayload,
+        LeaseState, NotificationAction, NotificationPayload, Rgba, StatusBarPayload,
         WidgetParamType, WidgetParameterValue, ZoneContent, ZoneMediaType, ZonePublishToken,
     },
 };
@@ -404,11 +404,7 @@ fn ensure_lease(ctx: &ToolCtx<'_>, scene: &mut SceneGraph) -> SceneId {
     {
         return id;
     }
-    let id = scene.grant_lease(
-        ns,
-        MCP_LEASE_TTL_MS,
-        vec![Capability::PublishZone("*".into())],
-    );
+    let id = scene.grant_lease(ns, MCP_LEASE_TTL_MS);
     ctx.state.with(ns, |s| s.lease = Some(id));
     id
 }

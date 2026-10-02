@@ -7,7 +7,7 @@ use tze_hud_config::TzeHudConfig;
 use tze_hud_protocol::proto::session::hud_session_server::HudSessionServer;
 use tze_hud_protocol::proto::session::runtime_service_server::RuntimeServiceServer;
 use tze_hud_protocol::session::SharedState;
-use tze_hud_protocol::session_server::HudSessionImpl;
+use tze_hud_protocol::session_server::{HudSessionImpl, SessionDeps};
 use tze_hud_scene::config::ConfigLoader;
 
 use super::WindowedConfig;
@@ -199,15 +199,16 @@ pub(super) fn start_network_services_with_render_wake(
         .map_err(|e| format!("windowed runtime: invalid gRPC address (port {grpc_port}): {e}"))?;
 
     // Wire config-driven agent identity (allow lists + per-agent PSKs).
-    let agent_caps = runtime_context.snapshot_agent_capabilities();
-    let service = HudSessionImpl::from_shared_state_with_runtime_envelope(
-        shared_state,
-        psk,
-        agent_caps,
-        runtime_context.snapshot_agent_resource_budgets(),
-        runtime_context.fallback_resource_budget(),
-        fallback_unrestricted,
-        Some(std::sync::Arc::new(
+    let mut agents = runtime_context.agent_directory(psk);
+    agents.fallback_permissions = if fallback_unrestricted {
+        vec!["*".to_string()]
+    } else {
+        Vec::new()
+    };
+    let service = HudSessionImpl::from_deps(SessionDeps {
+        agent_resource_budgets: runtime_context.snapshot_agent_resource_budgets(),
+        fallback_resource_budget: runtime_context.fallback_resource_budget(),
+        budget_enforcer: Some(std::sync::Arc::new(
             crate::RuntimeMutationBudgetEnforcer::with_limits(
                 runtime_context.operational_envelope.max_resident_sessions,
                 runtime_context.operational_envelope.max_leased_tiles,
@@ -216,9 +217,9 @@ pub(super) fn start_network_services_with_render_wake(
                     .max_agent_leased_texture_bytes,
             ),
         )),
-    )
-    .with_agent_psks(runtime_context.snapshot_agent_psks(psk))
-    .with_render_wake_notifier(render_wake);
+        render_wake,
+        ..SessionDeps::new(shared_state, agents)
+    });
 
     // Clone the broadcast senders before moving the service into the gRPC task.
     // The windowed runtime holds these senders to:

@@ -43,7 +43,6 @@ use tze_hud_runtime::headless::HeadlessConfig;
 use tze_hud_scene::types::*;
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 // ─── Shared gRPC session harness ─────────────────────────────────────────────
 // Extracted from duplicate copies in presence_card_coexistence, and
@@ -372,49 +371,6 @@ async fn test_three_agents_contention() -> Result<(), Box<dyn std::error::Error>
             );
         }
     }
-
-    // ── Phase 6: Lease priority ordering verification ───────────────────────
-
-    let lease_priorities = {
-        let state = runtime.shared_state().lock().await;
-        let scene = state.scene.lock().await;
-        let mut priorities: HashMap<String, u8> = HashMap::new();
-        for lease in scene.leases.values() {
-            if [&agent_a.namespace, &agent_b.namespace, &agent_c.namespace]
-                .contains(&&lease.namespace)
-            {
-                priorities.insert(lease.namespace.clone(), lease.priority);
-            }
-        }
-        priorities
-    };
-
-    let prio_a = lease_priorities
-        .get(&agent_a.namespace)
-        .copied()
-        .unwrap_or(255);
-    let prio_b = lease_priorities
-        .get(&agent_b.namespace)
-        .copied()
-        .unwrap_or(255);
-    let prio_c = lease_priorities
-        .get(&agent_c.namespace)
-        .copied()
-        .unwrap_or(255);
-
-    // Verify priority ordering: agent-weather (requested 1) ≤ agent-notifications (requested 2)
-    // Note: the server MAY downgrade priority 1 to priority 2 for agents without
-    // `lease:priority:1` capability (per lease-governance/spec.md lines 50-60).
-    // We assert the relative ordering holds regardless.
-    assert!(
-        prio_a <= prio_b,
-        "agent-weather priority ({prio_a}) must be <= agent-notifications priority ({prio_b}); \
-         lower number = higher priority"
-    );
-    assert!(
-        prio_b <= prio_c,
-        "agent-notifications priority ({prio_b}) must be <= agent-media priority ({prio_c})"
-    );
 
     // ── Phase 6b: Adversarial cross-agent namespace security check ──────────
     //
@@ -801,14 +757,7 @@ async fn test_grpc_and_mcp_share_single_scene_graph() {
     let lease_id = {
         let state = shared_state_arc.lock().await;
         let mut scene = state.scene.lock().await;
-        scene.grant_lease(
-            "coherence-agent",
-            60_000,
-            vec![
-                tze_hud_scene::types::Capability::CreateTiles,
-                tze_hud_scene::types::Capability::ModifyOwnTiles,
-            ],
-        )
+        scene.grant_lease("coherence-agent", 60_000)
     };
 
     // ── Step 3: Write a tile via shared_state (simulates MCP-side mutation) ──

@@ -1,27 +1,21 @@
 //! Lease lifecycle types: renewal policy, TTL tracking, orphan grace periods,
-//! priority, capability revocation, and post-revocation cleanup.
+//! and post-revocation cleanup.
 //!
 //! The scene graph (`graph::leases`) owns live lease state; this module holds
 //! the supporting types and pure helpers.
 
 pub mod budget;
-pub mod capability;
 pub mod cleanup;
 pub mod degradation;
 pub mod orphan;
-pub mod priority;
 pub mod ttl;
 pub mod types;
 
-pub use types::{
-    DenyReason, LeaseAuditEvent, LeaseEventKind, LeaseId, LeaseIdentity,
-    RevokeReason as AuditRevokeReason,
-};
+pub use types::LeaseId;
 // LeaseState is defined in crate::types and re-exported here so that the
 // lease module and all its sub-modules share one canonical definition.
 pub use crate::types::LeaseState;
 pub use budget::BudgetDelta;
-pub use capability::{CapabilityRevocationError, revoke_capability_from_lease};
 pub use cleanup::{
     CleanupResult, POST_REVOCATION_FREE_DELAY_MS, PostRevocationCleanupSpec, RevocationKind,
     ZonePublicationSweep,
@@ -55,7 +49,6 @@ pub enum RevokeReason {
     ViewerDismissed,
     BudgetPolicy,
     SuspensionTimeout,
-    CapabilityRevoked,
     Other,
 }
 

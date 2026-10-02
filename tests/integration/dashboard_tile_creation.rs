@@ -50,7 +50,7 @@ use tze_hud_resource::{
     UploadId, UploadStartRequest,
 };
 use tze_hud_scene::{
-    Capability, ResourceId, SceneGraph, SceneId, TestClock, ValidationErrorCode, ZONE_TILE_Z_MIN,
+    ResourceId, SceneGraph, SceneId, TestClock, ValidationErrorCode, ZONE_TILE_Z_MIN,
     mutation::{MutationBatch, SceneMutation},
     types::{
         CursorStyle, FontFamily, HitRegionNode, ImageFitMode, InputMode, Node, NodeData, Rect,
@@ -367,11 +367,7 @@ fn setup_scene_with_lease() -> (SceneGraph, SceneId, SceneId) {
     let mut scene = SceneGraph::new(DISPLAY_W, DISPLAY_H);
     let tab_id = scene.create_tab("Main", 0).unwrap();
     scene.active_tab = Some(tab_id);
-    let lease_id = scene.grant_lease(
-        "dashboard-agent",
-        120_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("dashboard-agent", 120_000);
     (scene, tab_id, lease_id)
 }
 
@@ -1035,11 +1031,7 @@ async fn content_update_with_expired_lease_rejected() {
     scene.active_tab = Some(tab_id);
 
     // Short-lived lease (100 ms TTL)
-    let lease_id = scene.grant_lease(
-        "dashboard-agent",
-        100,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("dashboard-agent", 100);
 
     // Create tile and initial tree while lease is ACTIVE
     let create_result = scene.apply_batch(&make_batch(

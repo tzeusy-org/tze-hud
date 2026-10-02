@@ -917,7 +917,7 @@ fn scene_with_static_image_tile(
     // Register the resource ID so the scene graph allows refcounting.
     scene.register_resource(resource_id);
     let tab_id = scene.create_tab("test", 0).unwrap();
-    let lease_id = scene.grant_lease("test-agent", 60_000, vec![]);
+    let lease_id = scene.grant_lease("test-agent", 60_000);
     let tile_id = scene
         .create_tile(
             tab_id,

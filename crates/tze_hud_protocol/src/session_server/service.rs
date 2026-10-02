@@ -1,9 +1,7 @@
 //! Service struct for the bidirectional streaming session server.
 //!
-//! This module contains the `HudSessionImpl` struct definition, its constructors,
-//! and the non-session-loop runtime helper methods. Moved from
-//! `session_server/mod.rs` as Step SS-5 of the module split
-//! (docs/design/session-server-renderer-module-split-plan.md §3.4).
+//! This module contains the `HudSessionImpl` struct definition, its
+//! constructor, and the non-session-loop runtime helper methods.
 //!
 //! The `async fn session` dispatch loop (the `HudSession` trait impl) remains in
 //! `session_server/mod.rs` as a separate `impl HudSession for HudSessionImpl`
@@ -95,171 +93,106 @@ pub struct HudSessionImpl {
     pub frame_presented_tx: tokio::sync::broadcast::Sender<crate::proto::FramePresented>,
 }
 
-impl HudSessionImpl {
-    /// Create a new session service with the given scene graph and PSK.
-    ///
-    /// Uses an empty capability registry with `fallback_unrestricted = true`
-    /// for backwards compatibility. Prefer `new_with_config` for production.
-    #[cfg(any(test, feature = "dev-mode"))]
-    pub fn new(scene: SceneGraph, psk: &str) -> Self {
-        let degradation_notices = super::DegradationNoticeSender::default();
-        let lease_expirations = super::LeaseExpirySender::default();
-        let input_event_tx = super::InputEventSender::new(super::BROADCAST_CHANNEL_CAPACITY);
-        let (element_repositioned_tx, _) =
-            tokio::sync::broadcast::channel(super::BROADCAST_CHANNEL_CAPACITY);
-        let (frame_presented_tx, _) =
-            tokio::sync::broadcast::channel(super::BROADCAST_CHANNEL_CAPACITY);
+/// Everything the session service takes from the runtime.
+///
+/// [`SessionDeps::new`] fills the optional parts with defaults; set the
+/// fields that differ before passing it to [`HudSessionImpl::from_deps`].
+pub struct SessionDeps {
+    pub state: Arc<Mutex<SharedState>>,
+    /// Credential → agent identity and permissions.
+    pub agents: AgentDirectory,
+    /// Frozen per-agent mutation/lease budgets derived at runtime startup.
+    pub agent_resource_budgets: HashMap<String, ResourceBudget>,
+    /// Budget applied to agents without an explicit registered override.
+    pub fallback_resource_budget: ResourceBudget,
+    /// Runtime-owned mutation-intake enforcement bridge.
+    pub budget_enforcer: Option<SharedMutationBudgetEnforcer>,
+    /// Transactional degradation-notice hub, shared with the runtime.
+    pub degradation_notices: super::DegradationNoticeSender,
+    /// Wakes the windowed event/compositor loops after render-relevant work.
+    pub render_wake: tze_hud_scene::render_wake::RenderWakeNotifier,
+}
+
+impl SessionDeps {
+    pub fn new(state: Arc<Mutex<SharedState>>, agents: AgentDirectory) -> Self {
         Self {
-            state: Arc::new(Mutex::new(SharedState {
-                scene: Arc::new(Mutex::new(scene)),
-                sessions: crate::session::SessionRegistry::new(psk),
-                resource_store: ResourceStore::new(ResourceStoreConfig::default()),
-                widget_asset_store: crate::session::WidgetAssetStore::default(),
-                runtime_widget_store: None,
-                element_store: tze_hud_scene::element_store::ElementStore::default(),
-                element_store_path: None,
-                safe_mode_atomic: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-                active_tab_mirror: Arc::new(std::sync::Mutex::new(None)),
-                token_store: crate::token::TokenStore::new(),
-                freeze_active: false,
-                input_capture_tx: None,
-                input_capture_wake: tze_hud_scene::render_wake::RenderWakeNotifier::default(),
-                resolved_portal_tokens: std::collections::HashMap::new(),
-            })),
-            render_wake: tze_hud_scene::render_wake::RenderWakeNotifier::default(),
-            agents: Arc::new(AgentDirectory::unrestricted(psk)),
-            agent_resource_budgets: Arc::new(HashMap::new()),
+            state,
+            agents,
+            agent_resource_budgets: HashMap::new(),
             fallback_resource_budget: ResourceBudget::default(),
             budget_enforcer: None,
-            degradation_notices,
-            lease_expirations,
-            input_event_tx,
-            element_repositioned_tx,
-            frame_presented_tx,
+            degradation_notices: super::DegradationNoticeSender::default(),
+            render_wake: tze_hud_scene::render_wake::RenderWakeNotifier::default(),
+        }
+    }
+}
+
+/// Per-session receivers for the runtime → session feeds.
+pub(super) struct RuntimeFeeds {
+    /// Durable lane for terminal lease transitions.
+    pub lease_expiry: super::LeaseExpiryReceiver,
+    /// Input events; the per-namespace durable lane is subscribed only after
+    /// authentication establishes the namespace.
+    pub input_events: super::InputEventSender,
+    /// Delivered when the agent holds the SCENE_TOPOLOGY subscription.
+    pub element_repositioned:
+        tokio::sync::broadcast::Receiver<crate::proto::ElementRepositionedEvent>,
+    /// Delivered when the agent holds the TELEMETRY_FRAMES subscription.
+    pub frame_presented: tokio::sync::broadcast::Receiver<crate::proto::FramePresented>,
+}
+
+impl HudSessionImpl {
+    pub(super) fn subscribe_feeds(&self) -> RuntimeFeeds {
+        RuntimeFeeds {
+            lease_expiry: self.lease_expirations.subscribe(),
+            input_events: self.input_event_tx.clone(),
+            element_repositioned: self.element_repositioned_tx.subscribe(),
+            frame_presented: self.frame_presented_tx.subscribe(),
         }
     }
 
-    /// Create from existing shared state with a config-driven capability registry.
-    ///
-    /// `agent_capabilities` is populated from `ResolvedConfig::agent_capabilities`
-    /// (i.e. the `[agents.<id>] allow` lists).
-    ///
-    /// `fallback_unrestricted` controls what happens when an agent is NOT found in
-    /// the registry:
-    /// - `false` (production): unlisted agents receive guest policy (no capabilities).
-    /// - `true` (dev/test): unlisted agents receive unrestricted policy.
-    pub fn from_shared_state_with_config(
-        state: Arc<Mutex<SharedState>>,
-        psk: &str,
-        agent_capabilities: HashMap<String, Vec<String>>,
-        fallback_unrestricted: bool,
-    ) -> Self {
-        Self::from_shared_state_with_config_and_degradation_notices(
-            state,
-            psk,
-            agent_capabilities,
-            fallback_unrestricted,
-            super::DegradationNoticeSender::default(),
-        )
-    }
-
-    pub fn from_shared_state_with_config_and_degradation_notices(
-        state: Arc<Mutex<SharedState>>,
-        psk: &str,
-        agent_capabilities: HashMap<String, Vec<String>>,
-        fallback_unrestricted: bool,
-        degradation_notices: super::DegradationNoticeSender,
-    ) -> Self {
-        Self::from_shared_state_with_runtime_envelope_and_degradation_notices(
-            state,
-            psk,
-            agent_capabilities,
-            HashMap::new(),
-            ResourceBudget::default(),
-            fallback_unrestricted,
-            None,
-            degradation_notices,
-        )
-    }
-    /// Create from shared state with the immutable production runtime envelope.
-    #[allow(clippy::too_many_arguments)]
-    pub fn from_shared_state_with_runtime_envelope(
-        state: Arc<Mutex<SharedState>>,
-        psk: &str,
-        agent_capabilities: HashMap<String, Vec<String>>,
-        agent_resource_budgets: HashMap<String, ResourceBudget>,
-        fallback_resource_budget: ResourceBudget,
-        fallback_unrestricted: bool,
-        budget_enforcer: Option<SharedMutationBudgetEnforcer>,
-    ) -> Self {
-        Self::from_shared_state_with_runtime_envelope_and_degradation_notices(
-            state,
-            psk,
-            agent_capabilities,
-            agent_resource_budgets,
-            fallback_resource_budget,
-            fallback_unrestricted,
-            budget_enforcer,
-            super::DegradationNoticeSender::default(),
-        )
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub fn from_shared_state_with_runtime_envelope_and_degradation_notices(
-        state: Arc<Mutex<SharedState>>,
-        psk: &str,
-        agent_capabilities: HashMap<String, Vec<String>>,
-        agent_resource_budgets: HashMap<String, ResourceBudget>,
-        fallback_resource_budget: ResourceBudget,
-        fallback_unrestricted: bool,
-        budget_enforcer: Option<SharedMutationBudgetEnforcer>,
-        degradation_notices: super::DegradationNoticeSender,
-    ) -> Self {
-        let lease_expirations = super::LeaseExpirySender::default();
-        let input_event_tx = super::InputEventSender::new(super::BROADCAST_CHANNEL_CAPACITY);
+    /// Build the service. The per-feature runtime → session channels are
+    /// created here, in one place.
+    pub fn from_deps(deps: SessionDeps) -> Self {
         let (element_repositioned_tx, _) =
             tokio::sync::broadcast::channel(super::BROADCAST_CHANNEL_CAPACITY);
         let (frame_presented_tx, _) =
             tokio::sync::broadcast::channel(super::BROADCAST_CHANNEL_CAPACITY);
         Self {
-            state,
-            render_wake: tze_hud_scene::render_wake::RenderWakeNotifier::default(),
-            agents: Arc::new(AgentDirectory {
-                runtime_psk: psk.to_string(),
-                agent_psks: HashMap::new(),
-                permissions: agent_capabilities,
-                fallback_permissions: if fallback_unrestricted {
-                    vec!["*".to_string()]
-                } else {
-                    Vec::new()
-                },
-            }),
-            agent_resource_budgets: Arc::new(agent_resource_budgets),
-            fallback_resource_budget,
-            budget_enforcer,
-            degradation_notices,
-            lease_expirations,
-            input_event_tx,
+            state: deps.state,
+            render_wake: deps.render_wake,
+            agents: Arc::new(deps.agents),
+            agent_resource_budgets: Arc::new(deps.agent_resource_budgets),
+            fallback_resource_budget: deps.fallback_resource_budget,
+            budget_enforcer: deps.budget_enforcer,
+            degradation_notices: deps.degradation_notices,
+            lease_expirations: super::LeaseExpirySender::default(),
+            input_event_tx: super::InputEventSender::new(super::BROADCAST_CHANNEL_CAPACITY),
             element_repositioned_tx,
             frame_presented_tx,
         }
     }
 
-    /// Bind the production render-work wake seam without exposing a platform
-    /// event-loop type to the protocol crate.
-    pub fn with_render_wake_notifier(
-        mut self,
-        notifier: tze_hud_scene::render_wake::RenderWakeNotifier,
-    ) -> Self {
-        self.render_wake = notifier;
-        self
-    }
-
-    /// Register per-agent PSKs (`[agents.<id>] psk_env`, resolved). A session
-    /// presenting one of these keys is identified as that agent.
-    pub fn with_agent_psks(mut self, agent_psks: HashMap<String, String>) -> Self {
-        Arc::make_mut(&mut self.agents).agent_psks = agent_psks;
-        self
+    /// Dev/test service over `scene` with one runtime PSK and unrestricted agents.
+    #[cfg(any(test, feature = "dev-mode"))]
+    pub fn new(scene: SceneGraph, psk: &str) -> Self {
+        let state = Arc::new(Mutex::new(SharedState {
+            scene: Arc::new(Mutex::new(scene)),
+            sessions: crate::session::SessionRegistry::new(psk),
+            resource_store: ResourceStore::new(ResourceStoreConfig::default()),
+            widget_asset_store: crate::session::WidgetAssetStore::default(),
+            runtime_widget_store: None,
+            element_store: tze_hud_scene::element_store::ElementStore::default(),
+            element_store_path: None,
+            safe_mode_atomic: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            active_tab_mirror: Arc::new(std::sync::Mutex::new(None)),
+            token_store: crate::token::TokenStore::new(),
+            freeze_active: false,
+            input_capture_tx: None,
+            input_capture_wake: tze_hud_scene::render_wake::RenderWakeNotifier::default(),
+            resolved_portal_tokens: std::collections::HashMap::new(),
+        }));
+        Self::from_deps(SessionDeps::new(state, AgentDirectory::unrestricted(psk)))
     }
 
     /// Replace per-agent permissions (expanded `allow` lists). Test-only:

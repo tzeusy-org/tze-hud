@@ -110,7 +110,7 @@ macro_rules! require_gpu {
 fn scene_with_node(node: Node) -> SceneGraph {
     let mut scene = SceneGraph::new(256.0, 256.0);
     let tab_id = scene.create_tab("test", 0).unwrap();
-    let lease_id = scene.grant_lease("test", 60_000, vec![]);
+    let lease_id = scene.grant_lease("test", 60_000);
     let tile_id = scene
         .create_tile(
             tab_id,
@@ -129,7 +129,7 @@ fn scene_with_node(node: Node) -> SceneGraph {
 fn canonical_retained_scene() -> (SceneGraph, SceneId, SceneId) {
     let mut scene = SceneGraph::new(1_000.0, 500.0);
     let tab_id = scene.create_tab("canonical", 0).expect("canonical tab");
-    let lease_id = scene.grant_lease("canonical-agent", 60_000, vec![]);
+    let lease_id = scene.grant_lease("canonical-agent", 60_000);
     let mut first_tile_and_root = None;
 
     for index in 0..50 {
@@ -240,7 +240,7 @@ async fn test_static_image_node_renders_placeholder_quad() {
     let mut scene = SceneGraph::new(256.0, 256.0);
     scene.register_resource(resource_id);
     let tab_id = scene.create_tab("test", 0).unwrap();
-    let lease_id = scene.grant_lease("test", 60_000, vec![]);
+    let lease_id = scene.grant_lease("test", 60_000);
     let tile_id = scene
         .create_tile(
             tab_id,
@@ -350,7 +350,7 @@ async fn test_static_image_node_composited_with_other_nodes() {
     let static_image_resource_id = ResourceId::of(b"8x8 green placeholder");
     scene.register_resource(static_image_resource_id);
     let tab_id = scene.create_tab("test", 0).unwrap();
-    let lease_id = scene.grant_lease("agent", 60_000, vec![]);
+    let lease_id = scene.grant_lease("agent", 60_000);
 
     // Left tile: red solid color
     let left_tile_id = scene
@@ -440,7 +440,7 @@ async fn test_focused_hit_region_emits_focus_ring_in_overlay_mode() {
 
     let mut scene = SceneGraph::new(400.0, 300.0);
     let tab_id = scene.create_tab("agent", 0).unwrap();
-    let lease_id = scene.grant_lease("agent", 60_000, vec![]);
+    let lease_id = scene.grant_lease("agent", 60_000);
     let tile_id = scene
         .create_tile(
             tab_id,
@@ -529,7 +529,7 @@ async fn test_portal_tile_emits_resize_grip_in_overlay_mode() {
 
     let mut scene = SceneGraph::new(400.0, 300.0);
     let tab_id = scene.create_tab("agent", 0).unwrap();
-    let lease_id = scene.grant_lease("agent", 60_000, vec![]);
+    let lease_id = scene.grant_lease("agent", 60_000);
     let tile_id = scene
         .create_tile(
             tab_id,
@@ -595,7 +595,7 @@ async fn test_resize_grip_swaps_to_hover_color_for_hovered_tile() {
 
     let mut scene = SceneGraph::new(400.0, 300.0);
     let tab_id = scene.create_tab("agent", 0).unwrap();
-    let lease_id = scene.grant_lease("agent", 60_000, vec![]);
+    let lease_id = scene.grant_lease("agent", 60_000);
     let tile_id = scene
         .create_tile(
             tab_id,
@@ -668,7 +668,7 @@ async fn test_tile_level_focus_owner_emits_ring_in_overlay_mode() {
 
     let mut scene = SceneGraph::new(400.0, 300.0);
     let tab_id = scene.create_tab("agent", 0).unwrap();
-    let lease_id = scene.grant_lease("agent", 60_000, vec![]);
+    let lease_id = scene.grant_lease("agent", 60_000);
     let tile_id = scene
         .create_tile(
             tab_id,
@@ -713,7 +713,7 @@ async fn test_composerless_node_focus_emits_ring() {
 
     let mut scene = SceneGraph::new(400.0, 300.0);
     let tab_id = scene.create_tab("agent", 0).unwrap();
-    let lease_id = scene.grant_lease("agent", 60_000, vec![]);
+    let lease_id = scene.grant_lease("agent", 60_000);
     let tile_id = scene
         .create_tile(
             tab_id,
@@ -768,7 +768,7 @@ async fn test_focus_ring_suppressed_on_non_active_tab() {
     let mut scene = SceneGraph::new(400.0, 300.0);
     let tab_id = scene.create_tab("agent", 0).unwrap();
     let other_tab = scene.create_tab("agent2", 1).unwrap();
-    let lease_id = scene.grant_lease("agent", 60_000, vec![]);
+    let lease_id = scene.grant_lease("agent", 60_000);
     let tile_id = scene
         .create_tile(
             tab_id,
@@ -808,7 +808,7 @@ async fn test_viewer_echo_renders_kind_distinct_line_above_composer() {
     // there is room above the bottom input strip for history lines.
     let mut scene = SceneGraph::new(400.0, 300.0);
     let tab_id = scene.create_tab("agent", 0).unwrap();
-    let lease_id = scene.grant_lease("agent", 60_000, vec![]);
+    let lease_id = scene.grant_lease("agent", 60_000);
     let tile_id = scene
         .create_tile(
             tab_id,
@@ -954,7 +954,7 @@ async fn test_viewer_echo_stack_tracks_live_composer_box() {
 
     let mut scene = SceneGraph::new(400.0, 300.0);
     let tab_id = scene.create_tab("agent", 0).unwrap();
-    let lease_id = scene.grant_lease("agent", 60_000, vec![]);
+    let lease_id = scene.grant_lease("agent", 60_000);
     let tile_id = scene
         .create_tile(
             tab_id,
@@ -1345,7 +1345,7 @@ fn assert_rect_close(actual: Rect, expected: Rect, message: &str) {
 fn viewer_echo_test_scene() -> (SceneGraph, SceneId) {
     let mut scene = SceneGraph::new(400.0, 300.0);
     let tab_id = scene.create_tab("agent", 0).unwrap();
-    let lease_id = scene.grant_lease("agent", 60_000, vec![]);
+    let lease_id = scene.grant_lease("agent", 60_000);
     let tile_id = scene
         .create_tile(
             tab_id,
@@ -1630,7 +1630,7 @@ async fn test_chrome_always_above_max_zorder_tile() {
     let max_agent_z = ZONE_TILE_Z_MIN - 1; // 0x7FFF_FFFF
     let mut scene = SceneGraph::new(256.0, 256.0);
     let tab_id = scene.create_tab("test", 0).unwrap();
-    let lease_id = scene.grant_lease("agent", 60_000, vec![]);
+    let lease_id = scene.grant_lease("agent", 60_000);
     let tile_id = scene
         .create_tile(
             tab_id,
@@ -1701,7 +1701,7 @@ async fn test_chrome_pass_uses_load_op_load() {
 
     let mut scene = SceneGraph::new(256.0, 256.0);
     let tab_id = scene.create_tab("test", 0).unwrap();
-    let lease_id = scene.grant_lease("agent", 60_000, vec![]);
+    let lease_id = scene.grant_lease("agent", 60_000);
     let tile_id = scene
         .create_tile(
             tab_id,
@@ -2542,7 +2542,7 @@ async fn test_stage6_budget_with_text_rendering_active() {
     // ── Build scene ─────────────────────────────────────────────────────────
     let mut scene = SceneGraph::new(1280.0, 720.0);
     let tab_id = scene.create_tab("bench", 0).unwrap();
-    let lease_id = scene.grant_lease("bench", 60_000, vec![]);
+    let lease_id = scene.grant_lease("bench", 60_000);
 
     // TextMarkdownNode tile occupying most of the screen.
     let tile_id = scene
@@ -8475,7 +8475,7 @@ async fn portal_frame_gets_full_width_header_band_handle() {
 
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab = scene.create_tab("Main", 0).unwrap();
-    let lease = scene.grant_lease("portal", 60_000, vec![]);
+    let lease = scene.grant_lease("portal", 60_000);
     // Frame = the large anchor.
     let frame_id = scene
         .create_tile(
@@ -8546,7 +8546,7 @@ async fn portal_resize_scales_and_clamps_text_font() {
 
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab = scene.create_tab("Main", 0).unwrap();
-    let lease = scene.grant_lease("agent", 60_000, vec![]);
+    let lease = scene.grant_lease("agent", 60_000);
     let tile = scene
         .create_tile(tab, "agent", lease, Rect::new(0.0, 0.0, 400.0, 300.0), 1)
         .unwrap();
@@ -8574,7 +8574,7 @@ async fn drag_handle_regions_cover_visible_tile_zone_and_widget() {
 
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab = scene.create_tab("Main", 0).unwrap();
-    let lease = scene.grant_lease("agent-a", 60_000, vec![]);
+    let lease = scene.grant_lease("agent-a", 60_000);
     let tile_id = scene
         .create_tile(
             tab,
@@ -8753,7 +8753,7 @@ async fn drag_handle_hit_test_wins_on_passthrough_tile() {
 
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab = scene.create_tab("Main", 0).unwrap();
-    let lease = scene.grant_lease("agent-a", 60_000, vec![]);
+    let lease = scene.grant_lease("agent-a", 60_000);
     let tile_id = scene
         .create_tile(
             tab,
@@ -8810,7 +8810,7 @@ async fn drag_handle_states_stale_entries_pruned_on_repopulate() {
 
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab = scene.create_tab("Main", 0).unwrap();
-    let lease = scene.grant_lease("agent-a", 60_000, vec![Capability::ModifyOwnTiles]);
+    let lease = scene.grant_lease("agent-a", 60_000);
     let tile_id = scene
         .create_tile(
             tab,
@@ -8869,7 +8869,7 @@ async fn drag_handle_opacity_switches_to_active_on_hover_state() {
 
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab = scene.create_tab("Main", 0).unwrap();
-    let lease = scene.grant_lease("agent-a", 60_000, vec![]);
+    let lease = scene.grant_lease("agent-a", 60_000);
     let _tile_id = scene
         .create_tile(
             tab,
@@ -8931,7 +8931,7 @@ async fn drag_visual_feedback_applied_during_active_drag() {
 
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab = scene.create_tab("Main", 0).unwrap();
-    let lease = scene.grant_lease("agent-a", 60_000, vec![]);
+    let lease = scene.grant_lease("agent-a", 60_000);
     let tile_id = scene
         .create_tile(
             tab,
@@ -9017,7 +9017,7 @@ async fn drag_visual_feedback_applied_during_active_drag() {
 fn drag_z_order_boost_raises_tile_above_peers() {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab = scene.create_tab("Main", 0).unwrap();
-    let lease = scene.grant_lease("agent-a", 60_000, vec![]);
+    let lease = scene.grant_lease("agent-a", 60_000);
 
     // Tile A: lower z_order (renders behind by default).
     let tile_a = scene
@@ -9089,7 +9089,7 @@ fn drag_z_order_boost_raises_tile_above_peers() {
 fn drag_opacity_boost_applied_faithfully() {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab = scene.create_tab("Main", 0).unwrap();
-    let lease = scene.grant_lease("agent-a", 60_000, vec![]);
+    let lease = scene.grant_lease("agent-a", 60_000);
     let tile_id = scene
         .create_tile(tab, "tile-a", lease, Rect::new(0.0, 0.0, 100.0, 100.0), 1)
         .unwrap();
@@ -9127,7 +9127,7 @@ fn drag_opacity_boost_applied_faithfully() {
 fn effective_tile_z_order_returns_boosted_key_during_drag() {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab = scene.create_tab("Main", 0).unwrap();
-    let lease = scene.grant_lease("agent-a", 60_000, vec![]);
+    let lease = scene.grant_lease("agent-a", 60_000);
     let tile_id = scene
         .create_tile(tab, "tile-a", lease, Rect::new(0.0, 0.0, 100.0, 100.0), 42)
         .unwrap();
@@ -9279,7 +9279,7 @@ async fn test_collect_text_items_applies_tile_scroll_offset() {
 
     let mut scene = SceneGraph::new(720.0, 360.0);
     let tab_id = scene.create_tab("test", 0).unwrap();
-    let lease_id = scene.grant_lease("scroll-test", 120_000, vec![]);
+    let lease_id = scene.grant_lease("scroll-test", 120_000);
 
     // Place a tile at (100, 50).
     let tile_x = 100.0_f32;
@@ -9359,7 +9359,7 @@ async fn test_collect_text_items_applies_tile_scroll_offset() {
     //   diff             =  scroll_y  (margin cancels)
     let mut scene_baseline = SceneGraph::new(720.0, 360.0);
     let tab2 = scene_baseline.create_tab("test", 0).unwrap();
-    let lease2 = scene_baseline.grant_lease("baseline", 120_000, vec![]);
+    let lease2 = scene_baseline.grant_lease("baseline", 120_000);
     let tile_id2 = scene_baseline
         .create_tile(
             tab2,
@@ -9444,7 +9444,7 @@ async fn jump_to_latest_badge_gates_on_scroll_and_unread_count() {
 
     let mut scene = SceneGraph::new(480.0, 320.0);
     let tab_id = scene.create_tab("test", 0).unwrap();
-    let lease_id = scene.grant_lease("badge-test", 120_000, vec![]);
+    let lease_id = scene.grant_lease("badge-test", 120_000);
 
     let tile_id = scene
         .create_tile(
@@ -9535,7 +9535,7 @@ async fn display_tile_scroll_offset_snaps_headless_and_settles_windowed() {
 
     let mut scene = SceneGraph::new(720.0, 360.0);
     let tab_id = scene.create_tab("test", 0).unwrap();
-    let lease_id = scene.grant_lease("smooth-scroll", 120_000, vec![]);
+    let lease_id = scene.grant_lease("smooth-scroll", 120_000);
     let tile_id = scene
         .create_tile(
             tab_id,
@@ -9599,7 +9599,7 @@ async fn publish_displayed_scroll_offsets_mirrors_smoother_and_clears_headless()
 
     let mut scene = SceneGraph::new(720.0, 360.0);
     let tab_id = scene.create_tab("test", 0).unwrap();
-    let lease_id = scene.grant_lease("smooth-scroll", 120_000, vec![]);
+    let lease_id = scene.grant_lease("smooth-scroll", 120_000);
     let tile_id = scene
         .create_tile(
             tab_id,
@@ -9668,7 +9668,7 @@ async fn idle_render_gate_skips_static_scene_renders_on_change_or_animation() {
 
     let mut scene = SceneGraph::new(720.0, 480.0);
     let tab_id = scene.create_tab("gate", 0).unwrap();
-    let lease_id = scene.grant_lease("gate", 120_000, vec![]);
+    let lease_id = scene.grant_lease("gate", 120_000);
     let tile_id = scene
         .create_tile(
             tab_id,
@@ -9884,7 +9884,7 @@ async fn scrolled_portal_output_tile_clips_geometry_outside_viewport() {
 
     let mut scene = SceneGraph::new(220.0, 180.0);
     let tab_id = scene.create_tab("portal-output-clip", 0).unwrap();
-    let lease_id = scene.grant_lease("portal-output-clip", 120_000, vec![]);
+    let lease_id = scene.grant_lease("portal-output-clip", 120_000);
 
     let frame_id = scene
         .create_tile(
@@ -10014,7 +10014,7 @@ async fn scrolled_rounded_solid_preserves_original_shape_with_viewport_clip() {
 
     let mut scene = SceneGraph::new(220.0, 180.0);
     let tab_id = scene.create_tab("portal-rounded-clip", 0).unwrap();
-    let lease_id = scene.grant_lease("portal-rounded-clip", 120_000, vec![]);
+    let lease_id = scene.grant_lease("portal-rounded-clip", 120_000);
     let output_id = scene
         .create_tile(
             tab_id,
@@ -10112,7 +10112,7 @@ async fn expanded_portal_chrome_stays_fixed_while_document_content_scrolls_after
 
     let mut scene = SceneGraph::new(800.0, 520.0);
     let tab = scene.create_tab("expanded-portal", 0).unwrap();
-    let lease = scene.grant_lease("expanded-portal", 120_000, vec![]);
+    let lease = scene.grant_lease("expanded-portal", 120_000);
     // Deliberately not the attach-time size: this is the operator's resized
     // portal. Every declared part is already re-resolved to this whole-unit
     // geometry before the wheel scroll happens.
@@ -10354,7 +10354,7 @@ async fn test_collect_text_items_zero_scroll_unchanged() {
 
     let mut scene = SceneGraph::new(720.0, 360.0);
     let tab_id = scene.create_tab("test", 0).unwrap();
-    let lease_id = scene.grant_lease("no-scroll-test", 120_000, vec![]);
+    let lease_id = scene.grant_lease("no-scroll-test", 120_000);
 
     let tile_x = 50.0_f32;
     let tile_y = 30.0_f32;
@@ -10440,7 +10440,7 @@ async fn test_collect_text_items_at_tail_ellipsis_uses_tail_anchored_viewport() 
     // ── Scene with at_tail = true ─────────────────────────────────────────
     let mut scene_at_tail = SceneGraph::new(720.0, 360.0);
     let tab_at = scene_at_tail.create_tab("test", 0).unwrap();
-    let lease_at = scene_at_tail.grant_lease("at-tail-test", 120_000, vec![]);
+    let lease_at = scene_at_tail.grant_lease("at-tail-test", 120_000);
     let tile_at = scene_at_tail
         .create_tile(
             tab_at,
@@ -10516,7 +10516,7 @@ async fn test_collect_text_items_at_tail_ellipsis_uses_tail_anchored_viewport() 
     // ── Scene with at_tail = false (scrolled back) ────────────────────────
     let mut scene_head = SceneGraph::new(720.0, 360.0);
     let tab_head = scene_head.create_tab("test", 0).unwrap();
-    let lease_head = scene_head.grant_lease("head-test", 120_000, vec![]);
+    let lease_head = scene_head.grant_lease("head-test", 120_000);
     let tile_head = scene_head
         .create_tile(
             tab_head,
@@ -10565,7 +10565,7 @@ async fn test_collect_text_items_at_tail_ellipsis_uses_tail_anchored_viewport() 
     // ── Clip overflow is unaffected by at_tail ────────────────────────────
     let mut scene_clip = SceneGraph::new(720.0, 360.0);
     let tab_clip = scene_clip.create_tab("test", 0).unwrap();
-    let lease_clip = scene_clip.grant_lease("clip-test", 120_000, vec![]);
+    let lease_clip = scene_clip.grant_lease("clip-test", 120_000);
     let tile_clip = scene_clip
         .create_tile(
             tab_clip,
@@ -10816,7 +10816,7 @@ fn markdown_cache_compute_key_is_deterministic_and_content_addressed() {
 
     let mut scene = SceneGraph::new(256.0, 256.0);
     let tab_id = scene.create_tab("test", 0).unwrap();
-    let lease_id = scene.grant_lease("test", 60_000, vec![]);
+    let lease_id = scene.grant_lease("test", 60_000);
 
     let node_a_id = SceneId::new();
     let node_a = Node {
@@ -10932,7 +10932,7 @@ fn portal_markdown_node_ids_scopes_by_scroll_config() {
 
     let mut scene = SceneGraph::new(512.0, 256.0);
     let tab_id = scene.create_tab("test", 0).unwrap();
-    let lease_id = scene.grant_lease("test", 60_000, vec![]);
+    let lease_id = scene.grant_lease("test", 60_000);
 
     // Portal tile: has a scroll config → governed portal surface.
     let portal_node_id = SceneId::new();
@@ -11449,7 +11449,7 @@ fn adaptive_cadence_intervals_are_strictly_ordered() {
 fn tile_at_tail_for_ellipsis_unregistered_tile_returns_false() {
     let mut scene = SceneGraph::new(720.0, 360.0);
     let tab = scene.create_tab("test", 0).unwrap();
-    let lease = scene.grant_lease("lease", 120_000, vec![]);
+    let lease = scene.grant_lease("lease", 120_000);
     let tile_id = scene
         .create_tile(
             tab,
@@ -11474,7 +11474,7 @@ fn tile_at_tail_for_ellipsis_unregistered_tile_returns_false() {
 fn tile_at_tail_for_ellipsis_at_tail_tile_returns_true() {
     let mut scene = SceneGraph::new(720.0, 360.0);
     let tab = scene.create_tab("test", 0).unwrap();
-    let lease = scene.grant_lease("lease", 120_000, vec![]);
+    let lease = scene.grant_lease("lease", 120_000);
     let tile_id = scene
         .create_tile(
             tab,
@@ -11499,7 +11499,7 @@ fn tile_at_tail_for_ellipsis_at_tail_tile_returns_true() {
 fn tile_at_tail_for_ellipsis_scrolled_back_returns_false() {
     let mut scene = SceneGraph::new(720.0, 360.0);
     let tab = scene.create_tab("test", 0).unwrap();
-    let lease = scene.grant_lease("lease", 120_000, vec![]);
+    let lease = scene.grant_lease("lease", 120_000);
     let tile_id = scene
         .create_tile(
             tab,
@@ -11695,7 +11695,7 @@ async fn local_composer_text_item_uses_hit_region_bounds() {
 
     let mut scene = SceneGraph::new(320.0, 200.0);
     let tab_id = scene.create_tab("test", 0).unwrap();
-    let lease_id = scene.grant_lease("test", 60_000, vec![]);
+    let lease_id = scene.grant_lease("test", 60_000);
     let tile_id = scene
         .create_tile(
             tab_id,
@@ -11811,7 +11811,7 @@ async fn composer_placeholder_renders_only_when_draft_empty() {
 
     let mut scene = SceneGraph::new(320.0, 200.0);
     let tab_id = scene.create_tab("test", 0).unwrap();
-    let lease_id = scene.grant_lease("test", 60_000, vec![]);
+    let lease_id = scene.grant_lease("test", 60_000);
     let tile_id = scene
         .create_tile(
             tab_id,
@@ -11968,7 +11968,7 @@ async fn composer_echo_confined_to_bottom_strip_full_tile_hitregion() {
 
     let mut scene = SceneGraph::new(600.0, 300.0);
     let tab_id = scene.create_tab("test", 0).unwrap();
-    let lease_id = scene.grant_lease("test", 60_000, vec![]);
+    let lease_id = scene.grant_lease("test", 60_000);
     let tile_id = scene
         .create_tile(
             tab_id,
@@ -12105,7 +12105,7 @@ async fn composer_wrapped_draft_stays_in_short_pane_headless() {
 
     let mut scene = SceneGraph::new(600.0, 400.0);
     let tab_id = scene.create_tab("test", 0).unwrap();
-    let lease_id = scene.grant_lease("test", 60_000, vec![]);
+    let lease_id = scene.grant_lease("test", 60_000);
     let tile_id = scene
         .create_tile(
             tab_id,
@@ -12216,7 +12216,7 @@ async fn composer_draft_overflow_is_clipped_to_box_headless() {
 
     let mut scene = SceneGraph::new(400.0, 160.0);
     let tab_id = scene.create_tab("test", 0).unwrap();
-    let lease_id = scene.grant_lease("test", 60_000, vec![]);
+    let lease_id = scene.grant_lease("test", 60_000);
     let tile_id = scene
         .create_tile(
             tab_id,
@@ -12371,7 +12371,7 @@ fn caret_blink_phase_square_wave() {
 fn composer_caret_test_scene() -> (SceneGraph, SceneId, SceneId) {
     let mut scene = SceneGraph::new(320.0, 200.0);
     let tab_id = scene.create_tab("test", 0).unwrap();
-    let lease_id = scene.grant_lease("test", 60_000, vec![]);
+    let lease_id = scene.grant_lease("test", 60_000);
     let tile_id = scene
         .create_tile(
             tab_id,
@@ -13238,7 +13238,7 @@ async fn top_anchored_empty_caret_sits_at_pane_origin_no_teleport() {
 
     let mut scene = SceneGraph::new(600.0, 400.0);
     let tab_id = scene.create_tab("test", 0).unwrap();
-    let lease_id = scene.grant_lease("test", 60_000, vec![]);
+    let lease_id = scene.grant_lease("test", 60_000);
     let tile_id = scene
         .create_tile(
             tab_id,
@@ -13801,7 +13801,7 @@ async fn input_history_block_honors_tile_scroll_offset() {
     // composer box (max_scrollback > 0), making the scroll shift observable.
     let mut scene = SceneGraph::new(400.0, 100.0);
     let tab_id = scene.create_tab("agent", 0).unwrap();
-    let lease_id = scene.grant_lease("agent", 60_000, vec![]);
+    let lease_id = scene.grant_lease("agent", 60_000);
     let tile_id = scene
         .create_tile(
             tab_id,
@@ -13945,7 +13945,7 @@ async fn transcript_divider_rects_track_tile_scroll_offset() {
     let sh = 400.0_f32;
     let mut scene = SceneGraph::new(sw, sh);
     let tab_id = scene.create_tab("divider-scroll", 0).unwrap();
-    let lease_id = scene.grant_lease("divider-scroll", 120_000, vec![]);
+    let lease_id = scene.grant_lease("divider-scroll", 120_000);
     let tile_y = 30.0_f32;
     let tile_id = scene
         .create_tile(
@@ -14985,7 +14985,7 @@ async fn portal_tile_fade_in_starts_on_first_content() {
     // Build a scene with one scrollable (portal) tile that has a root node.
     let mut scene = SceneGraph::new(256.0, 256.0);
     let tab_id = scene.create_tab("portal-test", 0).unwrap();
-    let lease_id = scene.grant_lease("portal-test", 60_000, vec![]);
+    let lease_id = scene.grant_lease("portal-test", 60_000);
     let tile_id = scene
         .create_tile(
             tab_id,
@@ -15061,7 +15061,7 @@ async fn portal_tile_fade_out_starts_on_content_removal() {
     // Scene has a scrollable tile with NO root node.
     let mut scene = SceneGraph::new(256.0, 256.0);
     let tab_id = scene.create_tab("portal-fade-out", 0).unwrap();
-    let lease_id = scene.grant_lease("portal-fade-out", 60_000, vec![]);
+    let lease_id = scene.grant_lease("portal-fade-out", 60_000);
     let tile_id = scene
         .create_tile(
             tab_id,
@@ -15128,7 +15128,7 @@ async fn portal_tile_interrupt_seeds_fade_in_from_eased_opacity() {
     // Scrollable tile WITH content present this frame (content was restored).
     let mut scene = SceneGraph::new(256.0, 256.0);
     let tab_id = scene.create_tab("portal-interrupt", 0).unwrap();
-    let lease_id = scene.grant_lease("portal-interrupt", 60_000, vec![]);
+    let lease_id = scene.grant_lease("portal-interrupt", 60_000);
     let tile_id = scene
         .create_tile(
             tab_id,
@@ -15226,7 +15226,7 @@ async fn non_scrollable_tile_has_no_portal_animation_state() {
 
     let mut scene = SceneGraph::new(256.0, 256.0);
     let tab_id = scene.create_tab("non-scroll-test", 0).unwrap();
-    let lease_id = scene.grant_lease("non-scroll-test", 60_000, vec![]);
+    let lease_id = scene.grant_lease("non-scroll-test", 60_000);
     let tile_id = scene
         .create_tile(
             tab_id,
@@ -15545,7 +15545,7 @@ async fn load_font_bytes_new_font_resets_truncation_cache_scene_version() {
 /// mirroring the resident portal node the projection driver publishes.
 fn w41ef_portal_tile(scene: &mut SceneGraph, bounds: Rect, node_bounds: Rect) -> SceneId {
     let tab_id = scene.create_tab("t", 0).unwrap();
-    let lease_id = scene.grant_lease("t", 60_000, vec![]);
+    let lease_id = scene.grant_lease("t", 60_000);
     let tile_id = scene.create_tile(tab_id, "t", lease_id, bounds, 1).unwrap();
     scene
         .register_tile_scroll_config(tile_id, TileScrollConfig::vertical())
@@ -15600,7 +15600,7 @@ async fn hud_w41ef_portal_content_background_scaled_by_tile_opacity() {
     let mut scene = SceneGraph::new(256.0, 256.0);
     let bg = Rgba::new(0.04, 0.05, 0.07, 1.0); // opaque backdrop
     let tab_id = scene.create_tab("t", 0).unwrap();
-    let lease_id = scene.grant_lease("t", 60_000, vec![]);
+    let lease_id = scene.grant_lease("t", 60_000);
     let tile_id = scene
         .create_tile(tab_id, "t", lease_id, Rect::new(0.0, 0.0, 120.0, 120.0), 1)
         .unwrap();
@@ -15720,7 +15720,7 @@ fn b0x0m_tile_with_root(
     data: NodeData,
 ) -> SceneId {
     let tab_id = scene.create_tab("t", 0).unwrap();
-    let lease_id = scene.grant_lease("t", 60_000, vec![]);
+    let lease_id = scene.grant_lease("t", 60_000);
     let tile_id = scene.create_tile(tab_id, "t", lease_id, bounds, 1).unwrap();
     scene
         .set_tile_root(
@@ -15763,7 +15763,7 @@ async fn hud_tfm3p_flow_offsets_resolve_without_a_text_rasterizer() {
 
     let mut scene = SceneGraph::new(256.0, 256.0);
     let tab_id = scene.create_tab("t", 0).unwrap();
-    let lease_id = scene.grant_lease("t", 60_000, vec![]);
+    let lease_id = scene.grant_lease("t", 60_000);
     let tile_id = scene
         .create_tile(tab_id, "t", lease_id, Rect::new(0.0, 0.0, 200.0, 200.0), 1)
         .unwrap();
@@ -16020,7 +16020,7 @@ async fn hud_b0x0m_static_image_tint_scaled_by_tile_opacity() {
 fn dat3x_markdown_tile_scene(content: &str, opacity: f32) -> (SceneGraph, SceneId) {
     let mut scene = SceneGraph::new(256.0, 256.0);
     let tab_id = scene.create_tab("t", 0).unwrap();
-    let lease_id = scene.grant_lease("t", 60_000, vec![]);
+    let lease_id = scene.grant_lease("t", 60_000);
     let tile_id = scene
         .create_tile(tab_id, "t", lease_id, Rect::new(0.0, 0.0, 120.0, 120.0), 1)
         .unwrap();
@@ -16177,7 +16177,7 @@ fn portal_reveal_md_data(
 /// container root, returning `(tile_id, root_id)`.
 fn portal_reveal_tile(scene: &mut SceneGraph) -> (SceneId, SceneId) {
     let tab_id = scene.create_tab("test", 0).unwrap();
-    let lease_id = scene.grant_lease("portal", 60_000, vec![]);
+    let lease_id = scene.grant_lease("portal", 60_000);
     let tile_id = scene
         .create_tile(
             tab_id,
@@ -16549,7 +16549,7 @@ fn portal_part_index_classifies_parts_and_falls_back() {
 
     let mut scene = SceneGraph::new(800.0, 600.0);
     let tab = scene.create_tab("t", 0).unwrap();
-    let lease = scene.grant_lease("ns", 120_000, vec![]);
+    let lease = scene.grant_lease("ns", 120_000);
     let tile = scene
         .create_tile(tab, "ns", lease, Rect::new(0.0, 0.0, 300.0, 200.0), 1)
         .unwrap();
@@ -16640,7 +16640,7 @@ fn portal_part_index_none_when_no_materialized_nodes() {
 
     let mut scene = SceneGraph::new(400.0, 300.0);
     let tab = scene.create_tab("t", 0).unwrap();
-    let lease = scene.grant_lease("ns", 120_000, vec![]);
+    let lease = scene.grant_lease("ns", 120_000);
     let tile = scene
         .create_tile(tab, "ns", lease, Rect::new(0.0, 0.0, 200.0, 120.0), 1)
         .unwrap();
@@ -16699,7 +16699,7 @@ async fn portal_surface_renders_parts_with_per_part_scope_and_clip() {
 
     let mut scene = SceneGraph::new(640.0, 480.0);
     let tab = scene.create_tab("test", 0).unwrap();
-    let lease = scene.grant_lease("portal", 120_000, vec![]);
+    let lease = scene.grant_lease("portal", 120_000);
     let tile = scene
         .create_tile(tab, "portal", lease, Rect::new(0.0, 0.0, tile_w, tile_h), 1)
         .unwrap();
@@ -16847,7 +16847,7 @@ async fn portal_surface_container_part_scopes_descendant_text() {
 
     let mut scene = SceneGraph::new(640.0, 480.0);
     let tab = scene.create_tab("test", 0).unwrap();
-    let lease = scene.grant_lease("portal", 120_000, vec![]);
+    let lease = scene.grant_lease("portal", 120_000);
     let tile = scene
         .create_tile(tab, "portal", lease, Rect::new(0.0, 0.0, tile_w, tile_h), 1)
         .unwrap();

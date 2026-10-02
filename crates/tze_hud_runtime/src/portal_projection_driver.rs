@@ -69,7 +69,7 @@ use tze_hud_projection::{
     },
 };
 use tze_hud_scene::{
-    Capability, Rect, SceneGraph,
+    Rect, SceneGraph,
     types::{LeaseState, SceneId, TileScrollConfig},
 };
 use tze_hud_telemetry::LatencyBucket;
@@ -2825,11 +2825,7 @@ impl InProcessPortalDriver {
         }
         // Grant a new lease for the portal driver.
         // 24-hour TTL in milliseconds (long-lived resident service).
-        let new_lease = scene.grant_lease(
-            PORTAL_DRIVER_NAMESPACE,
-            86_400_000, // 24h in ms
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let new_lease = scene.grant_lease(PORTAL_DRIVER_NAMESPACE, 86_400_000);
         self.drive.entries.get_mut(projection_id)?.scene_lease_id = Some(new_lease);
         #[cfg(test)]
         {
@@ -3653,11 +3649,7 @@ mod tests {
 
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
-        let lease_id = scene.grant_lease(
-            "portal-agent",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id = scene.grant_lease("portal-agent", 60_000);
         let viewport_h = 200.0_f32;
         let tile_id = scene
             .create_tile(

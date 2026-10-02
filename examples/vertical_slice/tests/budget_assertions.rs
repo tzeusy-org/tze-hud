@@ -48,8 +48,8 @@ use tze_hud_scene::graph::SceneGraph;
 use tze_hud_scene::mutation::{MutationBatch, SceneMutation};
 use tze_hud_scene::perf_budget::test_budget;
 use tze_hud_scene::types::{
-    Capability, FontFamily, HitRegionNode, Node, NodeData, Rect, Rgba, SceneId, SolidColorNode,
-    TextAlign, TextMarkdownNode, TextOverflow,
+    FontFamily, HitRegionNode, Node, NodeData, Rect, Rgba, SceneId, SolidColorNode, TextAlign,
+    TextMarkdownNode, TextOverflow,
 };
 use tze_hud_telemetry::LatencyBucket;
 
@@ -98,7 +98,7 @@ async fn test_frame_time_p99_within_budget() {
         let state = runtime.shared_state().lock().await;
         let mut scene = state.scene.lock().await;
         let tab = scene.create_tab("Main", 0).unwrap();
-        let lease = scene.grant_lease("test-agent", 60_000, vec![]);
+        let lease = scene.grant_lease("test-agent", 60_000);
         scene
             .create_tile(
                 tab,
@@ -168,7 +168,7 @@ async fn test_input_to_local_ack_p99_within_budget() {
         let state = runtime.shared_state().lock().await;
         let mut scene = state.scene.lock().await;
         let tab = scene.create_tab("Main", 0).unwrap();
-        let lease = scene.grant_lease("test-agent", 60_000, vec![]);
+        let lease = scene.grant_lease("test-agent", 60_000);
         let tile = scene
             .create_tile(
                 tab,
@@ -352,7 +352,7 @@ async fn test_input_to_next_present_p99_within_budget() {
         let state = runtime.shared_state().lock().await;
         let mut scene = state.scene.lock().await;
         let tab = scene.create_tab("Main", 0).unwrap();
-        let lease = scene.grant_lease("test-agent", 60_000, vec![]);
+        let lease = scene.grant_lease("test-agent", 60_000);
         scene
             .create_tile(
                 tab,
@@ -428,7 +428,7 @@ async fn test_hit_test_p99_within_budget() {
         let state = runtime.shared_state().lock().await;
         let mut scene = state.scene.lock().await;
         let tab = scene.create_tab("Main", 0).unwrap();
-        let lease = scene.grant_lease("test-agent", 60_000, vec![]);
+        let lease = scene.grant_lease("test-agent", 60_000);
         let tile = scene
             .create_tile(
                 tab,
@@ -512,11 +512,7 @@ fn test_transaction_validation_p99_within_budget() {
 
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab = scene.create_tab("Main", 0).unwrap();
-    let lease = scene.grant_lease(
-        "agent",
-        60_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease = scene.grant_lease("agent", 60_000);
     // Raise tile budget so budget enforcement doesn't reject batches in this timing test
     if let Some(l) = scene.leases.get_mut(&lease) {
         l.resource_budget.max_tiles = 256;
@@ -583,7 +579,7 @@ fn test_scene_diff_p99_within_budget() {
     for i in 0..DIFF_COUNT {
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab = scene.create_tab("Main", 0).unwrap();
-        let lease = scene.grant_lease("agent", 60_000, vec![]);
+        let lease = scene.grant_lease("agent", 60_000);
 
         // Build a scene with a handful of tiles
         for j in 0..10 {
@@ -683,11 +679,7 @@ async fn test_texture_upload_p99_within_budget() {
         let state = runtime.shared_state().lock().await;
         let mut scene = state.scene.lock().await;
         let tab = scene.active_tab.expect("active tab");
-        let lease = scene.grant_lease(
-            "upload-test",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease = scene.grant_lease("upload-test", 60_000);
         if let Some(l) = scene.leases.get_mut(&lease) {
             l.resource_budget.max_tiles = 4;
         }
@@ -849,7 +841,7 @@ async fn test_stage6_render_encode_p99_within_budget() {
         let state = runtime.shared_state().lock().await;
         let mut scene = state.scene.lock().await;
         let tab = scene.create_tab("BenchTab", 0).unwrap();
-        let lease = scene.grant_lease("bench-agent", 120_000, vec![]);
+        let lease = scene.grant_lease("bench-agent", 120_000);
         if let Some(l) = scene.leases.get_mut(&lease) {
             l.resource_budget.max_tiles = (TEXT_TILE_COUNT + 2) as u32;
         }
@@ -1025,7 +1017,7 @@ async fn test_layer1_pixel_readback_tile_color() {
         let mut scene = state.scene.lock().await;
         scene.create_tab("Main", 0).unwrap();
         let tab = scene.active_tab.unwrap();
-        let lease = scene.grant_lease("agent", 60_000, vec![]);
+        let lease = scene.grant_lease("agent", 60_000);
         let tile = scene
             .create_tile(
                 tab,
@@ -1102,7 +1094,7 @@ async fn test_layer1_pixel_readback_z_order() {
         let mut scene = state.scene.lock().await;
         scene.create_tab("Main", 0).unwrap();
         let tab = scene.active_tab.unwrap();
-        let lease = scene.grant_lease("agent", 60_000, vec![]);
+        let lease = scene.grant_lease("agent", 60_000);
 
         // Tile A at z=1 (blue)
         let tile_a = scene

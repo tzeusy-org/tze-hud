@@ -29,7 +29,7 @@ use tze_hud_scene::{
     mutation::{MAX_BATCH_SIZE, MutationBatch, SceneMutation},
     test_scenes::assert_layer0_invariants,
     types::{
-        Capability, FontFamily, Node, NodeData, Rect, Rgba, SceneId, SolidColorNode, TextAlign,
+        FontFamily, Node, NodeData, Rect, Rgba, SceneId, SolidColorNode, TextAlign,
         TextMarkdownNode, TextOverflow,
     },
 };
@@ -186,15 +186,7 @@ fn run_fuzz_sequence(ops: &[FuzzOp]) {
     let mut oracle = Oracle::new();
 
     // Pre-populate with one lease and one tab so early operations have targets.
-    let initial_lease = graph.grant_lease(
-        AGENT,
-        300_000,
-        vec![
-            Capability::CreateTiles,
-            Capability::ModifyOwnTiles,
-            Capability::ManageTabs,
-        ],
-    );
+    let initial_lease = graph.grant_lease(AGENT, 300_000);
     oracle.lease_ids.push(initial_lease);
 
     let initial_tab = graph.create_tab("FuzzTab", 0).unwrap();
@@ -347,11 +339,7 @@ fn apply_fuzz_op(graph: &mut SceneGraph, oracle: &mut Oracle, op: &FuzzOp, idx: 
 
         FuzzOp::GrantLease => {
             if oracle.lease_ids.len() < 5 {
-                let id = graph.grant_lease(
-                    AGENT,
-                    300_000,
-                    vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-                );
+                let id = graph.grant_lease(AGENT, 300_000);
                 oracle.lease_ids.push(id);
             }
         }
@@ -415,10 +403,7 @@ proptest! {
         n_tiles in 1usize..=5usize,
     ) {
         let mut graph = SceneGraph::new(1920.0, 1080.0);
-        let lease = graph.grant_lease(AGENT, 300_000, vec![
-            Capability::CreateTiles,
-            Capability::ModifyOwnTiles,
-        ]);
+        let lease = graph.grant_lease(AGENT, 300_000);
         let tab = graph.create_tab("Tab", 0).unwrap();
 
         let mut tile_ids = Vec::new();
@@ -455,7 +440,7 @@ proptest! {
         excess in 1usize..=10usize,
     ) {
         let mut graph = SceneGraph::new(1920.0, 1080.0);
-        let lease = graph.grant_lease(AGENT, 300_000, vec![Capability::CreateTiles, Capability::ModifyOwnTiles]);
+        let lease = graph.grant_lease(AGENT, 300_000);
         let tab = graph.create_tab("Tab", 0).unwrap();
 
         let n = MAX_BATCH_SIZE + excess;
@@ -535,7 +520,7 @@ proptest! {
         n_valid_after in 0usize..=5usize,
     ) {
         let mut graph = SceneGraph::new(1920.0, 1080.0);
-        let lease = graph.grant_lease(AGENT, 300_000, vec![Capability::CreateTiles, Capability::ModifyOwnTiles]);
+        let lease = graph.grant_lease(AGENT, 300_000);
         let tab = graph.create_tab("Tab", 0).unwrap();
 
         let mut mutations: Vec<SceneMutation> = Vec::new();
@@ -599,10 +584,7 @@ proptest! {
     ) {
         let mut graph = SceneGraph::new(1920.0, 1080.0);
         let tab = graph.create_tab("Tab", 0).unwrap();
-        let lease = graph.grant_lease(AGENT, 300_000, vec![
-            Capability::CreateTiles,
-            Capability::ModifyOwnTiles,
-        ]);
+        let lease = graph.grant_lease(AGENT, 300_000);
 
         for i in 0..n_tiles {
             let tile_id = graph
@@ -659,11 +641,7 @@ proptest! {
 fn test_100k_deterministic_tile_mutations() {
     let mut graph = SceneGraph::new(1920.0, 1080.0);
     let tab = graph.create_tab("Main", 0).unwrap();
-    let lease = graph.grant_lease(
-        "load.agent",
-        300_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease = graph.grant_lease("load.agent", 300_000);
 
     // Use a fixed pool of tile IDs — create 8 tiles then rotate through updates/deletes.
     let mut live_tiles: std::collections::VecDeque<SceneId> = std::collections::VecDeque::new();
@@ -752,11 +730,7 @@ fn test_100k_deterministic_tile_mutations() {
 fn test_invalid_opacity_rejected() {
     let mut graph = SceneGraph::new(1920.0, 1080.0);
     let tab = graph.create_tab("Tab", 0).unwrap();
-    let lease = graph.grant_lease(
-        AGENT,
-        300_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease = graph.grant_lease(AGENT, 300_000);
     let tile_id = graph
         .create_tile(tab, AGENT, lease, Rect::new(0.0, 0.0, 100.0, 100.0), 1)
         .unwrap();
@@ -807,11 +781,7 @@ fn test_oversized_markdown_content_rejected() {
     use tze_hud_scene::graph::MAX_MARKDOWN_BYTES;
     let mut graph = SceneGraph::new(1920.0, 1080.0);
     let tab = graph.create_tab("Tab", 0).unwrap();
-    let lease = graph.grant_lease(
-        AGENT,
-        300_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease = graph.grant_lease(AGENT, 300_000);
     let tile_id = graph
         .create_tile(tab, AGENT, lease, Rect::new(0.0, 0.0, 100.0, 100.0), 1)
         .unwrap();
@@ -873,11 +843,7 @@ fn test_zone_reserved_z_order_rejected() {
     use tze_hud_scene::graph::ZONE_TILE_Z_MIN;
     let mut graph = SceneGraph::new(1920.0, 1080.0);
     let tab = graph.create_tab("Tab", 0).unwrap();
-    let lease = graph.grant_lease(
-        AGENT,
-        300_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease = graph.grant_lease(AGENT, 300_000);
 
     let result = graph.create_tile(
         tab,

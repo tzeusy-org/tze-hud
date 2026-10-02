@@ -97,8 +97,9 @@ async fn next_server_msg(
 /// Agents whose `allow` list is deliberately narrow, for the denial tests.
 /// Every other agent id falls back to unrestricted (no `[agents]` configured).
 fn restricted_test_agents() -> HashMap<String, Vec<String>> {
-    let agents: [(&str, &[&str]); 4] = [
+    let agents: [(&str, &[&str]); 5] = [
         ("no-input-agent", &["create_tiles", "read_scene_topology"]),
+        ("zone-only-agent", &["publish_zone:subtitle"]),
         ("widget-no-cap-agent", &["create_tiles"]),
         ("asset-no-cap", &["create_tiles"]),
         ("resource-no-cap", &["create_tiles"]),
@@ -401,11 +402,7 @@ async fn successful_mutation_apply_wakes_before_capacity_one_response_send() {
     let namespace = "mutation-wake-ordering";
     let mut scene = SceneGraph::new(800.0, 600.0);
     let tab_id = scene.create_tab("Main", 0).expect("create active tab");
-    let lease_id = scene.grant_lease(
-        namespace,
-        60_000,
-        vec![tze_hud_scene::Capability::CreateTiles],
-    );
+    let lease_id = scene.grant_lease(namespace, 60_000);
     let service = HudSessionImpl::new(scene, "test-key");
     let state = Arc::clone(&service.state);
     let mut session = direct_handler_test_session(namespace, vec!["create_tiles".to_string()]);
@@ -495,14 +492,7 @@ async fn setup_test_with_input_capture_channel(
 ) {
     let mut scene = SceneGraph::new(800.0, 600.0);
     let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease(
-        "capture-agent",
-        60_000,
-        vec![
-            tze_hud_scene::Capability::CreateTiles,
-            tze_hud_scene::Capability::ModifyOwnTiles,
-        ],
-    );
+    let lease_id = scene.grant_lease("capture-agent", 60_000);
     let tile_id = scene
         .create_tile(
             tab_id,
@@ -1188,11 +1178,7 @@ async fn test_recreated_portal_tile_adopts_orphaned_durable_override() {
         // The adapter republish recreates the member tile with a fresh id.
         let mut scene = st.scene.lock().await;
         let tab_id = scene.create_tab("main", 0).expect("create tab");
-        let lease = scene.grant_lease(
-            "agent.portal",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease = scene.grant_lease("agent.portal", 60_000);
         recreated_id = scene
             .create_tile(
                 tab_id,
@@ -1264,15 +1250,7 @@ async fn test_list_elements_request_supports_filters_and_override_metadata() {
         let mut scene = st.scene.lock().await;
         let tab_id = scene.create_tab("main", 0).expect("create tab");
 
-        let bootstrap_lease = scene.grant_lease(
-            "agent-list",
-            60_000,
-            vec![
-                Capability::CreateTiles,
-                Capability::ModifyOwnTiles,
-                Capability::PublishZone("list-zone".to_string()),
-            ],
-        );
+        let bootstrap_lease = scene.grant_lease("agent-list", 60_000);
 
         tile_id = scene
             .create_tile(
@@ -1493,11 +1471,7 @@ async fn test_publish_to_tile_by_element_id_applies_override_and_updates_timesta
         st.element_store = tze_hud_scene::element_store::ElementStore::default();
         let mut scene = st.scene.lock().await;
         let tab_id = scene.create_tab("main", 0).expect("create tab");
-        let bootstrap_lease = scene.grant_lease(
-            "tile-publisher",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let bootstrap_lease = scene.grant_lease("tile-publisher", 60_000);
         tile_id = scene
             .create_tile(
                 tab_id,
@@ -1644,11 +1618,7 @@ async fn test_publish_to_tile_by_element_id_rejects_invalid_node_even_with_bound
         st.element_store = tze_hud_scene::element_store::ElementStore::default();
         let mut scene = st.scene.lock().await;
         let tab_id = scene.create_tab("main", 0).expect("create tab");
-        let bootstrap_lease = scene.grant_lease(
-            "tile-publisher-invalid-node",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let bootstrap_lease = scene.grant_lease("tile-publisher-invalid-node", 60_000);
         tile_id = scene
             .create_tile(
                 tab_id,
@@ -3735,17 +3705,18 @@ async fn test_handle_session_init_local_socket_non_loopback_auth_failed() {
     let init = local_socket_session_init("non-loopback-agent");
     let non_loopback_ip: std::net::IpAddr = "10.0.0.5".parse().unwrap();
 
-    let session = handle_session_init(
-        &state,
-        &tze_hud_scene::config::AgentDirectory::unrestricted("test-key"),
-        &tx,
-        &init,
-        &HashMap::new(),
-        &ResourceBudget::default(),
-        None,
-        Some(non_loopback_ip),
-    )
-    .await;
+    let agents = tze_hud_scene::config::AgentDirectory::unrestricted("test-key");
+    let budgets = HashMap::new();
+    let fallback_budget = ResourceBudget::default();
+    let ctx = HandshakeCtx {
+        state: &state,
+        agents: &agents,
+        agent_resource_budgets: &budgets,
+        fallback_resource_budget: &fallback_budget,
+        budget_enforcer: None,
+        peer_ip: Some(non_loopback_ip),
+    };
+    let session = handle_session_init(ctx, &tx, &init).await;
 
     assert!(
         session.is_none(),
@@ -3818,17 +3789,18 @@ async fn test_handle_session_resume_local_socket_non_loopback_auth_failed() {
 
     let non_loopback_ip: std::net::IpAddr = "10.0.0.5".parse().unwrap();
 
-    let session = handle_session_resume(
-        &state,
-        &tze_hud_scene::config::AgentDirectory::unrestricted("test-key"),
-        &tx,
-        &resume,
-        &HashMap::new(),
-        &ResourceBudget::default(),
-        None,
-        Some(non_loopback_ip),
-    )
-    .await;
+    let agents = tze_hud_scene::config::AgentDirectory::unrestricted("test-key");
+    let budgets = HashMap::new();
+    let fallback_budget = ResourceBudget::default();
+    let ctx = HandshakeCtx {
+        state: &state,
+        agents: &agents,
+        agent_resource_budgets: &budgets,
+        fallback_resource_budget: &fallback_budget,
+        budget_enforcer: None,
+        peer_ip: Some(non_loopback_ip),
+    };
+    let session = handle_session_resume(ctx, &tx, &resume).await;
 
     assert!(
         session.is_none(),
@@ -4019,7 +3991,9 @@ async fn setup_test_with_state_and_render_wake(
     Arc<Mutex<SharedState>>,
 ) {
     let scene = SceneGraph::new(800.0, 600.0);
-    let service = HudSessionImpl::new(scene, "test-key").with_render_wake_notifier(render_wake);
+    let mut service =
+        HudSessionImpl::new(scene, "test-key").with_agent_permissions(restricted_test_agents());
+    service.render_wake = render_wake;
     let shared_state = service.state.clone();
 
     let listener = tokio::net::TcpListener::bind("[::1]:0").await.unwrap();
@@ -5354,54 +5328,6 @@ async fn test_lease_id_is_16_byte_uuidv7() {
                 16,
                 "lease_id in LeaseResponse must be 16 bytes (SceneId UUIDv7)"
             );
-        }
-        other => panic!("Expected LeaseResponse, got: {other:?}"),
-    }
-}
-
-/// Scenario: Priority 0 request downgraded to priority 2 (lease-governance spec
-/// §Priority Assignment: "agent requesting priority 0 MUST receive priority 2").
-#[tokio::test]
-async fn test_lease_priority_zero_downgraded() {
-    let (mut client, _server) = setup_test().await;
-    let (tx, _init_messages, mut stream) = handshake(&mut client, "prio-agent", "test-key").await;
-
-    tx.send(ClientMessage {
-        sequence: 2,
-        timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::LeaseRequest(LeaseRequest { ttl_ms: 10_000 })),
-    })
-    .await
-    .unwrap();
-
-    let resp_msg = stream.next().await.unwrap().unwrap();
-    match &resp_msg.payload {
-        Some(ServerPayload::LeaseResponse(resp)) => {
-            assert!(resp.granted);
-        }
-        other => panic!("Expected LeaseResponse, got: {other:?}"),
-    }
-}
-
-/// Scenario: Priority 1 without capability is downgraded to 2.
-#[tokio::test]
-async fn test_lease_priority_one_without_capability_downgraded() {
-    let (mut client, _server) = setup_test().await;
-    // Agent does not request lease:priority:1 capability
-    let (tx, _init_messages, mut stream) = handshake(&mut client, "prio1-agent", "test-key").await;
-
-    tx.send(ClientMessage {
-        sequence: 2,
-        timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::LeaseRequest(LeaseRequest { ttl_ms: 10_000 })),
-    })
-    .await
-    .unwrap();
-
-    let resp_msg = stream.next().await.unwrap().unwrap();
-    match &resp_msg.payload {
-        Some(ServerPayload::LeaseResponse(resp)) => {
-            assert!(resp.granted);
         }
         other => panic!("Expected LeaseResponse, got: {other:?}"),
     }
@@ -6743,9 +6669,8 @@ async fn test_widget_asset_register_updates_runtime_widget_lifecycle_for_publish
     let notifier = tze_hud_scene::render_wake::RenderWakeNotifier::new(move || {
         callback_wakes.fetch_add(1, Ordering::AcqRel);
     });
-    let service = setup_widget_service()
-        .await
-        .with_render_wake_notifier(notifier);
+    let mut service = setup_widget_service().await;
+    service.render_wake = notifier;
     let shared_state = service.state.clone();
     let (mut client, handle) = setup_widget_test_with_service(service).await;
     let (tx, _init_msgs, mut stream) = handshake_with_capabilities(
@@ -9290,4 +9215,168 @@ async fn grpc_batch_present_at_with_create_is_rejected_with_hint() {
         other => panic!("expected RuntimeError, got {other:?}"),
     }
     server.abort();
+}
+
+// ─── Allow-list boundary checks ─────────────────────────────────────────────
+
+fn subtitle_zone_publish() -> ZonePublish {
+    ZonePublish {
+        zone_name: "subtitle".to_string(),
+        content: Some(crate::proto::ZoneContent {
+            payload: Some(crate::proto::zone_content::Payload::StreamText(
+                "hello".to_string(),
+            )),
+        }),
+        ttl_us: 0,
+        element_id: Vec::new(),
+        merge_key: String::new(),
+        breakpoints: Vec::new(),
+        present_at_wall_us: 0,
+        expires_at_wall_us: 0,
+        content_classification: String::new(),
+    }
+}
+
+/// Lease, then submit one mutation; return the MutationResult.
+async fn submit_single_mutation(
+    agent_id: &str,
+    mutation: crate::proto::mutation_proto::Mutation,
+) -> MutationResult {
+    let (mut client, _server, shared_state) = setup_test_with_state().await;
+    shared_state
+        .lock()
+        .await
+        .scene
+        .lock()
+        .await
+        .create_tab("main", 0)
+        .expect("create tab");
+    let (tx, _init, mut stream) = handshake(&mut client, agent_id, "test-key").await;
+
+    tx.send(ClientMessage {
+        sequence: 2,
+        timestamp_wall_us: now_wall_us(),
+        payload: Some(ClientPayload::LeaseRequest(LeaseRequest { ttl_ms: 60_000 })),
+    })
+    .await
+    .unwrap();
+    let lease_id = loop {
+        match next_server_msg(&mut stream).await.payload {
+            Some(ServerPayload::LeaseResponse(resp)) if resp.granted => break resp.lease_id,
+            Some(ServerPayload::LeaseResponse(resp)) => panic!("lease denied: {resp:?}"),
+            _ => continue,
+        }
+    };
+
+    tx.send(ClientMessage {
+        sequence: 3,
+        timestamp_wall_us: now_wall_us(),
+        payload: Some(ClientPayload::MutationBatch(MutationBatch {
+            batch_id: uuid::Uuid::now_v7().as_bytes().to_vec(),
+            lease_id,
+            mutations: vec![crate::proto::MutationProto {
+                mutation: Some(mutation),
+            }],
+            timing: None,
+        })),
+    })
+    .await
+    .unwrap();
+    loop {
+        if let Some(ServerPayload::MutationResult(result)) =
+            next_server_msg(&mut stream).await.payload
+        {
+            return result;
+        }
+    }
+}
+
+fn create_tile_mutation() -> crate::proto::mutation_proto::Mutation {
+    crate::proto::mutation_proto::Mutation::CreateTile(crate::proto::CreateTileMutation {
+        tab_id: vec![],
+        bounds: Some(crate::proto::Rect {
+            x: 0.0,
+            y: 0.0,
+            width: 200.0,
+            height: 150.0,
+        }),
+        z_order: 1,
+    })
+}
+
+/// A ZonePublish to a zone outside the agent's allow list is rejected at the
+/// boundary.
+#[tokio::test]
+async fn zone_publish_outside_allow_list_rejected() {
+    let (mut client, _server) = setup_test().await;
+    let (tx, _init, mut stream) = handshake(&mut client, "widget-no-cap-agent", "test-key").await;
+
+    tx.send(ClientMessage {
+        sequence: 2,
+        timestamp_wall_us: now_wall_us(),
+        payload: Some(ClientPayload::ZonePublish(subtitle_zone_publish())),
+    })
+    .await
+    .unwrap();
+
+    match next_server_msg(&mut stream).await.payload {
+        Some(ServerPayload::ZonePublishResult(result)) => {
+            assert!(!result.accepted);
+            assert_eq!(result.error_code, "CAPABILITY_MISSING");
+            assert!(result.error_message.contains("zone:subtitle"));
+        }
+        other => panic!("Expected ZonePublishResult, got: {other:?}"),
+    }
+}
+
+/// A ClearZone mutation needs the zone in the allow list.
+#[tokio::test]
+async fn clear_zone_mutation_outside_allow_list_rejected() {
+    let result = submit_single_mutation(
+        "widget-no-cap-agent",
+        crate::proto::mutation_proto::Mutation::ClearZone(crate::proto::ClearZoneMutation {
+            zone_name: "subtitle".to_string(),
+            publish_token: None,
+        }),
+    )
+    .await;
+    assert!(!result.accepted);
+    assert_eq!(result.error_code, "CAPABILITY_MISSING");
+    assert!(result.error_message.contains("zone:subtitle"));
+}
+
+/// A ClearWidget mutation needs the widget in the allow list.
+#[tokio::test]
+async fn clear_widget_mutation_outside_allow_list_rejected() {
+    let result = submit_single_mutation(
+        "widget-no-cap-agent",
+        crate::proto::mutation_proto::Mutation::ClearWidget(crate::proto::ClearWidgetMutation {
+            widget_name: "gauge".to_string(),
+            instance_id: String::new(),
+        }),
+    )
+    .await;
+    assert!(!result.accepted);
+    assert_eq!(result.error_code, "CAPABILITY_MISSING");
+    assert!(result.error_message.contains("widget:gauge"));
+}
+
+/// Tile mutations need `tiles` in the allow list.
+#[tokio::test]
+async fn create_tile_without_tiles_allow_rejected() {
+    let result = submit_single_mutation("zone-only-agent", create_tile_mutation()).await;
+    assert!(!result.accepted);
+    assert_eq!(result.error_code, "CAPABILITY_MISSING");
+    assert!(result.error_message.contains("tiles"));
+}
+
+/// With `create_tiles` granted, the same CreateTile is accepted.
+#[tokio::test]
+async fn create_tile_with_tiles_allow_accepted() {
+    let result = submit_single_mutation("widget-no-cap-agent", create_tile_mutation()).await;
+    assert!(
+        result.accepted,
+        "{}: {}",
+        result.error_code, result.error_message
+    );
 }

@@ -21,9 +21,7 @@ use tze_hud_scene::{
     graph::SceneGraph,
     mutation::{MutationBatch, SceneMutation},
     test_scenes::assert_layer0_invariants,
-    types::{
-        Capability, InputMode, LeaseState, Node, NodeData, Rect, Rgba, SceneId, SolidColorNode,
-    },
+    types::{InputMode, LeaseState, Node, NodeData, Rect, Rgba, SceneId, SolidColorNode},
     validation::ValidationErrorCode,
 };
 
@@ -48,11 +46,7 @@ fn make_batch(agent: &str, mutations: Vec<SceneMutation>) -> MutationBatch {
 fn spec_all_or_nothing_batch_rejection() {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease(
-        "agent",
-        60_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("agent", 60_000);
 
     let batch = make_batch(
         "agent",
@@ -126,11 +120,7 @@ fn spec_all_or_nothing_batch_rejection() {
 fn spec_batch_size_exceeded() {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease(
-        "agent",
-        60_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("agent", 60_000);
 
     // 1001 mutations = one over the limit
     let mutations: Vec<SceneMutation> = (0..=MAX_BATCH_SIZE)
@@ -184,11 +174,7 @@ fn spec_agent_namespace_from_session_context() {
 fn spec_lease_check_before_budget_check() {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease(
-        "agent",
-        1,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("agent", 1);
 
     // Force the lease into an expired state
     scene.leases.get_mut(&lease_id).unwrap().state = LeaseState::Expired;
@@ -236,11 +222,7 @@ fn spec_lease_check_before_budget_check() {
 fn spec_post_mutation_cycle_detected() {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease(
-        "agent",
-        60_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("agent", 60_000);
 
     // Create a tile
     let tile_id = scene
@@ -299,11 +281,7 @@ fn spec_post_mutation_cycle_detected() {
 fn spec_exclusive_z_order_conflict() {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease(
-        "agent",
-        60_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("agent", 60_000);
 
     // First tile at z_order=5, bounds [0,0,200,200]
     let b1 = make_batch(
@@ -349,11 +327,7 @@ fn spec_exclusive_z_order_conflict() {
 fn spec_passthrough_tiles_exempt_from_z_order_conflict() {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease(
-        "agent",
-        60_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("agent", 60_000);
 
     // Create a non-passthrough tile at z_order=3
     let tile_id = scene
@@ -396,11 +370,7 @@ fn spec_passthrough_tiles_exempt_from_z_order_conflict() {
 fn spec_sequential_batch_ordering() {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease(
-        "agent",
-        60_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("agent", 60_000);
 
     let mut prev_seq = 0u64;
 
@@ -434,11 +404,7 @@ fn spec_sequential_batch_ordering() {
 fn spec_rejected_batch_does_not_increment_sequence() {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease(
-        "agent",
-        60_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("agent", 60_000);
 
     // Apply one valid batch
     let b1 = make_batch(
@@ -503,11 +469,7 @@ fn spec_rejected_batch_does_not_increment_sequence() {
 fn spec_structured_validation_error_on_bounds_failure() {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease(
-        "agent",
-        60_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("agent", 60_000);
 
     // First mutation is valid; second fails on bounds
     let batch = make_batch(
@@ -557,11 +519,7 @@ fn spec_structured_validation_error_on_bounds_failure() {
 fn spec_batch_rejected_carries_batch_id() {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease(
-        "agent",
-        60_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("agent", 60_000);
 
     let batch_id = SceneId::new();
     let batch = MutationBatch {
@@ -596,11 +554,7 @@ fn spec_batch_rejected_carries_batch_id() {
 fn layer0_partial_failure_rollback() {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease(
-        "agent",
-        60_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("agent", 60_000);
 
     // Apply 2 valid tiles before the test batch
     let setup_batch = make_batch(
@@ -685,7 +639,7 @@ mod proptest_batch_atomicity {
     use tze_hud_scene::{
         graph::SceneGraph,
         mutation::{MutationBatch, SceneMutation},
-        types::{Capability, Rect, SceneId},
+        types::{Rect, SceneId},
     };
 
     /// Generate a valid `CreateTile` mutation for the given tab/lease.
@@ -728,11 +682,7 @@ mod proptest_batch_atomicity {
         ) {
             let mut scene = SceneGraph::new(1920.0, 1080.0);
             let tab_id = scene.create_tab("Main", 0).unwrap();
-            let lease_id = scene.grant_lease(
-                "prop.agent",
-                60_000,
-                vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-            );
+            let lease_id = scene.grant_lease("prop.agent", 60_000);
 
             // Pre-batch state: record tile count
             let pre_batch_tiles = scene.tile_count();
@@ -778,11 +728,7 @@ mod proptest_batch_atomicity {
         fn prop_all_valid_batch_succeeds(n in 1usize..=8) {
             let mut scene = SceneGraph::new(1920.0, 1080.0);
             let tab_id = scene.create_tab("Main", 0).unwrap();
-            let lease_id = scene.grant_lease(
-                "prop.agent",
-                60_000,
-                vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-            );
+            let lease_id = scene.grant_lease("prop.agent", 60_000);
 
             let pre_count = scene.tile_count();
             let mutations: Vec<SceneMutation> = (0..n)
@@ -860,11 +806,7 @@ fn stage1_batch_lease_id_nonexistent_is_rejected() {
 fn stage1_batch_lease_id_expired_is_rejected_before_budget() {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let _tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease(
-        "agent",
-        1,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("agent", 1);
 
     // Force into Expired state and also shrink budget to 0 — Stage 1 must fire first.
     scene.leases.get_mut(&lease_id).unwrap().state = LeaseState::Expired;
@@ -908,11 +850,7 @@ fn stage1_batch_lease_id_expired_is_rejected_before_budget() {
 fn stage1_delete_tile_with_expired_lease_rejected() {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease(
-        "agent",
-        60_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("agent", 60_000);
 
     // Create a tile on an active lease.
     let tile_id = scene
@@ -953,11 +891,7 @@ fn stage1_delete_tile_with_expired_lease_rejected() {
 fn stage1_update_tile_bounds_with_expired_lease_rejected() {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease(
-        "agent",
-        60_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("agent", 60_000);
 
     let tile_id = scene
         .create_tile(
@@ -1000,11 +934,7 @@ fn stage1_update_tile_bounds_with_expired_lease_rejected() {
 fn stage1_set_tile_root_with_expired_lease_rejected() {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease(
-        "agent",
-        60_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("agent", 60_000);
 
     let tile_id = scene
         .create_tile(
@@ -1059,11 +989,7 @@ fn stage1_set_tile_root_with_expired_lease_rejected() {
 fn stage1_add_node_with_expired_lease_rejected() {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease(
-        "agent",
-        60_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("agent", 60_000);
 
     let tile_id = scene
         .create_tile(

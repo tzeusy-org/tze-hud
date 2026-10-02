@@ -158,7 +158,7 @@ mod tests {
     fn test_diff_detects_tile_add() {
         let mut scene1 = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene1.create_tab("Main", 0).unwrap();
-        let lease_id = scene1.grant_lease("test", 60_000, vec![]);
+        let lease_id = scene1.grant_lease("test", 60_000);
 
         let scene_before = scene1.clone();
 

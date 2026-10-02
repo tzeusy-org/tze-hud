@@ -1,21 +1,18 @@
-//! # Hit-Test Integration Tests — [rig-xlr9]
+//! # Hit-Test Integration Tests
 //!
-//! Correctness tests for [`SceneGraph::hit_test`] per scene-graph/spec.md
-//! §Requirement: Hit-Testing Contract (lines 250-265) and
-//! input-model/spec.md §Requirement: Hit-Test Performance (lines 263-274).
+//! Correctness tests for [`SceneGraph::hit_test`].
 //!
 //! ## What is tested
 //!
-//! 1. Chrome layer always wins (priority-0 lease tiles checked first).
-//! 2. Highest-z non-passthrough content tile wins when tiles overlap.
-//! 3. Passthrough tiles are skipped; lower-z capture tiles below them hit.
-//! 4. Within a tile, reverse tree order (last sibling first, deepest first).
-//! 5. HitResult variants: `NodeHit`, `TileHit`, `Passthrough`, `Chrome`.
-//! 6. `interaction_id` forwarded correctly in `NodeHit`.
-//! 7. `update_hover_state` updates `HitRegionLocalState` without agent roundtrip.
-//! 8. `HitResult::is_some()` / `is_none()` helpers.
-//! 9. Layer 0 invariants pass on all hit-test test scenes.
-//! 10. Property tests: random scene layouts verify chrome-first and z-order-descending.
+//! 1. Highest-z non-passthrough content tile wins when tiles overlap.
+//! 2. Passthrough tiles are skipped; lower-z capture tiles below them hit.
+//! 3. Within a tile, reverse tree order (last sibling first, deepest first).
+//! 4. HitResult variants: `NodeHit`, `TileHit`, `Passthrough`.
+//! 5. `interaction_id` forwarded correctly in `NodeHit`.
+//! 6. `update_hover_state` updates `HitRegionLocalState` without agent roundtrip.
+//! 7. `HitResult::is_some()` / `is_none()` helpers.
+//! 8. Layer 0 invariants pass on all hit-test test scenes.
+//! 9. Property tests: random scene layouts verify z-order-descending.
 //!
 //! ## Layer
 //!
@@ -23,8 +20,7 @@
 
 use proptest::prelude::*;
 use tze_hud_scene::{
-    Capability, HitRegionNode, HitResult, InputMode, Node, NodeData, Rect, Rgba, SceneId,
-    SolidColorNode,
+    HitRegionNode, HitResult, InputMode, Node, NodeData, Rect, Rgba, SceneId, SolidColorNode,
     graph::SceneGraph,
     test_scenes::{ClockMs, TestSceneRegistry},
     types::{CursorStyle, EventMask},
@@ -43,11 +39,7 @@ fn single_tile_scene(
 ) -> (SceneGraph, SceneId, SceneId, SceneId) {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease(
-        "agent.test",
-        60_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("agent.test", 60_000);
     let tile_id = scene
         .create_tile(tab_id, "agent.test", lease_id, tile_bounds, 10)
         .unwrap();
@@ -70,52 +62,6 @@ fn single_tile_scene(
         )
         .unwrap();
     (scene, tab_id, tile_id, node_id)
-}
-
-/// Create a chrome tile on an existing scene (priority-0 lease).
-///
-/// Returns the tile id.
-fn add_chrome_tile(
-    scene: &mut SceneGraph,
-    tab_id: SceneId,
-    bounds: Rect,
-    z_order: u32,
-    interaction_id: &str,
-) -> SceneId {
-    let chrome_lease = scene.grant_lease(
-        "chrome.ui",
-        86_400_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
-    // Set lease priority to 0 (system/chrome).
-    scene.leases.get_mut(&chrome_lease).unwrap().priority = 0;
-
-    let tile_id = scene
-        .create_tile(tab_id, "chrome.ui", chrome_lease, bounds, z_order)
-        .unwrap();
-
-    if !interaction_id.is_empty() {
-        let node_id = SceneId::new();
-        scene
-            .set_tile_root(
-                tile_id,
-                Node {
-                    layout: Default::default(),
-                    id: node_id,
-                    children: vec![],
-                    data: NodeData::HitRegion(HitRegionNode {
-                        bounds: Rect::new(0.0, 0.0, bounds.width, bounds.height),
-                        interaction_id: interaction_id.to_string(),
-                        accepts_focus: false,
-                        accepts_pointer: true,
-                        ..Default::default()
-                    }),
-                },
-            )
-            .unwrap();
-    }
-
-    tile_id
 }
 
 // ─── Basic NodeHit / TileHit / Passthrough ────────────────────────────────────
@@ -171,68 +117,6 @@ fn passthrough_when_no_active_tab() {
     assert_eq!(scene.hit_test(500.0, 500.0), HitResult::Passthrough);
 }
 
-// ─── Chrome layer always wins ────────────────────────────────────────────────
-
-#[test]
-fn chrome_layer_wins_over_content_tile() {
-    // Content tile covers whole display.
-    let (mut scene, tab_id, _content_tile, _) = single_tile_scene(
-        Rect::new(0.0, 0.0, 1920.0, 1080.0),
-        Rect::new(0.0, 0.0, 1920.0, 1080.0),
-    );
-
-    // Chrome tile (priority-0) in the top-right corner.
-    let _chrome_tile_id = add_chrome_tile(
-        &mut scene,
-        tab_id,
-        Rect::new(1720.0, 0.0, 200.0, 60.0),
-        999,
-        "chrome-menu",
-    );
-
-    // Point inside chrome tile — should return Chrome.
-    let result = scene.hit_test(1800.0, 30.0);
-    match &result {
-        HitResult::Chrome { element_id } => {
-            // element_id is either the chrome tile or the chrome HitRegionNode inside it.
-            // Both are valid per spec; assert it's not a content-layer node.
-            let _ = element_id;
-        }
-        other => panic!("expected Chrome, got {other:?}"),
-    }
-
-    // Point outside chrome tile — should return NodeHit from content tile.
-    let result = scene.hit_test(100.0, 500.0);
-    assert!(
-        result.is_node_hit(),
-        "expected NodeHit outside chrome area, got {result:?}"
-    );
-}
-
-#[test]
-fn chrome_tile_at_low_z_still_wins() {
-    // Chrome is always first regardless of z_order.
-    let (mut scene, tab_id, _content_tile, _) = single_tile_scene(
-        Rect::new(0.0, 0.0, 1920.0, 1080.0),
-        Rect::new(0.0, 0.0, 1920.0, 1080.0),
-    );
-    // Content tile z=10 (set above). Chrome tile z=1 (lower than content).
-    add_chrome_tile(
-        &mut scene,
-        tab_id,
-        Rect::new(0.0, 0.0, 200.0, 50.0),
-        1,
-        "low-z-chrome",
-    );
-
-    // Chrome must still win despite lower z.
-    let result = scene.hit_test(100.0, 25.0);
-    assert!(
-        result.is_chrome(),
-        "chrome must win regardless of z, got {result:?}"
-    );
-}
-
 // ─── Widget passthrough hit-test ─────────────────────────────────────────────
 //
 // Widget tiles MUST default to input_mode = Passthrough per widget-system/spec.md
@@ -243,16 +127,8 @@ fn chrome_tile_at_low_z_still_wins() {
 fn widget_passthrough_skips_to_agent_tile_below() {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab_id = scene.create_tab("Main", 0).unwrap();
-    let agent_lease = scene.grant_lease(
-        "agent.test",
-        60_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
-    let widget_lease = scene.grant_lease(
-        "widget.renderer",
-        60_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let agent_lease = scene.grant_lease("agent.test", 60_000);
+    let widget_lease = scene.grant_lease("widget.renderer", 60_000);
 
     // Agent-owned content tile: covers central region, z=10, Capture (default).
     // Bounds: (300, 200, 600×400).
@@ -333,11 +209,7 @@ fn widget_passthrough_skips_to_agent_tile_below() {
 fn passthrough_tile_skipped_reveals_tile_below() {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease(
-        "agent.test",
-        60_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("agent.test", 60_000);
 
     // Low-z capture tile covering full screen.
     let low_tile = scene
@@ -397,11 +269,7 @@ fn passthrough_tile_skipped_reveals_tile_below() {
 fn all_tiles_passthrough_returns_passthrough() {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease(
-        "agent.test",
-        60_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("agent.test", 60_000);
 
     for z in [1u32, 2, 3] {
         let tile_id = scene
@@ -430,11 +298,7 @@ fn all_tiles_passthrough_returns_passthrough() {
 fn highest_z_tile_wins_in_overlap() {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease(
-        "agent.test",
-        60_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("agent.test", 60_000);
 
     // Two overlapping tiles.
     let low_tile = scene
@@ -527,11 +391,7 @@ fn last_sibling_wins_in_reverse_tree_order() {
     // The last child in the children list is the front-most and should win.
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease(
-        "agent.test",
-        60_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("agent.test", 60_000);
 
     let tile_id = scene
         .create_tile(
@@ -817,40 +677,6 @@ fn overlay_passthrough_skips_passthrough_tile() {
 // ─── Property tests ───────────────────────────────────────────────────────────
 
 proptest! {
-    /// Random scene layout: chrome-first invariant.
-    ///
-    /// Generates random (x, y) points and scenes with a chrome tile covering
-    /// the whole display.  Hit-test must always return Chrome (not NodeHit/TileHit)
-    /// for any point inside the chrome tile bounds.
-    #[test]
-    fn proptest_chrome_always_wins(
-        px in 0.0f32..1920.0f32,
-        py in 0.0f32..1080.0f32,
-        content_z in 1u32..100u32,
-    ) {
-        // Content tile: full-screen capture with a HitRegionNode.
-        let (mut scene, tab_id, _, _) = single_tile_scene(
-            Rect::new(0.0, 0.0, 1920.0, 1080.0),
-            Rect::new(0.0, 0.0, 1920.0, 1080.0),
-        );
-        // Update content tile z-order.
-        for tile in scene.tiles.values_mut() {
-            if tile.z_order == 10 {
-                tile.z_order = content_z;
-            }
-        }
-
-        // Chrome tile: full-screen, any z.
-        add_chrome_tile(&mut scene, tab_id, Rect::new(0.0, 0.0, 1920.0, 1080.0), 999, "chrome-bg");
-
-        let result = scene.hit_test(px, py);
-        prop_assert!(
-            result.is_chrome(),
-            "chrome must always win for point ({px}, {py}): got {:?}",
-            result
-        );
-    }
-
     /// Random scene layout: z-order descending invariant.
     ///
     /// Two overlapping non-passthrough tiles — hit in overlap must return the
@@ -866,11 +692,7 @@ proptest! {
 
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
-        let lease_id = scene.grant_lease(
-            "agent.test",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id = scene.grant_lease("agent.test", 60_000);
 
         // Two tiles overlapping at (400..800, 300..700).
         let low_tile = scene
@@ -924,11 +746,7 @@ proptest! {
     ) {
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
-        let lease_id = scene.grant_lease(
-            "agent.test",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id = scene.grant_lease("agent.test", 60_000);
 
         // Full-screen passthrough tile.
         let tile_id = scene

@@ -244,18 +244,14 @@ impl Default for CommandProcessor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tze_hud_scene::{Capability, HitRegionNode, Node, NodeData, Rect, SceneGraph, SceneId};
+    use tze_hud_scene::{HitRegionNode, Node, NodeData, Rect, SceneGraph, SceneId};
 
     // ── Test scene helpers ────────────────────────────────────────────────────
 
     fn setup_scene_with_focused_node() -> (SceneGraph, SceneId, SceneId, SceneId) {
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
-        let lease_id = scene.grant_lease(
-            "test-agent",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id = scene.grant_lease("test-agent", 60_000);
         let tile_id = scene
             .create_tile(
                 tab_id,

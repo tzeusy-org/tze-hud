@@ -12,8 +12,8 @@ use std::time::Instant;
 use tze_hud_scene::graph::SceneGraph;
 use tze_hud_scene::mutation::{MutationBatch, SceneMutation};
 use tze_hud_scene::types::{
-    Capability, FontFamily, Node, NodeData, Rect, Rgba, SceneId, SolidColorNode, TextAlign,
-    TextMarkdownNode, TextOverflow,
+    FontFamily, Node, NodeData, Rect, Rgba, SceneId, SolidColorNode, TextAlign, TextMarkdownNode,
+    TextOverflow,
 };
 
 /// Result of the CPU calibration workload.
@@ -100,11 +100,7 @@ fn run_scene_workload() -> f64 {
     total_ops += 1;
 
     // Grant a lease with a high budget for the calibration workload
-    let lease_id = scene.grant_lease(
-        "calibration",
-        300_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("calibration", 300_000);
     // Override the budget to allow many tiles
     if let Some(lease) = scene.leases.get_mut(&lease_id) {
         lease.resource_budget.max_tiles = (CALIBRATION_TILES + 10) as u32;

@@ -26,7 +26,7 @@ use tze_hud_runtime::HeadlessRuntime;
 use tze_hud_runtime::headless::HeadlessConfig;
 use tze_hud_scene::types::ZoneRegistry;
 use tze_hud_scene::{
-    Capability, SceneId,
+    SceneId,
     graph::SceneGraph,
     mutation::{MutationBatch, SceneMutation},
     types::{
@@ -312,11 +312,7 @@ fn content_update_set_tile_root_accepted() {
     // Register zeroed ResourceId used by make_placeholder_avatar_node() so
     // agent-submitted StaticImageNode mutations succeed.
     scene.register_resource(tze_hud_scene::ResourceId::from_bytes([0u8; 32]));
-    let lease_id = scene.grant_lease(
-        "agent-0",
-        120_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("agent-0", 120_000);
 
     // ── Initial tile creation ─────────────────────────────────────────────────
     let create_batch = make_batch(
@@ -474,11 +470,7 @@ fn content_update_time_progression() {
     scene.active_tab = Some(tab_id);
     // Register zeroed ResourceId used by make_placeholder_avatar_node().
     scene.register_resource(tze_hud_scene::ResourceId::from_bytes([0u8; 32]));
-    let lease_id = scene.grant_lease(
-        "agent-time",
-        120_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("agent-time", 120_000);
 
     let tile_id = {
         let batch = make_batch(
@@ -562,11 +554,7 @@ fn set_tile_root_replaces_old_nodes() {
     scene.active_tab = Some(tab_id);
     // Register zeroed ResourceId used by make_placeholder_avatar_node().
     scene.register_resource(tze_hud_scene::ResourceId::from_bytes([0u8; 32]));
-    let lease_id = scene.grant_lease(
-        "agent-replace",
-        120_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("agent-replace", 120_000);
 
     let tile_id = {
         let batch = make_batch(
@@ -698,11 +686,7 @@ fn set_tile_root_is_namespace_isolated() {
     let mut lease_ids = Vec::new();
 
     for (i, &agent) in agents.iter().enumerate() {
-        let lease_id = scene.grant_lease(
-            agent,
-            120_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id = scene.grant_lease(agent, 120_000);
         lease_ids.push(lease_id);
 
         let batch = make_batch(

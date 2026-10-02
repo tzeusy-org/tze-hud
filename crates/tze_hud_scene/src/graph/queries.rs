@@ -198,22 +198,15 @@ impl SceneGraph {
 
     /// Map a 2D display-coordinate point to the deepest interactive element.
     ///
-    /// Traversal order (per scene-graph/spec.md §Requirement: Hit-Testing Contract,
-    /// RFC 0001 §5.1-5.2, and input-model/spec.md lines 263-274):
+    /// Traversal order, after runtime drag handles and zone hit regions:
     ///
-    /// 1. **Chrome layer first** — tiles whose lease has priority 0 are checked
-    ///    before any content-layer tile, regardless of z-order.  The first
-    ///    non-passthrough chrome tile whose bounds contain the point wins and
-    ///    returns [`HitResult::Chrome`].
-    /// 2. **Content layer tiles by z-order descending** — remaining (non-chrome)
-    ///    tiles sorted highest z-order first.  Passthrough tiles are skipped.
-    /// 3. **Within each tile, reverse tree order** — node children visited
+    /// 1. **Tiles by z-order descending** — passthrough tiles are skipped.
+    /// 2. **Within each tile, reverse tree order** — node children visited
     ///    last-first (last sibling = front-most); depth-first.  Only
     ///    [`NodeData::HitRegion`] nodes with `accepts_pointer = true` qualify.
     ///
     /// # Return value
-    /// - [`HitResult::Chrome`]   — chrome-layer tile/node absorbed the point.
-    /// - [`HitResult::NodeHit`]  — a `HitRegionNode` within a content tile matched.
+    /// - [`HitResult::NodeHit`]  — a `HitRegionNode` within a tile matched.
     /// - [`HitResult::TileHit`]  — the tile absorbed the point but no node matched.
     /// - [`HitResult::Passthrough`] — only passthrough tiles at this coordinate.
     ///
@@ -221,7 +214,7 @@ impl SceneGraph {
     ///
     /// # Performance
     /// Pure geometry — no GPU involvement.  Target: < 100 µs for 50 tiles
-    /// (scene-graph/spec.md line 267, RFC 0001 §10).
+    ///.
     pub fn hit_test(&self, x: f32, y: f32) -> HitResult {
         // ── Chrome drag-handle hit regions (global, chrome-priority) ────────
         for region in &self.overlay.drag_handle_hit_regions {
@@ -272,61 +265,17 @@ impl SceneGraph {
             return HitResult::Passthrough;
         };
 
-        // Gather all tiles on the active tab that cover the point.
-        // Partition into chrome (priority-0 lease) and content.
-        let mut chrome_tiles: Vec<&Tile> = Vec::new();
-        let mut content_tiles: Vec<&Tile> = Vec::new();
+        // Gather all agent tiles on the active tab that cover the point.
+        // Runtime chrome is not a tile; it is hit-tested above.
+        let mut content_tiles: Vec<&Tile> = self
+            .tiles
+            .values()
+            .filter(|t| t.tab_id == active && t.bounds.contains_point(x, y))
+            .collect();
 
-        for tile in self.tiles.values().filter(|t| t.tab_id == active) {
-            if !tile.bounds.contains_point(x, y) {
-                continue;
-            }
-            let is_chrome = self
-                .leases
-                .get(&tile.lease_id)
-                .map(|l| l.priority == 0)
-                .unwrap_or(false);
-            if is_chrome {
-                chrome_tiles.push(tile);
-            } else {
-                content_tiles.push(tile);
-            }
-        }
-
-        // ── Phase 1: Chrome layer ────────────────────────────────────────
-        // Sort chrome tiles highest z-order first; passthrough chrome tiles
-        // do NOT block (they are skipped), but a non-passthrough chrome tile
-        // wins immediately.
-        chrome_tiles.sort_by(|a, b| b.z_order.cmp(&a.z_order));
-        for tile in &chrome_tiles {
-            if tile.input_mode == InputMode::Passthrough {
-                continue;
-            }
-            // Chrome tile absorbs the hit.  If it has a HitRegionNode, report
-            // its node_id as the element_id for richer routing; otherwise use
-            // the tile id.
-            // Use the displayed (smoothed/lagged) offset when a scroll
-            // animation is in flight so pointer mapping matches the rows the
-            // renderer drew; falls back to the authoritative offset otherwise
-            // (hud-3lynp).
-            let (scroll_x, scroll_y) = self.effective_tile_scroll_offset_local(tile.id);
-            let local_x = x - tile.bounds.x;
-            let local_y = y - tile.bounds.y;
-            let coordinates = TileHitTestCoordinates {
-                local_x,
-                local_y,
-                scroll_x,
-                scroll_y,
-            };
-            let element_id = tile
-                .root_node
-                .and_then(|root| self.hit_test_tile_node(root, tile.id, coordinates))
-                .unwrap_or(tile.id);
-            return HitResult::Chrome { element_id };
-        }
-
-        // ── Phase 2: Content layer tiles (z-order descending) ────────────
-        content_tiles.sort_by(|a, b| b.z_order.cmp(&a.z_order));
+        // ── Tiles, z-order descending; ties go to the later claim ─────────
+        // (SceneIds are UUIDv7, so id order is claim order.)
+        content_tiles.sort_by(|a, b| b.z_order.cmp(&a.z_order).then(b.id.cmp(&a.id)));
         for tile in &content_tiles {
             if tile.input_mode == InputMode::Passthrough {
                 continue; // Skip passthrough tiles per spec.
@@ -343,7 +292,7 @@ impl SceneGraph {
                 scroll_y,
             };
 
-            // ── Phase 3: Within the tile — reverse tree order ────────────
+            // ── Within the tile — reverse tree order ─────────────────────
             if let Some(root_id) = tile.root_node {
                 if let Some(node_id) = self.hit_test_tile_node(root_id, tile.id, coordinates) {
                     // Retrieve interaction_id from the node (it must be HitRegionNode).

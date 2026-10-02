@@ -410,14 +410,7 @@ async fn test_tile_solid_color_radius_rounds_corners() {
 
     let mut scene = SceneGraph::new(SURFACE_W as f32, SURFACE_H as f32);
     let tab_id = scene.create_tab("Main", 0).expect("create_tab");
-    let lease_id = scene.grant_lease(
-        "test-agent",
-        300_000,
-        vec![
-            tze_hud_scene::types::Capability::CreateTiles,
-            tze_hud_scene::types::Capability::ModifyOwnTiles,
-        ],
-    );
+    let lease_id = scene.grant_lease("test-agent", 300_000);
     let tile_id = scene
         .create_tile(
             tab_id,

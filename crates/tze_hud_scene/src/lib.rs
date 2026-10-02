@@ -62,11 +62,4 @@ pub use types::*;
 pub use validation::{BatchRejected, BatchValidationError, ValidationError, ValidationErrorCode};
 
 // ── Lease governance public API ───────────────────────────────────────────────
-pub use lease::capability::{
-    CapabilityRevocationError, ZonePublishError, check_zone_publish, has_publish_zone_capability,
-    revoke_capability_from_lease, should_clear_on_revoke,
-};
 pub use lease::degradation::DegradationLevel;
-pub use lease::priority::{
-    PRIORITY_DEFAULT, PRIORITY_HIGH, PRIORITY_SYSTEM, TileSortKey, clamp_requested_priority,
-};

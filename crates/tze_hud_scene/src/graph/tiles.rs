@@ -6,7 +6,7 @@ impl SceneGraph {
     /// Create a tile. This is the unchecked form used internally for scene construction.
     ///
     /// For agent-facing operations use [`create_tile_checked`] which enforces:
-    /// - Lease active + `CreateTiles` + `ModifyOwnTiles` capabilities
+    /// - Lease active
     /// - Per-tab tile count limit (1024)
     /// - Bounds positive-size and within-display-area
     /// - z_order < ZONE_TILE_Z_MIN
@@ -21,10 +21,9 @@ impl SceneGraph {
         self.create_tile_impl(tab_id, namespace, lease_id, bounds, z_order, false)
     }
 
-    /// Create a tile with full spec-compliant validation including capability checks.
+    /// Create a tile with full validation including the lease check.
     ///
-    /// RFC 0001 §2.3, §3.1, §3.3: requires active lease, `create_tiles`, and
-    /// `modify_own_tiles` capabilities. Enforces per-tab tile limit, bounds invariants,
+    /// Requires an active lease. Enforces per-tab tile limit, bounds invariants,
     /// and z_order zone-band reservation.
     pub fn create_tile_checked(
         &mut self,
@@ -44,22 +43,19 @@ impl SceneGraph {
         lease_id: SceneId,
         bounds: Rect,
         z_order: u32,
-        enforce_capabilities: bool,
+        enforce_lease: bool,
     ) -> Result<SceneId, ValidationError> {
         // Validate tab exists
         if !self.tabs.contains_key(&tab_id) {
             return Err(ValidationError::TabNotFound { id: tab_id });
         }
 
-        if enforce_capabilities {
-            // Lease must be active and have create_tiles + modify_own_tiles
+        if enforce_lease {
             self.require_active_lease(lease_id)?;
-            self.require_capability(lease_id, Capability::CreateTiles)?;
-            self.require_capability(lease_id, Capability::ModifyOwnTiles)?;
 
             // Namespace isolation: the caller's namespace must match the lease's namespace.
             // This prevents an agent from creating tiles in another agent's namespace
-            // using their own (valid) lease. RFC 0001 §1.2.
+            // using their own (valid) lease.
             let lease_namespace = self
                 .leases
                 .get(&lease_id)
@@ -79,7 +75,7 @@ impl SceneGraph {
             }
         }
 
-        // Per-tab tile count limit (RFC 0001 §2.1: max 1024 tiles per tab)
+        // Per-tab tile count limit
         let tiles_in_tab = self.tiles.values().filter(|t| t.tab_id == tab_id).count();
         if tiles_in_tab >= MAX_TILES_PER_TAB {
             return Err(ValidationError::BudgetExceeded {
@@ -87,7 +83,7 @@ impl SceneGraph {
             });
         }
 
-        // Bounds: width and height must be > 0 (RFC 0001 §2.3)
+        // Bounds: width and height must be > 0
         if bounds.width <= 0.0 || bounds.height <= 0.0 {
             return Err(ValidationError::BoundsOutOfRange {
                 reason: format!(
@@ -97,7 +93,7 @@ impl SceneGraph {
             });
         }
 
-        // Bounds must be fully within the tab display area (RFC 0001 §2.3)
+        // Bounds must be fully within the tab display area
         if !bounds.is_within(&self.display_area) {
             return Err(ValidationError::BoundsOutOfRange {
                 reason: format!(
@@ -114,7 +110,7 @@ impl SceneGraph {
             });
         }
 
-        // z_order must be < ZONE_TILE_Z_MIN for agent-owned tiles (RFC 0001 §2.3)
+        // z_order must be < ZONE_TILE_Z_MIN for agent-owned tiles
         if z_order >= ZONE_TILE_Z_MIN {
             return Err(ValidationError::InvalidField {
                 field: "z_order".into(),
@@ -149,7 +145,7 @@ impl SceneGraph {
 
     /// Update the bounds of a tile.
     ///
-    /// RFC 0001 §2.3: requires active lease + `ModifyOwnTiles` capability.
+    /// Requires an active lease.
     /// Bounds must be positive and within the display area.
     pub fn update_tile_bounds(
         &mut self,
@@ -159,7 +155,7 @@ impl SceneGraph {
     ) -> Result<(), ValidationError> {
         let lease_id = self.get_tile_lease_checked(tile_id, agent_namespace)?;
         self.require_active_lease(lease_id)?;
-        self.require_capability(lease_id, Capability::ModifyOwnTiles)?;
+        self.require_active_lease(lease_id)?;
 
         // Viewer geometry authority (hud-lyqun): once the viewer has moved or
         // resized this tile as part of a whole-portal gesture, the adapter no
@@ -201,7 +197,7 @@ impl SceneGraph {
 
     /// Update the z-order of a tile.
     ///
-    /// RFC 0001 §2.3: requires active lease + `ModifyOwnTiles`.
+    /// Requires an active lease.
     /// z_order must be < ZONE_TILE_Z_MIN.
     pub fn update_tile_z_order(
         &mut self,
@@ -211,7 +207,7 @@ impl SceneGraph {
     ) -> Result<(), ValidationError> {
         let lease_id = self.get_tile_lease_checked(tile_id, agent_namespace)?;
         self.require_active_lease(lease_id)?;
-        self.require_capability(lease_id, Capability::ModifyOwnTiles)?;
+        self.require_active_lease(lease_id)?;
 
         if z_order >= ZONE_TILE_Z_MIN {
             return Err(ValidationError::InvalidField {
@@ -233,7 +229,7 @@ impl SceneGraph {
 
     /// Update the opacity of a tile.
     ///
-    /// RFC 0001 §2.3: opacity must be in [0.0, 1.0]. Requires active lease + `ModifyOwnTiles`.
+    /// Opacity must be in [0.0, 1.0]. Requires an active lease.
     pub fn update_tile_opacity(
         &mut self,
         tile_id: SceneId,
@@ -242,7 +238,7 @@ impl SceneGraph {
     ) -> Result<(), ValidationError> {
         let lease_id = self.get_tile_lease_checked(tile_id, agent_namespace)?;
         self.require_active_lease(lease_id)?;
-        self.require_capability(lease_id, Capability::ModifyOwnTiles)?;
+        self.require_active_lease(lease_id)?;
 
         if !(0.0..=1.0).contains(&opacity) {
             return Err(ValidationError::InvalidField {
@@ -262,7 +258,7 @@ impl SceneGraph {
 
     /// Update the input mode of a tile.
     ///
-    /// RFC 0001 §2.3: requires active lease + `ModifyOwnTiles`.
+    /// Requires an active lease.
     pub fn update_tile_input_mode(
         &mut self,
         tile_id: SceneId,
@@ -271,7 +267,7 @@ impl SceneGraph {
     ) -> Result<(), ValidationError> {
         let lease_id = self.get_tile_lease_checked(tile_id, agent_namespace)?;
         self.require_active_lease(lease_id)?;
-        self.require_capability(lease_id, Capability::ModifyOwnTiles)?;
+        self.require_active_lease(lease_id)?;
 
         let tile = self
             .tiles
@@ -284,7 +280,7 @@ impl SceneGraph {
 
     /// Update the expiry timestamp of a tile.
     ///
-    /// RFC 0001 §2.3: requires active lease + `ModifyOwnTiles`.
+    /// Requires an active lease.
     pub fn update_tile_expiry(
         &mut self,
         tile_id: SceneId,
@@ -293,7 +289,7 @@ impl SceneGraph {
     ) -> Result<(), ValidationError> {
         let lease_id = self.get_tile_lease_checked(tile_id, agent_namespace)?;
         self.require_active_lease(lease_id)?;
-        self.require_capability(lease_id, Capability::ModifyOwnTiles)?;
+        self.require_active_lease(lease_id)?;
 
         let tile = self
             .tiles
@@ -306,7 +302,7 @@ impl SceneGraph {
 
     /// Delete a tile and all its nodes.
     ///
-    /// RFC 0001 §2.3: requires active lease + `ModifyOwnTiles`. Namespace isolation enforced.
+    /// Requires an active lease. Namespace isolation enforced.
     pub fn delete_tile(
         &mut self,
         tile_id: SceneId,
@@ -314,7 +310,7 @@ impl SceneGraph {
     ) -> Result<(), ValidationError> {
         let lease_id = self.get_tile_lease_checked(tile_id, agent_namespace)?;
         self.require_active_lease(lease_id)?;
-        self.require_capability(lease_id, Capability::ModifyOwnTiles)?;
+        self.require_active_lease(lease_id)?;
 
         self.remove_tile_and_nodes(tile_id);
         self.version += 1;
@@ -348,7 +344,7 @@ impl SceneGraph {
         self.set_tile_root_impl(tile_id, node, Vec::new(), None)
     }
 
-    /// Set tile root with full capability and node-count enforcement.
+    /// Set tile root with full lease and node-count enforcement.
     pub fn set_tile_root_checked(
         &mut self,
         tile_id: SceneId,
@@ -381,7 +377,7 @@ impl SceneGraph {
     }
 
     /// Subtree-aware [`set_tile_root_checked`](Self::set_tile_root_checked):
-    /// enforces the lease + `ModifyOwnTiles` capability, then materializes the
+    /// enforces the lease, then materializes the
     /// root and its inline `descendants` atomically (hud-ga4md).
     pub fn set_tile_root_tree_checked(
         &mut self,
@@ -403,7 +399,7 @@ impl SceneGraph {
         if let Some(ns) = agent_namespace {
             let lease_id = self.get_tile_lease_checked(tile_id, ns)?;
             self.require_active_lease(lease_id)?;
-            self.require_capability(lease_id, Capability::ModifyOwnTiles)?;
+            self.require_active_lease(lease_id)?;
         }
 
         // Validate the ENTIRE incoming subtree (root + inline descendants,
@@ -412,7 +408,7 @@ impl SceneGraph {
         // first, then every descendant.
         let all_incoming = || std::iter::once(&node).chain(descendants.iter());
 
-        // Check for duplicate node IDs (scene-globally unique per RFC 0001 §2.1):
+        // Check for duplicate node IDs (scene-globally unique):
         // no incoming id may already exist in the graph, and no two incoming
         // nodes may share an id.
         let mut seen_ids: std::collections::HashSet<SceneId> =
@@ -629,12 +625,12 @@ impl SceneGraph {
         if let Some(ns) = agent_namespace {
             let lease_id = self.get_tile_lease_checked(tile_id, ns)?;
             self.require_active_lease(lease_id)?;
-            self.require_capability(lease_id, Capability::ModifyOwnTiles)?;
+            self.require_active_lease(lease_id)?;
         } else if !self.tiles.contains_key(&tile_id) {
             return Err(ValidationError::TileNotFound { id: tile_id });
         }
 
-        // Check for duplicate node ID (RFC 0001 §2.1: NodeIds must be scene-globally unique)
+        // Check for duplicate node ID
         if self.nodes.contains_key(&node.id) {
             return Err(ValidationError::DuplicateId { id: node.id });
         }
@@ -646,9 +642,8 @@ impl SceneGraph {
 
         // Enforce resource registration for agent-submitted StaticImageNode mutations.
         //
-        // Per spec resource-store/spec.md §Requirement: Resource Upload Before Tile
-        // Creation: "Any agent-submitted tile mutation that references a ResourceId not
-        // present in the resource store MUST be rejected."
+        // A tile mutation that references a ResourceId not present in the
+        // resource store is rejected (upload must precede use).
         //
         // Only enforced for agent-submitted paths (agent_namespace.is_some()).
         // Internal/test paths (unchecked variants, snapshot restore) bypass this gate.
@@ -660,7 +655,7 @@ impl SceneGraph {
             }
         }
 
-        // Enforce per-tile node count limit (RFC 0001 §2.1: max 64 nodes)
+        // Enforce per-tile node count limit
         let current_count = self.count_nodes_in_tile(
             self.tiles
                 .get(&tile_id)
@@ -728,7 +723,7 @@ impl SceneGraph {
     /// Atomically replace the `data` of an existing node (checked form).
     ///
     /// Enforces namespace isolation (`agent_namespace` must match the tile's namespace)
-    /// and the `ModifyOwnTiles` capability, then delegates to `update_node_content_impl`.
+    /// then delegates to `update_node_content_impl`.
     pub fn update_node_content_checked(
         &mut self,
         tile_id: SceneId,
@@ -746,11 +741,11 @@ impl SceneGraph {
         mut data: NodeData,
         agent_namespace: Option<&str>,
     ) -> Result<(), ValidationError> {
-        // Stage 4: Lease + capability check (when namespace is provided).
+        // Stage 4: Lease check (when namespace is provided).
         if let Some(ns) = agent_namespace {
             let lease_id = self.get_tile_lease_checked(tile_id, ns)?;
             self.require_active_lease(lease_id)?;
-            self.require_capability(lease_id, Capability::ModifyOwnTiles)?;
+            self.require_active_lease(lease_id)?;
         } else if !self.tiles.contains_key(&tile_id) {
             return Err(ValidationError::TileNotFound { id: tile_id });
         }
@@ -802,9 +797,8 @@ impl SceneGraph {
 
         // Enforce resource registration for agent-submitted StaticImage content updates.
         //
-        // Per spec resource-store/spec.md §Requirement: Resource Upload Before Tile
-        // Creation: "Any agent-submitted tile mutation that references a ResourceId not
-        // present in the resource store MUST be rejected."
+        // A tile mutation that references a ResourceId not present in the
+        // resource store is rejected (upload must precede use).
         //
         // This gate closes the bypass where an agent could swap a StaticImageNode to an
         // unregistered resource_id via UpdateNodeContent while passing the add/set_root

@@ -696,7 +696,7 @@ mod tests {
         // Build a scene with one tile, run a frame that commits it
         let mut scene = SceneGraph::new(800.0, 600.0);
         let tab = scene.create_tab("Main", 0).unwrap();
-        let lease = scene.grant_lease("agent", 60_000, vec![]);
+        let lease = scene.grant_lease("agent", 60_000);
         scene
             .create_tile(tab, "agent", lease, Rect::new(10.0, 20.0, 100.0, 50.0), 1)
             .unwrap();
@@ -734,7 +734,7 @@ mod tests {
         let pipeline = FramePipeline::new();
         let mut scene = SceneGraph::new(800.0, 600.0);
         let tab = scene.create_tab("Main", 0).unwrap();
-        let lease = scene.grant_lease("agent", 60_000, vec![]);
+        let lease = scene.grant_lease("agent", 60_000);
         scene
             .create_tile(tab, "agent", lease, Rect::new(50.0, 50.0, 200.0, 100.0), 1)
             .unwrap();
@@ -820,7 +820,7 @@ mod tests {
     fn test_hit_test_snapshot_from_scene() {
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab = scene.create_tab("Main", 0).unwrap();
-        let lease = scene.grant_lease("agent", 60_000, vec![]);
+        let lease = scene.grant_lease("agent", 60_000);
         scene
             .create_tile(
                 tab,

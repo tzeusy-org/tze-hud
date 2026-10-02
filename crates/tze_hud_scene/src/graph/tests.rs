@@ -17,11 +17,7 @@ fn test_create_scene_with_tab_and_tiles() {
     assert_eq!(scene.active_tab, Some(tab_id));
 
     // Grant a lease
-    let lease_id = scene.grant_lease(
-        "test-agent",
-        60_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("test-agent", 60_000);
 
     // Create two tiles
     let tile1_id = scene
@@ -87,11 +83,7 @@ fn test_create_scene_with_tab_and_tiles() {
 fn test_hit_test() {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease(
-        "test",
-        60_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("test", 60_000);
 
     let tile_id = scene
         .create_tile(
@@ -142,11 +134,7 @@ fn test_hit_test() {
 fn test_hit_test_applies_tile_scroll_offset() {
     let mut scene = SceneGraph::new(800.0, 600.0);
     let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease(
-        "scroll-agent",
-        60_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("scroll-agent", 60_000);
     let tile_id = scene
         .create_tile(
             tab_id,
@@ -199,11 +187,7 @@ fn test_hit_test_applies_tile_scroll_offset() {
 fn test_hit_test_uses_displayed_scroll_offset_during_animation() {
     let mut scene = SceneGraph::new(800.0, 600.0);
     let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease(
-        "scroll-agent",
-        60_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("scroll-agent", 60_000);
     // Tile anchored at the origin so screen coords == tile-local coords (before
     // the scroll offset is applied), keeping the arithmetic easy to follow.
     let tile_id = scene
@@ -319,11 +303,7 @@ fn test_hit_test_uses_displayed_scroll_offset_during_animation() {
 fn test_hit_test_keeps_geometry_only_portal_composer_fixed_after_resize_and_displayed_scroll() {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease(
-        "portal",
-        60_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("portal", 60_000);
     let tile_id = scene
         .create_tile(
             tab_id,
@@ -485,11 +465,7 @@ fn test_hit_test_zone_regions_without_active_tab() {
 fn test_snapshot_roundtrip() {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease(
-        "test",
-        60_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("test", 60_000);
     scene
         .create_tile(
             tab_id,
@@ -524,11 +500,7 @@ fn take_snapshot_includes_display_area() {
 fn portal_snapshot_scene(namespace: &str) -> (SceneGraph, SceneId, SceneId) {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease(
-        namespace,
-        60_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease(namespace, 60_000);
     let tile_id = scene
         .create_tile(
             tab_id,
@@ -644,11 +616,7 @@ fn snapshot_portal_surfaces_are_tile_keyed_for_namespace_visibility() {
 
     // Namespace B: a second tile (on the same tab) + its own surface.
     let tab_id = scene.active_tab.unwrap();
-    let lease_b = scene.grant_lease(
-        "agent-b",
-        60_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_b = scene.grant_lease("agent-b", 60_000);
     let tile_b = scene
         .create_tile(
             tab_id,
@@ -726,11 +694,7 @@ fn test_lease_expiry() {
 
     // Grant a lease with a 500 ms TTL.
     // Clock is at t=1000; lease expires at t=1500.
-    let lease_id = scene.grant_lease(
-        "test",
-        500,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("test", 500);
     scene
         .create_tile(
             tab_id,
@@ -775,7 +739,7 @@ fn test_tab_created_at_uses_clock() {
 fn test_renew_lease_uses_clock() {
     let (mut scene, clock) = scene_with_test_clock();
     // Clock at t=1000.
-    let lease_id = scene.grant_lease("test", 5_000, vec![]);
+    let lease_id = scene.grant_lease("test", 5_000);
     assert_eq!(scene.leases[&lease_id].granted_at_ms, 1_000);
 
     // Advance clock then renew.
@@ -789,11 +753,7 @@ fn test_renew_lease_uses_clock() {
 fn test_lease_revocation_cleans_tiles() {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease(
-        "test",
-        60_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("test", 60_000);
 
     scene
         .create_tile(
@@ -825,7 +785,7 @@ fn test_lease_revocation_cleans_tiles() {
 fn test_visible_tiles_sorted_by_z_order() {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease("test", 60_000, vec![]);
+    let lease_id = scene.grant_lease("test", 60_000);
 
     scene
         .create_tile(
@@ -1954,11 +1914,7 @@ fn make_test_image_resource(w: u32, h: u32) -> (ResourceId, u64) {
 fn test_static_image_node_creation() {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease(
-        "agent",
-        60_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("agent", 60_000);
     let tile_id = scene
         .create_tile(
             tab_id,
@@ -2038,7 +1994,7 @@ fn test_static_image_node_all_fit_modes() {
 fn test_static_image_node_snapshot_roundtrip() {
     let mut scene = SceneGraph::new(1280.0, 720.0);
     let tab_id = scene.create_tab("Tab", 0).unwrap();
-    let lease_id = scene.grant_lease("agent", 60_000, vec![]);
+    let lease_id = scene.grant_lease("agent", 60_000);
     let tile_id = scene
         .create_tile(
             tab_id,
@@ -2098,7 +2054,7 @@ fn test_static_image_node_replace_with_set_tile_root() {
     // Verify that replacing a StaticImageNode via set_tile_root removes the old node.
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease("agent", 60_000, vec![]);
+    let lease_id = scene.grant_lease("agent", 60_000);
     let tile_id = scene
         .create_tile(
             tab_id,
@@ -2153,11 +2109,7 @@ fn test_static_image_node_replace_with_set_tile_root() {
 fn scene_with_static_image_node(w: u32, h: u32) -> (SceneGraph, SceneId, SceneId, SceneId, u64) {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease(
-        "agent",
-        60_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("agent", 60_000);
     let tile_id = scene
         .create_tile(
             tab_id,
@@ -2348,11 +2300,7 @@ fn test_update_static_image_decoded_bytes_zero_after_resource_change_is_zero() {
 fn resource_freed_when_only_referencing_tile_is_removed() {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease(
-        "agent",
-        300_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("agent", 300_000);
     let tile_id = scene
         .create_tile(
             tab_id,
@@ -2415,11 +2363,7 @@ fn resource_freed_when_only_referencing_tile_is_removed() {
 fn resource_kept_alive_while_second_tile_references_it_then_freed() {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease(
-        "agent",
-        300_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("agent", 300_000);
 
     let tile_a = scene
         .create_tile(
@@ -2500,7 +2444,7 @@ fn resource_freed_on_lease_expiry() {
 
     let tab_id = scene.create_tab("Main", 0).unwrap();
     // Grant a short lease (100 ms TTL).
-    let lease_id = scene.grant_lease("agent", 100, vec![Capability::CreateTiles]);
+    let lease_id = scene.grant_lease("agent", 100);
     let tile_id = scene
         .create_tile(
             tab_id,
@@ -2558,7 +2502,7 @@ fn expire_lease_scoped_reaps_only_the_named_grace_expired_lease() {
     let tab_id = scene.create_tab("Main", 0).unwrap();
 
     // Two long-TTL leases, each with a tile, so neither expires on TTL.
-    let lease_a = scene.grant_lease("agent-a", 86_400_000, vec![Capability::CreateTiles]);
+    let lease_a = scene.grant_lease("agent-a", 86_400_000);
     let tile_a = scene
         .create_tile(
             tab_id,
@@ -2568,7 +2512,7 @@ fn expire_lease_scoped_reaps_only_the_named_grace_expired_lease() {
             1,
         )
         .unwrap();
-    let lease_b = scene.grant_lease("agent-b", 86_400_000, vec![Capability::CreateTiles]);
+    let lease_b = scene.grant_lease("agent-b", 86_400_000);
     let tile_b = scene
         .create_tile(
             tab_id,
@@ -2623,7 +2567,7 @@ fn expire_lease_scoped_reaps_only_the_named_grace_expired_lease() {
 fn resource_refs_updated_on_set_tile_root_replacement() {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease("agent", 300_000, vec![Capability::ModifyOwnTiles]);
+    let lease_id = scene.grant_lease("agent", 300_000);
     let tile_id = scene
         .create_tile(
             tab_id,
@@ -2829,7 +2773,7 @@ fn resource_refs_unchanged_on_update_node_content_same_resource() {
 #[test]
 fn test_lease_state_defaults_to_active() {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
-    let lease_id = scene.grant_lease("test", 60_000, vec![]);
+    let lease_id = scene.grant_lease("test", 60_000);
     assert_eq!(scene.leases[&lease_id].state, LeaseState::Active);
     assert!(scene.leases[&lease_id].is_active());
     assert!(scene.leases[&lease_id].is_mutations_allowed());
@@ -2838,7 +2782,7 @@ fn test_lease_state_defaults_to_active() {
 #[test]
 fn test_lease_suspend_from_active() {
     let (mut scene, clock) = scene_with_test_clock();
-    let lease_id = scene.grant_lease("test", 60_000, vec![]);
+    let lease_id = scene.grant_lease("test", 60_000);
     clock.advance(10_000); // 10s elapsed
     scene.suspend_lease(&lease_id, clock.now_millis()).unwrap();
 
@@ -2854,7 +2798,7 @@ fn test_lease_suspend_from_active() {
 #[test]
 fn test_lease_suspend_invalid_from_non_active() {
     let (mut scene, _clock) = scene_with_test_clock();
-    let lease_id = scene.grant_lease("test", 60_000, vec![]);
+    let lease_id = scene.grant_lease("test", 60_000);
 
     // Suspend once (valid)
     scene.suspend_lease(&lease_id, 1000).unwrap();
@@ -2873,7 +2817,7 @@ fn test_lease_suspend_invalid_from_non_active() {
 #[test]
 fn test_lease_resume_from_suspended() {
     let (mut scene, clock) = scene_with_test_clock();
-    let lease_id = scene.grant_lease("test", 60_000, vec![]);
+    let lease_id = scene.grant_lease("test", 60_000);
 
     clock.advance(10_000);
     scene.suspend_lease(&lease_id, clock.now_millis()).unwrap();
@@ -2895,7 +2839,7 @@ fn test_lease_resume_from_suspended() {
 #[test]
 fn test_lease_resume_invalid_from_active() {
     let (mut scene, _clock) = scene_with_test_clock();
-    let lease_id = scene.grant_lease("test", 60_000, vec![]);
+    let lease_id = scene.grant_lease("test", 60_000);
 
     let err = scene.resume_lease(&lease_id, 1000).unwrap_err();
     assert!(matches!(
@@ -2910,7 +2854,7 @@ fn test_lease_resume_invalid_from_active() {
 #[test]
 fn test_lease_disconnect_from_active() {
     let (mut scene, clock) = scene_with_test_clock();
-    let lease_id = scene.grant_lease("test", 60_000, vec![]);
+    let lease_id = scene.grant_lease("test", 60_000);
 
     clock.advance(5_000);
     scene
@@ -2926,7 +2870,7 @@ fn test_lease_disconnect_from_active() {
 #[test]
 fn test_lease_disconnect_invalid_from_suspended() {
     let (mut scene, _clock) = scene_with_test_clock();
-    let lease_id = scene.grant_lease("test", 60_000, vec![]);
+    let lease_id = scene.grant_lease("test", 60_000);
     scene.suspend_lease(&lease_id, 1000).unwrap();
 
     let err = scene.disconnect_lease(&lease_id, 2000).unwrap_err();
@@ -2942,7 +2886,7 @@ fn test_lease_disconnect_invalid_from_suspended() {
 #[test]
 fn test_lease_reconnect_within_grace() {
     let (mut scene, clock) = scene_with_test_clock();
-    let lease_id = scene.grant_lease("test", 60_000, vec![]);
+    let lease_id = scene.grant_lease("test", 60_000);
 
     clock.advance(5_000);
     scene
@@ -2964,7 +2908,7 @@ fn test_lease_reconnect_within_grace() {
 #[test]
 fn test_lease_reconnect_after_grace_fails() {
     let (mut scene, clock) = scene_with_test_clock();
-    let lease_id = scene.grant_lease("test", 120_000, vec![]);
+    let lease_id = scene.grant_lease("test", 120_000);
 
     clock.advance(5_000);
     scene
@@ -2984,18 +2928,18 @@ fn test_lease_revoke_from_any_non_terminal() {
     let (mut scene, _clock) = scene_with_test_clock();
 
     // Revoke from Active
-    let l1 = scene.grant_lease("t1", 60_000, vec![]);
+    let l1 = scene.grant_lease("t1", 60_000);
     scene.leases.get_mut(&l1).unwrap().revoke().unwrap();
     assert_eq!(scene.leases[&l1].state, LeaseState::Revoked);
 
     // Revoke from Suspended
-    let l2 = scene.grant_lease("t2", 60_000, vec![]);
+    let l2 = scene.grant_lease("t2", 60_000);
     scene.leases.get_mut(&l2).unwrap().suspend(1000).unwrap();
     scene.leases.get_mut(&l2).unwrap().revoke().unwrap();
     assert_eq!(scene.leases[&l2].state, LeaseState::Revoked);
 
     // Revoke from Orphaned
-    let l3 = scene.grant_lease("t3", 60_000, vec![]);
+    let l3 = scene.grant_lease("t3", 60_000);
     scene.leases.get_mut(&l3).unwrap().disconnect(1000).unwrap();
     scene.leases.get_mut(&l3).unwrap().revoke().unwrap();
     assert_eq!(scene.leases[&l3].state, LeaseState::Revoked);
@@ -3004,7 +2948,7 @@ fn test_lease_revoke_from_any_non_terminal() {
 #[test]
 fn test_lease_revoke_from_terminal_fails() {
     let (mut scene, _clock) = scene_with_test_clock();
-    let lease_id = scene.grant_lease("test", 60_000, vec![]);
+    let lease_id = scene.grant_lease("test", 60_000);
     scene.leases.get_mut(&lease_id).unwrap().revoke().unwrap();
 
     // Already revoked — should fail
@@ -3026,7 +2970,7 @@ fn test_lease_revoke_from_terminal_fails() {
 #[test]
 fn test_lease_is_expired_not_when_suspended() {
     let (mut scene, clock) = scene_with_test_clock();
-    let lease_id = scene.grant_lease("test", 1_000, vec![]);
+    let lease_id = scene.grant_lease("test", 1_000);
 
     // Suspend at t=500ms (halfway)
     clock.advance(500);
@@ -3043,11 +2987,7 @@ fn test_lease_is_expired_not_when_suspended() {
 fn test_budget_tile_count_within_limit() {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease(
-        "test",
-        60_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("test", 60_000);
 
     // Default budget: max_tiles = 8. Create 1 tile — should be fine.
     let batch = crate::mutation::MutationBatch {
@@ -3072,11 +3012,7 @@ fn test_budget_tile_count_within_limit() {
 fn test_budget_tile_count_exceeds_limit() {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease(
-        "test",
-        60_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("test", 60_000);
 
     // Set budget to max 2 tiles
     scene
@@ -3129,11 +3065,7 @@ fn test_budget_tile_count_exceeds_limit() {
 fn test_budget_soft_limit_warning() {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease(
-        "test",
-        60_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("test", 60_000);
 
     // Set budget to max 5 tiles; soft limit at 80% = 4 tiles
     scene
@@ -3188,11 +3120,7 @@ fn test_budget_soft_limit_warning() {
 fn test_suspend_blocks_mutations() {
     let (mut scene, clock) = scene_with_test_clock();
     let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease(
-        "test",
-        60_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("test", 60_000);
 
     // Suspend the lease
     clock.advance(1_000);
@@ -3221,11 +3149,7 @@ fn test_suspend_blocks_mutations() {
 fn test_resume_allows_mutations_again() {
     let (mut scene, clock) = scene_with_test_clock();
     let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease(
-        "test",
-        60_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("test", 60_000);
 
     // Suspend then resume
     clock.advance(1_000);
@@ -3256,7 +3180,7 @@ fn test_resume_allows_mutations_again() {
 fn test_ttl_paused_during_suspension() {
     let (mut scene, clock) = scene_with_test_clock();
     // Grant a 10-second lease
-    let lease_id = scene.grant_lease("test", 10_000, vec![]);
+    let lease_id = scene.grant_lease("test", 10_000);
 
     // At t=5s, suspend
     clock.advance(5_000);
@@ -3301,11 +3225,7 @@ fn test_ttl_paused_during_suspension() {
 fn test_grace_period_disconnect_and_reconnect() {
     let (mut scene, clock) = scene_with_test_clock();
     let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease(
-        "test",
-        120_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("test", 120_000);
     scene
         .create_tile(
             tab_id,
@@ -3336,11 +3256,7 @@ fn test_grace_period_disconnect_and_reconnect() {
 fn test_grace_period_expiry_cleans_up() {
     let (mut scene, clock) = scene_with_test_clock();
     let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease(
-        "test",
-        120_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("test", 120_000);
     scene
         .create_tile(
             tab_id,
@@ -3382,11 +3298,7 @@ fn test_grace_period_expiry_cleans_up() {
 fn degraded_portal_surface_removed_on_lease_grace_expiry_via_orphan_path() {
     let (mut scene, clock) = scene_with_test_clock();
     let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease(
-        "portal-driver",
-        120_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("portal-driver", 120_000);
     let tile_id = scene
         .create_tile(
             tab_id,
@@ -3477,7 +3389,7 @@ fn degraded_portal_surface_removed_on_lease_grace_expiry_via_orphan_path() {
 #[test]
 fn test_grace_period_check() {
     let (mut scene, clock) = scene_with_test_clock();
-    let lease_id = scene.grant_lease("test", 120_000, vec![]);
+    let lease_id = scene.grant_lease("test", 120_000);
 
     clock.advance(5_000);
     scene
@@ -3498,9 +3410,9 @@ fn test_grace_period_check() {
 #[test]
 fn test_suspend_all_leases() {
     let (mut scene, clock) = scene_with_test_clock();
-    let l1 = scene.grant_lease("agent1", 60_000, vec![]);
-    let l2 = scene.grant_lease("agent2", 60_000, vec![]);
-    let l3 = scene.grant_lease("agent3", 60_000, vec![]);
+    let l1 = scene.grant_lease("agent1", 60_000);
+    let l2 = scene.grant_lease("agent2", 60_000);
+    let l3 = scene.grant_lease("agent3", 60_000);
 
     clock.advance(5_000);
     scene.suspend_all_leases(clock.now_millis());
@@ -3513,8 +3425,8 @@ fn test_suspend_all_leases() {
 #[test]
 fn test_resume_all_leases() {
     let (mut scene, clock) = scene_with_test_clock();
-    let l1 = scene.grant_lease("agent1", 60_000, vec![]);
-    let l2 = scene.grant_lease("agent2", 60_000, vec![]);
+    let l1 = scene.grant_lease("agent1", 60_000);
+    let l2 = scene.grant_lease("agent2", 60_000);
 
     clock.advance(5_000);
     scene.suspend_all_leases(clock.now_millis());
@@ -3529,8 +3441,8 @@ fn test_resume_all_leases() {
 #[test]
 fn test_suspend_all_skips_non_active() {
     let (mut scene, clock) = scene_with_test_clock();
-    let l1 = scene.grant_lease("agent1", 60_000, vec![]);
-    let l2 = scene.grant_lease("agent2", 60_000, vec![]);
+    let l1 = scene.grant_lease("agent1", 60_000);
+    let l2 = scene.grant_lease("agent2", 60_000);
 
     // Disconnect l2 first
     clock.advance(1_000);
@@ -3547,8 +3459,8 @@ fn test_suspend_all_skips_non_active() {
 #[test]
 fn test_resume_all_only_resumes_suspended() {
     let (mut scene, clock) = scene_with_test_clock();
-    let l1 = scene.grant_lease("agent1", 60_000, vec![]);
-    let l2 = scene.grant_lease("agent2", 60_000, vec![]);
+    let l1 = scene.grant_lease("agent1", 60_000);
+    let l2 = scene.grant_lease("agent2", 60_000);
 
     // Disconnect l2
     clock.advance(1_000);
@@ -3570,11 +3482,7 @@ fn test_resume_all_only_resumes_suspended() {
 fn test_suspension_timeout_revokes() {
     let (mut scene, clock) = scene_with_test_clock();
     let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease(
-        "test",
-        600_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("test", 600_000);
     scene
         .create_tile(
             tab_id,
@@ -3604,75 +3512,15 @@ fn test_suspension_timeout_revokes() {
 #[test]
 fn test_renewal_policy_defaults_to_manual() {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
-    let lease_id = scene.grant_lease("test", 60_000, vec![]);
+    let lease_id = scene.grant_lease("test", 60_000);
     assert_eq!(
         scene.leases[&lease_id].renewal_policy,
         RenewalPolicy::Manual
     );
 }
 
-#[test]
-fn test_lease_priority_defaults_to_normal() {
-    let mut scene = SceneGraph::new(1920.0, 1080.0);
-    let lease_id = scene.grant_lease("test", 60_000, vec![]);
-    assert_eq!(scene.leases[&lease_id].priority, 2);
-}
-
-// ─── Priority Persistence Tests ─────────────────────────────────────
 // Spec §Requirement: Priority Assignment (lease-governance/spec.md lines 49-60)
 // Spec §Requirement: Priority Sort Semantics (lease-governance/spec.md lines 62-69)
-
-/// WHEN grant_lease_with_priority is called with priority 1
-/// THEN the persisted lease priority is 1.
-///
-/// Validates that the scene graph stores the effective priority verbatim so the
-/// degradation ladder can sort tiles by (lease_priority ASC, z_order DESC) without
-/// consulting the session layer.
-#[test]
-fn test_grant_lease_with_priority_persists_value() {
-    let mut scene = SceneGraph::new(1920.0, 1080.0);
-    let lease_high = scene.grant_lease_with_priority("agent-high", 60_000, 1, vec![]);
-    let lease_normal = scene.grant_lease_with_priority("agent-normal", 60_000, 2, vec![]);
-    let lease_low = scene.grant_lease_with_priority("agent-low", 60_000, 3, vec![]);
-
-    assert_eq!(
-        scene.leases[&lease_high].priority, 1,
-        "high priority must be stored as 1"
-    );
-    assert_eq!(
-        scene.leases[&lease_normal].priority, 2,
-        "normal priority must be stored as 2"
-    );
-    assert_eq!(
-        scene.leases[&lease_low].priority, 3,
-        "low priority must be stored as 3"
-    );
-}
-
-/// WHEN a lease is renewed THEN the stored priority is preserved unchanged.
-///
-/// Spec: renewal updates the TTL clock but must not change the effective priority.
-#[test]
-fn test_renew_lease_preserves_priority() {
-    let mut scene = SceneGraph::new(1920.0, 1080.0);
-    let lease_id = scene.grant_lease_with_priority("agent", 60_000, 1, vec![]);
-
-    // Verify priority before renewal.
-    assert_eq!(scene.leases[&lease_id].priority, 1);
-
-    // Renew the lease with a new TTL.
-    scene
-        .renew_lease(lease_id, 120_000)
-        .expect("renewal must succeed");
-
-    // Priority must remain unchanged after renewal.
-    assert_eq!(
-        scene.leases[&lease_id].priority, 1,
-        "priority must be preserved across renewal"
-    );
-    // TTL must be updated.
-    assert_eq!(scene.leases[&lease_id].ttl_ms, 120_000);
-}
 
 // ─── Resource Usage Tests ───────────────────────────────────────────
 
@@ -3680,11 +3528,7 @@ fn test_renew_lease_preserves_priority() {
 fn test_lease_resource_usage() {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease(
-        "test",
-        60_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("test", 60_000);
 
     scene
         .create_tile(
@@ -3712,7 +3556,7 @@ fn test_lease_resource_usage() {
 #[test]
 fn test_renew_lease_fails_when_not_active() {
     let (mut scene, clock) = scene_with_test_clock();
-    let lease_id = scene.grant_lease("test", 60_000, vec![]);
+    let lease_id = scene.grant_lease("test", 60_000);
 
     // Suspend lease
     clock.advance(1_000);
@@ -3723,208 +3567,12 @@ fn test_renew_lease_fails_when_not_active() {
     assert!(err.is_err());
 }
 
-// ─── Live capability revocation tests (RFC 0001 §3.3) ───────────────────
-
-/// WHEN a capability is revoked from an active lease
-/// THEN the capability is removed from the scope and the lease stays Active.
-#[test]
-fn revoke_capability_removes_cap_from_active_lease() {
-    let mut scene = SceneGraph::new(1920.0, 1080.0);
-    let lease_id = scene.grant_lease(
-        "agent",
-        60_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
-    scene
-        .revoke_capability(lease_id, &Capability::CreateTiles)
-        .expect("revoke_capability must succeed");
-
-    let caps = scene
-        .lease_capabilities(&lease_id)
-        .expect("lease must exist");
-    assert!(
-        !caps.contains(&Capability::CreateTiles),
-        "CreateTiles must be removed"
-    );
-    assert!(
-        caps.contains(&Capability::ModifyOwnTiles),
-        "ModifyOwnTiles must remain"
-    );
-    // Lease must still be Active.
-    assert_eq!(
-        scene.leases[&lease_id].state,
-        LeaseState::Active,
-        "lease must remain Active after capability revocation"
-    );
-}
-
-/// WHEN a capability is revoked
-/// THEN subsequent mutations requiring that capability are rejected with CapabilityMissing.
-///
-/// This is the core RFC 0001 §3.3 requirement: enforcement is at mutation time
-/// against the live scope, not just at grant time.
-#[test]
-fn revoke_capability_blocks_subsequent_mutations() {
-    let mut scene = SceneGraph::new(1920.0, 1080.0);
-    let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease(
-        "agent",
-        60_000,
-        vec![
-            Capability::CreateTiles,
-            Capability::ModifyOwnTiles,
-            Capability::ManageTabs,
-        ],
-    );
-
-    // CreateTile (no capability check path) succeeds.
-    let tile_id = scene
-        .create_tile(
-            tab_id,
-            "agent",
-            lease_id,
-            Rect::new(0.0, 0.0, 100.0, 100.0),
-            1,
-        )
-        .expect("create_tile must succeed before revocation");
-
-    // Revoke ManageTabs.
-    scene
-        .revoke_capability(lease_id, &Capability::ManageTabs)
-        .expect("revoke must succeed");
-
-    // Tab management is now blocked because ManageTabs was revoked.
-    let err = scene
-        .create_tab_with_lease("New Tab", 1, lease_id)
-        .unwrap_err();
-    assert!(
-        matches!(err, ValidationError::CapabilityMissing { .. }),
-        "expected CapabilityMissing after ManageTabs revocation, got {err:?}"
-    );
-
-    // ModifyOwnTiles (not revoked) still works for tile mutations.
-    scene
-        .update_tile_bounds(tile_id, Rect::new(10.0, 10.0, 50.0, 50.0), "agent")
-        .expect("modify_own_tiles must still work");
-}
-
-/// WHEN revoke_capability is called on a non-existent lease
-/// THEN LeaseNotFound is returned.
-#[test]
-fn revoke_capability_unknown_lease_returns_not_found() {
-    let mut scene = SceneGraph::new(1920.0, 1080.0);
-    let unknown_id = SceneId::new();
-    let err = scene
-        .revoke_capability(unknown_id, &Capability::CreateTiles)
-        .unwrap_err();
-    assert!(
-        matches!(err, ValidationError::LeaseNotFound { .. }),
-        "expected LeaseNotFound, got {err:?}"
-    );
-}
-
-/// WHEN revoke_capability is called on a terminal (revoked) lease
-/// THEN an InvalidField error is returned.
-#[test]
-fn revoke_capability_on_terminal_lease_returns_invalid_field() {
-    let mut scene = SceneGraph::new(1920.0, 1080.0);
-    let lease_id = scene.grant_lease("agent", 60_000, vec![Capability::CreateTiles]);
-    scene
-        .revoke_lease(lease_id)
-        .expect("full revoke must succeed");
-
-    let err = scene
-        .revoke_capability(lease_id, &Capability::CreateTiles)
-        .unwrap_err();
-    assert!(
-        matches!(err, ValidationError::InvalidField { ref field, .. } if field == "lease_terminal"),
-        "expected InvalidField(lease_terminal), got {err:?}"
-    );
-}
-
-/// WHEN revoke_capability is called for a cap not in the lease scope
-/// THEN an InvalidField error (capability_not_present) is returned.
-#[test]
-fn revoke_capability_not_in_scope_returns_invalid_field() {
-    let mut scene = SceneGraph::new(1920.0, 1080.0);
-    let lease_id = scene.grant_lease("agent", 60_000, vec![Capability::CreateTiles]);
-    let err = scene
-        .revoke_capability(lease_id, &Capability::ManageTabs)
-        .unwrap_err();
-    assert!(
-        matches!(err, ValidationError::InvalidField { ref field, .. } if field == "capability_not_present"),
-        "expected InvalidField(capability_not_present), got {err:?}"
-    );
-}
-
-/// WHEN all capabilities are revoked one by one
-/// THEN the lease scope is empty and the lease remains Active.
-#[test]
-fn revoke_all_capabilities_leaves_empty_scope_and_active_lease() {
-    let mut scene = SceneGraph::new(1920.0, 1080.0);
-    let lease_id = scene.grant_lease(
-        "agent",
-        60_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
-    for cap in &[Capability::CreateTiles, Capability::ModifyOwnTiles] {
-        scene
-            .revoke_capability(lease_id, cap)
-            .expect("revoke must succeed");
-    }
-    let caps = scene
-        .lease_capabilities(&lease_id)
-        .expect("lease must exist");
-    assert!(caps.is_empty(), "capability scope must be empty");
-    assert_eq!(
-        scene.leases[&lease_id].state,
-        LeaseState::Active,
-        "lease must remain Active"
-    );
-}
-
-/// WHEN a capability is revoked from a suspended (non-terminal) lease
-/// THEN the capability is removed even in SUSPENDED state.
-#[test]
-fn revoke_capability_on_suspended_lease_succeeds() {
-    let (mut scene, clock) = scene_with_test_clock();
-    let lease_id = scene.grant_lease(
-        "agent",
-        60_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
-    // Suspend the lease (safe mode).
-    clock.advance(100);
-    scene.suspend_lease(&lease_id, clock.now_millis()).unwrap();
-
-    // Capability revocation must succeed on a suspended lease.
-    scene
-        .revoke_capability(lease_id, &Capability::CreateTiles)
-        .expect("revoke must work on suspended lease");
-
-    let caps = scene
-        .lease_capabilities(&lease_id)
-        .expect("lease must exist");
-    assert!(
-        !caps.contains(&Capability::CreateTiles),
-        "CreateTiles must be removed from suspended lease"
-    );
-}
-
-/// lease_capabilities returns None for unknown lease IDs.
-#[test]
-fn lease_capabilities_returns_none_for_unknown_id() {
-    let scene = SceneGraph::new(1920.0, 1080.0);
-    assert!(scene.lease_capabilities(&SceneId::new()).is_none());
-}
-
 /// hud-pk9pz: `lease_is_active` is the liveness predicate that distinguishes a
 /// usable lease from a merely-resident terminal one. It returns `false` for an
 /// unknown lease, and — critically — `false` for an `Expired` lease that
-/// grace-period reaping (`expire_leases`) left resident in the map. This is the
-/// distinction `lease_capabilities` does NOT make (it returns `Some` for any
-/// resident lease), and is what lets the portal driver start a fresh portal on
-/// a post-grace re-attach instead of reusing a dead lease.
+/// grace-period reaping (`expire_leases`) left resident in the map. This is
+/// what lets the portal driver start a fresh portal on a post-grace re-attach
+/// instead of reusing a dead lease.
 #[test]
 fn lease_is_active_false_for_unknown_and_grace_expired_lease() {
     let (mut scene, clock) = scene_with_test_clock();
@@ -3933,10 +3581,8 @@ fn lease_is_active_false_for_unknown_and_grace_expired_lease() {
     assert!(!scene.lease_is_active(&SceneId::new()));
 
     // Active lease: active.
-    let lease_id = scene.grant_lease("agent", 120_000, vec![Capability::CreateTiles]);
+    let lease_id = scene.grant_lease("agent", 120_000);
     assert!(scene.lease_is_active(&lease_id));
-    // ...but lease_capabilities also returns Some here — the two agree while active.
-    assert!(scene.lease_capabilities(&lease_id).is_some());
 
     // Orphan it and let the grace period elapse, then reap.
     scene
@@ -3950,11 +3596,11 @@ fn lease_is_active_false_for_unknown_and_grace_expired_lease() {
     let expiries = scene.expire_leases();
     assert_eq!(expiries.len(), 1);
 
-    // The lease is Expired but STILL RESIDENT in the map: lease_capabilities
-    // reports Some (the trap), while lease_is_active correctly reports false.
+    // The lease is Expired but STILL RESIDENT in the map, while
+    // lease_is_active correctly reports false.
     assert!(
-        scene.lease_capabilities(&lease_id).is_some(),
-        "expire_leases leaves the terminal lease resident — lease_capabilities still returns Some"
+        scene.leases.contains_key(&lease_id),
+        "expire_leases leaves the terminal lease resident"
     );
     assert!(
         !scene.lease_is_active(&lease_id),
@@ -3962,38 +3608,11 @@ fn lease_is_active_false_for_unknown_and_grace_expired_lease() {
     );
 }
 
-/// WHEN revoke_capability succeeds
-/// THEN it returns Ok((cap_name_string, revoked_at_wall_us)) so callers can populate
-/// the LeaseEventKind::CapabilityRevoked audit event fields.
-#[test]
-fn revoke_capability_returns_cap_name_and_timestamp() {
-    let (mut scene, clock) = scene_with_test_clock();
-    clock.advance(1_000_000); // 1 second in μs
-    let lease_id = scene.grant_lease("agent", 60_000, vec![Capability::CreateTiles]);
-    let (cap_name, revoked_at_us) = scene
-        .revoke_capability(lease_id, &Capability::CreateTiles)
-        .expect("revoke_capability must succeed");
-    // The name must identify the capability that was removed.
-    assert!(
-        cap_name.contains("CreateTile"),
-        "cap_name must identify CreateTiles, got: {cap_name:?}"
-    );
-    // The timestamp must be non-zero (clock was advanced before the call).
-    assert!(
-        revoked_at_us > 0,
-        "revoked_at_wall_us must be non-zero, got: {revoked_at_us}"
-    );
-}
-
 #[test]
 fn test_lease_expiry_returns_lease_expiry_struct() {
     let (mut scene, clock) = scene_with_test_clock();
     let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease(
-        "test",
-        500,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("test", 500);
     let tile_id = scene
         .create_tile(
             tab_id,
@@ -4021,11 +3640,7 @@ fn test_lease_expiry_returns_lease_expiry_struct() {
 fn locked_tile_ignores_adapter_update_tile_bounds() {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease(
-        "agent",
-        60_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("agent", 60_000);
     let tile_id = scene
         .create_tile(
             tab_id,
@@ -4085,11 +3700,7 @@ fn locked_tile_ignores_adapter_update_tile_bounds() {
 fn removing_tile_clears_viewer_geometry_lock() {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease(
-        "agent",
-        60_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("agent", 60_000);
     let tile_id = scene
         .create_tile(
             tab_id,
@@ -4118,11 +3729,7 @@ fn removing_tile_clears_viewer_geometry_lock() {
 fn portal_scene_with_minimize() -> (SceneGraph, SceneId, SceneId, SceneId) {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease(
-        "portal",
-        60_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("portal", 60_000);
     // Frame = the large anchor at (100,100) 600x400.
     let frame_id = scene
         .create_tile(
@@ -4230,7 +3837,7 @@ fn header_band_survives_full_tile_click_to_focus_region() {
     // INSIDE it (titlebar buttons), never a full-tile client-area region.
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease("proj", 60_000, vec![Capability::CreateTiles]);
+    let lease_id = scene.grant_lease("proj", 60_000);
     let tile_id = scene
         .create_tile(
             tab_id,
@@ -4334,7 +3941,7 @@ fn portal_header_band_anchors_includes_single_scrollable_tile() {
     // as it gets whole-portal resize today).
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease("solo", 60_000, vec![Capability::CreateTiles]);
+    let lease_id = scene.grant_lease("solo", 60_000);
     let tile_id = scene
         .create_tile(
             tab_id,
@@ -4357,7 +3964,7 @@ fn portal_header_band_anchors_excludes_non_scrollable_tiles() {
     // the legacy grip.
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease("plain", 60_000, vec![Capability::CreateTiles]);
+    let lease_id = scene.grant_lease("plain", 60_000);
     scene
         .create_tile(
             tab_id,
@@ -4389,11 +3996,7 @@ fn portal_anchor_tile_picks_largest_area_member() {
 fn portal_scene_with_declared_surface(header_h: f32) -> (SceneGraph, SceneId) {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab = scene.create_tab("Main", 0).unwrap();
-    let lease = scene.grant_lease(
-        "portal",
-        60_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease = scene.grant_lease("portal", 60_000);
     let tile = scene
         .create_tile(
             tab,
@@ -4462,11 +4065,7 @@ fn portal_header_band_anchors_keys_off_declared_header_part() {
 fn portal_header_band_clamps_negative_part_origin_to_tile() {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab = scene.create_tab("Main", 0).unwrap();
-    let lease = scene.grant_lease(
-        "portal",
-        60_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease = scene.grant_lease("portal", 60_000);
     let tile = scene
         .create_tile(
             tab,
@@ -4517,11 +4116,7 @@ fn portal_header_band_clamps_negative_part_origin_to_tile() {
 fn portal_header_band_anchors_falls_back_without_header_part() {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab = scene.create_tab("Main", 0).unwrap();
-    let lease = scene.grant_lease(
-        "portal",
-        60_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease = scene.grant_lease("portal", 60_000);
     let tile = scene
         .create_tile(tab, "portal", lease, Rect::new(0.0, 0.0, 300.0, 200.0), 1)
         .unwrap();
@@ -4568,11 +4163,7 @@ fn live_exemplar_portal_scene() -> (SceneGraph, SceneId, SceneId, SceneId, Scene
     const PORTAL_H: f32 = 680.0;
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab = scene.create_tab("Main", 0).unwrap();
-    let lease = scene.grant_lease(
-        "portal",
-        60_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease = scene.grant_lease("portal", 60_000);
     // Backstop FIRST (z lowest), same bounds as the frame.
     let backstop = scene
         .create_tile(
@@ -4800,7 +4391,7 @@ fn tile_font_scale_defaults_to_one_and_round_trips() {
 fn tile_font_scale_cleared_on_tile_removal() {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease("agent", 60_000, vec![Capability::CreateTiles]);
+    let lease_id = scene.grant_lease("agent", 60_000);
     let tile_id = scene
         .create_tile(
             tab_id,
@@ -4836,11 +4427,7 @@ fn tile_font_scale_cleared_on_tile_removal() {
 fn scene_with_accented_tile() -> (SceneGraph, TestClock, SceneId, SceneId) {
     let (mut scene, clock) = scene_with_test_clock();
     let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease(
-        "agent",
-        60_000,
-        vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-    );
+    let lease_id = scene.grant_lease("agent", 60_000);
     let tile_id = scene
         .create_tile(
             tab_id,
@@ -4993,11 +4580,7 @@ mod inline_subtree_materialization {
     fn scene_with_tile() -> (SceneGraph, SceneId) {
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
-        let lease_id = scene.grant_lease(
-            "agent",
-            60_000,
-            vec![Capability::CreateTiles, Capability::ModifyOwnTiles],
-        );
+        let lease_id = scene.grant_lease("agent", 60_000);
         let tile_id = scene
             .create_tile(
                 tab_id,

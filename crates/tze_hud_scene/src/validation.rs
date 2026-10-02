@@ -67,9 +67,6 @@ pub enum ValidationError {
         limit: usize,
     },
 
-    #[error("capability missing: {capability}")]
-    CapabilityMissing { capability: String },
-
     /// A mutation referenced a ResourceId that is not registered with the runtime.
     /// RFC 0001 §2.4: StaticImageNode referencing unknown ResourceId.
     #[error("resource not found: {id}")]
@@ -171,10 +168,6 @@ pub enum ValidationError {
         reason: String,
     },
 
-    /// Widget publish rejected: calling agent lacks `publish_widget:<widget_name>` capability.
-    #[error("widget capability missing: publish_widget:{widget}")]
-    WidgetCapabilityMissing { widget: String },
-
     /// Widget publish rejected: publisher has reached the per-namespace publication limit.
     ///
     /// Mirrors `ZoneMaxPublishersReached` for the widget publish path.
@@ -193,7 +186,7 @@ pub enum ValidationError {
 /// - Stage 1 (Lease): `LeaseNotFound`, `LeaseExpired`, `LeaseInvalidState`
 /// - Stage 2 (Budget): `BudgetExceeded`, `BatchSizeExceeded`
 /// - Stage 3 (Bounds): `BoundsOutOfRange`, `BoundsInvalid`
-/// - Stage 4 (Type): `TypeMismatch`, `CapabilityMissing`
+/// - Stage 4 (Type): `TypeMismatch`
 /// - Stage 5 (Invariant): `CycleDetected`, `ZOrderConflict`, `DuplicateId`,
 ///   `ReferenceInvalid`, `TabNotFound`, `TileNotFound`, `NodeNotFound`
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -212,9 +205,8 @@ pub enum ValidationErrorCode {
     BoundsOutOfRange,
     BoundsInvalid,
 
-    // Stage 4 – Type / capability
+    // Stage 4 – Type
     TypeMismatch,
-    CapabilityMissing,
 
     // Stage 5 – Invariants
     CycleDetected,
@@ -252,7 +244,6 @@ pub enum ValidationErrorCode {
     WidgetUnknownParameter,
     WidgetParameterTypeMismatch,
     WidgetParameterInvalidValue,
-    WidgetCapabilityMissing,
     WidgetMaxPublishersReached,
 
     // Unknown / future-proof catch-all
@@ -292,7 +283,6 @@ impl ValidationErrorCode {
             }
             ValidationError::InvalidField { .. } => Self::InvalidField,
             ValidationError::BudgetExceeded { .. } => Self::BudgetExceeded,
-            ValidationError::CapabilityMissing { .. } => Self::CapabilityMissing,
             ValidationError::ZoneNotFound { .. } => Self::ZoneNotFound,
             ValidationError::ZonePublishTokenInvalid { .. } => Self::ZonePublishTokenInvalid,
             ValidationError::ZoneMediaTypeMismatch { .. } => Self::ZoneMediaTypeMismatch,
@@ -313,7 +303,6 @@ impl ValidationErrorCode {
             ValidationError::WidgetParameterInvalidValue { .. } => {
                 Self::WidgetParameterInvalidValue
             }
-            ValidationError::WidgetCapabilityMissing { .. } => Self::WidgetCapabilityMissing,
             ValidationError::WidgetMaxPublishersReached { .. } => Self::WidgetMaxPublishersReached,
         }
     }
@@ -469,10 +458,6 @@ fn build_context_and_hint(
             }),
             Some(json!({ "action": "adjust_z_order", "suggested_z_order": z_order + 1 })),
         ),
-        ValidationError::CapabilityMissing { capability } => (
-            json!({ "field": "capability", "value": capability, "constraint": "lease must have this capability" }),
-            None,
-        ),
         ValidationError::DuplicateDisplayOrder { order } => (
             json!({ "field": "display_order", "value": order, "constraint": "display_order must be unique per scene" }),
             None,
@@ -531,10 +516,6 @@ fn build_context_and_hint(
             reason,
         } => (
             json!({ "field": "param_value", "param": param, "widget": widget, "constraint": reason }),
-            None,
-        ),
-        ValidationError::WidgetCapabilityMissing { widget } => (
-            json!({ "field": "capability", "value": format!("publish_widget:{widget}"), "constraint": "session must have publish_widget:<widget_name> capability" }),
             None,
         ),
         ValidationError::WidgetMaxPublishersReached { widget, max } => (

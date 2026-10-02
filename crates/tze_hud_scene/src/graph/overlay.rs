@@ -176,7 +176,7 @@ pub struct RuntimeOverlayState {
     #[serde(skip, default)]
     pub tile_composer_nodes: HashMap<SceneId, SceneId>,
     /// First-class text-stream portal surface descriptors, keyed by host tile id
-    /// (RFC 0013 §7.2 promotion; hud-tc153).
+    /// (hud-tc153).
     ///
     /// Declared by the Transactional [`SceneMutation::SetPortalSurface`] apply
     /// path and patched by the coalescible StateStream
@@ -435,7 +435,7 @@ impl SceneGraph {
         Ok(())
     }
 
-    /// Set the lifecycle accent with a full lease + capability gate (checked path).
+    /// Set the lifecycle accent with a full lease gate (checked path).
     ///
     /// Mirrors the checked tile-content mutations
     /// ([`set_tile_root_checked`](Self::set_tile_root_checked),
@@ -460,7 +460,7 @@ impl SceneGraph {
     ) -> Result<(), ValidationError> {
         let lease_id = self.portal_tile_lease_checked(tile_id, agent_namespace)?;
         self.require_active_lease(lease_id)?;
-        self.require_capability(lease_id, Capability::ModifyOwnTiles)?;
+        self.require_active_lease(lease_id)?;
         self.set_tile_lifecycle_accent(tile_id, accent)
     }
 
@@ -480,7 +480,7 @@ impl SceneGraph {
         }
     }
 
-    /// Clear the lifecycle accent with a full lease + capability gate (checked path).
+    /// Clear the lifecycle accent with a full lease gate (checked path).
     ///
     /// The clear-side counterpart to
     /// [`set_tile_lifecycle_accent_checked`](Self::set_tile_lifecycle_accent_checked):
@@ -494,7 +494,7 @@ impl SceneGraph {
     ) -> Result<(), ValidationError> {
         let lease_id = self.portal_tile_lease_checked(tile_id, agent_namespace)?;
         self.require_active_lease(lease_id)?;
-        self.require_capability(lease_id, Capability::ModifyOwnTiles)?;
+        self.require_active_lease(lease_id)?;
         self.clear_tile_lifecycle_accent(tile_id);
         Ok(())
     }
@@ -546,7 +546,7 @@ impl SceneGraph {
         Ok(())
     }
 
-    /// Set the composer interaction with a full lease + capability gate (checked
+    /// Set the composer interaction with a full lease gate (checked
     /// path).
     ///
     /// Mirrors the checked tile-content mutations
@@ -566,7 +566,7 @@ impl SceneGraph {
     ) -> Result<(), ValidationError> {
         let lease_id = self.portal_tile_lease_checked(tile_id, agent_namespace)?;
         self.require_active_lease(lease_id)?;
-        self.require_capability(lease_id, Capability::ModifyOwnTiles)?;
+        self.require_active_lease(lease_id)?;
         self.set_tile_composer_interaction(tile_id, region)
     }
 
@@ -589,7 +589,7 @@ impl SceneGraph {
         }
     }
 
-    /// Clear the composer interaction with a full lease + capability gate (checked
+    /// Clear the composer interaction with a full lease gate (checked
     /// path) — the clear-side counterpart to
     /// [`set_tile_composer_interaction_checked`](Self::set_tile_composer_interaction_checked)
     /// (hud-a745w).
@@ -600,7 +600,7 @@ impl SceneGraph {
     ) -> Result<(), ValidationError> {
         let lease_id = self.portal_tile_lease_checked(tile_id, agent_namespace)?;
         self.require_active_lease(lease_id)?;
-        self.require_capability(lease_id, Capability::ModifyOwnTiles)?;
+        self.require_active_lease(lease_id)?;
         self.clear_tile_composer_interaction(tile_id);
         Ok(())
     }
@@ -610,16 +610,14 @@ impl SceneGraph {
         self.overlay.tile_composer_interactions.get(&tile_id)
     }
 
-    // ── Portal surface (RFC 0013 §7.2 promotion; hud-tc153) ──────────────────
+    // ── Portal surface (hud-tc153) ──────────────────
 
     /// Declare or replace the first-class portal surface descriptor over a tile.
     ///
-    /// Enforces namespace isolation plus a live lease + `ModifyOwnTiles`
-    /// capability check (mirroring the checked tile-content mutation paths such
-    /// as [`set_tile_root_checked`](Self::set_tile_root_checked)): a portal
-    /// surface is a content-layer, lease-governed object (RFC 0013 §6), so an
-    /// agent whose `ModifyOwnTiles` capability has been revoked mid-lease must
-    /// not be able to mutate it, even while its lease is otherwise active.
+    /// Enforces namespace isolation plus a live lease check (mirroring the
+    /// checked tile-content mutation paths such as
+    /// [`set_tile_root_checked`](Self::set_tile_root_checked)): a portal
+    /// surface is a content-layer, lease-governed object.
     ///
     /// Validates the surface's structural invariants
     /// ([`PortalSurface::validate_structure`]) and that every part's referenced
@@ -634,7 +632,7 @@ impl SceneGraph {
     ) -> Result<(), ValidationError> {
         let lease_id = self.portal_tile_lease_checked(tile_id, agent_namespace)?;
         self.require_active_lease(lease_id)?;
-        self.require_capability(lease_id, Capability::ModifyOwnTiles)?;
+        self.require_active_lease(lease_id)?;
         if let Err(reason) = surface.validate_structure() {
             return Err(ValidationError::InvalidPortalSurface { tile_id, reason });
         }
@@ -665,9 +663,8 @@ impl SceneGraph {
     /// unchanged. Errors if no portal surface has been declared on `tile_id`.
     /// Bumps `scene.version` only when a field actually changes.
     ///
-    /// Enforces the same namespace + live lease/`ModifyOwnTiles` capability gate
-    /// as [`set_portal_surface`](Self::set_portal_surface) before touching state,
-    /// so a revoked capability blocks state patches too.
+    /// Enforces the same namespace + live lease gate as
+    /// [`set_portal_surface`](Self::set_portal_surface) before touching state.
     pub fn update_portal_surface_state(
         &mut self,
         tile_id: SceneId,
@@ -677,7 +674,7 @@ impl SceneGraph {
     ) -> Result<(), ValidationError> {
         let lease_id = self.portal_tile_lease_checked(tile_id, agent_namespace)?;
         self.require_active_lease(lease_id)?;
-        self.require_capability(lease_id, Capability::ModifyOwnTiles)?;
+        self.require_active_lease(lease_id)?;
         let surface = self
             .overlay
             .portal_surfaces
@@ -712,7 +709,7 @@ impl SceneGraph {
     /// Mirrors the tile-content `get_tile_lease_checked` gate (which lives in the
     /// `tiles` submodule and is not visible here): the tile must exist and belong
     /// to `agent_namespace`. Returns the tile's `lease_id` so the caller can layer
-    /// on `require_active_lease` / `require_capability`.
+    /// on `require_active_lease`.
     fn portal_tile_lease_checked(
         &self,
         tile_id: SceneId,
@@ -953,7 +950,7 @@ impl SceneGraph {
         }
     }
 
-    /// Set the unread-output count with a full lease + capability gate (checked
+    /// Set the unread-output count with a full lease gate (checked
     /// path), mirroring
     /// [`set_tile_lifecycle_accent_checked`](Self::set_tile_lifecycle_accent_checked):
     /// namespace isolation, a live `require_active_lease`, and `ModifyOwnTiles`.
@@ -975,7 +972,7 @@ impl SceneGraph {
     ) -> Result<(), ValidationError> {
         let lease_id = self.portal_tile_lease_checked(tile_id, agent_namespace)?;
         self.require_active_lease(lease_id)?;
-        self.require_capability(lease_id, Capability::ModifyOwnTiles)?;
+        self.require_active_lease(lease_id)?;
         self.set_tile_unread_count(tile_id, count);
         Ok(())
     }

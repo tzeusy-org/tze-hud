@@ -51,7 +51,7 @@ use tze_hud_resource::{
     ResourceError as StoreResourceError, ResourceStored as StoreResourceStored,
     RuntimeWidgetStoreError, RuntimeWidgetStorePutOutcome as DurablePutOutcome,
 };
-use tze_hud_scene::element_store::{ElementStore, ElementStoreEntry, ElementType};
+use tze_hud_scene::element_store::{ElementStoreEntry, ElementType};
 use tze_hud_scene::graph::SceneGraph;
 use tze_hud_scene::types::*;
 use tze_hud_widget::{RuntimeWidgetAssetError, register_runtime_widget_svg_asset};
@@ -60,6 +60,7 @@ use tze_hud_widget::{RuntimeWidgetAssetError, register_runtime_widget_svg_asset}
 
 pub mod budget_gate;
 pub mod degradation_notice_bus;
+mod element_persist;
 pub mod freeze_queue;
 pub mod handshake;
 pub mod input;
@@ -83,9 +84,13 @@ pub use budget_gate::{
 pub use degradation_notice_bus::{DegradationNoticeReceiver, DegradationNoticeSender};
 // FreezeEnqueueResult, FREEZE_QUEUE_CAPACITY, and SessionFreezeQueue are used
 // transitively in `mod tests { use super::* }`.
+use element_persist::{
+    ElementStorePersistRequest, persist_created_tile_entries, persist_element_store,
+    touch_element_store_entry_by_id, touch_element_store_entry_by_namespace,
+};
 #[allow(unused_imports)]
 use freeze_queue::{FREEZE_QUEUE_CAPACITY, FreezeEnqueueResult, SessionFreezeQueue};
-use handshake::{handle_session_init, handle_session_resume};
+use handshake::{HandshakeCtx, handle_session_init, handle_session_resume};
 use input::{
     handle_input_capture_release, handle_input_capture_request, handle_input_focus_request,
 };
@@ -97,7 +102,7 @@ pub use lease_expiry_bus::{LeaseExpiryNotice, LeaseExpiryReceiver, LeaseExpirySe
 use leases::{handle_lease_release, handle_lease_renew, handle_lease_request};
 pub use lifecycle::SessionState;
 use mutations::{apply_queued_batch_to_scene, handle_mutation_batch};
-pub use service::HudSessionImpl;
+pub use service::{HudSessionImpl, SessionDeps};
 use stream_session::StreamSession;
 use subscriptions_cap::{handle_list_elements_request, handle_subscription_change};
 pub use traffic::{TrafficClass, classify_server_payload};
@@ -192,264 +197,6 @@ pub(super) fn bytes_to_scene_id(bytes: &[u8]) -> Result<tze_hud_scene::SceneId, 
     Ok(tze_hud_scene::SceneId::from_uuid(uuid))
 }
 
-/// Captures the data needed to persist the element store outside the shared-state lock.
-pub(super) struct ElementStorePersistRequest {
-    store: ElementStore,
-    path: std::path::PathBuf,
-}
-
-/// Update tile entries in the element store and return an optional persistence request.
-pub(super) async fn persist_created_tile_entries(
-    st: &mut SharedState,
-    created_ids: &[SceneId],
-) -> Option<ElementStorePersistRequest> {
-    if created_ids.is_empty() {
-        return None;
-    }
-
-    // `(id, namespace, z_order)` for each just-created tile, plus the ids of
-    // every tile currently live in the scene (needed to tell a recreated portal
-    // member's orphaned entry from a still-live sibling's — hud-08nls).
-    let (created_tiles, live_ids): (
-        Vec<(SceneId, String, u32)>,
-        std::collections::HashSet<SceneId>,
-    ) = {
-        let scene = st.scene.lock().await;
-        let created = created_ids
-            .iter()
-            .filter_map(|id| {
-                scene
-                    .tiles
-                    .get(id)
-                    .map(|tile| (*id, tile.namespace.clone(), tile.z_order))
-            })
-            .collect();
-        let live = scene.tiles.keys().copied().collect();
-        (created, live)
-    };
-
-    if created_tiles.is_empty() {
-        return None;
-    }
-
-    let now = now_ms();
-    let mut changed = false;
-    let recreated: Vec<tze_hud_scene::element_store::RecreatedTile> = created_tiles
-        .iter()
-        .map(
-            |(id, namespace, z_order)| tze_hud_scene::element_store::RecreatedTile {
-                id: *id,
-                namespace: namespace.clone(),
-                z_order: *z_order,
-            },
-        )
-        .collect();
-    for (id, namespace, z_order) in created_tiles {
-        match st.element_store.entries.get_mut(&id) {
-            Some(entry) => {
-                if entry.element_type != ElementType::Tile {
-                    entry.element_type = ElementType::Tile;
-                    changed = true;
-                }
-                if entry.namespace != namespace {
-                    entry.namespace = namespace;
-                    changed = true;
-                }
-                if entry.z_order != z_order {
-                    entry.z_order = z_order;
-                    changed = true;
-                }
-                if entry.created_at == 0 {
-                    entry.created_at = now;
-                    changed = true;
-                }
-                if entry.last_published_at != now {
-                    entry.last_published_at = now;
-                    changed = true;
-                }
-                // A just-published tile is live, so it starts a fresh retention
-                // window; clear any accumulated unseen-restart count (hud-fwgv7).
-                if entry.unseen_restarts != 0 {
-                    entry.unseen_restarts = 0;
-                    changed = true;
-                }
-                if entry.geometry_override.is_some() {
-                    entry.geometry_override = None;
-                    changed = true;
-                }
-            }
-            None => {
-                st.element_store.entries.insert(
-                    id,
-                    ElementStoreEntry {
-                        element_type: ElementType::Tile,
-                        namespace,
-                        created_at: now,
-                        last_published_at: now,
-                        z_order,
-                        unseen_restarts: 0,
-                        geometry_override: None,
-                    },
-                );
-                changed = true;
-            }
-        }
-    }
-
-    // Re-home any durable override whose portal member tile was recreated with a
-    // fresh SceneId (the entries were just inserted above with no override; a
-    // matching orphan hands its override over here). Re-lock viewer geometry for
-    // each adopter so a subsequent adapter `UpdateTileBounds` republish cannot
-    // reposition it before the viewer touches it again (mirrors the bootstrap
-    // re-lock in `tze_hud_runtime::element_store`).
-    let adopted = st
-        .element_store
-        .adopt_orphaned_tile_overrides(&recreated, &live_ids);
-    if !adopted.is_empty() {
-        changed = true;
-        let mut scene = st.scene.lock().await;
-        for id in &adopted {
-            scene.lock_viewer_geometry(*id);
-        }
-    }
-
-    if !changed {
-        return None;
-    }
-
-    st.element_store_path
-        .clone()
-        .map(|path| ElementStorePersistRequest {
-            store: st.element_store.clone(),
-            path,
-        })
-}
-
-/// Serialize and atomically write an [`ElementStore`] to disk.
-///
-/// This is the protocol-layer counterpart of
-/// `tze_hud_runtime::element_store::persist_element_store_to_path`.  It is
-/// intentionally a local copy so that `tze_hud_protocol` does not need to
-/// depend on `tze_hud_runtime` (which would create a circular dependency since
-/// `tze_hud_runtime` already depends on `tze_hud_protocol`).
-fn write_element_store_to_path(
-    store: &ElementStore,
-    path: &std::path::Path,
-) -> std::io::Result<()> {
-    use std::fs::{self, OpenOptions};
-    use std::io::Write;
-    use std::path::Path;
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    let toml_text = toml::to_string_pretty(store).map_err(|err| {
-        std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            format!("failed to serialize element_store TOML: {err}"),
-        )
-    })?;
-
-    let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    fs::create_dir_all(parent)?;
-
-    let stem = path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("element_store.toml");
-    let now_ns = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    let temp_path = parent.join(format!(
-        ".{stem}.tmp.{}.{}.{}",
-        std::process::id(),
-        now_ns,
-        tze_hud_scene::types::SceneId::new()
-    ));
-
-    let mut file = OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .open(&temp_path)?;
-    file.write_all(toml_text.as_bytes())?;
-    file.sync_all()?;
-    drop(file);
-
-    if let Err(err) = fs::rename(&temp_path, path) {
-        let _ = fs::remove_file(&temp_path);
-        return Err(err);
-    }
-
-    // On Unix, sync the parent directory so the rename is durable.
-    // On Windows, the rename itself is sufficient.
-    #[cfg(not(target_os = "windows"))]
-    {
-        OpenOptions::new().read(true).open(parent)?.sync_all()?;
-    }
-
-    Ok(())
-}
-
-/// Persist the element store without blocking the async executor worker thread.
-pub(super) async fn persist_element_store(request: Option<ElementStorePersistRequest>) {
-    let Some(request) = request else {
-        return;
-    };
-
-    let path_for_log = request.path.clone();
-    match tokio::task::spawn_blocking(move || {
-        write_element_store_to_path(&request.store, &request.path)
-    })
-    .await
-    {
-        Ok(Ok(())) => {}
-        Ok(Err(err)) => {
-            tracing::warn!(
-                path = %path_for_log.display(),
-                error = %err,
-                "element_store: failed to persist tile IDs"
-            );
-        }
-        Err(err) => {
-            tracing::warn!(
-                path = %path_for_log.display(),
-                error = %err,
-                "element_store: failed to join tile ID persistence task"
-            );
-        }
-    }
-}
-
-pub(super) fn touch_element_store_entry_by_id(
-    st: &mut SharedState,
-    element_id: SceneId,
-    element_type: ElementType,
-    now: u64,
-) -> Option<ElementStorePersistRequest> {
-    let entry = st.element_store.entries.get_mut(&element_id)?;
-    if entry.element_type != element_type {
-        return None;
-    }
-    entry.last_published_at = now;
-    st.element_store_path
-        .clone()
-        .map(|path| ElementStorePersistRequest {
-            store: st.element_store.clone(),
-            path,
-        })
-}
-
-pub(super) fn touch_element_store_entry_by_namespace(
-    st: &mut SharedState,
-    element_type: ElementType,
-    namespace: &str,
-    now: u64,
-) -> Option<ElementStorePersistRequest> {
-    let id = st
-        .element_store
-        .find_id_by_type_namespace(element_type, namespace)?;
-    touch_element_store_entry_by_id(st, id, element_type, now)
-}
-
 /// Broadcast channel capacity for transactional server-push messages.
 ///
 /// Runtime-injected input events use this channel as well as degradation
@@ -484,20 +231,9 @@ impl HudSession for HudSessionImpl {
         let budget_enforcer = self.budget_enforcer.clone();
         let render_wake = self.render_wake.clone();
         let degradation_notices = self.degradation_notices.clone();
-        // This durable lane is subscribed before the handler task starts so a
-        // terminal transition cannot race a newly-connected session's setup.
-        let mut lease_expiry_rx = self.lease_expirations.subscribe();
-        // Clone the input-event sender into the task. The durable subscription
-        // is created only after authentication establishes the namespace.
-        let input_event_tx = self.input_event_tx.clone();
-
-        // Subscribe to the element-repositioned broadcast channel (hud-bs2q.6).
-        // Delivery is gated on SCENE_TOPOLOGY subscription in the session loop.
-        let mut element_repositioned_rx = self.element_repositioned_tx.subscribe();
-
-        // Subscribe to the frame-presented broadcast channel (hud-91uu6).
-        // Delivery is gated on TELEMETRY_FRAMES subscription in the session loop.
-        let mut frame_presented_rx = self.frame_presented_tx.subscribe();
+        // Runtime → session feeds, subscribed before the handler task starts
+        // so a terminal lease transition cannot race the session's setup.
+        let mut feeds = self.subscribe_feeds();
 
         // Create outbound channel
         let (tx, rx) = tokio::sync::mpsc::channel::<Result<ServerMessage, Status>>(
@@ -559,32 +295,20 @@ impl HudSession for HudSessionImpl {
             };
 
             // Process handshake
+            let handshake_ctx = HandshakeCtx {
+                state: &state,
+                agents: &agents,
+                agent_resource_budgets: &agent_resource_budgets,
+                fallback_resource_budget: &fallback_resource_budget,
+                budget_enforcer: budget_enforcer.as_ref(),
+                peer_ip,
+            };
             let mut session = match first_msg.payload {
                 Some(ClientPayload::SessionInit(init)) => {
-                    handle_session_init(
-                        &state,
-                        &agents,
-                        &tx,
-                        &init,
-                        &agent_resource_budgets,
-                        &fallback_resource_budget,
-                        budget_enforcer.as_ref(),
-                        peer_ip,
-                    )
-                    .await
+                    handle_session_init(handshake_ctx, &tx, &init).await
                 }
                 Some(ClientPayload::SessionResume(resume)) => {
-                    handle_session_resume(
-                        &state,
-                        &agents,
-                        &tx,
-                        &resume,
-                        &agent_resource_budgets,
-                        &fallback_resource_budget,
-                        budget_enforcer.as_ref(),
-                        peer_ip,
-                    )
-                    .await
+                    handle_session_resume(handshake_ctx, &tx, &resume).await
                 }
                 _ => {
                     let _ = tx
@@ -613,7 +337,7 @@ impl HudSession for HudSessionImpl {
             // Register the durable input lane only after the session has an
             // authenticated namespace. This prevents unrelated or incomplete
             // sessions from accumulating transactional input for other agents.
-            let mut input_event_rx = input_event_tx.subscribe(session.namespace.clone());
+            let mut input_event_rx = feeds.input_events.subscribe(session.namespace.clone());
 
             // Send SceneSnapshot after successful handshake (RFC 0005 §1.3, §6.4)
             {
@@ -763,7 +487,7 @@ impl HudSession for HudSessionImpl {
                     // `SceneGraph::expire_leases()` owns the transition and
                     // resource cleanup. This per-session durable lane owns the
                     // corresponding wire notification, filtered by lease id.
-                    lease_expiry = lease_expiry_rx.recv() => {
+                    lease_expiry = feeds.lease_expiry.recv() => {
                         if let LoopAction::Break = session.on_lease_expiry(lease_expiry, &tx).await {
                             break;
                         }
@@ -792,7 +516,7 @@ impl HudSession for HudSessionImpl {
                     // Emitted after drag completion or reset-to-default. Delivered to
                     // agents subscribed to SCENE_TOPOLOGY (requires read_scene_topology).
                     // Transactional — never coalesced or dropped. Agent cannot reject.
-                    element_repositioned_result = element_repositioned_rx.recv() => {
+                    element_repositioned_result = feeds.element_repositioned.recv() => {
                         if let LoopAction::Break = session.on_element_repositioned(element_repositioned_result, &tx).await {
                             break;
                         }
@@ -805,7 +529,7 @@ impl HudSession for HudSessionImpl {
                     // that frame's present wall-clock. Delivered to agents subscribed
                     // to TELEMETRY_FRAMES (requires read_telemetry). State-stream —
                     // coalesced/droppable under backpressure. Agent cannot reject.
-                    frame_presented_result = frame_presented_rx.recv() => {
+                    frame_presented_result = feeds.frame_presented.recv() => {
                         if let LoopAction::Break = session.on_frame_presented(
                             frame_presented_result,
                             &degradation_notices,
@@ -1473,36 +1197,6 @@ pub(super) fn validate_timing_hints(
     }
 
     Ok(())
-}
-
-/// Map a canonical v1 capability wire name to the `Capability` enum variant.
-///
-/// Only canonical names (post-validation) reach this function.
-/// Returns `None` for names that have no corresponding enum variant at this
-/// layer (e.g., informational capabilities not enforced by the scene graph).
-pub(super) fn canonical_name_to_capability(name: &str) -> Option<Capability> {
-    match name {
-        "create_tiles" => Some(Capability::CreateTiles),
-        "modify_own_tiles" => Some(Capability::ModifyOwnTiles),
-        "manage_tabs" => Some(Capability::ManageTabs),
-        "upload_resource" => Some(Capability::UploadResource),
-        "read_scene_topology" => Some(Capability::ReadSceneTopology),
-        "access_input_events" => Some(Capability::AccessInputEvents),
-        "read_telemetry" => Some(Capability::ReadTelemetry),
-        "resident_mcp" => Some(Capability::ResidentMcp),
-        "lease:priority:1" => Some(Capability::LeasePriority1),
-        _ if name.starts_with("publish_zone:") => {
-            let zone = name.strip_prefix("publish_zone:").unwrap_or("*");
-            Some(Capability::PublishZone(zone.to_string()))
-        }
-        _ if name.starts_with("publish_widget:") => {
-            let widget = name.strip_prefix("publish_widget:").unwrap_or("*");
-            Some(Capability::PublishWidget(widget.to_string()))
-        }
-        // Higher-priority lease variants beyond priority 1 are not yet represented
-        // in the enum; skip them without error (forward compat).
-        _ => None,
-    }
 }
 
 pub(super) fn capability_grant_covers(granted: &str, requested: &str) -> bool {

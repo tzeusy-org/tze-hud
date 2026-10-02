@@ -166,16 +166,16 @@ are no compatibility shims; removed proto fields are `reserved`.
 | S1 | **Remove dead wire.** Messages that are never sent or never handled: `SceneDelta`, `BackpressureSignal`, `RuntimeTelemetryFrame`, `TelemetryFrame`, `SetImePosition`, `EmitSceneEvent` (never delivered), and `Zone/WidgetRegistry*`. Also `events_legacy.proto`, fields that are never read, duplicate `LeaseStateChange`, deprecated `pre_shared_key`, `DegradationLevel` cut to two values, error enum values that are never set, the dead `SessionConfig`, and three copies of the capability vocabulary. |
 | S2 | **Identity and allowlist.** Per-agent PSK; `allow` replaces the 16-entry capability vocabulary and the resident principal; namespace comes from identity; the portal owner token leaves model context. |
 | S3 | **MCP verbs.** Done: five tools replace 22. One error shape. The token-footprint benchmark adds `tools/list`, discovery, and errors. |
-| S4 | **gRPC verbs.** `Publish`/`Clear`/`Hold`/`ClaimTile`/`Reclaimed`/one `Result`. Collapse the six `HudSessionImpl` constructors into one deps struct. |
+| S4 | **gRPC verbs.** `Publish`/`Clear`/`Hold`/`ClaimTile`/`Reclaimed`/one `Result`. Collapse the six `HudSessionImpl` constructors into one deps struct (done in S4a, with scene capabilities and lease priority removed). |
 | S5 | This file loses "proposal"; `scope.md` marks T5 done. |
 
 **S2 notes (landed).** Config is `[agents.<id>]` with `psk_env` and `allow`;
 `psk_env = "TZE_HUD_PSK"` always means the runtime PSK. Deferred to later
 slices:
 
-- The scene still has its internal `Capability` enum and per-lease priority.
-  `allow` entries expand to those at the session boundary, and every agent
-  lease gets the same priority. Deleting them belongs with S4.
+- The scene's internal `Capability` enum and per-lease priority (removed in
+  S4a). The session server now checks the allow list at the boundary, and
+  leases carry neither.
 - MCP still accepts the JSON-RPC `_auth` param next to the bearer.
 - The tool param structs still deserialize `namespace` and `owner_token`, but
   both are hidden from `tools/list`; the server sets the namespace and fills in

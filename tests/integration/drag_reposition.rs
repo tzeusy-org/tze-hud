@@ -640,7 +640,7 @@ async fn setup_service_with_tile_override(
 
     let mut scene = SceneGraph::new(DISPLAY_W, DISPLAY_H);
     let tab_id = scene.create_tab("Main", 0).expect("create tab");
-    let lease_id = scene.grant_lease("test-agent", 60_000, vec![]);
+    let lease_id = scene.grant_lease("test-agent", 60_000);
     let tile_id = scene
         .create_tile(
             tab_id,
