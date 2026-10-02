@@ -370,16 +370,17 @@ ${config_line}
  Auth: every MCP request must send the pre-shared key (PSK) as a bearer token:
      Authorization: Bearer <your PSK — the value of TZE_HUD_PSK>
 
- Projection (the portal_projection_* tools):
-   The bearer PSK identifies your agent; its [agents.<id>] allow list must
-   include "portal" (the generated config gives [agents.claude] allow = ["*"]).
+ Tools: hud_surfaces, hud_publish, hud_hold, hud_clear, hud_input.
+   The bearer PSK identifies your agent; its [agents.<id>] allow list decides
+   which zones, widgets, and portals it may use (the generated config gives
+   [agents.claude] allow = ["*"]).
    (This block never prints the PSK value itself.)
 
  Paste-ready MCP client config (e.g. .mcp.json / settings.json):
    {
      "mcpServers": {
        "tze-hud-runtime": {
-         "type": "url",
+         "type": "http",
          "url": "${MCP_URL}",
          "headers": {
            "Authorization": "Bearer <PSK from TZE_HUD_PSK>"
@@ -388,7 +389,7 @@ ${config_line}
      }
    }
 
- Then, in the LLM session, invoke the \`hud-projection\` skill and 'attach' —
+ Then, in the LLM session, invoke the \`hud-projection\` skill and publish to a portal —
  see docs/QUICKSTART.md for the full attach walkthrough.
 ────────────────────────────────────────────────────────────────────────────
 

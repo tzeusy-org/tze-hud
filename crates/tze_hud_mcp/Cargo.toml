@@ -14,9 +14,7 @@ tze_hud_projection = { path = "../tze_hud_projection", version = "0.1.0" }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-# Derives MCP tool `inputSchema` payloads directly from the `*Params` structs so
-# `tools/list` cannot drift from the deserialized shape (see crate::schema).
-schemars = { workspace = true }
+
 subtle = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }

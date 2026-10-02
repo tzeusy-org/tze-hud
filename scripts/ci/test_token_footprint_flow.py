@@ -1,98 +1,88 @@
 #!/usr/bin/env python3
-"""Production-framing contract tests for the canonical token-footprint driver."""
+"""Framing contract tests for the canonical token-footprint driver."""
 
 import importlib.util
 import json
-import os
 import pathlib
 import unittest
 from unittest import mock
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-os.environ.setdefault(
-    "PORTAL_CLIENT_PATH",
-    str(ROOT / ".claude/skills/hud-projection/scripts/portal_client.py"),
-)
 SCRIPT = ROOT / "examples/benchmark/token_footprint_flow.py"
 SPEC = importlib.util.spec_from_file_location("token_footprint_flow", SCRIPT)
 flow = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(flow)
 
 
-class CanonicalFlowFramingTests(unittest.TestCase):
-    def test_zone_and_widget_use_standard_mcp_tools_call_framing(self):
+def fake_rpc_factory(calls):
+    def fake_rpc(method, params):
+        calls.append((method, params))
+        if method == "tools/list":
+            result = {"tools": []}
+        else:
+            text = {"ok": True}
+            if params["name"] == "hud_input" and "ack" not in params["arguments"]:
+                text = {"items": [{"id": "i1", "s": flow.PORTAL, "text": "hi"}], "remaining": 0}
+            if params["arguments"].get("surface") == "zone:subtitles":
+                text = {"code": "ZONE_NOT_FOUND", "hint": "call hud_surfaces"}
+                result = {"content": [{"type": "text", "text": json.dumps(text)}], "isError": True}
+                return None, json.dumps({"method": method, "params": params}), "{}", {"result": result}
+            result = {"content": [{"type": "text", "text": json.dumps(text)}]}
+        return None, json.dumps({"method": method, "params": params}), "{}", {"result": result}
+
+    return fake_rpc
+
+
+class CanonicalFlowTests(unittest.TestCase):
+    def setUp(self):
+        flow.transactions.clear()
+
+    def test_every_call_is_standard_mcp(self):
         calls = []
-
-        def fake_recording_rpc(method, params, transaction_method=None):
-            calls.append((method, params, transaction_method))
-            result = {"accepted": True}
-            return {
-                "jsonrpc": "2.0",
-                "id": 1,
-                "result": {
-                    "content": [{"type": "text", "text": json.dumps(result)}],
-                    "isError": False,
-                },
-            }
-
-        with mock.patch.object(flow, "recording_rpc", fake_recording_rpc):
-            self.assertEqual(
-                flow.invoke_mcp_tool("publish_to_zone", {"zone_name": "notification-area"}),
-                {"accepted": True},
-            )
-            self.assertEqual(
-                flow.invoke_mcp_tool("publish_to_widget", {"widget_name": "gauge"}),
-                {"accepted": True},
-            )
-
-        self.assertEqual([call[0] for call in calls], ["tools/call", "tools/call"])
-        self.assertEqual(
-            [call[1]["name"] for call in calls],
-            ["publish_to_zone", "publish_to_widget"],
-        )
-        self.assertEqual(
-            [call[2] for call in calls],
-            ["publish_to_zone", "publish_to_widget"],
-        )
-
-    def test_portal_requests_pin_bare_method_compatibility_frame(self):
-        captured = []
-
-        def unexpected_call_tool(method, params):
-            raise AssertionError(
-                "canonical portal calibration must not follow call_tool dialect policy"
-            )
-
-        def fake_rpc(method, params):
-            captured.append((method, params.copy()))
-            return {"jsonrpc": "2.0", "id": 1, "result": {"accepted": True}}
-
-        with (
-            mock.patch.object(flow.portal_client, "call_tool", unexpected_call_tool),
-            mock.patch.object(flow.portal_client, "rpc", fake_rpc),
+        with mock.patch.object(flow, "rpc", fake_rpc_factory(calls)), mock.patch(
+            "sys.stdout"
         ):
-            for method in (
-                "portal_projection_attach",
-                "portal_projection_publish",
-                "portal_projection_get_pending_input",
-                "portal_projection_acknowledge_input",
-            ):
-                flow.invoke_portal_tool(method, {"projection_id": "fixture"})
+            flow.main()
+        self.assertEqual(calls[0][0], "tools/list")
+        self.assertTrue(all(method == "tools/call" for method, _ in calls[1:]))
+        names = {params["name"] for _, params in calls[1:]}
+        self.assertTrue(names <= {"hud_surfaces", "hud_publish", "hud_hold", "hud_clear", "hud_input"})
 
+    def test_flows_and_operations_are_labelled(self):
+        with mock.patch.object(flow, "rpc", fake_rpc_factory([])), mock.patch("sys.stdout"):
+            flow.main()
+        labels = [(t["flow"], t["operation"]) for t in flow.transactions]
         self.assertEqual(
-            [method for method, _ in captured],
+            labels,
             [
-                "portal_projection_attach",
-                "portal_projection_publish",
-                "portal_projection_get_pending_input",
-                "portal_projection_acknowledge_input",
+                ("tools_list", "tools/list"),
+                ("discover", "hud_surfaces"),
+                ("zone_publish", "hud_publish"),
+                ("widget_publish", "hud_publish"),
+                ("portal", "1_publish_attach"),
+                ("portal", "2_input_poll"),
+                ("portal", "3_input_ack"),
+                ("portal", "4_clear"),
+                ("error", "hud_publish"),
             ],
         )
-        self.assertEqual(
-            [params["operation"] for _, params in captured],
-            ["attach", "publish_output", "get_pending_input", "acknowledge_input"],
-        )
+
+    def test_portal_ack_uses_the_polled_id(self):
+        calls = []
+        with mock.patch.object(flow, "rpc", fake_rpc_factory(calls)), mock.patch("sys.stdout"):
+            flow.main()
+        ack = [p for m, p in calls if m == "tools/call" and "ack" in p["arguments"]]
+        self.assertEqual(ack[0]["arguments"]["ack"], ["i1"])
+
+    def test_unexpected_tool_error_raises(self):
+        def failing_rpc(method, params):
+            result = {"content": [{"type": "text", "text": "{}"}], "isError": True}
+            return None, "{}", "{}", {"result": result}
+
+        with mock.patch.object(flow, "rpc", failing_rpc):
+            with self.assertRaises(RuntimeError):
+                flow.tool("zone_publish", "hud_publish", "hud_publish", {})
 
 
 if __name__ == "__main__":

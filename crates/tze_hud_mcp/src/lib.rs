@@ -13,18 +13,18 @@
 //! control plane in spirit (same scene model) but speaks JSON-RPC for maximum
 //! LLM compatibility.
 //!
-//! ## Tools Exposed
+//! ## Tools
 //!
-//! | Tool              | Description                              |
-//! |-------------------|------------------------------------------|
-//! | `create_tab`      | Create a new tab in the scene            |
-//! | `create_tile`     | Create a tile within a tab               |
-//! | `set_content`     | Set markdown content on a tile's node    |
-//! | `dismiss`         | Delete a tile and release its lease      |
-//! | `publish_to_zone` | Publish content to a named zone          |
-//! | `list_zones`      | List available zones and their state     |
-//! | `list_scene`      | List tabs and zones (guest-restricted)   |
-//! | `register_widget_asset` | Register runtime widget SVG assets |
+//! Five verbs over surfaces (`zone:<name>`, `widget:<name>`,
+//! `portal:<projection_id>`), specified in `docs/api.md`:
+//!
+//! | Tool           | Stage                                      |
+//! |----------------|--------------------------------------------|
+//! | `hud_surfaces` | Discover allowed surfaces and holdings     |
+//! | `hud_publish`  | Claim and fill (zone, widget, portal)      |
+//! | `hud_hold`     | Renew without resending content            |
+//! | `hud_clear`    | Release                                    |
+//! | `hud_input`    | Collect and ack portal replies and actions |
 
 pub mod error;
 pub mod portal_op;

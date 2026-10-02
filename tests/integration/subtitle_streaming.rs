@@ -1,8 +1,8 @@
 //! Subtitle streaming breakpoint reveal — gRPC and MCP publish path verification.
 //!
 //! Implements acceptance criteria for `hud-hzub.4`:
-//! - MCP publish_to_zone with stream_text + breakpoints: breakpoints forwarded to compositor
-//! - gRPC ZonePublish with stream_text + breakpoints: identical behavior to MCP path
+//! - Breakpoints are gRPC-only (the MCP surface has no breakpoints field)
+//! - gRPC ZonePublish with stream_text + breakpoints: breakpoints forwarded to compositor
 //! - Stream-text without breakpoints reveals full text immediately
 //! - list_zones reports subtitle zone with correct contention_policy and accepted_media_types
 //!
@@ -429,7 +429,7 @@ async fn test_grpc_zone_publish_breakpoints_match_mcp_behavior()
 
 /// The subtitle zone has the correct metadata: LatestWins contention, StreamText media type.
 ///
-/// This verifies what both gRPC SceneSnapshot and MCP list_zones would report.
+/// This verifies what both gRPC SceneSnapshot and MCP hud_surfaces would report.
 ///
 /// Spec §Subtitle Contention Policy — Latest Wins.
 /// Spec §Subtitle MCP Test Fixtures — zone_name: "subtitle".
@@ -439,7 +439,7 @@ async fn test_grpc_list_zones_subtitle_metadata() -> Result<(), Box<dyn std::err
     let _server_handle = runtime.start_grpc_server().await?;
 
     // Verify the subtitle zone metadata directly via the scene graph
-    // (the gRPC snapshot and MCP list_zones serialize from the same data).
+    // (the gRPC snapshot and MCP hud_surfaces serialize from the same data).
     {
         let state = runtime.shared_state().lock().await;
         let scene = state.scene.lock().await;

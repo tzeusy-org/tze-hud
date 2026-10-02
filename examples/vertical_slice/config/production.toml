@@ -56,7 +56,7 @@ paths = [
 #   main-progress  → progress-bar widget
 #   main-status    → status-indicator widget
 #
-# IMPORTANT: widget_name in publish_to_widget refers to instance_id (not widget_type).
+# IMPORTANT: the MCP surface widget:<name> refers to instance_id (not widget_type).
 
 # Progress bar: horizontal progress bar in a clearly visible lower-left position.
 # MCP widget_name: "main-progress"

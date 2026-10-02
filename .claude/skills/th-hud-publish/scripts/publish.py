@@ -1,28 +1,28 @@
 #!/usr/bin/env python3
 """
-Publish MCP zone messages to a running tze_hud instance.
+Publish zone messages to a running tze_hud instance (MCP `hud_publish`).
 
 Usage:
-  # List zones
-  publish.py --url http://host:9090 --psk-env HUD_MCP_PSK --list-zones
+  # List the surfaces this PSK may use
+  publish.py --url http://host:9090/mcp --psk-env HUD_MCP_PSK --list-surfaces
 
   # Single inline publish (string content)
-  publish.py --url http://host:9090 --zone alert-banner --content "Hello"
+  publish.py --url http://host:9090/mcp --zone alert-banner --content "Hello"
 
-  # Single inline publish (typed content)
-  publish.py --url http://host:9090 --zone status-bar \
-    --content '{"type":"status_bar","entries":{"build":"passing"}}' \
-    --merge-key build-status
+  # Single inline publish (typed content; `type` is inferred from the zone)
+  publish.py --url http://host:9090/mcp --zone status-bar \
+    --content '{"entries":{"build":"passing"}}' --key build-status
+
+  # Clear your publication from a zone
+  publish.py --url http://host:9090/mcp --zone subtitle --clear
 
   # Batch publish from file
-  publish.py --url http://host:9090 --messages-file msgs.json
+  publish.py --url http://host:9090/mcp --messages-file msgs.json
 
-Content formats:
-  - Plain string: "Hello world" → StreamText
-  - Typed object (JSON): {"type":"notification","text":"Done!","urgency":1}
-  - Types: stream_text, notification, status_bar, solid_color
-
-Only zone_name and content are required per message.
+Message objects: {"zone": "...", "content": ..., "key"?: "...", "ttl_ms"?: N}.
+Content is a plain string, or an object for structured zones
+(notification: title/body/urgency/actions; status_bar: entries;
+solid_color: r/g/b/a). The namespace is the agent the PSK belongs to.
 """
 
 from __future__ import annotations
@@ -36,20 +36,21 @@ import urllib.request
 from typing import Any
 
 
-def rpc_call(
-    url: str, token: str, method: str, params: dict[str, Any], request_id: int
+def call_tool(
+    url: str, token: str, tool: str, arguments: dict[str, Any], request_id: int
 ) -> dict[str, Any]:
-    """Send a single JSON-RPC 2.0 request and return the parsed response.
+    """Call one MCP tool (`tools/call`).
 
-    This uses the runtime's bare-method dialect, where the JSON-RPC ``method``
-    is the tool name directly (e.g. ``publish_to_zone``). The runtime also
-    implements the MCP-standard ``tools/call`` envelope
-    (``method="tools/call"``, ``params={"name": <tool>, "arguments": {...}}``);
-    both dialects reach the same tool dispatch table. The bare form is kept here
-    for brevity; standard MCP clients use ``tools/call``.
+    Returns {"result": <decoded>} or {"error": <decoded>}; a tool error
+    decodes to {"code": ..., "hint": ...}.
     """
     body = json.dumps(
-        {"jsonrpc": "2.0", "id": request_id, "method": method, "params": params}
+        {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "method": "tools/call",
+            "params": {"name": tool, "arguments": arguments},
+        }
     ).encode("utf-8")
     req = urllib.request.Request(
         url=url,
@@ -61,11 +62,16 @@ def rpc_call(
         method="POST",
     )
     with urllib.request.urlopen(req, timeout=20) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+        envelope = json.loads(resp.read().decode("utf-8"))
+    if "error" in envelope:
+        return {"error": envelope["error"]}
+    result = envelope["result"]
+    decoded = json.loads(result["content"][0]["text"])
+    return {"error": decoded} if result.get("isError") else {"result": decoded}
 
 
 def parse_content(raw: str) -> Any:
-    """Parse content: try JSON object first, fall back to plain string."""
+    """Parse content: try a JSON object first, fall back to a plain string."""
     stripped = raw.strip()
     if stripped.startswith("{"):
         try:
@@ -86,15 +92,11 @@ def load_messages(path: str) -> list[dict[str, Any]]:
     for idx, item in enumerate(data):
         if not isinstance(item, dict):
             raise ValueError(f"message[{idx}] must be an object")
-        if not isinstance(item.get("zone_name"), str) or not item["zone_name"].strip():
-            raise ValueError(f"message[{idx}].zone_name must be a non-empty string")
+        if not isinstance(item.get("zone"), str) or not item["zone"].strip():
+            raise ValueError(f"message[{idx}].zone must be a non-empty string")
         content = item.get("content")
-        if content is None:
+        if content is None or content == "":
             raise ValueError(f"message[{idx}].content is required")
-        if isinstance(content, str) and not content:
-            raise ValueError(f"message[{idx}].content must be non-empty")
-        if isinstance(content, dict) and "type" not in content:
-            raise ValueError(f"message[{idx}].content object must have a \"type\" field")
     return data
 
 
@@ -104,34 +106,19 @@ def publish_messages(
     """Publish a list of messages and return (results, any_failed)."""
     results: list[dict[str, Any]] = []
     any_failed = False
-    req_id = 10
-
-    for msg in messages:
-        params: dict[str, Any] = {
-            "zone_name": msg["zone_name"],
+    for req_id, msg in enumerate(messages, start=10):
+        arguments: dict[str, Any] = {
+            "surface": f"zone:{msg['zone']}",
             "content": msg["content"],
         }
-        if "ttl_us" in msg:
-            params["ttl_us"] = int(msg["ttl_us"])
-        if "merge_key" in msg:
-            params["merge_key"] = msg["merge_key"]
-        if "namespace" in msg:
-            params["namespace"] = msg["namespace"]
-
-        response = rpc_call(url, token, "publish_to_zone", params, req_id)
-        ok = "error" not in response
-        if not ok:
+        if "ttl_ms" in msg:
+            arguments["ttl_ms"] = int(msg["ttl_ms"])
+        if "key" in msg:
+            arguments["key"] = msg["key"]
+        response = call_tool(url, token, "hud_publish", arguments, req_id)
+        if "error" in response:
             any_failed = True
-        results.append(
-            {
-                "request_id": req_id,
-                "zone_name": params["zone_name"],
-                "ok": ok,
-                "response": response,
-            }
-        )
-        req_id += 1
-
+        results.append({"surface": arguments["surface"], "response": response})
     return results, any_failed
 
 
@@ -139,118 +126,69 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Publish zone messages to a tze_hud MCP endpoint"
     )
-    parser.add_argument(
-        "--url", required=True, help="MCP HTTP URL (e.g. http://host:9090)"
-    )
+    parser.add_argument("--url", required=True, help="MCP HTTP URL (e.g. http://host:9090/mcp)")
     parser.add_argument(
         "--psk-env",
         default="HUD_MCP_PSK",
-        help="Environment variable containing the pre-shared key (default: HUD_MCP_PSK)",
+        help="Environment variable holding the agent PSK (default: HUD_MCP_PSK)",
     )
-    parser.add_argument(
-        "--list-zones",
-        action="store_true",
-        help="Call list_zones and print results",
-    )
-
-    # Batch mode
-    parser.add_argument(
-        "--messages-file", help="Path to JSON array of message objects"
-    )
-
-    # Inline single-publish mode
-    parser.add_argument(
-        "--zone", help="Zone name for inline single publish"
-    )
-    parser.add_argument(
-        "--content",
-        help="Content for inline publish: plain string or JSON object string",
-    )
-    parser.add_argument(
-        "--merge-key", help="Merge key for inline publish (MergeByKey zones)"
-    )
-    parser.add_argument(
-        "--ttl-us", type=int, help="TTL in microseconds for inline publish"
-    )
-    parser.add_argument(
-        "--namespace", help="Namespace for inline publish"
-    )
-
+    parser.add_argument("--list-surfaces", action="store_true", help="Call hud_surfaces and print results")
+    parser.add_argument("--messages-file", help="Path to JSON array of message objects")
+    parser.add_argument("--zone", help="Zone name for an inline publish or --clear")
+    parser.add_argument("--content", help="Inline content: plain string or JSON object string")
+    parser.add_argument("--key", help="Merge key for the inline publish")
+    parser.add_argument("--ttl-ms", type=int, help="Content lifetime in ms (0 = until cleared)")
+    parser.add_argument("--clear", action="store_true", help="Clear your publication from --zone")
     args = parser.parse_args()
 
-    has_inline = args.zone or args.content
-    if not args.list_zones and not args.messages_file and not has_inline:
-        parser.error(
-            "provide --list-zones, --messages-file, or --zone/--content"
-        )
-    if has_inline and not (args.zone and args.content):
-        parser.error("--zone and --content must both be provided for inline publish")
+    has_inline = args.content is not None
+    if not (args.list_surfaces or args.messages_file or has_inline or args.clear):
+        parser.error("provide --list-surfaces, --messages-file, --zone/--content, or --zone --clear")
+    if (has_inline or args.clear) and not args.zone:
+        parser.error("--content and --clear need --zone")
     if has_inline and args.messages_file:
-        parser.error("cannot combine --zone/--content with --messages-file")
+        parser.error("cannot combine --content with --messages-file")
 
     token = os.getenv(args.psk_env, "")
     if not token:
-        print(
-            f"ERROR: environment variable {args.psk_env} is empty or unset",
-            file=sys.stderr,
-        )
+        print(f"ERROR: environment variable {args.psk_env} is empty or unset", file=sys.stderr)
         return 2
 
     try:
-        if args.list_zones:
-            zones = rpc_call(args.url, token, "list_zones", {}, 1)
-            print(json.dumps(zones, indent=2))
+        if args.list_surfaces:
+            print(json.dumps(call_tool(args.url, token, "hud_surfaces", {}, 1), indent=2))
 
-        if has_inline:
-            msg: dict[str, Any] = {
-                "zone_name": args.zone,
-                "content": parse_content(args.content),
-            }
-            if args.ttl_us is not None:
-                msg["ttl_us"] = args.ttl_us
-            if args.merge_key is not None:
-                msg["merge_key"] = args.merge_key
-            if args.namespace is not None:
-                msg["namespace"] = args.namespace
-
-            results, any_failed = publish_messages(args.url, token, [msg])
-            print(json.dumps({"published": results}, indent=2))
-            if any_failed:
-                return 1
-
-        elif args.messages_file:
-            messages = load_messages(args.messages_file)
+        any_failed = False
+        if args.clear:
+            response = call_tool(args.url, token, "hud_clear", {"surface": f"zone:{args.zone}"}, 2)
+            print(json.dumps({"cleared": response}, indent=2))
+            any_failed = "error" in response
+        elif has_inline or args.messages_file:
+            if has_inline:
+                msg: dict[str, Any] = {"zone": args.zone, "content": parse_content(args.content)}
+                if args.ttl_ms is not None:
+                    msg["ttl_ms"] = args.ttl_ms
+                if args.key is not None:
+                    msg["key"] = args.key
+                messages = [msg]
+            else:
+                messages = load_messages(args.messages_file)
             results, any_failed = publish_messages(args.url, token, messages)
             print(json.dumps({"published": results}, indent=2))
-            if any_failed:
-                return 1
-
-        return 0
+        return 1 if any_failed else 0
 
     except urllib.error.HTTPError as e:
         body = e.read().decode("utf-8", errors="replace")
-        print(
-            json.dumps({"error": "http_error", "status": e.code, "body": body}),
-            file=sys.stderr,
-        )
+        print(json.dumps({"error": "http_error", "status": e.code, "body": body}), file=sys.stderr)
         return 3
     except urllib.error.URLError as e:
-        print(
-            json.dumps({"error": "url_error", "detail": str(e)}),
-            file=sys.stderr,
-        )
+        print(json.dumps({"error": "url_error", "detail": str(e)}), file=sys.stderr)
         return 4
     except ValueError as e:
-        print(
-            json.dumps({"error": "validation_error", "detail": str(e)}),
-            file=sys.stderr,
-        )
+        print(json.dumps({"error": "validation_error", "detail": str(e)}), file=sys.stderr)
         return 5
     except Exception as e:
-        print(
-            json.dumps({"error": "exception", "detail": str(e)}),
-            file=sys.stderr,
-        )
+        print(json.dumps({"error": "exception", "detail": str(e)}), file=sys.stderr)
         return 6
 
 

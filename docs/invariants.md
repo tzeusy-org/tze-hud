@@ -12,13 +12,13 @@ disappears on schedule without the agent returning; content scheduled with
 `present_at` is not shown early. This is what makes a HUD different from a
 dashboard: an agent can say "show this for 8 seconds" in one call.
 
-- `tze_hud_mcp` `test_publish_to_zone_ttl_sets_content_expiry_and_is_swept`
+- `tze_hud_mcp` `test_hud_publish_zone_ttl_sets_content_expiry_and_is_swept`,
+  `delay_ms_holds_content_until_due`
 - `tze_hud_scene` `widget_ttl_only_expired_publication_removed_when_mixed`
 - `tze_hud_compositor` `test_publication_ttl_ms_uses_expires_at_wall_us`
 - `tze_hud_protocol` (gRPC session) `grpc_zone_publish_ttl_sets_expiry_and_is_swept`,
   `grpc_zone_publish_expires_at_is_swept`, `grpc_zone_publish_present_at_is_held_until_due`,
   `grpc_batch_present_at_holds_content_until_due`, `grpc_batch_expires_at_sweeps_tile`
-- Gap: MCP has no `present_at` yet (T5 S3 adds it to `hud_publish`).
 
 ## 2. Three message classes, kept distinct
 
@@ -27,7 +27,7 @@ state-stream (content updates: reliable, coalesced, latest wins), and
 ephemeral (pointer moves, hover: droppable, latest wins). A transport or API
 change must not give one class another's delivery semantics.
 
-- `tze_hud_mcp` `test_publish_to_zone_contention_policy_latest_wins`
+- `tze_hud_mcp` `test_hud_publish_zone_contention_policy_latest_wins`
 - `tze_hud_compositor` `test_latest_wins_zone_renders_only_latest_publication`
 - `tze_hud_input` `test_pointer_move_coalesced_in_batch`, `test_coalesce_scroll_latest_wins`
 
@@ -93,9 +93,9 @@ Every rejection carries a stable error code and a `hint` that tells the model
 what to do next. Codes are part of the API and don't change silently. Keep
 this through T5: a good error saves a model a round trip and its tokens.
 
-- `tze_hud_protocol` `test_build_runtime_error_data_with_context_and_hint`,
-  `mutation_batch_oversized_rejected_with_structured_error`, `mcp_error_codes_are_stable`
-- `tze_hud_mcp` `test_structured_error_has_hint_field`
+- `tze_hud_protocol` `mutation_batch_oversized_rejected_with_structured_error`
+- `tze_hud_mcp` `test_structured_error_has_hint_field`, `error_codes_are_unique_and_documented`,
+  `every_returned_code_is_in_the_closed_set`
 
 ## 9. Time is injected
 

@@ -483,7 +483,7 @@ impl SceneGraph {
     /// Publish parameter values to a named widget instance.
     ///
     /// This is the scene-level implementation for both gRPC WidgetPublish and the
-    /// MCP `publish_to_widget` tool. It validates all parameters against the widget
+    /// MCP `hud_publish` tool (widget surfaces). It validates all parameters against the widget
     /// type's schema and applies the contention policy.
     ///
     /// # Capability

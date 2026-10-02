@@ -457,7 +457,7 @@ SSH_OPTS='-i ~/.ssh/hud-ssh-key -o IdentitiesOnly=yes -o BatchMode=yes' \
 curl -s -X POST http://windows-host.example:8765 \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $MCP_TEST_PSK" \
-  -d '{"jsonrpc":"2.0","method":"list_resources","params":{},"id":1}' | jq .
+  -d '{"jsonrpc":"2.0","method":"tools/list","params":{},"id":1}' | jq .
 ```
 
 If the endpoint is unreachable, stop and investigate launch logs. Do not proceed to publish.
@@ -469,16 +469,14 @@ If the endpoint is unreachable, stop and investigate launch logs. Do not proceed
 cat > /tmp/hud-test-zones.json <<'EOF'
 [
   {
-    "zone_name": "status-bar",
-    "content": "Canonical app deployed and live",
-    "merge_key": "deploy-status",
-    "namespace": "butler-test"
+    "zone": "status-bar",
+    "content": {"entries": {"deploy": "live"}},
+    "key": "deploy-status"
   },
   {
-    "zone_name": "notification-area",
-    "content": "MCP publish validation successful",
-    "merge_key": "mcp-test",
-    "ttl_us": 60000000
+    "zone": "notification-area",
+    "content": {"title": "MCP", "body": "publish validation successful"},
+    "ttl_ms": 60000
   }
 ]
 EOF

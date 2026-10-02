@@ -1,29 +1,26 @@
 [
   {
-    "widget_name": "main-status",
+    "widget": "main-status",
     "params": {
       "status": "online",
       "label": "Butler"
     },
-    "ttl_us": 10000000,
-    "namespace": "user-test"
+    "ttl_ms": 10000
   },
   {
-    "widget_name": "main-status",
+    "widget": "main-status",
     "params": {
       "status": "online",
       "label": "Codex"
     },
-    "ttl_us": 10000000,
-    "namespace": "user-test"
+    "ttl_ms": 10000
   },
   {
-    "widget_name": "main-status",
+    "widget": "main-status",
     "params": {
       "status": "online",
       "label": ""
     },
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   }
 ]

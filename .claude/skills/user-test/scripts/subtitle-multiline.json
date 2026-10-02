@@ -1,8 +1,7 @@
 [
   {
-    "zone_name": "subtitle",
+    "zone": "subtitle",
     "content": "This is a much longer subtitle message designed to test word wrapping behavior across multiple lines. The compositor should wrap this text cleanly within the zone bounds and truncate with ellipsis if it exceeds the vertical space available.",
-    "ttl_us": 10000000,
-    "namespace": "exemplar-test"
+    "ttl_ms": 10000
   }
 ]

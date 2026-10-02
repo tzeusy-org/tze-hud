@@ -72,13 +72,22 @@ STREAM_BREAKPOINTS = [3, 9, 15, 19, 25, 30, 34, 38]
 def rpc_call(
     url: str,
     token: str,
-    method: str,
-    params: dict[str, Any],
+    tool: str,
+    arguments: dict[str, Any],
     request_id: int,
 ) -> dict[str, Any]:
-    """Send a single JSON-RPC 2.0 request and return the parsed response."""
+    """Call one MCP tool (``tools/call``).
+
+    Returns ``{"result": <decoded result>}`` or ``{"error": <decoded error>}``;
+    a tool error decodes to ``{"code": ..., "hint": ...}``.
+    """
     body = json.dumps(
-        {"jsonrpc": "2.0", "id": request_id, "method": method, "params": params}
+        {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "method": "tools/call",
+            "params": {"name": tool, "arguments": arguments},
+        }
     ).encode("utf-8")
     req = urllib.request.Request(
         url=url,
@@ -90,7 +99,12 @@ def rpc_call(
         method="POST",
     )
     with urllib.request.urlopen(req, timeout=20) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+        envelope = json.loads(resp.read().decode("utf-8"))
+    if "error" in envelope:
+        return {"error": envelope["error"]}
+    result = envelope["result"]
+    decoded = json.loads(result["content"][0]["text"])
+    return {"error": decoded} if result.get("isError") else {"result": decoded}
 
 
 # ---------------------------------------------------------------------------
@@ -109,15 +123,15 @@ def publish_stream_text(
 ) -> dict[str, Any]:
     """Publish a stream_text payload (plain string content) to the subtitle zone."""
     params: dict[str, Any] = {
-        "zone_name": ZONE_NAME,
+        "surface": f"zone:{ZONE_NAME}",
         "content": text,
-        "ttl_us": ttl_ms * 1000,
-        "namespace": NAMESPACE,
+        "ttl_ms": ttl_ms,
     }
-    if breakpoints is not None:
-        params["breakpoints"] = breakpoints
+    # Breakpoints are not on the MCP surface (docs/api.md); kept in the
+    # signature so phases still document the intended reveal points.
+    del breakpoints
 
-    response = rpc_call(url, token, "publish_to_zone", params, req_id)
+    response = rpc_call(url, token, "hud_publish", params, req_id)
     ok = "error" not in response
     status = "ok" if ok else f"ERR: {response.get('error')}"
     tag = f"[{label}]" if label else ""

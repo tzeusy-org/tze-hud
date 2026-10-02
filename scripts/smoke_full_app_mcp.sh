@@ -6,7 +6,7 @@
 #   1. Linux cross-build of the canonical tze_hud Windows executable
 #   2. Deploy + launch on Windows over SSH/SCP
 #   3. MCP HTTP reachability gate (hard failure before publish)
-#   4. Live publish_to_zone smoke with structured result output
+#   4. Live hud_publish smoke with structured result output
 #
 # Exit codes:
 #   0   full smoke passed
@@ -335,7 +335,7 @@ if [[ "$NO_PUBLISH" -eq 1 ]]; then
   exit 0
 fi
 
-step "4/4  MCP publish_to_zone smoke"
+step "4/4  MCP hud_publish smoke"
 info "zone:    ${ZONE_NAME}"
 info "url:     ${MCP_URL}"
 
@@ -347,11 +347,10 @@ TIMESTAMP="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 cat > "${MESSAGES_FILE}" <<EOF
 [
   {
-    "zone_name": "${ZONE_NAME}",
-    "content": "smoke: full-app MCP publish ok at ${TIMESTAMP}",
-    "merge_key": "smoke-status",
-    "ttl_us": 60000000,
-    "namespace": "smoke-test"
+    "zone": "${ZONE_NAME}",
+    "content": {"entries": {"smoke": "MCP publish ok at ${TIMESTAMP}"}},
+    "key": "smoke-status",
+    "ttl_ms": 60000
   }
 ]
 EOF
@@ -364,7 +363,7 @@ PUBLISH_OUTPUT="$(TZE_HUD_PSK="${PSK}" \
     --url "${MCP_URL}" \
     --psk-env TZE_HUD_PSK \
     --messages-file "${MESSAGES_FILE}" \
-    --list-zones \
+    --list-surfaces \
     2>&1)" || PUBLISH_EXIT=$?
 
 echo
@@ -393,8 +392,8 @@ if command -v python3 >/dev/null 2>&1; then
 import json, sys
 
 text = sys.stdin.read()
-# Find the last JSON object in the output (list_zones may precede it).
-# published_zone_batch outputs one JSON line for list_zones and one for published.
+# Find the last JSON object in the output (hud_surfaces may precede it).
+# published_zone_batch outputs one JSON line for hud_surfaces and one for published.
 lines = [l.strip() for l in text.splitlines() if l.strip().startswith("{")]
 result = None
 for line in reversed(lines):

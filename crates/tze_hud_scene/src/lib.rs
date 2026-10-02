@@ -41,6 +41,7 @@ pub use graph::{
     // RFC 0001 §2.1 scene-level capacity constants
     MAX_TABS,
     MAX_TILES_PER_TAB,
+    PendingAction,
     RuntimeOverlayState,
     SceneGraph,
     // RFC 0001 §2.3 zone band reservation

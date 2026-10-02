@@ -1,20 +1,17 @@
 [
   {
-    "zone_name": "subtitle",
+    "zone": "subtitle",
     "content": "First subtitle — should be replaced immediately",
-    "ttl_us": 5000000,
-    "namespace": "exemplar-test"
+    "ttl_ms": 5000
   },
   {
-    "zone_name": "subtitle",
+    "zone": "subtitle",
     "content": "Second subtitle — also replaced",
-    "ttl_us": 5000000,
-    "namespace": "exemplar-test"
+    "ttl_ms": 5000
   },
   {
-    "zone_name": "subtitle",
+    "zone": "subtitle",
     "content": "Third subtitle — this one stays",
-    "ttl_us": 5000000,
-    "namespace": "exemplar-test"
+    "ttl_ms": 5000
   }
 ]

@@ -27,11 +27,6 @@ pub enum InputCaptureCommand {
     Release {
         device_id: u32,
     },
-    /// Inject text into the active composer draft buffer, as if pasted from
-    /// the clipboard. Delivered from the MCP plane via `inject_composer_paste`.
-    ComposerPasteInject {
-        text: String,
-    },
 }
 
 /// Stored runtime widget SVG asset metadata/content keyed by strong hash.

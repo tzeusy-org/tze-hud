@@ -1,18 +1,16 @@
 [
   {
-    "zone_name": "alert-banner",
+    "zone": "alert-banner",
     "content": "HUD test: alert-banner active",
-    "ttl_us": 30000000,
-    "namespace": "user-test"
+    "ttl_ms": 30000
   },
   {
-    "zone_name": "subtitle",
+    "zone": "subtitle",
     "content": "HUD test: subtitle zone rendering",
-    "ttl_us": 30000000,
-    "namespace": "user-test"
+    "ttl_ms": 30000
   },
   {
-    "zone_name": "status-bar",
+    "zone": "status-bar",
     "content": {
       "type": "status_bar",
       "entries": {
@@ -21,23 +19,21 @@
         "host": "windows"
       }
     },
-    "merge_key": "test-status",
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "key": "test-status",
+    "ttl_ms": 60000
   },
   {
-    "zone_name": "notification-area",
+    "zone": "notification-area",
     "content": {
       "type": "notification",
       "text": "HUD zone test complete",
       "icon": "",
       "urgency": 1
     },
-    "ttl_us": 15000000,
-    "namespace": "user-test"
+    "ttl_ms": 15000
   },
   {
-    "zone_name": "ambient-background",
+    "zone": "ambient-background",
     "content": {
       "type": "solid_color",
       "r": 0.1,
@@ -45,11 +41,10 @@
       "b": 0.4,
       "a": 0.05
     },
-    "ttl_us": 300000000,
-    "namespace": "user-test"
+    "ttl_ms": 300000
   },
   {
-    "zone_name": "pip",
+    "zone": "pip",
     "content": {
       "type": "solid_color",
       "r": 0.2,
@@ -57,7 +52,6 @@
       "b": 0.9,
       "a": 0.05
     },
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   }
 ]

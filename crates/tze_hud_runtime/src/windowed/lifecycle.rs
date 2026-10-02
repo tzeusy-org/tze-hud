@@ -1445,39 +1445,8 @@ impl WinitApp {
                         dispatch_capture_released_event(&self.state.input_event_tx, dispatch);
                     }
                 }
-                // ComposerPasteInject is handled by drain_paste_inject via the
-                // paste_inject_rx channel; it does not travel through
-                // input_capture_rx and should never appear here.
-                tze_hud_protocol::session::InputCaptureCommand::ComposerPasteInject { .. } => {
-                    tracing::warn!("ComposerPasteInject arrived on input_capture_rx — ignored");
-                }
             }
         }
-    }
-
-    /// Drain MCP paste ingress and report whether it changed compositor-visible
-    /// composer state. The caller emits a render wake only for a `true` result,
-    /// after all main-thread settle work has completed.
-    pub(super) fn drain_paste_inject(&mut self) -> bool {
-        let mut scene_changed = false;
-        while let Ok(text) = self.state.paste_inject_rx.try_recv() {
-            let input_started = std::time::Instant::now();
-            let (outcome, _batch) = self.state.input_processor.inject_paste_to_composer(&text);
-            if outcome != tze_hud_input::EditOutcome::Unchanged {
-                scene_changed = true;
-                tracing::debug!(outcome = ?outcome, "composer: paste injected via runtime API");
-                self.push_local_composer_echo(input_started);
-                // hud-sq2ss: mirror hud-qbcp8's typing reset-to-tail for the
-                // MCP paste-inject path. `push_local_composer_echo` above only
-                // updates the local-echo overlay; without this, a viewer
-                // scrolled back through their input-pane history stays
-                // stranded when paste-injected text lands in their composer.
-                if let Some(tile_id) = self.composer_focused_tile_id() {
-                    self.reset_input_history_scroll_to_tail(tile_id);
-                }
-            }
-        }
-        scene_changed
     }
 
     pub(super) fn synthesize_left_release_if_physically_up(&mut self) -> bool {
@@ -1952,8 +1921,12 @@ impl WinitApp {
                                 );
                             }
                             ZoneInteractionKind::Action { callback_id } => {
-                                // Action callback delivery to the owning agent is
-                                // handled by the agent event pipeline (hud-ltgk.7).
+                                // Delivered to the publisher via MCP `hud_input`.
+                                scene.push_pending_action(tze_hud_scene::PendingAction {
+                                    publisher_namespace: publisher_namespace.clone(),
+                                    zone_name: zone_name.clone(),
+                                    callback_id: callback_id.clone(),
+                                });
                                 tracing::debug!(
                                     zone = %zone_name,
                                     published_at_wall_us,

@@ -364,11 +364,6 @@ struct WindowedRuntimeState {
         tokio::sync::mpsc::UnboundedReceiver<tze_hud_protocol::session::InputCaptureCommand>,
     pending_input_capture_commands:
         std::collections::VecDeque<tze_hud_protocol::session::InputCaptureCommand>,
-    /// Runtime paste-injection channel from MCP `inject_composer_paste` tool.
-    ///
-    /// Drained on each `about_to_wait` iteration, matching the
-    /// `drain_input_capture_commands` sibling pattern.
-    paste_inject_rx: tokio::sync::mpsc::UnboundedReceiver<String>,
     /// Focus manager — tracks which node / tile has keyboard focus per tab.
     ///
     /// Updated on every pointer-down via `InputProcessor::process_with_focus`.
@@ -834,7 +829,6 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
         }
         self.refresh_cursor_position_from_os();
         self.drain_input_capture_commands();
-        let paste_scene_changed = self.drain_paste_inject();
         self.synthesize_left_release_if_physically_up();
         self.refresh_widget_hover_tracking();
         self.update_overlay_cursor_hittest();
@@ -883,7 +877,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
         // the main thread (deferred to next about_to_wait if busy).
         let portal_drain = self.drain_portal_projection();
         let portal_scene_changed = portal_drain.scene_changed();
-        let settled_scene_changed = paste_scene_changed || portal_scene_changed;
+        let settled_scene_changed = portal_scene_changed;
         // Prune stale portal_resize_states entries for tiles removed from the
         // scene (hud-kgu8u). Uses try_lock; silently deferred if lock is busy.
         self.prune_portal_resize_states();
@@ -2631,7 +2625,6 @@ impl WindowedRuntime {
         // Scene coherence: the MCP server and gRPC session server share the
         // same `Arc<Mutex<SceneGraph>>` (`shared_scene`).  Mutations applied
         // over gRPC are immediately visible to MCP queries and vice versa.
-        let (paste_inject_tx, paste_inject_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
         // Portal-op channel: bridges MCP async task → winit event-loop thread
         // (hud-bq0gl.2).  When the MCP server starts successfully the sender is
         // moved into it; the receiver is stored in `WindowedRuntimeState` and
@@ -2699,7 +2692,6 @@ impl WindowedRuntime {
                     Arc::clone(&shared_scene),
                     mcp_config,
                     mcp_shutdown,
-                    Some(paste_inject_tx),
                     portal_op_tx_opt.take(),
                     render_wake.clone(),
                     portal_ingress_wake.clone(),
@@ -2968,7 +2960,6 @@ impl WindowedRuntime {
             input_processor: InputProcessor::new(),
             input_capture_rx,
             pending_input_capture_commands: std::collections::VecDeque::new(),
-            paste_inject_rx,
             focus_manager: FocusManager::new(),
             keyboard_processor: KeyboardProcessor::new(),
             telemetry: TelemetryCollector::new(),

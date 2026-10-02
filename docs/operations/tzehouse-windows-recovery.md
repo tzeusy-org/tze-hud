@@ -82,20 +82,13 @@ into Beads notes.
 After the task starts, repeat the TCP probes above and use the MCP `/mcp`
 endpoint, not the bare port URL.
 
-MCP widget discovery:
+MCP discovery (zones and widgets the PSK may use):
 
 ```bash
-python3 .claude/skills/user-test/scripts/publish_widget_batch.py \
+python3 .claude/skills/th-hud-publish/scripts/publish.py \
   --url http://windows-host.example:9090/mcp \
-  --list-widgets
-```
-
-MCP zone discovery:
-
-```bash
-python3 .claude/skills/user-test/scripts/publish_zone_batch.py \
-  --url http://windows-host.example:9090/mcp \
-  --list-zones
+  --psk-env MCP_TEST_PSK \
+  --list-surfaces
 ```
 
 gRPC session smoke:

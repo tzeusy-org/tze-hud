@@ -223,19 +223,17 @@ bundled skill, just say **"project this session to the HUD"** — that loads the
 [`hud-projection`](../.claude/skills/hud-projection/SKILL.md) skill. Otherwise
 call the tools directly:
 
-1. `portal_projection_attach` — choose a stable `projection_id`, set
-   `provider_kind` (`claude` / `codex` / `opencode` / `other`) and a
-   `display_name`. Ownership is your agent identity: the runtime keeps the
-   owner token server-side, so no call takes or returns one. Re-attach with the
-   matching `idempotency_key` to rotate ownership.
-2. `portal_projection_publish` — publish transcript/output fragments; they render
-   in the portal on screen.
-3. `portal_projection_get_pending_input` / `portal_projection_acknowledge_input`
-   — poll operator-typed input from the HUD and acknowledge each item.
-4. `portal_projection_detach` — clean up when done.
+1. `hud_publish {"surface": "portal:<id>", "content": "...", "status": "active"}`
+   — the first publish to a stable `<id>` attaches the portal; `display_name`
+   is optional. Ownership is your agent identity: the runtime keeps the owner
+   token server-side, so no call takes or returns one.
+2. `hud_publish` again — publish output fragments; they render in the portal.
+   Add `"expects_reply": true` to arm the composer.
+3. `hud_input {"wait_ms": 30000}` — collect text typed at the HUD; pass the
+   ids back in `ack` on the next call.
+4. `hud_clear {"surface": "portal:<id>"}` — detach when done.
 
-Full per-operation JSON examples:
-[`.claude/skills/hud-projection/references/operation-examples.md`](../.claude/skills/hud-projection/references/operation-examples.md).
+The full contract is in [`docs/api.md`](api.md).
 
 You now have a session whose live output is on the screen and that can read
 input typed at the HUD — the portal is your primary interface to it.
@@ -245,8 +243,7 @@ input typed at the HUD — the portal is your primary interface to it.
 ## Verify it works (no GUI needed)
 
 Confirm the MCP endpoint is reachable and authenticating before debugging the
-UI. A resident tool call should be *accepted* with your PSK and *rejected*
-without it:
+UI. `tools/list` should be *accepted* with your PSK and *rejected* without it:
 
 ```bash
 # Reachable + authorized (expects a normal JSON-RPC result, not an auth error):
@@ -265,8 +262,8 @@ curl -s -X POST http://127.0.0.1:9090/mcp \
 | `canonical startup requires a readable config file` | No config resolved. Run from a dir containing `tze_hud.toml`, or pass `--config <path>`. `quickstart.sh` scaffolds one. |
 | `refusing startup with default PSK value "tze-hud-key"` | Set a non-trivial PSK (`--psk` / `TZE_HUD_PSK`). `quickstart.sh` generates one. |
 | Nothing printed on stdout after launch | The runtime always prints a one-time non-secret startup banner (bind addrs + attach hint). *Structured* logs beyond it are gated behind the `TZE_HUD_LOG` env filter — run with `TZE_HUD_LOG=info` for detailed startup/bind logs. (`quickstart.sh` prints the attach block regardless.) |
-| Projection tool call rejected `NOT_ALLOWED` | The bearer's agent lacks `portal` in its `allow` list. Add it (or `*`) to that `[agents.<id>]` table, as the hint says. |
-| `No active tab` on the autonomous test VM | WARP-VM-specific fallback: call MCP `create_tab {"name":"Main"}` once before portal work. The general config-tab bootstrap is fixed; this is not needed on a normal GPU desktop where `[[tabs]]` materializes. |
+| Portal call returns `NOT_ALLOWED` | The bearer's agent lacks `portal` in its `allow` list. Add it (or `*`) to that `[agents.<id>]` table, as the hint says. |
+| `No active tab` on the autonomous test VM | WARP-VM-specific: the config's `[[tabs]]` did not materialize. Restart the HUD task; tabs are not creatable over MCP. Not seen on a normal GPU desktop. |
 | Window won't open on a headless box | Expected — you need a real display server. Use overlay/fullscreen on a desktop, or the TigerVNC path in `README.md`. |
 
 ---

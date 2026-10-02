@@ -1,8 +1,7 @@
 [
   {
-    "zone_name": "subtitle",
+    "zone": "subtitle",
     "content": "Hello world — exemplar subtitle test",
-    "ttl_us": 10000000,
-    "namespace": "exemplar-test"
+    "ttl_ms": 10000
   }
 ]

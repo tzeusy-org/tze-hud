@@ -1,134 +1,122 @@
 [
   {
-    "widget_name": "main-status",
+    "widget": "main-status",
     "params": {
       "status": "online",
       "theme": "minimal",
       "label": "Butler",
       "reason": "minimal / online"
     },
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-status",
+    "widget": "main-status",
     "params": {
       "status": "away",
       "theme": "minimal",
       "label": "Butler",
       "reason": "minimal / away"
     },
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-status",
+    "widget": "main-status",
     "params": {
       "status": "busy",
       "theme": "minimal",
       "label": "Butler",
       "reason": "minimal / busy"
     },
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-status",
+    "widget": "main-status",
     "params": {
       "status": "offline",
       "theme": "minimal",
       "label": "Butler",
       "reason": "minimal / offline"
     },
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-status",
+    "widget": "main-status",
     "params": {
       "status": "online",
       "theme": "system",
       "label": "Butler",
       "reason": "system / online"
     },
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-status",
+    "widget": "main-status",
     "params": {
       "status": "away",
       "theme": "system",
       "label": "Butler",
       "reason": "system / away"
     },
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-status",
+    "widget": "main-status",
     "params": {
       "status": "busy",
       "theme": "system",
       "label": "Butler",
       "reason": "system / busy"
     },
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-status",
+    "widget": "main-status",
     "params": {
       "status": "offline",
       "theme": "system",
       "label": "Butler",
       "reason": "system / offline"
     },
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-status",
+    "widget": "main-status",
     "params": {
       "status": "online",
       "theme": "friendly",
       "label": "Butler",
       "reason": "friendly / online"
     },
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-status",
+    "widget": "main-status",
     "params": {
       "status": "away",
       "theme": "friendly",
       "label": "Butler",
       "reason": "friendly / away"
     },
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-status",
+    "widget": "main-status",
     "params": {
       "status": "busy",
       "theme": "friendly",
       "label": "Butler",
       "reason": "friendly / busy"
     },
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   },
   {
-    "widget_name": "main-status",
+    "widget": "main-status",
     "params": {
       "status": "offline",
       "theme": "friendly",
       "label": "Butler",
       "reason": "friendly / offline"
     },
-    "ttl_us": 60000000,
-    "namespace": "user-test"
+    "ttl_ms": 60000
   }
 ]

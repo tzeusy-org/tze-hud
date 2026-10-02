@@ -1,104 +1,119 @@
 ---
 name: hud-projection
-description: Use when an already-running Codex, Claude, opencode, or other LLM session should project itself onto the HUD, show its output or status on screen, attach to a text-stream portal, publish live transcript, poll HUD-originated operator input, acknowledge input, detach, or clean up. Trigger phrases — "project this session to the HUD", "attach this agent to HUD", "show this LLM session in a text-stream portal", "check HUD input". Do not use for terminal capture, PTY attachment, tmux scraping, process hosting, or direct runtime v1 MCP zone publishing; for one-shot zone publishing use th-hud-publish instead.
-compatibility: Requires a production projection ingress surface (MCP or gRPC) that exposes the in-process ProjectionAuthority to external sessions. The production ingress is not yet shipped (tracked as hud-bq0gl.1). Until it lands, use the stdio component harness for local development only — it does not connect to the live runtime.
+description: >-
+  Use when an already-running LLM session should project itself onto the HUD,
+  attach to a text-stream portal, publish live output, consume HUD input, or
+  detach. Trigger phrases include project this session to the HUD, attach this
+  agent to HUD, and check HUD input. Not for terminal capture, process hosting,
+  or one-shot zone publishing.
+compatibility: >-
+  Requires the tze_hud windowed runtime with MCP enabled. The MCP bearer is
+  your agent's PSK, and that agent's `allow` list must include `portal`.
 metadata:
   owner: tze
   authors:
     - tze
     - OpenAI Codex
   status: active
-  last_reviewed: "2026-06-14"
+  last_reviewed: "2026-10-02"
 ---
 
 # HUD Projection
 
-Use this skill to opt an already-running LLM session into a governed tze_hud text-stream portal.
+Opt an already-running LLM session into a tze_hud text-stream portal: the
+session publishes its output, the human reads it on the HUD and types replies
+into the portal composer, and the session collects those replies.
 
 Hard boundaries:
-- This is cooperative opt-in. The current session intentionally calls projection operations.
-- This is not PTY, tmux, shell, stdin/stdout, or terminal byte-stream capture.
-- The `ProjectionAuthority` runs **in-process** inside the tze_hud runtime (not as an external daemon). It owns projection state outside the LLM token context: HUD connection metadata, advisory portal lease identity, bounded transcript/window state, pending HUD input, acknowledgement state, lifecycle state, unread state, privacy classification, and reconnect bookkeeping.
-- If a projection MCP surface is available, it is a facade into the runtime's in-process authority, not the runtime v1 MCP zone publishing bridge. **This facade has not shipped yet** — see hud-bq0gl.1.
+- Cooperative opt-in. The session calls the tools on purpose.
+- Not PTY, tmux, shell, or terminal capture.
+- The portal authority runs in-process in the runtime and holds only
+  ephemeral state (visible transcript window, pending input, lifecycle). The
+  session owns its own history.
 
-## Source Of Truth
+## Tools
 
-When changing behavior or resolving ambiguity, read:
-- The code: `crates/tze_hud_projection/` (authority, session state) and the `portal_projection_*` tools in `crates/tze_hud_mcp/`. The old OpenSpec contract is history at git tag `pre-reset-2026-10-02`.
+A portal is the surface `portal:<projection_id>`. It uses the same MCP verbs as
+zones and widgets (`docs/api.md`):
 
-## Use When
+| Step | Call |
+|---|---|
+| Attach + publish | `hud_publish {"surface": "portal:my-session", "content": "Working on it", "status": "active"}` |
+| Publish more | `hud_publish {"surface": "portal:my-session", "content": "Tests pass. Ship it?", "expects_reply": true}` |
+| Collect replies | `hud_input {"wait_ms": 30000}` → `{"items":[{"id":"i7","s":"portal:my-session","text":"yes"}],"remaining":0}` |
+| Ack + keep polling | `hud_input {"ack": ["i7"], "wait_ms": 30000}` |
+| Detach | `hud_clear {"surface": "portal:my-session"}` |
 
-- The user asks to "project this session to the HUD", "attach this agent to HUD", "show this LLM session in a text-stream portal", or "check HUD input".
-- A Codex, Claude, opencode, or other provider session needs to publish explicit output/status to the HUD.
-- The session needs to poll operator-submitted HUD input and acknowledge each input item as handled, deferred, or rejected.
-- The session needs to detach or clean up its projection.
+- The first `hud_publish` to a portal attaches it (`display_name` is optional
+  and defaults to the id). The runtime keeps the owner token server-side,
+  keyed by your agent identity; no call carries a token.
+- `content` **appends** an output fragment. Send only the new text each turn.
+- `key` coalesces: publishes with the same key replace each other in place
+  (progress lines).
+- `status` sets the lifecycle state: `attached`, `active`, `degraded`,
+  `hud_unavailable`, or `detached`.
+- `expects_reply: true` arms the composer.
+- `hud_input` returns input from every surface you hold, oldest first,
+  including notification action presses. Unacked items are redelivered, so
+  ack each one once handled; the ack rides on your next poll.
+- `hud_surfaces` lists your attached portals with `state` and
+  `pending_input`.
+- If the runtime restarts, the next `hud_publish` attaches a fresh portal;
+  republish whatever context the human needs.
 
-Do not use this skill for one-shot zone publishing; use `th-hud-publish` for that.
+Errors are tool results with `isError: true` and `{"code", "hint"}`. Portal
+rejections keep their `PROJECTION_*` codes (`docs/api.md` lists them all).
 
-## Operation Contract
+## Choosing a target runtime
 
-All requests include:
-- `operation`
-- `projection_id`
-- `request_id`
-- `client_timestamp_wall_us`
+- **A human's screen** (e.g. tzehouse): endpoint and PSK per that host.
+  `eval "$(.claude/skills/user-test/scripts/tzehouse_env.sh)"`.
+- **The autonomous testhost** (`hud-windows` VM): for noninteractive work.
 
-Ownership is your agent identity (the MCP bearer PSK): the runtime keeps the owner token server-side and adds it to your later calls. Operator cleanup is the only non-attach operation that may instead use separate daemon authority.
+  ```bash
+  eval "$(.claude/skills/user-test/scripts/hud_vm_env.sh)"
+  # exports HUD_MCP_URL and TZE_HUD_PSK, starting the VM/HUD task if down
+  ```
 
-The normative operations are:
-- `attach`
-- `publish_output`
-- `publish_status`
-- `get_pending_input`
-- `acknowledge_input`
-- `detach`
-- `cleanup`
+  The VM renders with WARP (no GPU fidelity).
 
-Read `references/operation-examples.md` for compact JSON examples of every operation, including Codex, Claude, and opencode attach examples.
+## Deterministic client
 
-## Workflow
+Outside an MCP client, drive the same calls with
+[`portal_client.py`](../../../.claude/skills/hud-projection/scripts/portal_client.py):
 
-1. **Attach once.** Choose a stable `projection_id`, set `provider_kind` to `codex`, `claude`, `opencode`, or `other`, and include a human-readable `display_name`. Default missing or uncertain classification to `private`.
-2. **Keep your idempotency key.** No operation takes or returns `owner_token`; the runtime holds it, keyed by your agent and `projection_id`. Re-attach with the same idempotency key to rotate ownership.
-3. **Publish intentionally.** Call `publish_output` for assistant-visible transcript/status fragments and `publish_status` for lifecycle updates such as `active`, `degraded`, or `detached`.
+```bash
+CLIENT=.claude/skills/hud-projection/scripts/portal_client.py
+python3 $CLIENT publish --id my-session --display-name "My Session" --state active --text "hello"
+python3 $CLIENT publish --id my-session --text "Ship it?" --expects-reply
+python3 $CLIENT poll    --wait-ms 30000 --rounds 6      # NDJSON items; exit 3 if none
+python3 $CLIENT ack     --input-id i7
+python3 $CLIENT status  --id my-session --state degraded
+python3 $CLIENT surfaces
+python3 $CLIENT clear   --id my-session
+```
 
-   **Accepted `lifecycle_state` values** (snake_case strings; any other value is rejected):
-   - `attached` — session is attached but not yet actively working
-   - `active` — session is running / producing output
-   - `degraded` — session is blocked, slow, or in a degraded state
-   - `hud_unavailable` — session cannot reach the HUD
-   - `detached` — session has detached cleanly
-   - `cleanup_pending` — projection is pending removal
-   - `expired` — projection TTL has elapsed
+It reads `HUD_MCP_URL` and the PSK from `HUD_PSK` (or `TZE_HUD_PSK`,
+`HUD_MCP_PSK`, `MCP_TEST_PSK`). `poll --ack` acks every item it prints. For a
+one-command connectivity trial (attach, greeting, poll), use
+`.claude/skills/user-test/scripts/portal_trial.sh`.
 
-   **Accepted `output_kind` values** (snake_case strings; defaults to `assistant` when omitted; any other value is rejected):
-   - `assistant` *(default)* — normal assistant message / transcript fragment
-   - `tool` — tool call or tool result
-   - `status` — status or progress update
-   - `error` — error output
-   - `other` — any other kind
-   - `viewer` — *reserved for the runtime's echo of the operator's own reply; rejected if published by an adapter*
-4. **Poll HUD input compactly.** Call `get_pending_input` with small `max_items` and `max_bytes`. Treat returned input as semantic operator-submitted text, not terminal keystrokes.
-5. **Acknowledge every input item.** Use `acknowledge_input` with `handled`, `deferred`, or `rejected`. Use `not_before_wall_us` only with `deferred`.
-6. **Detach on normal exit.** Call `detach` with a bounded reason when the session is done projecting.
-7. **Cleanup stale state when appropriate.** Owner cleanup uses your identity; operator cleanup uses a separate daemon authority and must not expose private projection content.
+## Setup
 
-## Production Ingress (Pending)
+Point your MCP client at the runtime (see `settings.template.json`) with your
+agent's PSK as the bearer. The shipped configs give `[agents.claude]`, which
+reads `TZE_HUD_PSK`, `allow = ["*"]`.
 
-The production ingress — an MCP or gRPC surface that routes cooperative projection operations into the runtime's in-process `ProjectionAuthority` — has not shipped yet. It is tracked as **hud-bq0gl.1**.
+## Source of truth
 
-Until hud-bq0gl.1 lands, there is no live path from an external LLM session to the running HUD. The stdio component harness (`crates/tze_hud_projection` binary) can be used for local development and testing of the protocol but does NOT connect to the running runtime.
+- MCP verbs: `crates/tze_hud_mcp/src/tools.rs`; contract: `docs/api.md`.
+- Portal authority: `crates/tze_hud_projection/`, bridged by
+  `crates/tze_hud_runtime/src/portal_projection_driver.rs`.
+- [References](references/mcp-facade.md): wiring and boundary rules.
 
-When the production ingress ships, the facade may expose one dispatcher tool such as `projection_operation` or one tool per operation. The JSON payloads in `references/operation-examples.md` remain the contract either way. `settings.template.json` shows the expected configuration shape.
+## Safety
 
-See `references/mcp-facade.md` for facade requirements, boundary rules, and a configuration template.
-
-## Safety Notes
-
-- Keep operation responses bounded; do not request unbounded transcripts, inbox history, or raw scene state.
-- Do not publish secrets or owner tokens into the transcript window or any user-visible output.
-- No MCP response carries `owner_token`; the runtime strips it from attach and keeps it server-side.
-- Re-attach with the same `projection_id` requires the original idempotency key; otherwise the authority rejects it with `PROJECTION_ALREADY_ATTACHED`.
-- Do not publish secrets into `publish_output` text, `status_text`, `ack_message`, or `reason` fields; they are readable by audit records and portal rendering.
-- Treat `PROJECTION_UNAUTHORIZED`, `PROJECTION_TOKEN_EXPIRED`, and `PROJECTION_STATE_CONFLICT` as hard stops unless the user explicitly authorizes reattach or operator cleanup.
-- If the runtime restarts, prior transcript text, pending input text, owner tokens, and cached lease identity are gone. Attach again and receive a fresh owner token — the old token is permanently invalid after a restart.
+- Don't publish secrets into the portal.
+- Keep fragments small; never resend the whole transcript.
+- Treat `PROJECTION_ALREADY_ATTACHED` (another agent holds that id) and
+  `PROJECTION_STATE_CONFLICT` as stops; pick another id or ask the user.
