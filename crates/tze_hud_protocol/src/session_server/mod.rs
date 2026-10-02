@@ -863,19 +863,35 @@ impl HudSession for HudSessionImpl {
                 }
             }
 
-            // Cleanup: remove session from registry and store resume token.
+            // Cleanup: disconnect is not release (invariant 4).
             //
-            // The resume token issued at handshake time is saved to the TokenStore so
-            // the agent can reconnect within the grace period using SessionResume.
-            // Token is not persisted across process restarts (RFC 0005 §6.6).
+            // The session's active leases become ORPHANED (badge shown, content
+            // kept) and the resume token is saved so the agent can reconnect
+            // within the grace period using SessionResume. When the grace period
+            // ends, the compositor's `expire_leases()` sweep reclaims the leases
+            // and their content with no agent help. Token and lease grace are
+            // measured on the scene clock so they expire together. Tokens are
+            // not persisted across process restarts.
             let (resource_store, namespace_for_cleanup) = {
                 let mut st = state.lock().await;
                 st.sessions.remove_session(&session.session_id);
 
-                // Only register a resume token if the session was ever Active
-                // (i.e. handshake succeeded). Sessions that fail auth do not
-                // get an orphaned-lease grace period.
+                // Only sessions that completed the handshake get a grace period.
                 if !session.resume_token.is_empty() {
+                    let now = {
+                        let mut scene = st.scene.lock().await;
+                        let now = scene.now_millis();
+                        for lease_id in &session.lease_ids {
+                            let active = scene
+                                .leases
+                                .get(lease_id)
+                                .is_some_and(|l| l.state == LeaseState::Active);
+                            if active {
+                                let _ = scene.disconnect_lease(lease_id, now);
+                            }
+                        }
+                        now
+                    };
                     st.token_store.insert(
                         session.resume_token.clone(),
                         session.agent_name.clone(),
@@ -883,7 +899,7 @@ impl HudSession for HudSessionImpl {
                         session.subscriptions.clone(),
                         session.lease_ids.clone(),
                         DEFAULT_GRACE_PERIOD_MS,
-                        now_ms(),
+                        now,
                     );
                 }
                 (st.resource_store.clone(), session.namespace.clone())

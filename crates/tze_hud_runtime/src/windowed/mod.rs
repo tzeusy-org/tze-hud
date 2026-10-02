@@ -1623,6 +1623,18 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                         // ── Zone and widget publication expiry sweep ──────
                         // Per timing-model/spec.md §Expiration Policy: expired
                         // publications MUST be cleared before the next frame.
+                        // Timed content (invariant 1): apply batches whose
+                        // present_at has arrived, then sweep expired tiles.
+                        for late in scene.apply_due_batches() {
+                            if let Some(err) = late.error {
+                                tracing::warn!(
+                                    batch_id = %late.batch_id,
+                                    error = %err,
+                                    "scheduled batch rejected at present_at"
+                                );
+                            }
+                        }
+                        scene.drain_expired_tiles();
                         scene.drain_expired_zone_publications();
                         scene.drain_expired_widget_publications();
                         let terminal_lease_expiries = scene.expire_leases();
@@ -1703,6 +1715,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                             let scene_deadline_wall_us = scene
                                 .next_publication_expiry_wall_us()
                                 .into_iter()
+                                .chain(scene.next_timed_content_wall_us())
                                 .chain(
                                     scene
                                         .next_lease_deadline_ms(

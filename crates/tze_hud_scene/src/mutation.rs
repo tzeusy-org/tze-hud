@@ -565,6 +565,7 @@ impl SceneGraph {
         // carries this batch; the render loop drains and stamps it with the
         // present wall-clock to emit a FramePresented event.
         self.record_present_ack_batch(batch.batch_id);
+        self.stamp_batch_expiry(batch, &created_ids);
 
         MutationResult {
             batch_id: batch.batch_id,

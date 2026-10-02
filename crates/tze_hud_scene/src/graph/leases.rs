@@ -9,7 +9,7 @@ impl SceneGraph {
 
     /// Default grace period for disconnected leases (ms).
     /// RFC 0008 SS3.2: default 30,000 ms (30 seconds).
-    pub const DEFAULT_GRACE_PERIOD_MS: u64 = 30_000;
+    pub const DEFAULT_GRACE_PERIOD_MS: u64 = crate::lease::ORPHAN_GRACE_PERIOD_MS;
 
     /// Budget soft-limit threshold (80% of hard limit).
     pub const BUDGET_SOFT_LIMIT_PCT: f64 = 0.80;

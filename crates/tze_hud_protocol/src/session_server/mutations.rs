@@ -1037,13 +1037,51 @@ pub(super) async fn handle_mutation_batch(
     } = converted;
 
     let scene_batch_id = proto_batch_id_to_scene_id(&batch.batch_id);
+    let timing_hints = scene_timing_hints(batch.timing.as_ref());
+    let present_at_wall_us = timing_hints
+        .as_ref()
+        .and_then(|h| h.present_at_wall_us)
+        .map(|t| t.0)
+        .filter(|&t| t > 0);
     let scene_batch = SceneMutationBatch {
         batch_id: scene_batch_id,
         agent_namespace: session.namespace.clone(),
         mutations: scene_mutations,
-        timing_hints: None,
+        timing_hints,
         lease_id: Some(lease_id),
     };
+
+    // present_at in the future: hold the batch until due (invariant 1). Created
+    // ids must come back synchronously, so a scheduled batch cannot create tiles.
+    let scheduled_at = {
+        let now_us = st.scene.lock().await.now_wall_us();
+        present_at_wall_us.filter(|&t| t > now_us)
+    };
+    if scheduled_at.is_some()
+        && scene_batch
+            .mutations
+            .iter()
+            .any(|m| matches!(m, SceneMutation::CreateTile { .. }))
+    {
+        let seq = session.next_server_seq();
+        drop(st);
+        let _ = tx
+            .send(Ok(ServerMessage {
+                sequence: seq,
+                timestamp_wall_us: now_wall_us(),
+                payload: Some(ServerPayload::RuntimeError(RuntimeError {
+                    error_code: "PRESENT_AT_WITH_CREATE".to_string(),
+                    message: "a batch with a future present_at cannot create tiles".to_string(),
+                    context: "timing.present_at_wall_us".to_string(),
+                    hint: "create the tile in an immediate batch, then send its content \
+                           with present_at"
+                        .to_string(),
+                    error_code_enum: ErrorCode::InvalidArgument as i32,
+                })),
+            }))
+            .await;
+        return;
+    }
     let budget_delta = st
         .scene
         .lock()
@@ -1090,6 +1128,42 @@ pub(super) async fn handle_mutation_batch(
                 return;
             }
         }
+    }
+
+    if let Some(present_at) = scheduled_at {
+        st.scene
+            .lock()
+            .await
+            .schedule_batch(present_at, scene_batch);
+        if !batch.batch_id.is_empty() {
+            session.dedup_window.insert(
+                batch.batch_id.clone(),
+                CachedResult {
+                    accepted: true,
+                    created_ids: Vec::new(),
+                    error_code: String::new(),
+                    error_message: String::new(),
+                },
+            );
+        }
+        let seq = session.next_server_seq();
+        drop(st);
+        // Wake the compositor so it arms a wake for the new deadline.
+        render_wake.notify();
+        let _ = tx
+            .send(Ok(ServerMessage {
+                sequence: seq,
+                timestamp_wall_us: now_wall_us(),
+                payload: Some(ServerPayload::MutationResult(MutationResult {
+                    batch_id: batch.batch_id,
+                    accepted: true,
+                    created_ids: Vec::new(),
+                    error_code: String::new(),
+                    error_message: String::new(),
+                })),
+            }))
+            .await;
+        return;
     }
 
     let result = {
@@ -1282,13 +1356,38 @@ pub(super) async fn apply_queued_batch_to_scene(
         pending_touch_names,
     } = converted;
     let scene_batch_id = proto_batch_id_to_scene_id(&batch.batch_id);
+    let timing_hints = scene_timing_hints(batch.timing.as_ref());
+    let present_at_wall_us = timing_hints
+        .as_ref()
+        .and_then(|h| h.present_at_wall_us)
+        .map(|t| t.0)
+        .filter(|&t| t > 0);
     let scene_batch = SceneMutationBatch {
         batch_id: scene_batch_id,
         agent_namespace: session.namespace.clone(),
         mutations: scene_mutations,
-        timing_hints: None,
+        timing_hints,
         lease_id: Some(lease_id),
     };
+
+    // present_at in the future: hold the batch until due (invariant 1). Created
+    // ids must come back synchronously, so a scheduled batch cannot create tiles.
+    let scheduled_at = {
+        let now_us = st.scene.lock().await.now_wall_us();
+        present_at_wall_us.filter(|&t| t > now_us)
+    };
+    if scheduled_at.is_some()
+        && scene_batch
+            .mutations
+            .iter()
+            .any(|m| matches!(m, SceneMutation::CreateTile { .. }))
+    {
+        tracing::warn!(
+            namespace = session.namespace,
+            "queued mutation batch skipped: future present_at with CreateTile"
+        );
+        return false;
+    }
     let budget_delta = st
         .scene
         .lock()
@@ -1313,6 +1412,14 @@ pub(super) async fn apply_queued_batch_to_scene(
     }
 
     // Apply to scene; response was already sent when the batch was queued.
+    if let Some(present_at) = scheduled_at {
+        st.scene
+            .lock()
+            .await
+            .schedule_batch(present_at, scene_batch);
+        return true;
+    }
+
     let result = {
         let mut scene = st.scene.lock().await;
         let r = scene.apply_batch(&scene_batch);
@@ -1412,4 +1519,21 @@ fn resolve_tile_bounds_with_override(
     resolve_geometry_override_chain(user_override, agent_requested, None, None).map(|policy| {
         geometry_policy_to_absolute_rect(policy, display_area.width, display_area.height)
     })
+}
+
+/// Convert wire timing hints to scene hints; zero fields mean "not set".
+fn scene_timing_hints(
+    hints: Option<&TimingHints>,
+) -> Option<tze_hud_scene::mutation::BatchTimingHints> {
+    use tze_hud_scene::timing::domains::WallUs;
+    let hints = hints?;
+    let set = |us: u64| (us > 0).then_some(WallUs(us));
+    let present_at_wall_us = set(hints.present_at_wall_us);
+    let expires_at_wall_us = set(hints.expires_at_wall_us);
+    (present_at_wall_us.is_some() || expires_at_wall_us.is_some()).then_some(
+        tze_hud_scene::mutation::BatchTimingHints {
+            present_at_wall_us,
+            expires_at_wall_us,
+        },
+    )
 }

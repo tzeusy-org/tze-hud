@@ -243,7 +243,7 @@ async fn run_headless(dev_mode: bool) -> Result<(), Box<dyn std::error::Error>> 
         scene.register_resource(scene_resource_id);
     }
 
-    let tile_state = create_tile_batch(
+    let mut tile_state = create_tile_batch(
         GRPC_PORT,
         AGENT_PSK,
         AGENT_ID,
@@ -281,8 +281,7 @@ async fn run_headless(dev_mode: bool) -> Result<(), Box<dyn std::error::Error>> 
         GRPC_PORT,
         AGENT_PSK,
         AGENT_ID,
-        AGENT_DISPLAY_NAME,
-        tile_state.tile_id.clone(),
+        &mut tile_state,
         resource_id.clone(),
         1, // cycle #1
     )
@@ -332,8 +331,7 @@ pub async fn do_content_update(
     port: u16,
     psk: &str,
     agent_id: &str,
-    agent_display_name: &str,
-    tile_id_bytes: Vec<u8>,
+    tile_state: &mut TileCreationState,
     resource_id_bytes: Vec<u8>,
     cycle: u32,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -344,8 +342,7 @@ pub async fn do_content_update(
         port,
         psk,
         agent_id,
-        agent_display_name,
-        tile_id_bytes,
+        tile_state,
         resource_id_bytes,
         cycle,
     )
@@ -353,6 +350,9 @@ pub async fn do_content_update(
 }
 
 /// Like [`do_content_update`] but accepts an explicit `host` address.
+///
+/// Reconnects with `SessionResume` and the tile's resume token, so the update
+/// runs under the same lease that owns the tile, then stores the new token.
 ///
 /// Tests that spin up a server with `bind_all_interfaces = false` (which binds
 /// `[::1]` not `[::]`) must pass `host = "[::1]"` so the client connects on
@@ -363,8 +363,7 @@ async fn do_content_update_with_host(
     port: u16,
     psk: &str,
     agent_id: &str,
-    agent_display_name: &str,
-    tile_id_bytes: Vec<u8>,
+    tile_state: &mut TileCreationState,
     resource_id_bytes: Vec<u8>,
     cycle: u32,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -380,24 +379,17 @@ async fn do_content_update_with_host(
     let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
     let mut response_stream = session_client.session(stream).await?.into_inner();
 
-    // Session handshake.
-    let now_us = now_wall_us();
+    // Resume the tile's session (disconnect is not release: the lease and
+    // tile were kept, orphaned, for the grace period).
     tx.send(session_proto::ClientMessage {
         sequence: 1,
-        timestamp_wall_us: now_us,
-        payload: Some(session_proto::client_message::Payload::SessionInit(
-            session_proto::SessionInit {
+        timestamp_wall_us: now_wall_us(),
+        payload: Some(session_proto::client_message::Payload::SessionResume(
+            session_proto::SessionResume {
                 agent_id: agent_id.to_string(),
-                agent_display_name: agent_display_name.to_string(),
+                resume_token: tile_state.resume_token.clone(),
+                last_seen_server_sequence: 0,
                 pre_shared_key: String::new(),
-                requested_capabilities: vec![
-                    "create_tiles".to_string(),
-                    "modify_own_tiles".to_string(),
-                ],
-                initial_subscriptions: vec!["LEASE_CHANGES".to_string()],
-                resume_token: Vec::new(),
-                min_protocol_version: 1000,
-                max_protocol_version: 1001,
                 auth_credential: Some(session_proto::AuthCredential {
                     credential: Some(session_proto::auth_credential::Credential::PreSharedKey(
                         session_proto::PreSharedKeyCredential {
@@ -410,50 +402,31 @@ async fn do_content_update_with_host(
     })
     .await?;
 
-    // Drain SessionEstablished + SceneSnapshot + current DegradationNotice.
-    for _ in 0..3 {
+    // SessionResumeResult carries the next resume token; then drain
+    // SceneSnapshot + current DegradationNotice.
+    match response_stream
+        .next()
+        .await
+        .ok_or("stream closed during resume")??
+        .payload
+    {
+        Some(session_proto::server_message::Payload::SessionResumeResult(result))
+            if result.accepted =>
+        {
+            tile_state.resume_token = result.new_session_token;
+        }
+        other => {
+            return Err(format!("Expected accepted SessionResumeResult, got: {other:?}").into());
+        }
+    }
+    for _ in 0..2 {
         response_stream
             .next()
             .await
-            .ok_or("stream closed during handshake")??;
+            .ok_or("stream closed during resume")??;
     }
-
-    // Acquire a lease.
-    tx.send(session_proto::ClientMessage {
-        sequence: 2,
-        timestamp_wall_us: now_wall_us(),
-        payload: Some(session_proto::client_message::Payload::LeaseRequest(
-            session_proto::LeaseRequest {
-                ttl_ms: 60_000,
-                capabilities: vec!["create_tiles".to_string(), "modify_own_tiles".to_string()],
-                lease_priority: 2,
-            },
-        )),
-    })
-    .await?;
-
-    let lease_id_bytes: Vec<u8> = loop {
-        let msg = response_stream
-            .next()
-            .await
-            .ok_or("stream closed before LeaseResponse")??;
-        match msg.payload {
-            Some(session_proto::server_message::Payload::LeaseStateChange(_)) => continue,
-            Some(session_proto::server_message::Payload::LeaseResponse(resp)) => {
-                if !resp.granted {
-                    return Err(format!(
-                        "LeaseResponse denied for content update: code={}, reason={}",
-                        resp.deny_code, resp.deny_reason
-                    )
-                    .into());
-                }
-                break resp.lease_id;
-            }
-            other => {
-                return Err(format!("Expected LeaseResponse, got: {other:?}").into());
-            }
-        }
-    };
+    let tile_id_bytes = tile_state.tile_id.clone();
+    let lease_id_bytes = tile_state.lease_id.clone();
 
     // Build new root bg node.
     let bg_uuid = uuid::Uuid::now_v7();
@@ -608,7 +581,7 @@ async fn do_content_update_with_host(
     // root and all its children, then AddNode rebuilds the subtree.
     let batch_id = uuid::Uuid::now_v7().as_bytes().to_vec();
     tx.send(session_proto::ClientMessage {
-        sequence: 3,
+        sequence: 2,
         timestamp_wall_us: now_wall_us(),
         payload: Some(session_proto::client_message::Payload::MutationBatch(
             session_proto::MutationBatch {
@@ -1365,6 +1338,10 @@ pub struct TileCreationState {
     pub lease_id: Vec<u8>,
     /// The 6 node SceneId bytes from the second batch's `created_ids`.
     pub node_ids: Vec<Vec<u8>>,
+    /// Resume token for reconnecting to this tile's session. Disconnect is
+    /// not release: later phases resume with it to keep using the lease.
+    /// Single-use; each resume replaces it.
+    pub resume_token: Vec<u8>,
 }
 
 /// Dashboard tile geometry per spec §Decision 6 / §Dashboard Tile Composition.
@@ -1480,8 +1457,20 @@ async fn create_tile_batch_with_host(
     })
     .await?;
 
-    // Drain SessionEstablished + SceneSnapshot + current DegradationNotice.
-    for _ in 0..3 {
+    // SessionEstablished carries the resume token; then drain SceneSnapshot +
+    // current DegradationNotice.
+    let resume_token = match response_stream
+        .next()
+        .await
+        .ok_or("stream closed during handshake")??
+        .payload
+    {
+        Some(session_proto::server_message::Payload::SessionEstablished(established)) => {
+            established.resume_token
+        }
+        other => return Err(format!("Expected SessionEstablished, got: {other:?}").into()),
+    };
+    for _ in 0..2 {
         response_stream
             .next()
             .await
@@ -1947,6 +1936,7 @@ async fn create_tile_batch_with_host(
         tile_id: tile_id_bytes,
         lease_id: lease_id_bytes,
         node_ids,
+        resume_token,
     })
 }
 
@@ -3142,7 +3132,7 @@ mod tests {
         setup_scene_with_resource(&state, &resource_id_bytes).await;
 
         // Phase 4: create the tile.
-        let tile_state = crate::create_tile_batch_with_host(
+        let mut tile_state = crate::create_tile_batch_with_host(
             "[::1]",
             port,
             TEST_PSK,
@@ -3159,8 +3149,7 @@ mod tests {
             port,
             TEST_PSK,
             TEST_AGENT_ID,
-            TEST_AGENT_DISPLAY_NAME,
-            tile_state.tile_id.clone(),
+            &mut tile_state,
             resource_id_bytes.clone(),
             42,
         )
@@ -5113,7 +5102,7 @@ mod tests {
         // ── Step 3: Session connect + lease + tile creation ───────────────────
         // §12.1(1): session connect, §12.1(2): lease request, §12.1(4): atomic tile creation.
         // These are combined in create_tile_batch_with_host which opens a fresh session.
-        let tile_state = crate::create_tile_batch_with_host(
+        let mut tile_state = crate::create_tile_batch_with_host(
             "[::1]",
             port,
             TEST_PSK,
@@ -5148,8 +5137,7 @@ mod tests {
             port,
             TEST_PSK,
             TEST_AGENT_ID,
-            TEST_AGENT_DISPLAY_NAME,
-            tile_state.tile_id.clone(),
+            &mut tile_state,
             resource_id_bytes.clone(),
             1,
         )
@@ -5187,8 +5175,7 @@ mod tests {
             port,
             TEST_PSK,
             TEST_AGENT_ID,
-            TEST_AGENT_DISPLAY_NAME,
-            tile_state.tile_id.clone(),
+            &mut tile_state,
             resource_id_bytes.clone(),
             2,
         )

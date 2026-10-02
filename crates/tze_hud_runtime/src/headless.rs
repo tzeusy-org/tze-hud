@@ -473,8 +473,10 @@ impl HeadlessRuntime {
             scene_guard.drain_pending_widget_svg_assets(),
         );
 
-        // Per timing-model/spec.md §Expiration Policy: expired zone and widget
-        // publications MUST be cleared before the next frame.
+        // Timed content (invariant 1), then expired zone and widget
+        // publications, all cleared before the next frame.
+        scene_guard.apply_due_batches();
+        scene_guard.drain_expired_tiles();
         scene_guard.drain_expired_zone_publications();
         scene_guard.drain_expired_widget_publications();
 
