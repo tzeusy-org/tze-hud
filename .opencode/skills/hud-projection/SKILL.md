@@ -58,6 +58,10 @@ zones and widgets (`docs/api.md`):
   ack each one once handled; the ack rides on your next poll.
 - `hud_surfaces` lists your attached portals with `state` and
   `pending_input`.
+- A portal you stop calling degrades after 30 s and is reclaimed 30 s later,
+  transcript included. Publishing or polling keeps it; for quiet stretches
+  call `hud_hold {"surface": "portal:my-session", "ttl_ms": 600000}`
+  (`ttl_ms: 0` holds until `hud_clear`).
 - If the runtime restarts, the next `hud_publish` attaches a fresh portal;
   republish whatever context the human needs.
 
@@ -80,7 +84,7 @@ rejections keep their `PROJECTION_*` codes (`docs/api.md` lists them all).
 ## Deterministic client
 
 Outside an MCP client, drive the same calls with
-[`portal_client.py`](../../../.claude/skills/hud-projection/scripts/portal_client.py):
+[`scripts/portal_client.py`](scripts/portal_client.py):
 
 ```bash
 CLIENT=.claude/skills/hud-projection/scripts/portal_client.py

@@ -1221,7 +1221,12 @@ impl InProcessPortalDriver {
     ///    normal `drain()` call in the same `about_to_wait` iteration (or the
     ///    next one) materialises it into the scene.
     pub fn dispatch_portal_op(&mut self, op: PortalOp) {
-        let now_us = now_wall_us();
+        self.dispatch_portal_op_at(op, now_wall_us());
+    }
+
+    /// [`Self::dispatch_portal_op`] at a caller-supplied wall-clock instant, so
+    /// tests can drive time-dependent behaviour deterministically.
+    fn dispatch_portal_op_at(&mut self, op: PortalOp, now_us: u64) {
         match op {
             PortalOp::List { reply } => {
                 let request = ListProjectionsRequest {
@@ -1636,6 +1641,35 @@ impl InProcessPortalDriver {
                     let _ =
                         reply.send(Err(PortalOpRejection::new(error_code, resp.status_summary)));
                 }
+            }
+
+            PortalOp::Hold {
+                projection_id,
+                owner_token,
+                ttl_ms,
+                reply,
+            } => {
+                let hold_until_wall_us = if ttl_ms == 0 {
+                    u64::MAX
+                } else {
+                    now_us.saturating_add(ttl_ms.saturating_mul(1_000))
+                };
+                let result = self.authority.handle_hold(
+                    &projection_id,
+                    &owner_token,
+                    hold_until_wall_us,
+                    now_us,
+                );
+                if let Err(error_code) = result {
+                    tracing::warn!(
+                        proj_id = %projection_id,
+                        error_code = %error_code,
+                        "portal_op: Hold denied"
+                    );
+                }
+                let _ = reply.send(result.map_err(|code| {
+                    PortalOpRejection::new(code, "portal hold denied".to_string())
+                }));
             }
 
             PortalOp::Detach {
@@ -9102,6 +9136,146 @@ mod tests {
                 .projected_portal_state(projection_id, &ProjectedPortalPolicy::permit_all())
                 .is_none(),
             "the grace-reaped projection cannot rematerialize stale state"
+        );
+    }
+
+    /// T5: `hud_hold` on a portal keeps it past the idle reap window
+    /// (liveness threshold + lease grace) with its transcript intact; once the
+    /// hold lapses the ordinary liveness/grace path reclaims it.
+    #[test]
+    fn portal_hold_outlives_idle_reap_window_then_reclaims() {
+        use std::sync::Arc;
+        use tze_hud_scene::TestClock;
+
+        const T0_US: u64 = 1_000_000;
+        const HOLD_MS: u64 = 300_000;
+        let mut driver = InProcessPortalDriver::new();
+        let projection_id = "proj-held";
+        let token = attach_and_get_token_at(&mut driver, projection_id, T0_US);
+        driver.attach_projection(projection_id, Vec::new());
+        publish(&mut driver, projection_id, &token, "kept transcript", T0_US);
+
+        let clock = TestClock::new(T0_US / 1_000);
+        let mut scene = SceneGraph::new_with_clock(1920.0, 1080.0, Arc::new(clock.clone()));
+        let tab_id = scene.create_tab("Main", 0).unwrap();
+        let mut processor = InputProcessor::new();
+        driver.drain_inner(&mut scene, &mut processor, Some(tab_id), T0_US);
+        let lease = driver
+            .lease_id
+            .expect("first drain grants the portal lease");
+
+        let (tx, mut rx) = tokio::sync::oneshot::channel();
+        driver.dispatch_portal_op_at(
+            PortalOp::Hold {
+                projection_id: projection_id.to_string(),
+                owner_token: token.clone(),
+                ttl_ms: HOLD_MS,
+                reply: tx,
+            },
+            T0_US,
+        );
+        assert!(rx.try_recv().expect("hold replies").is_ok());
+        let hold_end_us = T0_US + HOLD_MS * 1_000;
+        assert_eq!(
+            driver.next_wake_deadline(&scene),
+            Some(PortalWakeDeadline {
+                wall_us: hold_end_us,
+                family: PortalDeadlineFamily::AgentLiveness,
+            }),
+            "a held portal's first liveness sweep is the hold deadline"
+        );
+
+        // Past the unheld reap window (30 s liveness + 30 s grace), within the hold.
+        let idle_reap_ms = ProjectionBounds::default().agent_liveness_degraded_after_wall_us
+            / 1_000
+            + SceneGraph::DEFAULT_GRACE_PERIOD_MS;
+        let mid_ms = 2 * idle_reap_ms;
+        assert!(mid_ms < HOLD_MS);
+        clock.advance(mid_ms);
+        driver.drain_inner(
+            &mut scene,
+            &mut processor,
+            Some(tab_id),
+            T0_US + mid_ms * 1_000,
+        );
+        assert!(
+            scene.lease_is_active(&lease),
+            "held portal lease stays active"
+        );
+        assert!(!driver.authority.is_agent_liveness_degraded(projection_id));
+        assert_eq!(scene.tile_count(), 1);
+        let transcript = driver
+            .authority
+            .visible_transcript_window(projection_id)
+            .expect("held portal keeps its session");
+        assert!(
+            transcript
+                .iter()
+                .any(|u| u.output_text == "kept transcript")
+        );
+
+        // The hold lapses: liveness degrades, the lease orphans, grace reaps.
+        clock.advance(HOLD_MS - mid_ms);
+        driver.drain_inner(&mut scene, &mut processor, Some(tab_id), hold_end_us);
+        assert!(driver.authority.is_agent_liveness_degraded(projection_id));
+        assert!(scene.lease_is_orphaned(&lease));
+        clock.advance(SceneGraph::DEFAULT_GRACE_PERIOD_MS + 1);
+        driver.drain_inner(
+            &mut scene,
+            &mut processor,
+            Some(tab_id),
+            hold_end_us + (SceneGraph::DEFAULT_GRACE_PERIOD_MS + 1) * 1_000,
+        );
+        assert_eq!(scene.tile_count(), 0, "expired hold is reclaimed");
+        assert!(
+            driver
+                .authority
+                .visible_transcript_window(projection_id)
+                .is_none()
+        );
+    }
+
+    /// `ttl_ms: 0` holds a portal until it is cleared: no liveness deadline.
+    #[test]
+    fn portal_hold_without_ttl_never_degrades() {
+        let mut driver = InProcessPortalDriver::new();
+        let projection_id = "proj-held-forever";
+        let token = attach_and_get_token_at(&mut driver, projection_id, 1_000);
+        let (tx, mut rx) = tokio::sync::oneshot::channel();
+        driver.dispatch_portal_op_at(
+            PortalOp::Hold {
+                projection_id: projection_id.to_string(),
+                owner_token: token,
+                ttl_ms: 0,
+                reply: tx,
+            },
+            1_000,
+        );
+        assert!(rx.try_recv().expect("hold replies").is_ok());
+        assert_eq!(
+            driver.authority.next_agent_liveness_deadline_wall_us(),
+            None
+        );
+        assert!(
+            driver
+                .authority
+                .sweep_agent_liveness_degradation(u64::MAX - 1)
+                .is_empty()
+        );
+
+        let (tx, mut rx) = tokio::sync::oneshot::channel();
+        driver.dispatch_portal_op_at(
+            PortalOp::Hold {
+                projection_id: projection_id.to_string(),
+                owner_token: "wrong".to_string(),
+                ttl_ms: 0,
+                reply: tx,
+            },
+            2_000,
+        );
+        assert_eq!(
+            rx.try_recv().expect("hold replies").unwrap_err().error_code,
+            ProjectionErrorCode::ProjectionUnauthorized
         );
     }
 

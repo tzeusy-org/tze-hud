@@ -9,18 +9,22 @@ import sys
 
 METRIC_NAMES = ("bytes", "tokens")
 SIDES = ("request", "response", "total", "model_visible")
+# A baseline the owner has approved, or one awaiting their review in its PR.
+# A pending baseline is compared in full but never reports better than
+# "warning". Any other status fails closed.
+APPROVAL_STATUSES = ("owner_approved", "pending_owner_review")
 FLOW_SIDES = ("total", "model_visible")
 
 
 def _incompatibility_checks(measurement, baseline):
     reasons = []
     approval = baseline.get("approval", {})
-    if approval.get("status") != "owner_approved":
-        reasons.append("baseline is not owner-approved")
+    if approval.get("status") not in APPROVAL_STATUSES:
+        reasons.append("baseline is not owner-approved or pending owner review")
     elif not isinstance(approval.get("decision_reference"), str) or not approval[
         "decision_reference"
     ].strip():
-        reasons.append("owner-approved baseline is missing a decision reference")
+        reasons.append("baseline approval is missing a decision reference")
     for field in ("schema_version", "tokenizer", "fixture_fingerprint"):
         if field not in measurement or field not in baseline:
             reasons.append(f"missing compatibility field: {field}")
@@ -249,14 +253,16 @@ def compare(measurement, baseline):
             improvements.append(entry)
 
     budget_violations = _budget_violations(measurement, baseline)
+    approval = baseline["approval"]["status"]
     status = (
         "failed"
         if regressions or budget_violations
-        else "warning" if warnings else "passed"
+        else "warning" if warnings or approval != "owner_approved" else "passed"
     )
     return {
         "schema_version": 1,
         "status": status,
+        "approval": approval,
         "threshold_percent": 5,
         "incompatibilities": [],
         "budget_violations": budget_violations,

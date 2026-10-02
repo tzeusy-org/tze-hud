@@ -69,7 +69,10 @@ otherwise.
 - Returns `{"ok":true,"expires_in_ms":8000}`. It doesn't echo the request.
 
 **`hud_hold`** `{surface*, ttl_ms*}` extends a holding, for any surface type.
-A portal is held until cleared, so holding one only checks it is attached.
+On a portal, `ttl_ms` keeps it (and its transcript) attached for that long,
+or until `hud_clear` when 0, even with no other calls. Without a hold, a
+portal is degraded after 30 s with no publish, poll, or hold, and reclaimed
+30 s later.
 
 **`hud_clear`** `{surface*, reason?}` releases a zone publication, a widget
 instance, or a portal (detach).

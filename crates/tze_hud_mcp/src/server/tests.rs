@@ -699,6 +699,7 @@ struct MockPortal {
     statuses: Vec<String>,
     pending: Vec<String>,
     acked: Vec<String>,
+    holds: Vec<u64>,
     detached: bool,
 }
 
@@ -779,6 +780,18 @@ fn mock_portal(server: McpServer) -> (McpServer, Arc<std::sync::Mutex<MockPortal
                 } => {
                     m.acked.push(input_id);
                     let _ = reply.send(Ok(()));
+                }
+                PortalOp::Hold {
+                    owner_token,
+                    ttl_ms,
+                    reply,
+                    ..
+                } => {
+                    let r = check(&owner_token);
+                    if r.is_ok() {
+                        m.holds.push(ttl_ms);
+                    }
+                    let _ = reply.send(r);
                 }
                 PortalOp::Detach { reply, .. } => {
                     m.detached = true;
@@ -862,6 +875,19 @@ async fn portal_flow_attach_publish_poll_ack_clear() {
     let v = call(&server, "hud_input", json!({"ack": ["i1"]})).await;
     assert_eq!(v, json!({"items": [], "remaining": 0}));
     assert_eq!(mock.lock().unwrap().acked, ["i1"]);
+
+    let v = call(
+        &server,
+        "hud_hold",
+        json!({"surface": "portal:main", "ttl_ms": 120000}),
+    )
+    .await;
+    assert_eq!(v["ok"], true);
+    assert_eq!(
+        mock.lock().unwrap().holds,
+        [120000],
+        "portal hold reaches the runtime"
+    );
 
     call(&server, "hud_clear", json!({"surface": "portal:main"})).await;
     assert!(mock.lock().unwrap().detached);

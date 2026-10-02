@@ -56,6 +56,11 @@ struct ProjectionSession {
     /// Set only by the runtime-owned liveness sweep, so automatic staleness can
     /// recover independently of an owner-authored `Degraded` status.
     agent_liveness_degraded_since_wall_us: Option<u64>,
+    /// Owner-requested hold (`hud_hold`): until this wall-clock instant the
+    /// agent-liveness sweep never degrades the session, so its lease is never
+    /// orphaned and its transcript is never reaped. `u64::MAX` holds until
+    /// detach or cleanup. `None` means only owner traffic keeps it live.
+    hold_until_wall_us: Option<u64>,
     retained_transcript: VecDeque<TranscriptUnit>,
     retained_transcript_bytes: usize,
     /// The viewer's own accepted submissions (the INPUT history), held as a
@@ -740,10 +745,10 @@ impl ProjectionAuthority {
             {
                 continue;
             }
-            let Some(last_liveness_wall_us) = session.reconnect.last_heartbeat_wall_us else {
+            let Some(deadline) = liveness_deadline_wall_us(session, threshold) else {
                 continue;
             };
-            if server_timestamp_wall_us.saturating_sub(last_liveness_wall_us) < threshold {
+            if server_timestamp_wall_us < deadline {
                 continue;
             }
             session.agent_liveness_degraded_since_wall_us = Some(server_timestamp_wall_us);
@@ -767,9 +772,30 @@ impl ProjectionAuthority {
                         ProjectionLifecycleState::Attached | ProjectionLifecycleState::Active
                     )
             })
-            .filter_map(|session| session.reconnect.last_heartbeat_wall_us)
-            .map(|last_liveness_wall_us| last_liveness_wall_us.saturating_add(threshold))
+            .filter_map(|session| liveness_deadline_wall_us(session, threshold))
             .min()
+    }
+
+    /// Hold an owned session (`hud_hold`): refresh agent liveness and keep the
+    /// session from liveness degradation until `hold_until_wall_us`
+    /// (`u64::MAX` = until detach or cleanup). Each call replaces the previous
+    /// hold. After the hold lapses, the ordinary liveness threshold applies,
+    /// measured from the latest authenticated owner operation.
+    pub fn handle_hold(
+        &mut self,
+        projection_id: &str,
+        owner_token: &str,
+        hold_until_wall_us: u64,
+        server_timestamp_wall_us: u64,
+    ) -> Result<(), ProjectionErrorCode> {
+        let session = self.authorize_owner(
+            projection_id,
+            owner_token,
+            server_timestamp_wall_us,
+            ProjectionAuditCategory::OwnerStatus,
+        )?;
+        session.hold_until_wall_us = Some(hold_until_wall_us);
+        Ok(())
     }
 
     /// Earliest expiry of any non-terminal viewer input item.
@@ -1035,6 +1061,7 @@ impl ProjectionAuthority {
                     ..ReconnectBookkeeping::default()
                 },
                 agent_liveness_degraded_since_wall_us: None,
+                hold_until_wall_us: None,
                 retained_transcript: VecDeque::new(),
                 retained_transcript_bytes: 0,
                 input_history: VecDeque::new(),
@@ -1104,7 +1131,7 @@ impl ProjectionAuthority {
         let mut cadence_append: Option<(String, u64)> = None;
 
         let response = match self.authorize_owner(
-            &request.envelope,
+            &request.envelope.projection_id,
             &request.owner_token,
             server_timestamp_wall_us,
             ProjectionAuditCategory::OwnerPublish,
@@ -1216,7 +1243,7 @@ impl ProjectionAuthority {
         // due (mirrors the content-less refresh in `handle_input_ack`).
         let mut cadence_append: Option<(String, u64, u64)> = None;
         let response = match self.authorize_owner(
-            &request.envelope,
+            &request.envelope.projection_id,
             &request.owner_token,
             server_timestamp_wall_us,
             ProjectionAuditCategory::OwnerStatus,
@@ -1452,7 +1479,7 @@ impl ProjectionAuthority {
             .min(self.bounds.max_poll_response_bytes);
         let mut cadence_append: Option<(String, u64, u64)> = None;
         let response = match self.authorize_owner(
-            &request.envelope,
+            &request.envelope.projection_id,
             &request.owner_token,
             server_timestamp_wall_us,
             ProjectionAuditCategory::OwnerInputRead,
@@ -1566,7 +1593,7 @@ impl ProjectionAuthority {
         }
         let mut cadence_append: Option<(String, u64, u64)> = None;
         let response = match self.authorize_owner(
-            &request.envelope,
+            &request.envelope.projection_id,
             &request.owner_token,
             server_timestamp_wall_us,
             ProjectionAuditCategory::OwnerInputAck,
@@ -1631,7 +1658,7 @@ impl ProjectionAuthority {
             );
         }
         let response = match self.authorize_owner(
-            &request.envelope,
+            &request.envelope.projection_id,
             &request.owner_token,
             server_timestamp_wall_us,
             ProjectionAuditCategory::OwnerDetach,
@@ -1689,7 +1716,7 @@ impl ProjectionAuthority {
             CleanupAuthority::Owner => {
                 let owner_token = request.owner_token.as_deref().unwrap_or_default();
                 match self.authorize_owner(
-                    &request.envelope,
+                    &request.envelope.projection_id,
                     owner_token,
                     server_timestamp_wall_us,
                     ProjectionAuditCategory::OwnerCleanup,
@@ -1779,26 +1806,21 @@ impl ProjectionAuthority {
 
     fn authorize_owner(
         &mut self,
-        envelope: &OperationEnvelope,
+        projection_id: &str,
         owner_token: &str,
         server_timestamp_wall_us: u64,
         _category: ProjectionAuditCategory,
     ) -> Result<&mut ProjectionSession, ProjectionErrorCode> {
-        if self
-            .sessions
-            .get(&envelope.projection_id)
-            .is_some_and(|session| {
-                server_timestamp_wall_us >= session.owner_token_expires_at_wall_us
-            })
-        {
-            self.cadence_coalescer
-                .remove_portal(&envelope.projection_id);
-            self.sessions.remove(&envelope.projection_id);
+        if self.sessions.get(projection_id).is_some_and(|session| {
+            server_timestamp_wall_us >= session.owner_token_expires_at_wall_us
+        }) {
+            self.cadence_coalescer.remove_portal(projection_id);
+            self.sessions.remove(projection_id);
             return Err(ProjectionErrorCode::ProjectionTokenExpired);
         }
         let session = self
             .sessions
-            .get_mut(&envelope.projection_id)
+            .get_mut(projection_id)
             .ok_or(ProjectionErrorCode::ProjectionNotFound)?;
         let presented = verifier_for_secret(owner_token);
         if !constant_time_eq(&session.owner_token_verifier, &presented) {
@@ -2427,6 +2449,21 @@ fn promote_to_active_if_recovering(session: &mut ProjectionSession) {
         ProjectionLifecycleState::Attached | ProjectionLifecycleState::HudUnavailable
     ) {
         session.lifecycle_state = ProjectionLifecycleState::Active;
+    }
+}
+
+/// When the liveness sweep degrades `session`: the later of its owner hold and
+/// `threshold` past its latest authenticated owner operation. `None` when it
+/// is held until cleared or has no liveness record.
+fn liveness_deadline_wall_us(session: &ProjectionSession, threshold: u64) -> Option<u64> {
+    let idle = session
+        .reconnect
+        .last_heartbeat_wall_us?
+        .saturating_add(threshold);
+    match session.hold_until_wall_us {
+        Some(u64::MAX) => None,
+        Some(hold) => Some(idle.max(hold)),
+        None => Some(idle),
     }
 }
 

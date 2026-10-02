@@ -756,11 +756,24 @@ pub async fn hud_hold(ctx: &ToolCtx<'_>, args: Value) -> McpResult<Value> {
             scene.version += 1;
         }
         Surface::Portal(pid) => {
-            // An attached portal is held until cleared; nothing to extend.
-            if portal_token(ctx, &pid).is_none() {
-                return Err(not_held(&p.surface));
+            // The runtime keeps a held portal (and its transcript) past the
+            // idle liveness reap until the hold lapses or hud_clear.
+            let token = portal_token(ctx, &pid).ok_or_else(|| not_held(&p.surface))?;
+            let held = portal_call(ctx, |reply| PortalOp::Hold {
+                projection_id: pid.clone(),
+                owner_token: token,
+                ttl_ms: p.ttl_ms,
+                reply,
+            })
+            .await;
+            match held {
+                Ok(()) => {}
+                Err(e) if is_stale_token(&e) => {
+                    ctx.state.with(&ns, |s| s.portals.remove(&pid));
+                    return Err(not_held(&p.surface));
+                }
+                Err(e) => return Err(e),
             }
-            return Ok(json!({ "ok": true }));
         }
     }
     Ok(result)

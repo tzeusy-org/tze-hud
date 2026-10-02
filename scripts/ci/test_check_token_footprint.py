@@ -192,6 +192,24 @@ class GateTests(unittest.TestCase):
         self.assertEqual(report["status"], "baseline_incompatible")
         self.assertIn("owner-approved", " ".join(report["incompatibilities"]))
 
+    def test_pending_review_baseline_warns_but_compares(self):
+        baseline = fixture()
+        approve(baseline)
+        baseline["approval"]["status"] = "pending_owner_review"
+        report = checker.compare(fixture(), baseline)
+        self.assertEqual(report["status"], "warning")
+        self.assertEqual(report["approval"], "pending_owner_review")
+        approve(baseline, budget=1)
+        baseline["approval"]["status"] = "pending_owner_review"
+        self.assertEqual(checker.compare(fixture(), baseline)["status"], "failed")
+
+    def test_unknown_approval_status_fails_closed(self):
+        baseline = fixture()
+        approve(baseline)
+        baseline["approval"]["status"] = "approved"
+        report = checker.compare(fixture(), baseline)
+        self.assertEqual(report["status"], "baseline_incompatible")
+
     def test_missing_metric_fails_closed_as_incompatible(self):
         baseline = fixture()
         approve(baseline)
@@ -241,11 +259,12 @@ class CandidatePacketTests(unittest.TestCase):
             )
         )
 
-    def test_candidate_records_revised_owner_approval(self):
-        self.assertEqual(self.candidate["approval"]["status"], "owner_approved")
+    def test_candidate_awaits_owner_review(self):
+        # The owner records approval in review; the candidate must not claim it.
+        self.assertEqual(self.candidate["approval"]["status"], "pending_owner_review")
         self.assertEqual(
             self.candidate["approval"]["decision_reference"],
-            "docs/api.md#token-budgets",
+            "pending owner review (T5 S3)",
         )
 
     def test_baseline_budgets_match_api_targets(self):
@@ -261,10 +280,17 @@ class CandidatePacketTests(unittest.TestCase):
             },
         )
 
-    def test_approved_candidate_is_accepted_by_fail_closed_gate(self):
+    def test_candidate_is_accepted_by_fail_closed_gate(self):
         report = checker.compare(copy.deepcopy(self.candidate), self.candidate)
-        self.assertEqual(report["status"], "passed")
+        self.assertEqual(report["status"], "warning")
         self.assertFalse(report["incompatibilities"])
+        self.assertFalse(report["warnings"] or report["regressions"])
+
+    def test_owner_approval_makes_candidate_pass(self):
+        approved = copy.deepcopy(self.candidate)
+        approved["approval"]["status"] = "owner_approved"
+        report = checker.compare(copy.deepcopy(self.candidate), approved)
+        self.assertEqual(report["status"], "passed")
 
 
 if __name__ == "__main__":

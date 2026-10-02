@@ -240,6 +240,20 @@ pub enum PortalOp {
         /// validation / auth / conflict failure.
         reply: tokio::sync::oneshot::Sender<Result<(), PortalOpRejection>>,
     },
+    /// Hold a projection session (`hud_hold`): refresh its agent liveness and
+    /// keep it from being degraded and reaped for `ttl_ms` (0 = until detach
+    /// or cleanup). The driver computes the deadline on its own clock.
+    Hold {
+        /// Projection identifier matching a prior successful `Attach`.
+        projection_id: String,
+        /// Owner token returned by the `Attach` response.
+        owner_token: String,
+        /// Hold duration in milliseconds; 0 holds until detach or cleanup.
+        ttl_ms: u64,
+        /// One-shot response channel: `Ok(())` on success or a
+        /// [`PortalOpRejection`] carrying the stable error code.
+        reply: tokio::sync::oneshot::Sender<Result<(), PortalOpRejection>>,
+    },
     /// Detach a projection session, purging its private state.
     ///
     /// Tears down the projection: the authority removes the session and its

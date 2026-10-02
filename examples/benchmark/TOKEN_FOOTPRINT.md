@@ -57,8 +57,11 @@ python3 scripts/ci/check_token_footprint.py \
   --output test_results/token-footprint/gate-report.json
 ```
 
-The checked-in values are the owner-approved comparison authority. The gate
-fails closed with `baseline_incompatible` if approval, its decision reference,
-or the budgets are missing, or if the compatibility identity changes
+The checked-in values are the comparison authority. Their approval status is
+`owner_approved`, or `pending_owner_review` while the owner reviews a new
+baseline in its PR; a pending baseline is compared in full but reports at best
+`warning`. The gate fails closed with `baseline_incompatible` on any other
+approval status, a missing decision reference or budgets, or a change to the
+compatibility identity
 (tokenizer, fixture fingerprint, flow version, flow fingerprint, or operation
 set). An intentional change re-records the baseline with owner approval.

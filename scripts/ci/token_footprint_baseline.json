@@ -269,8 +269,8 @@
     }
   },
   "approval": {
-    "status": "owner_approved",
-    "decision_reference": "docs/api.md#token-budgets",
-    "basis": "T5 S3 (2026-10-02) replaced the 22 MCP tools with five hud_* verbs and re-recorded every flow; the owner approved the T5 API and its token budgets (docs/api.md, Decisions 2026-10-02). Every measured integer, flow and fixture fingerprint, and tokenizer identity is comparison authority."
+    "status": "pending_owner_review",
+    "decision_reference": "pending owner review (T5 S3)",
+    "basis": "T5 S3 (2026-10-02) replaced the 22 MCP tools with five hud_* verbs and re-recorded every flow against the docs/api.md token budgets. The owner confirms this baseline in PR review; set status to owner_approved once they do. Every measured integer, flow and fixture fingerprint, and tokenizer identity is comparison authority."
   }
 }
