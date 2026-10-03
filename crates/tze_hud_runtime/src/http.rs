@@ -6,8 +6,9 @@
 //!
 //! Routes today: `POST /` and `POST /mcp` -> MCP; `GET /admin/status`,
 //! `GET /admin/logs`, `GET /admin/screenshot`, `POST /admin/restart` and
-//! `POST /admin/update` -> operator endpoints (admin PSK only). `/pair` is
-//! reserved for T6 and plugs in as a new [`Route`] variant.
+//! `POST /admin/update` -> operator endpoints (admin PSK only); `POST /pair` ->
+//! first-run pairing (no auth: the one-time code is the credential, and only
+//! while pairing is open).
 //! Unknown paths get a bare 404, known paths with the wrong method a bare 405
 //! with an `Allow` header (no JSON-RPC body in either case).
 
@@ -150,6 +151,8 @@ pub enum OperatorCode {
     Unauthenticated,
     PairingClosed,
     PairCodeInvalid,
+    /// A request body or field could not be used.
+    BadRequest,
     NotAdmin,
     NotInstalled,
     UpdateFailed,
@@ -181,6 +184,8 @@ impl OperatorError {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Route {
     Mcp,
+    /// `POST /pair`; needs no bearer.
+    Pair,
     /// An operator endpoint; the caller must pass [`admin_guard`] first.
     Admin(AdminRoute),
     Respond(Response),
@@ -226,6 +231,8 @@ pub fn route(method: &str, path: &str) -> Route {
     match (method, path) {
         ("POST", "/" | "/mcp") => Route::Mcp,
         (_, "/" | "/mcp") => Route::Respond(Response::method_not_allowed("POST")),
+        ("POST", "/pair") => Route::Pair,
+        (_, "/pair") => Route::Respond(Response::method_not_allowed("POST")),
         ("GET", "/admin/status") => Route::Admin(AdminRoute::Status),
         ("GET", "/admin/logs") => Route::Admin(AdminRoute::Logs),
         ("GET", "/admin/screenshot") => Route::Admin(AdminRoute::Screenshot),
@@ -396,6 +403,11 @@ mod tests {
             Route::Respond(Response::method_not_allowed("POST"))
         );
         assert_eq!(route("GET", "/mcp"), route("GET", "/"));
+        assert_eq!(route("POST", "/pair"), Route::Pair);
+        assert_eq!(
+            route("GET", "/pair"),
+            Route::Respond(Response::method_not_allowed("POST"))
+        );
         assert_eq!(
             route("POST", "/nope"),
             Route::Respond(Response::not_found())

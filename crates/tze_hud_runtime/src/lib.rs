@@ -47,6 +47,7 @@ pub(crate) mod mcp;
 pub(crate) mod mutation_budget_bridge;
 pub(crate) mod net_addrs;
 pub mod operator;
+pub mod pairing;
 pub(crate) mod pipeline;
 pub mod portal_projection_driver;
 pub mod portal_tokens;

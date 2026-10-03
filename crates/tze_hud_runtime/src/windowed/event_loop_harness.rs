@@ -121,6 +121,7 @@ impl WindowedRuntimeState {
             active_tab_mirror,
             chrome_state: Arc::new(std::sync::RwLock::new(crate::shell::ChromeState::new())),
             system_card: crate::shell::system_card::SystemCardHandle::default(),
+            pairing: None,
             input_ring: Arc::new(StdMutex::new(VecDeque::new())),
             pending_input_latency: Arc::new(StdMutex::new(VecDeque::new())),
             frame_ready_rx,
@@ -289,6 +290,7 @@ impl HeadlessEventLoopHarness {
             restart: None,
             update: None,
             bind_gate: None,
+            pairing: None,
         };
         let (_mcp_task, mcp_addrs) = crate::mcp::start_mcp_http_server_with_render_wake(
             scene_handle,

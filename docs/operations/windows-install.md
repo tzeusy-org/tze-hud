@@ -52,18 +52,21 @@ directories and the two registry entries is touched.
 
 ## Pair an agent
 
-Until first-run pairing lands (T6 in `docs/scope.md`), add an `agents.toml`
-beside the config. The HUD stores only each agent's PSK SHA-256; the agent keeps
-the PSK and sends it as its bearer:
+With no agents paired, the HUD shows a 6-digit code and its Tailscale address
+on a card. Give the code to the agent, which trades it for its key:
 
-```powershell
-$psk = -join ((1..32) | ForEach-Object { '{0:x2}' -f (Get-Random -Maximum 256) })
-$sha = [System.Security.Cryptography.SHA256]::Create()
-$hash = -join ($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($psk)) | ForEach-Object { $_.ToString('x2') })
-Set-Content "$env:APPDATA\tze_hud\agents.toml" "[agents.claude]`npsk_sha256 = `"$hash`"`nallow = [`"*`"]" -Encoding ascii
+```sh
+curl -s http://<tailscale-ip>:9090/pair -d '{"agent":"claude","code":"482913"}'
 ```
 
-Give `$psk` to the agent host and do not store it on the HUD side.
+The reply carries the PSK (once), the MCP URL, and the gRPC address. The HUD
+stores only the PSK's SHA-256 in `%APPDATA%\tze_hud\agents.toml`. Add
+`"admin": true` to the request to let that agent use `/admin/*`. To pair another
+agent, or re-pair one (which rotates its key), run `tze_hud.exe --pair` or press
+Ctrl+Shift+P with the HUD focused. A code works once and expires after 5
+minutes; five wrong codes replace it, and repeated failures pause pairing for
+60 seconds.
+
 `app/tze_hud_app/config/production.toml` is the reference (and default) config.
 
 ## Logs and operator endpoints
