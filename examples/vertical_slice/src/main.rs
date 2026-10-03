@@ -167,7 +167,6 @@ fn run_windowed() -> Result<(), Box<dyn std::error::Error>> {
         monitor_index: None,    // Use primary monitor.
         benchmark: None,        // Demo mode is unbounded until the window closes.
         quiescent_efficiency: None, // Demo mode never self-terminates for CI evidence.
-        bind_all_interfaces: false, // Demo binds loopback only (ports are 0 anyway).
     };
 
     let runtime = WindowedRuntime::new(config);
@@ -240,7 +239,6 @@ async fn run_headless(dev_mode: bool) -> Result<(), Box<dyn std::error::Error>> 
         grpc_port: 50051,
         // This example is a demo entrypoint where external agents connect;
         // opt in to all-interfaces binding so connections from outside loopback work.
-        bind_all_interfaces: true,
         agents,
         config_toml,
     };
@@ -1286,7 +1284,6 @@ default_tab = true
             width: 320,
             height: 240,
             grpc_port: free_port,
-            bind_all_interfaces: false,
             agents: tze_hud_config::AgentsFile::default()
                 .with_agent("test-agent", "test-key", &["tiles"])
                 .directory()
@@ -1852,7 +1849,6 @@ default_tab = true
             width: 320,
             height: 240,
             grpc_port: free_port,
-            bind_all_interfaces: false,
             // Pair a widget-only agent: no scene topology, no zones.
             agents: tze_hud_config::AgentsFile::default()
                 .with_agent("restricted-agent", "test-key", &["widget:gauge"])

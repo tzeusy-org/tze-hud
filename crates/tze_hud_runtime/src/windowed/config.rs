@@ -57,34 +57,17 @@ pub struct WindowedConfig {
     pub overlay_auto_size: bool,
     /// gRPC server port.  Set to `0` to disable the gRPC server.
     ///
-    /// Both gRPC and MCP default to loopback-only binding (`127.0.0.1`) for
-    /// security.  To expose them on all interfaces, set `bind_all_interfaces =
-    /// true` or the `TZE_HUD_BIND_ALL_INTERFACES=1` environment variable.
+    /// gRPC and MCP listen on loopback plus the local Tailscale addresses only
+    /// (see [`crate::net_addrs`]).
     pub grpc_port: u16,
     /// MCP HTTP server port.  Set to `0` to disable the MCP server.
     ///
-    /// The MCP server binds on `127.0.0.1` (loopback only) at the given port
-    /// by default.  Set `bind_all_interfaces = true` (or
-    /// `TZE_HUD_BIND_ALL_INTERFACES=1`) for `0.0.0.0` binding.  It enforces
+    /// The MCP server listens on the same addresses as gRPC.  It enforces
     /// PSK authentication on every request via HTTP `Authorization: Bearer
     /// <psk>` or the JSON-RPC `_auth` param field.
     ///
     /// Default: 9090.
     pub mcp_port: u16,
-    /// Bind gRPC and MCP servers on all interfaces (`0.0.0.0`) instead of
-    /// loopback only (`127.0.0.1`).
-    ///
-    /// **Security opt-in (hud-1aswu.1).** The default is `false` — both
-    /// servers bind loopback only, preventing LAN/tailnet access.  Set this
-    /// to `true` only when you deliberately need remote-agent or cloud-relay
-    /// access.  When enabled, all connections still require PSK authentication;
-    /// `LocalSocketCredential` is additionally gated to loopback peers.
-    ///
-    /// Can also be set via the `TZE_HUD_BIND_ALL_INTERFACES=1` environment
-    /// variable (overrides this field if set).
-    ///
-    /// Default: `false`.
-    pub bind_all_interfaces: bool,
     /// Paired agents (loaded from `agents.toml`), shared live by gRPC and
     /// MCP. Empty means no agent can authenticate until one is paired.
     pub agents: tze_hud_scene::config::SharedAgents,
@@ -152,23 +135,7 @@ impl Default for WindowedConfig {
             monitor_index: None,
             benchmark: None,
             quiescent_efficiency: None,
-            bind_all_interfaces: false,
         }
-    }
-}
-
-/// Select the gRPC bind host based on the `bind_all_interfaces` flag.
-///
-/// Security fix (hud-1aswu.1): the default is loopback (`127.0.0.1`).
-/// `0.0.0.0` (all interfaces) requires an explicit opt-in.
-///
-/// Extracted as a pure function to allow unit-testing of the bind-host
-/// selection without spinning up a Tokio runtime or gRPC server (hud-stl9j).
-pub(super) fn select_grpc_bind_host(bind_all_interfaces: bool) -> &'static str {
-    if bind_all_interfaces {
-        "0.0.0.0"
-    } else {
-        "127.0.0.1"
     }
 }
 
@@ -317,67 +284,6 @@ mod tests {
         assert_ne!(
             cfg.grpc_port, 0,
             "default grpc_port must be non-zero (gRPC enabled by default)"
-        );
-    }
-
-    /// `WindowedConfig::default()` must have `bind_all_interfaces = false`.
-    ///
-    /// Security gate: the default must never expose services on all interfaces
-    /// (hud-1aswu.1).
-    #[test]
-    fn windowed_config_default_bind_all_interfaces_is_false() {
-        let cfg = WindowedConfig::default();
-        assert!(
-            !cfg.bind_all_interfaces,
-            "default must not bind all interfaces (security: hud-1aswu.1)"
-        );
-    }
-
-    /// `select_grpc_bind_host(false)` must return `"127.0.0.1"` (loopback).
-    ///
-    /// Security gate (hud-1aswu.1): the default path — `bind_all_interfaces = false` —
-    /// must select a loopback address.  A future change that swaps the arms would
-    /// fail this test instead of silently exposing the service on all interfaces.
-    #[test]
-    fn select_grpc_bind_host_default_is_loopback() {
-        let host = select_grpc_bind_host(false);
-        let addr: std::net::IpAddr = host
-            .parse()
-            .expect("select_grpc_bind_host must return a valid IP string");
-        assert!(
-            addr.is_loopback(),
-            "bind_all_interfaces=false must select a loopback address; got {host}"
-        );
-    }
-
-    /// `select_grpc_bind_host(true)` must return `"0.0.0.0"` (all interfaces).
-    ///
-    /// Pins the opt-in path: explicit `bind_all_interfaces = true` must select
-    /// `0.0.0.0`, not a loopback address.
-    #[test]
-    fn select_grpc_bind_host_all_interfaces_is_not_loopback() {
-        let host = select_grpc_bind_host(true);
-        let addr: std::net::IpAddr = host
-            .parse()
-            .expect("select_grpc_bind_host must return a valid IP string");
-        assert!(
-            !addr.is_loopback(),
-            "bind_all_interfaces=true must select a non-loopback (all-interfaces) address; got {host}"
-        );
-        assert_eq!(
-            host, "0.0.0.0",
-            "bind_all_interfaces=true must return the all-interfaces sentinel 0.0.0.0"
-        );
-    }
-
-    /// The two `select_grpc_bind_host` outputs are distinct — loopback and
-    /// all-interfaces are not the same address.
-    #[test]
-    fn select_grpc_bind_host_outputs_are_distinct() {
-        assert_ne!(
-            select_grpc_bind_host(false),
-            select_grpc_bind_host(true),
-            "loopback and all-interfaces bind hosts must be different strings"
         );
     }
 

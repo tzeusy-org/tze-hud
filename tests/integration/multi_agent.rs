@@ -139,7 +139,6 @@ async fn test_three_agents_contention() -> Result<(), Box<dyn std::error::Error>
         width: DISPLAY_W,
         height: DISPLAY_H,
         grpc_port: GRPC_PORT,
-        bind_all_interfaces: false,
         agents: tze_hud_scene::config::AgentDirectory::unrestricted(TEST_PSK),
         config_toml: None,
     };
@@ -738,7 +737,6 @@ async fn test_grpc_and_mcp_share_single_scene_graph() {
         width: 800,
         height: 600,
         grpc_port: 0, // ephemeral port — no real gRPC server needed
-        bind_all_interfaces: false,
         agents: tze_hud_scene::config::AgentDirectory::unrestricted("coherence-test"),
         config_toml: None,
     };

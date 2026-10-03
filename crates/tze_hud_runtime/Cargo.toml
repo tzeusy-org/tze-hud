@@ -39,6 +39,7 @@ toml = { workspace = true }
 uuid = { workspace = true }
 arc-swap = { workspace = true }
 unicode-width = { workspace = true }
+if-addrs = "0.15"
 
 
 [target.'cfg(target_os = "linux")'.dependencies]

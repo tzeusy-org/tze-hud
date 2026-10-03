@@ -346,9 +346,8 @@ fi
 # starts the compositor — so invoking it here is cheap and safe. It also never
 # prints the PSK value (only placeholders), matching this script's own hygiene.
 #
-# `--host` is display-only in this script; the runtime models exposure as
-# loopback (default) vs all-interfaces, so map HOST=0.0.0.0 to
-# --bind-all-interfaces and leave every other host on the loopback default.
+# `--host` is display-only in this script; the runtime listens on loopback
+# plus its Tailscale addresses.
 print_attach_block() {
   local -a native_args=(
     --print-attach-info
@@ -356,9 +355,6 @@ print_attach_block() {
     --mcp-port "$MCP_PORT"
     --grpc-port "$GRPC_PORT"
   )
-  if [[ "$HOST" == "0.0.0.0" ]]; then
-    native_args+=(--bind-all-interfaces)
-  fi
 
   echo
   if [[ -x "$BIN_PATH" ]] && "$BIN_PATH" "${native_args[@]}"; then

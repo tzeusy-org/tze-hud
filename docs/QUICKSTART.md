@@ -54,8 +54,8 @@ exits **without** starting the runtime:
 
 ```bash
 ./target/release/tze_hud --print-attach-info
-# honours --config / --mcp-port / --grpc-port / --bind-all-interfaces so the
-# printed info matches the runtime it describes; never prints the PSK value.
+# honours --config / --mcp-port / --grpc-port so the printed info matches
+# the runtime it describes; never prints the PSK value.
 ```
 
 The rest of this doc is the same flow, step by step, explaining each piece.
@@ -161,8 +161,8 @@ or equivalently, by hand:
 The runtime takes no PSK: it authenticates each request against the hashes
 in `agents.toml` next to `--config`.
 
-A window opens. The MCP listener is on `http://127.0.0.1:9090/mcp` (loopback
-only by default — add `--bind-all-interfaces` to expose it on the LAN).
+A window opens. The MCP listener is on `http://127.0.0.1:9090/mcp` (the runtime
+listens on loopback plus this host's Tailscale addresses, nothing else).
 
 On launch the runtime also prints a short **startup banner** to stdout — once,
 unconditionally, even when `TZE_HUD_LOG` is unset — so you can see where it is

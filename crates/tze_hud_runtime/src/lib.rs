@@ -65,6 +65,7 @@ pub mod headless;
 pub mod idle_efficiency;
 pub mod mcp;
 pub mod mutation_budget_bridge;
+pub mod net_addrs;
 pub mod pipeline;
 pub mod portal_cadence;
 pub mod portal_projection_driver;

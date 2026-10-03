@@ -163,7 +163,6 @@ async fn capture(
         width: REFERENCE_WIDTH,
         height: REFERENCE_HEIGHT,
         grpc_port: 0,
-        bind_all_interfaces: false,
         agents: Default::default(),
         config_toml: Some(readback_config_toml()),
     })

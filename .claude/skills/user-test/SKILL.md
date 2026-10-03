@@ -77,7 +77,7 @@ networked MCP publish → subtitle rendered on the VM console):
 
 - Scheduled task **`TzeHudFullscreen`** (exe-direct, pre-registered by the
   VM's firstboot IaC):
-  `C:\tze_hud\tze_hud.exe --window-mode fullscreen --config C:\tze_hud\tze_hud.toml --bind-all-interfaces`
+  `C:\tze_hud\tze_hud.exe --window-mode fullscreen --config C:\tze_hud\tze_hud.toml`
   Deploy = SCP the exe, `taskkill /F /IM tze_hud.exe` (admin-user), then
   `schtasks /Run /TN TzeHudFullscreen`.
 - `C:\tze_hud\tze_hud.toml` (profile `full-display`) and the PSK machine env

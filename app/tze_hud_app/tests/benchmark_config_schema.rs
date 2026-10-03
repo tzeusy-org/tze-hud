@@ -34,7 +34,6 @@ fn benchmark_headless_config() -> HeadlessConfig {
         width: 320,
         height: 240,
         grpc_port: 0,
-        bind_all_interfaces: false,
         agents: tze_hud_scene::config::AgentDirectory::unrestricted("benchmark-config-test"),
         config_toml: Some(benchmark_config_for_headless()),
     }

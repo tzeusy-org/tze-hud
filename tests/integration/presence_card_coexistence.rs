@@ -868,7 +868,6 @@ async fn test_three_agents_presence_card_coexistence() -> Result<(), Box<dyn std
         width: DISPLAY_W as u32,
         height: DISPLAY_H as u32,
         grpc_port: GRPC_PORT,
-        bind_all_interfaces: false,
         agents: tze_hud_scene::config::AgentDirectory::unrestricted(TEST_PSK),
         config_toml: None,
     };

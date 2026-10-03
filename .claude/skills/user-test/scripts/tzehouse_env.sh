@@ -19,10 +19,10 @@
 #
 # Self-heal ladder (each step only if needed):
 #   1. no tze_hud.exe running                  -> schtasks /Run TzeHudOverlay
-#   2. instance up but MCP not on 0.0.0.0:9090 -> kill + relaunch via the task
+#   2. instance up but MCP not on 127.0.0.1:9090 -> kill + relaunch via the task
 #      (catches leftover ad-hoc launches, e.g. a benchmark.toml instance bound
-#       to loopback without --bind-all-interfaces; observed 2026-07-12)
-#   3. wait for 0.0.0.0 bind, then verify MCP HTTP `initialize` answers 200
+#       to loopback only; observed 2026-07-12)
+#   3. wait for the loopback bind, then verify MCP HTTP `initialize` answers 200
 # Diagnostics go to stderr; only export lines (or the hostname) go to stdout.
 set -euo pipefail
 
@@ -65,16 +65,17 @@ who_file=$(ssh_file "whoami" 2>/dev/null) || {
   echo "tzehouse_env: ERROR — file-user SSH gate failed ($FILE_USER@$HOST with $KEY)" >&2; exit 1; }
 echo "tzehouse_env: SSH gates OK ($who_admin, $who_file)" >&2
 
-# --- 2. HUD instance health: MCP must be bound on 0.0.0.0 (not loopback). ----
+# --- 2. HUD instance health: MCP must listen on loopback (+ Tailscale). ----
 mcp_bind() {
   # prints the local address netstat shows for the MCP listener, if any
   ssh_admin "netstat -ano | findstr LISTENING | findstr :$MCP_PORT" 2>/dev/null \
-    | awk '{print $2}' | grep ":$MCP_PORT\$" | head -1 || true
+    | awk '{print $2}' | grep ":$MCP_PORT\$" || true
 }
+mcp_on_loopback() { printf '%s\n' "$1" | grep -qx "127.0.0.1:$MCP_PORT"; }
 bind_addr=$(mcp_bind)
-if [ "$bind_addr" != "0.0.0.0:$MCP_PORT" ]; then
+if ! mcp_on_loopback "$bind_addr"; then
   if [ -n "$bind_addr" ]; then
-    echo "tzehouse_env: MCP bound on $bind_addr (not 0.0.0.0) — leftover ad-hoc instance; kill + relaunch via $TASK_NAME" >&2
+    echo "tzehouse_env: MCP listeners [$bind_addr] lack 127.0.0.1:$MCP_PORT — leftover ad-hoc instance; kill + relaunch via $TASK_NAME" >&2
   else
     echo "tzehouse_env: no MCP listener on :$MCP_PORT — launching $TASK_NAME" >&2
   fi
@@ -85,10 +86,10 @@ if [ "$bind_addr" != "0.0.0.0:$MCP_PORT" ]; then
   for _ in $(seq 1 12); do
     sleep 5
     bind_addr=$(mcp_bind)
-    if [ "$bind_addr" = "0.0.0.0:$MCP_PORT" ]; then ok=1; break; fi
+    if mcp_on_loopback "$bind_addr"; then ok=1; break; fi
   done
   if [ -z "$ok" ]; then
-    echo "tzehouse_env: ERROR — MCP not on 0.0.0.0:$MCP_PORT after relaunch (last bind: ${bind_addr:-none}); check the $TASK_NAME task definition on $HOST" >&2
+    echo "tzehouse_env: ERROR — MCP not on 127.0.0.1:$MCP_PORT after relaunch (last bind: ${bind_addr:-none}); check the $TASK_NAME task definition on $HOST" >&2
     exit 1
   fi
 fi

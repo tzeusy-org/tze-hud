@@ -2542,12 +2542,7 @@ impl WindowedRuntime {
         // runtime for gRPC server, MCP bridge, session management."
         //
         // gRPC server is disabled when grpc_port == 0 (per WindowedConfig docs).
-        // Security fix (hud-1aswu.1): pass bind_all_interfaces so gRPC also
-        // defaults to loopback unless explicitly opted in.
-        let bind_all = cfg.bind_all_interfaces
-            || std::env::var("TZE_HUD_BIND_ALL_INTERFACES")
-                .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-                .unwrap_or(false);
+        // gRPC and MCP listen on loopback plus local Tailscale addresses only.
         let (
             mut network_rt,
             mut network_handles,
@@ -2556,13 +2551,12 @@ impl WindowedRuntime {
             frame_presented_tx,
             degradation_notices,
             lease_expirations,
-            grpc_bound_addr,
+            grpc_bound_addrs,
         ) = start_network_services_with_render_wake(
             cfg.grpc_port,
             Arc::clone(&cfg.agents),
             shared_state.clone(),
             Arc::clone(&runtime_context),
-            bind_all,
             render_wake.clone(),
         )?;
 
@@ -2584,7 +2578,7 @@ impl WindowedRuntime {
         // log a misleading "MCP portal tools will no longer function" warning.
         // Bound MCP address for the startup banner (hud-ylwqc). Set only when the
         // MCP listener actually binds, so the banner never advertises a dead port.
-        let mut mcp_bound_addr: Option<std::net::SocketAddr> = None;
+        let mut mcp_bound_addrs: Vec<std::net::SocketAddr> = Vec::new();
         let (mut portal_op_tx_opt, mut portal_op_rx_opt): (
             Option<tokio::sync::mpsc::UnboundedSender<tze_hud_mcp::portal_op::PortalOp>>,
             Option<tokio::sync::mpsc::UnboundedReceiver<tze_hud_mcp::portal_op::PortalOp>>,
@@ -2615,22 +2609,13 @@ impl WindowedRuntime {
             }
 
             if let Some(ref rt) = network_rt {
-                // Security fix (hud-1aswu.1): bind loopback by default; opt-in
-                // via `bind_all_interfaces` or `TZE_HUD_BIND_ALL_INTERFACES=1`.
-                let bind_all = cfg.bind_all_interfaces
-                    || std::env::var("TZE_HUD_BIND_ALL_INTERFACES")
-                        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-                        .unwrap_or(false);
-                let mcp_bind_host = if bind_all { "0.0.0.0" } else { "127.0.0.1" };
-                tracing::info!(
-                    bind_all,
-                    mcp_bind_host,
-                    "MCP HTTP: bind address selected (hud-1aswu.1)"
-                );
+                // Same addresses as gRPC: loopback plus local Tailscale.
                 let mcp_config = McpServerConfig {
-                    bind_addr: format!("{mcp_bind_host}:{}", cfg.mcp_port)
-                        .parse()
-                        .expect("valid MCP bind addr"),
+                    bind_addrs: crate::net_addrs::listen_addrs(
+                        &crate::net_addrs::local_ips(),
+                        cfg.mcp_port,
+                    ),
+                    late_tailnet_port: Some(cfg.mcp_port),
                     agents: Arc::clone(&cfg.agents),
                 };
                 let mcp_shutdown = shutdown.clone();
@@ -2643,9 +2628,9 @@ impl WindowedRuntime {
                     portal_ingress_wake.clone(),
                     Arc::clone(&safe_mode_atomic),
                 )) {
-                    Ok((handle, local_addr)) => {
+                    Ok((handle, local_addrs)) => {
                         network_handles.push(handle);
-                        mcp_bound_addr = Some(local_addr);
+                        mcp_bound_addrs = local_addrs;
                         tracing::info!(
                             mcp_port = cfg.mcp_port,
                             "MCP HTTP server started on network runtime"
@@ -2673,10 +2658,13 @@ impl WindowedRuntime {
         // addresses and an attach hint — never the PSK or any credential (the
         // helper cannot access secrets; see `render_startup_banner`).
         //
-        // Both `grpc_bound_addr` and `mcp_bound_addr` are genuine bound
-        // `local_addr`s (`None` when the service is disabled), so the banner
+        // Both `grpc_bound_addrs` and `mcp_bound_addrs` are genuine bound
+        // `local_addr`s (empty when the service is disabled), so the banner
         // never advertises an endpoint that did not actually come up.
-        println!("{}", render_startup_banner(grpc_bound_addr, mcp_bound_addr));
+        println!(
+            "{}",
+            render_startup_banner(&grpc_bound_addrs, &mcp_bound_addrs)
+        );
 
         // ── Safe-mode keyboard exit bridge ─────────────────────────────────────
         // Create an mpsc channel so the sync winit event-loop thread can signal

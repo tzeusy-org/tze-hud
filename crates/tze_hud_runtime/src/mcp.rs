@@ -42,10 +42,14 @@ use crate::threads::ShutdownToken;
 /// Created internally by the windowed runtime from `WindowedConfig` fields.
 #[derive(Debug, Clone)]
 pub struct McpServerConfig {
-    /// Address and port to bind the MCP HTTP listener.
-    ///
-    /// Conventionally `0.0.0.0:<port>` or `127.0.0.1:<port>`.
-    pub bind_addr: SocketAddr,
+    /// Addresses to listen on, one listener each. The windowed runtime passes
+    /// loopback plus the local Tailscale addresses (see [`crate::net_addrs`]).
+    pub bind_addrs: Vec<SocketAddr>,
+
+    /// When `Some(port)`, and none of `bind_addrs` is a Tailscale address,
+    /// keep looking for one after startup and add a listener on `port` when it
+    /// appears (Tailscale often starts after the HUD).
+    pub late_tailnet_port: Option<u16>,
 
     /// Live credential → agent directory for MCP authentication and the
     /// `allow` gate, shared with gRPC. The bearer token must be a paired
@@ -53,16 +57,17 @@ pub struct McpServerConfig {
     pub agents: SharedAgents,
 }
 
-/// Start the MCP HTTP server task on the calling Tokio runtime.
+/// Start the MCP HTTP server on the calling Tokio runtime.
 ///
-/// Binds the listener, logs the effective address, and spawns the serve loop.
-/// Returns the join handle so the caller can await it during shutdown.
+/// Binds every listener in `config.bind_addrs` (all must bind), logs the
+/// effective addresses, and spawns one accept loop per listener over a shared
+/// server. Returns the join handle so the caller can await it during shutdown.
 ///
 /// # Parameters
 ///
 /// * `scene`           — shared scene graph for MCP tool dispatch.
-/// * `config`          — MCP server configuration (bind address, agents).
-/// * `shutdown`        — token that stops the accept loop when triggered.
+/// * `config`          — MCP server configuration (bind addresses, agents).
+/// * `shutdown`        — token that stops the accept loops when triggered.
 /// * `portal_op_tx` — optional channel sender for portal projection operations
 ///   (hud-bq0gl.2).  When `Some`, the MCP server forwards portal surface
 ///   operations through this channel to the winit event-loop thread where the
@@ -70,20 +75,20 @@ pub struct McpServerConfig {
 ///
 /// # Returns
 ///
-/// On success, returns `(join_handle, local_addr)` where `local_addr` is the
-/// *actually bound* socket address (resolves an ephemeral `:0` port to the real
-/// one). Callers use `local_addr` for user-facing discovery (e.g. the startup
-/// banner) so the reported address reflects a listener that is genuinely up.
+/// On success, returns `(join_handle, local_addrs)` where `local_addrs` are the
+/// *actually bound* socket addresses (an ephemeral `:0` port is resolved to the
+/// real one), in `bind_addrs` order. Callers use them for user-facing discovery
+/// (e.g. the startup banner) so the report reflects listeners that are up.
 ///
 /// # Errors
 ///
-/// Returns an error if `TcpListener::bind` fails (e.g., address in use).
+/// Returns an error if any `TcpListener::bind` fails (e.g., address in use).
 pub async fn start_mcp_http_server(
     scene: Arc<Mutex<SceneGraph>>,
     config: McpServerConfig,
     shutdown: ShutdownToken,
     portal_op_tx: Option<tokio::sync::mpsc::UnboundedSender<tze_hud_mcp::portal_op::PortalOp>>,
-) -> std::io::Result<(tokio::task::JoinHandle<()>, SocketAddr)> {
+) -> std::io::Result<(tokio::task::JoinHandle<()>, Vec<SocketAddr>)> {
     start_mcp_http_server_with_render_wake(
         scene,
         config,
@@ -104,14 +109,25 @@ pub async fn start_mcp_http_server_with_render_wake(
     render_wake: tze_hud_scene::render_wake::RenderWakeNotifier,
     portal_ingress_wake: tze_hud_scene::render_wake::RenderWakeNotifier,
     safe_mode: Arc<std::sync::atomic::AtomicBool>,
-) -> std::io::Result<(tokio::task::JoinHandle<()>, SocketAddr)> {
-    let listener = TcpListener::bind(config.bind_addr).await?;
-    let local_addr = listener.local_addr()?;
+) -> std::io::Result<(tokio::task::JoinHandle<()>, Vec<SocketAddr>)> {
+    // The first address is loopback and must bind; a Tailscale address that
+    // fails to bind is skipped with a warning.
+    let mut listeners = Vec::with_capacity(config.bind_addrs.len());
+    for (i, addr) in config.bind_addrs.iter().enumerate() {
+        match TcpListener::bind(addr).await {
+            Ok(l) => listeners.push(l),
+            Err(e) if i == 0 => return Err(e),
+            Err(e) => tracing::warn!(addr = %addr, error = %e, "MCP HTTP: failed to bind address"),
+        }
+    }
+    let local_addrs = listeners
+        .iter()
+        .map(TcpListener::local_addr)
+        .collect::<std::io::Result<Vec<_>>>()?;
 
-    tracing::info!(
-        addr = %local_addr,
-        "MCP HTTP listener bound"
-    );
+    for addr in &local_addrs {
+        tracing::info!(addr = %addr, "MCP HTTP listener bound");
+    }
 
     let mut server_builder = McpServer::with_shared_scene(scene)
         .with_config(McpConfig::with_agents(config.agents.clone()))
@@ -123,11 +139,72 @@ pub async fn start_mcp_http_server_with_render_wake(
     }
     let server = Arc::new(server_builder);
 
+    let mut loops = Vec::with_capacity(listeners.len());
+    for (listener, addr) in listeners.into_iter().zip(local_addrs.iter().copied()) {
+        loops.push(tokio::spawn(run_accept_loop(
+            listener,
+            Arc::clone(&server),
+            shutdown.clone(),
+            addr,
+        )));
+    }
+
+    if let Some(port) = config.late_tailnet_port
+        && !local_addrs
+            .iter()
+            .any(|a| !crate::net_addrs::tailnet_addrs(&[a.ip()]).is_empty())
+    {
+        let (server, shutdown, shutdown_w) =
+            (Arc::clone(&server), shutdown.clone(), shutdown.clone());
+        tokio::spawn(async move {
+            let watcher = crate::net_addrs::watch_for_tailnet(|ip| {
+                let addr = SocketAddr::new(ip, port);
+                match std::net::TcpListener::bind(addr).and_then(|l| {
+                    l.set_nonblocking(true)?;
+                    TcpListener::from_std(l)
+                }) {
+                    Ok(listener) => {
+                        tracing::info!(addr = %addr, "MCP HTTP listener bound (Tailscale address appeared)");
+                        tokio::spawn(run_accept_loop(
+                            listener,
+                            Arc::clone(&server),
+                            shutdown.clone(),
+                            addr,
+                        ));
+                        true
+                    }
+                    Err(e) => {
+                        tracing::warn!(addr = %addr, error = %e, "MCP HTTP: failed to bind Tailscale address");
+                        false
+                    }
+                }
+            });
+            tokio::select! {
+                _ = watcher => {}
+                _ = wait_shutdown(&shutdown_w) => {}
+            }
+        });
+    }
+
     let handle = tokio::spawn(async move {
-        run_accept_loop(listener, server, shutdown, local_addr).await;
+        for l in loops {
+            let _ = l.await;
+        }
     });
 
-    Ok((handle, local_addr))
+    Ok((handle, local_addrs))
+}
+
+/// Resolves once `shutdown` has been triggered (checks the flag too, so a
+/// trigger that predates the subscription is not missed).
+async fn wait_shutdown(shutdown: &ShutdownToken) {
+    let mut rx = shutdown.subscribe();
+    while !shutdown.is_triggered() {
+        tokio::select! {
+            _ = rx.recv() => return,
+            _ = tokio::time::sleep(std::time::Duration::from_secs(1)) => {}
+        }
+    }
 }
 
 /// Internal accept loop — runs until the shutdown token is triggered or the
@@ -308,7 +385,8 @@ mod tests {
 
     fn make_config(port: u16, psk: &str) -> McpServerConfig {
         McpServerConfig {
-            bind_addr: format!("127.0.0.1:{port}").parse().unwrap(),
+            bind_addrs: vec![format!("127.0.0.1:{port}").parse().unwrap()],
+            late_tailnet_port: None,
             agents: tze_hud_scene::config::AgentDirectory::unrestricted(psk).shared(),
         }
     }
@@ -365,7 +443,8 @@ mod tests {
 
         let scene = make_scene();
         let config = McpServerConfig {
-            bind_addr: addr,
+            bind_addrs: vec![addr],
+            late_tailnet_port: None,
             agents: tze_hud_scene::config::AgentDirectory::unrestricted("test-key").shared(),
         };
         let shutdown = ShutdownToken::new();
@@ -394,6 +473,73 @@ mod tests {
         handle.await.expect("task");
     }
 
+    /// One server answers on every listener it is given (loopback plus, in
+    /// production, each Tailscale address). 127.0.0.2 stands in for a second
+    /// interface address without needing Tailscale.
+    #[tokio::test]
+    async fn mcp_http_tools_list_on_every_listener() {
+        let config = McpServerConfig {
+            bind_addrs: vec![
+                "127.0.0.1:0".parse().unwrap(),
+                "127.0.0.2:0".parse().unwrap(),
+            ],
+            late_tailnet_port: None,
+            agents: tze_hud_scene::config::AgentDirectory::unrestricted("test-key").shared(),
+        };
+        let shutdown = ShutdownToken::new();
+        let (handle, addrs) = start_mcp_http_server(make_scene(), config, shutdown.clone(), None)
+            .await
+            .expect("bind");
+        assert_eq!(addrs.len(), 2);
+
+        let body = r#"{"jsonrpc":"2.0","method":"tools/list","params":{},"id":1}"#;
+        for addr in addrs {
+            let resp = http_post(addr, body, Some("test-key")).await;
+            assert!(
+                resp.contains("HTTP/1.1 200") && resp.contains("\"result\""),
+                "tools/list on {addr} failed: {resp}"
+            );
+        }
+
+        shutdown.trigger(crate::threads::ShutdownReason::Clean);
+        handle.await.expect("task");
+    }
+
+    /// Only the loopback listener is fatal: a Tailscale address that cannot
+    /// bind (192.0.2.1 is not local) is skipped, a loopback failure is not.
+    #[tokio::test]
+    async fn mcp_http_only_loopback_bind_failure_is_fatal() {
+        let agents = tze_hud_scene::config::AgentDirectory::unrestricted("k").shared();
+        let cfg = |addrs: [&str; 2]| McpServerConfig {
+            bind_addrs: addrs.iter().map(|a| a.parse().unwrap()).collect(),
+            late_tailnet_port: None,
+            agents: agents.clone(),
+        };
+        let shutdown = ShutdownToken::new();
+        let (handle, addrs) = start_mcp_http_server(
+            make_scene(),
+            cfg(["127.0.0.1:0", "192.0.2.1:0"]),
+            shutdown.clone(),
+            None,
+        )
+        .await
+        .expect("a failing non-loopback bind must not fail startup");
+        assert_eq!(addrs.len(), 1);
+        shutdown.trigger(crate::threads::ShutdownReason::Clean);
+        handle.await.expect("task");
+
+        assert!(
+            start_mcp_http_server(
+                make_scene(),
+                cfg(["192.0.2.1:0", "127.0.0.1:0"]),
+                ShutdownToken::new(),
+                None,
+            )
+            .await
+            .is_err()
+        );
+    }
+
     #[tokio::test]
     async fn mcp_http_unauthenticated_returns_error() {
         use std::net::TcpListener as StdListener;
@@ -404,7 +550,8 @@ mod tests {
 
         let scene = make_scene();
         let config = McpServerConfig {
-            bind_addr: addr,
+            bind_addrs: vec![addr],
+            late_tailnet_port: None,
             agents: tze_hud_scene::config::AgentDirectory::unrestricted("real-key").shared(),
         };
         let shutdown = ShutdownToken::new();
@@ -438,7 +585,8 @@ mod tests {
 
         let scene = make_scene();
         let config = McpServerConfig {
-            bind_addr: addr,
+            bind_addrs: vec![addr],
+            late_tailnet_port: None,
             agents: tze_hud_scene::config::AgentDirectory::unrestricted("correct-key").shared(),
         };
         let shutdown = ShutdownToken::new();
@@ -505,7 +653,8 @@ mod tests {
         }
 
         let config = McpServerConfig {
-            bind_addr: addr,
+            bind_addrs: vec![addr],
+            late_tailnet_port: None,
             agents: tze_hud_scene::config::AgentDirectory::unrestricted("test-key").shared(),
         };
         let shutdown = ShutdownToken::new();
@@ -539,7 +688,8 @@ mod tests {
 
         let scene = make_scene();
         let config = McpServerConfig {
-            bind_addr: addr,
+            bind_addrs: vec![addr],
+            late_tailnet_port: None,
             agents: tze_hud_scene::config::AgentDirectory::unrestricted("key").shared(),
         };
         let shutdown = ShutdownToken::new();
