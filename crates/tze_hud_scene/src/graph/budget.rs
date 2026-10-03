@@ -428,11 +428,7 @@ impl SceneGraph {
             // (lines 235–242): zone pubs must be cleared when lease is REVOKED/EXPIRED.
             // Widget publications are similarly cleared immediately.
             // Tile/node resources are deferred by the 100ms delay; zone/widget pubs are not.
-            if let Some(lease) = self.leases.get(&lease_id) {
-                let ns = lease.namespace.clone();
-                self.clear_zone_publications_for_namespace(&ns);
-                self.clear_widget_publications_for_namespace(&ns);
-            }
+            self.clear_publications_for_lease(lease_id);
             specs.push(PostRevocationCleanupSpec::new(
                 lease_id,
                 session_namespace,
@@ -473,8 +469,7 @@ impl SceneGraph {
                     self.remove_tile_and_nodes(tid);
                 }
                 // Clear zone and widget publications
-                self.clear_zone_publications_for_namespace(&spec.session_namespace);
-                self.clear_widget_publications_for_namespace(&spec.session_namespace);
+                self.clear_publications_for_lease(spec.lease_id);
                 finalized += 1;
             }
         }

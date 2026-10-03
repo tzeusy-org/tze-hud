@@ -228,6 +228,7 @@ fn build_scene_with_widgets(tile_count: usize, widget_count: usize) -> SceneGrap
 
         // Directly insert an active publish record so the snapshot includes widget publications.
         let record = tze_hud_scene::types::WidgetPublishRecord {
+            lease_id: None,
             widget_name: instance_name.clone(),
             publisher_namespace: "bench.agent".to_string(),
             params: std::collections::HashMap::from([

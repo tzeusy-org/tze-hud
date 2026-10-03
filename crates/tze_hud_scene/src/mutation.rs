@@ -510,7 +510,7 @@ impl SceneGraph {
 
             // Stage 3: Bounds check (in-line in apply_single_mutation via bounds validation)
             // Stage 4: Type check (in-line — references validated by apply_single_mutation)
-            match self.apply_single_mutation(mutation, &batch.agent_namespace) {
+            match self.apply_single_mutation(mutation, &batch.agent_namespace, batch.lease_id) {
                 Ok(ids) => created_ids.extend(ids),
                 Err(e) => {
                     // Rollback to snapshot
@@ -708,6 +708,7 @@ impl SceneGraph {
         &mut self,
         mutation: &SceneMutation,
         namespace: &str,
+        batch_lease_id: Option<SceneId>,
     ) -> Result<Vec<SceneId>, ValidationError> {
         match mutation {
             // ── Tab mutations ─────────────────────────────────────────────────
@@ -823,26 +824,21 @@ impl SceneGraph {
                 content_classification,
                 breakpoints,
             } => {
-                if !breakpoints.is_empty() && matches!(content, ZoneContent::StreamText(_)) {
-                    self.publish_to_zone_with_breakpoints(
-                        zone_name,
-                        content.clone(),
-                        namespace,
-                        merge_key.clone(),
-                        *expires_at_wall_us,
-                        content_classification.clone(),
-                        breakpoints.clone(),
-                    )?;
+                let breakpoints = if matches!(content, ZoneContent::StreamText(_)) {
+                    breakpoints.clone()
                 } else {
-                    self.publish_to_zone(
-                        zone_name,
-                        content.clone(),
-                        namespace,
-                        merge_key.clone(),
-                        *expires_at_wall_us,
-                        content_classification.clone(),
-                    )?;
-                }
+                    Vec::new()
+                };
+                self.publish_to_zone_for_lease(
+                    zone_name,
+                    content.clone(),
+                    namespace,
+                    merge_key.clone(),
+                    *expires_at_wall_us,
+                    content_classification.clone(),
+                    breakpoints,
+                    batch_lease_id,
+                )?;
                 Ok(vec![])
             }
             SceneMutation::ClearZone {

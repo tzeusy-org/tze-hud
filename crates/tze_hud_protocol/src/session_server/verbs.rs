@@ -609,13 +609,14 @@ fn publish_widget(
         .filter_map(crate::convert::proto_to_widget_param_value)
         .collect();
     let now = scene.now_wall_us();
-    match scene.publish_to_widget(
+    match scene.publish_to_widget_for_lease(
         widget,
         params,
         &session.namespace,
         (!publish.key.is_empty()).then(|| publish.key.clone()),
         publish.transition_ms,
         expires_at_wall_us(publish, now),
+        session.lease_ids.first().copied(),
     ) {
         Ok(_) => ok(seq),
         Err(e) => fail(seq, validation_error_code(&e), e.to_string()),

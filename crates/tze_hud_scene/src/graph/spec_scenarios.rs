@@ -2446,10 +2446,12 @@ fn clear_widget_for_publisher_widget_not_found() {
     );
 }
 
-/// WHEN clear_widget_publications_for_namespace is called
-/// THEN ALL widget publications for that namespace are removed across all widgets.
+/// WHEN clear_publications_for_lease is called
+/// THEN ALL widget publications under that lease are removed across all widgets,
+/// and publications under other leases remain.
 #[test]
-fn clear_widget_publications_for_namespace_removes_all_for_namespace() {
+fn clear_publications_for_lease_removes_only_that_leases_widget_pubs() {
+    let (lease_a, lease_b) = (SceneId::new(), SceneId::new());
     let (mut scene, tab_id) = scene_with_gauge(ContentionPolicy::LatestWins);
 
     // Register a second widget instance using the same definition
@@ -2465,7 +2467,7 @@ fn clear_widget_publications_for_namespace_removes_all_for_namespace() {
 
     // Publish as "agent.a" to both widgets
     scene
-        .publish_to_widget(
+        .publish_to_widget_for_lease(
             "gauge",
             std::collections::HashMap::from([(
                 "level".to_string(),
@@ -2475,10 +2477,11 @@ fn clear_widget_publications_for_namespace_removes_all_for_namespace() {
             None,
             0,
             None,
+            Some(lease_a),
         )
         .unwrap();
     scene
-        .publish_to_widget(
+        .publish_to_widget_for_lease(
             "mem-gauge",
             std::collections::HashMap::from([(
                 "level".to_string(),
@@ -2488,12 +2491,13 @@ fn clear_widget_publications_for_namespace_removes_all_for_namespace() {
             None,
             0,
             None,
+            Some(lease_a),
         )
         .unwrap();
 
     // Publish as "agent.b" to "gauge" only
     scene
-        .publish_to_widget(
+        .publish_to_widget_for_lease(
             "gauge",
             std::collections::HashMap::from([(
                 "level".to_string(),
@@ -2503,11 +2507,12 @@ fn clear_widget_publications_for_namespace_removes_all_for_namespace() {
             None,
             0,
             None,
+            Some(lease_b),
         )
         .unwrap();
 
-    // Clear ALL of "agent.a" publications
-    scene.clear_widget_publications_for_namespace("agent.a");
+    // Clear ALL of lease_a's publications
+    scene.clear_publications_for_lease(lease_a);
 
     // "agent.a"'s publication on "gauge" is gone; "agent.b"'s remains
     let gauge_pubs = scene.widget_registry.active_for_widget("gauge");
@@ -2764,4 +2769,73 @@ fn is_node_in_subtree_cycle_unreachable_node() {
 
     // Must not hang; C is not reachable from A.
     assert!(!scene.is_node_in_subtree(id_a, id_c));
+}
+
+// ── Terminal leases clear only their own publications ─────────────────────
+
+/// One namespace, two leases: `tile` (short TTL) and `mcp` (long TTL), each
+/// with a zone and a widget publication.
+fn same_namespace_two_lease_publications() -> (SceneGraph, TestClock, SceneId, SceneId) {
+    use crate::types::ZoneContent;
+    let (mut scene, _tab, clock) =
+        scene_with_gauge_and_clock(ContentionPolicy::MergeByKey { max_keys: 4 });
+    let mut zone = super::tests::make_subtitle_zone();
+    zone.contention_policy = ContentionPolicy::MergeByKey { max_keys: 4 };
+    scene.register_zone(zone);
+    let tile_lease = scene.grant_lease("agent.x", 1_000);
+    let mcp_lease = scene.grant_lease("agent.x", 600_000);
+    for (lease, text) in [(tile_lease, "tile"), (mcp_lease, "mcp")] {
+        scene
+            .publish_to_zone_with_lease(
+                "subtitle",
+                ZoneContent::StreamText(text.to_string()),
+                "agent.x",
+                lease,
+                Some(format!("key-{text}")),
+                None,
+            )
+            .unwrap();
+        scene
+            .publish_to_widget_for_lease(
+                "gauge",
+                std::collections::HashMap::from([(
+                    "level".to_string(),
+                    WidgetParameterValue::F32(0.5),
+                )]),
+                "agent.x",
+                Some(format!("key-{text}")),
+                0,
+                None,
+                Some(lease),
+            )
+            .unwrap();
+    }
+    (scene, clock, tile_lease, mcp_lease)
+}
+
+fn assert_only_lease_publications_remain(scene: &SceneGraph, lease: SceneId) {
+    let zone = &scene.zone_registry.active_publishes["subtitle"];
+    assert_eq!(zone.len(), 1, "zone: only the surviving lease remains");
+    assert_eq!(zone[0].lease_id, Some(lease));
+    let widget = scene.widget_registry.active_for_widget("gauge");
+    assert_eq!(widget.len(), 1, "widget: only the surviving lease remains");
+    assert_eq!(widget[0].lease_id, Some(lease));
+}
+
+/// A tile lease expiring must not wipe the same namespace's MCP publications.
+#[test]
+fn tile_lease_reap_keeps_same_namespace_mcp_publications() {
+    let (mut scene, clock, tile_lease, mcp_lease) = same_namespace_two_lease_publications();
+    clock.advance(1_001 + SceneGraph::DEFAULT_GRACE_PERIOD_MS);
+    let expiries = scene.expire_leases();
+    assert_eq!(expiries.len(), 1);
+    assert_eq!(expiries[0].lease_id, tile_lease);
+    assert_only_lease_publications_remain(&scene, mcp_lease);
+}
+
+#[test]
+fn revoked_lease_clears_only_its_publications() {
+    let (mut scene, _clock, tile_lease, mcp_lease) = same_namespace_two_lease_publications();
+    scene.revoke_lease(tile_lease).unwrap();
+    assert_only_lease_publications_remain(&scene, mcp_lease);
 }
