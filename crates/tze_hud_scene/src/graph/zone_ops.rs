@@ -181,7 +181,7 @@ impl SceneGraph {
     /// `urgency_default` gives a notification with no explicit expiry its
     /// urgency-derived one; `false` leaves it held until cleared.
     #[allow(clippy::too_many_arguments)]
-    fn publish_to_zone_inner(
+    pub(crate) fn publish_to_zone_inner(
         &mut self,
         zone_name: &str,
         content: ZoneContent,

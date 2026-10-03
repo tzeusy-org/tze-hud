@@ -171,6 +171,11 @@ pub enum SceneMutation {
         /// Per spec §Subtitle Streaming Word-by-Word Reveal.
         #[serde(default)]
         breakpoints: Vec<u64>,
+        /// No expiry at all: a notification skips its urgency-derived
+        /// default and stays until cleared. Ignored when
+        /// `expires_at_wall_us` is set. `hud_publish` with `ttl_ms: 0`.
+        #[serde(default)]
+        held: bool,
     },
     /// Clear all publications by this agent in the specified zone.
     ///
@@ -780,13 +785,14 @@ impl SceneGraph {
                 expires_at_wall_us,
                 content_classification,
                 breakpoints,
+                held,
             } => {
                 let breakpoints = if matches!(content, ZoneContent::StreamText(_)) {
                     breakpoints.clone()
                 } else {
                     Vec::new()
                 };
-                self.publish_to_zone_for_lease(
+                self.publish_to_zone_inner(
                     zone_name,
                     content.clone(),
                     namespace,
@@ -795,6 +801,7 @@ impl SceneGraph {
                     content_classification.clone(),
                     breakpoints,
                     batch_lease_id,
+                    !*held,
                 )?;
                 Ok(vec![])
             }

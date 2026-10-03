@@ -77,7 +77,8 @@ otherwise.
 - `ttl_ms` defaults to 60000 for zones; widgets are durable unless given one.
   0 means held until cleared.
 - `delay_ms` (zones, ≤ 300000) holds the content until then (invariant 1);
-  the expiry counts from presentation.
+  the expiry counts from presentation, and `ttl_ms: 0` holds a delayed
+  publish until cleared just like an immediate one.
 - Returns `{"ok":true,"expires_in_ms":8000}`. It doesn't echo the request.
 
 **`hud_hold`** `{surface*, ttl_ms*}` extends a holding, for any surface type.

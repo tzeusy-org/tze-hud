@@ -1776,6 +1776,7 @@ fn test_zone_publish_via_mutation_batch() {
             expires_at_wall_us: None,
             content_classification: None,
             breakpoints: Vec::new(),
+            held: false,
         }],
         timing_hints: None,
         lease_id: None,
