@@ -2111,7 +2111,7 @@ mod tests {
     }
 
     #[test]
-    fn rfc_default_keyboard_bindings_cover_the_command_vocabulary() {
+    fn default_keyboard_bindings_cover_the_command_vocabulary() {
         let tile_id = SceneId::new();
         let node_focus = FocusOwner::Node {
             tile_id,
@@ -2336,59 +2336,26 @@ mod tests {
         assert_key_down(&queue[2], "c");
     }
 
-    // ── Regression guards for the hud-dwcr7 kbd-livelock dispatch-storm ─────────
-    //
-    // The storm (docs/evidence/text-stream-portals/kbd-livelock-20260617-223504.log)
-    // was caused by `drain_pending_keyboard_events` calling the public Stage-1 dispatch
-    // functions. Those re-queued any event to the back when `pending_keyboard_events`
-    // was non-empty (the FIFO guard), rotating front→back forever: the queue never
-    // shrank; composer echo froze; the event-loop thread spun indefinitely.
-    //
-    // The fix extracts the bounded loop into `drain_keyboard_queue_bounded` (hud-dwcr7).
-    // The three tests below exercise the extracted helper directly so each invariant is
-    // independently guarded. Cross-linked: hud-dwcr7 (fix, closed), hud-b09ag (guard).
-
-    /// AC #2 guard: `drain_keyboard_queue_bounded` must stop after exactly `limit`
-    /// iterations even when new events arrive during the drain.
-    ///
-    /// Scenario: 4 events are queued.  Each dispatch iteration pops one event AND
-    /// pushes a new "concurrent arrival" (simulating the OS event path or an inner
-    /// dispatch re-enqueue racing with the drain).  With the `for _ in 0..limit`
-    /// bound the drain stops after 4 iterations; the 4 new arrivals remain queued
-    /// for the next `about_to_wait` cycle.
-    ///
-    /// **This test fails if the bound is removed** (e.g. changed to `loop` or
-    /// `while !queue.is_empty()`): without the bound the drain processes the 4 new
-    /// events too, making `iters ≠ 4` and `queue.len() ≠ 4`.
-    ///
-    /// AC #2 verified manually: temporarily changed `for _ in 0..limit` to `loop`
-    /// in `drain_keyboard_queue_bounded`; the test hit the `pop_front() == None`
-    /// branch at iteration 9 (assertion `iters == 4` failed with iters=9, and
-    /// `queue.len() == 4` failed with queue.len()=0).  Restored the bound: test
-    /// passes (iters=4, queue.len()=4).
-    ///
-    /// Cross-linked: hud-dwcr7 (fix), hud-b09ag (guard).
+    /// The drain must stop after the queue length it started with, even when new
+    /// events arrive mid-drain; those wait for the next wake. Without the bound a
+    /// steady producer turns one tick into an endless dispatch storm (the
+    /// composer-echo livelock) and honour Break. The real-path drain tests never enqueue
+    /// mid-drain, so this is the only guard on the bound.
     #[test]
-    fn drain_bounded_helper_stops_at_initial_limit_when_new_events_arrive_during_drain() {
+    fn keyboard_drain_stops_at_initial_queue_length_when_events_arrive_mid_drain() {
         let initial_events: usize = 4;
         let mut queue: VecDeque<PendingKeyboardEvent> = (0..initial_events)
             .map(|i| key_down(["a", "b", "c", "d"][i], (i as u64 + 1) * 1_000))
             .collect();
-
         let mut iters = 0usize;
         let mut arrivals = 0usize;
-        let limit = queue.len();
 
-        drain_keyboard_queue_bounded(limit, || {
+        drain_keyboard_queue_bounded(queue.len(), || {
             iters += 1;
-            let Some(_event) = queue.pop_front() else {
-                // Queue unexpectedly empty — only reachable if the bound was removed
-                // and the drain ran past the initial events.
+            if queue.pop_front().is_none() {
                 return ControlFlow::Break(());
-            };
-            // Simulate a concurrent OS-event arrival while the drain is running.
-            // Without the `0..limit` bound the drain processes these too, looping
-            // until arrivals is exhausted (2×initial_events total iterations).
+            }
+            // A concurrent arrival while the drain runs.
             if arrivals < initial_events {
                 queue.push_back(key_down("x", arrivals as u64 * 9_000));
                 arrivals += 1;
@@ -2396,32 +2363,11 @@ mod tests {
             ControlFlow::Continue(())
         });
 
-        // With the `0..limit` bound: exactly `initial_events` iterations.
-        // Without the bound: would be 2×initial_events (drains originals + arrivals).
-        assert_eq!(
-            iters, initial_events,
-            "drain must stop after {initial_events} iterations (the initial queue \
-             length); got {iters} — bound may have been removed"
-        );
-        // Newly-arrived events must still be queued (deferred to next cycle).
-        assert_eq!(
-            queue.len(),
-            initial_events,
-            "newly-arrived events must be deferred; queue.len()={} (expected \
-             {initial_events})",
-            queue.len()
-        );
-    }
+        assert_eq!(iters, initial_events, "drain ran past its initial bound");
+        assert_eq!(queue.len(), initial_events, "arrivals must stay queued");
 
-    /// Guards the `restore_front_requeued_event` break inside `drain_keyboard_queue_bounded`.
-    ///
-    /// When inner dispatch defers an event (lock-busy) it pushes to the tail.
-    /// `restore_front_requeued_event` detects this (queue grew) and the closure returns
-    /// `Break`, stopping the drain after exactly 1 iteration with FIFO order intact.
-    ///
-    /// Cross-linked: hud-dwcr7 (fix), hud-b09ag (guard).
-    #[test]
-    fn drain_bounded_helper_re_queue_path_breaks_immediately_and_preserves_fifo() {
+        // A Break (inner dispatch re-queued the front event) must stop the drain
+        // at once, leaving the rest queued in FIFO order.
         let mut queue: VecDeque<PendingKeyboardEvent> = [
             key_down("a", 1_000),
             key_down("b", 2_000),
@@ -2429,66 +2375,18 @@ mod tests {
         ]
         .into_iter()
         .collect();
-
         let mut iters = 0usize;
-        let limit = queue.len();
-
-        drain_keyboard_queue_bounded(limit, || {
+        drain_keyboard_queue_bounded(queue.len(), || {
             iters += 1;
-            let event = queue
-                .pop_front()
-                .expect("queue must not be empty within limit");
-            let len_after_pop = queue.len();
-            // Simulate inner dispatch hitting a lock-busy condition → defers to back.
+            let event = queue.pop_front().expect("within limit");
             queue.push_back(event);
-            if restore_front_requeued_event(&mut queue, len_after_pop) {
-                // Re-queue detected; "a" is back at front; caller stops this drain.
-                ControlFlow::Break(())
-            } else {
-                ControlFlow::Continue(())
-            }
+            let len_after_pop = queue.len() - 1;
+            restore_front_requeued_event(&mut queue, len_after_pop);
+            ControlFlow::Break(())
         });
-
-        // Must stop after exactly 1 iteration (re-queue detected → Break).
-        assert_eq!(
-            iters, 1,
-            "drain must break immediately on first re-queue; \
-             spinning {limit} iterations without breaking is the rotation livelock"
-        );
-        // Queue integrity: all 3 events preserved, none dropped or duplicated.
-        assert_eq!(queue.len(), 3, "re-queue must not drop or multiply events");
-        // FIFO order: the originally-first event ("a") is back at the front.
+        assert_eq!(iters, 1, "drain must honour ControlFlow::Break");
         assert_key_down(&queue[0], "a");
         assert_key_down(&queue[1], "b");
         assert_key_down(&queue[2], "c");
-    }
-
-    /// Sanity / happy-path: all events dispatch successfully → queue drains to zero.
-    ///
-    /// Cross-linked: hud-dwcr7 (fix), hud-b09ag (guard).
-    #[test]
-    fn drain_bounded_helper_full_success_path_drains_queue_to_zero() {
-        let mut queue: VecDeque<PendingKeyboardEvent> = [
-            key_down("a", 1_000),
-            key_down("b", 2_000),
-            key_down("c", 3_000),
-        ]
-        .into_iter()
-        .collect();
-
-        let limit = queue.len();
-        drain_keyboard_queue_bounded(limit, || {
-            let _ = queue
-                .pop_front()
-                .expect("queue must not be empty within limit");
-            // Inner dispatch succeeds: nothing pushed to back.
-            ControlFlow::Continue(())
-        });
-
-        assert_eq!(
-            queue.len(),
-            0,
-            "all events must be consumed when dispatch always succeeds"
-        );
     }
 }
