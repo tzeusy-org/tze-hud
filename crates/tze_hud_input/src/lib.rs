@@ -79,8 +79,7 @@ pub mod pointer;
 pub mod scroll;
 
 pub use events::{
-    EventBatch, HitTestResult, InputEnvelope, LocalStateUpdate, RouteTarget, SceneLocalPatch,
-    ScrollOffsetUpdate,
+    HitTestResult, LocalStateUpdate, RouteTarget, SceneLocalPatch, ScrollOffsetUpdate,
 };
 pub use hit_test::hit_test;
 pub use local_feedback::{
@@ -1897,36 +1896,6 @@ impl InputProcessor {
                     }
                 }
             }
-        }
-    }
-
-    /// Check the long-press progress for a device during `Accumulating` phase.
-    ///
-    /// Returns the progress value (0.0–1.0) and whether the threshold has been
-    /// met. Returns `None` if there is no drag state for the device.
-    ///
-    /// Called by the compositor or runtime loop to poll accumulation state
-    /// (e.g. to drive a progress indicator on the drag handle).
-    pub fn drag_accumulation_progress(&self, device_id: u32) -> Option<f32> {
-        let state = self.drag_states.get(&device_id)?;
-        if state.phase == DragPhase::Accumulating {
-            Some(state.progress())
-        } else {
-            None
-        }
-    }
-
-    /// Returns the element_id and element_kind of the currently active drag for
-    /// a given device, or `None` if no drag is active.
-    ///
-    /// The compositor uses this to decide whether to apply visual feedback
-    /// (z-order boost, opacity, 2px highlight border) to the element.
-    pub fn active_drag_element(&self, device_id: u32) -> Option<(SceneId, DragHandleElementKind)> {
-        let state = self.drag_states.get(&device_id)?;
-        if state.phase == DragPhase::Activated {
-            Some((state.element_id, state.element_kind))
-        } else {
-            None
         }
     }
 

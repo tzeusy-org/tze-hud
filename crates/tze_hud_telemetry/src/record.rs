@@ -358,58 +358,6 @@ impl LatencyBucket {
     }
 }
 
-/// Tier in the budget enforcement ladder.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum BudgetTier {
-    /// Agent is within all limits.
-    Normal,
-    /// Agent has exceeded a limit; grace period 5s before throttle.
-    Warning,
-    /// Agent is throttled: updates coalesced more aggressively, rate halved.
-    Throttled,
-    /// Agent session has been revoked and will be torn down.
-    Revoked,
-}
-
-/// The kind of budget violation that was detected.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum BudgetViolationKind {
-    TileCountExceeded,
-    TextureMemoryExceeded,
-    UpdateRateExceeded,
-    NodeCountPerTileExceeded,
-    CriticalTextureOomAttempt,
-    RepeatedInvariantViolations,
-}
-
-/// Telemetry event emitted when an agent's budget state changes.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct BudgetViolationEvent {
-    /// Namespace of the offending agent session.
-    pub namespace: String,
-    /// New tier the agent has been moved to.
-    pub new_tier: BudgetTier,
-    /// The violation that triggered the transition.
-    pub violation_kind: BudgetViolationKind,
-    /// Timestamp (microseconds since process start) of the event.
-    pub timestamp_us: u64,
-    /// Human-readable detail.
-    pub detail: String,
-}
-
-/// Frame-time guardian shed event — emitted when tiles are dropped to meet budget.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct FrameTimeShedEvent {
-    /// Frame number when shedding occurred.
-    pub frame_number: u64,
-    /// Number of tiles shed this frame.
-    pub tiles_shed: u32,
-    /// Cumulative elapsed time (µs) at Stage 5 that triggered the guardian.
-    pub elapsed_us_at_stage5: u64,
-    /// How many consecutive frames shedding has been active.
-    pub consecutive_shed_frames: u32,
-}
-
 /// Telemetry event emitted when the degradation level changes.
 ///
 /// Emitted on every level transition (both advance and recovery).

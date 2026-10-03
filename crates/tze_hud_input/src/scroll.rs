@@ -639,12 +639,6 @@ impl ScrollState {
         self.tiles.insert(tile_id, state);
     }
 
-    /// Unregister a tile (e.g. tile destroyed).
-    pub fn unregister_tile(&mut self, tile_id: SceneId) {
-        self.tiles.remove(&tile_id);
-        self.pending_unregistered_requests.remove(&tile_id);
-    }
-
     /// Returns true if a tile is registered as scrollable.
     pub fn is_scrollable(&self, tile_id: SceneId) -> bool {
         self.tiles.contains_key(&tile_id)

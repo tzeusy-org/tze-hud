@@ -42,8 +42,8 @@ pub use publish_load::{
     PublishLoadTransport, PublishLoadVerdict,
 };
 pub use record::{
-    BudgetTier, BudgetViolationEvent, BudgetViolationKind, DegradationDirection, DegradationEvent,
-    DegradationRecoverySource, FrameTelemetry, FrameTimeShedEvent, LatencyBucket, SessionSummary,
+    DegradationDirection, DegradationEvent, DegradationRecoverySource, FrameTelemetry,
+    LatencyBucket, SessionSummary,
 };
 pub use resource_monitor::{
     AgentFootprint, GrowthRatios, MutationAccountant, ResourceMonitor, ResourceSnapshot,

@@ -1327,6 +1327,22 @@ impl WinitApp {
         state.refresh_active_tab_mirror(&scene);
     }
 
+    /// Drop keyboard focus from a tile that lease revocation or expiry removed.
+    /// Non-blocking: skips this frame if the scene lock is busy.
+    pub(super) fn clear_focus_on_removed_tile(&mut self) {
+        let Ok(state) = self.state.shared_state.try_lock() else {
+            return;
+        };
+        let Ok(scene) = state.scene.try_lock() else {
+            return;
+        };
+        if let Some(tab_id) = scene.active_tab {
+            self.state
+                .focus_manager
+                .clear_focus_on_missing_tile(tab_id, &scene);
+        }
+    }
+
     /// Publish the active tab's current keyboard-focus owner to the compositor's
     /// chrome-layer focus-ring pass (hud-k6yvb).
     ///

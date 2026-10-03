@@ -94,11 +94,6 @@ impl HardwareFactors {
             upload: None,
         }
     }
-
-    /// Returns true if all three dimensions are calibrated.
-    pub fn is_fully_calibrated(&self) -> bool {
-        self.cpu.is_some() && self.gpu.is_some() && self.upload.is_some()
-    }
 }
 
 impl Default for HardwareFactors {
@@ -428,16 +423,9 @@ mod tests {
     #[test]
     fn hardware_factors_uncalibrated_all_none() {
         let f = HardwareFactors::uncalibrated();
-        assert!(!f.is_fully_calibrated());
         assert!(f.cpu.is_none());
         assert!(f.gpu.is_none());
         assert!(f.upload.is_none());
-    }
-
-    #[test]
-    fn hardware_factors_fully_calibrated() {
-        let f = HardwareFactors::new(1.0, 1.5, 2.0);
-        assert!(f.is_fully_calibrated());
     }
 
     #[test]
@@ -446,7 +434,6 @@ mod tests {
         assert!(f.cpu.is_some());
         assert!(f.gpu.is_none());
         assert!(f.upload.is_none());
-        assert!(!f.is_fully_calibrated());
     }
 
     // ── CalibrationDimension ─────────────────────────────────────────────────
