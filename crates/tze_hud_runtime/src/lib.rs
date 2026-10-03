@@ -52,7 +52,6 @@ pub(crate) mod pipeline;
 pub(crate) mod portal_cadence;
 pub mod portal_projection_driver;
 pub mod portal_tokens;
-pub(crate) mod reload_triggers;
 pub(crate) mod runtime_context;
 pub(crate) mod scene_startup;
 pub mod shell;

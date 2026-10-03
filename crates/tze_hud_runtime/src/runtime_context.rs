@@ -15,9 +15,8 @@
 //! Agents are not configuration: they live in `agents.toml` and are shared
 //! live as `tze_hud_scene::config::SharedAgents`.
 //!
-//! Every config section is frozen; a restart is required to change any of
-//! them. `hot` (an empty `HotReloadableConfig` behind an `ArcSwap`) remains
-//! as the reload seam for SIGHUP / `ReloadConfig`.
+//! Every config section is read once at startup; a restart is required to
+//! change any of them.
 //!
 //! ## Usage
 //!
@@ -31,9 +30,8 @@
 
 use std::sync::Arc;
 
-use arc_swap::ArcSwap;
-use tze_hud_config::HotReloadableConfig;
-use tze_hud_scene::config::{DisplayProfile, Hotkey, ResolvedConfig};
+use tze_hud_config::TzeHudConfig;
+use tze_hud_scene::config::{ConfigLoader, DisplayProfile, Hotkey, ResolvedConfig};
 use tze_hud_scene::types::ResourceBudget;
 
 use crate::mutation_budget_bridge::DEFAULT_MAX_GUEST_SESSIONS;
@@ -115,21 +113,9 @@ fn resident_ledger_for(envelope: &OperationalRuntimeEnvelope) -> tze_hud_resourc
 ///
 /// Built once at startup; shared via `Arc<RuntimeContext>` across all subsystems.
 ///
-/// **Frozen fields** (`profile`, `operational_envelope`) are immutable after
-/// construction. A restart is required
-/// to change them.
-///
-/// **Hot-reloadable fields** are held in `hot` as an `ArcSwap<HotReloadableConfig>`.
-/// Call `reload_hot_config()` to atomically swap in a freshly validated config subset
-/// with no locks and no restart. Every section is frozen today, so it is empty.
-///
-/// Per spec §Configuration Reload (lines 263-274, v1-mandatory): SIGHUP and the
-/// `RuntimeService.ReloadConfig` gRPC call both trigger a live reload of the
-/// hot-reloadable sections. The frozen sections require a full process restart.
+/// Immutable after construction; a restart is required to change the config.
 #[derive(Debug)]
 pub struct RuntimeContext {
-    // ── Frozen fields ─────────────────────────────────────────────────────────
-    // Immutable after construction. Require restart to change.
     /// Resolved display profile with budget values.
     pub profile: DisplayProfile,
 
@@ -141,14 +127,6 @@ pub struct RuntimeContext {
 
     /// Shared physical resident-allocation authority for all cache classes.
     pub resident_ledger: tze_hud_resource::ResidentLedger,
-
-    // ── Hot-reloadable fields ─────────────────────────────────────────────────
-    // Atomically swappable via SIGHUP or ReloadConfig RPC.
-    /// Hot-reload seam; every section is currently frozen, so this is empty.
-    ///
-    /// Access the current snapshot via `self.hot.load()`. Update atomically
-    /// via `self.reload_hot_config(new_hot)`.
-    hot: ArcSwap<HotReloadableConfig>,
 }
 
 impl RuntimeContext {
@@ -163,32 +141,60 @@ impl RuntimeContext {
             profile: config.profile,
             operational_envelope,
             resident_ledger,
-            hot: ArcSwap::from_pointee(HotReloadableConfig::default()),
         }
     }
 
-    /// Build a `RuntimeContext` from a `ResolvedConfig` and an initial
-    /// `HotReloadableConfig`.
+    /// Build a `RuntimeContext` from config TOML, the one path both runtimes
+    /// use.
     ///
-    /// Use this constructor when a config file is available at startup and you
-    /// want the hot-reloadable sections to reflect the initial file contents
-    /// immediately, rather than waiting for the first SIGHUP.
-    pub fn from_config_with_hot(config: ResolvedConfig, hot: HotReloadableConfig) -> Self {
-        let operational_envelope = OperationalRuntimeEnvelope::from_profile(&config.profile);
-        let resident_ledger = resident_ledger_for(&operational_envelope);
-        Self {
-            safe_mode_hotkey: config.safe_mode_hotkey,
-            profile: config.profile,
-            operational_envelope,
-            resident_ledger,
-            hot: ArcSwap::from_pointee(hot),
+    /// `None` yields [`Self::headless_default`]. A TOML parse or validation
+    /// failure is logged and also falls back to the headless default so the
+    /// runtime can still start.
+    pub fn from_toml(toml_src: Option<&str>) -> Self {
+        let Some(toml_src) = toml_src else {
+            tracing::debug!("no config TOML provided; using headless_default");
+            return Self::headless_default();
+        };
+        let loader = match TzeHudConfig::parse(toml_src) {
+            Ok(loader) => loader,
+            Err(e) => {
+                tracing::warn!(
+                    error = %e.message,
+                    line = e.line,
+                    column = e.column,
+                    "config TOML parse error; falling back to headless_default"
+                );
+                return Self::headless_default();
+            }
+        };
+        match loader.freeze() {
+            Ok(resolved) => {
+                tracing::info!(profile = %resolved.profile.name, "config loaded");
+                Self::from_config(resolved)
+            }
+            Err(errors) => {
+                for err in &errors {
+                    tracing::warn!(
+                        code = ?err.code,
+                        field = %err.field_path,
+                        expected = %err.expected,
+                        got = %err.got,
+                        hint = %err.hint,
+                        "config validation error"
+                    );
+                }
+                tracing::warn!(
+                    "{} config validation error(s); falling back to headless_default",
+                    errors.len()
+                );
+                Self::headless_default()
+            }
         }
     }
 
     /// Build a minimal `RuntimeContext` using the headless profile defaults.
     ///
     /// Used in tests and headless mode when no config file is present.
-    /// Hot-reloadable sections are initialized to defaults.
     pub fn headless_default() -> Self {
         let profile = DisplayProfile::headless();
         let operational_envelope = OperationalRuntimeEnvelope::from_profile(&profile);
@@ -198,35 +204,7 @@ impl RuntimeContext {
             safe_mode_hotkey: Hotkey::DEFAULT_SAFE_MODE,
             operational_envelope,
             resident_ledger,
-            hot: ArcSwap::from_pointee(HotReloadableConfig::default()),
         }
-    }
-
-    // ── Hot-reload ────────────────────────────────────────────────────────────
-
-    /// Atomically replace the hot-reloadable configuration sections.
-    ///
-    /// This is the integration point for SIGHUP and `RuntimeService.ReloadConfig`.
-    /// The caller is responsible for calling `tze_hud_config::reload_config()` first
-    /// to parse and validate the new TOML; this method only stores the result.
-    ///
-    /// Subsystems that hold a loaded snapshot (via `ctx.hot.load()`) will see stale
-    /// values until their next `load()` call. This is intentional — the swap is
-    /// atomic and lock-free; subsystems do not need to coordinate.
-    ///
-    /// Every section is currently frozen, so a reload changes nothing.
-    pub fn reload_hot_config(&self, new_hot: HotReloadableConfig) {
-        self.hot.store(Arc::new(new_hot));
-    }
-
-    /// Return a snapshot of the hot-reloadable configuration.
-    ///
-    /// The returned `Arc` keeps the current `HotReloadableConfig` alive for as long
-    /// as there are strong references to it. Use this to access
-    /// dynamic policy settings without exposing the
-    /// internal hot-reload mechanism.
-    pub fn hot_config(&self) -> Arc<HotReloadableConfig> {
-        self.hot.load_full()
     }
 
     /// The mutation/lease budget every session gets: canonical defaults
@@ -412,7 +390,23 @@ mod tests {
         assert_eq!(budget.max_update_rate_hz, 20.0);
     }
 
-    // ── from_config_with_hot ──────────────────────────────────────────────────
+    // ── from_toml ─────────────────────────────────────────────────────────────
+
+    #[test]
+    fn from_toml_loads_valid_config_and_falls_back_on_bad_input() {
+        let valid = "[runtime]\nprofile = \"full-display\"\n\n[[tabs]]\nname = \"Main\"\n";
+        assert_eq!(
+            RuntimeContext::from_toml(Some(valid)).profile.name,
+            "full-display"
+        );
+        for fallback in [
+            None,
+            Some("not [ toml"),
+            Some("[runtime]\nprofile = \"mobile\"\n\n[[tabs]]\nname = \"Main\"\n"),
+        ] {
+            assert_eq!(RuntimeContext::from_toml(fallback).profile.name, "headless");
+        }
+    }
 
     // ── headless_default ─────────────────────────────────────────────────────
 
@@ -421,10 +415,6 @@ mod tests {
         let ctx = RuntimeContext::headless_default();
         assert_eq!(ctx.profile.name, "headless");
     }
-
-    // ── reload_hot_config ─────────────────────────────────────────────────────
-
-    // ── capability_policy_for ─────────────────────────────────────────────────
 
     #[test]
     fn headless_production_consumers_share_exact_store_limits() {

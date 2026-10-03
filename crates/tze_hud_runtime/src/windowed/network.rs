@@ -3,83 +3,20 @@
 use std::sync::Arc;
 
 use tokio::sync::Mutex;
-use tze_hud_config::TzeHudConfig;
 use tze_hud_protocol::proto::session::hud_session_server::HudSessionServer;
-use tze_hud_protocol::proto::session::runtime_service_server::RuntimeServiceServer;
 use tze_hud_protocol::session::SharedState;
 use tze_hud_protocol::session_server::{HudSessionImpl, SessionDeps};
-use tze_hud_scene::config::{ConfigLoader, SharedAgents};
+use tze_hud_scene::config::SharedAgents;
 
 use super::WindowedConfig;
 use crate::net_addrs::{listen_addrs, local_ips, tailnet_addrs, watch_for_tailnet};
-use crate::reload_triggers::RuntimeServiceImpl;
 use crate::runtime_context::{RuntimeContext, SharedRuntimeContext};
 use crate::threads::NetworkRuntime;
 
-/// Build a `RuntimeContext` from the windowed config.
-///
-/// When `cfg.config_toml` is `Some`, the TOML is parsed and validated into
-/// the context's profile budgets. When it is `None` (no config file), the
-/// context is `RuntimeContext::headless_default()`.
-///
-/// Parse or validation errors are logged as warnings and cause a graceful
-/// fallback to `headless_default()` so the runtime can still start.
+/// Build a `RuntimeContext` from the windowed config (see
+/// [`RuntimeContext::from_toml`]).
 pub(super) fn build_runtime_context(cfg: &WindowedConfig) -> SharedRuntimeContext {
-    match &cfg.config_toml {
-        None => {
-            // No config file - fall back to headless default.
-            tracing::debug!("windowed runtime: no config TOML provided; using headless_default");
-            Arc::new(RuntimeContext::headless_default())
-        }
-        Some(toml_src) => {
-            // Parse the TOML.
-            let loader = match TzeHudConfig::parse(toml_src) {
-                Ok(l) => l,
-                Err(parse_err) => {
-                    tracing::warn!(
-                        error = %parse_err.message,
-                        line = parse_err.line,
-                        column = parse_err.column,
-                        "windowed runtime: config TOML parse error; \
-                         falling back to headless_default"
-                    );
-                    return Arc::new(RuntimeContext::headless_default());
-                }
-            };
-
-            // Validate and freeze into a ResolvedConfig.
-            let resolved = match loader.freeze() {
-                Ok(r) => r,
-                Err(errors) => {
-                    for err in &errors {
-                        tracing::warn!(
-                            code = ?err.code,
-                            field = %err.field_path,
-                            expected = %err.expected,
-                            got = %err.got,
-                            hint = %err.hint,
-                            "windowed runtime: config validation error"
-                        );
-                    }
-                    tracing::warn!(
-                        "windowed runtime: {} config validation error(s); \
-                         falling back to headless_default",
-                        errors.len()
-                    );
-                    return Arc::new(RuntimeContext::headless_default());
-                }
-            };
-
-            let hot = tze_hud_config::reload_config(toml_src).unwrap_or_default();
-
-            tracing::info!(
-                profile = %resolved.profile.name,
-                "windowed runtime: config loaded"
-            );
-
-            Arc::new(RuntimeContext::from_config_with_hot(resolved, hot))
-        }
-    }
+    Arc::new(RuntimeContext::from_toml(cfg.config_toml.as_deref()))
 }
 
 /// Start network services (gRPC) on a dedicated Tokio multi-thread runtime.
@@ -192,9 +129,6 @@ pub(super) fn start_network_services_with_render_wake(
     let degradation_notices = service.degradation_notices.clone();
     let lease_expirations = service.lease_expirations.clone();
 
-    // Wire RuntimeService (ReloadConfig RPC) alongside HudSession.
-    let runtime_svc = RuntimeServiceImpl::new(Arc::clone(&runtime_context));
-
     // Bind the listeners eagerly (hud-ylwqc). `std::net::TcpListener::bind` is
     // synchronous and needs no reactor, so a port conflict fails startup fast
     // and the returned addresses belong to listeners that are genuinely up.
@@ -241,7 +175,6 @@ pub(super) fn start_network_services_with_render_wake(
         drop(accept_tx);
         tonic::transport::Server::builder()
             .add_service(HudSessionServer::new(service))
-            .add_service(RuntimeServiceServer::new(runtime_svc))
             .serve_with_incoming(tokio_stream::wrappers::ReceiverStream::new(conn_rx))
             .await
             .unwrap_or_else(|e| {
@@ -703,76 +636,5 @@ mod tests {
         for h in handles {
             h.abort();
         }
-    }
-
-    /// When no config TOML is provided, the runtime uses headless_default().
-    #[test]
-    fn build_runtime_context_no_config_toml_uses_headless_default() {
-        let cfg = WindowedConfig {
-            config_toml: None,
-            ..WindowedConfig::default()
-        };
-        let ctx = build_runtime_context(&cfg);
-        assert_eq!(
-            ctx.profile.name, "headless",
-            "no-config path must use the headless profile"
-        );
-    }
-
-    /// Acceptance criterion 1: config-driven context uses the full-display profile.
-    #[test]
-    fn build_runtime_context_with_config_uses_configured_profile() {
-        let toml = r#"
-[runtime]
-profile = "full-display"
-
-[[tabs]]
-name = "Main"
-"#;
-        let cfg = WindowedConfig {
-            config_toml: Some(toml.to_string()),
-            ..WindowedConfig::default()
-        };
-        let ctx = build_runtime_context(&cfg);
-        assert_eq!(
-            ctx.profile.name, "full-display",
-            "config-driven path must use the profile specified in the TOML"
-        );
-    }
-
-    /// Acceptance criterion 3 (fallback): invalid TOML falls back to
-    /// headless_default() rather than crashing.
-    #[test]
-    fn build_runtime_context_invalid_toml_falls_back_to_headless() {
-        let bad_toml = "this is not valid TOML [\n";
-        let cfg = WindowedConfig {
-            config_toml: Some(bad_toml.to_string()),
-            ..WindowedConfig::default()
-        };
-        let ctx = build_runtime_context(&cfg);
-        assert_eq!(
-            ctx.profile.name, "headless",
-            "parse-error path must fall back to headless profile"
-        );
-    }
-
-    /// Acceptance criterion 3 (fallback): config with validation errors falls
-    /// back to headless_default() rather than crashing.
-    #[test]
-    fn build_runtime_context_validation_error_falls_back_to_headless() {
-        // Missing required [[tabs]] section -> validation error.
-        let invalid_toml = r#"
-[runtime]
-profile = "full-display"
-"#;
-        let cfg = WindowedConfig {
-            config_toml: Some(invalid_toml.to_string()),
-            ..WindowedConfig::default()
-        };
-        let ctx = build_runtime_context(&cfg);
-        assert_eq!(
-            ctx.profile.name, "headless",
-            "validation-error path must fall back to headless profile"
-        );
     }
 }
