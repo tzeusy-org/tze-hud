@@ -1105,6 +1105,20 @@ async fn test_three_agents_same_anchor_stack_without_overlap_and_update_concurre
         set_tile_text_via_grpc(&mut beta, &tile_beta, "beta"),
         set_tile_text_via_grpc(&mut gamma, &tile_gamma, "gamma"),
     )?;
+    {
+        let state = runtime.shared_state().lock().await;
+        let scene = state.scene.lock().await;
+        for (id, agent, label) in [
+            (&tile_alpha, &alpha, "alpha"),
+            (&tile_beta, &beta, "beta"),
+            (&tile_gamma, &gamma, "gamma"),
+        ] {
+            let uuid = uuid::Uuid::from_bytes(id.as_slice().try_into()?);
+            let tile = &scene.tiles[&tze_hud_scene::SceneId::from_uuid(uuid)];
+            assert_eq!(tile.namespace, agent.namespace, "{label}: tile namespace");
+            assert!(tile.root_node.is_some(), "{label}: root set by its update");
+        }
+    }
     // The agent that sets its tile root must not be able to do so on a peer's tile.
     assert!(
         set_tile_text_via_grpc(&mut alpha, &tile_gamma, "intrusion")
