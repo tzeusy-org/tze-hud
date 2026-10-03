@@ -5,7 +5,6 @@
 //!
 //! Covers tasks.md §10 (Lease Governance Lifecycle) and §11 (Namespace Isolation)
 //! plus the following spec.md requirements:
-//! - Requirement: Lease Request With AutoRenew — Scenario: Lease auto-renews at 75% TTL
 //! - Requirement: Lease Orphan Handling on Disconnect (3 scenarios)
 //! - Requirement: Lease Expiry Without Renewal Removes Tile (2 scenarios)
 //! - Namespace isolation enforcement
@@ -14,22 +13,20 @@
 //!
 //! ## Test scenarios
 //!
-//! 1. Auto-renewal fires at 75% TTL (45s for 60s lease) — agent receives
-//!    `RequestResult { ok: true }` with an updated expiry.
-//! 2. Agent disconnect → lease transitions ACTIVE→ORPHANED, tile frozen with
+//! 1. Agent disconnect → lease transitions ACTIVE→ORPHANED, tile frozen with
 //!    `TileVisualHint::DisconnectionBadge` (must happen within 1 frame, i.e.
 //!    synchronously from the scene graph's perspective).
-//! 3. Agent reconnects within 30-second grace → lease transitions
+//! 2. Agent reconnects within 30-second grace → lease transitions
 //!    ORPHANED→ACTIVE, badge clears, agent can immediately submit mutations.
-//! 4. Grace period expiry (no reconnect in 30s) → lease transitions
+//! 3. Grace period expiry (no reconnect in 30s) → lease transitions
 //!    ORPHANED→EXPIRED, tile and all nodes removed from scene graph.
-//! 5. Explicit `LeaseRelease` → lease transitions ACTIVE→RELEASED, tile
+//! 4. Explicit `LeaseRelease` → lease transitions ACTIVE→RELEASED, tile
 //!    removed cleanly (via `revoke_lease` on the scene graph).
-//! 6. Resource cleanup: on lease expiry, icon image resource `ref_count` drops;
+//! 5. Resource cleanup: on lease expiry, icon image resource `ref_count` drops;
 //!    modelled using `SceneGraph::expire_leases` and ref-count assertions.
-//! 7. Namespace isolation: second agent session cannot mutate dashboard tile
+//! 6. Namespace isolation: second agent session cannot mutate dashboard tile
 //!    (rejected with `NamespaceMismatch`).
-//! 8. Namespace isolation: dashboard agent cannot mutate tiles owned by a
+//! 7. Namespace isolation: dashboard agent cannot mutate tiles owned by a
 //!    different namespace (also `NamespaceMismatch`).
 
 use std::sync::Arc;
@@ -73,81 +70,6 @@ fn create_tile(scene: &mut SceneGraph, tab_id: SceneId, ns: &str, lease_id: Scen
             100,
         )
         .expect("tile creation must succeed")
-}
-
-// ─── Scenario 10.1: Auto-renewal at 75% TTL ───────────────────────────────────
-
-/// spec.md §Requirement: Lease Request With AutoRenew — Scenario: Lease auto-renews at 75% TTL
-///
-/// WHEN a 60-second lease has been active for 45 seconds (75% of 60s TTL)
-/// THEN the TTL state machine's `poll()` returns `TtlCheck::AutoRenewDue`
-/// AND after calling `reset_renewal_window` the remaining TTL is reset to the
-///     fresh window.
-#[test]
-fn auto_renewal_fires_at_75_percent_ttl() {
-    use tze_hud_scene::clock::TestClock;
-    use tze_hud_scene::lease::{
-        RenewalPolicy,
-        ttl::{TtlCheck, TtlState},
-    };
-
-    let clock = TestClock::new(0);
-    let mut ttl = TtlState::new_activated(60_000, RenewalPolicy::AutoRenew, clock.clone());
-
-    // Just before 75% threshold (44_999 ms < 45_000 ms) — no renewal yet.
-    clock.advance(44_999);
-    assert_eq!(
-        ttl.poll(),
-        TtlCheck::Ok,
-        "poll must return Ok before 75% threshold"
-    );
-
-    // Step over the threshold to exactly 45_000 ms (75% of 60_000 ms).
-    clock.advance(1); // total = 45_000 ms = 75%
-    assert_eq!(
-        ttl.poll(),
-        TtlCheck::AutoRenewDue,
-        "poll must return AutoRenewDue at 75% TTL elapsed"
-    );
-
-    // Simulate the session layer renewing the lease.
-    ttl.reset_renewal_window(60_000);
-
-    // After reset, poll at 0 ms elapsed — should be Ok (not fire again immediately).
-    assert_eq!(
-        ttl.poll(),
-        TtlCheck::Ok,
-        "poll must not fire again immediately after renewal reset"
-    );
-
-    // Advance to 75% of the fresh window (45_000 ms).
-    clock.advance(45_001); // 45_001 ms past reset → ≥ 75%
-    assert_eq!(
-        ttl.poll(),
-        TtlCheck::AutoRenewDue,
-        "poll must fire again at 75% of the renewed TTL window"
-    );
-}
-
-/// Auto-renewal timer arms at lease activation.
-///
-/// Verifies the `AutoRenewalArm::Armed` state after a fresh lease with
-/// `AutoRenew` policy — prerequisite for the 75% trigger.
-#[test]
-fn auto_renewal_arm_armed_at_activation() {
-    use tze_hud_scene::clock::TestClock;
-    use tze_hud_scene::lease::{
-        RenewalPolicy,
-        ttl::{AutoRenewalArm, TtlState},
-    };
-
-    let clock = TestClock::new(0);
-    let ttl = TtlState::new_activated(60_000, RenewalPolicy::AutoRenew, clock);
-    assert_eq!(
-        ttl.auto_renewal_arm(),
-        AutoRenewalArm::Armed,
-        "AutoRenew lease must start with the renewal timer Armed"
-    );
 }
 
 // ─── Scenario 10.2: Disconnect → ORPHANED with badge ─────────────────────────

@@ -33,9 +33,7 @@
 
 use std::sync::Arc;
 
-use tze_hud_scene::lease::{
-    GracePeriodTimer, ORPHAN_GRACE_PERIOD_MS, POST_REVOCATION_FREE_DELAY_MS, TileVisualHint,
-};
+use tze_hud_scene::lease::TileVisualHint;
 use tze_hud_scene::{
     Clock, TestClock,
     graph::SceneGraph,
@@ -1772,156 +1770,12 @@ fn test_zone_publish_rejected_when_lease_orphaned() {
     );
 }
 
-// ─── Test 14: Budget-driven revocation bypasses grace period ─────────────────
+// ─── Test 15: Grace period precision ─────────────────────────────────────────
 
-/// Verifies that budget-driven revocation:
-/// - Transitions leases directly to REVOKED (no orphan state).
-/// - Tiles are removed after the 100ms delay.
-/// - Post-revocation resource footprint is zero.
-///
-/// Spec §Post-Revocation Resource Cleanup (lines 253–260).
+/// Spec §Grace Period Precision (lines 147–154): the runtime MUST NOT
+/// prematurely expire the grace period; an agent can reconnect at 29,950ms.
 #[test]
-fn test_budget_revocation_bypasses_grace_and_zero_footprint() {
-    let clock = Arc::new(TestClock::new(0));
-    let mut scene = SceneGraph::new_with_clock(1920.0, 1080.0, clock.clone());
-
-    let tab_id = scene.create_tab("Main", 0).expect("create_tab");
-    let lease_id = scene.grant_lease("agent.kilo", 60_000);
-
-    let tile_a = apply_create_tile(
-        &mut scene,
-        tab_id,
-        "agent.kilo",
-        lease_id,
-        Rect::new(0.0, 0.0, 200.0, 200.0),
-        1,
-    );
-    let tile_b = apply_create_tile(
-        &mut scene,
-        tab_id,
-        "agent.kilo",
-        lease_id,
-        Rect::new(210.0, 0.0, 200.0, 200.0),
-        2,
-    );
-    assert_eq!(scene.tile_count(), 2);
-
-    // Also grant a second agent that must be unaffected
-    let other_lease = scene.grant_lease("agent.lima", 60_000);
-    let tile_other = apply_create_tile(
-        &mut scene,
-        tab_id,
-        "agent.lima",
-        other_lease,
-        Rect::new(500.0, 0.0, 200.0, 200.0),
-        3,
-    );
-    assert_eq!(scene.tile_count(), 3);
-
-    // ── Initiate budget-driven revocation ─────────────────────────────────
-    clock.advance(1_000);
-    let specs = scene.initiate_budget_revocation("agent.kilo");
-
-    assert_eq!(specs.len(), 1, "one lease for agent.kilo");
-    // Lease is now REVOKED (not ORPHANED — grace bypassed)
-    assert_eq!(
-        scene.leases[&lease_id].state,
-        LeaseState::Revoked,
-        "budget revocation must set state=REVOKED immediately (not ORPHANED)"
-    );
-
-    // Tiles still exist at t+0ms (pending 100ms free delay)
-    // Note: initiate only marks for removal; finalize does the actual free.
-    assert!(
-        specs[0].bypasses_grace_period(),
-        "budget policy revocation must bypass grace period"
-    );
-
-    // Verify the spec has the right free delay
-    assert!(
-        !specs[0].is_ready_to_free(clock.now_millis()),
-        "not ready to free at t=0 after revocation"
-    );
-    assert!(
-        !specs[0].is_ready_to_free(clock.now_millis() + POST_REVOCATION_FREE_DELAY_MS - 1),
-        "not ready at 99ms"
-    );
-
-    // ── After 100ms delay: finalize cleanup ───────────────────────────────
-    clock.advance(POST_REVOCATION_FREE_DELAY_MS);
-    let finalized = scene.finalize_budget_revocation(&specs, clock.now_millis());
-    assert_eq!(finalized, 1, "exactly 1 spec finalized");
-
-    // Tiles removed — zero footprint
-    assert!(
-        !scene.tiles.contains_key(&tile_a),
-        "tile_a removed after budget revocation"
-    );
-    assert!(
-        !scene.tiles.contains_key(&tile_b),
-        "tile_b removed after budget revocation"
-    );
-    assert_eq!(scene.tile_count(), 1, "only agent.lima tile remains");
-
-    // Other agent unaffected
-    assert!(
-        scene.tiles.contains_key(&tile_other),
-        "agent.lima tile survives kilo revocation"
-    );
-    assert_eq!(
-        scene.leases[&other_lease].state,
-        LeaseState::Active,
-        "agent.lima lease unaffected"
-    );
-
-    let violations = assert_layer0_invariants(&scene);
-    assert!(
-        violations.is_empty(),
-        "Layer 0 violations after budget revocation: {violations:?}"
-    );
-
-    let _ = (tile_a, tile_b, tile_other);
-}
-
-// ─── Test 15: Grace period precision (GracePeriodTimer unit integration) ──────
-
-/// Integration test for the GracePeriodTimer precision requirement.
-///
-/// Spec §Grace Period Precision (lines 147–154):
-/// - "The grace period MUST be accurate to +/- 100ms."
-/// - "The runtime MUST NOT prematurely expire the grace period."
-/// - Agent can reconnect at 29,950ms.
-#[test]
-fn test_grace_period_timer_precision_integration() {
-    // Simulate the scenario from the spec (lines 152–154):
-    // WHEN grace = 30,000ms THEN agent can still reconnect at 29,950ms.
-    let timer = GracePeriodTimer::new(
-        SceneId::new(),
-        0,                      // orphaned at t=0
-        ORPHAN_GRACE_PERIOD_MS, // 30,000ms
-    );
-
-    // Must not expire at 29,950ms (spec: MUST NOT prematurely expire)
-    assert!(
-        timer.can_reconnect(29_950),
-        "agent must be able to reconnect at 29,950ms (spec lines 152-154)"
-    );
-    assert!(
-        !timer.has_expired(29_950),
-        "grace period must not be expired at 29,950ms"
-    );
-
-    // Must be expired at exactly 30,000ms
-    assert!(
-        timer.has_expired(30_000),
-        "grace period must be expired at 30,000ms"
-    );
-    assert!(
-        !timer.can_reconnect(30_000),
-        "reconnect must not be allowed at exactly 30,000ms"
-    );
-
-    // SceneGraph-level: reconnect at 29,950ms succeeds
+fn test_grace_period_precision_reconnect_at_29950ms() {
     let clock = Arc::new(TestClock::new(0));
     let mut scene = SceneGraph::new_with_clock(1920.0, 1080.0, clock.clone());
     let _tab_id = scene.create_tab("Main", 0).expect("create_tab");

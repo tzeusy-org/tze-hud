@@ -1196,18 +1196,6 @@ impl LeaseState {
     }
 }
 
-/// Renewal policy per RFC 0008 SS1.4.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
-pub enum RenewalPolicy {
-    /// Agent must explicitly renew before TTL expires.
-    #[default]
-    Manual,
-    /// Runtime auto-renews at 75% TTL elapsed.
-    AutoRenew,
-    /// No renewal; expires at TTL.
-    OneShot,
-}
-
 /// Lease caps violation error.
 #[derive(Clone, Debug, PartialEq)]
 pub enum CapsError {
@@ -1333,7 +1321,6 @@ pub struct Lease {
     /// Corresponds to `granted_at_wall_us / 1000` in the wire protocol.
     pub granted_at_ms: u64,
     pub ttl_ms: u64,
-    pub renewal_policy: RenewalPolicy,
     pub resource_budget: ResourceBudget,
     /// Spatial constraints on tiles owned by this lease, enforced at
     /// interactive resize time (gesture + hotkey).  `0.0` for either field
