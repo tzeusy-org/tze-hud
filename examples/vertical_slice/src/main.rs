@@ -64,7 +64,12 @@ fn main() -> Result<(), BoxError> {
         .build()?
         .block_on(async {
             let runtime = boot(50051).await?;
-            run_lifecycle(&mut Agent::connect(50051, AGENT_PSK).await?, async || {}).await?;
+            let granted =
+                run_lifecycle(&mut Agent::connect(50051, AGENT_PSK).await?, async || {}).await?;
+            println!(
+                "granted ttl: claim {} ms, hold {} ms",
+                granted.claim_ttl_ms, granted.hold_ttl_ms
+            );
             println!("tiles left on the scene: {}", tile_count(&runtime).await);
             Ok(())
         })
