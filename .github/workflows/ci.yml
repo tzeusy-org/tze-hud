@@ -18,7 +18,7 @@
 #   clippy-windows-gnu — cargo clippy --target x86_64-pc-windows-gnu -D warnings on the
 #     crates carrying cfg(windows) code, which the Linux clippy job never compiles
 #   test-unit      — cargo test --workspace --all-targets --exclude integration
-#   test-integration — cargo test -p integration (headless suites; excl. soak)
+#   test-integration — cargo test -p integration --tests (soak test is #[ignore]d)
 #                    + deterministic LLM-facing token-footprint gate
 #   production-boot-vertical-slice / canonical-app-production-boot — boot the
 #     runtime with the committed production configs
@@ -223,10 +223,9 @@ jobs:
   # server required).
   #
   # Excluded targets (each with its own coverage):
-  # - soak             — wall-clock-bound soak/leak suite. Even the default
-  #   TZE_HUD_SOAK_SECS=10 run drives real-time multi-agent churn and is
-  #   designed for 1h/6h dedicated runs; timing-sensitive on shared runners,
-  #   so it stays opt-in (see tests/integration/Cargo.toml header).
+  # - soak's test_soak_resource_growth — wall-clock-bound soak/leak run,
+  #   #[ignore]d so it stays opt-in (see tests/integration/Cargo.toml header).
+  #   `just test-integration` runs the same `--tests` command.
 
   test-integration:
     name: cargo test (integration)
@@ -256,27 +255,7 @@ jobs:
             protobuf-compiler
       - name: cargo test -p integration (headless suites)
         run: |
-          cargo test \
-            -p integration \
-            --test multi_agent \
-            --test presence_card_tile \
-            --test disconnect_orphan \
-            --test presence_card_coexistence \
-            --test dashboard_tile_creation \
-            --test dashboard_tile_input \
-            --test dashboard_tile_lifecycle \
-            --test subtitle_streaming \
-            --test text_stream_portal_surface \
-            --test text_stream_portal_adapter \
-            --test text_stream_portal_coalescing \
-            --test text_stream_portal_governance \
-            --test text_stream_portal_markdown \
-            --test text_stream_portal_composer \
-            --test text_stream_portal_cadence \
-            --test text_stream_portal_styling \
-            --test drag_reposition \
-            --test movable_elements_e2e \
-            --test poc_acceptance
+          cargo test -p integration --tests
       - name: Test token-footprint gate contract
         run: >-
           python3 -m unittest
@@ -439,6 +418,8 @@ jobs:
             .claude/skills/user-test/scripts/test_hud_grpc_client.py \
             scripts/tests/ \
             -q
+      - name: Run scripts/ci unit tests
+        run: python3 -m unittest discover -s scripts/ci
 
   # ── Dev-mode guard ──────────────────────────────────────────────────────────
   #

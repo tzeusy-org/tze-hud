@@ -65,26 +65,35 @@ idle-efficiency-checker:
     python3 scripts/ci/test_run_quiescent_efficiency_script.py
 
 # Integration headless suites (mirror CI test-integration job)
-# Excludes: soak (wall-clock, opt-in via TZE_HUD_SOAK_SECS).
+# Runs every integration target; the wall-clock soak test is #[ignore]d
+# (opt in: cargo test -p integration --test soak -- --ignored).
 test-integration:
-    HEADLESS_FORCE_SOFTWARE=1 \
-        cargo test \
-            -p integration \
-            --test multi_agent \
-            --test presence_card_tile \
-            --test disconnect_orphan \
-            --test presence_card_coexistence \
-            --test dashboard_tile_creation \
-            --test dashboard_tile_input \
-            --test dashboard_tile_lifecycle \
-            --test subtitle_streaming \
-            --test text_stream_portal_surface \
-            --test text_stream_portal_adapter \
-            --test text_stream_portal_coalescing \
-            --test text_stream_portal_governance \
-            --test drag_reposition \
-            --test movable_elements_e2e \
-            --test poc_acceptance
+    HEADLESS_FORCE_SOFTWARE=1 cargo test -p integration --tests
+
+# Pure-Python suites (mirror CI user-test-python-suite job and scripts/ci tests)
+# Needs: pip install grpcio protobuf pillow blake3 pytest
+test-python:
+    python3 -m pytest \
+        .claude/skills/user-test/tests/ \
+        .claude/skills/user-test/scripts/test_hud_grpc_client.py \
+        scripts/tests/ \
+        -q
+    python3 -m unittest discover -s scripts/ci
+
+# Deterministic LLM-facing token-footprint gate (mirror CI test-integration job)
+token-footprint:
+    mkdir -p test_results/token-footprint
+    HEADLESS_FORCE_SOFTWARE=1 cargo run -p benchmark --features headless \
+        --bin token_footprint_calibration -- \
+        --output test_results/token-footprint/measurement.json
+    HEADLESS_FORCE_SOFTWARE=1 cargo run -p benchmark --features headless \
+        --bin token_footprint_calibration -- \
+        --output test_results/token-footprint/repeat.json
+    cmp test_results/token-footprint/measurement.json test_results/token-footprint/repeat.json
+    python3 scripts/ci/check_token_footprint.py \
+        --measurement test_results/token-footprint/measurement.json \
+        --baseline scripts/ci/token_footprint_baseline.json \
+        --output test_results/token-footprint/gate-report.json
 
 # vertical_slice production config boot (mirror CI production-boot-vertical-slice job)
 production-boot:
@@ -115,4 +124,4 @@ dev-mode-guard:
 # Run all CI gates that are feasible locally (excludes Windows perf budget and
 # GPU pixel-readback, which need specific hardware or Mesa llvmpipe + GPU).
 # Runs in the same logical order as CI: fast-fail gates first, then tests.
-ci: check fmt clippy dev-mode-guard idle-efficiency-checker test test-integration production-boot canonical-app-boot
+ci: check fmt clippy dev-mode-guard idle-efficiency-checker test test-integration test-python token-footprint production-boot canonical-app-boot

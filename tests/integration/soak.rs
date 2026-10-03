@@ -571,6 +571,7 @@ async fn capture_agent_footprint(
 /// ## Port
 /// Uses `SOAK_GRPC_PORT` (50053) to avoid conflicts with other tests.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "wall-clock soak; opt in with `cargo test -p integration --test soak -- --ignored`"]
 async fn test_soak_resource_growth() -> Result<(), Box<dyn std::error::Error>> {
     let cfg = SoakConfig::from_env();
 
