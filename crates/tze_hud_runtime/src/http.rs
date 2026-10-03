@@ -114,6 +114,7 @@ impl Response {
     pub fn to_bytes(&self) -> Vec<u8> {
         let reason = match self.status {
             200 => "OK",
+            202 => "Accepted",
             400 => "Bad Request",
             401 => "Unauthorized",
             403 => "Forbidden",
@@ -191,6 +192,8 @@ pub enum AdminRoute {
     Status,
     Logs,
     Screenshot,
+    /// `POST /admin/restart`: relaunch this exe with its own arguments.
+    Restart,
 }
 
 /// Gate for every `/admin/*` request, run before any admin data is read:
@@ -224,6 +227,8 @@ pub fn route(method: &str, path: &str) -> Route {
         ("GET", "/admin/status") => Route::Admin(AdminRoute::Status),
         ("GET", "/admin/logs") => Route::Admin(AdminRoute::Logs),
         ("GET", "/admin/screenshot") => Route::Admin(AdminRoute::Screenshot),
+        ("POST", "/admin/restart") => Route::Admin(AdminRoute::Restart),
+        (_, "/admin/restart") => Route::Respond(Response::method_not_allowed("POST")),
         (_, "/admin/status" | "/admin/logs" | "/admin/screenshot") => {
             Route::Respond(Response::method_not_allowed("GET"))
         }
@@ -411,6 +416,18 @@ mod tests {
             route("POST", "/admin/logs"),
             Route::Respond(Response::method_not_allowed("GET"))
         );
+        // Restart changes state: POST only, never GET (or anything else).
+        assert_eq!(
+            route("POST", "/admin/restart"),
+            Route::Admin(AdminRoute::Restart)
+        );
+        for method in ["GET", "PUT", "DELETE", "HEAD"] {
+            assert_eq!(
+                route(method, "/admin/restart"),
+                Route::Respond(Response::method_not_allowed("POST")),
+                "{method}"
+            );
+        }
         assert_eq!(
             route("GET", "/admin/other"),
             Route::Respond(Response::not_found())

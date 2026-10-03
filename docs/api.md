@@ -125,6 +125,12 @@ allow = ["zone:*", "widget:gauge", "portal", "tiles"]
   while idle, never cached, one at a time (429 `BUSY`), 503 `UNAVAILABLE` after
   3 s or without a display, 422 `TOO_LARGE` past 8192 px per side, 16 Mpx, or a 32 MiB PNG. It
   is not exposed through MCP tools or gRPC.
+  `POST /admin/restart` (POST only; 405 otherwise) relaunches the HUD with its
+  own exe and arguments and answers 202 `{"restarting":true}`; the request body
+  is ignored. The new process takes over once its first frame is up and the old
+  one exits. If it does not report within 30 s, it is killed and the old
+  process keeps running (`/admin/status` `last_restart` says why). One at a
+  time (429 `BUSY`).
 - The operator's local tools (cleanup, composer paste, SVG asset upload) are
   off the model surface: CLI/config, or gRPC for tooling.
 

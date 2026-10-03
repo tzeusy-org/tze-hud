@@ -71,6 +71,7 @@ pub(super) fn start_network_services(
         shared_state,
         runtime_context,
         tze_hud_scene::render_wake::RenderWakeNotifier::default(),
+        None,
     )
 }
 
@@ -81,6 +82,7 @@ pub(super) fn start_network_services_with_render_wake(
     shared_state: Arc<Mutex<SharedState>>,
     runtime_context: SharedRuntimeContext,
     render_wake: tze_hud_scene::render_wake::RenderWakeNotifier,
+    bind_gate: Option<crate::operator::handoff::BindGate>,
 ) -> Result<NetworkServices, Box<dyn std::error::Error>> {
     if grpc_port == 0 {
         tracing::info!(
@@ -134,25 +136,34 @@ pub(super) fn start_network_services_with_render_wake(
     // and the returned addresses belong to listeners that are genuinely up.
     // Loopback must bind; a Tailscale address that fails to bind is skipped.
     let mut std_listeners = Vec::with_capacity(addrs.len());
-    for (i, addr) in addrs.iter().enumerate() {
-        match bind_nonblocking(*addr) {
-            Ok(l) => std_listeners.push(l),
-            Err(e) if i == 0 => {
-                return Err(format!(
-                    "windowed runtime: failed to bind gRPC listener on {addr}: {e}"
-                )
-                .into());
-            }
-            Err(e) => {
-                tracing::warn!(addr = %addr, error = %e, "gRPC: failed to bind Tailscale address")
+    // A handed-over instance binds later, once the old one has let go (the
+    // spawned task below waits on the gate); until then the planned addresses
+    // stand in for the bound ones.
+    if bind_gate.is_none() {
+        for (i, addr) in addrs.iter().enumerate() {
+            match bind_nonblocking(*addr) {
+                Ok(l) => std_listeners.push(l),
+                Err(e) if i == 0 => {
+                    return Err(format!(
+                        "windowed runtime: failed to bind gRPC listener on {addr}: {e}"
+                    )
+                    .into());
+                }
+                Err(e) => {
+                    tracing::warn!(addr = %addr, error = %e, "gRPC: failed to bind Tailscale address")
+                }
             }
         }
     }
-    let grpc_bound_addrs = std_listeners
-        .iter()
-        .map(std::net::TcpListener::local_addr)
-        .collect::<std::io::Result<Vec<_>>>()
-        .map_err(|e| format!("windowed runtime: failed to read gRPC local_addr: {e}"))?;
+    let grpc_bound_addrs = if bind_gate.is_some() {
+        addrs.clone()
+    } else {
+        std_listeners
+            .iter()
+            .map(std::net::TcpListener::local_addr)
+            .collect::<std::io::Result<Vec<_>>>()
+            .map_err(|e| format!("windowed runtime: failed to read gRPC local_addr: {e}"))?
+    };
     let has_tailnet =
         !tailnet_addrs(&grpc_bound_addrs.iter().map(|a| a.ip()).collect::<Vec<_>>()).is_empty();
 
@@ -163,6 +174,12 @@ pub(super) fn start_network_services_with_render_wake(
         tokio::sync::mpsc::channel::<std::io::Result<tokio::net::TcpStream>>(64);
     let accept_tx = conn_tx.clone();
     let handle = network_rt.rt.spawn(async move {
+        if let Some(gate) = bind_gate {
+            match bind_after_handoff(&gate, &addrs).await {
+                Some(listeners) => std_listeners = listeners,
+                None => return,
+            }
+        }
         for l in std_listeners {
             // `from_std` requires a Tokio reactor, so it runs inside the task.
             match tokio::net::TcpListener::from_std(l) {
@@ -214,6 +231,34 @@ pub(super) fn start_network_services_with_render_wake(
         Some(lease_expirations),
         grpc_bound_addrs,
     ))
+}
+
+/// Wait for the takeover, then bind every address (retrying while the old
+/// instance releases them). The loopback address must bind or the gate fails
+/// (shutting this instance down); a Tailscale address that never binds is
+/// skipped. `None` when the takeover failed.
+async fn bind_after_handoff(
+    gate: &crate::operator::handoff::BindGate,
+    addrs: &[std::net::SocketAddr],
+) -> Option<Vec<std::net::TcpListener>> {
+    use crate::operator::handoff::{BIND_RETRY, retry_bind};
+    if !gate.wait().await {
+        return None;
+    }
+    let mut listeners = Vec::with_capacity(addrs.len());
+    for (i, addr) in addrs.iter().enumerate() {
+        match retry_bind(BIND_RETRY, || bind_nonblocking(*addr)).await {
+            Ok(l) => listeners.push(l),
+            Err(e) if i == 0 => {
+                gate.fail(&format!("gRPC: could not bind {addr}: {e}"));
+                return None;
+            }
+            Err(e) => {
+                tracing::warn!(addr = %addr, error = %e, "gRPC: failed to bind Tailscale address")
+            }
+        }
+    }
+    Some(listeners)
 }
 
 fn bind_nonblocking(addr: std::net::SocketAddr) -> std::io::Result<std::net::TcpListener> {
@@ -652,5 +697,43 @@ mod tests {
         for h in handles {
             h.abort();
         }
+    }
+
+    /// A handed-over instance starts while the old one still holds the port:
+    /// startup succeeds without binding, and the listener comes up only once
+    /// the gate opens and the port is free.
+    #[test]
+    fn deferred_bind_waits_for_the_gate_and_the_old_listener() {
+        let old = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = old.local_addr().unwrap().port();
+        let gate = crate::operator::handoff::BindGate::closed();
+        let (rt, handles, _, _, _, _, _, _) = start_network_services_with_render_wake(
+            port,
+            Default::default(),
+            make_shared_state(),
+            Arc::new(RuntimeContext::headless_default()),
+            tze_hud_scene::render_wake::RenderWakeNotifier::default(),
+            Some(gate.clone()),
+        )
+        .expect("deferred start must not need the port");
+        let reachable = || std::net::TcpStream::connect(("127.0.0.1", port)).is_ok();
+        gate.open();
+        // Still the old listener's: nothing of ours is accepting yet.
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        drop(old);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        // Connecting succeeds against the old listener's backlog only while it
+        // lives; after it is dropped, success means the new listener is up.
+        while !reachable() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "never bound after the old one let go"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        for h in handles {
+            h.abort();
+        }
+        drop(rt);
     }
 }

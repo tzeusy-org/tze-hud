@@ -2,6 +2,7 @@
 //! with an agent PSK whose allow list names `admin` (see
 //! `docs/operations/windows-install.md`).
 
+pub mod handoff;
 pub mod install;
 pub mod logs;
 pub mod screenshot;

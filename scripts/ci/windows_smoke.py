@@ -7,7 +7,9 @@ and that each lifecycle stage answers over MCP: discover, publish to a zone,
 attach/poll/detach a portal, and a structured error.
 
 The seeded agent also holds `admin`, so the operator endpoints
-(/admin/status, /admin/logs, /admin/screenshot) are checked too.
+(/admin/status, /admin/logs, /admin/screenshot) are checked too, and last
+POST /admin/restart: the HUD relaunches itself, the new process (a different
+pid, uptime reset) answers with the same PSK, and the old process exits.
 
 The config is copied to a temp dir with a seeded agents.toml beside it holding
 only the SHA-256 of a fresh random PSK, the way pairing stores agents.
@@ -23,7 +25,9 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import secrets
+import signal
 import shutil
 import struct
 import subprocess
@@ -64,12 +68,27 @@ class Smoke:
             raise AssertionError(f"{method}: JSON-RPC error {reply['error']}")
         return reply["result"]
 
-    def get_bytes(self, path: str) -> tuple[int, str, bytes]:
-        """GET an operator endpoint on the same port; return (status, content type, body)."""
+    def request(self, method: str, path: str) -> tuple[int, str, bytes]:
+        """Call an operator endpoint on the same port; return (status, content type, body)."""
         base = self.url.rsplit("/", 1)[0]
-        req = urllib.request.Request(base + path, headers={"Authorization": f"Bearer {self.psk}"})
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            return resp.status, resp.headers.get("Content-Type", ""), resp.read()
+        req = urllib.request.Request(
+            base + path,
+            method=method,
+            data=b"" if method == "POST" else None,
+            headers={"Authorization": f"Bearer {self.psk}"},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                return resp.status, resp.headers.get("Content-Type", ""), resp.read()
+        except urllib.error.HTTPError as err:
+            return err.code, err.headers.get("Content-Type", ""), err.read()
+
+    def get_bytes(self, path: str) -> tuple[int, str, bytes]:
+        """GET an operator endpoint; a non-2xx status raises."""
+        status, ctype, body = self.request("GET", path)
+        if status >= 300:
+            raise AssertionError(f"GET {path}: {status} {body[:200]!r}")
+        return status, ctype, body
 
     def get(self, path: str) -> tuple[int, str]:
         """GET an operator endpoint on the same port; return (status, body)."""
@@ -231,6 +250,62 @@ def check_admin(smoke: Smoke) -> None:
     check_screenshot(smoke)
 
 
+def kill_pid(pid: int) -> None:
+    if sys.platform == "win32":
+        subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)], capture_output=True)
+    else:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+
+def check_restart(smoke: Smoke, proc: subprocess.Popen, timeout_s: float = 60) -> int:
+    """POST /admin/restart; return the new instance's pid once it answers.
+
+    The replacement is spawned detached by the HUD itself, so the caller must
+    kill it. The old instance exits only after the new one reports its first
+    frame, so there is always at least one instance serving except for the
+    brief port handover.
+    """
+    old = json.loads(smoke.get("/admin/status")[1])
+
+    # State-changing: POST only, and never actionable by a GET.
+    status, _, _ = smoke.request("GET", "/admin/restart")
+    assert status == 405, f"GET /admin/restart: expected 405, got {status}"
+
+    status, _, body = smoke.request("POST", "/admin/restart")
+    assert status == 202, f"POST /admin/restart: {status} {body[:200]!r}"
+    started = time.monotonic()
+    print("ok  POST /admin/restart accepted")
+
+    info = None
+    while time.monotonic() - started < timeout_s:
+        try:
+            status, body = smoke.get("/admin/status")
+            candidate = json.loads(body)
+        except (urllib.error.URLError, ConnectionError, TimeoutError, ValueError, AssertionError):
+            time.sleep(1)  # between the old instance's exit and the new one's bind
+            continue
+        if status == 200 and candidate["pid"] != old["pid"]:
+            info = candidate
+            break
+        time.sleep(1)
+    assert info is not None, f"pid stayed {old['pid']} for {timeout_s:.0f}s after /admin/restart"
+    took = time.monotonic() - started
+    # A fresh process: its uptime counts from its own start, not the old one's.
+    assert info["uptime_s"] <= took + 2, f"uptime_s={info['uptime_s']} after {took:.0f}s: not a fresh process"
+    smoke.ok("hud_surfaces")  # the same PSK still authenticates
+    print(f"ok  restarted in {took:.1f}s: pid {old['pid']} -> {info['pid']}, uptime_s={info['uptime_s']}, PSK still works")
+
+    try:
+        code = proc.wait(timeout=30)
+    except subprocess.TimeoutExpired:
+        raise AssertionError(f"old pid {old['pid']} still running 30s after the handover") from None
+    print(f"ok  old instance exited (code {code})")
+    return info["pid"]
+
+
 def seed_config(config: Path, psk: str) -> Path:
     """Copy `config` to a temp dir and pair one agent for `psk` beside it."""
     config_dir = Path(tempfile.mkdtemp(prefix="tze_hud_smoke_"))
@@ -265,6 +340,7 @@ def main() -> int:
     with open(log_path, "wb") as log:
         proc = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT)
     smoke = Smoke(f"http://127.0.0.1:{args.mcp_port}/", psk)
+    restarted_pid = None
     try:
         wait_for_mcp(smoke, proc, args.startup_timeout)
         print("ok  MCP initialize")
@@ -273,6 +349,7 @@ def main() -> int:
         check_admin(smoke)
         assert proc.poll() is None, f"tze_hud exited after the checks (code {proc.returncode})"
         print("ok  HUD still running after the checks")
+        restarted_pid = check_restart(smoke, proc)
         return 0
     except AssertionError as err:
         print(f"FAIL {err}", file=sys.stderr)
@@ -281,8 +358,24 @@ def main() -> int:
         if proc.poll() is None:
             proc.kill()
             proc.wait(timeout=10)
+        # The replacement is detached from this script; stop it too.
+        if restarted_pid is None:
+            try:
+                restarted_pid = json.loads(smoke.get("/admin/status")[1])["pid"]
+            except Exception:  # noqa: BLE001 - best effort cleanup
+                pass
+        if restarted_pid is not None and restarted_pid != proc.pid:
+            kill_pid(restarted_pid)
         print(f"--- HUD log ({log_path}) ---")
         print(log_path.read_text(errors="replace")[-20_000:])
+        # Durable log (shared by the old and restarted instance).
+        base = os.environ.get("LOCALAPPDATA") if sys.platform == "win32" else None
+        durable = (Path(base) if base else Path(tempfile.gettempdir())) / "tze_hud" / "logs" / "tze_hud.log"
+        if os.environ.get("TZE_HUD_LOG_DIR"):
+            durable = Path(os.environ["TZE_HUD_LOG_DIR"]) / "tze_hud.log"
+        if durable.exists():
+            print(f"--- durable log tail ({durable}) ---")
+            print(durable.read_text(errors="replace")[-8_000:])
 
 
 if __name__ == "__main__":

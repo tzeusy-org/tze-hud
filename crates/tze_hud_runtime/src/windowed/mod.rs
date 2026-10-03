@@ -193,7 +193,7 @@ mod test_support;
 mod event_loop_harness;
 
 pub use self::config::{
-    WindowedBenchmarkConfig, WindowedConfig, WindowedQuiescentEfficiencyConfig,
+    Relaunch, WindowedBenchmarkConfig, WindowedConfig, WindowedQuiescentEfficiencyConfig,
 };
 #[cfg(feature = "test-harness")]
 pub use self::event_loop_harness::HeadlessEventLoopHarness;
@@ -1431,6 +1431,8 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
         let safe_mode_for_compositor = Arc::clone(&self.state.safe_mode_atomic);
         let system_card_for_compositor = self.state.system_card.clone();
         let capture_inbox = self.state.capture_inbox.clone();
+        // A handed-over instance reports ready after its first submitted frame.
+        let handoff_child = cfg.handoff.clone();
         let telemetry_collector = TelemetryCollector::new();
         let surface_for_compositor = window_surface.clone();
         let mut benchmark_state = cfg.benchmark.clone().map(|benchmark| {
@@ -1908,6 +1910,9 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                             // FrameReadySignal, and only the main thread SHALL call
                             // surface.present()."
                             if frame_submitted {
+                                if let Some(handoff) = &handoff_child {
+                                    handoff.first_present();
+                                }
                                 let _ = frame_ready_tx.send(true);
                                 compositor_wake.notify_main(
                                     crate::idle_efficiency::RuntimeWakeupSource::FrameReady,
@@ -2607,15 +2612,32 @@ impl WindowedRuntime {
         ));
         let pending_input_latency = Arc::new(StdMutex::new(VecDeque::new()));
         let shutdown = ShutdownToken::new();
-        // `--uninstall` / an upgrading installer ask this instance to quit.
-        {
+        // One way to stop this instance cleanly: the quit event
+        // (`--uninstall`, an upgrading installer), a finished restart handoff,
+        // or a failed takeover.
+        let quit: crate::operator::handoff::Quit = {
             let shutdown = shutdown.clone();
             let wake = wake.clone();
-            crate::operator::install::spawn_quit_listener(move || {
+            Arc::new(move || {
                 shutdown.trigger(crate::threads::ShutdownReason::Clean);
                 wake.notify_main(crate::idle_efficiency::RuntimeWakeupSource::Shutdown);
-            });
-        }
+            })
+        };
+        crate::operator::install::spawn_quit_listener({
+            let quit = Arc::clone(&quit);
+            move || quit()
+        });
+        let bind_gate = cfg.handoff.as_ref().map(|h| {
+            h.gate().install_quit(Arc::clone(&quit));
+            h.gate().clone()
+        });
+        let restart = cfg.relaunch.as_ref().map(|r| {
+            crate::operator::handoff::RestartHandle::new(
+                r.exe.clone(),
+                r.args.clone(),
+                Arc::clone(&quit),
+            )
+        });
 
         // ── Network runtime + gRPC + MCP HTTP servers ──────────────────────────
         // Spawn the Tokio multi-thread runtime for all network tasks (gRPC, MCP).
@@ -2642,6 +2664,7 @@ impl WindowedRuntime {
             shared_state.clone(),
             Arc::clone(&runtime_context),
             render_wake.clone(),
+            bind_gate.clone(),
         )?;
 
         // ── MCP HTTP server ────────────────────────────────────────────────────
@@ -2713,6 +2736,8 @@ impl WindowedRuntime {
                     agents: Arc::clone(&cfg.agents),
                     presents: Some(Arc::clone(wake.counters())),
                     capture: Some(capture_endpoint),
+                    restart,
+                    bind_gate,
                 };
                 let mcp_shutdown = shutdown.clone();
                 match rt.rt.block_on(start_mcp_http_server_with_render_wake(

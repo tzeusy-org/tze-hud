@@ -64,6 +64,15 @@ pub struct McpServerConfig {
     /// Compositor capture channel behind `/admin/screenshot`; the endpoint
     /// answers 503 without one (no display to read from).
     pub capture: Option<crate::operator::screenshot::CaptureEndpoint>,
+
+    /// Relaunch behind `POST /admin/restart`; the endpoint answers 503
+    /// without one.
+    pub restart: Option<crate::operator::handoff::RestartHandle>,
+
+    /// Set on a handed-over instance: listeners are bound only once the gate
+    /// opens (the old instance still holds the ports), retrying for
+    /// [`crate::operator::handoff::BIND_RETRY`].
+    pub bind_gate: Option<crate::operator::handoff::BindGate>,
 }
 
 /// Start the MCP HTTP server on the calling Tokio runtime.
@@ -120,31 +129,44 @@ pub async fn start_mcp_http_server_with_render_wake(
     safe_mode: Arc<std::sync::atomic::AtomicBool>,
 ) -> std::io::Result<(tokio::task::JoinHandle<()>, Vec<SocketAddr>)> {
     // The first address is loopback and must bind; a Tailscale address that
-    // fails to bind is skipped with a warning.
+    // fails to bind is skipped with a warning. A handed-over instance binds
+    // later, from the accept task (see `bind_gate`).
     let mut listeners = Vec::with_capacity(config.bind_addrs.len());
-    for (i, addr) in config.bind_addrs.iter().enumerate() {
-        match TcpListener::bind(addr).await {
-            Ok(l) => listeners.push(l),
-            Err(e) if i == 0 => return Err(e),
-            Err(e) => tracing::warn!(addr = %addr, error = %e, "MCP HTTP: failed to bind address"),
+    let mut local_addrs = Vec::new();
+    if config.bind_gate.is_none() {
+        for (i, addr) in config.bind_addrs.iter().enumerate() {
+            match TcpListener::bind(addr).await {
+                Ok(l) => listeners.push(l),
+                Err(e) if i == 0 => return Err(e),
+                Err(e) => {
+                    tracing::warn!(addr = %addr, error = %e, "MCP HTTP: failed to bind address")
+                }
+            }
+        }
+        local_addrs = listeners
+            .iter()
+            .map(TcpListener::local_addr)
+            .collect::<std::io::Result<Vec<_>>>()?;
+        for addr in &local_addrs {
+            tracing::info!(addr = %addr, "MCP HTTP listener bound");
         }
     }
-    let local_addrs = listeners
-        .iter()
-        .map(TcpListener::local_addr)
-        .collect::<std::io::Result<Vec<_>>>()?;
-
-    for addr in &local_addrs {
-        tracing::info!(addr = %addr, "MCP HTTP listener bound");
-    }
+    // What the startup banner and the late-Tailscale check should assume.
+    let planned_addrs = if config.bind_gate.is_some() {
+        config.bind_addrs.clone()
+    } else {
+        local_addrs.clone()
+    };
 
     crate::operator::status::process_start();
     let admin = Arc::new(StatusSource {
         agents: config.agents.clone(),
+        // In deferred mode this fills in as the listeners bind.
         binds: Arc::new(std::sync::Mutex::new(local_addrs.clone())),
         safe_mode: Arc::clone(&safe_mode),
         presents: config.presents.clone(),
         capture: config.capture.clone(),
+        restart: config.restart.clone(),
         log_path: crate::operator::logs::log_path(),
     });
 
@@ -158,7 +180,16 @@ pub async fn start_mcp_http_server_with_render_wake(
     }
     let server = Arc::new(server_builder);
 
-    let mut loops = Vec::with_capacity(listeners.len());
+    let mut loops = Vec::with_capacity(listeners.len() + 1);
+    if let Some(gate) = config.bind_gate.clone() {
+        loops.push(tokio::spawn(run_deferred_listeners(
+            gate,
+            config.bind_addrs.clone(),
+            Arc::clone(&server),
+            Arc::clone(&admin),
+            shutdown.clone(),
+        )));
+    }
     for (listener, addr) in listeners.into_iter().zip(local_addrs.iter().copied()) {
         loops.push(tokio::spawn(run_accept_loop(
             listener,
@@ -170,7 +201,7 @@ pub async fn start_mcp_http_server_with_render_wake(
     }
 
     if let Some(port) = config.late_tailnet_port
-        && !local_addrs
+        && !planned_addrs
             .iter()
             .any(|a| !crate::net_addrs::tailnet_addrs(&[a.ip()]).is_empty())
     {
@@ -222,7 +253,59 @@ pub async fn start_mcp_http_server_with_render_wake(
         }
     });
 
-    Ok((handle, local_addrs))
+    Ok((handle, planned_addrs))
+}
+
+/// A handed-over instance: wait for the takeover, bind each listener (the old
+/// instance may still be releasing the port), then serve them. The loopback
+/// listener must bind or the gate fails and this instance shuts down; a
+/// Tailscale address that never binds is skipped.
+async fn run_deferred_listeners(
+    gate: crate::operator::handoff::BindGate,
+    addrs: Vec<SocketAddr>,
+    server: Arc<McpServer>,
+    admin: Arc<StatusSource>,
+    shutdown: ShutdownToken,
+) {
+    use crate::operator::handoff::{BIND_RETRY, retry_bind};
+    if !gate.wait().await {
+        return;
+    }
+    let mut loops = Vec::new();
+    for (i, addr) in addrs.iter().enumerate() {
+        let bound = retry_bind(BIND_RETRY, || {
+            let l = std::net::TcpListener::bind(addr)?;
+            l.set_nonblocking(true)?;
+            TcpListener::from_std(l)
+        })
+        .await;
+        match bound {
+            Ok(listener) => {
+                let local = listener.local_addr().unwrap_or(*addr);
+                tracing::info!(addr = %local, "MCP HTTP listener bound (after handoff)");
+                admin
+                    .binds
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .push(local);
+                loops.push(tokio::spawn(run_accept_loop(
+                    listener,
+                    Arc::clone(&server),
+                    Arc::clone(&admin),
+                    shutdown.clone(),
+                    local,
+                )));
+            }
+            Err(e) if i == 0 => {
+                gate.fail(&format!("MCP HTTP: could not bind {addr}: {e}"));
+                return;
+            }
+            Err(e) => tracing::warn!(addr = %addr, error = %e, "MCP HTTP: failed to bind address"),
+        }
+    }
+    for l in loops {
+        let _ = l.await;
+    }
 }
 
 /// Resolves once `shutdown` has been triggered (checks the flag too, so a
@@ -332,7 +415,13 @@ async fn handle_admin(
     req: &crate::http::Request,
     admin: &StatusSource,
 ) -> crate::http::Response {
-    use crate::http::{AdminRoute, Response, admin_guard, query_param};
+    use crate::http::{
+        AdminRoute, OperatorCode, OperatorError, Response, admin_guard, query_param,
+    };
+    use crate::operator::handoff::RestartError;
+    let unavailable = |why: &str| {
+        Response::operator_error(503, &OperatorError::new(OperatorCode::Unavailable, why))
+    };
     let identity = req
         .bearer
         .as_deref()
@@ -350,6 +439,20 @@ async fn handle_admin(
             Some(capture) => match capture.capture_png().await {
                 Ok(png) => Response::png(png),
                 Err(e) => e.response(),
+            },
+        },
+        AdminRoute::Restart => match &admin.restart {
+            None => unavailable("this runtime cannot restart itself"),
+            Some(restart) => match restart.request() {
+                Ok(()) => Response {
+                    status: 202,
+                    ..Response::json(r#"{"restarting":true}"#)
+                },
+                Err(RestartError::Busy) => Response::operator_error(
+                    429,
+                    &OperatorError::new(OperatorCode::Busy, "a restart is already in progress"),
+                ),
+                Err(RestartError::Unavailable) => unavailable("could not start the restart"),
             },
         },
         AdminRoute::Logs => {
@@ -385,6 +488,8 @@ mod tests {
             agents: tze_hud_scene::config::AgentDirectory::unrestricted(psk).shared(),
             presents: None,
             capture: None,
+            restart: None,
+            bind_gate: None,
         }
     }
 
@@ -475,6 +580,7 @@ mod tests {
             safe_mode: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             presents: None,
             capture: None,
+            restart: None,
             log_path,
         }
     }
@@ -547,6 +653,68 @@ mod tests {
         assert_eq!(get(&src, Some("root-psk")).await.status, 503);
     }
 
+    #[tokio::test]
+    async fn admin_restart_is_guarded_single_flight_and_ignores_the_body() {
+        use crate::http::AdminRoute::Restart;
+        use crate::operator::handoff::{ChildProc, RestartHandle};
+        struct Silent;
+        impl ChildProc for Silent {
+            fn try_wait(&mut self) -> std::io::Result<Option<String>> {
+                Ok(None)
+            }
+            fn kill(&mut self) {}
+        }
+        let mut src = admin_source(std::env::temp_dir().join("tze_hud_no_such.log"));
+        let post = |bearer: Option<&str>| {
+            let mut req = admin_get("/admin/restart", bearer);
+            req.method = "POST".into();
+            // Nothing in a request can steer the relaunch.
+            req.body = br#"{"args":["--evil"],"exe":"x"}"#.to_vec();
+            req
+        };
+        // No relaunch configured (headless): 503, after the guard.
+        assert_eq!(handle_admin(Restart, &post(None), &src).await.status, 401);
+        assert_eq!(
+            handle_admin(Restart, &post(Some("star-psk")), &src)
+                .await
+                .status,
+            403
+        );
+        assert_eq!(
+            handle_admin(Restart, &post(Some("root-psk")), &src)
+                .await
+                .status,
+            503
+        );
+
+        let spawned = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let n = Arc::clone(&spawned);
+        src.restart = Some(RestartHandle::with_spawner(
+            Box::new(move |_| {
+                n.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Ok(Box::new(Silent))
+            }),
+            Arc::new(|| {}),
+            std::time::Duration::from_millis(300),
+        ));
+        let first = handle_admin(Restart, &post(Some("root-psk")), &src).await;
+        assert_eq!(first.status, 202);
+        assert_eq!(first.body, br#"{"restarting":true}"#);
+        let second = handle_admin(Restart, &post(Some("root-psk")), &src).await;
+        assert_eq!(second.status, 429);
+        assert!(String::from_utf8_lossy(&second.body).contains("BUSY"));
+        // Exactly one relaunch was attempted (the restart runs on its own thread).
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while spawned.load(std::sync::atomic::Ordering::SeqCst) == 0 {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "no relaunch attempted"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert_eq!(spawned.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
     #[tokio::test(start_paused = true)]
     async fn admin_status_has_every_key_and_no_secrets() {
         let src = admin_source(std::env::temp_dir().join("tze_hud_no_such.log"));
@@ -572,6 +740,7 @@ mod tests {
             "cpu_pct_2s",
             "cpu_pct_avg",
             "last_update",
+            "last_restart",
         ] {
             assert!(v.get(key).is_some(), "missing {key}: {text}");
         }
@@ -719,6 +888,8 @@ mod tests {
             agents: tze_hud_scene::config::AgentDirectory::unrestricted("test-key").shared(),
             presents: None,
             capture: None,
+            restart: None,
+            bind_gate: None,
         };
         let shutdown = ShutdownToken::new();
 
@@ -760,6 +931,8 @@ mod tests {
             agents: tze_hud_scene::config::AgentDirectory::unrestricted("test-key").shared(),
             presents: None,
             capture: None,
+            restart: None,
+            bind_gate: None,
         };
         let shutdown = ShutdownToken::new();
         let (handle, addrs) = start_mcp_http_server(make_scene(), config, shutdown.clone(), None)
@@ -791,6 +964,8 @@ mod tests {
             agents: agents.clone(),
             presents: None,
             capture: None,
+            restart: None,
+            bind_gate: None,
         };
         let shutdown = ShutdownToken::new();
         let (handle, addrs) = start_mcp_http_server(
@@ -832,6 +1007,8 @@ mod tests {
             agents: tze_hud_scene::config::AgentDirectory::unrestricted("real-key").shared(),
             presents: None,
             capture: None,
+            restart: None,
+            bind_gate: None,
         };
         let shutdown = ShutdownToken::new();
 
@@ -869,6 +1046,8 @@ mod tests {
             agents: tze_hud_scene::config::AgentDirectory::unrestricted("correct-key").shared(),
             presents: None,
             capture: None,
+            restart: None,
+            bind_gate: None,
         };
         let shutdown = ShutdownToken::new();
 
@@ -938,6 +1117,8 @@ mod tests {
             agents: tze_hud_scene::config::AgentDirectory::unrestricted("test-key").shared(),
             presents: None,
             capture: None,
+            restart: None,
+            bind_gate: None,
         };
         let shutdown = ShutdownToken::new();
 
@@ -975,6 +1156,8 @@ mod tests {
             agents: tze_hud_scene::config::AgentDirectory::unrestricted("key").shared(),
             presents: None,
             capture: None,
+            restart: None,
+            bind_gate: None,
         };
         let shutdown = ShutdownToken::new();
 

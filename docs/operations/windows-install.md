@@ -79,9 +79,30 @@ the MCP port with its PSK as the bearer:
 
 | Request | Response |
 |---|---|
-| `GET /admin/status` | JSON: `version`, `sha`, `channel`, `pid`, `uptime_s`, `binds`, `agents` (`id`, `admin`), `safe_mode`, `safe_mode_hotkey` (`chord`, `registered`, `error`; `null` when no hotkey is active (non-Windows, or no network runtime); `registered: null` means registration is still pending; `registered: false` means another program owns the chord and there is no human override, also shown in the startup banner and logged at error level), `frames_presented`, `cpu_pct_2s` (sampled over 2 s, so the call takes about 2 s), `cpu_pct_avg` (percent of one core), `last_update` (null until updates land) |
+| `GET /admin/status` | JSON: `version`, `sha`, `channel`, `pid`, `uptime_s`, `binds`, `agents` (`id`, `admin`), `safe_mode`, `safe_mode_hotkey` (`chord`, `registered`, `error`; `null` when no hotkey is active (non-Windows, or no network runtime); `registered: null` means registration is still pending; `registered: false` means another program owns the chord and there is no human override, also shown in the startup banner and logged at error level), `frames_presented`, `cpu_pct_2s` (sampled over 2 s, so the call takes about 2 s), `cpu_pct_avg` (percent of one core), `last_update` (null until updates land), `last_restart` (`null`, or `{ok, pid, error}` for the last restart that did not hand over) |
 | `GET /admin/logs?tail=N` | `text/plain`, the last N lines (default 100, max 2000) across the rotation |
 | `GET /admin/screenshot` | `image/png` of the HUD's own frame at the window size (what the compositor draws, not an OS capture); rendered once per request, so idle cost is unchanged. One at a time (429), 503 if the compositor does not answer within 3 s |
+| `POST /admin/restart` | 202 `{"restarting":true}`, then the HUD relaunches itself (see below). POST only; the request body is ignored. 429 `BUSY` while one is in progress |
 
 Without a valid PSK the answer is 401; with one lacking `admin`, 403
 `{"code":"NOT_ADMIN","hint":...}`.
+
+## Restart and handoff
+
+`POST /admin/restart` starts the same exe with the same arguments plus an
+internal `--handoff 127.0.0.1:<port>:<nonce>`; nothing from the request is
+used. The old instance keeps serving while the new one starts its window and
+GPU. When the new one has submitted its first frame it reports `READY` over the
+loopback socket (the nonce proves it is the child that was started), and the
+old instance shuts down cleanly (exit 0), releasing its ports and the
+single-instance mutex. The new instance then takes the mutex (waiting up to
+35 s) and binds the gRPC and MCP ports (retrying up to 10 s). Poll
+`GET /admin/status` until `pid` changes; the same PSK keeps working. The
+overlay is briefly doubled and the ports are briefly unreachable during the
+handover.
+
+If the new instance exits, sends a wrong nonce, or has not reported ready
+within 30 s, it is killed and the old instance keeps running untouched;
+`/admin/status` shows `last_restart` `{ok:false, error}`. If the new instance
+reported ready but then cannot take over the ports, it logs the error and exits;
+the next autostart or a manual launch recovers.
