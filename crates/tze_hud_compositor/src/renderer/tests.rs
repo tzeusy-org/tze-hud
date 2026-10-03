@@ -9900,7 +9900,6 @@ fn countdown_notification_scene() -> SceneGraph {
         rendering_policy: RenderingPolicy::default(),
         contention_policy: ContentionPolicy::Stack { max_depth: 5 },
         max_publishers: 8,
-        transport_constraint: None,
         auto_clear_ms: Some(8_000),
         ephemeral: false,
         layer_attachment: LayerAttachment::Chrome,
