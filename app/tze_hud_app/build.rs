@@ -30,9 +30,9 @@
 
 use std::process::Command;
 
-fn capture_git_sha() -> String {
+fn capture_git_sha(args: &[&str]) -> String {
     Command::new("git")
-        .args(["rev-parse", "--short", "HEAD"])
+        .args(args)
         .output()
         .ok()
         .filter(|o| o.status.success())
@@ -53,8 +53,18 @@ fn main() {
     // manifest-only edit cannot leave a stale Windows executable behind.
     println!("cargo::rerun-if-changed=tze_hud.rc");
     println!("cargo::rerun-if-changed=tze_hud.manifest");
-    let sha = capture_git_sha();
+    let sha = capture_git_sha(&["rev-parse", "--short", "HEAD"]);
     println!("cargo::rustc-env=TZE_HUD_GIT_SHA={sha}");
+    // Full SHA and release channel for /admin/status. CI sets TZE_HUD_CHANNEL
+    // (`dev` on main, the tag name on tags); local builds report `local`.
+    let full = capture_git_sha(&["rev-parse", "HEAD"]);
+    println!("cargo::rustc-env=TZE_HUD_GIT_SHA_FULL={full}");
+    println!("cargo::rerun-if-env-changed=TZE_HUD_CHANNEL");
+    let channel = std::env::var("TZE_HUD_CHANNEL")
+        .ok()
+        .filter(|c| !c.is_empty())
+        .unwrap_or_else(|| "local".to_owned());
+    println!("cargo::rustc-env=TZE_HUD_CHANNEL={channel}");
 
     // Build scripts compile for the host, so use Cargo's target metadata rather
     // than a compile-time cfg when cross-building the Windows artifact on Linux.

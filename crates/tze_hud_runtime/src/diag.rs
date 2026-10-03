@@ -11,7 +11,7 @@
 //! diagnose a freeze after the fact.
 //!
 //! Path resolution: `TZE_HUD_DIAG_LOG` env var if set, else
-//! `<exe-dir>/hud-diag.log`, else `<temp>/hud-diag.log`.
+//! `hud-diag.log` in the log directory (see [`crate::operator::logs::log_dir`]).
 
 use std::io::Write;
 use std::path::PathBuf;
@@ -24,12 +24,9 @@ fn diag_path() -> PathBuf {
             return PathBuf::from(p);
         }
     }
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            return dir.join("hud-diag.log");
-        }
-    }
-    std::env::temp_dir().join("hud-diag.log")
+    let dir = crate::operator::logs::log_dir();
+    let _ = std::fs::create_dir_all(&dir);
+    dir.join("hud-diag.log")
 }
 
 /// Append a single timestamped line to the diagnostics log. Best-effort:

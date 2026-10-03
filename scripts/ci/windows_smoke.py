@@ -6,6 +6,9 @@ build. Proves the shipped binary boots the overlay with the production config
 and that each lifecycle stage answers over MCP: discover, publish to a zone,
 attach/poll/detach a portal, and a structured error.
 
+The seeded agent also holds `admin`, so the operator endpoints
+(/admin/status, /admin/logs) are checked too.
+
 The config is copied to a temp dir with a seeded agents.toml beside it holding
 only the SHA-256 of a fresh random PSK, the way pairing stores agents.
 
@@ -57,6 +60,13 @@ class Smoke:
         if "error" in reply:
             raise AssertionError(f"{method}: JSON-RPC error {reply['error']}")
         return reply["result"]
+
+    def get(self, path: str) -> tuple[int, str]:
+        """GET an operator endpoint on the same port; return (status, body)."""
+        base = self.url.rsplit("/", 1)[0]
+        req = urllib.request.Request(base + path, headers={"Authorization": f"Bearer {self.psk}"})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return resp.status, resp.read().decode("utf-8", "replace")
 
     def call(self, tool: str, args: dict | None = None) -> tuple[bool, dict]:
         """Call a tool; return (is_error, parsed result text)."""
@@ -122,6 +132,20 @@ def run_checks(smoke: Smoke) -> None:
     print("ok  unknown zone -> ZONE_NOT_FOUND with hint")
 
 
+def check_admin(smoke: Smoke) -> None:
+    status, body = smoke.get("/admin/status")
+    info = json.loads(body)
+    assert status == 200 and info["pid"] and info["sha"], f"/admin/status: {body}"
+    # run_checks and the settle wait precede this, so the HUD should be idle.
+    cpu = info["cpu_pct_2s"]
+    assert isinstance(cpu, (int, float)) and cpu < 5, f"idle HUD cpu_pct_2s={cpu}, expected < 5"
+    print(f"ok  /admin/status (cpu_pct_2s={cpu}, channel={info['channel']})")
+
+    status, body = smoke.get("/admin/logs?tail=20")
+    assert status == 200 and body.strip(), "/admin/logs?tail=20 returned no lines"
+    print(f"ok  /admin/logs returned {len(body.splitlines())} lines")
+
+
 def seed_config(config: Path, psk: str) -> Path:
     """Copy `config` to a temp dir and pair one agent for `psk` beside it."""
     config_dir = Path(tempfile.mkdtemp(prefix="tze_hud_smoke_"))
@@ -129,7 +153,7 @@ def seed_config(config: Path, psk: str) -> Path:
     shutil.copyfile(config, seeded)
     digest = hashlib.sha256(psk.encode()).hexdigest()
     (config_dir / "agents.toml").write_text(
-        f'[agents.ci-smoke]\npsk_sha256 = "{digest}"\nallow = ["*"]\n', encoding="utf-8"
+        f'[agents.ci-smoke]\npsk_sha256 = "{digest}"\nallow = ["*", "admin"]\n', encoding="utf-8"
     )
     return seeded
 
@@ -161,6 +185,7 @@ def main() -> int:
         print("ok  MCP initialize")
         run_checks(smoke)
         time.sleep(args.settle_s)
+        check_admin(smoke)
         assert proc.poll() is None, f"tze_hud exited after the checks (code {proc.returncode})"
         print("ok  HUD still running after the checks")
         return 0

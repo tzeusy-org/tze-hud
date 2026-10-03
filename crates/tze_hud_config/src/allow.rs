@@ -8,7 +8,8 @@
 //! - `portal` — session-portal projection tools.
 //! - `tiles` — resident tiles: lease, create, mutate, tabs, image upload,
 //!   input/focus subscriptions.
-//! - `*` — everything.
+//! - `admin` — operator endpoints (`/admin/*`). Opt-in: `*` does not grant it.
+//! - `*` — everything else.
 //!
 //! Inside the runtime, allow entries expand to the scene's internal
 //! permission strings via [`allow_to_permissions`]; nothing outside the
@@ -17,7 +18,7 @@
 /// Validate one allow entry. Returns a hint for an unknown entry.
 pub fn validate_allow_entry(entry: &str) -> Result<(), String> {
     match entry {
-        "*" | "portal" | "tiles" => Ok(()),
+        "*" | "portal" | "tiles" | "admin" => Ok(()),
         _ => {
             if let Some(name) = entry
                 .strip_prefix("zone:")
@@ -32,7 +33,7 @@ pub fn validate_allow_entry(entry: &str) -> Result<(), String> {
             }
             Err(format!(
                 "unknown allow entry {entry:?}; valid entries: \"zone:<name|*>\", \
-                 \"widget:<name|*>\", \"portal\", \"tiles\", \"*\""
+                 \"widget:<name|*>\", \"portal\", \"tiles\", \"admin\", \"*\""
             ))
         }
     }
@@ -65,6 +66,7 @@ pub fn allow_to_permissions(allow: &[String]) -> Vec<String> {
             "*" => push("*"),
             "tiles" => TILE_PERMISSIONS.iter().for_each(|p| push(p)),
             "portal" => push("resident_mcp"),
+            "admin" => push(tze_hud_scene::config::OPERATOR_ADMIN),
             other => {
                 if let Some(zone) = other.strip_prefix("zone:") {
                     push(&format!("publish_zone:{zone}"));
@@ -89,6 +91,7 @@ mod tests {
             "*",
             "portal",
             "tiles",
+            "admin",
             "zone:subtitle",
             "zone:*",
             "widget:gauge",
@@ -115,5 +118,8 @@ mod tests {
         assert!(p.contains(&"resident_mcp".to_string()));
         assert!(p.contains(&"create_tiles".to_string()));
         assert_eq!(allow_to_permissions(&["*".into()]), vec!["*".to_string()]);
+        // `admin` is its own permission, never implied by `*`.
+        let admin = allow_to_permissions(&["*".into(), "admin".into()]);
+        assert_eq!(admin, vec!["*".to_string(), "operator_admin".to_string()]);
     }
 }

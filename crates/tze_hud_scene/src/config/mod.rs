@@ -7,8 +7,8 @@
 
 pub mod agents;
 pub use agents::{
-    AgentDirectory, AgentIdentity, AuthRejection, DEFAULT_MCP_AGENT_ID, PskDigest, SharedAgents,
-    hash_psk,
+    AgentDirectory, AgentIdentity, AuthRejection, DEFAULT_MCP_AGENT_ID, OPERATOR_ADMIN, PskDigest,
+    SharedAgents, hash_psk,
 };
 
 // ─── Error Codes ─────────────────────────────────────────────────────────────

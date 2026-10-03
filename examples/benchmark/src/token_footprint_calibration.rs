@@ -334,6 +334,7 @@ mod calibration {
             bind_addrs: vec![SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0)],
             late_tailnet_port: None,
             agents: tze_hud_scene::config::AgentDirectory::unrestricted(PSK).shared(),
+            presents: None,
         };
         let (server_task, addresses) =
             start_mcp_http_server(scene, config, shutdown.clone(), Some(portal_tx.clone())).await?;

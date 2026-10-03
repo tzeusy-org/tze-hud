@@ -17,6 +17,10 @@ use subtle::ConstantTimeEq;
 /// Agent id for a dev PSK presented with no claimed id (MCP).
 pub const DEFAULT_MCP_AGENT_ID: &str = "mcp";
 
+/// Internal permission granted by the `admin` allow entry. Held by exact
+/// membership only: `*` does not imply it.
+pub const OPERATOR_ADMIN: &str = "operator_admin";
+
 /// SHA-256 digest of a PSK, as stored in `agents.toml`.
 pub type PskDigest = [u8; 32];
 
@@ -39,6 +43,14 @@ impl AgentIdentity {
         self.permissions
             .iter()
             .any(|p| p == "*" || p == permission || wildcard_match(p, permission))
+    }
+}
+
+impl AgentIdentity {
+    /// True only when the `admin` allow entry was granted explicitly; `*` and
+    /// wildcards never grant it.
+    pub fn is_operator_admin(&self) -> bool {
+        self.permissions.iter().any(|p| p == OPERATOR_ADMIN)
     }
 }
 
@@ -114,6 +126,23 @@ impl AgentDirectory {
                 permissions,
             },
         );
+    }
+
+    /// Each paired agent's id and whether it holds `admin`, sorted by id.
+    /// Never includes credentials.
+    pub fn summaries(&self) -> Vec<(String, bool)> {
+        let mut out: Vec<(String, bool)> = self
+            .agents
+            .iter()
+            .map(|(id, a)| {
+                (
+                    id.clone(),
+                    a.permissions.iter().any(|p| p == OPERATOR_ADMIN),
+                )
+            })
+            .collect();
+        out.sort();
+        out
     }
 
     /// True when `agent_id` has an entry.

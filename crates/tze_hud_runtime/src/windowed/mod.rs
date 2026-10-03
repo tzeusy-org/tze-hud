@@ -2634,6 +2634,7 @@ impl WindowedRuntime {
                     ),
                     late_tailnet_port: Some(cfg.mcp_port),
                     agents: Arc::clone(&cfg.agents),
+                    presents: Some(Arc::clone(wake.counters())),
                 };
                 let mcp_shutdown = shutdown.clone();
                 match rt.rt.block_on(start_mcp_http_server_with_render_wake(

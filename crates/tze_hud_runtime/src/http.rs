@@ -4,8 +4,9 @@
 //! a [`Request`] with a byte body, routed by `(method, path)` through
 //! [`route`], and answered with a [`Response`] carrying a byte body.
 //!
-//! Routes today: `POST /` and `POST /mcp` -> MCP. `/pair` and `/admin/*` are
-//! reserved for operator endpoints (T6) and plug in as new [`Route`] variants.
+//! Routes today: `POST /` and `POST /mcp` -> MCP; `GET /admin/status` and
+//! `GET /admin/logs` -> operator endpoints (admin PSK only). `/pair` is
+//! reserved for T6 and plugs in as a new [`Route`] variant.
 //! Unknown paths get a bare 404, known paths with the wrong method a bare 405
 //! with an `Allow` header (no JSON-RPC body in either case).
 
@@ -13,6 +14,7 @@ use std::time::Duration;
 
 use serde::Serialize;
 use tokio::io::{AsyncRead, AsyncReadExt};
+use tze_hud_scene::config::AgentIdentity;
 
 /// Cap on a whole request (headers + body); larger requests are dropped.
 pub const MAX_REQUEST: usize = 64 * 1024;
@@ -50,6 +52,14 @@ impl Response {
             content_type: "application/json",
             body: body.into(),
             allow: None,
+        }
+    }
+
+    pub fn text(body: impl Into<Vec<u8>>) -> Self {
+        Self {
+            content_type: "text/plain; charset=utf-8",
+            body: body.into(),
+            ..Self::empty(200)
         }
     }
 
@@ -92,6 +102,8 @@ impl Response {
         let reason = match self.status {
             200 => "OK",
             400 => "Bad Request",
+            401 => "Unauthorized",
+            403 => "Forbidden",
             404 => "Not Found",
             405 => "Method Not Allowed",
             _ => "Error",
@@ -117,6 +129,7 @@ impl Response {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum OperatorCode {
+    Unauthenticated,
     PairingClosed,
     PairCodeInvalid,
     NotAdmin,
@@ -144,7 +157,39 @@ impl OperatorError {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Route {
     Mcp,
+    /// An operator endpoint; the caller must pass [`admin_guard`] first.
+    Admin(AdminRoute),
     Respond(Response),
+}
+
+/// Operator endpoints under `/admin`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AdminRoute {
+    Status,
+    Logs,
+}
+
+/// Gate for every `/admin/*` request, run before any admin data is read:
+/// 401 without a valid PSK, 403 `NOT_ADMIN` for a paired agent whose allow
+/// list lacks `admin` (`*` does not grant it).
+pub fn admin_guard(identity: Option<&AgentIdentity>) -> Result<(), Response> {
+    match identity {
+        None => Err(Response::operator_error(
+            401,
+            &OperatorError::new(
+                OperatorCode::Unauthenticated,
+                "send a paired agent's PSK as the bearer token",
+            ),
+        )),
+        Some(id) if !id.is_operator_admin() => Err(Response::operator_error(
+            403,
+            &OperatorError::new(
+                OperatorCode::NotAdmin,
+                "add \"admin\" to this agent's allow list in agents.toml",
+            ),
+        )),
+        Some(_) => Ok(()),
+    }
 }
 
 /// Route by `(method, path)`.
@@ -152,6 +197,9 @@ pub fn route(method: &str, path: &str) -> Route {
     match (method, path) {
         ("POST", "/" | "/mcp") => Route::Mcp,
         (_, "/" | "/mcp") => Route::Respond(Response::method_not_allowed("POST")),
+        ("GET", "/admin/status") => Route::Admin(AdminRoute::Status),
+        ("GET", "/admin/logs") => Route::Admin(AdminRoute::Logs),
+        (_, "/admin/status" | "/admin/logs") => Route::Respond(Response::method_not_allowed("GET")),
         _ => Route::Respond(Response::not_found()),
     }
 }
@@ -278,6 +326,33 @@ mod tests {
             route("POST", "/nope"),
             Route::Respond(Response::not_found())
         );
+    }
+
+    #[test]
+    fn admin_routes_are_get_only_and_guarded() {
+        assert_eq!(
+            route("GET", "/admin/status"),
+            Route::Admin(AdminRoute::Status)
+        );
+        assert_eq!(route("GET", "/admin/logs"), Route::Admin(AdminRoute::Logs));
+        assert_eq!(
+            route("POST", "/admin/logs"),
+            Route::Respond(Response::method_not_allowed("GET"))
+        );
+        assert_eq!(
+            route("GET", "/admin/other"),
+            Route::Respond(Response::not_found())
+        );
+
+        let id = |perms: &[&str]| AgentIdentity {
+            agent_id: "a".into(),
+            permissions: perms.iter().map(|p| p.to_string()).collect(),
+        };
+        assert_eq!(admin_guard(None).unwrap_err().status, 401);
+        let denied = admin_guard(Some(&id(&["*"]))).unwrap_err();
+        assert_eq!(denied.status, 403);
+        assert!(String::from_utf8_lossy(&denied.body).contains("NOT_ADMIN"));
+        assert!(admin_guard(Some(&id(&["*", "operator_admin"]))).is_ok());
     }
 
     #[test]

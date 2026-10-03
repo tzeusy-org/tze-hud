@@ -105,6 +105,9 @@ allow = ["zone:*", "widget:gauge", "portal", "tiles"]
   and `hud_surfaces` lists only allowed surfaces.
 - An agent has whatever the allowlist says. There is no capability
   negotiation and no resident principal.
+- `admin` is an operator entry, outside the model surface: it opens
+  `GET /admin/status` and `GET /admin/logs` on the MCP port, and `*` does not
+  grant it.
 - The operator's local tools (cleanup, composer paste, SVG asset upload) are
   off the model surface: CLI/config, or gRPC for tooling.
 
