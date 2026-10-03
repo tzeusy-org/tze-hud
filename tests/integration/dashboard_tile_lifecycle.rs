@@ -483,7 +483,7 @@ fn apply_content_update(
 ///   responses at each step, and the tile shall be cleanly removed on Dismiss.
 ///
 /// The gRPC session handshake and LeaseResponse are exercised in detail by
-/// `dashboard_tile_agent.rs` and `dashboard_tile_agent_callbacks.rs`. This test
+/// the session-server tests in `tze_hud_protocol` and `tests/event_delivery.rs`. This test
 /// proxies the session outcome (a granted lease) and focuses on the scene-layer
 /// lifecycle that underpins those interactions.
 ///
@@ -635,7 +635,7 @@ async fn full_lifecycle_connect_lease_upload_create_update_refresh_dismiss() {
     // ── Phase 5: Refresh click → agent submits content update ─────────────────
     // In the live system the runtime dispatches ClickEvent with
     // interaction_id="refresh-button". Here we simulate the agent's response:
-    // another SetTileRoot content update (tested end-to-end in dashboard_tile_agent_callbacks.rs).
+    // another SetTileRoot content update (event delivery tested in tze_hud_protocol/tests/event_delivery.rs).
     let refresh_result = apply_content_update(
         &mut scene,
         tile_id,
