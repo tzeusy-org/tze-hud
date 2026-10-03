@@ -43,8 +43,11 @@ The rest of this README is command-first and focused on four workflows:
 ## Required Gates / CI
 
 CI (`.github/workflows/ci.yml`) runs the gates below on every PR; `just ci`
-reproduces the blocking set locally except `clippy-windows-gnu` and `cargo-deny`
-(requires [just](https://github.com/casey/just)).
+reproduces the blocking set locally (requires [just](https://github.com/casey/just)).
+`clippy-windows-gnu`, `cargo-deny` and `overlay-harness-contract` are tool-gated:
+if the tool (windows-gnu target + mingw, cargo-deny, `pwsh`) is missing they print
+`SKIPPED: <reason>` and pass, so a green local `just ci` does not prove them;
+CI always runs them.
 Each local recipe maps to a CI job:
 
 | Local recipe (`just …`) | CI job | Checks |
@@ -60,10 +63,11 @@ Each local recipe maps to a CI job:
 | `canonical-app-boot` | `canonical-app-production-boot` | canonical app production-config boot |
 | `dev-mode-guard` | `dev-mode-guard` | dev-mode not enabled in any package's default-build dependency closure (shipped binary included) |
 | `deps-unused` | `check` | `cargo machete`: unused dependencies |
+| `overlay-harness-contract` | `check` | pwsh fullscreen-vs-overlay harness contract test |
 | `idle-efficiency-checker` | `check` | fail-closed idle artifact contract tests |
 | `test-gpu` | — | GPU subset of `test` only (compositor + `pixel_readback`), llvmpipe-pinned with timeouts; already covered by `test`, so not a separate `just ci` step |
-| — | `clippy-windows-gnu` | clippy on the `x86_64-pc-windows-gnu` target for the crates carrying `cfg(windows)` code |
-| — | `cargo-deny` | dependency/advisory policy (`deny.toml`) |
+| `clippy-windows-gnu` | `clippy-windows-gnu` | clippy on the `x86_64-pc-windows-gnu` target for the crates carrying `cfg(windows)` code |
+| `cargo-deny` | `cargo-deny` | dependency/advisory policy (`deny.toml`) |
 
 Slower suites run weekly, on demand, or on PRs labelled `perf-assert`, never as
 merge gates: `perf-budget.yml` (Windows performance budget, constrained-envelope
