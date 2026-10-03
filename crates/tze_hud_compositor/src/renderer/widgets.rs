@@ -62,6 +62,7 @@ impl super::Compositor {
             Some(r) => r,
             None => return,
         };
+        wr.begin_sync();
 
         let registry = &scene.widget_registry;
 

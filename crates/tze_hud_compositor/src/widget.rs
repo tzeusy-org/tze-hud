@@ -2489,6 +2489,12 @@ pub struct WidgetRenderer {
     /// Per-instance texture cache keyed by instance_name.
     textures: HashMap<String, WidgetTextureEntry>,
 
+    /// Cumulative SVG rasterizations per instance (survives texture eviction).
+    raster_counts: HashMap<String, u64>,
+
+    /// Instances rasterized by the most recent `sync_widget_textures` pass.
+    rasterized_last_sync: Vec<String>,
+
     /// Retained CPU render plans keyed by widget type id.
     render_plans: HashMap<String, WidgetRenderPlan>,
 
@@ -2555,6 +2561,8 @@ impl WidgetRenderer {
             svgs: HashMap::new(),
             svg_resident_allocation_ids: HashMap::new(),
             textures: HashMap::new(),
+            raster_counts: HashMap::new(),
+            rasterized_last_sync: Vec::new(),
             render_plans: HashMap::new(),
             texture_bind_group_layout,
             texture_pipeline,
@@ -2742,6 +2750,11 @@ impl WidgetRenderer {
         pixel_height: u32,
     ) -> u64 {
         let start = Instant::now();
+        *self
+            .raster_counts
+            .entry(instance_name.to_string())
+            .or_insert(0) += 1;
+        self.rasterized_last_sync.push(instance_name.to_string());
 
         // Build a map from param name to (f32_min, f32_max) for linear binding normalization.
         let param_constraints: HashMap<String, (f32, f32)> = widget_def
@@ -3158,6 +3171,21 @@ impl WidgetRenderer {
     }
 
     /// Get a reference to the texture entry for an instance (for testing / inspection).
+    /// Total SVG rasterizations performed for `instance_name` so far.
+    pub fn raster_count(&self, instance_name: &str) -> u64 {
+        self.raster_counts.get(instance_name).copied().unwrap_or(0)
+    }
+
+    /// Instances re-rasterized since the last [`Self::begin_sync`].
+    pub fn rasterized_last_sync(&self) -> &[String] {
+        &self.rasterized_last_sync
+    }
+
+    /// Start a new sync pass: forget the previous pass's rasterized set.
+    pub fn begin_sync(&mut self) {
+        self.rasterized_last_sync.clear();
+    }
+
     pub fn texture_entry(&self, instance_name: &str) -> Option<&WidgetTextureEntry> {
         self.textures.get(instance_name)
     }

@@ -43,7 +43,8 @@ two calls within its [api.md](api.md) token budget:
   (local echo, no round trip), and detaches; an abandoned portal is reclaimed.
 - **Zones:** a notification shows for its TTL and disappears unattended;
   `delay_ms` content appears on schedule; a notification action reaches `hud_input`.
-- **Widgets:** a typed parameter update re-renders only that widget.
+- **Widgets:** a typed parameter update re-rasterizes only that widget's SVG
+  (the frame is still re-presented in full; no damage tracking).
 - **Tiles:** a gRPC agent claims a tile with a placement hint in two round
   trips, updates it, and its tile is orphaned on disconnect and reclaimed
   after grace.
