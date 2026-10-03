@@ -6,7 +6,7 @@
 //! `GetMessageW` (zero idle cost). The OS releases the registration when the
 //! process exits.
 
-use crate::operator::status::HotkeyStatus;
+use crate::operator::status::{HotkeyStatus, report_outcome};
 use tokio::sync::mpsc::UnboundedSender;
 use tze_hud_scene::config::Hotkey;
 use windows::Win32::Foundation::HWND;
@@ -34,15 +34,21 @@ pub(super) fn spawn_global_hotkey(hotkey: Hotkey, tx: UnboundedSender<()>) -> Ho
             if let Err(error) =
                 unsafe { RegisterHotKey(HWND::default(), HOTKEY_ID, modifiers, hotkey.win32_vk()) }
             {
-                let _ = status_tx.send(HotkeyStatus::Failed {
-                    chord: hotkey.to_string(),
-                    reason: error.to_string(),
-                });
+                report_outcome(
+                    &status_tx,
+                    HotkeyStatus::Failed {
+                        chord: hotkey.to_string(),
+                        reason: error.to_string(),
+                    },
+                );
                 return;
             }
-            let _ = status_tx.send(HotkeyStatus::Registered {
-                chord: hotkey.to_string(),
-            });
+            report_outcome(
+                &status_tx,
+                HotkeyStatus::Registered {
+                    chord: hotkey.to_string(),
+                },
+            );
             let mut msg = MSG::default();
             // SAFETY: `msg` is a valid out-pointer; GetMessageW returns 0 on
             // WM_QUIT and -1 on error, both of which end the loop.
@@ -52,14 +58,15 @@ pub(super) fn spawn_global_hotkey(hotkey: Hotkey, tx: UnboundedSender<()>) -> Ho
                 }
             }
         });
-    let fail = |reason: String| HotkeyStatus::Failed {
-        chord: chord.clone(),
-        reason,
-    };
     match spawned {
-        Err(error) => fail(format!("could not start hotkey thread: {error}")),
+        Err(error) => HotkeyStatus::Failed {
+            chord,
+            reason: format!("could not start hotkey thread: {error}"),
+        },
+        // A slow thread is not a failure: it records its own outcome when it
+        // finds the starter gone (see `report_outcome`).
         Ok(_) => status_rx
             .recv_timeout(std::time::Duration::from_secs(2))
-            .unwrap_or_else(|_| fail("hotkey thread did not report".into())),
+            .unwrap_or(HotkeyStatus::Pending { chord }),
     }
 }

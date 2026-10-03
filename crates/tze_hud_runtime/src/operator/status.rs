@@ -107,6 +107,15 @@ pub fn set_safe_mode_hotkey(status: HotkeyStatus) -> HotkeyStatus {
     status
 }
 
+/// Hand a hotkey outcome to the starter waiting on `tx`. If the starter has
+/// already stopped waiting (timed out with `Pending`), record it directly so
+/// the late result supersedes `Pending`.
+pub fn report_outcome(tx: &std::sync::mpsc::Sender<HotkeyStatus>, status: HotkeyStatus) {
+    if let Err(std::sync::mpsc::SendError(status)) = tx.send(status) {
+        set_safe_mode_hotkey(status);
+    }
+}
+
 /// The recorded hotkey outcome, `NotApplicable` until one is set.
 pub fn safe_mode_hotkey() -> HotkeyStatus {
     SAFE_MODE_HOTKEY
@@ -302,6 +311,18 @@ mod tests {
         assert_eq!(safe_mode_hotkey(), pending);
         set_safe_mode_hotkey(ok.clone());
         assert_eq!(safe_mode_hotkey(), ok);
+        // Late report: the starter's receiver is gone, so the thread records it.
+        set_safe_mode_hotkey(pending.clone());
+        let (tx, rx) = std::sync::mpsc::channel();
+        drop(rx);
+        report_outcome(&tx, failed());
+        assert_eq!(safe_mode_hotkey(), failed());
+        // Receiver alive: the outcome is delivered, not recorded.
+        let (tx, rx) = std::sync::mpsc::channel();
+        report_outcome(&tx, ok.clone());
+        assert_eq!(rx.recv().unwrap(), ok);
+        assert_eq!(safe_mode_hotkey(), failed());
+        set_safe_mode_hotkey(ok.clone());
         // A late Pending never downgrades a definitive outcome.
         set_safe_mode_hotkey(pending.clone());
         assert_eq!(safe_mode_hotkey(), ok);
