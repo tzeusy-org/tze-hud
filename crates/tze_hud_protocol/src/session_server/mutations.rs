@@ -319,27 +319,29 @@ pub(super) async fn handle_mutation_batch(
     // Both are checked; shared state takes precedence.
     // Per the spec invariant: safe_mode=true implies freeze_active=false,
     // so this check runs before the freeze check.
-    {
-        let st = state.lock().await;
-        let safe_mode = session.safe_mode_active
-            || st
-                .safe_mode_atomic
-                .load(std::sync::atomic::Ordering::Acquire);
-        if safe_mode {
-            let seq = session.next_server_seq();
-            let _ = tx
-                .send(Ok(ServerMessage {
-                    sequence: seq,
-                    timestamp_wall_us: now_wall_us(),
-                    payload: Some(ServerPayload::RequestResult(fail(
-                        client_sequence,
-                        "SAFE_MODE_ACTIVE",
-                        "the human paused agents; retry after SessionResumed",
-                    ))),
-                }))
-                .await;
-            return;
-        }
+    // The lock is released before replying: a hung agent's full send buffer
+    // must never keep the shared state locked (the human could not leave safe
+    // mode).
+    let safe_mode = session.safe_mode_active
+        || state
+            .lock()
+            .await
+            .safe_mode_atomic
+            .load(std::sync::atomic::Ordering::Acquire);
+    if safe_mode {
+        let seq = session.next_server_seq();
+        let _ = tx
+            .send(Ok(ServerMessage {
+                sequence: seq,
+                timestamp_wall_us: now_wall_us(),
+                payload: Some(ServerPayload::RequestResult(fail(
+                    client_sequence,
+                    "SAFE_MODE_ACTIVE",
+                    "the human paused agents; retry after SessionResumed",
+                ))),
+            }))
+            .await;
+        return;
     }
 
     // ── Step 2: Freeze check (system-shell/spec.md §Freeze Scene) ────────────

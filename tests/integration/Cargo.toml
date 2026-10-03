@@ -170,6 +170,11 @@ uuid = { workspace = true }
 image = { workspace = true, features = ["png"] }
 blake3 = { workspace = true }
 tiktoken-rs = { workspace = true }
+# poc_acceptance's hung agent: a raw HTTP/2 client that stops reading replies.
+h2 = "0.4"
+http = "1"
+bytes = "1"
+prost = { workspace = true }
 
 [lints]
 workspace = true

@@ -39,7 +39,9 @@
 //!
 //! [`HeadlessEventLoopHarness::with_network`] boots the same state from a real
 //! config with the production MCP HTTP server on a loopback ephemeral port and
-//! the MCP → event-loop portal-op channel, all reading one injected clock.
+//! the MCP → event-loop portal-op channel, plus the gRPC session server on
+//! another (all over one `SharedState`), all reading one injected clock. The
+//! safe-mode hotkey bridge runs too ([`HeadlessEventLoopHarness::press_safe_mode_hotkey`]).
 //! [`HeadlessEventLoopHarness::tick`] runs one event-loop turn: the main-thread
 //! settle sequence `about_to_wait` runs, then the compositor's Stage 4
 //! timed-content sweep and notification hit-region refresh, minus the GPU.
@@ -59,6 +61,9 @@ use tze_hud_scene::types::ZoneInteractionKind;
 use tze_hud_scene::{Clock, MonoUs, NodeData, SceneId};
 #[cfg(test)]
 use tze_hud_scene::{Node, Rect, types::HitRegionNode};
+
+use tze_hud_protocol::proto::session::hud_session_server::HudSessionServer;
+use tze_hud_protocol::session_server::{HudSessionImpl, SessionDeps};
 
 use super::WindowedRuntimeState;
 use super::WinitApp;
@@ -224,6 +229,10 @@ impl SharedStateBuilder {
 pub struct HeadlessEventLoopHarness {
     app: WinitApp,
     mcp_addr: Option<SocketAddr>,
+    grpc_addr: Option<SocketAddr>,
+    /// The safe-mode hotkey bridge's signal channel (what the Windows hotkey
+    /// thread sends on).
+    safe_mode_hotkey: Option<tokio::sync::mpsc::UnboundedSender<()>>,
 }
 
 impl HeadlessEventLoopHarness {
@@ -278,14 +287,53 @@ impl HeadlessEventLoopHarness {
             presents: None,
             capture: None,
         };
-        let (_mcp_task, mcp_addrs) = crate::mcp::start_mcp_http_server(
+        let (_mcp_task, mcp_addrs) = crate::mcp::start_mcp_http_server_with_render_wake(
             scene_handle,
             mcp_config,
             state.shutdown.clone(),
             Some(portal_op_tx),
+            Default::default(),
+            Default::default(),
+            Arc::clone(&state.safe_mode_atomic),
         )
         .await?;
         let mcp_addr = mcp_addrs[0];
+
+        // The gRPC session server over the same `SharedState` (so one scene,
+        // one session registry, one safe-mode flag), built as production
+        // builds it. Its lease-expiry channel is the one `tick` publishes
+        // sweep results on.
+        let service = HudSessionImpl::from_deps(SessionDeps {
+            resource_budget: runtime_context.resource_budget(),
+            budget_enforcer: Some(Arc::new(
+                crate::mutation_budget_bridge::RuntimeMutationBudgetEnforcer::with_limits(
+                    runtime_context.operational_envelope.max_resident_sessions,
+                    runtime_context.operational_envelope.max_leased_tiles,
+                    runtime_context
+                        .operational_envelope
+                        .max_agent_leased_texture_bytes,
+                ),
+            )),
+            ..SessionDeps::new(Arc::clone(&state.shared_state), Arc::clone(&cfg.agents))
+        });
+        state.lease_expirations = Some(service.lease_expirations.clone());
+        let grpc_listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await?;
+        let grpc_addr = grpc_listener.local_addr()?;
+        tokio::spawn(
+            tonic::transport::Server::builder()
+                .add_service(HudSessionServer::new(service))
+                .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(
+                    grpc_listener,
+                )),
+        );
+
+        let safe_mode_hotkey = super::safe_mode_toggle::spawn_safe_mode_toggle_bridge(
+            &tokio::runtime::Handle::current(),
+            Arc::clone(&state.shared_state),
+            Arc::clone(&state.chrome_state),
+            state.wake.render_notifier(),
+            state.shutdown.clone(),
+        );
 
         let mut driver = crate::portal_projection_driver::InProcessPortalDriver::new();
         driver.set_clock(clock);
@@ -297,7 +345,31 @@ impl HeadlessEventLoopHarness {
         Ok(HeadlessEventLoopHarness {
             app: WinitApp { state },
             mcp_addr: Some(mcp_addr),
+            grpc_addr: Some(grpc_addr),
+            safe_mode_hotkey: Some(safe_mode_hotkey),
         })
+    }
+
+    /// The shared scene, locked. Session and MCP tasks on the network runtime
+    /// hold it briefly, so this waits them out (the test thread holds nothing
+    /// else, so it cannot deadlock).
+    fn scene(&self) -> tokio::sync::OwnedMutexGuard<SceneGraph> {
+        let mut scene = None;
+        for _ in 0..10_000_000 {
+            if let Ok(state) = self.app.state.shared_state.try_lock() {
+                scene = Some(Arc::clone(&state.scene));
+                break;
+            }
+            std::thread::yield_now();
+        }
+        let scene = scene.expect(BUSY);
+        for _ in 0..10_000_000 {
+            if let Ok(guard) = Arc::clone(&scene).try_lock_owned() {
+                return guard;
+            }
+            std::thread::yield_now();
+        }
+        panic!("{BUSY}");
     }
 
     /// The MCP endpoint `with_network` bound.
@@ -308,6 +380,89 @@ impl HeadlessEventLoopHarness {
     pub fn mcp_addr(&self) -> SocketAddr {
         self.mcp_addr
             .expect("harness was built without with_network")
+    }
+
+    /// The gRPC session endpoint `with_network` bound (loopback, ephemeral).
+    ///
+    /// # Panics
+    ///
+    /// On a harness built without [`Self::with_network`].
+    pub fn grpc_addr(&self) -> SocketAddr {
+        self.grpc_addr
+            .expect("harness was built without with_network")
+    }
+
+    /// Press the human safe-mode chord: the signal the Windows hotkey thread
+    /// sends the toggle bridge. The bridge flips safe mode on the network
+    /// runtime; [`Self::safe_mode_active`] shows when it has.
+    pub fn press_safe_mode_hotkey(&self) {
+        self.safe_mode_hotkey
+            .as_ref()
+            .expect("harness was built without with_network")
+            .send(())
+            .expect("safe-mode toggle bridge is running");
+    }
+
+    /// Whether safe mode is on (agents paused).
+    pub fn safe_mode_active(&self) -> bool {
+        self.app
+            .state
+            .safe_mode_atomic
+            .load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    /// Number of tiles showing the disconnection badge (their agent's session
+    /// dropped and the lease is in its grace period).
+    pub fn badged_tile_count(&self) -> usize {
+        self.scene()
+            .tiles
+            .values()
+            .filter(|tile| {
+                tile.visual_hint == tze_hud_scene::lease::TileVisualHint::DisconnectionBadge
+            })
+            .count()
+    }
+
+    /// Whether the server's send buffer to `agent`'s session is full: the agent
+    /// has stopped reading, so the next reply it is owed would block.
+    pub async fn session_backed_up(&self, agent: &str) -> bool {
+        let state = self.app.state.shared_state.lock().await;
+        state
+            .sessions
+            .session_for_namespace(agent)
+            .and_then(|session| session.server_message_tx.as_ref())
+            .is_some_and(|tx| tx.capacity() == 0)
+    }
+
+    /// Number of leases safe mode has suspended.
+    pub fn suspended_lease_count(&self) -> usize {
+        let scene = self.scene();
+        scene
+            .leases
+            .values()
+            .filter(|lease| lease.state == tze_hud_scene::types::LeaseState::Suspended)
+            .count()
+    }
+
+    /// Where each tile on screen sits, as the runtime resolved it.
+    pub fn tile_bounds(&self) -> Vec<tze_hud_scene::Rect> {
+        let scene = self.scene();
+        scene.tiles.values().map(|tile| tile.bounds).collect()
+    }
+
+    /// The text every tile on screen shows.
+    pub fn tile_texts(&self) -> Vec<String> {
+        let scene = self.scene();
+        scene
+            .tiles
+            .values()
+            .filter_map(|tile| tile.root_node)
+            .filter_map(|id| scene.nodes.get(&id))
+            .filter_map(|node| match &node.data {
+                NodeData::TextMarkdown(text) => Some(text.content.clone()),
+                _ => None,
+            })
+            .collect()
     }
 
     /// Run one GPU-free event-loop turn: the main-thread settle sequence from
@@ -329,13 +484,16 @@ impl HeadlessEventLoopHarness {
         let Ok(mut scene) = state.scene.try_lock() else {
             return false;
         };
-        let _ = crate::pipeline::sweep_timed_scene_state(&mut scene);
+        let expiries = crate::pipeline::sweep_timed_scene_state(&mut scene);
         tze_hud_compositor::renderer::hit_regions::populate_notification_hit_regions(
             &mut scene,
             width,
             height,
             &std::collections::HashMap::new(),
         );
+        // The compositor hands terminal lease transitions to the owning
+        // sessions, which tell their agents (`Reclaimed`).
+        super::publish_lease_expiries(self.app.state.lease_expirations.as_ref(), expiries);
         settled
     }
 
@@ -440,8 +598,7 @@ impl HeadlessEventLoopHarness {
 
     /// Number of publications currently shown in zone `zone`.
     pub fn zone_publication_count(&self, zone: &str) -> usize {
-        let state = self.app.state.shared_state.try_lock().expect(BUSY);
-        let scene = state.scene.try_lock().expect(BUSY);
+        let scene = self.scene();
         scene
             .zone_registry
             .active_publishes
@@ -470,8 +627,7 @@ impl HeadlessEventLoopHarness {
 
     /// Number of tiles on screen (portal surfaces included).
     pub fn tile_count(&self) -> usize {
-        let state = self.app.state.shared_state.try_lock().expect(BUSY);
-        state.scene.try_lock().expect(BUSY).tiles.len()
+        self.scene().tiles.len()
     }
 
     /// Build a harness around an inert-but-real `WinitApp`.
@@ -482,6 +638,8 @@ impl HeadlessEventLoopHarness {
                 state: WindowedRuntimeState::new_headless(),
             },
             mcp_addr: None,
+            grpc_addr: None,
+            safe_mode_hotkey: None,
         }
     }
 
@@ -618,8 +776,7 @@ impl HeadlessEventLoopHarness {
     }
 }
 
-/// Scene queries run between MCP calls, when nothing else holds the scene.
-const BUSY: &str = "scene is locked by an in-flight call; query between calls";
+const BUSY: &str = "scene stayed locked by another task";
 
 impl Drop for HeadlessEventLoopHarness {
     /// Stop the MCP accept loop with the harness.
