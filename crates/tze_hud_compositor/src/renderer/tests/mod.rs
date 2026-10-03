@@ -4,7 +4,6 @@ use image_cache::{
     CARET_BLINK_HALF_PERIOD, ComposerLayout, caret_visible_at, composer_scroll_offset,
     composer_vertical_line_offset, composer_visible_line_count,
 };
-use tze_hud_input::{DRAG_OPACITY_BOOST, DRAG_Z_ORDER_BOOST};
 use tze_hud_scene::graph::SceneGraph;
 
 /// Mutex to serialize tests that mutate `HEADLESS_FORCE_SOFTWARE`, a

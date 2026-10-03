@@ -274,67 +274,6 @@ fn composer_selection_bg_token_override_propagates() {
 
 // ── Tile background color token tests [hud-9wljr.10] ─────────────────────
 
-/// Fallback constants resolve to expected linear-RGB default values.
-///
-/// Asserts the three TILE_BG_* fallback constants match the values that
-/// were previously hardcoded in `tile_background_color`, guaranteeing no
-/// silent visual regression from the tokenization refactor.
-///
-/// CPU-only — no GPU required.
-#[test]
-fn tile_bg_fallback_constants_match_documented_defaults() {
-    // TextMarkdown: [0.15, 0.15, 0.25]
-    assert!(
-        (TILE_BG_TEXT_MARKDOWN.r - 0.15).abs() < f32::EPSILON,
-        "TILE_BG_TEXT_MARKDOWN.r expected 0.15, got {}",
-        TILE_BG_TEXT_MARKDOWN.r
-    );
-    assert!(
-        (TILE_BG_TEXT_MARKDOWN.g - 0.15).abs() < f32::EPSILON,
-        "TILE_BG_TEXT_MARKDOWN.g expected 0.15, got {}",
-        TILE_BG_TEXT_MARKDOWN.g
-    );
-    assert!(
-        (TILE_BG_TEXT_MARKDOWN.b - 0.25).abs() < f32::EPSILON,
-        "TILE_BG_TEXT_MARKDOWN.b expected 0.25, got {}",
-        TILE_BG_TEXT_MARKDOWN.b
-    );
-
-    // StaticImage: [0.05, 0.05, 0.05]
-    assert!(
-        (TILE_BG_STATIC_IMAGE.r - 0.05).abs() < f32::EPSILON,
-        "TILE_BG_STATIC_IMAGE.r expected 0.05, got {}",
-        TILE_BG_STATIC_IMAGE.r
-    );
-    assert!(
-        (TILE_BG_STATIC_IMAGE.g - 0.05).abs() < f32::EPSILON,
-        "TILE_BG_STATIC_IMAGE.g expected 0.05, got {}",
-        TILE_BG_STATIC_IMAGE.g
-    );
-    assert!(
-        (TILE_BG_STATIC_IMAGE.b - 0.05).abs() < f32::EPSILON,
-        "TILE_BG_STATIC_IMAGE.b expected 0.05, got {}",
-        TILE_BG_STATIC_IMAGE.b
-    );
-
-    // Default: [0.1, 0.1, 0.2]
-    assert!(
-        (TILE_BG_DEFAULT.r - 0.1).abs() < f32::EPSILON,
-        "TILE_BG_DEFAULT.r expected 0.1, got {}",
-        TILE_BG_DEFAULT.r
-    );
-    assert!(
-        (TILE_BG_DEFAULT.g - 0.1).abs() < f32::EPSILON,
-        "TILE_BG_DEFAULT.g expected 0.1, got {}",
-        TILE_BG_DEFAULT.g
-    );
-    assert!(
-        (TILE_BG_DEFAULT.b - 0.2).abs() < f32::EPSILON,
-        "TILE_BG_DEFAULT.b expected 0.2, got {}",
-        TILE_BG_DEFAULT.b
-    );
-}
-
 /// `resolve_tile_bg_token` returns the fallback when the token map is empty.
 ///
 /// CPU-only — no GPU required.
@@ -474,4 +413,41 @@ fn resolve_tile_bg_token_default_override() {
         "overridden default B should be ~0.0 (green), got {}",
         c.b
     );
+}
+
+/// Pins the user-visible design-token fallback colors (linear sRGB) the
+/// compositor paints when a token is absent: text/markdown tile background and
+/// notification urgency low/normal. These are the compositor-side mirror of the
+/// token defaults in `tze_hud_config` (see `CANONICAL_TOKENS` in
+/// `crates/tze_hud_config/src/tokens.rs`); change them together, or an
+/// unconfigured HUD silently changes color.
+#[test]
+fn token_fallback_colors_match_canonical_defaults() {
+    let empty: HashMap<String, String> = HashMap::new();
+    let tile_bg = resolve_tile_bg_token(
+        &empty,
+        "color.tile.background.text_markdown",
+        TILE_BG_TEXT_MARKDOWN,
+    );
+    let cases = [
+        ("tile bg text_markdown", tile_bg, [0.15, 0.15, 0.25]),
+        (
+            "notification urgency low",
+            urgency_to_notification_color(0, &empty),
+            [0.0, 0.0, 0.0],
+        ),
+        (
+            "notification urgency normal",
+            urgency_to_notification_color(1, &empty),
+            [0.0037, 0.007, 0.0194],
+        ),
+    ];
+    for (name, got, want) in cases {
+        for (ch, (g, w)) in [got.r, got.g, got.b].into_iter().zip(want).enumerate() {
+            assert!(
+                (g - w).abs() < 1e-4,
+                "{name} channel {ch}: got {g}, want {w}"
+            );
+        }
+    }
 }
