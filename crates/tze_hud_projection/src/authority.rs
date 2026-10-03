@@ -7,11 +7,10 @@
 //! submodule is extracted).
 
 use crate::contract::*;
-use crate::managed_session::*;
 use crate::portal_cadence::PortalCadenceCoalescer;
 use crate::{
     MAX_CALLER_IDENTITY_BYTES, MAX_HINT_BYTES, MAX_PORTAL_ID_BYTES, MAX_PROJECTION_ID_BYTES,
-    MAX_REASON_BYTES, MAX_REQUEST_ID_BYTES, PORTAL_UPDATE_RATE_WINDOW_WALL_US,
+    MAX_REQUEST_ID_BYTES, PORTAL_UPDATE_RATE_WINDOW_WALL_US,
 };
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -104,24 +103,12 @@ struct ProjectionSession {
     latest_geometry: Option<AdapterGeometrySnapshot>,
 }
 
-struct ProjectionAuditEvent<'a> {
-    envelope: &'a OperationEnvelope,
-    caller_identity: &'a str,
-    server_timestamp_wall_us: u64,
-    accepted: bool,
-    error_code: Option<ProjectionErrorCode>,
-    reason: &'a str,
-    category: ProjectionAuditCategory,
-}
-
 /// Minimal in-memory authority that enforces the operation contract. Production
 /// daemon storage can wrap or replace this, but must preserve these semantics.
 #[derive(Debug)]
 pub struct ProjectionAuthority {
     bounds: ProjectionBounds,
     sessions: HashMap<String, ProjectionSession>,
-    operator_authority_verifier: Option<String>,
-    audit_log: Vec<ProjectionAuditRecord>,
     /// Cross-portal cadence coalescer (hud-zmt1a).
     ///
     /// Wires `PortalCadenceCoalescer` into the live streaming presentation path
@@ -140,28 +127,12 @@ impl ProjectionAuthority {
         Ok(Self {
             bounds,
             sessions: HashMap::new(),
-            operator_authority_verifier: None,
-            audit_log: Vec::new(),
             cadence_coalescer: PortalCadenceCoalescer::new(),
         })
     }
 
-    /// Configure a separate operator authority credential for operator cleanup.
-    pub fn set_operator_authority(
-        &mut self,
-        credential: &str,
-    ) -> Result<(), ProjectionContractError> {
-        validate_non_empty_bounded("operator_authority", credential, MAX_HINT_BYTES)?;
-        self.operator_authority_verifier = Some(verifier_for_secret(credential));
-        Ok(())
-    }
-
     pub fn bounds(&self) -> &ProjectionBounds {
         &self.bounds
-    }
-
-    pub fn audit_log(&self) -> &[ProjectionAuditRecord] {
-        &self.audit_log
     }
 
     pub fn has_projection(&self, projection_id: &str) -> bool {
@@ -217,26 +188,14 @@ impl ProjectionAuthority {
         server_timestamp_wall_us: u64,
     ) -> ProjectionResponse {
         if let Err(error) = request.validate() {
-            return self.list_validation_denial(
-                &request,
-                caller_identity,
-                server_timestamp_wall_us,
-                error,
-                ProjectionAuditCategory::BoundsDenied,
-            );
+            return self.list_validation_denial(&request, server_timestamp_wall_us, error);
         }
         if let Err(error) = validate_non_empty_bounded(
             "caller_identity",
             caller_identity,
             MAX_CALLER_IDENTITY_BYTES,
         ) {
-            return self.list_validation_denial(
-                &request,
-                "invalid-caller",
-                server_timestamp_wall_us,
-                error,
-                ProjectionAuditCategory::AuthDenied,
-            );
+            return self.list_validation_denial(&request, server_timestamp_wall_us, error);
         }
 
         let mut projections: Vec<ProjectionListEntry> = self
@@ -266,13 +225,6 @@ impl ProjectionAuthority {
             "caller-scoped projection summaries",
         );
         response.projections = projections;
-        self.audit_list_response(
-            &request,
-            caller_identity,
-            server_timestamp_wall_us,
-            &response,
-            ProjectionAuditCategory::CallerList,
-        );
         response
     }
 
@@ -788,12 +740,7 @@ impl ProjectionAuthority {
         hold_until_wall_us: u64,
         server_timestamp_wall_us: u64,
     ) -> Result<(), ProjectionErrorCode> {
-        let session = self.authorize_owner(
-            projection_id,
-            owner_token,
-            server_timestamp_wall_us,
-            ProjectionAuditCategory::OwnerStatus,
-        )?;
+        let session = self.authorize_owner(projection_id, owner_token, server_timestamp_wall_us)?;
         session.hold_until_wall_us = Some(hold_until_wall_us);
         Ok(())
     }
@@ -915,26 +862,14 @@ impl ProjectionAuthority {
         server_timestamp_wall_us: u64,
     ) -> ProjectionResponse {
         if let Err(error) = request.validate() {
-            return self.validation_denial(
-                &request.envelope,
-                caller_identity,
-                server_timestamp_wall_us,
-                error,
-                ProjectionAuditCategory::BoundsDenied,
-            );
+            return self.validation_denial(&request.envelope, server_timestamp_wall_us, error);
         }
         if let Err(error) = validate_non_empty_bounded(
             "caller_identity",
             caller_identity,
             MAX_CALLER_IDENTITY_BYTES,
         ) {
-            return self.validation_denial(
-                &request.envelope,
-                "invalid-caller",
-                server_timestamp_wall_us,
-                error,
-                ProjectionAuditCategory::AuthDenied,
-            );
+            return self.validation_denial(&request.envelope, server_timestamp_wall_us, error);
         }
 
         if self
@@ -961,10 +896,8 @@ impl ProjectionAuthority {
                     Err(error) => {
                         return self.validation_denial(
                             &request.envelope,
-                            caller_identity,
                             server_timestamp_wall_us,
                             error,
-                            ProjectionAuditCategory::AuthDenied,
                         );
                     }
                 };
@@ -985,15 +918,6 @@ impl ProjectionAuthority {
                 );
                 response.owner_token = Some(owner_token);
                 response.lifecycle_state = Some(lifecycle_state);
-                self.audit(ProjectionAuditEvent {
-                    envelope: &request.envelope,
-                    caller_identity,
-                    server_timestamp_wall_us,
-                    accepted: true,
-                    error_code: None,
-                    reason: "idempotent attach replay rotated owner token",
-                    category: ProjectionAuditCategory::Attach,
-                });
                 return response;
             }
             let response = ProjectionResponse::denied(
@@ -1003,28 +927,13 @@ impl ProjectionAuthority {
                 ProjectionErrorCode::ProjectionAlreadyAttached,
                 "projection_id is already attached",
             );
-            self.audit(ProjectionAuditEvent {
-                envelope: &request.envelope,
-                caller_identity,
-                server_timestamp_wall_us,
-                accepted: false,
-                error_code: Some(ProjectionErrorCode::ProjectionAlreadyAttached),
-                reason: "attach conflict",
-                category: ProjectionAuditCategory::ConflictDenied,
-            });
             return response;
         }
 
         let owner_token = match generate_owner_token() {
             Ok(token) => token,
             Err(error) => {
-                return self.validation_denial(
-                    &request.envelope,
-                    caller_identity,
-                    server_timestamp_wall_us,
-                    error,
-                    ProjectionAuditCategory::AuthDenied,
-                );
+                return self.validation_denial(&request.envelope, server_timestamp_wall_us, error);
             }
         };
         let owner_token_verifier = verifier_for_secret(&owner_token);
@@ -1042,10 +951,7 @@ impl ProjectionAuthority {
                 repository_hint: request.repository_hint,
                 icon_profile_hint: request.icon_profile_hint,
                 hud_target: request.hud_target,
-                portal_id: portal_id_for_projection(
-                    PortalSurfaceKind::TextStreamRawTile,
-                    &request.envelope.projection_id,
-                ),
+                portal_id: portal_id_for_projection(&request.envelope.projection_id),
                 portal_presentation: ProjectedPortalPresentation::Expanded,
                 owner_token_verifier,
                 owner_token_expires_at_wall_us: server_timestamp_wall_us
@@ -1093,32 +999,17 @@ impl ProjectionAuthority {
         );
         response.owner_token = Some(owner_token);
         response.lifecycle_state = Some(ProjectionLifecycleState::Attached);
-        self.audit(ProjectionAuditEvent {
-            envelope: &request.envelope,
-            caller_identity,
-            server_timestamp_wall_us,
-            accepted: true,
-            error_code: None,
-            reason: "attach accepted",
-            category: ProjectionAuditCategory::Attach,
-        });
         response
     }
 
     pub fn handle_publish_output(
         &mut self,
         request: PublishOutputRequest,
-        caller_identity: &str,
+        _caller_identity: &str,
         server_timestamp_wall_us: u64,
     ) -> ProjectionResponse {
         if let Err(error) = request.validate(&self.bounds) {
-            return self.validation_denial(
-                &request.envelope,
-                caller_identity,
-                server_timestamp_wall_us,
-                error,
-                ProjectionAuditCategory::BoundsDenied,
-            );
+            return self.validation_denial(&request.envelope, server_timestamp_wall_us, error);
         }
         let max_retained_transcript_bytes = self.bounds.max_retained_transcript_bytes;
         let max_seen_logical_units = self.bounds.max_seen_logical_units;
@@ -1134,7 +1025,6 @@ impl ProjectionAuthority {
             &request.envelope.projection_id,
             &request.owner_token,
             server_timestamp_wall_us,
-            ProjectionAuditCategory::OwnerPublish,
         ) {
             Ok(session) => {
                 // A publish with a `logical_unit_id` we have already seen is an
@@ -1205,34 +1095,17 @@ impl ProjectionAuthority {
             );
         }
 
-        self.audit_from_response(
-            &request.envelope,
-            caller_identity,
-            server_timestamp_wall_us,
-            &response,
-            if response.accepted {
-                ProjectionAuditCategory::OwnerPublish
-            } else {
-                ProjectionAuditCategory::AuthDenied
-            },
-        );
         response
     }
 
     pub fn handle_publish_status(
         &mut self,
         request: PublishStatusRequest,
-        caller_identity: &str,
+        _caller_identity: &str,
         server_timestamp_wall_us: u64,
     ) -> ProjectionResponse {
         if let Err(error) = request.validate(&self.bounds) {
-            return self.validation_denial(
-                &request.envelope,
-                caller_identity,
-                server_timestamp_wall_us,
-                error,
-                ProjectionAuditCategory::BoundsDenied,
-            );
+            return self.validation_denial(&request.envelope, server_timestamp_wall_us, error);
         }
         // Collect (projection_id, sequence, submitted_at) for cadence coalescer
         // wiring after the session borrow is released. Set to `Some(...)` only on
@@ -1246,7 +1119,6 @@ impl ProjectionAuthority {
             &request.envelope.projection_id,
             &request.owner_token,
             server_timestamp_wall_us,
-            ProjectionAuditCategory::OwnerStatus,
         ) {
             Ok(session) => {
                 session.lifecycle_state = request.lifecycle_state;
@@ -1285,17 +1157,6 @@ impl ProjectionAuthority {
                 submitted_at_wall_us,
             );
         }
-        self.audit_from_response(
-            &request.envelope,
-            caller_identity,
-            server_timestamp_wall_us,
-            &response,
-            if response.accepted {
-                ProjectionAuditCategory::OwnerStatus
-            } else {
-                ProjectionAuditCategory::AuthDenied
-            },
-        );
         response
     }
 
@@ -1457,17 +1318,11 @@ impl ProjectionAuthority {
     pub fn handle_get_pending_input(
         &mut self,
         request: GetPendingInputRequest,
-        caller_identity: &str,
+        _caller_identity: &str,
         server_timestamp_wall_us: u64,
     ) -> ProjectionResponse {
         if let Err(error) = request.validate() {
-            return self.validation_denial(
-                &request.envelope,
-                caller_identity,
-                server_timestamp_wall_us,
-                error,
-                ProjectionAuditCategory::BoundsDenied,
-            );
+            return self.validation_denial(&request.envelope, server_timestamp_wall_us, error);
         }
         let max_items = request
             .max_items
@@ -1482,7 +1337,6 @@ impl ProjectionAuthority {
             &request.envelope.projection_id,
             &request.owner_token,
             server_timestamp_wall_us,
-            ProjectionAuditCategory::OwnerInputRead,
         ) {
             Ok(session) => {
                 expire_pending(session, server_timestamp_wall_us);
@@ -1562,41 +1416,23 @@ impl ProjectionAuthority {
                 submitted_at_wall_us,
             );
         }
-        self.audit_from_response(
-            &request.envelope,
-            caller_identity,
-            server_timestamp_wall_us,
-            &response,
-            if response.accepted {
-                ProjectionAuditCategory::OwnerInputRead
-            } else {
-                ProjectionAuditCategory::AuthDenied
-            },
-        );
         response
     }
 
     pub fn handle_acknowledge_input(
         &mut self,
         request: AcknowledgeInputRequest,
-        caller_identity: &str,
+        _caller_identity: &str,
         server_timestamp_wall_us: u64,
     ) -> ProjectionResponse {
         if let Err(error) = request.validate() {
-            return self.validation_denial(
-                &request.envelope,
-                caller_identity,
-                server_timestamp_wall_us,
-                error,
-                ProjectionAuditCategory::BoundsDenied,
-            );
+            return self.validation_denial(&request.envelope, server_timestamp_wall_us, error);
         }
         let mut cadence_append: Option<(String, u64, u64)> = None;
         let response = match self.authorize_owner(
             &request.envelope.projection_id,
             &request.owner_token,
             server_timestamp_wall_us,
-            ProjectionAuditCategory::OwnerInputAck,
         ) {
             Ok(session) => {
                 let (response, state_changed) =
@@ -1626,42 +1462,22 @@ impl ProjectionAuthority {
                 submitted_at_wall_us,
             );
         }
-        self.audit_from_response(
-            &request.envelope,
-            caller_identity,
-            server_timestamp_wall_us,
-            &response,
-            if response.accepted {
-                ProjectionAuditCategory::OwnerInputAck
-            } else if response.error_code == Some(ProjectionErrorCode::ProjectionStateConflict) {
-                ProjectionAuditCategory::ConflictDenied
-            } else {
-                ProjectionAuditCategory::AuthDenied
-            },
-        );
         response
     }
 
     pub fn handle_detach(
         &mut self,
         request: DetachRequest,
-        caller_identity: &str,
+        _caller_identity: &str,
         server_timestamp_wall_us: u64,
     ) -> ProjectionResponse {
         if let Err(error) = request.validate() {
-            return self.validation_denial(
-                &request.envelope,
-                caller_identity,
-                server_timestamp_wall_us,
-                error,
-                ProjectionAuditCategory::BoundsDenied,
-            );
+            return self.validation_denial(&request.envelope, server_timestamp_wall_us, error);
         }
-        let response = match self.authorize_owner(
+        match self.authorize_owner(
             &request.envelope.projection_id,
             &request.owner_token,
             server_timestamp_wall_us,
-            ProjectionAuditCategory::OwnerDetach,
         ) {
             Ok(_) => {
                 self.cadence_coalescer
@@ -1681,127 +1497,7 @@ impl ProjectionAuthority {
                 code,
                 "owner authorization failed",
             ),
-        };
-        self.audit_from_response(
-            &request.envelope,
-            caller_identity,
-            server_timestamp_wall_us,
-            &response,
-            if response.accepted {
-                ProjectionAuditCategory::OwnerDetach
-            } else {
-                ProjectionAuditCategory::AuthDenied
-            },
-        );
-        response
-    }
-
-    pub fn handle_cleanup(
-        &mut self,
-        request: CleanupRequest,
-        caller_identity: &str,
-        server_timestamp_wall_us: u64,
-    ) -> ProjectionResponse {
-        if let Err(error) = request.validate() {
-            return self.validation_denial(
-                &request.envelope,
-                caller_identity,
-                server_timestamp_wall_us,
-                error,
-                ProjectionAuditCategory::BoundsDenied,
-            );
         }
-
-        let response = match request.cleanup_authority {
-            CleanupAuthority::Owner => {
-                let owner_token = request.owner_token.as_deref().unwrap_or_default();
-                match self.authorize_owner(
-                    &request.envelope.projection_id,
-                    owner_token,
-                    server_timestamp_wall_us,
-                    ProjectionAuditCategory::OwnerCleanup,
-                ) {
-                    Ok(_) => {
-                        self.cadence_coalescer
-                            .remove_portal(&request.envelope.projection_id);
-                        self.sessions.remove(&request.envelope.projection_id);
-                        ProjectionResponse::accepted(
-                            &request.envelope.request_id,
-                            &request.envelope.projection_id,
-                            server_timestamp_wall_us,
-                            "owner cleanup purged projection state",
-                        )
-                    }
-                    Err(code) => ProjectionResponse::denied(
-                        &request.envelope.request_id,
-                        &request.envelope.projection_id,
-                        server_timestamp_wall_us,
-                        code,
-                        "owner authorization failed",
-                    ),
-                }
-            }
-            CleanupAuthority::Operator => {
-                let credential = request.operator_authority.as_deref().unwrap_or_default();
-                if self
-                    .operator_authority_verifier
-                    .as_deref()
-                    .is_some_and(|verifier| {
-                        constant_time_eq(verifier, &verifier_for_secret(credential))
-                    })
-                {
-                    // Purge the coalescer entry BEFORE removing the session so
-                    // both maps stay consistent regardless of which branch is
-                    // taken. The owner-cleanup branch (above), `handle_detach`,
-                    // `expire_projection`, and `expire_token_expired_projections`
-                    // all purge both maps; this operator branch previously purged
-                    // only the session, leaving an orphaned coalescer entry that
-                    // busy-spun the drain loop (hud-bsr7u).
-                    self.cadence_coalescer
-                        .remove_portal(&request.envelope.projection_id);
-                    if self
-                        .sessions
-                        .remove(&request.envelope.projection_id)
-                        .is_some()
-                    {
-                        ProjectionResponse::accepted(
-                            &request.envelope.request_id,
-                            &request.envelope.projection_id,
-                            server_timestamp_wall_us,
-                            "operator cleanup purged projection state",
-                        )
-                    } else {
-                        ProjectionResponse::denied(
-                            &request.envelope.request_id,
-                            &request.envelope.projection_id,
-                            server_timestamp_wall_us,
-                            ProjectionErrorCode::ProjectionNotFound,
-                            "projection not found",
-                        )
-                    }
-                } else {
-                    ProjectionResponse::denied(
-                        &request.envelope.request_id,
-                        &request.envelope.projection_id,
-                        server_timestamp_wall_us,
-                        ProjectionErrorCode::ProjectionUnauthorized,
-                        "operator authority failed",
-                    )
-                }
-            }
-        };
-        self.audit_from_response(
-            &request.envelope,
-            caller_identity,
-            server_timestamp_wall_us,
-            &response,
-            match (response.accepted, request.cleanup_authority) {
-                (true, CleanupAuthority::Owner) => ProjectionAuditCategory::OwnerCleanup,
-                (true, CleanupAuthority::Operator) => ProjectionAuditCategory::OperatorCleanup,
-                (false, _) => ProjectionAuditCategory::AuthDenied,
-            },
-        );
-        response
     }
 
     fn authorize_owner(
@@ -1809,7 +1505,6 @@ impl ProjectionAuthority {
         projection_id: &str,
         owner_token: &str,
         server_timestamp_wall_us: u64,
-        _category: ProjectionAuditCategory,
     ) -> Result<&mut ProjectionSession, ProjectionErrorCode> {
         if self.sessions.get(projection_id).is_some_and(|session| {
             server_timestamp_wall_us >= session.owner_token_expires_at_wall_us
@@ -1833,178 +1528,37 @@ impl ProjectionAuthority {
     fn validation_denial(
         &mut self,
         envelope: &OperationEnvelope,
-        caller_identity: &str,
         server_timestamp_wall_us: u64,
         error: ProjectionContractError,
-        category: ProjectionAuditCategory,
     ) -> ProjectionResponse {
-        let code = error.code();
-        let response = ProjectionResponse::denied(
+        ProjectionResponse::denied(
             &envelope.request_id,
             &envelope.projection_id,
             server_timestamp_wall_us,
-            code,
+            error.code(),
             error.to_string(),
-        );
-        self.audit_from_response(
-            envelope,
-            caller_identity,
-            server_timestamp_wall_us,
-            &response,
-            category,
-        );
-        response
+        )
     }
 
     fn list_validation_denial(
         &mut self,
         request: &ListProjectionsRequest,
-        caller_identity: &str,
         server_timestamp_wall_us: u64,
         error: ProjectionContractError,
-        category: ProjectionAuditCategory,
     ) -> ProjectionResponse {
-        let response = ProjectionResponse::denied(
+        ProjectionResponse::denied(
             &request.request_id,
             LIST_PROJECTIONS_AUDIT_SCOPE_ID,
             server_timestamp_wall_us,
             error.code(),
             error.to_string(),
-        );
-        self.audit_list_response(
-            request,
-            caller_identity,
-            server_timestamp_wall_us,
-            &response,
-            category,
-        );
-        response
-    }
-
-    fn audit_from_response(
-        &mut self,
-        envelope: &OperationEnvelope,
-        caller_identity: &str,
-        server_timestamp_wall_us: u64,
-        response: &ProjectionResponse,
-        category: ProjectionAuditCategory,
-    ) {
-        self.audit(ProjectionAuditEvent {
-            envelope,
-            caller_identity,
-            server_timestamp_wall_us,
-            accepted: response.accepted,
-            error_code: response.error_code,
-            reason: &response.status_summary,
-            category,
-        });
-    }
-
-    fn audit_list_response(
-        &mut self,
-        request: &ListProjectionsRequest,
-        caller_identity: &str,
-        server_timestamp_wall_us: u64,
-        response: &ProjectionResponse,
-        category: ProjectionAuditCategory,
-    ) {
-        let envelope = OperationEnvelope {
-            operation: ProjectionOperation::List,
-            projection_id: LIST_PROJECTIONS_AUDIT_SCOPE_ID.to_string(),
-            request_id: request.request_id.clone(),
-            client_timestamp_wall_us: request.client_timestamp_wall_us,
-        };
-        self.audit(ProjectionAuditEvent {
-            envelope: &envelope,
-            caller_identity,
-            server_timestamp_wall_us,
-            accepted: response.accepted,
-            error_code: response.error_code,
-            reason: &response.status_summary,
-            category,
-        });
-    }
-
-    fn audit(&mut self, event: ProjectionAuditEvent<'_>) {
-        self.audit_log.push(ProjectionAuditRecord {
-            timestamp_wall_us: event.server_timestamp_wall_us,
-            operation: event.envelope.operation,
-            projection_id: event.envelope.projection_id.clone(),
-            caller_identity: bounded_copy(
-                event.caller_identity.to_string(),
-                MAX_CALLER_IDENTITY_BYTES,
-            ),
-            request_id: event.envelope.request_id.clone(),
-            accepted: event.accepted,
-            error_code: event.error_code,
-            reason: bounded_copy(event.reason.to_string(), MAX_REASON_BYTES),
-            category: event.category,
-        });
-        if self.audit_log.len() > self.bounds.max_audit_records {
-            let overflow = self.audit_log.len() - self.bounds.max_audit_records;
-            self.audit_log.drain(0..overflow);
-        }
+        )
     }
 }
 
 impl Default for ProjectionAuthority {
     fn default() -> Self {
         Self::new(ProjectionBounds::default()).expect("default projection bounds are valid")
-    }
-}
-
-pub(crate) fn route_plan_for_request(
-    request: &ManagedSessionRequest,
-    target: &WindowsHudTarget,
-) -> ManagedSessionRoutePlan {
-    let agent_id = format!("projection:{}", request.projection_id);
-    let surface_command = match &request.surface_route {
-        PresenceSurfaceRoute::Zone {
-            zone_name,
-            content_kind,
-            ttl_ms,
-        } => HudSurfaceCommandPlan::ZonePublish {
-            zone_name: zone_name.clone(),
-            content_kind: content_kind.clone(),
-            ttl_ms: *ttl_ms,
-            agent_id,
-        },
-        PresenceSurfaceRoute::Widget {
-            widget_name,
-            parameters,
-            ttl_ms,
-        } => HudSurfaceCommandPlan::WidgetPublish {
-            widget_name: widget_name.clone(),
-            parameters: parameters.clone(),
-            ttl_ms: *ttl_ms,
-            agent_id,
-        },
-        PresenceSurfaceRoute::Portal {
-            portal_surface,
-            requested_capabilities,
-            lease_ttl_ms,
-        } => HudSurfaceCommandPlan::PortalLease {
-            portal_surface: *portal_surface,
-            portal_id: portal_id_for_projection(*portal_surface, &request.projection_id),
-            requested_capabilities: requested_capabilities.clone(),
-            lease_ttl_ms: *lease_ttl_ms,
-            agent_id,
-        },
-    };
-
-    ManagedSessionRoutePlan {
-        projection_id: request.projection_id.clone(),
-        provider_kind: request.provider_kind.clone(),
-        display_name: request.display_name.clone(),
-        origin: request.origin.clone(),
-        hud_target_id: target.target_id.clone(),
-        runtime_audience: target.runtime_audience.clone(),
-        credential_redacted: target.credential_source.redacted_marker(),
-        lifecycle_state: ProjectionLifecycleState::Attached,
-        content_classification: request.content_classification,
-        attention_intent: request.attention_intent,
-        surface_command,
-        cleanup_on_detach: true,
     }
 }
 
@@ -2215,10 +1769,8 @@ fn redacted_feedback(feedback: &PortalInputFeedback) -> PortalInputFeedback {
     }
 }
 
-fn portal_id_for_projection(portal_surface: PortalSurfaceKind, projection_id: &str) -> String {
-    let prefix = match portal_surface {
-        PortalSurfaceKind::TextStreamRawTile => "text-stream://projection/",
-    };
+fn portal_id_for_projection(projection_id: &str) -> String {
+    let prefix = "text-stream://projection/";
     let mut portal_id = String::with_capacity(prefix.len() + projection_id.len());
     portal_id.push_str(prefix);
     portal_id.push_str(projection_id);

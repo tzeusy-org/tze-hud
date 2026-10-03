@@ -282,7 +282,7 @@ impl HeadlessEventLoopHarness {
         .await?;
         let mcp_addr = mcp_addrs[0];
 
-        let mut driver = super::build_portal_projection_driver(&cfg)?;
+        let mut driver = crate::portal_projection_driver::InProcessPortalDriver::new();
         driver.set_clock(clock);
         state.portal_projection_driver = driver;
         state.portal_op_rx = Some(portal_op_rx);

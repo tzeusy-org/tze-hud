@@ -102,10 +102,6 @@ pub struct MarkdownTokens {
     ///
     /// Resolved from `typography.line_height.multiplier`.  Default 1.4.
     /// Must be in `[1.0, 4.0]`; values outside that range are ignored.
-    ///
-    /// Cross-ref: `PORTAL_LINE_HEIGHT_MULTIPLIER` in
-    /// `crates/tze_hud_projection/src/bin/projection_authority.rs` mirrors this
-    /// value and must be updated in the same PR when it changes.
     pub line_height_multiplier: f32,
     /// Blank-line multiplier applied **above** each heading block.
     ///

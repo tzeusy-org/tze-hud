@@ -12,16 +12,18 @@
 
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use tze_hud_projection::portal_cadence::{
+    CADENCE_BURST_BYTES, CADENCE_BURST_WINDOW_MS, CADENCE_MIN_INCREMENTS_PER_SEC,
+    CADENCE_MIN_SCALARS_PER_SEC, CadenceWorkload, FairnessProbe, PortalCadenceCoalescer,
+};
 use tze_hud_projection::{
     AttachRequest, ContentClassification, OperationEnvelope, PortalTranscriptUpdate,
     ProjectionAuthority, ProjectionBounds, ProjectionOperation, ProviderKind, PublishOutputRequest,
 };
 use tze_hud_runtime::headless::{HeadlessConfig, HeadlessRuntime};
 use tze_hud_runtime::{
-    CADENCE_BURST_BYTES, CADENCE_BURST_WINDOW_MS, CADENCE_MIN_INCREMENTS_PER_SEC,
-    CADENCE_MIN_SCALARS_PER_SEC, CadenceWorkload, EnqueueResult, FairnessProbe, FreezeQueue,
-    INPUT_TO_NEXT_PRESENT_BUDGET_US, MutationTrafficClass, PortalCadenceCoalescer, QueuedMutation,
-    STAGE3_BUDGET_US, STAGE4_BUDGET_US, STAGE5_BUDGET_US,
+    EnqueueResult, FreezeQueue, INPUT_TO_NEXT_PRESENT_BUDGET_US, MutationTrafficClass,
+    QueuedMutation, STAGE3_BUDGET_US, STAGE4_BUDGET_US, STAGE5_BUDGET_US,
 };
 use tze_hud_scene::{
     graph::SceneGraph,

@@ -824,9 +824,6 @@ fn mock_portal(server: McpServer) -> (McpServer, Arc<std::sync::Mutex<MockPortal
                         }],
                     }));
                 }
-                PortalOp::Cleanup { reply, .. } => {
-                    let _ = reply.send(Ok(()));
-                }
             }
         }
     });

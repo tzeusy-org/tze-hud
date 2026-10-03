@@ -82,7 +82,6 @@ pub enum ProjectionOperation {
     GetPendingInput,
     AcknowledgeInput,
     Detach,
-    Cleanup,
 }
 
 /// LLM provider kind. Provider-specific behavior must stay outside the core
@@ -163,14 +162,6 @@ impl InputDeliveryState {
     }
 }
 
-/// Authority path used for cleanup.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum CleanupAuthority {
-    Owner,
-    Operator,
-}
-
 /// Cooperative projected-session adapter family. The v1 projection path is a
 /// text-stream portal adapter, not a PTY or terminal-capture adapter.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -216,25 +207,6 @@ pub enum PortalInputFeedbackState {
     Rejected,
 }
 
-/// Audit category. Owner cleanup and operator cleanup are intentionally
-/// separate categories.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ProjectionAuditCategory {
-    Attach,
-    CallerList,
-    OwnerPublish,
-    OwnerStatus,
-    OwnerInputRead,
-    OwnerInputAck,
-    OwnerDetach,
-    OwnerCleanup,
-    OperatorCleanup,
-    AuthDenied,
-    BoundsDenied,
-    ConflictDenied,
-}
-
 /// Configurable contract bounds. Defaults match the v1 OpenSpec values.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProjectionBounds {
@@ -250,7 +222,6 @@ pub struct ProjectionBounds {
     pub max_list_items: usize,
     pub max_portal_updates_per_second: u32,
     pub max_seen_logical_units: usize,
-    pub max_audit_records: usize,
     pub owner_token_ttl_wall_us: u64,
     /// Maximum wall-clock gap between authenticated owner operations before the
     /// projection is presented as stale. Applied when the authority is built.
@@ -272,7 +243,6 @@ impl Default for ProjectionBounds {
             max_list_items: crate::DEFAULT_MAX_LIST_ITEMS,
             max_portal_updates_per_second: crate::DEFAULT_MAX_PORTAL_UPDATES_PER_SECOND,
             max_seen_logical_units: crate::DEFAULT_MAX_SEEN_LOGICAL_UNITS,
-            max_audit_records: crate::DEFAULT_MAX_AUDIT_RECORDS,
             owner_token_ttl_wall_us: crate::DEFAULT_OWNER_TOKEN_TTL_WALL_US,
             agent_liveness_degraded_after_wall_us:
                 crate::DEFAULT_AGENT_LIVENESS_DEGRADED_AFTER_WALL_US,
@@ -294,7 +264,6 @@ impl ProjectionBounds {
             || self.max_list_items == 0
             || self.max_portal_updates_per_second == 0
             || self.max_seen_logical_units == 0
-            || self.max_audit_records == 0
             || self.owner_token_ttl_wall_us == 0
         {
             return Err(ProjectionContractError::InvalidArgument(
@@ -601,45 +570,6 @@ impl DetachRequest {
     }
 }
 
-/// `cleanup` request. Owner cleanup requires `owner_token`; operator cleanup
-/// requires a separate operator authority credential.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CleanupRequest {
-    #[serde(flatten)]
-    pub envelope: OperationEnvelope,
-    pub cleanup_authority: CleanupAuthority,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub owner_token: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub operator_authority: Option<String>,
-    pub reason: String,
-}
-
-impl CleanupRequest {
-    pub fn validate(&self) -> Result<(), ProjectionContractError> {
-        self.envelope.validate(ProjectionOperation::Cleanup)?;
-        validate_non_empty_bounded("reason", &self.reason, crate::MAX_REASON_BYTES)?;
-        match self.cleanup_authority {
-            CleanupAuthority::Owner => {
-                validate_owner_token(self.owner_token.as_deref().ok_or_else(|| {
-                    ProjectionContractError::InvalidArgument(
-                        "owner cleanup requires owner_token".to_string(),
-                    )
-                })?)
-            }
-            CleanupAuthority::Operator => validate_non_empty_bounded(
-                "operator_authority",
-                self.operator_authority.as_deref().ok_or_else(|| {
-                    ProjectionContractError::InvalidArgument(
-                        "operator cleanup requires operator_authority".to_string(),
-                    )
-                })?,
-                crate::MAX_HINT_BYTES,
-            ),
-        }
-    }
-}
-
 /// Bounded pending input item returned by `get_pending_input`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PendingInputItem {
@@ -935,22 +865,6 @@ impl ProjectionResponse {
             coalesced_output_count: 0,
         }
     }
-}
-
-/// Structured audit record. It intentionally excludes transcript text, HUD input
-/// text, and owner/operator credentials.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ProjectionAuditRecord {
-    pub timestamp_wall_us: u64,
-    pub operation: ProjectionOperation,
-    pub projection_id: String,
-    pub caller_identity: String,
-    pub request_id: String,
-    pub accepted: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub error_code: Option<ProjectionErrorCode>,
-    pub reason: String,
-    pub category: ProjectionAuditCategory,
 }
 
 /// Bounded identity metadata for a live projection.
@@ -1421,15 +1335,6 @@ pub(crate) fn validate_optional_bounded(
 ) -> Result<(), ProjectionContractError> {
     if let Some(value) = value {
         validate_non_empty_bounded(field, value, max_bytes)?;
-    }
-    Ok(())
-}
-
-pub(crate) fn validate_non_zero(field: &str, value: u64) -> Result<(), ProjectionContractError> {
-    if value == 0 {
-        return Err(ProjectionContractError::InvalidArgument(format!(
-            "{field} must be non-zero"
-        )));
     }
     Ok(())
 }

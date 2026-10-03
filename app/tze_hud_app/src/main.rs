@@ -19,7 +19,6 @@
 //! | `--height <px>`     | `TZE_HUD_WINDOW_HEIGHT`| auto¹        | Window height in pixels.                 |
 //! | `--grpc-port <port>`| `TZE_HUD_GRPC_PORT`    | `50051`      | gRPC listen port (0 to disable).         |
 //! | `--mcp-port <port>` | `TZE_HUD_MCP_PORT`     | `9090`       | MCP HTTP listen port (0 to disable).     |
-//! | —                    | `TZE_HUD_PROJECTION_OPERATOR_AUTHORITY` | unset | Operator credential for projection cleanup. |
 //! | `--fps <n>`         | `TZE_HUD_FPS`          | `60`         | Target frames per second.                |
 //! | `--benchmark-emit <path>` | `TZE_HUD_BENCHMARK_EMIT` | — | Emit bounded windowed benchmark JSON and exit. |
 //! | `--benchmark-frames <n>` | `TZE_HUD_BENCHMARK_FRAMES` | `600` | Measured frames for benchmark mode. |
@@ -90,7 +89,6 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 const GIT_SHA: &str = env!("TZE_HUD_GIT_SHA");
 const BIN_NAME: &str = "tze_hud";
 const DEV_ALLOW_INSECURE_STARTUP_ENV: &str = "TZE_HUD_DEV_ALLOW_INSECURE_STARTUP";
-const PROJECTION_OPERATOR_AUTHORITY_ENV: &str = "TZE_HUD_PROJECTION_OPERATOR_AUTHORITY";
 
 fn print_help() {
     println!(
@@ -113,9 +111,6 @@ OPTIONS:
                            (env: TZE_HUD_GRPC_PORT)
     --mcp-port <port>      MCP HTTP listen port; 0 to disable  [default: 9090]
                            (env: TZE_HUD_MCP_PORT)
-    (env only) TZE_HUD_PROJECTION_OPERATOR_AUTHORITY
-                           Operator credential for cooperative projection cleanup.
-                           When unset, operator cleanup is denied fail-closed.
     --fps <n>              Target frames per second  [default: 60]
                            (env: TZE_HUD_FPS)
     --benchmark-emit <path>
@@ -182,8 +177,6 @@ struct StartupOptions {
     explicit_height: bool,
     grpc_port: u16,
     mcp_port: u16,
-    /// Optional operator credential used only for cooperative projection cleanup.
-    projection_operator_authority: Option<String>,
     fps: u32,
     /// When true, render zone boundaries with colored debug tints.
     debug_zones: bool,
@@ -214,7 +207,6 @@ impl Default for StartupOptions {
             explicit_height: false,
             grpc_port: 50051,
             mcp_port: 9090,
-            projection_operator_authority: None,
             fps: 60,
             debug_zones: false,
             monitor_index: None,
@@ -350,15 +342,6 @@ fn parse_options(args: &[String]) -> Result<StartupOptions, String> {
         opts.mcp_port = v
             .parse::<u16>()
             .map_err(|_| format!("TZE_HUD_MCP_PORT: invalid port: {v:?}"))?;
-    }
-    if let Ok(v) = std::env::var(PROJECTION_OPERATOR_AUTHORITY_ENV) {
-        let trimmed = v.trim();
-        if trimmed.is_empty() {
-            return Err(format!(
-                "{PROJECTION_OPERATOR_AUTHORITY_ENV} requires a non-empty value"
-            ));
-        }
-        opts.projection_operator_authority = Some(trimmed.to_string());
     }
     if let Ok(v) = std::env::var("TZE_HUD_FPS") {
         opts.fps = v
@@ -972,7 +955,6 @@ set {DEV_ALLOW_INSECURE_STARTUP_ENV}=1 only in debug/dev runs if you need fallba
         grpc_port: opts.grpc_port,
         mcp_port: opts.mcp_port,
         agents: agents.shared(),
-        projection_operator_authority: opts.projection_operator_authority,
         target_fps: opts.fps,
         config_toml,
         config_file_path,
@@ -1009,7 +991,6 @@ mod tests {
                 "TZE_HUD_WINDOW_HEIGHT",
                 "TZE_HUD_GRPC_PORT",
                 "TZE_HUD_MCP_PORT",
-                "TZE_HUD_PROJECTION_OPERATOR_AUTHORITY",
                 "TZE_HUD_FPS",
                 "TZE_HUD_BENCHMARK_EMIT",
                 "TZE_HUD_BENCHMARK_FRAMES",
@@ -1073,7 +1054,6 @@ mod tests {
         assert_eq!(opts.mcp_port, 9090);
         assert_eq!(opts.fps, 60);
         assert!(opts.config_path.is_none());
-        assert!(opts.projection_operator_authority.is_none());
         assert!(opts.benchmark_emit.is_none());
         assert_eq!(opts.benchmark_frames, 600);
         assert_eq!(opts.benchmark_warmup_frames, 120);
@@ -1324,49 +1304,6 @@ mod tests {
             !block.contains("\"mcpServers\""),
             "disabled MCP must not emit a client snippet:\n{block}"
         );
-    }
-
-    #[test]
-    fn parse_options_projection_operator_authority_env() {
-        let _guard = ENV_VAR_MUTEX.lock().unwrap();
-        // Safety: single-threaded within ENV_VAR_MUTEX guard.
-        unsafe {
-            std::env::set_var(
-                "TZE_HUD_PROJECTION_OPERATOR_AUTHORITY",
-                " operator-secret\n",
-            );
-        }
-
-        let opts = parse_options(&[]).unwrap();
-        assert_eq!(
-            opts.projection_operator_authority.as_deref(),
-            Some("operator-secret")
-        );
-
-        // Safety: single-threaded within ENV_VAR_MUTEX guard.
-        unsafe {
-            std::env::remove_var("TZE_HUD_PROJECTION_OPERATOR_AUTHORITY");
-        }
-    }
-
-    #[test]
-    fn parse_options_projection_operator_authority_env_rejects_empty() {
-        let _guard = ENV_VAR_MUTEX.lock().unwrap();
-        // Safety: single-threaded within ENV_VAR_MUTEX guard.
-        unsafe {
-            std::env::set_var("TZE_HUD_PROJECTION_OPERATOR_AUTHORITY", " \n\t ");
-        }
-
-        let err = parse_options(&[]).unwrap_err();
-        assert!(
-            err.contains("TZE_HUD_PROJECTION_OPERATOR_AUTHORITY") && err.contains("non-empty"),
-            "error must identify empty projection operator authority env var, got: {err}"
-        );
-
-        // Safety: single-threaded within ENV_VAR_MUTEX guard.
-        unsafe {
-            std::env::remove_var("TZE_HUD_PROJECTION_OPERATOR_AUTHORITY");
-        }
     }
 
     #[test]

@@ -6,10 +6,10 @@ use tze_hud_scene::HitResult;
 use tze_hud_scene::types::{DragHandleElementKind, TileScrollConfig, ZoneInteractionKind};
 use unicode_width::UnicodeWidthChar;
 
+use super::WinitApp;
 use super::input_dispatch::{deliver_composer_batch, dispatch_portal_geometry_event};
 use super::keyboard::ComposerDeliveryContext;
 use super::lifecycle::{INTERACTION_LOCK_BUDGET, spin_acquire};
-use super::{WindowedConfig, WinitApp};
 
 /// Result of one best-effort portal projection drain.
 ///
@@ -304,22 +304,6 @@ fn input_history_band_height_px(tile_height_px: f32, line_height_px: f32) -> f32
 /// `crates/tze_hud_compositor/src/renderer/tile_render.rs` (hud-3y7va).
 fn input_history_wrap_width_px(tile_width_px: f32) -> f32 {
     (tile_width_px - INPUT_COMPOSER_TEXT_MARGIN_PX * 2.0).max(1.0)
-}
-
-pub(super) fn build_portal_projection_driver(
-    config: &WindowedConfig,
-) -> Result<
-    crate::portal_projection_driver::InProcessPortalDriver,
-    tze_hud_projection::ProjectionContractError,
-> {
-    let mut driver = crate::portal_projection_driver::InProcessPortalDriver::new();
-    if let Some(operator_authority) = config.projection_operator_authority.as_deref() {
-        driver
-            .authority_mut()
-            .set_operator_authority(operator_authority)?;
-        tracing::info!("portal projection operator authority configured");
-    }
-    Ok(driver)
 }
 
 // ── Drag-to-move: data carried out of the scene-lock for post-lock work ──────

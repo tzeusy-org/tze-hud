@@ -3616,8 +3616,6 @@ dependencies = [
  "serde_json",
  "subtle",
  "thiserror 2.0.18",
- "tracing",
- "tracing-subscriber",
  "tze_hud_config",
  "tze_hud_input",
  "tze_hud_protocol",

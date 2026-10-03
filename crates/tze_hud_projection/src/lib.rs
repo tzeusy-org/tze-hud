@@ -20,14 +20,8 @@ pub mod portal_cadence;
 mod contract;
 pub use self::contract::*;
 
-mod managed_session;
-pub use self::managed_session::*;
-
 mod authority;
 pub use self::authority::*;
-
-mod portal;
-pub use self::portal::*;
 
 /// Default maximum bytes accepted by one `publish_output` request.
 pub const DEFAULT_MAX_OUTPUT_BYTES_PER_CALL: usize = 16_384;
@@ -53,8 +47,6 @@ pub const DEFAULT_MAX_LIST_ITEMS: usize = 8;
 pub const DEFAULT_MAX_PORTAL_UPDATES_PER_SECOND: u32 = 10;
 /// Default maximum retained publish-output logical-unit IDs per projection.
 pub const DEFAULT_MAX_SEEN_LOGICAL_UNITS: usize = 4_096;
-/// Default maximum retained audit records for the in-memory authority.
-pub const DEFAULT_MAX_AUDIT_RECORDS: usize = 4_096;
 /// Owner tokens are 256-bit random values encoded as lowercase hex.
 pub const OWNER_TOKEN_ENTROPY_BITS: usize = 256;
 /// Default owner-token lifetime in wall-clock microseconds.

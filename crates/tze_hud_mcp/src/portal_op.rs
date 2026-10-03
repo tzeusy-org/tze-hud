@@ -264,29 +264,7 @@ pub enum PortalOp {
         projection_id: String,
         /// Owner token returned by the `Attach` response.
         owner_token: String,
-        /// Human-readable reason recorded in the audit log.
-        reason: String,
-        /// One-shot response channel: `Ok(())` on success or a
-        /// [`PortalOpRejection`] carrying the stable error code on
-        /// validation / auth failure.
-        reply: tokio::sync::oneshot::Sender<Result<(), PortalOpRejection>>,
-    },
-    /// Cleanup a projection session, purging its private state.
-    ///
-    /// Owner cleanup is authenticated with the owner token. Operator cleanup is
-    /// authenticated by a separate operator-authority credential and does not
-    /// require or expose the owner token.
-    Cleanup {
-        /// Projection identifier matching a prior successful `Attach`.
-        projection_id: String,
-        /// Cleanup authority as a snake_case string (`owner`, `operator`).
-        /// The runtime parses this into the projection contract enum.
-        cleanup_authority: String,
-        /// Owner token for owner cleanup. Ignored for operator cleanup.
-        owner_token: Option<String>,
-        /// Operator credential for operator cleanup. Ignored for owner cleanup.
-        operator_authority: Option<String>,
-        /// Human-readable reason recorded in the audit log.
+        /// Human-readable detach reason.
         reason: String,
         /// One-shot response channel: `Ok(())` on success or a
         /// [`PortalOpRejection`] carrying the stable error code on

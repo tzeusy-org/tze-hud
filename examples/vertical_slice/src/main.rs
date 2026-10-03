@@ -159,7 +159,6 @@ fn run_windowed() -> Result<(), Box<dyn std::error::Error>> {
         grpc_port: 0, // Disabled for the standalone windowed demo.
         mcp_port: 0,  // Disabled for the standalone windowed demo.
         agents: Default::default(),
-        projection_operator_authority: None,
         target_fps: 60,
         config_toml: None,      // No configuration file for the standalone demo.
         config_file_path: None, // No config file path needed when config_toml is None.

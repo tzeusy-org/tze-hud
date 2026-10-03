@@ -35,31 +35,6 @@
 
 pub use tze_hud_projection::resident_grpc::portal_visual_tokens_from_part_tokens;
 
-/// Resolve the resident gRPC bridge's `PortalVisualTokens` from the runtime's
-/// LOADED startup design tokens.
-///
-/// `startup_tokens` is the runtime's `startup_compositor_tokens`: the canonical
-/// defaults already pre-merged with the active profile's token overrides (the
-/// same map applied to the in-process driver via `apply_token_map`). This is the
-/// bridge-spawn counterpart to the in-process driver's `resolve_visual_tokens`
-/// (`portal_projection_driver.rs`): both resolve against the same startup token
-/// map so a bridged portal renders identically to an in-process one instead of
-/// falling back to the unstyled canonical-default palette (hud-ygtiy).
-///
-/// Passing an empty map yields the canonical-default palette (the behaviour
-/// before hud-ygtiy — active-profile styling was ignored). Doctrine: never
-/// hardcode colours/fonts — `RenderingPolicy` is populated from these resolved
-/// design tokens.
-pub fn resolve_bridge_visual_tokens(
-    startup_tokens: &tze_hud_config::tokens::DesignTokenMap,
-) -> tze_hud_projection::resident_grpc::PortalVisualTokens {
-    let resolved = tze_hud_config::tokens::resolve_tokens(
-        &tze_hud_config::tokens::DesignTokenMap::new(),
-        startup_tokens,
-    );
-    portal_visual_tokens_from_part_tokens(&tze_hud_config::resolve_portal_tokens(&resolved))
-}
-
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -228,66 +203,6 @@ mod tests {
         assert_ne!(
             baseline.transcript_text_color.r, overridden.transcript_text_color.r,
             "baseline and overridden transcript text colors must differ"
-        );
-    }
-
-    /// hud-ygtiy: the resident gRPC bridge must resolve its visual tokens from the
-    /// runtime's LOADED startup design tokens (active profile), NOT empty maps.
-    ///
-    /// This is the exact production path: `windowed::run` builds the bridge's
-    /// `PortalVisualTokens` via `resolve_bridge_visual_tokens(&startup_compositor_tokens)`.
-    /// The test proves that an active-profile token override (a sentinel that
-    /// differs from the canonical default) appears in the bridge's resolved
-    /// output — i.e. a bridged portal is styled by the active profile, not the
-    /// unstyled canonical-default palette it used before hud-ygtiy.
-    #[test]
-    fn bridge_resolves_active_profile_tokens_not_empty_defaults() {
-        use tze_hud_config::tokens::DesignTokenMap;
-        use tze_hud_config::{
-            PORTAL_TOKEN_COLLAPSED_FONT_SIZE, PORTAL_TOKEN_TRANSCRIPT_TEXT_COLOR,
-        };
-
-        // Empty startup tokens → canonical-default palette (pre-hud-ygtiy behaviour).
-        let empty_defaults = resolve_bridge_visual_tokens(&DesignTokenMap::new());
-
-        // Simulate the runtime's `startup_compositor_tokens`: canonical defaults
-        // pre-merged with an active profile's overrides (sentinels that differ
-        // from the canonical defaults).
-        let mut startup_tokens = DesignTokenMap::new();
-        startup_tokens.insert(
-            PORTAL_TOKEN_TRANSCRIPT_TEXT_COLOR.to_string(),
-            "#FF0000".to_string(), // red sentinel — distinct from the default text color
-        );
-        startup_tokens.insert(
-            PORTAL_TOKEN_COLLAPSED_FONT_SIZE.to_string(),
-            "20".to_string(),
-        );
-
-        let from_profile = resolve_bridge_visual_tokens(&startup_tokens);
-
-        // The active-profile override MUST appear in the bridge's resolved output.
-        assert!(
-            (from_profile.transcript_text_color.r - 1.0).abs() < 1e-3
-                && from_profile.transcript_text_color.g.abs() < 1e-3
-                && from_profile.transcript_text_color.b.abs() < 1e-3,
-            "bridge must resolve the active-profile transcript text color (red), got {:?}",
-            from_profile.transcript_text_color
-        );
-        assert!(
-            (from_profile.collapsed_font_size_px - 20.0).abs() < 1e-4,
-            "bridge must resolve the active-profile collapsed font size (20px), got {}",
-            from_profile.collapsed_font_size_px
-        );
-
-        // And it must NOT equal the empty-default palette — proving the bridge no
-        // longer ignores the active profile (the hud-ygtiy regression).
-        assert_ne!(
-            from_profile.transcript_text_color.r, empty_defaults.transcript_text_color.r,
-            "bridge tokens must differ from the empty-default palette (active profile ignored)"
-        );
-        assert_ne!(
-            from_profile.collapsed_font_size_px, empty_defaults.collapsed_font_size_px,
-            "bridge collapsed font size must differ from the empty default"
         );
     }
 }
