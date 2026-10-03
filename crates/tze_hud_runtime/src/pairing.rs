@@ -366,6 +366,10 @@ impl Pairing {
                 address,
                 format!("valid for {} minutes", CODE_TTL.as_secs() / 60),
             ],
+            // Wall-clock deadline, taken at the same moment as the monotonic
+            // code expiry; they can drift apart only if the system clock is
+            // adjusted within the 5 minutes. The text is a fixed validity, not
+            // a countdown (a countdown would redraw every second).
             expires_at_wall_us: Some(self.clock.wall_us() + CODE_TTL.as_micros() as u64),
         });
     }
@@ -852,7 +856,7 @@ mod tests {
         assert_eq!(rfc3339_utc(1_709_210_096_000_000), "2024-02-29T12:34:56Z");
     }
 
-    /// Captures everything tracing emits while a test runs.
+    /// Everything tracing emits in this test process.
     #[derive(Clone, Default)]
     struct LogCapture(Arc<Mutex<Vec<u8>>>);
 
@@ -875,32 +879,46 @@ mod tests {
         }
     }
 
+    /// A process-global capture, installed once. A per-thread subscriber is
+    /// unreliable here: tracing caches callsite interest process-wide, so a
+    /// parallel test hitting the same callsite with no subscriber can disable
+    /// it for the capturing thread. Global, it also sees every other pairing
+    /// test's logs, which only widens the leak check.
+    fn global_capture() -> &'static LogCapture {
+        static CAPTURE: std::sync::OnceLock<LogCapture> = std::sync::OnceLock::new();
+        CAPTURE.get_or_init(|| {
+            let log = LogCapture::default();
+            tracing::subscriber::set_global_default(
+                tracing_subscriber::fmt()
+                    .with_writer(log.clone())
+                    // Timestamps carry digit runs that can look like a code.
+                    .without_time()
+                    .with_max_level(tracing::Level::TRACE)
+                    .finish(),
+            )
+            .expect("no other test installs a global subscriber");
+            log
+        })
+    }
+
     #[test]
     fn logs_contain_neither_the_code_nor_the_psk() {
-        let log = LogCapture::default();
-        let subscriber = tracing_subscriber::fmt()
-            .with_writer(log.clone())
-            // Timestamps carry digit runs that can look like a code.
-            .without_time()
-            .with_max_level(tracing::Level::TRACE)
-            .finish();
-        let psk = tracing::subscriber::with_default(subscriber, || {
-            let rig = rig();
-            rig.pairing.open();
-            // Wrong guesses (replacement, then cooldown), a spent code, then
-            // a fresh opening that succeeds.
-            for _ in 0..MAX_BAD_ATTEMPTS * 3 {
-                rig.pairing.pair(&pair_body("claude", "000000", false));
-            }
-            rig.clock.advance(COOLDOWN);
-            rig.pairing.open(); // code 444444
-            let ok = json(&rig.pairing.pair(&pair_body("claude", "444444", true)));
-            rig.pairing.pair(&pair_body("claude", "444444", true));
-            ok["psk"].as_str().unwrap().to_owned()
-        });
+        let log = global_capture();
+        let rig = rig();
+        rig.pairing.open();
+        // Wrong guesses (replacement, then cooldown), a spent code, then a
+        // fresh opening that succeeds.
+        for _ in 0..MAX_BAD_ATTEMPTS * 3 {
+            rig.pairing.pair(&pair_body("claude", "000000", false));
+        }
+        rig.clock.advance(COOLDOWN);
+        rig.pairing.open(); // code 444444
+        let ok = json(&rig.pairing.pair(&pair_body("claude", "444444", true)));
+        rig.pairing.pair(&pair_body("claude", "444444", true));
+        let psk = ok["psk"].as_str().unwrap();
         let logged = String::from_utf8(log.0.lock().unwrap().clone()).unwrap();
         assert!(logged.contains("agent paired"), "capture is live: {logged}");
-        for secret in [psk.as_str(), "111111", "222222", "333333", "444444"] {
+        for secret in [psk, "111111", "222222", "333333", "444444"] {
             assert!(!logged.contains(secret), "log leaks {secret}");
         }
     }

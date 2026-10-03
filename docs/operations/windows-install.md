@@ -67,6 +67,10 @@ Ctrl+Shift+P with the HUD focused. A code works once and expires after 5
 minutes; five wrong codes replace it, and repeated failures pause pairing for
 60 seconds.
 
+The card states a fixed 5-minute validity rather than a countdown, and it
+clears when the code expires. The code is on screen, so an agent holding an
+`admin` PSK can read it with `GET /admin/screenshot`; grant `admin` sparingly.
+
 `app/tze_hud_app/config/production.toml` is the reference (and default) config.
 
 ## Logs and operator endpoints

@@ -268,7 +268,13 @@ def check_pair(smoke: Smoke, exe: Path) -> None:
     assert status == 403 and b"PAIRING_CLOSED" in body, f"/pair before --pair: {status} {body[:200]!r}"
     done = subprocess.run([str(exe), "--pair"], capture_output=True, text=True, timeout=30)
     assert done.returncode == 0, f"--pair: exit {done.returncode} {done.stderr.strip()}"
-    status, body = pair_post(smoke, "not-a-code")
+    # The signal is asynchronous: PAIRING_CLOSED until the listener has opened pairing.
+    deadline = time.monotonic() + 10
+    while True:
+        status, body = pair_post(smoke, "not-a-code")
+        if b"PAIRING_CLOSED" not in body or time.monotonic() >= deadline:
+            break
+        time.sleep(0.25)
     assert status == 403 and b"PAIR_CODE_INVALID" in body, f"/pair wrong code: {status} {body[:200]!r}"
     print("ok  /pair closed until --pair, then a wrong code -> 403 PAIR_CODE_INVALID")
 
