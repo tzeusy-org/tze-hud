@@ -77,8 +77,6 @@ pub mod widget_geometry;
 pub mod widgets;
 pub mod zone_render;
 
-pub use retained::RetainedChangeEfficiencyCapture;
-
 // Re-export submodule items into this module's namespace so all existing code
 // in mod.rs can reference them without path changes (move-only, zero refactor).
 use draw_cmds::*;
@@ -207,11 +205,11 @@ pub struct Compositor {
     pub width: u32,
     pub height: u32,
     frame_number: u64,
-    /// Retained snapshot and evidence slot for the narrowly-scoped canonical
-    /// headless change-efficiency validation path.
+    /// Retained snapshot and work counts for the narrowly-scoped canonical
+    /// headless retained-render path.
     retained_render_state: retained::RetainedRenderState,
     /// Latest real window-surface lifecycle outcome. Successful recovery also
-    /// invalidates the compositor-private retained proof lane at this same
+    /// invalidates the compositor-private retained lane at this same
     /// production fan-out point.
     latest_surface_recovery: Option<SurfaceRecoveryOutcome>,
     /// When true, the clear color uses alpha=0 for transparent overlay mode.
