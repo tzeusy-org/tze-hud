@@ -165,6 +165,34 @@ impl SceneGraph {
         breakpoints: Vec<u64>,
         lease_id: Option<SceneId>,
     ) -> Result<(), ValidationError> {
+        self.publish_to_zone_inner(
+            zone_name,
+            content,
+            publisher_namespace,
+            merge_key,
+            expires_at_wall_us,
+            content_classification,
+            breakpoints,
+            lease_id,
+            true,
+        )
+    }
+
+    /// `urgency_default` gives a notification with no explicit expiry its
+    /// urgency-derived one; `false` leaves it held until cleared.
+    #[allow(clippy::too_many_arguments)]
+    fn publish_to_zone_inner(
+        &mut self,
+        zone_name: &str,
+        content: ZoneContent,
+        publisher_namespace: &str,
+        merge_key: Option<String>,
+        expires_at_wall_us: Option<u64>,
+        content_classification: Option<String>,
+        breakpoints: Vec<u64>,
+        lease_id: Option<SceneId>,
+        urgency_default: bool,
+    ) -> Result<(), ValidationError> {
         // Check zone exists and content type is accepted
         let (contention_policy, max_publishers, accepted) = {
             let zone = self.zone_registry.get_by_name(zone_name).ok_or_else(|| {
@@ -197,6 +225,9 @@ impl SceneGraph {
         //
         // A publisher-supplied expires_at always takes precedence.
         let effective_expires_at = expires_at_wall_us.or_else(|| {
+            if !urgency_default {
+                return None;
+            }
             if let ZoneContent::Notification(ref payload) = content {
                 let ttl_us: u64 = match payload.urgency {
                     0 | 1 => Self::NOTIFICATION_TTL_INFO_US,
@@ -302,30 +333,7 @@ impl SceneGraph {
         merge_key: Option<String>,
         ttl_us: Option<u64>,
     ) -> Result<(), ValidationError> {
-        let state = self
-            .leases
-            .get(&lease_id)
-            .filter(|l| l.namespace == publisher_namespace)
-            .map(|l| l.state)
-            .ok_or_else(|| ValidationError::ZonePublishLeaseNotFound {
-                namespace: publisher_namespace.to_string(),
-            })?;
-        let namespace = publisher_namespace.to_string();
-        match state {
-            LeaseState::Active => {}
-            LeaseState::Orphaned => {
-                return Err(ValidationError::ZonePublishLeaseOrphaned { namespace });
-            }
-            LeaseState::Suspended => {
-                return Err(ValidationError::ZonePublishSafeModeActive { namespace });
-            }
-            _ => {
-                return Err(ValidationError::ZonePublishLeaseNotActive {
-                    namespace,
-                    state: format!("{state:?}"),
-                });
-            }
-        }
+        self.check_zone_publish_lease(publisher_namespace, lease_id)?;
         let expires_at_wall_us = ttl_us.map(|t| self.clock.now_us().saturating_add(t));
         self.publish_to_zone_for_lease(
             zone_name,
@@ -337,6 +345,56 @@ impl SceneGraph {
             Vec::new(),
             Some(lease_id),
         )
+    }
+
+    /// [`Self::publish_to_zone_with_lease`] with no expiry at all: the
+    /// publication stays until cleared, even a notification (whose urgency
+    /// default would otherwise apply). `hud_publish` with `ttl_ms: 0`.
+    pub fn publish_held_to_zone_with_lease(
+        &mut self,
+        zone_name: &str,
+        content: ZoneContent,
+        publisher_namespace: &str,
+        lease_id: SceneId,
+        merge_key: Option<String>,
+    ) -> Result<(), ValidationError> {
+        self.check_zone_publish_lease(publisher_namespace, lease_id)?;
+        self.publish_to_zone_inner(
+            zone_name,
+            content,
+            publisher_namespace,
+            merge_key,
+            None,
+            None,
+            Vec::new(),
+            Some(lease_id),
+            false,
+        )
+    }
+
+    fn check_zone_publish_lease(
+        &self,
+        publisher_namespace: &str,
+        lease_id: SceneId,
+    ) -> Result<(), ValidationError> {
+        let state = self
+            .leases
+            .get(&lease_id)
+            .filter(|l| l.namespace == publisher_namespace)
+            .map(|l| l.state)
+            .ok_or_else(|| ValidationError::ZonePublishLeaseNotFound {
+                namespace: publisher_namespace.to_string(),
+            })?;
+        let namespace = publisher_namespace.to_string();
+        match state {
+            LeaseState::Active => Ok(()),
+            LeaseState::Orphaned => Err(ValidationError::ZonePublishLeaseOrphaned { namespace }),
+            LeaseState::Suspended => Err(ValidationError::ZonePublishSafeModeActive { namespace }),
+            _ => Err(ValidationError::ZonePublishLeaseNotActive {
+                namespace,
+                state: format!("{state:?}"),
+            }),
+        }
     }
 
     /// Publish content to a zone with optional streaming breakpoints (unchecked,

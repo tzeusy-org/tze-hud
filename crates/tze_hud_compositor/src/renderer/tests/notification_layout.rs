@@ -905,7 +905,7 @@ async fn test_rounded_notification_backdrop_uses_two_line_slot_height() {
 #[test]
 fn test_pub_anim_state_before_ttl_expiry_opacity_is_1() {
     // TTL = 10_000ms (far future), fade not yet started.
-    let state = PublicationAnimationState::new(10_000);
+    let state = PublicationAnimationState::new(Some(10_000), None);
     assert_eq!(
         state.current_opacity(),
         1.0,
@@ -922,7 +922,7 @@ fn test_pub_anim_state_before_ttl_expiry_opacity_is_1() {
 /// AC: notification published with ttl_ms=3000 begins fade-out at 3000ms.
 #[test]
 fn test_pub_anim_state_custom_ttl_3000ms_triggers_fade() {
-    let mut state = PublicationAnimationState::new(3_000);
+    let mut state = PublicationAnimationState::new(Some(3_000), None);
 
     // Simulate 3001ms elapsed by setting first_seen to the past.
     state.first_seen = std::time::Instant::now() - std::time::Duration::from_millis(3_001);
@@ -940,7 +940,7 @@ fn test_pub_anim_state_custom_ttl_3000ms_triggers_fade() {
 /// AC: opacity interpolates linearly; at midpoint it must be approximately 0.5.
 #[test]
 fn test_pub_anim_state_opacity_at_75ms_midpoint_is_half() {
-    let mut state = PublicationAnimationState::new(0); // TTL=0 → instant expire
+    let mut state = PublicationAnimationState::new(Some(0), None); // TTL=0 → instant expire
 
     // TTL already expired: set first_seen far in the past.
     state.first_seen = std::time::Instant::now() - std::time::Duration::from_secs(1);
@@ -961,7 +961,7 @@ fn test_pub_anim_state_opacity_at_75ms_midpoint_is_half() {
 /// AC: publication must be removed from active_publishes when fade completes.
 #[test]
 fn test_pub_anim_state_is_complete_after_150ms() {
-    let mut state = PublicationAnimationState::new(0);
+    let mut state = PublicationAnimationState::new(Some(0), None);
 
     // TTL already expired.
     state.first_seen = std::time::Instant::now() - std::time::Duration::from_secs(1);
@@ -1059,7 +1059,7 @@ async fn test_prune_faded_publications_removes_completed_fades() {
         (r.published_at_wall_us, r.publisher_namespace.clone())
     };
 
-    let mut completed_state = PublicationAnimationState::new(0);
+    let mut completed_state = PublicationAnimationState::new(Some(0), None);
     completed_state.first_seen = std::time::Instant::now() - std::time::Duration::from_secs(1);
     completed_state.tick(); // starts fade
     // Set fade_start 151ms in the past → fade complete.
@@ -1111,8 +1111,8 @@ async fn test_prune_faded_publications_removes_completed_fades() {
 #[test]
 fn test_simultaneous_independent_fades() {
     // Create two independent publication animation states.
-    let mut state_a = PublicationAnimationState::new(0);
-    let mut state_b = PublicationAnimationState::new(0);
+    let mut state_a = PublicationAnimationState::new(Some(0), None);
+    let mut state_b = PublicationAnimationState::new(Some(0), None);
 
     // Both TTLs expired.
     state_a.first_seen = std::time::Instant::now() - std::time::Duration::from_secs(1);
@@ -1225,7 +1225,7 @@ async fn test_stack_reflow_after_publication_pruned() {
         (r.published_at_wall_us, r.publisher_namespace.clone())
     };
 
-    let mut completed_state = PublicationAnimationState::new(0);
+    let mut completed_state = PublicationAnimationState::new(Some(0), None);
     completed_state.first_seen = std::time::Instant::now() - std::time::Duration::from_secs(1);
     completed_state.tick();
     completed_state.fade_start =
@@ -1338,21 +1338,17 @@ fn test_update_publication_animations_seeds_fresh_state() {
         .unwrap();
     let record = &publishes[0];
 
-    // Test publication_ttl_ms: urgency-derived expires_at_wall_us takes highest
-    // priority.  urgency=1 auto-derives expires_at = now + 8_000_000µs, so
-    // publication_ttl_ms = 8_000 - NOTIFICATION_FADE_OUT_MS(150) = 7_850.
-    // The per-notification ttl_ms=3_000 is superseded by expires_at_wall_us.
-    let zone_def = scene.zone_registry.zones.get("notification-area").unwrap();
-    let zone_auto_clear = zone_def
-        .auto_clear_ms
-        .unwrap_or(NOTIFICATION_DEFAULT_TTL_MS);
-    let ttl = Compositor::publication_ttl_ms(record, zone_auto_clear);
+    // Urgency-derived expires_at_wall_us (urgency=1: now + 8 s) sets the delay:
+    // 8_000 - NOTIFICATION_FADE_OUT_MS(150) = 7_850. The per-notification
+    // ttl_ms=3_000 is superseded.
+    let ttl = Compositor::publication_fade_delay_ms(record, record.published_at_wall_us);
     assert_eq!(
-        ttl, 7_850,
-        "publication_ttl_ms must use urgency-derived expires_at_wall_us (8_000ms - 150ms fade = 7_850ms)"
+        ttl,
+        Some(7_850),
+        "fade delay must use urgency-derived expires_at_wall_us (8_000ms - 150ms fade = 7_850ms)"
     );
 
-    // Test fallback: when NotificationPayload.ttl_ms is None, use zone default.
+    // No expiry: held, not the zone auto_clear_ms.
     let record_no_ttl = ZonePublishRecord {
         lease_id: None,
         zone_name: "notification-area".to_string(),
@@ -1371,9 +1367,9 @@ fn test_update_publication_animations_seeds_fresh_state() {
         content_classification: None,
         breakpoints: Vec::new(),
     };
-    let ttl_fallback = Compositor::publication_ttl_ms(&record_no_ttl, 8_000);
+    let ttl_fallback = Compositor::publication_fade_delay_ms(&record_no_ttl, 2_000_000);
     assert_eq!(
-        ttl_fallback, 8_000,
-        "publication_ttl_ms must fall back to zone auto_clear_ms=8000 when NotificationPayload.ttl_ms is None"
+        ttl_fallback, None,
+        "a notification with no expiry is held, not faded at the zone auto_clear_ms"
     );
 }

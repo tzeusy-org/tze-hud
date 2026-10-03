@@ -13,9 +13,10 @@ disappears on schedule without the agent returning; content scheduled with
 dashboard: an agent can say "show this for 8 seconds" in one call.
 
 - `tze_hud_mcp` `test_hud_publish_zone_ttl_sets_content_expiry_and_is_swept`,
-  `delay_ms_holds_content_until_due`
+  `delay_ms_holds_content_until_due`, `notification_ttl_zero_is_held_and_hold_retimes_it`
 - `tze_hud_scene` `widget_ttl_only_expired_publication_removed_when_mixed`
-- `tze_hud_compositor` `test_publication_ttl_ms_uses_expires_at_wall_us`
+- `tze_hud_compositor` `test_publication_ttl_ms_uses_expires_at_wall_us`,
+  `hold_moves_the_fade_deadline_and_ttl_zero_never_fades`
 - `tze_hud_protocol` (gRPC session) `grpc_zone_publish_ttl_sets_expiry_and_is_swept`,
   `grpc_zone_publish_expires_at_is_swept`, `grpc_zone_publish_present_at_is_held_until_due`,
   `grpc_batch_present_at_holds_content_until_due`, `grpc_batch_expires_at_sweeps_tile`

@@ -281,17 +281,18 @@ pub(crate) type PubKey = (u64, String);
 /// 4. When `is_fade_complete()` returns `true`, the publication is removed
 ///    from `SceneGraph::zone_registry::active_publishes`.
 ///
-/// The effective `ttl_ms` is derived by [`Compositor::publication_ttl_ms`] with
-/// this priority order:
-/// - `ZonePublishRecord.expires_at_wall_us` (urgency-derived, highest priority)
-/// - `NotificationPayload.ttl_ms`
-/// - Zone `auto_clear_ms` / `NOTIFICATION_DEFAULT_TTL_MS` (fallback)
+/// The fade delay is derived by [`Compositor::publication_fade_delay_ms`] from
+/// `ZonePublishRecord.expires_at_wall_us` alone. A publication with no expiry
+/// is held until cleared and never fades; `hud_hold` moves the expiry, which
+/// [`Self::retarget`] follows.
 pub struct PublicationAnimationState {
     /// Wall-clock instant when the compositor first rendered this publication.
     pub first_seen: std::time::Instant,
-    /// Effective TTL in milliseconds.  Fade-out begins once this many ms
-    /// have elapsed since `first_seen`.
-    pub ttl_ms: u64,
+    /// Fade-out begins once this many ms have elapsed since `first_seen`;
+    /// `None` is held until cleared (no fade).
+    pub ttl_ms: Option<u64>,
+    /// The record expiry `ttl_ms` was derived from, to notice a `hud_hold`.
+    pub source_expiry_us: Option<u64>,
     /// Instant when the fade-out transition started.  `None` means the
     /// publication is still fully visible (TTL has not yet expired).
     pub fade_start: Option<std::time::Instant>,
@@ -302,16 +303,13 @@ pub struct PublicationAnimationState {
 /// Duration of the per-notification fade-out transition (ms).
 pub(crate) const NOTIFICATION_FADE_OUT_MS: u32 = 150;
 
-/// Default TTL used when no per-publication TTL is set and the zone has no
-/// `auto_clear_ms`.  Matches the notification-area zone default (8 000 ms).
-pub(crate) const NOTIFICATION_DEFAULT_TTL_MS: u64 = 8_000;
-
 impl PublicationAnimationState {
     /// Create a new state for a freshly-seen publication.
-    pub fn new(ttl_ms: u64) -> Self {
+    pub fn new(ttl_ms: Option<u64>, source_expiry_us: Option<u64>) -> Self {
         Self {
             first_seen: std::time::Instant::now(),
             ttl_ms,
+            source_expiry_us,
             fade_start: None,
             fade_duration_ms: NOTIFICATION_FADE_OUT_MS,
         }
@@ -322,10 +320,19 @@ impl PublicationAnimationState {
     /// Must be called once per frame per publication.  Idempotent after the
     /// fade has started.
     pub fn tick(&mut self) {
-        if self.fade_start.is_none() && self.first_seen.elapsed().as_millis() as u64 >= self.ttl_ms
+        if self.fade_start.is_none()
+            && self
+                .ttl_ms
+                .is_some_and(|ttl| self.first_seen.elapsed().as_millis() as u64 >= ttl)
         {
             self.fade_start = Some(std::time::Instant::now());
         }
+    }
+
+    /// Follow a changed record expiry (`hud_hold`): the fade delay counts from
+    /// now, and a fade already under way is cancelled.
+    pub fn retarget(&mut self, ttl_ms: Option<u64>, source_expiry_us: Option<u64>) {
+        *self = Self::new(ttl_ms, source_expiry_us);
     }
 
     /// Returns the current effective opacity for this publication (0.0–1.0).
@@ -345,11 +352,14 @@ impl PublicationAnimationState {
         1.0 - t
     }
 
-    /// Instant at which the fade-out will start, or `None` once it has.
+    /// Instant at which the fade-out will start, or `None` once it has (or
+    /// when held: a held publication schedules no wake).
     pub fn fade_start_deadline(&self) -> Option<std::time::Instant> {
-        self.fade_start
-            .is_none()
-            .then(|| self.first_seen + std::time::Duration::from_millis(self.ttl_ms))
+        if self.fade_start.is_some() {
+            return None;
+        }
+        self.ttl_ms
+            .map(|ttl| self.first_seen + std::time::Duration::from_millis(ttl))
     }
 
     /// Returns `true` while the fade-out is running (started, not complete).

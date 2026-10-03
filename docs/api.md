@@ -79,6 +79,9 @@ otherwise.
 - Returns `{"ok":true,"expires_in_ms":8000}`. It doesn't echo the request.
 
 **`hud_hold`** `{surface*, ttl_ms*}` extends a holding, for any surface type.
+On a zone or widget, `ttl_ms` replaces the expiry with now + `ttl_ms` (not
+the original deadline), and 0 holds until `hud_clear`. A visible
+notification's fade moves with it; a held one never fades.
 On a portal, `ttl_ms` keeps it (and its transcript) attached for that long,
 or until `hud_clear` when 0, even with no other calls. Without a hold, a
 portal is degraded after 30 s with no publish, poll, or hold, and reclaimed
