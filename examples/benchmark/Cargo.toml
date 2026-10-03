@@ -15,7 +15,7 @@ name = "token_footprint_calibration"
 path = "src/token_footprint_calibration.rs"
 
 [features]
-headless = ["tze_hud_runtime/headless"]
+headless = []
 
 [dependencies]
 tze_hud_scene = { path = "../../crates/tze_hud_scene", version = "0.1.0" }

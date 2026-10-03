@@ -14,7 +14,7 @@
 //!
 //! It is split into a pure geometry core ([`stack_offsets`] / [`flow_total_height`],
 //! no fonts, unit-testable in isolation) and a measurement bridge
-//! ([`measure_child_height`] / [`resolve_vertical_flow`]) that reuses the
+//! ([`measure_child_height`]) that reuses the
 //! compositor's existing shaping so a measured child height agrees with what
 //! the render path paints for the same content and width.
 //!
@@ -116,17 +116,6 @@ pub struct FlowChild<'a> {
     /// Which render-path shaping to measure `content` against — see
     /// [`FlowContentMode`].
     pub content_mode: FlowContentMode<'a>,
-}
-
-/// A resolved vertical-flow layout: the top y-offset of each child (in the same
-/// coordinate space as the `start_y` passed to [`resolve_vertical_flow`]) plus the
-/// total stacked height of the flow.
-#[derive(Clone, Debug, PartialEq)]
-pub struct VerticalFlowLayout {
-    /// One entry per input child, in order: the child's resolved top y.
-    pub offsets: Vec<f32>,
-    /// Total height spanned by the stack (0.0 for an empty flow).
-    pub total_height: f32,
 }
 
 /// Pure geometry: stack `heights` top-to-bottom from `start_y`, inserting `gap`
@@ -235,30 +224,6 @@ pub fn measure_child_height(font_system: &mut FontSystem, child: &FlowChild<'_>)
         }
     };
     content_height + child.vertical_padding.max(0.0)
-}
-
-/// Resolve a full vertical-flow layout for `children`: measure each child's height
-/// (via [`measure_child_height`]) and stack them from `start_y` with `gap` between
-/// rows (via [`stack_offsets`]).
-///
-/// `gap` MUST be supplied by the caller from a design token (never hardcoded here)
-/// so a profile/token change reskins the flow spacing without touching this code.
-pub fn resolve_vertical_flow(
-    font_system: &mut FontSystem,
-    children: &[FlowChild<'_>],
-    gap: f32,
-    start_y: f32,
-) -> VerticalFlowLayout {
-    let heights: Vec<f32> = children
-        .iter()
-        .map(|child| measure_child_height(font_system, child))
-        .collect();
-    let offsets = stack_offsets(&heights, gap, start_y);
-    let total_height = flow_total_height(&heights, gap);
-    VerticalFlowLayout {
-        offsets,
-        total_height,
-    }
 }
 
 /// The height a single flowed child occupies in a vertical stack: measured
@@ -972,72 +937,6 @@ mod tests {
              height given a token line-height multiplier far above the raw path's \
              default: attributed={attributed_height} plain={plain_height}"
         );
-    }
-
-    // ── Full resolution (the demonstration) ───────────────────────────────────
-
-    #[test]
-    fn resolve_vertical_flow_stacks_children_without_overlap() {
-        let mut fs = FontSystem::new();
-        let children = [
-            FlowChild {
-                content: "assistant turn one",
-                wrap_width: 300.0,
-                font_size_px: 16.0,
-                font_family: FontFamily::SystemSansSerif,
-                vertical_padding: 4.0,
-                content_mode: FlowContentMode::PlainText,
-            },
-            FlowChild {
-                content: "tool: ran a command\nand printed two lines",
-                wrap_width: 300.0,
-                font_size_px: 16.0,
-                font_family: FontFamily::SystemSansSerif,
-                vertical_padding: 4.0,
-                content_mode: FlowContentMode::PlainText,
-            },
-            FlowChild {
-                content: "assistant turn three",
-                wrap_width: 300.0,
-                font_size_px: 16.0,
-                font_family: FontFamily::SystemSansSerif,
-                vertical_padding: 4.0,
-                content_mode: FlowContentMode::PlainText,
-            },
-        ];
-        let gap = 8.0;
-        let layout = resolve_vertical_flow(&mut fs, &children, gap, 12.0);
-
-        assert_eq!(layout.offsets.len(), 3);
-        // First child sits at the flow origin.
-        assert!((layout.offsets[0] - 12.0).abs() < 1e-3);
-        // Each subsequent child begins at least its predecessor's offset + a
-        // positive height + the gap — i.e. strictly below, no overlap.
-        for i in 1..layout.offsets.len() {
-            let prev_height = measure_child_height(&mut fs, &children[i - 1]);
-            assert!(
-                layout.offsets[i] >= layout.offsets[i - 1] + prev_height + gap - 1e-3,
-                "child {i} must not overlap child {}: offsets={:?}",
-                i - 1,
-                layout.offsets
-            );
-        }
-        // Total height spans from the first offset to the bottom of the last child.
-        let last_height = measure_child_height(&mut fs, &children[2]);
-        let spanned = layout.offsets[2] + last_height - layout.offsets[0];
-        assert!(
-            (spanned - layout.total_height).abs() < 1e-3,
-            "spanned={spanned} total={}",
-            layout.total_height
-        );
-    }
-
-    #[test]
-    fn resolve_vertical_flow_empty_is_empty() {
-        let mut fs = FontSystem::new();
-        let layout = resolve_vertical_flow(&mut fs, &[], 8.0, 0.0);
-        assert!(layout.offsets.is_empty());
-        assert_eq!(layout.total_height, 0.0);
     }
 
     // ── Tile-level pre-pass resolver ──────────────────────────────────────────

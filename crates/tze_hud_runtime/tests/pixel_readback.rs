@@ -42,7 +42,7 @@
 //! # Spec references
 //!
 //! - validation-framework/spec.md DR-V2 (line 186): headless frame pipeline
-//! - validation-framework/spec.md DR-V5 (line 228): `cargo test --features headless`
+//! - validation-framework/spec.md DR-V5 (line 228): `cargo test --features dev-mode`
 //! - scene-graph/spec.md lines 45-64: z-order rendering
 //! - scene-graph/spec.md lines 185-200: zone rendering
 //! - policy-arbitration/spec.md lines 91-104: Level 2 Privacy Evaluation

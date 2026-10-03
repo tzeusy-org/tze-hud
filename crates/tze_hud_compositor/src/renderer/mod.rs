@@ -690,6 +690,21 @@ impl ZoneSlotLayout {
     }
 }
 
+/// Backends the windowed compositor requests: Vulkan on Linux, D3D12 and
+/// Vulkan on Windows, Metal on macOS. Headless construction uses
+/// `Backends::all()` so software renderers (llvmpipe, WARP) still work.
+fn platform_backends() -> wgpu::Backends {
+    if cfg!(target_os = "linux") {
+        wgpu::Backends::VULKAN
+    } else if cfg!(target_os = "windows") {
+        wgpu::Backends::DX12 | wgpu::Backends::VULKAN
+    } else if cfg!(target_os = "macos") {
+        wgpu::Backends::METAL
+    } else {
+        wgpu::Backends::all()
+    }
+}
+
 impl Compositor {
     /// Create a new headless compositor.
     ///
@@ -833,7 +848,7 @@ impl Compositor {
     /// Create a windowed compositor backed by a real `winit::window::Window`.
     ///
     /// This is the factory method for production windowed rendering. It:
-    /// 1. Uses `select_gpu_adapter` with platform-mandated backends (Vulkan/D3D12/Metal).
+    /// 1. Requests an adapter with the platform backends (Vulkan on Linux, D3D12/Vulkan on Windows, Metal on macOS).
     /// 2. Creates a `wgpu::Surface` from the window via `instance.create_surface`.
     /// 3. Negotiates the surface format (sRGB preferred).
     /// 4. Configures the surface with the window's physical dimensions.
@@ -904,7 +919,7 @@ impl Compositor {
             tracing::info!("overlay mode: forcing Vulkan backend for transparent swapchain");
             wgpu::Backends::VULKAN
         } else {
-            crate::adapter::platform_backends().flags
+            platform_backends()
         };
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
             backends,

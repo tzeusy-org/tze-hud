@@ -5,14 +5,6 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
-[features]
-# Deliberate API-surface marker: callers use `features = ["headless"]` to signal
-# that they need the headless (offscreen) code paths. No cfg(feature="headless")
-# gates exist inside this crate — the compositor always compiles all paths — but
-# the marker lets consumers and CI jobs opt-in by name rather than relying on
-# implicit availability.
-headless = []
-
 [dependencies]
 tze_hud_scene = { path = "../tze_hud_scene", version = "0.1.0" }
 tze_hud_resource = { path = "../tze_hud_resource", version = "0.1.0" }

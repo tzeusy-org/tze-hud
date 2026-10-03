@@ -10,7 +10,6 @@ name = "vertical_slice"
 path = "src/main.rs"
 
 [features]
-headless = ["tze_hud_runtime/headless"]
 ## Enable dev-mode to allow `config_toml: None` (unrestricted capability grants).
 ## Used with `--dev` CLI flag for the headless demo.  MUST NOT be used in
 ## production deployments — the default binary path uses production.toml instead.

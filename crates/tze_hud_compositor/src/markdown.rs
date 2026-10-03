@@ -455,16 +455,6 @@ impl StyleAttr {
             size_scale: None,
         }
     }
-
-    /// Returns `true` when no attribute override is active.
-    pub fn is_plain(&self) -> bool {
-        self.weight.is_none()
-            && !self.italic
-            && !self.monospace
-            && self.color.is_none()
-            && self.background_color.is_none()
-            && self.size_scale.is_none()
-    }
 }
 
 // ─── StyledSpan ──────────────────────────────────────────────────────────────

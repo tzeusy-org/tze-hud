@@ -9,12 +9,8 @@
 //!
 //! ## Methods in this file
 //!
-//! - `populate_drag_handle_hit_regions` — recompute runtime-internal
-//!   drag-handle hit regions for the current frame (calls
-//!   `collect_drag_handle_entries` then `populate_drag_handle_hit_regions_from`).
 //! - `populate_drag_handle_hit_regions_from` — populate drag-handle hit regions
-//!   from a pre-computed entry list (avoids a second collection pass for
-//!   callers that already hold a `collect_drag_handle_entries` result).
+//!   from the `collect_drag_handle_entries` result a frame already holds.
 //! - `collect_context_menu_vertices` — build vertices for the drag-handle reset
 //!   context menu popup when one is showing.
 //! - `populate_zone_hit_regions` — recompute zone interaction hit regions
@@ -36,17 +32,8 @@ use super::token_colors::{
 use crate::pipeline::{RectVertex, rect_vertices};
 
 impl Compositor {
-    /// Recompute runtime-internal drag-handle hit regions for the current frame.
-    pub fn populate_drag_handle_hit_regions(&self, scene: &mut SceneGraph, sw: f32, sh: f32) {
-        let handles = self.collect_drag_handle_entries(scene, sw, sh);
-        self.populate_drag_handle_hit_regions_from(scene, handles);
-    }
-
-    /// Populate drag-handle hit regions from a pre-computed entry list.
-    ///
-    /// Callers that already hold a `collect_drag_handle_entries` result (e.g.
-    /// `render_frame_headless`) should use this variant to avoid a second
-    /// collection pass.
+    /// Populate drag-handle hit regions from a `collect_drag_handle_entries`
+    /// result (called by `render_frame_headless` and the windowed frame path).
     pub(super) fn populate_drag_handle_hit_regions_from(
         &self,
         scene: &mut SceneGraph,

@@ -1,19 +1,15 @@
 //! Motion-polish primitives for the portal tile render path (hud-bq0gl.10).
 //!
 //! This module hosts the **pure, deterministic** building blocks for compositor
-//! animation: easing curves, scalar/geometry interpolation, frame-rate-
+//! animation: easing curves, scalar interpolation, frame-rate-
 //! independent scroll smoothing, and a streaming-reveal fade ramp. The runtime
 //! never sits in the frame loop (RFC 0013 §3 — *arrival time ≠ presentation
 //! time*): adapters set targets (scroll offset, content), and these primitives
 //! drive the *presentation-time* interpolation the compositor owns.
 //!
 //! Everything here is split so that the time-independent math is testable
-//! without sleeping. The stateful machines ([`GeometryTransition`],
-//! [`ScrollSmoother`]) expose a pure `sample`/`advance` core that the timed
-//! wrappers feed; tests exercise the pure core directly for determinism, per the
-//! engineering-bar testing standard (invariants over point values).
-
-use tze_hud_scene::types::Rect;
+//! without sleeping. The stateful machine ([`ScrollSmoother`]) exposes a pure
+//! `advance` core; tests exercise it directly for determinism.
 
 /// Easing curve applied to a normalized progress value `t ∈ [0, 1]`.
 ///
@@ -60,20 +56,6 @@ pub fn lerp(a: f32, b: f32, t: f32) -> f32 {
     a + (b - a) * t
 }
 
-/// Component-wise linear interpolation of a [`Rect`] (position **and** size).
-///
-/// This is the size/position-morph primitive for collapse/expand transitions:
-/// pass an eased `t` to morph geometry instead of snapping.
-#[inline]
-pub fn lerp_rect(from: Rect, to: Rect, t: f32) -> Rect {
-    Rect {
-        x: lerp(from.x, to.x, t),
-        y: lerp(from.y, to.y, t),
-        width: lerp(from.width, to.width, t),
-        height: lerp(from.height, to.height, t),
-    }
-}
-
 /// Frame-rate-independent exponential smoothing factor.
 ///
 /// Returns the fraction `α ∈ [0, 1]` of the remaining distance to a target that
@@ -95,86 +77,6 @@ pub fn exp_smooth_factor(dt_ms: f32, tau_ms: f32) -> f32 {
     }
     let dt = dt_ms.max(0.0);
     (1.0 - (-dt / tau_ms).exp()).clamp(0.0, 1.0)
-}
-
-/// A timed morph of a [`Rect`] (position + size) and opacity, for collapse and
-/// expand transitions.
-///
-/// Splits cleanly into a **pure** sampler ([`GeometryTransition::sample`], which
-/// takes raw linear progress and applies easing) and a **timed** reader
-/// ([`GeometryTransition::current`], which derives progress from the wall
-/// clock). Tests drive `sample` directly so geometry interpolation is verified
-/// without sleeping.
-#[derive(Clone, Copy, Debug)]
-pub struct GeometryTransition {
-    start: std::time::Instant,
-    duration_ms: u32,
-    from: Rect,
-    to: Rect,
-    from_opacity: f32,
-    to_opacity: f32,
-    easing: Easing,
-}
-
-impl GeometryTransition {
-    /// Start a geometry+opacity transition from `from` to `to` over
-    /// `duration_ms`, shaped by `easing`.
-    pub fn new(
-        from: Rect,
-        to: Rect,
-        from_opacity: f32,
-        to_opacity: f32,
-        duration_ms: u32,
-        easing: Easing,
-    ) -> Self {
-        Self {
-            start: std::time::Instant::now(),
-            duration_ms,
-            from,
-            to,
-            from_opacity: from_opacity.clamp(0.0, 1.0),
-            to_opacity: to_opacity.clamp(0.0, 1.0),
-            easing,
-        }
-    }
-
-    /// Raw linear progress `∈ [0, 1]` derived from elapsed wall time.
-    ///
-    /// A `duration_ms` of `0` reports `1.0` (already complete).
-    #[inline]
-    pub fn linear_progress(&self) -> f32 {
-        if self.duration_ms == 0 {
-            return 1.0;
-        }
-        let elapsed_ms = self.start.elapsed().as_millis() as f32;
-        (elapsed_ms / self.duration_ms as f32).clamp(0.0, 1.0)
-    }
-
-    /// **Pure** geometry + opacity at the given raw linear progress.
-    ///
-    /// Easing is applied internally, so callers pass un-eased `linear_t`. At
-    /// `linear_t == 0` returns `(from, from_opacity)`; at `1` returns
-    /// `(to, to_opacity)`.
-    #[inline]
-    pub fn sample(&self, linear_t: f32) -> (Rect, f32) {
-        let e = self.easing.apply(linear_t);
-        (
-            lerp_rect(self.from, self.to, e),
-            lerp(self.from_opacity, self.to_opacity, e),
-        )
-    }
-
-    /// Current geometry + opacity at the present wall-clock time.
-    #[inline]
-    pub fn current(&self) -> (Rect, f32) {
-        self.sample(self.linear_progress())
-    }
-
-    /// Whether the transition has fully elapsed.
-    #[inline]
-    pub fn is_complete(&self) -> bool {
-        self.start.elapsed().as_millis() >= self.duration_ms as u128
-    }
 }
 
 /// Per-tile smoothed scroll offset (smooth scroll / animated follow-tail).
@@ -216,12 +118,6 @@ impl ScrollSmoother {
             tau_ms: SCROLL_SMOOTH_TAU_MS,
             snap_epsilon: SCROLL_SNAP_EPSILON_PX,
         }
-    }
-
-    /// Override the time constant (ms). Larger = slower catch-up.
-    pub fn with_tau_ms(mut self, tau_ms: f32) -> Self {
-        self.tau_ms = tau_ms;
-        self
     }
 
     /// The currently displayed (smoothed) offset.
@@ -320,15 +216,6 @@ mod tests {
 
     const EPS: f32 = 1e-5;
 
-    fn rect(x: f32, y: f32, w: f32, h: f32) -> Rect {
-        Rect {
-            x,
-            y,
-            width: w,
-            height: h,
-        }
-    }
-
     // ── Easing curves ───────────────────────────────────────────────────────
 
     #[test]
@@ -395,17 +282,6 @@ mod tests {
         assert!((lerp(10.0, 20.0, 0.5) - 15.0).abs() < EPS);
     }
 
-    #[test]
-    fn lerp_rect_interpolates_all_four_components() {
-        let from = rect(0.0, 0.0, 100.0, 40.0);
-        let to = rect(20.0, 10.0, 200.0, 80.0);
-        let mid = lerp_rect(from, to, 0.5);
-        assert!((mid.x - 10.0).abs() < EPS);
-        assert!((mid.y - 5.0).abs() < EPS);
-        assert!((mid.width - 150.0).abs() < EPS);
-        assert!((mid.height - 60.0).abs() < EPS);
-    }
-
     // ── Exponential smoothing factor ────────────────────────────────────────
 
     #[test]
@@ -431,50 +307,6 @@ mod tests {
     fn smooth_factor_non_positive_tau_snaps() {
         assert!((exp_smooth_factor(5.0, 0.0) - 1.0).abs() < EPS);
         assert!((exp_smooth_factor(5.0, -10.0) - 1.0).abs() < EPS);
-    }
-
-    // ── GeometryTransition (pure sampler) ───────────────────────────────────
-
-    #[test]
-    fn geometry_transition_samples_endpoints() {
-        let from = rect(0.0, 0.0, 100.0, 40.0);
-        let to = rect(50.0, 25.0, 300.0, 120.0);
-        let tr = GeometryTransition::new(from, to, 0.0, 1.0, 200, Easing::EaseInOut);
-
-        let (g0, o0) = tr.sample(0.0);
-        assert!((g0.x - from.x).abs() < EPS && (g0.width - from.width).abs() < EPS);
-        assert!((o0 - 0.0).abs() < EPS);
-
-        let (g1, o1) = tr.sample(1.0);
-        assert!((g1.x - to.x).abs() < EPS && (g1.height - to.height).abs() < EPS);
-        assert!((o1 - 1.0).abs() < EPS);
-    }
-
-    #[test]
-    fn geometry_transition_midpoint_uses_easing() {
-        let from = rect(0.0, 0.0, 100.0, 0.0);
-        let to = rect(0.0, 0.0, 200.0, 0.0);
-        // EaseInOut at linear 0.5 → eased 0.5 → width midpoint 150.
-        let tr = GeometryTransition::new(from, to, 1.0, 1.0, 100, Easing::EaseInOut);
-        let (g, _) = tr.sample(0.5);
-        assert!((g.width - 150.0).abs() < EPS);
-
-        // Geometry interpolates across frames rather than snapping: an early
-        // linear progress yields a width strictly between from and to.
-        let (g_early, _) = tr.sample(0.2);
-        assert!(
-            g_early.width > 100.0 && g_early.width < 150.0,
-            "expected in-between width, got {}",
-            g_early.width
-        );
-    }
-
-    #[test]
-    fn geometry_transition_zero_duration_is_complete() {
-        let r = rect(0.0, 0.0, 10.0, 10.0);
-        let tr = GeometryTransition::new(r, r, 1.0, 1.0, 0, Easing::EaseInOut);
-        assert!((tr.linear_progress() - 1.0).abs() < EPS);
-        assert!(tr.is_complete());
     }
 
     // ── ScrollSmoother ──────────────────────────────────────────────────────
