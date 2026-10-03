@@ -258,114 +258,34 @@ async fn run_accept_loop(
     tracing::info!(addr = %local_addr, "MCP HTTP accept loop exited");
 }
 
-/// Handle a single HTTP connection: read request, dispatch, write response.
-///
-/// This is a minimal HTTP/1.0 handler — one request per connection, no
-/// keep-alive, no TLS.  For production-grade serving, replace with an axum
-/// or hyper-based integration.
+/// Handle a single HTTP connection: read request, route, write response.
 async fn handle_connection(
     mut stream: tokio::net::TcpStream,
     peer: SocketAddr,
     server: Arc<McpServer>,
 ) {
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use crate::http::{self, ReadError, Response, Route};
+    use tokio::io::AsyncWriteExt;
 
-    // Read the full HTTP request.  A single read() may return a partial TCP
-    // segment (headers without body, or truncated body), so we loop until we
-    // find the header/body boundary and have received Content-Length bytes of
-    // body.  Cap total read at 64 KiB to bound memory.
-    const MAX_REQUEST: usize = 65536;
-    let mut buf = Vec::with_capacity(4096);
-    let mut tmp = [0u8; 4096];
-
-    // Phase 1: read until we have the full headers (terminated by \r\n\r\n).
-    let header_end;
-    loop {
-        let n = match stream.read(&mut tmp).await {
-            Ok(0) => return,
-            Ok(n) => n,
-            Err(e) => {
-                tracing::debug!(peer = %peer, error = %e, "MCP: read error");
-                return;
+    let response = match http::read_request(&mut stream, http::READ_TIMEOUT).await {
+        Ok(req) => match http::route(&req.method, &req.path) {
+            Route::Mcp => {
+                // Config-gated resident-principal grant (hud-nu65o); the PSK
+                // check still happens independently inside `dispatch`.
+                let ctx = server.caller_context(req.bearer);
+                let body = std::str::from_utf8(&req.body).unwrap_or("");
+                Response::json(server.dispatch(body, &ctx).await)
             }
-        };
-        buf.extend_from_slice(&tmp[..n]);
-        if buf.len() > MAX_REQUEST {
-            tracing::debug!(peer = %peer, "MCP: request too large, dropping");
+            Route::Respond(resp) => resp,
+        },
+        Err(ReadError::Malformed) => Response::bad_request(),
+        Err(e) => {
+            tracing::debug!(peer = %peer, error = ?e, "MCP: dropping connection");
             return;
         }
-        if let Some(pos) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
-            header_end = pos;
-            break;
-        }
-    }
-
-    let body_start = header_end + 4;
-
-    // Parse Content-Length and extract bearer token from headers before we
-    // mutate `buf` further (satisfies the borrow checker).
-    let (content_length, bearer_token) = {
-        let header_section = std::str::from_utf8(&buf[..header_end]).unwrap_or("");
-
-        let cl: usize = header_section
-            .lines()
-            .find(|l| l.to_lowercase().starts_with("content-length:"))
-            .and_then(|l| l.split_once(':').map(|x| x.1))
-            .and_then(|v| v.trim().parse().ok())
-            .unwrap_or(0);
-
-        let bt = header_section
-            .lines()
-            .find(|l| l.to_lowercase().starts_with("authorization:"))
-            .and_then(|l| l.split_once(':').map(|x| x.1))
-            .map(|v| v.trim().to_owned())
-            .and_then(|v| {
-                let mut parts = v.splitn(2, ' ');
-                match (parts.next(), parts.next()) {
-                    (Some(scheme), Some(credentials)) if scheme.eq_ignore_ascii_case("bearer") => {
-                        Some(credentials.trim().to_owned())
-                    }
-                    _ => None,
-                }
-            });
-
-        (cl, bt)
     };
 
-    // Phase 2: read remaining body bytes if we don't have them yet.
-    let body_end = body_start + content_length;
-    while buf.len() < body_end {
-        if buf.len() > MAX_REQUEST {
-            tracing::debug!(peer = %peer, "MCP: request too large, dropping");
-            return;
-        }
-        let n = match stream.read(&mut tmp).await {
-            Ok(0) => break, // EOF — use what we have
-            Ok(n) => n,
-            Err(e) => {
-                tracing::debug!(peer = %peer, error = %e, "MCP: read error (body)");
-                return;
-            }
-        };
-        buf.extend_from_slice(&tmp[..n]);
-    }
-
-    let body = std::str::from_utf8(&buf[body_start..buf.len().min(body_end)]).unwrap_or("");
-
-    // Apply the config-gated resident-principal grant (hud-nu65o).  This is the
-    // only place the production HTTP transport decides capabilities; the actual
-    // PSK check still happens independently inside `dispatch`.
-    let ctx = server.caller_context(bearer_token);
-
-    let response_body = server.dispatch(body, &ctx).await;
-
-    let http_response = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-        response_body.len(),
-        response_body,
-    );
-
-    if let Err(e) = stream.write_all(http_response.as_bytes()).await {
+    if let Err(e) = stream.write_all(&response.to_bytes()).await {
         tracing::debug!(peer = %peer, error = %e, "MCP: write error");
     }
 }
@@ -412,6 +332,49 @@ mod tests {
         let mut resp = Vec::new();
         conn.read_to_end(&mut resp).await.expect("read");
         String::from_utf8_lossy(&resp).into_owned()
+    }
+
+    /// Raw request helper for routing tests.
+    async fn http_raw(addr: SocketAddr, request: &str) -> String {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let mut conn = tokio::net::TcpStream::connect(addr).await.expect("connect");
+        conn.write_all(request.as_bytes()).await.expect("write");
+        let mut resp = Vec::new();
+        conn.read_to_end(&mut resp).await.expect("read");
+        String::from_utf8_lossy(&resp).into_owned()
+    }
+
+    #[tokio::test]
+    async fn mcp_http_routes_by_method_and_path() {
+        let shutdown = ShutdownToken::new();
+        let (handle, addrs) =
+            start_mcp_http_server(make_scene(), make_config(0, "k"), shutdown.clone(), None)
+                .await
+                .expect("start");
+        let addr = addrs[0];
+        let list = r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#;
+        let post = |path: &str| {
+            format!(
+                "POST {path} HTTP/1.1\r\nAuthorization: Bearer k\r\nContent-Length: {}\r\n\r\n{list}",
+                list.len()
+            )
+        };
+        for path in ["/", "/mcp"] {
+            let r = http_raw(addr, &post(path)).await;
+            assert!(r.starts_with("HTTP/1.1 200 "), "{path}: {r}");
+            assert!(r.contains("hud_publish"), "{path}: {r}");
+        }
+        let r = http_raw(addr, "GET / HTTP/1.1\r\n\r\n").await;
+        assert!(
+            r.starts_with("HTTP/1.1 405 ") && r.contains("Allow: POST"),
+            "{r}"
+        );
+        assert!(!r.contains("jsonrpc"));
+        let r = http_raw(addr, &post("/nope")).await;
+        assert!(r.starts_with("HTTP/1.1 404 "), "{r}");
+        assert!(!r.contains("jsonrpc"));
+        shutdown.trigger(crate::threads::ShutdownReason::Clean);
+        handle.await.expect("task");
     }
 
     #[tokio::test]
