@@ -22,8 +22,10 @@ use super::token_colors::{
     NOTIFICATION_DISMISS_FONT_SIZE_PX, NOTIFICATION_DISMISS_FONT_WEIGHT,
     NOTIFICATION_DISMISS_GAP_PX, NOTIFICATION_ICON_GAP_PX, NOTIFICATION_ICON_SIZE_PX,
     NOTIFICATION_INTER_LINE_GAP, NOTIFICATION_TITLE_WEIGHT, is_alert_banner_zone,
-    notification_dismiss_bounds, resolve_composer_overlay_tokens, resolve_jump_to_latest_tokens,
-    resolve_scroll_indicator_tokens, resolve_transcript_max_measure_px, resolve_viewer_echo_tokens,
+    notification_action_button_bounds, notification_dismiss_bounds,
+    resolve_composer_overlay_tokens, resolve_jump_to_latest_tokens,
+    resolve_notification_action_tokens, resolve_scroll_indicator_tokens,
+    resolve_transcript_max_measure_px, resolve_viewer_echo_tokens,
 };
 
 /// Default line-height multiplier (`font_size_px × 1.4 = line_height_px`).
@@ -503,6 +505,9 @@ impl super::Compositor {
                         .and_then(|v| v.trim_end_matches("px").parse::<f32>().ok())
                         .unwrap_or(NOTIFICATION_DISMISS_FONT_SIZE_PX)
                         .clamp(6.0, 200.0);
+                    let action_tokens = resolve_notification_action_tokens(&self.token_map);
+                    let (notif_action_font_size_px, notif_action_font_weight) =
+                        (action_tokens.font_size_px, action_tokens.font_weight);
                     let notif_dismiss_font_weight = self
                         .token_map
                         .get("typography.notification.dismiss.font_weight")
@@ -684,6 +689,39 @@ impl super::Compositor {
                                         ow,
                                         effective_opacity,
                                     ));
+                                }
+
+                                if self.text_rasterizer.is_some() {
+                                    let n_actions =
+                                        payload.actions.len().min(MAX_NOTIFICATION_ACTIONS);
+                                    for (action, b) in payload.actions.iter().zip(
+                                        notification_action_button_bounds(
+                                            zx,
+                                            slot_y,
+                                            zw,
+                                            effective_slot_h,
+                                            n_actions,
+                                        ),
+                                    ) {
+                                        items.push(Self::make_zone_text_item(
+                                            Arc::from(action.label.as_str()),
+                                            b.x,
+                                            b.y + (b.height - notif_action_font_size_px * 1.4)
+                                                .max(0.0)
+                                                * 0.5,
+                                            b.width.max(1.0),
+                                            b.height.max(1.0),
+                                            notif_action_font_size_px,
+                                            font_family,
+                                            notif_action_font_weight,
+                                            color,
+                                            tze_hud_scene::types::TextAlign::Center,
+                                            tze_hud_scene::types::TextOverflow::Clip,
+                                            None,
+                                            None,
+                                            effective_opacity,
+                                        ));
+                                    }
                                 }
 
                                 if !is_alert_banner_zone(zone_name)

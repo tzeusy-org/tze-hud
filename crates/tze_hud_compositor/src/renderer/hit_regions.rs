@@ -22,14 +22,16 @@
 //!   runtime "jump to latest" pill hit region for scrolled-back portal tiles
 //!   (hud-9ci61) via `populate_jump_to_latest_hit_regions`.
 
+use std::collections::HashMap;
+
 use tze_hud_scene::graph::SceneGraph;
 use tze_hud_scene::types::*;
 
 use super::Compositor;
 use super::draw_cmds::DragHandleEntry;
 use super::token_colors::{
-    is_alert_banner_zone, resolve_jump_to_latest_tokens, resolve_scroll_indicator_tokens,
-    sort_alert_banner_indices,
+    notification_action_button_bounds, notification_dismiss_bounds, resolve_jump_to_latest_tokens,
+    resolve_scroll_indicator_tokens,
 };
 use crate::pipeline::{RectVertex, rect_vertices};
 
@@ -152,7 +154,7 @@ impl Compositor {
     /// return `ZoneInteraction` for zone affordances based on the most recently
     /// rendered layout.
     pub fn populate_zone_hit_regions(&self, scene: &mut SceneGraph, sw: f32, sh: f32) {
-        let mut tab_order = populate_notification_hit_regions(scene, sw, sh);
+        let mut tab_order = populate_notification_hit_regions(scene, sw, sh, &self.token_map);
 
         // ── Jump-to-latest pill hit region (hud-9ci61) ───────────────────────
         // Recomputed here (not only at render time) so windowed hit-testing,
@@ -245,16 +247,14 @@ impl Compositor {
 ///
 /// # Layout
 ///
-/// For each notification slot (height = `stack_slot_height(policy)`):
+/// For each notification slot (heights from `Compositor::zone_slot_layout_with_tokens`, the same layout the renderer uses):
 ///
 /// - **Dismiss button**: a square in the top-right corner of the slot.
-///   Size: `DISMISS_BUTTON_SIZE × DISMISS_BUTTON_SIZE` px.
-///   Position: `(slot_right - DISMISS_BUTTON_SIZE, slot_y)`.
+///   See `notification_dismiss_bounds`.
 ///
 /// - **Action buttons**: a horizontal row at the bottom of the slot.
-///   Each button is `ACTION_BUTTON_H` px tall and
-///   `(slot_w - inset * 2) / n_actions` px wide (where `n_actions` is
-///   capped at `MAX_NOTIFICATION_ACTIONS`).
+///   See `notification_action_button_bounds` (shared with the renderer);
+///   `n_actions` is capped at `MAX_NOTIFICATION_ACTIONS`.
 ///
 /// Tab order within a slot: dismiss button first, then actions left-to-right.
 /// Slots are ordered top-to-bottom (slot 0 = newest, matching rendering order).
@@ -266,14 +266,12 @@ impl Compositor {
 /// notification buttons clickable through `SceneGraph::hit_test`.
 ///
 /// Returns the next free tab-order index.
-pub fn populate_notification_hit_regions(scene: &mut SceneGraph, sw: f32, sh: f32) -> u32 {
-    /// Side length of the dismiss (×) button in pixels.
-    const DISMISS_BUTTON_SIZE: f32 = 20.0;
-    /// Height of each action button row in pixels.
-    const ACTION_BUTTON_H: f32 = 22.0;
-    /// Horizontal inset used to position action buttons (matches notification inset).
-    const ACTION_INSET: f32 = 9.0;
-
+pub fn populate_notification_hit_regions(
+    scene: &mut SceneGraph,
+    sw: f32,
+    sh: f32,
+    token_map: &HashMap<String, String>,
+) -> u32 {
     scene.overlay.zone_hit_regions.clear();
     let mut tab_order: u32 = 0;
 
@@ -302,32 +300,11 @@ pub fn populate_notification_hit_regions(scene: &mut SceneGraph, sw: f32, sh: f3
 
         let policy = &zone_def.rendering_policy;
         let (zx, zy, zw, zh) = Compositor::resolve_zone_geometry(&zone_def.geometry_policy, sw, sh);
-        let slot_h = Compositor::stack_slot_height(policy);
+        let layout =
+            Compositor::zone_slot_layout_with_tokens(token_map, zone_name, publishes, policy, zh);
 
-        // alert-banner uses dynamic height; other Stack zones use configured zh.
-        let effective_zh = if is_alert_banner_zone(zone_name) {
-            publishes.len() as f32 * slot_h
-        } else {
-            zh
-        };
-
-        // Ordered as in render_zone_content: newest-first for regular zones,
-        // severity-descending for alert-banner.
-        let ordered: Vec<&ZonePublishRecord> = if is_alert_banner_zone(zone_name) {
-            sort_alert_banner_indices(publishes)
-                .into_iter()
-                .map(|idx| &publishes[idx])
-                .collect()
-        } else {
-            publishes.iter().rev().collect()
-        };
-
-        for (slot_idx, record) in ordered.iter().enumerate() {
-            let slot_y = zy + slot_idx as f32 * slot_h;
-            if slot_y >= zy + effective_zh {
-                break;
-            }
-            let effective_slot_h = slot_h.min((zy + effective_zh) - slot_y);
+        for (pub_idx, slot_y, effective_slot_h) in layout.iter_visible(zy) {
+            let record = &publishes[pub_idx];
 
             let n_payload = match &record.content {
                 ZoneContent::Notification(n) => n,
@@ -335,13 +312,8 @@ pub fn populate_notification_hit_regions(scene: &mut SceneGraph, sw: f32, sh: f3
             };
 
             // ── Dismiss (×) button ────────────────────────────────────────
-            // Top-right corner of the slot, DISMISS_BUTTON_SIZE square.
-            let dismiss_bounds = Rect::new(
-                zx + zw - DISMISS_BUTTON_SIZE,
-                slot_y,
-                DISMISS_BUTTON_SIZE,
-                DISMISS_BUTTON_SIZE.min(effective_slot_h),
-            );
+            // Top-right corner of the slot; same bounds the renderer draws.
+            let dismiss_bounds = notification_dismiss_bounds(zx, slot_y, zw, effective_slot_h);
             let dismiss_id = format!(
                 "zone:{}:dismiss:{}:{}",
                 zone_name, record.published_at_wall_us, record.publisher_namespace,
@@ -360,18 +332,10 @@ pub fn populate_notification_hit_regions(scene: &mut SceneGraph, sw: f32, sh: f3
             // ── Action buttons ────────────────────────────────────────────
             let n_actions = n_payload.actions.len().min(MAX_NOTIFICATION_ACTIONS);
             if n_actions > 0 {
-                let avail_w = (zw - ACTION_INSET * 2.0).max(1.0);
-                let btn_w = avail_w / n_actions as f32;
-                let action_y = slot_y + effective_slot_h - ACTION_BUTTON_H;
+                let action_rects =
+                    notification_action_button_bounds(zx, slot_y, zw, effective_slot_h, n_actions);
 
-                for (btn_idx, action) in n_payload.actions.iter().take(n_actions).enumerate() {
-                    let btn_x = zx + ACTION_INSET + btn_idx as f32 * btn_w;
-                    let action_bounds = Rect::new(
-                        btn_x,
-                        action_y.max(slot_y),
-                        btn_w,
-                        ACTION_BUTTON_H.min(effective_slot_h),
-                    );
+                for (action, action_bounds) in n_payload.actions.iter().zip(action_rects) {
                     let action_id = format!(
                         "zone:{}:action:{}:{}:{}",
                         zone_name,

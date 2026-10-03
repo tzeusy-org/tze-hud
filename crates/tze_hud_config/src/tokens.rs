@@ -463,6 +463,22 @@ pub static CANONICAL_TOKENS: &[CanonicalToken] = &[
         description: "Disconnection badge square extent on orphaned tiles (px)",
         default_value: "16",
     },
+    // Notification action buttons (docs/api.md notification `actions`).
+    CanonicalToken {
+        key: "notification.action.background",
+        description: "Fill of notification action buttons (RGBA hex)",
+        default_value: "#FFFFFF26",
+    },
+    CanonicalToken {
+        key: "typography.notification.action.font_size_px",
+        description: "Notification action button label font size (px)",
+        default_value: "12",
+    },
+    CanonicalToken {
+        key: "typography.notification.action.font_weight",
+        description: "Notification action button label font weight",
+        default_value: "600",
+    },
     CanonicalToken {
         key: "tile.margin",
         description: "Inset of claimed tiles from the display edge (px)",

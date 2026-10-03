@@ -34,9 +34,10 @@ use super::draw_cmds::TexturedDrawCmd;
 use super::token_colors::{
     ICON_SIZE_PX, NOTIFICATION_BACKDROP_OPACITY, NOTIFICATION_BODY_SCALE,
     NOTIFICATION_ICON_SIZE_PX, NOTIFICATION_INTER_LINE_GAP, STATIC_IMAGE_PLACEHOLDER_COLOR,
-    emit_border_quads, is_alert_banner_zone, notification_dismiss_bounds,
-    resolve_border_default_color, resolve_notification_control_color, sort_alert_banner_indices,
-    urgency_to_notification_color, urgency_to_severity_color,
+    emit_border_quads, is_alert_banner_zone, notification_action_button_bounds,
+    notification_dismiss_bounds, resolve_border_default_color, resolve_notification_action_tokens,
+    resolve_notification_control_color, sort_alert_banner_indices, urgency_to_notification_color,
+    urgency_to_severity_color,
 };
 use crate::pipeline::RectVertex;
 use crate::pipeline::rect_vertices;
@@ -258,6 +259,33 @@ impl Compositor {
                                     sh,
                                     self.gpu_color(control_color),
                                 );
+                            }
+                        }
+
+                        // Action buttons: token-filled rects at exactly the bounds
+                        // `populate_notification_hit_regions` registers; labels are
+                        // drawn by `collect_text_items`.
+                        if let ZoneContent::Notification(payload) = &record.content {
+                            let n_actions = payload.actions.len().min(MAX_NOTIFICATION_ACTIONS);
+                            let action_tokens = resolve_notification_action_tokens(&self.token_map);
+                            let mut fill = action_tokens.background;
+                            fill.a *= combined_opacity;
+                            for b in notification_action_button_bounds(
+                                x,
+                                slot_y,
+                                w,
+                                effective_slot_h,
+                                n_actions,
+                            ) {
+                                vertices.extend_from_slice(&rect_vertices(
+                                    b.x,
+                                    b.y,
+                                    b.width,
+                                    b.height,
+                                    sw,
+                                    sh,
+                                    self.gpu_color(fill),
+                                ));
                             }
                         }
 
@@ -695,14 +723,25 @@ impl Compositor {
         policy: &RenderingPolicy,
         zh: f32,
     ) -> super::ZoneSlotLayout {
+        Self::zone_slot_layout_with_tokens(&self.token_map, zone_name, publishes, policy, zh)
+    }
+
+    /// [`Self::zone_slot_layout`] without a compositor, so GPU-free hit-region
+    /// population lays slots out with the exact same function as drawing.
+    pub(super) fn zone_slot_layout_with_tokens(
+        token_map: &HashMap<String, String>,
+        zone_name: &str,
+        publishes: &[ZonePublishRecord],
+        policy: &RenderingPolicy,
+        zh: f32,
+    ) -> super::ZoneSlotLayout {
         let ordered_indices: Vec<usize> = if is_alert_banner_zone(zone_name) {
             sort_alert_banner_indices(publishes)
         } else {
             (0..publishes.len()).rev().collect()
         };
 
-        let notif_body_scale = self
-            .token_map
+        let notif_body_scale = token_map
             .get("typography.notification.body.scale")
             .and_then(|v| v.parse::<f32>().ok())
             .filter(|v| v.is_finite())
