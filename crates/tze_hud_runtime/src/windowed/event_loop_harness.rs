@@ -277,6 +277,8 @@ impl HeadlessEventLoopHarness {
             agents: Arc::clone(&cfg.agents),
             presents: None,
             capture: None,
+            restart: None,
+            bind_gate: None,
         };
         let (_mcp_task, mcp_addrs) = crate::mcp::start_mcp_http_server(
             scene_handle,

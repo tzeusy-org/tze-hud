@@ -133,6 +133,13 @@ pub fn set_build_info(info: BuildInfo) {
     let _ = BUILD_INFO.set(info);
 }
 
+/// Full git SHA of this build, `"unknown"` before [`set_build_info`].
+pub fn build_sha() -> String {
+    BUILD_INFO
+        .get()
+        .map_or_else(|| "unknown".to_owned(), |b| b.sha.clone())
+}
+
 /// Process start, as far as this crate can tell: the first time it is asked.
 pub fn process_start() -> Instant {
     *PROCESS_START.get_or_init(Instant::now)
@@ -204,6 +211,8 @@ pub struct StatusSource {
     pub log_path: std::path::PathBuf,
     /// Compositor capture channel behind `/admin/screenshot`.
     pub capture: Option<crate::operator::screenshot::CaptureEndpoint>,
+    /// Relaunch behind `POST /admin/restart`.
+    pub restart: Option<crate::operator::handoff::RestartHandle>,
 }
 
 /// Window over which `cpu_pct_2s` is sampled.
@@ -260,6 +269,12 @@ impl StatusSource {
             "cpu_pct_avg": cpu_pct_avg,
             // No updater yet (separate bead); the key is reserved.
             "last_update": Value::Null,
+            // Outcome of the last restart that did not hand over (a successful
+            // one ends this process): null, or {ok, pid, error}.
+            "last_restart": self
+                .restart
+                .as_ref()
+                .map_or(Value::Null, |r| r.last_json()),
         })
     }
 }

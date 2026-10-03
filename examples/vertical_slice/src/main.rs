@@ -166,6 +166,8 @@ fn run_windowed() -> Result<(), Box<dyn std::error::Error>> {
         monitor_index: None,    // Use primary monitor.
         benchmark: None,        // Demo mode is unbounded until the window closes.
         quiescent_efficiency: None, // Demo mode never self-terminates for CI evidence.
+        relaunch: None,         // No /admin/restart for the demo.
+        handoff: None,
     };
 
     let runtime = WindowedRuntime::new(config);

@@ -78,10 +78,12 @@
 //! ```
 
 use tze_hud_config::{agents_file, agents_path_for, resolve_config_path, validate_config};
+use tze_hud_runtime::operator::handoff::{self, HandoffChild};
 use tze_hud_runtime::operator::install::{self, Acquire, Action, InstallPaths};
 use tze_hud_runtime::window::{WindowConfig, WindowMode};
 use tze_hud_runtime::windowed::{
-    WindowedBenchmarkConfig, WindowedConfig, WindowedQuiescentEfficiencyConfig, WindowedRuntime,
+    Relaunch, WindowedBenchmarkConfig, WindowedConfig, WindowedQuiescentEfficiencyConfig,
+    WindowedRuntime,
 };
 use tze_hud_scene::config::AgentDirectory;
 
@@ -144,6 +146,10 @@ OPTIONS:
                            %LOCALAPPDATA%\tze_hud (config, agents, logs)
     --handoff              Wait up to 35 s for a previous instance to exit instead
                            of exiting 0 because one is already running
+    --handoff <ip:port:nonce>
+                           Internal (POST /admin/restart): started by a running
+                           instance, which this one replaces once its first frame
+                           is up. Not for manual use.
     --help                 Print this help and exit
     --version              Print version and exit
 
@@ -215,6 +221,9 @@ struct StartupOptions {
     purge: bool,
     /// `--handoff`: wait for a previous instance to exit before starting.
     handoff: bool,
+    /// `--handoff <spec>`: started by a running instance's restart; report
+    /// ready after the first frame and take over from it.
+    handoff_child: Option<handoff::ChildSpec>,
 }
 
 impl Default for StartupOptions {
@@ -240,6 +249,7 @@ impl Default for StartupOptions {
             uninstall: false,
             purge: false,
             handoff: false,
+            handoff_child: None,
         }
     }
 }
@@ -423,7 +433,16 @@ fn parse_options(args: &[String]) -> Result<StartupOptions, String> {
             "--install" => opts.install = true,
             "--uninstall" => opts.uninstall = true,
             "--purge" => opts.purge = true,
-            "--handoff" => opts.handoff = true,
+            "--handoff" => match args.get(i + 1).filter(|next| !next.starts_with("--")) {
+                // A restart's `--handoff <ip:port:nonce>`.
+                Some(spec) => {
+                    opts.handoff_child = Some(
+                        handoff::ChildSpec::parse(spec).map_err(|e| format!("--handoff: {e}"))?,
+                    );
+                    i += 1;
+                }
+                None => opts.handoff = true,
+            },
             "--config" => {
                 i += 1;
                 opts.config_path = Some(
@@ -823,7 +842,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Collect CLI args, skipping argv[0] (the binary name).
     let args: Vec<String> = std::env::args().skip(1).collect();
 
-    let opts = parse_options(&args).unwrap_or_else(|e| {
+    let mut opts = parse_options(&args).unwrap_or_else(|e| {
         eprintln!("error: {e}");
         std::process::exit(1);
     });
@@ -872,27 +891,34 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         std::time::Duration::ZERO
     };
-    let _instance = match install::acquire_single_instance(wait) {
-        Acquire::Acquired(guard) => guard,
-        Acquire::AlreadyRunning => {
-            // Silent exit 0 only for a bare launch or the autostart command;
-            // a launch with explicit args (benchmark, validation, CI) did not
-            // do its work and must say so.
-            let canonical = InstallPaths::from_env()
-                .map(|p| install::is_canonical_launch(&args, &p))
-                .unwrap_or(args.is_empty());
-            if canonical {
-                tracing::info!("tze_hud is already running; exiting");
-                std::process::exit(0);
-            }
-            tracing::error!(
-                "tze_hud is already running; refusing to start with explicit arguments"
-            );
-            eprintln!(
-                "error: tze_hud is already running for this user; not starting another instance \
+    // A restart's replacement does not take the instance mutex now: the old
+    // instance holds it until the replacement reports ready (first frame), and
+    // the replacement then takes it over (see `HandoffChild::first_present`).
+    let _instance = if opts.handoff_child.is_some() {
+        None
+    } else {
+        match install::acquire_single_instance(wait) {
+            Acquire::Acquired(guard) => Some(guard),
+            Acquire::AlreadyRunning => {
+                // Silent exit 0 only for a bare launch or the autostart command;
+                // a launch with explicit args (benchmark, validation, CI) did not
+                // do its work and must say so.
+                let canonical = InstallPaths::from_env()
+                    .map(|p| install::is_canonical_launch(&args, &p))
+                    .unwrap_or(args.is_empty());
+                if canonical {
+                    tracing::info!("tze_hud is already running; exiting");
+                    std::process::exit(0);
+                }
+                tracing::error!(
+                    "tze_hud is already running; refusing to start with explicit arguments"
+                );
+                eprintln!(
+                    "error: tze_hud is already running for this user; not starting another instance \
 (stop it, or pass --handoff to wait for it to exit)"
-            );
-            std::process::exit(2);
+                );
+                std::process::exit(2);
+            }
         }
     };
 
@@ -1070,6 +1096,11 @@ set {DEV_ALLOW_INSECURE_STARTUP_ENV}=1 only in debug/dev runs if you need fallba
         monitor_index: opts.monitor_index,
         benchmark,
         quiescent_efficiency,
+        relaunch: Some(Relaunch {
+            exe: current_exe,
+            args: args.clone(),
+        }),
+        handoff: opts.handoff_child.take().map(HandoffChild::new),
     };
 
     let runtime = WindowedRuntime::new(config);
@@ -1150,7 +1181,8 @@ mod tests {
                         || o.install
                         || o.uninstall
                         || o.purge
-                        || o.handoff)
+                        || o.handoff
+                        || o.handoff_child.is_some())
                 );
             }),
             ("install", &[], &["--install"], |o| {
@@ -1159,7 +1191,21 @@ mod tests {
             ("uninstall --purge", &[], &["--uninstall", "--purge"], |o| {
                 assert!(o.uninstall && o.purge);
             }),
-            ("handoff", &[], &["--handoff"], |o| assert!(o.handoff)),
+            ("handoff", &[], &["--handoff"], |o| {
+                assert!(o.handoff && o.handoff_child.is_none())
+            }),
+            // A restart's replacement: the spec is a value, not a bare flag.
+            (
+                "handoff spec",
+                &[],
+                &[
+                    "--handoff",
+                    "127.0.0.1:4242:abcdef0123456789",
+                    "--mcp-port",
+                    "9",
+                ],
+                |o| assert!(!o.handoff && o.handoff_child.is_some() && o.mcp_port == 9),
+            ),
             ("print-attach-info", &[], &["--print-attach-info"], |o| {
                 assert!(o.print_attach_info)
             }),
@@ -1318,6 +1364,12 @@ mod tests {
     #[test]
     fn parse_options_rejects() {
         let cases: &[(&str, Env, &[&str], &[&str])] = &[
+            (
+                "handoff spec off loopback",
+                &[],
+                &["--handoff", "10.0.0.1:4242:abcdef0123456789"],
+                &["--handoff", "not loopback"],
+            ),
             (
                 "unknown flag",
                 &[],

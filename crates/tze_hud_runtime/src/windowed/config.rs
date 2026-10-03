@@ -32,6 +32,14 @@ pub struct WindowedQuiescentEfficiencyConfig {
     pub build: String,
 }
 
+/// How `POST /admin/restart` relaunches this process: the current exe and the
+/// argv it was started with. Taken from the process itself, never from a request.
+#[derive(Debug, Clone)]
+pub struct Relaunch {
+    pub exe: PathBuf,
+    pub args: Vec<String>,
+}
+
 /// Configuration for the windowed runtime.
 #[derive(Debug, Clone)]
 pub struct WindowedConfig {
@@ -112,6 +120,11 @@ pub struct WindowedConfig {
     pub benchmark: Option<WindowedBenchmarkConfig>,
     /// Optional bounded, event-driven quiescent-efficiency measurement.
     pub quiescent_efficiency: Option<WindowedQuiescentEfficiencyConfig>,
+    /// Enables `POST /admin/restart`. `None`: the endpoint answers 503.
+    pub relaunch: Option<Relaunch>,
+    /// Set when this instance was started with `--handoff <spec>` by a running
+    /// one: report ready after the first frame, take over, then bind the ports.
+    pub handoff: Option<crate::operator::handoff::HandoffChild>,
 }
 
 impl Default for WindowedConfig {
@@ -129,6 +142,8 @@ impl Default for WindowedConfig {
             monitor_index: None,
             benchmark: None,
             quiescent_efficiency: None,
+            relaunch: None,
+            handoff: None,
         }
     }
 }
