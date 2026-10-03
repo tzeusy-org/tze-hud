@@ -699,7 +699,6 @@ mod tests {
                 rendering_policy: RenderingPolicy::default(),
                 contention_policy: ContentionPolicy::Stack { max_depth: 5 },
                 max_publishers: 4,
-                transport_constraint: None,
                 auto_clear_ms: None,
                 layer_attachment: LayerAttachment::Chrome,
                 ephemeral: false,

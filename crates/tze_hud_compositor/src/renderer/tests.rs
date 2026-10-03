@@ -2959,7 +2959,6 @@ async fn notification_actions_layout_matches_hit_regions() {
         },
         contention_policy: ContentionPolicy::Stack { max_depth: 8 },
         max_publishers: 4,
-        transport_constraint: None,
         auto_clear_ms: None,
         ephemeral: false,
         layer_attachment: LayerAttachment::Chrome,
