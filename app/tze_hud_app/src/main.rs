@@ -25,7 +25,7 @@
 //! | `--benchmark-frames <n>` | `TZE_HUD_BENCHMARK_FRAMES` | `600` | Measured frames for benchmark mode. |
 //! | `--benchmark-warmup-frames <n>` | `TZE_HUD_BENCHMARK_WARMUP_FRAMES` | `120` | Warmup frames skipped before measurement. |
 //! | `--quiescent-efficiency-emit <path>` | `TZE_HUD_QUIESCENT_EFFICIENCY_EMIT` | — | Emit a real event-driven static-overlay efficiency artifact after 5s settle + 60s observation. |
-//! | `--print-attach-info` | —                    | —            | Print the MCP attach-info block (endpoint URL, resident-principal==PSK rule, paste-ready MCP client config) and exit 0 without starting the runtime. Never prints the PSK. |
+//! | `--print-attach-info` | —                    | —            | Print the MCP attach-info block (endpoint URL, bearer-PSK auth rule, paste-ready MCP client config) and exit 0 without starting the runtime. Never prints the PSK. |
 //! | `--help`            | —                      | —            | Print this help and exit.                |
 //! | `--version`         | —                      | —            | Print version and exit.                  |
 //!
@@ -132,7 +132,7 @@ OPTIONS:
                            Requires a constrained software-renderer CI invocation.
                            (env: TZE_HUD_QUIESCENT_EFFICIENCY_EMIT)
     --print-attach-info    Print the MCP attach-info block (endpoint URL, the
-                           resident-principal == PSK rule, and a paste-ready MCP
+                           bearer-PSK auth rule, and a paste-ready MCP
                            client config snippet) and exit 0 WITHOUT starting the
                            runtime. Honours --config / --mcp-port / --grpc-port
                            so the printed info matches the runtime it describes. Never prints the PSK value.
@@ -198,7 +198,7 @@ struct StartupOptions {
     /// Path for a bounded real-runtime quiescent-efficiency artifact.
     quiescent_efficiency_emit: Option<String>,
     /// When true, print the MCP attach-info block (endpoint URL, the
-    /// resident-principal == PSK rule, and a paste-ready MCP client config
+    /// bearer-PSK auth rule, and a paste-ready MCP client config
     /// snippet) and exit 0 *without* starting the runtime (hud-b7c0m).
     print_attach_info: bool,
 }

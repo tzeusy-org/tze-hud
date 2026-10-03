@@ -368,7 +368,7 @@ pub(super) fn mcp_endpoint_url(addr: std::net::SocketAddr) -> String {
 /// `--print-attach-info` flag (hud-b7c0m).
 ///
 /// This is the single source of truth for the attach block: the MCP endpoint
-/// URL, the resident-principal == PSK rule, and a paste-ready MCP client config
+/// URL, the bearer-PSK auth rule, and a paste-ready MCP client config
 /// JSON snippet. It runs *without starting the runtime*, so it takes the
 /// configured (not yet bound) addresses that the runtime would use.
 ///
@@ -412,7 +412,7 @@ pub fn render_attach_info(
     lines.push("     Authorization: Bearer <your agent's PSK>".to_string());
 
     lines.push(String::new());
-    lines.push(" Projection (the portal_projection_* tools):".to_string());
+    lines.push(" Identity and permissions:".to_string());
     lines.push(
         "   The MCP Authorization: Bearer PSK identifies your agent; its [agents.<id>]".to_string(),
     );
@@ -434,7 +434,7 @@ pub fn render_attach_info(
                 "   {".to_string(),
                 "     \"mcpServers\": {".to_string(),
                 "       \"tze-hud-runtime\": {".to_string(),
-                "         \"type\": \"url\",".to_string(),
+                "         \"type\": \"http\",".to_string(),
                 format!("         \"url\": \"{url}\","),
                 "         \"headers\": {".to_string(),
                 "           \"Authorization\": \"Bearer <your agent's PSK>\"".to_string(),
@@ -505,7 +505,7 @@ mod tests {
     }
 
     /// The attach-info block must carry the discovery surface (MCP URL, the
-    /// resident-principal == PSK rule, and a paste-ready JSON snippet) and must
+    /// bearer-PSK auth rule, and a paste-ready JSON snippet) and must
     /// never contain a configured PSK value — the snippet always uses a
     /// placeholder.
     #[test]

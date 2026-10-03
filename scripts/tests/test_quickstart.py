@@ -64,7 +64,7 @@ class QuickstartMcpConfigTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         config = self.emitted_json(result.stdout)
         server = config["mcpServers"]["tze-hud-runtime"]
-        self.assertEqual(server["type"], "url")
+        self.assertEqual(server["type"], "http")
         self.assertEqual(server["url"], "http://hud.test:9191/mcp")
         self.assertEqual(
             server["headers"]["Authorization"], f"Bearer {secret}"
