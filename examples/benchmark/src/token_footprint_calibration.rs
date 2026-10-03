@@ -336,6 +336,8 @@ mod calibration {
             agents: tze_hud_scene::config::AgentDirectory::unrestricted(PSK).shared(),
             presents: None,
             capture: None,
+            restart: None,
+            bind_gate: None,
         };
         let (server_task, addresses) =
             start_mcp_http_server(scene, config, shutdown.clone(), Some(portal_tx.clone())).await?;
