@@ -8,10 +8,10 @@
 //! # Transactional vs ephemeral events
 //!
 //! Per spec.md §8.5 (RFC 0004 §8.5):
-//! - **Transactional**: down, up, click, key, focus, capture, IME, command.
+//! - **Transactional**: down, up, click, key, focus, capture, command.
 //!   Never dropped or coalesced. Guaranteed zero-loss delivery.
 //! - **Ephemeral realtime**: PointerMove, PointerEnter, PointerLeave, hover
-//!   state changes, GestureEvent, ScrollOffsetChanged.
+//!   state changes, ScrollOffsetChanged.
 //!   May be coalesced or dropped under backpressure.
 
 use tze_hud_scene::{MonoUs, SceneId};
@@ -192,43 +192,6 @@ pub enum CaptureReleasedReason {
 }
 
 #[derive(Clone, Debug)]
-pub struct ImeCompositionStartData {
-    pub tile_id: SceneId,
-    pub node_id: SceneId,
-    pub timestamp_mono_us: MonoUs,
-}
-
-#[derive(Clone, Debug)]
-pub struct ImeCompositionUpdateData {
-    pub tile_id: SceneId,
-    pub node_id: SceneId,
-    pub timestamp_mono_us: MonoUs,
-    pub composition_text: String,
-}
-
-#[derive(Clone, Debug)]
-pub struct ImeCompositionEndData {
-    pub tile_id: SceneId,
-    pub node_id: SceneId,
-    pub timestamp_mono_us: MonoUs,
-    pub committed_text: String,
-}
-
-#[derive(Clone, Debug)]
-pub struct GestureData {
-    pub tile_id: SceneId,
-    pub node_id: SceneId,
-    pub interaction_id: String,
-    pub timestamp_mono_us: MonoUs,
-    pub device_id: String,
-    pub gesture_kind: String,
-    pub scale: f32,
-    pub rotation: f32,
-    pub delta_x: f32,
-    pub delta_y: f32,
-}
-
-#[derive(Clone, Debug)]
 pub struct ScrollOffsetChangedData {
     pub tile_id: SceneId,
     pub timestamp_mono_us: MonoUs,
@@ -305,14 +268,6 @@ pub enum InputEnvelope {
     FocusGained(FocusGainedData),
     // field 14 — transactional
     FocusLost(FocusLostData),
-    // field 15 — ephemeral realtime
-    Gesture(GestureData),
-    // field 16 — transactional
-    ImeCompositionStart(ImeCompositionStartData),
-    // field 17 — transactional
-    ImeCompositionUpdate(ImeCompositionUpdateData),
-    // field 18 — transactional
-    ImeCompositionEnd(ImeCompositionEndData),
     // field 20 — transactional
     CaptureReleased(CaptureReleasedData),
     // field 21 — ephemeral realtime (coalesced per tile)
@@ -324,8 +279,8 @@ pub enum InputEnvelope {
 impl InputEnvelope {
     /// Returns `true` if this event must never be dropped or coalesced.
     ///
-    /// Transactional events: down, up, click, cancel, key, focus, capture, IME, command.
-    /// Ephemeral events: move, enter, leave, gesture, scroll_offset_changed.
+    /// Transactional events: down, up, click, cancel, key, focus, capture, command.
+    /// Ephemeral events: move, enter, leave, scroll_offset_changed.
     pub fn is_transactional(&self) -> bool {
         matches!(
             self,
@@ -338,9 +293,6 @@ impl InputEnvelope {
                 | InputEnvelope::Character(_)
                 | InputEnvelope::FocusGained(_)
                 | InputEnvelope::FocusLost(_)
-                | InputEnvelope::ImeCompositionStart(_)
-                | InputEnvelope::ImeCompositionUpdate(_)
-                | InputEnvelope::ImeCompositionEnd(_)
                 | InputEnvelope::CaptureReleased(_)
                 | InputEnvelope::CommandInput(_)
         )
@@ -361,10 +313,6 @@ impl InputEnvelope {
             InputEnvelope::Character(d) => d.timestamp_mono_us,
             InputEnvelope::FocusGained(d) => d.timestamp_mono_us,
             InputEnvelope::FocusLost(d) => d.timestamp_mono_us,
-            InputEnvelope::Gesture(d) => d.timestamp_mono_us,
-            InputEnvelope::ImeCompositionStart(d) => d.timestamp_mono_us,
-            InputEnvelope::ImeCompositionUpdate(d) => d.timestamp_mono_us,
-            InputEnvelope::ImeCompositionEnd(d) => d.timestamp_mono_us,
             InputEnvelope::CaptureReleased(d) => d.timestamp_mono_us,
             InputEnvelope::ScrollOffsetChanged(d) => d.timestamp_mono_us,
             InputEnvelope::CommandInput(d) => d.timestamp_mono_us,

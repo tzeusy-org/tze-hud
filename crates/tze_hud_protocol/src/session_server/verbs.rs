@@ -861,7 +861,6 @@ mod tests {
         "INPUT_EVENTS",
         "FOCUS_EVENTS",
         "DEGRADATION_NOTICES",
-        "LEASE_CHANGES",
         "TELEMETRY_FRAMES",
     ];
 }

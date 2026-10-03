@@ -8,8 +8,8 @@
 //!
 //! # Mandatory subscriptions
 //!
-//! `DEGRADATION_NOTICES` and `LEASE_CHANGES` are always active regardless of what
-//! the agent requests or what capabilities it has.
+//! `DEGRADATION_NOTICES` is always active regardless of what the agent requests
+//! or what capabilities it has.
 //!
 //! # Capability requirements
 //!
@@ -19,20 +19,19 @@
 //! | INPUT_EVENTS          | access_input_events             |
 //! | FOCUS_EVENTS          | access_input_events             |
 //! | DEGRADATION_NOTICES   | (mandatory — no requirement)    |
-//! | LEASE_CHANGES         | (mandatory — no requirement)    |
 //! | TELEMETRY_FRAMES      | read_telemetry                  |
 //!
 //! # EventBatch variant filtering
 //!
 //! Within a delivered [`EventBatch`], variants are filtered per subscription:
 //! - `FOCUS_EVENTS` subscription: `FocusGainedEvent`, `FocusLostEvent`,
-//!   `CaptureReleasedEvent`, `ImeCompositionStart/Update/End`.
-//! - `INPUT_EVENTS` subscription: all other pointer, key, gesture, scroll,
+//!   `CaptureReleasedEvent`.
+//! - `INPUT_EVENTS` subscription: all other pointer, key, scroll,
 //!   command, and character events.
 //!
 //! Per-variant filtering preserves within-batch ordering (RFC 0004 §8.4).
 //! An agent subscribed only to `input_events` receives pointer/key events but
-//! NOT focus/IME events. An agent not subscribed to either receives no events
+//! NOT focus events. An agent not subscribed to either receives no events
 //! from the batch (the batch is not delivered at all).
 
 use crate::proto::session::ServerMessage;
@@ -44,35 +43,32 @@ use tonic::Status;
 pub mod category {
     /// Scene topology events: tile creation/deletion/update. Requires `read_scene_topology`.
     pub const SCENE_TOPOLOGY: &str = "SCENE_TOPOLOGY";
-    /// Pointer, key, gesture, scroll, command, and character input events.
+    /// Pointer, key, scroll, command, and character input events.
     /// Requires `access_input_events`.
     pub const INPUT_EVENTS: &str = "INPUT_EVENTS";
-    /// Focus gain/loss, capture release, and IME composition events.
+    /// Focus gain/loss and capture release events.
     /// Requires `access_input_events`.
     pub const FOCUS_EVENTS: &str = "FOCUS_EVENTS";
     /// Runtime degradation level changes. Always active; not filterable.
     pub const DEGRADATION_NOTICES: &str = "DEGRADATION_NOTICES";
-    /// Lease state changes for this agent. Always active; not filterable.
-    pub const LEASE_CHANGES: &str = "LEASE_CHANGES";
     /// Compositor performance telemetry. Requires `read_telemetry`.
     pub const TELEMETRY_FRAMES: &str = "TELEMETRY_FRAMES";
 
     /// Mandatory subscriptions — always active, cannot be removed.
-    pub const MANDATORY: &[&str] = &[DEGRADATION_NOTICES, LEASE_CHANGES];
+    pub const MANDATORY: &[&str] = &[DEGRADATION_NOTICES];
 }
 
 /// Return the capability required to subscribe to `category`, or `None` if
 /// the category is mandatory (no capability required).
 ///
-/// `DEGRADATION_NOTICES` and `LEASE_CHANGES` return `None` because they are
-/// always active and cannot be filtered out.
+/// `DEGRADATION_NOTICES` returns `None` because it is always active and cannot
+/// be filtered out.
 fn required_capability(cat: &str) -> Option<&'static str> {
     match cat {
         category::SCENE_TOPOLOGY => Some("read_scene_topology"),
         category::INPUT_EVENTS => Some("access_input_events"),
         category::FOCUS_EVENTS => Some("access_input_events"),
         category::DEGRADATION_NOTICES => None, // mandatory
-        category::LEASE_CHANGES => None,       // mandatory
         category::TELEMETRY_FRAMES => Some("read_telemetry"),
         _ => Some("__unknown__"), // Unknown category: always denied
     }
@@ -80,10 +76,7 @@ fn required_capability(cat: &str) -> Option<&'static str> {
 
 /// Returns `true` if `category` is mandatory (always active, cannot be filtered).
 pub fn is_mandatory(category: &str) -> bool {
-    matches!(
-        category,
-        category::DEGRADATION_NOTICES | category::LEASE_CHANGES
-    )
+    category == category::DEGRADATION_NOTICES
 }
 
 /// Returns `true` if the agent has the capability required for `category`.
@@ -109,7 +102,7 @@ pub struct SubscriptionFilterResult {
 
 /// Filter `requested` subscription categories against `granted_capabilities`.
 ///
-/// Mandatory categories (`DEGRADATION_NOTICES`, `LEASE_CHANGES`) are included
+/// The mandatory category (`DEGRADATION_NOTICES`) is included
 /// in `active` unconditionally, even if not requested and regardless of
 /// capabilities. Requested categories that require capabilities the agent
 /// doesn't have are placed in `denied`. Unknown categories are denied.
@@ -166,18 +159,12 @@ pub fn filter_subscriptions(
 /// - `FocusGainedEvent`
 /// - `FocusLostEvent`
 /// - `CaptureReleasedEvent`
-/// - `ImeCompositionStartEvent`
-/// - `ImeCompositionUpdateEvent`
-/// - `ImeCompositionEndEvent`
 pub fn is_focus_variant(envelope: &InputEnvelope) -> bool {
     matches!(
         &envelope.event,
         Some(input_envelope::Event::FocusGained(_))
             | Some(input_envelope::Event::FocusLost(_))
             | Some(input_envelope::Event::CaptureReleased(_))
-            | Some(input_envelope::Event::ImeCompositionStart(_))
-            | Some(input_envelope::Event::ImeCompositionUpdate(_))
-            | Some(input_envelope::Event::ImeCompositionEnd(_))
     )
 }
 
@@ -185,7 +172,7 @@ pub fn is_focus_variant(envelope: &InputEnvelope) -> bool {
 /// (must be filtered by the `INPUT_EVENTS` subscription).
 ///
 /// All non-focus variants are considered input events:
-/// pointer, touch, key, gesture, scroll, command, character events.
+/// pointer, touch, key, scroll, command, character events.
 pub fn is_input_variant(envelope: &InputEnvelope) -> bool {
     // Any envelope variant that is not a focus variant is an input variant.
     // Envelopes with no event field set are dropped silently.
@@ -281,10 +268,6 @@ mod tests {
                 .active
                 .contains(&category::DEGRADATION_NOTICES.to_string()),
             "DEGRADATION_NOTICES must always be active"
-        );
-        assert!(
-            result.active.contains(&category::LEASE_CHANGES.to_string()),
-            "LEASE_CHANGES must always be active"
         );
         assert!(result.denied.is_empty());
     }
@@ -499,28 +482,6 @@ mod tests {
             filter_event_batch(batch, &subs).is_none(),
             "empty filtered batch should not be delivered"
         );
-    }
-
-    #[test]
-    fn test_ime_events_are_focus_variants() {
-        let ime_start = InputEnvelope {
-            event: Some(input_envelope::Event::ImeCompositionStart(
-                crate::proto::ImeCompositionStartEvent::default(),
-            )),
-        };
-        let ime_update = InputEnvelope {
-            event: Some(input_envelope::Event::ImeCompositionUpdate(
-                crate::proto::ImeCompositionUpdateEvent::default(),
-            )),
-        };
-        let ime_end = InputEnvelope {
-            event: Some(input_envelope::Event::ImeCompositionEnd(
-                crate::proto::ImeCompositionEndEvent::default(),
-            )),
-        };
-        assert!(is_focus_variant(&ime_start));
-        assert!(is_focus_variant(&ime_update));
-        assert!(is_focus_variant(&ime_end));
     }
 
     #[test]

@@ -31,12 +31,6 @@ async fn test_handshake_init_established_and_snapshot() {
                     .contains(&"DEGRADATION_NOTICES".to_string()),
                 "DEGRADATION_NOTICES must always be active"
             );
-            assert!(
-                established
-                    .active_subscriptions
-                    .contains(&"LEASE_CHANGES".to_string()),
-                "LEASE_CHANGES must always be active"
-            );
             // denied_subscriptions must be empty (all requested categories granted)
             assert!(
                 established.denied_subscriptions.is_empty(),
