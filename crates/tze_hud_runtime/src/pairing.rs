@@ -880,6 +880,8 @@ mod tests {
         let log = LogCapture::default();
         let subscriber = tracing_subscriber::fmt()
             .with_writer(log.clone())
+            // Timestamps carry digit runs that can look like a code.
+            .without_time()
             .with_max_level(tracing::Level::TRACE)
             .finish();
         let psk = tracing::subscriber::with_default(subscriber, || {
