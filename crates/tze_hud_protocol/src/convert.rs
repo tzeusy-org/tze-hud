@@ -3078,4 +3078,95 @@ mod tests {
             NodeLayout::Absolute
         );
     }
+
+    // ── Hand-written mapper coverage (moved from the deleted roundtrip.rs) ──
+
+    #[test]
+    fn rendering_policy_populated_round_trip_preserves_every_field() {
+        let c = |r, g, b, a| Rgba { r, g, b, a };
+        let original = RenderingPolicy {
+            font_size_px: Some(20.0),
+            backdrop: Some(c(0.1, 0.1, 0.1, 0.8)),
+            text_align: Some(TextAlign::End),
+            margin_px: Some(10.0),
+            font_family: Some(FontFamily::SystemSerif),
+            font_weight: Some(600),
+            text_color: Some(c(1.0, 1.0, 0.0, 1.0)),
+            backdrop_opacity: Some(0.5),
+            outline_color: Some(c(1.0, 0.0, 0.0, 1.0)),
+            outline_width: Some(3.0),
+            margin_horizontal: Some(12.0),
+            margin_vertical: Some(6.0),
+            transition_in_ms: Some(300),
+            transition_out_ms: Some(200),
+            overflow: Some(TextOverflow::Clip),
+            backdrop_radius: Some(12.0),
+            ..RenderingPolicy::default()
+        };
+        let back = proto_to_rendering_policy(&rendering_policy_to_proto(&original));
+        assert_eq!(back, original);
+
+        // Zero radius is a real value, not the None sentinel.
+        let zero = RenderingPolicy {
+            backdrop_radius: Some(0.0),
+            ..RenderingPolicy::default()
+        };
+        let back = proto_to_rendering_policy(&rendering_policy_to_proto(&zero));
+        assert_eq!(back.backdrop_radius, Some(0.0));
+    }
+
+    #[test]
+    fn color_runs_round_trip_proto_scene_proto() {
+        let proto_runs = vec![
+            proto::TextColorRunProto {
+                start_byte: 0,
+                end_byte: 5,
+                color: Some(proto::Rgba {
+                    r: 1.0,
+                    g: 0.0,
+                    b: 0.0,
+                    a: 1.0,
+                }),
+            },
+            proto::TextColorRunProto {
+                start_byte: 7,
+                end_byte: 16,
+                color: Some(proto::Rgba {
+                    r: 0.0,
+                    g: 1.0,
+                    b: 0.0,
+                    a: 1.0,
+                }),
+            },
+        ];
+        let scene_runs = proto_color_runs_to_scene(&proto_runs);
+        assert_eq!(scene_runs.len(), 2);
+        assert_eq!((scene_runs[1].start_byte, scene_runs[1].end_byte), (7, 16));
+        assert_eq!(scene_color_runs_to_proto(&scene_runs), proto_runs);
+    }
+
+    #[test]
+    fn text_overflow_wire_mapping() {
+        // Unspecified (old wire messages) and unknown values default to Ellipsis, not Clip.
+        for (wire, want) in [
+            (
+                proto::TextOverflowProto::Unspecified as i32,
+                TextOverflow::Ellipsis,
+            ),
+            (
+                proto::TextOverflowProto::Ellipsis as i32,
+                TextOverflow::Ellipsis,
+            ),
+            (proto::TextOverflowProto::Clip as i32, TextOverflow::Clip),
+            (999, TextOverflow::Ellipsis),
+        ] {
+            assert_eq!(proto_text_overflow_to_scene(wire), want, "wire {wire}");
+        }
+        for ov in [TextOverflow::Ellipsis, TextOverflow::Clip] {
+            assert_eq!(
+                proto_text_overflow_to_scene(scene_text_overflow_to_proto(ov)),
+                ov
+            );
+        }
+    }
 }
