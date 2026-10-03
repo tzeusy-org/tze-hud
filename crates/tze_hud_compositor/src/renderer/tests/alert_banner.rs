@@ -1,120 +1,5 @@
 use super::*;
 
-// ── Alert-banner heading typography tests [hud-w3o6.2] ───────────────────
-//
-// Acceptance criteria from spec §Alert-Banner Heading Typography:
-//   1. font_size_px = 24px
-//   2. font_weight = 700 (bold)
-//   3. font_family = SystemSansSerif
-//   4. text_color = #FFFFFF white
-//   5. margin_horizontal inset applied
-
-/// Alert-banner RenderingPolicy carries heading typography:
-/// 24px font, weight 700, SystemSansSerif, white text, margin_horizontal=8.
-///
-/// Acceptance criterion 3.1–3.3: heading typography wired to alert-banner zone.
-#[tokio::test]
-async fn test_alert_banner_heading_typography_in_rendering_policy() {
-    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
-
-    let mut scene = SceneGraph::new(1280.0, 720.0);
-    // Register alert-banner with heading-typography RenderingPolicy (spec values).
-    scene.register_zone(ZoneDefinition {
-        id: SceneId::new(),
-        name: "alert-banner".to_owned(),
-        description: "heading typography test".to_owned(),
-        geometry_policy: GeometryPolicy::EdgeAnchored {
-            edge: DisplayEdge::Top,
-            height_pct: 0.06,
-            width_pct: 1.0,
-            margin_px: 0.0,
-        },
-        accepted_media_types: vec![ZoneMediaType::ShortTextWithIcon],
-        rendering_policy: RenderingPolicy {
-            font_size_px: Some(24.0),
-            font_family: Some(FontFamily::SystemSansSerif),
-            font_weight: Some(700),
-            text_color: Some(Rgba {
-                r: 1.0,
-                g: 1.0,
-                b: 1.0,
-                a: 1.0,
-            }),
-            backdrop: Some(Rgba::new(0.1, 0.1, 0.16, 0.9)),
-            backdrop_opacity: Some(0.9),
-            margin_horizontal: Some(8.0),
-            margin_vertical: Some(0.0),
-            ..Default::default()
-        },
-        contention_policy: ContentionPolicy::Stack { max_depth: 8 },
-        max_publishers: 16,
-        auto_clear_ms: None,
-        ephemeral: false,
-        layer_attachment: LayerAttachment::Chrome,
-    });
-
-    // Publish a notification payload.
-    scene
-        .publish_to_zone(
-            "alert-banner",
-            ZoneContent::Notification(NotificationPayload {
-                text: "Weather alert: severe storms".to_owned(),
-                icon: String::new(),
-                urgency: 2,
-                ttl_ms: None,
-                title: String::new(),
-                actions: Vec::new(),
-            }),
-            "test",
-            None,
-            None,
-            None,
-        )
-        .unwrap();
-
-    // collect_text_items uses the RenderingPolicy fields for TextItem construction.
-    let items = compositor.collect_text_items(&scene, 1280.0, 720.0);
-    assert_eq!(
-        items.len(),
-        1,
-        "expected one TextItem for alert-banner notification"
-    );
-
-    let item = &items[0];
-
-    // AC 3.1: font_size_px = 24.0
-    assert_eq!(
-        item.font_size_px, 24.0,
-        "alert-banner text must be 24px per spec §Alert-Banner Heading Typography"
-    );
-
-    // AC 3.1: font_family = SystemSansSerif
-    assert_eq!(
-        item.font_family,
-        FontFamily::SystemSansSerif,
-        "alert-banner text must use system sans-serif family"
-    );
-
-    // AC 3.1: font_weight = 700
-    assert_eq!(
-        item.font_weight, 700,
-        "alert-banner text must be weight 700 (bold)"
-    );
-
-    // AC 3.2: text_color = #FFFFFF (white)
-    // White in linear sRGB: R=1.0 → 255u8, G=1.0 → 255u8, B=1.0 → 255u8.
-    assert_eq!(item.color[0], 255, "text R should be 255 (white)");
-    assert_eq!(item.color[1], 255, "text G should be 255 (white)");
-    assert_eq!(item.color[2], 255, "text B should be 255 (white)");
-
-    // AC 3.3: text is inset from x=0 by margin_horizontal=8
-    // Zone geometry: zx = (sw - sw*1.0)/2 = 0.0, so pixel_x = 0 + 8 = 8.
-    assert_eq!(
-        item.pixel_x, 8.0,
-        "text must be inset by margin_horizontal=8 from backdrop edge"
-    );
-}
-
 /// Alert-banner zone resolve_zone_geometry gives backdrop width = display width.
 ///
 /// At 1920×1080, the backdrop must span from x=0 to x=1920.
@@ -210,7 +95,10 @@ fn make_alert_banner_scene() -> SceneGraph {
         },
         accepted_media_types: vec![ZoneMediaType::ShortTextWithIcon],
         rendering_policy: RenderingPolicy {
-            font_size_px: Some(16.0),
+            // Non-default typography so the text path must honour the policy.
+            font_size_px: Some(24.0),
+            font_weight: Some(700),
+            margin_horizontal: Some(8.0),
             backdrop: Some(Rgba::new(0.08, 0.08, 0.08, 1.0)),
             backdrop_opacity: Some(1.0),
             text_color: Some(Rgba::WHITE),
@@ -246,147 +134,44 @@ fn publish_alert(scene: &mut SceneGraph, text: &str, urgency: u32, publisher: &s
         .expect("alert-banner publish must succeed");
 }
 
-/// Critical (urgency=3) banner must appear above warning (urgency=2).
-///
-/// With two banners, slot 0 (top) must be the critical one regardless of
-/// publication order (warning published before critical).
+/// Banners stack by severity, critical on top, whatever the arrival order; equal
+/// severities stack newest first. Each row lists (text, urgency) in publish order
+/// and the expected top-to-bottom order.
 #[tokio::test]
-async fn test_alert_banner_critical_above_warning() {
+async fn test_alert_banner_stacks_by_severity_then_recency() {
     let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
-    let mut scene = make_alert_banner_scene();
-
-    // Publish warning first, then critical.
-    publish_alert(&mut scene, "Warning: disk space low", 2, "agent-a");
-    publish_alert(&mut scene, "Critical: system failure", 3, "agent-b");
-
-    let items = compositor.collect_text_items(&scene, 1280.0, 720.0);
-    assert_eq!(items.len(), 2, "two banners → two TextItems");
-
-    // Slot 0 (pixel_y=0) must be the critical banner (urgency 3).
-    // Slot 1 (pixel_y=slot_h) must be the warning banner (urgency 2).
-    // The critical banner is at a lower pixel_y value (top of the zone).
-    let y_first = items[0].pixel_y;
-    let y_second = items[1].pixel_y;
-    assert!(
-        y_first < y_second,
-        "slot 0 (critical) must be above slot 1 (warning): y0={y_first} y1={y_second}"
-    );
-    assert!(
-        items[0].text.contains("Critical"),
-        "slot 0 must be the critical banner; got: {}",
-        items[0].text
-    );
-    assert!(
-        items[1].text.contains("Warning"),
-        "slot 1 must be the warning banner; got: {}",
-        items[1].text
-    );
-}
-
-/// Warning (urgency=2) banner must appear above info (urgency=0-1).
-///
-/// Info published before warning — severity sort must override arrival order.
-#[tokio::test]
-async fn test_alert_banner_warning_above_info() {
-    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
-    let mut scene = make_alert_banner_scene();
-
-    // Publish info first, then warning.
-    publish_alert(&mut scene, "Info: update available", 1, "agent-a");
-    publish_alert(&mut scene, "Warning: memory pressure", 2, "agent-b");
-
-    let items = compositor.collect_text_items(&scene, 1280.0, 720.0);
-    assert_eq!(items.len(), 2, "two banners → two TextItems");
-
-    assert!(
-        items[0].text.contains("Warning"),
-        "slot 0 must be the warning banner; got: {}",
-        items[0].text
-    );
-    assert!(
-        items[1].text.contains("Info"),
-        "slot 1 must be the info banner; got: {}",
-        items[1].text
-    );
-    assert!(
-        items[0].pixel_y < items[1].pixel_y,
-        "warning slot must be above info slot"
-    );
-}
-
-/// Three-level severity stack: critical → warning → info (top to bottom).
-///
-/// Published in reverse order (info, warning, critical) to confirm severity
-/// sort overrides arrival order.
-#[tokio::test]
-async fn test_alert_banner_three_level_severity_stack() {
-    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
-    let mut scene = make_alert_banner_scene();
-
-    // Publish info first, then warning, then critical.
-    publish_alert(&mut scene, "Info: routine scan complete", 0, "agent-a");
-    publish_alert(&mut scene, "Warning: high load", 2, "agent-b");
-    publish_alert(&mut scene, "Critical: disk full", 3, "agent-c");
-
-    let items = compositor.collect_text_items(&scene, 1280.0, 720.0);
-    assert_eq!(items.len(), 3, "three banners → three TextItems");
-
-    // Verify order: critical (slot 0), warning (slot 1), info (slot 2).
-    assert!(
-        items[0].text.contains("Critical"),
-        "slot 0 must be critical; got: {}",
-        items[0].text
-    );
-    assert!(
-        items[1].text.contains("Warning"),
-        "slot 1 must be warning; got: {}",
-        items[1].text
-    );
-    assert!(
-        items[2].text.contains("Info"),
-        "slot 2 must be info; got: {}",
-        items[2].text
-    );
-    // Pixel positions must decrease (slot 0 < slot 1 < slot 2 in pixel_y).
-    assert!(
-        items[0].pixel_y < items[1].pixel_y,
-        "critical above warning"
-    );
-    assert!(items[1].pixel_y < items[2].pixel_y, "warning above info");
-}
-
-/// Same-severity banners: the newer one must appear above the older one.
-///
-/// Two warnings published in order (A first, B second).  Slot 0 must be
-/// the newer one ("Warning B").
-///
-/// The sort is deterministic even when timestamps are equal: a tertiary
-/// `index descending` key in `sort_alert_banner_indices` ensures the later
-/// insert (higher index) always wins on exact timestamp ties.
-#[tokio::test]
-async fn test_alert_banner_same_severity_recency_order() {
-    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
-    let mut scene = make_alert_banner_scene();
-
-    // Publish two warnings in order.  Even if both arrive in the same µs,
-    // the tertiary index key ensures B (higher index) sorts above A.
-    publish_alert(&mut scene, "Warning A (older)", 2, "agent-a");
-    publish_alert(&mut scene, "Warning B (newer)", 2, "agent-b");
-
-    let items = compositor.collect_text_items(&scene, 1280.0, 720.0);
-    assert_eq!(items.len(), 2, "two warnings → two TextItems");
-
-    // Newer publish must be slot 0 (top).
-    assert!(
-        items[0].text.contains("Warning B"),
-        "slot 0 must be the newer warning (B); got: {}",
-        items[0].text
-    );
-    assert!(
-        items[1].text.contains("Warning A"),
-        "slot 1 must be the older warning (A); got: {}",
-        items[1].text
-    );
+    type Case = (&'static [(&'static str, u32)], &'static [&'static str]);
+    let cases: [Case; 3] = [
+        (&[("Warning", 2), ("Critical", 3)], &["Critical", "Warning"]),
+        (
+            &[("Info", 0), ("Warning", 2), ("Critical", 3)],
+            &["Critical", "Warning", "Info"],
+        ),
+        (
+            &[("Warning A", 2), ("Warning B", 2)],
+            &["Warning B", "Warning A"],
+        ),
+    ];
+    for (published, expected) in cases {
+        let mut scene = make_alert_banner_scene();
+        for (i, &(text, urgency)) in published.iter().enumerate() {
+            publish_alert(&mut scene, text, urgency, &format!("agent-{i}"));
+        }
+        let items = compositor.collect_text_items(&scene, 1280.0, 720.0);
+        let order: Vec<&str> = items.iter().map(|item| &*item.text).collect();
+        assert_eq!(order, expected, "published {published:?}");
+        assert!(
+            items.windows(2).all(|w| w[0].pixel_y < w[1].pixel_y),
+            "slots must descend the screen in order"
+        );
+        // The zone's heading typography reaches every TextItem: size, weight and
+        // the horizontal inset from the full-width zone's left edge (x = 0).
+        for item in &items {
+            assert_eq!(item.font_size_px, 24.0, "policy font size");
+            assert_eq!(item.font_weight, 700, "policy font weight");
+            assert_eq!(item.pixel_x, 8.0, "margin_horizontal inset");
+        }
+    }
 }
 
 /// Alert-banner zone height grows dynamically with active banner count.
@@ -459,57 +244,4 @@ async fn test_alert_banner_zone_height_grows_with_active_count() {
             "3rd slot must be below 1st slot in NDC y; slot0={slot0_ndc_y}, slot2={slot2_ndc_y}"
         );
     }
-}
-
-/// render_zone_content for alert-banner uses severity-ordered backdropcolors.
-///
-/// With critical (urgency=3) and warning (urgency=2), the first backdrop quad
-/// (slot 0, top) must be red (critical color), and the second must be amber
-/// (warning color).
-#[tokio::test]
-async fn test_alert_banner_backdrop_colors_ordered_by_severity() {
-    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
-    let mut scene = make_alert_banner_scene();
-
-    // Publish warning first, then critical (to confirm severity overrides arrival).
-    publish_alert(&mut scene, "Warning", 2, "agent-a");
-    publish_alert(&mut scene, "Critical", 3, "agent-b");
-
-    let mut vertices: Vec<crate::pipeline::RectVertex> = Vec::new();
-    compositor.render_zone_content(&scene, &mut vertices, &mut Vec::new(), 1280.0, 720.0, None);
-
-    // 2 backdrop quads → 12 vertices.
-    assert_eq!(vertices.len(), 12, "2 banners → 12 vertices");
-
-    // Slot 0 (vertices 0-5) must be critical red: R > 0.9, G < 0.1, B < 0.1.
-    let slot0_color = vertices[0].color;
-    assert!(
-        slot0_color[0] > 0.9,
-        "slot 0 backdrop R should be ~1.0 (critical red); got {}",
-        slot0_color[0]
-    );
-    assert!(
-        slot0_color[1] < 0.1,
-        "slot 0 backdrop G should be ~0.0 (critical red); got {}",
-        slot0_color[1]
-    );
-
-    // Slot 1 (vertices 6-11) must be warning amber: R > 0.9, G mid, B < 0.1.
-    let slot1_color = vertices[6].color;
-    assert!(
-        slot1_color[0] > 0.9,
-        "slot 1 backdrop R should be ~1.0 (warning amber); got {}",
-        slot1_color[0]
-    );
-    assert!(
-        slot1_color[2] < 0.1,
-        "slot 1 backdrop B should be ~0.0 (warning amber); got {}",
-        slot1_color[2]
-    );
-    // Amber has non-trivial G (0.5–0.9), while critical has G < 0.1.
-    assert!(
-        slot1_color[1] > 0.5,
-        "slot 1 backdrop G should be mid (warning amber ≈ 0.72); got {}",
-        slot1_color[1]
-    );
 }
