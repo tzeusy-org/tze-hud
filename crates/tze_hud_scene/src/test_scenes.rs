@@ -723,11 +723,12 @@ impl TestSceneRegistry {
     ///
     /// The lease is granted with TTL = 1ms relative to `clock`.  The scene as-built has
     /// state = ACTIVE.  To test expiry, callers must call `expire_leases(now_ms)` with a
-    /// `now_ms` value past the TTL.  Note: this scene uses `SceneGraph::new()` (system
-    /// clock), so the injected `clock` only sets `granted_at_ms`; time advancement for
-    /// expiry testing requires passing `now_ms` directly to `expire_leases(now_ms)`.
+    /// `now_ms` value past the TTL.  The graph runs on a `SimulatedClock` pinned at `clock`
+    /// (via `new_graph`), so automatic sweeps (e.g. the headless per-frame sweep) never see
+    /// the lease as expired; expiry testing requires passing `now_ms` directly to
+    /// `expire_leases(now_ms)`.
     fn build_lease_expiry(&self, clock: ClockMs) -> (SceneGraph, SceneSpec) {
-        let mut graph = SceneGraph::new(self.display_width, self.display_height);
+        let mut graph = self.new_graph(clock);
 
         let tab_id = graph.create_tab("Expiring", 0).expect("create_tab failed");
 
