@@ -427,9 +427,10 @@ jobs:
 
   # ── Dev-mode guard ──────────────────────────────────────────────────────────
   #
-  # Verifies that `dev-mode` is not in the default features of release-critical
-  # workspace members (scripts/ci/check_dev_mode_defaults.py). This is a Cargo
-  # metadata check only; the real release build runs in windows.yml.
+  # Verifies that `dev-mode` is not enabled by a default build of any workspace
+  # package, including the tze_hud_app release binary's whole dependency closure
+  # (feature edges and indirection included; scripts/ci/check_dev_mode_defaults.py).
+  # This is a Cargo metadata check only; the real release build runs in windows.yml.
   # `just dev-mode-guard` runs the same command.
 
   dev-mode-guard:
