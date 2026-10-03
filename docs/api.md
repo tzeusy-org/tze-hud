@@ -83,7 +83,9 @@ otherwise.
 
 **`hud_hold`** `{surface*, ttl_ms*}` extends a holding, for any surface type.
 On a zone or widget, `ttl_ms` replaces the expiry with now + `ttl_ms` (not
-the original deadline), and 0 holds until `hud_clear`. A visible
+the original deadline), and 0 holds until `hud_clear`. A delayed publish
+that has not presented yet counts as held: its new expiry counts from
+presentation. A visible
 notification's fade moves with it; a held one never fades.
 On a portal, `ttl_ms` keeps it (and its transcript) attached for that long,
 or until `hud_clear` when 0, even with no other calls. Without a hold, a
@@ -91,7 +93,10 @@ portal is degraded after 30 s with no publish, poll, or hold, and reclaimed
 30 s later.
 
 **`hud_clear`** `{surface*, reason?}` releases a zone publication, a widget
-instance, or a portal (detach).
+instance, or a portal (detach). On a zone it also cancels the caller's own
+delayed publishes that haven't presented yet; other agents' are untouched.
+The gRPC `Hold` and `Clear` behave the same on zones. A `ClearZone` inside a
+mutation batch clears only active publications and never cancels pending ones.
 
 **`hud_input`** `{ack?: [input_id], wait_ms?, max_items?}`
 

@@ -454,11 +454,7 @@ async fn hold_moves_the_fade_deadline_and_ttl_zero_never_fades() {
     // 5 s in, hold 20 s: the fade is due 19.85 s from now, one deadline.
     clock.advance(5_000);
     let first_deadline = compositor.next_animation_deadline().unwrap();
-    assert!(scene.hold_zone_publications(
-        "notification-area",
-        "agent-a",
-        Some(scene.now_wall_us() + 20_000_000)
-    ));
+    assert!(scene.hold_zone_publications("notification-area", "agent-a", Some(20_000_000)));
     compositor.update_publication_animations(&scene);
     assert_eq!(delay(&compositor), Some(19_850));
     let moved = compositor.next_animation_deadline().unwrap();

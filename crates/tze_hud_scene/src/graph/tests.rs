@@ -1836,6 +1836,46 @@ fn test_batch_notification_expiry_follows_held_flag() {
     }
 }
 
+/// A batch `ClearZone` (the replace pattern's first half) clears active
+/// publications only; the agent's later scheduled publish still presents.
+#[test]
+fn batch_clear_zone_does_not_cancel_later_pending_publish() {
+    use crate::mutation::{MutationBatch, SceneMutation};
+    let (mut scene, clock) = scene_with_test_clock();
+    scene.register_zone(make_subtitle_zone());
+    let batch = |mutation| MutationBatch {
+        batch_id: SceneId::new(),
+        agent_namespace: "agent".to_string(),
+        mutations: vec![mutation],
+        timing_hints: None,
+        lease_id: None,
+    };
+    let now = scene.now_wall_us();
+    scene.schedule_batch(
+        now + 1_000,
+        batch(SceneMutation::ClearZone {
+            zone_name: "subtitle".to_string(),
+            publish_token: dummy_token(),
+        }),
+    );
+    scene.schedule_batch(
+        now + 5_000_000,
+        batch(SceneMutation::PublishToZone {
+            zone_name: "subtitle".to_string(),
+            content: ZoneContent::StreamText("B".to_string()),
+            publish_token: dummy_token(),
+            merge_key: None,
+            expires_at_wall_us: None,
+            content_classification: None,
+            breakpoints: Vec::new(),
+            held: true,
+        }),
+    );
+    clock.advance(1);
+    assert_eq!(scene.apply_due_batches().len(), 1);
+    assert_eq!(scene.scheduled_batches.len(), 1, "B stays scheduled");
+}
+
 #[test]
 fn test_clear_zone_via_mutation_batch() {
     // Per spec: ClearZone clears publications by THIS agent (batch.agent_namespace).

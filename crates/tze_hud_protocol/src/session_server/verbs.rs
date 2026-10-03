@@ -689,7 +689,7 @@ pub(super) async fn handle_clear(
         let st = state.lock().await;
         let mut scene = st.scene.lock().await;
         let r = match &surface {
-            Surface::Zone(zone) => scene.clear_zone_for_publisher(zone, &session.namespace),
+            Surface::Zone(zone) => scene.clear_zone_and_cancel_pending(zone, &session.namespace),
             Surface::Widget(widget) => scene.clear_widget_for_publisher(widget, &session.namespace),
             Surface::Tile(tile) => match owned_tile_lease(&scene, &session.namespace, *tile) {
                 Some(lease) => {
@@ -746,7 +746,8 @@ pub(super) async fn handle_hold(
         };
         match &surface {
             Surface::Zone(zone) => {
-                if scene.hold_zone_publications(zone, &session.namespace, expires) {
+                let ttl_us = (hold.ttl_ms > 0).then(|| hold.ttl_ms.saturating_mul(1_000));
+                if scene.hold_zone_publications(zone, &session.namespace, ttl_us) {
                     held_ttl
                 } else {
                     not_held(seq, &hold.surface)

@@ -658,15 +658,18 @@ impl SceneGraph {
         Ok(())
     }
 
-    /// Set the expiry of every publication `publisher_namespace` holds on
-    /// `zone` (`None` = until cleared). Returns whether it held any.
+    /// Expire every publication `publisher_namespace` holds on `zone` `ttl_us`
+    /// from now (`None` = until cleared). Its not-yet-presented scheduled
+    /// publishes take the same ttl counted from presentation. Returns whether
+    /// it held any.
     pub fn hold_zone_publications(
         &mut self,
         zone: &str,
         publisher_namespace: &str,
-        expires_at_wall_us: Option<u64>,
+        ttl_us: Option<u64>,
     ) -> bool {
-        let mut held = false;
+        let expires_at_wall_us = ttl_us.map(|t| self.clock.now_us().saturating_add(t));
+        let mut held = self.hold_scheduled_zone_publishes(zone, publisher_namespace, ttl_us);
         for r in self
             .zone_registry
             .active_publishes
@@ -713,6 +716,9 @@ impl SceneGraph {
     ///
     /// Per spec: "ClearZone clears all publications by the agent in the specified zone."
     /// If no publications exist for the publisher, this is a no-op (but still succeeds).
+    /// Pending scheduled publishes are untouched (a batch `ClearZone` followed by
+    /// a later batch's publish is the replace pattern); the verbs use
+    /// [`Self::clear_zone_and_cancel_pending`].
     pub fn clear_zone_for_publisher(
         &mut self,
         zone_name: &str,
@@ -730,6 +736,18 @@ impl SceneGraph {
                 self.version += 1;
             }
         }
+        Ok(())
+    }
+
+    /// The `hud_clear` / `Clear` verb: [`Self::clear_zone_for_publisher`] plus
+    /// cancelling the publisher's not-yet-presented publishes to the zone.
+    pub fn clear_zone_and_cancel_pending(
+        &mut self,
+        zone_name: &str,
+        publisher_namespace: &str,
+    ) -> Result<(), ValidationError> {
+        self.clear_zone_for_publisher(zone_name, publisher_namespace)?;
+        self.cancel_scheduled_zone_publishes(zone_name, publisher_namespace);
         Ok(())
     }
 
