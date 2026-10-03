@@ -8,7 +8,7 @@
 # - data-role attributes for DualLayer readability profile compatibility
 # - 100x240 viewBox providing extra clearance for the label below the track
 #
-# Registered as "gauge" in the WidgetRegistry when loaded from assets/widgets/.
+# Registered as "gauge" in the WidgetRegistry when loaded from assets/widget_bundles/.
 #
 # IMPORTANT: Do NOT confuse with crates/tze_hud_widget/tests/fixtures/gauge/
 # which is the unit-test fixture (hardcoded colors, 100x220 viewBox). This

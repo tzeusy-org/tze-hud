@@ -24,7 +24,6 @@ fn benchmark_config_for_headless() -> String {
     config["widget_bundles"]["paths"] = toml::Value::Array(vec![
         toml::Value::String(format!("{REPO_ROOT}/widget_bundles")),
         toml::Value::String(format!("{REPO_ROOT}/assets/widget_bundles")),
-        toml::Value::String(format!("{REPO_ROOT}/assets/widgets")),
     ]);
 
     toml::to_string(&config).expect("headless benchmark config must serialize")

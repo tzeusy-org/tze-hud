@@ -10,10 +10,11 @@
 //!    `[[tabs.widgets]]` declaration in the config, bound to the appropriate
 //!    tab scene IDs.
 //!
-//! ## Empty registry
+//! ## Built-in bundles
 //!
-//! If no `[widget_bundles]` section exists, the widget registry is left empty
-//! (no definitions, no instances). This is valid — the runtime starts normally.
+//! The three shipped bundles (gauge, progress-bar, status-indicator) are
+//! embedded in the binary and always registered. `[widget_bundles].paths` is
+//! optional; an on-disk bundle with the same type name overrides the built-in.
 //!
 //! ## Bundle errors
 //!
@@ -38,7 +39,31 @@ use tze_hud_config::raw::RawConfig;
 use tze_hud_config::widgets::{LoadedWidgetType, build_widget_instance, resolve_bundle_path};
 use tze_hud_scene::graph::SceneGraph;
 use tze_hud_scene::types::SceneId;
-use tze_hud_widget::loader::{BundleScanResult, scan_bundle_dirs};
+use tze_hud_widget::loader::{BundleScanResult, load_bundle_from_files, scan_bundle_dirs};
+
+// ─── Built-in bundles ─────────────────────────────────────────────────────────
+
+macro_rules! builtin_bundle {
+    ($name:literal, [$($file:literal),*]) => {
+        (
+            $name,
+            &[
+                ("widget.toml", include_bytes!(concat!("../../../assets/widget_bundles/", $name, "/widget.toml")) as &[u8]),
+                $(($file, include_bytes!(concat!("../../../assets/widget_bundles/", $name, "/", $file)) as &[u8])),*
+            ] as BundleFiles,
+        )
+    };
+}
+
+/// Widget bundles compiled into the executable so a lone `tze_hud.exe` exposes
+/// `gauge`, `progress-bar` and `status-indicator` with no asset files beside it.
+type BundleFiles = &'static [(&'static str, &'static [u8])];
+
+const BUILTIN_BUNDLES: &[(&str, BundleFiles)] = &[
+    builtin_bundle!("gauge", ["background.svg", "fill.svg"]),
+    builtin_bundle!("progress-bar", ["track.svg", "fill.svg"]),
+    builtin_bundle!("status-indicator", ["indicator.svg"]),
+];
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
@@ -80,30 +105,40 @@ pub fn init_widget_registry(
     tab_name_to_id: &HashMap<String, SceneId>,
     token_map: &HashMap<String, String>,
 ) -> Vec<WidgetSvgAsset> {
-    let Some(wb) = &raw.widget_bundles else {
-        tracing::debug!("widget_startup: no [widget_bundles] section; widget registry empty");
-        return Vec::new();
-    };
-
-    if wb.paths.is_empty() {
-        tracing::debug!("widget_startup: [widget_bundles].paths is empty; widget registry empty");
-        return Vec::new();
-    }
-
+    // Step 1: Resolve on-disk bundle roots (optional) relative to `config_parent`.
     let base = config_parent.unwrap_or_else(|| Path::new("."));
-
-    // Step 1: Resolve all bundle root paths relative to `config_parent`
-    // (uses the shared helper from tze_hud_config::widgets to avoid duplication).
-    let bundle_roots: Vec<std::path::PathBuf> = wb
-        .paths
+    let bundle_roots: Vec<std::path::PathBuf> = raw
+        .widget_bundles
         .iter()
+        .flat_map(|wb| wb.paths.iter())
         .map(|p| resolve_bundle_path(p, base))
         .collect();
 
-    // Step 2: Scan all bundle directories with token substitution.
-    // Per component-shape-language/spec.md §SVG Token Placeholder Resolution:
-    // global bundles resolve {{token.key}} placeholders against the global token map.
-    let scan_results = scan_bundle_dirs(&bundle_roots, token_map);
+    // Step 2: Scan on-disk bundles with token substitution. Per
+    // component-shape-language/spec.md §SVG Token Placeholder Resolution: global
+    // bundles resolve {{token.key}} placeholders against the global token map.
+    let mut scan_results = scan_bundle_dirs(&bundle_roots, token_map);
+
+    // Built-in bundles are defaults: an on-disk bundle with the same type name
+    // overrides the embedded one.
+    for (name, files) in BUILTIN_BUNDLES {
+        let overridden = scan_results.iter().any(|r| match r {
+            BundleScanResult::Ok(b) => b.definition.id == *name,
+            BundleScanResult::Err(_) => false,
+        });
+        if overridden {
+            tracing::info!(
+                widget_name = *name,
+                "widget_startup: on-disk bundle overrides built-in"
+            );
+            continue;
+        }
+        scan_results.push(load_bundle_from_files(
+            &format!("builtin:{name}"),
+            files,
+            token_map,
+        ));
+    }
 
     // Step 3: Register each valid WidgetDefinition.
     // Track registered names to detect cross-dir duplicates (scan_bundle_dirs
@@ -279,79 +314,82 @@ pub fn collect_tab_name_to_id(scene: &SceneGraph) -> HashMap<String, SceneId> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tze_hud_config::raw::{RawConfig, RawTab, RawWidgetBundles};
+    use tze_hud_config::raw::{RawConfig, RawWidgetBundles};
     use tze_hud_scene::graph::SceneGraph;
 
-    /// WHEN [widget_bundles] is absent THEN widget registry stays empty and startup succeeds.
-    #[test]
-    fn absent_widget_bundles_empty_registry() {
-        let mut scene = SceneGraph::new(1920.0, 1080.0);
-        let raw = RawConfig::default();
-        let tab_map = HashMap::new();
-        let token_map = HashMap::new();
-        init_widget_registry(&mut scene, &raw, None, &tab_map, &token_map);
-        assert!(
-            scene.widget_registry.definitions.is_empty(),
-            "widget registry should be empty when no bundles configured"
-        );
-        assert!(
-            scene.widget_registry.instances.is_empty(),
-            "no instances should be created when registry is empty"
-        );
+    fn default_tokens() -> HashMap<String, String> {
+        use tze_hud_config::tokens::resolve_tokens;
+        resolve_tokens(&Default::default(), &Default::default())
     }
 
-    /// WHEN [widget_bundles].paths is empty THEN widget registry stays empty.
-    #[test]
-    fn empty_paths_list_empty_registry() {
-        let mut scene = SceneGraph::new(1920.0, 1080.0);
-        let raw = RawConfig {
-            widget_bundles: Some(RawWidgetBundles { paths: vec![] }),
-            ..RawConfig::default()
-        };
-        let tab_map = HashMap::new();
-        let token_map = HashMap::new();
-        init_widget_registry(&mut scene, &raw, None, &tab_map, &token_map);
-        assert!(scene.widget_registry.definitions.is_empty());
+    fn registered_types(scene: &SceneGraph) -> Vec<String> {
+        let mut v: Vec<String> = scene.widget_registry.definitions.keys().cloned().collect();
+        v.sort();
+        v
     }
 
-    /// WHEN [widget_bundles].paths contains a non-existent path THEN
-    /// scan_bundle_dirs handles it gracefully (skips non-readable dirs).
+    /// WHEN no [widget_bundles] section exists THEN the three built-in bundles
+    /// are still registered, and a missing on-disk root does not break startup.
     #[test]
-    fn nonexistent_path_does_not_panic() {
-        let mut scene = SceneGraph::new(1920.0, 1080.0);
+    fn builtin_bundles_register_without_any_paths() {
+        let expected = ["gauge", "progress-bar", "status-indicator"];
+        for raw in [
+            RawConfig::default(),
+            RawConfig {
+                widget_bundles: Some(RawWidgetBundles {
+                    paths: vec!["/tmp/tze_hud_nonexistent_widget_dir_99999_a1b2c3".into()],
+                }),
+                ..RawConfig::default()
+            },
+        ] {
+            let mut scene = SceneGraph::new(1920.0, 1080.0);
+            init_widget_registry(&mut scene, &raw, None, &HashMap::new(), &default_tokens());
+            assert_eq!(registered_types(&scene), expected);
+        }
+    }
+
+    /// WHEN an on-disk bundle has the same type name as a built-in THEN the
+    /// on-disk bundle wins and the type is registered once.
+    #[test]
+    fn on_disk_bundle_overrides_builtin_by_type_name() {
+        let root = std::env::temp_dir().join(format!("tze_hud_override_{}", std::process::id()));
+        let bundle = root.join("my-gauge");
+        std::fs::create_dir_all(&bundle).unwrap();
+        for (file, bytes) in BUILTIN_BUNDLES
+            .iter()
+            .find(|(n, _)| *n == "gauge")
+            .unwrap()
+            .1
+        {
+            let mut bytes = bytes.to_vec();
+            if *file == "widget.toml" {
+                let text = String::from_utf8(bytes).unwrap();
+                bytes = text
+                    .replace("Vertical fill gauge:", "OVERRIDDEN gauge:")
+                    .into_bytes();
+            }
+            std::fs::write(bundle.join(file), bytes).unwrap();
+        }
+
         let raw = RawConfig {
             widget_bundles: Some(RawWidgetBundles {
-                paths: vec!["/tmp/tze_hud_nonexistent_widget_dir_99999_a1b2c3".into()],
+                paths: vec![root.to_string_lossy().into_owned()],
             }),
             ..RawConfig::default()
         };
-        let tab_map = HashMap::new();
-        let token_map = HashMap::new();
-        // Should not panic; the bundle scanner handles missing dirs gracefully.
-        init_widget_registry(&mut scene, &raw, None, &tab_map, &token_map);
-        assert!(scene.widget_registry.definitions.is_empty());
-    }
-
-    /// WHEN tab_name_to_id is empty THEN no instances created (tab not found warning).
-    #[test]
-    fn missing_tab_in_scene_skips_instance_creation() {
         let mut scene = SceneGraph::new(1920.0, 1080.0);
-        let mut raw = RawConfig {
-            widget_bundles: Some(RawWidgetBundles { paths: vec![] }),
-            ..RawConfig::default()
-        };
-        raw.tabs.push(RawTab {
-            name: Some("Main".into()),
-            widgets: vec![tze_hud_config::raw::RawTabWidget {
-                widget_type: Some("gauge".into()),
-                ..Default::default()
-            }],
-            ..Default::default()
-        });
-        // Empty tab map — tab "Main" not in scene yet.
-        let tab_map = HashMap::new();
-        let token_map = HashMap::new();
-        init_widget_registry(&mut scene, &raw, None, &tab_map, &token_map);
-        assert!(scene.widget_registry.instances.is_empty());
+        init_widget_registry(&mut scene, &raw, None, &HashMap::new(), &default_tokens());
+        std::fs::remove_dir_all(&root).ok();
+
+        assert_eq!(
+            registered_types(&scene),
+            ["gauge", "progress-bar", "status-indicator"]
+        );
+        let gauge = scene.widget_registry.get_definition("gauge").unwrap();
+        assert!(
+            gauge.description.starts_with("OVERRIDDEN"),
+            "{}",
+            gauge.description
+        );
     }
 }

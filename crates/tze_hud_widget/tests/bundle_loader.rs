@@ -1488,10 +1488,10 @@ svg_file = "fill.svg"
     );
 }
 
-// ─── Exemplar gauge bundle (assets/widgets/gauge/) [hud-x5cm] ────────────────
+// ─── Exemplar gauge bundle (assets/widget_bundles/gauge/) [hud-x5cm] ────────────────
 //
 // These tests validate the production-quality exemplar gauge bundle that lives
-// at assets/widgets/gauge/ (distinct from the unit-test fixture at
+// at assets/widget_bundles/gauge/ (distinct from the unit-test fixture at
 // crates/tze_hud_widget/tests/fixtures/gauge/).
 //
 // The exemplar uses {{token.key}} placeholders in all SVG color/style
@@ -1499,13 +1499,13 @@ svg_file = "fill.svg"
 // to load it successfully.
 
 /// Returns the path to the production exemplar gauge bundle.
-/// Located at <workspace>/assets/widgets/gauge/ relative to CARGO_MANIFEST_DIR.
+/// Located at <workspace>/assets/widget_bundles/gauge/ relative to CARGO_MANIFEST_DIR.
 fn exemplar_gauge_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("..") // crates/
         .join("..") // workspace root
         .join("assets")
-        .join("widgets")
+        .join("widget_bundles")
         .join("gauge")
 }
 

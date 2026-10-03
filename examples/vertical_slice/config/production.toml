@@ -38,13 +38,11 @@ default_tab = true
 # Paths are resolved relative to this config file's parent directory
 # (examples/vertical_slice/config/).
 #
-# Two roots cover all production widget bundles:
-#   assets/widget_bundles/ — progress-bar, status-indicator
-#   assets/widgets/        — gauge
+# assets/widget_bundles/ holds all production bundles (gauge, progress-bar,
+# status-indicator).
 [widget_bundles]
 paths = [
     "../../../assets/widget_bundles",
-    "../../../assets/widgets",
 ]
 
 # Widget instances declared on the Main tab.

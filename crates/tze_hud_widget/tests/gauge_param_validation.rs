@@ -1,7 +1,7 @@
 //! Parameter validation tests for the production exemplar gauge widget.
 //!
 //! These tests load the canonical production gauge bundle from
-//! `assets/widgets/gauge/` and exercise its parameter types through the
+//! `assets/widget_bundles/gauge/` and exercise its parameter types through the
 //! scene graph's `publish_to_widget` validation path.
 //!
 //! Acceptance criteria (hud-awpt):
@@ -55,14 +55,14 @@ fn gauge_test_tokens() -> HashMap<String, String> {
 
 /// Path to the production exemplar gauge bundle.
 ///
-/// Located at `assets/widgets/gauge/` relative to the workspace root.
+/// Located at `assets/widget_bundles/gauge/` relative to the workspace root.
 /// `CARGO_MANIFEST_DIR` points to `crates/tze_hud_widget/`, so we go up two levels.
 fn production_gauge_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("..") // crates/
         .join("..") // workspace root
         .join("assets")
-        .join("widgets")
+        .join("widget_bundles")
         .join("gauge")
 }
 
@@ -408,7 +408,7 @@ fn gauge_severity_empty_string_is_rejected() {
 // ─── AC 5: Default values match widget.toml schema ───────────────────────────
 
 /// WHEN the production gauge bundle is loaded THEN all parameter defaults
-/// match the values declared in `assets/widgets/gauge/widget.toml` exactly.
+/// match the values declared in `assets/widget_bundles/gauge/widget.toml` exactly.
 ///
 /// Expected from widget.toml:
 ///   level      = 0.0         (f32)

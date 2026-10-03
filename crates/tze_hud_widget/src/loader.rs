@@ -208,25 +208,58 @@ pub fn validate_runtime_svg_registration(
     validate_svg_layer(&path_str, svg_filename, svg_bytes, tokens, &layer.bindings)
 }
 
+/// Load a bundle from in-memory files (`(filename, bytes)`), e.g. bundles
+/// embedded in the executable. Same validation as [`load_bundle_dir_with_tokens`];
+/// `label` stands in for the directory path in error messages.
+pub fn load_bundle_from_files(
+    label: &str,
+    files: &[(&str, &[u8])],
+    tokens: &HashMap<String, String>,
+) -> BundleScanResult {
+    let read = |name: &str| {
+        files
+            .iter()
+            .find(|(n, _)| *n == name)
+            .map(|(_, b)| b.to_vec())
+            .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::NotFound))
+    };
+    match load_bundle_inner(&read, label, tokens) {
+        Ok(bundle) => BundleScanResult::Ok(bundle),
+        Err(e) => BundleScanResult::Err(e),
+    }
+}
+
 fn load_bundle_dir_inner(
     dir: &Path,
     path_str: &str,
     tokens: &HashMap<String, String>,
 ) -> Result<LoadedBundle, BundleError> {
-    // Step 1: Locate widget.toml.
-    let manifest_path = dir.join("widget.toml");
-    if !manifest_path.exists() {
-        return Err(BundleError::NoManifest {
-            path: path_str.to_string(),
-        });
-    }
+    let read = |name: &str| std::fs::read(dir.join(name));
+    load_bundle_inner(&read, path_str, tokens)
+}
 
-    // Step 2: Read and parse widget.toml.
-    let toml_str =
-        std::fs::read_to_string(&manifest_path).map_err(|e| BundleError::InvalidManifest {
-            path: path_str.to_string(),
-            detail: format!("cannot read widget.toml: {e}"),
-        })?;
+fn load_bundle_inner(
+    read: &dyn Fn(&str) -> std::io::Result<Vec<u8>>,
+    path_str: &str,
+    tokens: &HashMap<String, String>,
+) -> Result<LoadedBundle, BundleError> {
+    // Steps 1-2: Read and parse widget.toml.
+    let manifest_bytes = read("widget.toml").map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            BundleError::NoManifest {
+                path: path_str.to_string(),
+            }
+        } else {
+            BundleError::InvalidManifest {
+                path: path_str.to_string(),
+                detail: format!("cannot read widget.toml: {e}"),
+            }
+        }
+    })?;
+    let toml_str = String::from_utf8(manifest_bytes).map_err(|e| BundleError::InvalidManifest {
+        path: path_str.to_string(),
+        detail: format!("cannot read widget.toml: {e}"),
+    })?;
 
     let raw: RawManifest = toml::from_str(&toml_str).map_err(|e| BundleError::InvalidManifest {
         path: path_str.to_string(),
@@ -308,20 +341,20 @@ fn load_bundle_dir_inner(
                 detail: "a layer entry is missing required field 'svg_file'".to_string(),
             })?;
 
-        // Step 5a: Verify SVG file exists.
-        let svg_path = dir.join(svg_file);
-        if !svg_path.exists() {
-            return Err(BundleError::MissingSvg {
-                path: path_str.to_string(),
-                svg_file: svg_file.to_string(),
-            });
-        }
-
-        // Step 5b: Read and validate SVG.
-        let svg_bytes = std::fs::read(&svg_path).map_err(|e| BundleError::SvgParseError {
-            path: path_str.to_string(),
-            svg_file: svg_file.to_string(),
-            detail: format!("cannot read file: {e}"),
+        // Step 5a/5b: Read the SVG (missing file is a distinct error).
+        let svg_bytes = read(svg_file).map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                BundleError::MissingSvg {
+                    path: path_str.to_string(),
+                    svg_file: svg_file.to_string(),
+                }
+            } else {
+                BundleError::SvgParseError {
+                    path: path_str.to_string(),
+                    svg_file: svg_file.to_string(),
+                    detail: format!("cannot read file: {e}"),
+                }
+            }
         })?;
         // Step 5b-post/5c/5d: validate SVG + binding targets.
         let (resolved_svg, bindings) = validate_svg_layer_and_manifest_bindings(
