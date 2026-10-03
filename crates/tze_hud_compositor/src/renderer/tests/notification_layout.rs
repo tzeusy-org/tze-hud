@@ -66,67 +66,35 @@ async fn test_notification_text_uses_body_typography_token_default() {
     );
 }
 
-/// Notification text uses typography.body.size resolved from the token map.
-///
-/// AC: when typography.body.size token is present, it overrides the 16px default.
+/// `typography.body.size` sets the notification font size (with or without a `px`
+/// suffix); absent, it is 16px.
 #[test]
-fn test_notification_text_uses_typography_body_size_token() {
-    let mut token_map = HashMap::new();
-    token_map.insert("typography.body.size".to_string(), "20px".to_string());
-    let font_size = Compositor::resolve_body_font_size(&token_map);
-    assert_eq!(
-        font_size, 20.0,
-        "typography.body.size=20px must resolve to 20.0"
-    );
+fn test_notification_body_font_size_token() {
+    for (token, expected) in [(Some("20px"), 20.0), (Some("18"), 18.0), (None, 16.0)] {
+        let token_map: HashMap<String, String> = token
+            .map(|v| ("typography.body.size".to_string(), v.to_string()))
+            .into_iter()
+            .collect();
+        assert_eq!(
+            Compositor::resolve_body_font_size(&token_map),
+            expected,
+            "typography.body.size={token:?}"
+        );
+    }
 }
 
-/// typography.body.size without 'px' suffix still parses.
+/// `color.text.primary` sets the notification text colour; absent, it is near-white.
 #[test]
-fn test_notification_text_typography_token_without_px_suffix() {
-    let mut token_map = HashMap::new();
-    token_map.insert("typography.body.size".to_string(), "18".to_string());
-    let font_size = Compositor::resolve_body_font_size(&token_map);
-    assert_eq!(
-        font_size, 18.0,
-        "numeric-only typography.body.size must parse"
-    );
-}
+fn test_notification_text_primary_color_token() {
+    let red = HashMap::from([("color.text.primary".to_string(), "#FF0000".to_string())]);
+    let color = Compositor::resolve_text_primary_color(&red);
+    assert_eq!(&color[..3], &[255, 0, 0], "#FF0000 token");
 
-/// Absent typography.body.size token falls back to 16px.
-#[test]
-fn test_notification_text_typography_absent_defaults_to_16px() {
-    let token_map = HashMap::new();
-    let font_size = Compositor::resolve_body_font_size(&token_map);
-    assert_eq!(
-        font_size, 16.0,
-        "absent typography.body.size must default to 16px"
-    );
-}
-
-/// color.text.primary token resolves to the correct sRGB u8 color.
-#[test]
-fn test_notification_text_uses_color_text_primary_token() {
-    let mut token_map = HashMap::new();
-    // White: #FFFFFF
-    token_map.insert("color.text.primary".to_string(), "#FFFFFF".to_string());
-    let color = Compositor::resolve_text_primary_color(&token_map);
-    assert_eq!(color[0], 255, "color.text.primary #FFFFFF R must be 255");
-    assert_eq!(color[1], 255, "color.text.primary #FFFFFF G must be 255");
-    assert_eq!(color[2], 255, "color.text.primary #FFFFFF B must be 255");
-}
-
-/// Absent color.text.primary falls back to near-white.
-#[test]
-fn test_notification_text_primary_absent_falls_back_to_near_white() {
-    let token_map = HashMap::new();
-    let color = Compositor::resolve_text_primary_color(&token_map);
-    assert_eq!(color[0], 255, "fallback text.primary R must be 255");
-    assert_eq!(color[1], 255, "fallback text.primary G must be 255");
-    assert_eq!(color[2], 255, "fallback text.primary B must be 255");
-    // Alpha is near-white (≥200 of 255).
+    let color = Compositor::resolve_text_primary_color(&HashMap::new());
+    assert_eq!(&color[..3], &[255, 255, 255], "absent token is near-white");
     assert!(
         color[3] >= 200,
-        "fallback text.primary alpha must be ≥ 200, got {}",
+        "fallback alpha must be near-opaque, got {}",
         color[3]
     );
 }
