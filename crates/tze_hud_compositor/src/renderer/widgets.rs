@@ -65,6 +65,7 @@ impl super::Compositor {
         wr.begin_sync();
 
         let registry = &scene.widget_registry;
+        let now_us = scene.now_monotonic_us();
 
         // Collect instances that need texture updates. Widgets without active
         // publications are not visible; clear their cached texture so clear/TTL
@@ -115,8 +116,40 @@ impl super::Compositor {
 
             // Resolve animated or static params, applying degradation-aware snapping.
             let current_params = &instance.current_params;
-            let (effective_params, still_animating) =
-                wr.resolve_animated_params(&instance_name, current_params, degradation_level);
+
+            // A published change on an already-visible widget starts a
+            // transition of the newest publication's `transition_ms`, from
+            // what is on screen now (so a retarget mid-flight is continuous).
+            // First appearance and `transition_ms == 0` snap.
+            let transition_ms = registry
+                .active_publishes
+                .get(&instance_name)
+                .and_then(|p| p.iter().max_by_key(|r| r.published_at_wall_us))
+                .map_or(0, |r| r.transition_ms);
+            if transition_ms > 0
+                && let Some(entry) = wr.texture_entry(&instance_name)
+            {
+                let target = entry
+                    .animation
+                    .as_ref()
+                    .map_or(&entry.last_rendered_params, |a| &a.to_params);
+                if target != current_params {
+                    let from = entry.last_rendered_params.clone();
+                    wr.start_transition(
+                        &instance_name,
+                        from,
+                        current_params.clone(),
+                        transition_ms,
+                        now_us,
+                    );
+                }
+            }
+            let (effective_params, still_animating) = wr.resolve_animated_params(
+                &instance_name,
+                current_params,
+                degradation_level,
+                now_us,
+            );
 
             let params_changed = wr
                 .texture_entry(&instance_name)

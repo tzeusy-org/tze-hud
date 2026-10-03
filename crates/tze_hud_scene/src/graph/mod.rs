@@ -303,6 +303,12 @@ impl SceneGraph {
     pub fn now_wall_us(&self) -> u64 {
         self.clock.now_us()
     }
+
+    /// Monotonic microseconds from the injected clock, for measuring elapsed
+    /// time (animations); never steps backward on a real clock.
+    pub fn now_monotonic_us(&self) -> u64 {
+        self.clock.monotonic_us()
+    }
 }
 
 #[cfg(test)]
