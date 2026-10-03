@@ -190,6 +190,15 @@ pub struct FrameTelemetry {
     /// compositor thread — no atomics or cross-thread synchronization cost.
     #[serde(default)]
     pub scene_lock_miss_count: u64,
+
+    /// Widget instances whose SVG was re-rasterized while preparing this frame.
+    ///
+    /// Empty on frames where no widget parameter changed: widget work is
+    /// proportional to change, and an update re-rasterizes only the instance
+    /// it targets. (The frame is still re-presented in full; there is no
+    /// damage tracking.)
+    #[serde(default)]
+    pub widget_rasterized: Vec<String>,
 }
 
 impl FrameTelemetry {
@@ -223,6 +232,7 @@ impl FrameTelemetry {
             invariant_violations_this_frame: 0,
             layer0_checks_failed_this_frame: 0,
             scene_lock_miss_count: 0,
+            widget_rasterized: Vec::new(),
         }
     }
 }

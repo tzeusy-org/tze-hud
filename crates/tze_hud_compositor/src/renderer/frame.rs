@@ -577,6 +577,11 @@ impl Compositor {
         // the surface texture, the texture is destroyed and queue.submit panics.
         // Kept in the build phase (under the lock) since it reads scene state.
         self.sync_widget_textures(scene, self.degradation_level);
+        telemetry.widget_rasterized = self
+            .widget_renderer
+            .as_ref()
+            .map(|wr| wr.rasterized_last_sync().to_vec())
+            .unwrap_or_default();
 
         // ── Scene-free encode inputs (rounded-rect cmds + prepared text) ─────
         // This is the second big scene read; collecting it here (rather than
@@ -884,6 +889,11 @@ impl Compositor {
 
         // ── Widget texture sync before frame acquisition (same as windowed path).
         self.sync_widget_textures(scene, self.degradation_level);
+        telemetry.widget_rasterized = self
+            .widget_renderer
+            .as_ref()
+            .map(|wr| wr.rasterized_last_sync().to_vec())
+            .unwrap_or_default();
 
         // Acquire frame via trait — same code path as render_frame().
         // HeadlessSurface never returns None, but we handle it for API
@@ -1033,6 +1043,11 @@ impl Compositor {
 
         // ── Widget texture sync before encoding (avoids surface-texture race).
         self.sync_widget_textures(scene, self.degradation_level);
+        telemetry.widget_rasterized = self
+            .widget_renderer
+            .as_ref()
+            .map(|wr| wr.rasterized_last_sync().to_vec())
+            .unwrap_or_default();
 
         // Build the shared per-frame content geometry (Background → tiles →
         // Content → Chrome zones). `build_frame_vertices` is the single source of
