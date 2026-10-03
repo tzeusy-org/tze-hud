@@ -519,7 +519,9 @@ async fn delay_ms_holds_content_until_due() {
 
 /// A delayed notification takes the same expiry as an immediate one: held
 /// for `ttl_ms:0` (and `hud_hold` then retimes it once it has materialized),
-/// the default ttl counted from presentation otherwise.
+/// otherwise the explicit expiry stamped at schedule time (the 60 s
+/// `DEFAULT_ZONE_TTL_MS` when `ttl_ms` is absent), counted from presentation.
+/// That case is unchanged from before the fix.
 #[tokio::test]
 async fn delayed_notification_expiry_matches_immediate() {
     for (ttl, expected) in [
