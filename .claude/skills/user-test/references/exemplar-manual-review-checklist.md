@@ -312,7 +312,7 @@ _(to be filled during review)_
 - `publish_widget_batch.py` with `status-indicator-enum-cycle-test.json` passed for `online/away/busy/offline` on `main-status`.
 - `publish_widget_batch.py` with `status-indicator-theme-cycle-test.json` and `status-indicator-theme-status-matrix-test.json` passed theme+state combinations.
 - `publish_widget_batch.py` with `status-indicator-label-update-test.json` passed label changes.
-- Validation fixture `status-indicator-validation-test.json` returned expected MCP error `WIDGET_PARAMETER_INVALID_VALUE` for `status=do-not-disturb`.
+- Validation fixture `status-indicator-validation-test.json` returned expected MCP error `WIDGET_PARAMETER_INVALID` for `status=do-not-disturb`.
 - This confirms publish-path, enum handling, and validation behavior; visual/accessibility criteria above still require manual sign-off.
 
 ### UX Tweaks

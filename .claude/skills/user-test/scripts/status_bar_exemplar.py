@@ -23,7 +23,8 @@ multi-agent coexistence, key replacement, empty-value removal, and TTL expiry.
   Step 9  — wait for agent-power TTL to expire (~15s default + margin)
   Step 10 — VISUAL CHECK: battery gone, time remains
 
-Distinct namespaces: "agent-weather", "agent-power", "agent-clock".
+Distinct log labels (and merge keys): "agent-weather", "agent-power", "agent-clock".
+The publisher is the PSK's agent; one PSK means one agent.
 
 Usage:
   status_bar_exemplar.py --url http://host:9090
@@ -61,7 +62,7 @@ VISUAL_PAUSE_S = 3.0
 
 ZONE_NAME = "status-bar"
 
-# Agent namespaces, as required by the spec
+# Log labels
 NS_WEATHER = "agent-weather"
 NS_POWER = "agent-power"
 NS_CLOCK = "agent-clock"
@@ -118,7 +119,7 @@ def publish_status_entry(
     url: str,
     token: str,
     req_id: int,
-    namespace: str,
+    label: str,
     merge_key: str,
     entry_key: str,
     entry_value: str,
@@ -129,7 +130,7 @@ def publish_status_entry(
 
     Uses the canonical MCP shape:
       content = {"type": "status_bar", "entries": {entry_key: entry_value}}
-    with merge_key and namespace set for agent-level isolation.
+    with merge_key set; `label` is only a log prefix.
     """
     content: dict[str, Any] = {
         "type": "status_bar",
@@ -146,7 +147,7 @@ def publish_status_entry(
     value_display = repr(entry_value) if entry_value else "(empty — removal)"
     status = "ok" if ok else f"ERR: {response.get('error')}"
     print(
-        f"  [{namespace:14s}] merge_key={merge_key!r:10s} "
+        f"  [{label:14s}] merge_key={merge_key!r:10s} "
         f"{entry_key}={value_display:20s} | {status}",
         flush=True,
     )
@@ -163,7 +164,7 @@ def step1_weather_initial(url: str, token: str, ttl_ms: int, req_id: int) -> int
     print("\n--- Step 1: agent-weather publishes 'weather' → '72F Sunny' ---", flush=True)
     publish_status_entry(
         url, token, req_id,
-        namespace=NS_WEATHER,
+        label=NS_WEATHER,
         merge_key="weather",
         entry_key="weather",
         entry_value="72F Sunny",
@@ -177,7 +178,7 @@ def step2_battery_initial(url: str, token: str, battery_ttl_ms: int, req_id: int
     print("\n--- Step 2: agent-power publishes 'battery' → '85%' ---", flush=True)
     publish_status_entry(
         url, token, req_id,
-        namespace=NS_POWER,
+        label=NS_POWER,
         merge_key="battery",
         entry_key="battery",
         entry_value="85%",
@@ -191,7 +192,7 @@ def step3_time_initial(url: str, token: str, ttl_ms: int, req_id: int) -> int:
     print("\n--- Step 3: agent-clock publishes 'time' → '3:42 PM' ---", flush=True)
     publish_status_entry(
         url, token, req_id,
-        namespace=NS_CLOCK,
+        label=NS_CLOCK,
         merge_key="time",
         entry_key="time",
         entry_value="3:42 PM",
@@ -228,7 +229,7 @@ def step5_weather_update(url: str, token: str, ttl_ms: int, req_id: int) -> int:
     )
     publish_status_entry(
         url, token, req_id,
-        namespace=NS_WEATHER,
+        label=NS_WEATHER,
         merge_key="weather",
         entry_key="weather",
         entry_value="75F Cloudy",
@@ -267,7 +268,7 @@ def step7_weather_empty(url: str, token: str, ttl_ms: int, req_id: int) -> int:
     )
     publish_status_entry(
         url, token, req_id,
-        namespace=NS_WEATHER,
+        label=NS_WEATHER,
         merge_key="weather",
         entry_key="weather",
         entry_value="",

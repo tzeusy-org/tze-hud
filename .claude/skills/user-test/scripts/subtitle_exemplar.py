@@ -9,7 +9,7 @@ Subtitle exemplar user-test scenario.
 Exercises the subtitle zone on a live deployed HUD by publishing a streaming
 breakpoint-reveal sequence and then a full multi-scenario sequence. Validates
 progressive word-by-word reveal, rapid-replacement latest-wins, TTL auto-clear,
-and multi-line word-wrap — all with the exemplar-test namespace.
+and multi-line word-wrap against one agent.
 
 Phases:
   1. Streaming reveal  — stream_text with breakpoints at word boundaries;
@@ -29,7 +29,7 @@ Phases:
                          final human sign-off on word-by-word behaviour)
                          + TTL hold (10s default)
 
-All messages use namespace: "exemplar-test".
+All messages are published by the agent the PSK belongs to.
 
 Usage:
   subtitle_exemplar.py --url http://host:9090
@@ -531,7 +531,7 @@ def main() -> int:
         "\n    [phase 5] TTL auto-clear — 3s expiry with visible fade-out      (AC5)"
         "\n    [phase 6] Streaming repeat — final word-by-word sign-off        (AC6)"
         "\n"
-        "\n  namespace: exemplar-test was used for all publishes.",
+        "\n  All publishes were made by the PSK's agent.",
         flush=True,
     )
     return 0

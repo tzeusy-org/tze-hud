@@ -402,7 +402,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--targets-file", default=DEFAULT_TARGETS_FILE, help="Target registry JSON")
 
     parser.add_argument("--psk-env", default=DEFAULT_PSK_ENV, help="PSK environment variable")
-    parser.add_argument("--agent-id", default="user-test-performance-agent", help="Session agent_id")
+    parser.add_argument("--agent-id", default="user-test-performance-agent", help="Session agent_id (must be a paired agent in agents.toml with a matching allow)")
 
     parser.add_argument("--widget-name", default="main-progress", help="Widget instance name")
     parser.add_argument("--count", type=int, default=100, help="Publish count")

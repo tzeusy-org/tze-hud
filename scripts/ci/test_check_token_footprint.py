@@ -31,10 +31,10 @@ def fixture(value=100):
         },
         "fixture_fingerprint": "sha256:fixture",
         "flows": {
-            "publish_to_zone": {
+            "zone_publish": {
                 "flow_version": 1,
                 "flow_fingerprint": "sha256:zone",
-                "operations": {"publish_to_zone": copy.deepcopy(metric)},
+                "operations": {"zone_publish": copy.deepcopy(metric)},
                 "total": copy.deepcopy(metric["total"]),
                 "model_visible": copy.deepcopy(metric["model_visible"]),
             },
@@ -114,7 +114,7 @@ class GateTests(unittest.TestCase):
         baseline = fixture()
         approve(baseline)
         measurement = fixture()
-        measurement["flows"]["publish_to_zone"]["flow_fingerprint"] = "sha256:changed"
+        measurement["flows"]["zone_publish"]["flow_fingerprint"] = "sha256:changed"
         report = checker.compare(measurement, baseline)
         self.assertEqual(report["status"], "baseline_incompatible")
         self.assertFalse(report["regressions"])
@@ -168,15 +168,15 @@ class GateTests(unittest.TestCase):
         approve(baseline, budget=100)
         self.assertEqual(checker.compare(fixture(), baseline)["status"], "passed")
         over = fixture()
-        over["flows"]["publish_to_zone"]["operations"]["publish_to_zone"]["model_visible"][
+        over["flows"]["zone_publish"]["operations"]["zone_publish"]["model_visible"][
             "tokens"
         ] = 101
-        over["flows"]["publish_to_zone"]["model_visible"]["tokens"] = 101
+        over["flows"]["zone_publish"]["model_visible"]["tokens"] = 101
         report = checker.compare(over, baseline)
         self.assertEqual(report["status"], "failed")
         self.assertEqual(
             report["budget_violations"],
-            [{"flow": "publish_to_zone", "budget": 100, "measured": 101}],
+            [{"flow": "zone_publish", "budget": 100, "measured": 101}],
         )
 
     def test_missing_budgets_fail_closed(self):
@@ -239,7 +239,7 @@ class GateTests(unittest.TestCase):
         baseline = fixture()
         approve(baseline)
         measurement = fixture()
-        measurement["flows"]["publish_to_zone"]["operations"]["publish_to_zone"][
+        measurement["flows"]["zone_publish"]["operations"]["zone_publish"][
             "total"
         ]["tokens"] += 1
         measurement["flows"]["publish_to_widget"]["total"]["bytes"] += 1

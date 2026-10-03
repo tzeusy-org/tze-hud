@@ -86,3 +86,13 @@ def test_tool_error_prints_code_and_hint(capsys):
         )
     assert exit_info.value.code == 1
     assert json.loads(capsys.readouterr().out) == {"code": "NOT_HELD", "hint": "hud_publish first"}
+
+
+def test_hold_calls_hud_hold_with_portal_surface():
+    calls = run(["hold", "--id", "s1", "--ttl-ms", "600000"], [tool_response({"ok": True})])
+    assert calls == [
+        (
+            "tools/call",
+            {"name": "hud_hold", "arguments": {"surface": "portal:s1", "ttl_ms": 600000}},
+        )
+    ]
