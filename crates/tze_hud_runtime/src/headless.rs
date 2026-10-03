@@ -1025,7 +1025,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn transparent_overlap_update_repaints_only_the_declared_z_ordered_closure() {
+    async fn transparent_overlap_update_repaints_only_the_changed_tile_and_its_overlap() {
         let _runtime_guard = crate::test_support::lock_headless_runtime().await;
         let config = HeadlessConfig {
             width: 1_000,
@@ -1045,7 +1045,7 @@ mod tests {
         })
         .await
         .expect("primary runtime init");
-        let (scene_arc, lease_id, lower_tile_id, lower_node_id, upper_tile_id, control_tile_ids) =
+        let (scene_arc, lease_id, lower_tile_id, lower_node_id, _upper_tile_id, _control_tile_ids) =
             install_transparent_overlap_scene(&runtime, "AB", false).await;
 
         // Seed the retained snapshot and glyph atlas from a real full frame.
@@ -1092,8 +1092,9 @@ mod tests {
         assert!(
             reference
                 .compositor
-                .take_change_efficiency_capture()
-                .is_none(),
+                .take_work_counts()
+                .expect("reference frame records work")
+                .full_frame,
             "fresh reference must use the established full renderer"
         );
         let reference_pixels = reference.read_pixels();
@@ -1116,113 +1117,20 @@ mod tests {
             reference_pixels.len(),
             "the retained/reference pixel oracle must not silently truncate either readback"
         );
-        let capture = runtime
+        let work = runtime
             .compositor
-            .take_change_efficiency_capture()
-            .expect("retained transparent-overlap capture after lower text update");
-        let artifact = capture.artifact();
-        let report = capture.validate();
-
-        assert!(report.passed, "{report:#?}");
+            .take_work_counts()
+            .expect("work counts after lower text update");
+        assert!(!work.full_frame, "{work:?}");
         assert_eq!(
-            artifact.scenario.name, "transparent_overlap_change_50_tiles",
-            "transparent overlap must use a distinct versioned scenario"
-        );
-        assert_eq!(artifact.scenario.version, 1);
-        assert_eq!(artifact.scene_tile_count, 50);
-        assert_eq!(report.layout.actual_operation_count, 2);
-        assert_eq!(report.raster.actual_operation_count, 2);
-        assert_eq!(report.texture_upload.category.actual_operation_count, 0);
-        assert_eq!(report.render_encoding.actual_operation_count, 2);
-        assert_eq!(artifact.render_observation.full_surface_clear_operations, 0);
-        assert_eq!(artifact.render_observation.full_frame_encode_operations, 0);
-        assert_eq!(
-            artifact.render_observation.scoped_render_encode_operations,
-            2
+            work.tiles_redrawn, 2,
+            "only the changed lower tile and its z-higher overlap are repainted"
         );
         assert_eq!(
-            artifact.encoded_draw_calls, 6,
-            "two closure tiles each contribute background, text, and idle-grip work"
+            work.pixels_damaged,
+            400 * 240,
+            "damage is the lower tile, not the 1000x500 surface"
         );
-
-        for category in [&artifact.closure.layout, &artifact.closure.raster] {
-            assert_eq!(category.closure_items.len(), 2);
-            assert_eq!(
-                category.closure_items[0].identity.tile_id,
-                lower_tile_id.to_string()
-            );
-            assert_eq!(
-                category.closure_items[0].dependency_reason,
-                tze_hud_telemetry::InvalidationDependencyReason::DirectChange
-            );
-            assert_eq!(
-                category.closure_items[1].identity.tile_id,
-                upper_tile_id.to_string()
-            );
-            assert_eq!(
-                category.closure_items[1].dependency_reason,
-                tze_hud_telemetry::InvalidationDependencyReason::VisualOverlap
-            );
-        }
-        assert_eq!(artifact.closure.render_encoding.closure_items.len(), 2);
-        assert_eq!(
-            artifact.closure.render_encoding.closure_items[0]
-                .identity
-                .tile_id,
-            lower_tile_id.to_string(),
-            "the lower contributor must encode before its z-higher overlap"
-        );
-        assert_eq!(
-            artifact.closure.render_encoding.closure_items[1]
-                .identity
-                .tile_id,
-            upper_tile_id.to_string(),
-            "the visual-overlap contributor must encode in z order"
-        );
-        assert_eq!(
-            artifact.closure.render_encoding.closure_items[1].dependency_reason,
-            tze_hud_telemetry::InvalidationDependencyReason::VisualOverlap
-        );
-
-        for control_tile_id in control_tile_ids {
-            let control_id = control_tile_id.to_string();
-            assert!(
-                artifact
-                    .closure
-                    .layout
-                    .closure_items
-                    .iter()
-                    .all(|item| item.identity.tile_id != control_id),
-                "unrelated control {control_id} entered layout closure"
-            );
-            assert!(
-                artifact
-                    .closure
-                    .raster
-                    .closure_items
-                    .iter()
-                    .all(|item| item.identity.tile_id != control_id),
-                "unrelated control {control_id} entered raster closure"
-            );
-            assert!(
-                artifact
-                    .closure
-                    .render_encoding
-                    .closure_items
-                    .iter()
-                    .all(|item| item.identity.tile_id != control_id),
-                "unrelated control {control_id} entered render closure"
-            );
-            assert!(
-                artifact
-                    .closure
-                    .composition_damage
-                    .closure_items
-                    .iter()
-                    .all(|item| item.identity.tile_id != control_id),
-                "unrelated control {control_id} entered damage closure"
-            );
-        }
 
         let mut differing_pixels = 0usize;
         let mut first_difference = None;
@@ -1320,31 +1228,15 @@ mod tests {
         assert!(
             runtime
                 .compositor
-                .take_change_efficiency_capture()
-                .is_none(),
-            "a non-closure grip crossing retained damage must fall back rather than certify"
-        );
-        let diagnostic = runtime
-            .compositor
-            .take_change_efficiency_diagnostic()
-            .expect("rejected retained change emits a structured diagnostic");
-        let report = diagnostic.validate();
-        assert_eq!(
-            report.status,
-            tze_hud_telemetry::ChangeEfficiencyValidationStatus::DiagnosticFullSurface,
-            "{report:#?}"
-        );
-        assert_eq!(
-            diagnostic
-                .full_surface_invalidation
-                .expect("full diagnostic metadata")
-                .reason,
-            tze_hud_telemetry::FullSurfaceInvalidationReason::UnsupportedRetainedSceneChange
+                .take_work_counts()
+                .expect("fallback frame records work")
+                .full_frame,
+            "a non-closure grip crossing retained damage must fall back to a full frame"
         );
     }
 
     #[tokio::test]
-    async fn canonical_one_node_update_captures_only_retained_changed_tile_work() {
+    async fn canonical_one_node_update_repaints_only_the_changed_tile() {
         let _runtime_guard = crate::test_support::lock_headless_runtime().await;
         let mut runtime = HeadlessRuntime::new(HeadlessConfig {
             width: 1_000,
@@ -1466,69 +1358,29 @@ mod tests {
         // compositor path; this test never manufactures an artifact.
         runtime.render_frame().await;
         let updated_pixels = runtime.read_pixels();
-        let capture = runtime
+        let work = runtime
             .compositor
-            .take_change_efficiency_capture()
-            .expect("real retained compositor capture after UpdateNodeContent");
-        let artifact = capture.artifact();
-        let report = capture.validate();
+            .take_work_counts()
+            .expect("work counts after UpdateNodeContent");
+        assert!(!work.full_frame, "{work:?}");
+        assert_eq!(work.tiles_redrawn, 1);
+        assert_eq!(work.pixels_damaged, 96 * 92, "damage is the changed tile");
 
-        assert!(report.passed, "{report:#?}");
-        assert!(
-            runtime
-                .compositor
-                .take_change_efficiency_diagnostic()
-                .is_none(),
-            "successful retained capture must supersede the baseline full-frame diagnostic"
-        );
-        assert_eq!(artifact.scene_tile_count, 50);
-        assert_eq!(report.layout.closure_cardinality, 1);
-        assert_eq!(report.layout.actual_operation_count, 1);
-        assert_eq!(report.raster.closure_cardinality, 1);
-        assert_eq!(report.raster.actual_operation_count, 1);
-        assert_eq!(report.texture_upload.category.closure_cardinality, 0);
-        assert_eq!(report.texture_upload.category.actual_operation_count, 0);
-        assert_eq!(report.render_encoding.closure_cardinality, 1);
-        assert_eq!(report.render_encoding.actual_operation_count, 1);
-        assert!(artifact.full_surface_invalidation.is_none());
-        assert_eq!(
-            artifact.render_observation.full_surface_clear_operations, 0,
-            "a retained capture must not clear the full surface"
-        );
-        assert_eq!(
-            artifact.render_observation.full_frame_encode_operations, 0,
-            "a retained capture must not encode a full frame"
-        );
-        assert_eq!(
-            artifact.render_observation.scoped_render_encode_operations,
-            1
-        );
-        assert_eq!(
-            artifact.closure.layout.actual_work[0].identity.tile_id,
-            changed_tile_id.to_string()
-        );
-        assert_eq!(
-            artifact.closure.layout.actual_work[0].identity.node_id,
-            changed_node_id.to_string()
-        );
-
-        // The artifact is not accepted as a proxy for rendering correctness.
         // Read back both submitted surfaces: LoadOp::Load plus the scoped
         // scissors must preserve every pixel outside the changed tile and must
         // visibly update at least one pixel inside it.
-        let damage = &artifact.closure.composition_damage.actual_work[0]
-            .identity
-            .bounds;
+        // The changed tile is the first tile at the origin.
+        let damage = (0_u32, 0_u32, 96_u32, 92_u32);
         let mut changed_pixels_inside_damage = 0_u64;
         for y in 0..500 {
             for x in 0..1_000 {
                 let offset = ((y * 1_000 + x) * 4) as usize;
                 let before = &baseline_pixels[offset..offset + 4];
                 let after = &updated_pixels[offset..offset + 4];
-                let inside_damage = x >= damage.x
-                    && x < damage.x + damage.width
-                    && y >= damage.y
-                    && y < damage.y + damage.height;
+                let inside_damage = x >= damage.0
+                    && x < damage.0 + damage.2
+                    && y >= damage.1
+                    && y < damage.1 + damage.3;
                 if inside_damage {
                     changed_pixels_inside_damage += u64::from(before != after);
                 } else {
@@ -1587,33 +1439,20 @@ mod tests {
         assert!(
             runtime
                 .compositor
-                .take_change_efficiency_capture()
-                .is_none(),
-            "degraded frames must never certify a retained update"
-        );
-        let suppressed_diagnostic = runtime
-            .compositor
-            .take_change_efficiency_diagnostic()
-            .expect("degraded retained change emits a structured diagnostic");
-        assert_eq!(
-            suppressed_diagnostic
-                .full_surface_invalidation
-                .expect("full diagnostic metadata")
-                .reason,
-            tze_hud_telemetry::FullSurfaceInvalidationReason::UnsupportedRetainedSceneChange
+                .take_work_counts()
+                .expect("degraded frame records work")
+                .full_frame,
+            "degraded frames must never take the retained path"
         );
         runtime.degradation_controller = DegradationController::with_defaults();
         runtime.render_frame().await;
-        let rebaseline_diagnostic = runtime
-            .compositor
-            .take_change_efficiency_diagnostic()
-            .expect("returning to the canonical policy requires a fresh baseline");
-        assert_eq!(
-            rebaseline_diagnostic
-                .full_surface_invalidation
-                .expect("full diagnostic metadata")
-                .reason,
-            tze_hud_telemetry::FullSurfaceInvalidationReason::SurfaceCreation
+        assert!(
+            runtime
+                .compositor
+                .take_work_counts()
+                .expect("rebaseline frame records work")
+                .full_frame,
+            "returning to the canonical policy requires a fresh full-frame baseline"
         );
 
         // A canonical scene change that leaves the deliberately narrow proof
@@ -1648,23 +1487,13 @@ mod tests {
             );
         }
         runtime.render_frame().await;
-        let diagnostic = runtime
-            .compositor
-            .take_change_efficiency_diagnostic()
-            .expect("unsupported retained change emits a structured diagnostic");
-        let diagnostic_report = diagnostic.validate();
-        assert!(!diagnostic_report.passed, "{diagnostic_report:#?}");
-        assert_eq!(
-            diagnostic_report.status,
-            tze_hud_telemetry::ChangeEfficiencyValidationStatus::DiagnosticFullSurface,
-            "{diagnostic_report:#?}"
-        );
-        assert_eq!(
-            diagnostic
-                .full_surface_invalidation
-                .expect("full diagnostic metadata")
-                .reason,
-            tze_hud_telemetry::FullSurfaceInvalidationReason::UnsupportedRetainedSceneChange
+        assert!(
+            runtime
+                .compositor
+                .take_work_counts()
+                .expect("unsupported change records work")
+                .full_frame,
+            "a change outside the retained envelope falls back to a full frame"
         );
     }
 

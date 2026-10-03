@@ -1,9 +1,10 @@
-//! Narrow retained-render path used by the canonical change-efficiency proof.
+//! Narrow retained-render path for the canonical headless scene.
 //!
-//! This module deliberately does not consume any reconnect/WAL
-//! protocol state.  It owns a private compositor snapshot and accepts only the
-//! bounded fifty-tile headless scene used by the Layer 3 evidence lane.  Every
-//! other scene stays on the established full-frame renderer.
+//! It owns a private compositor snapshot and accepts only the bounded
+//! fifty-tile headless scene: one tile's text changes and only that tile (plus
+//! a z-higher translucent overlap, if any) is repainted inside a scissor. Every
+//! other scene stays on the established full-frame renderer. Each frame records
+//! [`WorkCounts`] so tests can see how much was repainted.
 
 use std::collections::BTreeSet;
 use std::time::Instant;
@@ -12,15 +13,7 @@ use wgpu::util::DeviceExt;
 
 use tze_hud_scene::graph::SceneGraph;
 use tze_hud_scene::types::{DragHandleElementKind, NodeData, Rect, SceneId, TextMarkdownNode};
-use tze_hud_telemetry::{
-    ActualWorkItem, ChangeEfficiencyArtifact, ChangeMeasurementProvenance, ChangeMeasurementStatus,
-    ChangeRenderWorkObservation, ClosureWorkItem, EfficiencyPacingIdentity, EfficiencyPacingMode,
-    EfficiencyRendererIdentity, EfficiencyRuntimeIdentity, EfficiencyScenarioIdentity,
-    EfficiencyViewport, EfficiencyWindowMode, FullSurfaceInvalidation,
-    FullSurfaceInvalidationReason, InvalidationCategory, InvalidationClosure,
-    InvalidationDependencyReason, NodeWorkItemId, PartialPresentCapability, PixelRect,
-    RenderPlanWorkItemId, TextureUploadCategory,
-};
+use tze_hud_telemetry::WorkCounts;
 
 use crate::pipeline::rect_vertices;
 use crate::surface::{CompositorSurface, HeadlessSurface};
@@ -30,64 +23,31 @@ use super::Compositor;
 
 const CANONICAL_TILE_COUNT: usize = 50;
 
-/// Compositor-private retained state for the canonical headless proof lane.
+/// Integer pixel rectangle in the presentation viewport.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct PixelRect {
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+}
+
+impl PixelRect {
+    fn area(self) -> u64 {
+        u64::from(self.width) * u64::from(self.height)
+    }
+}
+
+/// Compositor-private retained state for the canonical headless lane.
 #[derive(Default)]
 pub(super) struct RetainedRenderState {
     snapshot: Option<CanonicalSceneSnapshot>,
-    pending_full_surface_diagnostic: Option<FullSurfaceInvalidation>,
-    latest_capture: Option<RetainedChangeEfficiencyCapture>,
-    latest_diagnostic: Option<ChangeEfficiencyArtifact>,
-    device_recovery_pending: bool,
-}
-
-/// Opaque proof returned only by the compositor after the retained headless
-/// renderer has encoded and submitted scoped work. A serialized
-/// `ChangeEfficiencyArtifact` cannot manufacture this wrapper.
-#[derive(Debug)]
-#[must_use = "a retained runtime capture should be validated or inspected"]
-pub struct RetainedChangeEfficiencyCapture {
-    artifact: ChangeEfficiencyArtifact,
-}
-
-impl RetainedChangeEfficiencyCapture {
-    fn from_observed_runtime(artifact: ChangeEfficiencyArtifact) -> Self {
-        debug_assert_eq!(
-            artifact.measurement_provenance,
-            ChangeMeasurementProvenance::ObservedRetainedRuntime,
-            "only a real retained runtime observation may create a capture"
-        );
-        Self { artifact }
-    }
-
-    /// Inspect the immutable observed-operation artifact recorded by the
-    /// compositor. Calling `ChangeEfficiencyArtifact::validate` directly is
-    /// intentionally non-certifying; use [`Self::validate`] for this opaque
-    /// runtime capture.
-    pub fn artifact(&self) -> &ChangeEfficiencyArtifact {
-        &self.artifact
-    }
-
-    /// Validate the real retained capture and upgrade only a contract-valid,
-    /// scoped observation to the certification status.
-    pub fn validate(&self) -> tze_hud_telemetry::ChangeEfficiencyValidation {
-        let mut validation = self.artifact.validate();
-        if validation.contract_satisfied
-            && validation.status
-                == tze_hud_telemetry::ChangeEfficiencyValidationStatus::PendingRuntimeInstrumentation
-            && self.artifact.measurement_provenance
-                == ChangeMeasurementProvenance::ObservedRetainedRuntime
-        {
-            validation.passed = true;
-            validation.status =
-                tze_hud_telemetry::ChangeEfficiencyValidationStatus::CertifiedRetainedRuntime;
-        }
-        validation
-    }
+    latest_work: Option<WorkCounts>,
 }
 
 #[derive(Clone, PartialEq)]
 struct CanonicalSceneSnapshot {
-    viewport: EfficiencyViewport,
+    viewport: (u32, u32),
     scenario: CanonicalScenario,
     tiles: Vec<CanonicalTextTile>,
 }
@@ -118,159 +78,57 @@ struct CanonicalTextTile {
 }
 
 struct CanonicalTextChange {
-    changed: CanonicalTextTile,
     redraw_tiles: Vec<CanonicalTextTile>,
     damage: PixelRect,
-    scenario: CanonicalScenario,
     next_snapshot: CanonicalSceneSnapshot,
 }
 
-enum RetainedPlan {
-    Partial(Box<CanonicalTextChange>),
-    FullFrame {
-        diagnostic: Option<FullSurfaceInvalidation>,
-    },
-}
-
-/// Typed, compositor-private planner for the exact retained evidence envelope.
-///
-/// It has no WAL input: planning is derived solely from the prior
-/// private snapshot and the live scene about to be rendered.
-struct InvalidationPlanner;
-
-impl InvalidationPlanner {
-    fn plan_headless(
-        state: &RetainedRenderState,
-        scene: &SceneGraph,
-        width: u32,
-        height: u32,
-    ) -> RetainedPlan {
-        if state.device_recovery_pending {
-            return RetainedPlan::FullFrame {
-                diagnostic: Some(full_surface_invalidation(
-                    FullSurfaceInvalidationReason::DeviceRecovery,
-                    PartialPresentCapability::Supported,
-                )),
-            };
-        }
-
-        match (&state.snapshot, canonical_snapshot(scene, width, height)) {
-            (None, Some(_)) => RetainedPlan::FullFrame {
-                diagnostic: Some(full_surface_invalidation(
-                    FullSurfaceInvalidationReason::SurfaceCreation,
-                    PartialPresentCapability::Supported,
-                )),
-            },
-            // This lane intentionally does not instrument arbitrary scenes
-            // before it has established a canonical baseline. hud-f670c.1 owns
-            // broader retained-planner coverage.
-            (None, None) => RetainedPlan::FullFrame { diagnostic: None },
-            (Some(_), None) => RetainedPlan::FullFrame {
-                diagnostic: Some(full_surface_invalidation(
-                    FullSurfaceInvalidationReason::UnsupportedRetainedSceneChange,
-                    PartialPresentCapability::Supported,
-                )),
-            },
-            (Some(previous_snapshot), Some(next_snapshot)) => {
-                if previous_snapshot.viewport != next_snapshot.viewport {
-                    return RetainedPlan::FullFrame {
-                        diagnostic: Some(full_surface_invalidation(
-                            FullSurfaceInvalidationReason::Resize,
-                            PartialPresentCapability::Supported,
-                        )),
-                    };
-                }
-                if previous_snapshot == &next_snapshot {
-                    return RetainedPlan::FullFrame { diagnostic: None };
-                }
-                let Some(change) = planned_canonical_text_change(previous_snapshot, &next_snapshot)
-                else {
-                    return RetainedPlan::FullFrame {
-                        diagnostic: Some(full_surface_invalidation(
-                            FullSurfaceInvalidationReason::UnsupportedRetainedSceneChange,
-                            PartialPresentCapability::Supported,
-                        )),
-                    };
-                };
-                RetainedPlan::Partial(Box::new(CanonicalTextChange {
-                    next_snapshot,
-                    ..change
-                }))
-            }
-        }
+/// Plan a scoped repaint from the prior private snapshot and the live scene.
+/// `None` means the caller must run the full-frame renderer.
+fn plan_headless(
+    state: &RetainedRenderState,
+    scene: &SceneGraph,
+    width: u32,
+    height: u32,
+) -> Option<Box<CanonicalTextChange>> {
+    let previous = state.snapshot.as_ref()?;
+    let next = canonical_snapshot(scene, width, height)?;
+    if previous.viewport != next.viewport || previous == &next {
+        return None;
     }
+    let change = planned_canonical_text_change(previous, &next)?;
+    Some(Box::new(CanonicalTextChange {
+        next_snapshot: next,
+        ..change
+    }))
 }
 
 impl RetainedRenderState {
-    fn plan_headless(&self, scene: &SceneGraph, width: u32, height: u32) -> RetainedPlan {
-        InvalidationPlanner::plan_headless(self, scene, width, height)
-    }
-
     fn remember_full_headless_scene(&mut self, scene: &SceneGraph, width: u32, height: u32) {
         self.snapshot = canonical_snapshot(scene, width, height);
-        self.device_recovery_pending = false;
     }
 
     fn forget_snapshot(&mut self) {
         self.snapshot = None;
     }
 
-    fn complete_partial(&mut self, next_snapshot: CanonicalSceneSnapshot) {
-        self.snapshot = Some(next_snapshot);
-    }
-
-    fn set_pending_full_surface_diagnostic(&mut self, diagnostic: Option<FullSurfaceInvalidation>) {
-        self.pending_full_surface_diagnostic = diagnostic;
-    }
-
-    /// Start a new observed frame. Evidence slots are single-frame drains, not
-    /// a history: a later fallback must never leave a prior passing capture
-    /// available to be misattributed to the new frame.
+    /// Work counts are a single-frame drain, not a history: a new frame must
+    /// never leave the previous frame's counts available to be misattributed.
     fn begin_observation_frame(&mut self) {
-        self.clear_observed_evidence();
-        // A previous planner decline that never reached the full-frame observer
-        // must not leak its diagnostic into the next observed frame.
-        self.pending_full_surface_diagnostic = None;
+        self.latest_work = None;
     }
 
-    fn clear_observed_evidence(&mut self) {
-        self.latest_capture = None;
-        self.latest_diagnostic = None;
-    }
-
-    fn take_pending_full_surface_diagnostic(&mut self) -> Option<FullSurfaceInvalidation> {
-        self.pending_full_surface_diagnostic.take()
-    }
-
-    fn set_latest_capture(&mut self, capture: RetainedChangeEfficiencyCapture) {
-        self.latest_capture = Some(capture);
-    }
-
-    fn take_latest_capture(&mut self) -> Option<RetainedChangeEfficiencyCapture> {
-        self.latest_capture.take()
-    }
-
-    fn set_latest_diagnostic(&mut self, artifact: ChangeEfficiencyArtifact) {
-        self.latest_diagnostic = Some(artifact);
-    }
-
-    fn take_latest_diagnostic(&mut self) -> Option<ChangeEfficiencyArtifact> {
-        self.latest_diagnostic.take()
-    }
-
-    /// Invalidate the retained proof baseline after a real production surface
-    /// recovery. The following observed frame must be a full-surface
-    /// diagnostic, never a scoped retained certification.
+    /// Invalidate the retained baseline after a real production surface
+    /// recovery. The following frame is a full repaint.
     pub(super) fn note_device_recovery(&mut self) {
-        self.device_recovery_pending = true;
         self.snapshot = None;
     }
 }
 
 impl Compositor {
     /// Try the retained canonical headless path before falling back to the
-    /// ordinary full-frame renderer.  `None` always means the caller must run
-    /// the existing path; it never treats a proxy counter as evidence.
+    /// ordinary full-frame renderer. `None` always means the caller must run
+    /// the existing path.
     pub(super) fn try_render_retained_headless(
         &mut self,
         scene: &SceneGraph,
@@ -280,104 +138,56 @@ impl Compositor {
         if !self.retained_headless_policy_is_supported() {
             // A full-frame degradation policy can alter visibility or raster
             // semantics. Its submitted pixels are not a retained baseline, so
-            // invalidate the private snapshot and surface a non-certifying
-            // fallback rather than repainting against divergent content.
+            // invalidate the private snapshot rather than repainting against
+            // divergent content.
             self.retained_render_state.forget_snapshot();
-            self.retained_render_state
-                .set_pending_full_surface_diagnostic(Some(full_surface_invalidation(
-                    FullSurfaceInvalidationReason::UnsupportedRetainedSceneChange,
-                    PartialPresentCapability::Supported,
-                )));
             return None;
         }
         let (width, height) = surface.size();
-        let plan = self
-            .retained_render_state
-            .plan_headless(scene, width, height);
-        let RetainedPlan::Partial(change) = plan else {
-            let RetainedPlan::FullFrame { diagnostic } = plan else {
-                unreachable!("retained plan has only partial or full-frame variants");
-            };
-            self.retained_render_state
-                .set_pending_full_surface_diagnostic(diagnostic);
+        let change = *plan_headless(&self.retained_render_state, scene, width, height)?;
+
+        let Some(telemetry) = self.render_retained_text_change(scene, surface, &change) else {
+            self.retained_render_state.forget_snapshot();
             return None;
         };
-        let change = *change;
 
-        let (telemetry, interval_duration_ms) =
-            match self.render_retained_text_change(scene, surface, &change) {
-                Some(result) => result,
-                None => {
-                    self.retained_render_state.forget_snapshot();
-                    self.retained_render_state
-                        .set_pending_full_surface_diagnostic(Some(full_surface_invalidation(
-                            FullSurfaceInvalidationReason::UnsupportedRetainedSceneChange,
-                            PartialPresentCapability::Supported,
-                        )));
-                    return None;
-                }
-            };
-
-        let capture = RetainedChangeEfficiencyCapture::from_observed_runtime(
-            self.observed_change_artifact(&change, width, height, interval_duration_ms),
-        );
-        self.retained_render_state
-            .complete_partial(change.next_snapshot);
-        self.retained_render_state.set_latest_capture(capture);
+        self.retained_render_state.latest_work = Some(WorkCounts::scoped(
+            change.redraw_tiles.len() as u32,
+            change.damage.area(),
+        ));
+        self.retained_render_state.snapshot = Some(change.next_snapshot);
         Some(telemetry)
     }
 
-    /// Record the result of an ordinary headless frame.  This seeds (or
+    /// Record the result of an ordinary headless frame. This seeds (or
     /// refreshes) the private retained snapshot only after the real full frame
-    /// was submitted, and preserves structured diagnostics for resize and the
-    /// modeled device-recovery planner path rather than certifying them.
+    /// was submitted.
     pub(super) fn observe_full_headless_frame(
         &mut self,
         scene: &SceneGraph,
         surface: &HeadlessSurface,
     ) {
-        // `render_frame_headless` normally calls the retained planner first,
-        // but keep this observer independently fail-closed for callers that
-        // invoke a full frame directly.
-        self.retained_render_state.clear_observed_evidence();
         let (width, height) = surface.size();
-        let diagnostic = self
-            .retained_render_state
-            .take_pending_full_surface_diagnostic();
         if self.retained_headless_policy_is_supported() {
             self.retained_render_state
                 .remember_full_headless_scene(scene, width, height);
         } else {
             self.retained_render_state.forget_snapshot();
         }
-        if let Some(diagnostic) = diagnostic {
-            self.retained_render_state
-                .set_latest_diagnostic(full_surface_artifact(
-                    self.renderer_identity(),
-                    scene.visible_tiles().len() as u32,
-                    width,
-                    height,
-                    diagnostic,
-                ));
-        }
+        self.retained_render_state.latest_work = Some(WorkCounts::full_frame(
+            scene.visible_tiles().len() as u32,
+            width,
+            height,
+        ));
     }
 
-    /// Drain the most recent opaque capture from the canonical fifty-tile,
-    /// headless evidence lane.
+    /// Drain the work counts of the most recent headless frame: a scoped
+    /// repaint of the changed tile(s), or a full-frame repaint.
     ///
-    /// This is a Rust-only Layer 3 validation hook.  It does not alter scene,
-    /// gRPC, protobuf, reconnect-diff, or WAL contracts. `None` means this
-    /// deliberately narrow producer did not observe its canonical scenario;
-    /// it does not make a claim about arbitrary scene changes.
-    pub fn take_change_efficiency_capture(&mut self) -> Option<RetainedChangeEfficiencyCapture> {
-        self.retained_render_state.take_latest_capture()
-    }
-
-    /// Drain the most recent structured full-frame diagnostic from the
-    /// canonical retained evidence lane. Diagnostics are deliberately raw
-    /// artifacts and can never certify proportional rendering.
-    pub fn take_change_efficiency_diagnostic(&mut self) -> Option<ChangeEfficiencyArtifact> {
-        self.retained_render_state.take_latest_diagnostic()
+    /// Rust-only dev/test hook; it does not touch scene, gRPC, or protobuf
+    /// contracts.
+    pub fn take_work_counts(&mut self) -> Option<WorkCounts> {
+        self.retained_render_state.latest_work.take()
     }
 
     fn render_retained_text_change(
@@ -385,7 +195,7 @@ impl Compositor {
         scene: &SceneGraph,
         surface: &HeadlessSurface,
         change: &CanonicalTextChange,
-    ) -> Option<(tze_hud_telemetry::FrameTelemetry, u64)> {
+    ) -> Option<tze_hud_telemetry::FrameTelemetry> {
         let frame_start = Instant::now();
         let (width, height) = surface.size();
         let damage = change.damage;
@@ -626,149 +436,7 @@ impl Compositor {
         telemetry.stage6_render_encode_us = stage6_render_encode_us;
         telemetry.stage7_gpu_submit_us = stage7_gpu_submit_us;
         telemetry.frame_time_us = frame_start.elapsed().as_micros().max(1) as u64;
-        let interval_duration_ms = frame_start.elapsed().as_millis().max(1) as u64;
-        Some((telemetry, interval_duration_ms))
-    }
-
-    fn observed_change_artifact(
-        &self,
-        change: &CanonicalTextChange,
-        width: u32,
-        height: u32,
-        interval_duration_ms: u64,
-    ) -> ChangeEfficiencyArtifact {
-        let members: Vec<_> = change
-            .redraw_tiles
-            .iter()
-            .map(|tile| {
-                let reason = if tile.tile_id == change.changed.tile_id {
-                    InvalidationDependencyReason::DirectChange
-                } else {
-                    InvalidationDependencyReason::VisualOverlap
-                };
-                (tile, reason)
-            })
-            .collect();
-        let node_members: Vec<_> = members
-            .iter()
-            .map(|(tile, reason)| {
-                (
-                    NodeWorkItemId {
-                        tile_id: tile.tile_id.to_string(),
-                        node_id: tile.node_id.to_string(),
-                    },
-                    reason.clone(),
-                )
-            })
-            .collect();
-        let render_members: Vec<_> = members
-            .iter()
-            .map(|(tile, reason)| {
-                (
-                    RenderPlanWorkItemId {
-                        tile_id: tile.tile_id.to_string(),
-                        plan_id: format!("{}:retained-text", tile.node_id),
-                    },
-                    reason.clone(),
-                )
-            })
-            .collect();
-        let direct_damage = tze_hud_telemetry::DamageWorkItemId {
-            tile_id: change.changed.tile_id.to_string(),
-            region_id: format!("{}:bounds", change.changed.tile_id),
-            bounds: pixel_rect_for_bounds(change.changed.tile_bounds, width, height)
-                .expect("canonical planner already validated changed tile damage"),
-        };
-        let damage_members = match &change.scenario {
-            CanonicalScenario::OpaqueNonOverlapping => {
-                vec![(direct_damage, InvalidationDependencyReason::DirectChange)]
-            }
-            CanonicalScenario::TransparentOverlap {
-                upper_tile_id,
-                overlap_bounds,
-                ..
-            } => {
-                let upper = change
-                    .redraw_tiles
-                    .iter()
-                    .find(|tile| tile.tile_id == *upper_tile_id)
-                    .expect("transparent-overlap planner supplies its upper tile");
-                vec![
-                    (direct_damage, InvalidationDependencyReason::DirectChange),
-                    (
-                        tze_hud_telemetry::DamageWorkItemId {
-                            tile_id: upper.tile_id.to_string(),
-                            region_id: format!("{}:overlap", upper.tile_id),
-                            bounds: pixel_rect_for_bounds(*overlap_bounds, width, height)
-                                .expect("transparent-overlap planner supplies viewport bounds"),
-                        },
-                        InvalidationDependencyReason::VisualOverlap,
-                    ),
-                ]
-            }
-        };
-        let (scenario_name, scenario_version) = match &change.scenario {
-            CanonicalScenario::OpaqueNonOverlapping => (
-                tze_hud_telemetry::ONE_NODE_FIFTY_TILE_SCENARIO_NAME,
-                tze_hud_telemetry::ONE_NODE_FIFTY_TILE_SCENARIO_VERSION,
-            ),
-            CanonicalScenario::TransparentOverlap { .. } => (
-                tze_hud_telemetry::TRANSPARENT_OVERLAP_FIFTY_TILE_SCENARIO_NAME,
-                tze_hud_telemetry::TRANSPARENT_OVERLAP_FIFTY_TILE_SCENARIO_VERSION,
-            ),
-        };
-        let scoped_encode_count = members.len() as u64;
-        ChangeEfficiencyArtifact {
-            schema_version: tze_hud_telemetry::CHANGE_EFFICIENCY_SCHEMA_VERSION,
-            scenario: EfficiencyScenarioIdentity {
-                name: scenario_name.into(),
-                version: scenario_version,
-            },
-            runtime: EfficiencyRuntimeIdentity {
-                build: format!("tze_hud_compositor-{}", env!("CARGO_PKG_VERSION")),
-                window_mode: EfficiencyWindowMode::Headless,
-            },
-            pacing: EfficiencyPacingIdentity {
-                mode: EfficiencyPacingMode::EventDriven,
-                requested_cadence_hz: None,
-            },
-            renderer: self.renderer_identity(),
-            viewport: EfficiencyViewport { width, height },
-            constrained_profile: None,
-            settling_duration_ms: 0,
-            interval_duration_ms,
-            status: ChangeMeasurementStatus::Complete,
-            measurement_provenance: ChangeMeasurementProvenance::ObservedRetainedRuntime,
-            scene_tile_count: CANONICAL_TILE_COUNT as u32,
-            closure: InvalidationClosure {
-                layout: observed_category(node_members.clone()),
-                raster: observed_category(node_members),
-                texture_upload: TextureUploadCategory {
-                    closure_items: vec![],
-                    actual_work: vec![],
-                },
-                render_encoding: observed_category(render_members),
-                composition_damage: observed_category(damage_members),
-            },
-            render_observation: ChangeRenderWorkObservation {
-                full_surface_clear_operations: 0,
-                full_frame_encode_operations: 0,
-                scoped_render_encode_operations: scoped_encode_count,
-            },
-            // Each closure tile contributes scoped background, prepared-text,
-            // and deterministic idle-grip work. This logical count remains
-            // distinct from render-plan membership and full-frame encodes.
-            encoded_draw_calls: scoped_encode_count * 3,
-            full_surface_invalidation: None,
-        }
-    }
-
-    fn renderer_identity(&self) -> EfficiencyRendererIdentity {
-        EfficiencyRendererIdentity {
-            backend: nonempty_identity(&self.adapter_info.backend, "unknown-backend"),
-            adapter: nonempty_identity(&self.adapter_info.name, "unknown-adapter"),
-            software: self.adapter_info.device_type.eq_ignore_ascii_case("cpu"),
-        }
+        Some(telemetry)
     }
 
     fn retained_headless_policy_is_supported(&self) -> bool {
@@ -851,7 +519,7 @@ fn canonical_snapshot(
     tiles.sort_by_key(|tile| tile.tile_id);
     let scenario = classify_canonical_scenario(&tiles)?;
     Some(CanonicalSceneSnapshot {
-        viewport: EfficiencyViewport { width, height },
+        viewport: (width, height),
         scenario,
         tiles,
     })
@@ -923,16 +591,11 @@ fn planned_canonical_text_change(
     let changed = changed_canonical_tile(previous, current)?;
     match &current.scenario {
         CanonicalScenario::OpaqueNonOverlapping => {
-            let damage = pixel_rect_for_bounds(
-                changed.tile_bounds,
-                current.viewport.width,
-                current.viewport.height,
-            )?;
+            let damage =
+                pixel_rect_for_bounds(changed.tile_bounds, current.viewport.0, current.viewport.1)?;
             Some(CanonicalTextChange {
-                changed: changed.clone(),
                 redraw_tiles: vec![changed],
                 damage,
-                scenario: current.scenario.clone(),
                 next_snapshot: current.clone(),
             })
         }
@@ -959,14 +622,12 @@ fn planned_canonical_text_change(
             }
             let damage = pixel_rect_for_bounds(
                 union_rect(changed.tile_bounds, *overlap_bounds),
-                current.viewport.width,
-                current.viewport.height,
+                current.viewport.0,
+                current.viewport.1,
             )?;
             Some(CanonicalTextChange {
-                changed,
                 redraw_tiles,
                 damage,
-                scenario: current.scenario.clone(),
                 next_snapshot: current.clone(),
             })
         }
@@ -1096,142 +757,10 @@ fn pixel_rects_intersect(first: PixelRect, second: PixelRect) -> bool {
         && first_bottom > second.y
 }
 
-fn one_item_category<T>(identity: T) -> InvalidationCategory<T>
-where
-    T: Clone,
-{
-    InvalidationCategory {
-        closure_items: vec![ClosureWorkItem {
-            identity: identity.clone(),
-            dependency_reason: InvalidationDependencyReason::DirectChange,
-        }],
-        actual_work: vec![ActualWorkItem {
-            identity,
-            operations: 1,
-        }],
-    }
-}
-
-fn observed_category<T>(members: Vec<(T, InvalidationDependencyReason)>) -> InvalidationCategory<T>
-where
-    T: Clone,
-{
-    InvalidationCategory {
-        closure_items: members
-            .iter()
-            .map(|(identity, dependency_reason)| ClosureWorkItem {
-                identity: identity.clone(),
-                dependency_reason: dependency_reason.clone(),
-            })
-            .collect(),
-        actual_work: members
-            .into_iter()
-            .map(|(identity, _)| ActualWorkItem {
-                identity,
-                operations: 1,
-            })
-            .collect(),
-    }
-}
-
-fn full_surface_invalidation(
-    reason: FullSurfaceInvalidationReason,
-    partial_present_capability: PartialPresentCapability,
-) -> FullSurfaceInvalidation {
-    FullSurfaceInvalidation {
-        reason,
-        partial_present_capability,
-    }
-}
-
-fn full_surface_artifact(
-    renderer: EfficiencyRendererIdentity,
-    scene_tile_count: u32,
-    width: u32,
-    height: u32,
-    full_surface_invalidation: FullSurfaceInvalidation,
-) -> ChangeEfficiencyArtifact {
-    let surface_damage = tze_hud_telemetry::DamageWorkItemId {
-        tile_id: "runtime-surface".into(),
-        region_id: "full-surface".into(),
-        bounds: PixelRect {
-            x: 0,
-            y: 0,
-            width,
-            height,
-        },
-    };
-    ChangeEfficiencyArtifact {
-        schema_version: tze_hud_telemetry::CHANGE_EFFICIENCY_SCHEMA_VERSION,
-        scenario: EfficiencyScenarioIdentity {
-            name: tze_hud_telemetry::ONE_NODE_FIFTY_TILE_SCENARIO_NAME.into(),
-            version: tze_hud_telemetry::ONE_NODE_FIFTY_TILE_SCENARIO_VERSION,
-        },
-        runtime: EfficiencyRuntimeIdentity {
-            build: format!("tze_hud_compositor-{}", env!("CARGO_PKG_VERSION")),
-            window_mode: EfficiencyWindowMode::Headless,
-        },
-        pacing: EfficiencyPacingIdentity {
-            mode: EfficiencyPacingMode::EventDriven,
-            requested_cadence_hz: None,
-        },
-        renderer,
-        viewport: EfficiencyViewport { width, height },
-        constrained_profile: None,
-        settling_duration_ms: 0,
-        interval_duration_ms: 1,
-        status: ChangeMeasurementStatus::Complete,
-        measurement_provenance: ChangeMeasurementProvenance::ObservedFullFrameRuntime,
-        scene_tile_count,
-        closure: InvalidationClosure {
-            layout: InvalidationCategory {
-                closure_items: vec![],
-                actual_work: vec![],
-            },
-            raster: InvalidationCategory {
-                closure_items: vec![],
-                actual_work: vec![],
-            },
-            texture_upload: TextureUploadCategory {
-                closure_items: vec![],
-                actual_work: vec![],
-            },
-            render_encoding: InvalidationCategory {
-                closure_items: vec![],
-                actual_work: vec![],
-            },
-            composition_damage: one_item_category(surface_damage),
-        },
-        render_observation: ChangeRenderWorkObservation {
-            full_surface_clear_operations: 1,
-            full_frame_encode_operations: 1,
-            scoped_render_encode_operations: 0,
-        },
-        encoded_draw_calls: 0,
-        full_surface_invalidation: Some(full_surface_invalidation),
-    }
-}
-
-fn nonempty_identity(value: &str, fallback: &str) -> String {
-    if value.trim().is_empty() {
-        fallback.into()
-    } else {
-        value.into()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use tze_hud_scene::types::{FontFamily, Node, Rgba, TextAlign, TextOverflow};
-
-    fn renderer() -> EfficiencyRendererIdentity {
-        EfficiencyRendererIdentity {
-            backend: "test-backend".into(),
-            adapter: "test-adapter".into(),
-            software: true,
-        }
-    }
 
     fn canonical_scene_with_first_content(first_content: &str) -> SceneGraph {
         let mut scene = SceneGraph::new(1_000.0, 500.0);
@@ -1307,91 +836,22 @@ mod tests {
     }
 
     #[test]
-    fn full_surface_reasons_are_structured_non_passing_diagnostics() {
-        for (reason, capability) in [
-            (
-                FullSurfaceInvalidationReason::Resize,
-                PartialPresentCapability::Supported,
-            ),
-            (
-                FullSurfaceInvalidationReason::DeviceRecovery,
-                PartialPresentCapability::Supported,
-            ),
-            (
-                FullSurfaceInvalidationReason::UnsupportedPartialPresentBackend,
-                PartialPresentCapability::Unsupported,
-            ),
-            (
-                FullSurfaceInvalidationReason::UnsupportedRetainedSceneChange,
-                PartialPresentCapability::Supported,
-            ),
-        ] {
-            let artifact = full_surface_artifact(
-                renderer(),
-                CANONICAL_TILE_COUNT as u32,
-                1_000,
-                500,
-                full_surface_invalidation(reason.clone(), capability),
-            );
-            let report = artifact.validate();
-            assert!(!report.passed, "{report:#?}");
-            assert_eq!(
-                report.status,
-                tze_hud_telemetry::ChangeEfficiencyValidationStatus::DiagnosticFullSurface,
-                "{report:#?}"
-            );
-            assert_eq!(artifact.full_surface_invalidation.unwrap().reason, reason);
-        }
-    }
-
-    #[test]
-    fn new_observation_clears_prior_frame_capture_and_diagnostic() {
-        let mut state = RetainedRenderState::default();
-        let mut prior_capture_artifact = full_surface_artifact(
-            renderer(),
-            CANONICAL_TILE_COUNT as u32,
-            1_000,
-            500,
-            full_surface_invalidation(
-                FullSurfaceInvalidationReason::SurfaceCreation,
-                PartialPresentCapability::Supported,
-            ),
-        );
-        prior_capture_artifact.measurement_provenance =
-            ChangeMeasurementProvenance::ObservedRetainedRuntime;
-        state.set_latest_capture(RetainedChangeEfficiencyCapture::from_observed_runtime(
-            prior_capture_artifact,
-        ));
-        state.set_latest_diagnostic(full_surface_artifact(
-            renderer(),
-            CANONICAL_TILE_COUNT as u32,
-            1_000,
-            500,
-            full_surface_invalidation(
-                FullSurfaceInvalidationReason::Resize,
-                PartialPresentCapability::Supported,
-            ),
-        ));
-        state.set_pending_full_surface_diagnostic(Some(full_surface_invalidation(
-            FullSurfaceInvalidationReason::DeviceRecovery,
-            PartialPresentCapability::Supported,
-        )));
+    fn new_observation_clears_prior_frame_work_counts() {
+        let mut state = RetainedRenderState {
+            latest_work: Some(WorkCounts::scoped(1, 100)),
+            ..RetainedRenderState::default()
+        };
 
         state.begin_observation_frame();
 
-        assert!(state.take_latest_capture().is_none());
-        assert!(state.take_latest_diagnostic().is_none());
-        assert!(state.take_pending_full_surface_diagnostic().is_none());
+        assert!(state.latest_work.is_none());
     }
 
     #[test]
     fn device_recovery_invalidates_the_private_snapshot() {
         let mut state = RetainedRenderState {
             snapshot: Some(CanonicalSceneSnapshot {
-                viewport: EfficiencyViewport {
-                    width: 1_000,
-                    height: 500,
-                },
+                viewport: (1_000, 500),
                 scenario: CanonicalScenario::OpaqueNonOverlapping,
                 tiles: vec![],
             }),
@@ -1401,6 +861,5 @@ mod tests {
         state.note_device_recovery();
 
         assert!(state.snapshot.is_none());
-        assert!(state.device_recovery_pending);
     }
 }
