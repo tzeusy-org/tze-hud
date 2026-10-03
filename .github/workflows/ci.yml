@@ -12,6 +12,7 @@
 #
 # Job map:
 #   check          — cargo check: fast compilation gate (no codegen)
+#                    + cargo machete (unused dependencies)
 #                    + fail-closed idle-efficiency checker contract tests
 #   fmt            — cargo fmt --check
 #   clippy         — cargo clippy --all-targets -D warnings (incl. tests/examples/benches)
@@ -79,6 +80,13 @@ jobs:
           sudo apt-get $APT_OPTS install -y --no-install-recommends protobuf-compiler
       - name: cargo check (workspace)
         run: cargo check --workspace
+      # Unused dependencies. Needs no build; false positives go in
+      # [package.metadata.cargo-machete] ignored (with a comment saying why).
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-machete@0.9.2
+      - name: cargo machete (unused dependencies)
+        run: cargo machete
       - name: Test idle-efficiency artifact gate
         run: python3 scripts/ci/test_check_idle_efficiency.py
       - name: Test quiescent-efficiency startup contract
