@@ -69,7 +69,7 @@ async fn test_resume_with_token() {
     }
 }
 
-// ─── Reconnection and resume tests (RFC 0005 §6.1–6.6, rig-3dou) ────────
+// ─── Reconnect and resume ────────────────────────────────────────────────────
 
 /// Helper: perform a full handshake and return the resume token.
 ///
@@ -92,9 +92,8 @@ async fn handshake_and_disconnect(
     resume_token
 }
 
-/// Scenario (rig-3dou AC): Reconnect within grace period succeeds with
+/// Scenario: Reconnect within grace period succeeds with
 /// `SessionResumeResult(accepted=true)`.
-/// RFC 0005 §6.1–6.3
 #[tokio::test]
 async fn test_reconnect_within_grace_accepted() {
     let (mut client, _server) = setup_test().await;
@@ -140,7 +139,7 @@ async fn test_reconnect_within_grace_accepted() {
         other => panic!("Expected SessionResumeResult, got: {other:?}"),
     }
 
-    // Full SceneSnapshot must follow SessionResumeResult (RFC 0005 §6.4).
+    // Full SceneSnapshot must follow SessionResumeResult.
     let msg2 = response_stream.next().await.unwrap().unwrap();
     match &msg2.payload {
         Some(ServerPayload::SceneSnapshot(_)) => {}
@@ -148,9 +147,8 @@ async fn test_reconnect_within_grace_accepted() {
     }
 }
 
-/// Scenario (rig-3dou AC): New session token is issued on resume; old token
+/// Scenario: New session token is issued on resume; old token
 /// is single-use and consumed.
-/// RFC 0005 §6.1 — "single-use for resumption"
 #[tokio::test]
 async fn test_resume_token_single_use() {
     let (mut client, _server) = setup_test().await;
@@ -216,9 +214,8 @@ async fn test_resume_token_single_use() {
     }
 }
 
-/// Scenario (rig-3dou AC): Re-authentication required on resume.
+/// Scenario: Re-authentication required on resume.
 /// Invalid credentials result in `SessionError(AUTH_FAILED)`.
-/// RFC 0005 §6.2
 #[tokio::test]
 async fn test_resume_auth_required() {
     let (mut client, _server) = setup_test().await;
@@ -257,9 +254,8 @@ async fn test_resume_auth_required() {
     }
 }
 
-/// Scenario (rig-3dou AC): Bogus token (as if runtime restarted and all tokens
+/// Scenario: Bogus token (as if runtime restarted and all tokens
 /// cleared) is rejected with `SESSION_GRACE_EXPIRED`.
-/// RFC 0005 §6.6
 #[tokio::test]
 async fn test_bogus_token_rejected_with_grace_expired() {
     let (mut client, _server) = setup_test().await;
@@ -302,8 +298,8 @@ async fn test_bogus_token_rejected_with_grace_expired() {
     }
 }
 
-/// Scenario (rig-3dou AC): SessionResumeResult carries complete subscription state.
-/// RFC 0005 §6.3 — agents MUST use confirmed subscription state, not assume pre-disconnect set.
+/// Scenario: SessionResumeResult carries complete subscription state.
+/// Agents must use the confirmed subscription state, not assume the pre-disconnect set.
 #[tokio::test]
 async fn test_resume_result_carries_subscription_state() {
     let (mut client, _server) = setup_test().await;

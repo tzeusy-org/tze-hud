@@ -1,6 +1,6 @@
 use super::*;
 
-// ─── TimingHints validation tests (RFC 0003 §3.5, RFC 0005 §3.3) ─────────
+// ─── TimingHints validation ──────────────────────────────────────────────────
 
 /// Unit test for validate_timing_hints: TIMESTAMP_TOO_OLD.
 #[test]

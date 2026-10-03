@@ -86,9 +86,6 @@ use stream_session::StreamSession;
 pub use traffic::{TrafficClass, classify_server_payload};
 use upload::{UploadWorkerCommand, UploadWorkerEvent, run_upload_worker};
 use verbs::{handle_claim_tile, handle_clear, handle_hold, handle_publish};
-// UploadByteRateLimiter is used transitively in `mod tests { use super::* }`.
-#[allow(unused_imports)]
-use upload::UploadByteRateLimiter;
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 

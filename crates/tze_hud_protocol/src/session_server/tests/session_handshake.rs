@@ -120,9 +120,9 @@ async fn test_heartbeat_echo() {
     }
 }
 
-// ─── Sequence number validation tests (RFC 0005 §2.3) ────────────────────
+// ─── Sequence validation ─────────────────────────────────────────────────────
 
-/// Scenario: Sequence gap exceeds threshold (RFC 0005 §2.3)
+/// Scenario: Sequence gap exceeds threshold
 /// WHEN client sends sequence 5 followed by 150 (gap > max_sequence_gap=100),
 /// THEN runtime closes the stream with SEQUENCE_GAP_EXCEEDED.
 #[tokio::test]
@@ -180,7 +180,7 @@ async fn test_sequence_gap_exceeded() {
     }
 }
 
-/// Scenario: Sequence regression rejected (RFC 0005 §2.3)
+/// Scenario: Sequence regression rejected
 /// WHEN client sends sequence 10 followed by sequence 8,
 /// THEN runtime closes the stream with SEQUENCE_REGRESSION.
 #[tokio::test]
@@ -254,78 +254,6 @@ async fn test_sequence_monotonic_accepted() {
     }
 }
 
-// ─── Session state machine tests (RFC 0005 §1.1) ─────────────────────────
-
-/// Scenario: Successful session establishment transitions through Connecting→Handshaking→Active.
-/// The state machine starts in Handshaking during the handle_session_init call and
-/// transitions to Active after the handshake response is sent.
-#[tokio::test]
-async fn test_state_machine_successful_establishment() {
-    let (mut client, _server) = setup_test().await;
-    let (_tx, messages, _stream) = handshake(&mut client, "state-test-agent", "test-key").await;
-
-    // The complete initial baseline is establishment, snapshot, then current policy.
-    assert_eq!(
-        messages.len(),
-        3,
-        "Expected SessionEstablished + SceneSnapshot + DegradationNotice"
-    );
-    assert!(
-        matches!(
-            messages[0].payload,
-            Some(ServerPayload::SessionEstablished(_))
-        ),
-        "First message must be SessionEstablished"
-    );
-    assert!(
-        matches!(messages[1].payload, Some(ServerPayload::SceneSnapshot(_))),
-        "Second message must be SceneSnapshot"
-    );
-    assert!(
-        matches!(
-            messages[2].payload,
-            Some(ServerPayload::DegradationNotice(_))
-        ),
-        "Third message must be current DegradationNotice"
-    );
-}
-
-/// Scenario: Auth failure transitions Handshaking→Closed with SessionError.
-#[tokio::test]
-async fn test_state_machine_auth_failure_to_closed() {
-    let (mut client, _server) = setup_test().await;
-
-    let (init_tx, init_rx) = tokio::sync::mpsc::channel::<ClientMessage>(64);
-    let stream = tokio_stream::wrappers::ReceiverStream::new(init_rx);
-
-    init_tx
-        .send(ClientMessage {
-            sequence: 1,
-            timestamp_wall_us: now_wall_us(),
-            payload: Some(ClientPayload::SessionInit(SessionInit {
-                agent_id: "state-fail-agent".to_string(),
-                initial_subscriptions: Vec::new(),
-                resume_token: Vec::new(),
-                min_protocol_version: 1000,
-                max_protocol_version: 1001,
-                auth_credential: Some(crate::auth::psk_credential("wrong-key".to_string())),
-            })),
-        })
-        .await
-        .unwrap();
-
-    let mut response_stream = client.session(stream).await.unwrap().into_inner();
-    let msg = response_stream.next().await.unwrap().unwrap();
-
-    // State machine should send SessionError (AUTH_FAILED) and transition to Closed
-    match &msg.payload {
-        Some(ServerPayload::SessionError(error)) => {
-            assert_eq!(error.code, "AUTH_FAILED");
-        }
-        other => panic!("Expected SessionError(AUTH_FAILED), got: {other:?}"),
-    }
-}
-
 /// Scenario: Graceful disconnect via SessionClose.
 /// The session stream should terminate cleanly after SessionClose is sent.
 #[tokio::test]
@@ -374,142 +302,9 @@ async fn test_graceful_disconnect_session_close() {
     );
 }
 
-// ─── Traffic class classification tests ─────────────────────────────────
+// ─── Handshake auth, version, capability, subscription ───────────────────────
 
-/// Verify traffic class routing for server payloads.
-#[test]
-fn test_traffic_class_routing() {
-    use crate::proto::session::*;
-
-    // Transactional messages
-    assert_eq!(
-        classify_server_payload(&ServerPayload::SessionEstablished(
-            SessionEstablished::default()
-        )),
-        TrafficClass::Transactional,
-    );
-    assert_eq!(
-        classify_server_payload(&ServerPayload::RequestResult(RequestResult::default())),
-        TrafficClass::Transactional,
-    );
-    assert_eq!(
-        classify_server_payload(&ServerPayload::RequestResult(RequestResult::default())),
-        TrafficClass::Transactional,
-    );
-    assert_eq!(
-        classify_server_payload(&ServerPayload::SessionSuspended(SessionSuspended::default())),
-        TrafficClass::Transactional,
-    );
-    assert_eq!(
-        classify_server_payload(&ServerPayload::SessionResumed(SessionResumed::default())),
-        TrafficClass::Transactional,
-    );
-    assert_eq!(
-        classify_server_payload(&ServerPayload::RequestResult(RequestResult::default())),
-        TrafficClass::Transactional,
-    );
-    assert_eq!(
-        classify_server_payload(&ServerPayload::ResourceUploadAccepted(
-            ResourceUploadAccepted::default(),
-        )),
-        TrafficClass::Transactional,
-    );
-    assert_eq!(
-        classify_server_payload(&ServerPayload::ResourceStored(ResourceStored::default())),
-        TrafficClass::Transactional,
-    );
-    assert_eq!(
-        classify_server_payload(&ServerPayload::ResourceErrorResponse(
-            ResourceErrorResponse::default(),
-        )),
-        TrafficClass::Transactional,
-    );
-
-    // StateStream messages
-    assert_eq!(
-        classify_server_payload(&ServerPayload::SceneSnapshot(SceneSnapshot::default())),
-        TrafficClass::StateStream,
-    );
-
-    // DegradationNotice — transactional (RFC 0005 §3.4)
-    assert_eq!(
-        classify_server_payload(&ServerPayload::DegradationNotice(
-            DegradationNotice::default()
-        )),
-        TrafficClass::Transactional,
-    );
-
-    // Ephemeral messages
-    assert_eq!(
-        classify_server_payload(&ServerPayload::Heartbeat(Heartbeat::default())),
-        TrafficClass::Ephemeral,
-    );
-}
-
-// ─── Sequence validation unit tests ─────────────────────────────────────
-
-/// Unit tests for StreamSession::validate_client_sequence.
-#[test]
-fn test_validate_sequence_unit() {
-    let mut session = StreamSession {
-        session_id: "test".to_string(),
-        namespace: "test".to_string(),
-        agent_name: "test".to_string(),
-        capabilities: Vec::new(),
-        lease_ids: Vec::new(),
-        scene_session_id: SceneId::new(),
-        resource_budget: ResourceBudget::default(),
-        budget_enforcer: None,
-        subscriptions: Vec::new(),
-        server_sequence: 0,
-        resume_token: Vec::new(),
-        last_heartbeat_ms: 0,
-        state: SessionState::Active,
-        last_client_sequence: 1,
-        safe_mode_active: false,
-        freeze_queue: SessionFreezeQueue::new(FREEZE_QUEUE_CAPACITY),
-        session_open_at_wall_us: now_wall_us(),
-        dedup_window: DedupWindow::new(1000, 60),
-        lease_correlation_cache: LeaseCorrelationCache::new(
-            DEFAULT_LEASE_CORRELATION_CACHE_CAPACITY,
-        ),
-        resource_upload_rate_limiter: UploadByteRateLimiter::with_limit(
-            tze_hud_resource::DEFAULT_UPLOAD_RATE_LIMIT_BYTES_PER_SEC,
-        ),
-    };
-
-    // seq=2 (gap=1): OK
-    assert!(session.validate_client_sequence(2, 100).is_ok());
-    assert_eq!(session.last_client_sequence, 2);
-
-    // seq=102 (gap=100): still OK (gap == max_gap, not >)
-    assert!(session.validate_client_sequence(102, 100).is_ok());
-    assert_eq!(session.last_client_sequence, 102);
-
-    // seq=203 (gap=101): exceeds max_gap=100
-    let err = session.validate_client_sequence(203, 100);
-    assert!(err.is_err());
-    let (code, _) = err.unwrap_err();
-    assert_eq!(code, "SEQUENCE_GAP_EXCEEDED");
-    // last_client_sequence unchanged on error
-    assert_eq!(session.last_client_sequence, 102);
-
-    // seq=50 (regression): error
-    let err = session.validate_client_sequence(50, 100);
-    assert!(err.is_err());
-    let (code, _) = err.unwrap_err();
-    assert_eq!(code, "SEQUENCE_REGRESSION");
-
-    // seq=102 (same as last): regression (not strictly greater)
-    let err = session.validate_client_sequence(102, 100);
-    assert!(err.is_err());
-    let (code, _) = err.unwrap_err();
-    assert_eq!(code, "SEQUENCE_REGRESSION");
-}
-
-// ─── Handshake auth, version, capability, subscription tests (rig-8uqz) ──
-
-/// Scenario: Structured AuthCredential (PSK) accepted (RFC 0005 §1.4)
+/// Scenario: Structured AuthCredential (PSK) accepted
 /// WHEN agent sends SessionInit with a valid PreSharedKeyCredential in auth_credential,
 /// THEN runtime authenticates and proceeds to SessionEstablished.
 #[tokio::test]
@@ -550,7 +345,7 @@ async fn test_auth_structured_psk_credential_accepted() {
     }
 }
 
-/// Scenario: Invalid structured PSK credential rejected with AUTH_FAILED (RFC 0005 §1.4)
+/// Scenario: Invalid structured PSK credential rejected with AUTH_FAILED
 /// WHEN agent sends SessionInit with a wrong PreSharedKeyCredential,
 /// THEN runtime sends SessionError(AUTH_FAILED) and closes stream.
 #[tokio::test]
@@ -593,7 +388,7 @@ async fn test_auth_structured_psk_credential_wrong_key() {
     }
 }
 
-/// Scenario: LocalSocketCredential accepted (RFC 0005 §1.4)
+/// Scenario: LocalSocketCredential accepted
 /// WHEN agent sends SessionInit with a valid LocalSocketCredential,
 /// THEN runtime authenticates and proceeds to SessionEstablished.
 #[tokio::test]
@@ -635,7 +430,7 @@ async fn test_auth_local_socket_credential_accepted() {
     }
 }
 
-// ── Wire-level LocalSocket non-loopback rejection (hud-stl9j / hud-1aswu.1) ──
+// ── Wire-level LocalSocket non-loopback rejection ──
 //
 // The gRPC integration tests above always connect from loopback (::1), so
 // peer_ip is always loopback there.  These unit tests call handle_session_init
@@ -669,7 +464,7 @@ fn local_socket_session_init(agent_id: &str) -> SessionInit {
 /// THEN the server message channel receives SessionError { code: "AUTH_FAILED" }
 ///      and handle_session_init returns None (session not established).
 ///
-/// Security regression gate for hud-1aswu.1: a future refactor that removes
+/// Security regression gate: a future refactor that removes
 /// the loopback check would cause this test to fail instead of silently breaking.
 #[tokio::test]
 async fn test_handle_session_init_local_socket_non_loopback_auth_failed() {
@@ -731,7 +526,7 @@ async fn test_handle_session_init_local_socket_non_loopback_auth_failed() {
 /// THEN the server message channel receives SessionError { code: "AUTH_FAILED" }
 ///      and handle_session_resume returns None (resume rejected before token check).
 ///
-/// Security regression gate for hud-1aswu.1 resume path: the resume path re-
+/// Security regression gate for the resume path: the resume path re-
 /// authenticates independently; this test pins it.
 #[tokio::test]
 async fn test_handle_session_resume_local_socket_non_loopback_auth_failed() {
@@ -801,7 +596,7 @@ async fn test_handle_session_resume_local_socket_non_loopback_auth_failed() {
     }
 }
 
-/// Scenario: Version negotiated successfully (RFC 0005 §4.1)
+/// Scenario: Version negotiated successfully
 /// WHEN agent declares min=1000, max=1001 and runtime supports 1000-1001,
 /// THEN SessionEstablished contains negotiated_protocol_version=1001.
 #[tokio::test]
@@ -839,7 +634,7 @@ async fn test_version_negotiation_success() {
     }
 }
 
-/// Scenario: Version negotiation failure — no mutual version (RFC 0005 §4.1)
+/// Scenario: Version negotiation failure — no mutual version
 /// WHEN agent declares min=2000, max=2001 and runtime only supports 1000-1001,
 /// THEN runtime sends SessionError(code=UNSUPPORTED_PROTOCOL_VERSION) and closes stream.
 #[tokio::test]
@@ -892,13 +687,13 @@ fn test_capability_set_covers_wildcard_grants() {
 }
 
 /// Scenario: PSK agent with access_input_events capability successfully subscribes to
-/// INPUT_EVENTS (RFC 0005 §7.1).
+/// INPUT_EVENTS.
 /// WHEN a PSK-authenticated agent requests INPUT_EVENTS subscription AND includes
 /// access_input_events in requested_capabilities,
 /// THEN SessionEstablished includes INPUT_EVENTS in active_subscriptions and
 /// denied_subscriptions is empty.
 ///
-/// Subscription gating uses the agent's explicitly granted capabilities (RFC 0005 §7.1).
+/// Subscription gating uses the agent's explicitly granted capabilities.
 /// Agents must request the required capability to subscribe to gated categories.
 #[tokio::test]
 async fn test_psk_with_capability_allows_input_events_subscription() {

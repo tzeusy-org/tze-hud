@@ -236,9 +236,9 @@ async fn viewer_dismiss_tile_pushes_reclaimed_override() {
     server.abort();
 }
 
-// ─── DegradationNotice tests (RFC 0005 §3.4, §7.1) ───────────────────────
+// ─── DegradationNotice ───────────────────────────────────────────────────────
 
-/// traffic_class: DegradationNotice must be Transactional (RFC 0005 §3.4).
+/// traffic_class: DegradationNotice must be Transactional.
 #[test]
 fn test_degradation_notice_is_transactional() {
     assert_eq!(
@@ -351,7 +351,7 @@ async fn test_degradation_notice_broadcast_to_active_session() {
     drop(tx);
 }
 
-// ─── ElementRepositionedEvent tests (hud-bs2q.6) ─────────────────────────
+// ─── ElementRepositionedEvent ────────────────────────────────────────────────
 
 /// Build a service + shared-state + element_repositioned broadcast channel.
 ///
@@ -630,7 +630,7 @@ async fn test_element_repositioned_not_delivered_without_scene_topology_subscrip
     drop(tx); // close stream
 }
 
-// ─── FramePresented tests (hud-91uu6) ────────────────────────────────────
+// ─── FramePresented ──────────────────────────────────────────────────────────
 
 /// Build a service + frame_presented broadcast channel behind a live server.
 async fn setup_test_with_frame_presented_tx() -> (
