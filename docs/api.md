@@ -116,10 +116,15 @@ allow = ["zone:*", "widget:gauge", "portal", "tiles"]
 - An agent has whatever the allowlist says. There is no capability
   negotiation and no resident principal.
 - `admin` is an operator entry, outside the model surface: it opens
-  `GET /admin/status` and `GET /admin/logs` on the MCP port, and `*` does not
-  grant it. `/admin/status` includes `safe_mode_hotkey`
+  `GET /admin/status`, `GET /admin/logs`, and `GET /admin/screenshot` on the
+  MCP port, and `*` does not grant it. `/admin/status` includes `safe_mode_hotkey`
   (`chord`, `registered`, `error`; `null` when no hotkey is active; `registered: null` while pending): `registered: false`
   means the human safe-mode chord is owned by another program.
+  `/admin/screenshot` returns a PNG of the frame the compositor draws (not an
+  OS capture; overlay alpha is as composited): one render on request, no cost
+  while idle, never cached, one at a time (429 `BUSY`), 503 `UNAVAILABLE` after
+  3 s or without a display, 422 `TOO_LARGE` past 8192 px per side or 32 MiB. It
+  is not exposed through MCP tools or gRPC.
 - The operator's local tools (cleanup, composer paste, SVG asset upload) are
   off the model surface: CLI/config, or gRPC for tooling.
 

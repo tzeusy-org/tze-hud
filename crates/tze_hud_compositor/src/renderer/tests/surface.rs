@@ -324,6 +324,31 @@ async fn build_windowed_frame_decoupled_from_surface_then_presents() {
     );
 }
 
+/// An admin capture renders a built frame offscreen without acquiring or
+/// presenting anything, and returns the frame's pixels (hud-i2e10.8).
+#[tokio::test]
+async fn capture_windowed_frame_reads_back_the_built_frame() {
+    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(320, 200).await);
+    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
+    let mut scene = SceneGraph::new(320.0, 200.0);
+    compositor.prime_markdown_cache(&scene);
+    compositor.prime_truncation_cache(&scene);
+
+    let build = compositor.build_windowed_frame(&mut scene, 320, 200);
+    let frame = compositor
+        .capture_windowed_frame(build, wgpu::TextureFormat::Rgba8UnormSrgb)
+        .expect("capture");
+    assert_eq!((frame.width, frame.height), (320, 200));
+    assert_eq!(frame.rgba.len(), 320 * 200 * 4);
+
+    let build = compositor.build_windowed_frame(&mut scene, 320, 200);
+    let unsupported = compositor.capture_windowed_frame(build, wgpu::TextureFormat::Rgba16Float);
+    assert!(matches!(
+        unsupported,
+        Err(crate::CaptureError::UnsupportedFormat(_))
+    ));
+}
+
 /// Verify that HEADLESS_FORCE_SOFTWARE env-var path is exercised in the
 /// adapter-selection code.  We cannot assert the adapter backend in a unit
 /// test (it's opaque), so we just verify that creating a compositor with

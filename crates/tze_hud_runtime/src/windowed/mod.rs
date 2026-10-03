@@ -590,6 +590,8 @@ struct WindowedRuntimeState {
     /// `None` when the MCP server is disabled (`mcp_port == 0`) or when the
     /// network runtime could not be created.
     portal_op_rx: Option<tokio::sync::mpsc::UnboundedReceiver<tze_hud_mcp::portal_op::PortalOp>>,
+    /// `GET /admin/screenshot` requests for the compositor thread to serve.
+    capture_inbox: crate::operator::screenshot::CaptureInbox,
     /// Keyboard events deferred because the shared-state or scene lock was busy
     /// at dispatch time (hud-2fz34).
     ///
@@ -1428,6 +1430,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
         let compositor_wake = self.state.wake.clone();
         let safe_mode_for_compositor = Arc::clone(&self.state.safe_mode_atomic);
         let system_card_for_compositor = self.state.system_card.clone();
+        let capture_inbox = self.state.capture_inbox.clone();
         let telemetry_collector = TelemetryCollector::new();
         let surface_for_compositor = window_surface.clone();
         let mut benchmark_state = cfg.benchmark.clone().map(|benchmark| {
@@ -1725,6 +1728,19 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                         let composer_needs_render =
                             compositor.drain_local_composer_and_needs_render();
 
+                        // ── Admin screenshot (build half) ─────────────────
+                        // Build the frame under the lock like Stage 5, but do
+                        // not present it, refresh hit regions, or advance
+                        // `last_rendered_*` (an admin read must not change idle
+                        // accounting). The offscreen render + readback
+                        // happens after the lock is released (below).
+                        // A request that finds the scene locked stays queued; the
+                        // availability waiter below wakes this loop to retry.
+                        let capture_job = capture_inbox.next_live().map(|req| {
+                            let (w, h) = surface_for_compositor.size();
+                            (req, compositor.build_windowed_frame(&mut scene, w, h))
+                        });
+
                         // ── Idle render gate (hud-ilivg) ──────────────────
                         // Build/encode/present only when the scene graph changed
                         // since the last presented frame OR an animation is in
@@ -1978,6 +1994,14 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                             if frame_submitted && benchmark_state.is_some() {
                                 pending_benchmark_sample = telemetry.records().last().cloned();
                             }
+                        }
+
+                        // ── Admin screenshot (render half) ────────────────
+                        // Lock released: render offscreen, copy once, reply.
+                        if let Some((req, build)) = capture_job {
+                            let result = compositor
+                                .capture_windowed_frame(build, surface_for_compositor.format());
+                            let _ = req.reply.send(result);
                         }
                     } else {
                         // Stage 4 try_lock missed: the scene lock was held by a
@@ -2637,6 +2661,16 @@ impl WindowedRuntime {
         // Bound MCP address for the startup banner (hud-ylwqc). Set only when the
         // MCP listener actually binds, so the banner never advertises a dead port.
         let mut mcp_bound_addrs: Vec<std::net::SocketAddr> = Vec::new();
+        // Admin screenshot: the MCP task asks, the compositor thread serves.
+        // The wake runs on the network thread and only nudges the compositor
+        // loop; the loop's idle gate is untouched.
+        let (capture_endpoint, capture_inbox) = {
+            let wake = wake.clone();
+            crate::operator::screenshot::capture_channel(move || {
+                wake.compositor()
+                    .notify(crate::idle_efficiency::RuntimeWakeupSource::OperatorCapture);
+            })
+        };
         let (mut portal_op_tx_opt, mut portal_op_rx_opt): (
             Option<tokio::sync::mpsc::UnboundedSender<tze_hud_mcp::portal_op::PortalOp>>,
             Option<tokio::sync::mpsc::UnboundedReceiver<tze_hud_mcp::portal_op::PortalOp>>,
@@ -2676,6 +2710,7 @@ impl WindowedRuntime {
                     late_tailnet_port: Some(cfg.mcp_port),
                     agents: Arc::clone(&cfg.agents),
                     presents: Some(Arc::clone(wake.counters())),
+                    capture: Some(capture_endpoint),
                 };
                 let mcp_shutdown = shutdown.clone();
                 match rt.rt.block_on(start_mcp_http_server_with_render_wake(
@@ -2825,6 +2860,7 @@ impl WindowedRuntime {
             composer_visual_layout: Arc::new(StdMutex::new(None)),
             portal_projection_driver,
             portal_op_rx: portal_op_rx_opt.take(),
+            capture_inbox,
             pending_keyboard_events: VecDeque::new(),
             interaction_feedback_lock_misses: std::sync::atomic::AtomicU64::new(0),
         };

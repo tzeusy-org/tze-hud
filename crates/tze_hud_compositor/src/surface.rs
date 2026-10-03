@@ -383,6 +383,11 @@ impl WindowSurface {
         }
     }
 
+    /// Texture format the swapchain is configured with.
+    pub fn format(&self) -> wgpu::TextureFormat {
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).format
+    }
+
     /// Return the number of swapchain textures actually presented.
     pub fn presented_frame_count(&self) -> u64 {
         self.presented_frame_count

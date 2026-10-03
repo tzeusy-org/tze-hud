@@ -60,6 +60,10 @@ pub struct McpServerConfig {
     /// Present-frame counters reported by `/admin/status` (`frames_presented`
     /// is null without them).
     pub presents: Option<Arc<crate::idle_efficiency::IdleEfficiencyCounters>>,
+
+    /// Compositor capture channel behind `/admin/screenshot`; the endpoint
+    /// answers 503 without one (no display to read from).
+    pub capture: Option<crate::operator::screenshot::CaptureEndpoint>,
 }
 
 /// Start the MCP HTTP server on the calling Tokio runtime.
@@ -140,6 +144,7 @@ pub async fn start_mcp_http_server_with_render_wake(
         binds: Arc::new(std::sync::Mutex::new(local_addrs.clone())),
         safe_mode: Arc::clone(&safe_mode),
         presents: config.presents.clone(),
+        capture: config.capture.clone(),
         log_path: crate::operator::logs::log_path(),
     });
 
@@ -337,6 +342,16 @@ async fn handle_admin(
     }
     match which {
         AdminRoute::Status => Response::json(admin.render().await.to_string()),
+        AdminRoute::Screenshot => match &admin.capture {
+            None => crate::operator::screenshot::ScreenshotError::Unavailable(
+                "this runtime has no display to capture",
+            )
+            .response(),
+            Some(capture) => match capture.capture_png().await {
+                Ok(png) => Response::png(png),
+                Err(e) => e.response(),
+            },
+        },
         AdminRoute::Logs => {
             let tail = match query_param(&req.query, "tail") {
                 None => 100,
@@ -369,6 +384,7 @@ mod tests {
             late_tailnet_port: None,
             agents: tze_hud_scene::config::AgentDirectory::unrestricted(psk).shared(),
             presents: None,
+            capture: None,
         }
     }
 
@@ -458,6 +474,7 @@ mod tests {
             ])),
             safe_mode: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             presents: None,
+            capture: None,
             log_path,
         }
     }
@@ -494,6 +511,40 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[tokio::test]
+    async fn admin_screenshot_is_guarded_then_served_as_png() {
+        use crate::http::AdminRoute::Screenshot;
+        let mut src = admin_source(std::env::temp_dir().join("tze_hud_no_such.log"));
+        let (endpoint, inbox) = crate::operator::screenshot::capture_channel(|| {});
+        std::thread::spawn(move || {
+            loop {
+                if let Some(req) = inbox.next_live() {
+                    let _ = req.reply.send(Ok(tze_hud_compositor::CapturedFrame {
+                        width: 1,
+                        height: 1,
+                        rgba: vec![1, 2, 3, 4],
+                    }));
+                    return;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+        });
+        src.capture = Some(endpoint);
+        async fn get(src: &StatusSource, bearer: Option<&str>) -> crate::http::Response {
+            let req = admin_get("/admin/screenshot", bearer);
+            handle_admin(Screenshot, &req, src).await
+        }
+        // The guard runs before any capture is requested.
+        assert_eq!(get(&src, None).await.status, 401);
+        assert_eq!(get(&src, Some("star-psk")).await.status, 403);
+        let ok = get(&src, Some("root-psk")).await;
+        assert_eq!((ok.status, ok.content_type), (200, "image/png"));
+        assert_eq!(&ok.body[..4], b"\x89PNG");
+        // No capture endpoint (headless runtime): 503, not a hang.
+        src.capture = None;
+        assert_eq!(get(&src, Some("root-psk")).await.status, 503);
     }
 
     #[tokio::test(start_paused = true)]
@@ -667,6 +718,7 @@ mod tests {
             late_tailnet_port: None,
             agents: tze_hud_scene::config::AgentDirectory::unrestricted("test-key").shared(),
             presents: None,
+            capture: None,
         };
         let shutdown = ShutdownToken::new();
 
@@ -707,6 +759,7 @@ mod tests {
             late_tailnet_port: None,
             agents: tze_hud_scene::config::AgentDirectory::unrestricted("test-key").shared(),
             presents: None,
+            capture: None,
         };
         let shutdown = ShutdownToken::new();
         let (handle, addrs) = start_mcp_http_server(make_scene(), config, shutdown.clone(), None)
@@ -737,6 +790,7 @@ mod tests {
             late_tailnet_port: None,
             agents: agents.clone(),
             presents: None,
+            capture: None,
         };
         let shutdown = ShutdownToken::new();
         let (handle, addrs) = start_mcp_http_server(
@@ -777,6 +831,7 @@ mod tests {
             late_tailnet_port: None,
             agents: tze_hud_scene::config::AgentDirectory::unrestricted("real-key").shared(),
             presents: None,
+            capture: None,
         };
         let shutdown = ShutdownToken::new();
 
@@ -813,6 +868,7 @@ mod tests {
             late_tailnet_port: None,
             agents: tze_hud_scene::config::AgentDirectory::unrestricted("correct-key").shared(),
             presents: None,
+            capture: None,
         };
         let shutdown = ShutdownToken::new();
 
@@ -881,6 +937,7 @@ mod tests {
             late_tailnet_port: None,
             agents: tze_hud_scene::config::AgentDirectory::unrestricted("test-key").shared(),
             presents: None,
+            capture: None,
         };
         let shutdown = ShutdownToken::new();
 
@@ -917,6 +974,7 @@ mod tests {
             late_tailnet_port: None,
             agents: tze_hud_scene::config::AgentDirectory::unrestricted("key").shared(),
             presents: None,
+            capture: None,
         };
         let shutdown = ShutdownToken::new();
 
