@@ -26,6 +26,9 @@
 # config MUST include [runtime] with profile and at least one [[tabs]] entry.
 [runtime]
 profile = "full-display"
+# Global safe-mode toggle (works while the overlay is unfocused and click-through).
+# Modifiers Ctrl/Shift/Alt/Win plus F1-F24, a letter, or a digit.
+safe_mode_hotkey = "Ctrl+Shift+F12"
 
 # Widget bundles: gauge, progress-bar and status-indicator are built into the
 # exe. To override one (or add your own), add a [widget_bundles] table with

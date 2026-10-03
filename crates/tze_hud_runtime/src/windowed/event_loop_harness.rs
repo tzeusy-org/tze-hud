@@ -74,7 +74,7 @@ impl WindowedRuntimeState {
     /// - `window` / `window_surface` / `compositor` / `compositor_handle` — `None`.
     /// - `network_rt` / `network_handles` — no gRPC/MCP servers are spawned.
     /// - the broadcast/op channels (`element_repositioned_tx`, `input_event_tx`,
-    ///   `portal_op_rx`, `safe_mode_exit_tx`) — `None`.
+    ///   `portal_op_rx`) — `None`.
     ///
     /// The `safe_mode_atomic` and `active_tab_mirror` `Arc`s are shared between
     /// the state and its embedded [`SharedState`] exactly as production does, so
@@ -113,7 +113,6 @@ impl WindowedRuntimeState {
             shared_state,
             safe_mode_atomic,
             active_tab_mirror,
-            safe_mode_exit_tx: None,
             chrome_state: Arc::new(std::sync::RwLock::new(crate::shell::ChromeState::new())),
             input_ring: Arc::new(StdMutex::new(VecDeque::new())),
             pending_input_latency: Arc::new(StdMutex::new(VecDeque::new())),

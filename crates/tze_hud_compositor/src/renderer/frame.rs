@@ -34,6 +34,8 @@ pub struct WindowedFrameBuild {
     focus_ring_vertices: Vec<RectVertex>,
     /// Precomputed drag-handle reset context-menu chrome vertices.
     context_menu_vertices: Vec<RectVertex>,
+    /// Safe-mode overlay quads (empty unless safe mode is active); drawn last.
+    safe_mode_vertices: Vec<RectVertex>,
     /// Precomputed per-instance widget draw quads.
     widget_quads: Vec<crate::widget::WidgetDrawQuad>,
     /// Wall-clock start of the frame, for the total frame-time telemetry.
@@ -600,6 +602,7 @@ impl Compositor {
 
         // ── Chrome context menu (hud-zc7f) ─────────────────────────────────
         let context_menu_vertices = self.collect_context_menu_vertices(scene, sw, sh);
+        let safe_mode_vertices = self.safe_mode_overlay_vertices(sw, sh);
 
         // Populate drag-handle hit regions from the geometry we are about to
         // present so the next input snapshot matches this frame (see the method
@@ -617,6 +620,7 @@ impl Compositor {
             drag_handle_vertices,
             focus_ring_vertices,
             context_menu_vertices,
+            safe_mode_vertices,
             widget_quads,
             frame_start,
         }
@@ -660,6 +664,7 @@ impl Compositor {
             drag_handle_vertices,
             focus_ring_vertices,
             context_menu_vertices,
+            safe_mode_vertices,
             widget_quads,
             frame_start,
         } = build;
@@ -716,6 +721,11 @@ impl Compositor {
         // Render the drag-handle reset context menu on top of everything.
         if !context_menu_vertices.is_empty() {
             self.encode_drag_handle_pass(&mut encoder, &frame.view, &context_menu_vertices);
+        }
+
+        // ── Safe-mode overlay (hud-jm8nq.10): above everything, including chrome.
+        if !safe_mode_vertices.is_empty() {
+            self.encode_drag_handle_pass(&mut encoder, &frame.view, &safe_mode_vertices);
         }
 
         let submit_start = std::time::Instant::now();

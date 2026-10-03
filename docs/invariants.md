@@ -42,13 +42,18 @@ shell state exposes no portal identity or transcript.
 - `tze_hud_runtime` `shell::safe_mode` `test_enter_safe_mode_suspends_active_leases`,
   `test_mutations_rejected_via_shared_state_flag`,
   `test_overlay_renders_from_chrome_state_only_after_critical_error`
+- `tze_hud_runtime` `windowed::safe_mode_toggle`
+  `hotkey_event_enters_safe_mode_and_suspends_leases` (global hotkey, default
+  Ctrl+Shift+F12, `[runtime].safe_mode_hotkey`)
+- `tze_hud_config` `safe_mode_hotkey_defaults_overrides_and_rejects_garbage`
 - `integration` `shell_dismiss_override_removes_portal_tile`,
   `shell_status_snapshot_exposes_no_portal_identity_or_transcript`
 - `tze_hud_mcp` `hud_publish_in_safe_mode_returns_safe_mode_active`,
   `safe_mode_does_not_regrant_suspended_mcp_lease`,
   `resume_restores_mcp_publishing`
 - `tze_hud_scene` `widget_publish_with_suspended_lease_is_safe_mode_active`
-- `tze_hud_compositor` `test_chrome_always_above_max_zorder_tile`
+- `tze_hud_compositor` `test_chrome_always_above_max_zorder_tile`,
+  `windowed_frame_draws_chrome_overlay_in_safe_mode`
 
 ## 4. Disconnect is not release
 
@@ -78,7 +83,8 @@ Every lease has a TTL and expires on its own. Suspension (safe mode) pauses
 the TTL clock and preserves lease identity; resuming continues it.
 
 - `tze_hud_runtime` `test_ttl_excluded_during_suspension`,
-  `test_lease_identity_preserved_across_suspend_resume`
+  `test_lease_identity_preserved_across_suspend_resume`,
+  `hotkey_event_enters_safe_mode_and_suspends_leases`
 - `tze_hud_scene` `test_lease_suspend_from_active`, `test_lease_resume_from_suspended`
 - `tze_hud_mcp` `safe_mode_does_not_regrant_suspended_mcp_lease`,
   `resume_restores_mcp_publishing`

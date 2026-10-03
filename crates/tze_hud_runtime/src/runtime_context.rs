@@ -33,7 +33,7 @@ use std::sync::Arc;
 
 use arc_swap::ArcSwap;
 use tze_hud_config::HotReloadableConfig;
-use tze_hud_scene::config::{DisplayProfile, ResolvedConfig};
+use tze_hud_scene::config::{DisplayProfile, Hotkey, ResolvedConfig};
 use tze_hud_scene::types::ResourceBudget;
 
 use crate::mutation_budget_bridge::DEFAULT_MAX_GUEST_SESSIONS;
@@ -133,6 +133,9 @@ pub struct RuntimeContext {
     /// Resolved display profile with budget values.
     pub profile: DisplayProfile,
 
+    /// Global chord that toggles safe mode.
+    pub safe_mode_hotkey: Hotkey,
+
     /// Profile-derived operational limits, constructed once at startup.
     pub operational_envelope: OperationalRuntimeEnvelope,
 
@@ -156,6 +159,7 @@ impl RuntimeContext {
         let operational_envelope = OperationalRuntimeEnvelope::from_profile(&config.profile);
         let resident_ledger = resident_ledger_for(&operational_envelope);
         Self {
+            safe_mode_hotkey: config.safe_mode_hotkey,
             profile: config.profile,
             operational_envelope,
             resident_ledger,
@@ -173,6 +177,7 @@ impl RuntimeContext {
         let operational_envelope = OperationalRuntimeEnvelope::from_profile(&config.profile);
         let resident_ledger = resident_ledger_for(&operational_envelope);
         Self {
+            safe_mode_hotkey: config.safe_mode_hotkey,
             profile: config.profile,
             operational_envelope,
             resident_ledger,
@@ -190,6 +195,7 @@ impl RuntimeContext {
         let resident_ledger = resident_ledger_for(&operational_envelope);
         Self {
             profile,
+            safe_mode_hotkey: Hotkey::DEFAULT_SAFE_MODE,
             operational_envelope,
             resident_ledger,
             hot: ArcSwap::from_pointee(HotReloadableConfig::default()),
@@ -338,6 +344,7 @@ mod tests {
         ResolvedConfig {
             profile: DisplayProfile::headless(),
             tab_names: vec!["main".to_string()],
+            safe_mode_hotkey: Hotkey::DEFAULT_SAFE_MODE,
             source_path: None,
         }
     }
