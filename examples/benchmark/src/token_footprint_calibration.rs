@@ -9,7 +9,7 @@ mod calibration {
     use std::process::Command;
     use tokio::sync::mpsc;
     use tze_hud_runtime::headless::{HeadlessConfig, HeadlessRuntime};
-    use tze_hud_runtime::portal_projection_driver::{InProcessPortalDriver, PortalOp};
+    use tze_hud_runtime::portal_projection_driver::{InProcessPortalDriver, PortalKey, PortalOp};
     use tze_hud_runtime::threads::{ShutdownReason, ShutdownToken};
     use tze_hud_runtime::{McpServerConfig, start_mcp_http_server};
     use tze_hud_scene::types::{
@@ -158,20 +158,24 @@ mod calibration {
             let mut driver = InProcessPortalDriver::new();
             let mut input_injected = false;
             while let Some(op) = rx.recv().await {
-                let is_attach = matches!(&op, PortalOp::Attach { .. });
+                // The first publish attaches the portal; queue the canonical
+                // HUD reply on it.
+                let attached = match &op {
+                    PortalOp::Publish { agent, portal, .. } if !input_injected => {
+                        Some(PortalKey::new(agent.clone(), portal.clone()))
+                    }
+                    _ => None,
+                };
                 driver.dispatch_portal_op(op);
-                if is_attach && !input_injected {
-                    driver
-                        .authority_mut()
-                        .enqueue_input(
-                            "claude-main",
+                if let Some(key) = attached {
+                    assert!(
+                        driver.inject_input(
+                            &key,
                             "canonical-input-0001",
-                            "Canonical HUD-originated input.".to_string(),
-                            1_700_000_000_100_000,
-                            9_000_000_000_000_000,
-                            None,
-                        )
-                        .expect("inject canonical portal input");
+                            "Canonical HUD-originated input."
+                        ),
+                        "inject canonical portal input"
+                    );
                     input_injected = true;
                 }
             }

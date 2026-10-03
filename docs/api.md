@@ -33,8 +33,8 @@ MCP `tools/list` has five tools. The resident tile API is gRPC only.
 (`tile.close_button.*` tokens). Pressing it reclaims the tile's lease on the
 spot, with no agent round trip: a gRPC agent gets `Reclaimed{OVERRIDE}` for
 `tile:<id>`. A dismissed portal is detached; the agent's next `hud_publish` to
-`portal:<id>` attaches a fresh one (its old token is dead), `hud_hold` answers
-`NOT_HELD` and `hud_clear` succeeds as a no-op.
+`portal:<id>` attaches a fresh one, `hud_hold` answers `NOT_HELD` and
+`hud_clear` succeeds as a no-op.
 
 ## MCP tools
 
@@ -71,7 +71,9 @@ otherwise.
   runtime wakes only until the transition lands.
 - Portal: the first publish to `portal:<id>` attaches (`display_name` is
   optional). `content` is the output text, `status` is the lifecycle state,
-  and `expects_reply` arms the composer. `key` is the portal coalesce key.
+  and `expects_reply` arms the composer. `key` replaces the newest output
+  with the same key (progress lines). Portals are per agent: another agent's
+  `portal:<id>` with the same id is a separate portal.
 - `ttl_ms` defaults to 60000 for zones; widgets are durable unless given one.
   0 means held until cleared.
 - `delay_ms` (zones, ≤ 300000) holds the content until then (invariant 1);
@@ -176,7 +178,7 @@ unknown PSK) is a JSON-RPC error.
 | Code | Meaning |
 |---|---|
 | `INVALID_ARGUMENT` | Unknown field, wrong type, or bad surface string |
-| `NOT_ALLOWED` | The agent's `allow` list doesn't cover the surface, or another agent holds that `portal:<id>` |
+| `NOT_ALLOWED` | The agent's `allow` list doesn't cover the surface |
 | `NOT_HELD` | `hud_hold` with nothing to extend (including a portal the viewer dismissed); `hud_clear` on a portal this agent never attached (a dismissed portal's `hud_clear` is an ok no-op) |
 | `ZONE_NOT_FOUND` | No such zone |
 | `WIDGET_NOT_FOUND` | No such widget instance |

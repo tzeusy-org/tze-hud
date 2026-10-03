@@ -2,18 +2,19 @@
 //! `hud_hold`, `hud_clear`, `hud_input`.
 //!
 //! Every verb acts on a surface string handed out by `hud_surfaces`:
-//! `zone:<name>`, `widget:<name>`, or `portal:<projection_id>`. Identity comes
-//! from the caller's PSK (the namespace is the agent id), so no call carries a
-//! namespace or owner token. Times are milliseconds. Failures are
+//! `zone:<name>`, `widget:<name>`, or `portal:<id>`. Identity comes from the
+//! caller's PSK (the namespace is the agent id), so no call carries a
+//! namespace or token. Times are milliseconds. Failures are
 //! [`McpError::Tool`] with a stable code and a hint naming the next call.
 
 use crate::{error::McpError, portal_op::PortalOp, types::McpResult};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use tokio::sync::Mutex;
+use tze_hud_projection::hub::PortalError;
 use tze_hud_scene::{
     SceneId, ValidationError,
     config::AgentIdentity,
@@ -52,40 +53,22 @@ fn invalid(hint: impl Into<String>) -> McpError {
 
 // ─── Per-agent MCP state ─────────────────────────────────────────────────────
 
-/// An input item delivered to an agent and not yet acked. Redelivered on
-/// every `hud_input` until acked.
+/// A notification action press delivered to an agent and not yet acked.
+/// Redelivered on every `hud_input` until acked. (Portal input is queued and
+/// redelivered by the portal hub.)
 #[derive(Clone, Debug)]
-struct InputItem {
+struct ActionItem {
     id: String,
-    surface: String,
-    text: Option<String>,
-    action: Option<String>,
-    projection_id: Option<String>,
-}
-
-impl InputItem {
-    fn to_json(&self) -> Value {
-        let mut o = Map::new();
-        o.insert("id".into(), json!(self.id));
-        o.insert("s".into(), json!(self.surface));
-        if let Some(t) = &self.text {
-            o.insert("text".into(), json!(t));
-        }
-        if let Some(a) = &self.action {
-            o.insert("action".into(), json!(a));
-        }
-        Value::Object(o)
-    }
+    zone: String,
+    action: String,
 }
 
 #[derive(Default, Debug)]
 struct AgentState {
     /// The agent's MCP lease (renewed by publish and hold).
     lease: Option<SceneId>,
-    /// projection_id → owner token. Never shown to the model.
-    portals: BTreeMap<String, String>,
-    /// Delivered, unacked input, oldest first.
-    delivered: Vec<InputItem>,
+    /// Delivered, unacked action presses, oldest first.
+    delivered: Vec<ActionItem>,
 }
 
 /// Server-side MCP state, keyed by agent id.
@@ -98,11 +81,6 @@ impl McpState {
     fn with<R>(&self, agent: &str, f: impl FnOnce(&mut AgentState) -> R) -> R {
         let mut agents = self.agents.lock().unwrap_or_else(|p| p.into_inner());
         f(agents.entry(agent.to_string()).or_default())
-    }
-
-    /// Whether the agent holds an attached portal (for tests).
-    pub fn holds_portal(&self, agent: &str, projection_id: &str) -> bool {
-        self.with(agent, |s| s.portals.contains_key(projection_id))
     }
 }
 
@@ -312,23 +290,20 @@ pub async fn hud_surfaces(ctx: &ToolCtx<'_>) -> McpResult<Value> {
             surfaces.push(Value::Object(o));
         }
     }
-    let held_portals: Vec<String> = ctx.state.with(ns, |s| s.portals.keys().cloned().collect());
-    if !held_portals.is_empty() && ctx.portal_op_tx.is_some() {
+    if portals_enabled(ctx) {
         // Discovery still answers if the portal service is down.
-        let projections = portal_call(ctx, |reply| PortalOp::List { reply })
+        let agent = ns.to_string();
+        let portals = portal_call(ctx, |reply| PortalOp::List { agent, reply })
             .await
-            .map(|b| b.projections)
             .unwrap_or_default();
-        for p in projections {
-            if held_portals.contains(&p.projection_id) {
-                let mut o = Map::new();
-                o.insert("s".into(), json!(format!("portal:{}", p.projection_id)));
-                o.insert("state".into(), json!(p.lifecycle_state));
-                if p.pending_input_count > 0 {
-                    o.insert("pending_input".into(), json!(p.pending_input_count));
-                }
-                surfaces.push(Value::Object(o));
+        for p in portals {
+            let mut o = Map::new();
+            o.insert("s".into(), json!(format!("portal:{}", p.id)));
+            o.insert("state".into(), json!(p.status.as_str()));
+            if p.pending_input > 0 {
+                o.insert("pending_input".into(), json!(p.pending_input));
             }
+            surfaces.push(Value::Object(o));
         }
     }
     Ok(json!({ "surfaces": surfaces }))
@@ -592,139 +567,64 @@ async fn publish_widget(ctx: &ToolCtx<'_>, widget: &str, p: PublishParams) -> Mc
     Ok(ok_with_expiry((ttl_ms > 0).then_some(ttl_ms)))
 }
 
-/// Send one operation to the portal authority and await its reply.
-///
-/// Failures are already mapped to the shared code set; `stale` records, from
-/// the authority's own code, that the owner token is gone so callers can
-/// re-attach or drop the holding.
+/// Whether this agent may hold portals and the portal driver is wired, so
+/// discovery and input polling ask it.
+fn portals_enabled(ctx: &ToolCtx<'_>) -> bool {
+    ctx.portal_op_tx.is_some()
+        && ctx
+            .agent
+            .allows(&Surface::Portal(String::new()).permission().0)
+}
+
+/// Send one operation to the portal driver and await its reply.
 async fn portal_call<T>(
     ctx: &ToolCtx<'_>,
-    build: impl FnOnce(
-        tokio::sync::oneshot::Sender<Result<T, crate::portal_op::PortalOpRejection>>,
-    ) -> PortalOp,
-) -> Result<T, PortalError> {
-    let unavailable = || PortalError {
-        err: tool_err(
+    build: impl FnOnce(tokio::sync::oneshot::Sender<T>) -> PortalOp,
+) -> McpResult<T> {
+    let unavailable = || {
+        tool_err(
             "UNAVAILABLE",
             "the portal service isn't running; retry later",
-        ),
-        stale: false,
+        )
     };
     let tx = ctx.portal_op_tx.ok_or_else(unavailable)?;
     let (reply, rx) = tokio::sync::oneshot::channel();
     tx.send(build(reply)).map_err(|_| unavailable())?;
     ctx.portal_wake.notify();
-    match rx.await {
-        Ok(Ok(v)) => Ok(v),
-        Ok(Err(r)) => {
-            let (code, hint) = crate::error::map_projection(r.error_code);
-            Err(PortalError {
-                err: tool_err(code, hint),
-                stale: crate::error::is_stale_token(r.error_code),
-            })
+    rx.await.map_err(|_| unavailable())
+}
+
+/// A portal refusal in the shared error set; `NotHeld` names the surface.
+fn portal_err(e: PortalError, surface: &str) -> McpError {
+    match e {
+        PortalError::NotHeld => not_held(surface),
+        e => {
+            let (code, hint) = crate::error::map_portal(e);
+            tool_err(code, hint)
         }
-        Err(_) => Err(unavailable()),
     }
-}
-
-/// A portal rejection mapped to the shared error set.
-struct PortalError {
-    err: McpError,
-    /// The owner token is unknown, expired, or rejected.
-    stale: bool,
-}
-
-impl From<PortalError> for McpError {
-    fn from(e: PortalError) -> Self {
-        e.err
-    }
-}
-
-/// Attach (or re-attach, rotating the token) and remember the owner token.
-async fn portal_attach(
-    ctx: &ToolCtx<'_>,
-    pid: &str,
-    display_name: Option<String>,
-) -> McpResult<String> {
-    let ns = ctx.agent.agent_id.clone();
-    let token = portal_call(ctx, |reply| PortalOp::Attach {
-        projection_id: pid.to_string(),
-        display_name: display_name.unwrap_or_else(|| pid.to_string()),
-        idempotency_key: Some(format!("{ns}:{pid}")),
-        provider_kind: None,
-        content_classification: None,
-        workspace_hint: None,
-        repository_hint: None,
-        icon_profile_hint: None,
-        hud_target: None,
-        reply,
-    })
-    .await?;
-    ctx.state
-        .with(&ns, |s| s.portals.insert(pid.to_string(), token.clone()));
-    Ok(token)
-}
-
-fn portal_token(ctx: &ToolCtx<'_>, pid: &str) -> Option<String> {
-    ctx.state
-        .with(&ctx.agent.agent_id, |s| s.portals.get(pid).cloned())
 }
 
 async fn publish_portal(ctx: &ToolCtx<'_>, pid: &str, p: PublishParams) -> McpResult<Value> {
-    let text = match p.content.clone() {
+    let text = match p.content {
         None | Some(Value::Null) => None,
         Some(Value::String(s)) if s.is_empty() => None,
         Some(Value::String(s)) => Some(s),
         Some(_) => return Err(invalid("portal content is the output text (a string)")),
     };
-    let mut token = match portal_token(ctx, pid) {
-        Some(t) => t,
-        None => portal_attach(ctx, pid, p.display_name.clone()).await?,
-    };
-    for attempt in 0..2 {
-        let result = portal_send_output(ctx, pid, &token, &p, text.as_deref()).await;
-        match result {
-            Err(e) if attempt == 0 && e.stale => {
-                token = portal_attach(ctx, pid, p.display_name.clone()).await?;
-            }
-            other => return other.map(|()| json!({ "ok": true })).map_err(Into::into),
-        }
-    }
-    unreachable!("loop returns on the second attempt")
-}
-
-async fn portal_send_output(
-    ctx: &ToolCtx<'_>,
-    pid: &str,
-    token: &str,
-    p: &PublishParams,
-    text: Option<&str>,
-) -> Result<(), PortalError> {
-    if let Some(text) = text {
-        portal_call(ctx, |reply| PortalOp::PublishOutput {
-            projection_id: pid.to_string(),
-            owner_token: token.to_string(),
-            output_text: text.to_string(),
-            logical_unit_id: None,
-            output_kind: None,
-            content_classification: None,
-            coalesce_key: p.key.clone(),
-            expects_reply: p.expects_reply,
-            reply,
-        })
-        .await?;
-    }
-    if let Some(status) = p.status.as_deref() {
-        portal_call(ctx, |reply| PortalOp::PublishStatus {
-            projection_id: pid.to_string(),
-            owner_token: token.to_string(),
-            lifecycle_state: status.to_string(),
-            status_text: None,
-            reply,
-        })
-        .await?;
-    }
-    Ok(())
+    portal_call(ctx, |reply| PortalOp::Publish {
+        agent: ctx.agent.agent_id.clone(),
+        portal: pid.to_string(),
+        display_name: p.display_name,
+        text,
+        key: p.key,
+        expects_reply: p.expects_reply.unwrap_or(false),
+        status: p.status,
+        reply,
+    })
+    .await?
+    .map_err(|e| portal_err(e, &p.surface))?;
+    Ok(json!({ "ok": true }))
 }
 
 // ─── hud_hold ────────────────────────────────────────────────────────────────
@@ -771,23 +671,15 @@ pub async fn hud_hold(ctx: &ToolCtx<'_>, args: Value) -> McpResult<Value> {
         }
         Surface::Portal(pid) => {
             // The runtime keeps a held portal (and its transcript) past the
-            // idle liveness reap until the hold lapses or hud_clear.
-            let token = portal_token(ctx, &pid).ok_or_else(|| not_held(&p.surface))?;
-            let held = portal_call(ctx, |reply| PortalOp::Hold {
-                projection_id: pid.clone(),
-                owner_token: token,
+            // idle reclaim until the hold lapses or hud_clear.
+            portal_call(ctx, |reply| PortalOp::Hold {
+                agent: ns,
+                portal: pid,
                 ttl_ms: p.ttl_ms,
                 reply,
             })
-            .await;
-            match held {
-                Ok(()) => {}
-                Err(e) if e.stale => {
-                    ctx.state.with(&ns, |s| s.portals.remove(&pid));
-                    return Err(not_held(&p.surface));
-                }
-                Err(e) => return Err(e.into()),
-            }
+            .await?
+            .map_err(|e| portal_err(e, &p.surface))?;
         }
     }
     Ok(result)
@@ -823,25 +715,13 @@ pub async fn hud_clear(ctx: &ToolCtx<'_>, args: Value) -> McpResult<Value> {
                 .map_err(|e| scene_error(&e))?;
         }
         Surface::Portal(pid) => {
-            let token = portal_token(ctx, &pid).ok_or_else(|| not_held(&p.surface))?;
-            let reason = p.reason.unwrap_or_else(|| "cleared".into());
-            let result = portal_call(ctx, |reply| PortalOp::Detach {
-                projection_id: pid.clone(),
-                owner_token: token,
-                reason,
+            portal_call(ctx, |reply| PortalOp::Clear {
+                agent: ns,
+                portal: pid,
                 reply,
             })
-            .await;
-            ctx.state.with(&ns, |s| {
-                s.portals.remove(&pid);
-                s.delivered
-                    .retain(|i| i.projection_id.as_deref() != Some(pid.as_str()));
-            });
-            // A projection that already went away is released either way.
-            match result {
-                Err(e) if e.stale => {}
-                other => other?,
-            }
+            .await?
+            .map_err(|e| portal_err(e, &p.surface))?;
         }
     }
     Ok(json!({ "ok": true }))
@@ -869,43 +749,43 @@ pub async fn hud_input(ctx: &ToolCtx<'_>, args: Value) -> McpResult<Value> {
     let ns = ctx.agent.agent_id.clone();
 
     // Acks first, so a poll+ack is one round trip.
-    let acked: Vec<InputItem> = ctx.state.with(&ns, |s| {
-        let (acked, keep): (Vec<_>, Vec<_>) =
-            s.delivered.drain(..).partition(|i| p.ack.contains(&i.id));
-        s.delivered = keep;
-        acked
-    });
-    for item in acked {
-        if let Some(pid) = item.projection_id
-            && let Some(token) = portal_token(ctx, &pid)
-        {
-            let result = portal_call(ctx, |reply| PortalOp::AcknowledgeInput {
-                projection_id: pid,
-                owner_token: token,
-                input_id: item.id,
-                ack_state: "handled".into(),
-                ack_message: None,
-                not_before_wall_us: None,
-                reply,
-            })
-            .await;
-            match result {
-                Err(e) if e.stale => {}
-                other => other?,
-            }
-        }
-    }
+    ctx.state
+        .with(&ns, |s| s.delivered.retain(|i| !p.ack.contains(&i.id)));
+    let mut ack = p.ack;
 
     let wait_ms = p.wait_ms.unwrap_or(0).min(MAX_WAIT_MS);
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(wait_ms);
-    let max_items = p.max_items;
+    let max_items = p.max_items.unwrap_or(usize::MAX);
     loop {
-        let remaining = collect_new_input(ctx, &ns, max_items).await?;
-        let items: Vec<Value> = ctx.state.with(&ns, |s| {
-            let n = max_items.unwrap_or(usize::MAX).min(s.delivered.len());
-            s.delivered[..n].iter().map(InputItem::to_json).collect()
+        let actions = ctx.scene.lock().await.take_pending_actions(&ns);
+        let mut items: Vec<Value> = ctx.state.with(&ns, |s| {
+            for a in actions {
+                s.delivered.push(ActionItem {
+                    id: format!("a{}", NEXT_ACTION_ID.fetch_add(1, Ordering::Relaxed)),
+                    zone: a.zone_name,
+                    action: a.callback_id,
+                });
+            }
+            s.delivered
+                .iter()
+                .take(max_items)
+                .map(|a| json!({ "id": a.id, "s": format!("zone:{}", a.zone), "action": a.action }))
+                .collect()
         });
-        let backlog = ctx.state.with(&ns, |s| s.delivered.len()) - items.len() + remaining;
+        let mut backlog = ctx.state.with(&ns, |s| s.delivered.len()) - items.len();
+        if portals_enabled(ctx) {
+            let batch = portal_call(ctx, |reply| PortalOp::Input {
+                agent: ns.clone(),
+                ack: std::mem::take(&mut ack),
+                max_items: Some(max_items - items.len()),
+                reply,
+            })
+            .await?;
+            backlog += batch.remaining;
+            items.extend(batch.items.into_iter().map(
+                |i| json!({ "id": i.id, "s": format!("portal:{}", i.portal), "text": i.text }),
+            ));
+        }
         let now = tokio::time::Instant::now();
         if !items.is_empty() || backlog > 0 || now >= deadline {
             return Ok(json!({ "items": items, "remaining": backlog }));
@@ -915,69 +795,6 @@ pub async fn hud_input(ctx: &ToolCtx<'_>, args: Value) -> McpResult<Value> {
         )
         .await;
     }
-}
-
-/// Pull new portal input and notification action presses into the agent's
-/// delivered list. Returns how many portal items didn't fit.
-async fn collect_new_input(
-    ctx: &ToolCtx<'_>,
-    ns: &str,
-    max_items: Option<usize>,
-) -> McpResult<usize> {
-    let actions = ctx.scene.lock().await.take_pending_actions(ns);
-    ctx.state.with(ns, |s| {
-        for a in actions {
-            s.delivered.push(InputItem {
-                id: format!("a{}", NEXT_ACTION_ID.fetch_add(1, Ordering::Relaxed)),
-                surface: format!("zone:{}", a.zone_name),
-                text: None,
-                action: Some(a.callback_id),
-                projection_id: None,
-            });
-        }
-    });
-    let portals: Vec<(String, String)> = ctx.state.with(ns, |s| {
-        s.portals
-            .iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect()
-    });
-    let mut remaining = 0;
-    for (pid, token) in portals {
-        let result = portal_call(ctx, |reply| PortalOp::GetPendingInput {
-            projection_id: pid.clone(),
-            owner_token: token,
-            max_items,
-            max_bytes: None,
-            reply,
-        })
-        .await;
-        let batch = match result {
-            Ok(b) => b,
-            // A portal that went away has no input; drop the stale holding.
-            Err(e) if e.stale => {
-                ctx.state.with(ns, |s| s.portals.remove(&pid));
-                continue;
-            }
-            Err(e) => return Err(e.into()),
-        };
-        remaining += batch.remaining_count;
-        ctx.state.with(ns, |s| {
-            for it in batch.items {
-                if s.delivered.iter().any(|d| d.id == it.input_id) {
-                    continue;
-                }
-                s.delivered.push(InputItem {
-                    id: it.input_id,
-                    surface: format!("portal:{pid}"),
-                    text: Some(it.submission_text),
-                    action: None,
-                    projection_id: Some(pid.clone()),
-                });
-            }
-        });
-    }
-    Ok(remaining)
 }
 
 // ─── Content parsing ─────────────────────────────────────────────────────────

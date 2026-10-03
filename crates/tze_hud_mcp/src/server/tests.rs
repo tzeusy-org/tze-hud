@@ -1,11 +1,7 @@
 use super::*;
-use crate::portal_op::{
-    PendingInputBatch, PendingInputEntry, PortalOpRejection, ProjectionListBatch,
-    ProjectionListEntry,
-};
 use serde_json::{Value, json};
 use std::collections::HashMap;
-use tze_hud_projection::ProjectionErrorCode;
+use tze_hud_projection::hub::{PortalHub, PortalKey, PortalStatus};
 use tze_hud_scene::config::hash_psk;
 use tze_hud_scene::{
     PendingAction, SceneId, TestClock,
@@ -782,144 +778,27 @@ async fn action_presses_are_delivered_until_acked() {
 
 // ── Portal ───────────────────────────────────────────────────────────────────
 
-#[derive(Default)]
-struct MockPortal {
-    attaches: usize,
-    outputs: Vec<(String, Option<bool>)>,
-    statuses: Vec<String>,
-    pending: Vec<String>,
-    acked: Vec<String>,
-    holds: Vec<u64>,
-    detached: bool,
-}
-
-/// Run a fake portal authority answering `PortalOp`s.
-fn mock_portal(server: McpServer) -> (McpServer, Arc<std::sync::Mutex<MockPortal>>) {
+/// Run a portal hub answering `PortalOp`s, as the runtime's driver does.
+fn hub_portal(server: McpServer) -> (McpServer, Arc<std::sync::Mutex<PortalHub>>) {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<PortalOp>();
-    let state = Arc::new(std::sync::Mutex::new(MockPortal::default()));
-    let s = Arc::clone(&state);
+    let hub = Arc::new(std::sync::Mutex::new(PortalHub::default()));
+    let h = Arc::clone(&hub);
     tokio::spawn(async move {
         while let Some(op) = rx.recv().await {
-            let mut m = s.lock().unwrap();
-            let check = |token: &str| {
-                if token == "tok" {
-                    Ok(())
-                } else {
-                    Err(PortalOpRejection {
-                        error_code: ProjectionErrorCode::ProjectionUnauthorized,
-                        message: String::new(),
-                    })
-                }
-            };
-            match op {
-                PortalOp::Attach { reply, .. } => {
-                    m.attaches += 1;
-                    let _ = reply.send(Ok("tok".into()));
-                }
-                PortalOp::PublishOutput {
-                    owner_token,
-                    output_text,
-                    expects_reply,
-                    reply,
-                    ..
-                } => {
-                    let r = if output_text.len() > 10_000 {
-                        Err(PortalOpRejection {
-                            error_code: ProjectionErrorCode::ProjectionOutputTooLarge,
-                            message: String::new(),
-                        })
-                    } else {
-                        check(&owner_token)
-                    };
-                    if r.is_ok() {
-                        m.outputs.push((output_text, expects_reply));
-                    }
-                    let _ = reply.send(r);
-                }
-                PortalOp::PublishStatus {
-                    owner_token,
-                    lifecycle_state,
-                    reply,
-                    ..
-                } => {
-                    let r = check(&owner_token).map(|()| lifecycle_state.clone());
-                    m.statuses.push(lifecycle_state);
-                    let _ = reply.send(r);
-                }
-                PortalOp::GetPendingInput {
-                    projection_id,
-                    owner_token,
-                    reply,
-                    ..
-                } => {
-                    let items = m
-                        .pending
-                        .iter()
-                        .filter(|id| !m.acked.contains(id))
-                        .map(|id| PendingInputEntry {
-                            input_id: id.clone(),
-                            projection_id: projection_id.clone(),
-                            submission_text: format!("reply {id}"),
-                            submitted_at_wall_us: 0,
-                            expires_at_wall_us: 0,
-                            delivery_state: "delivered".into(),
-                            content_classification: "private".into(),
-                        })
-                        .collect();
-                    let _ = reply.send(check(&owner_token).map(|()| PendingInputBatch {
-                        items,
-                        remaining_count: 0,
-                        remaining_bytes: 0,
-                    }));
-                }
-                PortalOp::AcknowledgeInput {
-                    input_id, reply, ..
-                } => {
-                    m.acked.push(input_id);
-                    let _ = reply.send(Ok(()));
-                }
-                PortalOp::Hold {
-                    owner_token,
-                    ttl_ms,
-                    reply,
-                    ..
-                } => {
-                    let r = check(&owner_token);
-                    if r.is_ok() {
-                        m.holds.push(ttl_ms);
-                    }
-                    let _ = reply.send(r);
-                }
-                PortalOp::Detach { reply, .. } => {
-                    m.detached = true;
-                    let _ = reply.send(Ok(()));
-                }
-                PortalOp::List { reply } => {
-                    let pending = m.pending.iter().filter(|id| !m.acked.contains(id)).count();
-                    let _ = reply.send(Ok(ProjectionListBatch {
-                        projections: vec![ProjectionListEntry {
-                            projection_id: "main".into(),
-                            display_name: "main".into(),
-                            lifecycle_state: "active".into(),
-                            unread_output_count: 0,
-                            pending_input_count: pending,
-                        }],
-                    }));
-                }
-            }
+            op.apply(&mut h.lock().unwrap(), 0);
         }
     });
-    (server.with_portal_op_tx(tx), state)
+    (server.with_portal_op_tx(tx), hub)
 }
 
 #[tokio::test]
 async fn portal_output_too_large_is_content_rejected() {
     let (server, _) = server();
-    let (server, _) = mock_portal(server);
+    let (server, _) = hub_portal(server);
     let e = call_err(
         &server,
         "hud_publish",
-        json!({"surface": "portal:main", "content": "x".repeat(10_001)}),
+        json!({"surface": "portal:main", "content": "x".repeat(16 * 1024 + 1)}),
     )
     .await;
     assert_eq!(e["code"], "CONTENT_REJECTED");
@@ -929,9 +808,10 @@ async fn portal_output_too_large_is_content_rejected() {
 #[tokio::test]
 async fn portal_flow_attach_publish_poll_ack_clear() {
     let (server, _) = server();
-    let (server, mock) = mock_portal(server);
+    let (server, hub) = hub_portal(server);
+    let key = PortalKey::new(psk_agent(), "main");
 
-    // First publish attaches; the owner token never reaches the model.
+    // The first publish attaches; identity is the caller's PSK, no token.
     let v = call(&server, "hud_publish", json!({"surface": "portal:main", "content": "Working on it", "status": "active", "expects_reply": true})).await;
     assert_eq!(v, json!({"ok": true}));
     call(
@@ -941,22 +821,22 @@ async fn portal_flow_attach_publish_poll_ack_clear() {
     )
     .await;
     {
-        let m = mock.lock().unwrap();
-        assert_eq!(
-            m.attaches, 1,
-            "attach once, then reuse the server-held token"
-        );
-        assert_eq!(
-            m.outputs,
-            [
-                ("Working on it".to_string(), Some(true)),
-                ("Done?".to_string(), None)
-            ]
-        );
-        assert_eq!(m.statuses, ["active"]);
+        let hub = hub.lock().unwrap();
+        let portal = hub.get(&key).expect("attached under the caller's id");
+        let units: Vec<_> = portal
+            .transcript
+            .iter()
+            .map(|u| (u.text.as_str(), u.expects_reply))
+            .collect();
+        assert_eq!(units, [("Working on it", true), ("Done?", false)]);
+        assert_eq!(portal.status, PortalStatus::Active);
     }
 
-    mock.lock().unwrap().pending = vec!["i1".into()];
+    let id = hub
+        .lock()
+        .unwrap()
+        .submit_reply(&key, "ship it".into(), 0)
+        .unwrap();
     let v = call(&server, "hud_surfaces", json!({})).await;
     let portal = v["surfaces"]
         .as_array()
@@ -973,16 +853,15 @@ async fn portal_flow_attach_publish_poll_ack_clear() {
     let v = call(&server, "hud_input", json!({"wait_ms": 1000})).await;
     assert_eq!(
         v,
-        json!({"items": [{"id": "i1", "s": "portal:main", "text": "reply i1"}], "remaining": 0})
+        json!({"items": [{"id": id, "s": "portal:main", "text": "ship it"}], "remaining": 0})
     );
     let v = call(&server, "hud_input", json!({})).await;
     assert_eq!(
-        v["items"][0]["id"], "i1",
+        v["items"][0]["id"], id,
         "unacked portal input is redelivered"
     );
-    let v = call(&server, "hud_input", json!({"ack": ["i1"]})).await;
+    let v = call(&server, "hud_input", json!({"ack": [id]})).await;
     assert_eq!(v, json!({"items": [], "remaining": 0}));
-    assert_eq!(mock.lock().unwrap().acked, ["i1"]);
 
     let v = call(
         &server,
@@ -992,21 +871,19 @@ async fn portal_flow_attach_publish_poll_ack_clear() {
     .await;
     assert_eq!(v["ok"], true);
     assert_eq!(
-        mock.lock().unwrap().holds,
-        [120000],
+        hub.lock().unwrap().get(&key).unwrap().hold_until_us,
+        Some(120_000_000),
         "portal hold reaches the runtime"
     );
 
     call(&server, "hud_clear", json!({"surface": "portal:main"})).await;
-    assert!(mock.lock().unwrap().detached);
-    assert!(!server.state().holds_portal(&psk_agent(), "main"));
-    let err = call_err(
-        &server,
-        "hud_hold",
-        json!({"surface": "portal:main", "ttl_ms": 1}),
-    )
-    .await;
-    assert_eq!(err["code"], "NOT_HELD");
+    assert!(hub.lock().unwrap().get(&key).is_none());
+    for (verb, args) in [
+        ("hud_hold", json!({"surface": "portal:main", "ttl_ms": 1})),
+        ("hud_clear", json!({"surface": "portal:main"})),
+    ] {
+        assert_eq!(call_err(&server, verb, args).await["code"], "NOT_HELD");
+    }
 }
 
 #[tokio::test]
@@ -1060,7 +937,7 @@ fn set_safe_mode(server: &McpServer, on: bool) {
 #[tokio::test]
 async fn hud_publish_in_safe_mode_returns_safe_mode_active() {
     let (server, _) = server();
-    let (server, mock) = mock_portal(server);
+    let (server, hub) = hub_portal(server);
     // Held before safe mode, so hud_hold has something to extend.
     for surface in ["zone:subtitle", "widget:gauge"] {
         let args = match surface {
@@ -1104,8 +981,9 @@ async fn hud_publish_in_safe_mode_returns_safe_mode_active() {
         .await;
         assert_eq!(err["code"], "SAFE_MODE_ACTIVE", "hold {surface}");
     }
+    let key = PortalKey::new(psk_agent(), "main");
     assert_eq!(
-        mock.lock().unwrap().outputs.len(),
+        hub.lock().unwrap().get(&key).unwrap().transcript.len(),
         1,
         "nothing reached the portal driver during safe mode"
     );

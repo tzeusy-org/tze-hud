@@ -1331,12 +1331,12 @@ impl WinitApp {
         let authority_handled = self.route_portal_composer_batch(context.tile_id, &batch);
 
         // Runtime-authored viewer reply echo (hud-nx7yq.3): on the raw-tile pilot
-        // path (a portal NOT attached to the projection authority, so
+        // path (a tile that is not a hub portal, so
         // `route_portal_composer_batch` returned false and no `append_viewer_echo`
         // fired), the submitted text would otherwise vanish on Enter. Author a
         // kind-distinct viewer entry at submit time so the reply bubbles into the
-        // transcript. Authority-attached portals already echo via
-        // `submit_portal_input`, so we skip them to avoid a double.
+        // transcript. Hub portals already echo via `PortalHub::submit_reply`,
+        // so we skip them to avoid a double.
         if !authority_handled {
             if let Some(submission) = batch.submission.as_ref() {
                 if !submission.text.trim().is_empty() {
@@ -1473,11 +1473,11 @@ impl WinitApp {
         }
     }
 
-    /// Route submitted focused-portal composer text into the in-process
-    /// projection authority before the legacy namespace broadcast is emitted.
+    /// Route submitted focused-portal composer text into the portal hub
+    /// before the legacy namespace broadcast is emitted.
     ///
-    /// Returns `true` when the tile is owned by an attached in-process projection
-    /// (the authority consumed the batch and echoed on its own path), `false`
+    /// Returns `true` when the tile is a hub portal (the hub queued the reply
+    /// and echoed it on its own path), `false`
     /// for a raw-tile pilot portal — the caller uses this to decide whether a
     /// runtime-authored viewer echo is needed (hud-nx7yq.3).
     fn route_portal_composer_batch(
@@ -1490,19 +1490,13 @@ impl WinitApp {
         if let Some(feedback) = self
             .state
             .portal_projection_driver
-            .submit_composer_batch_for_tile(
-                tile_id,
-                batch,
-                submitted_at_wall_us.max(1),
-                None,
-                tze_hud_projection::ContentClassification::Private,
-            )
+            .submit_composer_batch_for_tile(tile_id, batch, submitted_at_wall_us)
         {
             tracing::debug!(
                 tile_id = ?tile_id,
                 pending_input_count = feedback.pending_input_count,
                 feedback_state = ?feedback.feedback_state,
-                "composer: routed portal submission to projection authority"
+                "composer: routed portal submission to the portal hub"
             );
             true
         } else {
@@ -1669,12 +1663,12 @@ impl WinitApp {
     /// Drain pending [`PortalOp`] messages from the MCP channel (hud-bq0gl.2).
     ///
     /// Called from `about_to_wait` BEFORE `drain_portal_projection` so that
-    /// content published in the same event-loop tick is fed into the cadence
-    /// coalescer and materialised by the immediately-following drain call.
+    /// content published in the same event-loop tick renders in the
+    /// immediately-following drain call.
     ///
     /// Uses `try_recv` in a non-blocking loop — never blocks the event-loop
-    /// thread.  Each dispatched op calls `InProcessPortalDriver::dispatch_portal_op`
-    /// which synchronously feeds the operation into `ProjectionAuthority`.
+    /// thread.  Each op is applied synchronously to the portal hub by
+    /// `InProcessPortalDriver::dispatch_portal_op`.
     pub(super) fn drain_portal_ops(&mut self) {
         let Some(ref mut rx) = self.state.portal_op_rx else {
             return;
@@ -1689,10 +1683,9 @@ impl WinitApp {
                     tracing::warn!(
                         "portal_op channel disconnected — MCP portal tools will no longer function"
                     );
-                    // The ingress that feeds portal ops went away without per-
-                    // projection clean Detach ops — an ungraceful upstream drop.
-                    // Latch every still-attached projection to the degraded
-                    // treatment so the surfaces stop looking live (hud-5i16d).
+                    // The ingress that feeds portal ops went away: no agent
+                    // can reach its portals. Degrade them all so the surfaces
+                    // stop looking live (hud-5i16d).
                     self.state
                         .portal_projection_driver
                         .mark_all_projections_disconnected();
@@ -1953,7 +1946,7 @@ impl WinitApp {
         // the geometry actually changes, so the compositor re-primes the
         // truncation cache at the new geometry (hud-ghhxa — spec §6b.3) without
         // churning at a clamped boundary.
-        let (members, portal_ids) = {
+        let members = {
             let Some(state) = spin_acquire(&self.state.shared_state, INTERACTION_LOCK_BUDGET)
             else {
                 return true; // hotkey consumed even if local update fails
@@ -1961,28 +1954,13 @@ impl WinitApp {
             let Some(mut scene) = spin_acquire(&state.scene, INTERACTION_LOCK_BUDGET) else {
                 return true;
             };
-            let members = commit_portal_group_resize(&mut scene, &group, old_rect, snapshot);
-            // Resolve each member's declared portal-surface identity while the
-            // scene lock is already held (hud-s62vv): a bridged (first-class-
-            // surface) member has no in-process tile, so
-            // `push_geometry_snapshot_for_tile`'s plain tile-id reverse lookup
-            // alone cannot find its projection below. Only the (small) identity
-            // string is extracted — never the whole `SceneGraph`.
-            let portal_ids: std::collections::HashMap<tze_hud_scene::SceneId, String> = members
-                .iter()
-                .filter_map(|member| {
-                    scene
-                        .portal_surface(member.tile_id)
-                        .map(|s| (member.tile_id, s.identity.session_id.clone()))
-                })
-                .collect();
-            (members, portal_ids)
+            commit_portal_group_resize(&mut scene, &group, old_rect, snapshot)
         };
 
         // Broadcast a geometry snapshot per constituent surface to gRPC
         // subscribers via ElementRepositionedEvent (§6b.4: coalescible
-        // state-stream delivery), and mirror each into the in-process projection
-        // authority so the drain loop sees the updated bounds next cycle.
+        // state-stream delivery), and mirror each into the portal driver so
+        // the next render sees the updated bounds.
         let mut member_bounds: Vec<(tze_hud_scene::SceneId, tze_hud_scene::types::Rect)> =
             Vec::with_capacity(members.len());
         for member in &members {
@@ -1995,11 +1973,7 @@ impl WinitApp {
             );
             self.state
                 .portal_projection_driver
-                .push_geometry_snapshot_for_tile(
-                    member.tile_id,
-                    member.snapshot,
-                    portal_ids.get(&member.tile_id).map(String::as_str),
-                );
+                .push_geometry_snapshot_for_tile(member.tile_id, member.snapshot);
             let r = member.snapshot.rect;
             member_bounds.push((
                 member.tile_id,
@@ -2167,51 +2141,18 @@ mod tests {
     }
 
     fn make_windowed_app_with_pending_portal_publish(projection_id: &str) -> WinitApp {
-        use tze_hud_projection::{
-            AttachRequest, ContentClassification, OperationEnvelope, OutputKind,
-            ProjectionOperation, ProviderKind, PublishOutputRequest,
-        };
-
         let mut driver = crate::portal_projection_driver::InProcessPortalDriver::new();
-        let envelope = |operation, request_id: &str| OperationEnvelope {
-            operation,
-            projection_id: projection_id.to_string(),
-            request_id: request_id.to_string(),
-            client_timestamp_wall_us: 1,
-        };
-        let attach = driver.authority_mut().handle_attach(
-            AttachRequest {
-                envelope: envelope(ProjectionOperation::Attach, "attach-wake"),
-                provider_kind: ProviderKind::Claude,
-                display_name: "Wake test".to_string(),
-                workspace_hint: None,
-                repository_hint: None,
-                icon_profile_hint: None,
-                content_classification: ContentClassification::Private,
-                hud_target: None,
-                idempotency_key: None,
-            },
-            "wake-test-caller",
-            1_000,
-        );
-        assert!(attach.accepted);
-        let owner_token = attach.owner_token.expect("owner token after attach");
-        driver.attach_projection(projection_id, Vec::new());
-        let published = driver.authority_mut().handle_publish_output(
-            PublishOutputRequest {
-                envelope: envelope(ProjectionOperation::PublishOutput, "publish-wake"),
-                owner_token,
-                output_text: "actual portal mutation".to_string(),
-                output_kind: OutputKind::Assistant,
-                content_classification: ContentClassification::Private,
-                logical_unit_id: Some("wake-unit".to_string()),
-                coalesce_key: None,
-                expects_reply: false,
-            },
-            "wake-test-caller",
-            1_001,
-        );
-        assert!(published.accepted);
+        driver
+            .hub_mut()
+            .publish(
+                &tze_hud_projection::hub::PortalKey::new("wake-test", projection_id),
+                tze_hud_projection::hub::Publish {
+                    text: Some("actual portal mutation".to_string()),
+                    ..Default::default()
+                },
+                1_001,
+            )
+            .expect("publish accepted");
 
         let mut scene = tze_hud_scene::SceneGraph::new(1920.0, 1080.0);
         scene.create_tab("Main", 0).unwrap();
@@ -4498,72 +4439,38 @@ mod tests {
         );
     }
 
-    /// An authority-attached submission routes to the ProjectionAuthority, so the
+    /// A hub-backed portal's submission routes to the portal hub, so the
     /// raw-tile echo path (which resets on its own) is SKIPPED. The keyboard
     /// submit-terminal reset must still snap a scrolled-back input-history back to
     /// the tail so the just-submitted reply is revealed (hud-npcdf).
     #[test]
     fn authority_attached_submit_snaps_scrolled_back_history_to_tail() {
         use tze_hud_input::{FocusManager, InputProcessor, RawCharacterEvent};
-        use tze_hud_projection::{
-            AttachRequest, ContentClassification, OperationEnvelope, OutputKind,
-            ProjectionOperation, ProviderKind, PublishOutputRequest,
-        };
         use tze_hud_scene::types::HitRegionNode;
         use tze_hud_scene::{Node, NodeData, Rect, SceneGraph, SceneId};
 
-        // Attach a projection and drain a publish to MATERIALISE an
-        // authority-backed portal tile (binding it in the driver). A submission on
-        // this tile is routed to the authority, so `route_portal_composer_batch`
-        // returns true and `append_raw_tile_viewer_echo` never runs — isolating
-        // the keyboard submit-terminal reset as the only thing that can pin the
-        // tail.
+        // Publish and drain to MATERIALISE a hub-backed portal tile (binding
+        // it in the driver). A submission on this tile is routed to the hub,
+        // so `route_portal_composer_batch` returns true and
+        // `append_raw_tile_viewer_echo` never runs — isolating the keyboard
+        // submit-terminal reset as the only thing that can pin the tail.
         let mut driver = crate::portal_projection_driver::InProcessPortalDriver::new();
-        let projection_id = "proj-npcdf";
-        let envelope = |op: ProjectionOperation, request_id: &str| OperationEnvelope {
-            operation: op,
-            projection_id: projection_id.to_string(),
-            request_id: request_id.to_string(),
-            client_timestamp_wall_us: 1,
-        };
-        let attach = driver.authority_mut().handle_attach(
-            AttachRequest {
-                envelope: envelope(ProjectionOperation::Attach, "attach-1"),
-                provider_kind: ProviderKind::Claude,
-                display_name: "Test".to_string(),
-                workspace_hint: None,
-                repository_hint: None,
-                icon_profile_hint: None,
-                content_classification: ContentClassification::Private,
-                hud_target: None,
-                idempotency_key: None,
-            },
-            "test-caller",
-            1000,
-        );
-        assert!(attach.accepted, "attach must be accepted");
-        let token = attach.owner_token.expect("owner_token after attach");
-        driver.attach_projection(projection_id, Vec::new());
+        driver
+            .hub_mut()
+            .publish(
+                &tze_hud_projection::hub::PortalKey::new("test-agent", "proj-npcdf"),
+                tze_hud_projection::hub::Publish {
+                    text: Some("assistant ready".to_string()),
+                    ..Default::default()
+                },
+                100,
+            )
+            .expect("publish accepted");
 
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
         let mut processor = InputProcessor::new();
 
-        let published = driver.authority_mut().handle_publish_output(
-            PublishOutputRequest {
-                envelope: envelope(ProjectionOperation::PublishOutput, "pub-1"),
-                owner_token: token.clone(),
-                output_text: "assistant ready".to_string(),
-                output_kind: OutputKind::Assistant,
-                content_classification: ContentClassification::Private,
-                logical_unit_id: Some("unit-1".to_string()),
-                coalesce_key: None,
-                expects_reply: false,
-            },
-            "test-caller",
-            100,
-        );
-        assert!(published.accepted, "publish must be accepted");
         driver.drain(&mut scene, &mut processor, Some(tab_id));
 
         let tile_id = *scene
