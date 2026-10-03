@@ -597,6 +597,20 @@ async fn notification_ttl_zero_is_held_and_hold_retimes_it() {
             Some(scene.now_wall_us() + 5_000_000)
         );
     }
+    // A shorter hold replaces the expiry (it is not the later of old and new).
+    call(
+        &server,
+        "hud_hold",
+        json!({"surface": "zone:notification-area", "ttl_ms": 1000}),
+    )
+    .await;
+    {
+        let scene = server.scene.lock().await;
+        assert_eq!(
+            scene.zone_registry.active_publishes["notification-area"][0].expires_at_wall_us,
+            Some(scene.now_wall_us() + 1_000_000)
+        );
+    }
     call(
         &server,
         "hud_hold",
