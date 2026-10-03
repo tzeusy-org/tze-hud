@@ -52,7 +52,8 @@ shell state exposes no portal identity or transcript.
   `viewer_dismiss_tile_revokes_lease_in_any_live_state`; `tze_hud_protocol`
   `viewer_dismiss_tile_pushes_reclaimed_override`; `tze_hud_runtime`
   `viewer_dismiss_portal_detaches_and_next_publish_reattaches`,
-  `viewer_close_button_dismisses_hovered_tile_and_notifies_owner`;
+  `viewer_close_button_dismisses_hovered_tile_and_notifies_owner`; `integration`
+  `poc_portal_viewer_dismiss_then_mcp_verbs`;
   `tze_hud_compositor` `tile_close_button_draw_and_hit_region_share_token_geometry`
 - `tze_hud_mcp` `hud_publish_in_safe_mode_returns_safe_mode_active`,
   `safe_mode_does_not_regrant_suspended_mcp_lease`,

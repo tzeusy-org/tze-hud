@@ -446,6 +446,25 @@ impl HeadlessEventLoopHarness {
             .map_or(0, Vec::len)
     }
 
+    /// Dismiss every tile on screen the way the hover close button does, through
+    /// the runtime's real viewer-dismiss entry (`InProcessPortalDriver::viewer_dismiss_tile`).
+    pub fn viewer_dismiss_all_tiles(&mut self) {
+        let state = self.app.state.shared_state.try_lock().expect(BUSY);
+        let mut scene = state.scene.try_lock().expect(BUSY);
+        let ids: Vec<SceneId> = scene.tiles.keys().copied().collect();
+        let expiries: Vec<_> = ids
+            .into_iter()
+            .filter_map(|id| {
+                self.app
+                    .state
+                    .portal_projection_driver
+                    .viewer_dismiss_tile(&mut scene, id)
+                    .expiry
+            })
+            .collect();
+        super::publish_lease_expiries(self.app.state.lease_expirations.as_ref(), expiries);
+    }
+
     /// Number of tiles on screen (portal surfaces included).
     pub fn tile_count(&self) -> usize {
         let state = self.app.state.shared_state.try_lock().expect(BUSY);

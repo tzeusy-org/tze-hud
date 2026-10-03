@@ -34,8 +34,7 @@ MCP `tools/list` has five tools. The resident tile API is gRPC only.
 spot, with no agent round trip: a gRPC agent gets `Reclaimed{OVERRIDE}` for
 `tile:<id>`. A dismissed portal is detached; the agent's next `hud_publish` to
 `portal:<id>` attaches a fresh one (its old token is dead), `hud_hold` answers
-`NOT_HELD`, `hud_clear` succeeds as a no-op, and `hud_input` forgets the
-holding.
+`NOT_HELD` and `hud_clear` succeeds as a no-op.
 
 ## MCP tools
 
@@ -136,7 +135,7 @@ unknown PSK) is a JSON-RPC error.
 |---|---|
 | `INVALID_ARGUMENT` | Unknown field, wrong type, or bad surface string |
 | `NOT_ALLOWED` | The agent's `allow` list doesn't cover the surface, or another agent holds that `portal:<id>` |
-| `NOT_HELD` | `hud_hold` with nothing to extend, or `hud_clear` on a portal that isn't attached |
+| `NOT_HELD` | `hud_hold` with nothing to extend (including a portal the viewer dismissed); `hud_clear` on a portal this agent never attached (a dismissed portal's `hud_clear` is an ok no-op) |
 | `ZONE_NOT_FOUND` | No such zone |
 | `WIDGET_NOT_FOUND` | No such widget instance |
 | `WIDGET_PARAMETER_INVALID` | Unknown widget param, or a value of the wrong type or range |

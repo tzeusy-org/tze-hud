@@ -135,6 +135,35 @@ impl Poc {
         }
     }
 
+    /// Call an MCP tool that must fail; returns the error `code`.
+    async fn call_err(&mut self, tool: &str, arguments: Value) -> String {
+        let request = json!({
+            "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+            "params": {"name": tool, "arguments": arguments},
+        })
+        .to_string();
+        let mut call = tokio::spawn(post(self.hud.mcp_addr(), request));
+        let response = loop {
+            self.hud.tick();
+            tokio::select! {
+                biased;
+                done = &mut call => break done.expect("MCP call task"),
+                () = tokio::task::yield_now() => {}
+            }
+        };
+        self.settle().await;
+        let response: Value = serde_json::from_str(&response).expect("JSON-RPC response");
+        let result = &response["result"];
+        assert_eq!(
+            result["isError"],
+            json!(true),
+            "{tool} should fail: {response}"
+        );
+        let text = result["content"][0]["text"].as_str().expect("error text");
+        let body: Value = serde_json::from_str(text).expect("error text is JSON");
+        body["code"].as_str().expect("error code").to_string()
+    }
+
     /// `hud_surfaces`, returning this agent's entry for `surface` (if listed)
     /// after checking the discover budget.
     async fn surface(&mut self, surface: &str) -> Option<Value> {
@@ -246,6 +275,47 @@ async fn poc_portal_attach_stream_reply_detach() {
     assert!(
         flow_tokens <= PORTAL_FLOW_BUDGET,
         "portal flow took {flow_tokens} model-visible tokens (budget {PORTAL_FLOW_BUDGET})"
+    );
+}
+
+/// docs/api.md "Viewer dismiss": after the viewer closes a portal, the agent's
+/// cached holding is dead. `hud_hold` is NOT_HELD, `hud_clear` is an ok no-op,
+/// and the next `hud_publish` attaches a fresh portal.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn poc_portal_viewer_dismiss_then_mcp_verbs() {
+    let publish = json!({"surface": PORTAL, "content": "Working."});
+    let mut poc = Poc::boot().await;
+    poc.call("hud_publish", publish.clone()).await;
+    assert_eq!(poc.hud.tile_count(), 1);
+
+    poc.hud.viewer_dismiss_all_tiles();
+    poc.settle().await;
+    assert_eq!(poc.hud.tile_count(), 0, "the viewer's dismiss is immediate");
+
+    let hold = poc
+        .call_err("hud_hold", json!({"surface": PORTAL, "ttl_ms": 1_000}))
+        .await;
+    assert_eq!(hold, "NOT_HELD");
+
+    // hud_hold dropped the stale holding; re-attach, dismiss again, and prove
+    // hud_clear is a no-op success on a stale (still cached) token.
+    poc.call("hud_publish", publish.clone()).await;
+    assert_eq!(
+        poc.hud.tile_count(),
+        1,
+        "publish re-attaches a fresh portal"
+    );
+    poc.hud.viewer_dismiss_all_tiles();
+    poc.settle().await;
+    let clear = poc.call("hud_clear", json!({"surface": PORTAL})).await;
+    assert_eq!(clear.body, json!({"ok": true}));
+
+    let again = poc.call("hud_publish", publish).await;
+    assert_eq!(again.body, json!({"ok": true}));
+    assert_eq!(
+        poc.hud.tile_count(),
+        1,
+        "publish after clear attaches fresh"
     );
 }
 
