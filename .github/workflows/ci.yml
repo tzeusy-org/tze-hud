@@ -441,86 +441,20 @@ jobs:
 
   # ── Dev-mode guard ──────────────────────────────────────────────────────────
   #
-  # Verifies that the `dev-mode` feature is NOT accidentally compiled into a
-  # release binary.  In a release build of `tze_hud_app` (no features flag),
-  # `HeadlessConfig { config_toml: None }` must return Err, not Ok.
-  #
-  # The guard works by:
-  # 1. Building the release binary of `tze_hud_app` without --features dev-mode.
-  # 2. Asserting the build output does NOT contain the dev-mode gate string
-  #    "fallback_unrestricted = true" compiled in (checked via a test assertion
-  #    in the build).
-  #
-  # Additionally: a dedicated unit test `dev_mode_not_active_in_release` in
-  # tze_hud_runtime guards the cfg() gate at the Rust level.  It is compiled
-  # only when NOT in test/dev-mode, and asserts that `HeadlessConfig::default()`
-  # does NOT compile (the impl is absent).  This is validated by `test-unit`.
-  #
-  # The release build check here is the belt-and-suspenders CI gate.
+  # Verifies that `dev-mode` is not in the default features of release-critical
+  # workspace members (scripts/ci/check_dev_mode_defaults.py). This is a Cargo
+  # metadata check only; the real release build runs in windows.yml.
+  # `just dev-mode-guard` runs the same command.
 
   dev-mode-guard:
     name: dev-mode guard (release build)
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 5
     needs: [check]
     steps:
       - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: "1.88"
-      # timeout-minutes caps cache-save hangs (incident: PR #606, canonical-app-production-boot
-      # hung 15+ min in the Swatinem/rust-cache post-step, required --admin merge).
-      # v2.9.1 pins to a specific stable release rather than the floating v2 alias.
-      - uses: Swatinem/rust-cache@v2.9.1
-        timeout-minutes: 10
-      - name: Install protobuf compiler (required by tze_hud_protocol build script)
-        timeout-minutes: 5
-        run: |
-          sudo apt-get $APT_OPTS update -q
-          sudo apt-get $APT_OPTS install -y --no-install-recommends protobuf-compiler
-      - name: Build workspace release (no dev-mode feature)
-        run: |
-          cargo build --workspace --release 2>&1 | tee /tmp/release-build.log
-          echo "--- Checking for dev-mode leakage ---"
-          # Verify that the tze_hud_runtime crate did NOT compile with the
-          # dev-mode feature by checking that there is no dev-mode feature
-          # in the resolved Cargo metadata for the release profile.
-          cargo metadata --format-version 1 --no-deps 2>/dev/null \
-            | python3 -c "
-          import json, sys
-          meta = json.load(sys.stdin)
-          for pkg in meta['packages']:
-              if pkg['name'] == 'tze_hud_runtime':
-                  features = pkg.get('features', {})
-                  # dev-mode must exist as a feature but must NOT be in
-                  # the default feature set.
-                  default_features = features.get('default', [])
-                  if 'dev-mode' in default_features:
-                      print('FAIL: dev-mode is in default features of tze_hud_runtime')
-                      sys.exit(1)
-                  print('PASS: dev-mode is not in default features of tze_hud_runtime')
-                  sys.exit(0)
-          print('WARN: tze_hud_runtime package not found in metadata')
-          sys.exit(0)
-          "
-      - name: Verify dev-mode is not a default feature in vertical_slice
-        run: |
-          cargo metadata --format-version 1 --no-deps 2>/dev/null \
-            | python3 -c "
-          import json, sys
-          meta = json.load(sys.stdin)
-          fail = False
-          for pkg in meta['packages']:
-              if pkg['name'] in ('tze_hud_runtime', 'vertical_slice', 'integration'):
-                  features = pkg.get('features', {})
-                  default_features = features.get('default', [])
-                  if 'dev-mode' in default_features:
-                      print(f'FAIL: dev-mode is in default features of {pkg[\"name\"]}')
-                      fail = True
-                  else:
-                      print(f'PASS: dev-mode is not in default features of {pkg[\"name\"]}')
-          sys.exit(1 if fail else 0)
-          "
+      - name: Verify dev-mode is not a default feature
+        run: cargo metadata --format-version 1 --no-deps | python3 scripts/ci/check_dev_mode_defaults.py
 
   # ── Dependency security + license audit (cargo-deny) ──────────────────────
   #

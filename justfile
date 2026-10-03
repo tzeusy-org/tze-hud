@@ -104,10 +104,9 @@ canonical-app-boot:
 # ── Static analysis ──────────────────────────────────────────────────────────
 
 # Verify dev-mode feature is not in release default features (mirror CI dev-mode-guard job)
-# Note: this only checks Cargo metadata; it does not run a release build.
-# For the full belt-and-suspenders release-build check, run the CI job.
+# Cargo metadata only; the release build is covered by windows.yml.
 dev-mode-guard:
-    cargo metadata --format-version 1 --no-deps 2>/dev/null \
+    cargo metadata --format-version 1 --no-deps \
         | python3 scripts/ci/check_dev_mode_defaults.py
 
 # ── Full local CI sweep ───────────────────────────────────────────────────────
