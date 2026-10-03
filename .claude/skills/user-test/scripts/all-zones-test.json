@@ -25,9 +25,7 @@
   {
     "zone": "notification-area",
     "content": {
-      "type": "notification",
-      "text": "HUD zone test complete",
-      "icon": "",
+      "body": "HUD zone test complete",
       "urgency": 1
     },
     "ttl_ms": 15000

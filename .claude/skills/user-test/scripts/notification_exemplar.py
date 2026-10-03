@@ -22,26 +22,26 @@ TTL auto-dismiss, and max_depth eviction.
                       + 3s pause for visual inspection
 
 Usage:
-  notification_exemplar.py --url http://host:9090
-  notification_exemplar.py --url http://host:9090 --psk-env MY_PSK --ttl 8000
+  notification_exemplar.py
+  notification_exemplar.py --psk-env MY_PSK --ttl 8000
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 import time
 import urllib.error
 import urllib.request
 from typing import Any
 
+import hud_env
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
-DEFAULT_PSK_ENV = "TZE_HUD_PSK"
 DEFAULT_TTL_MS = 8000
 
 ZONE_NAME = "notification-area"
@@ -341,16 +341,13 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--url",
-        required=True,
-        help="MCP HTTP URL of the running HUD (e.g. http://host:9090)",
+        default=None,
+        help="MCP URL (default: derived from HUD_HOST)",
     )
     parser.add_argument(
         "--psk-env",
-        default=DEFAULT_PSK_ENV,
-        help=(
-            f"Environment variable containing the pre-shared key"
-            f" (default: {DEFAULT_PSK_ENV})"
-        ),
+        default=None,
+        help="Read the PSK from this environment variable instead of the paired file",
     )
     parser.add_argument(
         "--ttl",
@@ -370,20 +367,16 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
 
-    token = os.getenv(args.psk_env, "")
-    if not token:
-        print(
-            f"ERROR: environment variable {args.psk_env} is empty or unset",
-            file=sys.stderr,
-        )
+    try:
+        url, token = hud_env.resolve(args.url, args.psk_env)
+    except hud_env.HudEnvError as error:
+        print(f"ERROR: {error}", file=sys.stderr)
         return 2
 
     ttl_ms: int = args.ttl
-    url: str = args.url
 
     print("Notification Exemplar User-Test", flush=True)
     print(f"  HUD URL : {url}", flush=True)
-    print(f"  PSK env : {args.psk_env}", flush=True)
     print(f"  TTL     : {ttl_ms}ms per notification", flush=True)
     print(f"  Zone    : {ZONE_NAME}", flush=True)
     print(f"  Agents  : {', '.join(AGENTS.keys())}", flush=True)

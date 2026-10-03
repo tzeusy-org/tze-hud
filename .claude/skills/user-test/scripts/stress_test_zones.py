@@ -10,14 +10,14 @@ Exercises the MCP hud_publish endpoint at varying load levels while
 collecting latency percentiles and host resource telemetry via SSH.
 
 Connection defaults:
-  MCP URL : http://windows-host.example:9090
-  PSK env : MCP_TEST_PSK  (default token: tze-hud-key)
+  MCP URL : http://$HUD_HOST:9090/mcp
+  PSK     : ~/.config/tze-hud/$HUD_HOST.psk (see hud_pair.py)
   SSH host: admin-user@windows-host.example
   SSH key : ~/.ssh/hud-ssh-key
 
 CLI flags (see parse_args() for full reference):
-  --url           MCP HTTP endpoint
-  --psk-env       Env var containing the auth PSK
+  --url           MCP endpoint (default: from HUD_HOST)
+  --psk-env       Env var holding the PSK (default: the paired file)
   --ssh-host      SSH hostname for telemetry (user@host format)
   --ssh-key       SSH private key path
   --output        JSON report output path (default: stress_report_<ISO8601>.json)
@@ -47,13 +47,12 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
+import hud_env
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
-DEFAULT_MCP_URL = "http://windows-host.example:9090"
-DEFAULT_PSK_ENV = "MCP_TEST_PSK"
-DEFAULT_PSK_FALLBACK = "tze-hud-key"
 DEFAULT_SSH_USER = "admin-user"
 DEFAULT_SSH_HOST = "windows-host.example"
 DEFAULT_SSH_KEY = os.path.expanduser("~/.ssh/hud-ssh-key")
@@ -1326,13 +1325,13 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--url",
-        default=DEFAULT_MCP_URL,
-        help=f"MCP HTTP URL (default: {DEFAULT_MCP_URL})",
+        default=None,
+        help="MCP URL (default: derived from HUD_HOST)",
     )
     parser.add_argument(
         "--psk-env",
-        default=DEFAULT_PSK_ENV,
-        help=f"Env var containing the PSK (default: {DEFAULT_PSK_ENV})",
+        default=None,
+        help="Read the PSK from this environment variable instead of the paired file",
     )
     parser.add_argument(
         "--ssh-user",
@@ -1454,14 +1453,11 @@ def main() -> int:
         ssh_user = args.ssh_user
         ssh_host = ssh_host_raw
 
-    # Resolve token -- no hardcoded credentials in logic
-    token = os.environ.get(args.psk_env, "").strip()
-    if not token:
-        token = DEFAULT_PSK_FALLBACK
-        print(
-            f"WARNING: {args.psk_env} not set, using built-in default token.",
-            file=sys.stderr,
-        )
+    try:
+        args.url, token = hud_env.resolve(args.url, args.psk_env)
+    except hud_env.HudEnvError as error:
+        print(f"ERROR: {error}", file=sys.stderr)
+        return 2
 
     # Resolve which profiles to run.
     # Spec §Connection Parameters: --profiles is a comma-separated subset.

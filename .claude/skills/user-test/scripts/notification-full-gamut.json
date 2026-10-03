@@ -3,10 +3,8 @@
     "zone": "notification-area",
     "ttl_ms": 18000,
     "content": {
-      "type": "notification",
       "title": "Low / Smoke Black",
-      "text": "Background sync finished with no action needed.",
-      "icon": "",
+      "body": "Background sync finished with no action needed.",
       "urgency": 0
     }
   },
@@ -14,10 +12,8 @@
     "zone": "notification-area",
     "ttl_ms": 18000,
     "content": {
-      "type": "notification",
       "title": "Normal / Blue-Black",
-      "text": "New build artifacts are ready for review in the dashboard.",
-      "icon": "",
+      "body": "New build artifacts are ready for review in the dashboard.",
       "urgency": 1
     }
   },
@@ -25,10 +21,8 @@
     "zone": "notification-area",
     "ttl_ms": 22000,
     "content": {
-      "type": "notification",
       "title": "Urgent / Amber-Black",
-      "text": "Queue depth exceeded soft threshold for more than 3 minutes.",
-      "icon": "",
+      "body": "Queue depth exceeded soft threshold for more than 3 minutes.",
       "urgency": 2,
       "actions": [
         {
@@ -46,10 +40,8 @@
     "zone": "notification-area",
     "ttl_ms": 24000,
     "content": {
-      "type": "notification",
       "title": "Critical / Red-Black",
-      "text": "Please check corner radius and typography while this long sentence tests card height containment under stress.",
-      "icon": "",
+      "body": "Please check corner radius and typography while this long sentence tests card height containment under stress.",
       "urgency": 3,
       "actions": [
         {

@@ -26,36 +26,26 @@ If not connected, see **Setup**.
 
 ## Setup
 
-### 1. MCP server configuration
+### 1. Pair once
 
-Merge the `mcpServers` entry from `settings.template.json` into
-`.claude/settings.json`:
-
-```json
-{
-  "mcpServers": {
-    "tze-hud": {
-      "type": "http",
-      "url": "http://<HUD_HOST>:9090/mcp",
-      "headers": { "Authorization": "Bearer ${HUD_MCP_PSK}" }
-    }
-  }
-}
-```
-
-`HUD_MCP_PSK` is your agent's PSK. Identity comes from it: the agent id is
-your namespace, and the agent's `[agents.<id>] allow` list decides which
-surfaces you see and may publish to.
-
-**Autonomous / noninteractive target:** when no human display is needed,
-resolve the always-on `hud-windows` VM:
+Set `HUD_HOST` to the HUD's host. With no paired agent the HUD shows a
+6-digit code; trade it for your PSK:
 
 ```bash
-eval "$(.claude/skills/user-test/scripts/hud_vm_env.sh)"
-# -> HUD_MCP_URL + HUD_MCP_PSK exported; VM/HUD self-healed if down
+HUD_HOST=<host> python3 .claude/skills/user-test/scripts/hud_pair.py --code 482913
 ```
 
-### 2. Verify connectivity
+The PSK lands in `~/.config/tze-hud/<host>.psk` (mode 0600) and is never
+printed. Pairing again rotates it. Identity comes from the PSK: the agent id
+is your namespace, and its `allow` list decides which surfaces you see and
+may publish to.
+
+### 2. MCP server configuration
+
+Merge the `mcpServers` entry from `settings.template.json` into your MCP
+settings. Its `headersHelper` sends the paired PSK as the bearer.
+
+### 3. Verify connectivity
 
 `tools/list` should show the five `hud_*` tools. Call `hud_surfaces` to
 confirm the connection.
@@ -147,15 +137,16 @@ Zone sets are instance-specific; discover with `hud_surfaces`.
 
 ## Script
 
-For batch publishing or diagnostics outside an MCP client:
+For batch publishing or diagnostics outside an MCP client (reads `HUD_HOST`
+and the paired PSK file):
 
 ```bash
 S=.claude/skills/th-hud-publish/scripts/publish.py
-python3 $S --url http://<HUD_HOST>:9090/mcp --psk-env HUD_MCP_PSK --list-surfaces
-python3 $S --url ... --zone alert-banner --content "Build passed"
-python3 $S --url ... --zone status-bar --content '{"entries":{"build":"passing"}}' --key build-status
-python3 $S --url ... --zone subtitle --clear
-python3 $S --url ... --messages-file /tmp/messages.json
+python3 $S --list-surfaces
+python3 $S --zone alert-banner --content "Build passed"
+python3 $S --zone status-bar --content '{"entries":{"build":"passing"}}' --key build-status
+python3 $S --zone subtitle --clear
+python3 $S --messages-file /tmp/messages.json
 ```
 
 Message file:

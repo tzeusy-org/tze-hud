@@ -21,26 +21,26 @@ Expected visual after all 3 publishes:
   All three visible simultaneously until TTL expires.
 
 Usage:
-  alert_banner_exemplar.py --url http://host:9090
-  alert_banner_exemplar.py --url http://host:9090 --psk-env MY_PSK --ttl 15000
+  alert_banner_exemplar.py
+  alert_banner_exemplar.py --psk-env MY_PSK --ttl 15000
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 import time
 import urllib.error
 import urllib.request
 from typing import Any
 
+import hud_env
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
-DEFAULT_PSK_ENV = "TZE_HUD_PSK"
 DEFAULT_TTL_MS = 15000
 
 ZONE_NAME = "alert-banner"
@@ -203,16 +203,13 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--url",
-        required=True,
-        help="MCP HTTP URL of the running HUD (e.g. http://host:9090)",
+        default=None,
+        help="MCP URL (default: derived from HUD_HOST)",
     )
     parser.add_argument(
         "--psk-env",
-        default=DEFAULT_PSK_ENV,
-        help=(
-            f"Environment variable containing the pre-shared key"
-            f" (default: {DEFAULT_PSK_ENV})"
-        ),
+        default=None,
+        help="Read the PSK from this environment variable instead of the paired file",
     )
     parser.add_argument(
         "--ttl",
@@ -231,20 +228,16 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
 
-    token = os.getenv(args.psk_env, "")
-    if not token:
-        print(
-            f"ERROR: environment variable {args.psk_env} is empty or unset",
-            file=sys.stderr,
-        )
+    try:
+        url, token = hud_env.resolve(args.url, args.psk_env)
+    except hud_env.HudEnvError as error:
+        print(f"ERROR: {error}", file=sys.stderr)
         return 2
 
     ttl_ms: int = args.ttl
-    url: str = args.url
 
     print("Alert-Banner Exemplar User-Test", flush=True)
     print(f"  HUD URL : {url}", flush=True)
-    print(f"  PSK env : {args.psk_env}", flush=True)
     print(f"  TTL     : {ttl_ms}ms per alert", flush=True)
     print(f"  Zone    : {ZONE_NAME}", flush=True)
     print(f"  Alerts  : {len(ALERTS)} (info, warning, critical)", flush=True)

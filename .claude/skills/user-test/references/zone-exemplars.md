@@ -2,7 +2,7 @@
 
 Per-zone live-HUD exemplar scenarios published via MCP `hud_publish`. Each
 section is self-contained: CLI, phases/sequence, visual checklist, and payload
-shape. Referenced from [../SKILL.md](../SKILL.md).
+shape. Referenced from [../SKILL.md](../SKILL.md). Every script reads `HUD_HOST` and the PSK file written by `hud_pair.py`.
 
 ## Subtitle Exemplar Scenario
 
@@ -15,12 +15,10 @@ the `exemplar-test` namespace.
 
 ```bash
 python3 .claude/skills/user-test/scripts/subtitle_exemplar.py \
-  --url http://windows-host.example:9090 \
-  --psk-env TZE_HUD_PSK \
   --ttl 10000
 ```
 
-Required: `--url`. Optional: `--psk-env` (default `TZE_HUD_PSK`), `--ttl` (ms, default 10000).
+Optional: `--ttl` (ms, default 10000).
 
 All messages are published to `zone:subtitle` under the PSK's agent namespace.
 
@@ -58,8 +56,6 @@ to render before the next publish fires:
 
 ```bash
 python3 .claude/skills/user-test/scripts/publish_zone_batch.py \
-  --url "$MCP_HTTP_URL" \
-  --psk-env MCP_TEST_PSK \
   --messages-file .claude/skills/user-test/scripts/subtitle-full-sequence.json \
   --delay-ms 4000 \
   --list-surfaces
@@ -104,12 +100,10 @@ notifications with mixed urgency levels across 4 phases.
 
 ```bash
 python3 .claude/skills/user-test/scripts/notification_exemplar.py \
-  --url http://windows-host.example:9090 \
-  --psk-env TZE_HUD_PSK \
   --ttl 8000
 ```
 
-Required: `--url`. Optional: `--psk-env` (default `TZE_HUD_PSK`), `--ttl` (ms, default 8000).
+Optional: `--ttl` (ms, default 8000).
 
 ### Phases
 
@@ -138,9 +132,7 @@ is gone with no fade — evicted instantly. "Burst C6" is at top.
 
 ```json
 {
-  "type": "notification",
-  "text": "...",
-  "icon": "...",
+  "body": "...",
   "urgency": 0,
   "title": "Optional heading",
   "actions": [
@@ -162,8 +154,6 @@ long-body containment, and action-button rows.
 
 ```bash
 python3 .claude/skills/user-test/scripts/publish_zone_batch.py \
-  --url http://windows-host.example:9090 \
-  --psk-env TZE_HUD_PSK \
   --messages-file .claude/skills/user-test/scripts/notification-full-gamut.json \
   --delay-ms 250 \
   --list-surfaces
@@ -192,12 +182,10 @@ multi-alert display.
 
 ```bash
 python3 .claude/skills/user-test/scripts/alert_banner_exemplar.py \
-  --url http://windows-host.example:9090 \
-  --psk-env TZE_HUD_PSK \
   --ttl 15000
 ```
 
-Required: `--url`. Optional: `--psk-env` (default `TZE_HUD_PSK`), `--ttl` (ms, default 15000).
+Optional: `--ttl` (ms, default 15000).
 
 ### Sequence
 
@@ -223,7 +211,7 @@ amber for warning (urgency=2), red for critical (urgency=3).
 ### Alert payload shape
 
 ```json
-{"type": "notification", "text": "...", "icon": "", "urgency": 1}
+{"body": "...", "urgency": 1}
 ```
 
 Published via MCP `hud_publish` to `zone:alert-banner` with `ttl_ms` set to
@@ -240,13 +228,10 @@ key replacement, empty-value removal, and TTL-driven sweep.
 
 ```bash
 python3 .claude/skills/user-test/scripts/status_bar_exemplar.py \
-  --url http://windows-host.example:9090 \
-  --psk-env TZE_HUD_PSK \
   --battery-ttl 5000
 ```
 
-Required: `--url`. Optional: `--psk-env` (default `TZE_HUD_PSK`),
-`--ttl` (ms, default 60000 — long TTL for weather/time entries),
+Optional: `--ttl` (ms, default 60000 — long TTL for weather/time entries),
 `--battery-ttl` (ms, default 15000 — TTL for battery entry; long enough to survive steps 4/6/8 visual checks but expires during step 9).
 
 ### 10-Step Sequence
@@ -319,12 +304,10 @@ latest-wins replacement, static-image placeholder, and rapid-replacement stress.
 ### CLI
 
 ```bash
-python3 .claude/skills/user-test/scripts/ambient_background_exemplar.py \
-  --url http://windows-host.example:9090 \
-  --psk-env TZE_HUD_PSK
+python3 .claude/skills/user-test/scripts/ambient_background_exemplar.py
 ```
 
-Required: `--url`. Optional: `--psk-env` (default `TZE_HUD_PSK`).
+Both read `HUD_HOST` and the paired PSK file.
 
 ### Phases
 

@@ -32,6 +32,7 @@ from perf_common import (
     stable_primary_key,
     utc_now_iso,
 )
+import hud_env  # noqa: E402  (perf_common puts user-test/scripts on sys.path)
 
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -39,8 +40,6 @@ _REFERENCE_DIR = os.path.normpath(os.path.join(_SCRIPT_DIR, "..", "reference"))
 DEFAULT_TARGETS_FILE = os.path.join(_REFERENCE_DIR, "targets.json")
 DEFAULT_RESULTS_CSV = os.path.join(_REFERENCE_DIR, "results.csv")
 
-DEFAULT_PSK_ENV = "MCP_TEST_PSK"
-DEFAULT_PSK_FALLBACK = "tze-hud-key"
 SCRIPT_VERSION = "1.0"
 
 
@@ -208,7 +207,7 @@ def main() -> int:
     parser.add_argument("--url", default=None, help="Direct MCP HTTP URL override")
     parser.add_argument("--target-id", default=None, help="Target id from targets file")
     parser.add_argument("--targets-file", default=DEFAULT_TARGETS_FILE, help="Target registry JSON")
-    parser.add_argument("--psk-env", default=DEFAULT_PSK_ENV, help="PSK environment variable")
+    parser.add_argument("--psk-env", help="Read the PSK from this environment variable instead of the paired file")
 
     parser.add_argument("--mode", choices=["widget", "zone"], default="widget")
     parser.add_argument("--count", type=int, default=100, help="Number of publishes")
@@ -270,9 +269,10 @@ def main() -> int:
         endpoint_key="mcp_url",
     )
 
-    token = os.getenv(args.psk_env, DEFAULT_PSK_FALLBACK)
-    if not token:
-        raise SystemExit(f"PSK not found: env {args.psk_env} is empty")
+    try:
+        token = hud_env.load_psk(resolved_url, args.psk_env)
+    except hud_env.HudEnvError as error:
+        raise SystemExit(str(error)) from None
 
     benchmark_name = args.benchmark_name or default_benchmark_name(args)
     preflight = maybe_preflight(args, resolved_url, token)

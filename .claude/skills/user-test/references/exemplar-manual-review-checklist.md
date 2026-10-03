@@ -13,7 +13,7 @@ Reviewed: 2026-04-09
 | 4 | [Status Bar](#4-status-bar) | **deferred** | Repositioned to right edge, compact value-only format. Needs SVG widget redesign (hud-x2v1) |
 | 5 | [Ambient Background](#5-ambient-background) | **deferred** | Fixed exemplar alpha 1.0→0.15; StaticImage rendering blocked on hud-4sk5 |
 | 6 | [Dashboard Tile](#6-dashboard-tile) | pending | gRPC test client built; ready for visual review |
-| 7 | [Presence Card](#7-presence-card) | **blocked** | 2026-04-16 live run attempt reached Windows host but failed preflight auth (`missing_psk` for `TZE_HUD_PSK`); manual visual sign-off remains pending |
+| 7 | [Presence Card](#7-presence-card) | **blocked** | 2026-04-16 live run attempt reached Windows host but failed preflight auth (`missing_psk`: no paired PSK); manual visual sign-off remains pending |
 | 8 | [Gauge Widget](#8-gauge-widget) | **done** | Automation batch + manual visual sign-off completed on 2026-04-09 (ultra-minimal track, hover-only readout/label, tuned spacing/colors) |
 | 9 | [Progress Bar](#9-progress-bar) | **automation-pass** | Step + color-sweep batches passed on 2026-04-09; manual visual sign-off pending |
 | 10 | [Status Indicator](#10-status-indicator) | **automation-pass** | Enum/theme/label/validation batches passed on 2026-04-09; manual visual sign-off pending |
@@ -217,11 +217,11 @@ _(to be filled during review)_
 
 Live validation update (2026-04-16):
 1. Attempted canonical resident `/user-test` run against `windows-host.example:50051`.
-2. Reachability succeeded (`50051` and `9090` reachable), but scenario exited with `{"error":"missing_psk","psk_env":"TZE_HUD_PSK"}`.
-3. Manual visual verdict is blocked until `TZE_HUD_PSK` is provisioned in the operator environment and the scenario is re-run.
+2. Reachability succeeded (`50051` and `9090` reachable), but scenario exited with `{"error":"missing_psk"}`.
+3. Manual visual verdict is blocked until the host is paired (`hud_pair.py`) and the scenario is re-run.
 
 Open closeout items:
-1. Re-run `presence_card_exemplar.py` with valid `TZE_HUD_PSK` and archive transcript evidence.
+1. Re-run `presence_card_exemplar.py` after pairing and archive transcript evidence.
 2. Record PASS/FAIL for all seven visual steps in `docs/reports/exemplar-presence-card-user-test.md`.
 3. Move status to `done` only after evidence-backed manual sign-off is recorded.
 

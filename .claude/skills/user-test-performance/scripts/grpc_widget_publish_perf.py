@@ -27,6 +27,7 @@ from perf_common import (
     stable_primary_key,
     utc_now_iso,
 )
+import hud_env  # noqa: E402  (perf_common puts user-test/scripts on sys.path)
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 if _SCRIPT_DIR not in sys.path:
@@ -38,8 +39,6 @@ _REFERENCE_DIR = os.path.normpath(os.path.join(_SCRIPT_DIR, "..", "reference"))
 DEFAULT_TARGETS_FILE = os.path.join(_REFERENCE_DIR, "targets.json")
 DEFAULT_RESULTS_CSV = os.path.join(_REFERENCE_DIR, "results.csv")
 
-DEFAULT_PSK_ENV = "MCP_TEST_PSK"
-DEFAULT_PSK_FALLBACK = "tze-hud-key"
 SCRIPT_VERSION = "1.0"
 
 
@@ -143,16 +142,13 @@ def default_benchmark_name(args: argparse.Namespace) -> str:
 
 
 async def run(args: argparse.Namespace) -> dict[str, Any]:
-    psk = os.getenv(args.psk_env, DEFAULT_PSK_FALLBACK)
-    if not psk:
-        raise RuntimeError(f"PSK env {args.psk_env} is empty")
-
     target_id, resolved_target, target_meta = resolve_target_endpoint(
         targets_file=args.targets_file,
         target_id=args.target_id,
         direct_endpoint=args.target,
         endpoint_key="grpc_target",
     )
+    psk = hud_env.load_psk(resolved_target, args.psk_env)
 
     benchmark_name = args.benchmark_name or default_benchmark_name(args)
 
@@ -401,7 +397,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--target-id", default=None, help="Target id from targets file")
     parser.add_argument("--targets-file", default=DEFAULT_TARGETS_FILE, help="Target registry JSON")
 
-    parser.add_argument("--psk-env", default=DEFAULT_PSK_ENV, help="PSK environment variable")
+    parser.add_argument("--psk-env", help="Read the PSK from this environment variable instead of the paired file")
     parser.add_argument("--agent-id", default="user-test-performance-agent", help="Session agent_id (must be a paired agent in agents.toml with a matching allow)")
 
     parser.add_argument("--widget-name", default="main-progress", help="Widget instance name")

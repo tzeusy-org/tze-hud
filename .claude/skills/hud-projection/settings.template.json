@@ -1,11 +1,9 @@
 {
   "mcpServers": {
-    "tze-hud-runtime": {
+    "tze-hud": {
       "type": "http",
-      "url": "http://<TZE_HUD_RUNTIME_HOST>:<MCP_PORT>/mcp",
-      "headers": {
-        "Authorization": "Bearer ${TZE_HUD_PSK}"
-      }
+      "url": "http://${HUD_HOST}:9090/mcp",
+      "headersHelper": "python3 .claude/skills/user-test/scripts/hud_env.py mcp-headers"
     }
   }
 }

@@ -28,7 +28,7 @@ Message shape — `content` is either a plain string (StreamText) or a typed JSO
   },
   {
     "zone": "notification-area",
-    "content": {"type": "notification", "text": "Build complete", "icon": "", "urgency": 1},
+    "content": {"body": "Build complete", "urgency": 1},
     "ttl_ms": 10000
   },
   {
@@ -47,7 +47,7 @@ Message shape — `content` is either a plain string (StreamText) or a typed JSO
 **Content types by zone:**
 - `alert-banner`, `subtitle`: plain string (StreamText)
 - `status-bar`: `{"type":"status_bar","entries":{"key":"value",...}}` with `key`
-- `notification-area`: `{"type":"notification","text":"...","icon":"","urgency":0-3,"title":"...","actions":[...]}` (`title` and `actions` optional)
+- `notification-area`: `{"body":"...","urgency":0-3,"title":"...","actions":[...]}` (`title` and `actions` optional)
 - `ambient-background`, `pip`: `{"type":"solid_color","r":0-1,"g":0-1,"b":0-1,"a":0-1}`
 
 `key` and `ttl_ms` are optional per message. The publisher namespace is the
@@ -97,7 +97,6 @@ For the production `tze_hud_app` deployment (see `app/tze_hud_app/config/product
 Use `hud_surfaces` to discover available instances:
 ```bash
 python3 .claude/skills/user-test/scripts/publish_widget_batch.py \
-  --url "$MCP_HTTP_URL" --psk-env MCP_TEST_PSK \
   --messages-file /dev/null --list-surfaces
 ```
 `hud_surfaces` returns `widget:<name>` entries with their params — use those names as `widget`.

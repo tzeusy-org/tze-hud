@@ -36,6 +36,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
+import hud_env
 from hud_grpc_client import HudClient, _make_node, make_avatar_png
 from proto_gen import session_pb2, types_pb2
 
@@ -108,8 +109,6 @@ DISMISS_TEXT_H = 20.0
 DISMISS_FONT_SIZE_PX = 15.0
 DISMISS_INTERACTION_ID = "dismiss-card"
 
-DEFAULT_PSK_ENV = "TZE_HUD_PSK"
-DEFAULT_TARGET = "windows-host.example:50051"
 DEFAULT_TRANSCRIPT_PATH = "test_results/presence-card-latest.json"
 
 
@@ -581,15 +580,11 @@ async def cleanup_agents(agents: list[AgentRuntime]) -> None:
 
 
 async def run_scenario(args: argparse.Namespace) -> int:
-    psk = os.getenv(args.psk_env, "")
-    if not psk:
-        print(
-            json.dumps(
-                {"error": "missing_psk", "psk_env": args.psk_env},
-                sort_keys=True,
-            ),
-            file=sys.stderr,
-        )
+    try:
+        psk = hud_env.load_psk(args.target, args.psk_env)
+        args.target = args.target or hud_env.grpc_target()
+    except hud_env.HudEnvError as error:
+        print(json.dumps({"error": "missing_psk", "detail": str(error)}, sort_keys=True), file=sys.stderr)
         return 2
 
     transcript: list[dict[str, Any]] = []
@@ -689,8 +684,8 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Run the Presence Card live resident gRPC scenario.",
     )
-    parser.add_argument("--target", default=DEFAULT_TARGET, help="gRPC host:port for the HUD session stream")
-    parser.add_argument("--psk-env", default=DEFAULT_PSK_ENV, help="Environment variable containing the HUD PSK")
+    parser.add_argument("--target", help="gRPC host:port (default: HUD_HOST:50051)")
+    parser.add_argument("--psk-env", help="Read the PSK from this environment variable instead of the paired file")
     parser.add_argument("--tab-height", type=float, default=1080.0, help="Logical tab height used to compute bottom-left card stacking")
     parser.add_argument("--update-wait-s", type=int, default=30, help="Seconds to wait before the first periodic update")
     parser.add_argument("--heartbeat-timeout-s", type=int, default=15, help="Human reference for heartbeat-timeout orphan detection")

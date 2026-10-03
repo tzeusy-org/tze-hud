@@ -12,8 +12,6 @@ Use `scripts/gauge_cycle_test.json` from this skill with `--delay-ms 3000`:
 
 ```bash
 python3 .claude/skills/user-test/scripts/publish_widget_batch.py \
-  --url "$MCP_HTTP_URL" \
-  --psk-env MCP_TEST_PSK \
   --messages-file .claude/skills/user-test/scripts/gauge_cycle_test.json \
   --delay-ms 3000
 ```
@@ -30,8 +28,6 @@ Use `scripts/status-indicator-enum-cycle-test.json` from this skill with `--dela
 
 ```bash
 python3 .claude/skills/user-test/scripts/publish_widget_batch.py \
-  --url "$MCP_HTTP_URL" \
-  --psk-env MCP_TEST_PSK \
   --messages-file .claude/skills/user-test/scripts/status-indicator-enum-cycle-test.json \
   --delay-ms 1000 \
   --cleanup-on-exit
@@ -49,8 +45,6 @@ Next, run the theme cycle to verify all three status-indicator visual themes are
 
 ```bash
 python3 .claude/skills/user-test/scripts/publish_widget_batch.py \
-  --url "$MCP_HTTP_URL" \
-  --psk-env MCP_TEST_PSK \
   --messages-file .claude/skills/user-test/scripts/status-indicator-theme-cycle-test.json \
   --delay-ms 1200 \
   --cleanup-on-exit
@@ -67,8 +61,6 @@ Next, run the label-update sequence to verify text-content binding:
 
 ```bash
 python3 .claude/skills/user-test/scripts/publish_widget_batch.py \
-  --url "$MCP_HTTP_URL" \
-  --psk-env MCP_TEST_PSK \
   --messages-file .claude/skills/user-test/scripts/status-indicator-label-update-test.json \
   --delay-ms 1000 \
   --cleanup-on-exit
@@ -80,8 +72,6 @@ Finally, run the validation fixture to confirm invalid enum rejection at the MCP
 
 ```bash
 python3 .claude/skills/user-test/scripts/publish_widget_batch.py \
-  --url "$MCP_HTTP_URL" \
-  --psk-env MCP_TEST_PSK \
   --messages-file .claude/skills/user-test/scripts/status-indicator-validation-test.json
 ```
 
@@ -99,8 +89,6 @@ Run `progress-bar-step.json` with `--delay-ms 1000` so the tester has ~1 second 
 
 ```bash
 python3 .claude/skills/user-test/scripts/publish_widget_batch.py \
-  --url "$MCP_HTTP_URL" \
-  --psk-env MCP_TEST_PSK \
   --messages-file .claude/skills/user-test/scripts/progress-bar-step.json \
   --delay-ms 1000 \
   --cleanup-on-exit
@@ -132,8 +120,6 @@ Optionally, run the color-sweep fixture to validate color interpolation across t
 
 ```bash
 python3 .claude/skills/user-test/scripts/publish_widget_batch.py \
-  --url "$MCP_HTTP_URL" \
-  --psk-env MCP_TEST_PSK \
   --messages-file .claude/skills/user-test/scripts/progress-bar-color-sweep.json \
   --delay-ms 1000 \
   --cleanup-on-exit
@@ -149,8 +135,6 @@ Use this fixture to simulate a dense progress-update stream and validate that th
 
 ```bash
 python3 .claude/skills/user-test/scripts/publish_widget_batch.py \
-  --url "$MCP_HTTP_URL" \
-  --psk-env MCP_TEST_PSK \
   --messages-file .claude/skills/user-test/scripts/progress-bar-rapidfire-100-5s.json \
   --delay-ms 50 \
   --cleanup-on-exit --cleanup-delay-ms 3000

@@ -1377,12 +1377,15 @@ async def _self_test():
     """Connect, create a Presence Card tile, hold for 5s, close."""
     import argparse
     parser = argparse.ArgumentParser(description="gRPC client self-test")
-    parser.add_argument("--target", default="windows-host.example:50051")
-    parser.add_argument("--psk", default=os.getenv("MCP_TEST_PSK", "tze-hud-key"))
+    parser.add_argument("--target", help="gRPC host:port (default: HUD_HOST:50051)")
     args = parser.parse_args()
+    import hud_env
 
-    print(f"Connecting to {args.target}...", flush=True)
-    async with HudClient(args.target, psk=args.psk, agent_id="grpc-self-test") as client:
+    target = args.target or hud_env.grpc_target()
+    psk = hud_env.load_psk(args.target)
+
+    print(f"Connecting to {target}...", flush=True)
+    async with HudClient(target, psk=psk, agent_id="grpc-self-test") as client:
         avatar_png = make_avatar_png((255, 0, 0))
         avatar_resource_id = await client.upload_avatar_png(avatar_png)
         claimed = await client.create_presence_card_tile(

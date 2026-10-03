@@ -31,8 +31,6 @@ observation, cleanup, and the real resident image-upload consumer contract.
 
 ```bash
 python3 .claude/skills/user-test/scripts/presence_card_exemplar.py \
-  --target windows-host.example:50051 \
-  --psk-env TZE_HUD_PSK \
   --tab-height 1080 \
   --transcript-out test_results/presence-card-latest.json
 ```
