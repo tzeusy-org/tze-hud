@@ -3658,12 +3658,14 @@ name = "tze_hud_runtime"
 version = "0.1.0"
 dependencies = [
  "arc-swap",
+ "getrandom 0.3.4",
  "if-addrs",
  "image",
  "libc",
  "prost",
  "serde",
  "serde_json",
+ "subtle",
  "thiserror 2.0.18",
  "tokio",
  "tokio-stream",

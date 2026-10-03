@@ -37,6 +37,8 @@ pub const BIND_RETRY: Duration = Duration::from_secs(10);
 const BIND_RETRY_STEP: Duration = Duration::from_millis(100);
 /// Poll step while waiting for the child.
 const POLL_STEP: Duration = Duration::from_millis(5);
+/// Longest a single connection may take to deliver its line.
+const CONN_READ_CAP: Duration = Duration::from_secs(1);
 /// Longest READY line accepted.
 const MAX_LINE: u64 = 4096;
 
@@ -105,9 +107,17 @@ impl ChildSpec {
     fn fresh(addr: SocketAddr) -> Self {
         Self {
             addr,
-            nonce: uuid::Uuid::now_v7().simple().to_string(),
+            nonce: random_nonce(),
         }
     }
+}
+
+/// 16 bytes from the OS CSPRNG, hex encoded. No fallback: without randomness
+/// the restart fails rather than using a guessable nonce.
+fn random_nonce() -> String {
+    let mut bytes = [0u8; 16];
+    getrandom::fill(&mut bytes).expect("OS random source");
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 /// The new instance's ready report: `READY {json}\n`.
@@ -133,7 +143,10 @@ fn parse_ready_line(line: &str, spec: &ChildSpec) -> Result<Ready, HandoffError>
         .ok_or(HandoffError::BadReady("not a READY line"))?;
     let ready: Ready =
         serde_json::from_str(body).map_err(|_| HandoffError::BadReady("malformed READY json"))?;
-    if ready.nonce != spec.nonce {
+    if !bool::from(subtle::ConstantTimeEq::ct_eq(
+        ready.nonce.as_bytes(),
+        spec.nonce.as_bytes(),
+    )) {
         return Err(HandoffError::BadReady("wrong nonce"));
     }
     Ok(ready)
@@ -145,6 +158,9 @@ pub fn child_args(original: &[String]) -> Vec<String> {
     let mut out = Vec::with_capacity(original.len());
     let mut it = original.iter().peekable();
     while let Some(arg) = it.next() {
+        if arg.starts_with("--handoff=") {
+            continue;
+        }
         if arg == "--handoff" {
             // Drop the optional spec value too.
             if it.peek().is_some_and(|next| !next.starts_with("--")) {
@@ -238,7 +254,15 @@ fn wait_ready(
 ) -> Result<Ready, HandoffError> {
     loop {
         match listener.accept() {
-            Ok((stream, _)) => return read_ready(stream, spec, deadline, timeout),
+            // Anything else that connects (wrong nonce, junk, silence) is
+            // dropped and the wait goes on, so a stray local connection cannot
+            // burn the attempt.
+            Ok((stream, _)) => {
+                if let Ok(ready) = read_ready(stream, spec, deadline, timeout) {
+                    return Ok(ready);
+                }
+                continue;
+            }
             Err(e) if e.kind() == io::ErrorKind::WouldBlock => {}
             Err(e) => return Err(HandoffError::Listen(e)),
         }
@@ -261,6 +285,7 @@ fn read_ready(
 ) -> Result<Ready, HandoffError> {
     let remaining = deadline
         .saturating_duration_since(Instant::now())
+        .min(CONN_READ_CAP)
         .max(Duration::from_millis(1));
     stream.set_nonblocking(false).map_err(HandoffError::Wait)?;
     stream
@@ -563,6 +588,8 @@ mod tests {
     }
 
     enum Behaviour {
+        /// Junk and a closed connection arrive first; the real READY follows.
+        StrayThenReady,
         Ready,
         WrongNonce,
         Silent,
@@ -577,12 +604,22 @@ mod tests {
             move |spec| {
                 let exited = Arc::new(Mutex::new(None));
                 match behaviour {
-                    Behaviour::Ready | Behaviour::WrongNonce => {
+                    Behaviour::Ready | Behaviour::WrongNonce | Behaviour::StrayThenReady => {
                         let mut spec = spec.clone();
                         if matches!(behaviour, Behaviour::WrongNonce) {
                             spec.nonce = "wrongnonce".into();
                         }
-                        std::thread::spawn(move || report_ready(&spec).unwrap());
+                        let stray = matches!(behaviour, Behaviour::StrayThenReady);
+                        std::thread::spawn(move || {
+                            if stray {
+                                use std::io::Write;
+                                let _ = TcpStream::connect(spec.addr);
+                                if let Ok(mut c) = TcpStream::connect(spec.addr) {
+                                    let _ = c.write_all(b"GET / HTTP/1.1\r\n\r\n");
+                                }
+                            }
+                            report_ready(&spec).unwrap()
+                        });
                     }
                     Behaviour::Silent => {}
                     Behaviour::ExitEarly => *exited.lock().unwrap() = Some("exit status: 3".into()),
@@ -612,11 +649,9 @@ mod tests {
 
     #[test]
     fn wrong_nonce_silence_and_early_exit_kill_the_child_and_keep_the_old_instance() {
-        let (r, killed, shutdowns) = run(Behaviour::WrongNonce, Duration::from_secs(5));
-        assert!(
-            matches!(r, Err(HandoffError::BadReady("wrong nonce"))),
-            "{r:?}"
-        );
+        // A wrong nonce is ignored (not an instant failure), so it times out.
+        let (r, killed, shutdowns) = run(Behaviour::WrongNonce, SHORT);
+        assert!(matches!(r, Err(HandoffError::Timeout(_))), "{r:?}");
         assert!(killed && shutdowns == 0);
 
         let (r, killed, shutdowns) = run(Behaviour::Silent, SHORT);
@@ -626,6 +661,13 @@ mod tests {
         let (r, killed, shutdowns) = run(Behaviour::ExitEarly, Duration::from_secs(5));
         assert!(matches!(r, Err(HandoffError::ChildExited(_))), "{r:?}");
         assert!(killed && shutdowns == 0);
+    }
+
+    #[test]
+    fn stray_connections_do_not_burn_the_attempt() {
+        let (r, killed, shutdowns) = run(Behaviour::StrayThenReady, Duration::from_secs(5));
+        assert!(r.is_ok(), "{r:?}");
+        assert!(!killed && shutdowns == 1);
     }
 
     #[test]
@@ -668,6 +710,10 @@ mod tests {
         let mut spec = a(&["--handoff", "127.0.0.1:1:abcdef0123"]);
         spec.extend(base.clone());
         assert_eq!(child_args(&spec), base);
+        assert_eq!(
+            child_args(&a(&["--handoff=127.0.0.1:1:abcdef0123", "--mcp-port", "9"])),
+            a(&["--mcp-port", "9"])
+        );
         // A bare --handoff before another flag keeps that flag.
         assert_eq!(
             child_args(&a(&["--handoff", "--mcp-port", "9"])),

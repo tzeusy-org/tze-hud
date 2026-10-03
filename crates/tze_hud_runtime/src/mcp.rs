@@ -135,7 +135,13 @@ pub async fn start_mcp_http_server_with_render_wake(
     let mut local_addrs = Vec::new();
     if config.bind_gate.is_none() {
         for (i, addr) in config.bind_addrs.iter().enumerate() {
-            match TcpListener::bind(addr).await {
+            // Bound through std, whose sockets are not inheritable on Windows:
+            // a restart's child process must not keep this listening socket
+            // (and so the port) alive after this process exits.
+            match std::net::TcpListener::bind(addr).and_then(|l| {
+                l.set_nonblocking(true)?;
+                TcpListener::from_std(l)
+            }) {
                 Ok(l) => listeners.push(l),
                 Err(e) if i == 0 => return Err(e),
                 Err(e) => {

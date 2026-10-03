@@ -101,8 +101,14 @@ single-instance mutex. The new instance then takes the mutex (waiting up to
 overlay is briefly doubled and the ports are briefly unreachable during the
 handover.
 
-If the new instance exits, sends a wrong nonce, or has not reported ready
-within 30 s, it is killed and the old instance keeps running untouched;
-`/admin/status` shows `last_restart` `{ok:false, error}`. If the new instance
-reported ready but then cannot take over the ports, it logs the error and exits;
-the next autostart or a manual launch recovers.
+If the new instance exits or has not reported ready within 30 s, it is killed
+and the old instance keeps running untouched; `/admin/status` shows
+`last_restart` `{ok:false, error}`. Other local connections to the one-shot
+handoff port (wrong nonce, junk) are ignored. The nonce is 16 random bytes.
+
+Residual failure mode: the old instance exits as soon as the new one reports
+ready, before the new one has bound the ports (the two cannot hold the same
+port). If the new instance then fails to bind within 10 s, it logs the error
+and exits, and no instance is running until the next autostart or a manual
+launch. The listening sockets are created non-inheritable so the child cannot
+keep the old instance's port alive.
