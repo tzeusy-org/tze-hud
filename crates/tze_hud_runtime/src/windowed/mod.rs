@@ -767,6 +767,7 @@ impl WinitApp {
         // tracks Tab/click/Escape focus changes without instrumenting every
         // transition site; the compositor recomputes bounds from the live scene,
         // so geometry changes (resize/drag) stay fresh without a focus event.
+        self.clear_focus_on_removed_tile();
         self.push_focus_ring_owner();
         // Publish the resize-grip hover target (hud-wgiys): when the pointer sits
         // over the focused portal's bottom-right resize corner, the compositor

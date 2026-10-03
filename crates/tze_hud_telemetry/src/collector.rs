@@ -2,41 +2,12 @@
 
 use crate::record::{FrameTelemetry, SessionSummary};
 use std::sync::Arc;
-use std::sync::mpsc;
 use tze_hud_scene::clock::{Clock, SystemClock};
 
-/// Non-blocking telemetry collector.
-/// The compositor sends records via a channel; the collector aggregates them.
+/// Aggregates per-frame telemetry records into a session summary.
 pub struct TelemetryCollector {
     records: Vec<FrameTelemetry>,
     summary: SessionSummary,
-    /// Optional channel receiver for async collection.
-    receiver: Option<mpsc::Receiver<FrameTelemetry>>,
-}
-
-/// Handle for sending telemetry from the frame pipeline.
-pub struct TelemetrySender {
-    sender: mpsc::SyncSender<FrameTelemetry>,
-}
-
-impl TelemetrySender {
-    /// Non-blocking send. Drops the record if the channel is full.
-    pub fn send(&self, record: FrameTelemetry) {
-        let _ = self.sender.try_send(record);
-    }
-}
-
-/// Create a telemetry channel pair.
-pub fn telemetry_channel(capacity: usize) -> (TelemetrySender, TelemetryCollector) {
-    let (sender, receiver) = mpsc::sync_channel(capacity);
-    (
-        TelemetrySender { sender },
-        TelemetryCollector {
-            records: Vec::new(),
-            summary: SessionSummary::new(),
-            receiver: Some(receiver),
-        },
-    )
 }
 
 impl TelemetryCollector {
@@ -45,7 +16,6 @@ impl TelemetryCollector {
         Self {
             records: Vec::new(),
             summary: SessionSummary::new(),
-            receiver: None,
         }
     }
 
@@ -55,19 +25,6 @@ impl TelemetryCollector {
         self.summary.frame_time.record(frame.frame_time_us);
         self.summary.record_frame_correctness(&frame);
         self.records.push(frame);
-    }
-
-    /// Drain any pending records from the channel.
-    pub fn drain_channel(&mut self) {
-        if let Some(rx) = &self.receiver {
-            let mut pending = Vec::new();
-            while let Ok(record) = rx.try_recv() {
-                pending.push(record);
-            }
-            for record in pending {
-                self.record(record);
-            }
-        }
     }
 
     /// Get the current session summary.

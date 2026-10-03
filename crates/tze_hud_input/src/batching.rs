@@ -119,11 +119,6 @@ impl EventBatchAssembler {
     pub fn has_pending(&self) -> bool {
         !self.pending.is_empty()
     }
-
-    /// Returns the number of agents with pending events.
-    pub fn pending_agent_count(&self) -> usize {
-        self.pending.len()
-    }
 }
 
 impl Default for EventBatchAssembler {

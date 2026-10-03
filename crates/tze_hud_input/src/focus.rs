@@ -505,111 +505,25 @@ impl FocusManager {
         transition
     }
 
-    /// Called when a lease is revoked. Clears focus on the focused tile (if any)
-    /// owned by the lease, and purges all leased tiles from focus history.
-    pub fn on_lease_revoked(
+    /// Clears focus from a tile that no longer exists in the scene.
+    ///
+    /// Lease revocation and expiry remove a tile without telling the focus
+    /// manager, so the runtime calls this every frame. Focus falls back through
+    /// history, skipping tiles that are also gone. The `FocusLostEvent` is
+    /// dropped: the owning agent's tile is already gone.
+    pub fn clear_focus_on_missing_tile(
         &mut self,
         tab_id: SceneId,
-        lease_id: SceneId,
         scene: &SceneGraph,
     ) -> FocusTransition {
-        // Find tiles owned by this lease.
-        let leased_tiles: Vec<SceneId> = scene
-            .tiles
-            .values()
-            .filter(|t| t.lease_id == lease_id)
-            .map(|t| t.id)
-            .collect();
-
-        // Find the focused tile (if any) among leased tiles and capture lost event.
-        let lost_event: Option<(FocusLostEvent, String)>;
-        {
-            let tree = self.tree_for(tab_id);
-            let focused_leased = leased_tiles
-                .iter()
-                .find(|&&tid| tree.current().is_on_tile(tid))
-                .copied();
-
-            lost_event = if let Some(_tile_id) = focused_leased {
-                let old_owner = tree.current().clone();
-                let ev = build_lost_event(&old_owner, FocusLostReason::LeaseRevoked, scene);
-                tree.set_focus(FocusOwner::None);
-                ev
-            } else {
-                None
-            };
-
-            // Purge all leased tiles from history regardless of whether they were focused.
-            for tile_id in &leased_tiles {
-                tree.remove_from_history(*tile_id);
+        let mut transition = FocusTransition::default();
+        while let Some(tile_id) = self.current_owner(tab_id).tile_id() {
+            if scene.tiles.contains_key(&tile_id) {
+                break;
             }
+            transition = self.on_tile_destroyed(tab_id, tile_id, scene);
         }
-
-        if lost_event.is_some() {
-            let ring_update = Some(self.compute_ring_update(tab_id, scene));
-            return FocusTransition {
-                lost: lost_event,
-                gained: None,
-                ring_update,
-            };
-        }
-        FocusTransition::default()
-    }
-
-    /// Called when an agent disconnects. Clears focus for any tiles the agent owns
-    /// and purges all of the agent's tiles from focus history.
-    pub fn on_agent_disconnected(
-        &mut self,
-        tab_id: SceneId,
-        namespace: &str,
-        scene: &SceneGraph,
-    ) -> FocusTransition {
-        // Collect all tiles owned by the disconnecting agent on this tab.
-        let agent_tiles: Vec<SceneId> = scene
-            .tiles
-            .values()
-            .filter(|t| t.tab_id == tab_id && t.namespace == namespace)
-            .map(|t| t.id)
-            .collect();
-
-        let lost_event: Option<(FocusLostEvent, String)>;
-        {
-            let tree = self.tree_for(tab_id);
-
-            let is_focused_on_agent = match tree.current() {
-                FocusOwner::Tile(tid) => {
-                    scene.tiles.get(tid).map(|t| t.namespace.as_str()) == Some(namespace)
-                }
-                FocusOwner::Node { tile_id, .. } => {
-                    scene.tiles.get(tile_id).map(|t| t.namespace.as_str()) == Some(namespace)
-                }
-                _ => false,
-            };
-
-            lost_event = if is_focused_on_agent {
-                let old_owner = tree.current().clone();
-                let ev = build_lost_event(&old_owner, FocusLostReason::AgentDisconnected, scene);
-                tree.set_focus(FocusOwner::None);
-                ev
-            } else {
-                None
-            };
-
-            // Purge all of this agent's tiles from history so fallback never points
-            // to a disconnected agent's tile.
-            for tile_id in &agent_tiles {
-                tree.remove_from_history(*tile_id);
-            }
-        }
-
-        if lost_event.is_some() {
-            return FocusTransition {
-                lost: lost_event,
-                gained: None,
-                ring_update: Some(self.compute_ring_update(tab_id, scene)),
-            };
-        }
-        FocusTransition::default()
+        transition
     }
 
     // ─── Focus isolation (spec lines 67-69) ─────────────────────────────
@@ -1387,6 +1301,28 @@ mod tests {
         let owner = fm.trees[&tab_id].current().clone();
         assert_eq!(owner, FocusOwner::None);
         assert!(t.lost.is_some());
+    }
+
+    #[test]
+    fn focus_cleared_when_lease_revoked() {
+        let (mut scene, tab_id, tile_id) = setup_scene();
+        let node_id = add_hit_region(
+            &mut scene,
+            tile_id,
+            Rect::new(0.0, 0.0, 100.0, 50.0),
+            "btn",
+            true,
+        );
+        let mut fm = FocusManager::new();
+        fm.add_tab(tab_id);
+        fm.on_click(tab_id, tile_id, Some(node_id), &scene);
+        assert!(fm.current_owner(tab_id).tile_id().is_some());
+
+        // Revocation removes the tile without notifying the focus manager.
+        scene.tiles.remove(&tile_id);
+        fm.clear_focus_on_missing_tile(tab_id, &scene);
+
+        assert_eq!(*fm.current_owner(tab_id), FocusOwner::None);
     }
 
     // ── Focus isolation ──────────────────────────────────────────────────
