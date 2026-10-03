@@ -1178,8 +1178,8 @@ impl super::Compositor {
             }
         }
 
-        // Runtime system card / toast text goes last so it draws above the rest.
-        items.extend(self.system_card_text_items(sw, sh));
+        // System card text is NOT here: it has its own final overlay layer
+        // (`encode_system_card_pass`) so nothing can cover it (hud-w5zon).
 
         items
     }
