@@ -24,6 +24,7 @@ requirements. Do not restore them or design against them.
 - Two protocol planes: MCP (JSON-RPC over HTTP) for zone/widget publishing and
   portal tools; gRPC for resident tiles and streams. No media plane.
 - Windows is the only deployment target. Linux builds are for headless CI.
+  Developing from Windows: `docs/development/windows.md`.
 - TypeScript/browser only for tooling, never in the runtime.
 
 ## Rules
