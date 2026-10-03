@@ -2380,7 +2380,8 @@ mod tests {
             iters += 1;
             let event = queue.pop_front().expect("within limit");
             queue.push_back(event);
-            restore_front_requeued_event(&mut queue, queue.len() - 1);
+            let len_after_pop = queue.len() - 1;
+            restore_front_requeued_event(&mut queue, len_after_pop);
             ControlFlow::Break(())
         });
         assert_eq!(iters, 1, "drain must honour ControlFlow::Break");
