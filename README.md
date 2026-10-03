@@ -448,7 +448,7 @@ SSH_OPTS='-i ~/.ssh/hud-ssh-key -o IdentitiesOnly=yes -o BatchMode=yes' \
 
 ```bash
 # Test MCP HTTP endpoint
-curl -s -X POST http://windows-host.example:8765 \
+curl -s -X POST http://windows-host.example:9090/mcp \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $MCP_TEST_PSK" \
   -d '{"jsonrpc":"2.0","method":"tools/list","params":{},"id":1}' | jq .
@@ -477,7 +477,7 @@ EOF
 
 # Publish via MCP HTTP
 python3 .claude/skills/user-test/scripts/publish_zone_batch.py \
-  --url "http://windows-host.example:8765" \
+  --url "http://windows-host.example:9090/mcp" \
   --psk-env MCP_TEST_PSK \
   --messages-file /tmp/hud-test-zones.json
 ```
@@ -492,7 +492,7 @@ python3 .claude/skills/user-test/scripts/publish_zone_batch.py \
 **Symptom**: Deployment succeeds but MCP endpoint unreachable
 - Check Windows target's `C:\tze_hud\logs\hud.stdout.log` and `hud.stderr.log`
 - Verify MCP HTTP endpoint config in runtime config file
-- Verify firewall allows HTTP (port 8765 by default) from Linux host
+- Verify firewall allows HTTP (port 9090 by default) from Linux host
 
 **Symptom**: MCP publish request rejected with 401/403
 - Verify `MCP_TEST_PSK` environment variable is set

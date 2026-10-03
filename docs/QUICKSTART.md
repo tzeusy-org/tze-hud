@@ -18,7 +18,7 @@ screen (placement, timing, composition, permissions); the LLM session
 
 ## TL;DR (the one command)
 
-From the repo root (`mayor/rig/`):
+From the repo root:
 
 ```bash
 # Build the runtime once (5–10 min the first time), then bootstrap + launch.
@@ -49,7 +49,7 @@ scripts/quickstart.sh --print-attach-info
 
 The binary also has this built in — no shell required, so it works on Windows
 too. Once you have a `tze_hud` binary, ask it directly and it prints the same
-attach block (MCP URL + resident-principal rule + paste-ready MCP config) and
+attach block (MCP URL + auth rule + paste-ready MCP config) and
 exits **without** starting the runtime:
 
 ```bash
@@ -206,7 +206,7 @@ MCP settings. If you prefer to do that manually, the equivalent shape is:
 {
   "mcpServers": {
     "tze-hud-runtime": {
-      "type": "url",
+      "type": "http",
       "url": "http://127.0.0.1:9090/mcp",
       "headers": { "Authorization": "Bearer <your PSK>" }
     }

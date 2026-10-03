@@ -25,7 +25,7 @@ discovery.
 | Interact | `hud_input` | `EventBatch` (pushed) | MCP pulls input and acks it in the same call |
 | Hold | `hud_hold` | `Hold` | Renews without resending content |
 | Release | `hud_clear` | `Clear` | |
-| Reclaim | none (runtime) | `Reclaimed` (pushed) | Runs on expiry, disconnect, or human override |
+| Reclaim | none (runtime) | `Reclaimed` (pushed while connected) | Runs on expiry, disconnect, or human override; a disconnect has no live session to push to |
 
 MCP `tools/list` has five tools. The resident tile API is gRPC only.
 
@@ -33,7 +33,7 @@ MCP `tools/list` has five tools. The resident tile API is gRPC only.
 
 Standard MCP over JSON-RPC 2.0 (HTTP POST): `initialize`,
 `notifications/initialized` (no response), `tools/list`, and `tools/call`.
-There are no other methods. A result is one text content block of compact
+`ping` answers `{}`. There are no other methods. A result is one text content block of compact
 JSON. Agents never send geometry, styling, or z-order. Times are
 milliseconds, named `*_ms`, everywhere.
 
@@ -42,7 +42,7 @@ milliseconds, named `*_ms`, everywhere.
 ```json
 {"surfaces":[
   {"s":"zone:subtitle","accepts":"text"},
-  {"s":"zone:notification","accepts":"notification","held":true,"expires_in_ms":4200},
+  {"s":"zone:notification-area","accepts":"notification","held":true,"expires_in_ms":4200},
   {"s":"widget:gauge","params":{"level":"f32 0..1","label":"string"}},
   {"s":"portal:claude-main","state":"attached","pending_input":1}
 ]}
@@ -81,7 +81,7 @@ instance, or a portal (detach).
 
 - Returns input from every surface the agent holds, oldest first:
   `{"items":[{"id":"i7","s":"portal:claude-main","text":"yes, ship it"}],"remaining":0}`.
-- Also returns notification action presses (`{"id":…,"s":"zone:notification","action":"approve"}`).
+- Also returns notification action presses (`{"id":…,"s":"zone:notification-area","action":"approve"}`).
 - `ack` confirms earlier items, so polling and acking take one round trip.
   Unacked items are redelivered.
 
@@ -148,10 +148,10 @@ down to the lifecycle.
 
 | Client → server | Server → client |
 |---|---|
-| `SessionInit{agent_id, pre_shared_key, subscriptions, …}` / `SessionResume{resume_token}` | `SessionEstablished{session_id, namespace, resume_token, heartbeat_interval_ms, …}` + `SceneSnapshot` |
+| `SessionInit{agent_id, auth_credential, subscriptions, …}` / `SessionResume{resume_token}` | `SessionEstablished{session_id, namespace, resume_token, heartbeat_interval_ms, …}` + `SceneSnapshot` |
 | `Publish{surface, content \| params, ttl_ms, present_at_us?, expires_at_us?, key?}` | `RequestResult{seq, ok, code?, hint?, ids?, lease_id?, ttl_ms?, batch_id?}` (one shape for every request) |
 | `Clear{surface}` (`tile:<id>` releases the tile and its lease) | `EventBatch{…}` (input, focus, element moved) |
-| `ClaimTile{placement, ttl_ms, root?}` → tile id, lease, and content in one round trip | `Reclaimed{surface, why: EXPIRED \| DISCONNECTED \| OVERRIDE, lease_id}` |
+| `ClaimTile{placement, ttl_ms, root?}` → tile id, lease, and content in one round trip | `Reclaimed{surface, why: EXPIRED \| OVERRIDE, lease_id}` (not sent after a disconnect: the session is gone) |
 | `MutationBatch{lease_id, mutations}` (node tree updates on own tiles) | `SessionSuspended` / `SessionResumed` (safe mode) |
 | `Hold{surface, ttl_ms}` (zone, widget, or `tile:<id>`) | `Heartbeat` |
 | `ResourceUpload*` (images), `Heartbeat`, `SessionClose` | `DegradationNotice{level: NORMAL \| SIMPLIFIED}` |

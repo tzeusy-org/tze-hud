@@ -13,7 +13,7 @@
 #      `tze_hud.psk` (chmod 600) so re-runs are stable, and pairs it as agent
 #      `claude` in `agents.toml` next to the config (only the PSK's SHA-256 is
 #      stored there; the runtime never sees the PSK itself).
-#   4. Prints the ATTACH INFO block: the MCP endpoint URL, the resident-principal
+#   4. Prints the ATTACH INFO block: the MCP endpoint URL, the bearer-auth
 #      rule, and a ready-to-paste MCP `settings.json` snippet — by delegating to
 #      the runtime's own `tze_hud --print-attach-info` flag so there is a single
 #      source of truth (a built-in fallback covers a not-yet-built binary).
@@ -297,7 +297,7 @@ render_mcp_config() {
 {
   "mcpServers": {
     "tze-hud-runtime": {
-      "type": "url",
+      "type": "http",
       "url": "${escaped_url}",
       "headers": {
         "Authorization": "${escaped_authorization}"
