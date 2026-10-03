@@ -35,6 +35,7 @@ import urllib.request
 import zlib
 from pathlib import Path
 
+MIN_CHANGED_PIXELS = 200
 TOOLS = {"hud_surfaces", "hud_publish", "hud_hold", "hud_clear", "hud_input"}
 
 
@@ -178,22 +179,39 @@ def decode_png_rgba(data: bytes) -> tuple[int, int, bytes]:
 
 
 def check_screenshot(smoke: Smoke) -> None:
-    """The screenshot is a real PNG of the frame: screen-sized, with drawn pixels."""
-    zone = next(s["s"] for s in smoke.ok("hud_surfaces")["surfaces"] if s.get("accepts") == "text")
-    smoke.ok("hud_publish", {"surface": zone, "content": "screenshot check", "ttl_ms": 30000})
-    time.sleep(1)  # let the compositor render the publish
-    status, ctype, body = smoke.get_bytes("/admin/screenshot")
-    assert status == 200 and ctype == "image/png", f"/admin/screenshot: {status} {ctype}"
-    width, height, pixels = decode_png_rgba(body)
+    """The screenshot is a real PNG of the frame, and it shows a new notification.
+
+    The overlay is fully opaque under WARP, so alpha proves nothing. Instead take
+    a baseline, publish, take another, and require the two to differ in a
+    meaningful number of pixels (the notification's backdrop and text).
+    """
+
+    def shot() -> tuple[int, int, bytes]:
+        status, ctype, body = smoke.get_bytes("/admin/screenshot")
+        assert status == 200 and ctype == "image/png", f"/admin/screenshot: {status} {ctype}"
+        return decode_png_rgba(body)
+
+    width, height, before = shot()
     if sys.platform == "win32":
         import ctypes
 
         ctypes.windll.user32.SetProcessDPIAware()  # physical pixels, like the swapchain
         screen = (ctypes.windll.user32.GetSystemMetrics(0), ctypes.windll.user32.GetSystemMetrics(1))
         assert (width, height) == screen, f"screenshot {width}x{height}, screen {screen}"
-    drawn = sum(1 for a in pixels[3::4] if a)
-    assert drawn > 0, "screenshot has no pixel with non-zero alpha (the published notification is missing)"
-    print(f"ok  /admin/screenshot {width}x{height} PNG, {drawn} non-transparent pixels")
+
+    zone = next(s["s"] for s in smoke.ok("hud_surfaces")["surfaces"] if s.get("accepts") == "text")
+    smoke.ok("hud_publish", {"surface": zone, "content": "screenshot check", "ttl_ms": 30000})
+    deadline, changed = time.monotonic() + 10, 0
+    while time.monotonic() < deadline and changed < MIN_CHANGED_PIXELS:
+        time.sleep(0.5)  # let the compositor render the publish
+        w2, h2, after = shot()
+        assert (w2, h2) == (width, height), f"screenshot size changed: {w2}x{h2}"
+        changed = sum(1 for i in range(0, len(after), 4) if after[i : i + 4] != before[i : i + 4])
+    assert changed >= MIN_CHANGED_PIXELS, (
+        f"screenshot after publish differs from the baseline in only {changed} pixels "
+        f"(need {MIN_CHANGED_PIXELS}); the notification is not in the captured frame"
+    )
+    print(f"ok  /admin/screenshot {width}x{height} PNG, {changed} pixels changed by the notification")
 
 
 def check_admin(smoke: Smoke) -> None:

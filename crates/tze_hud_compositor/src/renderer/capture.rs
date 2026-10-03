@@ -11,6 +11,11 @@ use super::*;
 /// Largest width or height a capture will allocate for.
 pub const MAX_CAPTURE_DIM: u32 = 8192;
 
+/// Largest frame (width x height) a capture will allocate for: 16 Mpx covers
+/// 4K and 5K displays. It bounds peak memory (readback buffer, RGBA copy and
+/// PNG encode, roughly 4x the frame's 64 MiB) to a few hundred MiB.
+pub const MAX_CAPTURE_PIXELS: u64 = 16 * 1024 * 1024;
+
 /// A captured frame: tightly packed straight-from-the-GPU RGBA8 (row-major,
 /// no padding). In sRGB formats the bytes are sRGB-encoded, as on screen; in
 /// overlay mode alpha is as composited (premultiplied).
@@ -23,7 +28,9 @@ pub struct CapturedFrame {
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum CaptureError {
-    #[error("surface {width}x{height} exceeds the {MAX_CAPTURE_DIM}px capture limit")]
+    #[error(
+        "surface {width}x{height} exceeds the capture limit ({MAX_CAPTURE_DIM}px per side, {MAX_CAPTURE_PIXELS} px total)"
+    )]
     TooLarge { width: u32, height: u32 },
     #[error("surface format {0:?} cannot be captured as RGBA8")]
     UnsupportedFormat(wgpu::TextureFormat),
@@ -40,6 +47,13 @@ pub fn format_is_bgra(format: wgpu::TextureFormat) -> Result<bool, CaptureError>
         Rgba8Unorm | Rgba8UnormSrgb => Ok(false),
         other => Err(CaptureError::UnsupportedFormat(other)),
     }
+}
+
+/// Whether a `width` x `height` frame is within the capture limits.
+pub fn capture_size_ok(width: u32, height: u32) -> bool {
+    width <= MAX_CAPTURE_DIM
+        && height <= MAX_CAPTURE_DIM
+        && u64::from(width) * u64::from(height) <= MAX_CAPTURE_PIXELS
 }
 
 /// Drop the per-row padding wgpu requires and, for BGRA, swap to RGBA.
@@ -70,13 +84,31 @@ impl Compositor {
     /// Blocks the calling (compositor) thread for one submit and map. Does not
     /// acquire or present a swapchain image and does not advance any render
     /// gate; the caller owns that decision.
+    ///
+    /// A GPU panic (wgpu validation error, out of memory) is contained and
+    /// returned as an error: an authenticated request must not be able to kill
+    /// the compositor thread and freeze the HUD.
     pub fn capture_windowed_frame(
         &mut self,
         build: WindowedFrameBuild,
         format: wgpu::TextureFormat,
     ) -> Result<CapturedFrame, CaptureError> {
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            self.capture_inner(build, format)
+        }))
+        .unwrap_or_else(|_| {
+            tracing::error!("admin capture panicked in the GPU path; request failed");
+            Err(CaptureError::Readback("GPU capture panicked".to_owned()))
+        })
+    }
+
+    fn capture_inner(
+        &mut self,
+        build: WindowedFrameBuild,
+        format: wgpu::TextureFormat,
+    ) -> Result<CapturedFrame, CaptureError> {
         let (width, height) = build.size();
-        if width > MAX_CAPTURE_DIM || height > MAX_CAPTURE_DIM {
+        if !capture_size_ok(width, height) {
             return Err(CaptureError::TooLarge { width, height });
         }
         let bgra = format_is_bgra(format)?;
@@ -173,6 +205,14 @@ mod tests {
             unpad_to_rgba(&padded, 2, 2, 12, false),
             [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
         );
+    }
+
+    #[test]
+    fn size_limits_bound_dimensions_and_total_pixels() {
+        assert!(capture_size_ok(3840, 2160));
+        assert!(capture_size_ok(5120, 2880));
+        assert!(!capture_size_ok(8192, 8192));
+        assert!(!capture_size_ok(8193, 1));
     }
 
     #[test]

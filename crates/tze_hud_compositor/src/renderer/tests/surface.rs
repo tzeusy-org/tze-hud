@@ -349,6 +349,25 @@ async fn capture_windowed_frame_reads_back_the_built_frame() {
     ));
 }
 
+/// The admin capture path builds a frame outside the render gate, so building
+/// an idle scene must neither bump the versions the idle gate watches nor start
+/// an animation (hud-i2e10.8): a capture cannot cause or consume a repaint.
+#[tokio::test]
+async fn building_an_idle_frame_leaves_the_idle_gate_inputs_unchanged() {
+    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(320, 200).await);
+    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
+    let mut scene = SceneGraph::new(320.0, 200.0);
+    compositor.prime_markdown_cache(&scene);
+    compositor.prime_truncation_cache(&scene);
+    assert!(!compositor.has_inflight_animation(&scene));
+    let (version, epoch) = (scene.version, scene.geometry_epoch);
+
+    let _ = compositor.build_windowed_frame(&mut scene, 320, 200);
+
+    assert_eq!((scene.version, scene.geometry_epoch), (version, epoch));
+    assert!(!compositor.has_inflight_animation(&scene));
+}
+
 /// Verify that HEADLESS_FORCE_SOFTWARE env-var path is exercised in the
 /// adapter-selection code.  We cannot assert the adapter backend in a unit
 /// test (it's opaque), so we just verify that creating a compositor with

@@ -123,7 +123,7 @@ allow = ["zone:*", "widget:gauge", "portal", "tiles"]
   `/admin/screenshot` returns a PNG of the frame the compositor draws (not an
   OS capture; overlay alpha is as composited): one render on request, no cost
   while idle, never cached, one at a time (429 `BUSY`), 503 `UNAVAILABLE` after
-  3 s or without a display, 422 `TOO_LARGE` past 8192 px per side or 32 MiB. It
+  3 s or without a display, 422 `TOO_LARGE` past 8192 px per side, 16 Mpx, or a 32 MiB PNG. It
   is not exposed through MCP tools or gRPC.
 - The operator's local tools (cleanup, composer paste, SVG asset upload) are
   off the model surface: CLI/config, or gRPC for tooling.

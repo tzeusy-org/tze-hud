@@ -1728,19 +1728,6 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                         let composer_needs_render =
                             compositor.drain_local_composer_and_needs_render();
 
-                        // ── Admin screenshot (build half) ─────────────────
-                        // Build the frame under the lock like Stage 5, but do
-                        // not present it, refresh hit regions, or advance
-                        // `last_rendered_*` (an admin read must not change idle
-                        // accounting). The offscreen render + readback
-                        // happens after the lock is released (below).
-                        // A request that finds the scene locked stays queued; the
-                        // availability waiter below wakes this loop to retry.
-                        let capture_job = capture_inbox.next_live().map(|req| {
-                            let (w, h) = surface_for_compositor.size();
-                            (req, compositor.build_windowed_frame(&mut scene, w, h))
-                        });
-
                         // ── Idle render gate (hud-ilivg) ──────────────────
                         // Build/encode/present only when the scene graph changed
                         // since the last presented frame OR an animation is in
@@ -1762,6 +1749,27 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                             surface_repaint_pending,
                         );
                         continue_at_cadence |= needs_render;
+
+                        // ── Admin screenshot (build half) ─────────────────
+                        // Runs AFTER the idle gate on purpose: the build steps
+                        // animation state (scroll smoothers, widget transitions,
+                        // scroll offsets), so building first could consume an
+                        // animation's final step, leave `needs_render` false and
+                        // strand the screen on a stale frame. With the gate
+                        // already evaluated, an in-flight animation has already
+                        // forced a render (whose own build follows this one), and
+                        // an idle scene has nothing to step.
+                        // Builds under the lock like Stage 5 but does not
+                        // present, refresh hit regions, or advance
+                        // `last_rendered_*`, so an admin read does not change idle
+                        // accounting. The offscreen render + readback happens
+                        // after the lock is released (below). A request that
+                        // finds the scene locked stays queued; the availability
+                        // waiter below wakes this loop to retry.
+                        let capture_job = capture_inbox.next_live().map(|req| {
+                            let (w, h) = surface_for_compositor.size();
+                            (req, compositor.build_windowed_frame(&mut scene, w, h))
+                        });
 
                         if !needs_render {
                             // Idle: scene unchanged and nothing animating. Release
