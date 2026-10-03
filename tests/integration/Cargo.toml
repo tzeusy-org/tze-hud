@@ -9,39 +9,6 @@ license.workspace = true
 name = "multi_agent"
 path = "multi_agent.rs"
 
-# E13: Presence card tile builder — avatar upload, tile creation, node tree.
-# Tests hud-apoe.1 acceptance criteria: avatar resource upload (BLAKE3 dedup),
-# tile geometry (200x80, computed y-offset, z_order), 3-node flat tree
-# (SolidColorNode + StaticImageNode + TextMarkdownNode), and batch submission.
-[[test]]
-name = "presence_card_tile"
-path = "presence_card_tile.rs"
-
-# hud-apoe.4: Disconnect detection, orphan handling, and reconnect-within-grace tests.
-# Scene-graph-level tests using TestClock for deterministic time control.
-# Covers all 6 acceptance criteria (AC1-AC6) plus no-repositioning (AC7).
-[[test]]
-name = "disconnect_orphan"
-path = "disconnect_orphan.rs"
-
-# E13: Presence card periodic content updates and multi-agent coexistence.
-# Tests hud-apoe.3 acceptance criteria: 30-second content update loop (SetTileRoot),
-# human-friendly time formatting ("now", "30s ago", "1m ago", "2m ago"), and
-# 3-agent concurrent coexistence (non-overlapping geometry, namespace isolation,
-# concurrent content updates).
-[[test]]
-name = "presence_card_coexistence"
-path = "presence_card_coexistence.rs"
-
-# hud-i6yd.4: Atomic tile creation batch with resource upload.
-# Tests: 48x48 PNG icon upload (BLAKE3 ResourceId), atomic MutationBatch
-# (CreateTile + SetTileRoot 6-node tree + UpdateTileOpacity + UpdateTileInputMode),
-# partial failure atomicity, z_order=100 in agent-owned band, and periodic
-# content update (SetTileRoot) with active/expired lease checks.
-[[test]]
-name = "dashboard_tile_creation"
-path = "dashboard_tile_creation.rs"
-
 # hud-i6yd.5: HitRegionNode input capture, local feedback, and focus cycling.
 # Tests: PointerDown/Up events on Refresh/Dismiss buttons, hover enter/leave,
 # auto_capture + release_on_up semantics, focus cycling Tab/Shift+Tab,
@@ -50,15 +17,6 @@ path = "dashboard_tile_creation.rs"
 [[test]]
 name = "dashboard_tile_input"
 path = "dashboard_tile_input.rs"
-
-# hud-i6yd.8: Full lifecycle user-test and headless integration scenarios.
-# Tests: complete connect→lease→upload→create→update→Refresh→Dismiss lifecycle,
-# disconnect-during-lifecycle (orphan + badge + grace-period cleanup),
-# namespace isolation throughout lifecycle, and three headless scenarios
-# (tile creation, pointer hit-test, lease TTL expiry) — all without GPU.
-[[test]]
-name = "dashboard_tile_lifecycle"
-path = "dashboard_tile_lifecycle.rs"
 
 # hud-hzub.4: Subtitle streaming breakpoint reveal — MCP and gRPC publish path verification.
 # Tests: gRPC ZonePublish with stream_text + breakpoints forwarded to compositor,

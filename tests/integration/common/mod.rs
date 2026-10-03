@@ -10,7 +10,7 @@
 //! ## Design
 //!
 //! Shared gRPC session helpers for the multi-agent integration suites
-//! (`multi_agent.rs`, `presence_card_coexistence.rs`, `subtitle_streaming.rs`).
+//! (`multi_agent.rs`, `subtitle_streaming.rs`).
 //! PSK and port are parameters so the helpers stay test-agnostic.
 
 #![allow(dead_code)] // Items are selectively used across the test binaries.
