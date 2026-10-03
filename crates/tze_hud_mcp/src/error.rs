@@ -95,24 +95,40 @@ impl McpError {
     }
 }
 
-/// The hint for a projection rejection surfaced through `hud_*` verbs.
-pub const fn projection_hint(error_code: ProjectionErrorCode) -> &'static str {
+/// Map a portal authority rejection to a shared code and a hint naming the
+/// next call. The portal's own codes never reach the model.
+pub const fn map_projection(error_code: ProjectionErrorCode) -> (&'static str, &'static str) {
+    use ProjectionErrorCode as P;
     match error_code {
-        ProjectionErrorCode::ProjectionNotFound
-        | ProjectionErrorCode::ProjectionUnauthorized
-        | ProjectionErrorCode::ProjectionTokenExpired => "hud_publish to the portal to re-attach",
-        ProjectionErrorCode::ProjectionAlreadyAttached => {
-            "another agent holds this portal id; pick another"
+        P::ProjectionNotFound | P::ProjectionUnauthorized | P::ProjectionTokenExpired => {
+            ("NOT_HELD", "hud_publish to the portal to re-attach")
         }
-        ProjectionErrorCode::ProjectionInvalidArgument => "fix the arguments and retry",
-        ProjectionErrorCode::ProjectionOutputTooLarge => "split the output into smaller publishes",
-        ProjectionErrorCode::ProjectionInputTooLarge => "reduce the input and retry",
-        ProjectionErrorCode::ProjectionInputQueueFull => "hud_input with ack to drain input",
-        ProjectionErrorCode::ProjectionRateLimited => "back off, then retry",
-        ProjectionErrorCode::ProjectionStateConflict => "check state in hud_surfaces, then retry",
-        ProjectionErrorCode::ProjectionHudUnavailable => "the HUD is unavailable; retry later",
-        ProjectionErrorCode::ProjectionInternalError => "retry once",
+        P::ProjectionAlreadyAttached => (
+            "NOT_ALLOWED",
+            "another agent holds this portal id; pick another id",
+        ),
+        P::ProjectionInvalidArgument | P::ProjectionStateConflict => {
+            ("INVALID_ARGUMENT", "fix the arguments and retry")
+        }
+        P::ProjectionOutputTooLarge => (
+            "CONTENT_REJECTED",
+            "split the output into smaller publishes",
+        ),
+        P::ProjectionInputTooLarge => ("CONTENT_REJECTED", "reduce the input and retry"),
+        P::ProjectionInputQueueFull => ("BUDGET_EXCEEDED", "hud_input with ack to drain input"),
+        P::ProjectionRateLimited => ("BUDGET_EXCEEDED", "back off, then retry"),
+        P::ProjectionHudUnavailable => ("UNAVAILABLE", "the HUD is unavailable; retry later"),
+        P::ProjectionInternalError => ("INTERNAL", "retry once"),
     }
+}
+
+/// The owner token the portal holds for this holding is gone.
+pub const fn is_stale_token(error_code: ProjectionErrorCode) -> bool {
+    use ProjectionErrorCode as P;
+    matches!(
+        error_code,
+        P::ProjectionNotFound | P::ProjectionUnauthorized | P::ProjectionTokenExpired
+    )
 }
 
 #[cfg(test)]
@@ -135,10 +151,12 @@ mod tests {
     ];
 
     #[test]
-    fn every_projection_code_is_in_the_closed_set() {
+    fn projection_rejections_map_to_shared_codes() {
         for code in ALL_PROJECTION_CODES {
-            assert!(ERROR_CODES.contains(&code.as_str()), "{}", code.as_str());
-            assert!(!projection_hint(code).is_empty());
+            let (shared, hint) = map_projection(code);
+            assert!(ERROR_CODES.contains(&shared), "{shared}");
+            assert!(!hint.is_empty());
+            assert!(!shared.starts_with("PROJECTION_"));
         }
     }
 

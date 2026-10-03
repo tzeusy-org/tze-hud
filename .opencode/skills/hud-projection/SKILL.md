@@ -66,7 +66,7 @@ zones and widgets (`docs/api.md`):
   republish whatever context the human needs.
 
 Errors are tool results with `isError: true` and `{"code", "hint"}`. Portal
-rejections keep their `PROJECTION_*` codes (`docs/api.md` lists them all).
+rejections use the same codes (`docs/api.md` lists them all).
 
 ## Choosing a target runtime
 
@@ -119,5 +119,5 @@ reads `TZE_HUD_PSK`, `allow = ["*"]`.
 
 - Don't publish secrets into the portal.
 - Keep fragments small; never resend the whole transcript.
-- Treat `PROJECTION_ALREADY_ATTACHED` (another agent holds that id) and
-  `PROJECTION_STATE_CONFLICT` as stops; pick another id or ask the user.
+- Treat `NOT_ALLOWED` on a portal (another agent holds that id) as a stop;
+  pick another id or ask the user.

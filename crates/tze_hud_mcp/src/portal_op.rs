@@ -23,10 +23,10 @@
 //!
 //! Reply channels are the one exception: they carry a typed
 //! [`PortalOpRejection`] (wrapping a [`ProjectionErrorCode`]) on the error path
-//! rather than a flattened `String`. This is what lets the stable
-//! `PROJECTION_*` code reach the MCP layer — and the LLM, via JSON-RPC
-//! `error.data.error_code` — instead of collapsing every failure into an opaque
-//! `-32603` message (hud-s8a62). This module therefore depends on
+//! rather than a flattened `String`, so the tool layer can map it to the
+//! shared error set (`error::map_projection`) and tell a stale owner token from
+//! other failures. The portal's own codes never reach the model. This module
+//! therefore depends on
 //! `tze_hud_projection` for that single type; there is no dependency cycle
 //! because the projection crate does not depend on `tze_hud_mcp`.
 
@@ -34,13 +34,8 @@ use tze_hud_projection::ProjectionErrorCode;
 
 /// Structured rejection carried on a [`PortalOp`] reply channel's error path.
 ///
-/// Replaces the previous flattened `String` error so the stable
-/// [`ProjectionErrorCode`] survives the hop from the projection authority to
-/// the MCP layer. The MCP tool maps this into a JSON-RPC error whose
-/// `data.error_code` is the stable `PROJECTION_*` string, letting the LLM
-/// branch on it (e.g. `PROJECTION_TOKEN_EXPIRED` = hard stop,
-/// `PROJECTION_RATE_LIMITED` = defer) instead of seeing an opaque `-32603`
-/// message (hud-s8a62).
+/// The tool layer maps it to a shared code and hint at the MCP boundary
+/// (`error::map_projection`); the internal code is never shown to the model.
 #[derive(Debug, Clone)]
 pub struct PortalOpRejection {
     /// Stable projection error code. Either the authority's own

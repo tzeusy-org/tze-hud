@@ -590,17 +590,22 @@ async fn publish_widget(ctx: &ToolCtx<'_>, widget: &str, p: PublishParams) -> Mc
 }
 
 /// Send one operation to the portal authority and await its reply.
+///
+/// Failures are already mapped to the shared code set; `stale` records, from
+/// the authority's own code, that the owner token is gone so callers can
+/// re-attach or drop the holding.
 async fn portal_call<T>(
     ctx: &ToolCtx<'_>,
     build: impl FnOnce(
         tokio::sync::oneshot::Sender<Result<T, crate::portal_op::PortalOpRejection>>,
     ) -> PortalOp,
-) -> McpResult<T> {
-    let unavailable = || {
-        tool_err(
+) -> Result<T, PortalError> {
+    let unavailable = || PortalError {
+        err: tool_err(
             "UNAVAILABLE",
             "the portal service isn't running; retry later",
-        )
+        ),
+        stale: false,
     };
     let tx = ctx.portal_op_tx.ok_or_else(unavailable)?;
     let (reply, rx) = tokio::sync::oneshot::channel();
@@ -608,11 +613,27 @@ async fn portal_call<T>(
     ctx.portal_wake.notify();
     match rx.await {
         Ok(Ok(v)) => Ok(v),
-        Ok(Err(r)) => Err(tool_err(
-            r.error_code.as_str(),
-            crate::error::projection_hint(r.error_code),
-        )),
+        Ok(Err(r)) => {
+            let (code, hint) = crate::error::map_projection(r.error_code);
+            Err(PortalError {
+                err: tool_err(code, hint),
+                stale: crate::error::is_stale_token(r.error_code),
+            })
+        }
         Err(_) => Err(unavailable()),
+    }
+}
+
+/// A portal rejection mapped to the shared error set.
+struct PortalError {
+    err: McpError,
+    /// The owner token is unknown, expired, or rejected.
+    stale: bool,
+}
+
+impl From<PortalError> for McpError {
+    fn from(e: PortalError) -> Self {
+        e.err
     }
 }
 
@@ -646,11 +667,6 @@ fn portal_token(ctx: &ToolCtx<'_>, pid: &str) -> Option<String> {
         .with(&ctx.agent.agent_id, |s| s.portals.get(pid).cloned())
 }
 
-fn is_stale_token(e: &McpError) -> bool {
-    matches!(e, McpError::Tool { code, .. }
-        if *code == "PROJECTION_UNAUTHORIZED" || *code == "PROJECTION_TOKEN_EXPIRED" || *code == "PROJECTION_NOT_FOUND")
-}
-
 async fn publish_portal(ctx: &ToolCtx<'_>, pid: &str, p: PublishParams) -> McpResult<Value> {
     let text = match p.content.clone() {
         None | Some(Value::Null) => None,
@@ -665,10 +681,10 @@ async fn publish_portal(ctx: &ToolCtx<'_>, pid: &str, p: PublishParams) -> McpRe
     for attempt in 0..2 {
         let result = portal_send_output(ctx, pid, &token, &p, text.as_deref()).await;
         match result {
-            Err(e) if attempt == 0 && is_stale_token(&e) => {
+            Err(e) if attempt == 0 && e.stale => {
                 token = portal_attach(ctx, pid, p.display_name.clone()).await?;
             }
-            other => return other.map(|()| json!({ "ok": true })),
+            other => return other.map(|()| json!({ "ok": true })).map_err(Into::into),
         }
     }
     unreachable!("loop returns on the second attempt")
@@ -680,7 +696,7 @@ async fn portal_send_output(
     token: &str,
     p: &PublishParams,
     text: Option<&str>,
-) -> McpResult<()> {
+) -> Result<(), PortalError> {
     if let Some(text) = text {
         portal_call(ctx, |reply| PortalOp::PublishOutput {
             projection_id: pid.to_string(),
@@ -763,11 +779,11 @@ pub async fn hud_hold(ctx: &ToolCtx<'_>, args: Value) -> McpResult<Value> {
             .await;
             match held {
                 Ok(()) => {}
-                Err(e) if is_stale_token(&e) => {
+                Err(e) if e.stale => {
                     ctx.state.with(&ns, |s| s.portals.remove(&pid));
                     return Err(not_held(&p.surface));
                 }
-                Err(e) => return Err(e),
+                Err(e) => return Err(e.into()),
             }
         }
     }
@@ -820,7 +836,7 @@ pub async fn hud_clear(ctx: &ToolCtx<'_>, args: Value) -> McpResult<Value> {
             });
             // A projection that already went away is released either way.
             match result {
-                Err(e) if is_stale_token(&e) => {}
+                Err(e) if e.stale => {}
                 other => other?,
             }
         }
@@ -871,7 +887,7 @@ pub async fn hud_input(ctx: &ToolCtx<'_>, args: Value) -> McpResult<Value> {
             })
             .await;
             match result {
-                Err(e) if is_stale_token(&e) => {}
+                Err(e) if e.stale => {}
                 other => other?,
             }
         }
@@ -936,11 +952,11 @@ async fn collect_new_input(
         let batch = match result {
             Ok(b) => b,
             // A portal that went away has no input; drop the stale holding.
-            Err(e) if is_stale_token(&e) => {
+            Err(e) if e.stale => {
                 ctx.state.with(ns, |s| s.portals.remove(&pid));
                 continue;
             }
-            Err(e) => return Err(e),
+            Err(e) => return Err(e.into()),
         };
         remaining += batch.remaining_count;
         ctx.state.with(ns, |s| {
