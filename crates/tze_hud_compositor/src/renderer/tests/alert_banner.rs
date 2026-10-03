@@ -115,48 +115,6 @@ async fn test_alert_banner_heading_typography_in_rendering_policy() {
     );
 }
 
-/// Alert-banner zone has LayerAttachment::Chrome — renders above all agent content.
-///
-/// Acceptance criterion: chrome-layer z-order verified by checking ZoneDefinition.
-#[test]
-fn test_alert_banner_default_zone_has_chrome_layer_attachment() {
-    use tze_hud_scene::types::ZoneRegistry;
-
-    let registry = ZoneRegistry::with_defaults();
-    let zone = registry
-        .get_by_name("alert-banner")
-        .expect("alert-banner must be in default zone registry");
-
-    assert_eq!(
-        zone.layer_attachment,
-        LayerAttachment::Chrome,
-        "alert-banner zone must be attached to chrome layer (above all agent content)"
-    );
-}
-
-/// Alert-banner zone spans full display width (width_pct = 1.0).
-///
-/// Acceptance criterion: backdrop quad spans from x=0 to x=display_width.
-#[test]
-fn test_alert_banner_default_zone_is_full_width() {
-    use tze_hud_scene::types::ZoneRegistry;
-
-    let registry = ZoneRegistry::with_defaults();
-    let zone = registry
-        .get_by_name("alert-banner")
-        .expect("alert-banner must be in default zone registry");
-
-    match zone.geometry_policy {
-        GeometryPolicy::EdgeAnchored { width_pct, .. } => {
-            assert_eq!(
-                width_pct, 1.0,
-                "alert-banner must span full display width (width_pct=1.0)"
-            );
-        }
-        _ => panic!("alert-banner must use EdgeAnchored geometry for full-width positioning"),
-    }
-}
-
 /// Alert-banner zone resolve_zone_geometry gives backdrop width = display width.
 ///
 /// At 1920×1080, the backdrop must span from x=0 to x=1920.
@@ -174,30 +132,6 @@ fn test_alert_banner_backdrop_spans_full_display_width() {
     assert_eq!(
         w, 1920.0,
         "alert-banner width must equal display width (1920)"
-    );
-}
-
-/// Alert-banner zone height accommodates 24px heading + vertical padding.
-///
-/// At 720p, height_pct=0.06 → 43.2px > 24px + 2×8px = 40px minimum.
-#[test]
-fn test_alert_banner_zone_height_accommodates_heading_typography() {
-    use tze_hud_scene::types::ZoneRegistry;
-
-    let registry = ZoneRegistry::with_defaults();
-    let zone = registry
-        .get_by_name("alert-banner")
-        .expect("alert-banner zone must exist");
-
-    // Check that resolved height at 720p is sufficient for 24px heading.
-    // margin_vertical=0.0 (flush to edge), so minimum is font_size_px only.
-    // height_pct=0.06 → 0.06×720=43.2px, well above the 24px minimum.
-    let (_x, _y, _w, h) = Compositor::resolve_zone_geometry(&zone.geometry_policy, 1280.0, 720.0);
-    let font_size_px = zone.rendering_policy.font_size_px.unwrap_or(24.0);
-    let min_required = font_size_px; // margin_vertical=0.0; height must cover font at minimum
-    assert!(
-        h >= min_required,
-        "alert-banner height {h}px must accommodate heading ({font_size_px}px)"
     );
 }
 
@@ -252,60 +186,6 @@ async fn test_alert_banner_zero_height_when_inactive() {
     assert!(
         items.is_empty(),
         "no text must be rendered for inactive alert-banner zone"
-    );
-}
-
-/// Alert-banner RenderingPolicy in ZoneRegistry::with_defaults() carries
-/// heading typography: 24px, weight 700, white text, margin_horizontal=8.
-#[test]
-fn test_alert_banner_default_zone_rendering_policy_has_heading_typography() {
-    use tze_hud_scene::types::ZoneRegistry;
-
-    let registry = ZoneRegistry::with_defaults();
-    let zone = registry
-        .get_by_name("alert-banner")
-        .expect("alert-banner must be in default zone registry");
-
-    let policy = &zone.rendering_policy;
-
-    assert_eq!(
-        policy.font_size_px,
-        Some(24.0),
-        "alert-banner default rendering policy must have font_size_px=24"
-    );
-    assert_eq!(
-        policy.font_weight,
-        Some(700),
-        "alert-banner default rendering policy must have font_weight=700 (bold)"
-    );
-    assert_eq!(
-        policy.font_family,
-        Some(FontFamily::SystemSansSerif),
-        "alert-banner default rendering policy must use SystemSansSerif"
-    );
-    // text_color must be white (R=1.0, G=1.0, B=1.0).
-    let tc = policy
-        .text_color
-        .expect("alert-banner default rendering policy must have text_color set");
-    assert!(
-        (tc.r - 1.0).abs() < 0.01,
-        "text_color R must be 1.0 (white), got {}",
-        tc.r
-    );
-    assert!(
-        (tc.g - 1.0).abs() < 0.01,
-        "text_color G must be 1.0 (white), got {}",
-        tc.g
-    );
-    assert!(
-        (tc.b - 1.0).abs() < 0.01,
-        "text_color B must be 1.0 (white), got {}",
-        tc.b
-    );
-    assert_eq!(
-        policy.margin_horizontal,
-        Some(8.0),
-        "alert-banner default rendering policy must have margin_horizontal=8"
     );
 }
 

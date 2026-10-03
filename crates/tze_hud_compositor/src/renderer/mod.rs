@@ -1878,7 +1878,11 @@ impl Compositor {
         // number happens to fall inside the debounce window.
         let forced_prime = self.truncation_cache_scene_version == u64::MAX || !same_instance;
         let interval_ms = adaptive_reprime_interval_ms(self.resize_reprime_content_bytes);
-        if !forced_prime && should_defer_reprime(self.resize_reprime_last_at, interval_ms) {
+        if !forced_prime
+            && self
+                .resize_reprime_last_at
+                .is_some_and(|last| last.elapsed() < std::time::Duration::from_millis(interval_ms))
+        {
             // Within the debounce window: defer, do not update the sentinel.
             tracing::trace!(
                 scene_version = scene.version,
@@ -2535,40 +2539,6 @@ pub(crate) fn focus_or_grip_changed(
     current_grip: Option<tze_hud_scene::SceneId>,
 ) -> bool {
     previous_focus != current_focus || previous_grip != current_grip
-}
-
-/// Collect [`TextItem`]s for all `TextOverflow::Ellipsis` nodes reachable from
-/// `node_id`, without scroll offset (prime-time geometry).
-///
-/// This is a free function (not a method) to avoid a split-borrow conflict in
-/// [`Compositor::prime_truncation_cache`], where `self.text_rasterizer` is
-/// borrowed mutably while the markdown snapshot (loaded from the primer) and
-/// `self.node_key_cache` are read immutably.
-///
-/// The geometry produced here is identical to what `collect_text_items_from_node`
-/// produces at scroll_x=0, scroll_y=0 (valid because truncation is geometry-
-/// Returns `true` if the mid-drag cadence gate should defer a truncation cache
-/// re-prime call.
-///
-/// Called by [`Compositor::prime_truncation_cache`] to rate-limit re-primes
-/// during rapid geometry changes (e.g. hotkey resize).  The gate is bypassed
-/// for forced primes (`truncation_cache_scene_version == u64::MAX`) — callers
-/// are responsible for that check.
-///
-/// # Parameters
-/// - `last_at`: timestamp of the last successful truncation cache prime, or
-///   `None` if no prime has ever run.
-/// - `interval_ms`: minimum interval between primes in milliseconds
-///   (derived from content length via [`adaptive_reprime_interval_ms`]).
-///
-/// Returns `true` (defer) only when `last_at` is `Some` and the elapsed time
-/// is less than `interval_ms`.  Returns `false` (allow) when `last_at` is
-/// `None` (first call ever) or the interval has elapsed.
-pub(crate) fn should_defer_reprime(last_at: Option<std::time::Instant>, interval_ms: u64) -> bool {
-    match last_at {
-        None => false, // first call: never defer
-        Some(last) => last.elapsed() < std::time::Duration::from_millis(interval_ms),
-    }
 }
 
 /// Return whether a tile is currently in follow-tail/at-tail mode for the
