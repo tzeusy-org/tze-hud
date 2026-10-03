@@ -1110,78 +1110,365 @@ mod tests {
         }
     }
 
-    // ── parse_window_mode ────────────────────────────────────────────────────
+    // ── parse_options (table-driven) ──────────────────────────────────────────
 
-    #[test]
-    fn parse_window_mode_fullscreen() {
-        assert_eq!(
-            parse_window_mode("fullscreen").unwrap(),
-            WindowMode::Fullscreen
-        );
-        assert_eq!(
-            parse_window_mode("FULLSCREEN").unwrap(),
-            WindowMode::Fullscreen
-        );
-        assert_eq!(
-            parse_window_mode("Fullscreen").unwrap(),
-            WindowMode::Fullscreen
-        );
-    }
+    type Env<'a> = &'a [(&'a str, &'a str)];
 
-    #[test]
-    fn parse_window_mode_overlay() {
-        assert_eq!(parse_window_mode("overlay").unwrap(), WindowMode::Overlay);
-        assert_eq!(parse_window_mode("OVERLAY").unwrap(), WindowMode::Overlay);
-    }
-
-    #[test]
-    fn parse_window_mode_unknown_returns_error() {
-        let err = parse_window_mode("windowed").unwrap_err();
-        assert!(
-            err.contains("windowed"),
-            "error should mention the bad value"
-        );
-        assert!(
-            err.contains("fullscreen") || err.contains("overlay"),
-            "error should mention valid values"
-        );
-    }
-
-    // ── parse_options: defaults ───────────────────────────────────────────────
-
-    #[test]
-    fn parse_options_defaults_when_no_args() {
-        let _guard = ENV_VAR_MUTEX.lock().unwrap();
+    /// Run `parse_options` with exactly `env` set (all other parse env cleared).
+    fn parse_with_env(env: Env, args: &[&str]) -> Result<StartupOptions, String> {
+        let _guard = ENV_VAR_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         clear_parse_options_env();
-
-        let opts = parse_options(&[]).unwrap();
-        assert_eq!(opts.window_mode, WindowMode::Fullscreen);
-        assert_eq!(opts.width, 1920);
-        assert_eq!(opts.height, 1080);
-        assert_eq!(opts.grpc_port, 50051);
-        assert_eq!(opts.mcp_port, 9090);
-        assert_eq!(opts.fps, 60);
-        assert!(opts.config_path.is_none());
-        assert!(opts.benchmark_emit.is_none());
-        assert_eq!(opts.benchmark_frames, 600);
-        assert_eq!(opts.benchmark_warmup_frames, 120);
-        assert!(opts.quiescent_efficiency_emit.is_none());
+        // Safety: ENV_VAR_MUTEX is held.
+        unsafe {
+            for (k, v) in env {
+                std::env::set_var(k, v);
+            }
+        }
+        let args: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+        let result = parse_options(&args);
+        clear_parse_options_env();
+        result
     }
 
+    /// Every distinct (env, args) -> parsed-options case. `check` asserts the
+    /// fields the case is about.
     #[test]
-    fn parse_options_install_flags() {
-        let _guard = ENV_VAR_MUTEX.lock().unwrap();
-        clear_parse_options_env();
-        let parse =
-            |a: &[&str]| parse_options(&a.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+    fn parse_options_accepts() {
+        type Check = fn(&StartupOptions);
+        let cases: &[(&str, Env, &[&str], Check)] = &[
+            ("defaults", &[], &[], |o| {
+                assert_eq!(o.window_mode, WindowMode::Fullscreen);
+                assert_eq!((o.width, o.height), (1920, 1080));
+                assert!(!o.explicit_width && !o.explicit_height);
+                assert_eq!((o.grpc_port, o.mcp_port, o.fps), (50051, 9090, 60));
+                assert!(o.config_path.is_none() && o.monitor_index.is_none());
+                assert!(o.benchmark_emit.is_none() && o.quiescent_efficiency_emit.is_none());
+                assert_eq!((o.benchmark_frames, o.benchmark_warmup_frames), (600, 120));
+                assert!(
+                    !(o.print_attach_info
+                        || o.debug_zones
+                        || o.install
+                        || o.uninstall
+                        || o.purge
+                        || o.handoff)
+                );
+            }),
+            ("install", &[], &["--install"], |o| {
+                assert!(o.install && !o.uninstall);
+            }),
+            ("uninstall --purge", &[], &["--uninstall", "--purge"], |o| {
+                assert!(o.uninstall && o.purge);
+            }),
+            ("handoff", &[], &["--handoff"], |o| assert!(o.handoff)),
+            ("print-attach-info", &[], &["--print-attach-info"], |o| {
+                assert!(o.print_attach_info)
+            }),
+            ("debug-zones", &[], &["--debug-zones"], |o| {
+                assert!(o.debug_zones)
+            }),
+            ("monitor", &[], &["--monitor", "1"], |o| {
+                assert_eq!(o.monitor_index, Some(1))
+            }),
+            (
+                "config",
+                &[],
+                &["--config", "/etc/tze_hud/config.toml"],
+                |o| assert_eq!(o.config_path.as_deref(), Some("/etc/tze_hud/config.toml")),
+            ),
+            ("fps", &[], &["--fps", "30"], |o| assert_eq!(o.fps, 30)),
+            ("grpc-port 0 disables", &[], &["--grpc-port", "0"], |o| {
+                assert_eq!(o.grpc_port, 0)
+            }),
+            ("mcp-port", &[], &["--mcp-port", "8080"], |o| {
+                assert_eq!(o.mcp_port, 8080)
+            }),
+            ("mcp-port 0 disables", &[], &["--mcp-port", "0"], |o| {
+                assert_eq!(o.mcp_port, 0)
+            }),
+            // Window mode is case-insensitive.
+            (
+                "window-mode FULLSCREEN",
+                &[],
+                &["--window-mode", "FULLSCREEN"],
+                |o| assert_eq!(o.window_mode, WindowMode::Fullscreen),
+            ),
+            // hud-48ml: overlay auto-sizes only when neither dimension is explicit.
+            (
+                "overlay, no dims -> auto-size",
+                &[],
+                &["--window-mode", "Overlay"],
+                |o| {
+                    assert_eq!(o.window_mode, WindowMode::Overlay);
+                    assert!(!o.explicit_width && !o.explicit_height);
+                },
+            ),
+            // hud-q5hx bug-report command line.
+            (
+                "overlay 2560x1440",
+                &[],
+                &[
+                    "--window-mode",
+                    "overlay",
+                    "--width",
+                    "2560",
+                    "--height",
+                    "1440",
+                ],
+                |o| {
+                    assert_eq!(o.window_mode, WindowMode::Overlay);
+                    assert_eq!((o.width, o.height), (2560, 1440));
+                    assert!(o.explicit_width && o.explicit_height);
+                },
+            ),
+            (
+                "overlay 4k",
+                &[],
+                &[
+                    "--window-mode",
+                    "overlay",
+                    "--width",
+                    "3840",
+                    "--height",
+                    "2160",
+                ],
+                |o| {
+                    assert_eq!(o.window_mode, WindowMode::Overlay);
+                    assert_eq!((o.width, o.height), (3840, 2160));
+                },
+            ),
+            (
+                "width only is explicit",
+                &[],
+                &["--window-mode", "overlay", "--width", "1280"],
+                |o| {
+                    assert_eq!(o.width, 1280);
+                    assert!(o.explicit_width && !o.explicit_height);
+                },
+            ),
+            ("height only is explicit", &[], &["--height", "720"], |o| {
+                assert_eq!(o.height, 720);
+                assert!(!o.explicit_width && o.explicit_height);
+            }),
+            (
+                "env dims are explicit",
+                &[
+                    ("TZE_HUD_WINDOW_MODE", "overlay"),
+                    ("TZE_HUD_WINDOW_WIDTH", "3840"),
+                    ("TZE_HUD_WINDOW_HEIGHT", "2160"),
+                ],
+                &[],
+                |o| {
+                    assert_eq!(o.window_mode, WindowMode::Overlay);
+                    assert_eq!((o.width, o.height), (3840, 2160));
+                    assert!(o.explicit_width && o.explicit_height);
+                },
+            ),
+            (
+                "cli overrides env",
+                &[("TZE_HUD_FPS", "30"), ("TZE_HUD_WINDOW_MODE", "overlay")],
+                &["--fps", "45", "--window-mode", "fullscreen"],
+                |o| {
+                    assert_eq!(o.fps, 45);
+                    assert_eq!(o.window_mode, WindowMode::Fullscreen);
+                },
+            ),
+            (
+                "benchmark flags",
+                &[],
+                &[
+                    "--benchmark-emit",
+                    "artifacts/fullscreen.json",
+                    "--benchmark-frames",
+                    "720",
+                    "--benchmark-warmup-frames",
+                    "180",
+                ],
+                |o| {
+                    assert_eq!(
+                        o.benchmark_emit.as_deref(),
+                        Some("artifacts/fullscreen.json")
+                    );
+                    assert_eq!((o.benchmark_frames, o.benchmark_warmup_frames), (720, 180));
+                },
+            ),
+            (
+                "quiescent-efficiency-emit",
+                &[],
+                &[
+                    "--quiescent-efficiency-emit",
+                    "artifacts/idle-efficiency.json",
+                ],
+                |o| {
+                    assert_eq!(
+                        o.quiescent_efficiency_emit.as_deref(),
+                        Some("artifacts/idle-efficiency.json")
+                    );
+                    assert!(o.benchmark_emit.is_none());
+                },
+            ),
+        ];
+        for (name, env, args, check) in cases {
+            let opts = parse_with_env(env, args)
+                .unwrap_or_else(|e| panic!("case {name:?} should parse, got: {e}"));
+            check(&opts);
+        }
+    }
 
-        let opts = parse(&["--install"]).unwrap();
-        assert!(opts.install && !opts.uninstall);
-        let opts = parse(&["--uninstall", "--purge"]).unwrap();
-        assert!(opts.uninstall && opts.purge);
-        assert!(parse(&["--handoff"]).unwrap().handoff);
-        assert!(parse(&["--purge"]).unwrap_err().contains("--uninstall"));
-        assert!(parse(&["--install", "--uninstall"]).is_err());
+    /// Every distinct (env, args) -> error case; the message must carry the hint.
+    #[test]
+    fn parse_options_rejects() {
+        let cases: &[(&str, Env, &[&str], &[&str])] = &[
+            (
+                "unknown flag",
+                &[],
+                &["--unknown-flag", "value"],
+                &["unknown flag: --unknown-flag"],
+            ),
+            // --psk is gone: agents authenticate with paired PSKs (agents.toml).
+            (
+                "removed --psk",
+                &[],
+                &["--psk", "value"],
+                &["unknown flag: --psk"],
+            ),
+            (
+                "removed --bind-all-interfaces",
+                &[],
+                &["--bind-all-interfaces"],
+                &["unknown flag: --bind-all-interfaces"],
+            ),
+            (
+                "positional",
+                &[],
+                &["unexpected"],
+                &["unexpected positional argument"],
+            ),
+            (
+                "--install + --uninstall",
+                &[],
+                &["--install", "--uninstall"],
+                &["--install", "--uninstall"],
+            ),
+            (
+                "--purge alone",
+                &[],
+                &["--purge"],
+                &["--purge", "--uninstall"],
+            ),
+            (
+                "window-mode unknown",
+                &[],
+                &["--window-mode", "windowed"],
+                &["windowed", "fullscreen"],
+            ),
+            (
+                "env window-mode unknown",
+                &[("TZE_HUD_WINDOW_MODE", "windowed")],
+                &[],
+                &["windowed"],
+            ),
+            (
+                "window-mode missing",
+                &[],
+                &["--window-mode"],
+                &["--window-mode"],
+            ),
+            ("config missing", &[], &["--config"], &["--config"]),
+            ("width missing", &[], &["--width"], &["--width"]),
+            ("height missing", &[], &["--height"], &["--height"]),
+            ("grpc-port missing", &[], &["--grpc-port"], &["--grpc-port"]),
+            ("mcp-port missing", &[], &["--mcp-port"], &["--mcp-port"]),
+            ("fps missing", &[], &["--fps"], &["--fps"]),
+            ("monitor missing", &[], &["--monitor"], &["--monitor"]),
+            (
+                "benchmark-emit missing",
+                &[],
+                &["--benchmark-emit"],
+                &["--benchmark-emit"],
+            ),
+            (
+                "benchmark-frames missing",
+                &[],
+                &["--benchmark-frames"],
+                &["--benchmark-frames"],
+            ),
+            (
+                "benchmark-warmup-frames missing",
+                &[],
+                &["--benchmark-warmup-frames"],
+                &["--benchmark-warmup-frames"],
+            ),
+            (
+                "quiescent-efficiency-emit missing",
+                &[],
+                &["--quiescent-efficiency-emit"],
+                &["--quiescent-efficiency-emit"],
+            ),
+            ("width non-integer", &[], &["--width", "bad"], &["--width"]),
+            (
+                "height non-integer",
+                &[],
+                &["--height", "bad"],
+                &["--height"],
+            ),
+            (
+                "grpc-port out of range",
+                &[],
+                &["--grpc-port", "70000"],
+                &["--grpc-port"],
+            ),
+            (
+                "mcp-port non-integer",
+                &[],
+                &["--mcp-port", "x"],
+                &["--mcp-port"],
+            ),
+            ("fps non-integer", &[], &["--fps", "x"], &["--fps"]),
+            (
+                "monitor non-integer",
+                &[],
+                &["--monitor", "x"],
+                &["--monitor"],
+            ),
+            (
+                "benchmark-frames non-integer",
+                &[],
+                &["--benchmark-frames", "x"],
+                &["--benchmark-frames"],
+            ),
+            (
+                "benchmark-warmup-frames non-integer",
+                &[],
+                &["--benchmark-warmup-frames", "x"],
+                &["--benchmark-warmup-frames"],
+            ),
+            (
+                "empty benchmark-emit path",
+                &[],
+                &["--benchmark-emit", ""],
+                &["--benchmark-emit", "non-empty path"],
+            ),
+            (
+                "empty quiescent-efficiency-emit path",
+                &[],
+                &["--quiescent-efficiency-emit", ""],
+                &["--quiescent-efficiency-emit", "non-empty path"],
+            ),
+            (
+                "env width non-integer",
+                &[("TZE_HUD_WINDOW_WIDTH", "bad")],
+                &[],
+                &["TZE_HUD_WINDOW_WIDTH"],
+            ),
+        ];
+        for (name, env, args, hints) in cases {
+            let err = parse_with_env(env, args)
+                .err()
+                .unwrap_or_else(|| panic!("case {name:?} should be rejected"));
+            for hint in *hints {
+                assert!(err.contains(hint), "case {name:?}: {err:?} lacks {hint:?}");
+            }
+        }
     }
 
     #[test]
@@ -1197,170 +1484,6 @@ mod tests {
     }
 
     // ── parse_options: CLI flags ─────────────────────────────────────────────
-
-    #[test]
-    fn parse_options_window_mode_overlay() {
-        let _guard = ENV_VAR_MUTEX.lock().unwrap();
-        // Safety: single-threaded within ENV_VAR_MUTEX guard.
-        unsafe {
-            std::env::remove_var("TZE_HUD_WINDOW_MODE");
-        }
-        let args: Vec<String> = vec!["--window-mode".to_string(), "overlay".to_string()];
-        let opts = parse_options(&args).unwrap();
-        assert_eq!(opts.window_mode, WindowMode::Overlay);
-    }
-
-    #[test]
-    fn parse_options_width_and_height() {
-        let _guard = ENV_VAR_MUTEX.lock().unwrap();
-        // Safety: single-threaded within ENV_VAR_MUTEX guard.
-        unsafe {
-            std::env::remove_var("TZE_HUD_WINDOW_WIDTH");
-            std::env::remove_var("TZE_HUD_WINDOW_HEIGHT");
-        }
-        let args: Vec<String> = vec![
-            "--width".to_string(),
-            "1280".to_string(),
-            "--height".to_string(),
-            "720".to_string(),
-        ];
-        let opts = parse_options(&args).unwrap();
-        assert_eq!(opts.width, 1280);
-        assert_eq!(opts.height, 720);
-    }
-
-    #[test]
-    fn parse_options_grpc_port_zero_disables() {
-        let _guard = ENV_VAR_MUTEX.lock().unwrap();
-        // Safety: single-threaded within ENV_VAR_MUTEX guard.
-        unsafe {
-            std::env::remove_var("TZE_HUD_GRPC_PORT");
-        }
-        let args: Vec<String> = vec!["--grpc-port".to_string(), "0".to_string()];
-        let opts = parse_options(&args).unwrap();
-        assert_eq!(opts.grpc_port, 0);
-    }
-
-    #[test]
-    fn parse_options_mcp_port() {
-        let _guard = ENV_VAR_MUTEX.lock().unwrap();
-        // Safety: single-threaded within ENV_VAR_MUTEX guard.
-        unsafe {
-            std::env::remove_var("TZE_HUD_MCP_PORT");
-        }
-        let args: Vec<String> = vec!["--mcp-port".to_string(), "8080".to_string()];
-        let opts = parse_options(&args).unwrap();
-        assert_eq!(opts.mcp_port, 8080);
-    }
-
-    #[test]
-    fn parse_options_mcp_port_zero_disables() {
-        let _guard = ENV_VAR_MUTEX.lock().unwrap();
-        // Safety: single-threaded within ENV_VAR_MUTEX guard.
-        unsafe {
-            std::env::remove_var("TZE_HUD_MCP_PORT");
-        }
-        let args: Vec<String> = vec!["--mcp-port".to_string(), "0".to_string()];
-        let opts = parse_options(&args).unwrap();
-        assert_eq!(opts.mcp_port, 0);
-    }
-
-    #[test]
-    fn parse_options_fps() {
-        let _guard = ENV_VAR_MUTEX.lock().unwrap();
-        // Safety: single-threaded within ENV_VAR_MUTEX guard.
-        unsafe {
-            std::env::remove_var("TZE_HUD_FPS");
-        }
-        let args: Vec<String> = vec!["--fps".to_string(), "30".to_string()];
-        let opts = parse_options(&args).unwrap();
-        assert_eq!(opts.fps, 30);
-    }
-
-    #[test]
-    fn parse_options_windowed_benchmark_flags() {
-        let _guard = ENV_VAR_MUTEX.lock().unwrap();
-        // Safety: single-threaded within ENV_VAR_MUTEX guard.
-        unsafe {
-            std::env::remove_var("TZE_HUD_BENCHMARK_EMIT");
-            std::env::remove_var("TZE_HUD_BENCHMARK_FRAMES");
-            std::env::remove_var("TZE_HUD_BENCHMARK_WARMUP_FRAMES");
-        }
-        let args: Vec<String> = vec![
-            "--benchmark-emit".to_string(),
-            "artifacts/fullscreen.json".to_string(),
-            "--benchmark-frames".to_string(),
-            "720".to_string(),
-            "--benchmark-warmup-frames".to_string(),
-            "180".to_string(),
-        ];
-        let opts = parse_options(&args).unwrap();
-        assert_eq!(
-            opts.benchmark_emit.as_deref(),
-            Some("artifacts/fullscreen.json")
-        );
-        assert_eq!(opts.benchmark_frames, 720);
-        assert_eq!(opts.benchmark_warmup_frames, 180);
-    }
-
-    #[test]
-    fn parse_options_rejects_empty_benchmark_emit_path() {
-        let _guard = ENV_VAR_MUTEX.lock().unwrap();
-        // Safety: single-threaded within ENV_VAR_MUTEX guard.
-        unsafe {
-            std::env::remove_var("TZE_HUD_BENCHMARK_EMIT");
-        }
-        let args: Vec<String> = vec!["--benchmark-emit".to_string(), "".to_string()];
-        let err = parse_options(&args).unwrap_err();
-        assert!(
-            err.contains("--benchmark-emit") && err.contains("non-empty path"),
-            "error should identify the empty benchmark emit path, got: {err}"
-        );
-    }
-
-    #[test]
-    fn parse_options_quiescent_efficiency_emit_flag() {
-        let _guard = ENV_VAR_MUTEX.lock().unwrap();
-        clear_parse_options_env();
-        let args: Vec<String> = vec![
-            "--quiescent-efficiency-emit".to_string(),
-            "artifacts/idle-efficiency.json".to_string(),
-        ];
-
-        let opts = parse_options(&args).unwrap();
-        assert_eq!(
-            opts.quiescent_efficiency_emit.as_deref(),
-            Some("artifacts/idle-efficiency.json")
-        );
-        assert!(opts.benchmark_emit.is_none());
-    }
-
-    #[test]
-    fn parse_options_config_path() {
-        let _guard = ENV_VAR_MUTEX.lock().unwrap();
-        clear_parse_options_env();
-        let args: Vec<String> = vec![
-            "--config".to_string(),
-            "/etc/tze_hud/config.toml".to_string(),
-        ];
-        let opts = parse_options(&args).unwrap();
-        assert_eq!(
-            opts.config_path.as_deref(),
-            Some("/etc/tze_hud/config.toml")
-        );
-    }
-
-    #[test]
-    fn parse_options_print_attach_info_flag() {
-        let _guard = ENV_VAR_MUTEX.lock().unwrap();
-        clear_parse_options_env();
-        let args: Vec<String> = vec!["--print-attach-info".to_string()];
-        let opts = parse_options(&args).unwrap();
-        assert!(
-            opts.print_attach_info,
-            "--print-attach-info must set the flag"
-        );
-    }
 
     /// hud-q2glv: `main` calls `attach_parent_console()` once at startup so
     /// every output path — `--help`/`--version`, `--print-attach-info`, tracing
@@ -1494,277 +1617,5 @@ profile = "full-display"
             result.is_err(),
             "config missing [[tabs]] must be rejected by startup validation"
         );
-    }
-
-    // ── parse_options: errors ─────────────────────────────────────────────────
-
-    #[test]
-    fn parse_options_unknown_flag_returns_error() {
-        let _guard = ENV_VAR_MUTEX.lock().unwrap();
-        clear_parse_options_env();
-        // `--psk` is gone: agents authenticate with paired PSKs (agents.toml).
-        for flag in ["--unknown-flag", "--psk", "--bind-all-interfaces"] {
-            let args: Vec<String> = vec![flag.to_string(), "value".to_string()];
-            let err = parse_options(&args).unwrap_err();
-            assert!(
-                err.contains(&format!("unknown flag: {flag}")),
-                "error should mention unknown flag: {err}"
-            );
-        }
-    }
-
-    #[test]
-    fn parse_options_window_mode_missing_value_returns_error() {
-        let _guard = ENV_VAR_MUTEX.lock().unwrap();
-        clear_parse_options_env();
-        let args: Vec<String> = vec!["--window-mode".to_string()];
-        let err = parse_options(&args).unwrap_err();
-        assert!(
-            err.contains("--window-mode"),
-            "error should mention the flag"
-        );
-    }
-
-    #[test]
-    fn parse_options_width_non_integer_returns_error() {
-        let _guard = ENV_VAR_MUTEX.lock().unwrap();
-        // Safety: single-threaded within ENV_VAR_MUTEX guard.
-        unsafe {
-            std::env::remove_var("TZE_HUD_WINDOW_WIDTH");
-        }
-        let args: Vec<String> = vec!["--width".to_string(), "bad".to_string()];
-        let err = parse_options(&args).unwrap_err();
-        assert!(err.contains("--width"), "error should mention the flag");
-    }
-
-    #[test]
-    fn parse_options_positional_arg_returns_error() {
-        let _guard = ENV_VAR_MUTEX.lock().unwrap();
-        clear_parse_options_env();
-        let args: Vec<String> = vec!["unexpected".to_string()];
-        let err = parse_options(&args).unwrap_err();
-        assert!(
-            err.contains("unexpected positional argument"),
-            "error should explain positional arg, got: {err}"
-        );
-    }
-
-    // ── Non-default dimension regression tests (hud-q5hx) ────────────────────
-    //
-    // Verify that the exact CLI invocation reported in hud-q5hx parses correctly.
-    // The crash was triggered by `--window-mode overlay --width 2560 --height 1440`;
-    // the root cause was in the windowed runtime's surface initialization, not
-    // argument parsing, but these tests document the contract end-to-end.
-
-    /// The exact command line from the bug report must parse without error and
-    /// produce the correct overlay mode and 2560x1440 dimensions.
-    #[test]
-    fn parse_options_overlay_2560x1440_bug_repro_command() {
-        let _guard = ENV_VAR_MUTEX.lock().unwrap();
-        // Safety: single-threaded within ENV_VAR_MUTEX guard.
-        unsafe {
-            std::env::remove_var("TZE_HUD_WINDOW_MODE");
-            std::env::remove_var("TZE_HUD_WINDOW_WIDTH");
-            std::env::remove_var("TZE_HUD_WINDOW_HEIGHT");
-        }
-
-        // Mirrors: tze_hud.exe --window-mode overlay --width 2560 --height 1440
-        let args: Vec<String> = vec![
-            "--window-mode".to_string(),
-            "overlay".to_string(),
-            "--width".to_string(),
-            "2560".to_string(),
-            "--height".to_string(),
-            "1440".to_string(),
-        ];
-        let opts = parse_options(&args).expect("must parse without error");
-        assert_eq!(
-            opts.window_mode,
-            WindowMode::Overlay,
-            "window mode must be Overlay"
-        );
-        assert_eq!(opts.width, 2560, "width must be 2560");
-        assert_eq!(opts.height, 1440, "height must be 1440");
-    }
-
-    /// Verify 4K (3840x2160) dimensions also parse correctly.
-    #[test]
-    fn parse_options_overlay_4k_dimensions() {
-        let _guard = ENV_VAR_MUTEX.lock().unwrap();
-        // Safety: single-threaded within ENV_VAR_MUTEX guard.
-        unsafe {
-            std::env::remove_var("TZE_HUD_WINDOW_MODE");
-            std::env::remove_var("TZE_HUD_WINDOW_WIDTH");
-            std::env::remove_var("TZE_HUD_WINDOW_HEIGHT");
-        }
-
-        let args: Vec<String> = vec![
-            "--window-mode".to_string(),
-            "overlay".to_string(),
-            "--width".to_string(),
-            "3840".to_string(),
-            "--height".to_string(),
-            "2160".to_string(),
-        ];
-        let opts = parse_options(&args).expect("must parse without error");
-        assert_eq!(opts.window_mode, WindowMode::Overlay);
-        assert_eq!(opts.width, 3840);
-        assert_eq!(opts.height, 2160);
-    }
-
-    // ── overlay_auto_size flag computation (hud-48ml) ─────────────────────────
-    //
-    // These tests verify the three-way interaction that controls whether the
-    // windowed runtime should auto-detect the primary monitor resolution:
-    // 1. overlay mode + no explicit dimensions → auto_size=true
-    // 2. overlay mode + explicit --width/--height → auto_size=false (user intent)
-    // 3. fullscreen mode → auto_size=false (fullscreen always uses monitor native)
-
-    /// In overlay mode with no explicit dimensions, auto-detection must be enabled
-    /// (acceptance criterion 1: overlay auto-sizes to primary monitor).
-    #[test]
-    fn overlay_mode_no_explicit_dims_enables_auto_size() {
-        let _guard = ENV_VAR_MUTEX.lock().unwrap();
-        // Safety: single-threaded within ENV_VAR_MUTEX guard.
-        unsafe {
-            std::env::remove_var("TZE_HUD_WINDOW_MODE");
-            std::env::remove_var("TZE_HUD_WINDOW_WIDTH");
-            std::env::remove_var("TZE_HUD_WINDOW_HEIGHT");
-        }
-        let args: Vec<String> = vec!["--window-mode".to_string(), "overlay".to_string()];
-        let opts = parse_options(&args).expect("must parse");
-        assert_eq!(opts.window_mode, WindowMode::Overlay);
-        assert!(!opts.explicit_width, "width must not be marked explicit");
-        assert!(!opts.explicit_height, "height must not be marked explicit");
-        // Derived: overlay_auto_size would be true
-        let overlay_auto_size = opts.window_mode == WindowMode::Overlay
-            && !opts.explicit_width
-            && !opts.explicit_height;
-        assert!(
-            overlay_auto_size,
-            "overlay without explicit dims must enable auto-size"
-        );
-    }
-
-    /// In overlay mode with explicit --width AND --height, auto-detection must be
-    /// disabled (acceptance criterion 2: explicit flags override auto-detection).
-    #[test]
-    fn overlay_mode_with_explicit_dims_disables_auto_size() {
-        let _guard = ENV_VAR_MUTEX.lock().unwrap();
-        // Safety: single-threaded within ENV_VAR_MUTEX guard.
-        unsafe {
-            std::env::remove_var("TZE_HUD_WINDOW_MODE");
-            std::env::remove_var("TZE_HUD_WINDOW_WIDTH");
-            std::env::remove_var("TZE_HUD_WINDOW_HEIGHT");
-        }
-        let args: Vec<String> = vec![
-            "--window-mode".to_string(),
-            "overlay".to_string(),
-            "--width".to_string(),
-            "2560".to_string(),
-            "--height".to_string(),
-            "1440".to_string(),
-        ];
-        let opts = parse_options(&args).expect("must parse");
-        assert!(
-            opts.explicit_width,
-            "width must be marked explicit when --width is given"
-        );
-        assert!(
-            opts.explicit_height,
-            "height must be marked explicit when --height is given"
-        );
-        let overlay_auto_size = opts.window_mode == WindowMode::Overlay
-            && !opts.explicit_width
-            && !opts.explicit_height;
-        assert!(
-            !overlay_auto_size,
-            "explicit --width/--height must disable auto-size"
-        );
-    }
-
-    /// In overlay mode with only --width set, auto-detection is disabled
-    /// (either dimension being explicit disables auto-size for consistency).
-    #[test]
-    fn overlay_mode_with_explicit_width_only_disables_auto_size() {
-        let _guard = ENV_VAR_MUTEX.lock().unwrap();
-        // Safety: single-threaded within ENV_VAR_MUTEX guard.
-        unsafe {
-            std::env::remove_var("TZE_HUD_WINDOW_MODE");
-            std::env::remove_var("TZE_HUD_WINDOW_WIDTH");
-            std::env::remove_var("TZE_HUD_WINDOW_HEIGHT");
-        }
-        let args: Vec<String> = vec![
-            "--window-mode".to_string(),
-            "overlay".to_string(),
-            "--width".to_string(),
-            "1280".to_string(),
-        ];
-        let opts = parse_options(&args).expect("must parse");
-        assert!(opts.explicit_width, "explicit_width must be set");
-        assert!(!opts.explicit_height, "explicit_height must not be set");
-        let overlay_auto_size = opts.window_mode == WindowMode::Overlay
-            && !opts.explicit_width
-            && !opts.explicit_height;
-        assert!(
-            !overlay_auto_size,
-            "any explicit dimension must disable auto-size"
-        );
-    }
-
-    /// In fullscreen mode, auto-size is always disabled regardless of explicit dims
-    /// (fullscreen handles sizing via Fullscreen::Borderless, not overlay path).
-    #[test]
-    fn fullscreen_mode_never_enables_auto_size() {
-        let _guard = ENV_VAR_MUTEX.lock().unwrap();
-        // Safety: single-threaded within ENV_VAR_MUTEX guard.
-        unsafe {
-            std::env::remove_var("TZE_HUD_WINDOW_MODE");
-            std::env::remove_var("TZE_HUD_WINDOW_WIDTH");
-            std::env::remove_var("TZE_HUD_WINDOW_HEIGHT");
-        }
-        let opts = parse_options(&[]).expect("must parse");
-        assert_eq!(opts.window_mode, WindowMode::Fullscreen);
-        let overlay_auto_size = opts.window_mode == WindowMode::Overlay
-            && !opts.explicit_width
-            && !opts.explicit_height;
-        assert!(
-            !overlay_auto_size,
-            "fullscreen mode must never enable overlay auto-size"
-        );
-    }
-
-    /// Explicit width/height via environment variables also disables auto-size.
-    #[test]
-    fn overlay_mode_with_env_var_dims_disables_auto_size() {
-        let _guard = ENV_VAR_MUTEX.lock().unwrap();
-        // Safety: single-threaded within ENV_VAR_MUTEX guard.
-        unsafe {
-            std::env::set_var("TZE_HUD_WINDOW_MODE", "overlay");
-            std::env::set_var("TZE_HUD_WINDOW_WIDTH", "3840");
-            std::env::set_var("TZE_HUD_WINDOW_HEIGHT", "2160");
-        }
-        let opts = parse_options(&[]).expect("must parse");
-        assert_eq!(opts.window_mode, WindowMode::Overlay);
-        assert_eq!(opts.width, 3840);
-        assert_eq!(opts.height, 2160);
-        assert!(opts.explicit_width, "env-var width must count as explicit");
-        assert!(
-            opts.explicit_height,
-            "env-var height must count as explicit"
-        );
-        let overlay_auto_size = opts.window_mode == WindowMode::Overlay
-            && !opts.explicit_width
-            && !opts.explicit_height;
-        assert!(
-            !overlay_auto_size,
-            "env-var explicit dims must disable auto-size"
-        );
-        // Clean up.
-        unsafe {
-            std::env::remove_var("TZE_HUD_WINDOW_MODE");
-            std::env::remove_var("TZE_HUD_WINDOW_WIDTH");
-            std::env::remove_var("TZE_HUD_WINDOW_HEIGHT");
-        }
     }
 }
