@@ -25,9 +25,13 @@
 #     runtime with the committed production configs
 #   user-test-python-suite — pytest over the user-test and repo script suites;
 #     pure-Python tests only, with no GPU, Windows, live HUD runtime, or network
-#   dev-mode-guard — verifies dev-mode feature is NOT compiled into release binary
+#   dev-mode-guard — cargo-metadata check (no build) that dev-mode is not enabled in the
+#     default-build dependency closure of any workspace package, incl. the shipped
+#     binary (the actual release build runs in windows.yml)
 #   cargo-deny     — advisories + licenses (informational)
-#   test-gpu-pixel-readback — pixel readback on llvmpipe (informational)
+#   test-gpu-pixel-readback — pixel readback on llvmpipe (informational duplicate: the
+#     same pixel_readback tests already run, blocking, inside test-unit via workspace
+#     feature unification of tze_hud_runtime/dev-mode)
 #
 # GPU jobs run with HEADLESS_FORCE_SOFTWARE=1 (llvmpipe on Linux) so no
 # hardware GPU is needed.
@@ -477,10 +481,7 @@ jobs:
           # without failing the job.
           log-level: warn
 
-  # ── Windowed / GPU smoke (gated) ────────────────────────────────────────────
-  #
-  # GATED: This job is manually triggered or runs in environments with Vulkan
-  # hardware (not standard GitHub-hosted runners).
+  # ── GPU pixel readback (informational) ────────────────────────────────────────────
   #
   # Runs the pixel readback integration tests that validate the full GPU
   # compositing pipeline (Layer 1 colour assertions).  These require either:
@@ -494,16 +495,18 @@ jobs:
   # To run locally:
   #   cargo test -p tze_hud_runtime --test pixel_readback --features dev-mode
   #
-  # This job is INFORMATIONAL only on PRs and does not block merge.
-  # Enable blocking by changing `continue-on-error: true` to `false` once
-  # llvmpipe stability is confirmed across all runner image versions.
+  # This job is INFORMATIONAL only on PRs and does not block merge. It is a
+  # pure duplicate: the workspace-wide `cargo test` in test-unit (a required
+  # check) already builds and runs pixel_readback, because workspace feature
+  # unification enables tze_hud_runtime/dev-mode. Making this job blocking would
+  # add nothing; see bead hud-bstmy.8.6 for its disposition.
 
   test-gpu-pixel-readback:
     name: pixel readback (GPU / llvmpipe, informational)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: [test-unit]
-    continue-on-error: true  # GATED: does not block merge; see comment above
+    continue-on-error: true  # informational duplicate of test-unit coverage; see comment above
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
