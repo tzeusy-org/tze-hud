@@ -107,6 +107,12 @@ error; nothing escalates, throttles, or partially applies.
 
 - `tze_hud_runtime` `mutation_budget_bridge::tests::registered_budget_rejects_mutation_above_tile_limit`,
   `aggregate_limits_are_atomic_across_agents`
+- `tze_hud_resource` `store_behavior`: `agent_texture_budget_rejects_whole_upload_and_stores_nothing`,
+  `runtime_wide_texture_cap_is_shared_across_agents`,
+  `resource_count_cap_rejects_the_extra_resource`,
+  `per_resource_size_cap_rejects_chunked_upload_at_start`,
+  `upload_slot_cap_is_per_agent_and_freed_by_abort`,
+  `chunked_upload_rejected_at_complete_frees_its_slot_and_stores_nothing`
 
 ## 8. Errors are affordances for the model
 
@@ -117,6 +123,8 @@ this through T5: a good error saves a model a round trip and its tokens.
 - `tze_hud_protocol` `mutation_batch_oversized_rejected_with_structured_error`
 - `tze_hud_mcp` `test_structured_error_has_hint_field`, `error_codes_are_unique_and_documented`,
   `every_returned_code_is_in_the_closed_set`
+- `tze_hud_resource` `store_behavior`: `rejections_carry_stable_wire_code_and_actionable_detail`,
+  `chunk_protocol_errors_have_stable_codes`
 
 ## 9. Time is injected
 
