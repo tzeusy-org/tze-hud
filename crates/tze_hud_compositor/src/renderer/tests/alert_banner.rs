@@ -95,7 +95,10 @@ fn make_alert_banner_scene() -> SceneGraph {
         },
         accepted_media_types: vec![ZoneMediaType::ShortTextWithIcon],
         rendering_policy: RenderingPolicy {
-            font_size_px: Some(16.0),
+            // Non-default typography so the text path must honour the policy.
+            font_size_px: Some(24.0),
+            font_weight: Some(700),
+            margin_horizontal: Some(8.0),
             backdrop: Some(Rgba::new(0.08, 0.08, 0.08, 1.0)),
             backdrop_opacity: Some(1.0),
             text_color: Some(Rgba::WHITE),
@@ -161,6 +164,13 @@ async fn test_alert_banner_stacks_by_severity_then_recency() {
             items.windows(2).all(|w| w[0].pixel_y < w[1].pixel_y),
             "slots must descend the screen in order"
         );
+        // The zone's heading typography reaches every TextItem: size, weight and
+        // the horizontal inset from the full-width zone's left edge (x = 0).
+        for item in &items {
+            assert_eq!(item.font_size_px, 24.0, "policy font size");
+            assert_eq!(item.font_weight, 700, "policy font weight");
+            assert_eq!(item.pixel_x, 8.0, "margin_horizontal inset");
+        }
     }
 }
 
