@@ -219,7 +219,7 @@ impl WindowedWake {
         }
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-harness"))]
     pub(super) fn disconnected() -> Self {
         Self {
             proxy: None,

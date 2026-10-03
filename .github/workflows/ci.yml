@@ -275,7 +275,8 @@ jobs:
             --test text_stream_portal_cadence \
             --test text_stream_portal_styling \
             --test drag_reposition \
-            --test movable_elements_e2e
+            --test movable_elements_e2e \
+            --test poc_acceptance
       - name: Test token-footprint gate contract
         run: >-
           python3 -m unittest

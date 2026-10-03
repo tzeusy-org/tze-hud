@@ -152,6 +152,14 @@ path = "drag_reposition.rs"
 name = "movable_elements_e2e"
 path = "movable_elements_e2e.rs"
 
+# hud-jm8nq.7: POC acceptance (docs/scope.md) for the Portal and Zones bullets,
+# end to end over MCP on loopback HTTP and the real windowed event-loop
+# dispatch, headless, with production.toml and an injected TestClock. The
+# MCP-level regression guard for the T7 portal rewrite.
+[[test]]
+name = "poc_acceptance"
+path = "poc_acceptance.rs"
+
 # Integration tests always run headless (no display server required).
 # tze_hud_runtime is built with the headless feature unconditionally so
 # all tests run in CI without a display. The workspace-level `headless`
@@ -167,7 +175,7 @@ headless = ["tze_hud_compositor/headless"]
 tze_hud_scene = { path = "../../crates/tze_hud_scene", version = "0.1.0" }
 tze_hud_input = { path = "../../crates/tze_hud_input", version = "0.1.0" }
 tze_hud_compositor = { path = "../../crates/tze_hud_compositor", version = "0.1.0" }
-tze_hud_runtime = { path = "../../crates/tze_hud_runtime", version = "0.1.0", features = ["headless", "dev-mode"] }
+tze_hud_runtime = { path = "../../crates/tze_hud_runtime", version = "0.1.0", features = ["headless", "dev-mode", "test-harness"] }
 tze_hud_protocol = { path = "../../crates/tze_hud_protocol", version = "0.1.0", features = ["dev-mode"] }
 tze_hud_projection = { path = "../../crates/tze_hud_projection", version = "0.1.0", features = ["resident-grpc"] }
 tze_hud_config = { path = "../../crates/tze_hud_config", version = "0.1.0" }
@@ -181,6 +189,7 @@ serde_json = { workspace = true }
 uuid = { workspace = true }
 image = { workspace = true, features = ["png"] }
 blake3 = { workspace = true }
+tiktoken-rs = { workspace = true }
 
 [lints]
 workspace = true

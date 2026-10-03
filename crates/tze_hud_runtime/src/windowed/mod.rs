@@ -189,12 +189,17 @@ mod widgets;
 #[cfg(test)]
 mod test_support;
 
-#[cfg(test)]
+// Unit tests use the keyboard-drain surface; the networked mode is used only
+// by `tests/integration` through the `test-harness` feature.
+#[cfg(any(test, feature = "test-harness"))]
+#[cfg_attr(not(feature = "test-harness"), allow(dead_code))]
 mod event_loop_harness;
 
 pub use self::config::{
     WindowedBenchmarkConfig, WindowedConfig, WindowedQuiescentEfficiencyConfig,
 };
+#[cfg(feature = "test-harness")]
+pub use self::event_loop_harness::HeadlessEventLoopHarness;
 use self::hittest::{refresh_interaction_hit_regions_after_render, sync_scene_display_area};
 use self::input_dispatch::{
     enqueue_input, logical_key_to_str, nanoseconds_since_start, normalize_mouse_wheel_delta,
@@ -737,6 +742,58 @@ impl WinitApp {
     }
 }
 
+impl WinitApp {
+    /// Settle the scene-side main-thread work for one event-loop turn: flush
+    /// the composer draft, retry deferred keystrokes, dispatch MCP portal ops,
+    /// and drain the portal projection into the scene. Needs no window or
+    /// GPU, so the headless harness runs exactly this sequence too.
+    fn settle_scene_work(&mut self) -> PortalProjectionDrain {
+        // Flush any coalesced composer draft notifications accumulated during
+        // the current event batch.  This is the normal settle point: all key
+        // events for this winit iteration have been drained above; flushing here
+        // guarantees the terminal draft state is delivered within the same batch
+        // window (spec §4.3 flush guarantee).
+        self.flush_composer_draft_at_settle();
+        // Opportunistically reconverge the lock-free active_tab mirror from the
+        // authoritative scene (hud-dwcr7).  The mirror is also refreshed at the
+        // point of every active_tab change (gRPC mutation apply, pointer-down
+        // tab switch), but this best-effort per-frame sync is a safety net so a
+        // mirror can never drift indefinitely from any tab-change path.  Uses
+        // try_lock — never stalls the event loop; simply skips this frame if the
+        // scene lock is momentarily busy.
+        self.refresh_active_tab_mirror_opportunistic();
+        // Publish the active tab's current focus owner to the compositor's
+        // chrome-layer ring pass (hud-k6yvb). Per-frame + latest-wins so the ring
+        // tracks Tab/click/Escape focus changes without instrumenting every
+        // transition site; the compositor recomputes bounds from the live scene,
+        // so geometry changes (resize/drag) stay fresh without a focus event.
+        self.push_focus_ring_owner();
+        // Publish the resize-grip hover target (hud-wgiys): when the pointer sits
+        // over the focused portal's bottom-right resize corner, the compositor
+        // lights that tile's grip in hover_color. Same per-frame + latest-wins
+        // cadence as the focus-ring push above.
+        self.push_resize_grip_hover();
+        // Retry any keyboard events that were deferred because the scene lock
+        // was busy during dispatch (hud-2fz34).  Runs after composer flush so
+        // deferred keystrokes re-enter the same path as fresh ones.
+        self.drain_pending_keyboard_events();
+        // Drain any PortalOp messages from the MCP channel (hud-bq0gl.2).
+        // Must run BEFORE drain_portal_projection so that Attach/PublishOutput
+        // ops enqueued in the same event-loop tick are fed into the cadence
+        // coalescer and materialised by the immediately-following drain call.
+        self.drain_portal_ops();
+        // Drain the in-process portal projection authority (hud-2iup7).
+        // Must run AFTER composer flush so draft state is settled before portal
+        // content is refreshed.  Uses try_lock on the scene to avoid blocking
+        // the main thread (deferred to next about_to_wait if busy).
+        let portal_drain = self.drain_portal_projection();
+        // Prune stale portal_resize_states entries for tiles removed from the
+        // scene (hud-kgu8u). Uses try_lock; silently deferred if lock is busy.
+        self.prune_portal_resize_states();
+        portal_drain
+    }
+}
+
 impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
     fn new_events(&mut self, _event_loop: &ActiveEventLoop, cause: StartCause) {
         match cause {
@@ -817,50 +874,8 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
         self.synthesize_left_release_if_physically_up();
         self.refresh_widget_hover_tracking();
         self.update_overlay_cursor_hittest();
-        // Flush any coalesced composer draft notifications accumulated during
-        // the current event batch.  This is the normal settle point: all key
-        // events for this winit iteration have been drained above; flushing here
-        // guarantees the terminal draft state is delivered within the same batch
-        // window (spec §4.3 flush guarantee).
-        self.flush_composer_draft_at_settle();
-        // Opportunistically reconverge the lock-free active_tab mirror from the
-        // authoritative scene (hud-dwcr7).  The mirror is also refreshed at the
-        // point of every active_tab change (gRPC mutation apply, pointer-down
-        // tab switch), but this best-effort per-frame sync is a safety net so a
-        // mirror can never drift indefinitely from any tab-change path.  Uses
-        // try_lock — never stalls the event loop; simply skips this frame if the
-        // scene lock is momentarily busy.
-        self.refresh_active_tab_mirror_opportunistic();
-        // Publish the active tab's current focus owner to the compositor's
-        // chrome-layer ring pass (hud-k6yvb). Per-frame + latest-wins so the ring
-        // tracks Tab/click/Escape focus changes without instrumenting every
-        // transition site; the compositor recomputes bounds from the live scene,
-        // so geometry changes (resize/drag) stay fresh without a focus event.
-        self.push_focus_ring_owner();
-        // Publish the resize-grip hover target (hud-wgiys): when the pointer sits
-        // over the focused portal's bottom-right resize corner, the compositor
-        // lights that tile's grip in hover_color. Same per-frame + latest-wins
-        // cadence as the focus-ring push above.
-        self.push_resize_grip_hover();
-        // Retry any keyboard events that were deferred because the scene lock
-        // was busy during dispatch (hud-2fz34).  Runs after composer flush so
-        // deferred keystrokes re-enter the same path as fresh ones.
-        self.drain_pending_keyboard_events();
-        // Drain any PortalOp messages from the MCP channel (hud-bq0gl.2).
-        // Must run BEFORE drain_portal_projection so that Attach/PublishOutput
-        // ops enqueued in the same event-loop tick are fed into the cadence
-        // coalescer and materialised by the immediately-following drain call.
-        self.drain_portal_ops();
-        // Drain the in-process portal projection authority (hud-2iup7).
-        // Must run AFTER composer flush so draft state is settled before portal
-        // content is refreshed.  Uses try_lock on the scene to avoid blocking
-        // the main thread (deferred to next about_to_wait if busy).
-        let portal_drain = self.drain_portal_projection();
-        let portal_scene_changed = portal_drain.scene_changed();
-        let settled_scene_changed = portal_scene_changed;
-        // Prune stale portal_resize_states entries for tiles removed from the
-        // scene (hud-kgu8u). Uses try_lock; silently deferred if lock is busy.
-        self.prune_portal_resize_states();
+        let portal_drain = self.settle_scene_work();
+        let settled_scene_changed = portal_drain.scene_changed();
 
         // ── Per-frame ticks + present poll (hud-ilivg) ────────────────────
         // Moved here from the `RedrawRequested` handler so the main loop no
@@ -1590,24 +1605,11 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                             scene.drain_pending_widget_svg_assets(),
                         );
 
-                        // ── Zone and widget publication expiry sweep ──────
-                        // Per timing-model/spec.md §Expiration Policy: expired
-                        // publications MUST be cleared before the next frame.
-                        // Timed content (invariant 1): apply batches whose
-                        // present_at has arrived, then sweep expired tiles.
-                        for late in scene.apply_due_batches() {
-                            if let Some(err) = late.error {
-                                tracing::warn!(
-                                    batch_id = %late.batch_id,
-                                    error = %err,
-                                    "scheduled batch rejected at present_at"
-                                );
-                            }
-                        }
-                        scene.drain_expired_tiles();
-                        scene.drain_expired_zone_publications();
-                        scene.drain_expired_widget_publications();
-                        let terminal_lease_expiries = scene.expire_leases();
+                        // ── Timed-content sweep (invariants 1 and 4) ──────
+                        // Expired publications, tiles, and leases MUST be
+                        // cleared before the next frame.
+                        let terminal_lease_expiries =
+                            crate::pipeline::sweep_timed_scene_state(&mut scene);
 
                         let applied_degradation_level = degradation_controller.level();
                         compositor

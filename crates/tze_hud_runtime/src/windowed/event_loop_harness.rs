@@ -34,18 +34,35 @@
 //! state machine that are GPU-independent (input/keyboard dispatch, portal/
 //! composer routing over the shared scene). The window, surface, and compositor
 //! fields are left `None`.
+//!
+//! ## Networked mode (POC acceptance)
+//!
+//! [`HeadlessEventLoopHarness::with_network`] boots the same state from a real
+//! config with the production MCP HTTP server on a loopback ephemeral port and
+//! the MCP → event-loop portal-op channel, all reading one injected clock.
+//! [`HeadlessEventLoopHarness::tick`] runs one event-loop turn: the main-thread
+//! settle sequence `about_to_wait` runs, then the compositor's Stage 4
+//! timed-content sweep and notification hit-region refresh, minus the GPU.
+//! `tests/integration/poc_acceptance.rs` drives it (feature `test-harness`).
 
+use std::net::SocketAddr;
 use std::sync::Arc;
 
+#[cfg(test)]
+use tze_hud_input::PointerEvent;
 use tze_hud_input::{
-    FocusManager, InputProcessor, KeyboardProcessor, PointerEvent, PointerEventKind,
+    FocusManager, InputProcessor, KeyboardModifiers, KeyboardProcessor, PointerEventKind,
+    RawCharacterEvent, RawKeyDownEvent, RawKeyUpEvent,
 };
 use tze_hud_scene::graph::SceneGraph;
-use tze_hud_scene::types::HitRegionNode;
-use tze_hud_scene::{Node, NodeData, Rect, SceneId};
+use tze_hud_scene::types::ZoneInteractionKind;
+use tze_hud_scene::{Clock, MonoUs, NodeData, SceneId};
+#[cfg(test)]
+use tze_hud_scene::{Node, Rect, types::HitRegionNode};
 
 use super::WindowedRuntimeState;
 use super::WinitApp;
+#[cfg(test)]
 use super::keyboard::PendingKeyboardEvent;
 
 impl WindowedRuntimeState {
@@ -197,17 +214,246 @@ impl SharedStateBuilder {
 /// composer draft. The entire body of the drain — active-tab resolution via the
 /// lock-free mirror, per-event inner-fn dispatch, and
 /// `restore_front_requeued_event` — runs through production code.
-pub(super) struct HeadlessEventLoopHarness {
+///
+/// [`Self::with_network`] adds the MCP server and an injected clock for
+/// end-to-end tests (see the module docs).
+pub struct HeadlessEventLoopHarness {
     app: WinitApp,
+    mcp_addr: Option<SocketAddr>,
 }
 
 impl HeadlessEventLoopHarness {
+    /// Boot the GPU-free runtime from `cfg` with its MCP server listening on
+    /// `127.0.0.1:0`, every deadline reading `clock` (invariant 9).
+    ///
+    /// Mirrors [`super::WindowedRuntime::run`]'s wiring: runtime context and
+    /// agent directory from `cfg.config_toml`, scene startup (zones, widgets,
+    /// design tokens), the MCP → event-loop portal-op channel, and the portal
+    /// projection driver. It skips what needs a display or touches the user's
+    /// disk (window, compositor, gRPC, element and widget-asset stores).
+    /// `cfg.mcp_port` and `cfg.grpc_port` are ignored.
+    pub async fn with_network(
+        cfg: super::WindowedConfig,
+        clock: Arc<dyn Clock>,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let (runtime_context, fallback_unrestricted) = super::build_runtime_context(&cfg);
+        let mut state = WindowedRuntimeState::new_headless();
+
+        let mut scene = SceneGraph::new_with_clock(
+            cfg.window.width as f32,
+            cfg.window.height as f32,
+            Arc::clone(&clock),
+        );
+        let global_tokens = match cfg.config_toml.as_deref() {
+            Some(toml_src) => {
+                let raw: tze_hud_config::raw::RawConfig = toml::from_str(toml_src)?;
+                let config_parent = cfg
+                    .config_file_path
+                    .as_deref()
+                    .and_then(|p| std::path::Path::new(p).parent());
+                crate::scene_startup::run_scene_startup(&raw, config_parent, &mut scene)
+                    .global_tokens
+            }
+            None => {
+                scene.zone_registry = tze_hud_scene::types::ZoneRegistry::with_defaults();
+                std::collections::HashMap::new()
+            }
+        };
+        let scene_handle = {
+            let mut shared = state.shared_state.lock().await;
+            shared.sessions = tze_hud_protocol::session::SessionRegistry::new(&cfg.psk);
+            shared.tile_placement = tze_hud_config::tile_placement_from_tokens(&global_tokens);
+            *shared.scene.lock().await = scene;
+            Arc::clone(&shared.scene)
+        };
+
+        let (portal_op_tx, portal_op_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mcp_config = crate::mcp::McpServerConfig {
+            bind_addr: SocketAddr::from(([127, 0, 0, 1], 0)),
+            agents: runtime_context.agent_directory(&cfg.psk),
+        };
+        let (_mcp_task, mcp_addr) = crate::mcp::start_mcp_http_server(
+            scene_handle,
+            mcp_config,
+            state.shutdown.clone(),
+            Some(portal_op_tx),
+        )
+        .await?;
+
+        let mut driver = super::build_portal_projection_driver(&cfg)?;
+        driver.set_clock(clock);
+        state.portal_projection_driver = driver;
+        state.portal_op_rx = Some(portal_op_rx);
+        state.global_tokens = global_tokens;
+        state.runtime_context = runtime_context;
+        state.fallback_unrestricted = fallback_unrestricted;
+        state.config = cfg;
+        Ok(HeadlessEventLoopHarness {
+            app: WinitApp { state },
+            mcp_addr: Some(mcp_addr),
+        })
+    }
+
+    /// The MCP endpoint `with_network` bound.
+    ///
+    /// # Panics
+    ///
+    /// On a harness built without [`Self::with_network`].
+    pub fn mcp_addr(&self) -> SocketAddr {
+        self.mcp_addr
+            .expect("harness was built without with_network")
+    }
+
+    /// Run one GPU-free event-loop turn: the main-thread settle sequence from
+    /// `about_to_wait` (composer flush, deferred keys, MCP portal ops, portal
+    /// projection drain), then the compositor's Stage 4 timed-content sweep
+    /// and the notification hit-region refresh its post-render pass does.
+    ///
+    /// Returns `false` when a lock was busy and part of the turn was deferred;
+    /// call again.
+    pub fn tick(&mut self) -> bool {
+        let settled = !self.app.settle_scene_work().is_deferred();
+        let (width, height) = (
+            self.app.state.config.window.width as f32,
+            self.app.state.config.window.height as f32,
+        );
+        let Ok(state) = self.app.state.shared_state.try_lock() else {
+            return false;
+        };
+        let Ok(mut scene) = state.scene.try_lock() else {
+            return false;
+        };
+        let _ = crate::pipeline::sweep_timed_scene_state(&mut scene);
+        tze_hud_compositor::renderer::hit_regions::populate_notification_hit_regions(
+            &mut scene, width, height,
+        );
+        settled
+    }
+
+    /// Press and release the primary pointer button at display `(x, y)`
+    /// through the winit pointer path.
+    pub fn click(&mut self, x: f32, y: f32) {
+        self.app.state.cursor_x = x;
+        self.app.state.cursor_y = y;
+        self.app.enqueue_pointer_event(PointerEventKind::Down);
+        self.app.enqueue_pointer_event(PointerEventKind::Up);
+    }
+
+    /// Type `text` key by key the way the winit keyboard handler delivers it:
+    /// key-down, character (for a character key), key-up. Space is a named
+    /// key in winit, so it carries no character event.
+    pub fn type_text(&mut self, text: &str) {
+        for ch in text.chars() {
+            if ch == ' ' {
+                self.press_named_key("Space");
+                continue;
+            }
+            let key_code = match ch {
+                'a'..='z' | 'A'..='Z' => format!("Key{}", ch.to_ascii_uppercase()),
+                '0'..='9' => format!("Digit{ch}"),
+                _ => "Unidentified".to_string(),
+            };
+            self.press_key(&key_code, &ch.to_string(), Some(&ch.to_string()));
+        }
+    }
+
+    /// Press and release a named key (e.g. `"Enter"`), as winit delivers it.
+    pub fn press_named_key(&mut self, key: &str) {
+        self.press_key(key, key, None);
+    }
+
+    fn press_key(&mut self, key_code: &str, key: &str, character: Option<&str>) {
+        let timestamp_mono_us = MonoUs(super::nanoseconds_since_start() / 1_000);
+        self.app.dispatch_key_down_event(&RawKeyDownEvent {
+            key_code: key_code.to_string(),
+            key: key.to_string(),
+            modifiers: KeyboardModifiers::NONE,
+            repeat: false,
+            timestamp_mono_us,
+        });
+        if let Some(character) = character {
+            self.app.dispatch_character_event(&RawCharacterEvent {
+                character: character.to_string(),
+                timestamp_mono_us,
+            });
+        }
+        self.app.dispatch_key_up_event(&RawKeyUpEvent {
+            key_code: key_code.to_string(),
+            key: key.to_string(),
+            modifiers: KeyboardModifiers::NONE,
+            timestamp_mono_us,
+        });
+    }
+
+    /// Display-space center of the first composer input region on screen
+    /// (a portal armed with `expects_reply`), where a user would click to type.
+    pub fn composer_center(&self) -> Option<(f32, f32)> {
+        let state = self.app.state.shared_state.try_lock().ok()?;
+        let scene = state.scene.try_lock().ok()?;
+        scene.tiles.values().find_map(|tile| {
+            let mut stack: Vec<SceneId> = tile.root_node.into_iter().collect();
+            while let Some(id) = stack.pop() {
+                let node = scene.nodes.get(&id)?;
+                if let NodeData::HitRegion(region) = &node.data
+                    && region.accepts_composer_input
+                {
+                    return Some((
+                        tile.bounds.x + region.bounds.x + region.bounds.width / 2.0,
+                        tile.bounds.y + region.bounds.y + region.bounds.height / 2.0,
+                    ));
+                }
+                stack.extend(node.children.iter().copied());
+            }
+            None
+        })
+    }
+
+    /// Display-space center of the on-screen notification action button
+    /// whose callback is `callback_id`, as hit-tested after the last
+    /// [`Self::tick`].
+    pub fn notification_action_center(&self, callback_id: &str) -> Option<(f32, f32)> {
+        let state = self.app.state.shared_state.try_lock().ok()?;
+        let scene = state.scene.try_lock().ok()?;
+        scene
+            .overlay
+            .zone_hit_regions
+            .iter()
+            .find(|region| {
+                matches!(&region.kind, ZoneInteractionKind::Action { callback_id: id } if id == callback_id)
+            })
+            .map(|region| {
+                (
+                    region.bounds.x + region.bounds.width / 2.0,
+                    region.bounds.y + region.bounds.height / 2.0,
+                )
+            })
+    }
+
+    /// Number of publications currently shown in zone `zone`.
+    pub fn zone_publication_count(&self, zone: &str) -> usize {
+        let state = self.app.state.shared_state.try_lock().expect(BUSY);
+        let scene = state.scene.try_lock().expect(BUSY);
+        scene
+            .zone_registry
+            .active_publishes
+            .get(zone)
+            .map_or(0, Vec::len)
+    }
+
+    /// Number of tiles on screen (portal surfaces included).
+    pub fn tile_count(&self) -> usize {
+        let state = self.app.state.shared_state.try_lock().expect(BUSY);
+        state.scene.try_lock().expect(BUSY).tiles.len()
+    }
+
     /// Build a harness around an inert-but-real `WinitApp`.
+    #[cfg(test)]
     pub(super) fn new() -> Self {
         HeadlessEventLoopHarness {
             app: WinitApp {
                 state: WindowedRuntimeState::new_headless(),
             },
+            mcp_addr: None,
         }
     }
 
@@ -219,6 +465,7 @@ impl HeadlessEventLoopHarness {
     /// use: [`InputProcessor::process_with_focus`] on the harness's *own*
     /// `input_processor` and `focus_manager` (the exact fields the drain later
     /// reads).
+    #[cfg(test)]
     pub(super) fn focus_composer(&mut self) -> SceneId {
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
@@ -287,33 +534,38 @@ impl HeadlessEventLoopHarness {
 
     /// Enqueue a synthetic keyboard event onto the runtime's pending queue,
     /// exactly as the winit event handler does when a dispatch is deferred.
+    #[cfg(test)]
     pub(super) fn enqueue(&mut self, event: PendingKeyboardEvent) {
         self.app.state.pending_keyboard_events.push_back(event);
     }
 
     /// Number of events still pending (undrained).
+    #[cfg(test)]
     pub(super) fn pending_len(&self) -> usize {
         self.app.state.pending_keyboard_events.len()
     }
 
     /// Peek the front pending event (for FIFO-ordering assertions).
+    #[cfg(test)]
     pub(super) fn front_pending(&self) -> Option<&PendingKeyboardEvent> {
         self.app.state.pending_keyboard_events.front()
     }
 
     /// Run the genuine production drain over the pending queue.
+    #[cfg(test)]
     pub(super) fn drain(&mut self) {
         self.app.drain_pending_keyboard_events();
     }
 
     /// Exercise the exact production completion-wake path that
     /// `about_to_wait` uses after a busy shared-scene observation.
+    #[cfg(test)]
     pub(super) fn schedule_shared_scene_availability_wake(&self) {
         self.app.schedule_shared_scene_availability_wake();
     }
 
     /// Current composer draft text, if a composer is active.
-    pub(super) fn composer_draft(&self) -> Option<String> {
+    pub fn composer_draft(&self) -> Option<String> {
         self.app
             .state
             .input_processor
@@ -323,16 +575,31 @@ impl HeadlessEventLoopHarness {
 
     /// A clone of the lock-free `active_tab_mirror` handle, so a test can hold
     /// its guard to simulate mirror contention.
+    #[cfg(test)]
     pub(super) fn active_tab_mirror(&self) -> Arc<std::sync::Mutex<Option<SceneId>>> {
         Arc::clone(&self.app.state.active_tab_mirror)
     }
 
     /// A clone of the `shared_state` handle, so a test can hold its guard to
     /// simulate scene/shared-state lock contention (the busy-defer path).
+    #[cfg(test)]
     pub(super) fn shared_state(
         &self,
     ) -> Arc<tokio::sync::Mutex<tze_hud_protocol::session::SharedState>> {
         Arc::clone(&self.app.state.shared_state)
+    }
+}
+
+/// Scene queries run between MCP calls, when nothing else holds the scene.
+const BUSY: &str = "scene is locked by an in-flight call; query between calls";
+
+impl Drop for HeadlessEventLoopHarness {
+    /// Stop the MCP accept loop with the harness.
+    fn drop(&mut self) {
+        self.app
+            .state
+            .shutdown
+            .trigger(crate::threads::ShutdownReason::Clean);
     }
 }
 

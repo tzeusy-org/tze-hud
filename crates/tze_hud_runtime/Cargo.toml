@@ -11,6 +11,10 @@ headless = ["tze_hud_compositor/headless"]
 ## unrestricted capability grants. MUST NOT be enabled in production builds.
 ## Safe to enable in tests (which also compile under `cfg(test)`) and examples.
 dev-mode = []
+## Expose `windowed::HeadlessEventLoopHarness`: the GPU-free event-loop
+## harness with a live MCP server and an injected clock, for end-to-end tests
+## (`tests/integration/poc_acceptance.rs`). Not for production builds.
+test-harness = []
 
 [dependencies]
 tze_hud_scene = { path = "../tze_hud_scene", version = "0.1.0" }

@@ -202,6 +202,10 @@ The portal flow takes 4 round trips in the canonical fixture because the
 first poll has nothing to ack; in a steady loop each `hud_input` both acks
 the previous items and polls, so poll+ack is one round trip.
 
+`integration` `poc_acceptance` checks the same model-visible counts on the
+POC acceptance flows (`docs/scope.md`), run end to end against
+`production.toml`.
+
 ## Design decisions (T5, 2026-10-02)
 
 1. **Tiles are gRPC only.** MCP loses `create_tile`, `set_content`,

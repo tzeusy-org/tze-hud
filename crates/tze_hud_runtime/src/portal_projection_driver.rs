@@ -48,6 +48,7 @@
 //!   so scrolled-back viewports stay stable (spec §3.3).
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use tze_hud_config::{resolve_portal_tokens, tokens::DesignTokenMap};
 use tze_hud_input::{DraftNotificationBatch, InputProcessor};
@@ -69,7 +70,7 @@ use tze_hud_projection::{
     },
 };
 use tze_hud_scene::{
-    Rect, SceneGraph,
+    Clock, Rect, SceneGraph, SystemClock,
     types::{LeaseState, SceneId, TileScrollConfig},
 };
 use tze_hud_telemetry::LatencyBucket;
@@ -560,6 +561,11 @@ impl InProcessPortalDriveState {
 pub struct InProcessPortalDriver {
     authority: ProjectionAuthority,
     drive: InProcessPortalDriveState,
+    /// Wall clock for every authority timestamp: op dispatch, liveness and
+    /// pending-input sweeps, and wake deadlines (invariant 9). The windowed
+    /// runtime uses the system clock; harnesses share the scene's `TestClock`
+    /// so the liveness window and lease grace advance together.
+    clock: Arc<dyn Clock>,
     /// Test-only observation alias for the most recently granted projection
     /// lease. Production lifecycle decisions use only the owning DriveEntry.
     #[cfg(test)]
@@ -600,6 +606,7 @@ impl InProcessPortalDriver {
         Self {
             authority,
             drive: InProcessPortalDriveState::new(),
+            clock: Arc::new(SystemClock::new()),
             #[cfg(test)]
             lease_id: None,
             portal_publish_to_present_latency: LatencyBucket::new("portal_publish_to_present"),
@@ -635,7 +642,7 @@ impl InProcessPortalDriver {
     /// agent-liveness transition, or a projection lease's orphan-grace/TTL
     /// boundary.
     pub(super) fn next_wake_deadline(&self, scene: &SceneGraph) -> Option<PortalWakeDeadline> {
-        let now_us = now_wall_us();
+        let now_us = self.now_wall_us();
         // Queued cleanup or degraded repaint must win over any stale timed
         // deadline. A missed scene-lock turn needs an immediate retry; sorting
         // it by wall time could otherwise attribute and delay that retry behind
@@ -771,7 +778,7 @@ impl InProcessPortalDriver {
     /// never resurrect a degraded surface for it (AC: clean detach does not
     /// degrade).
     pub fn mark_projection_disconnected(&mut self, projection_id: &str) -> bool {
-        self.mark_projection_disconnected_at(projection_id, now_wall_us())
+        self.mark_projection_disconnected_at(projection_id, self.now_wall_us())
     }
 
     /// Latch **all** attached projections as ungracefully dropped (hud-5i16d).
@@ -782,7 +789,7 @@ impl InProcessPortalDriver {
     /// (`windowed/portal.rs::drain_portal_ops`). Cleanly-detached projections are
     /// already absent from the drive map and so are unaffected.
     pub fn mark_all_projections_disconnected(&mut self) {
-        let now = now_wall_us();
+        let now = self.now_wall_us();
         let ids: Vec<String> = self.drive.entries.keys().cloned().collect();
         for id in ids {
             self.mark_projection_disconnected_at(&id, now);
@@ -891,6 +898,17 @@ impl InProcessPortalDriver {
     /// PublishOutput, Detach, etc.) into the authority.
     pub fn authority_mut(&mut self) -> &mut ProjectionAuthority {
         &mut self.authority
+    }
+
+    /// Replace the driver's wall clock. Harnesses pass the scene's
+    /// `TestClock` so portal liveness and lease grace share one time source.
+    pub fn set_clock(&mut self, clock: Arc<dyn Clock>) {
+        self.clock = clock;
+    }
+
+    /// Current wall-clock time (µs since the Unix epoch) from the driver's clock.
+    pub fn now_wall_us(&self) -> u64 {
+        self.clock.now_us()
     }
 
     /// Push a geometry snapshot to the projection session that owns `tile_id`.
@@ -1070,7 +1088,7 @@ impl InProcessPortalDriver {
     ///    normal `drain()` call in the same `about_to_wait` iteration (or the
     ///    next one) materialises it into the scene.
     pub fn dispatch_portal_op(&mut self, op: PortalOp) {
-        self.dispatch_portal_op_at(op, now_wall_us());
+        self.dispatch_portal_op_at(op, self.now_wall_us());
     }
 
     /// [`Self::dispatch_portal_op`] at a caller-supplied wall-clock instant, so
@@ -1627,7 +1645,7 @@ impl InProcessPortalDriver {
         input_processor: &mut InputProcessor,
         tab_id: Option<SceneId>,
     ) {
-        let now_us = now_wall_us();
+        let now_us = self.now_wall_us();
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             self.drain_inner(scene, input_processor, tab_id, now_us)
         }));
@@ -2736,6 +2754,7 @@ impl Default for InProcessPortalDriver {
 }
 
 /// Get current wall-clock timestamp in microseconds since UNIX epoch.
+#[cfg(test)]
 fn now_wall_us() -> u64 {
     use std::time::{SystemTime, UNIX_EPOCH};
     SystemTime::now()
@@ -2848,6 +2867,7 @@ mod tests {
             })
             .unwrap(),
             drive: InProcessPortalDriveState::new(),
+            clock: Arc::new(SystemClock::new()),
             lease_id: None,
             portal_publish_to_present_latency: LatencyBucket::new("portal_publish_to_present"),
             drain_deferral_count: 0,
@@ -2971,6 +2991,7 @@ mod tests {
             })
             .unwrap(),
             drive: InProcessPortalDriveState::new(),
+            clock: Arc::new(SystemClock::new()),
             lease_id: None,
             portal_publish_to_present_latency: LatencyBucket::new("portal_publish_to_present"),
             drain_deferral_count: 0,
@@ -3126,6 +3147,7 @@ mod tests {
             })
             .unwrap(),
             drive: InProcessPortalDriveState::new(),
+            clock: Arc::new(SystemClock::new()),
             lease_id: None,
             portal_publish_to_present_latency: LatencyBucket::new("portal_publish_to_present"),
             drain_deferral_count: 0,
@@ -3244,6 +3266,7 @@ mod tests {
             })
             .unwrap(),
             drive: InProcessPortalDriveState::new(),
+            clock: Arc::new(SystemClock::new()),
             lease_id: None,
             portal_publish_to_present_latency: LatencyBucket::new("portal_publish_to_present"),
             drain_deferral_count: 0,
@@ -3474,6 +3497,7 @@ mod tests {
             })
             .unwrap(),
             drive: InProcessPortalDriveState::new(),
+            clock: Arc::new(SystemClock::new()),
             lease_id: None,
             portal_publish_to_present_latency: LatencyBucket::new("portal_publish_to_present"),
             drain_deferral_count: 0,
@@ -3609,6 +3633,7 @@ mod tests {
             })
             .unwrap(),
             drive: InProcessPortalDriveState::new(),
+            clock: Arc::new(SystemClock::new()),
             lease_id: None,
             portal_publish_to_present_latency: LatencyBucket::new("portal_publish_to_present"),
             drain_deferral_count: 0,
@@ -3820,6 +3845,7 @@ mod tests {
             })
             .unwrap(),
             drive: InProcessPortalDriveState::new(),
+            clock: Arc::new(SystemClock::new()),
             lease_id: None,
             portal_publish_to_present_latency: LatencyBucket::new("test_dispatch_portal_op"),
             drain_deferral_count: 0,
@@ -4054,6 +4080,7 @@ mod tests {
             })
             .unwrap(),
             drive: InProcessPortalDriveState::new(),
+            clock: Arc::new(SystemClock::new()),
             lease_id: None,
             portal_publish_to_present_latency: LatencyBucket::new("test_paint_content"),
             drain_deferral_count: 0,
@@ -4200,6 +4227,7 @@ mod tests {
             })
             .unwrap(),
             drive: InProcessPortalDriveState::new(),
+            clock: Arc::new(SystemClock::new()),
             lease_id: None,
             portal_publish_to_present_latency: LatencyBucket::new("test_surface_decl"),
             drain_deferral_count: 0,
@@ -4379,6 +4407,7 @@ mod tests {
             })
             .unwrap(),
             drive: InProcessPortalDriveState::new(),
+            clock: Arc::new(SystemClock::new()),
             lease_id: None,
             portal_publish_to_present_latency: LatencyBucket::new("test_unread_indicator"),
             drain_deferral_count: 0,
@@ -4497,6 +4526,7 @@ mod tests {
             })
             .unwrap(),
             drive: InProcessPortalDriveState::new(),
+            clock: Arc::new(SystemClock::new()),
             lease_id: None,
             portal_publish_to_present_latency: LatencyBucket::new("test_unread_divider"),
             drain_deferral_count: 0,
@@ -4612,6 +4642,7 @@ mod tests {
             })
             .unwrap(),
             drive: InProcessPortalDriveState::new(),
+            clock: Arc::new(SystemClock::new()),
             lease_id: None,
             portal_publish_to_present_latency: LatencyBucket::new("test_degraded_unread"),
             drain_deferral_count: 0,
@@ -4757,6 +4788,7 @@ mod tests {
                 })
                 .unwrap(),
                 drive: InProcessPortalDriveState::new(),
+                clock: Arc::new(SystemClock::new()),
                 lease_id: None,
                 portal_publish_to_present_latency: LatencyBucket::new("test_no_tab"),
                 drain_deferral_count: 0,
@@ -4880,6 +4912,7 @@ mod tests {
             })
             .unwrap(),
             drive: InProcessPortalDriveState::new(),
+            clock: Arc::new(SystemClock::new()),
             lease_id: None,
             portal_publish_to_present_latency: LatencyBucket::new("test_deferred_tab_activation"),
             drain_deferral_count: 0,
@@ -4940,6 +4973,7 @@ mod tests {
             })
             .unwrap(),
             drive: InProcessPortalDriveState::new(),
+            clock: Arc::new(SystemClock::new()),
             lease_id: None,
             portal_publish_to_present_latency: LatencyBucket::new("test_reattach"),
             drain_deferral_count: 0,
@@ -5139,6 +5173,7 @@ mod tests {
             })
             .unwrap(),
             drive: InProcessPortalDriveState::new(),
+            clock: Arc::new(SystemClock::new()),
             lease_id: None,
             portal_publish_to_present_latency: LatencyBucket::new("test_htrim_runtime"),
             drain_deferral_count: 0,
@@ -5310,6 +5345,7 @@ mod tests {
             })
             .unwrap(),
             drive: InProcessPortalDriveState::new(),
+            clock: Arc::new(SystemClock::new()),
             lease_id: None,
             portal_publish_to_present_latency: LatencyBucket::new("test_deferral"),
             drain_deferral_count: 0,
@@ -5686,6 +5722,7 @@ mod tests {
         let mut driver = InProcessPortalDriver {
             authority: ProjectionAuthority::new(ProjectionBounds::default()).unwrap(),
             drive: InProcessPortalDriveState::new(),
+            clock: Arc::new(SystemClock::new()),
             lease_id: None,
             portal_publish_to_present_latency: LatencyBucket::new("test_attach_identity"),
             drain_deferral_count: 0,
@@ -5765,6 +5802,7 @@ mod tests {
         let mut driver = InProcessPortalDriver {
             authority: ProjectionAuthority::new(ProjectionBounds::default()).unwrap(),
             drive: InProcessPortalDriveState::new(),
+            clock: Arc::new(SystemClock::new()),
             lease_id: None,
             portal_publish_to_present_latency: LatencyBucket::new("test_attach_invalid_kind"),
             drain_deferral_count: 0,
@@ -5811,6 +5849,7 @@ mod tests {
         let mut driver = InProcessPortalDriver {
             authority: ProjectionAuthority::new(ProjectionBounds::default()).unwrap(),
             drive: InProcessPortalDriveState::new(),
+            clock: Arc::new(SystemClock::new()),
             lease_id: None,
             portal_publish_to_present_latency: LatencyBucket::new("test_attach_invalid_class"),
             drain_deferral_count: 0,
@@ -5863,6 +5902,7 @@ mod tests {
             })
             .unwrap(),
             drive: InProcessPortalDriveState::new(),
+            clock: Arc::new(SystemClock::new()),
             lease_id: None,
             portal_publish_to_present_latency: LatencyBucket::new("test_publish_classification"),
             drain_deferral_count: 0,
@@ -5921,6 +5961,7 @@ mod tests {
             })
             .unwrap(),
             drive: InProcessPortalDriveState::new(),
+            clock: Arc::new(SystemClock::new()),
             lease_id: None,
             portal_publish_to_present_latency: LatencyBucket::new("test_publish_expects_reply"),
             drain_deferral_count: 0,
@@ -6010,6 +6051,7 @@ mod tests {
         let mut driver = InProcessPortalDriver {
             authority: ProjectionAuthority::new(ProjectionBounds::default()).unwrap(),
             drive: InProcessPortalDriveState::new(),
+            clock: Arc::new(SystemClock::new()),
             lease_id: None,
             portal_publish_to_present_latency: LatencyBucket::new("test_publish_invalid"),
             drain_deferral_count: 0,
@@ -6087,6 +6129,7 @@ mod tests {
             })
             .unwrap(),
             drive: InProcessPortalDriveState::new(),
+            clock: Arc::new(SystemClock::new()),
             lease_id: None,
             portal_publish_to_present_latency: LatencyBucket::new("portal_publish_to_present"),
             drain_deferral_count: 0,
@@ -6902,6 +6945,7 @@ mod tests {
             })
             .unwrap(),
             drive: InProcessPortalDriveState::new(),
+            clock: Arc::new(SystemClock::new()),
             lease_id: None,
             portal_publish_to_present_latency: LatencyBucket::new("pending_input_expiry"),
             drain_deferral_count: 0,
@@ -6982,6 +7026,7 @@ mod tests {
             })
             .unwrap(),
             drive: InProcessPortalDriveState::new(),
+            clock: Arc::new(SystemClock::new()),
             lease_id: None,
             portal_publish_to_present_latency: LatencyBucket::new("deadline_families"),
             drain_deferral_count: 0,
@@ -7141,6 +7186,7 @@ mod tests {
             })
             .unwrap(),
             drive: InProcessPortalDriveState::new(),
+            clock: Arc::new(SystemClock::new()),
             lease_id: None,
             portal_publish_to_present_latency: LatencyBucket::new("attach_only_liveness"),
             drain_deferral_count: 0,
@@ -7656,6 +7702,7 @@ mod tests {
             })
             .unwrap(),
             drive: InProcessPortalDriveState::new(),
+            clock: Arc::new(SystemClock::new()),
             lease_id: None,
             portal_publish_to_present_latency: LatencyBucket::new("portal_publish_to_present"),
             drain_deferral_count: 0,
@@ -7792,6 +7839,7 @@ mod tests {
             })
             .unwrap(),
             drive: InProcessPortalDriveState::new(),
+            clock: Arc::new(SystemClock::new()),
             lease_id: None,
             portal_publish_to_present_latency: LatencyBucket::new("portal_publish_to_present"),
             drain_deferral_count: 0,
@@ -7951,6 +7999,7 @@ mod tests {
             })
             .unwrap(),
             drive: InProcessPortalDriveState::new(),
+            clock: Arc::new(SystemClock::new()),
             lease_id: None,
             portal_publish_to_present_latency: LatencyBucket::new("portal_publish_to_present"),
             drain_deferral_count: 0,
@@ -8079,6 +8128,7 @@ mod tests {
             })
             .unwrap(),
             drive: InProcessPortalDriveState::new(),
+            clock: Arc::new(SystemClock::new()),
             lease_id: None,
             portal_publish_to_present_latency: LatencyBucket::new("portal_publish_to_present"),
             drain_deferral_count: 0,
@@ -8365,6 +8415,7 @@ mod tests {
             })
             .unwrap(),
             drive: InProcessPortalDriveState::new(),
+            clock: Arc::new(SystemClock::new()),
             lease_id: None,
             portal_publish_to_present_latency: LatencyBucket::new("portal_publish_to_present"),
             drain_deferral_count: 0,
@@ -8449,6 +8500,7 @@ mod tests {
             })
             .unwrap(),
             drive: InProcessPortalDriveState::new(),
+            clock: Arc::new(SystemClock::new()),
             lease_id: None,
             portal_publish_to_present_latency: LatencyBucket::new("portal_publish_to_present"),
             drain_deferral_count: 0,

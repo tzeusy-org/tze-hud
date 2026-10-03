@@ -584,6 +584,33 @@ impl Default for FramePipeline {
     }
 }
 
+// ─── Stage 4 timed-content sweep ──────────────────────────────────────────────
+
+/// Stage 4 sweep of everything with a deadline, shared by every frame driver
+/// (windowed compositor, headless runtime, GPU-free harness) so none of them
+/// can skip a step.
+///
+/// Applies batches whose `present_at` has arrived (invariant 1), removes
+/// expired tiles and zone and widget publications, and expires leases whose
+/// TTL or orphan grace has elapsed (invariant 4). Returns the terminal lease
+/// expiries; the caller forwards them to sessions after releasing the scene
+/// lock.
+pub fn sweep_timed_scene_state(scene: &mut SceneGraph) -> Vec<tze_hud_scene::types::LeaseExpiry> {
+    for late in scene.apply_due_batches() {
+        if let Some(err) = late.error {
+            tracing::warn!(
+                batch_id = %late.batch_id,
+                error = %err,
+                "scheduled batch rejected at present_at"
+            );
+        }
+    }
+    scene.drain_expired_tiles();
+    scene.drain_expired_zone_publications();
+    scene.drain_expired_widget_publications();
+    scene.expire_leases()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
