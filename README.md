@@ -264,57 +264,23 @@ default_tab = true
 .\tze_hud.exe --config tze_hud.toml
 ```
 
-For Windows deployment automation, see [Cross-Machine Deployment](#cross-machine-deployment) below.
+To install on Windows, see [Windows install and operation](#12-windows-install-and-operation) below.
 
 CI-backed checks for the canonical path:
 - `app/tze_hud_app/tests/canonical_config_schema.rs` validates `app/tze_hud_app/config/production.toml`.
 - CI `test-unit` job runs `cargo test --workspace --all-targets --exclude integration`, which includes that test.
 
-## 1.2) Cross-Machine Deployment
+## 1.2) Windows install and operation
 
-The canonical `tze_hud` binary is designed for automated cross-machine deployment using SSH+SCP.
+CI builds a signed `tze_hud.exe` for every merge to `main` (`dev`) and every
+`v*` tag. Download it, double-click it, and pair an agent from the code on the
+HUD card. Install, pairing, update, restart, uninstall, and the `/admin`
+operator endpoints are in
+[`docs/operations/windows-install.md`](docs/operations/windows-install.md).
 
-### Prerequisites
-
-- Linux host with built canonical app binary for Windows target
-- Windows remote host reachable via SSH (tailnet or VPN)
-- SSH key-based authentication configured
-
-### Deployment Workflow
-
-**Step 1: Build Windows artifact on Linux**
-
-```bash
-# From repo root
-cargo build --bin tze_hud --release --target x86_64-pc-windows-gnu
-WINDOWS_EXE="target/x86_64-pc-windows-gnu/release/tze_hud.exe"
-echo "Artifact ready: $WINDOWS_EXE"
-```
-
-**Step 2: Deploy and launch via user-test automation**
-
-See [Cross-Machine Validation via user-test](#cross-machine-validation-via-user-test) below for the full automation script.
-
-**Key deployment points:**
-1. Verify SSH connectivity BEFORE deploying
-2. Build or locate prebuilt canonical app `.exe`
-3. Use deployment script to copy and launch on Windows
-4. **Verify MCP HTTP reachability gate BEFORE publish assertions**
-5. Publish zone test messages via MCP HTTP once endpoint is live
-
-### Deployment Artifact Identity
-
-For automation purposes, the canonical app binary produces:
-
-- **Artifact name**: `tze_hud.exe` (stable, deterministic)
-- **Linux build output**: `target/x86_64-pc-windows-gnu/release/tze_hud.exe`
-- **Windows remote path**: `C:\tze_hud\tze_hud.exe` (default deployment location)
-- **Checksum / provenance**: the `release-provenance` workflow
-  (`.github/workflows/release-provenance.yml`) cross-builds `tze_hud.exe` and
-  publishes a pipeline-generated `tze_hud.exe.sha256` alongside it as a workflow
-  artifact. Deployment automation MUST verify the artifact against the published
-  checksum (`sha256sum -c tze_hud.exe.sha256`) before activation. (Signing is
-  optional/deferred for v1.)
+The canonical binary is `tze_hud.exe` (built natively on Windows MSVC, one
+file). Release assets include `tze_hud.exe.sha256` and `tze_hud.exe.minisig`;
+verify before running (see the runbook).
 
 ## 2) Linux + TigerVNC, then connect from Windows
 
@@ -348,8 +314,7 @@ cargo run -p tze_hud_app
 ### From Windows client
 
 ```powershell
-# Secure option: tunnel VNC over SSH
-ssh -L 5901:localhost:5901 <linux-user>@<linux-host>
+# Connect to <linux-host>:5901 over your tailnet or VPN
 ```
 
 Then open TigerVNC Viewer and connect to:
@@ -358,7 +323,6 @@ Then open TigerVNC Viewer and connect to:
 localhost:5901
 ```
 
-(Direct LAN option without tunnel: `<linux-host>:5901`.)
 
 To stop VNC on Linux:
 
@@ -433,135 +397,21 @@ You should see logs for:
 - a `Publish` to `zone:status-bar`,
 - `Hold` and `Clear` of the tile.
 
-**For operational workflows**, use the **canonical runtime app binary** instead. See [Cross-Machine Deployment](#cross-machine-deployment) and [Cross-Machine Validation](#cross-machine-validation-via-user-test).
+**For operational workflows**, use the **canonical runtime app binary** instead. See [Windows install and operation](#12-windows-install-and-operation) and [Cross-machine validation](#5-cross-machine-validation-via-user-test).
 
-## 5) Cross-Machine Validation via user-test
+## 5) Cross-machine validation via user-test
 
-For automated cross-machine deployment and MCP publish validation, use the `user-test` skill workflow.
-
-### Workflow Overview
-
-1. **Build canonical app for Windows target** (Linux cross-compile)
-2. **Deploy to Windows** via SSH+SCP
-3. **MCP Reachability Gate** - Verify endpoint is live before publish
-4. **Publish test zones** - Validate MCP authentication and zone semantics
-5. **Diagnostics** - Structured failure output on endpoint/auth mismatches
-
-### Quick Start
-
-**Prerequisites:**
-- `~/.ssh/hud-ssh-key` SSH key (or override via `SSH_OPTS`)
-- Windows host: `windows-host.example` (or override `--win-host`)
-- Windows SSH user: `hud-user` (or override `--win-user`)
-- MCP test PSK in environment: `export MCP_TEST_PSK="..."`
-
-**Step 1: Verify SSH connectivity**
+Once a Windows HUD is installed and paired (see
+[`docs/operations/windows-install.md`](docs/operations/windows-install.md)), the
+`user-test` skill publishes test messages to it over MCP and drives the
+`/admin` endpoints. Everything goes over HTTP and gRPC; nothing needs a shell
+on the Windows host.
 
 ```bash
-ssh -o BatchMode=yes -o IdentitiesOnly=yes -i ~/.ssh/hud-ssh-key \
-  hud-user@windows-host.example "whoami"
+export HUD_HOST=<tailscale-ip>
+python3 .claude/skills/user-test/scripts/hud_pair.py --code <6-digit code on the HUD card> --admin
+python3 .claude/skills/user-test/scripts/hud_admin.py status
+python3 .claude/skills/user-test/scripts/publish_zone_batch.py --messages-file <messages.json>
 ```
 
-Must return `hud-user`. Do not proceed without successful key auth.
-
-**Step 2: Build canonical app for Windows**
-
-```bash
-cargo build --bin tze_hud --release --target x86_64-pc-windows-gnu
-FULL_APP_EXE="target/x86_64-pc-windows-gnu/release/tze_hud.exe"
-```
-
-**Step 3: Deploy and launch with MCP reachability gate**
-
-```bash
-# From repo root
-WIN_USER=hud-user \
-SSH_OPTS='-i ~/.ssh/hud-ssh-key -o IdentitiesOnly=yes -o BatchMode=yes' \
-.claude/skills/user-test/scripts/deploy_windows_hud.sh \
-  --win-host windows-host.example \
-  --full-app-exe "$FULL_APP_EXE" \
-  --launch-mode auto \
-  --tail
-```
-
-**Expected output:**
-- Remote exe path: `C:\tze_hud\tze_hud.exe`
-- Launcher logs tail (remote)
-
-**Step 4: Verify MCP endpoint reachability (MCP Reachability Gate)**
-
-```bash
-# Test MCP HTTP endpoint
-curl -s -X POST http://windows-host.example:9090/mcp \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $MCP_TEST_PSK" \
-  -d '{"jsonrpc":"2.0","method":"tools/list","params":{},"id":1}' | jq .
-```
-
-If the endpoint is unreachable, stop and investigate launch logs. Do not proceed to publish.
-
-**Step 5: Publish test zone messages via MCP HTTP**
-
-```bash
-# Create test message JSON
-cat > /tmp/hud-test-zones.json <<'EOF'
-[
-  {
-    "zone": "status-bar",
-    "content": {"entries": {"deploy": "live"}},
-    "key": "deploy-status"
-  },
-  {
-    "zone": "notification-area",
-    "content": {"title": "MCP", "body": "publish validation successful"},
-    "ttl_ms": 60000
-  }
-]
-EOF
-
-# Publish via MCP HTTP
-python3 .claude/skills/user-test/scripts/publish_zone_batch.py \
-  --url "http://windows-host.example:9090/mcp" \
-  --psk-env MCP_TEST_PSK \
-  --messages-file /tmp/hud-test-zones.json
-```
-
-### Troubleshooting
-
-**Symptom**: SSH connectivity fails at step 1
-- Verify `~/.ssh/hud-ssh-key` exists and has correct permissions
-- Check Windows SSH server is running
-- Verify firewall rules allow SSH (port 22)
-
-**Symptom**: Deployment succeeds but MCP endpoint unreachable
-- Check Windows target's `C:\tze_hud\logs\hud.stdout.log` and `hud.stderr.log`
-- Verify MCP HTTP endpoint config in runtime config file
-- Verify firewall allows HTTP (port 9090 by default) from Linux host
-
-**Symptom**: MCP publish request rejected with 401/403
-- Verify `MCP_TEST_PSK` environment variable is set
-- Verify PSK matches value in Windows runtime config
-- Check MCP authentication enforcement in runtime logs
-
-### Debugging Tips
-
-**Tail launcher logs on Windows:**
-
-```bash
-ssh -i ~/.ssh/hud-ssh-key hud-user@windows-host.example \
-  "powershell -Command \"Get-Content -Path 'C:\\tze_hud\\logs\\hud.launcher.log' -Tail 50 -Wait\""
-```
-
-**Stop running runtime and check process state:**
-
-```bash
-ssh -i ~/.ssh/hud-ssh-key hud-user@windows-host.example \
-  "powershell -Command \"Get-Process tze_hud -ErrorAction SilentlyContinue | Stop-Process -Force\""
-```
-
-**Verify artifact was copied:**
-
-```bash
-ssh -i ~/.ssh/hud-ssh-key hud-user@windows-host.example \
-  "powershell -Command \"Get-Item 'C:\\tze_hud\\tze_hud.exe' | Select-Object FullName, Length, LastWriteTime\""
-```
+See `.claude/skills/user-test/SKILL.md` for the full flow.

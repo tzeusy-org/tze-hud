@@ -5,8 +5,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[4]
 SKILL_ROOTS = [ROOT / d / "skills" for d in (".claude", ".opencode", ".gemini")]
-# Deleted wholesale by hud-i2e10.12 (SSH deploy tooling); not rewritten here.
-LEGACY = ROOT / ".claude/skills/user-test/subskills/portal-hud-deploy"
 DOC_SUFFIXES = {".md", ".json", ".yaml"}
 
 REMOVED_TOOL = re.compile(
@@ -23,7 +21,6 @@ def skill_files(suffixes=None):
                 path.is_file()
                 and "proto_gen" not in path.parts
                 and "__pycache__" not in path.parts
-                and LEGACY not in path.parents
                 and (suffixes is None or path.suffix in suffixes)
                 and path.suffix not in {".pyc", ".csv"}
             ):

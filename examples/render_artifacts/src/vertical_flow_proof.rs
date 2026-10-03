@@ -977,7 +977,7 @@ mod tests {
     #[test]
     fn wrong_reference_tag_fails_with_dedicated_check() {
         let mut evidence = passing_evidence();
-        evidence.reference_hardware.tag = "not-tzehouse".to_string();
+        evidence.reference_hardware.tag = "not-the-reference-host".to_string();
         let report = evaluate_evidence(evidence);
         let check = report
             .checks

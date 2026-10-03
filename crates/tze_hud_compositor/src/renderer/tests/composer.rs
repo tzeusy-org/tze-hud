@@ -2097,7 +2097,7 @@ fn input_history_block_top_slides_with_scroll_offset() {
 /// hud-3nus3: the input-history band is placed on the side of the composer box
 /// AWAY from its anchored edge, so a viewer's submissions always have on-pane
 /// room to paint. This is the pure geometry proof for the live report "input
-/// tracked, nothing rendered" on the tzehouse exemplar (`portal.composer.anchor
+/// tracked, nothing rendered" on the live exemplar (`portal.composer.anchor
 /// = top`): with a top-pinned composer box the old band-above-box collapsed to
 /// zero height and the whole history silently failed to paint. No rasterizer, no
 /// GPU — asserts the band/block geometry directly.

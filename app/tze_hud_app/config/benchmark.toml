@@ -2,8 +2,8 @@
 #
 # This config is intentionally separate from production.toml. Use it for live
 # Windows performance and soak runs where resident benchmark agents need
-# explicit widget/zone publish grants. Deploy as C:\tze_hud\benchmark.toml and
-# launch with scripts/windows/install_benchmark_hud_task.ps1.
+# explicit widget/zone publish grants. Launch with
+# `tze_hud.exe --config <path to this file>`.
 #
 # Production safety:
 # - does not change the default production config
