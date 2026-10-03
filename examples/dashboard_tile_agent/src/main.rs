@@ -123,16 +123,13 @@ async fn run_headless(dev_mode: bool) -> Result<(), Box<dyn std::error::Error>> 
         width: 1920,
         height: 1080,
         grpc_port: GRPC_PORT,
-        // This example is a demo entrypoint where external agents connect;
-        // opt in to all-interfaces binding so connections from outside loopback work.
-        bind_all_interfaces: true,
         agents,
         config_toml,
     };
 
     let runtime = HeadlessRuntime::new(config).await?;
     let _server = runtime.start_grpc_server().await?;
-    println!("Runtime initialized: 1920x1080, gRPC on [::]:{GRPC_PORT}\n");
+    println!("Runtime initialized: 1920x1080, gRPC on [::1]:{GRPC_PORT}\n");
 
     // ─────────────────────────────────────────────────────────────────────────
     // PHASE 1: Session Establishment (tasks.md §1.1–1.2)
@@ -335,10 +332,9 @@ pub async fn do_content_update(
     resource_id_bytes: Vec<u8>,
     cycle: u32,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // The server in run_headless uses bind_all_interfaces: true (dual-stack [::]),
-    // which accepts IPv4-mapped connections on 127.0.0.1.
+    // The headless server binds IPv6 loopback ([::1]) only.
     do_content_update_with_host(
-        "127.0.0.1",
+        "[::1]",
         port,
         psk,
         agent_id,
@@ -354,9 +350,7 @@ pub async fn do_content_update(
 /// Reconnects with `SessionResume` and the tile's resume token, so the update
 /// runs under the same lease that owns the tile, then stores the new token.
 ///
-/// Tests that spin up a server with `bind_all_interfaces = false` (which binds
-/// `[::1]` not `[::]`) must pass `host = "[::1]"` so the client connects on
-/// the same interface as the server.
+/// The headless server binds `[::1]`, so callers pass `host = "[::1]"`.
 #[allow(clippy::too_many_arguments)]
 async fn do_content_update_with_host(
     host: &str,
@@ -824,23 +818,18 @@ pub async fn establish_session() -> Result<SessionState, Box<dyn std::error::Err
 /// Accepts connection parameters so tests can spin up isolated runtimes on
 /// ephemeral ports without conflicting with production constants.
 ///
-/// Connects to `http://127.0.0.1:{port}` — suitable for dual-stack servers
-/// (`bind_all_interfaces = true`, which binds `[::]`).  For tests that start a
-/// loopback-only server (`bind_all_interfaces = false`, which binds `[::1]`),
-/// call [`establish_session_with_host`] and pass `"[::1]"` explicitly.
+/// Connects to `http://[::1]:{port}`, where the headless server listens.
 async fn establish_session_with(
     port: u16,
     psk: &str,
     agent_id: &str,
 ) -> Result<SessionState, Box<dyn std::error::Error>> {
-    establish_session_with_host("127.0.0.1", port, psk, agent_id).await
+    establish_session_with_host("[::1]", port, psk, agent_id).await
 }
 
 /// Like [`establish_session_with`] but accepts an explicit `host` address.
 ///
-/// Tests that spin up a server with `bind_all_interfaces = false` (which binds
-/// `[::1]` not `[::]`) must pass `host = "[::1]"` so the client connects on
-/// the same interface as the server.
+/// The headless server binds `[::1]`, so callers pass `host = "[::1]"`.
 async fn establish_session_with_host(
     host: &str,
     port: u16,
@@ -1046,16 +1035,13 @@ pub async fn request_lease(
     psk: &str,
     agent_id: &str,
 ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-    // The server in run_headless uses bind_all_interfaces: true (dual-stack [::]),
-    // which accepts IPv4-mapped connections on 127.0.0.1.
-    request_lease_with_host("127.0.0.1", port, psk, agent_id).await
+    // The headless server binds IPv6 loopback ([::1]) only.
+    request_lease_with_host("[::1]", port, psk, agent_id).await
 }
 
 /// Like [`request_lease`] but accepts an explicit `host` address.
 ///
-/// Tests that spin up a server with `bind_all_interfaces = false` (which binds
-/// `[::1]` not `[::]`) must pass `host = "[::1]"` so the client connects on
-/// the same interface as the server.
+/// The headless server binds `[::1]`, so callers pass `host = "[::1]"`.
 async fn request_lease_with_host(
     host: &str,
     port: u16,
@@ -1348,16 +1334,13 @@ pub async fn create_tile_batch(
     agent_id: &str,
     resource_id_bytes: Vec<u8>,
 ) -> Result<TileCreationState, Box<dyn std::error::Error>> {
-    // The server in run_headless uses bind_all_interfaces: true (dual-stack [::]),
-    // which accepts IPv4-mapped connections on 127.0.0.1.
-    create_tile_batch_with_host("127.0.0.1", port, psk, agent_id, resource_id_bytes).await
+    // The headless server binds IPv6 loopback ([::1]) only.
+    create_tile_batch_with_host("[::1]", port, psk, agent_id, resource_id_bytes).await
 }
 
 /// Like [`create_tile_batch`] but accepts an explicit `host` address.
 ///
-/// Tests that spin up a server with `bind_all_interfaces = false` (which binds
-/// `[::1]` not `[::]`) must pass `host = "[::1]"` so the client connects on
-/// the same interface as the server.
+/// The headless server binds `[::1]`, so callers pass `host = "[::1]"`.
 async fn create_tile_batch_with_host(
     host: &str,
     port: u16,
@@ -1848,7 +1831,7 @@ mod tests {
     /// same pattern used across the integration test suite.
     ///
     /// Binds on `[::1]:0` (IPv6 loopback) to match the default
-    /// `HeadlessConfig { bind_all_interfaces: false }` server bind address.
+    /// the `HeadlessConfig` server bind address.
     fn ephemeral_port() -> u16 {
         let listener = std::net::TcpListener::bind("[::1]:0").expect("bind ephemeral port");
         let port = listener.local_addr().expect("get local addr").port();
@@ -1864,7 +1847,6 @@ mod tests {
             height: 600,
             grpc_port: port,
             // Loopback-only ([::1]) — tests connect via "[::1]" to match.
-            bind_all_interfaces: false,
             agents: tze_hud_scene::config::AgentDirectory::unrestricted(TEST_PSK),
             config_toml: None, // dev-mode: unrestricted capabilities
         };
@@ -2015,7 +1997,6 @@ mod tests {
             height: 1080,
             grpc_port: port,
             // Loopback-only ([::1]) — tests connect via "[::1]" to match.
-            bind_all_interfaces: false,
             agents: tze_hud_scene::config::AgentDirectory::unrestricted(TEST_PSK),
             config_toml: None, // dev-mode: unrestricted capabilities
         };

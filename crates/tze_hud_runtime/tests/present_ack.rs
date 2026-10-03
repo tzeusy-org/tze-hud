@@ -31,7 +31,6 @@ async fn make_runtime() -> HeadlessRuntime {
         width: 320,
         height: 240,
         grpc_port: 0,
-        bind_all_interfaces: false,
         agents: tze_hud_scene::config::AgentDirectory::unrestricted("test"),
         config_toml: None,
     };

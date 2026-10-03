@@ -85,7 +85,6 @@ mod calibration {
             width: 1920,
             height: 1080,
             grpc_port: 0,
-            bind_all_interfaces: false,
             agents: tze_hud_scene::config::AgentDirectory::unrestricted(PSK),
             config_toml: Some(String::new()),
         }
@@ -332,12 +331,14 @@ mod calibration {
         let portal_task = spawn_portal_driver(portal_rx);
         let shutdown = ShutdownToken::new();
         let config = McpServerConfig {
-            bind_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
+            bind_addrs: vec![SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0)],
+            late_tailnet_port: None,
             agents: tze_hud_scene::config::AgentDirectory::unrestricted(PSK).shared(),
         };
-        let (server_task, address) =
+        let (server_task, addresses) =
             start_mcp_http_server(scene, config, shutdown.clone(), Some(portal_tx.clone())).await?;
-        let driver_output = tokio::task::spawn_blocking(move || run_python_driver(address)).await?;
+        let driver_output =
+            tokio::task::spawn_blocking(move || run_python_driver(addresses[0])).await?;
         let output = build_output(driver_output);
         if let Some(parent) = output_path.parent() {
             std::fs::create_dir_all(parent)?;

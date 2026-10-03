@@ -79,23 +79,8 @@ pub struct HeadlessConfig {
     /// gRPC server port.  Set to `0` to disable the gRPC server entirely
     /// (useful for tests that only need rendering, not session management).
     ///
-    /// The gRPC server defaults to loopback-only binding (`[::1]`) for
-    /// security.  To expose it on all interfaces, set `bind_all_interfaces =
-    /// true` or the `TZE_HUD_BIND_ALL_INTERFACES=1` environment variable.
+    /// The headless gRPC server binds IPv6 loopback (`[::1]`) only.
     pub grpc_port: u16,
-    /// Bind the gRPC server on all interfaces (`[::]`) instead of loopback
-    /// only (`[::1]`).
-    ///
-    /// **Security opt-in (hud-d2lld).** The default is `false` — the server
-    /// binds `[::1]` only, preventing LAN/tailnet access.  Set this to `true`
-    /// only when you deliberately need remote-agent or cloud-relay access.
-    /// When enabled, all connections still require PSK authentication.
-    ///
-    /// Can also be set via the `TZE_HUD_BIND_ALL_INTERFACES=1` environment
-    /// variable (mirrors the windowed runtime opt-in, hud-1aswu.1).
-    ///
-    /// Default: `false`.
-    pub bind_all_interfaces: bool,
     /// The agents that may connect: paired agents (from `agents.toml`, see
     /// `tze_hud_config::AgentsFile`) and, for tests and dev, an
     /// [`AgentDirectory::unrestricted`] dev PSK.
@@ -127,7 +112,6 @@ impl Default for HeadlessConfig {
             width: 1920,
             height: 1080,
             grpc_port: 50051,
-            bind_all_interfaces: false,
             agents: AgentDirectory::unrestricted("test-key"),
             config_toml: None,
         }
@@ -699,30 +683,11 @@ impl HeadlessRuntime {
             return Err("start_grpc_server: grpc_port = 0 (gRPC server disabled)".into());
         }
 
-        // Security fix (hud-d2lld): default to loopback ([::1]); opt-in for all
-        // interfaces ([::]) via bind_all_interfaces or TZE_HUD_BIND_ALL_INTERFACES=1.
-        //
-        // Using [::1] (IPv6 loopback) rather than 127.0.0.1 (IPv4 loopback) because:
-        // - The previous wildcard bind was [::] (IPv6), not 0.0.0.0 (IPv4)
-        // - All integration tests connect via http://[::1]:{port}; switching to
-        //   127.0.0.1 would break them without reciprocal client changes.
-        //
-        // When bind_all_interfaces is true, [::] binds dual-stack on Linux
-        // (net.ipv6.bindv6only=0 default), accepting both [::1] and 127.0.0.1.
-        //
-        // Binding before spawning eliminates the race that required the previous
-        // 50ms sleep: the port is ready before this function returns.
-        let bind_all = self.config.bind_all_interfaces
-            || std::env::var("TZE_HUD_BIND_ALL_INTERFACES")
-                .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-                .unwrap_or(false);
-        let grpc_bind_host = if bind_all { "[::]" } else { "[::1]" };
-        tracing::info!(
-            bind_all,
-            grpc_bind_host,
-            "headless gRPC: bind address selected (hud-d2lld)"
-        );
-        let bind_addr = format!("{grpc_bind_host}:{}", self.config.grpc_port);
+        // Loopback only. [::1] (IPv6) rather than 127.0.0.1 because the
+        // integration tests connect via http://[::1]:{port}.
+        // Binding before spawning eliminates the race that required a sleep:
+        // the port is ready before this function returns.
+        let bind_addr = format!("[::1]:{}", self.config.grpc_port);
         let listener = tokio::net::TcpListener::bind(&bind_addr)
             .await
             .map_err(|e| format!("gRPC server: failed to bind {bind_addr}: {e}"))?;
@@ -1031,7 +996,6 @@ mod tests {
             width: 64,
             height: 64,
             grpc_port: 0,
-            bind_all_interfaces: false,
             agents: AgentDirectory::unrestricted("idle-efficiency-test"),
             config_toml: None,
         })
@@ -1069,7 +1033,6 @@ mod tests {
             width: 1_000,
             height: 500,
             grpc_port: 0,
-            bind_all_interfaces: false,
             agents: AgentDirectory::unrestricted("transparent-overlap-efficiency-test"),
             config_toml: None,
         };
@@ -1079,7 +1042,6 @@ mod tests {
             width: config.width,
             height: config.height,
             grpc_port: config.grpc_port,
-            bind_all_interfaces: config.bind_all_interfaces,
             agents: config.agents.clone(),
             config_toml: config.config_toml.clone(),
         })
@@ -1313,7 +1275,6 @@ mod tests {
             width: 1_000,
             height: 500,
             grpc_port: 0,
-            bind_all_interfaces: false,
             agents: AgentDirectory::unrestricted("transparent-overlap-intruding-grip-test"),
             config_toml: None,
         })
@@ -1391,7 +1352,6 @@ mod tests {
             width: 1_000,
             height: 500,
             grpc_port: 0,
-            bind_all_interfaces: false,
             agents: AgentDirectory::unrestricted("change-efficiency-test"),
             config_toml: None,
         })
@@ -1717,7 +1677,6 @@ mod tests {
             width: 64,
             height: 64,
             grpc_port: 0,
-            bind_all_interfaces: false,
             agents: AgentDirectory::unrestricted("test"),
             config_toml: None,
         };
@@ -1737,7 +1696,6 @@ mod tests {
             width: 64,
             height: 64,
             grpc_port: 0,
-            bind_all_interfaces: false,
             agents: AgentDirectory::unrestricted("test"),
             config_toml: None,
         };
@@ -1795,7 +1753,6 @@ mod tests {
             width: 128,
             height: 96,
             grpc_port: 0,
-            bind_all_interfaces: false,
             agents: AgentDirectory::unrestricted("test"),
             config_toml: None,
         };
@@ -1826,7 +1783,6 @@ mod tests {
             width: 64,
             height: 64,
             grpc_port: 0,
-            bind_all_interfaces: false,
             agents: AgentDirectory::unrestricted("test"),
             config_toml: None,
         };
@@ -1866,7 +1822,7 @@ mod tests {
         // Bind to [::1]:0 to get an ephemeral port, then release the listener
         // before tonic binds.  We use [::1] (IPv6 loopback) rather than
         // 127.0.0.1 (IPv4) so the probe address matches the gRPC server's
-        // default bind address (bind_all_interfaces=false → [::1]).  An IPv4
+        // default bind address ([::1]).  An IPv4
         // probe does not guarantee the same port number is free on IPv6.
         let listener = std::net::TcpListener::bind("[::1]:0").unwrap();
         let free_port = listener.local_addr().unwrap().port();
@@ -1876,7 +1832,6 @@ mod tests {
             width: 64,
             height: 64,
             grpc_port: free_port,
-            bind_all_interfaces: false,
             agents: AgentDirectory::unrestricted("test"),
             config_toml: None,
         };
@@ -1907,7 +1862,6 @@ mod tests {
             width: 64,
             height: 64,
             grpc_port: 0,
-            bind_all_interfaces: false,
             agents: AgentDirectory::unrestricted("test"),
             config_toml: None,
         };
@@ -1926,7 +1880,6 @@ mod tests {
                 width: 64,
                 height: 64,
                 grpc_port: 0,
-                bind_all_interfaces: false,
                 agents: AgentDirectory::default(),
                 config_toml: Some(toml.to_string()),
             }
@@ -1996,7 +1949,6 @@ default_tab = true
             width: 64,
             height: 64,
             grpc_port: 0,
-            bind_all_interfaces: false,
             agents: AgentDirectory::unrestricted("test"),
             config_toml: Some(toml.to_string()),
         };
@@ -2136,7 +2088,6 @@ default_tab = true
             width: 64,
             height: 64,
             grpc_port: 0,
-            bind_all_interfaces: false,
             agents: AgentDirectory::unrestricted("test"),
             config_toml: None,
         };
@@ -2331,7 +2282,6 @@ default_tab = true
             width: 64,
             height: 64,
             grpc_port: 0,
-            bind_all_interfaces: false,
             agents: AgentDirectory::unrestricted("test"),
             config_toml: None,
         };
@@ -2343,145 +2293,5 @@ default_tab = true
             runtime.compositor.token_map.is_empty(),
             "compositor token_map should be empty when config_toml is None"
         );
-    }
-
-    // ── bind_all_interfaces tests (hud-d2lld) ─────────────────────────────────
-    //
-    // These tests verify that `start_grpc_server` honours the new security
-    // default: loopback-only (`[::1]`) unless `bind_all_interfaces = true` or
-    // `TZE_HUD_BIND_ALL_INTERFACES=1` is set.
-    //
-    // We use port 0 so the OS assigns an ephemeral port and confirm whether the
-    // resulting bound address is loopback or wildcard.  The `TcpListener::local_addr`
-    // call reads back the OS-assigned address for the assertion.
-
-    /// Serialize all tests that mutate env vars.  `tokio::sync::Mutex` is used
-    /// so the guard can be held across `.await` points, preventing races between
-    /// concurrent Tokio test tasks that read the same env var.
-    ///
-    /// Pattern mirrors `tze_hud_compositor::renderer::ENV_VAR_MUTEX`.
-    static ENV_VAR_MUTEX: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
-
-    /// Default bind (`bind_all_interfaces = false`, env var absent) must use
-    /// `[::1]` (IPv6 loopback), not `[::]` (all interfaces).
-    ///
-    /// We verify by binding a `TcpListener` on `[::1]:0`, getting the port, then
-    /// starting the server on that port.  If the server binds `[::]` it will try
-    /// to own all interfaces and would *also* accept the port on `[::1]` — the
-    /// port would already be taken (we bind first).  We use a different strategy:
-    /// check the local_addr of a fresh bind on `[::]:0`; if the server is already
-    /// on that port, the bind would fail.  Instead, we start the server first with
-    /// `[::1]:0` (port chosen by OS) and verify `start_grpc_server` succeeds,
-    /// confirming it resolves to `[::1]`.
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn test_start_grpc_server_default_binds_loopback() {
-        let _guard = ENV_VAR_MUTEX.lock().await;
-        // SAFETY: serialised by ENV_VAR_MUTEX; guard held for the full test.
-        unsafe {
-            std::env::remove_var("TZE_HUD_BIND_ALL_INTERFACES");
-        }
-
-        // Pick a free port via [::1]:0 — this proves the default bind host is [::1].
-        let probe = tokio::net::TcpListener::bind("[::1]:0").await.unwrap();
-        let free_port = probe.local_addr().unwrap().port();
-        drop(probe);
-
-        let config = HeadlessConfig {
-            width: 64,
-            height: 64,
-            grpc_port: free_port,
-            bind_all_interfaces: false, // explicit default
-            agents: AgentDirectory::unrestricted("test"),
-            config_toml: None,
-        };
-        let _runtime_guard = crate::test_support::lock_headless_runtime().await;
-        let runtime = HeadlessRuntime::new(config).await.expect("runtime init");
-        let handle = runtime
-            .start_grpc_server()
-            .await
-            .expect("default loopback bind must succeed on [::1]");
-        assert!(
-            !handle.is_finished(),
-            "gRPC server task must be running after loopback bind"
-        );
-        handle.abort();
-    }
-
-    /// When `bind_all_interfaces = true`, `start_grpc_server` must bind `[::]`
-    /// (all interfaces), not just `[::1]`.
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn test_start_grpc_server_bind_all_interfaces_flag_uses_wildcard() {
-        let _guard = ENV_VAR_MUTEX.lock().await;
-        // SAFETY: serialised by ENV_VAR_MUTEX; guard held for the full test.
-        unsafe {
-            std::env::remove_var("TZE_HUD_BIND_ALL_INTERFACES");
-        }
-
-        // Pick a free port via [::]:0 — proving the bind host is [::].
-        let probe = tokio::net::TcpListener::bind("[::]:0").await.unwrap();
-        let free_port = probe.local_addr().unwrap().port();
-        drop(probe);
-
-        let config = HeadlessConfig {
-            width: 64,
-            height: 64,
-            grpc_port: free_port,
-            bind_all_interfaces: true, // opt-in
-            agents: AgentDirectory::unrestricted("test"),
-            config_toml: None,
-        };
-        let _runtime_guard = crate::test_support::lock_headless_runtime().await;
-        let runtime = HeadlessRuntime::new(config).await.expect("runtime init");
-        let handle = runtime
-            .start_grpc_server()
-            .await
-            .expect("wildcard bind must succeed when bind_all_interfaces = true");
-        assert!(
-            !handle.is_finished(),
-            "gRPC server task must be running after wildcard bind"
-        );
-        handle.abort();
-    }
-
-    /// When `TZE_HUD_BIND_ALL_INTERFACES=1` is set, `start_grpc_server` must
-    /// bind `[::]` even when `bind_all_interfaces = false` in the config.
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn test_start_grpc_server_env_var_overrides_config_to_wildcard() {
-        let _guard = ENV_VAR_MUTEX.lock().await;
-        // SAFETY: serialised by ENV_VAR_MUTEX; guard held for the full test.
-        unsafe {
-            std::env::set_var("TZE_HUD_BIND_ALL_INTERFACES", "1");
-        }
-
-        // Allocate port while holding the guard.
-        let probe = std::net::TcpListener::bind("[::]:0").unwrap();
-        let free_port = probe.local_addr().unwrap().port();
-        drop(probe);
-
-        let config = HeadlessConfig {
-            width: 64,
-            height: 64,
-            grpc_port: free_port,
-            bind_all_interfaces: false, // config says no, but env var overrides
-            agents: AgentDirectory::unrestricted("test"),
-            config_toml: None,
-        };
-        let _runtime_guard = crate::test_support::lock_headless_runtime().await;
-        let runtime = HeadlessRuntime::new(config).await.expect("runtime init");
-        let handle = runtime
-            .start_grpc_server()
-            .await
-            .expect("env var TZE_HUD_BIND_ALL_INTERFACES=1 must activate wildcard bind");
-        assert!(
-            !handle.is_finished(),
-            "gRPC server task must be running after env-var-activated wildcard bind"
-        );
-        handle.abort();
-
-        // Clean up env var so other tests are not affected.
-        // SAFETY: serialised by ENV_VAR_MUTEX; guard still held.
-        unsafe {
-            std::env::remove_var("TZE_HUD_BIND_ALL_INTERFACES");
-        }
     }
 }

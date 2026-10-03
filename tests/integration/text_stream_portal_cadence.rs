@@ -81,7 +81,6 @@ fn cadence_bench_config() -> HeadlessConfig {
         width: DISPLAY_W,
         height: DISPLAY_H,
         grpc_port: 0,
-        bind_all_interfaces: false,
         agents: tze_hud_scene::config::AgentDirectory::unrestricted("cadence-test-key"),
         config_toml: None,
     }

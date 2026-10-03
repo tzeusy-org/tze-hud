@@ -581,7 +581,6 @@ async fn test_soak_resource_growth() -> Result<(), Box<dyn std::error::Error>> {
         width: DISPLAY_W,
         height: DISPLAY_H,
         grpc_port: SOAK_GRPC_PORT,
-        bind_all_interfaces: false,
         agents: tze_hud_scene::config::AgentDirectory::unrestricted(SOAK_PSK),
         config_toml: None,
     };
@@ -804,7 +803,6 @@ async fn test_post_disconnect_cleanup() -> Result<(), Box<dyn std::error::Error>
         width: DISPLAY_W,
         height: DISPLAY_H,
         grpc_port,
-        bind_all_interfaces: false,
         agents: tze_hud_scene::config::AgentDirectory::unrestricted(SOAK_PSK),
         config_toml: None,
     };
@@ -1002,7 +1000,6 @@ async fn test_lease_expiry_frees_resources() -> Result<(), Box<dyn std::error::E
         width: DISPLAY_W,
         height: DISPLAY_H,
         grpc_port,
-        bind_all_interfaces: false,
         agents: tze_hud_scene::config::AgentDirectory::unrestricted(SOAK_PSK),
         config_toml: None,
     };

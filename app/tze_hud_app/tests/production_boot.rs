@@ -20,7 +20,6 @@ fn canonical_headless_config() -> HeadlessConfig {
         width: 320,
         height: 240,
         grpc_port: 0,
-        bind_all_interfaces: false,
         agents: tze_hud_scene::config::AgentDirectory::unrestricted(
             "canonical-app-production-boot-test",
         ),

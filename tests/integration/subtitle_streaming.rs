@@ -99,7 +99,6 @@ async fn start_runtime_with_subtitle_zone(
         width: DISPLAY_W,
         height: DISPLAY_H,
         grpc_port: port,
-        bind_all_interfaces: false,
         agents: tze_hud_scene::config::AgentDirectory::unrestricted(TEST_PSK),
         config_toml: None,
     };

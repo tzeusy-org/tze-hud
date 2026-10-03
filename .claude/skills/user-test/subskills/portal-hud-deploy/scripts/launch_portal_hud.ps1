@@ -94,7 +94,7 @@ try {
 
     # ── Register the overlay task (exe-direct, NO wrapper, NO redirect) ───────
     Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
-    $argline = "--config $ConfigPath --window-mode overlay --bind-all-interfaces --grpc-port $GrpcPort --mcp-port $McpPort"
+    $argline = "--config $ConfigPath --window-mode overlay --grpc-port $GrpcPort --mcp-port $McpPort"
     $action = New-ScheduledTaskAction -Execute $ExePath -Argument $argline -WorkingDirectory $WorkingDir
     # ExecutionTimeLimit MUST be unlimited (PT0S) — the overlay is a long-lived
     # presence runtime, not a batch job. A finite limit makes Windows TERMINATE

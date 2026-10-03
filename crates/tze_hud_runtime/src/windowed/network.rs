@@ -11,7 +11,7 @@ use tze_hud_protocol::session_server::{HudSessionImpl, SessionDeps};
 use tze_hud_scene::config::{ConfigLoader, SharedAgents};
 
 use super::WindowedConfig;
-use super::config::select_grpc_bind_host;
+use crate::net_addrs::{listen_addrs, local_ips, tailnet_addrs, watch_for_tailnet};
 use crate::reload_triggers::RuntimeServiceImpl;
 use crate::runtime_context::{RuntimeContext, SharedRuntimeContext};
 use crate::threads::NetworkRuntime;
@@ -84,31 +84,31 @@ pub(super) fn build_runtime_context(cfg: &WindowedConfig) -> SharedRuntimeContex
 
 /// Start network services (gRPC) on a dedicated Tokio multi-thread runtime.
 ///
-/// Returns `(network_rt, handles, ..., grpc_bound_addr)`:
+/// Returns `(network_rt, handles, ..., grpc_bound_addrs)`:
 /// - `network_rt` is `Some(NetworkRuntime)` when `grpc_port != 0`; `None` if
 ///   all services are disabled (port 0 disables gRPC).
 /// - `handles` contains join handles for each spawned server task.
-/// - `grpc_bound_addr` is `Some` with the *actually bound* socket address when
-///   gRPC is enabled and bound successfully; `None` when gRPC is disabled.
+/// - `grpc_bound_addrs` are the *actually bound* socket addresses when gRPC is
+///   enabled and bound successfully; empty when gRPC is disabled.
 ///
 /// ## gRPC server
 ///
-/// When `grpc_port != 0`, starts the `HudSession` gRPC server. The bind
-/// address is `127.0.0.1:grpc_port` by default (loopback only) unless
-/// `bind_all_interfaces` is `true`, in which case it binds `0.0.0.0:grpc_port`
-/// (all interfaces - explicit opt-in required, hud-1aswu.1).
+/// When `grpc_port != 0`, starts the `HudSession` gRPC server on
+/// `127.0.0.1:grpc_port` plus every local Tailscale address (see
+/// [`crate::net_addrs`]); nothing else. A Tailscale address that appears after
+/// startup gets a listener too.
 /// Setting `grpc_port = 0` skips server creation (compositor-only mode).
 ///
-/// The listener is bound *eagerly* (before the serve task is spawned) so a
-/// port conflict fails startup fast and the returned `grpc_bound_addr` reflects
-/// a listener that is genuinely up — rather than an address the serve task
+/// The listeners are bound *eagerly* (before the serve task is spawned) so a
+/// port conflict fails startup fast and the returned `grpc_bound_addrs` reflect
+/// listeners that are genuinely up — rather than an address the serve task
 /// might fail to bind asynchronously (hud-ylwqc).
 ///
 /// ## Errors
 ///
 /// Returns `Err` if the `NetworkRuntime` Tokio runtime cannot be created, if
-/// the gRPC server address fails to parse, or if the gRPC listener fails to
-/// bind (e.g. the port is already in use).
+/// or if the loopback gRPC listener fails to bind (e.g. the port is already in
+/// use).
 type NetworkServices = (
     Option<NetworkRuntime>,
     Vec<tokio::task::JoinHandle<()>>,
@@ -117,7 +117,7 @@ type NetworkServices = (
     Option<tokio::sync::broadcast::Sender<tze_hud_protocol::proto::FramePresented>>,
     Option<tze_hud_protocol::session_server::DegradationNoticeSender>,
     Option<tze_hud_protocol::session_server::LeaseExpirySender>,
-    Option<std::net::SocketAddr>,
+    Vec<std::net::SocketAddr>,
 );
 
 #[allow(clippy::type_complexity)] // return type is self-documenting in this internal helper
@@ -127,14 +127,12 @@ pub(super) fn start_network_services(
     agents: SharedAgents,
     shared_state: Arc<Mutex<SharedState>>,
     runtime_context: SharedRuntimeContext,
-    bind_all_interfaces: bool,
 ) -> Result<NetworkServices, Box<dyn std::error::Error>> {
     start_network_services_with_render_wake(
         grpc_port,
         agents,
         shared_state,
         runtime_context,
-        bind_all_interfaces,
         tze_hud_scene::render_wake::RenderWakeNotifier::default(),
     )
 }
@@ -145,7 +143,6 @@ pub(super) fn start_network_services_with_render_wake(
     agents: SharedAgents,
     shared_state: Arc<Mutex<SharedState>>,
     runtime_context: SharedRuntimeContext,
-    bind_all_interfaces: bool,
     render_wake: tze_hud_scene::render_wake::RenderWakeNotifier,
 ) -> Result<NetworkServices, Box<dyn std::error::Error>> {
     if grpc_port == 0 {
@@ -155,23 +152,15 @@ pub(super) fn start_network_services_with_render_wake(
         // Compositor-only mode: no session, so no present-ack subscriber. The
         // compositor thread still drains the present-ack queue (bounded memory)
         // but has no sender to broadcast on (hud-4va6q).
-        return Ok((None, Vec::new(), None, None, None, None, None, None));
+        return Ok((None, Vec::new(), None, None, None, None, None, Vec::new()));
     }
 
     // Build the multi-thread Tokio runtime for network tasks.
     let network_rt = NetworkRuntime::new()
         .map_err(|e| format!("windowed runtime: failed to build network Tokio runtime: {e}"))?;
 
-    // Security fix (hud-1aswu.1): default to loopback; opt-in for all interfaces.
-    let grpc_bind_host = select_grpc_bind_host(bind_all_interfaces);
-    tracing::info!(
-        bind_all_interfaces,
-        grpc_bind_host,
-        "gRPC: bind address selected (hud-1aswu.1)"
-    );
-    let addr: std::net::SocketAddr = format!("{grpc_bind_host}:{grpc_port}")
-        .parse()
-        .map_err(|e| format!("windowed runtime: invalid gRPC address (port {grpc_port}): {e}"))?;
+    // Loopback plus the local Tailscale addresses, nothing else.
+    let addrs = listen_addrs(&local_ips(), grpc_port);
 
     let service = HudSessionImpl::from_deps(SessionDeps {
         resource_budget: runtime_context.resource_budget(),
@@ -206,45 +195,77 @@ pub(super) fn start_network_services_with_render_wake(
     // Wire RuntimeService (ReloadConfig RPC) alongside HudSession.
     let runtime_svc = RuntimeServiceImpl::new(Arc::clone(&runtime_context));
 
-    tracing::info!(grpc_addr = %addr, "windowed runtime: starting gRPC server");
-
-    // Bind the gRPC listener eagerly (hud-ylwqc). `std::net::TcpListener::bind`
-    // is synchronous and needs no reactor, so we learn immediately whether the
-    // port is available and can surface a genuine bound address — instead of
-    // letting `tonic::Server::serve(addr)` bind lazily inside the spawned task
-    // where a conflict would only be logged after we already reported "ready".
-    let std_listener = std::net::TcpListener::bind(addr)
-        .map_err(|e| format!("windowed runtime: failed to bind gRPC listener on {addr}: {e}"))?;
-    std_listener.set_nonblocking(true).map_err(|e| {
-        format!("windowed runtime: failed to set gRPC listener non-blocking on {addr}: {e}")
-    })?;
-    let grpc_bound_addr = std_listener
-        .local_addr()
-        .map_err(|e| format!("windowed runtime: failed to read gRPC local_addr: {e}"))?;
-
-    // Spawn the combined gRPC server task onto the network runtime, serving over
-    // the already-bound listener via `serve_with_incoming`.
-    let handle = network_rt.rt.spawn(async move {
-        // `from_std` requires a Tokio reactor, so it runs inside the task.
-        let tokio_listener = match tokio::net::TcpListener::from_std(std_listener) {
-            Ok(l) => l,
-            Err(e) => {
-                tracing::error!(error = %e, "gRPC: failed to adopt bound listener into Tokio runtime");
-                return;
+    // Bind the listeners eagerly (hud-ylwqc). `std::net::TcpListener::bind` is
+    // synchronous and needs no reactor, so a port conflict fails startup fast
+    // and the returned addresses belong to listeners that are genuinely up.
+    // Loopback must bind; a Tailscale address that fails to bind is skipped.
+    let mut std_listeners = Vec::with_capacity(addrs.len());
+    for (i, addr) in addrs.iter().enumerate() {
+        match bind_nonblocking(*addr) {
+            Ok(l) => std_listeners.push(l),
+            Err(e) if i == 0 => {
+                return Err(format!(
+                    "windowed runtime: failed to bind gRPC listener on {addr}: {e}"
+                )
+                .into());
             }
-        };
-        let incoming = tokio_stream::wrappers::TcpListenerStream::new(tokio_listener);
+            Err(e) => {
+                tracing::warn!(addr = %addr, error = %e, "gRPC: failed to bind Tailscale address")
+            }
+        }
+    }
+    let grpc_bound_addrs = std_listeners
+        .iter()
+        .map(std::net::TcpListener::local_addr)
+        .collect::<std::io::Result<Vec<_>>>()
+        .map_err(|e| format!("windowed runtime: failed to read gRPC local_addr: {e}"))?;
+    let has_tailnet =
+        !tailnet_addrs(&grpc_bound_addrs.iter().map(|a| a.ip()).collect::<Vec<_>>()).is_empty();
+
+    // One accept task per listener feeds a single stream into the server, so
+    // listeners can be added later (a Tailscale address that appears after
+    // startup) without restarting it.
+    let (conn_tx, conn_rx) =
+        tokio::sync::mpsc::channel::<std::io::Result<tokio::net::TcpStream>>(64);
+    let accept_tx = conn_tx.clone();
+    let handle = network_rt.rt.spawn(async move {
+        for l in std_listeners {
+            // `from_std` requires a Tokio reactor, so it runs inside the task.
+            match tokio::net::TcpListener::from_std(l) {
+                Ok(l) => {
+                    tokio::spawn(accept_into(l, accept_tx.clone()));
+                }
+                Err(e) => tracing::error!(error = %e, "gRPC: failed to adopt bound listener into Tokio runtime"),
+            }
+        }
+        drop(accept_tx);
         tonic::transport::Server::builder()
             .add_service(HudSessionServer::new(service))
             .add_service(RuntimeServiceServer::new(runtime_svc))
-            .serve_with_incoming(incoming)
+            .serve_with_incoming(tokio_stream::wrappers::ReceiverStream::new(conn_rx))
             .await
             .unwrap_or_else(|e| {
                 tracing::error!(error = %e, "gRPC server exited with error");
             });
     });
+    if has_tailnet {
+        drop(conn_tx);
+    } else {
+        network_rt
+            .rt
+            .spawn(watch_for_tailnet(move |ip| {
+                let addr = std::net::SocketAddr::new(ip, grpc_port);
+                match bind_nonblocking(addr).and_then(tokio::net::TcpListener::from_std) {
+                    Ok(l) => {
+                        tracing::info!(addr = %addr, "gRPC listener bound (Tailscale address appeared)");
+                        tokio::spawn(accept_into(l, conn_tx.clone()));
+                    }
+                    Err(e) => tracing::warn!(addr = %addr, error = %e, "gRPC: failed to bind Tailscale address"),
+                }
+            }));
+    }
 
-    tracing::info!(grpc_addr = %grpc_bound_addr, "windowed runtime: gRPC server task spawned");
+    tracing::info!(grpc_addrs = ?grpc_bound_addrs, "windowed runtime: gRPC server task spawned");
 
     Ok((
         Some(network_rt),
@@ -254,8 +275,35 @@ pub(super) fn start_network_services_with_render_wake(
         Some(frame_presented_tx),
         Some(degradation_notices),
         Some(lease_expirations),
-        Some(grpc_bound_addr),
+        grpc_bound_addrs,
     ))
+}
+
+fn bind_nonblocking(addr: std::net::SocketAddr) -> std::io::Result<std::net::TcpListener> {
+    let l = std::net::TcpListener::bind(addr)?;
+    l.set_nonblocking(true)?;
+    Ok(l)
+}
+
+/// Accept connections on `listener` and forward them to the gRPC server until
+/// the server stops reading.
+async fn accept_into(
+    listener: tokio::net::TcpListener,
+    tx: tokio::sync::mpsc::Sender<std::io::Result<tokio::net::TcpStream>>,
+) {
+    loop {
+        match listener.accept().await {
+            Ok((stream, _)) => {
+                if tx.send(Ok(stream)).await.is_err() {
+                    return;
+                }
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "gRPC: accept error");
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+        }
+    }
 }
 
 /// Render the non-secret startup banner printed to stdout once the network
@@ -272,23 +320,27 @@ pub(super) fn start_network_services_with_render_wake(
 /// a service is disabled, its address is passed as `None` and rendered as
 /// `disabled` rather than a bogus endpoint.
 pub(super) fn render_startup_banner(
-    grpc_addr: Option<std::net::SocketAddr>,
-    mcp_addr: Option<std::net::SocketAddr>,
+    grpc_addrs: &[std::net::SocketAddr],
+    mcp_addrs: &[std::net::SocketAddr],
 ) -> String {
     const RULE: &str = "────────────────────────────────────────────────────────────────────";
     let mut lines: Vec<String> = Vec::with_capacity(7);
     lines.push(RULE.to_string());
     lines.push(" tze_hud runtime ready".to_string());
-    match grpc_addr {
-        Some(addr) => lines.push(format!("   gRPC   : {addr}")),
-        None => lines.push("   gRPC   : disabled".to_string()),
+    if grpc_addrs.is_empty() {
+        lines.push("   gRPC   : disabled".to_string());
     }
-    match mcp_addr {
-        Some(addr) => lines.push(format!(
+    for addr in grpc_addrs {
+        lines.push(format!("   gRPC   : {addr}"));
+    }
+    if mcp_addrs.is_empty() {
+        lines.push("   MCP    : disabled".to_string());
+    }
+    for addr in mcp_addrs {
+        lines.push(format!(
             "   MCP    : {}   (auth: Authorization: Bearer <agent PSK>)",
-            mcp_endpoint_url(addr)
-        )),
-        None => lines.push("   MCP    : disabled".to_string()),
+            mcp_endpoint_url(*addr)
+        ));
     }
     lines.push(
         "   attach : invoke the `hud-projection` skill in an LLM session, or run".to_string(),
@@ -303,27 +355,9 @@ pub(super) fn render_startup_banner(
 /// Single source of truth for the MCP URL shape, shared by the startup banner
 /// and `--print-attach-info` (`render_attach_info`) so the two can never drift.
 /// This is a pure formatter: it reports `addr` verbatim (the banner deliberately
-/// advertises the genuine bound address, including `0.0.0.0` when all interfaces
-/// were bound). Callers that need a *connectable* client URL should pass an
-/// already-loopback-normalized address (see `connectable_addr`).
+/// advertises the genuine bound addresses).
 pub(super) fn mcp_endpoint_url(addr: std::net::SocketAddr) -> String {
     format!("http://{addr}/mcp")
-}
-
-/// Translate an all-interfaces bind address (`0.0.0.0` / `::`) into a
-/// connectable loopback address for a client-facing URL. An all-interfaces bind
-/// includes loopback, so `127.0.0.1` is always reachable; a literal `0.0.0.0`
-/// URL is not something a client can connect to. Non-wildcard addresses pass
-/// through unchanged.
-fn connectable_addr(addr: std::net::SocketAddr) -> std::net::SocketAddr {
-    if addr.ip().is_unspecified() {
-        std::net::SocketAddr::new(
-            std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
-            addr.port(),
-        )
-    } else {
-        addr
-    }
 }
 
 /// Render the human-readable **attach info** block printed by the native
@@ -354,19 +388,8 @@ pub fn render_attach_info(
     lines.push(" tze_hud — ATTACH INFO  (point your LLM session's MCP client here)".to_string());
     lines.push(RULE.to_string());
 
-    let connectable_mcp = mcp_addr.map(connectable_addr);
     match mcp_addr {
-        Some(addr) => {
-            lines.push(format!(
-                " MCP endpoint : {}",
-                mcp_endpoint_url(connectable_mcp.expect("mcp_addr is Some"))
-            ));
-            if addr.ip().is_unspecified() {
-                lines.push(format!(
-                    "                (bound all interfaces at {addr}; also reachable on this host's LAN IP)"
-                ));
-            }
-        }
+        Some(addr) => lines.push(format!(" MCP endpoint : {}", mcp_endpoint_url(addr))),
         None => lines.push(" MCP endpoint : disabled (--mcp-port 0)".to_string()),
     }
     match grpc_addr {
@@ -396,7 +419,7 @@ pub fn render_attach_info(
     lines.push("   (This command never prints the PSK value itself.)".to_string());
 
     lines.push(String::new());
-    match connectable_mcp {
+    match mcp_addr {
         Some(addr) => {
             let url = mcp_endpoint_url(addr);
             lines.push(
@@ -452,7 +475,7 @@ mod tests {
         // Simulate a fully-configured runtime with a PSK set in the environment.
         let grpc: std::net::SocketAddr = "127.0.0.1:50051".parse().unwrap();
         let mcp: std::net::SocketAddr = "127.0.0.1:9090".parse().unwrap();
-        let banner = render_startup_banner(Some(grpc), Some(mcp));
+        let banner = render_startup_banner(&[grpc], &[mcp]);
         assert!(
             !banner.contains(psk),
             "startup banner must not leak the PSK; banner was:\n{banner}"
@@ -470,7 +493,7 @@ mod tests {
     /// Disabled services render as `disabled`, not a bogus `:0` endpoint.
     #[test]
     fn startup_banner_renders_disabled_services() {
-        let banner = render_startup_banner(None, None);
+        let banner = render_startup_banner(&[], &[]);
         assert!(banner.contains("gRPC   : disabled"));
         assert!(banner.contains("MCP    : disabled"));
         // Attach hint is always present so the runtime stays self-describing.
@@ -522,27 +545,6 @@ mod tests {
         );
     }
 
-    /// An all-interfaces bind (`0.0.0.0`) is not a connectable client URL, so the
-    /// snippet substitutes loopback while the info block still discloses the
-    /// wildcard bind.
-    #[test]
-    fn attach_info_all_interfaces_uses_connectable_loopback_url() {
-        let mcp: std::net::SocketAddr = "0.0.0.0:9090".parse().unwrap();
-        let info = render_attach_info(Some(mcp), None, None);
-        assert!(
-            info.contains("http://127.0.0.1:9090/mcp"),
-            "wildcard bind must yield a loopback client URL:\n{info}"
-        );
-        assert!(
-            info.contains("all interfaces"),
-            "wildcard bind should be disclosed:\n{info}"
-        );
-        assert!(
-            !info.contains("http://0.0.0.0:9090/mcp"),
-            "must not print a non-connectable 0.0.0.0 client URL:\n{info}"
-        );
-    }
-
     /// When MCP is disabled, the block says so and omits the (useless) JSON
     /// snippet rather than advertising a bogus endpoint.
     #[test]
@@ -573,8 +575,8 @@ mod tests {
             present_tx,
             _degradation_notices,
             lease_expirations,
-            grpc_addr,
-        ) = start_network_services(0, Default::default(), shared_state, ctx, false)
+            grpc_addrs,
+        ) = start_network_services(0, Default::default(), shared_state, ctx)
             .expect("start_network_services should not fail for port 0");
         assert!(
             rt.is_none(),
@@ -593,7 +595,7 @@ mod tests {
             "grpc_port=0 has no session, so no terminal lease-expiry sender"
         );
         assert!(
-            grpc_addr.is_none(),
+            grpc_addrs.is_empty(),
             "grpc_port=0 must not report a bound gRPC address"
         );
     }
@@ -619,8 +621,8 @@ mod tests {
             present_tx,
             _degradation_notices,
             lease_expirations,
-            grpc_addr,
-        ) = start_network_services(port, Default::default(), shared_state, ctx, true)
+            grpc_addrs,
+        ) = start_network_services(port, Default::default(), shared_state, ctx)
             .expect("start_network_services should not error for a valid port");
         assert!(
             rt.is_some(),
@@ -641,7 +643,7 @@ mod tests {
              compositor can notify connected lease owners"
         );
         assert_eq!(
-            grpc_addr.map(|a| a.port()),
+            grpc_addrs.first().map(|a| a.port()),
             Some(port),
             "non-zero grpc_port must report the genuine bound gRPC address"
         );
@@ -667,7 +669,7 @@ mod tests {
                 _degradation_notices,
                 _lease_expirations,
                 _grpc_addr,
-            ) = start_network_services(0, Default::default(), shared_state, ctx, false)
+            ) = start_network_services(0, Default::default(), shared_state, ctx)
                 .expect("port-0 must not error");
             assert!(rt.is_none());
             assert!(handles.is_empty());
@@ -679,13 +681,8 @@ mod tests {
     // TcpListener::bind(":0") so the OS picks a free port, eliminating port-
     // conflict flakiness in parallel CI runs.
 
-    /// When `bind_all_interfaces = false`, `start_network_services` binds to
-    /// `127.0.0.1` (loopback only) and must succeed.
-    ///
-    /// The bound address is determined by `select_grpc_bind_host` (separately
-    /// pinned by the unit tests above). This test asserts that the full
-    /// service startup path with the loopback bind host succeeds - not just
-    /// that it doesn't error on an early-exit code path.
+    /// `start_network_services` binds loopback and must succeed, not just avoid
+    /// erroring on an early-exit code path.
     #[test]
     fn start_network_services_loopback_default_binds_successfully() {
         let port = std::net::TcpListener::bind("127.0.0.1:0")
@@ -695,36 +692,10 @@ mod tests {
         let shared_state = make_shared_state();
         let ctx: SharedRuntimeContext = Arc::new(RuntimeContext::headless_default());
         let (rt, handles, _, _, _, _, _, _) =
-            start_network_services(port, Default::default(), shared_state, ctx, false)
+            start_network_services(port, Default::default(), shared_state, ctx)
                 .expect("loopback bind must succeed on a freshly allocated ephemeral port");
         assert!(rt.is_some(), "loopback bind must create a NetworkRuntime");
         assert!(!handles.is_empty(), "loopback bind must spawn task handles");
-        for h in handles {
-            h.abort();
-        }
-    }
-
-    /// `start_network_services` with `bind_all_interfaces = true` binds on
-    /// `0.0.0.0` (explicit opt-in for LAN/remote exposure) and must succeed.
-    #[test]
-    fn start_network_services_bind_all_interfaces_opt_in_binds_successfully() {
-        let port = std::net::TcpListener::bind("0.0.0.0:0")
-            .and_then(|l| l.local_addr())
-            .map(|a| a.port())
-            .expect("failed to allocate ephemeral port for all-interfaces bind test");
-        let shared_state = make_shared_state();
-        let ctx: SharedRuntimeContext = Arc::new(RuntimeContext::headless_default());
-        let (rt, handles, _, _, _, _, _, _) =
-            start_network_services(port, Default::default(), shared_state, ctx, true)
-                .expect("all-interfaces bind must succeed on a freshly allocated ephemeral port");
-        assert!(
-            rt.is_some(),
-            "all-interfaces bind must create a NetworkRuntime"
-        );
-        assert!(
-            !handles.is_empty(),
-            "all-interfaces bind must spawn task handles"
-        );
         for h in handles {
             h.abort();
         }

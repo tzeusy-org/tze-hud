@@ -21,7 +21,7 @@
 #   1. no tze_hud.exe running                  -> schtasks /Run TzeHudOverlay
 #   2. instance up but MCP not on 0.0.0.0:9090 -> kill + relaunch via the task
 #      (catches leftover ad-hoc launches, e.g. a benchmark.toml instance bound
-#       to loopback without --bind-all-interfaces; observed 2026-07-12)
+#       to loopback only; observed 2026-07-12)
 #   3. wait for 0.0.0.0 bind, then verify MCP HTTP `initialize` answers 200
 # Diagnostics go to stderr; only export lines (or the hostname) go to stdout.
 set -euo pipefail

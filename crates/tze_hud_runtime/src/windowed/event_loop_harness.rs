@@ -268,16 +268,18 @@ impl HeadlessEventLoopHarness {
 
         let (portal_op_tx, portal_op_rx) = tokio::sync::mpsc::unbounded_channel();
         let mcp_config = crate::mcp::McpServerConfig {
-            bind_addr: SocketAddr::from(([127, 0, 0, 1], 0)),
+            bind_addrs: vec![SocketAddr::from(([127, 0, 0, 1], 0))],
+            late_tailnet_port: None,
             agents: Arc::clone(&cfg.agents),
         };
-        let (_mcp_task, mcp_addr) = crate::mcp::start_mcp_http_server(
+        let (_mcp_task, mcp_addrs) = crate::mcp::start_mcp_http_server(
             scene_handle,
             mcp_config,
             state.shutdown.clone(),
             Some(portal_op_tx),
         )
         .await?;
+        let mcp_addr = mcp_addrs[0];
 
         let mut driver = super::build_portal_projection_driver(&cfg)?;
         driver.set_clock(clock);
