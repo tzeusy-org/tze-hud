@@ -9,28 +9,22 @@ license.workspace = true
 name = "vertical_slice"
 path = "src/main.rs"
 
-[features]
-## Enable dev-mode to allow `config_toml: None` (unrestricted capability grants).
-## Used with `--dev` CLI flag for the headless demo.  MUST NOT be used in
-## production deployments — the default binary path uses production.toml instead.
-dev-mode = ["tze_hud_runtime/dev-mode"]
-
 [dependencies]
-tze_hud_scene = { path = "../../crates/tze_hud_scene", version = "0.1.0" }
 tze_hud_config = { path = "../../crates/tze_hud_config", version = "0.1.0" }
-tze_hud_compositor = { path = "../../crates/tze_hud_compositor", version = "0.1.0" }
 tze_hud_runtime = { path = "../../crates/tze_hud_runtime", version = "0.1.0" }
 tze_hud_protocol = { path = "../../crates/tze_hud_protocol", version = "0.1.0" }
-tze_hud_input = { path = "../../crates/tze_hud_input", version = "0.1.0" }
-tze_hud_telemetry = { path = "../../crates/tze_hud_telemetry", version = "0.1.0" }
 tokio = { workspace = true }
 tokio-stream = { workspace = true }
+tonic = { workspace = true }
 
 [dev-dependencies]
-# dev-mode activated for test builds: tests/budget_assertions.rs uses config_toml: None
-# (unrestricted capabilities). The released binary does NOT carry dev-mode; use
-# `--features dev-mode` or `cargo test` to enable it for development.
+# dev-mode: tests/budget_assertions.rs boots with config_toml: None (unrestricted
+# agents). The released binary does not carry it.
 tze_hud_runtime = { path = "../../crates/tze_hud_runtime", version = "0.1.0", features = ["dev-mode"] }
+tze_hud_scene = { path = "../../crates/tze_hud_scene", version = "0.1.0" }
+tze_hud_compositor = { path = "../../crates/tze_hud_compositor", version = "0.1.0" }
+tze_hud_input = { path = "../../crates/tze_hud_input", version = "0.1.0" }
+tze_hud_telemetry = { path = "../../crates/tze_hud_telemetry", version = "0.1.0" }
 
 [lints]
 workspace = true

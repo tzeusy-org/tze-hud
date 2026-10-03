@@ -1,9 +1,8 @@
 //! # Budget and pixel assertions for the vertical slice
 //!
-//! Validates the latency budgets defined in `heart-and-soul/validation.md`
-//! (Layer 3) and pixel readback correctness (Layer 1).
+//! Validates the latency budgets (Layer 3) and pixel readback correctness (Layer 1).
 //!
-//! ## Budgets (from validation.md Layer 3)
+//! ## Budgets (Layer 3)
 //! - Frame time p99 < 16.6ms  (16_600 µs)
 //! - input_to_local_ack p99 < 4ms  (4_000 µs)
 //! - Hit-test p99 < 100µs
@@ -25,8 +24,8 @@
 //! Wall-clock / p99 latency assertions are **gated** behind the
 //! `TZE_HUD_PERF_ASSERT=1` environment variable so they never block the
 //! standard `test-unit` CI lane on shared runners (where scheduler noise
-//! causes spurious failures).  See `about/heart-and-soul/validation.md`
-//! determinism doctrine: "flaky tests poison the feedback loop".
+//! causes spurious failures).  Flaky tests poison the
+//! feedback loop.
 //!
 //! - **Blocking everywhere**: structural assertions (sample counts, correctness
 //!   invariants, pixel readback, scene rendering completeness).
@@ -719,9 +718,8 @@ async fn test_texture_upload_p99_within_budget() {
 /// Assert that Stage 6 (Render Encode) p99 is within budget with text rendering
 /// active.
 ///
-/// ## Spec Reference
+/// ## Budget
 ///
-/// From `runtime-kernel/spec.md` §Requirement: Stage 6 Render Encode (line 128–135):
 /// > Stage 6 (Render Encode) MUST run on the compositor thread with a p99 budget
 /// > of < 4ms. It SHALL build wgpu CommandEncoder from the RenderFrame, issue draw
 /// > calls for tile nodes (solid color, text, image), encode alpha-blend passes for
@@ -743,7 +741,7 @@ async fn test_texture_upload_p99_within_budget() {
 /// runaway regressions, not enforcing the 4ms boundary.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_stage6_render_encode_p99_within_budget() {
-    /// Spec target: 4ms p99 on reference GPU hardware (runtime-kernel/spec.md line 135).
+    /// Spec target: 4ms p99 on reference GPU hardware.
     const NOMINAL_BUDGET_US: u64 = 4_000;
     /// Number of text-content tiles in the benchmark scene.
     const TEXT_TILE_COUNT: usize = 5;
@@ -1097,13 +1095,8 @@ async fn test_layer1_pixel_readback_z_order() {
 
 // ─── Layer 1: 25-scene pixel readback assertions ──────────────────────────────
 //
-// Per validation-framework/spec.md Requirement: DR-V2 (line 186):
-// "Compositor MUST render complete frame to offscreen texture with no window,
-// no display server, no user interaction. Feature-equivalent to windowed for
-// scene composition."
-//
-// Per validation-framework/spec.md Requirement: DR-V5 (line 228):
-// "`cargo test --features headless` SHALL run full test suite (Layers 0-2)."
+// The compositor renders a complete frame to an offscreen texture with no
+// window or display server, so these run headless.
 //
 // These tests cover every scene in TestSceneRegistry.  For each scene:
 // - Pixel buffer size is correct (width × height × 4).

@@ -4,11 +4,8 @@
 # Only the agent paired in agents.toml ("vertical-slice-agent") may connect,
 # with its `allow` list there; any other PSK is rejected.
 #
-# Usage (headless, production path — no feature flags needed):
-#   cargo run -p vertical_slice -- --headless
-#
-# Usage (headless, dev mode — unrestricted caps, test/dev only):
-#   cargo run -p vertical_slice --features dev-mode -- --headless --dev
+# Usage:
+#   cargo run -p vertical_slice
 
 [runtime]
 profile = "headless"

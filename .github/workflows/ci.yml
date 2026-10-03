@@ -296,16 +296,15 @@ jobs:
 
   # ── Example production config boot (vertical_slice) ────────────────────────
   #
-  # Boots the runtime with the committed production config (config/production.toml)
-  # and verifies startup succeeds.  This is the canonical sovereignty-by-mechanism
-  # smoke test: if the committed config is malformed or governance is broken, this
-  # fails.
+  # Boots the runtime with the example's committed production config
+  # (examples/vertical_slice/config/production.toml) and its paired agents
+  # (agents.toml). If either file is malformed or governance config parsing
+  # regresses, this fails.
   #
-  # The test lives at examples/vertical_slice/tests/production_boot.rs and:
-  # - Parses production.toml via HeadlessRuntime::new(config_toml: Some(...))
-  # - Asserts the runtime starts without error
-  # - Verifies that an unregistered agent receives guest policy (no capabilities)
-  # - Does NOT use dev-mode: requires explicit config governance to pass
+  # The test lives at examples/vertical_slice/tests/production_boot.rs: it
+  # builds HeadlessRuntime from the config and asserts startup succeeds, with
+  # no dev-mode. The unpaired-PSK gate lives in tze_hud_app's production_boot,
+  # and the full agent lifecycle in the vertical_slice binary's own tests.
 
   production-boot-vertical-slice:
     name: vertical_slice production config boot
