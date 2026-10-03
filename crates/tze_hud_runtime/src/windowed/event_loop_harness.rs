@@ -104,6 +104,7 @@ impl WindowedRuntimeState {
         WindowedRuntimeState {
             wake: super::wake::WindowedWake::disconnected(),
             scheduled_main_deadline: None,
+            cursor_poll: super::wake::CursorPollState::default(),
             config: super::WindowedConfig::default(),
             compositor_handle: None,
             network_rt: None,
@@ -1676,5 +1677,138 @@ mod tests {
             "released scene lock must drain FIFO work"
         );
         assert_eq!(harness.composer_draft().as_deref(), Some("x"));
+    }
+
+    #[test]
+    fn armed_cursor_poll_never_wakes_compositor_until_hover_changes() {
+        use super::super::wake::{CURSOR_POLL_INTERVAL, CursorPollTurn};
+        use crate::window::{HitRegion, WindowMode};
+
+        let mut harness = HeadlessEventLoopHarness::new();
+        let state = &mut harness.app.state;
+        state.effective_mode = WindowMode::Overlay;
+        state.hit_regions = vec![HitRegion::new(100.0, 100.0, 50.0, 50.0)];
+        state.cursor_x = 10.0;
+        state.cursor_y = 10.0;
+        let (tile_a, tile_b) = {
+            let shared = harness.app.state.shared_state.blocking_lock();
+            let mut scene = shared.scene.blocking_lock();
+            *scene = SceneGraph::new(1920.0, 1080.0);
+            let tab = scene.create_tab("Main", 0).unwrap();
+            let lease = scene.grant_lease("agent", 60_000);
+            let mut tile = |x: f32| {
+                scene
+                    .create_tile(tab, "agent", lease, Rect::new(x, 200.0, 100.0, 100.0), 5)
+                    .unwrap()
+            };
+            let ids = (tile(200.0), tile(400.0));
+            harness.app.state.pipeline.hit_test_snapshot.store(Arc::new(
+                crate::pipeline::HitTestSnapshot::from_scene(&scene),
+            ));
+            ids
+        };
+        let seeded = harness.app.cursor_poll_signature();
+        harness.app.state.cursor_poll.signature = Some(seeded);
+
+        let wake = harness.app.state.wake.clone();
+        let compositor_before = wake.compositor().checkpoint();
+        let main_work_before = wake.main_work_generation();
+        let counters_before = wake.counters().snapshot();
+
+        // Hold the scene so a poll that touched it could not go unnoticed
+        // (it would defer, and the quiet result below would not hold).
+        let shared = harness.shared_state();
+        let guard = shared.try_lock().expect(BUSY);
+        let _scene = guard.scene.try_lock().expect(BUSY);
+        let now = std::time::Instant::now();
+        for _ in 0..100 {
+            let CursorPollTurn::Quiet { next } = harness.app.cursor_poll_turn(now) else {
+                panic!("an unchanged cursor must stay on the quiet path");
+            };
+            let next = next.expect("poll stays armed in passthrough");
+            assert!(next.main_only);
+            assert_eq!(next.at, now + CURSOR_POLL_INTERVAL);
+        }
+        assert_eq!(wake.compositor().checkpoint(), compositor_before);
+        assert_eq!(wake.main_work_generation(), main_work_before);
+        assert_eq!(wake.counters().snapshot(), counters_before);
+
+        // Entering a region is a hover change: one full turn, one wake.
+        harness.app.state.cursor_x = 120.0;
+        harness.app.state.cursor_y = 120.0;
+        assert_eq!(harness.app.cursor_poll_turn(now), CursorPollTurn::FullTurn);
+        assert_eq!(wake.main_work_generation(), main_work_before + 1);
+        assert!(wake.finish_main_work(wake.main_work_checkpoint()));
+        assert_eq!(wake.compositor().checkpoint(), compositor_before + 1);
+
+        // Capture flip (passthrough -> capturing) disarms the poll: no deadline.
+        harness.app.state.overlay_capturing = true;
+        assert!(matches!(
+            harness.app.cursor_poll_turn(now),
+            CursorPollTurn::Quiet { next: None }
+        ));
+        assert_eq!(wake.compositor().checkpoint(), compositor_before + 1);
+
+        // Leaving the region is the next change: exactly one more wake.
+        harness.app.state.cursor_x = 10.0;
+        harness.app.state.overlay_capturing = false;
+        assert_eq!(harness.app.cursor_poll_turn(now), CursorPollTurn::FullTurn);
+        assert!(wake.finish_main_work(wake.main_work_checkpoint()));
+        assert_eq!(wake.compositor().checkpoint(), compositor_before + 2);
+
+        // The quiet path skips `push_tile_close_hover`, so the close target is
+        // part of the signature: entering, switching, and leaving a dismissible
+        // tile (or the window) is one full turn and one wake each; moving
+        // within the same target costs none.
+        let mut expected = compositor_before + 2;
+        let mut step = |app: &mut WinitApp, x: f32, left: bool, target: Option<SceneId>, wakes| {
+            app.state.cursor_x = x;
+            app.state.cursor_y = 250.0;
+            app.state.cursor_left_window = left;
+            assert_eq!(app.close_hover_target(), target);
+            let turn = app.cursor_poll_turn(now);
+            if wakes {
+                assert_eq!(turn, CursorPollTurn::FullTurn);
+                assert!(
+                    app.state
+                        .wake
+                        .finish_main_work(app.state.wake.main_work_checkpoint())
+                );
+                expected += 1;
+            } else {
+                assert!(matches!(turn, CursorPollTurn::Quiet { .. }));
+            }
+            assert_eq!(app.state.wake.compositor().checkpoint(), expected);
+        };
+        step(&mut harness.app, 250.0, false, Some(tile_a), true);
+        step(&mut harness.app, 260.0, false, Some(tile_a), false);
+        step(&mut harness.app, 450.0, false, Some(tile_b), true);
+        step(&mut harness.app, 450.0, true, None, true);
+        step(&mut harness.app, 10.0, true, None, false);
+    }
+
+    /// A due main-only poll deadline owes no compositor notification; any other
+    /// due deadline does.
+    #[test]
+    fn resume_time_poll_deadline_owes_no_main_work_but_others_do() {
+        use super::super::wake::Deadline;
+        use crate::idle_efficiency::RuntimeWakeupSource::AnimationDeadline;
+
+        let mut harness = HeadlessEventLoopHarness::new();
+        let now = std::time::Instant::now();
+        let before = harness.app.state.wake.main_work_generation();
+        harness.app.state.scheduled_main_deadline = Some(Deadline {
+            main_only: true,
+            ..Deadline::new(now, AnimationDeadline)
+        });
+        harness.app.on_resume_time_reached(now);
+        assert!(harness.app.state.cursor_poll.tick);
+        assert_eq!(harness.app.state.wake.main_work_generation(), before);
+
+        harness.app.state.cursor_poll.tick = false;
+        harness.app.state.scheduled_main_deadline = Some(Deadline::new(now, AnimationDeadline));
+        harness.app.on_resume_time_reached(now);
+        assert!(!harness.app.state.cursor_poll.tick);
+        assert_eq!(harness.app.state.wake.main_work_generation(), before + 1);
     }
 }

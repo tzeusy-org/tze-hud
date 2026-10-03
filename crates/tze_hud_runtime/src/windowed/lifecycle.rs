@@ -1404,15 +1404,7 @@ impl WinitApp {
     /// needs no scene lock. Latest-wins: the compositor renders only when the
     /// target changes, so an idle HUD stays idle.
     pub(super) fn push_tile_close_hover(&self) {
-        let target = (!self.state.cursor_left_window)
-            .then(|| {
-                self.state
-                    .pipeline
-                    .hit_test_snapshot
-                    .load()
-                    .close_hover_target(self.state.cursor_x, self.state.cursor_y)
-            })
-            .flatten();
+        let target = self.close_hover_target();
         if let Ok(mut slot) = self.state.tile_close_hover_state.lock() {
             *slot = target;
         }

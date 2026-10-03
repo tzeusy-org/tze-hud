@@ -18,12 +18,56 @@ use crate::idle_efficiency::{IdleEfficiencyCounters, RuntimeWakeupSource};
 pub(super) struct Deadline {
     pub(super) at: Instant,
     pub(super) source: RuntimeWakeupSource,
+    /// Serviced on the main thread alone: a due tick that finds nothing changed
+    /// must not create main-work debt (and so no compositor wake).
+    pub(super) main_only: bool,
 }
 
 impl Deadline {
     pub(super) const fn new(at: Instant, source: RuntimeWakeupSource) -> Self {
-        Self { at, source }
+        Self {
+            at,
+            source,
+            main_only: false,
+        }
     }
+}
+
+/// What a cursor poll tick may observe changing; any difference between two
+/// ticks is a hover/capture transition that deserves a full turn.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct CursorPollSignature {
+    /// The overlay should capture (cursor over a region or portal affordance).
+    pub(super) capture: bool,
+    /// Focused portal whose resize grip the cursor is over.
+    pub(super) grip: Option<tze_hud_scene::SceneId>,
+    /// Dismissible tile whose viewer close button the cursor is over.
+    pub(super) close_target: Option<tze_hud_scene::SceneId>,
+    /// Number of widget hover regions containing the cursor.
+    pub(super) widget_regions: u32,
+}
+
+/// Cursor-poll bookkeeping kept between event-loop turns.
+#[derive(Debug, Default)]
+pub(super) struct CursorPollState {
+    /// The turn in progress began with a due, main-only poll deadline.
+    pub(super) tick: bool,
+    /// Earliest non-poll deadline from the last full turn, so a quiet poll
+    /// turn can re-arm without recomputing (and locking the scene for) them.
+    pub(super) other_deadline: Option<Deadline>,
+    /// Signature at the last full turn or poll tick.
+    pub(super) signature: Option<CursorPollSignature>,
+}
+
+/// Result of servicing one cursor poll tick.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum CursorPollTurn {
+    /// Nothing changed: the loop sleeps until `next` without touching the
+    /// scene or the compositor.
+    Quiet { next: Option<Deadline> },
+    /// State changed or the turn has other work: run the full turn, which owns
+    /// exactly one compositor wake (main work is already marked pending).
+    FullTurn,
 }
 
 /// Select the winit sleep policy from explicit deadlines.
@@ -55,8 +99,9 @@ pub(super) fn cursor_poll_deadline(
     has_interactive_regions: bool,
     in_passthrough: bool,
 ) -> Option<Deadline> {
-    (overlay && has_interactive_regions && in_passthrough).then(|| {
-        Deadline::new(
+    (overlay && has_interactive_regions && in_passthrough).then(|| Deadline {
+        main_only: true,
+        ..Deadline::new(
             now + CURSOR_POLL_INTERVAL,
             RuntimeWakeupSource::AnimationDeadline,
         )
@@ -305,6 +350,16 @@ impl WindowedWake {
             generation: main_work.generation,
             source: main_work.source,
         }
+    }
+
+    /// True while a producer generation has not been published to the
+    /// compositor yet.
+    pub(super) fn has_unfinished_main_work(&self) -> bool {
+        let main_work = self
+            .main_work
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        main_work.generation > main_work.finished_generation
     }
 
     #[cfg(test)]

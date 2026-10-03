@@ -2087,6 +2087,7 @@ mod tests {
         let state = WindowedRuntimeState {
             wake: crate::windowed::wake::WindowedWake::disconnected(),
             scheduled_main_deadline: None,
+            cursor_poll: crate::windowed::wake::CursorPollState::default(),
             config: cfg,
             compositor_handle: None,
             network_rt: None,
