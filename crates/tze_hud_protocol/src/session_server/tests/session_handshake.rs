@@ -760,3 +760,78 @@ fn removed_client_request_numbers_decode_to_empty_payload() {
         );
     }
 }
+
+/// Poll until the registry reports `expected` sessions (bounded, no fixed sleep).
+async fn wait_for_session_count(state: &Arc<Mutex<SharedState>>, expected: usize) -> usize {
+    for _ in 0..100 {
+        let count = state.lock().await.sessions.session_count();
+        if count == expected {
+            return count;
+        }
+        tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
+    }
+    state.lock().await.sessions.session_count()
+}
+
+/// A session whose outbound stream is already gone when the handler tries to
+/// send the initial DegradationNotice exits early. That exit must still
+/// unregister the session (registry entry and its outbound sender), while a
+/// healthy session keeps its entry.
+#[tokio::test]
+async fn degradation_notice_send_failure_unregisters_session() {
+    let (mut client, server, state) = setup_test_with_state().await;
+
+    // Healthy control session.
+    let (_healthy_tx, _msgs, _healthy_stream) = handshake(&mut client, "healthy", "test-key").await;
+    assert_eq!(wait_for_session_count(&state, 1).await, 1);
+    assert!(
+        state
+            .lock()
+            .await
+            .sessions
+            .session_for_namespace("healthy")
+            .is_some_and(|s| s.server_message_tx.is_some())
+    );
+
+    // Hold the registry lock so the doomed handler parks mid-handshake; drop
+    // its client connection meanwhile so every later send fails.
+    let blocker = state.lock().await;
+    let (doomed_tx, rx) = tokio::sync::mpsc::channel::<ClientMessage>(1);
+    doomed_tx
+        .send(ClientMessage {
+            sequence: 1,
+            timestamp_wall_us: now_wall_us(),
+            payload: Some(ClientPayload::SessionInit(SessionInit {
+                agent_id: "doomed".to_string(),
+                initial_subscriptions: Vec::new(),
+                resume_token: Vec::new(),
+                min_protocol_version: 1000,
+                max_protocol_version: 1001,
+                auth_credential: Some(crate::auth::psk_credential("test-key".to_string())),
+            })),
+        })
+        .await
+        .unwrap();
+    let mut doomed_client = client.clone();
+    let doomed_stream = doomed_client
+        .session(tokio_stream::wrappers::ReceiverStream::new(rx))
+        .await
+        .unwrap()
+        .into_inner();
+    // Let the handler read SessionInit and park on the registry lock, then
+    // reset the stream (the response receiver is dropped server-side).
+    tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+    drop(doomed_stream);
+    drop(doomed_tx);
+    drop(doomed_client);
+    tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+    drop(blocker);
+
+    // Only the healthy session remains registered.
+    assert_eq!(wait_for_session_count(&state, 1).await, 1);
+    let st = state.lock().await;
+    assert!(st.sessions.session_for_namespace("doomed").is_none());
+    assert!(st.sessions.session_for_namespace("healthy").is_some());
+    drop(st);
+    server.abort();
+}
