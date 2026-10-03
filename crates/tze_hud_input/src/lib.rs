@@ -417,6 +417,10 @@ impl InputProcessor {
     ) -> Option<ScrollOffsetChangedEvent> {
         let config = scene.tile_scroll_config(tile_id)?;
         if !self.scroll_state.is_scrollable(tile_id) {
+            // Entries are created lazily here; sweep ones whose tile was
+            // destroyed (scene drops its config on destroy) so they can't accumulate.
+            self.scroll_state
+                .retain_tiles(|id| scene.tile_scroll_config(id).is_some());
             self.scroll_state.register_tile(
                 tile_id,
                 ScrollConfig {
@@ -2107,6 +2111,34 @@ mod tests {
             (offset_y - 24.0).abs() < f32::EPSILON,
             "expected local offset_y=24.0, got {offset_y}"
         );
+    }
+
+    #[test]
+    fn scroll_state_of_destroyed_tile_is_swept() {
+        let (mut scene, tile_a) = setup_scrollable_scene();
+        let mut processor = InputProcessor::new();
+        let wheel = |x| ScrollEvent {
+            x,
+            y: 150.0,
+            delta_x: 0.0,
+            delta_y: 24.0,
+        };
+        processor.process_scroll_event(&wheel(150.0), &mut scene);
+        assert!(processor.scroll_state.is_scrollable(tile_a));
+
+        scene.delete_tile(tile_a, "test").unwrap();
+        let tab = scene.active_tab.unwrap();
+        let lease = scene.grant_lease("test", 60_000);
+        let tile_b = scene
+            .create_tile(tab, "test", lease, Rect::new(600.0, 100.0, 400.0, 300.0), 1)
+            .unwrap();
+        scene
+            .register_tile_scroll_config(tile_b, tze_hud_scene::TileScrollConfig::vertical())
+            .unwrap();
+        processor.process_scroll_event(&wheel(650.0), &mut scene);
+
+        assert!(processor.scroll_state.is_scrollable(tile_b));
+        assert!(!processor.scroll_state.is_scrollable(tile_a));
     }
 
     #[test]
