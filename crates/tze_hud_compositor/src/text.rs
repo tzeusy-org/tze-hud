@@ -3960,6 +3960,10 @@ mod tests {
             .get_by_key(&key_narrow)
             .expect("narrow must be cached");
         let wide_result = cache.get_by_key(&key_wide).expect("wide must be cached");
+        assert_eq!(
+            wide_result.text, content,
+            "text that fits the wide box passes through unchanged"
+        );
         assert!(
             wide_result.text.len() >= narrow_result.text.len(),
             "wider bounds must produce an equal-or-longer result"

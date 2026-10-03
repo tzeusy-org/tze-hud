@@ -3074,10 +3074,11 @@ mod tests {
 
     // ── Adversarial / DoS-resistance ──────────────────────────────────────────
 
-    /// Pathological 64 KiB inputs must terminate (no stack overflow, no O(n²)
-    /// hang: a quadratic regression makes this test run for seconds-to-minutes
-    /// and trip the CI job timeout) and must not silently drop content. Speed
-    /// itself is not asserted: wall-clock thresholds are not deterministic.
+    /// Pathological 64 KiB inputs must terminate without stack overflow and
+    /// must not silently drop or alter content. This table asserts correctness
+    /// only; it is NOT a speed guard (a quadratic regression still passes here,
+    /// just slowly). Speed for the backtick and nested-link floods is guarded by
+    /// `adversarial_floods_stay_within_budget`.
     #[test]
     fn adversarial_inputs_terminate_and_preserve_content() {
         #[derive(Clone, Copy)]
@@ -3161,6 +3162,34 @@ mod tests {
                 Expect::Len(n) => md.plain_text.len() == n,
             };
             assert!(ok, "adversarial case dropped or altered content: {name}");
+        }
+    }
+
+    /// Speed guard for the O(n) backtick-run skip and the per-slice paren table:
+    /// the backtick flood and both nested link-text floods must stay under a
+    /// generous budget (500 ms at the default slack; O(n) costs ~0.1 ms, the
+    /// quadratic path costs seconds). The budget scales with
+    /// `TZE_HUD_TEST_BUDGET_SLACK` like the other timing tests.
+    #[test]
+    fn adversarial_floods_stay_within_budget() {
+        let budget =
+            std::time::Duration::from_micros(tze_hud_scene::perf_budget::test_budget(25_000));
+        let floods = [
+            ("backtick flood", format!("a{}", "`".repeat(65534))),
+            (
+                "nested link-text backtick flood",
+                format!("[a{}](u)", "`".repeat(65528)),
+            ),
+            (
+                "nested link-text paren flood",
+                format!("[{}](u)", "[](".repeat(21841)),
+            ),
+        ];
+        for (name, input) in floods {
+            let t0 = std::time::Instant::now();
+            let _ = parse(&input);
+            let elapsed = t0.elapsed();
+            assert!(elapsed < budget, "{name}: {elapsed:?} exceeds {budget:?}");
         }
     }
 
