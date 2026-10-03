@@ -4,8 +4,9 @@
 //! a [`Request`] with a byte body, routed by `(method, path)` through
 //! [`route`], and answered with a [`Response`] carrying a byte body.
 //!
-//! Routes today: `POST /` and `POST /mcp` -> MCP; `GET /admin/status` and
-//! `GET /admin/logs` -> operator endpoints (admin PSK only). `/pair` is
+//! Routes today: `POST /` and `POST /mcp` -> MCP; `GET /admin/status`,
+//! `GET /admin/logs`, and `GET /admin/screenshot` -> operator endpoints (admin
+//! PSK only). `/pair` is
 //! reserved for T6 and plugs in as a new [`Route`] variant.
 //! Unknown paths get a bare 404, known paths with the wrong method a bare 405
 //! with an `Allow` header (no JSON-RPC body in either case).
@@ -52,6 +53,14 @@ impl Response {
             content_type: "application/json",
             body: body.into(),
             allow: None,
+        }
+    }
+
+    pub fn png(body: impl Into<Vec<u8>>) -> Self {
+        Self {
+            content_type: "image/png",
+            body: body.into(),
+            ..Self::empty(200)
         }
     }
 
@@ -110,11 +119,14 @@ impl Response {
             403 => "Forbidden",
             404 => "Not Found",
             405 => "Method Not Allowed",
+            422 => "Unprocessable Content",
+            429 => "Too Many Requests",
             501 => "Not Implemented",
+            503 => "Service Unavailable",
             _ => "Error",
         };
         let mut head = format!(
-            "HTTP/1.1 {} {reason}\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n",
+            "HTTP/1.1 {} {reason}\r\nContent-Type: {}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n",
             self.status,
             self.content_type,
             self.body.len()
@@ -140,6 +152,12 @@ pub enum OperatorCode {
     NotAdmin,
     NotInstalled,
     UpdateFailed,
+    /// A capture is already running; retry shortly.
+    Busy,
+    /// No display to read from, or the compositor did not answer in time.
+    Unavailable,
+    /// The frame exceeds the capture size limits.
+    TooLarge,
 }
 
 /// Body of an operator-endpoint error: `{"code","hint"}`.
@@ -172,6 +190,7 @@ pub enum Route {
 pub enum AdminRoute {
     Status,
     Logs,
+    Screenshot,
 }
 
 /// Gate for every `/admin/*` request, run before any admin data is read:
@@ -204,7 +223,10 @@ pub fn route(method: &str, path: &str) -> Route {
         (_, "/" | "/mcp") => Route::Respond(Response::method_not_allowed("POST")),
         ("GET", "/admin/status") => Route::Admin(AdminRoute::Status),
         ("GET", "/admin/logs") => Route::Admin(AdminRoute::Logs),
-        (_, "/admin/status" | "/admin/logs") => Route::Respond(Response::method_not_allowed("GET")),
+        ("GET", "/admin/screenshot") => Route::Admin(AdminRoute::Screenshot),
+        (_, "/admin/status" | "/admin/logs" | "/admin/screenshot") => {
+            Route::Respond(Response::method_not_allowed("GET"))
+        }
         _ => Route::Respond(Response::not_found()),
     }
 }
@@ -378,6 +400,14 @@ mod tests {
         );
         assert_eq!(route("GET", "/admin/logs"), Route::Admin(AdminRoute::Logs));
         assert_eq!(
+            route("GET", "/admin/screenshot"),
+            Route::Admin(AdminRoute::Screenshot)
+        );
+        assert_eq!(
+            route("POST", "/admin/screenshot"),
+            Route::Respond(Response::method_not_allowed("GET"))
+        );
+        assert_eq!(
             route("POST", "/admin/logs"),
             Route::Respond(Response::method_not_allowed("GET"))
         );
@@ -403,6 +433,8 @@ mod tests {
         assert!(r405.starts_with("HTTP/1.1 405 "));
         assert!(r405.contains("Allow: POST\r\n"));
         assert!(r405.ends_with("\r\n\r\n"));
+        // Operator data (a screenshot of the overlay) must never be cached.
+        assert!(r405.contains("Cache-Control: no-store\r\n"));
         assert!(Response::not_found().body.is_empty());
     }
 

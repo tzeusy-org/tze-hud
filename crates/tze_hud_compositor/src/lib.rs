@@ -23,6 +23,7 @@ pub use overflow::{
     ELLIPSIS, TruncationResult, TruncationViewport, truncate_for_ellipsis, truncate_tail_anchored,
 };
 pub use pipeline::{ChromeDrawCmd, RoundedRectDrawCmd, TexturedRectVertex};
+pub use renderer::capture::{CaptureError, CapturedFrame, MAX_CAPTURE_DIM};
 pub use renderer::{
     ComposerVisualLayoutHandle, Compositor, CompositorAdapterInfo, CompositorDegradationPolicy,
     CompositorError, FocusRingOwner, FocusRingOwnerHandle, ImageTextureEntry, LocalComposerState,

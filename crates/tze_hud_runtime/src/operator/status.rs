@@ -202,6 +202,8 @@ pub struct StatusSource {
     pub presents: Option<Arc<IdleEfficiencyCounters>>,
     /// Log file served by `/admin/logs`.
     pub log_path: std::path::PathBuf,
+    /// Compositor capture channel behind `/admin/screenshot`.
+    pub capture: Option<crate::operator::screenshot::CaptureEndpoint>,
 }
 
 /// Window over which `cpu_pct_2s` is sampled.

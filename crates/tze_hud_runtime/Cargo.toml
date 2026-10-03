@@ -40,6 +40,8 @@ uuid = { workspace = true }
 arc-swap = { workspace = true }
 unicode-width = { workspace = true }
 if-addrs = "0.15"
+# PNG encoding for GET /admin/screenshot; already in the tree via tze_hud_resource.
+image = { workspace = true, features = ["png"] }
 
 
 [target.'cfg(target_os = "linux")'.dependencies]

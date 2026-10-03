@@ -7,7 +7,7 @@ and that each lifecycle stage answers over MCP: discover, publish to a zone,
 attach/poll/detach a portal, and a structured error.
 
 The seeded agent also holds `admin`, so the operator endpoints
-(/admin/status, /admin/logs) are checked too.
+(/admin/status, /admin/logs, /admin/screenshot) are checked too.
 
 The config is copied to a temp dir with a seeded agents.toml beside it holding
 only the SHA-256 of a fresh random PSK, the way pairing stores agents.
@@ -25,14 +25,17 @@ import hashlib
 import json
 import secrets
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
 import time
 import urllib.error
 import urllib.request
+import zlib
 from pathlib import Path
 
+MIN_CHANGED_PIXELS = 200
 TOOLS = {"hud_surfaces", "hud_publish", "hud_hold", "hud_clear", "hud_input"}
 
 
@@ -61,12 +64,17 @@ class Smoke:
             raise AssertionError(f"{method}: JSON-RPC error {reply['error']}")
         return reply["result"]
 
-    def get(self, path: str) -> tuple[int, str]:
-        """GET an operator endpoint on the same port; return (status, body)."""
+    def get_bytes(self, path: str) -> tuple[int, str, bytes]:
+        """GET an operator endpoint on the same port; return (status, content type, body)."""
         base = self.url.rsplit("/", 1)[0]
         req = urllib.request.Request(base + path, headers={"Authorization": f"Bearer {self.psk}"})
         with urllib.request.urlopen(req, timeout=15) as resp:
-            return resp.status, resp.read().decode("utf-8", "replace")
+            return resp.status, resp.headers.get("Content-Type", ""), resp.read()
+
+    def get(self, path: str) -> tuple[int, str]:
+        """GET an operator endpoint on the same port; return (status, body)."""
+        status, _, body = self.get_bytes(path)
+        return status, body.decode("utf-8", "replace")
 
     def call(self, tool: str, args: dict | None = None) -> tuple[bool, dict]:
         """Call a tool; return (is_error, parsed result text)."""
@@ -132,6 +140,80 @@ def run_checks(smoke: Smoke) -> None:
     print("ok  unknown zone -> ZONE_NOT_FOUND with hint")
 
 
+def decode_png_rgba(data: bytes) -> tuple[int, int, bytes]:
+    """Decode an 8-bit RGBA, non-interlaced PNG; return (width, height, pixels)."""
+    assert data[:8] == b"\x89PNG\r\n\x1a\n", "not a PNG"
+    pos, idat, width = 8, b"", 0
+    while pos < len(data):
+        (length,) = struct.unpack(">I", data[pos : pos + 4])
+        kind, body = data[pos + 4 : pos + 8], data[pos + 8 : pos + 8 + length]
+        if kind == b"IHDR":
+            width, height, depth, ctype, _, _, interlace = struct.unpack(">IIBBBBB", body)
+            assert (depth, ctype, interlace) == (8, 6, 0), f"expected 8-bit RGBA, got {body.hex()}"
+        elif kind == b"IDAT":
+            idat += body
+        pos += 12 + length
+    raw, stride = zlib.decompress(idat), width * 4
+    out, prev = bytearray(), bytearray(stride)
+    for y in range(height):
+        row = bytearray(raw[y * (stride + 1) + 1 : (y + 1) * (stride + 1)])
+        ftype = raw[y * (stride + 1)]
+        for i in range(stride):
+            a = row[i - 4] if i >= 4 else 0
+            b = prev[i]
+            c = prev[i - 4] if i >= 4 else 0
+            if ftype == 1:
+                row[i] = (row[i] + a) & 255
+            elif ftype == 2:
+                row[i] = (row[i] + b) & 255
+            elif ftype == 3:
+                row[i] = (row[i] + (a + b) // 2) & 255
+            elif ftype == 4:
+                p = a + b - c
+                pa, pb, pc = abs(p - a), abs(p - b), abs(p - c)
+                pred = a if pa <= pb and pa <= pc else (b if pb <= pc else c)
+                row[i] = (row[i] + pred) & 255
+        out += row
+        prev = row
+    return width, height, bytes(out)
+
+
+def check_screenshot(smoke: Smoke) -> None:
+    """The screenshot is a real PNG of the frame, and it shows a new notification.
+
+    The overlay is fully opaque under WARP, so alpha proves nothing. Instead take
+    a baseline, publish, take another, and require the two to differ in a
+    meaningful number of pixels (the notification's backdrop and text).
+    """
+
+    def shot() -> tuple[int, int, bytes]:
+        status, ctype, body = smoke.get_bytes("/admin/screenshot")
+        assert status == 200 and ctype == "image/png", f"/admin/screenshot: {status} {ctype}"
+        return decode_png_rgba(body)
+
+    width, height, before = shot()
+    if sys.platform == "win32":
+        import ctypes
+
+        ctypes.windll.user32.SetProcessDPIAware()  # physical pixels, like the swapchain
+        screen = (ctypes.windll.user32.GetSystemMetrics(0), ctypes.windll.user32.GetSystemMetrics(1))
+        assert (width, height) == screen, f"screenshot {width}x{height}, screen {screen}"
+
+    zone = next(s["s"] for s in smoke.ok("hud_surfaces")["surfaces"] if s.get("accepts") == "text")
+    smoke.ok("hud_publish", {"surface": zone, "content": "screenshot check", "ttl_ms": 30000})
+    deadline, changed = time.monotonic() + 10, 0
+    while time.monotonic() < deadline and changed < MIN_CHANGED_PIXELS:
+        time.sleep(0.5)  # let the compositor render the publish
+        w2, h2, after = shot()
+        assert (w2, h2) == (width, height), f"screenshot size changed: {w2}x{h2}"
+        changed = sum(1 for i in range(0, len(after), 4) if after[i : i + 4] != before[i : i + 4])
+    assert changed >= MIN_CHANGED_PIXELS, (
+        f"screenshot after publish differs from the baseline in only {changed} pixels "
+        f"(need {MIN_CHANGED_PIXELS}); the notification is not in the captured frame"
+    )
+    print(f"ok  /admin/screenshot {width}x{height} PNG, {changed} pixels changed by the notification")
+
+
 def check_admin(smoke: Smoke) -> None:
     status, body = smoke.get("/admin/status")
     info = json.loads(body)
@@ -145,6 +227,8 @@ def check_admin(smoke: Smoke) -> None:
     status, body = smoke.get("/admin/logs?tail=20")
     assert status == 200 and body.strip(), "/admin/logs?tail=20 returned no lines"
     print(f"ok  /admin/logs returned {len(body.splitlines())} lines")
+
+    check_screenshot(smoke)
 
 
 def seed_config(config: Path, psk: str) -> Path:

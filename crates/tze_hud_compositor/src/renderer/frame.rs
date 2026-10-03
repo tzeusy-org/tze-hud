@@ -56,6 +56,13 @@ pub struct WindowedPresentOutcome {
     pub gpu_submitted: bool,
 }
 
+impl WindowedFrameBuild {
+    /// Surface dimensions this frame was built for.
+    pub(super) fn size(&self) -> (u32, u32) {
+        (self.surf_w, self.surf_h)
+    }
+}
+
 #[cfg(test)]
 impl WindowedFrameBuild {
     /// Total flat-rect vertices built this frame (test / diagnostic accessor).
@@ -660,25 +667,6 @@ impl Compositor {
         build: WindowedFrameBuild,
         surface: &dyn CompositorSurface,
     ) -> WindowedPresentOutcome {
-        let WindowedFrameBuild {
-            mut telemetry,
-            surf_w,
-            surf_h,
-            vertices,
-            bg_vertex_count,
-            textured_cmds,
-            encode_inputs,
-            drag_handle_vertices,
-            focus_ring_vertices,
-            context_menu_vertices,
-            safe_mode_vertices,
-            widget_quads,
-            frame_start,
-        } = build;
-
-        let sw = surf_w as f32;
-        let sh = surf_h as f32;
-
         // Acquire frame through the surface trait (surface-agnostic).
         // The CompositorFrame._guard keeps the backing resource alive until drop.
         // Returns None when the swapchain is temporarily unavailable (double
@@ -688,7 +676,8 @@ impl Compositor {
             None => {
                 // Surface unavailable: skip render pass, return zeroed telemetry.
                 // The runtime will retry on the next frame cycle.
-                telemetry.frame_time_us = frame_start.elapsed().as_micros() as u64;
+                let mut telemetry = build.telemetry;
+                telemetry.frame_time_us = build.frame_start.elapsed().as_micros() as u64;
                 return WindowedPresentOutcome {
                     telemetry,
                     surface_acquired: false,
@@ -698,42 +687,10 @@ impl Compositor {
         };
         let surface_acquired = frame.acquisition.is_fresh();
 
-        let (mut encoder, encode_us) = self.encode_from_inputs(
-            &vertices,
-            &frame.view,
-            &encode_inputs,
-            surf_w,
-            surf_h,
-            self.overlay_mode,
-            bg_vertex_count,
-        );
+        let (encoder, encode_us) = self.encode_windowed_passes(&build, &frame.view);
+        let frame_start = build.frame_start;
+        let mut telemetry = build.telemetry;
         telemetry.stage6_render_encode_us = encode_us;
-
-        // ── Image pass: draw textured quads on top of color geometry ─────────
-        self.encode_image_pass(&mut encoder, &frame.view, &textured_cmds, sw, sh);
-
-        // ── Widget pass: composite pre-synced textures above zone content ────
-        self.encode_widget_pass_prepared(&mut encoder, &frame.view, &widget_quads, sw, sh);
-        self.encode_drag_handle_pass(&mut encoder, &frame.view, &drag_handle_vertices);
-
-        // ── Keyboard focus ring (chrome layer, hud-k6yvb) ───────────────────
-        // Drawn above all agent content (input-model §416) for the current focus
-        // owner — node OR tile-level, any tile — via the same LoadOp::Load chrome
-        // pass the drag handles use.
-        if !focus_ring_vertices.is_empty() {
-            self.encode_drag_handle_pass(&mut encoder, &frame.view, &focus_ring_vertices);
-        }
-
-        // ── Chrome context menu (hud-zc7f) ─────────────────────────────────
-        // Render the drag-handle reset context menu on top of everything.
-        if !context_menu_vertices.is_empty() {
-            self.encode_drag_handle_pass(&mut encoder, &frame.view, &context_menu_vertices);
-        }
-
-        // ── Safe-mode overlay (hud-jm8nq.10): above everything, including chrome.
-        if !safe_mode_vertices.is_empty() {
-            self.encode_drag_handle_pass(&mut encoder, &frame.view, &safe_mode_vertices);
-        }
 
         let submit_start = std::time::Instant::now();
         let cmd = encoder.finish();
@@ -783,6 +740,56 @@ impl Compositor {
             surface_acquired,
             gpu_submitted,
         }
+    }
+
+    /// Encode every pass of a built frame into `view`, in draw order, and
+    /// return the encoder plus the encode time. Shared by the swapchain present
+    /// path and the offscreen admin capture so both draw identical pixels.
+    pub(super) fn encode_windowed_passes(
+        &mut self,
+        build: &WindowedFrameBuild,
+        view: &wgpu::TextureView,
+    ) -> (wgpu::CommandEncoder, u64) {
+        let sw = build.surf_w as f32;
+        let sh = build.surf_h as f32;
+
+        let (mut encoder, encode_us) = self.encode_from_inputs(
+            &build.vertices,
+            view,
+            &build.encode_inputs,
+            build.surf_w,
+            build.surf_h,
+            self.overlay_mode,
+            build.bg_vertex_count,
+        );
+
+        // ── Image pass: draw textured quads on top of color geometry ─────────
+        self.encode_image_pass(&mut encoder, view, &build.textured_cmds, sw, sh);
+
+        // ── Widget pass: composite pre-synced textures above zone content ────
+        self.encode_widget_pass_prepared(&mut encoder, view, &build.widget_quads, sw, sh);
+        self.encode_drag_handle_pass(&mut encoder, view, &build.drag_handle_vertices);
+
+        // ── Keyboard focus ring (chrome layer, hud-k6yvb) ───────────────────
+        // Drawn above all agent content (input-model §416) for the current focus
+        // owner — node OR tile-level, any tile — via the same LoadOp::Load chrome
+        // pass the drag handles use.
+        if !build.focus_ring_vertices.is_empty() {
+            self.encode_drag_handle_pass(&mut encoder, view, &build.focus_ring_vertices);
+        }
+
+        // ── Chrome context menu (hud-zc7f) ─────────────────────────────────
+        // Render the drag-handle reset context menu on top of everything.
+        if !build.context_menu_vertices.is_empty() {
+            self.encode_drag_handle_pass(&mut encoder, view, &build.context_menu_vertices);
+        }
+
+        // ── Safe-mode overlay (hud-jm8nq.10): above everything, including chrome.
+        if !build.safe_mode_vertices.is_empty() {
+            self.encode_drag_handle_pass(&mut encoder, view, &build.safe_mode_vertices);
+        }
+
+        (encoder, encode_us)
     }
 
     /// Render one frame of the scene to the surface (single-lock convenience).

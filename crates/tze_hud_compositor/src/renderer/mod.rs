@@ -60,6 +60,7 @@ impl Default for CompositorDegradationPolicy {
 }
 
 pub mod animation;
+pub mod capture;
 pub mod draw_cmds;
 pub mod easing;
 pub mod encode_pass;

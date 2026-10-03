@@ -81,6 +81,7 @@ the MCP port with its PSK as the bearer:
 |---|---|
 | `GET /admin/status` | JSON: `version`, `sha`, `channel`, `pid`, `uptime_s`, `binds`, `agents` (`id`, `admin`), `safe_mode`, `safe_mode_hotkey` (`chord`, `registered`, `error`; `null` when no hotkey is active (non-Windows, or no network runtime); `registered: null` means registration is still pending; `registered: false` means another program owns the chord and there is no human override, also shown in the startup banner and logged at error level), `frames_presented`, `cpu_pct_2s` (sampled over 2 s, so the call takes about 2 s), `cpu_pct_avg` (percent of one core), `last_update` (null until updates land) |
 | `GET /admin/logs?tail=N` | `text/plain`, the last N lines (default 100, max 2000) across the rotation |
+| `GET /admin/screenshot` | `image/png` of the HUD's own frame at the window size (what the compositor draws, not an OS capture); rendered once per request, so idle cost is unchanged. One at a time (429), 503 if the compositor does not answer within 3 s |
 
 Without a valid PSK the answer is 401; with one lacking `admin`, 403
 `{"code":"NOT_ADMIN","hint":...}`.
