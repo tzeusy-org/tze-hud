@@ -14,7 +14,7 @@ members = [
     "crates/tze_hud_projection",
     "app/tze_hud_app",
     "examples/vertical_slice",
-    "examples/dashboard_tile_agent",
+    "examples/poc_demo",
     "examples/benchmark",
     "examples/widget_publish_load_harness",
     "examples/render_artifacts",
