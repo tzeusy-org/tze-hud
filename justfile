@@ -65,8 +65,7 @@ idle-efficiency-checker:
     python3 scripts/ci/test_run_quiescent_efficiency_script.py
 
 # Integration headless suites (mirror CI test-integration job)
-# Runs every integration target; the wall-clock soak test is #[ignore]d
-# (opt in: cargo test -p integration --test soak -- --ignored).
+# Runs every integration target.
 test-integration:
     HEADLESS_FORCE_SOFTWARE=1 cargo test -p integration --tests
 

@@ -18,7 +18,7 @@
 #   clippy-windows-gnu — cargo clippy --target x86_64-pc-windows-gnu -D warnings on the
 #     crates carrying cfg(windows) code, which the Linux clippy job never compiles
 #   test-unit      — cargo test --workspace --all-targets --exclude integration
-#   test-integration — cargo test -p integration --tests (soak test is #[ignore]d)
+#   test-integration — cargo test -p integration --tests
 #                    + deterministic LLM-facing token-footprint gate
 #   production-boot-vertical-slice / canonical-app-production-boot — boot the
 #     runtime with the committed production configs
@@ -174,7 +174,7 @@ jobs:
   # Runs all unit and crate tests across the workspace, excluding the
   # `integration` package, whose test targets run in their own jobs
   # (test-integration below) so failures are
-  # attributable per-suite and the long soak target stays opt-in.
+  # attributable per-suite.
   # The vertical_slice tests require a software GPU (llvmpipe) — HEADLESS_FORCE_SOFTWARE=1
   # is set globally in env above.
 
@@ -221,11 +221,7 @@ jobs:
   # Runs the `integration` package's test targets that are fast and headless
   # (HeadlessRuntime + software GPU via HEADLESS_FORCE_SOFTWARE=1; no display
   # server required).
-  #
-  # Excluded targets (each with its own coverage):
-  # - soak's test_soak_resource_growth — wall-clock-bound soak/leak run,
-  #   #[ignore]d so it stays opt-in (see tests/integration/Cargo.toml header).
-  #   `just test-integration` runs the same `--tests` command.
+  # `just test-integration` runs the same `--tests` command.
 
   test-integration:
     name: cargo test (integration)
