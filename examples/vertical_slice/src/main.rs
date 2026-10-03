@@ -64,7 +64,7 @@ fn main() -> Result<(), BoxError> {
         .build()?
         .block_on(async {
             let runtime = boot(50051).await?;
-            run_lifecycle(50051).await?;
+            run_lifecycle(&mut Agent::connect(50051, AGENT_PSK).await?, async || {}).await?;
             println!("tiles left on the scene: {}", tile_count(&runtime).await);
             Ok(())
         })
@@ -172,10 +172,17 @@ impl Agent {
     }
 }
 
-/// Claim a filled tile, publish a status entry, hold the tile, then clear it.
-async fn run_lifecycle(port: u16) -> Result<(), BoxError> {
-    let mut agent = Agent::connect(port, AGENT_PSK).await?;
+/// TTLs the runtime granted to the claim and the hold.
+struct Granted {
+    claim_ttl_ms: u64,
+    hold_ttl_ms: u64,
+}
 
+/// Claim a filled tile, publish a status entry, hold the tile, then clear it.
+async fn run_lifecycle(
+    agent: &mut Agent,
+    before_clear: impl AsyncFnOnce(),
+) -> Result<Granted, BoxError> {
     // Claim: lease, tile, and content in one round trip. The runtime resolves
     // the placement hint into bounds and z-order.
     let claimed = agent
@@ -214,14 +221,19 @@ async fn run_lifecycle(port: u16) -> Result<(), BoxError> {
         .await?;
     println!("held {tile}, ttl {} ms", held.ttl_ms);
 
-    // Clear: release the tile and its lease.
+    before_clear().await;
+
+    // Clear: release the tile and its lease (and with it the zone publication).
     agent
         .request(Request::Clear(Clear {
             surface: tile.clone(),
         }))
         .await?;
     println!("cleared {tile}");
-    Ok(())
+    Ok(Granted {
+        claim_ttl_ms: claimed.ttl_ms,
+        hold_ttl_ms: held.ttl_ms,
+    })
 }
 
 /// `tile:<uuid>` from the 16 id bytes a `ClaimTile` reply carries.
@@ -270,13 +282,27 @@ fn text_root(text: &str) -> NodeProto {
 mod tests {
     use super::*;
 
-    /// The paired agent can claim, publish, hold, and clear; clearing the tile
-    /// leaves the scene empty (invariant: leases release what they own).
+    /// The paired agent can claim, publish, hold, and clear: the claim and
+    /// hold grant the requested TTLs, the status-bar entry is on the scene,
+    /// and clearing the tile leaves no tile behind.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn paired_agent_runs_the_full_lifecycle() {
         let port = free_port();
         let runtime = boot(port).await.expect("runtime boots");
-        run_lifecycle(port).await.expect("lifecycle completes");
+        let mut agent = Agent::connect(port, AGENT_PSK).await.expect("handshake");
+        let granted = run_lifecycle(&mut agent, async || {
+            let scene = runtime.shared_state().lock().await.scene.clone();
+            let scene = scene.lock().await;
+            let published = scene.zone_registry.active_publishes.get("status-bar");
+            assert!(
+                published.is_some_and(|p| !p.is_empty()),
+                "the status-bar Publish must be on the scene"
+            );
+        })
+        .await
+        .expect("lifecycle completes");
+        assert_eq!(granted.claim_ttl_ms, 60_000);
+        assert_eq!(granted.hold_ttl_ms, 120_000, "Hold must renew the lease");
         assert_eq!(tile_count(&runtime).await, 0, "Clear must remove the tile");
     }
 
