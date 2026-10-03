@@ -30,7 +30,6 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::Instant;
 
 use ab_glyph::{Font, ScaleFont};
 use tze_hud_scene::DegradationLevel;
@@ -1721,9 +1720,13 @@ pub struct WidgetTextureEntry {
     pub animation: Option<WidgetAnimationState>,
 }
 
+/// Spacing of wake-ups while a widget transition is animating (~60 Hz).
+pub const WIDGET_TRANSITION_TICK: std::time::Duration = std::time::Duration::from_millis(16);
+
 /// Active animation state for a widget instance.
 pub struct WidgetAnimationState {
-    pub start: Instant,
+    /// Start time on the scene's injected clock (microseconds).
+    pub start_us: u64,
     pub duration_ms: u32,
     pub from_params: HashMap<String, WidgetParameterValue>,
     pub to_params: HashMap<String, WidgetParameterValue>,
@@ -2661,17 +2664,19 @@ impl WidgetRenderer {
     }
 
     /// Mark a widget instance as dirty and start a transition animation.
+    /// `now_us` is the scene's injected clock, never the wall clock.
     pub fn start_transition(
         &mut self,
         instance_name: &str,
         from_params: HashMap<String, WidgetParameterValue>,
         to_params: HashMap<String, WidgetParameterValue>,
         transition_ms: u32,
+        now_us: u64,
     ) {
         if let Some(entry) = self.textures.get_mut(instance_name) {
             entry.dirty = true;
             entry.animation = Some(WidgetAnimationState {
-                start: Instant::now(),
+                start_us: now_us,
                 duration_ms: transition_ms,
                 from_params,
                 to_params,
@@ -2693,6 +2698,7 @@ impl WidgetRenderer {
         instance_name: &str,
         current_params: &HashMap<String, WidgetParameterValue>,
         degradation_level: DegradationLevel,
+        now_us: u64,
     ) -> (HashMap<String, WidgetParameterValue>, bool) {
         let entry = match self.textures.get_mut(instance_name) {
             Some(e) => e,
@@ -2704,7 +2710,7 @@ impl WidgetRenderer {
             None => return (current_params.clone(), false),
         };
 
-        let elapsed_ms = anim.start.elapsed().as_millis() as f32;
+        let elapsed_ms = now_us.saturating_sub(anim.start_us) as f32 / 1000.0;
         let duration_ms = anim.duration_ms as f32;
         // Under RENDERING_SIMPLIFIED or higher degradation, snap to final values
         // immediately to avoid per-frame re-rasterization.
@@ -2727,10 +2733,16 @@ impl WidgetRenderer {
         (result, still_animating)
     }
 
+    /// True while any widget instance has a transition in flight. Idle widgets
+    /// report false, so the frame loop schedules no work for them.
+    pub fn has_active_transition(&self) -> bool {
+        self.textures.values().any(|e| e.animation.is_some())
+    }
+
     /// Rasterize an SVG layer with parameter bindings applied and upload to GPU.
     ///
-    /// Returns the time spent rasterizing in microseconds (for performance monitoring).
-    /// Per spec, re-rasterization MUST complete in less than 2ms for a 512x512 widget.
+    /// Per-instance raster counts (`raster_count`) are the observable cost;
+    /// timing lives in `tests/widget_rasterize_budget.rs`, not on this path.
     #[allow(clippy::too_many_arguments)]
     pub fn rasterize_and_upload(
         &mut self,
@@ -2741,8 +2753,7 @@ impl WidgetRenderer {
         params: &HashMap<String, WidgetParameterValue>,
         pixel_width: u32,
         pixel_height: u32,
-    ) -> u64 {
-        let start = Instant::now();
+    ) {
         *self
             .raster_counts
             .entry(instance_name.to_string())
@@ -2808,21 +2819,11 @@ impl WidgetRenderer {
             )
         });
 
-        let raster_us = start.elapsed().as_micros() as u64;
-
-        if raster_us > 2000 {
-            tracing::warn!(
-                widget = instance_name,
-                raster_us,
-                "widget re-rasterization exceeded 2ms budget"
-            );
-        }
-
         let pixmap = match composed {
             Some(p) => p,
             None => {
                 tracing::debug!(widget = instance_name, "no layers rendered for widget");
-                return raster_us;
+                return;
             }
         };
 
@@ -2836,17 +2837,12 @@ impl WidgetRenderer {
             pixel_height,
         );
 
-        let total_us = start.elapsed().as_micros() as u64;
         tracing::trace!(
             widget = instance_name,
-            raster_us,
-            total_us,
             width = pixel_width,
             height = pixel_height,
             "widget rasterized and uploaded"
         );
-
-        total_us
     }
 
     /// Upload RGBA pixel data to a wgpu texture (creating or replacing the cached entry).
@@ -2938,6 +2934,11 @@ impl WidgetRenderer {
             ],
         });
 
+        // Re-uploading a frame of a running transition must not end it.
+        let animation = self
+            .textures
+            .get_mut(instance_name)
+            .and_then(|e| e.animation.take());
         let old = self.textures.insert(
             instance_name.to_string(),
             WidgetTextureEntry {
@@ -2951,7 +2952,7 @@ impl WidgetRenderer {
                 height,
                 dirty: false,
                 last_rendered_params: HashMap::new(),
-                animation: None,
+                animation,
             },
         );
         if let Some(old) = old
@@ -4341,39 +4342,6 @@ mod tests {
     }
 
     #[test]
-    fn test_rasterization_performance_512x512() {
-        // Spec: re-rasterization MUST complete in less than 2ms for 512x512.
-        // On CI this is a soft check — we log a warning but don't fail.
-        // Use r##"..."## so that "#" inside SVG attribute values doesn't terminate the string.
-        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512">
-            <rect id="bar" x="0" y="0" width="256" height="512" fill="#336699"/>
-            <rect id="accent" x="10" y="10" width="236" height="100" fill="#ff8800"/>
-        </svg>"##;
-
-        let start = std::time::Instant::now();
-
-        let opts = resvg::usvg::Options::default();
-        let tree = resvg::usvg::Tree::from_str(svg, &opts).expect("parse");
-        let mut pixmap = tiny_skia::Pixmap::new(512, 512).expect("pixmap");
-        let sx = 512.0 / tree.size().width();
-        let sy = 512.0 / tree.size().height();
-        resvg::render(
-            &tree,
-            tiny_skia::Transform::from_scale(sx, sy),
-            &mut pixmap.as_mut(),
-        );
-
-        let elapsed_us = start.elapsed().as_micros();
-        if elapsed_us > 2000 {
-            eprintln!(
-                "WARNING: 512x512 rasterization took {elapsed_us}µs (budget: 2000µs) — may fail on slow CI"
-            );
-        }
-        // Verify non-trivial output
-        assert_eq!(pixmap.data().len(), 512 * 512 * 4);
-    }
-
-    #[test]
     fn snap_composite_rect_rounds_fractional_origin() {
         let (x, y, w, h) = snap_composite_rect(2213.3333, 10.6667, 336.0, 128.0, 2560.0, 1440.0);
         assert_eq!(x, 2213.0);
@@ -4567,29 +4535,5 @@ mod tests {
             "warning indicator should be yellow (low blue), got: b={}",
             px.blue()
         );
-    }
-
-    /// WHEN the reference gauge is rasterized at 512×512 with a full-height bar
-    /// THEN rasterization completes within the 2ms budget.
-    ///
-    /// Source: hud-mim2.7 acceptance criterion 10 — re-rasterization < 2ms for 512×512.
-    #[test]
-    fn reference_gauge_rasterization_within_2ms_budget_at_512x512() {
-        let modified_svg = apply_gauge_params("200", "#00b4ff", "CPU", "#00cc66");
-
-        let start = std::time::Instant::now();
-        let pixmap = rasterize_svg(&modified_svg, 512, 512);
-        let elapsed_us = start.elapsed().as_micros();
-
-        // Soft budget check: warn on CI if over budget; do not fail the build.
-        // The reference hardware target is 3GHz single-core; llvmpipe in CI may be slower.
-        if elapsed_us > 2000 {
-            eprintln!(
-                "WARNING: reference gauge 512×512 rasterization took {elapsed_us}µs (budget: 2000µs) — may fail on slow CI"
-            );
-        }
-
-        // The output must be valid 512×512 RGBA8.
-        assert_eq!(pixmap.data().len(), 512 * 512 * 4);
     }
 }

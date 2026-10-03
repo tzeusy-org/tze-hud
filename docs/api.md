@@ -58,7 +58,10 @@ otherwise.
   (`notification` with `title`, `body`, `urgency`, `actions`). `type` may be
   omitted; the runtime infers it from what the zone accepts. `key` is the
   merge key.
-- Widget: `params` is the typed parameter map.
+- Widget: `params` is the typed parameter map. A gRPC publish with
+  `transition_ms` > 0 eases f32 and color params from what is on screen; enum
+  and string params snap, and so does everything under degradation. The
+  runtime wakes only until the transition lands.
 - Portal: the first publish to `portal:<id>` attaches (`display_name` is
   optional). `content` is the output text, `status` is the lifecycle state,
   and `expects_reply` arms the composer. `key` is the portal coalesce key.

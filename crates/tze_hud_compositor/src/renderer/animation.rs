@@ -715,7 +715,14 @@ impl Compositor {
             let next_toggle_ns = (elapsed / half + 1) * half;
             self.composer_caret_blink_start + std::time::Duration::from_nanos(next_toggle_ns as u64)
         });
-        fade_starts.chain(caret_toggle).min()
+        // A widget mid-transition changes pixels every tick until it lands;
+        // an idle widget contributes nothing.
+        let widget_tick = self
+            .widget_renderer
+            .as_ref()
+            .filter(|wr| wr.has_active_transition())
+            .map(|_| std::time::Instant::now() + crate::widget::WIDGET_TRANSITION_TICK);
+        fade_starts.chain(caret_toggle).chain(widget_tick).min()
     }
 
     /// Whether any per-frame animation, fade, reveal, or scroll smoothing is
@@ -762,6 +769,15 @@ impl Compositor {
             .pub_animation_states
             .values()
             .any(|zone| zone.values().any(|s| s.is_fading()))
+        {
+            return true;
+        }
+
+        // Widget parameter transition still easing toward its target.
+        if self
+            .widget_renderer
+            .as_ref()
+            .is_some_and(|wr| wr.has_active_transition())
         {
             return true;
         }
