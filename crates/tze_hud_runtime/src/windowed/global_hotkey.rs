@@ -6,6 +6,7 @@
 //! `GetMessageW` (zero idle cost). The OS releases the registration when the
 //! process exits.
 
+use crate::operator::status::HotkeyStatus;
 use tokio::sync::mpsc::UnboundedSender;
 use tze_hud_scene::config::Hotkey;
 use windows::Win32::Foundation::HWND;
@@ -16,11 +17,14 @@ use windows::Win32::UI::WindowsAndMessaging::{GetMessageW, MSG, WM_HOTKEY};
 
 const HOTKEY_ID: i32 = 1;
 
-/// Register `hotkey` globally and signal `tx` on every press.
+/// Register `hotkey` globally, signal `tx` on every press, and return the
+/// registration outcome (waits briefly for the hotkey thread to report).
 ///
-/// A chord another program already owns is logged and left unregistered; the
-/// runtime keeps working without the hotkey.
-pub(super) fn spawn_global_hotkey(hotkey: Hotkey, tx: UnboundedSender<()>) {
+/// A chord another program already owns is left unregistered and reported as
+/// `Failed`; the runtime keeps working without the hotkey.
+pub(super) fn spawn_global_hotkey(hotkey: Hotkey, tx: UnboundedSender<()>) -> HotkeyStatus {
+    let chord = hotkey.to_string();
+    let (status_tx, status_rx) = std::sync::mpsc::channel();
     let spawned = std::thread::Builder::new()
         .name("safe-mode-hotkey".into())
         .spawn(move || {
@@ -30,10 +34,15 @@ pub(super) fn spawn_global_hotkey(hotkey: Hotkey, tx: UnboundedSender<()>) {
             if let Err(error) =
                 unsafe { RegisterHotKey(HWND::default(), HOTKEY_ID, modifiers, hotkey.win32_vk()) }
             {
-                tracing::warn!(%hotkey, %error, "safe-mode hotkey not registered (chord in use?)");
+                let _ = status_tx.send(HotkeyStatus::Failed {
+                    chord: hotkey.to_string(),
+                    reason: error.to_string(),
+                });
                 return;
             }
-            tracing::info!(%hotkey, "safe-mode global hotkey registered");
+            let _ = status_tx.send(HotkeyStatus::Registered {
+                chord: hotkey.to_string(),
+            });
             let mut msg = MSG::default();
             // SAFETY: `msg` is a valid out-pointer; GetMessageW returns 0 on
             // WM_QUIT and -1 on error, both of which end the loop.
@@ -43,7 +52,14 @@ pub(super) fn spawn_global_hotkey(hotkey: Hotkey, tx: UnboundedSender<()>) {
                 }
             }
         });
-    if let Err(error) = spawned {
-        tracing::warn!(%error, "failed to spawn safe-mode hotkey thread");
+    let fail = |reason: String| HotkeyStatus::Failed {
+        chord: chord.clone(),
+        reason,
+    };
+    match spawned {
+        Err(error) => fail(format!("could not start hotkey thread: {error}")),
+        Ok(_) => status_rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .unwrap_or_else(|_| fail("hotkey thread did not report".into())),
     }
 }

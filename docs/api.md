@@ -110,7 +110,9 @@ allow = ["zone:*", "widget:gauge", "portal", "tiles"]
   negotiation and no resident principal.
 - `admin` is an operator entry, outside the model surface: it opens
   `GET /admin/status` and `GET /admin/logs` on the MCP port, and `*` does not
-  grant it.
+  grant it. `/admin/status` includes `safe_mode_hotkey`
+  (`chord`, `registered`, `error`; `null` off Windows): `registered: false`
+  means the human safe-mode chord is owned by another program.
 - The operator's local tools (cleanup, composer paste, SVG asset upload) are
   off the model surface: CLI/config, or gRPC for tooling.
 

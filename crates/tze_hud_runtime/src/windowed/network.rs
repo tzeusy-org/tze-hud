@@ -259,6 +259,7 @@ async fn accept_into(
 pub(super) fn render_startup_banner(
     grpc_addrs: &[std::net::SocketAddr],
     mcp_addrs: &[std::net::SocketAddr],
+    hotkey: &crate::operator::status::HotkeyStatus,
 ) -> String {
     const RULE: &str = "────────────────────────────────────────────────────────────────────";
     let mut lines: Vec<String> = Vec::with_capacity(7);
@@ -279,6 +280,7 @@ pub(super) fn render_startup_banner(
             mcp_endpoint_url(*addr)
         ));
     }
+    lines.extend(hotkey.banner_line());
     lines.push(
         "   attach : invoke the `hud-projection` skill in an LLM session, or run".to_string(),
     );
@@ -401,6 +403,20 @@ pub fn render_attach_info(
 mod tests {
     use super::super::test_support::make_shared_state;
     use super::*;
+    use crate::operator::status::HotkeyStatus;
+
+    #[test]
+    fn startup_banner_states_hotkey_failure() {
+        let failed = HotkeyStatus::Failed {
+            chord: "Ctrl+Shift+F12".into(),
+            reason: "in use".into(),
+        };
+        let banner = render_startup_banner(&[], &[], &failed);
+        assert!(banner.contains("NOT registered") && banner.contains("Ctrl+Shift+F12"));
+        assert!(
+            !render_startup_banner(&[], &[], &HotkeyStatus::NotApplicable).contains("safe   :")
+        );
+    }
 
     /// The banner must never contain the PSK, even when one is configured.
     /// `render_startup_banner` takes only bound addresses (never the secret),
@@ -412,7 +428,7 @@ mod tests {
         // Simulate a fully-configured runtime with a PSK set in the environment.
         let grpc: std::net::SocketAddr = "127.0.0.1:50051".parse().unwrap();
         let mcp: std::net::SocketAddr = "127.0.0.1:9090".parse().unwrap();
-        let banner = render_startup_banner(&[grpc], &[mcp]);
+        let banner = render_startup_banner(&[grpc], &[mcp], &HotkeyStatus::NotApplicable);
         assert!(
             !banner.contains(psk),
             "startup banner must not leak the PSK; banner was:\n{banner}"
@@ -430,7 +446,7 @@ mod tests {
     /// Disabled services render as `disabled`, not a bogus `:0` endpoint.
     #[test]
     fn startup_banner_renders_disabled_services() {
-        let banner = render_startup_banner(&[], &[]);
+        let banner = render_startup_banner(&[], &[], &HotkeyStatus::NotApplicable);
         assert!(banner.contains("gRPC   : disabled"));
         assert!(banner.contains("MCP    : disabled"));
         // Attach hint is always present so the runtime stays self-describing.

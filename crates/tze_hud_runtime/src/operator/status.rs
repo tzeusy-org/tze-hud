@@ -20,6 +20,70 @@ pub struct BuildInfo {
     pub channel: String,
 }
 
+/// Outcome of registering the human safe-mode override chord.
+///
+/// Platform-neutral so the banner, `/admin/status`, and tests need no Windows
+/// types. Only the Windows hotkey thread produces `Registered` / `Failed`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HotkeyStatus {
+    /// No global hotkey on this platform (or it was never started).
+    NotApplicable,
+    Registered {
+        chord: String,
+    },
+    /// The chord could not be registered (typically another program owns it),
+    /// so the human override is unavailable.
+    Failed {
+        chord: String,
+        reason: String,
+    },
+}
+
+impl HotkeyStatus {
+    /// One banner line, or `None` when there is nothing to say.
+    pub fn banner_line(&self) -> Option<String> {
+        match self {
+            Self::NotApplicable => None,
+            Self::Registered { chord } => Some(format!("   safe   : {chord} toggles safe mode")),
+            Self::Failed { chord, reason } => Some(format!(
+                "   safe   : WARNING hotkey {chord} NOT registered ({reason}); no human safe-mode override"
+            )),
+        }
+    }
+
+    /// The `safe_mode_hotkey` value for `/admin/status`: `null` when not applicable.
+    pub fn to_json(&self) -> Value {
+        match self {
+            Self::NotApplicable => Value::Null,
+            Self::Registered { chord } => {
+                json!({"chord": chord, "registered": true, "error": Value::Null})
+            }
+            Self::Failed { chord, reason } => {
+                json!({"chord": chord, "registered": false, "error": reason})
+            }
+        }
+    }
+}
+
+static SAFE_MODE_HOTKEY: OnceLock<HotkeyStatus> = OnceLock::new();
+
+/// Record the hotkey outcome (first call wins). A failure is logged at error
+/// level because the human has no other override.
+pub fn set_safe_mode_hotkey(status: HotkeyStatus) -> HotkeyStatus {
+    if let HotkeyStatus::Failed { chord, reason } = &status {
+        tracing::error!(%chord, %reason, "safe-mode hotkey NOT registered: no human safe-mode override");
+    }
+    SAFE_MODE_HOTKEY.get_or_init(|| status).clone()
+}
+
+/// The recorded hotkey outcome, `NotApplicable` until one is set.
+pub fn safe_mode_hotkey() -> HotkeyStatus {
+    SAFE_MODE_HOTKEY
+        .get()
+        .cloned()
+        .unwrap_or(HotkeyStatus::NotApplicable)
+}
+
 static BUILD_INFO: OnceLock<BuildInfo> = OnceLock::new();
 static PROCESS_START: OnceLock<Instant> = OnceLock::new();
 
@@ -148,11 +212,44 @@ impl StatusSource {
             "binds": binds,
             "agents": agents,
             "safe_mode": self.safe_mode.load(Ordering::Relaxed),
+            "safe_mode_hotkey": safe_mode_hotkey().to_json(),
             "frames_presented": self.presents.as_ref().map(|c| c.snapshot().presents),
             "cpu_pct_2s": cpu_pct_2s,
             "cpu_pct_avg": cpu_pct_avg,
             // No updater yet (separate bead); the key is reserved.
             "last_update": Value::Null,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn failed() -> HotkeyStatus {
+        HotkeyStatus::Failed {
+            chord: "Ctrl+Shift+F12".into(),
+            reason: "already in use".into(),
+        }
+    }
+
+    #[test]
+    fn hotkey_status_json_and_banner() {
+        let ok = HotkeyStatus::Registered {
+            chord: "Ctrl+Shift+F12".into(),
+        };
+        assert_eq!(
+            ok.to_json(),
+            json!({"chord": "Ctrl+Shift+F12", "registered": true, "error": null})
+        );
+        assert_eq!(
+            failed().to_json(),
+            json!({"chord": "Ctrl+Shift+F12", "registered": false, "error": "already in use"})
+        );
+        assert_eq!(HotkeyStatus::NotApplicable.to_json(), Value::Null);
+        assert!(HotkeyStatus::NotApplicable.banner_line().is_none());
+        assert!(ok.banner_line().unwrap().contains("Ctrl+Shift+F12 toggles"));
+        let line = failed().banner_line().unwrap();
+        assert!(line.contains("NOT registered") && line.contains("already in use"));
     }
 }
