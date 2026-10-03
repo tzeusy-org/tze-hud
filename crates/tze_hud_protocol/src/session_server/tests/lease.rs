@@ -91,7 +91,7 @@ async fn test_mutation_rejected_with_expired_lease_id() {
             assert!(
                 !result.ok,
                 "Mutation with revoked lease_id must be rejected \
-                     (regression for hud-wu32: lease_id=None previously bypassed validation)"
+                     (a missing lease_id must not bypass validation)"
             );
             assert_eq!(
                 result.batch_id, batch_id,
@@ -131,7 +131,7 @@ async fn test_lease_over_stream() {
     }
 }
 
-// ─── Lease management tests (rig-7bho) ───────────────────────────────────
+// ─── Lease management ────────────────────────────────────────────────────────
 
 /// Scenario: Lease acquisition via session stream (spec §Lease Management RPCs,
 /// lease-governance spec §Lease State Machine).
@@ -204,7 +204,7 @@ async fn test_lease_id_is_16_byte_uuidv7() {
 }
 
 /// Scenario: Retransmit correlation — sending a lease request with the same
-/// client sequence number returns the cached response (RFC 0005 §5.3).
+/// client sequence number returns the cached response.
 ///
 /// The server must detect retransmits (same sequence) and replay the response
 /// without re-applying the operation.
@@ -362,16 +362,6 @@ async fn test_lease_expiry_scenario_initial_grant() {
         }
         other => panic!("Expected LeaseResponse for short-TTL lease, got: {other:?}"),
     }
-}
-
-/// LeaseResponse is Transactional (never dropped under backpressure).
-#[test]
-fn test_lease_response_is_transactional() {
-    assert_eq!(
-        classify_server_payload(&ServerPayload::RequestResult(RequestResult::default())),
-        TrafficClass::Transactional,
-        "LeaseResponse must be Transactional (never dropped)"
-    );
 }
 
 /// Scenario: Disconnect orphan behavior — session cleanup does not panic

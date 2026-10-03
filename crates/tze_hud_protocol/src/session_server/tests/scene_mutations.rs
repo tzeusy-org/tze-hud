@@ -267,14 +267,14 @@ async fn test_mutation_result_echoes_client_batch_id() {
             assert_eq!(
                 result.batch_id, client_batch_id,
                 "MutationResult.batch_id must echo the client-provided batch_id \
-                     (regression for hud-wu32: batch_id was previously a fresh SceneId)"
+                     (batch_id must be echoed, not regenerated)"
             );
         }
         other => panic!("Expected MutationResult, got: {other:?}"),
     }
 }
 
-// ─── Deduplication tests (RFC 0005 §5.2) ─────────────────────────────────
+// ─── Mutation deduplication ──────────────────────────────────────────────────
 
 /// Scenario: duplicate batch_id within window returns cached MutationResult.
 #[tokio::test]

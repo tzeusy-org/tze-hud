@@ -1,3 +1,4 @@
+use super::upload::UploadByteRateLimiter;
 use super::*;
 
 mod allow;
@@ -228,9 +229,7 @@ async fn setup_test_with_state_and_render_wake(
     (client, handle, shared_state)
 }
 
-// ─── Live capability revocation tests (RFC 0001 §3.3, GAP-G3-4) ────────────
-
-// ─── Widget publish tests (widget-system spec §Requirement: Widget Publishing via gRPC) ──
+// ─── Widget publish and resource upload ──────────────────────────────────────
 
 /// Helper: create a test service with a durable widget registered.
 async fn setup_widget_service() -> HudSessionImpl {

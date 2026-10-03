@@ -51,11 +51,11 @@ async fn test_zone_publish_result() {
     }
 }
 
-// ─── Zone durability tests (RFC 0005 §3.1, §8.6) ─────────────────────────
+// ─── Zone publish acknowledgement ────────────────────────────────────────────
 
 /// Scenario: Ephemeral zone publish is fire-and-forget — no ZonePublishResult.
 /// WHEN agent publishes to an ephemeral zone (zone.ephemeral=true)
-/// THEN runtime does NOT send a ZonePublishResult (spec lines 624-626)
+/// THEN runtime does NOT send a ZonePublishResult
 #[tokio::test]
 async fn test_ephemeral_zone_no_publish_result() {
     use tze_hud_scene::types::{
@@ -162,7 +162,7 @@ async fn test_ephemeral_zone_no_publish_result() {
     drop(handle);
 }
 
-/// Scenario: Durable zone publish is acknowledged (RFC 0005 §3.1, spec lines 620-622).
+/// Scenario: Durable zone publish is acknowledged.
 /// WHEN agent publishes to a durable zone (zone.ephemeral=false)
 /// THEN runtime sends a ZonePublishResult.
 #[tokio::test]

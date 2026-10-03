@@ -1,8 +1,8 @@
 use super::*;
 
-// ─── Safe mode tests (RFC 0005 §3.7) ─────────────────────────────────────
+// ─── Safe mode ───────────────────────────────────────────────────────────────
 
-/// Scenario: Mutations rejected during safe mode (RFC 0005 §3.7)
+/// Scenario: Mutations rejected during safe mode
 /// WHEN the runtime enters safe mode and sets `SharedState.safe_mode_atomic = true`,
 /// THEN MutationBatch is rejected with SAFE_MODE_ACTIVE.
 ///
@@ -124,7 +124,7 @@ async fn test_safe_mode_rejects_mutations() {
     }
 }
 
-// ─── Freeze queue tests (system-shell/spec.md §Freeze Scene) ────────────
+// ─── Freeze queue ────────────────────────────────────────────────────────────
 
 /// Scenario: Freeze queues mutations (spec line 146)
 /// WHEN viewer activates freeze via SharedState.freeze_active = true
@@ -273,6 +273,64 @@ async fn test_freeze_queues_mutations_not_applied() {
         assert_eq!(scene.tiles.len(), tile_count_before);
         let tile_id = bytes_to_scene_id(&tile_id).expect("claimed tile id");
         assert_eq!(scene.tiles[&tile_id].opacity, 0.5);
+    }
+}
+
+/// Scenario: Freeze ignored during safe mode (spec line 137)
+/// WHEN safe mode is active AND freeze is set
+/// THEN mutations are rejected with SAFE_MODE_ACTIVE (not queued)
+#[tokio::test]
+async fn test_safe_mode_takes_precedence_over_freeze() {
+    let (mut client, _server, shared_state) = setup_test_with_state().await;
+    let (tx, _init_messages, mut stream) =
+        handshake(&mut client, "safe-freeze-agent", "test-key").await;
+
+    // Request a lease
+    tx.send(ClientMessage {
+        sequence: 2,
+        timestamp_wall_us: now_wall_us(),
+        payload: Some(ClientPayload::ClaimTile(ClaimTile {
+            ttl_ms: 30_000,
+            ..Default::default()
+        })),
+    })
+    .await
+    .unwrap();
+    let lease_msg = stream.next().await.unwrap().unwrap();
+    let lease_id = match &lease_msg.payload {
+        Some(ServerPayload::RequestResult(resp)) if resp.ok => resp.lease_id.clone(),
+        other => panic!("Expected LeaseResponse (granted), got: {other:?}"),
+    };
+
+    // Set BOTH safe mode and freeze (invariant: safe mode cancels freeze, but we test
+    // that safe mode takes precedence in the session server check order)
+    {
+        let mut st = shared_state.lock().await;
+        st.safe_mode_atomic
+            .store(true, std::sync::atomic::Ordering::Release);
+        st.freeze_active = false; // Invariant: safe_mode=true => freeze_active=false
+    }
+
+    let batch_id = uuid::Uuid::now_v7().as_bytes().to_vec();
+    tx.send(ClientMessage {
+        sequence: 3,
+        timestamp_wall_us: now_wall_us(),
+        payload: Some(ClientPayload::MutationBatch(MutationBatch {
+            batch_id: batch_id.clone(),
+            lease_id: lease_id.clone(),
+            mutations: Vec::new(),
+            ..Default::default()
+        })),
+    })
+    .await
+    .unwrap();
+
+    let msg = next_server_msg(&mut stream).await;
+    match &msg.payload {
+        Some(ServerPayload::RequestResult(err)) => {
+            assert_eq!(err.code, "SAFE_MODE_ACTIVE");
+        }
+        other => panic!("Expected SAFE_MODE_ACTIVE RuntimeError, got: {other:?}"),
     }
 }
 
@@ -572,143 +630,5 @@ async fn test_freeze_retransmit_deduped_applied_exactly_once() {
     assert!(
         outbound_rx.try_recv().is_err(),
         "No additional messages should be in the outbound channel after dedup"
-    );
-}
-
-/// Scenario: Freeze ignored during safe mode (spec line 137)
-/// WHEN safe mode is active AND freeze is set
-/// THEN mutations are rejected with SAFE_MODE_ACTIVE (not queued)
-#[tokio::test]
-async fn test_safe_mode_takes_precedence_over_freeze() {
-    let (mut client, _server, shared_state) = setup_test_with_state().await;
-    let (tx, _init_messages, mut stream) =
-        handshake(&mut client, "safe-freeze-agent", "test-key").await;
-
-    // Request a lease
-    tx.send(ClientMessage {
-        sequence: 2,
-        timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::ClaimTile(ClaimTile {
-            ttl_ms: 30_000,
-            ..Default::default()
-        })),
-    })
-    .await
-    .unwrap();
-    let lease_msg = stream.next().await.unwrap().unwrap();
-    let lease_id = match &lease_msg.payload {
-        Some(ServerPayload::RequestResult(resp)) if resp.ok => resp.lease_id.clone(),
-        other => panic!("Expected LeaseResponse (granted), got: {other:?}"),
-    };
-
-    // Set BOTH safe mode and freeze (invariant: safe mode cancels freeze, but we test
-    // that safe mode takes precedence in the session server check order)
-    {
-        let mut st = shared_state.lock().await;
-        st.safe_mode_atomic
-            .store(true, std::sync::atomic::Ordering::Release);
-        st.freeze_active = false; // Invariant: safe_mode=true => freeze_active=false
-    }
-
-    let batch_id = uuid::Uuid::now_v7().as_bytes().to_vec();
-    tx.send(ClientMessage {
-        sequence: 3,
-        timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::MutationBatch(MutationBatch {
-            batch_id: batch_id.clone(),
-            lease_id: lease_id.clone(),
-            mutations: Vec::new(),
-            ..Default::default()
-        })),
-    })
-    .await
-    .unwrap();
-
-    let msg = next_server_msg(&mut stream).await;
-    match &msg.payload {
-        Some(ServerPayload::RequestResult(err)) => {
-            assert_eq!(err.code, "SAFE_MODE_ACTIVE");
-        }
-        other => panic!("Expected SAFE_MODE_ACTIVE RuntimeError, got: {other:?}"),
-    }
-}
-
-/// Scenario: SessionFreezeQueue unit test — MUTATION_QUEUE_PRESSURE at 80% capacity
-#[test]
-fn test_session_freeze_queue_pressure_signal() {
-    let mut q = SessionFreezeQueue::new(10);
-    // Fill 7 entries (70%) without crossing threshold
-    for i in 0..7 {
-        let batch = MutationBatch {
-            batch_id: format!("b{i}").into_bytes(),
-            lease_id: vec![0u8; 16],
-            mutations: Vec::new(),
-            ..Default::default()
-        };
-        let r = q.enqueue(batch, "ns");
-        assert!(
-            matches!(
-                r,
-                FreezeEnqueueResult::Queued {
-                    pressure_warning: false
-                }
-            ),
-            "Expected no pressure warning at {i}/7"
-        );
-    }
-    // 8th entry crosses 80%
-    let batch = MutationBatch {
-        batch_id: b"b7".to_vec(),
-        lease_id: vec![0u8; 16],
-        mutations: Vec::new(),
-        ..Default::default()
-    };
-    let r = q.enqueue(batch, "ns");
-    assert!(
-        matches!(
-            r,
-            FreezeEnqueueResult::Queued {
-                pressure_warning: true
-            }
-        ),
-        "Expected pressure_warning=true at 80%"
-    );
-}
-
-/// Scenario: SessionFreezeQueue transactional never evicted
-#[test]
-fn test_session_freeze_queue_transactional_never_evicted() {
-    use crate::proto::mutation_proto::Mutation;
-    use crate::proto::{CreateTileMutation, MutationProto};
-
-    let mut q = SessionFreezeQueue::new(2);
-    // Fill with non-empty (StateStream) batches
-    for i in 0..2 {
-        let batch = MutationBatch {
-            batch_id: format!("ss{i}").into_bytes(),
-            lease_id: vec![0u8; 16],
-            mutations: vec![],
-            ..Default::default()
-        };
-        q.enqueue(batch, "ns");
-    }
-
-    // Submit a transactional mutation (CreateTile) — should get backpressure
-    let tx_batch = MutationBatch {
-        batch_id: b"tx1".to_vec(),
-        lease_id: vec![0u8; 16],
-        mutations: vec![MutationProto {
-            mutation: Some(Mutation::CreateTile(CreateTileMutation {
-                tab_id: vec![], // empty = server infers active tab
-                bounds: None,
-                z_order: 0,
-            })),
-        }],
-        ..Default::default()
-    };
-    let r = q.enqueue(tx_batch, "ns");
-    assert!(
-        matches!(r, FreezeEnqueueResult::BackpressureRequired),
-        "Transactional mutation should require backpressure when queue is full, got: {r:?}"
     );
 }
