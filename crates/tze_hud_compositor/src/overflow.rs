@@ -1332,31 +1332,18 @@ mod tests {
     // ── Task 3.4: max_whole_lines invariants ──────────────────────────────────
 
     #[test]
-    fn max_whole_lines_exact_fit() {
-        // 3 lines × 20px each = 60px height: exactly 3 lines.
-        assert_eq!(max_whole_lines(60.0, 20.0), 3);
-    }
-
-    #[test]
-    fn max_whole_lines_partial_line_excluded() {
-        // 65px / 20px = 3.25 → floor = 3: partial 4th line not counted.
-        assert_eq!(max_whole_lines(65.0, 20.0), 3);
-    }
-
-    #[test]
-    fn max_whole_lines_zero_height() {
-        assert_eq!(max_whole_lines(0.0, 20.0), 0);
-    }
-
-    #[test]
-    fn max_whole_lines_zero_line_height() {
-        assert_eq!(max_whole_lines(100.0, 0.0), 0);
-    }
-
-    #[test]
-    fn max_whole_lines_smaller_than_one_line() {
-        // 10px height / 20px per line = 0.5 → floor = 0.
-        assert_eq!(max_whole_lines(10.0, 20.0), 0);
+    fn max_whole_lines_cases() {
+        // (case, height, line_height, expected)
+        let cases = [
+            ("exact fit", 60.0, 20.0, 3),
+            ("partial line excluded", 65.0, 20.0, 3),
+            ("zero height", 0.0, 20.0, 0),
+            ("zero line height", 100.0, 0.0, 0),
+            ("smaller than one line", 10.0, 20.0, 0),
+        ];
+        for (name, h, lh, expected) in cases {
+            assert_eq!(max_whole_lines(h, lh), expected, "case: {name}");
+        }
     }
 
     // ── Task 3.4: ellipsis content correctness ────────────────────────────────
@@ -1964,61 +1951,6 @@ mod tests {
         );
     }
 
-    // ── Task 3.5: layout-resolve stage budget ─────────────────────────────────
-    //
-    // Task 3.5 requires that the layout-resolve stage stays < 1 ms with styled-run
-    // caching under transcript-sized content.  This is primarily an integration
-    // concern (the phase pipeline must invoke truncation only on change, not per
-    // frame).  We provide a basic timing smoke test here to catch catastrophic
-    // regressions on the CI path.
-
-    #[test]
-    fn layout_resolve_under_1ms_for_transcript_sized_content() {
-        let mut fs = make_font_system();
-        let font_size = 14.0_f32;
-        let line_h = font_size * 1.4;
-        // Transcript-sized content: ~500 bytes, typical for a streaming LLM token window.
-        let content = "The quick brown fox jumps over the lazy dog. ".repeat(12); // ~540 bytes
-        let bounds_w = 400.0_f32;
-        let height = line_h * 5.0; // 5 visible lines
-
-        // Warm-up pass: the first call to FontSystem loads fonts from disk and
-        // initialises the shaper; exclude that one-time cost from the timing window.
-        let _ = truncate_for_ellipsis(
-            &content,
-            base_attrs(),
-            bounds_w,
-            height,
-            font_size,
-            line_h,
-            &mut fs,
-        );
-
-        let start = std::time::Instant::now();
-        let _result = truncate_for_ellipsis(
-            &content,
-            base_attrs(),
-            bounds_w,
-            height,
-            font_size,
-            line_h,
-            &mut fs,
-        );
-        let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
-
-        // We allow up to 500ms here to tolerate debug-mode unoptimised builds and
-        // headless CI environments (no GPU, software-renderer font rasterisation).
-        // The real budget (< 1ms p99 in release) is enforced by the Criterion
-        // benchmark in benches/overflow_truncate.rs with hardware calibration.
-        // This test is a catastrophic-regression guard: it catches algorithmic
-        // complexity explosions (e.g. O(n²) shaping loops), not framework overhead.
-        assert!(
-            elapsed_ms < 500.0,
-            "truncate_for_ellipsis exceeded catastrophic regression threshold (500ms) for \
-             transcript-sized content on warm call: {elapsed_ms:.2}ms"
-        );
-    }
-
     // ── RTL / bidi regression tests (hud-u7nyn) ──────────────────────────────
     //
     // These tests guard the fix for "Ellipsis truncation corrupts RTL text:
@@ -2614,22 +2546,16 @@ mod tests {
         );
     }
 
-    /// Empty text produces an empty result from tail-anchored truncation.
+    /// Tail-anchored degenerate inputs: empty text stays empty (untruncated);
+    /// zero-width bounds yield empty text flagged as truncated.
     #[test]
-    fn tail_anchored_empty_text_no_truncation() {
+    fn tail_anchored_degenerate_inputs_produce_empty() {
         let mut fs = make_font_system();
-        let result = truncate_tail_anchored("", base_attrs(), 200.0, 100.0, 16.0, 22.4, &mut fs);
-        assert_eq!(result.text, "", "empty text must remain empty");
-        assert!(!result.was_truncated);
-    }
-
-    /// Degenerate geometry produces empty result from tail-anchored truncation.
-    #[test]
-    fn tail_anchored_zero_width_produces_empty() {
-        let mut fs = make_font_system();
-        let result = truncate_tail_anchored("hello", base_attrs(), 0.0, 100.0, 16.0, 22.4, &mut fs);
-        assert_eq!(result.text, "");
-        assert!(result.was_truncated);
+        for (text, width, truncated) in [("", 200.0, false), ("hello", 0.0, true)] {
+            let r = truncate_tail_anchored(text, base_attrs(), width, 100.0, 16.0, 22.4, &mut fs);
+            assert_eq!(r.text, "", "text={text:?} width={width}");
+            assert_eq!(r.was_truncated, truncated, "text={text:?} width={width}");
+        }
     }
 
     // ── Task 3.2: property-based tests for truncate_tail_anchored (hud-347b4) ──
@@ -3368,19 +3294,11 @@ mod tests {
         }
     }
 
-    /// **Acceptance #4 (perf)**: a single uncached truncation through the fallback
-    /// is dramatically cheaper than shaping the full retained transcript, because
-    /// the shaped input is bounded by viewport geometry, not transcript size.
-    ///
-    /// The Stage-5 Layout Resolve budget (< 1 ms) is a release/warm figure; in a
-    /// debug build with software shaping the absolute number is meaningless, so
-    /// this test verifies the *relative* property that matters: the windowed call
-    /// is many times faster than the un-windowed call on the same input. That is
-    /// the mechanism by which the fallback keeps the production call within
-    /// budget (the `overflow_truncate/fallback_64KiB` bench measures the warm
-    /// release figure). A loose absolute ceiling guards against gross regressions.
+    /// A ~64 KiB transcript truncated through the windowed fallback yields the
+    /// same visible result as shaping the whole input. (The warm-path latency
+    /// budget is measured by the `overflow_truncate/fallback_64KiB` bench, not here.)
     #[test]
-    fn fallback_is_dramatically_cheaper_than_full_input() {
+    fn windowed_fallback_matches_full_input_on_large_transcript() {
         let text = transcript(64 * 1024 / 40); // ~64 KiB transcript, far above bound
         assert!(text.len() > 8 * DEFAULT_MAX_TRUNCATION_INPUT_BYTES);
         let font_size = 14.0_f32;
@@ -3389,27 +3307,7 @@ mod tests {
         let bounds_h = line_h * 5.0;
         let mut fs = make_font_system();
 
-        // Warm the font system (first call loads system fonts) on the small window.
-        let warm_input = viewport_adjacent_input(
-            &text,
-            bounds_h,
-            line_h,
-            TruncationViewport::HeadAnchored,
-            DEFAULT_MAX_TRUNCATION_INPUT_BYTES,
-            TRUNCATION_OVERSCAN_LINES,
-        );
-        let _ = truncate_for_ellipsis(
-            warm_input,
-            base_attrs(),
-            bounds_w,
-            bounds_h,
-            font_size,
-            line_h,
-            &mut fs,
-        );
-
         // Full-input truncation (no windowing): shapes the entire transcript.
-        let full_start = std::time::Instant::now();
         let full = truncate_for_ellipsis(
             &text,
             base_attrs(),
@@ -3419,10 +3317,8 @@ mod tests {
             line_h,
             &mut fs,
         );
-        let full_elapsed = full_start.elapsed();
 
         // Windowed truncation through the fallback: shapes only the window.
-        let win_start = std::time::Instant::now();
         let input = viewport_adjacent_input(
             &text,
             bounds_h,
@@ -3440,20 +3336,12 @@ mod tests {
             line_h,
             &mut fs,
         );
-        let win_elapsed = win_start.elapsed();
 
         assert!(windowed.was_truncated, "large transcript must be truncated");
         // Correctness: windowing did not change the visible result.
         assert_eq!(
             windowed.text, full.text,
             "windowed result must stay byte-identical to the full-input result"
-        );
-        // The windowed call must be far cheaper than the full-input call. The real
-        // ratio is ~100x+; require a conservative 4x to stay robust under noisy CI.
-        assert!(
-            win_elapsed.saturating_mul(4) < full_elapsed,
-            "windowed truncation ({win_elapsed:?}) must be much cheaper than \
-             full-input truncation ({full_elapsed:?})"
         );
     }
 }

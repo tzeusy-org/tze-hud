@@ -382,39 +382,35 @@ mod tests {
     // ── Pure geometry core (no fonts) ────────────────────────────────────────
 
     #[test]
-    fn stack_offsets_empty_is_empty() {
-        assert!(stack_offsets(&[], 8.0, 0.0).is_empty());
-    }
-
-    #[test]
-    fn stack_offsets_single_has_no_gap() {
-        assert_eq!(stack_offsets(&[20.0], 8.0, 5.0), vec![5.0]);
-    }
-
-    #[test]
-    fn stack_offsets_stacks_with_gap() {
-        // start 0, heights [10, 20, 5], gap 4:
-        //  child0 @ 0
-        //  child1 @ 0 + 10 + 4 = 14
-        //  child2 @ 14 + 20 + 4 = 38
-        assert_eq!(
-            stack_offsets(&[10.0, 20.0, 5.0], 4.0, 0.0),
-            vec![0.0, 14.0, 38.0]
-        );
-    }
-
-    #[test]
-    fn stack_offsets_honors_start_y() {
-        assert_eq!(stack_offsets(&[10.0, 10.0], 0.0, 100.0), vec![100.0, 110.0]);
-    }
-
-    #[test]
-    fn stack_offsets_clamps_negative_gap_and_height() {
-        // Negative gap → 0; negative height → 0 contribution, offset still emitted.
-        assert_eq!(
-            stack_offsets(&[10.0, -5.0, 7.0], -3.0, 0.0),
-            vec![0.0, 10.0, 10.0]
-        );
+    fn stack_offsets_cases() {
+        // (case, heights, gap, start_y, expected)
+        type Case = (&'static str, &'static [f32], f32, f32, &'static [f32]);
+        let cases: &[Case] = &[
+            ("empty", &[], 8.0, 0.0, &[]),
+            ("single has no gap", &[20.0], 8.0, 5.0, &[5.0]),
+            (
+                "stacks with gap",
+                &[10.0, 20.0, 5.0],
+                4.0,
+                0.0,
+                &[0.0, 14.0, 38.0],
+            ),
+            ("honors start_y", &[10.0, 10.0], 0.0, 100.0, &[100.0, 110.0]),
+            (
+                "negative gap and height clamp to 0",
+                &[10.0, -5.0, 7.0],
+                -3.0,
+                0.0,
+                &[0.0, 10.0, 10.0],
+            ),
+        ];
+        for (name, heights, gap, start_y, expected) in cases {
+            assert_eq!(
+                stack_offsets(heights, *gap, *start_y),
+                expected.to_vec(),
+                "case: {name}"
+            );
+        }
     }
 
     #[test]

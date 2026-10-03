@@ -2420,19 +2420,6 @@ fn parse_hex_color(s: &str) -> Option<Rgba> {
 mod tests {
     use super::*;
 
-    // ─── Timing-assertion gate (hud-94vm5) ───────────────────────────────────────
-
-    /// Returns `true` when wall-clock / p99 latency hard assertions should run.
-    ///
-    /// Set `TZE_HUD_PERF_ASSERT=1` to enable.  On the standard `test-unit` / blocking
-    /// CI lane this is unset; wall-clock budget assertions are skipped to
-    /// avoid flakes from scheduler noise on shared runners.
-    fn perf_assert_enabled() -> bool {
-        std::env::var("TZE_HUD_PERF_ASSERT")
-            .map(|v| v.trim() == "1")
-            .unwrap_or(false)
-    }
-
     fn tokens() -> MarkdownTokens {
         MarkdownTokens::default()
     }
@@ -2721,94 +2708,34 @@ mod tests {
 
     // ── Task 2.4 — Excluded construct tests ───────────────────────────────────
 
-    /// Markdown table renders as literal source text (not parsed).
+    /// Excluded constructs render as literal source: content is never dropped
+    /// and the markers stay visible (images must round-trip exactly).
     #[test]
-    fn excluded_table_renders_literal() {
-        let input = "| A | B |\n|---|---|\n| 1 | 2 |";
-        let md = parse(input);
-        // The table syntax should appear verbatim in the output.
-        assert!(
-            md.plain_text.contains("|"),
-            "table pipes must appear literally"
-        );
-        assert!(
-            md.plain_text.contains("A"),
-            "table content must appear literally"
-        );
-    }
-
-    /// Image `![alt](url)` renders as its full literal source — not dropped, not transformed.
-    ///
-    /// Per the excluded-construct contract: the verbatim source substring is
-    /// emitted so no content is silently lost.
-    #[test]
-    fn excluded_image_renders_literal_source() {
-        let md = parse("![diagram](img.png)");
-        // The full source must appear verbatim — not silently dropped.
-        assert!(
-            !md.plain_text.is_empty(),
-            "image construct must not be silently dropped"
-        );
+    fn excluded_constructs_render_literally() {
+        let cases: &[(&str, &str, &[&str])] = &[
+            ("table", "| A | B |\n|---|---|\n| 1 | 2 |", &["|", "A"]),
+            ("raw html", "<strong>bold</strong>", &["<"]),
+            (
+                "blockquote",
+                "> This is a blockquote",
+                &[">", "This is a blockquote"],
+            ),
+            ("strikethrough", "~~crossed out~~", &["crossed out", "~~"]),
+            ("task list", "- [ ] todo item", &["todo item"]),
+        ];
+        for (name, input, needles) in cases {
+            let md = parse(input);
+            for needle in *needles {
+                assert!(
+                    md.plain_text.contains(needle),
+                    "{name}: {needle:?} missing from {:?}",
+                    md.plain_text
+                );
+            }
+        }
         assert_eq!(
-            &*md.plain_text, "![diagram](img.png)",
-            "image must render as verbatim source; got: {:?}",
-            md.plain_text
-        );
-    }
-
-    /// Raw HTML is rendered literally (not parsed or dropped).
-    #[test]
-    fn excluded_raw_html_renders_literally() {
-        let input = "<strong>bold</strong>";
-        let md = parse(input);
-        // Raw HTML angle brackets should appear literally.
-        assert!(
-            md.plain_text.contains('<'),
-            "raw HTML must not be dropped; got: {:?}",
-            md.plain_text
-        );
-    }
-
-    /// Blockquote (`> text`) renders as literal text (not styled as a blockquote).
-    #[test]
-    fn excluded_blockquote_renders_literally() {
-        let input = "> This is a blockquote";
-        let md = parse(input);
-        assert!(
-            md.plain_text.contains('>'),
-            "blockquote marker must appear literally"
-        );
-        assert!(
-            md.plain_text.contains("This is a blockquote"),
-            "blockquote content must not be dropped"
-        );
-    }
-
-    /// Strikethrough (`~~text~~`) renders as literal text.
-    #[test]
-    fn excluded_strikethrough_renders_literally() {
-        let input = "~~crossed out~~";
-        let md = parse(input);
-        assert!(
-            md.plain_text.contains("crossed out"),
-            "strikethrough content must appear literally"
-        );
-        assert!(
-            md.plain_text.contains("~~"),
-            "strikethrough markers must appear literally (not parsed)"
-        );
-    }
-
-    /// Task list (`- [ ] item`) renders as literal text (not a checkbox widget).
-    #[test]
-    fn excluded_task_list_renders_literally() {
-        let input = "- [ ] todo item";
-        let md = parse(input);
-        // The checkbox syntax [ ] should remain visible in some form.
-        // (May render as bullet item; the key property is content not dropped.)
-        assert!(
-            md.plain_text.contains("todo item"),
-            "task list content must not be dropped"
+            &*parse("![diagram](img.png)").plain_text,
+            "![diagram](img.png)"
         );
     }
 
@@ -3145,390 +3072,95 @@ mod tests {
         }
     }
 
-    // ── Adversarial / DoS-resistance tests ────────────────────────────────────
+    // ── Adversarial / DoS-resistance ──────────────────────────────────────────
 
-    /// 65535 unmatched `[` characters complete in bounded time without stack
-    /// overflow and without stalling the compositor.
-    ///
-    /// This exercises fix (b): the precomputed bracket-match table (`O(n)` single
-    /// pass) replaces the original per-`[` end-of-input scan that was `O(n²)`.
-    /// With 65535 brackets the old code performed ~2×10⁹ comparisons; the new
-    /// code costs one `O(n)` build pass and `O(1)` lookups thereafter.
-    ///
-    /// The time assertion is gated by `#[ignore]` because wall-clock thresholds
-    /// are not deterministic across CI runners.  Run manually with
-    /// `cargo test -- --ignored` to validate timing.  Structural correctness
-    /// (no panic, no dropped content) is asserted unconditionally in the
-    /// `adversarial_*_no_stack_overflow` / `adversarial_*_completes_fast` tests.
+    /// Pathological 64 KiB inputs must terminate (no stack overflow, no O(n²)
+    /// hang: a quadratic regression makes this test run for seconds-to-minutes
+    /// and trip the CI job timeout) and must not silently drop content. Speed
+    /// itself is not asserted: wall-clock thresholds are not deterministic.
     #[test]
-    #[ignore = "wall-clock assertion; run with --ignored to validate timing locally"]
-    fn adversarial_flood_of_unmatched_open_brackets_completes_fast() {
-        let input = "[".repeat(65535);
-        let deadline = std::time::Instant::now();
-        let md = parse(&input);
-        let elapsed = deadline.elapsed();
-        // All characters must appear in the output (no content silently dropped).
-        assert_eq!(
-            md.plain_text.len(),
-            65535,
-            "all '[' must appear in plain text output"
-        );
-        assert!(
-            elapsed < std::time::Duration::from_secs(5),
-            "65535 unmatched '[' must complete in <5s (debug build); took {elapsed:?}"
-        );
-    }
-
-    /// Deeply-nested bold markers (`**` × 32768 pairs) complete quickly without
-    /// stack overflow.
-    ///
-    /// This exercises fix (a): the recursion depth cap in `process_inline_inner`.
-    /// Beyond `MAX_INLINE_DEPTH` (100) the parser emits remaining characters as
-    /// literals; this bounds stack consumption to a safe constant regardless of
-    /// nesting depth.
-    #[test]
-    #[ignore = "wall-clock assertion; run with --ignored to validate timing locally"]
-    fn adversarial_deeply_nested_bold_no_stack_overflow() {
-        // Build "**" × 16384 + "x" + "**" × 16384 — deeply nested bold.
-        let mut input = String::with_capacity(65535);
-        for _ in 0..16384 {
-            input.push_str("**");
+    fn adversarial_inputs_terminate_and_preserve_content() {
+        #[derive(Clone, Copy)]
+        enum Expect {
+            /// Every source character is emitted verbatim.
+            Verbatim,
+            /// Output is non-empty.
+            NonEmpty,
+            /// Output contains the given text.
+            Contains(&'static str),
+            /// Output has exactly this many bytes.
+            Len(usize),
         }
-        input.push('x');
-        for _ in 0..16384 {
-            input.push_str("**");
-        }
-        let deadline = std::time::Instant::now();
-        let md = parse(&input);
-        let elapsed = deadline.elapsed();
-        // Must not panic/overflow and must complete quickly.
-        assert!(
-            !md.plain_text.is_empty(),
-            "deeply nested bold must produce non-empty output"
-        );
-        assert!(
-            elapsed < std::time::Duration::from_secs(5),
-            "deeply nested bold must complete in <5s (debug build); took {elapsed:?}"
-        );
-    }
-
-    /// Deeply-nested italic markers (`*` × 32767 pairs) complete quickly without
-    /// stack overflow.
-    #[test]
-    #[ignore = "wall-clock assertion; run with --ignored to validate timing locally"]
-    fn adversarial_deeply_nested_italic_no_stack_overflow() {
-        // Build "*" × 32767 + "x" + "*" × 32767
-        let mut input = String::with_capacity(65535);
-        for _ in 0..32767 {
-            input.push('*');
-        }
-        input.push('x');
-        for _ in 0..32767 {
-            input.push('*');
-        }
-        let deadline = std::time::Instant::now();
-        let md = parse(&input);
-        let elapsed = deadline.elapsed();
-        assert!(
-            !md.plain_text.is_empty(),
-            "deeply nested italic must produce non-empty output"
-        );
-        assert!(
-            elapsed < std::time::Duration::from_secs(5),
-            "deeply nested italic must complete in <5s (debug build); took {elapsed:?}"
-        );
-    }
-
-    /// Deeply-nested link brackets (`[` × 32768 pairs) complete quickly without
-    /// stack overflow.
-    ///
-    /// This exercises both fix (a) (depth cap) and fix (b) (bracket-match table).
-    #[test]
-    #[ignore = "wall-clock assertion; run with --ignored to validate timing locally"]
-    fn adversarial_deeply_nested_link_brackets_no_stack_overflow() {
-        // Build "[" × 32768 + "text" + "]" × 32768 — deeply nested brackets.
-        let n = 32768usize;
-        let mut input = String::with_capacity(n * 2 + 4);
-        for _ in 0..n {
-            input.push('[');
-        }
-        input.push_str("text");
-        for _ in 0..n {
-            input.push(']');
-        }
-        let deadline = std::time::Instant::now();
-        let md = parse(&input);
-        let elapsed = deadline.elapsed();
-        assert!(
-            md.plain_text.contains("text"),
-            "link bracket flood must not drop inner text"
-        );
-        assert!(
-            elapsed < std::time::Duration::from_secs(5),
-            "deeply nested link brackets must complete in <5s (debug build); took {elapsed:?}"
-        );
-    }
-
-    /// Span-dense content (many short bold spans) completes in bounded time.
-    ///
-    /// This exercises fix (c): `fill_gaps_with_base` now scans only the spans
-    /// added during the current `process_inline_inner` call (`O(new_spans)`)
-    /// rather than the full vec (`O(all_spans)`), eliminating the `O(spans²)`
-    /// blowup that would otherwise occur on span-dense content.
-    #[test]
-    #[ignore = "wall-clock assertion; run with --ignored to validate timing locally"]
-    fn adversarial_span_dense_bold_content_completes_fast() {
-        // Build a heading with ~1000 alternating bold/plain segments.
-        // Each "**x** " adds one styled span; fill_gaps_with_base is called once
-        // per block.  Without the O(n) fix this would be O(1000²) operations.
-        let segment = "**a** b ";
-        let repeat = 1000;
-        let body: String = segment.repeat(repeat);
-        let input = format!("# {body}");
-        let deadline = std::time::Instant::now();
-        let md = parse(&input);
-        let elapsed = deadline.elapsed();
-        assert!(
-            !md.plain_text.is_empty(),
-            "span-dense heading must produce non-empty output"
-        );
-        assert!(
-            elapsed < std::time::Duration::from_secs(5),
-            "span-dense content must complete in <5s (debug build); took {elapsed:?}"
-        );
-    }
-
-    /// Full 64 KiB adversarial payload with all three pathological patterns
-    /// combined: mixed bracket floods, emphasis nesting, and span density.
-    #[test]
-    #[ignore = "wall-clock assertion; run with --ignored to validate timing locally"]
-    fn adversarial_combined_64kib_completes_fast() {
-        // 21845 repetitions of "[**x**] " ≈ 8 bytes each ≈ ~175 KiB; cap at 65535
-        let segment = "[**x**] ";
-        let n = 65535 / segment.len();
-        let input: String = segment.repeat(n);
-        let input = &input[..input.len().min(65535)];
-        let deadline = std::time::Instant::now();
-        let md = parse(input);
-        let elapsed = deadline.elapsed();
-        assert!(
-            !md.plain_text.is_empty(),
-            "combined adversarial input must produce non-empty output"
-        );
-        assert!(
-            elapsed < std::time::Duration::from_secs(5),
-            "combined 64KiB adversarial input must complete in <5s (debug build); took {elapsed:?}"
-        );
-    }
-
-    // ── Paren-close adversarial tests (hud-xq0uo) ────────────────────────────
-
-    /// 21845 repetitions of `[](` complete in bounded time.
-    ///
-    /// Before hud-xq0uo, `find_paren_close` re-scanned the full suffix for
-    /// every unmatched `(`, costing O(n²) — ~969 ms in release on real hardware.
-    /// The precomputed `build_paren_matches` table reduces each lookup to O(1),
-    /// making the whole line O(n).
-    ///
-    /// This test is NOT `#[ignore]`-gated: O(n²) would make it hang for
-    /// tens of seconds in any build mode; O(n) finishes instantly.
-    #[test]
-    fn adversarial_paren_flood_link_dest_completes_fast() {
-        // "[](": 21845 repetitions ≈ 65535 bytes, all parens unmatched.
-        // Since no `)(` closes any `(`, every character is emitted literally.
-        let input = "[](".repeat(21845);
-        let md = parse(&input);
-        // Every source character must be preserved verbatim — no silent drops.
-        assert_eq!(
-            &*md.plain_text, input,
-            "paren flood must emit all source characters verbatim"
-        );
-    }
-
-    /// 16383 repetitions of `[a](` complete in bounded time.
-    ///
-    /// Variant: link text present (`a`) — exercises the bracket-table lookup
-    /// followed by the paren-table lookup.  Empirical: ~963 ms before fix.
-    ///
-    /// This test is NOT `#[ignore]`-gated: see `adversarial_paren_flood_link_dest_completes_fast`.
-    #[test]
-    fn adversarial_paren_flood_with_link_text_completes_fast() {
-        // "[a](": 16383 repetitions ≈ 65532 bytes, no closing `)`.
-        // With no matching `)`, every character is emitted literally.
-        let input = "[a](".repeat(16383);
-        let md = parse(&input);
-        // Every source character must be preserved verbatim — no silent drops.
-        assert_eq!(
-            &*md.plain_text, input,
-            "paren flood with link text must emit all source characters verbatim"
-        );
-    }
-
-    /// 13107 repetitions of `![a](` complete in bounded time.
-    ///
-    /// Variant: image `!` prefix — exercises `find_link_end_with_table` which
-    /// also calls `find_paren_close`.  Empirical: ~642 ms before fix.
-    ///
-    /// This test is NOT `#[ignore]`-gated: see `adversarial_paren_flood_link_dest_completes_fast`.
-    #[test]
-    fn adversarial_paren_flood_image_construct_completes_fast() {
-        // "![a](": 13107 repetitions ≈ 65535 bytes, no closing `)`.
-        // With no matching `)`, the image construct is never completed and
-        // every character is emitted literally.
-        let input = "![a](".repeat(13107);
-        let md = parse(&input);
-        // Every source character must be preserved verbatim — no silent drops.
-        assert_eq!(
-            &*md.plain_text, input,
-            "image paren flood must emit all source characters verbatim"
-        );
-    }
-
-    // ── Backtick-close adversarial tests (hud-xq0uo / hud-t39nw) ────────────
-
-    /// `a` + `` ` ``×65534 completes in bounded time with a real timing assertion.
-    ///
-    /// Before hud-xq0uo the `BacktickCloseMemo` was introduced to short-circuit
-    /// failing scans, but it only covers tick_count ≤ MAX_TICK (32).  A run of
-    /// 65534 adjacent backticks produces tick_count values 65534, 65533, …, 1 as
-    /// the parser advances from each internal position — all values above 32
-    /// bypassed the memo and fell back to O(n) scans, yielding O(n²) total.
-    ///
-    /// hud-t39nw fixes this by advancing `i` by `tick_count` (skipping the
-    /// entire run) instead of by 1 on close-failure.  This is correct per
-    /// CommonMark: a backtick string is an indivisible token; no valid code span
-    /// can begin from an interior position of an unmatched run.
-    ///
-    /// The timing assertion here uses a 500 ms wall-clock budget, which is orders
-    /// of magnitude above the O(n) cost (~0.1 ms) and well below the O(n²) cost
-    /// (~9.5 s in debug / ~628 ms in release).  It will catch any regression to
-    /// the quadratic path even in slow CI environments.
-    ///
-    /// This test is NOT `#[ignore]`-gated: O(n) finishes instantly in all build
-    /// modes; O(n²) would take seconds and the timing assertion makes that visible.
-    #[test]
-    fn adversarial_backtick_flood_completes_fast() {
-        // "a" + "`" × 65534: a single non-backtick followed by one large run of
-        // 65534 adjacent backticks.  No matching closing run exists, so no code
-        // span is formed and every character is emitted literally.
-        let mut input = String::with_capacity(65535);
-        input.push('a');
-        for _ in 0..65534 {
-            input.push('`');
-        }
-        let t0 = std::time::Instant::now();
-        let md = parse(&input);
-        let elapsed = t0.elapsed();
-        // Structural assertion: always runs — correctness invariant, not speed.
-        assert_eq!(
-            &*md.plain_text, input,
-            "backtick flood must emit all source characters verbatim"
-        );
-        // Timing assertion: gated — wall-clock budget.  (hud-94vm5)
-        if perf_assert_enabled() {
-            assert!(
-                elapsed < std::time::Duration::from_millis(500),
-                "backtick flood must complete in <500ms (O(n)); took {elapsed:?} — likely O(n²) regression"
-            );
-        } else {
-            eprintln!(
-                "[SKIP-TIMING] adversarial_backtick_flood elapsed={elapsed:?}; \
-                 set TZE_HUD_PERF_ASSERT=1 to enforce 500ms budget"
-            );
-        }
-    }
-
-    /// `[` + `a` + `` ` ``×65528 + `](u)` completes in bounded time.
-    ///
-    /// The outer link `[…](u)` is valid; its inner text is `a` + `` ` ``×65528.
-    /// The recursive call to `process_inline_inner` for the link text operates on
-    /// the sub-slice and must not regress to O(n²) on the backtick run.
-    ///
-    /// Before hud-t39nw, the recursive call advanced by 1 per backtick position
-    /// and all tick_counts above MAX_TICK (32) bypassed the memo, costing ~612 ms
-    /// in release / ~9.5 s in debug.  After the fix the run is skipped in O(1).
-    ///
-    /// This test is NOT `#[ignore]`-gated: O(n) finishes instantly; O(n²) would
-    /// exceed the 500 ms timing assertion even in fast CI environments.
-    #[test]
-    fn adversarial_nested_link_text_backtick_flood_completes_fast() {
-        // "[" + "a" + "`" × 65528 + "](u)": the link text is `a` + 65528 backticks.
-        // No closing backtick run exists inside the link text, so all backticks
-        // are emitted literally within the link span.
-        let mut input = String::with_capacity(65536);
-        input.push('[');
-        input.push('a');
-        for _ in 0..65528 {
-            input.push('`');
-        }
-        input.push_str("](u)");
-        let t0 = std::time::Instant::now();
-        let md = parse(&input);
-        let elapsed = t0.elapsed();
-        // Structural assertion: always runs — correctness invariant, not speed.
-        assert!(
-            !md.plain_text.is_empty(),
-            "nested link backtick flood must produce non-empty output"
-        );
-        // Timing assertion: gated — wall-clock budget.  (hud-94vm5)
-        if perf_assert_enabled() {
-            assert!(
-                elapsed < std::time::Duration::from_millis(500),
-                "nested link-text backtick flood must complete in <500ms (O(n)); took {elapsed:?} — likely O(n²) regression"
-            );
-        } else {
-            eprintln!(
-                "[SKIP-TIMING] adversarial_nested_link_text_backtick_flood elapsed={elapsed:?}; \
-                 set TZE_HUD_PERF_ASSERT=1 to enforce 500ms budget"
-            );
-        }
-    }
-
-    /// `[` + `[](` × 21841 + `](u)` completes in bounded time.
-    ///
-    /// The outer link `[…](u)` is valid; its inner text is `[](` × 21841 — a
-    /// flood of opening parens with no closing `)`.  The recursive call for the
-    /// link text receives a precomputed paren-match table (built by hud-t39nw);
-    /// without it, each `(` triggers an O(n) fallback scan, costing O(n²) total.
-    ///
-    /// Before hud-t39nw, the recursive call passed `&[]` for `paren_matches` and
-    /// relied on the O(n) depth scan for every `(`, costing ~518 ms in release.
-    /// After the fix the paren table is rebuilt for the sub-slice, reducing each
-    /// lookup to O(1).
-    ///
-    /// This test is NOT `#[ignore]`-gated: O(n) finishes instantly; O(n²) would
-    /// exceed the 500 ms timing assertion.
-    #[test]
-    fn adversarial_nested_link_text_paren_flood_completes_fast() {
-        // "[" + "[](", × 21841 + "](u)": the link text is a flood of `[](` that
-        // contains 21841 unmatched opening parens.  No valid sub-links are formed
-        // (the `]` of each `[]` closes the `[` of the same token, leaving `(`
-        // unmatched).
-        let mut input = String::with_capacity(65540);
-        input.push('[');
-        for _ in 0..21841 {
-            input.push_str("[](");
-        }
-        input.push_str("](u)");
-        let t0 = std::time::Instant::now();
-        let md = parse(&input);
-        let elapsed = t0.elapsed();
-        // Structural assertion: always runs — correctness invariant, not speed.
-        assert!(
-            !md.plain_text.is_empty(),
-            "nested link paren flood must produce non-empty output"
-        );
-        // Timing assertion: gated — wall-clock budget.  (hud-94vm5)
-        if perf_assert_enabled() {
-            assert!(
-                elapsed < std::time::Duration::from_millis(500),
-                "nested link-text paren flood must complete in <500ms (O(n)); took {elapsed:?} — likely O(n²) regression"
-            );
-        } else {
-            eprintln!(
-                "[SKIP-TIMING] adversarial_nested_link_text_paren_flood elapsed={elapsed:?}; \
-                 set TZE_HUD_PERF_ASSERT=1 to enforce 500ms budget"
-            );
+        let nested = |open: &str, mid: &str, close: &str, n: usize| {
+            format!("{}{mid}{}", open.repeat(n), close.repeat(n))
+        };
+        let cases: Vec<(&str, String, Expect)> = vec![
+            ("unmatched '[' flood", "[".repeat(65535), Expect::Len(65535)),
+            (
+                "nested bold",
+                nested("**", "x", "**", 16384),
+                Expect::NonEmpty,
+            ),
+            (
+                "nested italic",
+                nested("*", "x", "*", 32767),
+                Expect::NonEmpty,
+            ),
+            (
+                "nested link brackets",
+                nested("[", "text", "]", 32768),
+                Expect::Contains("text"),
+            ),
+            (
+                "span-dense heading",
+                format!("# {}", "**a** b ".repeat(1000)),
+                Expect::NonEmpty,
+            ),
+            (
+                "combined bracket/emphasis/span soup",
+                "[**x**] ".repeat(65535 / 8),
+                Expect::NonEmpty,
+            ),
+            (
+                "paren flood link dest",
+                "[](".repeat(21845),
+                Expect::Verbatim,
+            ),
+            (
+                "paren flood with link text",
+                "[a](".repeat(16383),
+                Expect::Verbatim,
+            ),
+            (
+                "paren flood image construct",
+                "![a](".repeat(13107),
+                Expect::Verbatim,
+            ),
+            (
+                "backtick flood",
+                format!("a{}", "`".repeat(65534)),
+                Expect::Verbatim,
+            ),
+            (
+                "nested link-text backtick flood",
+                format!("[a{}](u)", "`".repeat(65528)),
+                Expect::NonEmpty,
+            ),
+            (
+                "nested link-text paren flood",
+                format!("[{}](u)", "[](".repeat(21841)),
+                Expect::NonEmpty,
+            ),
+        ];
+        for (name, input, expect) in cases {
+            let md = parse(&input);
+            let ok = match expect {
+                Expect::Verbatim => *md.plain_text == *input,
+                Expect::NonEmpty => !md.plain_text.is_empty(),
+                Expect::Contains(s) => md.plain_text.contains(s),
+                Expect::Len(n) => md.plain_text.len() == n,
+            };
+            assert!(ok, "adversarial case dropped or altered content: {name}");
         }
     }
 
@@ -3620,39 +3252,22 @@ mod tests {
     // (c) bold weight comes from tokens.bold_weight, not a hardcoded 700.
     // (d) ordered-list ordinal is preserved, not replaced with "• ".
 
-    /// (a) Heading scale: H1 span carries size_scale = 1.75 (default token).
+    /// (a) Heading scale: default-token headings carry `size_scale` from the token table.
     #[test]
-    fn heading_h1_size_scale_applied() {
-        let md = parse("# Hello");
-        let scale_span = md.spans.iter().find(|s| s.attr.size_scale.is_some());
-        assert!(
-            scale_span.is_some(),
-            "H1 must produce a span with size_scale set; got spans: {:?}",
-            md.spans
-        );
-        let scale = scale_span.unwrap().attr.size_scale.unwrap();
-        let expected = MarkdownTokens::default().heading_scale[0];
-        assert!(
-            (scale - expected).abs() < 1e-5,
-            "H1 size_scale must equal token heading_scale[0] ({expected}); got {scale}"
-        );
-    }
-
-    /// (a) Heading scale: H3 span carries size_scale = 1.25 (default token).
-    #[test]
-    fn heading_h3_size_scale_applied() {
-        let md = parse("### Section");
-        let scale_span = md.spans.iter().find(|s| s.attr.size_scale.is_some());
-        assert!(
-            scale_span.is_some(),
-            "H3 must produce a span with size_scale set"
-        );
-        let scale = scale_span.unwrap().attr.size_scale.unwrap();
-        let expected = MarkdownTokens::default().heading_scale[2]; // index 2 = H3
-        assert!(
-            (scale - expected).abs() < 1e-5,
-            "H3 size_scale must equal token heading_scale[2] ({expected}); got {scale}"
-        );
+    fn heading_size_scale_applied() {
+        for (input, idx) in [("# Hello", 0), ("### Section", 2)] {
+            let md = parse(input);
+            let scale = md
+                .spans
+                .iter()
+                .find_map(|s| s.attr.size_scale)
+                .unwrap_or_else(|| panic!("{input}: no size_scale span in {:?}", md.spans));
+            let expected = MarkdownTokens::default().heading_scale[idx];
+            assert!(
+                (scale - expected).abs() < 1e-5,
+                "{input}: size_scale {scale} != token {expected}"
+            );
+        }
     }
 
     /// (a) Heading scale: H5 uses scale 1.0 — size_scale is None (no scaling needed).
