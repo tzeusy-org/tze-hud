@@ -2098,6 +2098,7 @@ mod tests {
             safe_mode_atomic,
             active_tab_mirror,
             chrome_state: Arc::new(std::sync::RwLock::new(crate::shell::ChromeState::new())),
+            system_card: crate::shell::system_card::SystemCardHandle::default(),
             input_ring: Arc::new(std::sync::Mutex::new(
                 std::collections::VecDeque::with_capacity(INPUT_EVENT_CAPACITY),
             )),

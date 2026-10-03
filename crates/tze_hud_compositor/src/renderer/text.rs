@@ -1178,6 +1178,9 @@ impl super::Compositor {
             }
         }
 
+        // Runtime system card / toast text goes last so it draws above the rest.
+        items.extend(self.system_card_text_items(sw, sh));
+
         items
     }
 

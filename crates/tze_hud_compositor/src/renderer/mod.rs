@@ -70,6 +70,7 @@ pub mod icon;
 pub mod image_cache;
 mod retained;
 mod safe_mode_overlay;
+mod system_card;
 pub mod text;
 pub mod tile_render;
 pub mod token_colors;
@@ -86,6 +87,7 @@ use icon::*;
 // LocalComposerStateHandle) so callers via `tze_hud_compositor::renderer::*`
 // see unchanged paths.  The pub(crate) helpers are brought in separately.
 pub use focus_ring::{FocusRingOwner, FocusRingOwnerHandle};
+pub use system_card::{SystemCardKind, SystemCardModel};
 
 /// Shared single-slot handle carrying the tile whose resize-grip affordance the
 /// pointer is currently over (hud-wgiys). The runtime's windowed hit-test writes
@@ -223,6 +225,8 @@ pub struct Compositor {
     /// When true, the chrome pass draws the safe-mode overlay (see
     /// [`Compositor::set_safe_mode_overlay`]).
     safe_mode_overlay: bool,
+    /// Runtime system card / toast (see [`Compositor::set_system_card`]).
+    system_card: Option<SystemCardModel>,
     /// When true, render all zone boundaries with colored tints even when
     /// zones have no active content. Controlled by `TZE_HUD_DEBUG_ZONES=1`.
     pub debug_zone_tints: bool,
@@ -806,6 +810,7 @@ impl Compositor {
             latest_surface_recovery: None,
             overlay_mode: false,
             safe_mode_overlay: false,
+            system_card: None,
             debug_zone_tints: std::env::var("TZE_HUD_DEBUG_ZONES").is_ok_and(|v| v == "1"),
             degradation_level: DegradationLevel::Nominal,
             degradation_policy: CompositorDegradationPolicy::default(),
@@ -1131,6 +1136,7 @@ impl Compositor {
             latest_surface_recovery: None,
             overlay_mode: false,
             safe_mode_overlay: false,
+            system_card: None,
             debug_zone_tints: std::env::var("TZE_HUD_DEBUG_ZONES").is_ok_and(|v| v == "1"),
             degradation_level: DegradationLevel::Nominal,
             degradation_policy: CompositorDegradationPolicy::default(),

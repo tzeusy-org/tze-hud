@@ -319,6 +319,9 @@ struct WindowedRuntimeState {
     /// `SafeModeController` so the hotkey bridge can enter/exit safe mode
     /// without going through the gRPC path.
     chrome_state: Arc<std::sync::RwLock<crate::shell::ChromeState>>,
+    /// Runtime system card / toast slot. Runtime-owned and never in the scene
+    /// graph, so agents cannot observe it; setting it wakes the render loop.
+    system_card: crate::shell::system_card::SystemCardHandle,
     /// Input channel (ring buffer) — main thread writes, compositor thread reads.
     input_ring: Arc<std::sync::Mutex<std::collections::VecDeque<InputEvent>>>,
     /// Pending Stage 1/2 input latency samples for the next compositor frame.
@@ -1424,6 +1427,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
         let terminal_surface_recovery_failed = self.state.terminal_surface_recovery_failed.clone();
         let compositor_wake = self.state.wake.clone();
         let safe_mode_for_compositor = Arc::clone(&self.state.safe_mode_atomic);
+        let system_card_for_compositor = self.state.system_card.clone();
         let telemetry_collector = TelemetryCollector::new();
         let surface_for_compositor = window_surface.clone();
         let mut benchmark_state = cfg.benchmark.clone().map(|benchmark| {
@@ -1632,9 +1636,22 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                     let safe_mode_flipped = compositor.set_safe_mode_overlay(
                         safe_mode_for_compositor.load(std::sync::atomic::Ordering::Acquire),
                     );
+                    // The system card / toast is runtime chrome with the same
+                    // property: set, clear and expiry change pixels without
+                    // touching the scene. Expiry arrives as a timed deadline
+                    // (below), so an idle card costs no frames.
+                    let card_frame = system_card_for_compositor.frame_state(
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_micros() as u64,
+                    );
+                    let card_changed = compositor.set_system_card(card_frame.model);
                     surface_repaint_pending = update_surface_repaint_pending(
                         surface_repaint_pending,
-                        surface_recovery.reconfigured_surface() || safe_mode_flipped,
+                        surface_recovery.reconfigured_surface()
+                            || safe_mode_flipped
+                            || card_changed,
                         false,
                     );
 
@@ -1745,6 +1762,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                                         )
                                         .map(|ms| ms.saturating_mul(1_000)),
                                 )
+                                .chain(card_frame.wake_at_wall_us)
                                 .min();
                             drop(scene);
                             publish_lease_expiries(
@@ -2527,6 +2545,7 @@ impl WindowedRuntime {
         // side) so composer echo never try_locks the scene mutex.
         let active_tab_mirror = Arc::new(std::sync::Mutex::new(None));
         let chrome_state = Arc::new(std::sync::RwLock::new(crate::shell::ChromeState::new()));
+        let system_card = crate::shell::system_card::SystemCardHandle::new(render_wake.clone());
         let resident_limits = runtime_context.resident_store_limits();
         let shared_state = Arc::new(Mutex::new(SharedState {
             scene: Arc::clone(&shared_scene),
@@ -2747,6 +2766,7 @@ impl WindowedRuntime {
             safe_mode_atomic,
             active_tab_mirror,
             chrome_state,
+            system_card,
             input_ring,
             pending_input_latency,
             frame_ready_rx,

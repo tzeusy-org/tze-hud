@@ -433,3 +433,39 @@ async fn test_focus_ring_suppressed_on_non_active_tab() {
         verts.len()
     );
 }
+
+/// hud-i2e10.4: the runtime system card emits backdrop quads and text items
+/// only while set; re-setting an identical card requests no repaint.
+#[tokio::test]
+async fn system_card_emits_draw_cmds_only_while_set() {
+    use crate::renderer::{SystemCardKind, SystemCardModel};
+    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(800, 600).await);
+    let card = SystemCardModel {
+        kind: SystemCardKind::Pairing,
+        title: "Pair an agent".into(),
+        lines: vec!["482913".into()],
+    };
+
+    assert!(compositor.system_card_vertices(800.0, 600.0).is_empty());
+    assert!(
+        !compositor.set_system_card(None),
+        "no-op clear is not a change"
+    );
+    assert!(compositor.set_system_card(Some(card.clone())));
+    assert!(
+        !compositor.set_system_card(Some(card)),
+        "identical card must not force a repaint"
+    );
+    assert_eq!(
+        compositor.system_card_vertices(800.0, 600.0).len(),
+        12,
+        "backdrop + accent quads"
+    );
+    let texts = compositor.system_card_text_items(800.0, 600.0);
+    assert_eq!(texts.len(), 2, "title + code line");
+    assert_eq!(&*texts[1].text, "482913");
+
+    assert!(compositor.set_system_card(None));
+    assert!(compositor.system_card_vertices(800.0, 600.0).is_empty());
+    assert!(compositor.system_card_text_items(800.0, 600.0).is_empty());
+}
