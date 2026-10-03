@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 
 use tze_hud_scene::config::{
-    ConfigError, ConfigErrorCode, ConfigLoader, DisplayProfile, ParseError, ResolvedConfig,
+    ConfigError, ConfigErrorCode, ConfigLoader, DisplayProfile, Hotkey, ParseError, ResolvedConfig,
 };
 
 use crate::raw::RawConfig;
@@ -147,6 +147,23 @@ impl ConfigLoader for TzeHudConfig {
             validate_profile(p, &mut errors);
         }
 
+        // ── (2b) [runtime].safe_mode_hotkey parses as a chord ─────────────────
+        if let Some(chord) = self
+            .raw
+            .runtime
+            .as_ref()
+            .and_then(|r| r.safe_mode_hotkey.as_deref())
+            && let Err(e) = Hotkey::parse(chord)
+        {
+            errors.push(ConfigError {
+                code: ConfigErrorCode::Other("CONFIG_INVALID_HOTKEY".into()),
+                field_path: "runtime.safe_mode_hotkey".into(),
+                expected: "chord like \"Ctrl+Shift+F12\" (modifiers Ctrl/Shift/Alt/Win + F1-F24, letter or digit)".into(),
+                got: format!("{chord:?}"),
+                hint: e.to_string(),
+            });
+        }
+
         // ── (3) [display_profile] is rejected; the built-in profiles are fixed ──
         if self.raw.display_profile.is_some() {
             errors.push(ConfigError {
@@ -238,11 +255,20 @@ impl ConfigLoader for TzeHudConfig {
             .filter_map(|t| t.name.clone())
             .collect();
 
+        let safe_mode_hotkey = self
+            .raw
+            .runtime
+            .as_ref()
+            .and_then(|r| r.safe_mode_hotkey.as_deref())
+            .map(|c| Hotkey::parse(c).expect("validated chord parses"))
+            .unwrap_or(Hotkey::DEFAULT_SAFE_MODE);
+
         let source_path = None; // Set by caller after file load.
 
         Ok(ResolvedConfig {
             profile,
             tab_names,
+            safe_mode_hotkey,
             source_path,
         })
     }

@@ -171,12 +171,15 @@ impl Drop for FramePacingTimerGuard {
 }
 
 mod config;
+#[cfg(target_os = "windows")]
+mod global_hotkey;
 mod hittest;
 mod input_dispatch;
 mod keyboard;
 mod lifecycle;
 mod network;
 mod portal;
+mod safe_mode_toggle;
 mod wake;
 mod widgets;
 
@@ -308,20 +311,10 @@ struct WindowedRuntimeState {
     /// instead of `try_lock`ing the scene Tokio mutex, so composer keystroke
     /// echo is never starved by gRPC scene-mutation batches (hud-dwcr7).
     active_tab_mirror: Arc<std::sync::Mutex<Option<tze_hud_scene::SceneId>>>,
-    /// Channel sender for the Ctrl+Shift+Escape safe-mode exit chord.
-    ///
-    /// The winit event-loop thread sends on this channel when it detects
-    /// Ctrl+Shift+Escape (in Stage 1, BEFORE the safe-mode capture guard).
-    /// An async task on the network runtime listens on the receiver and calls
-    /// `SafeModeController::exit_safe_mode()` — bridging the sync event thread
-    /// to the async `SafeModeController`.
-    ///
-    /// `None` when gRPC/MCP is disabled (no network runtime available).
-    safe_mode_exit_tx: Option<tokio::sync::mpsc::UnboundedSender<()>>,
     /// Shared chrome state — read by `ChromeRenderer`, written by `SafeModeController`.
     ///
     /// Created at runtime startup alongside `shared_state`.  Passed to
-    /// `SafeModeController` so the keyboard exit bridge can call `exit_safe_mode()`
+    /// `SafeModeController` so the hotkey bridge can enter/exit safe mode
     /// without going through the gRPC path.
     chrome_state: Arc<std::sync::RwLock<crate::shell::ChromeState>>,
     /// Input channel (ring buffer) — main thread writes, compositor thread reads.
@@ -1390,6 +1383,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
         let benchmark_failed = self.state.benchmark_failed.clone();
         let terminal_surface_recovery_failed = self.state.terminal_surface_recovery_failed.clone();
         let compositor_wake = self.state.wake.clone();
+        let safe_mode_for_compositor = Arc::clone(&self.state.safe_mode_atomic);
         let telemetry_collector = TelemetryCollector::new();
         let surface_for_compositor = window_surface.clone();
         let mut benchmark_state = cfg.benchmark.clone().map(|benchmark| {
@@ -1592,9 +1586,15 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                         );
                         break;
                     }
+                    // Safe mode changes no scene state, so a flip must itself
+                    // force one repaint (the overlay appears / clears); the
+                    // transition's render wake brought us here.
+                    let safe_mode_flipped = compositor.set_safe_mode_overlay(
+                        safe_mode_for_compositor.load(std::sync::atomic::Ordering::Acquire),
+                    );
                     surface_repaint_pending = update_surface_repaint_pending(
                         surface_repaint_pending,
-                        surface_recovery.reconfigured_surface(),
+                        surface_recovery.reconfigured_surface() || safe_mode_flipped,
                         false,
                     );
 
@@ -2168,32 +2168,6 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                         && !mods.super_key();
                     if ctrl_shift {
                         match event.physical_key {
-                            PhysicalKey::Code(KeyCode::Escape) => {
-                                // ── Safe-mode keyboard exit (hud-hpudo) ────────────────────────
-                                // Ctrl+Shift+Escape exits safe mode via an async channel bridge.
-                                // This is detected at Stage 1 (the OS event path), BEFORE any
-                                // safe-mode capture check, so the exit chord is always honored
-                                // even when safe mode is actively capturing all other input.
-                                //
-                                // The send is best-effort (non-blocking): if the channel is
-                                // closed (no network runtime), the error is silently dropped.
-                                if let Some(ref tx) = self.state.safe_mode_exit_tx {
-                                    let _ = tx.send(());
-                                    tracing::debug!(
-                                        "safe-mode keyboard exit: Ctrl+Shift+Escape detected at Stage 1 — \
-                                         exit signal sent"
-                                    );
-                                } else {
-                                    tracing::debug!(
-                                        "safe-mode keyboard exit: Ctrl+Shift+Escape detected but no \
-                                         network runtime — exit signal not available"
-                                    );
-                                }
-                                self.state
-                                    .consumed_shell_shortcut_keydowns
-                                    .insert("Escape".to_string());
-                                return;
-                            }
                             PhysicalKey::Code(KeyCode::F9) => {
                                 self.cycle_monitor(event_loop, 1);
                                 self.state
@@ -2363,17 +2337,6 @@ fn main_work_source_for_window_event(
         | WindowEvent::KeyboardInput { .. }
         | WindowEvent::Ime(winit::event::Ime::Commit(_)) => Some(RuntimeWakeupSource::SceneChange),
         _ => None,
-    }
-}
-
-/// Schedule compositor work only when safe mode actually left its active state.
-/// Repeated Ctrl+Shift+Escape signals while inactive are side-effect-free.
-fn notify_after_safe_mode_exit(
-    result: &crate::shell::SafeModeExitResult,
-    render_wake: &tze_hud_scene::render_wake::RenderWakeNotifier,
-) {
-    if result.exited {
-        render_wake.notify();
     }
 }
 
@@ -2683,65 +2646,22 @@ impl WindowedRuntime {
             render_startup_banner(&grpc_bound_addrs, &mcp_bound_addrs)
         );
 
-        // ── Safe-mode keyboard exit bridge ─────────────────────────────────────
-        // Create an mpsc channel so the sync winit event-loop thread can signal
-        // the async SafeModeController to exit safe mode when Ctrl+Shift+Escape
-        // is pressed.  The channel is unbounded so the send never blocks the
-        // event-loop thread (hud-hpudo).
-        let (safe_mode_exit_tx, safe_mode_exit_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
-        let safe_mode_exit_tx_opt = if let Some(ref rt) = network_rt {
-            // Spawn the listener task onto the network runtime.
-            let shared_for_exit = Arc::clone(&shared_state);
-            let chrome_for_exit = Arc::clone(&chrome_state);
-            let shutdown_for_exit = shutdown.clone();
-            let render_wake_for_exit = render_wake.clone();
-            let mut rx = safe_mode_exit_rx;
-            rt.rt.spawn(async move {
-                let mut shutdown_rx = shutdown_for_exit.subscribe();
-                loop {
-                    tokio::select! {
-                        maybe = rx.recv() => {
-                            match maybe {
-                                Some(()) => {
-                                    tracing::info!(
-                                        "safe-mode keyboard exit: Ctrl+Shift+Escape received — \
-                                         calling SafeModeController::exit_safe_mode"
-                                    );
-                                    let mut ctrl = crate::shell::SafeModeController::new_headless(
-                                        Arc::clone(&shared_for_exit),
-                                        Arc::clone(&chrome_for_exit),
-                                    );
-                                    let result = ctrl.exit_safe_mode().await;
-                                    notify_after_safe_mode_exit(&result, &render_wake_for_exit);
-                                    tracing::info!(
-                                        exited = result.exited,
-                                        leases_resumed = result.leases_resumed,
-                                        sessions_notified = result.sessions_notified,
-                                        suspension_duration_us = result.suspension_duration_us,
-                                        "safe-mode keyboard exit: exit_safe_mode completed"
-                                    );
-                                }
-                                None => {
-                                    tracing::debug!("safe-mode exit channel closed; listener exiting");
-                                    break;
-                                }
-                            }
-                        }
-                        _ = shutdown_rx.recv() => {
-                            tracing::debug!("safe-mode exit listener: shutdown received");
-                            break;
-                        }
-                    }
-                }
-            });
-            Some(safe_mode_exit_tx)
-        } else {
-            // No network runtime — exit chord cannot drive the async controller.
-            // The channel receiver is dropped here; the tx will produce SendError
-            // which is silently ignored in the send path.
-            drop(safe_mode_exit_rx);
-            None
-        };
+        // ── Safe-mode global hotkey (hud-jm8nq.10) ─────────────────────────────
+        // A dedicated Windows thread owns the RegisterHotKey registration and
+        // signals the bridge task; the unfocused click-through overlay never
+        // receives the keystroke itself. Needs the network runtime (the bridge
+        // is async); without one there is nothing to suspend anyway.
+        #[cfg(target_os = "windows")]
+        if let Some(ref rt) = network_rt {
+            let toggle_tx = safe_mode_toggle::spawn_safe_mode_toggle_bridge(
+                rt.rt.handle(),
+                Arc::clone(&shared_state),
+                Arc::clone(&chrome_state),
+                render_wake.clone(),
+                shutdown.clone(),
+            );
+            global_hotkey::spawn_global_hotkey(runtime_context.safe_mode_hotkey, toggle_tx);
+        }
 
         let portal_projection_driver = build_portal_projection_driver(&cfg)?;
 
@@ -2757,7 +2677,6 @@ impl WindowedRuntime {
             shared_state,
             safe_mode_atomic,
             active_tab_mirror,
-            safe_mode_exit_tx: safe_mode_exit_tx_opt,
             chrome_state,
             input_ring,
             pending_input_latency,
@@ -3196,41 +3115,6 @@ mod wake_accounting_tests {
             )),
             None,
             "a zero-sized suspended surface has no renderable resize work"
-        );
-    }
-
-    #[test]
-    fn safe_mode_exit_wakes_only_after_an_actual_transition() {
-        let wake = WindowedWake::disconnected();
-        let render_wake = wake.render_notifier();
-        let compositor_before = wake.compositor().checkpoint();
-        let no_op = crate::shell::SafeModeExitResult {
-            exited: false,
-            leases_resumed: 0,
-            lease_resumes: Vec::new(),
-            sessions_notified: 0,
-            suspension_duration_us: 0,
-        };
-
-        notify_after_safe_mode_exit(&no_op, &render_wake);
-        assert_eq!(
-            wake.compositor().checkpoint(),
-            compositor_before,
-            "an idempotent safe-mode exit must not create compositor work"
-        );
-
-        let transition = crate::shell::SafeModeExitResult {
-            exited: true,
-            leases_resumed: 0,
-            lease_resumes: Vec::new(),
-            sessions_notified: 0,
-            suspension_duration_us: 0,
-        };
-        notify_after_safe_mode_exit(&transition, &render_wake);
-        assert_eq!(
-            wake.compositor().checkpoint(),
-            compositor_before.wrapping_add(1),
-            "a real safe-mode exit must wake the compositor exactly once"
         );
     }
 

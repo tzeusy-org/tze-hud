@@ -711,3 +711,34 @@ name = "Main"
         "in-range schema_version must not produce a schema-version error"
     );
 }
+
+// ── [runtime].safe_mode_hotkey ────────────────────────────────────────────────
+
+/// WHEN no hotkey is configured THEN the default is Ctrl+Shift+F12; WHEN one is
+/// configured THEN it overrides; WHEN it is malformed THEN validation names the field.
+#[test]
+fn safe_mode_hotkey_defaults_overrides_and_rejects_garbage() {
+    use tze_hud_scene::config::Hotkey;
+    let cfg = |runtime_extra: &str| {
+        format!(
+            "[runtime]\nprofile = \"full-display\"\n{runtime_extra}\n[[tabs]]\nname = \"Main\"\n"
+        )
+    };
+
+    let default = parse_ok(&cfg("")).freeze().expect("freeze");
+    assert_eq!(default.safe_mode_hotkey, Hotkey::DEFAULT_SAFE_MODE);
+
+    let custom = parse_ok(&cfg("safe_mode_hotkey = \"Ctrl+Alt+F11\""))
+        .freeze()
+        .expect("freeze");
+    assert_eq!(custom.safe_mode_hotkey.to_string(), "Ctrl+Alt+F11");
+
+    let errors = parse_ok(&cfg("safe_mode_hotkey = \"F12\""))
+        .freeze()
+        .expect_err("modifier-less chord must be rejected");
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.field_path == "runtime.safe_mode_hotkey")
+    );
+}

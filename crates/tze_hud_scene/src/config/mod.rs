@@ -6,10 +6,12 @@
 //! and supporting types — no implementation is provided here.
 
 pub mod agents;
+pub mod hotkey;
 pub use agents::{
     AgentDirectory, AgentIdentity, AuthRejection, DEFAULT_MCP_AGENT_ID, OPERATOR_ADMIN, PskDigest,
     SharedAgents, hash_psk,
 };
+pub use hotkey::{Hotkey, HotkeyKey, HotkeyParseError};
 
 // ─── Error Codes ─────────────────────────────────────────────────────────────
 
@@ -180,6 +182,8 @@ impl DisplayProfile {
 pub struct ResolvedConfig {
     pub profile: DisplayProfile,
     pub tab_names: Vec<String>,
+    /// Global chord that toggles safe mode (`[runtime].safe_mode_hotkey`).
+    pub safe_mode_hotkey: Hotkey,
     /// Sourced TOML file path.
     pub source_path: Option<String>,
 }

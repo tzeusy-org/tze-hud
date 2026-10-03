@@ -69,6 +69,7 @@ pub mod hit_regions;
 pub mod icon;
 pub mod image_cache;
 mod retained;
+mod safe_mode_overlay;
 pub mod text;
 pub mod tile_render;
 pub mod token_colors;
@@ -216,6 +217,9 @@ pub struct Compositor {
     latest_surface_recovery: Option<SurfaceRecoveryOutcome>,
     /// When true, the clear color uses alpha=0 for transparent overlay mode.
     pub overlay_mode: bool,
+    /// When true, the chrome pass draws the safe-mode overlay (see
+    /// [`Compositor::set_safe_mode_overlay`]).
+    safe_mode_overlay: bool,
     /// When true, render all zone boundaries with colored tints even when
     /// zones have no active content. Controlled by `TZE_HUD_DEBUG_ZONES=1`.
     pub debug_zone_tints: bool,
@@ -777,6 +781,7 @@ impl Compositor {
             retained_render_state: retained::RetainedRenderState::default(),
             latest_surface_recovery: None,
             overlay_mode: false,
+            safe_mode_overlay: false,
             debug_zone_tints: std::env::var("TZE_HUD_DEBUG_ZONES").is_ok_and(|v| v == "1"),
             degradation_level: DegradationLevel::Nominal,
             degradation_policy: CompositorDegradationPolicy::default(),
@@ -1099,6 +1104,7 @@ impl Compositor {
             retained_render_state: retained::RetainedRenderState::default(),
             latest_surface_recovery: None,
             overlay_mode: false,
+            safe_mode_overlay: false,
             debug_zone_tints: std::env::var("TZE_HUD_DEBUG_ZONES").is_ok_and(|v| v == "1"),
             degradation_level: DegradationLevel::Nominal,
             degradation_policy: CompositorDegradationPolicy::default(),

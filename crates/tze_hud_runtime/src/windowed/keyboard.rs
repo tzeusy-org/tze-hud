@@ -421,7 +421,7 @@ impl WinitApp {
     /// event at FIFO front rather than leaking it through the agent path.
     fn handle_shell_reserved_shortcut(&mut self, raw: &RawKeyDownEvent) -> ShellShortcutOutcome {
         let Some(shortcut) = chrome_shortcut(raw) else {
-            // Ctrl+Shift+Escape and Ctrl+Shift+F8/F9 are handled at the OS
+            // Ctrl+Shift+F8/F9 are handled at the OS
             // event stage. Synthetic/in-process entry still consumes them.
             return ShellShortcutOutcome::Consumed;
         };

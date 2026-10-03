@@ -26,6 +26,8 @@ pub struct AnyValue(pub toml::Value);
 pub struct RawRuntime {
     /// Display profile name.  Must be present.
     pub profile: Option<String>,
+    /// Global safe-mode chord, e.g. `"Ctrl+Shift+F12"` (the default).
+    pub safe_mode_hotkey: Option<String>,
 }
 
 // ─── [[tabs]] ────────────────────────────────────────────────────────────────

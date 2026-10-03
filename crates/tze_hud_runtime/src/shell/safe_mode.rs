@@ -644,7 +644,7 @@ impl SafeModeController {
         .await
     }
 
-    /// Manual safe mode entry via `Ctrl+Shift+Escape` or "Dismiss All" chrome control.
+    /// Manual safe mode entry via the global hotkey (default Ctrl+Shift+F12) or "Dismiss All".
     pub async fn enter_safe_mode_viewer_action(&mut self) -> SafeModeEntryResult {
         self.enter_safe_mode(
             SafeModeEntryReason::ExplicitViewerAction,

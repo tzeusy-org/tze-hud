@@ -463,6 +463,22 @@ pub static CANONICAL_TOKENS: &[CanonicalToken] = &[
         description: "Disconnection badge square extent on orphaned tiles (px)",
         default_value: "16",
     },
+    // Safe-mode overlay (docs/invariants.md section 5), drawn by the compositor.
+    CanonicalToken {
+        key: "safe_mode.overlay.color",
+        description: "Full-surface dim while safe mode is active (RGBA hex)",
+        default_value: "#000000B3",
+    },
+    CanonicalToken {
+        key: "safe_mode.banner.color",
+        description: "Top banner bar color while safe mode is active",
+        default_value: "#FFB800",
+    },
+    CanonicalToken {
+        key: "safe_mode.banner.height_px",
+        description: "Top banner bar height while safe mode is active (px)",
+        default_value: "8",
+    },
     // Notification action buttons (docs/api.md notification `actions`).
     CanonicalToken {
         key: "notification.action.background",
