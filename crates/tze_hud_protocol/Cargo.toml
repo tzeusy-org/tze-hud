@@ -42,6 +42,8 @@ subtle = { workspace = true }
 # Self-dependency with dev-mode enabled so that integration tests under tests/
 # can call HudSessionImpl::new without going through the production config path.
 tze_hud_protocol = { path = ".", version = "0.1.0", features = ["dev-mode"] }
+# fuzz_protocol_boundary.rs asserts Layer 0 invariants from the scene test fixtures.
+tze_hud_scene = { path = "../tze_hud_scene", version = "0.1.0", features = ["test-support"] }
 proptest = { workspace = true }
 tempfile = { workspace = true }
 

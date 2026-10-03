@@ -152,7 +152,7 @@ path = "poc_acceptance.rs"
 # Integration tests are separate binaries; cfg(test) is set in them but NOT
 # in the library they link, so dev-mode must be enabled explicitly here.
 [dependencies]
-tze_hud_scene = { path = "../../crates/tze_hud_scene", version = "0.1.0" }
+tze_hud_scene = { path = "../../crates/tze_hud_scene", version = "0.1.0", features = ["test-support"] }
 tze_hud_input = { path = "../../crates/tze_hud_input", version = "0.1.0" }
 tze_hud_compositor = { path = "../../crates/tze_hud_compositor", version = "0.1.0" }
 tze_hud_runtime = { path = "../../crates/tze_hud_runtime", version = "0.1.0", features = ["dev-mode", "test-harness"] }

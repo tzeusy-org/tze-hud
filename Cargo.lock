@@ -3717,6 +3717,7 @@ dependencies = [
  "sha2",
  "subtle",
  "thiserror 2.0.18",
+ "tze_hud_scene",
  "uuid",
 ]
 

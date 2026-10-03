@@ -16,6 +16,7 @@ pub mod perf_budget;
 pub mod placement;
 pub mod render_wake;
 pub mod svg_tokens;
+#[cfg(any(test, feature = "test-support"))]
 pub mod test_scenes;
 pub mod timing;
 pub mod types;
@@ -51,9 +52,9 @@ pub use mutation::{
     BatchTimingHints, MAX_BATCH_SIZE, MutationBatch, MutationResult, SceneMutation,
 };
 pub use svg_tokens::{is_valid_token_key, resolve_token_placeholders};
+#[cfg(any(test, feature = "test-support"))]
 pub use test_scenes::{
-    ClockMs, InvariantViolation, SceneGraphTestExt, SceneSpec, TestSceneRegistry,
-    assert_layer0_invariants,
+    ClockMs, InvariantViolation, SceneSpec, TestSceneRegistry, assert_layer0_invariants,
 };
 pub use timing::{DeliveryPolicy, DurationUs, MessageClass, MonoUs, Schedule, TimingHints, WallUs};
 pub use types::*;

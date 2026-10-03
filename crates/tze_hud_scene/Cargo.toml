@@ -15,7 +15,15 @@ subtle = { workspace = true }
 sha2 = { workspace = true }
 arc-swap = { workspace = true }
 
+[features]
+# Deterministic named scenes and Layer 0 invariant checks for pixel, budget and
+# fuzz tests. Enable only from dev-dependencies; never in a shipped build.
+test-support = []
+
 [dev-dependencies]
+# Integration tests and benches link the lib without cfg(test), so they get the
+# fixtures by enabling the feature on the crate itself.
+tze_hud_scene = { path = ".", features = ["test-support"] }
 proptest = { workspace = true }
 criterion = { workspace = true }
 
