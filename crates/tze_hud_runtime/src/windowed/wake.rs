@@ -18,25 +18,18 @@ use crate::idle_efficiency::{IdleEfficiencyCounters, RuntimeWakeupSource};
 pub(super) struct Deadline {
     pub(super) at: Instant,
     pub(super) source: RuntimeWakeupSource,
-    /// Serviced on the main thread alone: a due tick that finds nothing changed
-    /// must not create main-work debt (and so no compositor wake).
-    pub(super) main_only: bool,
 }
 
 impl Deadline {
     pub(super) const fn new(at: Instant, source: RuntimeWakeupSource) -> Self {
-        Self {
-            at,
-            source,
-            main_only: false,
-        }
+        Self { at, source }
     }
 }
 
-/// What a cursor poll tick may observe changing; any difference between two
-/// ticks is a hover/capture transition that deserves a full turn.
+/// What a cursor-entry check may observe changing; any difference between two
+/// checks is a hover/capture transition that deserves a full turn.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) struct CursorPollSignature {
+pub(super) struct CursorEntrySignature {
     /// The overlay should capture (cursor over a region or portal affordance).
     pub(super) capture: bool,
     /// Focused portal whose resize grip the cursor is over.
@@ -47,21 +40,21 @@ pub(super) struct CursorPollSignature {
     pub(super) widget_regions: u32,
 }
 
-/// Cursor-poll bookkeeping kept between event-loop turns.
+/// Cursor-entry bookkeeping kept between event-loop turns.
 #[derive(Debug, Default)]
-pub(super) struct CursorPollState {
-    /// The turn in progress began with a due, main-only poll deadline.
+pub(super) struct CursorEntryState {
+    /// The turn in progress began with a raw mouse-motion event while armed.
     pub(super) tick: bool,
-    /// Earliest non-poll deadline from the last full turn, so a quiet poll
-    /// turn can re-arm without recomputing (and locking the scene for) them.
-    pub(super) other_deadline: Option<Deadline>,
-    /// Signature at the last full turn or poll tick.
-    pub(super) signature: Option<CursorPollSignature>,
+    /// Raw mouse input is currently being requested from the OS
+    /// (`RIDEV_INPUTSINK`); mirrors [`cursor_entry_armed`].
+    pub(super) listening: bool,
+    /// Signature at the last full turn or cursor check.
+    pub(super) signature: Option<CursorEntrySignature>,
 }
 
-/// Result of servicing one cursor poll tick.
+/// Result of servicing one raw mouse-motion event.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum CursorPollTurn {
+pub(super) enum CursorEntryTurn {
     /// Nothing changed: the loop sleeps until `next` without touching the
     /// scene or the compositor.
     Quiet { next: Option<Deadline> },
@@ -87,25 +80,16 @@ pub(super) fn control_flow_for_deadlines(
         })
 }
 
-/// Interval of the overlay cursor poll (~30 Hz).
-pub(super) const CURSOR_POLL_INTERVAL: Duration = Duration::from_millis(33);
-
-/// Next cursor poll, armed only while a click could be missed: an overlay in
-/// passthrough (the OS delivers no pointer events) with interactive regions to
-/// enter. Otherwise `None`, so an idle HUD with nothing clickable parks.
-pub(super) fn cursor_poll_deadline(
-    now: Instant,
+/// Whether raw mouse input must wake the loop: an overlay in passthrough (the
+/// OS delivers no pointer messages to the window) with interactive regions to
+/// enter. Otherwise nothing is listened for, so an idle HUD with nothing
+/// clickable parks and receives zero input wakeups.
+pub(super) fn cursor_entry_armed(
     overlay: bool,
     has_interactive_regions: bool,
     in_passthrough: bool,
-) -> Option<Deadline> {
-    (overlay && has_interactive_regions && in_passthrough).then(|| Deadline {
-        main_only: true,
-        ..Deadline::new(
-            now + CURSOR_POLL_INTERVAL,
-            RuntimeWakeupSource::AnimationDeadline,
-        )
-    })
+) -> bool {
+    overlay && has_interactive_regions && in_passthrough
 }
 
 pub(super) fn deadline_from_wall_us(
@@ -544,8 +528,7 @@ mod tests {
     use crate::idle_efficiency::{IdleEfficiencyCounters, RuntimeWakeupSource};
 
     use super::{
-        CURSOR_POLL_INTERVAL, CompositorWake, Deadline, WindowedWake, control_flow_for_deadlines,
-        cursor_poll_deadline,
+        CompositorWake, Deadline, WindowedWake, control_flow_for_deadlines, cursor_entry_armed,
     };
 
     #[test]
@@ -599,23 +582,16 @@ mod tests {
     }
 
     #[test]
-    fn cursor_poll_armed_only_with_hit_regions() {
-        let now = Instant::now();
-        let poll = |overlay, regions, passthrough| {
-            cursor_poll_deadline(now, overlay, regions, passthrough)
-        };
-        let armed = poll(true, true, true).expect("overlay passthrough with regions polls");
-        assert_eq!(armed.at, now + CURSOR_POLL_INTERVAL);
-        assert!(poll(true, false, true).is_none(), "no regions: park");
+    fn cursor_entry_armed_only_with_hit_regions_in_passthrough() {
+        assert!(cursor_entry_armed(true, true, true));
+        assert!(!cursor_entry_armed(true, false, true), "no regions: park");
         assert!(
-            poll(true, true, false).is_none(),
-            "capturing: events arrive"
+            !cursor_entry_armed(true, true, false),
+            "capturing: pointer events arrive"
         );
-        assert!(poll(false, true, true).is_none(), "fullscreen captures all");
-        // With nothing armed the loop selects Wait, so idle counters stay zero.
-        assert_eq!(
-            control_flow_for_deadlines(now, poll(true, false, true)),
-            winit::event_loop::ControlFlow::Wait
+        assert!(
+            !cursor_entry_armed(false, true, true),
+            "fullscreen captures all"
         );
     }
 
