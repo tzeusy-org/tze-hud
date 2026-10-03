@@ -2520,7 +2520,6 @@ impl WindowedRuntime {
             resource_store: tze_hud_resource::ResourceStore::new_with_resident_ledger(
                 tze_hud_resource::ResourceStoreConfig {
                     max_total_texture_bytes: resident_limits.resource_bytes,
-                    max_font_cache_bytes: resident_limits.font_bytes,
                     ..tze_hud_resource::ResourceStoreConfig::default()
                 },
                 runtime_context.resident_ledger.clone(),

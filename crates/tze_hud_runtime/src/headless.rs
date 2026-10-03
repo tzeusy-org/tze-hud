@@ -338,7 +338,6 @@ impl HeadlessRuntime {
             resource_store: ResourceStore::new_with_resident_ledger(
                 ResourceStoreConfig {
                     max_total_texture_bytes: resident_limits.resource_bytes,
-                    max_font_cache_bytes: resident_limits.font_bytes,
                     ..ResourceStoreConfig::default()
                 },
                 runtime_context.resident_ledger.clone(),

@@ -176,9 +176,6 @@ pub const MAX_TEXTURE_DIMENSION_PX: u32 = 8192;
 /// Default maximum total texture memory across all agents (512 MiB).
 pub const DEFAULT_MAX_TOTAL_TEXTURE_BYTES: usize = 512 * 1024 * 1024;
 
-/// Default maximum total font cache memory (64 MiB).
-pub const DEFAULT_MAX_FONT_CACHE_BYTES: usize = 64 * 1024 * 1024;
-
 /// Default maximum number of concurrent resources in the store.
 pub const DEFAULT_MAX_CONCURRENT_RESOURCES: usize = 4096;
 
@@ -221,8 +218,6 @@ pub struct ResourceStoreConfig {
     pub max_decoded_texture_bytes: usize,
     /// Maximum total texture bytes across all resources (default 512 MiB).
     pub max_total_texture_bytes: usize,
-    /// Maximum total font cache bytes (default 64 MiB).
-    pub max_font_cache_bytes: usize,
     /// Maximum number of concurrent resources in the store (default 4096).
     pub max_concurrent_resources: usize,
     /// Per-agent upload rate limit in bytes/second (default 1 MiB/s).
@@ -238,7 +233,6 @@ impl Default for ResourceStoreConfig {
             max_resource_bytes: DEFAULT_MAX_RESOURCE_BYTES,
             max_decoded_texture_bytes: DEFAULT_MAX_DECODED_TEXTURE_BYTES,
             max_total_texture_bytes: DEFAULT_MAX_TOTAL_TEXTURE_BYTES,
-            max_font_cache_bytes: DEFAULT_MAX_FONT_CACHE_BYTES,
             max_concurrent_resources: DEFAULT_MAX_CONCURRENT_RESOURCES,
             upload_rate_limit_bytes_per_sec: DEFAULT_UPLOAD_RATE_LIMIT_BYTES_PER_SEC,
         }
