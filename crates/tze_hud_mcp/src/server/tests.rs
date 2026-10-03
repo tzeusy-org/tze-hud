@@ -517,6 +517,51 @@ async fn delay_ms_holds_content_until_due() {
     );
 }
 
+/// A delayed notification takes the same expiry as an immediate one: held
+/// for `ttl_ms:0` (and `hud_hold` then retimes it once it has materialized),
+/// otherwise the explicit expiry stamped at schedule time (the 60 s
+/// `DEFAULT_ZONE_TTL_MS` when `ttl_ms` is absent), counted from presentation.
+/// That case is unchanged from before the fix.
+#[tokio::test]
+async fn delayed_notification_expiry_matches_immediate() {
+    for (ttl, expected) in [
+        (Some(0), None),
+        (None, Some(1_000_000 + 5_000_000 + 60_000_000)),
+    ] {
+        let (server, clock) = server();
+        let mut args = json!({"surface": "zone:notification-area",
+            "content": {"title": "t", "body": "b"}, "delay_ms": 5000});
+        if let Some(ttl) = ttl {
+            args["ttl_ms"] = json!(ttl);
+        }
+        call(&server, "hud_publish", args).await;
+        clock.advance(5_000);
+        {
+            let mut scene = server.scene.lock().await;
+            scene.apply_due_batches();
+            let rec = &scene.zone_registry.active_publishes["notification-area"][0];
+            assert_eq!(rec.expires_at_wall_us, expected, "ttl {ttl:?}");
+            clock.advance(120_000);
+            let drained = scene.drain_expired_zone_publications();
+            assert_eq!(drained, usize::from(expected.is_some()), "ttl {ttl:?}");
+        }
+        if ttl == Some(0) {
+            let v = call(
+                &server,
+                "hud_hold",
+                json!({"surface": "zone:notification-area", "ttl_ms": 5000}),
+            )
+            .await;
+            assert_eq!(v, json!({"ok": true, "expires_in_ms": 5000}));
+            let scene = server.scene.lock().await;
+            assert_eq!(
+                scene.zone_registry.active_publishes["notification-area"][0].expires_at_wall_us,
+                Some(scene.now_wall_us() + 5_000_000)
+            );
+        }
+    }
+}
+
 #[tokio::test]
 async fn delay_beyond_horizon_is_timestamp_too_future() {
     let (server, _) = server();

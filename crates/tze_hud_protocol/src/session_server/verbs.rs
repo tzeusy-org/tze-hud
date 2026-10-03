@@ -579,6 +579,7 @@ fn publish_zone(
             expires_at_wall_us: expires_at_wall_us(publish, now),
             content_classification: None,
             breakpoints: publish.breakpoints.clone(),
+            held: false,
         }],
         timing_hints: None,
         lease_id: session.lease_ids.first().copied(),

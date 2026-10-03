@@ -523,6 +523,7 @@ async fn publish_zone(ctx: &ToolCtx<'_>, zone: &str, p: PublishParams) -> McpRes
                 expires_at_wall_us: ttl_us.map(|t| present_at.saturating_add(t)),
                 content_classification: None,
                 breakpoints: Vec::new(),
+                held: ttl_us.is_none(),
             }],
             timing_hints: None,
             lease_id: Some(lease_id),

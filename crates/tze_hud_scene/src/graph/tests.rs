@@ -1776,6 +1776,7 @@ fn test_zone_publish_via_mutation_batch() {
             expires_at_wall_us: None,
             content_classification: None,
             breakpoints: Vec::new(),
+            held: false,
         }],
         timing_hints: None,
         lease_id: None,
@@ -1789,6 +1790,50 @@ fn test_zone_publish_via_mutation_batch() {
         publishes[0].content,
         ZoneContent::StreamText("batch publish".to_string())
     );
+}
+
+/// A notification applied through a batch with no explicit expiry takes the
+/// urgency default (8 s for urgency 1); `held` leaves it until cleared.
+#[test]
+fn test_batch_notification_expiry_follows_held_flag() {
+    use crate::mutation::{MutationBatch, SceneMutation};
+    for (held, expected_ttl) in [
+        (false, Some(SceneGraph::NOTIFICATION_TTL_INFO_US)),
+        (true, None),
+    ] {
+        let (mut scene, clock) = scene_with_test_clock();
+        scene.register_zone(make_alert_banner_zone());
+        let batch = MutationBatch {
+            batch_id: SceneId::new(),
+            agent_namespace: "agent".to_string(),
+            mutations: vec![SceneMutation::PublishToZone {
+                zone_name: "alert-banner".to_string(),
+                content: ZoneContent::Notification(NotificationPayload {
+                    text: "n".to_string(),
+                    icon: String::new(),
+                    urgency: 1,
+                    ttl_ms: None,
+                    title: String::new(),
+                    actions: Vec::new(),
+                }),
+                publish_token: dummy_token(),
+                merge_key: None,
+                expires_at_wall_us: None,
+                content_classification: None,
+                breakpoints: Vec::new(),
+                held,
+            }],
+            timing_hints: None,
+            lease_id: None,
+        };
+        assert!(scene.apply_batch(&batch).applied);
+        let record = &scene.zone_registry.active_for_zone("alert-banner")[0];
+        assert_eq!(
+            record.expires_at_wall_us,
+            expected_ttl.map(|t| clock.now_us() + t),
+            "held={held}"
+        );
+    }
 }
 
 #[test]
