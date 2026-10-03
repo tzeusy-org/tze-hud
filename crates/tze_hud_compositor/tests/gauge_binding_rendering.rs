@@ -502,7 +502,7 @@ mod contention {
             .join("..") // crates/
             .join("..") // workspace root
             .join("assets")
-            .join("widgets")
+            .join("widget_bundles")
             .join("gauge")
     }
 
