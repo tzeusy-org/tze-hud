@@ -4,9 +4,10 @@
 # Deploy alongside the compiled binary as tze_hud.toml in the same directory
 # (the runtime's CWD auto-resolution picks up ./tze_hud.toml first).
 #
-# On Windows, copy tze_hud.exe and this file as tze_hud.toml next to it. No other
-# files are needed: the gauge, progress-bar and status-indicator widget bundles
-# are built into the exe.
+# On Windows, double-clicking tze_hud.exe installs it per user and writes this
+# file to %APPDATA%\tze_hud\config.toml if none exists. Or copy tze_hud.exe and
+# this file as tze_hud.toml next to it. No other files are needed: the gauge,
+# progress-bar and status-indicator widget bundles are built into the exe.
 #
 # Usage:
 #   tze_hud --window-mode overlay

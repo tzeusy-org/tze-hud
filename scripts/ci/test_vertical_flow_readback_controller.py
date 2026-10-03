@@ -18,7 +18,7 @@ class VerticalFlowReadbackControllerTests(unittest.TestCase):
         )
         cls.runbook = RUNBOOK.read_text(encoding="utf-8") if RUNBOOK.is_file() else ""
 
-    def test_controller_requires_authority_and_rejects_foreign_live_gpu_lock(self):
+    def test_controller_requires_authority_and_rejects_foreign_live_lock(self):
         self.assertIn("[switch]$AllowProductionStop", self.controller)
         self.assertIn("if (-not $AllowProductionStop)", self.controller)
         self.assertIn("live non-production PID", self.controller)

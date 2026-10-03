@@ -2511,6 +2511,15 @@ impl WindowedRuntime {
         ));
         let pending_input_latency = Arc::new(StdMutex::new(VecDeque::new()));
         let shutdown = ShutdownToken::new();
+        // `--uninstall` / an upgrading installer ask this instance to quit.
+        {
+            let shutdown = shutdown.clone();
+            let wake = wake.clone();
+            crate::operator::install::spawn_quit_listener(move || {
+                shutdown.trigger(crate::threads::ShutdownReason::Clean);
+                wake.notify_main(crate::idle_efficiency::RuntimeWakeupSource::Shutdown);
+            });
+        }
 
         // ── Network runtime + gRPC + MCP HTTP servers ──────────────────────────
         // Spawn the Tokio multi-thread runtime for all network tasks (gRPC, MCP).

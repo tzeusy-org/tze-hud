@@ -21,22 +21,50 @@ signing key lives only in the `MINISIGN_SECRET_KEY` repository secret; the
 release job refuses to publish without it and checks every signature against
 the committed public key.
 
-## Run
+## Install
 
-Until first-run install and pairing land (T6 in `docs/scope.md`), run it with
-a config and an `agents.toml` beside it. The HUD stores only each agent's PSK
-SHA-256; the agent keeps the PSK and sends it as its bearer:
+Double-click `tze_hud.exe` (or run it with no arguments). From outside the
+install dir it installs for the current user, no admin rights:
+
+- copies itself to `%LOCALAPPDATA%\Programs\tze_hud\tze_hud.exe` (a previous
+  copy is parked as `tze_hud.old.exe` and removed on the next start);
+- writes `%APPDATA%\tze_hud\config.toml` from the built-in default if absent
+  (an existing config is never overwritten);
+- registers `HKCU\...\Run\tze_hud` (autostart at logon, overlay mode) and
+  `HKCU\...\App Paths\tze_hud.exe`;
+- relaunches the installed copy detached and exits.
+
+Running a newer download the same way upgrades in place: the running instance
+is asked to quit, then the new one starts. Any command-line argument runs the
+exe where it is instead; `--install` forces the install. One instance runs per
+user: a second bare launch (or the autostart command) logs "already running"
+and exits 0, while a second launch with any other arguments (benchmark, CI)
+prints an error and exits 2. `--handoff` waits up to 35 s for the previous one
+to exit instead. Install and uninstall stop the running instance through a
+named event that only the windowed runtime listens on; if it has not exited
+within 15 s, install fails without replacing anything.
+
+`tze_hud.exe --uninstall` removes both registry entries, stops the running
+instance, and deletes the install dir once it has exited. It keeps
+`%APPDATA%\tze_hud` (config, `agents.toml`). Add `--purge` to delete that and
+`%LOCALAPPDATA%\tze_hud` (logs) too. Nothing outside `tze_hud`-named
+directories and the two registry entries is touched.
+
+## Pair an agent
+
+Until first-run pairing lands (T6 in `docs/scope.md`), add an `agents.toml`
+beside the config. The HUD stores only each agent's PSK SHA-256; the agent keeps
+the PSK and sends it as its bearer:
 
 ```powershell
 $psk = -join ((1..32) | ForEach-Object { '{0:x2}' -f (Get-Random -Maximum 256) })
 $sha = [System.Security.Cryptography.SHA256]::Create()
 $hash = -join ($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($psk)) | ForEach-Object { $_.ToString('x2') })
-Set-Content agents.toml "[agents.claude]`npsk_sha256 = `"$hash`"`nallow = [`"*`"]" -Encoding ascii
-.\tze_hud.exe --config tze_hud.toml --window-mode overlay
+Set-Content "$env:APPDATA\tze_hud\agents.toml" "[agents.claude]`npsk_sha256 = `"$hash`"`nallow = [`"*`"]" -Encoding ascii
 ```
 
 Give `$psk` to the agent host and do not store it on the HUD side.
-`app/tze_hud_app/config/production.toml` is the reference config.
+`app/tze_hud_app/config/production.toml` is the reference (and default) config.
 
 ## Logs and operator endpoints
 

@@ -78,7 +78,7 @@
 //! ```
 
 use tze_hud_config::{agents_file, agents_path_for, resolve_config_path, validate_config};
-use tze_hud_runtime::gpu_lock::GpuLock;
+use tze_hud_runtime::operator::install::{self, Acquire, Action, InstallPaths};
 use tze_hud_runtime::window::{WindowConfig, WindowMode};
 use tze_hud_runtime::windowed::{
     WindowedBenchmarkConfig, WindowedConfig, WindowedQuiescentEfficiencyConfig, WindowedRuntime,
@@ -89,6 +89,9 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 const GIT_SHA: &str = env!("TZE_HUD_GIT_SHA");
 const BIN_NAME: &str = "tze_hud";
 const DEV_ALLOW_INSECURE_STARTUP_ENV: &str = "TZE_HUD_DEV_ALLOW_INSECURE_STARTUP";
+/// Written to `%APPDATA%\tze_hud\config.toml` on first install. Carries no
+/// `[agents]`: agents are paired into `agents.toml` beside it.
+const DEFAULT_CONFIG: &str = include_str!("../config/production.toml");
 
 fn print_help() {
     println!(
@@ -131,6 +134,16 @@ OPTIONS:
                            client config snippet) and exit 0 WITHOUT starting the
                            runtime. Honours --config / --mcp-port / --grpc-port
                            so the printed info matches the runtime it describes. Never prints the PSK value.
+    --install              Install per user (%LOCALAPPDATA%\Programs\tze_hud), register
+                           autostart, and relaunch. A bare launch with no arguments
+                           from outside the install dir does this automatically;
+                           any argument runs in place instead.
+    --uninstall            Remove autostart and the install dir and stop the running
+                           instance. Keeps %APPDATA%\tze_hud (config, paired agents).
+    --purge                With --uninstall: also delete %APPDATA%\tze_hud and
+                           %LOCALAPPDATA%\tze_hud (config, agents, logs)
+    --handoff              Wait up to 35 s for a previous instance to exit instead
+                           of exiting 0 because one is already running
     --help                 Print this help and exit
     --version              Print version and exit
 
@@ -194,6 +207,14 @@ struct StartupOptions {
     /// bearer-PSK auth rule, and a paste-ready MCP client config
     /// snippet) and exit 0 *without* starting the runtime (hud-b7c0m).
     print_attach_info: bool,
+    /// `--install`: install per user even when args are present.
+    install: bool,
+    /// `--uninstall`: reverse the install and exit.
+    uninstall: bool,
+    /// `--purge` (with `--uninstall`): also delete config and data dirs.
+    purge: bool,
+    /// `--handoff`: wait for a previous instance to exit before starting.
+    handoff: bool,
 }
 
 impl Default for StartupOptions {
@@ -215,6 +236,10 @@ impl Default for StartupOptions {
             benchmark_warmup_frames: 120,
             quiescent_efficiency_emit: None,
             print_attach_info: false,
+            install: false,
+            uninstall: false,
+            purge: false,
+            handoff: false,
         }
     }
 }
@@ -395,6 +420,10 @@ fn parse_options(args: &[String]) -> Result<StartupOptions, String> {
                 // are already applied. Does not start the runtime.
                 opts.print_attach_info = true;
             }
+            "--install" => opts.install = true,
+            "--uninstall" => opts.uninstall = true,
+            "--purge" => opts.purge = true,
+            "--handoff" => opts.handoff = true,
             "--config" => {
                 i += 1;
                 opts.config_path = Some(
@@ -519,6 +548,13 @@ fn parse_options(args: &[String]) -> Result<StartupOptions, String> {
             }
         }
         i += 1;
+    }
+
+    if opts.install && opts.uninstall {
+        return Err("--install and --uninstall cannot be used together".to_string());
+    }
+    if opts.purge && !opts.uninstall {
+        return Err("--purge is only valid with --uninstall".to_string());
     }
 
     Ok(opts)
@@ -710,6 +746,46 @@ fn init_logging() {
     }
 }
 
+/// `--install` / bare first launch: install, then exit; the installed copy runs.
+fn run_install(current_exe: &std::path::Path, paths: &InstallPaths) -> ! {
+    match install::install(current_exe, paths, DEFAULT_CONFIG) {
+        Ok(staged) => {
+            tracing::info!(
+                exe = %paths.exe.display(),
+                config = %paths.config_file.display(),
+                config_written = staged.config_written,
+                "installed; relaunched from the install dir"
+            );
+            println!("installed to {}", paths.install_dir.display());
+            std::process::exit(0);
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "install failed");
+            eprintln!("error: install failed: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+/// `--uninstall [--purge]`: reverse the install, then exit.
+fn run_uninstall(paths: &InstallPaths, purge: bool) -> ! {
+    match install::uninstall(paths, purge) {
+        Ok(()) => {
+            tracing::info!(
+                purge,
+                "uninstalled; install dir is removed after this process exits"
+            );
+            println!("uninstalled");
+            std::process::exit(0);
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "uninstall failed");
+            eprintln!("error: uninstall failed: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Bind the standard handles to the launching terminal ONCE, before any
     // output is produced (hud-q2glv). This is the GUI-subsystem console fix
@@ -768,23 +844,55 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::process::exit(0);
     }
 
-    // ── GPU lock (Windows scheduling policy, hud-940e4) ───────────────────────
-    // Acquire the interactive GPU lock before claiming the GPU adapter.
-    // On non-Windows this is a no-op (returns Ok(None)).
-    // On Windows:
-    //   - lock absent        → acquire and hold for process lifetime.
-    //   - lock stale (dead)  → log warning, take over, hold for lifetime.
-    //   - lock live (CI run) → hard refusal; exit with a clear error message.
-    //   - I/O error          → log warning, continue without lock (fail-safe).
-    let _gpu_lock_guard = match GpuLock::acquire() {
-        Ok(guard) => guard,
-        Err(conflict) => {
-            eprintln!("error: {conflict}");
-            eprintln!(
-                "hint: A CI real-decode job or another tze_hud session is using the GPU. \
-Wait for it to finish, then retry. See docs/design/tzehouse-windows-gpu-scheduling.md."
-            );
+    // ── Install / uninstall / single instance (T6) ────────────────────────────
+    let request = install::Request {
+        any_args: !args.is_empty(),
+        install: opts.install,
+        uninstall: opts.uninstall,
+        purge: opts.purge,
+    };
+    let current_exe = std::env::current_exe().unwrap_or_else(|e| {
+        eprintln!("error: cannot determine this executable's path: {e}");
+        std::process::exit(1);
+    });
+    match InstallPaths::from_env() {
+        Ok(paths) => match install::decide(request, &current_exe, &paths, cfg!(windows)) {
+            Action::Install => run_install(&current_exe, &paths),
+            Action::Uninstall { purge } => run_uninstall(&paths, purge),
+            Action::Run => install::cleanup_old_exe(&paths),
+        },
+        Err(e) if opts.install || opts.uninstall => {
+            eprintln!("error: {e}");
             std::process::exit(1);
+        }
+        Err(_) => {}
+    }
+    let wait = if opts.handoff {
+        install::HANDOFF_WAIT
+    } else {
+        std::time::Duration::ZERO
+    };
+    let _instance = match install::acquire_single_instance(wait) {
+        Acquire::Acquired(guard) => guard,
+        Acquire::AlreadyRunning => {
+            // Silent exit 0 only for a bare launch or the autostart command;
+            // a launch with explicit args (benchmark, validation, CI) did not
+            // do its work and must say so.
+            let canonical = InstallPaths::from_env()
+                .map(|p| install::is_canonical_launch(&args, &p))
+                .unwrap_or(args.is_empty());
+            if canonical {
+                tracing::info!("tze_hud is already running; exiting");
+                std::process::exit(0);
+            }
+            tracing::error!(
+                "tze_hud is already running; refusing to start with explicit arguments"
+            );
+            eprintln!(
+                "error: tze_hud is already running for this user; not starting another instance \
+(stop it, or pass --handoff to wait for it to exit)"
+            );
+            std::process::exit(2);
         }
     };
 
@@ -1058,6 +1166,34 @@ mod tests {
         assert_eq!(opts.benchmark_frames, 600);
         assert_eq!(opts.benchmark_warmup_frames, 120);
         assert!(opts.quiescent_efficiency_emit.is_none());
+    }
+
+    #[test]
+    fn parse_options_install_flags() {
+        let _guard = ENV_VAR_MUTEX.lock().unwrap();
+        clear_parse_options_env();
+        let parse =
+            |a: &[&str]| parse_options(&a.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+
+        let opts = parse(&["--install"]).unwrap();
+        assert!(opts.install && !opts.uninstall);
+        let opts = parse(&["--uninstall", "--purge"]).unwrap();
+        assert!(opts.uninstall && opts.purge);
+        assert!(parse(&["--handoff"]).unwrap().handoff);
+        assert!(parse(&["--purge"]).unwrap_err().contains("--uninstall"));
+        assert!(parse(&["--install", "--uninstall"]).is_err());
+    }
+
+    #[test]
+    fn default_config_is_valid_and_has_no_agents_table() {
+        validate_config_toml_for_startup(DEFAULT_CONFIG).expect("default config validates");
+        let table: toml::Table = DEFAULT_CONFIG.parse().unwrap();
+        assert!(
+            !table.contains_key("agents"),
+            "agents belong in agents.toml"
+        );
+        // Widget bundles are built in: nothing to stage next to the config.
+        assert!(!table.contains_key("widget_bundles"));
     }
 
     // ── parse_options: CLI flags ─────────────────────────────────────────────

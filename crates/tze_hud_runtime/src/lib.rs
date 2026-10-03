@@ -40,7 +40,6 @@ pub(crate) mod channels;
 pub(crate) mod degradation;
 pub mod diag;
 pub mod element_store;
-pub mod gpu_lock;
 pub mod headless;
 pub mod http;
 pub(crate) mod idle_efficiency;
