@@ -91,7 +91,7 @@ The toolchain is pinned in `rust-toolchain.toml` (Rust 1.88, matching CI and the
 Live media (GStreamer/WebRTC) is out of scope; see `docs/vision.md`.
 
 ### Demo and Reference Binaries
-- `vertical_slice` (`examples/vertical_slice/`): Development reference showing scene/lease/zone publish semantics. **Not** intended for operations or remote deployment.
+- `vertical_slice` (`examples/vertical_slice/`): Development reference: a headless resident gRPC agent running the lifecycle verbs (`ClaimTile`, `Publish`, `Hold`, `Clear`). **Not** intended for operations or remote deployment.
 - `benchmark` (`examples/benchmark/`): Performance profiling reference.
 - `render_artifacts` (`examples/render_artifacts/`): GPU rendering artifact generation.
 
@@ -301,9 +301,9 @@ chmod +x ~/.vnc/xstartup
 # Start VNC display :1 (TCP 5901)
 vncserver :1 -localhost no -geometry 1920x1080 -depth 24
 
-# Run the windowed demo inside that display
+# Run the windowed app inside that display
 export DISPLAY=:1
-cargo run -p vertical_slice
+cargo run -p tze_hud_app
 ```
 
 ### From Windows client
@@ -379,25 +379,20 @@ cargo test -p tze_hud_protocol test_ephemeral_zone_no_publish_result -- --nocapt
 
 ### B. Development/Reference Demo (vertical_slice - NOT for operations)
 
-The `vertical_slice` example is a **reference implementation** for understanding scene/lease/zone semantics.
+The `vertical_slice` example is a **reference implementation** of a resident gRPC agent (see `docs/api.md`).
 **It is NOT intended for production operations or remote deployment.**
 
-Run the demo locally for development/testing:
+Run it locally for development/testing (headless; no display needed):
 
 ```bash
 cargo run -p vertical_slice
 ```
 
 You should see logs for:
-- session + lease handshake,
-- tile creation and hit-region input handling,
-- zone publishes (`status-bar`, `notification-area`).
-
-Headless variant (for server-side environments):
-
-```bash
-cargo run -p vertical_slice -- --headless
-```
+- the session handshake,
+- `ClaimTile` (a filled tile in one round trip),
+- a `Publish` to `zone:status-bar`,
+- `Hold` and `Clear` of the tile.
 
 **For operational workflows**, use the **canonical runtime app binary** instead. See [Cross-Machine Deployment](#cross-machine-deployment) and [Cross-Machine Validation](#cross-machine-validation-via-user-test).
 

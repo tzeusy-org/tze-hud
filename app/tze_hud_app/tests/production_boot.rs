@@ -94,3 +94,64 @@ async fn production_config_boots_with_builtin_widget_bundles() {
         text_color.b
     );
 }
+
+/// Only agents paired in `agents.toml` may connect: an unpaired PSK is
+/// rejected at the handshake, whatever id it claims.
+#[tokio::test]
+async fn production_config_rejects_unpaired_psk() {
+    use tokio_stream::StreamExt;
+    use tze_hud_protocol::proto::session::client_message::Payload as Request;
+    use tze_hud_protocol::proto::session::hud_session_client::HudSessionClient;
+    use tze_hud_protocol::proto::session::server_message::Payload as Reply;
+    use tze_hud_protocol::proto::session::{ClientMessage, SessionInit};
+
+    let port = std::net::TcpListener::bind("[::1]:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let paired = tze_hud_config::AgentsFile::default()
+        .with_agent("paired-agent", "paired-key", &["tiles"])
+        .directory()
+        .expect("paired agent directory");
+    let runtime = HeadlessRuntime::new(HeadlessConfig {
+        grpc_port: port,
+        agents: paired,
+        ..canonical_headless_config()
+    })
+    .await
+    .expect("runtime must start with canonical app production config");
+    let _server = runtime.start_grpc_server().await.expect("gRPC server");
+
+    let (tx, rx) = tokio::sync::mpsc::channel(1);
+    tx.send(ClientMessage {
+        sequence: 1,
+        timestamp_wall_us: 0,
+        payload: Some(Request::SessionInit(SessionInit {
+            agent_id: "paired-agent".to_string(),
+            min_protocol_version: 1000,
+            max_protocol_version: 1001,
+            auth_credential: Some(tze_hud_protocol::auth::psk_credential("unpaired-key")),
+            ..Default::default()
+        })),
+    })
+    .await
+    .unwrap();
+    let mut replies = HudSessionClient::connect(format!("http://[::1]:{port}"))
+        .await
+        .expect("connect")
+        .session(tokio_stream::wrappers::ReceiverStream::new(rx))
+        .await
+        .expect("open session stream")
+        .into_inner();
+
+    let first = replies
+        .next()
+        .await
+        .expect("a reply")
+        .expect("no stream error");
+    match first.payload {
+        Some(Reply::SessionError(e)) => assert_eq!(e.code, "AUTH_FAILED"),
+        other => panic!("expected SessionError(AUTH_FAILED), got {other:?}"),
+    }
+}

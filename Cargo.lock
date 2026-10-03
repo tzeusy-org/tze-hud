@@ -3529,10 +3529,12 @@ version = "0.1.0"
 dependencies = [
  "embed-resource",
  "tokio",
+ "tokio-stream",
  "toml 0.8.23",
  "tracing",
  "tracing-subscriber",
  "tze_hud_config",
+ "tze_hud_protocol",
  "tze_hud_runtime",
  "tze_hud_scene",
 ]
@@ -3875,6 +3877,7 @@ version = "0.1.0"
 dependencies = [
  "tokio",
  "tokio-stream",
+ "tonic",
  "tze_hud_compositor",
  "tze_hud_config",
  "tze_hud_input",
