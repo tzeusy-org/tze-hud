@@ -2074,6 +2074,7 @@ impl WinitApp {
 #[cfg(test)]
 mod tests {
     use std::collections::VecDeque;
+    use std::ops::ControlFlow;
 
     use tze_hud_input::{
         CommandAction, CommandSource, FocusOwner, KeyboardModifiers, RawKeyDownEvent,
@@ -2081,7 +2082,8 @@ mod tests {
     use tze_hud_scene::{MonoUs, SceneId};
 
     use super::{
-        PendingKeyboardEvent, is_bare_tab_chord, keyboard_command, restore_front_requeued_event,
+        PendingKeyboardEvent, drain_keyboard_queue_bounded, is_bare_tab_chord, keyboard_command,
+        restore_front_requeued_event,
     };
 
     fn command_binding(
@@ -2332,5 +2334,36 @@ mod tests {
         assert_key_down(&queue[0], "a");
         assert_key_down(&queue[1], "b");
         assert_key_down(&queue[2], "c");
+    }
+
+    /// The drain must stop after the queue length it started with, even when new
+    /// events arrive mid-drain; those wait for the next wake. Without the bound a
+    /// steady producer turns one tick into an endless dispatch storm (the
+    /// composer-echo livelock). The real-path drain tests never enqueue
+    /// mid-drain, so this is the only guard on the bound.
+    #[test]
+    fn keyboard_drain_stops_at_initial_queue_length_when_events_arrive_mid_drain() {
+        let initial_events: usize = 4;
+        let mut queue: VecDeque<PendingKeyboardEvent> = (0..initial_events)
+            .map(|i| key_down(["a", "b", "c", "d"][i], (i as u64 + 1) * 1_000))
+            .collect();
+        let mut iters = 0usize;
+        let mut arrivals = 0usize;
+
+        drain_keyboard_queue_bounded(queue.len(), || {
+            iters += 1;
+            if queue.pop_front().is_none() {
+                return ControlFlow::Break(());
+            }
+            // A concurrent arrival while the drain runs.
+            if arrivals < initial_events {
+                queue.push_back(key_down("x", arrivals as u64 * 9_000));
+                arrivals += 1;
+            }
+            ControlFlow::Continue(())
+        });
+
+        assert_eq!(iters, initial_events, "drain ran past its initial bound");
+        assert_eq!(queue.len(), initial_events, "arrivals must stay queued");
     }
 }
