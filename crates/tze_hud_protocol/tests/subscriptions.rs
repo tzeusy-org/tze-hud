@@ -11,9 +11,11 @@
 use tze_hud_protocol::proto::input_envelope::Event as EnvEvent;
 use tze_hud_protocol::proto::{
     CaptureReleasedEvent, EventBatch, FocusGainedEvent, FocusLostEvent, InputEnvelope,
-    KeyDownEvent, PointerDownEvent, PointerMoveEvent, PointerUpEvent,
+    KeyDownEvent, PointerDownEvent, PointerMoveEvent, PointerUpEvent, ScrollOffsetChangedEvent,
 };
-use tze_hud_protocol::subscriptions::{category, filter_event_batch, filter_subscriptions};
+use tze_hud_protocol::subscriptions::{
+    category, filter_event_batch, filter_subscriptions, is_focus_variant, is_input_variant,
+};
 
 // ─── Category-to-capability mapping ─────────────────────────────────────────
 
@@ -226,6 +228,18 @@ fn all_focus_events_filtered_returns_none_for_input_only_subscriber() {
         filter_event_batch(batch, &subs).is_none(),
         "batch with only focus events must not be delivered to INPUT_EVENTS-only subscriber"
     );
+}
+
+/// Scroll events are input variants, not focus variants.
+#[test]
+fn scroll_is_input_variant() {
+    let scroll = InputEnvelope {
+        event: Some(EnvEvent::ScrollOffsetChanged(
+            ScrollOffsetChangedEvent::default(),
+        )),
+    };
+    assert!(is_input_variant(&scroll));
+    assert!(!is_focus_variant(&scroll));
 }
 
 /// Within-batch ordering is preserved after filtering.

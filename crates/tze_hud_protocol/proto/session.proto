@@ -107,8 +107,8 @@ message ServerMessage {
     Heartbeat             heartbeat              = 33;
 
     // Event batch (defined in events.proto; RFC 0004 §8.3, §8.4, RFC 0005 §3.1)
-    // Carries per-frame InputEnvelope variants (pointer, keyboard, focus, capture, gesture,
-    // IME, scroll, command events). Variants are filtered per RFC 0005 §7.1 before delivery.
+    // Carries per-frame InputEnvelope variants (pointer, keyboard, focus, capture,
+    // scroll, command events). Variants are filtered per RFC 0005 §7.1 before delivery.
     tze_hud.protocol.v1.EventBatch event_batch   = 34;
 
     // Scene-resource upload responses (RFC 0011 resident upload flow).

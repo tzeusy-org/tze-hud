@@ -313,17 +313,15 @@ message ComposerDraftCancelEvent {
 
 // ─── Input Envelope and Event Batch (RFC 0004 §8.3, §8.4, §9.1) ───────────────
 //
-// InputEnvelope is a 19-variant oneof covering all V1-mandatory input event types.
+// InputEnvelope is a oneof covering the input event types the runtime produces.
 // EventBatch groups per-frame events for a single agent on ServerMessage field 34.
 // Multiple input events within a single compositor frame are batched into a single
 // EventBatch and delivered as a single ServerMessage. Within a batch, events are
 // ordered by timestamp_mono_us ascending (RFC 0004 §8.4).
 //
-// NOTE: RFC 0004 §9.1 specifies a 22-variant InputEnvelope including DoubleClickEvent
-// (field 7), ContextMenuEvent (field 8), and ImeCompositionCancelledEvent (field 19).
-// Those variants and their field numbers are reserved for a future PR that adds the
-// corresponding message definitions; field numbers below skip these slots to preserve
-// alignment with the RFC's fixed assignments once the messages are defined.
+// NOTE: Fields 7-8 (DoubleClickEvent, ContextMenuEvent) were never defined; fields
+// 15-19 (gesture and IME composition events) were removed. Numbers below skip these
+// slots; do not reuse them.
 
 message InputEnvelope {
   // Fields 15-19 (gesture and IME composition events) had no producer and
