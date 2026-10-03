@@ -91,6 +91,7 @@ pub async fn start_mcp_http_server(
         portal_op_tx,
         tze_hud_scene::render_wake::RenderWakeNotifier::default(),
         tze_hud_scene::render_wake::RenderWakeNotifier::default(),
+        Arc::new(std::sync::atomic::AtomicBool::new(false)),
     )
     .await
 }
@@ -102,6 +103,7 @@ pub async fn start_mcp_http_server_with_render_wake(
     portal_op_tx: Option<tokio::sync::mpsc::UnboundedSender<tze_hud_mcp::portal_op::PortalOp>>,
     render_wake: tze_hud_scene::render_wake::RenderWakeNotifier,
     portal_ingress_wake: tze_hud_scene::render_wake::RenderWakeNotifier,
+    safe_mode: Arc<std::sync::atomic::AtomicBool>,
 ) -> std::io::Result<(tokio::task::JoinHandle<()>, SocketAddr)> {
     let listener = TcpListener::bind(config.bind_addr).await?;
     let local_addr = listener.local_addr()?;
@@ -114,7 +116,8 @@ pub async fn start_mcp_http_server_with_render_wake(
     let mut server_builder = McpServer::with_shared_scene(scene)
         .with_config(McpConfig::with_agents(config.agents.clone()))
         .with_render_wake_notifier(render_wake)
-        .with_portal_ingress_wake_notifier(portal_ingress_wake);
+        .with_portal_ingress_wake_notifier(portal_ingress_wake)
+        .with_safe_mode(safe_mode);
     if let Some(tx) = portal_op_tx {
         server_builder = server_builder.with_portal_op_tx(tx);
     }

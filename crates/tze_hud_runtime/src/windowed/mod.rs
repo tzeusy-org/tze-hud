@@ -2640,6 +2640,7 @@ impl WindowedRuntime {
                     portal_op_tx_opt.take(),
                     render_wake.clone(),
                     portal_ingress_wake.clone(),
+                    Arc::clone(&safe_mode_atomic),
                 )) {
                     Ok((handle, local_addr)) => {
                         network_handles.push(handle);

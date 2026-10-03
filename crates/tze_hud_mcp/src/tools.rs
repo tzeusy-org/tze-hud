@@ -12,7 +12,7 @@ use serde::Deserialize;
 use serde_json::{Map, Value, json};
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use tokio::sync::Mutex;
 use tze_hud_scene::{
     SceneId, ValidationError,
@@ -112,7 +112,26 @@ pub struct ToolCtx<'a> {
     pub portal_op_tx: Option<&'a tokio::sync::mpsc::UnboundedSender<PortalOp>>,
     pub portal_wake: &'a RenderWakeNotifier,
     pub state: &'a McpState,
+    /// The runtime's safe-mode flag, shared with gRPC. While set, every
+    /// mutating verb is refused.
+    pub safe_mode: &'a AtomicBool,
     pub agent: &'a AgentIdentity,
+}
+
+/// The one error every mutating verb returns while the human has paused agents.
+fn safe_mode_active() -> McpError {
+    tool_err(
+        "SAFE_MODE_ACTIVE",
+        "the human paused agents; retry after safe mode ends",
+    )
+}
+
+/// Refuse a mutating verb during safe mode (all surfaces, including portals).
+fn check_not_safe_mode(ctx: &ToolCtx<'_>) -> McpResult<()> {
+    if ctx.safe_mode.load(Ordering::Acquire) {
+        return Err(safe_mode_active());
+    }
+    Ok(())
 }
 
 // ─── Surfaces ────────────────────────────────────────────────────────────────
@@ -348,6 +367,7 @@ pub async fn hud_publish(ctx: &ToolCtx<'_>, args: Value) -> McpResult<Value> {
     let p: PublishParams = parse_args(args)?;
     let surface = Surface::parse(&p.surface)?;
     check_allowed(ctx, &surface)?;
+    check_not_safe_mode(ctx)?;
     check_fields(&surface, &p)?;
     match surface {
         Surface::Zone(zone) => publish_zone(ctx, &zone, p).await,
@@ -392,21 +412,22 @@ fn check_fields(surface: &Surface, p: &PublishParams) -> McpResult<()> {
 }
 
 /// The agent's MCP lease: reuse (and renew) it while active, else grant one.
-fn ensure_lease(ctx: &ToolCtx<'_>, scene: &mut SceneGraph) -> SceneId {
+/// A Suspended lease means safe mode: never grant around it.
+fn ensure_lease(ctx: &ToolCtx<'_>, scene: &mut SceneGraph) -> McpResult<SceneId> {
     let ns = ctx.agent.agent_id.as_str();
     let existing = ctx.state.with(ns, |s| s.lease);
-    if let Some(id) = existing
-        && scene
-            .leases
-            .get(&id)
-            .is_some_and(|l| l.state == LeaseState::Active)
-        && scene.renew_lease(id, MCP_LEASE_TTL_MS).is_ok()
-    {
-        return id;
+    if let Some(id) = existing {
+        match scene.leases.get(&id).map(|l| l.state) {
+            Some(LeaseState::Suspended) => return Err(safe_mode_active()),
+            Some(LeaseState::Active) if scene.renew_lease(id, MCP_LEASE_TTL_MS).is_ok() => {
+                return Ok(id);
+            }
+            _ => {}
+        }
     }
     let id = scene.grant_lease(ns, MCP_LEASE_TTL_MS);
     ctx.state.with(ns, |s| s.lease = Some(id));
-    id
+    Ok(id)
 }
 
 fn ok_with_expiry(expires_in_ms: Option<u64>) -> Value {
@@ -511,7 +532,7 @@ async fn publish_zone(ctx: &ToolCtx<'_>, zone: &str, p: PublishParams) -> McpRes
         ));
     };
     let content = parse_zone_content(&with_inferred_type(raw, &def.accepted_media_types))?;
-    let lease_id = ensure_lease(ctx, &mut scene);
+    let lease_id = ensure_lease(ctx, &mut scene)?;
     let ttl_us = (ttl_ms > 0).then(|| ttl_ms.saturating_mul(1_000));
     if delay_ms > 0 {
         // Arrival is not presentation (invariant 1): hold until due.
@@ -559,7 +580,7 @@ async fn publish_widget(ctx: &ToolCtx<'_>, widget: &str, p: PublishParams) -> Mc
             json_to_widget_param_value(value, name, &scene, widget)?,
         );
     }
-    ensure_lease(ctx, &mut scene);
+    ensure_lease(ctx, &mut scene)?;
     let ttl_ms = p.ttl_ms.unwrap_or(0);
     let expires = (ttl_ms > 0).then(|| now_us(&scene).saturating_add(ttl_ms * 1_000));
     scene
@@ -708,6 +729,7 @@ pub async fn hud_hold(ctx: &ToolCtx<'_>, args: Value) -> McpResult<Value> {
     let p: HoldParams = parse_args(args)?;
     let surface = Surface::parse(&p.surface)?;
     check_allowed(ctx, &surface)?;
+    check_not_safe_mode(ctx)?;
     let ns = ctx.agent.agent_id.clone();
     let expiry = |now: u64| (p.ttl_ms > 0).then(|| now.saturating_add(p.ttl_ms * 1_000));
     let result = ok_with_expiry((p.ttl_ms > 0).then_some(p.ttl_ms));
@@ -718,7 +740,7 @@ pub async fn hud_hold(ctx: &ToolCtx<'_>, args: Value) -> McpResult<Value> {
             if !scene.hold_zone_publications(&zone, &ns, expires) {
                 return Err(not_held(&p.surface));
             }
-            ensure_lease(ctx, &mut scene);
+            ensure_lease(ctx, &mut scene)?;
         }
         Surface::Widget(widget) => {
             let mut scene = ctx.scene.lock().await;
@@ -726,7 +748,7 @@ pub async fn hud_hold(ctx: &ToolCtx<'_>, args: Value) -> McpResult<Value> {
             if !scene.hold_widget_publications(&widget, &ns, expires) {
                 return Err(not_held(&p.surface));
             }
-            ensure_lease(ctx, &mut scene);
+            ensure_lease(ctx, &mut scene)?;
         }
         Surface::Portal(pid) => {
             // The runtime keeps a held portal (and its transcript) past the

@@ -909,6 +909,30 @@ fn scene_with_gauge(contention: ContentionPolicy) -> (SceneGraph, SceneId /* tab
     (scene, tab_id)
 }
 
+/// A Suspended lease (safe mode) blocks widget publishes; resuming restores them.
+#[test]
+fn widget_publish_with_suspended_lease_is_safe_mode_active() {
+    let (mut scene, _tab) = scene_with_gauge(ContentionPolicy::LatestWins);
+    let lease = scene.grant_lease("agent.test", 300_000);
+    let params =
+        || std::collections::HashMap::from([("level".to_string(), WidgetParameterValue::F32(0.5))]);
+    scene.suspend_lease(&lease, 1).unwrap();
+    let result = scene.publish_to_widget("gauge", params(), "agent.test", None, 0, None);
+    assert!(
+        matches!(
+            result,
+            Err(ValidationError::ZonePublishSafeModeActive { .. })
+        ),
+        "got: {result:?}"
+    );
+    scene.resume_lease(&lease, 2).unwrap();
+    assert!(
+        scene
+            .publish_to_widget("gauge", params(), "agent.test", None, 0, None)
+            .is_ok()
+    );
+}
+
 // ── WidgetParameterValue validation ───────────────────────────────────────
 
 /// WHEN an f32 NaN value is submitted THEN publish_to_widget returns

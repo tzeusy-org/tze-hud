@@ -21,6 +21,7 @@
 //! requests (bad JSON, unknown method or tool, bad auth) are JSON-RPC errors.
 
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use tokio::sync::Mutex;
 use tracing::{debug, warn};
 use tze_hud_scene::config::{AgentDirectory, SharedAgents};
@@ -123,6 +124,8 @@ pub struct McpServer {
     portal_op_tx: Option<tokio::sync::mpsc::UnboundedSender<PortalOp>>,
     /// Per-agent leases, portal owner tokens, and unacked input.
     state: McpState,
+    /// Runtime safe-mode flag (shared with gRPC); false when standalone.
+    safe_mode: Arc<AtomicBool>,
 }
 
 impl McpServer {
@@ -141,6 +144,7 @@ impl McpServer {
             config: McpConfig::default(),
             portal_op_tx: None,
             state: McpState::default(),
+            safe_mode: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -165,6 +169,12 @@ impl McpServer {
     /// Attach the portal-operation channel to the winit thread.
     pub fn with_portal_op_tx(mut self, tx: tokio::sync::mpsc::UnboundedSender<PortalOp>) -> Self {
         self.portal_op_tx = Some(tx);
+        self
+    }
+
+    /// Share the runtime's safe-mode flag so mutating verbs honor it.
+    pub fn with_safe_mode(mut self, flag: Arc<AtomicBool>) -> Self {
+        self.safe_mode = flag;
         self
     }
 
@@ -244,6 +254,7 @@ impl McpServer {
                     portal_op_tx: self.portal_op_tx.as_ref(),
                     portal_wake: &self.portal_ingress_wake,
                     state: &self.state,
+                    safe_mode: &self.safe_mode,
                     agent: &identity,
                 };
                 let result = match name {
