@@ -27,8 +27,11 @@ The toolchain is pinned in `rust-toolchain.toml` (Rust 1.88, matching CI and the
 in every member crate.
 
 GPU tests: run `just test-gpu` (compositor render tests plus runtime `pixel_readback`,
-pinned to Mesa llvmpipe via `VK_ICD_FILENAMES`, with GPU device creation serialized in the
-test helpers). Don't run bare `cargo test -p tze_hud_compositor` on a host with a hardware
+pinned to Mesa llvmpipe via `VK_ICD_FILENAMES`). Device creation is serialized by a
+process-wide mutex in the compositor `tests/common` helper, the runtime `pixel_helpers`
+helper, and the runtime lib-test `test_support`; the integration, `vertical_slice`, and
+boot suites are not serialized, so every `just` recipe that builds a GPU device pins
+llvmpipe when the ICD is installed. Don't run bare `cargo test -p tze_hud_compositor` on a host with a hardware
 Vulkan ICD (recorded hangs were NVIDIA driver threads). Building needs protoc >= 3.15; set
 `PROTOC=/path/to/protoc` if `/usr/bin/protoc` is older.
 

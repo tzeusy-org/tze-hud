@@ -4,6 +4,8 @@
 //! Time is the scene's injected `TestClock`; nothing here sleeps.
 //! Set `TZE_HUD_SKIP_GPU_TESTS=1` to skip; run with `HEADLESS_FORCE_SOFTWARE=1`.
 
+mod common;
+
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -61,7 +63,7 @@ impl Rig {
         if std::env::var("TZE_HUD_SKIP_GPU_TESTS").is_ok_and(|v| v.trim() == "1") {
             return None;
         }
-        let mut compositor = match Compositor::new_headless(256, 256).await {
+        let mut compositor = match common::new_headless_serialized(256, 256).await {
             Ok(c) => c,
             Err(CompositorError::NoAdapter) => return None,
             Err(e) => panic!("unexpected compositor error: {e}"),
