@@ -196,15 +196,18 @@ baselined against regressions.
 | Zone publish | ~197 | 90 | 39 | ≤ 80 |
 | Widget publish | ~168 | 73 | 22 | ≤ 80 |
 | Portal: attach+publish, poll, ack, clear | ~575 over 5 round trips | 319 over 4 | 113 over 4 | ≤ 250 |
+| Discover (`production.toml`: 6 zones, 3 built-in widgets) | n/a | n/a | ~232 | ≤ 250 |
 | Error | up to ~212 | 101 | 45 | ≤ 60 |
 
 The portal flow takes 4 round trips in the canonical fixture because the
 first poll has nothing to ack; in a steady loop each `hud_input` both acks
 the previous items and polls, so poll+ack is one round trip.
 
-`integration` `poc_acceptance` checks the same model-visible counts on the
-POC acceptance flows (`docs/scope.md`), run end to end against
-`production.toml`.
+`integration` `poc_acceptance` checks model-visible counts on the POC
+acceptance flows (`docs/scope.md`), run end to end against `production.toml`.
+Its discover budget is the production row above: the three built-in widgets
+add about 100 tokens, all typed parameter names and ranges the model needs to
+publish, so shrinking further would drop information the model acts on.
 
 ## Design decisions (T5, 2026-10-02)
 

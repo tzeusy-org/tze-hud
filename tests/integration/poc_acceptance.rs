@@ -26,8 +26,9 @@ const PORTAL: &str = "portal:claude-main";
 const NOTIFICATION: &str = "zone:notification-area";
 const SUBTITLE: &str = "zone:subtitle";
 
-// docs/api.md "Token budgets" (model-visible tokens).
-const DISCOVER_BUDGET: usize = 150;
+// docs/api.md "Token budgets" (model-visible tokens). Discover is the
+// production.toml scene: 6 zones plus the 3 built-in widgets (~230 tokens).
+const DISCOVER_BUDGET: usize = 250;
 const ZONE_PUBLISH_BUDGET: usize = 80;
 const PORTAL_FLOW_BUDGET: usize = 250;
 
