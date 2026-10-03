@@ -44,7 +44,6 @@ use crate::degradation::{DegradationController, DegradationEnvelope};
 use crate::element_store::bootstrap_scene_element_store;
 use crate::idle_efficiency::{IdleEfficiencyCounters, IdleEfficiencySnapshot, RuntimeWakeupSource};
 use crate::pipeline::{FramePipeline, HitTestSnapshot};
-use crate::reload_triggers::{RuntimeServiceImpl, spawn_sighup_listener};
 use crate::runtime_context::RuntimeContext;
 use crate::scene_startup::run_scene_startup;
 use crate::widget_runtime_registration::process_pending_widget_svgs;
@@ -52,18 +51,16 @@ use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::Mutex;
 use tze_hud_compositor::{Compositor, HeadlessSurface};
-use tze_hud_config::{TzeHudConfig, resolve_runtime_widget_asset_store};
+use tze_hud_config::resolve_runtime_widget_asset_store;
 use tze_hud_input::{InputProcessor, PointerEvent, PointerEventKind, ScrollEvent};
 use tze_hud_protocol::proto::FramePresented;
 use tze_hud_protocol::proto::session::hud_session_server::HudSessionServer;
-use tze_hud_protocol::proto::session::runtime_service_server::RuntimeServiceServer;
 use tze_hud_protocol::session::SharedState;
 use tze_hud_protocol::session_server::{DegradationNoticeSender, HudSessionImpl, SessionDeps};
 use tze_hud_resource::{
     ResourceStore, ResourceStoreConfig, RuntimeWidgetStore, RuntimeWidgetStoreConfig,
 };
 use tze_hud_scene::HitResult;
-use tze_hud_scene::config::ConfigLoader;
 use tze_hud_scene::config::{AgentDirectory, SharedAgents};
 use tze_hud_scene::graph::SceneGraph;
 use tze_hud_scene::types::ZoneInteractionKind;
@@ -126,8 +123,8 @@ impl HeadlessConfig {
     ///   context.
     /// - In production builds: returns `Err` — config is required.
     ///
-    /// If `config_toml` is `Some(toml)` but parsing, validation, or freezing
-    /// fails, logs warnings and falls back to the headless default.
+    /// If `config_toml` is `Some(toml)`, see [`RuntimeContext::from_toml`]
+    /// (a bad config falls back to the headless default).
     pub fn build_runtime_context(&self) -> Result<RuntimeContext, Box<dyn std::error::Error>> {
         match &self.config_toml {
             None => {
@@ -146,44 +143,7 @@ impl HeadlessConfig {
                     )
                 }
             }
-            Some(toml) => match TzeHudConfig::parse(toml) {
-                Err(e) => {
-                    tracing::warn!(
-                        parse_error = %e.message,
-                        line = e.line,
-                        column = e.column,
-                        "HeadlessConfig: TOML parse error; using headless-default RuntimeContext"
-                    );
-                    Ok(RuntimeContext::headless_default())
-                }
-                Ok(mut loader) => {
-                    loader.normalize();
-                    let errors = loader.validate();
-                    if !errors.is_empty() {
-                        tracing::warn!(
-                            error_count = errors.len(),
-                            "HeadlessConfig: config validation errors; using headless-default RuntimeContext"
-                        );
-                        return Ok(RuntimeContext::headless_default());
-                    }
-                    match loader.freeze() {
-                        Ok(resolved) => {
-                            tracing::info!(
-                                profile = %resolved.profile.name,
-                                "HeadlessConfig: loaded RuntimeContext from config"
-                            );
-                            Ok(RuntimeContext::from_config(resolved))
-                        }
-                        Err(errors) => {
-                            tracing::warn!(
-                                error_count = errors.len(),
-                                "HeadlessConfig: config freeze errors; using headless-default RuntimeContext"
-                            );
-                            Ok(RuntimeContext::headless_default())
-                        }
-                    }
-                }
-            },
+            Some(toml) => Ok(RuntimeContext::from_toml(Some(toml))),
         }
     }
 }
@@ -718,56 +678,6 @@ impl HeadlessRuntime {
         });
 
         Ok(handle)
-    }
-
-    /// Start the `RuntimeService` gRPC server in the background.
-    ///
-    /// Satisfies RFC 0006 §9 (v1-mandatory) gRPC trigger requirement.
-    ///
-    /// The `RuntimeService.ReloadConfig` RPC accepts a TOML string, validates it,
-    /// and atomically applies the hot-reloadable sections via `RuntimeContext`.
-    ///
-    /// The server binds to `addr` (e.g. `"127.0.0.1:50052"`). It is independent of
-    /// the `HudSession` gRPC server — you may co-host them on the same port via
-    /// `tonic::transport::Server::builder().add_service(...).add_service(...)`.
-    ///
-    /// Returns the server task handle. The caller must retain it to keep the
-    /// server running (dropping it keeps the task alive; use `.abort()` to stop).
-    pub async fn start_runtime_service_server(
-        &self,
-        addr: std::net::SocketAddr,
-    ) -> Result<tokio::task::JoinHandle<()>, Box<dyn std::error::Error>> {
-        let svc = RuntimeServiceImpl::new(Arc::clone(&self.runtime_context));
-        let handle = tokio::spawn(async move {
-            tonic::transport::Server::builder()
-                .add_service(RuntimeServiceServer::new(svc))
-                .serve(addr)
-                .await
-                .expect("RuntimeService gRPC server failed");
-        });
-
-        // Give the server a moment to bind.
-        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-
-        Ok(handle)
-    }
-
-    /// Install a SIGHUP listener that hot-reloads config from `config_path`.
-    ///
-    /// Satisfies RFC 0006 §9 (v1-mandatory) SIGHUP trigger requirement.
-    ///
-    /// On Unix: spawns a Tokio task that waits for SIGHUP signals and reloads
-    /// the config file at `config_path`, applying hot-reloadable sections via
-    /// `RuntimeContext`.
-    ///
-    /// On non-Unix (Windows): this is a no-op stub — use `ReloadConfig` gRPC instead.
-    ///
-    /// Returns the task handle. Dropping the handle keeps the task running.
-    pub fn start_sighup_listener(
-        &self,
-        config_path: impl Into<String> + Send + 'static,
-    ) -> tokio::task::JoinHandle<()> {
-        spawn_sighup_listener(Arc::clone(&self.runtime_context), config_path)
     }
 
     /// Process a single pointer event through the input pipeline, applying any
@@ -1696,26 +1606,6 @@ mod tests {
             .build_runtime_context()
             .expect("build_runtime_context with None should succeed under cfg(test)");
         assert_eq!(ctx.profile.name, "headless");
-    }
-
-    /// A valid config drives the profile; a malformed one falls back to the
-    /// headless default rather than failing startup.
-    #[test]
-    fn test_build_runtime_context_uses_config_profile_or_falls_back() {
-        let build = |toml: &str| {
-            HeadlessConfig {
-                width: 64,
-                height: 64,
-                grpc_port: 0,
-                agents: AgentDirectory::default(),
-                config_toml: Some(toml.to_string()),
-            }
-            .build_runtime_context()
-            .expect("build_runtime_context returns Ok for any config string")
-        };
-        let valid = "[runtime]\nprofile = \"full-display\"\n\n[[tabs]]\nname = \"Main\"\n";
-        assert_eq!(build(valid).profile.name, "full-display");
-        assert_eq!(build("this is not valid TOML %%%").profile.name, "headless");
     }
 
     /// Verify that design tokens from config_toml are applied to the compositor

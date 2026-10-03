@@ -7,7 +7,7 @@
 //!
 //! Covers TOML parsing and validation, file resolution, the built-in display
 //! profiles (`full-display`, `headless`), zone and widget registries, design
-//! tokens, paired agents (`agents.toml`), and reload classification.
+//! tokens, and paired agents (`agents.toml`).
 
 pub mod agents_file;
 pub mod allow;
@@ -15,12 +15,12 @@ pub mod loader;
 pub mod policy_builder;
 pub mod portal_tokens;
 pub mod raw;
-pub mod reload;
 pub mod resolver;
 pub mod runtime_widget_assets;
 #[cfg(test)]
 mod tests;
 pub mod tokens;
+pub mod validate;
 pub mod widgets;
 pub mod zones;
 
@@ -57,16 +57,13 @@ pub use portal_tokens::{
     PORTAL_TOKEN_WINDOW_RESIZE_STEP_PX, PortalPartTokens, TimestampGranularity,
     resolve_portal_tokens,
 };
-pub use reload::{
-    FROZEN_SECTIONS, FieldClassification, HotReloadableConfig, SighupHandler,
-    check_frozen_section_changes, reload_config, section_classification,
-};
 pub use resolver::resolve_config_path;
 pub use runtime_widget_assets::{
     DEFAULT_MAX_AGENT_BYTES as DEFAULT_WIDGET_RUNTIME_MAX_AGENT_BYTES,
     DEFAULT_MAX_TOTAL_BYTES as DEFAULT_WIDGET_RUNTIME_MAX_TOTAL_BYTES,
     RuntimeWidgetAssetStoreConfig, resolve_runtime_widget_asset_store, resolve_store_path,
 };
+pub use validate::validate_config;
 pub use widgets::{
     LoadedWidgetType, build_widget_instance, validate_widget_bundles, validate_widget_instances,
 };

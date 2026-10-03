@@ -590,51 +590,6 @@ fn spec_builtin_zone_type_subtitle_accepted() {
     );
 }
 
-// ── Spec §Configuration Reload (rig-mop4) ────────────────────────────────────
-
-/// WHEN SIGHUP received with a valid config THEN the reload succeeds.
-#[test]
-fn spec_reload_hot_section_change() {
-    use crate::reload::reload_config;
-
-    let new_toml = r#"
-[runtime]
-profile = "full-display"
-
-[[tabs]]
-name = "Main"
-"#;
-    let result = reload_config(new_toml);
-    assert!(result.is_ok(), "valid reload config should succeed");
-}
-
-/// WHEN SIGHUP received and updated config has validation errors THEN
-/// errors returned and running config unchanged.
-#[test]
-fn spec_reload_validation_failure_leaves_config_unchanged() {
-    use crate::reload::reload_config;
-
-    let bad_toml = r#"
-[runtime]
-profile = "mobile"
-
-[[tabs]]
-name = "Main"
-"#;
-    let result = reload_config(bad_toml);
-    assert!(
-        result.is_err(),
-        "reload with validation error should return Err"
-    );
-    let errors = result.unwrap_err();
-    assert!(
-        errors
-            .iter()
-            .any(|e| matches!(e.code, ConfigErrorCode::UnknownProfile)),
-        "should return validation error from reload, got: {errors:?}"
-    );
-}
-
 // ── Spec §Config Schema Version and Compatibility Policy ──────────────────────
 
 fn has_schema_version_error(errors: &[tze_hud_scene::config::ConfigError]) -> bool {

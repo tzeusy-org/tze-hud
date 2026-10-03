@@ -78,7 +78,7 @@
 //! tze_hud --grpc-port 0
 //! ```
 
-use tze_hud_config::{agents_file, agents_path_for, reload_config, resolve_config_path};
+use tze_hud_config::{agents_file, agents_path_for, resolve_config_path, validate_config};
 use tze_hud_runtime::gpu_lock::GpuLock;
 use tze_hud_runtime::window::{WindowConfig, WindowMode};
 use tze_hud_runtime::windowed::{
@@ -292,7 +292,7 @@ fn load_agents(
 }
 
 fn validate_config_toml_for_startup(toml_src: &str) -> Result<(), String> {
-    reload_config(toml_src).map(|_| ()).map_err(|errors| {
+    validate_config(toml_src).map_err(|errors| {
         let mut rendered = String::new();
         for (idx, err) in errors.iter().enumerate() {
             if idx > 0 {
