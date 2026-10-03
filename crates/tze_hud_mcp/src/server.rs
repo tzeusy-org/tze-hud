@@ -122,7 +122,7 @@ pub struct McpServer {
     /// Channel to the portal authority on the winit thread. `None` means
     /// portal surfaces answer `UNAVAILABLE`.
     portal_op_tx: Option<tokio::sync::mpsc::UnboundedSender<PortalOp>>,
-    /// Per-agent leases, portal owner tokens, and unacked input.
+    /// Per-agent leases and unacked action presses.
     state: McpState,
     /// Runtime safe-mode flag (shared with gRPC); false when standalone.
     safe_mode: Arc<AtomicBool>,

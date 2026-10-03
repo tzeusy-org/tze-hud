@@ -10,10 +10,10 @@ Every command is one standard MCP `tools/call` to the runtime (`docs/api.md`):
   ack      --input-id I ...     hud_input   {ack: [I, ...]}
   clear    --id ID              hud_clear   {surface: portal:ID}
 
-The first publish to a portal attaches it. The runtime keeps the owner token
-server-side, keyed by your agent identity (the PSK), so no command handles a
-token. Environment: HUD_MCP_URL (e.g. http://host:9090/mcp) and the agent PSK
-in HUD_PSK (or TZE_HUD_PSK / HUD_MCP_PSK / MCP_TEST_PSK).
+The first publish to a portal attaches it. The portal is keyed by your agent
+identity (the PSK), so no command handles a token. Environment: HUD_MCP_URL
+(e.g. http://host:9090/mcp) and the agent PSK in HUD_PSK (or TZE_HUD_PSK /
+HUD_MCP_PSK / MCP_TEST_PSK).
 """
 
 import argparse
