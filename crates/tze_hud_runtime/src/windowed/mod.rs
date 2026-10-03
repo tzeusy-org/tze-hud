@@ -545,8 +545,8 @@ struct WindowedRuntimeState {
     /// `None` = no update since last drain (compositor keeps prior state).
     local_composer_state: LocalComposerStateHandle,
     /// Shared queue for runtime-authored viewer reply echoes on raw-tile portals
-    /// (hud-nx7yq.3).  On an accepted composer submission for a raw tile (one not
-    /// attached to the projection authority, which echoes on its own path), this
+    /// (hud-nx7yq.3).  On an accepted composer submission for a raw tile (one
+    /// that is not a hub portal, which echoes on its own path), this
     /// thread pushes the submitted text; the compositor drains it into its
     /// per-tile viewer-echo store and renders it above the composer strip.
     viewer_echo_queue: PortalViewerEchoQueue,
@@ -580,10 +580,8 @@ struct WindowedRuntimeState {
     /// dispatching ArrowUp/ArrowDown so the caret can step between soft-wrapped
     /// visual rows. Cloned from `compositor.composer_visual_layout` at init.
     composer_visual_layout: tze_hud_compositor::ComposerVisualLayoutHandle,
-    /// In-process portal projection authority driver (hud-2iup7).
-    ///
-    /// Hosts a `ProjectionAuthority` in the runtime process and drives the portal
-    /// drain loop on each `about_to_wait` call.  Wires
+    /// Portal driver: owns the `PortalHub` and renders its portals on each
+    /// `about_to_wait` call.  Wires
     /// `InputProcessor::notify_tile_content_appended` so follow-tail advances
     /// (spec §3.2) and scrolled-back stability is preserved (spec §3.3).
     portal_projection_driver: crate::portal_projection_driver::InProcessPortalDriver,
@@ -825,11 +823,11 @@ impl WinitApp {
         // deferred keystrokes re-enter the same path as fresh ones.
         self.drain_pending_keyboard_events();
         // Drain any PortalOp messages from the MCP channel (hud-bq0gl.2).
-        // Must run BEFORE drain_portal_projection so that Attach/PublishOutput
-        // ops enqueued in the same event-loop tick are fed into the cadence
-        // coalescer and materialised by the immediately-following drain call.
+        // Must run BEFORE drain_portal_projection so that portal ops enqueued
+        // in the same event-loop tick render in the immediately-following
+        // drain call.
         self.drain_portal_ops();
-        // Drain the in-process portal projection authority (hud-2iup7).
+        // Render the portals (hud-2iup7).
         // Must run AFTER composer flush so draft state is settled before portal
         // content is refreshed.  Uses try_lock on the scene to avoid blocking
         // the main thread (deferred to next about_to_wait if busy).

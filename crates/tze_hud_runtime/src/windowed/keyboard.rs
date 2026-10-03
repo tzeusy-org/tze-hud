@@ -870,7 +870,7 @@ impl WinitApp {
                 }
                 // hud-npcdf: a submission sets `key_down_is_terminal`, so the
                 // reset-to-tail in the `!key_down_is_terminal` branch below is
-                // skipped — and a ProjectionAuthority-attached tile echoes its own
+                // skipped — and a hub portal tile echoes its own
                 // submission async via `portal_projection_driver`'s
                 // `notify_tile_content_appended`, which honors `ScrolledBack` and
                 // does not reset. A scrolled-back viewer's just-submitted reply

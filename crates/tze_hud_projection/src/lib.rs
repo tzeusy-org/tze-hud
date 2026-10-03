@@ -17,6 +17,9 @@ pub mod resident_grpc;
 /// `tze_hud_runtime` re-exports all public items from this module.
 pub mod portal_cadence;
 
+/// Portal state keyed by (agent, portal id): the runtime's portal model.
+pub mod hub;
+
 mod contract;
 pub use self::contract::*;
 

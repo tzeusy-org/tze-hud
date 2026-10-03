@@ -45,8 +45,8 @@ zones and widgets (`docs/api.md`):
 | Detach | `hud_clear {"surface": "portal:my-session"}` |
 
 - The first `hud_publish` to a portal attaches it (`display_name` is optional
-  and defaults to the id). The runtime keeps the owner token server-side,
-  keyed by your agent identity; no call carries a token.
+  and defaults to the id). The portal is keyed by your agent identity (the
+  PSK); no call carries a token.
 - `content` **appends** an output fragment. Send only the new text each turn.
 - `key` coalesces: publishes with the same key replace each other in place
   (progress lines).
@@ -121,5 +121,6 @@ agent's PSK as the bearer. `scripts/quickstart.sh` pairs that PSK as
 
 - Don't publish secrets into the portal.
 - Keep fragments small; never resend the whole transcript.
-- Treat `NOT_ALLOWED` on a portal (another agent holds that id) as a stop;
-  pick another id or ask the user.
+- Treat `NOT_ALLOWED` on a portal as a stop: your `[agents.<id>] allow`
+  list lacks `portal`; ask the user. (Portal ids are per agent, so another
+  agent's `portal:<id>` never blocks yours.)

@@ -26,13 +26,17 @@ def test_projection_guidance_uses_the_five_verbs() -> None:
             assert removed not in contents, removed
 
 
-def test_owner_token_stays_off_the_model_surface() -> None:
+def test_portal_identity_is_the_psk_not_a_token() -> None:
     skill = read(SKILL_DIR / "SKILL.md")
+    facade = read(SKILL_DIR / "references" / "mcp-facade.md")
     client = read(SKILL_DIR / "scripts" / "portal_client.py")
 
-    assert "owner_token" not in skill
-    assert "owner_token" not in client
-    assert "server-side" in skill
+    for contents in (skill, facade, client):
+        assert "owner_token" not in contents
+        assert "owner token" not in contents
+    # Portals are keyed by the caller's agent identity, so no call carries a token.
+    assert "keyed by your agent identity" in skill
+    assert "no call carries a token" in skill
 
 
 def test_quickstart_warp_note_is_vm_only() -> None:

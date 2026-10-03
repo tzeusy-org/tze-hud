@@ -13,7 +13,7 @@
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use tze_hud_projection::ProjectionErrorCode;
+use tze_hud_projection::hub::PortalError;
 
 /// JSON-RPC 2.0 protocol error codes.
 pub mod codes {
@@ -95,68 +95,34 @@ impl McpError {
     }
 }
 
-/// Map a portal authority rejection to a shared code and a hint naming the
-/// next call. The portal's own codes never reach the model.
-pub const fn map_projection(error_code: ProjectionErrorCode) -> (&'static str, &'static str) {
-    use ProjectionErrorCode as P;
-    match error_code {
-        P::ProjectionNotFound | P::ProjectionUnauthorized | P::ProjectionTokenExpired => {
-            ("NOT_HELD", "hud_publish to the portal to re-attach")
-        }
-        P::ProjectionAlreadyAttached => (
-            "NOT_ALLOWED",
-            "another agent holds this portal id; pick another id",
-        ),
-        P::ProjectionInvalidArgument | P::ProjectionStateConflict => {
-            ("INVALID_ARGUMENT", "fix the arguments and retry")
-        }
-        P::ProjectionOutputTooLarge => (
+/// Map a portal refusal to a shared code and a hint naming the next call.
+pub const fn map_portal(error: PortalError) -> (&'static str, &'static str) {
+    match error {
+        PortalError::NotHeld => ("NOT_HELD", "hud_publish to the portal first"),
+        PortalError::TooLarge { .. } => (
             "CONTENT_REJECTED",
             "split the output into smaller publishes",
         ),
-        P::ProjectionInputTooLarge => ("CONTENT_REJECTED", "reduce the input and retry"),
-        P::ProjectionInputQueueFull => ("BUDGET_EXCEEDED", "hud_input with ack to drain input"),
-        P::ProjectionRateLimited => ("BUDGET_EXCEEDED", "back off, then retry"),
-        P::ProjectionHudUnavailable => ("UNAVAILABLE", "the HUD is unavailable; retry later"),
-        P::ProjectionInternalError => ("INTERNAL", "retry once"),
+        PortalError::InvalidArgument => ("INVALID_ARGUMENT", "fix the arguments and retry"),
+        PortalError::QueueFull => ("BUDGET_EXCEEDED", "hud_input with ack to drain input"),
     }
-}
-
-/// The owner token the portal holds for this holding is gone.
-pub const fn is_stale_token(error_code: ProjectionErrorCode) -> bool {
-    use ProjectionErrorCode as P;
-    matches!(
-        error_code,
-        P::ProjectionNotFound | P::ProjectionUnauthorized | P::ProjectionTokenExpired
-    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    const ALL_PROJECTION_CODES: [ProjectionErrorCode; 12] = [
-        ProjectionErrorCode::ProjectionNotFound,
-        ProjectionErrorCode::ProjectionAlreadyAttached,
-        ProjectionErrorCode::ProjectionUnauthorized,
-        ProjectionErrorCode::ProjectionTokenExpired,
-        ProjectionErrorCode::ProjectionInvalidArgument,
-        ProjectionErrorCode::ProjectionOutputTooLarge,
-        ProjectionErrorCode::ProjectionInputTooLarge,
-        ProjectionErrorCode::ProjectionInputQueueFull,
-        ProjectionErrorCode::ProjectionRateLimited,
-        ProjectionErrorCode::ProjectionStateConflict,
-        ProjectionErrorCode::ProjectionHudUnavailable,
-        ProjectionErrorCode::ProjectionInternalError,
-    ];
-
     #[test]
-    fn projection_rejections_map_to_shared_codes() {
-        for code in ALL_PROJECTION_CODES {
-            let (shared, hint) = map_projection(code);
+    fn portal_refusals_map_to_shared_codes() {
+        for error in [
+            PortalError::NotHeld,
+            PortalError::TooLarge { limit: 1 },
+            PortalError::InvalidArgument,
+            PortalError::QueueFull,
+        ] {
+            let (shared, hint) = map_portal(error);
             assert!(ERROR_CODES.contains(&shared), "{shared}");
             assert!(!hint.is_empty());
-            assert!(!shared.starts_with("PROJECTION_"));
         }
     }
 

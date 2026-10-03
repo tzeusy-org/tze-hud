@@ -232,8 +232,8 @@ call the tools directly:
 
 1. `hud_publish {"surface": "portal:<id>", "content": "...", "status": "active"}`
    — the first publish to a stable `<id>` attaches the portal; `display_name`
-   is optional. Ownership is your agent identity: the runtime keeps the owner
-   token server-side, so no call takes or returns one.
+   is optional. The portal is keyed by your agent identity (the PSK), so no
+   call takes or returns a token.
 2. `hud_publish` again — publish output fragments; they render in the portal.
    Add `"expects_reply": true` to arm the composer.
 3. `hud_input {"wait_ms": 30000}` — collect text typed at the HUD; pass the

@@ -2121,27 +2121,6 @@ impl WinitApp {
             // member's new bounds must reach adapters/subscribers.
             let mut member_bounds: Vec<(tze_hud_scene::SceneId, tze_hud_scene::types::Rect)> =
                 Vec::with_capacity(outcome.members.len());
-            // Brief read-only re-lock (hud-s62vv): resolving a bridged member's
-            // projection id requires reading its declared portal-surface identity
-            // from the scene (see `push_geometry_snapshot_for_tile`). Acquired once
-            // for the whole broadcast loop and only the (small) identity strings
-            // are extracted — never the whole `SceneGraph` — so this stays cheap
-            // on the pointer-move hot path.
-            let mut portal_ids: std::collections::HashMap<tze_hud_scene::SceneId, String> =
-                Default::default();
-            if let Some(state) = spin_acquire(&self.state.shared_state, INTERACTION_LOCK_BUDGET) {
-                if let Some(scene) = spin_acquire(&state.scene, INTERACTION_LOCK_BUDGET) {
-                    portal_ids = outcome
-                        .members
-                        .iter()
-                        .filter_map(|member| {
-                            scene
-                                .portal_surface(member.tile_id)
-                                .map(|s| (member.tile_id, s.identity.session_id.clone()))
-                        })
-                        .collect();
-                }
-            }
             for member in &outcome.members {
                 dispatch_portal_geometry_event(
                     &self.state.element_repositioned_tx,
@@ -2150,20 +2129,12 @@ impl WinitApp {
                     outcome.display_w,
                     outcome.display_h,
                 );
-                // §6b.4 producer wiring (hud-npq6g): push snapshot into the
-                // in-process projection authority so the drain loop consumer sees
-                // live pointer-affordance geometry (same path as the hotkey
-                // resize wiring above). Also resolves bridged (first-class-surface)
-                // members via their declared portal-surface identity (hud-s62vv) —
-                // a bridged member has no in-process tile, so the plain tile-id
-                // reverse lookup alone cannot find its projection.
+                // §6b.4 producer wiring (hud-npq6g): the next portal render
+                // sizes against live pointer-affordance geometry (same path as
+                // the hotkey resize wiring).
                 self.state
                     .portal_projection_driver
-                    .push_geometry_snapshot_for_tile(
-                        member.tile_id,
-                        member.snapshot,
-                        portal_ids.get(&member.tile_id).map(String::as_str),
-                    );
+                    .push_geometry_snapshot_for_tile(member.tile_id, member.snapshot);
                 let r = member.snapshot.rect;
                 member_bounds.push((
                     member.tile_id,
