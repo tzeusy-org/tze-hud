@@ -22,7 +22,10 @@ just canonical-app-boot # canonical app production config boot
 just deps-unused     # cargo machete: unused dependencies
 just dead-code <crate> # advisory dead pub-item list for one crate
 just dev-mode-guard  # verify dev-mode is not enabled in any package's default-build dependency closure
-just ci              # full local CI sweep (all blocking gates except test-gpu, which `test` already covers)
+just clippy-windows-gnu # clippy on x86_64-pc-windows-gnu (prints SKIPPED and passes if the target/mingw is missing)
+just cargo-deny      # advisories/licenses/bans/sources (SKIPPED if cargo-deny is missing)
+just overlay-harness-contract # pwsh overlay-harness contract test (SKIPPED if pwsh is missing)
+just ci              # full local CI sweep (all blocking gates except test-gpu, which `test` already covers; tool-gated gates SKIP loudly when their tool is absent)
 ```
 
 The toolchain is pinned in `rust-toolchain.toml` (Rust 1.88, matching CI and the

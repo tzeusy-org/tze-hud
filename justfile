@@ -17,6 +17,9 @@
 #   just dead-code <crate>  # advisory list of dead pub items in one crate
 #   just dev-mode-guard     # verify dev-mode is not enabled in any package's default build
 #   just idle-efficiency-checker # fail-closed idle artifact contract tests
+#   just clippy-windows-gnu # clippy on the windows-gnu target (skips if target/mingw missing)
+#   just cargo-deny         # advisories/licenses/bans/sources (skips if cargo-deny missing)
+#   just overlay-harness-contract # pwsh overlay-harness contract test (skips if pwsh missing)
 #   just ci        # full local gate sweep (see the `ci` recipe; no Windows-only jobs)
 #
 # GPU tests (compositor render tests + runtime pixel_readback) already run inside
@@ -153,6 +156,46 @@ dev-mode-guard:
 deps-unused:
     cargo machete
 
+# Tool-gated gates. If the tool is missing the recipe prints "SKIPPED: <reason>"
+# and exits 0 (so `just ci` still runs on machines without it); CI always has
+# the tool, so these remain blocking there.
+
+# clippy on the windows-gnu cross-target (mirror CI clippy-windows-gnu job).
+# Needs `rustup target add x86_64-pc-windows-gnu` and mingw-w64.
+clippy-windows-gnu:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! rustup target list --installed | grep -qx x86_64-pc-windows-gnu; then
+        echo "SKIPPED: clippy-windows-gnu needs the rustup target (rustup target add x86_64-pc-windows-gnu)"; exit 0
+    fi
+    if ! command -v x86_64-w64-mingw32-gcc >/dev/null; then
+        echo "SKIPPED: clippy-windows-gnu needs the MinGW cross toolchain (apt install mingw-w64)"; exit 0
+    fi
+    cargo clippy \
+        -p tze_hud_runtime \
+        -p tze_hud_compositor \
+        -p tze_hud_config \
+        --target x86_64-pc-windows-gnu \
+        -- -D warnings
+
+# Dependency advisory/license policy (mirror CI cargo-deny job).
+cargo-deny:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! cargo deny --version >/dev/null 2>&1; then
+        echo "SKIPPED: cargo-deny not installed (cargo install --locked cargo-deny)"; exit 0
+    fi
+    cargo deny check advisories licenses bans sources
+
+# Fullscreen-vs-overlay harness PowerShell contract test (mirror CI check job step).
+overlay-harness-contract:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! command -v pwsh >/dev/null; then
+        echo "SKIPPED: overlay-harness-contract needs PowerShell (pwsh)"; exit 0
+    fi
+    pwsh -File ./scripts/ci/windows/test-windowed-fullscreen-overlay-perf.ps1
+
 # Advisory dead-item list for one crate: narrows its pub items to pub(crate) in a
 # temp copy (keeping names other crates use) and prints rustc dead_code warnings.
 # Example: just dead-code tze_hud_telemetry
@@ -162,7 +205,10 @@ dead-code crate:
 # ── Full local CI sweep ───────────────────────────────────────────────────────
 
 # Run all CI gates that are feasible locally. GPU and pixel_readback tests are
-# included via `test` (they need Mesa llvmpipe); excluded are the Windows-only
-# jobs, the windows-gnu clippy cross-target, cargo-deny, and the weekly perf lanes.
+# included via `test` (they need Mesa llvmpipe). clippy-windows-gnu, cargo-deny and
+# overlay-harness-contract are tool-gated: they print "SKIPPED: <reason>" and
+# pass when their tool (windows-gnu target + mingw, cargo-deny, pwsh) is absent.
+# Excluded by design: the Windows-only jobs (windows.yml), the informational
+# test-gpu-pixel-readback job (covered by `test`), and the weekly perf lanes.
 # Runs in the same logical order as CI: fast-fail gates first, then tests.
-ci: check fmt clippy deps-unused dev-mode-guard idle-efficiency-checker test test-integration test-python token-footprint production-boot canonical-app-boot
+ci: overlay-harness-contract check fmt clippy clippy-windows-gnu cargo-deny deps-unused dev-mode-guard idle-efficiency-checker test test-integration test-python token-footprint production-boot canonical-app-boot
