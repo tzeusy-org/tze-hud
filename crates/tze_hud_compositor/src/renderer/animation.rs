@@ -699,6 +699,25 @@ impl Compositor {
         }
     }
 
+    /// Earliest future instant at which idle content needs a frame with no
+    /// other event: the next notification fade start or composer caret toggle.
+    /// The windowed loop folds this into its wake deadline so countdowns and a
+    /// blinking caret cost one wake per transition, not a frame per vsync.
+    pub fn next_animation_deadline(&self) -> Option<std::time::Instant> {
+        let fade_starts = self
+            .pub_animation_states
+            .values()
+            .flat_map(|zone| zone.values())
+            .filter_map(|s| s.fade_start_deadline());
+        let caret_toggle = self.local_composer.as_ref().map(|_| {
+            let half = crate::renderer::image_cache::CARET_BLINK_HALF_PERIOD.as_nanos();
+            let elapsed = self.composer_caret_blink_start.elapsed().as_nanos();
+            let next_toggle_ns = (elapsed / half + 1) * half;
+            self.composer_caret_blink_start + std::time::Duration::from_nanos(next_toggle_ns as u64)
+        });
+        fade_starts.chain(caret_toggle).min()
+    }
+
     /// Whether any per-frame animation, fade, reveal, or scroll smoothing is
     /// still in flight — i.e. the next presented frame's pixels would differ
     /// from the last even though `scene.version` is unchanged.
@@ -735,13 +754,14 @@ impl Compositor {
             return true;
         }
 
-        // Per-publication TTL fade-out (Stack notifications). A publication that
-        // has not finished fading is in flight: it is still counting down to its
-        // fade-out start (which must be ticked to begin) or actively fading.
+        // Per-publication TTL fade-out (Stack notifications). Only a publication
+        // that has started fading is in flight. One still counting down to its
+        // fade is idle: `next_animation_deadline` wakes the loop at the fade
+        // start instead of rendering identical frames for the whole TTL.
         if self
             .pub_animation_states
             .values()
-            .any(|zone| zone.values().any(|s| !s.is_fade_complete()))
+            .any(|zone| zone.values().any(|s| s.is_fading()))
         {
             return true;
         }

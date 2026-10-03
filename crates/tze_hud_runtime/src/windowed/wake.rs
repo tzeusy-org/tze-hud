@@ -43,6 +43,26 @@ pub(super) fn control_flow_for_deadlines(
         })
 }
 
+/// Interval of the overlay cursor poll (~30 Hz).
+pub(super) const CURSOR_POLL_INTERVAL: Duration = Duration::from_millis(33);
+
+/// Next cursor poll, armed only while a click could be missed: an overlay in
+/// passthrough (the OS delivers no pointer events) with interactive regions to
+/// enter. Otherwise `None`, so an idle HUD with nothing clickable parks.
+pub(super) fn cursor_poll_deadline(
+    now: Instant,
+    overlay: bool,
+    has_interactive_regions: bool,
+    in_passthrough: bool,
+) -> Option<Deadline> {
+    (overlay && has_interactive_regions && in_passthrough).then(|| {
+        Deadline::new(
+            now + CURSOR_POLL_INTERVAL,
+            RuntimeWakeupSource::AnimationDeadline,
+        )
+    })
+}
+
 pub(super) fn deadline_from_wall_us(
     deadline_wall_us: u64,
     source: RuntimeWakeupSource,
@@ -468,7 +488,10 @@ mod tests {
 
     use crate::idle_efficiency::{IdleEfficiencyCounters, RuntimeWakeupSource};
 
-    use super::{CompositorWake, Deadline, WindowedWake, control_flow_for_deadlines};
+    use super::{
+        CURSOR_POLL_INTERVAL, CompositorWake, Deadline, WindowedWake, control_flow_for_deadlines,
+        cursor_poll_deadline,
+    };
 
     #[test]
     fn static_idle_selects_wait_without_a_bounded_poll() {
@@ -518,6 +541,27 @@ mod tests {
                 winit::event_loop::ControlFlow::WaitUntil(at)
             );
         }
+    }
+
+    #[test]
+    fn cursor_poll_armed_only_with_hit_regions() {
+        let now = Instant::now();
+        let poll = |overlay, regions, passthrough| {
+            cursor_poll_deadline(now, overlay, regions, passthrough)
+        };
+        let armed = poll(true, true, true).expect("overlay passthrough with regions polls");
+        assert_eq!(armed.at, now + CURSOR_POLL_INTERVAL);
+        assert!(poll(true, false, true).is_none(), "no regions: park");
+        assert!(
+            poll(true, true, false).is_none(),
+            "capturing: events arrive"
+        );
+        assert!(poll(false, true, true).is_none(), "fullscreen captures all");
+        // With nothing armed the loop selects Wait, so idle counters stay zero.
+        assert_eq!(
+            control_flow_for_deadlines(now, poll(true, false, true)),
+            winit::event_loop::ControlFlow::Wait
+        );
     }
 
     #[test]

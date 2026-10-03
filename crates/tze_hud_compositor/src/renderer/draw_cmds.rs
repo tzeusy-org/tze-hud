@@ -345,6 +345,18 @@ impl PublicationAnimationState {
         1.0 - t
     }
 
+    /// Instant at which the fade-out will start, or `None` once it has.
+    pub fn fade_start_deadline(&self) -> Option<std::time::Instant> {
+        self.fade_start
+            .is_none()
+            .then(|| self.first_seen + std::time::Duration::from_millis(self.ttl_ms))
+    }
+
+    /// Returns `true` while the fade-out is running (started, not complete).
+    pub fn is_fading(&self) -> bool {
+        self.fade_start.is_some() && !self.is_fade_complete()
+    }
+
     /// Returns `true` when the fade-out transition has fully completed.
     pub fn is_fade_complete(&self) -> bool {
         let Some(start) = self.fade_start else {

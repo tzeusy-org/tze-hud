@@ -142,6 +142,7 @@ impl WindowedRuntimeState {
             window: None,
             effective_mode: crate::window::WindowMode::Fullscreen,
             hit_regions: Vec::new(),
+            overlay_capturing: false,
             static_hit_regions: Vec::new(),
             widget_hover_trackers: HashMap::new(),
             pending_mode_switch: None,
