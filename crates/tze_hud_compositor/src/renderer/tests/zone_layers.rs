@@ -515,7 +515,7 @@ async fn test_three_pass_ordering_independent_of_registration_order() {
     );
 }
 
-/// publication_ttl_ms derives TTL (delay until fade starts) from expires_at_wall_us
+/// publication_fade_delay_ms derives the delay (delay until fade starts) from expires_at_wall_us
 /// when present (highest priority), subtracting NOTIFICATION_FADE_OUT_MS so the
 /// fade completes before the drain boundary.
 ///
@@ -543,10 +543,12 @@ fn test_publication_ttl_ms_uses_expires_at_wall_us() {
         content_classification: None,
         breakpoints: Vec::new(),
     };
-    let ttl = Compositor::publication_ttl_ms(&record_warning, 8_000);
+    let ttl =
+        Compositor::publication_fade_delay_ms(&record_warning, record_warning.published_at_wall_us);
     assert_eq!(
-        ttl, 14_850,
-        "publication_ttl_ms must derive 14_850 ms (15_000 - 150 fade) for a 15s warning"
+        ttl,
+        Some(14_850),
+        "publication_fade_delay_ms must derive 14_850 ms (15_000 - 150 fade) for a 15s warning"
     );
 
     // Critical notification (urgency 3): published at t=0, expires at t=30s.
@@ -569,10 +571,14 @@ fn test_publication_ttl_ms_uses_expires_at_wall_us() {
         content_classification: None,
         breakpoints: Vec::new(),
     };
-    let ttl_crit = Compositor::publication_ttl_ms(&record_critical, 8_000);
+    let ttl_crit = Compositor::publication_fade_delay_ms(
+        &record_critical,
+        record_critical.published_at_wall_us,
+    );
     assert_eq!(
-        ttl_crit, 29_850,
-        "publication_ttl_ms must derive 29_850 ms (30_000 - 150 fade) for a 30s critical"
+        ttl_crit,
+        Some(29_850),
+        "publication_fade_delay_ms must derive 29_850 ms (30_000 - 150 fade) for a 30s critical"
     );
 
     // expires_at_wall_us takes priority over per-notification ttl_ms.
@@ -595,13 +601,15 @@ fn test_publication_ttl_ms_uses_expires_at_wall_us() {
         content_classification: None,
         breakpoints: Vec::new(),
     };
-    let ttl_both = Compositor::publication_ttl_ms(&record_both, 8_000);
+    let ttl_both =
+        Compositor::publication_fade_delay_ms(&record_both, record_both.published_at_wall_us);
     assert_eq!(
-        ttl_both, 14_850,
-        "publication_ttl_ms must prefer expires_at_wall_us over per-notification ttl_ms (14_850 ms = 15_000 - 150)"
+        ttl_both,
+        Some(14_850),
+        "publication_fade_delay_ms must prefer expires_at_wall_us over per-notification ttl_ms (14_850 ms = 15_000 - 150)"
     );
 
-    // Info notification (urgency 1, no expires_at): falls back to ttl_ms then zone default.
+    // No expires_at: held until cleared, whatever the payload ttl_ms says.
     let record_info = ZonePublishRecord {
         lease_id: None,
         zone_name: "alert-banner".to_string(),
@@ -620,10 +628,10 @@ fn test_publication_ttl_ms_uses_expires_at_wall_us() {
         content_classification: None,
         breakpoints: Vec::new(),
     };
-    let ttl_info = Compositor::publication_ttl_ms(&record_info, 8_000);
+    let ttl_info = Compositor::publication_fade_delay_ms(&record_info, 0);
     assert_eq!(
-        ttl_info, 8_000,
-        "publication_ttl_ms must use NotificationPayload.ttl_ms when expires_at_wall_us is absent"
+        ttl_info, None,
+        "a record with no expiry is held and has no fade delay"
     );
 }
 

@@ -563,6 +563,67 @@ async fn hold_extends_and_requires_a_holding() {
     );
 }
 
+/// Notifications otherwise get an urgency-derived expiry, which would drop a
+/// `ttl_ms:0` notification after 8 s. Held means held until cleared, and a
+/// hold re-times (or releases) it.
+#[tokio::test]
+async fn notification_ttl_zero_is_held_and_hold_retimes_it() {
+    let (server, clock) = server();
+    let notif = json!({"surface": "zone:notification-area",
+        "content": {"title": "t", "body": "b"}});
+    let mut held = notif.clone();
+    held["ttl_ms"] = json!(0);
+    let v = call(&server, "hud_publish", held).await;
+    assert_eq!(v, json!({"ok": true}));
+    {
+        let mut scene = server.scene.lock().await;
+        let rec = &scene.zone_registry.active_publishes["notification-area"][0];
+        assert_eq!(rec.expires_at_wall_us, None, "no urgency-derived expiry");
+        clock.advance(120_000);
+        assert_eq!(scene.drain_expired_zone_publications(), 0);
+    }
+    // Hold with a ttl counts from now; hold 0 releases it again.
+    let v = call(
+        &server,
+        "hud_hold",
+        json!({"surface": "zone:notification-area", "ttl_ms": 5000}),
+    )
+    .await;
+    assert_eq!(v, json!({"ok": true, "expires_in_ms": 5000}));
+    {
+        let scene = server.scene.lock().await;
+        assert_eq!(
+            scene.zone_registry.active_publishes["notification-area"][0].expires_at_wall_us,
+            Some(scene.now_wall_us() + 5_000_000)
+        );
+    }
+    call(
+        &server,
+        "hud_hold",
+        json!({"surface": "zone:notification-area", "ttl_ms": 0}),
+    )
+    .await;
+    {
+        let mut scene = server.scene.lock().await;
+        clock.advance(120_000);
+        assert_eq!(scene.drain_expired_zone_publications(), 0);
+    }
+    call(
+        &server,
+        "hud_clear",
+        json!({"surface": "zone:notification-area"}),
+    )
+    .await;
+    let scene = server.scene.lock().await;
+    assert!(
+        scene
+            .zone_registry
+            .active_publishes
+            .get("notification-area")
+            .is_none_or(Vec::is_empty)
+    );
+}
+
 #[tokio::test]
 async fn clear_removes_own_zone_content() {
     let (server, _) = server();

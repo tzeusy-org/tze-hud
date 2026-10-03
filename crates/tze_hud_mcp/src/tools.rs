@@ -555,9 +555,12 @@ async fn publish_zone(ctx: &ToolCtx<'_>, zone: &str, p: PublishParams) -> McpRes
         scene.schedule_batch(present_at, batch);
         return Ok(ok_with_expiry((ttl_ms > 0).then_some(delay_ms + ttl_ms)));
     }
-    scene
-        .publish_to_zone_with_lease(zone, content, &ns, lease_id, p.key, ttl_us)
-        .map_err(|e| scene_error(&e))?;
+    match ttl_us {
+        Some(_) => scene.publish_to_zone_with_lease(zone, content, &ns, lease_id, p.key, ttl_us),
+        // Held until cleared: no urgency-derived expiry either.
+        None => scene.publish_held_to_zone_with_lease(zone, content, &ns, lease_id, p.key),
+    }
+    .map_err(|e| scene_error(&e))?;
     Ok(ok_with_expiry((ttl_ms > 0).then_some(ttl_ms)))
 }
 

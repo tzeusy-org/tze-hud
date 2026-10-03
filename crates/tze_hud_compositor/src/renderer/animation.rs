@@ -19,9 +19,8 @@ use tze_hud_scene::types::*;
 
 use super::Compositor;
 use super::draw_cmds::{
-    NOTIFICATION_DEFAULT_TTL_MS, NOTIFICATION_FADE_OUT_MS, PortalTileStreamReveal, PubKey,
-    PublicationAnimationState, StreamRevealState, ZoneAnimationState, common_prefix_len,
-    derive_word_breakpoints,
+    NOTIFICATION_FADE_OUT_MS, PortalTileStreamReveal, PubKey, PublicationAnimationState,
+    StreamRevealState, ZoneAnimationState, common_prefix_len, derive_word_breakpoints,
 };
 
 impl Compositor {
@@ -451,11 +450,12 @@ impl Compositor {
     /// For each active publication in a Stack zone:
     ///
     /// 1. If it is new (not in `pub_animation_states`), insert a fresh
-    ///    [`PublicationAnimationState`] using the effective TTL from
-    ///    [`Compositor::publication_ttl_ms`]: `expires_at_wall_us` (urgency-derived)
-    ///    takes highest priority, then `NotificationPayload.ttl_ms`, then the zone's
-    ///    `auto_clear_ms`, then `NOTIFICATION_DEFAULT_TTL_MS` (8 000 ms).
-    /// 2. Call `tick()` to check whether the TTL has expired and start the fade if so.
+    ///    [`PublicationAnimationState`] whose fade delay comes from
+    ///    [`Compositor::publication_fade_delay_ms`]. A publication with no expiry
+    ///    is held until cleared and never fades.
+    /// 2. If its `expires_at_wall_us` changed (`hud_hold`), retarget the state
+    ///    so the single fade deadline moves (or disappears when held).
+    /// 3. Call `tick()` to check whether the delay has elapsed and start the fade.
     ///
     /// Stale entries (publications no longer present in `active_publishes`) are
     /// pruned from `pub_animation_states` by this method.
@@ -466,6 +466,7 @@ impl Compositor {
     /// Call order per frame: `update_zone_animations` → `update_publication_animations`
     /// → `prune_faded_publications(scene)` → render.
     pub fn update_publication_animations(&mut self, scene: &SceneGraph) {
+        let now_us = scene.now_wall_us();
         for (zone_name, publishes) in &scene.zone_registry.active_publishes {
             let zone_def = match scene.zone_registry.zones.get(zone_name) {
                 Some(z) => z,
@@ -475,9 +476,6 @@ impl Compositor {
             if !matches!(zone_def.contention_policy, ContentionPolicy::Stack { .. }) {
                 continue;
             }
-            let zone_auto_clear_ms = zone_def
-                .auto_clear_ms
-                .unwrap_or(NOTIFICATION_DEFAULT_TTL_MS);
 
             let zone_states = self
                 .pub_animation_states
@@ -495,15 +493,18 @@ impl Compositor {
 
             // Ensure every active publication has an animation state; tick existing ones.
             for record in publishes {
-                let ttl_ms = Self::publication_ttl_ms(record, zone_auto_clear_ms);
+                let ttl_ms = Self::publication_fade_delay_ms(record, now_us);
                 let key: PubKey = (
                     record.published_at_wall_us,
                     record.publisher_namespace.clone(),
                 );
-                zone_states
-                    .entry(key)
-                    .or_insert_with(|| PublicationAnimationState::new(ttl_ms))
-                    .tick();
+                let state = zone_states.entry(key).or_insert_with(|| {
+                    PublicationAnimationState::new(ttl_ms, record.expires_at_wall_us)
+                });
+                if state.source_expiry_us != record.expires_at_wall_us {
+                    state.retarget(ttl_ms, record.expires_at_wall_us);
+                }
+                state.tick();
             }
         }
 
@@ -512,43 +513,19 @@ impl Compositor {
             .retain(|zone_name, _| scene.zone_registry.active_publishes.contains_key(zone_name));
     }
 
-    /// Determine the effective TTL (ms) for a single publication.
+    /// Delay (ms from `now_us`) until the fade-out of one publication begins,
+    /// or `None` when it has no expiry and is held until cleared.
     ///
-    /// `ttl_ms` is the delay **until the fade-out animation begins**; the fade
-    /// itself then lasts `NOTIFICATION_FADE_OUT_MS` ms.  Total visible duration
-    /// is therefore `ttl_ms + NOTIFICATION_FADE_OUT_MS`.
-    ///
-    /// Priority (highest to lowest):
-    /// 1. `ZonePublishRecord.expires_at_wall_us` — urgency-derived absolute expiry
-    ///    set by the publishing path.  TTL is derived so the fade-out **starts**
-    ///    `NOTIFICATION_FADE_OUT_MS` before the drain deadline:
-    ///    `((expires_at_wall_us - published_at_wall_us) / 1_000)
-    ///        .saturating_sub(NOTIFICATION_FADE_OUT_MS as u64)`.
-    ///    If `expires_at_wall_us <= published_at_wall_us` (already expired or
-    ///    invalid), the TTL is `0` (immediate fade-out).
-    ///    This ensures the visual fade-out completes before `drain_expired_zone_publications`
-    ///    removes the record (e.g., ~14 850 ms TTL for a 15 s warning).
-    /// 2. `NotificationPayload.ttl_ms` — per-notification override.
-    /// 3. Zone `auto_clear_ms` fallback (supplied by the caller).
-    pub(super) fn publication_ttl_ms(record: &ZonePublishRecord, zone_default_ttl_ms: u64) -> u64 {
-        // Highest priority: absolute wall-clock expiry on the record.
-        // Derive TTL so the fade starts NOTIFICATION_FADE_OUT_MS before the drain boundary.
-        if let Some(exp_us) = record.expires_at_wall_us {
-            let duration_ms = if exp_us > record.published_at_wall_us {
-                (exp_us - record.published_at_wall_us) / 1_000
-            } else {
-                // Already expired or invalid: immediate fade-out.
-                0
-            };
-            return duration_ms.saturating_sub(NOTIFICATION_FADE_OUT_MS as u64);
-        }
-        // Next: per-notification explicit TTL.
-        if let ZoneContent::Notification(n) = &record.content {
-            if let Some(ttl) = n.ttl_ms {
-                return ttl;
-            }
-        }
-        zone_default_ttl_ms
+    /// The fade starts `NOTIFICATION_FADE_OUT_MS` before the expiry so it
+    /// completes before `drain_expired_zone_publications` removes the record
+    /// (e.g. 14 850 ms for a 15 s warning). Already expired: fade at once.
+    pub(super) fn publication_fade_delay_ms(
+        record: &ZonePublishRecord,
+        now_us: u64,
+    ) -> Option<u64> {
+        record.expires_at_wall_us.map(|exp_us| {
+            (exp_us.saturating_sub(now_us) / 1_000).saturating_sub(NOTIFICATION_FADE_OUT_MS as u64)
+        })
     }
 
     /// Look up the current opacity for a publication in `pub_animation_states`.

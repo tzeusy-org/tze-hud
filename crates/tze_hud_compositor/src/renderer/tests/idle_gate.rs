@@ -138,7 +138,11 @@ async fn caret_blink_wakes_at_toggle_not_every_frame() {
 }
 
 fn countdown_notification_scene() -> SceneGraph {
-    let mut scene = SceneGraph::new(1280.0, 720.0);
+    countdown_notification_scene_on(SceneGraph::new(1280.0, 720.0))
+}
+
+/// The countdown scene on a caller-supplied graph (e.g. one with a `TestClock`).
+fn countdown_notification_scene_on(mut scene: SceneGraph) -> SceneGraph {
     scene.register_zone(ZoneDefinition {
         id: SceneId::new(),
         name: "notification-area".to_owned(),
@@ -195,7 +199,7 @@ async fn notification_countdown_is_not_inflight_animation() {
         .unwrap();
     assert_eq!(
         compositor.next_animation_deadline(),
-        Some(state.first_seen + std::time::Duration::from_millis(state.ttl_ms)),
+        Some(state.first_seen + std::time::Duration::from_millis(state.ttl_ms.unwrap())),
         "the wake is the fade start"
     );
 
@@ -227,7 +231,10 @@ async fn idle_with_notification_renders_only_at_fade() {
             .values()
             .next()
             .unwrap();
-        (s.first_seen, std::time::Duration::from_millis(s.ttl_ms))
+        (
+            s.first_seen,
+            std::time::Duration::from_millis(s.ttl_ms.unwrap()),
+        )
     };
 
     // Virtual clock: step to each wake the loop would take. Rewinding
@@ -413,4 +420,92 @@ fn static_focus_and_resize_grip_transitions_each_dirty_exactly_once() {
         Some(tile_id),
         Some(tile_id),
     ));
+}
+
+/// `hud_hold` on a visible notification moves exactly its one fade deadline
+/// (counted from the hold, not the original publish), and `ttl_ms:0` removes
+/// it: no deadline, no in-flight animation, and the scene sweep keeps it past
+/// the zone's `auto_clear_ms`. `hud_clear` still removes it. All on the
+/// injected scene clock; the only wake is the fade start.
+#[tokio::test]
+async fn hold_moves_the_fade_deadline_and_ttl_zero_never_fades() {
+    use std::sync::Arc;
+    use std::time::Duration;
+    use tze_hud_scene::clock::TestClock;
+
+    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(320, 200).await);
+    let clock = Arc::new(TestClock::new(1_000));
+    let mut scene =
+        countdown_notification_scene_on(SceneGraph::new_with_clock(1280.0, 720.0, clock.clone()));
+    let delay = |c: &Compositor| {
+        let states: Vec<_> = c.pub_animation_states["notification-area"]
+            .values()
+            .collect();
+        assert_eq!(states.len(), 1);
+        states[0].ttl_ms
+    };
+    compositor.update_publication_animations(&scene);
+    assert_eq!(
+        delay(&compositor),
+        Some(7_850),
+        "urgency default, 8 s - fade"
+    );
+
+    // 5 s in, hold 20 s: the fade is due 19.85 s from now, one deadline.
+    clock.advance(5_000);
+    let first_deadline = compositor.next_animation_deadline().unwrap();
+    assert!(scene.hold_zone_publications(
+        "notification-area",
+        "agent-a",
+        Some(scene.now_wall_us() + 20_000_000)
+    ));
+    compositor.update_publication_animations(&scene);
+    assert_eq!(delay(&compositor), Some(19_850));
+    let moved = compositor.next_animation_deadline().unwrap();
+    assert!(
+        moved > first_deadline + Duration::from_secs(10),
+        "deadline moved out"
+    );
+    assert!(
+        !compositor.has_inflight_animation(&scene),
+        "still just counting down"
+    );
+
+    // ttl_ms:0 holds: no deadline, no animation, past auto_clear_ms and the sweep.
+    assert!(scene.hold_zone_publications("notification-area", "agent-a", None));
+    compositor.update_publication_animations(&scene);
+    assert_eq!(delay(&compositor), None);
+    assert_eq!(
+        compositor.next_animation_deadline(),
+        None,
+        "held schedules no wake"
+    );
+    clock.advance(60_000);
+    assert_eq!(
+        scene.drain_expired_zone_publications(),
+        0,
+        "scene sweep keeps it"
+    );
+    compositor.update_publication_animations(&scene);
+    assert!(!compositor.has_inflight_animation(&scene));
+    assert_eq!(
+        compositor.pub_opacity(
+            "notification-area",
+            &scene.zone_registry.active_publishes["notification-area"][0]
+        ),
+        1.0
+    );
+
+    // hud_clear removes it.
+    scene
+        .clear_zone_for_publisher("notification-area", "agent-a")
+        .unwrap();
+    compositor.update_publication_animations(&scene);
+    assert!(
+        compositor
+            .pub_animation_states
+            .values()
+            .all(|zone| zone.is_empty())
+    );
+    assert_eq!(compositor.next_animation_deadline(), None);
 }
