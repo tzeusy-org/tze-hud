@@ -1491,6 +1491,7 @@ pub fn proto_to_widget_publish_record(p: &proto::WidgetPublishRecordProto) -> Wi
         .filter_map(proto_to_widget_param_value)
         .collect();
     WidgetPublishRecord {
+        lease_id: None,
         widget_name: p.widget_name.clone(),
         publisher_namespace: p.publisher_namespace.clone(),
         params,
@@ -2645,6 +2646,7 @@ mod tests {
         .collect();
 
         let record = WidgetPublishRecord {
+            lease_id: None,
             widget_name: "gauge".to_string(),
             publisher_namespace: "agent.test".to_string(),
             params: params.clone(),

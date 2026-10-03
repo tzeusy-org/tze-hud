@@ -166,8 +166,7 @@ impl PostRevocationCleanupSpec {
 /// "When a lease is REVOKED or EXPIRED, all zone publications made under that
 /// lease MUST be immediately cleared from the zone registry."
 ///
-/// The actual clearing is done by `SceneGraph::clear_zone_publications_for_namespace`
-/// (added in `graph.rs`).  This type captures *what* needs to be cleared.
+/// The actual clearing is done by `SceneGraph::clear_publications_for_lease`.  This type captures *what* needs to be cleared.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ZonePublicationSweep {
     /// The lease whose publications must be cleared.

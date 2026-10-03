@@ -1644,11 +1644,11 @@ fn test_zone_publications_cleared_on_lease_expiry() {
 
     // Agent publishes to subtitle zone
     scene
-        .publish_to_zone(
+        .publish_to_zone_with_lease(
             "subtitle",
             ZoneContent::StreamText("Hello from agent.india".to_string()),
             "agent.india",
-            None,
+            lease_id,
             None,
             None,
         )
@@ -1729,6 +1729,7 @@ fn test_zone_publish_rejected_when_lease_orphaned() {
             "subtitle",
             ZoneContent::StreamText("first".to_string()),
             "agent.juliet",
+            lease_id,
             None,
             None,
         )
@@ -1746,6 +1747,7 @@ fn test_zone_publish_rejected_when_lease_orphaned() {
         "subtitle",
         ZoneContent::StreamText("second attempt from disconnected agent".to_string()),
         "agent.juliet",
+        lease_id,
         None,
         None,
     );
@@ -1960,11 +1962,11 @@ fn test_zone_publications_cleared_on_revoke_lease() {
 
     // Publish while active
     scene
-        .publish_to_zone(
+        .publish_to_zone_with_lease(
             "status",
             ZoneContent::StreamText("active".into()),
             "agent.november",
-            None,
+            lease_id,
             None,
             None,
         )

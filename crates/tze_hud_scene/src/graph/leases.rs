@@ -140,7 +140,7 @@ impl SceneGraph {
     }
 
     pub fn revoke_lease(&mut self, lease_id: SceneId) -> Result<(), ValidationError> {
-        let namespace = {
+        {
             let lease = self
                 .leases
                 .get_mut(&lease_id)
@@ -148,10 +148,8 @@ impl SceneGraph {
             if lease.state.is_terminal() {
                 return Err(ValidationError::LeaseNotFound { id: lease_id });
             }
-            let ns = lease.namespace.clone();
             lease.state = LeaseState::Revoked;
-            ns
-        };
+        }
         // Remove all tiles associated with this lease.
         let orphaned_tiles: Vec<SceneId> = self
             .tiles
@@ -163,8 +161,8 @@ impl SceneGraph {
             self.remove_tile_and_nodes(tile_id);
         }
         // Spec §Requirement: Lease Revocation Clears Zone Publications
-        // (lines 235–242): clear all zone pubs from this namespace on revocation.
-        self.clear_zone_publications_for_namespace(&namespace);
+        // (lines 235–242): clear this lease's publications on revocation.
+        self.clear_publications_for_lease(lease_id);
         self.version += 1;
         Ok(())
     }
@@ -429,14 +427,12 @@ impl SceneGraph {
     /// once. Shared reap body for [`Self::expire_leases_with_max_suspend`] and
     /// [`Self::expire_lease`].
     fn reap_lease(&mut self, id: SceneId, terminal_state: LeaseState) -> LeaseExpiry {
-        // Collect the old state and namespace before mutating so terminal
-        // delivery can report the actual transition and cleanup can clear
-        // namespace-scoped publications.
-        let (previous_state, namespace) = self
+        // Collect the old state before mutating so terminal delivery can
+        // report the actual transition.
+        let previous_state = self
             .leases
             .get(&id)
-            .map(|lease| (lease.state, Some(lease.namespace.clone())))
-            .unwrap_or((terminal_state, None));
+            .map_or(terminal_state, |lease| lease.state);
 
         // Collect tile IDs that will be removed
         let removed_tiles: Vec<SceneId> = self
@@ -457,10 +453,7 @@ impl SceneGraph {
         // publications made under that lease MUST be immediately cleared.
         // Widget publications are also cleared on lease expiry/revocation.
         if terminal_state.is_terminal() {
-            if let Some(ns) = namespace {
-                self.clear_zone_publications_for_namespace(&ns);
-                self.clear_widget_publications_for_namespace(&ns);
-            }
+            self.clear_publications_for_lease(id);
         }
 
         LeaseExpiry {
@@ -469,27 +462,5 @@ impl SceneGraph {
             terminal_state,
             removed_tiles,
         }
-    }
-
-    /// Remove all zone publications from a given agent namespace.
-    ///
-    /// Called on lease expiry/revocation to satisfy spec §Requirement: Lease
-    /// Revocation Clears Zone Publications (lines 235–242).
-    ///
-    /// **Design note**: Zone publications are namespace-scoped rather than
-    /// lease-scoped in v1. A namespace holds at most one non-terminal lease
-    /// at a time in v1 (multi-lease atomic operations are post-v1, spec lines
-    /// 325–332), so clearing by namespace is equivalent to clearing by lease.
-    /// If a namespace ever has multiple concurrent leases in future versions,
-    /// `ZonePublishRecord` should carry a `lease_id` field and clearing should
-    /// filter by lease_id instead.
-    pub fn clear_zone_publications_for_namespace(&mut self, namespace: &str) {
-        for publishes in self.zone_registry.active_publishes.values_mut() {
-            publishes.retain(|r| r.publisher_namespace != namespace);
-        }
-        // Remove empty entries for cleanliness
-        self.zone_registry
-            .active_publishes
-            .retain(|_, v| !v.is_empty());
     }
 }

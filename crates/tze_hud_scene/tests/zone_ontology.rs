@@ -917,6 +917,7 @@ fn zone_occupancy_query_returns_correct_state() {
         .entry("subtitle".to_string())
         .or_default()
         .push(tze_hud_scene::types::ZonePublishRecord {
+            lease_id: None,
             zone_name: "subtitle".to_string(),
             publisher_namespace: "agent".to_string(),
             content: ZoneContent::StreamText("hello".to_string()),

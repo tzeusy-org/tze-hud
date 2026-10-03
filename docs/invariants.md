@@ -55,7 +55,9 @@ shell state exposes no portal identity or transcript.
 A disconnected agent's leases become orphaned (badge shown, content kept) for
 a grace period. Reconnecting within the grace period with the resume token
 restores the same surfaces and their budget usage; when the grace period
-ends, the runtime reclaims everything with no agent help.
+ends, the runtime reclaims everything with no agent help. Reclaiming a lease
+clears only the zone and widget publications made under that lease, never the
+rest of the agent's namespace.
 
 - `tze_hud_protocol` `disconnect_transitions_to_orphaned_and_sets_disconnection_badge`,
   `grace_period_expiry_removes_tile_and_nodes`
@@ -67,6 +69,8 @@ ends, the runtime reclaims everything with no agent help.
 - `tze_hud_runtime` (headless frame sweep) `render_frame_reclaims_orphaned_lease_after_grace`
 - `tze_hud_compositor` (badge draw command) `orphaned_tile_emits_disconnection_badge_draw_cmd`
 - `integration` (POC acceptance) `poc_portal_abandoned_is_reclaimed`
+- `tze_hud_scene` `tile_lease_reap_keeps_same_namespace_mcp_publications`,
+  `revoked_lease_clears_only_its_publications`
 
 ## 5. Leases hold time; safe mode pauses it
 

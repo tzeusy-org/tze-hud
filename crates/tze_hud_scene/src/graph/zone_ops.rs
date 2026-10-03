@@ -136,6 +136,35 @@ impl SceneGraph {
         expires_at_wall_us: Option<u64>,
         content_classification: Option<String>,
     ) -> Result<(), ValidationError> {
+        self.publish_to_zone_for_lease(
+            zone_name,
+            content,
+            publisher_namespace,
+            merge_key,
+            expires_at_wall_us,
+            content_classification,
+            Vec::new(),
+            None,
+        )
+    }
+
+    /// Publish to a zone, recording `lease_id` as the publishing lease.
+    ///
+    /// The core of every zone publish. A terminal lease clears exactly the
+    /// publications recorded under its id ([`Self::clear_publications_for_lease`]);
+    /// `None` means the publication belongs to no lease and survives every reap.
+    #[allow(clippy::too_many_arguments)]
+    pub fn publish_to_zone_for_lease(
+        &mut self,
+        zone_name: &str,
+        content: ZoneContent,
+        publisher_namespace: &str,
+        merge_key: Option<String>,
+        expires_at_wall_us: Option<u64>,
+        content_classification: Option<String>,
+        breakpoints: Vec<u64>,
+        lease_id: Option<SceneId>,
+    ) -> Result<(), ValidationError> {
         // Check zone exists and content type is accepted
         let (contention_policy, max_publishers, accepted) = {
             let zone = self.zone_registry.get_by_name(zone_name).ok_or_else(|| {
@@ -188,7 +217,8 @@ impl SceneGraph {
             merge_key: merge_key.clone(),
             expires_at_wall_us: effective_expires_at,
             content_classification,
-            breakpoints: Vec::new(),
+            breakpoints,
+            lease_id,
         };
 
         let publishes = self
@@ -247,174 +277,71 @@ impl SceneGraph {
         }
     }
 
-    /// Publish content to a zone with lease-state enforcement.
+    /// Publish content to a zone under `lease_id`, enforcing its state.
     ///
-    /// This is the lease-aware variant of `publish_to_zone`. It looks up the
-    /// active lease for `publisher_namespace` and enforces spec
-    /// §Requirement: Zone Publish Requires Active Lease (lines 213–242):
+    /// Spec §Requirement: Zone Publish Requires Active Lease:
     ///
-    /// - ACTIVE lease → accepted.
+    /// - ACTIVE lease → accepted, recorded under `lease_id`.
     /// - ORPHANED lease → rejected with `ZonePublishLeaseOrphaned`; existing
-    ///   content remains visible with stale badge (spec lines 231–233).
-    /// - SUSPENDED lease → rejected with `ZonePublishSafeModeActive`
-    ///   (spec line 227).
-    /// - Terminal or missing lease → rejected with `ZonePublishLeaseNotFound`
-    ///   or `ZonePublishLeaseNotActive`.
-    ///
-    /// Callers that do not hold a lease (e.g., system/chrome publishers) should
-    /// use the unchecked `publish_to_zone` directly.
+    ///   content remains visible with stale badge.
+    /// - SUSPENDED lease → rejected with `ZonePublishSafeModeActive`.
+    /// - Terminal lease → `ZonePublishLeaseNotActive`.
+    /// - Unknown lease, or one held by another namespace →
+    ///   `ZonePublishLeaseNotFound`.
     ///
     /// `ttl_us` is the caller-supplied content time-to-live (microseconds). When
     /// `Some`, it is converted here into an absolute `expires_at_wall_us`
-    /// (`clock.now_us() + ttl_us`) and stored on the publish record so the
-    /// per-frame expiry sweep clears the content at its deadline. Passing the
-    /// TTL as a relative duration (rather than an absolute time computed by the
-    /// caller) keeps the expiry in the scene's own clock domain, which the sweep
-    /// reads via the same `clock`. `None` means no content expiry (the record
-    /// persists until overwritten or the zone default applies).
+    /// (`clock.now_us() + ttl_us`) so the per-frame expiry sweep, which reads
+    /// the same `clock`, clears the content at its deadline.
     pub fn publish_to_zone_with_lease(
         &mut self,
         zone_name: &str,
         content: ZoneContent,
         publisher_namespace: &str,
+        lease_id: SceneId,
         merge_key: Option<String>,
         ttl_us: Option<u64>,
     ) -> Result<(), ValidationError> {
-        use crate::lease::orphan::ZonePublishResult;
-
-        let lease_state = self.resolve_lease_state_for_namespace(publisher_namespace);
-
-        match lease_state {
-            None => {
-                // No lease whatsoever (namespace has never held a lease).
-                return Err(ValidationError::ZonePublishLeaseNotFound {
-                    namespace: publisher_namespace.to_string(),
+        let state = self
+            .leases
+            .get(&lease_id)
+            .filter(|l| l.namespace == publisher_namespace)
+            .map(|l| l.state)
+            .ok_or_else(|| ValidationError::ZonePublishLeaseNotFound {
+                namespace: publisher_namespace.to_string(),
+            })?;
+        let namespace = publisher_namespace.to_string();
+        match state {
+            LeaseState::Active => {}
+            LeaseState::Orphaned => {
+                return Err(ValidationError::ZonePublishLeaseOrphaned { namespace });
+            }
+            LeaseState::Suspended => {
+                return Err(ValidationError::ZonePublishSafeModeActive { namespace });
+            }
+            _ => {
+                return Err(ValidationError::ZonePublishLeaseNotActive {
+                    namespace,
+                    state: format!("{state:?}"),
                 });
             }
-            Some(state) => {
-                let result = match state {
-                    LeaseState::Active => ZonePublishResult::Accepted,
-                    LeaseState::Orphaned => ZonePublishResult::RejectedLeaseOrphaned,
-                    LeaseState::Suspended => ZonePublishResult::RejectedSafeModeActive,
-                    _ => ZonePublishResult::RejectedLeaseTerminal,
-                };
-                match result {
-                    ZonePublishResult::Accepted => {} // fall through to publish
-                    ZonePublishResult::RejectedLeaseOrphaned => {
-                        return Err(ValidationError::ZonePublishLeaseOrphaned {
-                            namespace: publisher_namespace.to_string(),
-                        });
-                    }
-                    ZonePublishResult::RejectedSafeModeActive => {
-                        return Err(ValidationError::ZonePublishSafeModeActive {
-                            namespace: publisher_namespace.to_string(),
-                        });
-                    }
-                    ZonePublishResult::RejectedLeaseTerminal => {
-                        return Err(ValidationError::ZonePublishLeaseNotActive {
-                            namespace: publisher_namespace.to_string(),
-                            state: format!("{state:?}"),
-                        });
-                    }
-                }
-            }
         }
-
-        // Lease is Active — delegate to unchecked publish. Convert the relative
-        // TTL into an absolute wall-clock deadline in the scene's clock domain so
-        // `drain_expired_zone_publications` (which reads the same clock) sweeps it.
         let expires_at_wall_us = ttl_us.map(|t| self.clock.now_us().saturating_add(t));
-        self.publish_to_zone(
+        self.publish_to_zone_for_lease(
             zone_name,
             content,
             publisher_namespace,
             merge_key,
             expires_at_wall_us,
             None,
+            Vec::new(),
+            Some(lease_id),
         )
     }
 
-    /// Publish streaming `StreamText` content to a zone with breakpoints and
-    /// lease-state enforcement.
+    /// Publish content to a zone with optional streaming breakpoints (unchecked,
+    /// recorded under no lease).
     ///
-    /// This is the breakpoint-aware variant of `publish_to_zone_with_lease`. It
-    /// performs the same lease validation and then stores the breakpoints in the
-    /// `ZonePublishRecord` so the compositor can reveal the text progressively.
-    ///
-    /// Per spec §Subtitle Streaming Word-by-Word Reveal: breakpoints are
-    /// byte-offset indices in the UTF-8 text where the compositor pauses reveal.
-    /// An empty `breakpoints` vec reveals all text immediately.
-    ///
-    /// Non-`StreamText` content types MUST pass `breakpoints = Vec::new()`.
-    ///
-    /// `ttl_us` behaves as in [`publish_to_zone_with_lease`]: when `Some`, it is
-    /// converted into an absolute `expires_at_wall_us` in the scene clock domain
-    /// so the per-frame sweep clears the streamed content at its deadline.
-    pub fn publish_to_zone_with_lease_and_breakpoints(
-        &mut self,
-        zone_name: &str,
-        content: ZoneContent,
-        publisher_namespace: &str,
-        merge_key: Option<String>,
-        ttl_us: Option<u64>,
-        breakpoints: Vec<u64>,
-    ) -> Result<(), ValidationError> {
-        use crate::lease::orphan::ZonePublishResult;
-
-        let lease_state = self.resolve_lease_state_for_namespace(publisher_namespace);
-
-        match lease_state {
-            None => {
-                return Err(ValidationError::ZonePublishLeaseNotFound {
-                    namespace: publisher_namespace.to_string(),
-                });
-            }
-            Some(state) => {
-                let result = match state {
-                    LeaseState::Active => ZonePublishResult::Accepted,
-                    LeaseState::Orphaned => ZonePublishResult::RejectedLeaseOrphaned,
-                    LeaseState::Suspended => ZonePublishResult::RejectedSafeModeActive,
-                    _ => ZonePublishResult::RejectedLeaseTerminal,
-                };
-                match result {
-                    ZonePublishResult::Accepted => {}
-                    ZonePublishResult::RejectedLeaseOrphaned => {
-                        return Err(ValidationError::ZonePublishLeaseOrphaned {
-                            namespace: publisher_namespace.to_string(),
-                        });
-                    }
-                    ZonePublishResult::RejectedSafeModeActive => {
-                        return Err(ValidationError::ZonePublishSafeModeActive {
-                            namespace: publisher_namespace.to_string(),
-                        });
-                    }
-                    ZonePublishResult::RejectedLeaseTerminal => {
-                        return Err(ValidationError::ZonePublishLeaseNotActive {
-                            namespace: publisher_namespace.to_string(),
-                            state: format!("{state:?}"),
-                        });
-                    }
-                }
-            }
-        }
-
-        // Lease is Active — publish with breakpoints. Convert the relative TTL
-        // into an absolute wall-clock deadline in the scene's clock domain.
-        let expires_at_wall_us = ttl_us.map(|t| self.clock.now_us().saturating_add(t));
-        self.publish_to_zone_with_breakpoints(
-            zone_name,
-            content,
-            publisher_namespace,
-            merge_key,
-            expires_at_wall_us,
-            None,
-            breakpoints,
-        )
-    }
-
-    /// Publish content to a zone with optional streaming breakpoints (unchecked).
-    ///
-    /// Like `publish_to_zone` but stores breakpoints in the publish record.
     /// Breakpoints identify byte offsets in the StreamText where the compositor
     /// pauses progressive reveal.
     #[allow(clippy::too_many_arguments)]
@@ -428,56 +355,16 @@ impl SceneGraph {
         content_classification: Option<String>,
         breakpoints: Vec<u64>,
     ) -> Result<(), ValidationError> {
-        // Check zone exists and content type is accepted
-        let (contention_policy, max_publishers, accepted) = {
-            let zone = self.zone_registry.get_by_name(zone_name).ok_or_else(|| {
-                ValidationError::ZoneNotFound {
-                    name: zone_name.to_string(),
-                }
-            })?;
-            let accepted = Self::content_media_type(&content)
-                .map(|mt| zone.accepted_media_types.contains(&mt))
-                .unwrap_or(true);
-            (zone.contention_policy, zone.max_publishers, accepted)
-        };
-
-        if !accepted {
-            return Err(ValidationError::ZoneMediaTypeMismatch {
-                zone: zone_name.to_string(),
-            });
-        }
-
-        let now_us = self.clock.now_us();
-        let record = ZonePublishRecord {
-            zone_name: zone_name.to_string(),
-            publisher_namespace: publisher_namespace.to_string(),
+        self.publish_to_zone_for_lease(
+            zone_name,
             content,
-            published_at_wall_us: now_us,
-            merge_key: merge_key.clone(),
+            publisher_namespace,
+            merge_key,
             expires_at_wall_us,
             content_classification,
             breakpoints,
-        };
-
-        let publishes = self
-            .zone_registry
-            .active_publishes
-            .entry(zone_name.to_string())
-            .or_default();
-
-        apply_contention(
-            publishes,
-            record,
-            contention_policy,
-            max_publishers,
-            |max| ValidationError::ZoneMaxPublishersReached {
-                zone: zone_name.to_string(),
-                max,
-            },
-        )?;
-
-        self.version += 1;
-        Ok(())
+            None,
+        )
     }
 
     /// Publish parameter values to a named widget instance.
@@ -516,6 +403,31 @@ impl SceneGraph {
         transition_ms: u32,
         expires_at_wall_us: Option<u64>,
     ) -> Result<bool, ValidationError> {
+        self.publish_to_widget_for_lease(
+            widget_name,
+            params,
+            publisher_namespace,
+            merge_key,
+            transition_ms,
+            expires_at_wall_us,
+            None,
+        )
+    }
+
+    /// [`Self::publish_to_widget`], recording `lease_id` as the publishing
+    /// lease. A terminal lease clears exactly its own publications; `None`
+    /// belongs to no lease and survives every reap.
+    #[allow(clippy::too_many_arguments)]
+    pub fn publish_to_widget_for_lease(
+        &mut self,
+        widget_name: &str,
+        params: std::collections::HashMap<String, crate::types::WidgetParameterValue>,
+        publisher_namespace: &str,
+        merge_key: Option<String>,
+        transition_ms: u32,
+        expires_at_wall_us: Option<u64>,
+        lease_id: Option<SceneId>,
+    ) -> Result<bool, ValidationError> {
         // ── Step 0: Safe mode ────────────────────────────────────────────────
         // A Suspended lease means the human paused this agent; widget publishes
         // are refused like zone publishes. (No lease at all is allowed here.)
@@ -526,7 +438,6 @@ impl SceneGraph {
                 namespace: publisher_namespace.to_string(),
             });
         }
-
         // ── Step 1: Resolve the widget instance ──────────────────────────────
         let instance_name = widget_name;
         let instance = self
@@ -585,6 +496,7 @@ impl SceneGraph {
             merge_key: merge_key.clone(),
             expires_at_wall_us,
             transition_ms,
+            lease_id,
         };
 
         let publishes = self
@@ -813,21 +725,28 @@ impl SceneGraph {
         removed
     }
 
-    /// Clear all widget publications from a given agent namespace across all widgets.
+    /// Clear every zone and widget publication recorded under `lease_id`.
     ///
-    /// Called on lease expiry/revocation to satisfy spec §Requirement: Lease
-    /// Revocation Clears Widget Publications. Mirrors
-    /// [`clear_zone_publications_for_namespace`] for the widget registry.
-    pub fn clear_widget_publications_for_namespace(&mut self, namespace: &str) {
+    /// Called when a lease reaches a terminal state (expired after grace,
+    /// revoked) per spec §Requirement: Lease Revocation Clears Zone
+    /// Publications. Publications by the same namespace under another lease
+    /// (e.g. an operator session's MCP notifications) are untouched.
+    pub fn clear_publications_for_lease(&mut self, lease_id: SceneId) {
+        for publishes in self.zone_registry.active_publishes.values_mut() {
+            publishes.retain(|r| r.lease_id != Some(lease_id));
+        }
+        self.zone_registry
+            .active_publishes
+            .retain(|_, v| !v.is_empty());
+
         let mut touched_widgets = Vec::new();
         for (widget_name, publishes) in self.widget_registry.active_publishes.iter_mut() {
             let before = publishes.len();
-            publishes.retain(|r| r.publisher_namespace != namespace);
+            publishes.retain(|r| r.lease_id != Some(lease_id));
             if publishes.len() != before {
                 touched_widgets.push(widget_name.clone());
             }
         }
-        // Remove empty entries for cleanliness
         self.widget_registry
             .active_publishes
             .retain(|_, v| !v.is_empty());

@@ -556,7 +556,7 @@ async fn publish_zone(ctx: &ToolCtx<'_>, zone: &str, p: PublishParams) -> McpRes
         return Ok(ok_with_expiry((ttl_ms > 0).then_some(delay_ms + ttl_ms)));
     }
     scene
-        .publish_to_zone_with_lease(zone, content, &ns, p.key, ttl_us)
+        .publish_to_zone_with_lease(zone, content, &ns, lease_id, p.key, ttl_us)
         .map_err(|e| scene_error(&e))?;
     Ok(ok_with_expiry((ttl_ms > 0).then_some(ttl_ms)))
 }
@@ -580,11 +580,11 @@ async fn publish_widget(ctx: &ToolCtx<'_>, widget: &str, p: PublishParams) -> Mc
             json_to_widget_param_value(value, name, &scene, widget)?,
         );
     }
-    ensure_lease(ctx, &mut scene)?;
+    let lease_id = ensure_lease(ctx, &mut scene)?;
     let ttl_ms = p.ttl_ms.unwrap_or(0);
     let expires = (ttl_ms > 0).then(|| now_us(&scene).saturating_add(ttl_ms * 1_000));
     scene
-        .publish_to_widget(widget, typed, &ns, p.key, 0, expires)
+        .publish_to_widget_for_lease(widget, typed, &ns, p.key, 0, expires, Some(lease_id))
         .map_err(|e| scene_error(&e))?;
     Ok(ok_with_expiry((ttl_ms > 0).then_some(ttl_ms)))
 }

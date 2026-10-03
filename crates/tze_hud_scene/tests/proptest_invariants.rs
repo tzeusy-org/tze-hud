@@ -388,6 +388,7 @@ proptest! {
             graph.zone_registry.active_publishes.insert(
                 zone_name.clone(),
                 vec![ZonePublishRecord {
+                    lease_id: None,
                     zone_name: zone_name.clone(),
                     publisher_namespace: "agent.alpha".into(),
                     content: ZoneContent::StreamText("hello world".into()),

@@ -1139,6 +1139,7 @@ async fn test_list_elements_request_supports_filters_and_override_metadata() {
                 "list-zone",
                 ZoneContent::StreamText("hello".to_string()),
                 "agent-list",
+                bootstrap_lease,
                 None,
                 None,
             )

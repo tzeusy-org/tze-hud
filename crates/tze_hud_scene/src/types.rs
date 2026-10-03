@@ -2353,6 +2353,10 @@ pub struct ZonePublishRecord {
     /// indexing time (e.g., `bp as usize`).
     #[serde(default)]
     pub breakpoints: Vec<u64>,
+    /// The lease this publication was made under. A terminal lease clears
+    /// exactly the publications carrying its id; `None` belongs to no lease.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lease_id: Option<SceneId>,
 }
 
 /// A zone instance — zone type bound to a specific tab.
@@ -2601,6 +2605,9 @@ pub struct WidgetPublishRecord {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expires_at_wall_us: Option<u64>,
     pub transition_ms: u32,
+    /// The lease this publication was made under (see `ZonePublishRecord`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lease_id: Option<SceneId>,
 }
 
 /// Resolved occupancy state for a widget instance after contention policy.

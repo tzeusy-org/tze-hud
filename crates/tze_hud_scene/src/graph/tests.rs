@@ -824,7 +824,7 @@ fn test_visible_tiles_sorted_by_z_order() {
 
 // ─── Zone tests ───────────────────────────────────────────────────────
 
-fn make_subtitle_zone() -> ZoneDefinition {
+pub(super) fn make_subtitle_zone() -> ZoneDefinition {
     ZoneDefinition {
         id: SceneId::new(),
         name: "subtitle".to_string(),

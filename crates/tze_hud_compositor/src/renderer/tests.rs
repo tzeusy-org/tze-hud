@@ -7082,6 +7082,7 @@ fn test_update_publication_animations_seeds_fresh_state() {
 
     // Test fallback: when NotificationPayload.ttl_ms is None, use zone default.
     let record_no_ttl = ZonePublishRecord {
+        lease_id: None,
         zone_name: "notification-area".to_string(),
         publisher_namespace: "agent-b".to_string(),
         content: ZoneContent::Notification(NotificationPayload {
@@ -7639,6 +7640,7 @@ fn test_publication_ttl_ms_uses_expires_at_wall_us() {
     // Warning notification (urgency 2): published at t=0, expires at t=15s.
     // Expected: 15_000 ms - 150 ms fade = 14_850 ms until fade starts.
     let record_warning = ZonePublishRecord {
+        lease_id: None,
         zone_name: "alert-banner".to_string(),
         publisher_namespace: "agent-warn".to_string(),
         content: ZoneContent::Notification(NotificationPayload {
@@ -7664,6 +7666,7 @@ fn test_publication_ttl_ms_uses_expires_at_wall_us() {
     // Critical notification (urgency 3): published at t=0, expires at t=30s.
     // Expected: 30_000 ms - 150 ms fade = 29_850 ms until fade starts.
     let record_critical = ZonePublishRecord {
+        lease_id: None,
         zone_name: "alert-banner".to_string(),
         publisher_namespace: "agent-crit".to_string(),
         content: ZoneContent::Notification(NotificationPayload {
@@ -7689,6 +7692,7 @@ fn test_publication_ttl_ms_uses_expires_at_wall_us() {
     // expires_at_wall_us takes priority over per-notification ttl_ms.
     // published=1s, expires=16s → duration=15s → 15_000 - 150 = 14_850 ms until fade.
     let record_both = ZonePublishRecord {
+        lease_id: None,
         zone_name: "alert-banner".to_string(),
         publisher_namespace: "agent-both".to_string(),
         content: ZoneContent::Notification(NotificationPayload {
@@ -7713,6 +7717,7 @@ fn test_publication_ttl_ms_uses_expires_at_wall_us() {
 
     // Info notification (urgency 1, no expires_at): falls back to ttl_ms then zone default.
     let record_info = ZonePublishRecord {
+        lease_id: None,
         zone_name: "alert-banner".to_string(),
         publisher_namespace: "agent-info".to_string(),
         content: ZoneContent::Notification(NotificationPayload {
