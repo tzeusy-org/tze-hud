@@ -323,7 +323,6 @@ Then open TigerVNC Viewer and connect to:
 localhost:5901
 ```
 
-
 To stop VNC on Linux:
 
 ```bash

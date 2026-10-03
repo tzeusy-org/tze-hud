@@ -103,7 +103,7 @@ the MCP port with its PSK as the bearer:
 | `GET /admin/logs?tail=N` | `text/plain`, the last N lines (default 100, max 2000) across the rotation |
 | `GET /admin/screenshot` | `image/png` of the HUD's own frame at the window size (what the compositor draws, not an OS capture); rendered once per request, so idle cost is unchanged. One at a time (429), 503 if the compositor does not answer within 3 s |
 | `POST /admin/restart` | 202 `{"restarting":true}`, then the HUD relaunches itself (see below). POST only; the request body is ignored. 429 `BUSY` while one is in progress |
-| `POST /admin/update` | `{"channel":"dev"}`, `"stable"` (latest release) or a tag such as `"v1.2.3"`. Downloads, verifies and installs a signed release (see Update below). 200 `{"up_to_date":true}`, 202 `{"updating":true,"sha":...}`, 400 `UPDATE_FAILED` for a bad body or channel, 409 `NOT_INSTALLED`, 429 `BUSY`, 502 `UPDATE_FAILED` |
+| `POST /admin/update` | `{"channel":"dev"}`, `"stable"` (latest release) or a tag such as `"v1.2.3"`. Downloads, verifies and installs a signed release (see Update below). 200 `{"up_to_date":true}`, 202 `{"updating":true,"sha":...}`, 400 `UPDATE_FAILED` for a bad body or channel, 409 `NOT_INSTALLED`, 429 `BUSY`, 502 `UPDATE_FAILED`, 503 `UNAVAILABLE` |
 
 The same calls are wrapped by `python3 .claude/skills/user-test/scripts/hud_admin.py`
 (`status`, `logs --tail N`, `screenshot -o FILE`, `update --channel dev`,
@@ -127,7 +127,7 @@ to do.
 | `NOT_INSTALLED` | 409 | `/admin/update` on a copy that is not the installed one |
 | `UPDATE_FAILED` | 400, 502 | bad channel, or download, signature, channel or handoff failure (cause in the log) |
 | `BUSY` | 429 | a screenshot, restart or update is already running |
-| `UNAVAILABLE` | 503 | no display, compositor silent for 3 s, capture failed, restart could not start, or `/pair` could not save `agents.toml` (a new code is shown) |
+| `UNAVAILABLE` | 503 | no display, compositor silent for 3 s, capture failed, restart or update could not start, or `/pair` could not save `agents.toml` (a new code is shown) |
 | `TOO_LARGE` | 422 | the frame exceeds the screenshot size limit |
 
 ## Update
