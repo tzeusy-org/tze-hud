@@ -302,9 +302,8 @@ struct WindowedRuntimeState {
     /// `dispatch_character_event`) reads this flag with `Ordering::Acquire` to check
     /// safe-mode capture without ever acquiring the async Tokio `SharedState` mutex.
     ///
-    /// Writers (`SafeModeController::enter_safe_mode` / `exit_safe_mode`) update
-    /// both `SharedState.safe_mode_active` (under the mutex) and this AtomicBool
-    /// (also under the mutex, with `Ordering::Release`).
+    /// Writers (`shell::safe_mode::enter_safe_mode` / `exit_safe_mode`) store
+    /// it under the `SharedState` mutex with `Ordering::Release`.
     safe_mode_atomic: Arc<std::sync::atomic::AtomicBool>,
     /// Lock-free mirror of `scene.active_tab` for the winit event thread.
     ///
@@ -313,11 +312,9 @@ struct WindowedRuntimeState {
     /// instead of `try_lock`ing the scene Tokio mutex, so composer keystroke
     /// echo is never starved by gRPC scene-mutation batches (hud-dwcr7).
     active_tab_mirror: Arc<std::sync::Mutex<Option<tze_hud_scene::SceneId>>>,
-    /// Shared chrome state — read by `ChromeRenderer`, written by `SafeModeController`.
-    ///
-    /// Created at runtime startup alongside `shared_state`.  Passed to
-    /// `SafeModeController` so the hotkey bridge can enter/exit safe mode
-    /// without going through the gRPC path.
+    /// Shared chrome state — its `safe_mode_active` flag drives the overlay.
+    /// Written by the safe-mode functions the hotkey bridge calls, so safe mode
+    /// can be entered/exited without going through the gRPC path.
     chrome_state: Arc<std::sync::RwLock<crate::shell::ChromeState>>,
     /// Runtime system card / toast slot. Runtime-owned and never in the scene
     /// graph, so agents cannot observe it; setting it wakes the render loop.

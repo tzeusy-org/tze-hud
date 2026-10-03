@@ -1,112 +1,30 @@
-//! System shell subsystem.
+//! System shell: runtime-owned state that agents never see or address.
 //!
-//! The system shell owns the chrome layer — the set of UI elements that are ALWAYS
-//! rendered on top of all agent content and are NEVER accessible to agents.
+//! The shell owns the human-override semantics. Viewer dismiss, safe mode, and
+//! freeze work without any agent's cooperation and cannot be vetoed.
 //!
-//! The shell layer also implements human-override semantics: chrome sovereignty,
-//! safe mode, freeze, and disconnection badges.
+//! - `chrome.rs`: tab slots, safe-mode flag, keyboard shortcuts, viewer dismiss.
+//! - `safe_mode.rs`: suspend/resume every agent's leases.
+//! - `freeze.rs`: freeze queue semantics.
+//! - `system_card.rs`: the runtime's own toast/status card.
 //!
-//! # Sovereignty contract
-//!
-//! - Chrome renders above all agent tiles in every frame (background → content → chrome).
-//! - No agent API exposes any chrome element or viewer context.
-//! - Shell state transitions are the SOLE owner of chrome layer governance.
-//! - The shell is the **sole** owner of `OverrideState` transitions (freeze, safe mode).
-//!   No other subsystem may write these fields.
-//! - Override controls are local, frame-bounded, unconditional, and cannot be vetoed.
-//!
-//! # Badges (Shell #5)
-//!
-//! Disconnection badges and backpressure signals are handled by [`badges`]. The
-//! shell is the sole owner of badge rendering. Badge state is owned by the
-//! `badges` subsystem (per-tile [`badges::TileBadgeState`] and frame-level
-//! [`badges::BadgeFrame`]) and consumed by the chrome render pass.
-//! Agents are never notified of badge state. See `badges.rs`.
-//!
-//! See `chrome.rs` for chrome layer implementation.
-//! See `freeze.rs` for freeze semantics.
+//! The safe-mode overlay and other chrome pixels are drawn by the compositor's
+//! windowed frame, never by this module.
 
-pub mod badges;
-pub mod chrome;
-pub mod freeze;
-pub mod safe_mode;
-pub mod system_card;
+pub(crate) mod chrome;
+// Freeze is unwired in production; hud-bstmy.5.6 decides delete-or-wire. Drop
+// this expectation (and the dead items) with that decision.
+#[expect(dead_code, reason = "freeze is never activated; see hud-bstmy.5.6")]
+pub(crate) mod freeze;
+pub(crate) mod safe_mode;
+// The card producers (pairing, update and event toasts) are not wired yet; this
+// expectation fails to compile once they are, which is the cue to drop it.
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "card producers are not wired yet")
+)]
+pub(crate) mod system_card;
 
-pub use chrome::{
-    // Agent exclusion
-    AgentVisibleTopology,
-    AuditPayload,
-    AuditTrigger,
-    // Layout
-    ChromeLayout,
-    // Rendering
-    ChromeRenderer,
-    // Keyboard
-    ChromeShortcut,
-    // Core state
-    ChromeState,
-    ChromeTab,
-    CollectingAuditSink,
-    // Diagnostics
-    DiagnosticSnapshot,
-    // Dismiss / override
-    DismissTileResult,
-    NoopAuditSink,
-    RevokeReason,
-    SafeModeEntryReason,
-    // Audit
-    ShellAuditEvent,
-    ShellAuditSink,
-    ShortcutResult,
-    SystemHealth,
-    TabBarPosition,
-    collect_diagnostic,
-    dismiss_tile,
-    handle_shortcut,
-    strip_chrome_from_topology,
-};
-pub use safe_mode::{
-    // Results
-    LeaseResumeInfo,
-    // Controller
-    SafeModeController,
-    SafeModeEntryResult,
-    SafeModeExitResult,
-    // Input handling
-    SafeModeInput,
-    SafeModeInputResult,
-    // Core state
-    ShellOverrideState,
-    classify_safe_mode_input,
-};
-// ChromeDrawCmd lives in tze_hud_compositor to avoid circular dependencies.
-pub use tze_hud_compositor::ChromeDrawCmd;
-
-pub use freeze::{
-    DEFAULT_AUTO_UNFREEZE_MS, DEFAULT_FREEZE_QUEUE_CAPACITY, EnqueueResult, FreezeManager,
-    FreezeQueue, FreezeState, MutationTrafficClass, QUEUE_PRESSURE_FRACTION, QueuedMutation,
-    classify_mutation_batch,
-};
-
-pub use badges::{
-    BUDGET_WARNING_AMBER_COLOR,
-    BUDGET_WARNING_BORDER_OPACITY,
-    BUDGET_WARNING_BORDER_PX,
-    // Backpressure signals
-    BackpressureSignal,
-    // Frame-level badge snapshot
-    BadgeFrame,
-    DISCONNECTED_BADGE_OPACITY,
-    // Rendering constants
-    DISCONNECTED_CONTENT_OPACITY,
-    DISCONNECTION_BADGE_BG_COLOR,
-    DISCONNECTION_BADGE_ICON_COLOR,
-    DISCONNECTION_BADGE_OFFSET_PX,
-    DISCONNECTION_BADGE_SIZE_PX,
-    DISCONNECTION_CONTENT_SCRIM_COLOR,
-    // Media-disconnection badge (B11)
-    // Per-tile badge state (written by control plane, read by chrome render pass)
-    TileBadgeState,
-    // Draw command builders
-    build_badge_cmds,
+pub(crate) use chrome::{
+    ChromeShortcut, ChromeState, ChromeTab, DismissTileResult, dismiss_tile, handle_shortcut,
 };

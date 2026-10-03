@@ -40,8 +40,7 @@ effect even when agents are hung. Agents never see or address chrome, and
 shell state exposes no portal identity or transcript.
 
 - `tze_hud_runtime` `shell::safe_mode` `test_enter_safe_mode_suspends_active_leases`,
-  `test_mutations_rejected_via_shared_state_flag`,
-  `test_overlay_renders_from_chrome_state_only_after_critical_error`
+  `test_mutations_rejected_via_shared_state_flag`
 - `tze_hud_runtime` `windowed::safe_mode_toggle`
   `hotkey_event_enters_safe_mode_and_suspends_leases` (global hotkey, default
   Ctrl+Shift+F12, `[runtime].safe_mode_hotkey`)
