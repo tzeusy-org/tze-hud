@@ -67,7 +67,6 @@ pub fn section_classification(_section_path: &str) -> FieldClassification {
 pub const FROZEN_SECTIONS: &[&str] = &[
     "runtime",
     "tabs",
-    "display_profile",
     "includes",
     "design_tokens",
     "widget_runtime_assets",
@@ -116,7 +115,6 @@ pub fn check_frozen_section_changes(
 
     check_frozen_field!(runtime, "runtime");
     check_frozen_field!(tabs, "tabs");
-    check_frozen_field!(display_profile, "display_profile");
     check_frozen_field!(design_tokens, "design_tokens");
     check_frozen_field!(widget_runtime_assets, "widget_runtime_assets");
 
@@ -278,10 +276,6 @@ name = "Main"
         );
         assert_eq!(section_classification("tabs"), FieldClassification::Frozen);
         assert_eq!(
-            section_classification("display_profile"),
-            FieldClassification::Frozen
-        );
-        assert_eq!(
             section_classification("includes"),
             FieldClassification::Frozen
         );
@@ -331,12 +325,7 @@ name = "Main"
         // config unchanged.
         let bad_config = r#"
 [runtime]
-profile = "custom"
-
-[display_profile]
-extends = "full-display"
-target_fps = 15
-min_fps = 30
+profile = "mobile"
 
 [[tabs]]
 name = "Tab1"
@@ -350,8 +339,8 @@ name = "Tab1"
         assert!(
             errors
                 .iter()
-                .any(|e| matches!(e.code, ConfigErrorCode::InvalidFpsRange)),
-            "should return CONFIG_INVALID_FPS_RANGE, got: {errors:?}"
+                .any(|e| matches!(e.code, ConfigErrorCode::UnknownProfile)),
+            "should return the unknown-profile error, got: {errors:?}"
         );
     }
 

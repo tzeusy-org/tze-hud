@@ -24,7 +24,6 @@ pub mod validation;
 
 // ── v1 subsystem trait contracts ─────────────────────────────────────────────
 pub mod config;
-pub mod events;
 pub mod lease;
 
 pub use clock::{Clock, SimulatedClock, SystemClock, TestClock};

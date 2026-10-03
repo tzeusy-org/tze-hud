@@ -22,23 +22,15 @@ pub enum ConfigErrorCode {
     NoTabs,
     DuplicateTabName,
     MultipleDefaultTabs,
-    UnknownLayout,
     UnknownProfile,
-    HeadlessNotExtendable,
-    ProfileExtendsConflictsWithProfile,
-    ProfileBudgetEscalation,
-    /// Resident-memory class ceilings do not fit within the aggregate ceiling.
-    ProfileResidentBudgetInvalid,
-    ProfileCapabilityEscalation,
     UnknownZoneType,
     UnknownAllowEntry,
-    InvalidEventName,
     /// `[agents]` in the config file; agents live in `agents.toml` (pairing).
     AgentsInConfigFile,
+    /// `[display_profile]` in the config file; only the built-in profiles exist.
+    DisplayProfileNotSupported,
     /// An `agents.toml` `psk_sha256` is not 64 hex characters.
     InvalidPskHash,
-    InvalidReservedFraction,
-    InvalidFpsRange,
     ConfigIncludesNotSupported,
     /// `[widget_bundles].paths` entry does not exist on disk.
     WidgetBundlePathNotFound,
@@ -87,8 +79,7 @@ pub struct ParseError {
 ///
 /// This mirrors `tze_hud_compositor::overflow::DEFAULT_MAX_TRUNCATION_INPUT_BYTES`:
 /// the compositor's `TruncationCache` falls back to this same value when no
-/// profile-supplied bound is applied, so an unset `[display_profile]` preserves
-/// the historical 4096-byte behaviour. The value sits well below the ~8 KiB
+/// profile-supplied bound is applied. The value sits well below the ~8 KiB
 /// point where the `overflow_truncate` benchmark first exceeds the Stage-5
 /// Layout Resolve budget (< 1 ms).
 pub const DEFAULT_MAX_TRUNCATION_INPUT_BYTES: u32 = 4096;
@@ -123,15 +114,20 @@ pub struct DisplayProfile {
     /// shaped input to a viewport-adjacent window of whole source lines
     /// (spec.md §324/§331).
     ///
-    /// Operators tune this per surface via `[display_profile]
-    /// max_truncation_input_bytes`: lower it on constrained hosts to keep a
-    /// single uncached truncation inside the Stage-5 Layout Resolve budget, or
-    /// raise it on capable hosts that can afford shaping a larger committed
-    /// transcript. Defaults to [`DEFAULT_MAX_TRUNCATION_INPUT_BYTES`].
+    /// Both built-in profiles use [`DEFAULT_MAX_TRUNCATION_INPUT_BYTES`].
     pub max_truncation_input_bytes: u32,
 }
 
 impl DisplayProfile {
+    /// Looks up a built-in profile by its `[runtime].profile` name.
+    pub fn builtin(name: &str) -> Option<Self> {
+        match name {
+            "full-display" => Some(Self::full_display()),
+            "headless" => Some(Self::headless()),
+            _ => None,
+        }
+    }
+
     /// Returns the `full-display` profile defaults.
     pub fn full_display() -> Self {
         DisplayProfile {
@@ -196,7 +192,6 @@ pub struct ResolvedConfig {
 /// - Accept only TOML with parse errors including line/column.
 /// - Search configuration file chain (CLI → env → cwd → XDG) in order.
 /// - Enforce built-in profile budget values exactly.
-/// - Prevent budget escalation in custom profiles.
 /// - Reject `[agents]` (agents live in `agents.toml`).
 /// - Collect ALL validation errors before reporting.
 /// - Reject `includes` fields (post-v1 reserved).
@@ -260,5 +255,32 @@ mod tests {
         assert_eq!(p.max_agent_update_hz, 60);
         assert_eq!(p.target_fps, 60);
         assert_eq!(p.min_fps, 1);
+    }
+
+    #[test]
+    fn built_in_resident_classes_exactly_partition_the_aggregate() {
+        for profile in [DisplayProfile::full_display(), DisplayProfile::headless()] {
+            let class_total = u64::from(profile.max_resource_resident_mb)
+                + u64::from(profile.max_widget_asset_resident_mb)
+                + u64::from(profile.max_widget_raster_cache_mb)
+                + u64::from(profile.max_font_resident_mb);
+            assert_eq!(
+                class_total,
+                u64::from(profile.max_runtime_resident_mb),
+                "{} class ceilings must exactly partition the aggregate",
+                profile.name
+            );
+        }
+    }
+
+    #[test]
+    fn only_full_display_and_headless_are_built_in() {
+        assert_eq!(
+            DisplayProfile::builtin("headless"),
+            Some(DisplayProfile::headless())
+        );
+        assert!(DisplayProfile::builtin("full-display").is_some());
+        assert!(DisplayProfile::builtin("auto").is_none());
+        assert!(DisplayProfile::builtin("custom").is_none());
     }
 }

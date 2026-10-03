@@ -569,18 +569,6 @@ pub struct Tab {
     pub name: String,
     pub display_order: u32,
     pub created_at_ms: u64,
-    /// Optional bare event name that triggers automatic tab activation.
-    ///
-    /// Per scene-events/spec.md §9.1–§9.4 (Requirement: tab_switch_on_event Contract):
-    /// - Names a scene-level event that triggers automatic activation of this tab.
-    /// - Agent events match against the bare name (before namespace prefixing) for
-    ///   agent-independence: "doorbell.ring" fires for ANY agent emitting "doorbell.ring".
-    /// - System events (system.* prefix) are excluded from matching.
-    /// - Successful switch generates ActiveTabChangedEvent (event_type "scene.tab.active_changed").
-    ///
-    /// Set to `None` to disable event-triggered tab switching for this tab.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tab_switch_on_event: Option<String>,
 }
 
 /// Per-agent resource envelope enforced by the budget enforcement ladder.

@@ -183,7 +183,7 @@ impl SceneGraph {
         }
         for anchor in anchors {
             if let Some(tile) = self.tiles.get(&anchor) {
-                // Clamp the band to the tile so a tiny frame never over-extends.
+                // Clamp the band to the tile so a tiny frame never overshoots.
                 let h = band_h.min(tile.bounds.height).max(1.0);
                 out.push((
                     anchor,
