@@ -396,6 +396,10 @@ impl Compositor {
         // value at the call site.
         self.append_resize_grip_vertices(scene, &mut vertices, sw, sh);
 
+        // ── Disconnection badge on orphaned tiles (invariant 4) ────────────────
+        // Colored/sized from `tile.disconnect_badge.*`; reads `Tile::visual_hint`.
+        self.append_disconnect_badge_vertices(scene, &mut vertices, sw, sh);
+
         // Update zone animation states (fade-in/fade-out) before rendering.
         self.update_zone_animations(scene);
         // §6.3 portal transition: advance per-portal-tile fade animations

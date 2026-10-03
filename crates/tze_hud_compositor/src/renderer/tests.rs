@@ -658,6 +658,62 @@ async fn test_resize_grip_swaps_to_hover_color_for_hovered_tile() {
     );
 }
 
+/// hud-jm8nq.12: an orphaned tile (agent disconnected, within grace) emits a
+/// token-colored disconnection badge quad; resuming the lease clears it.
+/// Draw-list-level assertion (no pixel readback).
+#[tokio::test]
+async fn orphaned_tile_emits_disconnection_badge_draw_cmd() {
+    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(400, 300).await);
+    compositor.overlay_mode = true;
+
+    let mut scene = SceneGraph::new(400.0, 300.0);
+    let tab_id = scene.create_tab("agent", 0).unwrap();
+    let lease_id = scene.grant_lease("agent", 60_000);
+    scene
+        .create_tile(
+            tab_id,
+            "agent",
+            lease_id,
+            Rect::new(50.0, 40.0, 300.0, 200.0),
+            1,
+        )
+        .unwrap();
+
+    let badge_verts = |compositor: &Compositor, scene: &SceneGraph| {
+        let mut verts: Vec<crate::pipeline::RectVertex> = Vec::new();
+        compositor.append_disconnect_badge_vertices(scene, &mut verts, 400.0, 300.0);
+        verts
+    };
+
+    assert!(
+        badge_verts(&compositor, &scene).is_empty(),
+        "a live tile must not show the disconnection badge"
+    );
+
+    scene.disconnect_lease(&lease_id, 1_000).unwrap();
+    let verts = badge_verts(&compositor, &scene);
+    assert_eq!(verts.len(), 6, "orphaned tile must emit one badge quad");
+    let tokens =
+        crate::renderer::token_colors::resolve_disconnect_badge_tokens(&compositor.token_map);
+    let expected = compositor.gpu_color_raw(tokens.color);
+    assert!(expected[3] > 0.0, "badge default alpha must be visible");
+    for v in &verts {
+        assert!(
+            v.color
+                .iter()
+                .zip(expected.iter())
+                .all(|(a, b)| (a - b).abs() < 1e-3),
+            "badge must carry the token-driven color"
+        );
+    }
+
+    scene.reconnect_lease(&lease_id, 2_000).unwrap();
+    assert!(
+        badge_verts(&compositor, &scene).is_empty(),
+        "resuming within grace must clear the badge"
+    );
+}
+
 /// hud-k6yvb: a TILE-LEVEL focus owner (a non-passthrough tile with no focusable
 /// nodes) must get a visible ring around the whole tile from the chrome pass —
 /// the case #988 could not draw because tile-level focus has no scene state.
