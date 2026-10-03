@@ -10,7 +10,6 @@ pub mod idle_efficiency;
 pub mod invalidation_closure;
 pub mod publish_load;
 pub mod record;
-pub mod resource_monitor;
 pub mod validation;
 
 pub use collector::{FrameRecorder, TelemetryCollector};
@@ -44,10 +43,6 @@ pub use publish_load::{
 pub use record::{
     DegradationDirection, DegradationEvent, DegradationRecoverySource, FrameTelemetry,
     LatencyBucket, SessionSummary,
-};
-pub use resource_monitor::{
-    AgentFootprint, GrowthRatios, MutationAccountant, ResourceMonitor, ResourceSnapshot,
-    SPEC_GROWTH_TOLERANCE,
 };
 pub use validation::{
     AssertionOutcome, BudgetAssertion, CalibrationDimension, HardwareFactors, ValidationReport,

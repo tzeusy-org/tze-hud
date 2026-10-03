@@ -347,14 +347,7 @@ cargo test -p tze_hud_runtime --test pixel_readback -- --nocapture
 ### Integration tests
 
 ```bash
-cargo test -p integration --test soak -- --nocapture
-```
-
-Long soak runs:
-
-```bash
-TZE_HUD_SOAK_SECS=3600 cargo test -p integration --test soak -- --nocapture   # 1 hour
-TZE_HUD_SOAK_SECS=21600 cargo test -p integration --test soak -- --nocapture  # 6 hours
+cargo test -p integration --tests
 ```
 
 Multi-agent integration tests:

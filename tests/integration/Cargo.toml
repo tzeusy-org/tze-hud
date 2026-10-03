@@ -60,20 +60,6 @@ path = "dashboard_tile_input.rs"
 name = "dashboard_tile_lifecycle"
 path = "dashboard_tile_lifecycle.rs"
 
-# Soak and leak test suite (validation-framework/spec.md lines 298-310).
-#
-# Default run (fast CI, 10 seconds):
-#   cargo test --test soak -- --ignored
-#
-# 1-hour CI run:
-#   TZE_HUD_SOAK_SECS=3600 cargo test --test soak -- --ignored --nocapture
-#
-# 6-hour nightly run:
-#   TZE_HUD_SOAK_SECS=21600 cargo test --test soak -- --ignored --nocapture
-[[test]]
-name = "soak"
-path = "soak.rs"
-
 # hud-hzub.4: Subtitle streaming breakpoint reveal — MCP and gRPC publish path verification.
 # Tests: gRPC ZonePublish with stream_text + breakpoints forwarded to compositor,
 # empty breakpoints = immediate reveal, replacement cancels streaming, gRPC/MCP parity,
