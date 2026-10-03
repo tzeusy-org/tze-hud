@@ -2116,31 +2116,6 @@ impl ComposerDraftManager {
     pub fn is_active(&self) -> bool {
         self.draft.is_some()
     }
-
-    /// Inject clipboard paste text into the active draft buffer.
-    ///
-    /// Sanitises the input (strips CR, LF, and control characters per spec §4.4)
-    /// and routes the result through `draft.paste()`. If no composer is currently
-    /// focused, returns `(EditOutcome::Unchanged, None)` without side effects.
-    ///
-    /// The batch return value is always `None` — notifications are coalesced via
-    /// the scheduler and delivered at the next `try_flush` settle point, matching
-    /// the `route_character` pattern.
-    pub fn inject_paste(&mut self, text: &str) -> (EditOutcome, Option<DraftNotificationBatch>) {
-        let Some(draft) = self.draft.as_mut() else {
-            return (EditOutcome::Unchanged, None);
-        };
-        // Sanitise: strip CR, LF, and control characters (spec §4.4)
-        let sanitised: String = text
-            .chars()
-            .filter(|c| *c != '\r' && *c != '\n' && !c.is_control())
-            .collect();
-        let outcome = draft.paste(&sanitised);
-        if matches!(outcome, EditOutcome::Mutated | EditOutcome::AtCapacity) {
-            self.scheduler.push_notification(draft.snapshot());
-        }
-        (outcome, None)
-    }
 }
 
 fn is_enter_key(key_code: &str, key: &str) -> bool {
@@ -4046,68 +4021,5 @@ mod tests {
 
         let (outcome, _) = mgr.route_character("x");
         assert_eq!(outcome, EditOutcome::Suspended);
-    }
-
-    // ─── inject_paste ──────────────────────────────────────────────────────────
-
-    #[test]
-    fn inject_paste_routes_to_draft() {
-        let mut mgr = ComposerDraftManager::new();
-        let node_id = tze_hud_scene::SceneId::new();
-        mgr.on_focus_gained(node_id, false);
-        let (outcome, batch) = mgr.inject_paste("hello world");
-        assert_eq!(outcome, EditOutcome::Mutated);
-        assert!(batch.is_none(), "inject_paste uses coalesced path");
-        let flush = mgr.try_flush().expect("flush delivers paste");
-        let snap = flush.latest.as_ref().unwrap();
-        assert_eq!(snap.text, "hello world");
-    }
-
-    #[test]
-    fn inject_paste_strips_control_chars() {
-        let mut mgr = ComposerDraftManager::new();
-        let node_id = tze_hud_scene::SceneId::new();
-        mgr.on_focus_gained(node_id, false);
-        let (outcome, _) = mgr.inject_paste("line1\nline2\r\nline3");
-        assert_eq!(outcome, EditOutcome::Mutated);
-        let flush = mgr.try_flush().expect("flush");
-        let snap = flush.latest.as_ref().unwrap();
-        assert_eq!(snap.text, "line1line2line3", "newlines must be stripped");
-    }
-
-    #[test]
-    fn inject_paste_respects_capacity() {
-        let mut mgr = ComposerDraftManager::new();
-        let node_id = tze_hud_scene::SceneId::new();
-        mgr.on_focus_gained(node_id, false);
-        let cap = DEFAULT_DRAFT_CAP;
-        let big = "x".repeat(cap + 100);
-        let (outcome, _) = mgr.inject_paste(&big);
-        assert_eq!(outcome, EditOutcome::AtCapacity);
-        let flush = mgr.try_flush().expect("flush");
-        let snap = flush.latest.as_ref().unwrap();
-        assert!(snap.text.len() <= cap, "injected text must respect cap");
-        assert!(snap.at_capacity);
-    }
-
-    #[test]
-    fn inject_paste_no_active_composer_returns_unchanged() {
-        let mut mgr = ComposerDraftManager::new();
-        let (outcome, batch) = mgr.inject_paste("hello");
-        assert_eq!(outcome, EditOutcome::Unchanged);
-        assert!(batch.is_none());
-    }
-
-    #[test]
-    fn inject_paste_multibyte_safe() {
-        let mut mgr = ComposerDraftManager::new();
-        let node_id = tze_hud_scene::SceneId::new();
-        mgr.on_focus_gained(node_id, false);
-        let (outcome, _) = mgr.inject_paste("café au lait 🍵");
-        assert_eq!(outcome, EditOutcome::Mutated);
-        let flush = mgr.try_flush().expect("flush");
-        let snap = flush.latest.as_ref().unwrap();
-        assert_eq!(snap.text, "café au lait 🍵");
-        assert!(snap.text.is_char_boundary(snap.cursor));
     }
 }

@@ -7,8 +7,7 @@
 //! ## Architecture decision (hud-6k06b)
 //!
 //! The projection authority is hosted in-process rather than as a stdio
-//! subprocess. The stdio binary (`projection_authority`) and its tests remain
-//! as the component harness; this driver is the production integration path.
+//! subprocess. This driver is the production integration path.
 //!
 //! ## Drain loop (spec §3.2 / §3.3)
 //!
@@ -59,11 +58,11 @@ pub use tze_hud_mcp::portal_op::{
 use tze_hud_projection::{
     AcknowledgeInputRequest, AdapterDraftBatch, AdapterDraftCancel, AdapterDraftNotification,
     AdapterDraftSubmission, AdapterGeometrySnapshot, AdapterPortalRect, AttachRequest,
-    CleanupAuthority, CleanupRequest, ContentClassification, DetachRequest, GetPendingInputRequest,
-    HudConnectionMetadata, InputAckState, ListProjectionsRequest, OperationEnvelope, OutputKind,
-    PendingInputItem, PortalInputFeedback, ProjectedPortalPolicy, ProjectionAuthority,
-    ProjectionBounds, ProjectionErrorCode, ProjectionLifecycleState, ProjectionOperation,
-    ProviderKind, PublishOutputRequest, PublishStatusRequest,
+    ContentClassification, DetachRequest, GetPendingInputRequest, HudConnectionMetadata,
+    InputAckState, ListProjectionsRequest, OperationEnvelope, OutputKind, PendingInputItem,
+    PortalInputFeedback, ProjectedPortalPolicy, ProjectionAuthority, ProjectionBounds,
+    ProjectionErrorCode, ProjectionLifecycleState, ProjectionOperation, ProviderKind,
+    PublishOutputRequest, PublishStatusRequest,
     resident_grpc::{
         ResidentGrpcPortalAdapter, ResidentGrpcPortalCommandKind, ResidentGrpcPortalConfig,
         portal_visual_tokens_from_part_tokens,
@@ -139,7 +138,7 @@ const PORTAL_Z_ORDER: u32 = 160;
 /// presentation pipeline (whole-HUD freeze, one core pegged ~98%). The loop is
 /// normally work-conserving and terminates when the coalescer is drained, but a
 /// divergence between the session map and the coalescer (e.g. an orphaned
-/// coalescer entry whose session was removed by operator cleanup — hud-bsr7u)
+/// coalescer entry whose session was removed without purging it — hud-bsr7u)
 /// could make `next_due_projection_id` return the same id forever.
 ///
 /// This cap is a defense-in-depth backstop: even if a future divergence
@@ -309,16 +308,6 @@ fn lifecycle_state_wire(state: ProjectionLifecycleState) -> String {
     }
 }
 
-/// Parse a snake_case cleanup authority string into [`CleanupAuthority`].
-///
-/// Accepted spellings match the projection contract enum exactly (`owner`,
-/// `operator`). Rejection happens before reaching the authority so malformed MCP
-/// requests cannot be silently treated as owner or operator cleanup.
-fn parse_cleanup_authority(raw: &str) -> Result<CleanupAuthority, String> {
-    serde_json::from_value(serde_json::Value::String(raw.to_string()))
-        .map_err(|_| format!("invalid cleanup_authority {raw:?}: expected owner or operator"))
-}
-
 fn adapter_draft_batch_from_runtime(batch: &DraftNotificationBatch) -> AdapterDraftBatch {
     AdapterDraftBatch {
         latest: batch
@@ -390,8 +379,7 @@ struct DriveEntry {
     /// difference so a scrolled-back viewport stays stable (spec §3.3 /
     /// hud-pkg2g, hud-66i1s).
     ///
-    /// This is the height-only condition, mirroring the fix in
-    /// `projection_authority.rs` (hud-hkaw2 / PR #779).
+    /// This is the height-only condition (hud-hkaw2 / PR #779).
     prev_content_height_px: f32,
     /// Whether the driver has latched this projection's upstream as ungracefully
     /// dropped (hud-5i16d).
@@ -461,8 +449,7 @@ struct DriveEntry {
 
 /// In-process state for the portal projection drive loop.
 ///
-/// This is the runtime-side equivalent of `PortalDriveState` in the stdio
-/// projection_authority binary. It holds one `ResidentGrpcPortalAdapter` per
+/// It holds one `ResidentGrpcPortalAdapter` per
 /// attached projection session plus tile-to-scene mapping.
 struct InProcessPortalDriveState {
     /// Per-projection drive entries keyed by `projection_id`.
@@ -1018,37 +1005,6 @@ impl InProcessPortalDriver {
         Some(result.feedback)
     }
 
-    /// Ingest a composer submission that arrived over the resident gRPC bridge for
-    /// `projection_id` (hud-omfqi).
-    ///
-    /// A bridged portal tile is materialised by the bridge's own gRPC session, so
-    /// its viewer keystrokes never reach [`Self::submit_composer_batch_for_tile`]
-    /// (which resolves by in-process tile id). Instead the bridge routes the
-    /// submitted text back here, and this routes it through the SAME adapter →
-    /// [`ProjectionAuthority`] sink a non-bridged submission reaches (echo viewer
-    /// entry + enqueue pending input), so the driving session sees it.
-    ///
-    /// Returns `None` when no projection with an adapter is attached for
-    /// `projection_id` (already detached).
-    pub fn ingest_bridged_composer_submit(
-        &mut self,
-        projection_id: &str,
-        text: String,
-        submitted_at_wall_us: u64,
-        content_classification: ContentClassification,
-    ) -> Option<PortalInputFeedback> {
-        let entry = self.drive.entries.get_mut(projection_id)?;
-        let result = entry.adapter.submit_composer_text(
-            &mut self.authority,
-            projection_id,
-            text,
-            submitted_at_wall_us,
-            None,
-            content_classification,
-        );
-        Some(result.feedback)
-    }
-
     /// Apply a new design-token override map, propagating to all live adapters.
     ///
     pub fn apply_token_map(&mut self, overrides: DesignTokenMap) {
@@ -1561,64 +1517,6 @@ impl InProcessPortalDriver {
                         reply.send(Err(PortalOpRejection::new(error_code, resp.status_summary)));
                 }
             }
-
-            PortalOp::Cleanup {
-                projection_id,
-                cleanup_authority,
-                owner_token,
-                operator_authority,
-                reason,
-                reply,
-            } => {
-                let cleanup_authority = match parse_cleanup_authority(&cleanup_authority) {
-                    Ok(authority) => authority,
-                    Err(reason) => {
-                        let _ = reply.send(Err(PortalOpRejection::new(
-                            ProjectionErrorCode::ProjectionInvalidArgument,
-                            reason,
-                        )));
-                        return;
-                    }
-                };
-                let request_id = uuid::Uuid::now_v7().to_string();
-                let req = CleanupRequest {
-                    envelope: OperationEnvelope {
-                        operation: ProjectionOperation::Cleanup,
-                        projection_id: projection_id.clone(),
-                        request_id,
-                        client_timestamp_wall_us: now_us.max(1),
-                    },
-                    cleanup_authority,
-                    owner_token,
-                    operator_authority,
-                    reason,
-                };
-                let resp = self
-                    .authority
-                    .handle_cleanup(req, MCP_PORTAL_CALLER_IDENTITY, now_us);
-                if resp.accepted {
-                    // Cleanup purges authority state through either owner-token or
-                    // operator-authority paths. Drop driver-side state as well so
-                    // stale projected-session tiles are not rendered after cleanup.
-                    self.detach_projection(&projection_id);
-                    tracing::info!(
-                        proj_id = %projection_id,
-                        "portal_op: Cleanup accepted — drive entry dropped"
-                    );
-                    let _ = reply.send(Ok(()));
-                } else {
-                    let error_code = resp
-                        .error_code
-                        .unwrap_or(ProjectionErrorCode::ProjectionInternalError);
-                    tracing::warn!(
-                        proj_id = %projection_id,
-                        error_code = %error_code,
-                        "portal_op: Cleanup denied"
-                    );
-                    let _ =
-                        reply.send(Err(PortalOpRejection::new(error_code, resp.status_summary)));
-                }
-            }
         }
     }
 
@@ -1797,7 +1695,7 @@ impl InProcessPortalDriver {
                     // Projection not found or expired. `take_due_portal_update`
                     // returns early on the session lookup BEFORE it consumes the
                     // coalescer entry, so an orphaned entry (session gone but
-                    // coalescer still pending — e.g. operator cleanup, hud-bsr7u)
+                    // coalescer still pending — e.g. a session-only purge, hud-bsr7u)
                     // would otherwise be returned again by the next
                     // `next_due_projection_id` and busy-spin this loop forever.
                     // Discard the coalescer entry here so it cannot recur, then
@@ -2098,8 +1996,7 @@ impl InProcessPortalDriver {
                         }
                     }
 
-                    // Compute append geometry (mirrors drain_and_emit_portal_updates in
-                    // projection_authority.rs §1316-1363).
+                    // Compute append geometry.
                     //
                     // line_height_px  = transcript_font_size_px × PORTAL_LINE_HEIGHT_MULTIPLIER
                     // new_content_h   = total_rendered_lines × line_height_px
@@ -2205,9 +2102,8 @@ impl InProcessPortalDriver {
                     // The previous dual-condition (bytes_shrank && height_shrank) was
                     // overly restrictive: it would miss a height shrink that occurred
                     // without a corresponding byte-count decrease (e.g., a many-newline
-                    // unit evicted by a flat unit of equal or greater byte count).  This
-                    // mirrors the fix applied to projection_authority.rs in PR #779
-                    // (hud-hkaw2).
+                    // unit evicted by a flat unit of equal or greater byte count).  See
+                    // PR #779 (hud-hkaw2).
                     let prev_height = entry.prev_content_height_px;
                     if new_content_height_px < prev_height {
                         let removed_px = prev_height - new_content_height_px;
@@ -2269,14 +2165,6 @@ impl InProcessPortalDriver {
                     if state.geometry_batch.is_some() {
                         self.authority.consume_geometry_batch(&proj_id);
                     }
-                }
-
-                ResidentGrpcPortalCommandKind::ReleaseLease => {
-                    // ReleaseLease: no content notification needed.
-                    tracing::debug!(
-                        proj_id = %proj_id,
-                        "portal drain: ReleaseLease — no notify required"
-                    );
                 }
             }
 
@@ -5135,9 +5023,7 @@ mod tests {
     /// consecutive `RenderPortal` drains, even when `visible_transcript_bytes` does
     /// NOT shrink (or grows).
     ///
-    /// This is the runtime-path counterpart to the CLI-path test
-    /// `head_trim_geometry_emitted_when_height_shrinks_without_byte_shrink` in
-    /// `projection_authority.rs` (PR #779 / hud-hkaw2).
+    /// Regression guard for PR #779 / hud-hkaw2.
     ///
     /// The old dual-condition (`bytes_shrank && height_shrank`) would miss the
     /// case where a many-newline unit is evicted by a flat unit of equal or
@@ -5493,8 +5379,8 @@ mod tests {
 
     /// Regression guard (hud-bsr7u): the drain loop must TERMINATE when the
     /// coalescer holds a pending entry for a projection whose session is gone
-    /// (session/coalescer divergence — e.g. operator cleanup that purged only
-    /// the session).
+    /// (session/coalescer divergence — e.g. a purge that removed only the
+    /// session).
     ///
     /// Mechanism of the original freeze:
     ///   1. `next_due_projection_id` returns the orphaned id (pending entry set).
@@ -5517,7 +5403,7 @@ mod tests {
         let tab_id = scene.create_tab("Main", 0).unwrap();
 
         // Inject an orphaned coalescer entry: a pending snapshot with NO session
-        // backing it (the abnormal divergence state operator-cleanup used to leave).
+        // backing it (the abnormal divergence state a session-only purge used to leave).
         driver
             .authority_mut()
             .inject_orphan_coalescer_entry_for_test("proj-orphan");
@@ -5553,28 +5439,19 @@ mod tests {
         );
     }
 
-    /// Regression guard (hud-bsr7u): operator cleanup performed through the
+    /// Regression guard (hud-bsr7u): detaching a projection through the
     /// driver's hosted authority leaves the coalescer with no pending entry, and
     /// a subsequent drain terminates cleanly.
     ///
-    /// This exercises the full path the live freeze took: cooperative attach →
-    /// publish_output (seeds a coalescer pending entry) → operator cleanup →
-    /// drain. With the layer-1 fix the coalescer is already clear at cleanup
-    /// time; with the layer-2 fix the drain would still terminate even if it
-    /// weren't. Together they guarantee no busy-spin.
+    /// Path: cooperative attach → publish_output (seeds a coalescer pending
+    /// entry) → detach → drain. The authority purges the coalescer at detach
+    /// time; the drain-loop `Err` arm and iteration cap are the backstops.
     #[test]
-    fn operator_cleanup_then_drain_does_not_spin() {
-        use tze_hud_projection::{CleanupAuthority, CleanupRequest};
-
+    fn detach_then_drain_does_not_spin() {
         let mut driver = InProcessPortalDriver::new();
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let mut processor = InputProcessor::new();
         let tab_id = scene.create_tab("Main", 0).unwrap();
-
-        driver
-            .authority_mut()
-            .set_operator_authority("operator-secret")
-            .unwrap();
 
         let token = attach_and_get_token(&mut driver, "proj-op");
         driver.attach_projection("proj-op", Vec::new());
@@ -5587,30 +5464,26 @@ mod tests {
             "precondition: publish seeds a pending coalescer entry"
         );
 
-        // Operator cleanup — the live freeze trigger.
-        let resp = driver.authority_mut().handle_cleanup(
-            CleanupRequest {
+        let resp = driver.authority_mut().handle_detach(
+            DetachRequest {
                 envelope: OperationEnvelope {
-                    operation: ProjectionOperation::Cleanup,
+                    operation: ProjectionOperation::Detach,
                     projection_id: "proj-op".to_string(),
-                    request_id: "req-op-cleanup".to_string(),
+                    request_id: "req-detach".to_string(),
                     client_timestamp_wall_us: 1,
                 },
-                cleanup_authority: CleanupAuthority::Operator,
-                owner_token: None,
-                operator_authority: Some("operator-secret".to_string()),
-                reason: "operator override".to_string(),
+                owner_token: token,
+                reason: "done".to_string(),
             },
-            "operator",
+            "caller",
             200,
         );
-        assert!(resp.accepted, "operator cleanup must be accepted");
+        assert!(resp.accepted, "detach must be accepted");
 
-        // Layer-1: coalescer already purged at cleanup time.
         assert_eq!(
             driver.authority_mut().coalescer_pending_portal_count(),
             0,
-            "hud-bsr7u layer-1: operator cleanup must purge the coalescer entry"
+            "hud-bsr7u: detach must purge the coalescer entry"
         );
 
         // Drain must terminate (no busy-spin) and remain idle.
@@ -5618,7 +5491,7 @@ mod tests {
         driver.drain_inner(&mut scene, &mut processor, Some(tab_id), now);
         assert!(
             driver.authority_mut().next_due_projection_id().is_none(),
-            "hud-bsr7u: no portal may remain due after operator cleanup + drain"
+            "hud-bsr7u: no portal may remain due after detach + drain"
         );
     }
 
@@ -7526,147 +7399,6 @@ mod tests {
                 .is_some(),
             "default deployment (bridge not installed) must be byte-for-byte \
              unchanged: projections still materialise in-process"
-        );
-    }
-
-    #[test]
-    fn dispatch_portal_op_operator_cleanup_purges_authority_and_drive_state() {
-        let mut driver = InProcessPortalDriver::new();
-        driver
-            .authority_mut()
-            .set_operator_authority("operator-secret")
-            .expect("operator credential must configure");
-        let proj = "proj-cleanup";
-
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        driver.dispatch_portal_op(PortalOp::Attach {
-            projection_id: proj.to_string(),
-            display_name: "Cleanup Test".to_string(),
-            idempotency_key: None,
-            provider_kind: None,
-            content_classification: None,
-            workspace_hint: None,
-            repository_hint: None,
-            icon_profile_hint: None,
-            hud_target: None,
-            reply: tx,
-        });
-        rx.blocking_recv()
-            .expect("attach reply must arrive")
-            .expect("attach must be accepted");
-        assert!(
-            driver.authority_mut().has_projection(proj),
-            "projection must exist before cleanup"
-        );
-        assert!(
-            driver.drive.entries.contains_key(proj),
-            "dispatch attach must create a driver entry"
-        );
-
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        driver.dispatch_portal_op(PortalOp::Cleanup {
-            projection_id: proj.to_string(),
-            cleanup_authority: "operator".to_string(),
-            owner_token: None,
-            operator_authority: Some("operator-secret".to_string()),
-            reason: "operator override".to_string(),
-            reply: tx,
-        });
-        rx.blocking_recv()
-            .expect("cleanup reply must arrive")
-            .expect("operator cleanup must be accepted");
-
-        assert!(
-            !driver.authority_mut().has_projection(proj),
-            "operator cleanup must purge authority state"
-        );
-        assert!(
-            !driver.drive.entries.contains_key(proj),
-            "operator cleanup must drop the driver entry"
-        );
-    }
-
-    #[test]
-    fn dispatch_portal_op_operator_cleanup_removes_projection_tile_on_next_drain() {
-        let mut driver = InProcessPortalDriver::new();
-        driver
-            .authority_mut()
-            .set_operator_authority("operator-secret")
-            .expect("operator credential must configure");
-        let proj = "proj-cleanup-tile";
-        let token = attach_and_get_token(&mut driver, proj);
-        driver.attach_projection(proj, Vec::new());
-
-        let mut scene = SceneGraph::new(1920.0, 1080.0);
-        let tab_id = scene.create_tab("Main", 0).unwrap();
-        let mut processor = InputProcessor::new();
-
-        publish(&mut driver, proj, &token, "line before cleanup", 100);
-        driver.drain_inner(&mut scene, &mut processor, Some(tab_id), 200);
-        let tile_id = driver
-            .drive
-            .entries
-            .get(proj)
-            .expect("drive entry must exist")
-            .tile_scene_id
-            .expect("drain must create a portal tile");
-        let lease_id = driver
-            .drive
-            .entries
-            .get(proj)
-            .and_then(|entry| entry.scene_lease_id)
-            .expect("materialised projection must own a lease");
-        assert!(
-            scene.tiles.contains_key(&tile_id),
-            "precondition: projected tile must exist before cleanup"
-        );
-        assert!(
-            scene.tile_scroll_config(tile_id).is_some(),
-            "precondition: projected tile must have scroll state before cleanup"
-        );
-
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        driver.dispatch_portal_op(PortalOp::Cleanup {
-            projection_id: proj.to_string(),
-            cleanup_authority: "operator".to_string(),
-            owner_token: None,
-            operator_authority: Some("operator-secret".to_string()),
-            reason: "operator override".to_string(),
-            reply: tx,
-        });
-        rx.blocking_recv()
-            .expect("cleanup reply must arrive")
-            .expect("operator cleanup must be accepted");
-        assert!(
-            !driver.drive.entries.contains_key(proj),
-            "accepted cleanup must drop the drive entry immediately"
-        );
-        assert!(
-            scene.tiles.contains_key(&tile_id),
-            "tile removal is queued until the next drain has scene access"
-        );
-
-        driver.drain_inner(&mut scene, &mut processor, Some(tab_id), 300);
-
-        assert!(
-            !scene.tiles.contains_key(&tile_id),
-            "accepted cleanup must remove the projection tile on the next drain"
-        );
-        assert!(
-            scene.tile_scroll_config(tile_id).is_none(),
-            "accepted cleanup must clear scene scroll config for the projection tile"
-        );
-        assert!(
-            !scene.tile_follow_tail_at_tail(tile_id),
-            "accepted cleanup must clear follow-tail scene state for the projection tile"
-        );
-        assert!(
-            scene.drain_removed_tile_ids().contains(&tile_id),
-            "accepted cleanup must publish a removed-tile notification for external state pruning"
-        );
-        assert!(
-            !scene.lease_is_active(&lease_id),
-            "accepted cleanup must revoke the detached projection's lease"
         );
     }
 

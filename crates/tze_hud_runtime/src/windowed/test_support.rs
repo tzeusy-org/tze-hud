@@ -220,91 +220,10 @@ pub(super) fn portal_scene_with_focus() -> (SceneGraph, SceneId, SceneId, FocusM
 #[cfg(test)]
 mod tests {
     use super::super::keyboard::PendingKeyboardEvent;
-    use super::super::portal::build_portal_projection_driver;
     use super::super::*;
     use super::{make_shared_state, make_test_zone, scene_with_composer_in_nonactive_tab};
     use tze_hud_scene::HitResult;
     use tze_hud_scene::types::ZoneInteractionKind;
-
-    #[test]
-    fn build_portal_projection_driver_configures_operator_authority() {
-        use tze_hud_projection::{
-            AttachRequest, CleanupAuthority, CleanupRequest, ContentClassification,
-            OperationEnvelope, ProjectionErrorCode, ProjectionOperation, ProviderKind,
-        };
-
-        let cfg = WindowedConfig {
-            projection_operator_authority: Some("operator-secret".to_string()),
-            ..WindowedConfig::default()
-        };
-        let mut driver = build_portal_projection_driver(&cfg)
-            .expect("configured operator authority should build a portal driver");
-        let projection_id = "projection-runtime-configured-operator";
-        let attach = driver.authority_mut().handle_attach(
-            AttachRequest {
-                envelope: OperationEnvelope {
-                    operation: ProjectionOperation::Attach,
-                    projection_id: projection_id.to_string(),
-                    request_id: "attach-runtime-configured-operator".to_string(),
-                    client_timestamp_wall_us: 1,
-                },
-                provider_kind: ProviderKind::Other,
-                display_name: "Runtime Configured Operator".to_string(),
-                workspace_hint: None,
-                repository_hint: None,
-                icon_profile_hint: None,
-                content_classification: ContentClassification::Private,
-                hud_target: None,
-                idempotency_key: None,
-            },
-            "test-caller",
-            1_000,
-        );
-        assert!(attach.accepted, "attach precondition must be accepted");
-
-        let denied = driver.authority_mut().handle_cleanup(
-            CleanupRequest {
-                envelope: OperationEnvelope {
-                    operation: ProjectionOperation::Cleanup,
-                    projection_id: projection_id.to_string(),
-                    request_id: "bad-operator-cleanup".to_string(),
-                    client_timestamp_wall_us: 1,
-                },
-                cleanup_authority: CleanupAuthority::Operator,
-                owner_token: None,
-                operator_authority: Some("wrong-secret".to_string()),
-                reason: "operator override".to_string(),
-            },
-            "operator",
-            2_000,
-        );
-        assert!(!denied.accepted, "wrong operator authority must be denied");
-        assert_eq!(
-            denied.error_code,
-            Some(ProjectionErrorCode::ProjectionUnauthorized)
-        );
-
-        let accepted = driver.authority_mut().handle_cleanup(
-            CleanupRequest {
-                envelope: OperationEnvelope {
-                    operation: ProjectionOperation::Cleanup,
-                    projection_id: projection_id.to_string(),
-                    request_id: "good-operator-cleanup".to_string(),
-                    client_timestamp_wall_us: 1,
-                },
-                cleanup_authority: CleanupAuthority::Operator,
-                owner_token: None,
-                operator_authority: Some("operator-secret".to_string()),
-                reason: "operator override".to_string(),
-            },
-            "operator",
-            3_000,
-        );
-        assert!(
-            accepted.accepted,
-            "configured operator authority must allow operator cleanup"
-        );
-    }
 
     /// Regression (hud-dwcr7): composer keystroke echo must apply to the draft
     /// even while the scene mutex is held by a gRPC mutation batch.

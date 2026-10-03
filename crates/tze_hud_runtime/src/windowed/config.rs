@@ -71,11 +71,6 @@ pub struct WindowedConfig {
     /// Paired agents (loaded from `agents.toml`), shared live by gRPC and
     /// MCP. Empty means no agent can authenticate until one is paired.
     pub agents: tze_hud_scene::config::SharedAgents,
-    /// Optional operator-authority credential for cooperative projection cleanup.
-    ///
-    /// When unset, owner cleanup remains available through owner tokens, while
-    /// operator cleanup stays fail-closed with `PROJECTION_UNAUTHORIZED`.
-    pub projection_operator_authority: Option<String>,
     /// Target frames per second.  Default: 60.
     pub target_fps: u32,
     /// Raw TOML content of the configuration file, if one was loaded.
@@ -127,7 +122,6 @@ impl Default for WindowedConfig {
             grpc_port: 50051,
             mcp_port: 9090,
             agents: Default::default(),
-            projection_operator_authority: None,
             target_fps: 60,
             config_toml: None,
             config_file_path: None,
@@ -155,10 +149,6 @@ mod tests {
             "no agent is paired by default"
         );
         assert!(cfg.benchmark.is_none());
-        assert!(
-            cfg.projection_operator_authority.is_none(),
-            "operator cleanup must stay fail-closed unless explicitly configured"
-        );
     }
 
     /// Default `WindowedConfig` must have `overlay_auto_size = true` so that

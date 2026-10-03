@@ -33,11 +33,5 @@ There is no other dialect: bare tool-name methods return `-32601`.
   authority as `handled`.
 - The authority's transcript window is in-memory presentation state; durable
   history belongs to the session.
-- Operator cleanup, accent, unread counts, and composer state are runtime
+- Accent, unread counts, and composer state are runtime
   internals with no MCP surface (decision 4 in `docs/api.md`).
-
-## Component harness (testing only)
-
-`cargo run -p tze_hud_projection --bin tze_hud_projection_authority -- --stdio --caller-identity codex-local`
-runs the authority in an isolated process for protocol tests and audit-record
-inspection. Its output never reaches the screen.

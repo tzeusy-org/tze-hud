@@ -54,12 +54,6 @@ use crate::overflow::{self, TruncationResult, TruncationViewport};
 /// lacks a parsed `MarkdownTokens` (e.g. zone items, the legacy `TextItem`
 /// constructor). A design-token map may override it per-tile via
 /// `typography.line_height.multiplier`.
-///
-/// Cross-ref: `PORTAL_LINE_HEIGHT_MULTIPLIER` in
-/// `crates/tze_hud_projection/src/bin/projection_authority.rs` mirrors this
-/// value. The projection binary does not depend on `tze_hud_compositor`, so it
-/// cannot import this constant; if you change the value here, update that
-/// constant in the same PR.
 pub const LINE_HEIGHT_MULTIPLIER: f32 = 1.4;
 
 // ─── TruncationCache ─────────────────────────────────────────────────────────
@@ -2059,10 +2053,6 @@ pub struct TextItem {
     ///
     /// Resolved from the `typography.line_height.multiplier` design token via
     /// [`ParsedMarkdown::line_height_multiplier`].  Default `1.4`.
-    ///
-    /// Cross-ref: `PORTAL_LINE_HEIGHT_MULTIPLIER` in
-    /// `crates/tze_hud_projection/src/bin/projection_authority.rs` mirrors this
-    /// value. If you change the default, update that constant in the same PR.
     pub line_height_multiplier: f32,
 }
 

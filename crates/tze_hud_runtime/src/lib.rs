@@ -49,7 +49,6 @@ pub(crate) mod mutation_budget_bridge;
 pub(crate) mod net_addrs;
 pub mod operator;
 pub(crate) mod pipeline;
-pub(crate) mod portal_cadence;
 pub mod portal_projection_driver;
 pub mod portal_tokens;
 pub(crate) mod runtime_context;
@@ -70,11 +69,6 @@ pub use idle_efficiency::{IdleEfficiencyCounters, RuntimeWakeupSource};
 pub use mcp::{McpServerConfig, start_mcp_http_server};
 pub use pipeline::{
     INPUT_TO_NEXT_PRESENT_BUDGET_US, STAGE3_BUDGET_US, STAGE4_BUDGET_US, STAGE5_BUDGET_US,
-};
-pub use portal_cadence::{
-    CADENCE_BURST_BYTES, CADENCE_BURST_WINDOW_MS, CADENCE_MIN_INCREMENTS_PER_SEC,
-    CADENCE_MIN_SCALARS_PER_SEC, CADENCE_SUSTAINED_SECS, CadenceWorkload, FairnessProbe,
-    MAX_PORTAL_SNAPSHOT_BYTES, PortalCadenceCoalescer,
 };
 pub use shell::chrome::{ChromeState, collect_diagnostic};
 pub use shell::{

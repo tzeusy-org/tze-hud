@@ -601,7 +601,6 @@ pub enum ResidentGrpcPortalCommandKind {
     CreatePortalTile,
     ReusePortalTile,
     RenderPortal,
-    ReleaseLease,
 }
 
 /// One outbound `HudSession` client message plus adapter-local budget evidence.
@@ -893,51 +892,6 @@ impl ResidentGrpcPortalAdapter {
         )
     }
 
-    /// Move the compact affordance. The next collapsed render publishes this
-    /// geometry through `PublishToTile`, reusing the existing content-layer tile.
-    pub fn move_compact_to(&mut self, x: f32, y: f32) {
-        self.config.compact_bounds.x = x;
-        self.config.compact_bounds.y = y;
-    }
-
-    /// Build the one-time `CreatePortalTile` command for a projection that has no
-    /// content-layer tile yet.
-    ///
-    /// Callers (`resident_grpc_bridge`, `projection_authority`) only invoke this
-    /// when `tile_id().is_none()`; once the tile exists, every subsequent render
-    /// goes through [`render_portal_message`](Self::render_portal_message), so
-    /// there is no reuse path here.
-    pub fn ensure_portal_tile_message(
-        &self,
-        state: &ProjectedPortalState,
-        sequence: u64,
-        timestamp_wall_us: u64,
-    ) -> Result<ResidentGrpcPortalCommand, ResidentGrpcAdapterError> {
-        let started = Instant::now();
-        let payload =
-            session_proto::client_message::Payload::MutationBatch(session_proto::MutationBatch {
-                batch_id: new_scene_id_bytes(),
-                lease_id: self.config.lease_id.clone(),
-                mutations: vec![proto::MutationProto {
-                    mutation: Some(proto::mutation_proto::Mutation::CreateTile(
-                        proto::CreateTileMutation {
-                            tab_id: Vec::new(),
-                            bounds: Some(self.bounds_for_state(state)),
-                            z_order: self.config.z_order,
-                        },
-                    )),
-                }],
-                timing: None,
-            });
-        Ok(self.command(
-            ResidentGrpcPortalCommandKind::CreatePortalTile,
-            sequence,
-            timestamp_wall_us,
-            payload,
-            started,
-        ))
-    }
-
     /// Render expanded/collapsed projected state into the existing resident
     /// portal tile, including current geometry and input mode.
     pub fn render_portal_message(
@@ -959,29 +913,6 @@ impl ResidentGrpcPortalAdapter {
             session_proto::client_message::Payload::MutationBatch(batch),
             started,
         ))
-    }
-
-    /// Clear the portal tile (`Clear{tile:<id>}`), releasing its lease so the
-    /// runtime removes it through the normal lease cleanup path.
-    pub fn release_lease_message(
-        &self,
-        sequence: u64,
-        timestamp_wall_us: u64,
-    ) -> ResidentGrpcPortalCommand {
-        let started = Instant::now();
-        self.command(
-            ResidentGrpcPortalCommandKind::ReleaseLease,
-            sequence,
-            timestamp_wall_us,
-            session_proto::client_message::Payload::Clear(session_proto::Clear {
-                surface: self
-                    .tile_id()
-                    .and_then(|id| <[u8; 16]>::try_from(id).ok())
-                    .map(|id| format!("tile:{}", uuid_string(id)))
-                    .unwrap_or_default(),
-            }),
-            started,
-        )
     }
 
     // ── Draft notification methods (hud-5jbra.4) ─────────────────────────
@@ -1147,8 +1078,7 @@ impl ResidentGrpcPortalAdapter {
     /// Build the portal-content `MutationBatch` for the given projected state.
     ///
     /// This is the single render path shared by both adapter families: the
-    /// gRPC/wire family wraps it in a `ClientMessage` (`ensure_portal_tile_message`
-    /// / `render_portal_message`) and sends it over the session stream, while the
+    /// gRPC/wire family wraps it in a `ClientMessage` (`render_portal_message`) and sends it over the session stream, while the
     /// in-process cooperative driver applies it directly to the `SceneGraph` via
     /// `tze_hud_protocol::convert::apply_portal_render_batch_to_scene`. It is
     /// `pub` so the runtime driver can ask the adapter to render content rather
@@ -2056,19 +1986,6 @@ impl ResidentGrpcPortalAdapter {
             budget: sample_budget(started, RESIDENT_PORTAL_UPDATE_BUILD_BUDGET_US),
         }
     }
-}
-
-/// Hyphenated lowercase UUID text for 16 big-endian id bytes.
-fn uuid_string(b: [u8; 16]) -> String {
-    let h: String = b.iter().map(|x| format!("{x:02x}")).collect();
-    format!(
-        "{}-{}-{}-{}-{}",
-        &h[0..8],
-        &h[8..12],
-        &h[12..16],
-        &h[16..20],
-        &h[20..32]
-    )
 }
 
 /// Render the portal body markdown with ambient per-turn timestamps OFF.

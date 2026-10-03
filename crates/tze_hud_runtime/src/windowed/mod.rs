@@ -214,7 +214,7 @@ pub use self::network::render_attach_info;
 use self::network::{
     build_runtime_context, render_startup_banner, start_network_services_with_render_wake,
 };
-use self::portal::{PortalProjectionDrain, build_portal_projection_driver};
+use self::portal::PortalProjectionDrain;
 use self::wake::{
     Deadline, RuntimeWakeEvent, WindowedWake, control_flow_for_deadlines, deadline_from_wall_us,
 };
@@ -2663,7 +2663,8 @@ impl WindowedRuntime {
             global_hotkey::spawn_global_hotkey(runtime_context.safe_mode_hotkey, toggle_tx);
         }
 
-        let portal_projection_driver = build_portal_projection_driver(&cfg)?;
+        let portal_projection_driver =
+            crate::portal_projection_driver::InProcessPortalDriver::new();
 
         let app_state = WindowedRuntimeState {
             config: cfg,

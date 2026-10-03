@@ -5,11 +5,6 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
-[[bin]]
-name = "tze_hud_projection_authority"
-path = "src/bin/projection_authority.rs"
-required-features = ["resident-grpc"]
-
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -17,8 +12,6 @@ thiserror = { workspace = true }
 blake3 = { workspace = true }
 getrandom = { workspace = true }
 subtle = { workspace = true }
-tracing = { workspace = true }
-tracing-subscriber = { workspace = true, features = ["env-filter", "json"] }
 tze_hud_config = { path = "../tze_hud_config", version = "0.1.0", optional = true }
 tze_hud_protocol = { path = "../tze_hud_protocol", version = "0.1.0", optional = true }
 uuid = { workspace = true, optional = true }
@@ -28,7 +21,6 @@ default = []
 # Enable the resident gRPC projection driver (tze_hud_protocol + tze_hud_config + uuid).
 # Note: tze_hud_runtime always enables this feature (`features = ["resident-grpc"]`)
 # so in practice it is unconditionally active whenever the runtime is linked.
-# Also required by the `tze_hud_projection_authority` binary.
 resident-grpc = ["dep:tze_hud_config", "dep:tze_hud_protocol", "dep:uuid"]
 
 [dev-dependencies]
