@@ -170,7 +170,6 @@ fn batch_is_transactional(batch: &EventBatch) -> bool {
                 input_envelope::Event::PointerMove(_)
                     | input_envelope::Event::PointerEnter(_)
                     | input_envelope::Event::PointerLeave(_)
-                    | input_envelope::Event::Gesture(_)
                     | input_envelope::Event::ScrollOffsetChanged(_)
                     | input_envelope::Event::ComposerDraftState(_)
             )

@@ -107,8 +107,8 @@ message ServerMessage {
     Heartbeat             heartbeat              = 33;
 
     // Event batch (defined in events.proto; RFC 0004 §8.3, §8.4, RFC 0005 §3.1)
-    // Carries per-frame InputEnvelope variants (pointer, keyboard, focus, capture, gesture,
-    // IME, scroll, command events). Variants are filtered per RFC 0005 §7.1 before delivery.
+    // Carries per-frame InputEnvelope variants (pointer, keyboard, focus, capture,
+    // scroll, command events). Variants are filtered per RFC 0005 §7.1 before delivery.
     tze_hud.protocol.v1.EventBatch event_batch   = 34;
 
     // Scene-resource upload responses (RFC 0011 resident upload flow).
@@ -194,29 +194,16 @@ message LocalSocketCredential {
   string pid_hint    = 2;  // Caller PID hint (advisory, for logging only)
 }
 
-// OAuth 2.0 bearer token credential.
-// V1 schema defined; implementation deferred to post-v1.
-message OauthTokenCredential {
-  string bearer_token = 1;  // OAuth 2.0 bearer token
-  string token_type   = 2;  // e.g. "Bearer"
-}
-
-// Mutual TLS credential.
-// V1 schema defined; implementation deferred to post-v1.
-message MtlsCredential {
-  bytes  client_certificate_der = 1;  // DER-encoded client certificate
-  string expected_san           = 2;  // Expected Subject Alternative Name for verification
-}
-
 // Authentication credential oneof (RFC 0005 §1.4, DR-SP6).
-// V1 ships pre-shared key and local socket implementations only.
-// OauthToken and Mtls are schema-defined but implementation is v1-reserved.
+// Pre-shared key and local socket are the only credentials. Fields 3 and 4
+// (OAuth token, mTLS) had no verifier and were removed in T8.
 message AuthCredential {
+  reserved 3, 4;
+  reserved "oauth_token", "mtls";
+
   oneof credential {
     PreSharedKeyCredential  pre_shared_key    = 1;
     LocalSocketCredential   local_socket      = 2;
-    OauthTokenCredential    oauth_token       = 3;  // v1-reserved: schema only
-    MtlsCredential          mtls              = 4;  // v1-reserved: schema only
   }
 }
 

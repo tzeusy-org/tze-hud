@@ -7,16 +7,13 @@
 //! # V1 Auth Implementations
 //!
 //! Per RFC 0005 §1.4 and the v1-mandatory scope, two credential types are
-//! fully implemented:
+//! implemented:
 //!
 //! - `PreSharedKeyCredential` — matched against the server PSK.
 //! - `LocalSocketCredential` — accepted only when the peer address is a
 //!   loopback address (`127.0.0.0/8` or `::1`).  Non-loopback peers are
 //!   rejected with `AUTH_FAILED` (see `hud-1aswu.1`).
 //!
-//! `OauthTokenCredential` and `MtlsCredential` are schema-defined
-//! (proto messages exist) but their implementations are v1-reserved; they
-//! are rejected with `AUTH_FAILED` until a future release enables them.
 
 use std::net::IpAddr;
 
@@ -48,8 +45,6 @@ pub enum AuthResult {
     Accepted,
     /// Authentication failed. The reason string is sent in `SessionError`.
     Failed(String),
-    /// The credential type is not yet implemented (v1-reserved).
-    Unimplemented(String),
 }
 
 /// Evaluate a structured `AuthCredential` against the server configuration.
@@ -94,19 +89,6 @@ pub fn evaluate_auth_credential(
                         .to_string(),
                 ),
             }
-        }
-        Some(Credential::OauthToken(_)) => {
-            // v1-reserved: OauthTokenCredential schema exists but is not implemented.
-            AuthResult::Unimplemented(
-                "OauthTokenCredential is not implemented in v1; use PreSharedKeyCredential"
-                    .to_string(),
-            )
-        }
-        Some(Credential::Mtls(_)) => {
-            // v1-reserved: MtlsCredential schema exists but is not implemented.
-            AuthResult::Unimplemented(
-                "MtlsCredential is not implemented in v1; use PreSharedKeyCredential".to_string(),
-            )
         }
         None => {
             // Empty AuthCredential: treat as "no credential provided" — fail auth.
@@ -178,13 +160,6 @@ pub fn identify_session(
                     code: "AUTH_FAILED",
                     message,
                     hint: String::new(),
-                }),
-                AuthResult::Unimplemented(message) => Err(AuthRejection {
-                    code: "AUTH_FAILED",
-                    message,
-                    hint:
-                        r#"{"supported_v1": ["PreSharedKeyCredential", "LocalSocketCredential"]}"#
-                            .to_string(),
                 }),
             };
         }
@@ -424,36 +399,6 @@ mod tests {
                 "Expected AUTH_FAILED for ::ffff:127.0.0.1 (IPv4-mapped loopback, fail-closed), \
                  got: {other:?}"
             ),
-        }
-    }
-
-    #[test]
-    fn test_oauth_credential_unimplemented() {
-        use crate::proto::session::OauthTokenCredential;
-        let cred = AuthCredential {
-            credential: Some(Credential::OauthToken(OauthTokenCredential {
-                bearer_token: "token".to_string(),
-                token_type: "Bearer".to_string(),
-            })),
-        };
-        match evaluate_auth_credential(&cred, "secret", loopback_v4()) {
-            AuthResult::Unimplemented(_) => {}
-            other => panic!("Expected Unimplemented, got: {other:?}"),
-        }
-    }
-
-    #[test]
-    fn test_mtls_credential_unimplemented() {
-        use crate::proto::session::MtlsCredential;
-        let cred = AuthCredential {
-            credential: Some(Credential::Mtls(MtlsCredential {
-                client_certificate_der: vec![1, 2, 3],
-                expected_san: "test".to_string(),
-            })),
-        };
-        match evaluate_auth_credential(&cred, "secret", loopback_v4()) {
-            AuthResult::Unimplemented(_) => {}
-            other => panic!("Expected Unimplemented, got: {other:?}"),
         }
     }
 

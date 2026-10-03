@@ -10,9 +10,8 @@
 
 use tze_hud_protocol::proto::input_envelope::Event as EnvEvent;
 use tze_hud_protocol::proto::{
-    CaptureReleasedEvent, EventBatch, FocusGainedEvent, FocusLostEvent, GestureEvent,
-    ImeCompositionEndEvent, ImeCompositionStartEvent, ImeCompositionUpdateEvent, InputEnvelope,
-    KeyDownEvent, PointerDownEvent, PointerMoveEvent, PointerUpEvent,
+    CaptureReleasedEvent, EventBatch, FocusGainedEvent, FocusLostEvent, InputEnvelope,
+    KeyDownEvent, PointerDownEvent, PointerMoveEvent, PointerUpEvent, ScrollOffsetChangedEvent,
 };
 use tze_hud_protocol::subscriptions::{
     category, filter_event_batch, filter_subscriptions, is_focus_variant, is_input_variant,
@@ -92,16 +91,6 @@ fn degradation_notices_mandatory_cannot_be_removed() {
             .active
             .contains(&category::DEGRADATION_NOTICES.to_string()),
         "DEGRADATION_NOTICES must always be active (mandatory)"
-    );
-}
-
-/// LEASE_CHANGES is always active — mandatory subscription.
-#[test]
-fn lease_changes_mandatory_always_active() {
-    let result = filter_subscriptions(&[], &[]);
-    assert!(
-        result.active.contains(&category::LEASE_CHANGES.to_string()),
-        "LEASE_CHANGES must always be active (mandatory)"
     );
 }
 
@@ -241,56 +230,16 @@ fn all_focus_events_filtered_returns_none_for_input_only_subscriber() {
     );
 }
 
-/// IME events are classified as focus variants.
+/// Scroll events are input variants, not focus variants.
 #[test]
-fn ime_events_are_focus_variants_not_input_variants() {
-    let ime_start = InputEnvelope {
-        event: Some(EnvEvent::ImeCompositionStart(
-            ImeCompositionStartEvent::default(),
+fn scroll_is_input_variant() {
+    let scroll = InputEnvelope {
+        event: Some(EnvEvent::ScrollOffsetChanged(
+            ScrollOffsetChangedEvent::default(),
         )),
     };
-    let ime_update = InputEnvelope {
-        event: Some(EnvEvent::ImeCompositionUpdate(
-            ImeCompositionUpdateEvent::default(),
-        )),
-    };
-    let ime_end = InputEnvelope {
-        event: Some(EnvEvent::ImeCompositionEnd(
-            ImeCompositionEndEvent::default(),
-        )),
-    };
-    assert!(
-        is_focus_variant(&ime_start),
-        "IME start must be a focus variant"
-    );
-    assert!(
-        is_focus_variant(&ime_update),
-        "IME update must be a focus variant"
-    );
-    assert!(
-        is_focus_variant(&ime_end),
-        "IME end must be a focus variant"
-    );
-    assert!(
-        !is_input_variant(&ime_start),
-        "IME start must not be an input variant"
-    );
-}
-
-/// Gesture and scroll events are input variants, not focus variants.
-#[test]
-fn gesture_and_scroll_are_input_variants() {
-    let gesture = InputEnvelope {
-        event: Some(EnvEvent::Gesture(GestureEvent::default())),
-    };
-    assert!(
-        is_input_variant(&gesture),
-        "Gesture must be an input variant"
-    );
-    assert!(
-        !is_focus_variant(&gesture),
-        "Gesture must not be a focus variant"
-    );
+    assert!(is_input_variant(&scroll));
+    assert!(!is_focus_variant(&scroll));
 }
 
 /// Within-batch ordering is preserved after filtering.

@@ -8,7 +8,7 @@
 //!   - Session init with canonical capability names (`create_tiles`,
 //!     `modify_own_tiles`, `access_input_events`, `read_scene_topology`)
 //!   - Capability negotiation: shows granted vs denied capabilities
-//!   - Mandatory subscription categories: `LEASE_CHANGES`, `SCENE_TOPOLOGY`,
+//!   - Mandatory subscription categories: `DEGRADATION_NOTICES`, `SCENE_TOPOLOGY`,
 //!     `ZONE_EVENTS`
 //!   - Lease acquisition
 //!   - Structured error handling: capability denied, budget exceeded
@@ -267,8 +267,7 @@ async fn run_headless(dev_mode: bool) -> Result<(), Box<dyn std::error::Error>> 
     // with CONFIG_UNKNOWN_CAPABILITY — always use the canonical plural forms.
     //
     // Mandatory subscription categories (session-protocol/spec.md §Subscriptions):
-    // - LEASE_CHANGES: always delivered regardless of capability gating; demonstrates
-    //   spec requirement that agents MUST subscribe to lease state changes.
+    // - DEGRADATION_NOTICES: mandatory, always active regardless of capability gating.
     // - SCENE_TOPOLOGY: requires `read_scene_topology` capability.
     // - ZONE_EVENTS: requires any `publish_zone:<zone>` capability; not open to all.
     tx.send(session_proto::ClientMessage {
@@ -281,12 +280,8 @@ async fn run_headless(dev_mode: bool) -> Result<(), Box<dyn std::error::Error>> 
                 // the canonical vocabulary; non-canonical names are rejected with a
                 // CONFIG_UNKNOWN_CAPABILITY error and a hint pointing to the canonical
                 // replacement (see the structured error handling demo below).
-                // LEASE_CHANGES is mandatory (always active). Listing it in
-                // initial_subscriptions is spec-compliant and demonstrates
-                // that agents should explicitly declare their intent.
                 initial_subscriptions: vec![
                     "SCENE_TOPOLOGY".to_string(), // requires read_scene_topology
-                    "LEASE_CHANGES".to_string(),  // mandatory: always active
                     "ZONE_EVENTS".to_string(),    // requires publish_zone:<zone> capability
                 ],
                 resume_token: Vec::new(),
@@ -328,13 +323,13 @@ async fn run_headless(dev_mode: bool) -> Result<(), Box<dyn std::error::Error>> 
             );
 
             // Subscription negotiation:
-            // - LEASE_CHANGES: mandatory, always active regardless of capabilities
+            // - DEGRADATION_NOTICES: mandatory, always active regardless of capabilities
             // - SCENE_TOPOLOGY: active because agent has read_scene_topology
             // - ZONE_EVENTS: active because agent has publish_zone:status-bar
             let subs = &established.active_subscriptions;
             assert!(
-                subs.contains(&"LEASE_CHANGES".to_string()),
-                "LEASE_CHANGES must be active (mandatory category)"
+                subs.contains(&"DEGRADATION_NOTICES".to_string()),
+                "DEGRADATION_NOTICES must be active (mandatory category)"
             );
             assert!(
                 subs.contains(&"SCENE_TOPOLOGY".to_string()),
@@ -345,7 +340,7 @@ async fn run_headless(dev_mode: bool) -> Result<(), Box<dyn std::error::Error>> 
                 "ZONE_EVENTS must be active (agent has publish_zone:status-bar)"
             );
             println!(
-                "  Subscription negotiation: LEASE_CHANGES + SCENE_TOPOLOGY + ZONE_EVENTS active."
+                "  Subscription negotiation: DEGRADATION_NOTICES + SCENE_TOPOLOGY + ZONE_EVENTS active."
             );
 
             established.namespace.clone()
@@ -1821,12 +1816,12 @@ default_tab = true
 
     /// GIVEN an agent subscribes to SCENE_TOPOLOGY and ZONE_EVENTS without the required capabilities
     /// WHEN the runtime processes the SessionInit
-    /// THEN both gated subscriptions are denied while LEASE_CHANGES remains active (mandatory)
+    /// THEN both gated subscriptions are denied while DEGRADATION_NOTICES remains active (mandatory)
     ///
     /// Subscription gating (session-protocol/spec.md §Subscription Categories):
     /// - SCENE_TOPOLOGY requires `read_scene_topology` capability
     /// - ZONE_EVENTS requires any `publish_zone:<zone>` capability
-    /// - LEASE_CHANGES is mandatory: always active regardless of capabilities
+    /// - DEGRADATION_NOTICES is mandatory: always active regardless of capabilities
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_gated_subscriptions_denied_without_required_capabilities() {
         let toml = r#"
@@ -1871,10 +1866,9 @@ default_tab = true
                     agent_id: "restricted-agent".to_string(),
                     // Request SCENE_TOPOLOGY and ZONE_EVENTS without the required capabilities.
                     // This demonstrates the subscription gating behaviour: the agent will
-                    // receive LEASE_CHANGES (mandatory) but not the gated categories.
+                    // receive DEGRADATION_NOTICES (mandatory) but not the gated categories.
                     initial_subscriptions: vec![
                         "SCENE_TOPOLOGY".to_string(), // gated: denied (no read_scene_topology)
-                        "LEASE_CHANGES".to_string(),  // mandatory: always active
                         "ZONE_EVENTS".to_string(),    // gated: denied (no publish_zone:*)
                     ],
                     resume_token: Vec::new(),
@@ -1917,12 +1911,12 @@ default_tab = true
                      active: {:?}",
                     established.active_subscriptions
                 );
-                // LEASE_CHANGES must be active: it is mandatory regardless of capabilities.
+                // DEGRADATION_NOTICES must be active: it is mandatory regardless of capabilities.
                 assert!(
                     established
                         .active_subscriptions
-                        .contains(&"LEASE_CHANGES".to_string()),
-                    "LEASE_CHANGES must always be active (mandatory category); \
+                        .contains(&"DEGRADATION_NOTICES".to_string()),
+                    "DEGRADATION_NOTICES must always be active (mandatory category); \
                      active: {:?}",
                     established.active_subscriptions
                 );

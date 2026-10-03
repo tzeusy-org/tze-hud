@@ -216,43 +216,6 @@ message CaptureReleasedEvent {
   CaptureReleasedReason reason        = 5;
 }
 
-// IME composition started event (transactional).
-message ImeCompositionStartEvent {
-  bytes  tile_id         = 1;
-  bytes  node_id         = 2;
-  uint64 timestamp_mono_us = 3;
-}
-
-// IME composition updated event (transactional).
-message ImeCompositionUpdateEvent {
-  bytes  tile_id         = 1;
-  bytes  node_id         = 2;
-  uint64 timestamp_mono_us = 3;
-  string composition_text = 4;  // Current preedit string
-}
-
-// IME composition ended event (transactional).
-message ImeCompositionEndEvent {
-  bytes  tile_id         = 1;
-  bytes  node_id         = 2;
-  uint64 timestamp_mono_us = 3;
-  string committed_text  = 4;  // Final committed text (empty if cancelled)
-}
-
-// Gesture event (e.g. pinch, swipe) — ephemeral realtime.
-message GestureEvent {
-  bytes  tile_id         = 1;
-  bytes  node_id         = 2;
-  string interaction_id  = 3;
-  uint64 timestamp_mono_us = 4;
-  string device_id       = 5;
-  string gesture_kind    = 6;  // "pinch", "swipe", "rotate", etc.
-  float  scale           = 7;  // For pinch: cumulative scale factor
-  float  rotation        = 8;  // For rotate: cumulative angle in radians
-  float  delta_x         = 9;  // For swipe: delta in display-space pixels
-  float  delta_y         = 10;
-}
-
 // Scroll offset changed event — ephemeral realtime (coalesced to latest per tile).
 message ScrollOffsetChangedEvent {
   bytes  tile_id         = 1;
@@ -350,19 +313,23 @@ message ComposerDraftCancelEvent {
 
 // ─── Input Envelope and Event Batch (RFC 0004 §8.3, §8.4, §9.1) ───────────────
 //
-// InputEnvelope is a 19-variant oneof covering all V1-mandatory input event types.
+// InputEnvelope is a oneof covering the input event types the runtime produces.
 // EventBatch groups per-frame events for a single agent on ServerMessage field 34.
 // Multiple input events within a single compositor frame are batched into a single
 // EventBatch and delivered as a single ServerMessage. Within a batch, events are
 // ordered by timestamp_mono_us ascending (RFC 0004 §8.4).
 //
-// NOTE: RFC 0004 §9.1 specifies a 22-variant InputEnvelope including DoubleClickEvent
-// (field 7), ContextMenuEvent (field 8), and ImeCompositionCancelledEvent (field 19).
-// Those variants and their field numbers are reserved for a future PR that adds the
-// corresponding message definitions; field numbers below skip these slots to preserve
-// alignment with the RFC's fixed assignments once the messages are defined.
+// NOTE: Fields 7-8 (DoubleClickEvent, ContextMenuEvent) were never defined; fields
+// 15-19 (gesture and IME composition events) were removed. Numbers below skip these
+// slots; do not reuse them.
 
 message InputEnvelope {
+  // Fields 15-19 (gesture and IME composition events) had no producer and
+  // were removed in T8.
+  reserved 15, 16, 17, 18, 19;
+  reserved "gesture", "ime_composition_start", "ime_composition_update",
+           "ime_composition_end";
+
   oneof event {
     // Pointer events (RFC 0004 §9.1 field assignments)
     PointerDownEvent        pointer_down         = 1;   // transactional
@@ -382,15 +349,6 @@ message InputEnvelope {
     // Focus events (FOCUS_EVENTS subscription category)
     FocusGainedEvent        focus_gained         = 13;  // transactional
     FocusLostEvent          focus_lost           = 14;  // transactional
-
-    // Gesture events
-    GestureEvent            gesture              = 15;  // ephemeral realtime
-
-    // IME events (FOCUS_EVENTS subscription category; RFC 0004 §4.0 V1 fallback)
-    ImeCompositionStartEvent  ime_composition_start  = 16;  // transactional
-    ImeCompositionUpdateEvent ime_composition_update = 17;  // transactional
-    ImeCompositionEndEvent    ime_composition_end    = 18;  // transactional
-    // field 19: ImeCompositionCancelledEvent — reserved; message not yet defined
 
     // Capture events (FOCUS_EVENTS subscription category; RFC 0004 §8.3.1)
     CaptureReleasedEvent    capture_released     = 20;  // transactional

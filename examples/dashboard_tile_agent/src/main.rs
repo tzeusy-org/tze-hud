@@ -791,7 +791,7 @@ pub struct SessionState {
 ///    - `agent_id` = "dashboard-tile-agent"
 ///    - `requested_capabilities` = [create_tiles, modify_own_tiles,
 ///      access_input_events]
-///    - `initial_subscriptions` = [LEASE_CHANGES]
+///    - `initial_subscriptions` = []
 ///    - `min_protocol_version` / `max_protocol_version` = 1000–1001
 /// 3. Reads `SessionEstablished` from the server.
 /// 4. Verifies `session_id` is non-empty (spec §SessionEstablished field 1).
@@ -866,9 +866,6 @@ async fn establish_session_with_host(
     //   - "modify_own_tiles"     — mutate tiles owned by this agent
     //   - "access_input_events"  — receive pointer / keyboard events
     //
-    // LEASE_CHANGES is a mandatory subscription category (always active).
-    // Listing it in `initial_subscriptions` is spec-compliant and explicit
-    // about the agent's intent (session-protocol/spec.md §Subscriptions).
     let now_us = now_wall_us();
     tx.send(session_proto::ClientMessage {
         sequence: 1,
@@ -878,8 +875,7 @@ async fn establish_session_with_host(
                 agent_id: agent_id.to_string(),
                 // Canonical v1 capability names — non-canonical names are
                 // rejected with CONFIG_UNKNOWN_CAPABILITY.
-                // LEASE_CHANGES is mandatory; listing it explicitly is idiomatic.
-                initial_subscriptions: vec!["LEASE_CHANGES".to_string()],
+                initial_subscriptions: vec![],
                 resume_token: Vec::new(), // new session, no prior resume token
                 min_protocol_version: 1000, // v1.0
                 max_protocol_version: 1001, // v1.1
@@ -1072,7 +1068,7 @@ async fn request_lease_with_host(
         payload: Some(session_proto::client_message::Payload::SessionInit(
             session_proto::SessionInit {
                 agent_id: agent_id.to_string(),
-                initial_subscriptions: vec!["LEASE_CHANGES".to_string()],
+                initial_subscriptions: vec![],
                 resume_token: Vec::new(),
                 min_protocol_version: 1000,
                 max_protocol_version: 1001,
@@ -1369,7 +1365,7 @@ async fn create_tile_batch_with_host(
         payload: Some(session_proto::client_message::Payload::SessionInit(
             session_proto::SessionInit {
                 agent_id: agent_id.to_string(),
-                initial_subscriptions: vec!["LEASE_CHANGES".to_string()],
+                initial_subscriptions: vec![],
                 resume_token: Vec::new(),
                 min_protocol_version: 1000,
                 max_protocol_version: 1001,
@@ -2262,7 +2258,7 @@ mod tests {
             timestamp_wall_us: now_us,
             payload: Some(sp::client_message::Payload::SessionInit(sp::SessionInit {
                 agent_id: "node-atomicity-test-agent".to_string(),
-                initial_subscriptions: vec!["LEASE_CHANGES".to_string()],
+                initial_subscriptions: vec![],
                 resume_token: vec![],
                 min_protocol_version: 1000,
                 max_protocol_version: 1001,
@@ -2650,7 +2646,7 @@ mod tests {
             timestamp_wall_us: now_us,
             payload: Some(sp::client_message::Payload::SessionInit(sp::SessionInit {
                 agent_id: "expired-lease-update-agent".to_string(),
-                initial_subscriptions: vec!["LEASE_CHANGES".to_string()],
+                initial_subscriptions: vec![],
                 resume_token: vec![],
                 min_protocol_version: 1000,
                 max_protocol_version: 1001,
@@ -3312,10 +3308,7 @@ mod tests {
             payload: Some(sp::client_message::Payload::SessionInit(sp::SessionInit {
                 agent_id: agent_id.to_string(),
                 // Subscribe to INPUT_EVENTS to receive ClickEvent / CommandInputEvent.
-                initial_subscriptions: vec![
-                    "LEASE_CHANGES".to_string(),
-                    "INPUT_EVENTS".to_string(),
-                ],
+                initial_subscriptions: vec!["INPUT_EVENTS".to_string()],
                 resume_token: vec![],
                 min_protocol_version: 1000,
                 max_protocol_version: 1001,

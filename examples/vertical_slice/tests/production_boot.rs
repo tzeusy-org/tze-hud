@@ -218,10 +218,7 @@ async fn production_config_grants_registered_agent_capabilities() {
         payload: Some(session_proto::client_message::Payload::SessionInit(
             session_proto::SessionInit {
                 agent_id: "vertical-slice-agent".to_string(),
-                initial_subscriptions: vec![
-                    "LEASE_CHANGES".to_string(),
-                    "SCENE_TOPOLOGY".to_string(),
-                ],
+                initial_subscriptions: vec!["SCENE_TOPOLOGY".to_string()],
                 resume_token: Vec::new(),
                 min_protocol_version: 1000,
                 max_protocol_version: 1001,
@@ -316,10 +313,7 @@ async fn production_config_rejects_unpaired_psk() {
             session_proto::SessionInit {
                 agent_id: "unknown-rogue-agent".to_string(),
                 // Requests all capabilities — must receive none.
-                initial_subscriptions: vec![
-                    "LEASE_CHANGES".to_string(),
-                    "SCENE_TOPOLOGY".to_string(),
-                ],
+                initial_subscriptions: vec!["SCENE_TOPOLOGY".to_string()],
                 resume_token: Vec::new(),
                 min_protocol_version: 1000,
                 max_protocol_version: 1001,

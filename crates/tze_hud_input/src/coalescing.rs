@@ -199,9 +199,8 @@ impl FrameCoalescer {
                 self.transactional.push(other);
             }
             other => {
-                // Other ephemeral types (Gesture) — not yet coalesced per node.
+                // Other ephemeral types — not yet coalesced per node.
                 // Appended in push order; low-frequency so acceptable for v1.
-                // TODO: add gestures HashMap when per-node gesture coalescing is needed.
                 self.transactional.push(other);
             }
         }
