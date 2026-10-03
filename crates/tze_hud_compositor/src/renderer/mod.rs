@@ -647,6 +647,9 @@ pub(crate) struct EncodeInputs {
     /// failed — in which case the text pass is skipped (but the atlas is still
     /// trimmed) exactly as before the split.
     render_text: bool,
+    /// Whether the system card's text was prepared on the overlay text layer and
+    /// must be replayed by [`Compositor::encode_system_card_pass`] (hud-w5zon).
+    render_card_text: bool,
 }
 
 /// Per-zone Stack slot layout, computed once per zone per frame by
@@ -2275,11 +2278,33 @@ impl Compositor {
             None => false,
         };
 
+        // System card text: prepared on its own glyphon layer so the final
+        // `encode_system_card_pass` can draw it above every other pass. Empty
+        // (no card) means no prepare and no extra pass.
+        let card_items = if has_text_rasterizer {
+            self.system_card_text_items(sw, sh)
+        } else {
+            vec![]
+        };
+        let render_card_text = match self.text_rasterizer {
+            Some(ref mut tr) if !card_items.is_empty() => {
+                match tr.prepare_overlay_text_items(&self.device, &self.queue, &card_items) {
+                    Ok(_) => true,
+                    Err(e) => {
+                        tracing::warn!(error = %e, "system card text prepare failed");
+                        false
+                    }
+                }
+            }
+            _ => false,
+        };
+
         EncodeInputs {
             rr_background,
             rr_post,
             inline_verts,
             render_text,
+            render_card_text,
         }
     }
 
@@ -2490,6 +2515,43 @@ impl Compositor {
         (encoder, encode_us)
     }
 
+    /// Final pass of every frame: the system card backdrop, then its text, above
+    /// all other content including the safe-mode overlay (hud-w5zon), so the
+    /// pairing code stays readable. Draws nothing, and costs nothing, when no
+    /// card is set (`card_vertices` is empty and `render_card_text` is false).
+    pub(super) fn encode_system_card_pass(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        frame_view: &wgpu::TextureView,
+        card_vertices: &[RectVertex],
+        inputs: &EncodeInputs,
+    ) {
+        self.encode_drag_handle_pass(encoder, frame_view, card_vertices);
+        if !inputs.render_card_text {
+            return;
+        }
+        let Some(ref tr) = self.text_rasterizer else {
+            return;
+        };
+        let mut text_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("system_card_text_pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: frame_view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+        });
+        if let Err(e) = tr.render_overlay_text_pass(&mut text_pass) {
+            tracing::warn!(error = %e, "system card text render failed");
+        }
+    }
+
     /// Encode one frame's GPU command buffer directly from the scene (the
     /// headless / chrome-render convenience wrapper).
     ///
@@ -2508,9 +2570,9 @@ impl Compositor {
         surf_h: u32,
         use_overlay_pipeline: bool,
         bg_vertex_count: usize,
-    ) -> (wgpu::CommandEncoder, u64) {
+    ) -> (wgpu::CommandEncoder, u64, EncodeInputs) {
         let inputs = self.collect_encode_inputs(scene, surf_w, surf_h);
-        self.encode_from_inputs(
+        let (encoder, encode_us) = self.encode_from_inputs(
             vertices,
             frame_view,
             &inputs,
@@ -2518,7 +2580,8 @@ impl Compositor {
             surf_h,
             use_overlay_pipeline,
             bg_vertex_count,
-        )
+        );
+        (encoder, encode_us, inputs)
     }
 }
 

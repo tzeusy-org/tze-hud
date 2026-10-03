@@ -34,8 +34,11 @@ pub struct WindowedFrameBuild {
     focus_ring_vertices: Vec<RectVertex>,
     /// Precomputed drag-handle reset context-menu chrome vertices.
     context_menu_vertices: Vec<RectVertex>,
-    /// Safe-mode overlay quads (empty unless safe mode is active); drawn last.
+    /// Safe-mode overlay quads (empty unless safe mode is active).
     safe_mode_vertices: Vec<RectVertex>,
+    /// System card backdrop quads (empty unless a card is set); the very last
+    /// pass, above the safe-mode overlay.
+    system_card_vertices: Vec<RectVertex>,
     /// Precomputed per-instance widget draw quads.
     widget_quads: Vec<crate::widget::WidgetDrawQuad>,
     /// Wall-clock start of the frame, for the total frame-time telemetry.
@@ -436,7 +439,7 @@ impl Compositor {
             sh,
             Some(LayerAttachment::Content),
         );
-        // Chrome zones render last, above everything.
+        // Chrome zones render last, above tiles and content zones.
         self.render_zone_content(
             scene,
             &mut vertices,
@@ -445,8 +448,8 @@ impl Compositor {
             sh,
             Some(LayerAttachment::Chrome),
         );
-        // Runtime system card / toast backdrop: above all scene geometry.
-        vertices.extend(self.system_card_vertices(sw, sh));
+        // The system card is not part of this vertex list: it is drawn by the
+        // final `encode_system_card_pass` above every other pass (hud-w5zon).
 
         (vertices, textured_cmds, bg_vertex_count)
     }
@@ -616,6 +619,7 @@ impl Compositor {
         // ── Chrome context menu (hud-zc7f) ─────────────────────────────────
         let context_menu_vertices = self.collect_context_menu_vertices(scene, sw, sh);
         let safe_mode_vertices = self.safe_mode_overlay_vertices(sw, sh);
+        let system_card_vertices = self.system_card_vertices(sw, sh);
 
         // Populate drag-handle hit regions from the geometry we are about to
         // present so the next input snapshot matches this frame (see the method
@@ -634,6 +638,7 @@ impl Compositor {
             focus_ring_vertices,
             context_menu_vertices,
             safe_mode_vertices,
+            system_card_vertices,
             widget_quads,
             frame_start,
         }
@@ -783,10 +788,19 @@ impl Compositor {
             self.encode_drag_handle_pass(&mut encoder, view, &build.context_menu_vertices);
         }
 
-        // ── Safe-mode overlay (hud-jm8nq.10): above everything, including chrome.
+        // ── Safe-mode overlay (hud-jm8nq.10): above all scene content and chrome.
         if !build.safe_mode_vertices.is_empty() {
             self.encode_drag_handle_pass(&mut encoder, view, &build.safe_mode_vertices);
         }
+
+        // ── System card (hud-w5zon): the last pass, above the safe-mode overlay,
+        // so the pairing code can never be covered.
+        self.encode_system_card_pass(
+            &mut encoder,
+            view,
+            &build.system_card_vertices,
+            &build.encode_inputs,
+        );
 
         (encoder, encode_us)
     }
@@ -932,7 +946,7 @@ impl Compositor {
         };
 
         // Headless never uses overlay mode — pass false for the pipeline selector.
-        let (mut encoder, encode_us) = self.encode_frame(
+        let (mut encoder, encode_us, encode_inputs) = self.encode_frame(
             &vertices,
             &frame.view,
             scene,
@@ -964,6 +978,15 @@ impl Compositor {
         if !context_menu_vertices.is_empty() {
             self.encode_drag_handle_pass(&mut encoder, &frame.view, &context_menu_vertices);
         }
+
+        // System card last, above everything (hud-w5zon).
+        let system_card_vertices = self.system_card_vertices(sw, sh);
+        self.encode_system_card_pass(
+            &mut encoder,
+            &frame.view,
+            &system_card_vertices,
+            &encode_inputs,
+        );
 
         // Headless-specific: copy rendered texture to readback buffer.
         // Must happen after all render passes and before submit.

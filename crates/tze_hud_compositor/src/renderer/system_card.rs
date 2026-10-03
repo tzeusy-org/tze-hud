@@ -1,7 +1,10 @@
 //! Runtime system card and toast chrome (hud-i2e10.4).
 //!
 //! A centred card (pairing code + address) or a bottom-centre toast, drawn
-//! above agent content from `system_card.*` design tokens. The model is pushed
+//! above all other content, including the safe-mode overlay, from
+//! `system_card.*` design tokens. It is drawn by the final
+//! `encode_system_card_pass` (backdrop quads, then a dedicated overlay text
+//! layer), never in the main passes. The model is pushed
 //! by the runtime through [`Compositor::set_system_card`]; it never enters the
 //! scene graph, so no agent API (SceneSnapshot, `hud_surfaces`, zone publish
 //! results) can observe it. Fallbacks below MUST stay in sync with
@@ -179,7 +182,7 @@ impl Compositor {
         true
     }
 
-    /// Card backdrop quads for the flat-rect pass; empty when no card is set.
+    /// Card backdrop quads for the final system-card pass; empty when no card is set.
     pub(super) fn system_card_vertices(&self, sw: f32, sh: f32) -> Vec<RectVertex> {
         let Some(card) = &self.system_card else {
             return Vec::new();
@@ -191,7 +194,7 @@ impl Compositor {
             .collect()
     }
 
-    /// Card text for the text pass; empty when no card is set.
+    /// Card text for the overlay text layer; empty when no card is set.
     pub(super) fn system_card_text_items(&self, sw: f32, sh: f32) -> Vec<TextItem> {
         self.system_card
             .as_ref()

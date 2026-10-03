@@ -92,6 +92,82 @@ async fn test_chrome_always_above_max_zorder_tile() {
     );
 }
 
+/// hud-w5zon: the system card (backdrop AND text) is the last pass, above a
+/// max-z tile and the safe-mode overlay, so the pairing code stays readable.
+/// Pixel readback via the admin-capture seam (no swapchain, no deadlock).
+#[tokio::test]
+async fn test_system_card_drawn_above_safe_mode_overlay_and_content() {
+    use crate::renderer::{SystemCardKind, SystemCardModel};
+    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(800, 600).await);
+    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
+
+    let mut scene = SceneGraph::new(800.0, 600.0);
+    let tab_id = scene.create_tab("test", 0).unwrap();
+    let lease_id = scene.grant_lease("agent", 60_000);
+    let tile_id = scene
+        .create_tile(
+            tab_id,
+            "agent",
+            lease_id,
+            Rect::new(0.0, 0.0, 800.0, 600.0),
+            tze_hud_scene::types::ZONE_TILE_Z_MIN - 1,
+        )
+        .unwrap();
+    scene
+        .set_tile_root(
+            tile_id,
+            Node {
+                layout: Default::default(),
+                id: SceneId::new(),
+                children: vec![],
+                data: NodeData::SolidColor(SolidColorNode {
+                    color: Rgba::new(1.0, 0.0, 0.0, 1.0),
+                    bounds: Rect::new(0.0, 0.0, 800.0, 600.0),
+                    radius: None,
+                }),
+            },
+        )
+        .unwrap();
+    compositor.prime_markdown_cache(&scene);
+    compositor.prime_truncation_cache(&scene);
+    compositor.set_safe_mode_overlay(true);
+    compositor.set_system_card(Some(SystemCardModel {
+        kind: SystemCardKind::Pairing,
+        title: "Pair an agent".into(),
+        lines: vec!["482913".into()],
+    }));
+
+    let build = compositor.build_windowed_frame(&mut scene, 800, 600);
+    let frame = compositor
+        .capture_windowed_frame(build, wgpu::TextureFormat::Rgba8UnormSrgb)
+        .expect("capture");
+
+    // Default card geometry: 420 wide, centred. Tall enough that the centre
+    // row is inside it; scan that card-wide band for pixels.
+    let (x0, x1) = (190usize, 610usize);
+    let (y0, y1) = (240usize, 360usize);
+    let px = |x: usize, y: usize| &frame.rgba[(y * 800 + x) * 4..(y * 800 + x) * 4 + 4];
+    // Backdrop (#0C1426, ~95% opaque): the red tile must not bleed through and
+    // the 70% black dim must not darken it to black. Sample inside the card,
+    // right of the text, below the accent bar.
+    let backdrop = px(x1 - 10, y0 + 12);
+    assert!(
+        backdrop[0] < 60 && backdrop[2] > 15,
+        "card backdrop must be drawn above tile and dim, got {backdrop:?}"
+    );
+    // Text (white): some pixels inside the card must be near-white. Under the
+    // safe-mode dim (alpha 0.7) white would drop to ~77, so this fails if the
+    // text pass runs before the overlay.
+    let bright = (y0..y1)
+        .flat_map(|y| (x0..x1).map(move |x| (x, y)))
+        .filter(|&(x, y)| px(x, y)[..3].iter().all(|&c| c > 200))
+        .count();
+    assert!(
+        bright > 20,
+        "card text must stay bright above the safe-mode dim ({bright} bright px)"
+    );
+}
+
 // ── Headless parity tests ─────────────────────────────────────────────────
 
 /// Verify that `render_frame` (surface-agnostic) works with a `HeadlessSurface`

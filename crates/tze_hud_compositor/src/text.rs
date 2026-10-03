@@ -377,6 +377,10 @@ pub struct TextRasterizer {
     viewport: Viewport,
     atlas: TextAtlas,
     renderer: TextRenderer,
+    /// Second glyphon renderer sharing `atlas`, prepared and replayed AFTER every
+    /// other pass so runtime chrome text (the system card) cannot be covered by
+    /// content, widgets, focus rings, menus or the safe-mode overlay (hud-w5zon).
+    overlay_renderer: TextRenderer,
     /// Content-addressed IDs of agent-uploaded fonts already loaded into
     /// `font_system`.  Used to skip redundant `load_font_data` calls (which
     /// would add duplicate entries to fontdb).
@@ -419,6 +423,18 @@ pub struct TextRasterizer {
     /// accumulated). Front-runs the Wave-3 "perf-whole-scene-reshape-per-frame"
     /// shaped-buffer-reuse item.
     shape_cache: HashMap<[u8; 32], Buffer>,
+    /// Shaped-buffer cache for the overlay layer, kept apart so a frame that
+    /// prepares overlay text does not evict the content layer's buffers.
+    overlay_shape_cache: HashMap<[u8; 32], Buffer>,
+}
+
+/// Which glyphon renderer (and shaped-buffer cache) a prepare call targets.
+#[derive(Clone, Copy)]
+enum TextLayer {
+    /// Scene content text, drawn in the main text pass.
+    Content,
+    /// Runtime chrome text, drawn in the final pass above everything else.
+    Overlay,
 }
 
 /// Wrap policy for wrapped text (composer draft, viewer-echo history, and every
@@ -704,6 +720,8 @@ impl TextRasterizer {
         let viewport = Viewport::new(device, &cache);
         let mut atlas = TextAtlas::new(device, queue, &cache, format);
         let renderer = TextRenderer::new(&mut atlas, device, MultisampleState::default(), None);
+        let overlay_renderer =
+            TextRenderer::new(&mut atlas, device, MultisampleState::default(), None);
 
         Self {
             font_system,
@@ -711,10 +729,12 @@ impl TextRasterizer {
             viewport,
             atlas,
             renderer,
+            overlay_renderer,
             loaded_font_ids: HashSet::new(),
             truncation_cache: TruncationCache::new(),
             shape_call_count: 0,
             shape_cache: HashMap::new(),
+            overlay_shape_cache: HashMap::new(),
         }
     }
 
@@ -764,6 +784,7 @@ impl TextRasterizer {
         // (the ShapeKey does not capture FontSystem state). Drop the cache; it is
         // rebuilt from the next frame's items on the miss path (hud-991cj).
         self.shape_cache.clear();
+        self.overlay_shape_cache.clear();
 
         tracing::info!(
             resource_id = %format_resource_id(&resource_id),
@@ -1195,6 +1216,28 @@ impl TextRasterizer {
         queue: &Queue,
         items: &[TextItem],
     ) -> Result<Vec<InlineBackdropQuad>, String> {
+        self.prepare_layer(TextLayer::Content, device, queue, items)
+    }
+
+    /// Prepare runtime chrome text for the final overlay pass (hud-w5zon); replay
+    /// it with [`TextRasterizer::render_overlay_text_pass`]. Independent of the
+    /// content layer's prepared state.
+    pub fn prepare_overlay_text_items(
+        &mut self,
+        device: &Device,
+        queue: &Queue,
+        items: &[TextItem],
+    ) -> Result<Vec<InlineBackdropQuad>, String> {
+        self.prepare_layer(TextLayer::Overlay, device, queue, items)
+    }
+
+    fn prepare_layer(
+        &mut self,
+        layer: TextLayer,
+        device: &Device,
+        queue: &Queue,
+        items: &[TextItem],
+    ) -> Result<Vec<InlineBackdropQuad>, String> {
         // 8-direction offsets for outline rendering (cardinal + diagonal).
         const OUTLINE_DIRS: [(f32, f32); 8] = [
             (-1.0, 0.0),
@@ -1274,7 +1317,10 @@ impl TextRasterizer {
         // frame are dropped when `old_cache` falls out of scope, so the cache
         // never accumulates stale entries — it holds only the currently-rendered
         // set.
-        let mut old_cache = std::mem::take(&mut self.shape_cache);
+        let mut old_cache = std::mem::take(match layer {
+            TextLayer::Content => &mut self.shape_cache,
+            TextLayer::Overlay => &mut self.overlay_shape_cache,
+        });
         let mut shape_keys: Vec<[u8; 32]> = Vec::with_capacity(items.len());
         let mut buffers: Vec<Buffer> = Vec::with_capacity(items.len());
 
@@ -1370,8 +1416,11 @@ impl TextRasterizer {
             });
         }
 
-        let prepare_result = self
-            .renderer
+        let renderer = match layer {
+            TextLayer::Content => &mut self.renderer,
+            TextLayer::Overlay => &mut self.overlay_renderer,
+        };
+        let prepare_result = renderer
             .prepare(
                 device,
                 queue,
@@ -1387,7 +1436,11 @@ impl TextRasterizer {
         // `TextArea` borrows of `buffers` have ended (prepare consumed them). Only
         // the currently-rendered set is retained (hud-991cj); on a duplicate key
         // the later buffer wins, which is harmless (identical shape inputs).
-        self.shape_cache = shape_keys.into_iter().zip(buffers).collect();
+        let rebuilt = shape_keys.into_iter().zip(buffers).collect();
+        match layer {
+            TextLayer::Content => self.shape_cache = rebuilt,
+            TextLayer::Overlay => self.overlay_shape_cache = rebuilt,
+        }
 
         prepare_result.map(|()| inline_backdrop_quads)
     }
@@ -1556,6 +1609,17 @@ impl TextRasterizer {
         self.renderer
             .render(&self.atlas, &self.viewport, render_pass)
             .map_err(|e| format!("glyphon render: {e:?}"))
+    }
+
+    /// Record the overlay-layer text pass (see [`TextRasterizer::prepare_overlay_text_items`]).
+    /// Same `LoadOp::Load` contract as [`TextRasterizer::render_text_pass`].
+    pub fn render_overlay_text_pass<'rp>(
+        &'rp self,
+        render_pass: &mut wgpu::RenderPass<'rp>,
+    ) -> Result<(), String> {
+        self.overlay_renderer
+            .render(&self.atlas, &self.viewport, render_pass)
+            .map_err(|e| format!("glyphon overlay render: {e:?}"))
     }
 
     /// Trim the atlas after the frame is presented.
