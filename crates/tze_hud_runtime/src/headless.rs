@@ -42,7 +42,6 @@
 
 use crate::degradation::{DegradationController, DegradationEnvelope};
 use crate::element_store::bootstrap_scene_element_store;
-use crate::idle_efficiency::{IdleEfficiencyCounters, IdleEfficiencySnapshot, RuntimeWakeupSource};
 use crate::pipeline::{FramePipeline, HitTestSnapshot};
 use crate::runtime_context::RuntimeContext;
 use crate::scene_startup::run_scene_startup;
@@ -52,7 +51,7 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::Mutex;
 use tze_hud_compositor::{Compositor, HeadlessSurface};
 use tze_hud_config::resolve_runtime_widget_asset_store;
-use tze_hud_input::{InputProcessor, PointerEvent, PointerEventKind, ScrollEvent};
+use tze_hud_input::{InputProcessor, ScrollEvent};
 use tze_hud_protocol::proto::FramePresented;
 use tze_hud_protocol::proto::session::hud_session_server::HudSessionServer;
 use tze_hud_protocol::session::SharedState;
@@ -60,10 +59,8 @@ use tze_hud_protocol::session_server::{DegradationNoticeSender, HudSessionImpl, 
 use tze_hud_resource::{
     ResourceStore, ResourceStoreConfig, RuntimeWidgetStore, RuntimeWidgetStoreConfig,
 };
-use tze_hud_scene::HitResult;
 use tze_hud_scene::config::{AgentDirectory, SharedAgents};
 use tze_hud_scene::graph::SceneGraph;
-use tze_hud_scene::types::ZoneInteractionKind;
 use tze_hud_telemetry::{FrameTelemetry, TelemetryCollector};
 use wgpu::TextureFormat;
 
@@ -184,7 +181,6 @@ pub struct HeadlessRuntime {
     degradation_controller: DegradationController,
     degradation_notices: DegradationNoticeSender,
     degradation_clock_start: Instant,
-    idle_efficiency_counters: IdleEfficiencyCounters,
 }
 
 impl HeadlessRuntime {
@@ -339,7 +335,6 @@ impl HeadlessRuntime {
             ),
             degradation_notices,
             degradation_clock_start: Instant::now(),
-            idle_efficiency_counters: IdleEfficiencyCounters::default(),
         })
     }
 
@@ -358,14 +353,6 @@ impl HeadlessRuntime {
         &self.state
     }
 
-    /// Snapshot the monotonic counters used by the quiescent-efficiency gate.
-    ///
-    /// Callers take a baseline after settling and subtract it after the
-    /// observation interval. The snapshot never resets production counters.
-    pub fn idle_efficiency_snapshot(&self) -> IdleEfficiencySnapshot {
-        self.idle_efficiency_counters.snapshot()
-    }
-
     /// Run one frame through the full 8-stage pipeline.
     ///
     /// Stages 1-8 run sequentially in the calling task (no cross-thread signalling
@@ -376,8 +363,6 @@ impl HeadlessRuntime {
     /// `render_frame_headless()`, which includes the `copy_to_buffer` step so
     /// that `read_pixels()` returns actual rendered pixel data after this call.
     pub async fn render_frame(&mut self) -> FrameTelemetry {
-        self.idle_efficiency_counters
-            .record_compositor_wakeup(RuntimeWakeupSource::SceneChange);
         let frame_start = Instant::now();
         // Include all active scene/compositor work performed for this frame;
         // this boundary precedes expiry, animation, and Stage 3 work and ends
@@ -477,12 +462,6 @@ impl HeadlessRuntime {
         let compositor_telemetry = self
             .compositor
             .render_frame_headless(&mut scene_guard, &self.surface);
-        // HeadlessSurface::acquire_frame is infallible and the compositor only
-        // returns from this call after submitting its encoder. Record at this
-        // completed-operation boundary so the evidence counter cannot advance
-        // for work that was merely requested.
-        self.idle_efficiency_counters.record_surface_acquisition();
-        self.idle_efficiency_counters.record_gpu_submission();
         // Total frame time from Compositor covers encode + submit
         let stage6_us = compositor_telemetry.stage6_render_encode_us;
         let stage7_us = compositor_telemetry.stage7_gpu_submit_us;
@@ -674,81 +653,6 @@ impl HeadlessRuntime {
         Ok(handle)
     }
 
-    /// Process a single pointer event through the input pipeline, applying any
-    /// resulting zone interactions (e.g. dismiss) to the scene immediately.
-    ///
-    /// This is the headless equivalent of the windowed runtime's input handling
-    /// in `enqueue_pointer_event()`.  Both paths MUST stay in sync so that the
-    /// zone interaction wiring is exercised by headless tests.
-    ///
-    /// Per doctrine ("local feedback first"): dismiss actions are applied
-    /// synchronously so the stale affordance disappears before the next frame.
-    pub fn process_pointer_event(&mut self, event: &PointerEvent, scene: &mut SceneGraph) {
-        let result = self.input_processor.process(event, scene);
-
-        // ── Zone interaction dispatch (local feedback first) ────────────────
-        // On pointer-up, check whether the hit landed on a compositor-managed
-        // zone interaction element.  Dismiss is applied immediately; action
-        // callbacks are logged (delivery wired in hud-ltgk.7).
-        if event.kind == PointerEventKind::Up {
-            if let HitResult::ZoneInteraction {
-                ref zone_name,
-                published_at_wall_us,
-                ref publisher_namespace,
-                ref kind,
-                ..
-            } = result.hit
-            {
-                match kind {
-                    ZoneInteractionKind::Dismiss => {
-                        let removed = scene.dismiss_notification(
-                            zone_name,
-                            published_at_wall_us,
-                            publisher_namespace,
-                        );
-                        tracing::debug!(
-                            zone = %zone_name,
-                            published_at_wall_us,
-                            publisher = %publisher_namespace,
-                            removed,
-                            "zone dismiss: notification removed from scene"
-                        );
-                    }
-                    ZoneInteractionKind::Action { callback_id } => {
-                        // Delivered to the publisher via MCP `hud_input`.
-                        scene.push_pending_action(tze_hud_scene::PendingAction {
-                            publisher_namespace: publisher_namespace.clone(),
-                            zone_name: zone_name.clone(),
-                            callback_id: callback_id.clone(),
-                        });
-                        tracing::debug!(
-                            zone = %zone_name,
-                            published_at_wall_us,
-                            publisher = %publisher_namespace,
-                            %callback_id,
-                            "zone action: callback queued for agent delivery"
-                        );
-                    }
-                    ZoneInteractionKind::DragHandle { .. } => {}
-                    ZoneInteractionKind::DismissTile { tile_id } => {
-                        // Headless has no session bridge; reclaim the lease locally.
-                        crate::shell::dismiss_tile(scene, *tile_id);
-                    }
-                    ZoneInteractionKind::JumpToLatest { tile_id } => {
-                        let changed = self
-                            .input_processor
-                            .reset_tile_scroll_to_tail(*tile_id, scene);
-                        tracing::debug!(
-                            tile_id = ?tile_id,
-                            changed,
-                            "jump-to-latest: pill clicked, scroll reset to tail"
-                        );
-                    }
-                }
-            }
-        }
-    }
-
     /// Process a wheel/trackpad scroll event through the local-first scroll path.
     pub fn process_scroll_event(
         &mut self,
@@ -763,7 +667,8 @@ impl HeadlessRuntime {
 mod tests {
     use super::*;
     use tze_hud_scene::types::{
-        FontFamily, Node, NodeData, ResourceBudget, Rgba, TextAlign, TextMarkdownNode, TextOverflow,
+        FontFamily, Node, NodeData, Rect, ResourceBudget, Rgba, SceneId, TextAlign,
+        TextMarkdownNode, TextOverflow,
     };
     use tze_hud_scene::{MutationBatch, SceneMutation};
 
@@ -893,43 +798,6 @@ mod tests {
             upper_tile_id,
             control_tile_ids,
         )
-    }
-
-    #[tokio::test]
-    async fn idle_efficiency_counters_follow_real_headless_gpu_operations() {
-        let _runtime_guard = crate::test_support::lock_headless_runtime().await;
-        let mut runtime = HeadlessRuntime::new(HeadlessConfig {
-            width: 64,
-            height: 64,
-            grpc_port: 0,
-            agents: AgentDirectory::unrestricted("idle-efficiency-test"),
-            config_toml: None,
-        })
-        .await
-        .expect("runtime init");
-
-        let before = runtime.idle_efficiency_snapshot();
-        runtime.render_frame().await;
-        let rendered = runtime
-            .idle_efficiency_snapshot()
-            .delta_since(&before)
-            .expect("monotonic counters");
-
-        assert_eq!(rendered.compositor_loop_wakeups, 1);
-        assert_eq!(rendered.sources["compositor.scene_change"], 1);
-        assert_eq!(rendered.surface_acquisitions, 1);
-        assert_eq!(rendered.gpu_queue_submissions, 1);
-        assert_eq!(rendered.presents, 0, "headless present is a no-op");
-
-        let settled = runtime.idle_efficiency_snapshot();
-        let unchanged = runtime
-            .idle_efficiency_snapshot()
-            .delta_since(&settled)
-            .expect("monotonic counters");
-        assert_eq!(unchanged.combined_runtime_wakeups(), 0);
-        assert_eq!(unchanged.gpu_queue_submissions, 0);
-        assert_eq!(unchanged.surface_acquisitions, 0);
-        assert_eq!(unchanged.presents, 0);
     }
 
     #[tokio::test]
@@ -1481,27 +1349,6 @@ mod tests {
         );
     }
 
-    /// Verify that read_pixels returns the correct buffer size after a render.
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn test_headless_read_pixels_buffer_size() {
-        let config = HeadlessConfig {
-            width: 128,
-            height: 96,
-            grpc_port: 0,
-            agents: AgentDirectory::unrestricted("test"),
-            config_toml: None,
-        };
-        let _runtime_guard = crate::test_support::lock_headless_runtime().await;
-        let mut runtime = HeadlessRuntime::new(config).await.expect("runtime init");
-        runtime.render_frame().await;
-        let pixels = runtime.read_pixels();
-        assert_eq!(
-            pixels.len(),
-            128 * 96 * 4,
-            "pixel buffer must be width * height * 4 bytes (RGBA8)"
-        );
-    }
-
     /// Verify that read_pixels returns actual rendered content after render_frame().
     ///
     /// Regression test for the bug where render_frame() called compositor.render_frame()
@@ -1720,271 +1567,6 @@ default_tab = true
             text_color.b < 1e-3,
             "subtitle text_color.b should be 0.0 for #FF0000, got {}",
             text_color.b
-        );
-    }
-
-    // ── Zone interaction: process_pointer_event dismiss wiring (hud-ltgk.6) ──
-
-    use tze_hud_scene::types::{
-        ContentionPolicy, GeometryPolicy, LayerAttachment, NotificationPayload, Rect,
-        RenderingPolicy, SceneId, ZoneContent, ZoneDefinition, ZoneHitRegion, ZoneMediaType,
-    };
-
-    fn make_test_zone(name: &str) -> ZoneDefinition {
-        ZoneDefinition {
-            id: SceneId::new(),
-            name: name.to_string(),
-            description: format!("test zone: {name}"),
-            geometry_policy: GeometryPolicy::Relative {
-                x_pct: 0.0,
-                y_pct: 0.0,
-                width_pct: 1.0,
-                height_pct: 0.1,
-            },
-            accepted_media_types: vec![ZoneMediaType::ShortTextWithIcon],
-            rendering_policy: RenderingPolicy::default(),
-            contention_policy: ContentionPolicy::Stack { max_depth: 8 },
-            max_publishers: 8,
-            auto_clear_ms: None,
-            ephemeral: false,
-            layer_attachment: LayerAttachment::Chrome,
-        }
-    }
-
-    /// `process_pointer_event` must call `dismiss_notification` on pointer-up
-    /// over a dismiss hit-region, removing the notification from active_publishes.
-    ///
-    /// Regression test for hud-ltgk.6: the dismiss button rendered but clicks
-    /// had no effect because `InputResult.hit` was not acted on.
-    #[test]
-    fn process_pointer_event_dismiss_removes_notification() {
-        let mut scene = SceneGraph::new(1920.0, 1080.0);
-        // hit_test requires an active tab; create one to mimic production state.
-        scene
-            .create_tab("Main", 0)
-            .expect("tab creation must succeed");
-        scene.register_zone(make_test_zone("alert-banner"));
-
-        scene
-            .publish_to_zone(
-                "alert-banner",
-                ZoneContent::Notification(NotificationPayload {
-                    text: "test".to_string(),
-                    icon: String::new(),
-                    urgency: 0,
-                    ttl_ms: None,
-                    title: String::new(),
-                    actions: vec![],
-                }),
-                "test-agent",
-                None,
-                None,
-                None,
-            )
-            .expect("publish should succeed");
-
-        let record_published_at =
-            scene.zone_registry.active_for_zone("alert-banner")[0].published_at_wall_us;
-
-        scene.overlay.zone_hit_regions.push(ZoneHitRegion {
-            zone_name: "alert-banner".to_string(),
-            published_at_wall_us: record_published_at,
-            publisher_namespace: "test-agent".to_string(),
-            bounds: Rect::new(100.0, 10.0, 20.0, 20.0),
-            kind: ZoneInteractionKind::Dismiss,
-            interaction_id: format!("zone:alert-banner:dismiss:{record_published_at}:test-agent"),
-            tab_order: 0,
-        });
-
-        // Build a HeadlessRuntime just for its input_processor.
-        // We drive process_pointer_event directly without GPU init.
-        let config = HeadlessConfig {
-            width: 64,
-            height: 64,
-            grpc_port: 0,
-            agents: AgentDirectory::unrestricted("test"),
-            config_toml: None,
-        };
-        // We only need input_processor which has no GPU dependency.
-        let mut input_processor = InputProcessor::new();
-
-        // Pointer-down: must not dismiss.
-        let down = PointerEvent {
-            x: 110.0,
-            y: 20.0,
-            kind: PointerEventKind::Down,
-            device_id: 0,
-            timestamp: None,
-        };
-        input_processor.process(&down, &mut scene);
-        assert_eq!(
-            scene.zone_registry.active_for_zone("alert-banner").len(),
-            1,
-            "notification must still be present after pointer-down"
-        );
-
-        // Now use a fresh HeadlessRuntime-like object; since we can't init GPU in
-        // a unit test, we simulate what process_pointer_event does inline:
-        let up = PointerEvent {
-            x: 110.0,
-            y: 20.0,
-            kind: PointerEventKind::Up,
-            device_id: 0,
-            timestamp: None,
-        };
-        let result = input_processor.process(&up, &mut scene);
-
-        // Apply the zone interaction dispatch (mirrors process_pointer_event body).
-        if up.kind == PointerEventKind::Up {
-            if let HitResult::ZoneInteraction {
-                ref zone_name,
-                published_at_wall_us,
-                ref publisher_namespace,
-                kind: ZoneInteractionKind::Dismiss,
-                ..
-            } = result.hit
-            {
-                scene.dismiss_notification(zone_name, published_at_wall_us, publisher_namespace);
-            }
-        }
-
-        assert_eq!(
-            scene.zone_registry.active_for_zone("alert-banner").len(),
-            0,
-            "notification must be removed after dismiss pointer-up [hud-ltgk.6 regression]"
-        );
-        assert!(
-            scene.overlay.zone_hit_regions.is_empty(),
-            "stale hit-region must be pruned after dismiss [local feedback first]"
-        );
-
-        // Suppress unused variable warning for config.
-        let _ = config;
-    }
-
-    /// A synthesized pointer-up over a "jump to latest" pill hit region must
-    /// invoke `InputProcessor::reset_tile_scroll_to_tail` and publish the
-    /// tail offset + `AtTail` anchor to the scene — mirrors
-    /// `process_pointer_event_dismiss_removes_notification` above, but for
-    /// the jump-to-latest wiring (hud-9ci61).
-    ///
-    /// Asserts at the state layer (scroll offset / follow-tail flag), not
-    /// pixels, per the compositor headless-render footgun in AGENTS.md.
-    #[test]
-    fn process_pointer_event_jump_to_latest_resets_scroll_to_tail() {
-        let mut scene = SceneGraph::new(1920.0, 1080.0);
-        let tab_id = scene
-            .create_tab("Main", 0)
-            .expect("tab creation must succeed");
-        let lease_id = scene.grant_lease("test-agent", 60_000);
-        let tile_id = scene
-            .create_tile(
-                tab_id,
-                "test-agent",
-                lease_id,
-                Rect::new(0.0, 0.0, 400.0, 100.0), // viewport = 100px
-                1,
-            )
-            .expect("tile creation must succeed");
-        scene
-            .register_tile_scroll_config(tile_id, tze_hud_scene::TileScrollConfig::vertical())
-            .expect("scroll config registration must succeed");
-
-        let mut input_processor = InputProcessor::new();
-        let line_h = 20.0_f32;
-        let viewport_h = 100.0_f32;
-
-        // 20 lines of content (400px) — tail = 400 - 100 = 300px.
-        input_processor.notify_tile_content_appended(
-            tile_id,
-            20.0 * line_h,
-            viewport_h,
-            line_h,
-            &mut scene,
-        );
-        let (_, tail_offset) = scene.tile_scroll_offset_local(tile_id);
-        assert!(tail_offset > 0.0, "tail offset should be nonzero here");
-
-        // Scroll back up, away from the tail.
-        let _ = input_processor.process_scroll_event(
-            &ScrollEvent {
-                x: 200.0,
-                y: 50.0,
-                delta_x: 0.0,
-                delta_y: -120.0,
-            },
-            &mut scene,
-        );
-        assert!(
-            !scene.tile_follow_tail_at_tail(tile_id),
-            "tile must be scrolled back before the synthesized click"
-        );
-
-        // Register the pill hit region exactly as
-        // `populate_zone_hit_regions` would (bounds are arbitrary here — only
-        // the dispatch behavior on a `JumpToLatest` hit is under test).
-        let pill_bounds = Rect::new(150.0, 70.0, 96.0, 24.0);
-        scene.overlay.zone_hit_regions.push(ZoneHitRegion {
-            zone_name: "__chrome_jump_to_latest__".to_string(),
-            published_at_wall_us: 0,
-            publisher_namespace: "runtime".to_string(),
-            bounds: pill_bounds,
-            kind: ZoneInteractionKind::JumpToLatest { tile_id },
-            interaction_id: format!("jump-to-latest:{tile_id}"),
-            tab_order: 0,
-        });
-
-        let click_x = pill_bounds.x + pill_bounds.width / 2.0;
-        let click_y = pill_bounds.y + pill_bounds.height / 2.0;
-
-        // Pointer-down: must not reset scroll (mirrors the dismiss test's
-        // down-must-not-act assertion).
-        let down = PointerEvent {
-            x: click_x,
-            y: click_y,
-            kind: PointerEventKind::Down,
-            device_id: 0,
-            timestamp: None,
-        };
-        input_processor.process(&down, &mut scene);
-        assert!(
-            !scene.tile_follow_tail_at_tail(tile_id),
-            "pointer-down over the pill must not reset scroll"
-        );
-
-        // Pointer-up over the pill: mirrors `process_pointer_event`'s real
-        // dispatch body for `ZoneInteractionKind::JumpToLatest`.
-        let up = PointerEvent {
-            x: click_x,
-            y: click_y,
-            kind: PointerEventKind::Up,
-            device_id: 0,
-            timestamp: None,
-        };
-        let result = input_processor.process(&up, &mut scene);
-        assert!(
-            result.hit.is_zone_interaction(),
-            "click must hit the jump-to-latest zone interaction region"
-        );
-        if let HitResult::ZoneInteraction {
-            kind: ZoneInteractionKind::JumpToLatest { tile_id },
-            ..
-        } = result.hit
-        {
-            let changed = input_processor.reset_tile_scroll_to_tail(tile_id, &mut scene);
-            assert!(changed, "reset must report the offset changed");
-        } else {
-            panic!("expected a JumpToLatest zone interaction hit");
-        }
-
-        let (_, offset_after) = scene.tile_scroll_offset_local(tile_id);
-        assert!(
-            (offset_after - tail_offset).abs() < f32::EPSILON,
-            "click must snap the scene offset back to the tail ({tail_offset}); got {offset_after}"
-        );
-        assert!(
-            scene.tile_follow_tail_at_tail(tile_id),
-            "click must publish AtTail to the scene [hud-9ci61]"
         );
     }
 

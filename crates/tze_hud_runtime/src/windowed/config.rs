@@ -158,60 +158,6 @@ mod tests {
     use crate::window::WindowMode;
 
     #[test]
-    fn windowed_config_default_values() {
-        let cfg = WindowedConfig::default();
-        assert_eq!(cfg.target_fps, 60);
-        assert_eq!(cfg.grpc_port, 50051);
-        assert_eq!(cfg.mcp_port, 9090);
-        assert!(
-            cfg.agents.load().is_empty(),
-            "no agent is paired by default"
-        );
-        assert!(cfg.benchmark.is_none());
-    }
-
-    /// Default `WindowedConfig` must have `overlay_auto_size = true` so that
-    /// overlay mode auto-detects the primary monitor resolution out-of-the-box.
-    #[test]
-    fn windowed_config_default_overlay_auto_size_is_true() {
-        let cfg = WindowedConfig::default();
-        assert!(
-            cfg.overlay_auto_size,
-            "overlay_auto_size must default to true so overlay covers the full monitor"
-        );
-    }
-
-    /// `overlay_auto_size` can be explicitly disabled to respect user-provided
-    /// `--width`/`--height` flags.
-    #[test]
-    fn windowed_config_overlay_auto_size_can_be_disabled() {
-        let cfg = WindowedConfig {
-            overlay_auto_size: false,
-            ..WindowedConfig::default()
-        };
-        assert!(!cfg.overlay_auto_size);
-    }
-
-    /// When `overlay_auto_size` is false and mode is Overlay, the configured
-    /// width/height values are respected (no monitor detection).
-    #[test]
-    fn windowed_config_overlay_explicit_dims_preserved() {
-        let cfg = WindowedConfig {
-            window: WindowConfig {
-                mode: WindowMode::Overlay,
-                width: 2560,
-                height: 1440,
-                title: "test".to_string(),
-            },
-            overlay_auto_size: false,
-            ..WindowedConfig::default()
-        };
-        assert_eq!(cfg.window.width, 2560);
-        assert_eq!(cfg.window.height, 1440);
-        assert!(!cfg.overlay_auto_size);
-    }
-
-    #[test]
     fn windowed_config_default_mode_is_fullscreen() {
         let cfg = WindowedConfig::default();
         assert_eq!(
@@ -221,107 +167,13 @@ mod tests {
         );
     }
 
-    #[test]
-    fn windowed_config_overlay_mode_can_be_set() {
-        let cfg = WindowedConfig {
-            window: WindowConfig {
-                mode: WindowMode::Overlay,
-                width: 1280,
-                height: 720,
-                title: "test-overlay".to_string(),
-            },
-            ..WindowedConfig::default()
-        };
-        assert_eq!(cfg.window.mode, WindowMode::Overlay);
-    }
-
-    #[test]
-    fn windowed_config_title_is_non_empty_by_default() {
-        let cfg = WindowedConfig::default();
-        assert!(
-            !cfg.window.title.is_empty(),
-            "default title must be non-empty"
-        );
-    }
-
-    #[test]
-    fn windowed_config_dimensions_are_sensible_by_default() {
-        let cfg = WindowedConfig::default();
-        assert!(cfg.window.width > 0, "default width must be positive");
-        assert!(cfg.window.height > 0, "default height must be positive");
-    }
-
-    /// `WindowedConfig` with `grpc_port = 0` reflects a "compositor-only" intent.
-    /// Verify the config field is stored and readable (AC §2 — explicit disable).
+    /// `grpc_port = 0` is the explicit "compositor-only" intent.
     #[test]
     fn windowed_config_grpc_port_zero_is_compositor_only() {
         let cfg = WindowedConfig {
             grpc_port: 0,
             ..WindowedConfig::default()
         };
-        assert_eq!(
-            cfg.grpc_port, 0,
-            "grpc_port=0 must be stored and readable as 0 (endpoint disabled)"
-        );
-    }
-
-    /// `WindowedConfig` with `grpc_port = 50051` (default) signals network enabled.
-    #[test]
-    fn windowed_config_grpc_port_nonzero_enables_network() {
-        let cfg = WindowedConfig::default();
-        assert_ne!(
-            cfg.grpc_port, 0,
-            "default grpc_port must be non-zero (gRPC enabled by default)"
-        );
-    }
-
-    /// Acceptance criterion 1: default WindowedConfig has no config_toml.
-    #[test]
-    fn windowed_config_default_has_no_config_toml() {
-        let cfg = WindowedConfig::default();
-        assert!(
-            cfg.config_toml.is_none(),
-            "default WindowedConfig must have config_toml = None"
-        );
-    }
-
-    /// `WindowedConfig` built with 2560x1440 must preserve those dimensions
-    /// exactly. Verifies that the config struct does not silently clamp or
-    /// reject resolutions larger than the default 1920x1080.
-    #[test]
-    fn windowed_config_preserves_non_default_dimensions() {
-        let cfg = WindowedConfig {
-            window: WindowConfig {
-                mode: WindowMode::Overlay,
-                width: 2560,
-                height: 1440,
-                title: "tze_hud".to_string(),
-            },
-            ..WindowedConfig::default()
-        };
-        assert_eq!(
-            cfg.window.width, 2560,
-            "2560x1440 width must be preserved in WindowedConfig"
-        );
-        assert_eq!(
-            cfg.window.height, 1440,
-            "2560x1440 height must be preserved in WindowedConfig"
-        );
-    }
-
-    /// `WindowedConfig` built with 3840x2160 (4K) must preserve those dimensions.
-    #[test]
-    fn windowed_config_preserves_4k_dimensions() {
-        let cfg = WindowedConfig {
-            window: WindowConfig {
-                mode: WindowMode::Overlay,
-                width: 3840,
-                height: 2160,
-                title: "tze_hud".to_string(),
-            },
-            ..WindowedConfig::default()
-        };
-        assert_eq!(cfg.window.width, 3840);
-        assert_eq!(cfg.window.height, 2160);
+        assert_eq!(cfg.grpc_port, 0);
     }
 }

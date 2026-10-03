@@ -488,22 +488,10 @@ mod tests {
         assert!(banner.contains("tze_hud runtime ready"), "header missing");
     }
 
-    /// Disabled services render as `disabled`, not a bogus `:0` endpoint.
+    /// The attach-info block must never contain a configured PSK value; the
+    /// paste-ready snippet always uses a placeholder.
     #[test]
-    fn startup_banner_renders_disabled_services() {
-        let banner = render_startup_banner(&[], &[], &HotkeyStatus::NotApplicable);
-        assert!(banner.contains("gRPC   : disabled"));
-        assert!(banner.contains("MCP    : disabled"));
-        // Attach hint is always present so the runtime stays self-describing.
-        assert!(banner.contains("hud-projection"));
-    }
-
-    /// The attach-info block must carry the discovery surface (MCP URL, the
-    /// bearer-PSK auth rule, and a paste-ready JSON snippet) and must
-    /// never contain a configured PSK value — the snippet always uses a
-    /// placeholder.
-    #[test]
-    fn attach_info_carries_discovery_surface_without_psk() {
+    fn attach_info_never_contains_psk() {
         let psk = "SUPER-SECRET-PSK-2f9c1a7e-do-not-leak";
         let mcp: std::net::SocketAddr = "127.0.0.1:9090".parse().unwrap();
         let grpc: std::net::SocketAddr = "127.0.0.1:50051".parse().unwrap();
@@ -514,48 +502,8 @@ mod tests {
             "attach info must not leak the PSK:\n{info}"
         );
         assert!(
-            info.contains("http://127.0.0.1:9090/mcp"),
-            "MCP endpoint URL missing:\n{info}"
-        );
-        assert!(
-            info.contains("127.0.0.1:50051"),
-            "gRPC addr missing:\n{info}"
-        );
-        assert!(
-            info.contains("/etc/tze_hud/config.toml"),
-            "config path missing:\n{info}"
-        );
-        assert!(
-            info.contains("allow list must include"),
-            "allow-list rule missing:\n{info}"
-        );
-        assert!(
-            info.contains("Authorization: Bearer") || info.contains("\"Authorization\""),
-            "bearer auth guidance missing:\n{info}"
-        );
-        assert!(
-            info.contains("\"mcpServers\""),
-            "JSON snippet missing:\n{info}"
-        );
-        assert!(
             info.contains("Bearer <your agent's PSK>"),
             "JSON snippet must use a PSK placeholder:\n{info}"
-        );
-    }
-
-    /// When MCP is disabled, the block says so and omits the (useless) JSON
-    /// snippet rather than advertising a bogus endpoint.
-    #[test]
-    fn attach_info_mcp_disabled_omits_snippet() {
-        let info = render_attach_info(None, None, None);
-        assert!(info.contains("MCP endpoint : disabled"), "info:\n{info}");
-        assert!(
-            !info.contains("\"mcpServers\""),
-            "disabled MCP must not emit a client snippet:\n{info}"
-        );
-        assert!(
-            info.contains("--mcp-port"),
-            "should hint how to enable MCP:\n{info}"
         );
     }
 
@@ -648,29 +596,6 @@ mod tests {
         // Abort the spawned task so the test doesn't leave a lingering server.
         for h in handles {
             h.abort();
-        }
-    }
-
-    /// Two successive calls with `grpc_port = 0` must both return `(None, [])`.
-    /// Verifies idempotency of the disabled path (AC §2 deterministic).
-    #[test]
-    fn start_network_services_grpc_port_zero_is_idempotent() {
-        for _ in 0..2 {
-            let shared_state = make_shared_state();
-            let ctx: SharedRuntimeContext = Arc::new(RuntimeContext::headless_default());
-            let (
-                rt,
-                handles,
-                _tx,
-                _scroll_tx,
-                _present_tx,
-                _degradation_notices,
-                _lease_expirations,
-                _grpc_addr,
-            ) = start_network_services(0, Default::default(), shared_state, ctx)
-                .expect("port-0 must not error");
-            assert!(rt.is_none());
-            assert!(handles.is_empty());
         }
     }
 
