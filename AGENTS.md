@@ -24,6 +24,9 @@ The toolchain is pinned in `rust-toolchain.toml` (Rust 1.88, matching CI and the
 `[workspace.lints]` in the root `Cargo.toml` and inherited via `lints.workspace = true`
 in every member crate.
 
+On Windows, `just` needs Git for Windows' `sh` and a real `python3`; setup, the
+per-recipe status, and runtime differences are in `docs/development/windows.md`.
+
 WARNING: do NOT run `cargo test -p tze_hud_compositor` bare — the pixel_readback GPU
 test deadlocks headless without Mesa llvmpipe. Use `just test` which excludes it, or
 the explicit `just test-gpu-pixel-readback` recipe.
