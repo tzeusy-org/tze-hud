@@ -97,7 +97,7 @@ fn portal_reveal_add_md(
 /// changes between frames must NOT start a spurious word-by-word reveal of
 /// already-settled content.
 ///
-/// Reproduces the live tzehouse bug. The portal input tile carries a settled
+/// Reproduces the live-host bug. The portal input tile carries a settled
 /// history markdown node plus a composer draft node whose pixel-bearing color
 /// runs toggle its eligibility. Under the old per-*tile* keying,
 /// `update_portal_tile_reveals` tracked only the first-eligible node's

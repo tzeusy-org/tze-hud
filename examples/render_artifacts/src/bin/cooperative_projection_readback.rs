@@ -197,7 +197,7 @@ fn build_projection_scene(
                     "**Cooperative HUD Projection Proof**",
                     "`hud-ggntn.12` | Expanded | AttentionLow",
                     "status: runtime-native readback artifact",
-                    "note: OS desktop capture was unavailable from SSH",
+                    "note: OS desktop capture was unavailable in this session",
                     "",
                     "Transcript:",
                     "Agent output is rendered through the governed HUD surface.",

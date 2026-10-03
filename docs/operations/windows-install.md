@@ -11,6 +11,9 @@ and `tze_hud.pdb` (symbols for WPA, PIX, and crash dumps) when emitted.
 
 ## Download and verify
 
+Download `tze_hud.exe` from the release page in a browser, or with the GitHub
+CLI:
+
 ```powershell
 gh release download dev -R tzeusy-org/tze-hud -p "tze_hud.exe*"
 minisign -Vm tze_hud.exe -P RWTpCWtkNWD3YEwR2XCS2cwutGmd/fJCVuq9a99frgpLfTinnjWPsuvE
@@ -23,7 +26,10 @@ the committed public key.
 
 ## Install
 
-Double-click `tze_hud.exe` (or run it with no arguments). From outside the
+Double-click `tze_hud.exe` (or run it with no arguments). The exe is not
+Authenticode-signed, so Windows SmartScreen may show "Windows protected your
+PC": click **More info**, then **Run anyway**. (The minisign check above is
+the integrity check.) From outside the
 install dir it installs for the current user, no admin rights:
 
 - copies itself to `%LOCALAPPDATA%\Programs\tze_hud\tze_hud.exe` (a previous
@@ -59,6 +65,13 @@ on a card. Give the code to the agent, which trades it for its key:
 curl -s http://<tailscale-ip>:9090/pair -d '{"agent":"claude","code":"482913"}'
 ```
 
+or, from this repo, which saves the PSK to `~/.config/tze-hud/<host>.psk`
+(mode 0600, never printed) for the other skill scripts:
+
+```sh
+HUD_HOST=<tailscale-ip> python3 .claude/skills/user-test/scripts/hud_pair.py --code 482913 --agent claude --admin
+```
+
 The reply carries the PSK (once), the MCP URL, and the gRPC address. The HUD
 stores only the PSK's SHA-256 in `%APPDATA%\tze_hud\agents.toml`. Add
 `"admin": true` to the request to let that agent use `/admin/*`. To pair another
@@ -90,11 +103,32 @@ the MCP port with its PSK as the bearer:
 | `GET /admin/logs?tail=N` | `text/plain`, the last N lines (default 100, max 2000) across the rotation |
 | `GET /admin/screenshot` | `image/png` of the HUD's own frame at the window size (what the compositor draws, not an OS capture); rendered once per request, so idle cost is unchanged. One at a time (429), 503 if the compositor does not answer within 3 s |
 | `POST /admin/restart` | 202 `{"restarting":true}`, then the HUD relaunches itself (see below). POST only; the request body is ignored. 429 `BUSY` while one is in progress |
+| `POST /admin/update` | `{"channel":"dev"}`, `"stable"` (latest release) or a tag such as `"v1.2.3"`. Downloads, verifies and installs a signed release (see Update below). 200 `{"up_to_date":true}`, 202 `{"updating":true,"sha":...}`, 400 `UPDATE_FAILED` for a bad body or channel, 409 `NOT_INSTALLED`, 429 `BUSY`, 502 `UPDATE_FAILED`, 503 `UNAVAILABLE` |
 
-| `POST /admin/update` | `{"channel":"dev"}`, `"stable"` (latest release) or a tag such as `"v1.2.3"`. Downloads, verifies and installs a signed release (see Update below). 200 `{"up_to_date":true}`, 202 `{"updating":true,"sha":...}`, 400 bad body, 409 `NOT_INSTALLED`, 429 `BUSY`, 502 `UPDATE_FAILED` |
+The same calls are wrapped by `python3 .claude/skills/user-test/scripts/hud_admin.py`
+(`status`, `logs --tail N`, `screenshot -o FILE`, `update --channel dev`,
+`restart`).
 
 Without a valid PSK the answer is 401; with one lacking `admin`, 403
 `{"code":"NOT_ADMIN","hint":...}`.
+
+### Operator error codes
+
+`/pair` and `/admin/*` errors are JSON `{"code","hint"}`; the `hint` says what
+to do.
+
+| Code | HTTP | Meaning |
+|---|---|---|
+| `UNAUTHENTICATED` | 401 | no valid PSK bearer on an `/admin/*` call |
+| `NOT_ADMIN` | 403 | the agent's `allow` in `agents.toml` lacks `admin` (`*` does not grant it) |
+| `PAIRING_CLOSED` | 403 | no open code: press Ctrl+Shift+P on the HUD or run `tze_hud.exe --pair`, then retry |
+| `PAIR_CODE_INVALID` | 403 | wrong code; read the current one off the HUD |
+| `BAD_REQUEST` | 400 | `/pair` body is not `{"agent","code"[,"admin"]}` JSON, or the agent id is not 1-32 characters of `a-z`, `0-9`, `-` |
+| `NOT_INSTALLED` | 409 | `/admin/update` on a copy that is not the installed one |
+| `UPDATE_FAILED` | 400, 502 | bad channel, or download, signature, channel or handoff failure (cause in the log) |
+| `BUSY` | 429 | a screenshot, restart or update is already running |
+| `UNAVAILABLE` | 503 | no display, compositor silent for 3 s, capture failed, restart or update could not start, or `/pair` could not save `agents.toml` (a new code is shown) |
+| `TOO_LARGE` | 422 | the frame exceeds the screenshot size limit |
 
 ## Update
 

@@ -142,11 +142,11 @@ Windows, `--print-attach-info` plus pairing is the more direct path.
 ### Runtime behavior specific to Windows
 
 - **Interactive desktop only.** Launch the HUD from a terminal in your own
-  desktop session. A process started over SSH, or by a service, cannot reach
-  the desktop GPU, and it draws a grey opaque window instead of a transparent
-  overlay. That is why the remote-deploy tooling launches through the
-  `TzeHudOverlay` scheduled task (`scripts/windows/run_hud.ps1`). Local
-  development doesn't need that.
+  desktop session. A process started by a service or a remote shell cannot
+  reach the desktop GPU, and it draws a grey opaque window instead of a
+  transparent overlay. The installed HUD autostarts at logon through the
+  `HKCU` Run key (see [windows-install.md](../operations/windows-install.md)),
+  which is an interactive session.
 - **Ctrl+C does not stop it.** `tze_hud.exe` is a GUI-subsystem binary. It
   attaches to the parent console for output, then ignores console Ctrl+C
   (`app/tze_hud_app/src/main.rs`). Stop it with `Stop-Process -Name tze_hud`.
@@ -178,10 +178,8 @@ unchanged against `http://127.0.0.1:9090/mcp`:
 
 - `th-hud-publish`: `python .claude/skills/th-hud-publish/scripts/publish.py --url http://127.0.0.1:9090/mcp ...`
 - `hud-projection`: set `HUD_MCP_URL=http://127.0.0.1:9090/mcp` and the agent PSK.
-- `user-test`: its `*.sh` deploy scripts (`deploy_windows_hud.sh`,
-  `tzehouse_env.sh`) SSH from a Linux host into Windows, and you don't need
-  them locally. Its `publish_zone_batch.py` and `publish_widget_batch.py` still
-  work when given a local `--url`.
+- `user-test`: `publish_zone_batch.py` and `publish_widget_batch.py` work when
+  given a local `--url` (or `HUD_HOST=127.0.0.1`).
 
 ## Running the gates
 
