@@ -114,6 +114,7 @@ impl WindowedRuntimeState {
             safe_mode_atomic,
             active_tab_mirror,
             chrome_state: Arc::new(std::sync::RwLock::new(crate::shell::ChromeState::new())),
+            system_card: crate::shell::system_card::SystemCardHandle::default(),
             input_ring: Arc::new(StdMutex::new(VecDeque::new())),
             pending_input_latency: Arc::new(StdMutex::new(VecDeque::new())),
             frame_ready_rx,

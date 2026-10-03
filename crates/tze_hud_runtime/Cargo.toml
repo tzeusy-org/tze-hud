@@ -49,6 +49,7 @@ libc = "0.2"
 windows = { workspace = true }
 
 [dev-dependencies]
+prost = { workspace = true }
 tze_hud_scene = { path = "../tze_hud_scene", version = "0.1.0" }
 tze_hud_compositor = { path = "../tze_hud_compositor", version = "0.1.0" }
 # dev-mode exposes HudSessionImpl::new(scene, psk) for the resident gRPC bridge

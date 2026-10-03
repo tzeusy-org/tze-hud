@@ -521,6 +521,52 @@ pub static CANONICAL_TOKENS: &[CanonicalToken] = &[
         description: "Notification action button label font weight",
         default_value: "600",
     },
+    // Runtime system card / toast (pairing code, update notices); never agent-visible.
+    CanonicalToken {
+        key: "system_card.background",
+        description: "System card and toast fill (RGBA hex)",
+        default_value: "#0C1426F2",
+    },
+    CanonicalToken {
+        key: "system_card.accent.color",
+        description: "System card left accent bar color",
+        default_value: "#4A9EFF",
+    },
+    CanonicalToken {
+        key: "system_card.accent.width_px",
+        description: "System card left accent bar width (px)",
+        default_value: "4",
+    },
+    CanonicalToken {
+        key: "system_card.width_px",
+        description: "System card and toast width (px)",
+        default_value: "420",
+    },
+    CanonicalToken {
+        key: "system_card.padding_px",
+        description: "System card inner padding (px)",
+        default_value: "20",
+    },
+    CanonicalToken {
+        key: "system_card.toast.margin_px",
+        description: "Toast distance from the bottom display edge (px)",
+        default_value: "32",
+    },
+    CanonicalToken {
+        key: "system_card.title.font_size_px",
+        description: "System card title font size (px)",
+        default_value: "18",
+    },
+    CanonicalToken {
+        key: "system_card.body.font_size_px",
+        description: "System card body line font size (px)",
+        default_value: "14",
+    },
+    CanonicalToken {
+        key: "system_card.code.font_size_px",
+        description: "Pairing code font size on the system card (px)",
+        default_value: "40",
+    },
     CanonicalToken {
         key: "tile.margin",
         description: "Inset of claimed tiles from the display edge (px)",

@@ -30,6 +30,7 @@ pub mod badges;
 pub mod chrome;
 pub mod freeze;
 pub mod safe_mode;
+pub mod system_card;
 
 pub use chrome::{
     // Agent exclusion

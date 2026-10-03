@@ -439,6 +439,8 @@ impl Compositor {
             sh,
             Some(LayerAttachment::Chrome),
         );
+        // Runtime system card / toast backdrop: above all scene geometry.
+        vertices.extend(self.system_card_vertices(sw, sh));
 
         (vertices, textured_cmds, bg_vertex_count)
     }
