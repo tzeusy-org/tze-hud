@@ -452,6 +452,17 @@ pub static CANONICAL_TOKENS: &[CanonicalToken] = &[
         description: "Claimed tile height, tall size class (px)",
         default_value: "520",
     },
+    // Orphaned-tile disconnection badge (docs/invariants.md section 4).
+    CanonicalToken {
+        key: "tile.disconnect_badge.color",
+        description: "Disconnection badge color on orphaned tiles",
+        default_value: "#FFB800",
+    },
+    CanonicalToken {
+        key: "tile.disconnect_badge.size_px",
+        description: "Disconnection badge square extent on orphaned tiles (px)",
+        default_value: "16",
+    },
     CanonicalToken {
         key: "tile.margin",
         description: "Inset of claimed tiles from the display edge (px)",

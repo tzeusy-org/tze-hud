@@ -61,6 +61,7 @@ ends, the runtime reclaims everything with no agent help.
   `grpc_resume_within_grace_restores_same_lease_and_tile`,
   `grpc_grace_expiry_reclaims_orphaned_lease_and_rejects_resume`
 - `tze_hud_runtime` (headless frame sweep) `render_frame_reclaims_orphaned_lease_after_grace`
+- `tze_hud_compositor` (badge draw command) `orphaned_tile_emits_disconnection_badge_draw_cmd`
 - `integration` (POC acceptance) `poc_portal_abandoned_is_reclaimed`
 
 ## 5. Leases hold time; safe mode pauses it

@@ -743,6 +743,35 @@ pub(super) fn resolve_resize_grip_tokens(token_map: &HashMap<String, String>) ->
     }
 }
 
+/// Resolved tokens for the orphaned-tile disconnection badge.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct DisconnectBadgeTokens {
+    pub(super) color: [f32; 4],
+    /// Badge square extent in physical pixels.
+    pub(super) size_px: f32,
+}
+
+// Fallbacks MUST stay in sync with `tze_hud_config`'s `CANONICAL_TOKENS`
+// entries `tile.disconnect_badge.*` (the crates are intentionally unlinked).
+const DISCONNECT_BADGE_DEFAULT_COLOR_HEX: &str = "#FFB800";
+const DISCONNECT_BADGE_DEFAULT_SIZE_PX: f32 = 16.0;
+
+/// Resolve [`DisconnectBadgeTokens`] from `tile.disconnect_badge.{color,size_px}`.
+pub(super) fn resolve_disconnect_badge_tokens(
+    token_map: &HashMap<String, String>,
+) -> DisconnectBadgeTokens {
+    let color = resolve_token_color(token_map, "tile.disconnect_badge.color")
+        .or_else(|| parse_hex_color(DISCONNECT_BADGE_DEFAULT_COLOR_HEX))
+        .unwrap_or(Rgba::WHITE)
+        .to_array();
+    let size_px = token_map
+        .get("tile.disconnect_badge.size_px")
+        .and_then(|v| v.parse::<f32>().ok())
+        .filter(|v| v.is_finite() && *v > 0.0)
+        .unwrap_or(DISCONNECT_BADGE_DEFAULT_SIZE_PX);
+    DisconnectBadgeTokens { color, size_px }
+}
+
 /// Resolved visual tokens for the runtime-authored viewer reply echo
 /// (hud-nx7yq.3) — a kind-distinct color plus font size for viewer history lines
 /// rendered above the composer strip on raw-tile portals.

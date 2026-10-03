@@ -45,8 +45,9 @@ use super::image_cache::{
 use super::token_colors::{
     ComposerOverlayTokens, ComposerVerticalAnchor, TILE_BG_DEFAULT, TILE_BG_STATIC_IMAGE,
     TILE_BG_TEXT_MARKDOWN, linear_to_srgb, resolve_composer_overlay_tokens,
-    resolve_focus_ring_tokens, resolve_resize_grip_tokens, resolve_section_gap_px,
-    resolve_tile_bg_token, resolve_tile_spacing_tokens, resolve_viewer_echo_tokens, srgb_to_linear,
+    resolve_disconnect_badge_tokens, resolve_focus_ring_tokens, resolve_resize_grip_tokens,
+    resolve_section_gap_px, resolve_tile_bg_token, resolve_tile_spacing_tokens,
+    resolve_viewer_echo_tokens, srgb_to_linear,
 };
 use super::{Compositor, CompositorDegradationPolicy};
 
@@ -813,6 +814,35 @@ impl Compositor {
             for dot in Self::resize_grip_dot_rects(tile.bounds, grip.size_px) {
                 Self::append_clipped_rect_vertices(tile, dot, sw, sh, color, vertices);
             }
+        }
+    }
+
+    /// Emit the disconnection badge (invariant 4, "badge shown") for every
+    /// visible tile whose `visual_hint` is `DisconnectionBadge`: a token-colored
+    /// square inset at the tile's top-right corner. Geometry-only, so it is
+    /// redaction-safe; the hint is cleared by the scene on resume.
+    pub(super) fn append_disconnect_badge_vertices(
+        &self,
+        scene: &SceneGraph,
+        vertices: &mut Vec<RectVertex>,
+        sw: f32,
+        sh: f32,
+    ) {
+        let badge = resolve_disconnect_badge_tokens(&self.token_map);
+        let color = self.gpu_color_raw(badge.color);
+        let inset = badge.size_px * 0.25;
+        for tile in self.policy_visible_tiles(scene) {
+            if tile.visual_hint != tze_hud_scene::lease::TileVisualHint::DisconnectionBadge {
+                continue;
+            }
+            let b = tile.bounds;
+            let rect = Rect::new(
+                b.x + b.width - badge.size_px - inset,
+                b.y + inset,
+                badge.size_px,
+                badge.size_px,
+            );
+            Self::append_clipped_rect_vertices(tile, rect, sw, sh, color, vertices);
         }
     }
 
