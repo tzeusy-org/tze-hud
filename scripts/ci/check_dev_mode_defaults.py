@@ -60,7 +60,10 @@ class Workspace:
     def closure_features(self, root):
         """Return {package: enabled feature names} for `cargo build -p root`."""
         enabled = {}
-        active = set()  # (package, dep key) edges that are turned on
+        # Edges turned on, keyed by (parent, id of the dependency entry). cargo
+        # emits one entry per kind AND target for the same crate, each with its
+        # own features/default-features, so the key must be per entry.
+        active = set()
         work = [(root, "default")]
         # Non-optional edges are active as soon as their parent is in the closure.
         seen_pkgs = set()
@@ -76,9 +79,9 @@ class Workspace:
                         activate(name, key, target, d)
 
         def activate(parent, key, target, d):
-            if (parent, key, target) in active:
+            if (parent, id(d)) in active:
                 return
-            active.add((parent, key, target))
+            active.add((parent, id(d)))
             add_pkg(target)
             if d["uses_default_features"]:
                 work.append((target, "default"))
@@ -100,7 +103,9 @@ class Workspace:
                     dep, sub = item.split("/", 1)
                     weak = dep.endswith("?")
                     dep = dep.rstrip("?")
-                    if dep in edges and (not weak or (name, dep) in {(p, k) for p, k, _ in active}):
+                    if dep in edges and (
+                        not weak or any((name, id(d)) in active for _, d in edges[dep])
+                    ):
                         self._turn_on(name, dep, edges, work, activate)
                         for target, _ in edges[dep]:
                             work.append((target, sub))

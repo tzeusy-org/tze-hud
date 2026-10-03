@@ -112,6 +112,30 @@ class DevModeGuardTest(unittest.TestCase):
         rc, out = run(m)
         self.assertEqual(rc, 0, out)
 
+    def test_second_target_specific_edge_enabling_dev_mode_fails(self):
+        m = clean()
+        app = by_name(m, "tze_hud_app")
+        # First edge is featureless; cargo emits a separate entry per target.
+        windows = dep("tze_hud_runtime", features=["dev-mode"])
+        windows["target"] = "cfg(windows)"
+        app["dependencies"].append(windows)
+        self.assertFails(m, "tze_hud_app (shipped binary) on: tze_hud_runtime")
+
+    def test_second_build_kind_edge_enabling_dev_mode_fails(self):
+        m = clean()
+        app = by_name(m, "tze_hud_app")
+        app["dependencies"].append(dep("tze_hud_runtime", "build", ["dev-mode"]))
+        self.assertFails(m, "tze_hud_app (shipped binary) on: tze_hud_runtime")
+
+    def test_multiple_clean_edges_to_same_crate_pass(self):
+        m = clean()
+        app = by_name(m, "tze_hud_app")
+        windows = dep("tze_hud_runtime")
+        windows["target"] = "cfg(windows)"
+        app["dependencies"] += [windows, dep("tze_hud_runtime", "build")]
+        rc, out = run(m)
+        self.assertEqual(rc, 0, out)
+
     def test_missing_shipped_package_fails(self):
         m = clean()
         m["packages"] = [p for p in m["packages"] if p["name"] != "tze_hud_app"]
