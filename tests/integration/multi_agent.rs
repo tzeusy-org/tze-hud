@@ -45,7 +45,7 @@ use tze_hud_scene::types::*;
 use serde::{Deserialize, Serialize};
 
 // ─── Shared gRPC session harness ─────────────────────────────────────────────
-// Extracted from duplicate copies in presence_card_coexistence, and
+// Extracted from duplicate copies in the former presence-card suite and
 // subtitle_streaming (hud-ls5pz). See common/mod.rs for drift reconciliation notes.
 #[path = "common/mod.rs"]
 mod common;
@@ -975,4 +975,158 @@ fn test_latest_wins_two_distinct_publishers() {
         !content_text.contains("Alpha"),
         "agent-alpha's content must have been evicted by LatestWins ('{content_text}')"
     );
+}
+
+// ─── Same-anchor coexistence ─────────────────────────────────────────────────
+
+/// Replace a tile's root with a single text node and wait for the result.
+async fn set_tile_text_via_grpc(
+    session: &mut AgentSession,
+    tile_id: &[u8],
+    content: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let seq = session.next_seq();
+    let text = proto::TextMarkdownNodeProto {
+        content: content.to_string(),
+        bounds: Some(proto::Rect {
+            x: 0.0,
+            y: 0.0,
+            width: 100.0,
+            height: 20.0,
+        }),
+        font_size_px: 14.0,
+        color: Some(proto::Rgba {
+            r: 0.9,
+            g: 0.9,
+            b: 0.9,
+            a: 1.0,
+        }),
+        background: None,
+        color_runs: vec![],
+        overflow: 0,
+    };
+    session
+        .tx
+        .send(session_proto::ClientMessage {
+            sequence: seq,
+            timestamp_wall_us: now_wall_us(),
+            payload: Some(session_proto::client_message::Payload::MutationBatch(
+                session_proto::MutationBatch {
+                    batch_id: uuid::Uuid::now_v7().as_bytes().to_vec(),
+                    lease_id: session.lease_id_bytes.clone(),
+                    mutations: vec![proto::MutationProto {
+                        mutation: Some(proto::mutation_proto::Mutation::SetTileRoot(
+                            proto::SetTileRootMutation {
+                                tile_id: tile_id.to_vec(),
+                                node: Some(proto::NodeProto {
+                                    layout: 0,
+                                    id: Vec::new(),
+                                    data: Some(proto::node_proto::Data::TextMarkdown(text)),
+                                    children: vec![],
+                                }),
+                            },
+                        )),
+                    }],
+                    timing: None,
+                },
+            )),
+        })
+        .await?;
+    match session
+        .next_server_msg()
+        .await
+        .ok_or("no mutation result")??
+        .payload
+    {
+        Some(session_proto::server_message::Payload::RequestResult(r)) if r.ok => Ok(()),
+        other => Err(format!("SetTileRoot rejected: {other:?}").into()),
+    }
+}
+
+/// Three agents claim the same anchor concurrently: the runtime stacks the
+/// tiles without overlap (z-order follows claim order), and all three can
+/// then update their own tile's content at once without interference.
+#[tokio::test]
+async fn test_three_agents_same_anchor_stack_without_overlap_and_update_concurrently()
+-> Result<(), Box<dyn std::error::Error>> {
+    const PORT: u16 = 50055;
+    let config = HeadlessConfig {
+        width: DISPLAY_W,
+        height: DISPLAY_H,
+        grpc_port: PORT,
+        agents: tze_hud_scene::config::AgentDirectory::unrestricted(TEST_PSK),
+        config_toml: None,
+    };
+    let runtime = HeadlessRuntime::new(config).await?;
+    {
+        let state = runtime.shared_state().lock().await;
+        let mut scene = state.scene.lock().await;
+        let tab_id = scene.create_tab("Stack", 0)?;
+        scene.active_tab = Some(tab_id);
+    }
+    let _server_handle = runtime.start_grpc_server().await?;
+
+    let (mut alpha, mut beta, mut gamma) = tokio::try_join!(
+        connect_agent(TEST_PSK, PORT, "agent-alpha"),
+        connect_agent(TEST_PSK, PORT, "agent-beta"),
+        connect_agent(TEST_PSK, PORT, "agent-gamma"),
+    )?;
+    let small = || placement(TileAnchor::BottomLeft, TileSize::Small);
+    let (tile_alpha, tile_beta, tile_gamma) = tokio::try_join!(
+        claim_tile_via_grpc(&mut alpha, small()),
+        claim_tile_via_grpc(&mut beta, small()),
+        claim_tile_via_grpc(&mut gamma, small()),
+    )?;
+
+    {
+        let state = runtime.shared_state().lock().await;
+        let scene = state.scene.lock().await;
+        let mut tiles: Vec<_> = scene.tiles.values().collect();
+        assert_eq!(tiles.len(), 3, "each agent's claim creates one tile");
+        tiles.sort_by_key(|t| t.z_order);
+        assert_eq!(
+            tiles.iter().map(|t| t.z_order).collect::<Vec<_>>(),
+            vec![1, 2, 3],
+            "each claim stacks above the previous one"
+        );
+        for (i, a) in tiles.iter().enumerate() {
+            for b in &tiles[i + 1..] {
+                assert!(
+                    a.bounds.y + a.bounds.height <= b.bounds.y
+                        || b.bounds.y + b.bounds.height <= a.bounds.y,
+                    "tiles claimed at one anchor must not overlap: {:?} vs {:?}",
+                    a.bounds,
+                    b.bounds
+                );
+            }
+        }
+    }
+
+    tokio::try_join!(
+        set_tile_text_via_grpc(&mut alpha, &tile_alpha, "alpha"),
+        set_tile_text_via_grpc(&mut beta, &tile_beta, "beta"),
+        set_tile_text_via_grpc(&mut gamma, &tile_gamma, "gamma"),
+    )?;
+    {
+        let state = runtime.shared_state().lock().await;
+        let scene = state.scene.lock().await;
+        for (id, agent, label) in [
+            (&tile_alpha, &alpha, "alpha"),
+            (&tile_beta, &beta, "beta"),
+            (&tile_gamma, &gamma, "gamma"),
+        ] {
+            let uuid = uuid::Uuid::from_bytes(id.as_slice().try_into()?);
+            let tile = &scene.tiles[&tze_hud_scene::SceneId::from_uuid(uuid)];
+            assert_eq!(tile.namespace, agent.namespace, "{label}: tile namespace");
+            assert!(tile.root_node.is_some(), "{label}: root set by its update");
+        }
+    }
+    // The agent that sets its tile root must not be able to do so on a peer's tile.
+    assert!(
+        set_tile_text_via_grpc(&mut alpha, &tile_gamma, "intrusion")
+            .await
+            .is_err(),
+        "an agent must not replace another agent's tile content"
+    );
+    Ok(())
 }

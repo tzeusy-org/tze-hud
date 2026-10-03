@@ -1069,3 +1069,98 @@ fn stage1_empty_batch_with_nonexistent_batch_lease_id_rejected() {
         "expected LeaseNotFound, got {code:?}"
     );
 }
+
+// ─── Resource registration gate ──────────────────────────────────────────────
+
+/// An agent may not reference an image it never uploaded: SetTileRoot, AddNode
+/// and UpdateNodeContent each reject a StaticImage node with an unregistered
+/// resource id as `ResourceNotFound`, leaving the tile untouched.
+#[test]
+fn static_image_with_unregistered_resource_is_rejected_on_every_agent_path() {
+    use tze_hud_scene::types::{ImageFitMode, ResourceId, StaticImageNode};
+
+    let image = |byte: u8| {
+        NodeData::StaticImage(StaticImageNode {
+            resource_id: ResourceId::from_bytes([byte; 32]),
+            width: 48,
+            height: 48,
+            decoded_bytes: 48 * 48 * 4,
+            fit_mode: ImageFitMode::Cover,
+            bounds: Rect::new(0.0, 0.0, 48.0, 48.0),
+        })
+    };
+    let node = |data| Node {
+        layout: Default::default(),
+        id: SceneId::new(),
+        children: Vec::new(),
+        data,
+    };
+    let assert_resource_not_found =
+        |scene: &mut SceneGraph, mutation: SceneMutation, path: &str| {
+            let result = scene.apply_batch(&make_batch("agent", vec![mutation]));
+            assert!(
+                !result.applied,
+                "{path}: unregistered image must be rejected"
+            );
+            let code = result.rejection.as_ref().map(|r| r.errors[0].code);
+            assert_eq!(code, Some(ValidationErrorCode::ResourceNotFound), "{path}");
+        };
+
+    let mut scene = SceneGraph::new(1920.0, 1080.0);
+    scene.register_resource(ResourceId::from_bytes([0xAA; 32]));
+    let tab_id = scene.create_tab("Main", 0).unwrap();
+    let lease_id = scene.grant_lease("agent", 60_000);
+    let tile_id = scene
+        .create_tile_checked(
+            tab_id,
+            "agent",
+            lease_id,
+            Rect::new(0.0, 0.0, 100.0, 100.0),
+            1,
+        )
+        .unwrap();
+
+    // SetTileRoot with an unregistered image as the root: the tile stays empty.
+    assert_resource_not_found(
+        &mut scene,
+        SceneMutation::SetTileRoot {
+            tile_id,
+            node: node(image(0xDE)),
+            descendants: vec![],
+        },
+        "SetTileRoot",
+    );
+    assert!(scene.tiles[&tile_id].root_node.is_none());
+
+    // With a registered image as the root, AddNode and UpdateNodeContent are gated too.
+    let root = node(image(0xAA));
+    let root_id = root.id;
+    let set_root = make_batch(
+        "agent",
+        vec![SceneMutation::SetTileRoot {
+            tile_id,
+            node: root,
+            descendants: vec![],
+        }],
+    );
+    assert!(scene.apply_batch(&set_root).applied);
+    assert_resource_not_found(
+        &mut scene,
+        SceneMutation::AddNode {
+            tile_id,
+            parent_id: Some(root_id),
+            node: node(image(0xDE)),
+        },
+        "AddNode",
+    );
+    assert_resource_not_found(
+        &mut scene,
+        SceneMutation::UpdateNodeContent {
+            tile_id,
+            node_id: root_id,
+            data: image(0xDE), // 0xDE is never registered
+        },
+        "UpdateNodeContent",
+    );
+    assert_eq!(scene.tiles[&tile_id].root_node, Some(root_id));
+}
