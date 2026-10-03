@@ -1738,7 +1738,7 @@ mod tests {
             height: 64,
             grpc_port: 0,
             bind_all_interfaces: false,
-            psk: "test".to_string(),
+            agents: AgentDirectory::unrestricted("test"),
             config_toml: None,
         };
         let _runtime_guard = crate::test_support::lock_headless_runtime().await;

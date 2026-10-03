@@ -227,7 +227,7 @@ impl HeadlessEventLoopHarness {
     /// `127.0.0.1:0`, every deadline reading `clock` (invariant 9).
     ///
     /// Mirrors [`super::WindowedRuntime::run`]'s wiring: runtime context and
-    /// agent directory from `cfg.config_toml`, scene startup (zones, widgets,
+    /// agent directory from `cfg.agents`, scene startup (zones, widgets,
     /// design tokens), the MCP → event-loop portal-op channel, and the portal
     /// projection driver. It skips what needs a display or touches the user's
     /// disk (window, compositor, gRPC, element and widget-asset stores).
@@ -236,7 +236,7 @@ impl HeadlessEventLoopHarness {
         cfg: super::WindowedConfig,
         clock: Arc<dyn Clock>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        let (runtime_context, fallback_unrestricted) = super::build_runtime_context(&cfg);
+        let runtime_context = super::build_runtime_context(&cfg);
         let mut state = WindowedRuntimeState::new_headless();
 
         let mut scene = SceneGraph::new_with_clock(
@@ -261,7 +261,6 @@ impl HeadlessEventLoopHarness {
         };
         let scene_handle = {
             let mut shared = state.shared_state.lock().await;
-            shared.sessions = tze_hud_protocol::session::SessionRegistry::new(&cfg.psk);
             shared.tile_placement = tze_hud_config::tile_placement_from_tokens(&global_tokens);
             *shared.scene.lock().await = scene;
             Arc::clone(&shared.scene)
@@ -270,7 +269,7 @@ impl HeadlessEventLoopHarness {
         let (portal_op_tx, portal_op_rx) = tokio::sync::mpsc::unbounded_channel();
         let mcp_config = crate::mcp::McpServerConfig {
             bind_addr: SocketAddr::from(([127, 0, 0, 1], 0)),
-            agents: runtime_context.agent_directory(&cfg.psk),
+            agents: Arc::clone(&cfg.agents),
         };
         let (_mcp_task, mcp_addr) = crate::mcp::start_mcp_http_server(
             scene_handle,
@@ -286,7 +285,6 @@ impl HeadlessEventLoopHarness {
         state.portal_op_rx = Some(portal_op_rx);
         state.global_tokens = global_tokens;
         state.runtime_context = runtime_context;
-        state.fallback_unrestricted = fallback_unrestricted;
         state.config = cfg;
         Ok(HeadlessEventLoopHarness {
             app: WinitApp { state },

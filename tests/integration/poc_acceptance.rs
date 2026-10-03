@@ -35,14 +35,22 @@ const PORTAL_FLOW_BUDGET: usize = 250;
 const PORTAL_DEGRADE_MS: u64 = 30_000;
 const PORTAL_RECLAIM_MS: u64 = 60_000;
 
-/// Agent identity, in one place. production.toml's `[agents.claude]` reads
-/// the runtime PSK (`psk_env = "TZE_HUD_PSK"`), so the runtime is started with
-/// this PSK and MCP calls present it as the bearer.
+/// Agent identity, in one place. The runtime is seeded with an `agents.toml`-style
+/// directory pairing `claude` (allow = ["*"]) by the SHA-256 of this PSK, and MCP
+/// calls present the PSK as the bearer.
 const CLAUDE_PSK: &str = "poc-acceptance-psk";
 
 fn runtime_config() -> WindowedConfig {
     WindowedConfig {
-        psk: CLAUDE_PSK.to_string(),
+        agents: {
+            let mut agents = tze_hud_scene::config::AgentDirectory::default();
+            agents.insert(
+                "claude",
+                tze_hud_scene::config::hash_psk(CLAUDE_PSK),
+                vec!["*".to_string()],
+            );
+            agents.shared()
+        },
         config_toml: Some(PRODUCTION_CONFIG.to_string()),
         config_file_path: Some(
             concat!(
