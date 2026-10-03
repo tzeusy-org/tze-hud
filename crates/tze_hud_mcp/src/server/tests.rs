@@ -748,7 +748,14 @@ fn mock_portal(server: McpServer) -> (McpServer, Arc<std::sync::Mutex<MockPortal
                     reply,
                     ..
                 } => {
-                    let r = check(&owner_token);
+                    let r = if output_text.len() > 10_000 {
+                        Err(PortalOpRejection {
+                            error_code: ProjectionErrorCode::ProjectionOutputTooLarge,
+                            message: String::new(),
+                        })
+                    } else {
+                        check(&owner_token)
+                    };
                     if r.is_ok() {
                         m.outputs.push((output_text, expects_reply));
                     }
@@ -831,6 +838,20 @@ fn mock_portal(server: McpServer) -> (McpServer, Arc<std::sync::Mutex<MockPortal
         }
     });
     (server.with_portal_op_tx(tx), state)
+}
+
+#[tokio::test]
+async fn portal_output_too_large_is_content_rejected() {
+    let (server, _) = server();
+    let (server, _) = mock_portal(server);
+    let e = call_err(
+        &server,
+        "hud_publish",
+        json!({"surface": "portal:main", "content": "x".repeat(10_001)}),
+    )
+    .await;
+    assert_eq!(e["code"], "CONTENT_REJECTED");
+    assert!(!e["hint"].as_str().unwrap().is_empty());
 }
 
 #[tokio::test]

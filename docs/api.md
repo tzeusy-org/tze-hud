@@ -127,21 +127,20 @@ unknown PSK) is a JSON-RPC error.
 | Code | Meaning |
 |---|---|
 | `INVALID_ARGUMENT` | Unknown field, wrong type, or bad surface string |
-| `NOT_ALLOWED` | The agent's `allow` list doesn't cover the surface |
+| `NOT_ALLOWED` | The agent's `allow` list doesn't cover the surface, or another agent holds that `portal:<id>` |
 | `NOT_HELD` | `hud_hold` with nothing to extend, or `hud_clear` on a portal that isn't attached |
 | `ZONE_NOT_FOUND` | No such zone |
 | `WIDGET_NOT_FOUND` | No such widget instance |
 | `WIDGET_PARAMETER_INVALID` | Unknown widget param, or a value of the wrong type or range |
-| `CONTENT_REJECTED` | The zone doesn't accept this content, or is full |
+| `CONTENT_REJECTED` | The zone doesn't accept this content, or is full; a portal publish or input too large |
 | `LEASE_NOT_ACTIVE` | The agent's lease lapsed mid-call; retry |
 | `SAFE_MODE_ACTIVE` | The human paused agents |
 | `TIMESTAMP_TOO_FUTURE` | `delay_ms` beyond the scheduling horizon |
 | `TIMESTAMP_TOO_OLD` | gRPC timing hint further in the past than the staleness window |
 | `TIMESTAMP_EXPIRY_BEFORE_PRESENT` | gRPC `expires_at_us` is not after `present_at_us` |
-| `BUDGET_EXCEEDED` | gRPC batch or claim over the session's resource budget; the hint names the limit |
-| `UNAVAILABLE` | The portal service isn't running |
+| `BUDGET_EXCEEDED` | gRPC batch or claim over the session's resource budget, or a portal rate limit or full input queue; the hint names the next call |
+| `UNAVAILABLE` | The portal service isn't running or the HUD is unavailable |
 | `INTERNAL` | Runtime fault |
-| `PROJECTION_NOT_FOUND`, `PROJECTION_ALREADY_ATTACHED`, `PROJECTION_UNAUTHORIZED`, `PROJECTION_TOKEN_EXPIRED`, `PROJECTION_INVALID_ARGUMENT`, `PROJECTION_OUTPUT_TOO_LARGE`, `PROJECTION_INPUT_TOO_LARGE`, `PROJECTION_INPUT_QUEUE_FULL`, `PROJECTION_RATE_LIMITED`, `PROJECTION_STATE_CONFLICT`, `PROJECTION_HUD_UNAVAILABLE`, `PROJECTION_INTERNAL_ERROR` | Portal authority rejections, passed through |
 
 ## gRPC (resident sessions)
 
