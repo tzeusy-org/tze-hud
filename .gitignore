@@ -3,6 +3,7 @@
 .dolt/
 *.db
 **/*.pyc
+__pycache__/
 
 .env
 # Rust build artifacts (no trailing slash: also matches when this is a
