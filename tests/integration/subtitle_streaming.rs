@@ -58,7 +58,7 @@ mod common;
 // Other tests use:
 //   50052  multi_agent
 //   50053  soak
-//   50055  presence_card_coexistence
+//   50055  multi_agent (same-anchor stacking)
 //   50056-50060 reserved for this file
 //
 // Port per test for isolation (tests run in parallel by default):

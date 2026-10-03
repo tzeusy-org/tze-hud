@@ -965,3 +965,118 @@ fn mutation_after_release_is_rejected() {
         "mutation after lease release must be rejected (tile no longer exists)"
     );
 }
+
+/// An orphaned agent is frozen (its tile keeps the last committed content and
+/// every mutation is rejected) while other agents keep working; reconnecting
+/// within grace lets it mutate again, and grace expiry removes only its tile.
+#[test]
+fn orphaned_agent_is_frozen_while_other_agents_keep_working() {
+    use tze_hud_scene::mutation::{MutationBatch, SceneMutation};
+    use tze_hud_scene::types::{Node, NodeData, Rgba, SolidColorNode};
+
+    fn batch(ns: &str, lease_id: SceneId, mutation: SceneMutation) -> MutationBatch {
+        MutationBatch {
+            batch_id: SceneId::new(),
+            agent_namespace: ns.to_string(),
+            mutations: vec![mutation],
+            timing_hints: None,
+            lease_id: Some(lease_id),
+        }
+    }
+    fn root() -> Node {
+        Node {
+            layout: Default::default(),
+            id: SceneId::new(),
+            children: Vec::new(),
+            data: NodeData::SolidColor(SolidColorNode {
+                color: Rgba {
+                    r: 0.1,
+                    g: 0.1,
+                    b: 0.1,
+                    a: 1.0,
+                },
+                bounds: Rect::new(0.0, 0.0, 400.0, 300.0),
+                radius: None,
+            }),
+        }
+    }
+    let set_root = |tile_id| SceneMutation::SetTileRoot {
+        tile_id,
+        node: root(),
+        descendants: vec![],
+    };
+    let opacity = |tile_id, opacity| SceneMutation::UpdateTileOpacity { tile_id, opacity };
+
+    let (mut scene, clock) = make_scene(0);
+    let tab_id = setup_active_tab(&mut scene);
+    let lease_a = grant_lease(&mut scene, "agent-a");
+    let lease_b = grant_lease(&mut scene, "agent-b");
+    let tile_a = create_tile(&mut scene, tab_id, "agent-a", lease_a);
+    // Agent B's tile sits elsewhere so the two tiles do not collide on z-order.
+    let tile_b = scene
+        .create_tile_checked(
+            tab_id,
+            "agent-b",
+            lease_b,
+            Rect::new(500.0, 50.0, 200.0, 200.0),
+            101,
+        )
+        .unwrap();
+    let b_bounds = scene.tiles[&tile_b].bounds;
+    let first = scene.apply_batch(&batch("agent-a", lease_a, set_root(tile_a)));
+    assert!(first.applied, "{:?}", first.rejection);
+    let root_before = scene.tiles[&tile_a].root_node;
+
+    clock.advance(5_000);
+    scene
+        .disconnect_lease(&lease_a, clock.now_millis())
+        .unwrap();
+
+    // The orphaned agent can neither replace content nor change opacity.
+    for mutation in [set_root(tile_a), opacity(tile_a, 0.5)] {
+        let result = scene.apply_batch(&batch("agent-a", lease_a, mutation));
+        assert!(
+            !result.applied,
+            "mutation from an ORPHANED agent must be rejected"
+        );
+    }
+    assert_eq!(
+        scene.tiles[&tile_a].root_node, root_before,
+        "orphaned tile keeps its last committed content"
+    );
+    assert_eq!(
+        scene.tiles[&tile_a].visual_hint,
+        TileVisualHint::DisconnectionBadge
+    );
+
+    // The other agent is unaffected: no badge, mutations accepted.
+    assert_eq!(scene.tiles[&tile_b].visual_hint, TileVisualHint::None);
+    assert!(
+        scene
+            .apply_batch(&batch("agent-b", lease_b, opacity(tile_b, 0.9)))
+            .applied,
+        "an active agent keeps working while another is orphaned"
+    );
+
+    // Reconnect within grace: the agent can mutate again.
+    clock.advance(10_000);
+    scene.reconnect_lease(&lease_a, clock.now_millis()).unwrap();
+    assert!(
+        scene
+            .apply_batch(&batch("agent-a", lease_a, opacity(tile_a, 0.5)))
+            .applied,
+        "mutations resume after reconnect within grace"
+    );
+
+    // Disconnect again and let grace lapse: only agent A's tile goes away.
+    scene
+        .disconnect_lease(&lease_a, clock.now_millis())
+        .unwrap();
+    clock.advance(31_000);
+    scene.expire_leases();
+    assert!(!scene.tiles.contains_key(&tile_a));
+    assert_eq!(
+        scene.tiles[&tile_b].bounds, b_bounds,
+        "remaining tiles are not repositioned when another agent's tile is reclaimed"
+    );
+}
