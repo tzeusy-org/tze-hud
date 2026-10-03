@@ -4,7 +4,11 @@ use tze_hud_scene::SceneId;
 use tze_hud_scene::graph::SceneGraph;
 use winit::window::CursorIcon;
 
+use std::time::Instant;
+
 use super::WinitApp;
+use super::wake::{self, CursorPollSignature, CursorPollTurn, Deadline};
+use crate::idle_efficiency::RuntimeWakeupSource;
 use crate::window::{HitRegion, WindowMode, should_capture_pointer_event};
 
 /// Map a backend-agnostic [`PortalCursor`] onto a concrete winit cursor icon.
@@ -214,6 +218,94 @@ impl WinitApp {
                 }
             }
         }
+    }
+
+    /// The next cursor poll deadline, armed only while passthrough could hide a
+    /// click from an interactive region (see [`wake::cursor_poll_deadline`]).
+    pub(super) fn cursor_poll_deadline_at(&self, now: Instant) -> Option<Deadline> {
+        let snapshot = self.state.pipeline.hit_test_snapshot.load();
+        let interactive = !self.state.hit_regions.is_empty()
+            || !snapshot.drag_handles.is_empty()
+            || snapshot
+                .tiles
+                .iter()
+                .any(|tile| tile.has_scroll_config || tile.dismissible);
+        wake::cursor_poll_deadline(
+            now,
+            self.state.effective_mode == WindowMode::Overlay,
+            interactive,
+            !self.state.overlay_capturing,
+        )
+    }
+
+    /// The dismissible tile whose viewer close button the cursor is over, from
+    /// the lock-free snapshot; none once the cursor has left the window.
+    pub(super) fn close_hover_target(&self) -> Option<SceneId> {
+        (!self.state.cursor_left_window)
+            .then(|| {
+                self.state
+                    .pipeline
+                    .hit_test_snapshot
+                    .load()
+                    .close_hover_target(self.state.cursor_x, self.state.cursor_y)
+            })
+            .flatten()
+    }
+
+    /// Lock-free view of what the cursor currently hovers or would capture.
+    pub(super) fn cursor_poll_signature(&self) -> CursorPollSignature {
+        let (x, y) = (self.state.cursor_x, self.state.cursor_y);
+        CursorPollSignature {
+            capture: should_capture_pointer_event(
+                WindowMode::Overlay,
+                x,
+                y,
+                &self.state.hit_regions,
+            ) || self.cursor_over_focused_portal_affordance(),
+            grip: self.resize_grip_hover_target(),
+            close_target: self.close_hover_target(),
+            widget_regions: self
+                .state
+                .widget_hover_trackers
+                .values()
+                .filter(|tracker| tracker.region.contains(x, y))
+                .count() as u32,
+        }
+    }
+
+    /// Service a due cursor poll tick on the main thread alone.
+    ///
+    /// Costs a cursor read plus lock-free snapshot reads: no scene lock, no
+    /// compositor wake, no main-work debt. Only a hover/capture change (or any
+    /// other pending work) returns [`CursorPollTurn::FullTurn`], after marking
+    /// main work pending so the full turn publishes exactly one compositor
+    /// wake. The capture flip itself still happens in that turn on the main
+    /// thread, before anything waits on the compositor.
+    pub(super) fn cursor_poll_turn(&mut self, now: Instant) -> CursorPollTurn {
+        self.refresh_cursor_position_from_os();
+        let signature = self.cursor_poll_signature();
+        let previous = self.state.cursor_poll.signature.replace(signature);
+        let has_other_work = self.state.shutdown.is_triggered()
+            || self.state.pending_mode_switch.is_some()
+            || self.state.left_button_down
+            || self.state.quiescent_efficiency.is_some()
+            || !self.state.pending_input_capture_commands.is_empty()
+            || !self.state.pending_keyboard_events.is_empty()
+            || self.state.wake.has_unfinished_main_work();
+        if has_other_work || previous != Some(signature) {
+            self.state
+                .wake
+                .mark_main_work_pending(RuntimeWakeupSource::AnimationDeadline);
+            return CursorPollTurn::FullTurn;
+        }
+        let next = [
+            self.cursor_poll_deadline_at(now),
+            self.state.cursor_poll.other_deadline,
+        ]
+        .into_iter()
+        .flatten()
+        .min_by_key(|deadline| deadline.at);
+        CursorPollTurn::Quiet { next }
     }
 
     /// Update overlay passthrough/capture state from current cursor+regions.

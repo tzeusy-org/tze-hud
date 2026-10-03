@@ -216,7 +216,8 @@ use self::network::{
 };
 use self::portal::PortalProjectionDrain;
 use self::wake::{
-    Deadline, RuntimeWakeEvent, WindowedWake, control_flow_for_deadlines, deadline_from_wall_us,
+    CursorPollTurn, Deadline, RuntimeWakeEvent, WindowedWake, control_flow_for_deadlines,
+    deadline_from_wall_us,
 };
 use crate::portal_projection_driver::PortalWakeDeadline;
 
@@ -275,6 +276,7 @@ struct WindowedRuntimeState {
     config: WindowedConfig,
     wake: WindowedWake,
     scheduled_main_deadline: Option<Deadline>,
+    cursor_poll: wake::CursorPollState,
     /// Compositor thread handle (stored so it can be joined on shutdown).
     compositor_handle: Option<std::thread::JoinHandle<()>>,
     /// Network runtime for gRPC / MCP.
@@ -742,6 +744,42 @@ impl WinitApp {
 }
 
 impl WinitApp {
+    /// Service a timer wake: count it and, for a due main-owned deadline, either
+    /// owe a compositor notification (full turn) or, for a main-only cursor
+    /// poll tick, defer to `cursor_poll_turn`, which creates main work only if
+    /// something changed.
+    fn on_resume_time_reached(&mut self, now: Instant) {
+        let Some(deadline) = self
+            .state
+            .scheduled_main_deadline
+            .filter(|deadline| deadline.at <= now)
+        else {
+            return;
+        };
+        self.state.scheduled_main_deadline = None;
+        self.state
+            .wake
+            .counters()
+            .record_main_wakeup(deadline.source);
+        let other_due = self
+            .state
+            .cursor_poll
+            .other_deadline
+            .is_some_and(|other| other.at <= now);
+        if deadline.main_only && !other_due {
+            self.state.cursor_poll.tick = true;
+            return;
+        }
+        // Main-owned deadlines (portal liveness/cadence, hover, and chrome
+        // expiry) mutate the scene later in `about_to_wait`. Mark a
+        // post-mutation compositor notification as owed; a pre-mutation wake can
+        // otherwise be consumed against the old scene and strand the
+        // newly-created work.
+        self.state.wake.mark_main_work_pending(deadline.source);
+    }
+}
+
+impl WinitApp {
     /// Settle the scene-side main-thread work for one event-loop turn: flush
     /// the composer draft, retry deferred keystrokes, dispatch MCP portal ops,
     /// and drain the portal projection into the scene. Needs no window or
@@ -802,27 +840,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
     fn new_events(&mut self, _event_loop: &ActiveEventLoop, cause: StartCause) {
         match cause {
             StartCause::ResumeTimeReached { .. } => {
-                if self
-                    .state
-                    .scheduled_main_deadline
-                    .is_some_and(|deadline| deadline.at <= Instant::now())
-                {
-                    let deadline = self
-                        .state
-                        .scheduled_main_deadline
-                        .take()
-                        .expect("a due main deadline was checked above");
-                    self.state
-                        .wake
-                        .counters()
-                        .record_main_wakeup(deadline.source);
-                    // Main-owned deadlines (portal liveness/cadence, hover, and
-                    // chrome expiry) mutate the scene later in `about_to_wait`.
-                    // Mark a post-mutation compositor notification as owed; a
-                    // pre-mutation wake can otherwise be consumed against the
-                    // old scene and strand the newly-created work.
-                    self.state.wake.mark_main_work_pending(deadline.source);
-                }
+                self.on_resume_time_reached(Instant::now());
             }
             StartCause::WaitCancelled { .. } => {
                 // EventLoopProxy delivery also cancels a parked wait, but that
@@ -841,6 +859,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
     }
 
     fn user_event(&mut self, _event_loop: &ActiveEventLoop, _event: RuntimeWakeEvent) {
+        self.state.cursor_poll.tick = false;
         let source = self.state.wake.take_main_source();
         self.state.wake.counters().record_main_wakeup(source);
     }
@@ -855,6 +874,15 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
     /// Pending mode switches must therefore be handled here in `about_to_wait`
     /// rather than in `resumed()`.
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        if std::mem::take(&mut self.state.cursor_poll.tick) {
+            if let CursorPollTurn::Quiet { next } = self.cursor_poll_turn(Instant::now()) {
+                self.state.scheduled_main_deadline = next;
+                event_loop.set_control_flow(next.map_or(ControlFlow::Wait, |deadline| {
+                    ControlFlow::WaitUntil(deadline.at)
+                }));
+                return;
+            }
+        }
         // A proxy/OS event can cancel WaitUntil immediately before its instant,
         // then settle work can cross the deadline. Claim it before the work
         // checkpoint so its typed post-settle compositor wake cannot be lost.
@@ -984,21 +1012,16 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                 ));
             }
         }
-        let snapshot = self.state.pipeline.hit_test_snapshot.load();
-        // A dismissible tile counts as interactive: in passthrough the pointer
-        // must be polled to show its viewer close button (hud-jm8nq.11).
-        let interactive = !self.state.hit_regions.is_empty()
-            || !snapshot.drag_handles.is_empty()
-            || snapshot
-                .tiles
-                .iter()
-                .any(|tile| tile.has_scroll_config || tile.dismissible);
-        deadlines.extend(wake::cursor_poll_deadline(
-            now,
-            self.state.effective_mode == WindowMode::Overlay,
-            interactive,
-            !self.state.overlay_capturing,
-        ));
+        deadlines.extend(self.cursor_poll_deadline_at(now));
+        self.state.cursor_poll.other_deadline = deadlines
+            .iter()
+            .copied()
+            .filter(|deadline| !deadline.main_only)
+            .min_by_key(|deadline| deadline.at);
+        self.state.cursor_poll.signature = deadlines
+            .iter()
+            .any(|deadline| deadline.main_only)
+            .then(|| self.cursor_poll_signature());
         let has_deferred_scene_work = portal_drain.is_deferred()
             || !self.state.pending_input_capture_commands.is_empty()
             || !self.state.pending_keyboard_events.is_empty();
@@ -2046,6 +2069,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
         _window_id: WindowId,
         event: WindowEvent,
     ) {
+        self.state.cursor_poll.tick = false;
         let wake_source = main_work_source_for_window_event(&event);
         match event {
             // ── Close ──────────────────────────────────────────────────────
@@ -2697,6 +2721,7 @@ impl WindowedRuntime {
             config: cfg,
             wake,
             scheduled_main_deadline: None,
+            cursor_poll: wake::CursorPollState::default(),
             compositor_handle: None,
             network_rt,
             network_handles,
