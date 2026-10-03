@@ -44,6 +44,12 @@ const PORTAL_FLOW_BUDGET: usize = 250;
 const PORTAL_DEGRADE_MS: u64 = 30_000;
 const PORTAL_RECLAIM_MS: u64 = 60_000;
 
+/// Real-time cap on every wait in this file, and how often waits poll. These
+/// bound the test's own patience (a regression fails instead of hanging); the
+/// runtime under test still reads only the injected `TestClock`.
+const WAIT: Duration = Duration::from_secs(45);
+const POLL: Duration = Duration::from_millis(1);
+
 /// Agent identity, in one place. The runtime is seeded with the directory an
 /// `agents.toml` describes (agents paired by the SHA-256 of their PSK), and MCP
 /// calls present the PSK as the bearer. `claude` (allow = ["*"]) is the
@@ -131,7 +137,7 @@ impl Poc {
         })
         .to_string();
         let mut call = tokio::spawn(post(self.hud.mcp_addr(), psk, request));
-        let deadline = Instant::now() + Duration::from_secs(10);
+        let deadline = Instant::now() + WAIT;
         let response = loop {
             self.hud.tick();
             tokio::select! {
@@ -163,6 +169,7 @@ impl Poc {
         })
         .to_string();
         let mut call = tokio::spawn(post(self.hud.mcp_addr(), CLAUDE_PSK, request));
+        let deadline = Instant::now() + WAIT;
         let response = loop {
             self.hud.tick();
             tokio::select! {
@@ -170,6 +177,7 @@ impl Poc {
                 done = &mut call => break done.expect("MCP call task"),
                 () = tokio::task::yield_now() => {}
             }
+            assert!(Instant::now() < deadline, "{tool} did not complete");
         };
         self.settle().await;
         let response: Value = serde_json::from_str(&response).expect("JSON-RPC response");
@@ -209,13 +217,11 @@ impl Poc {
 
     /// Turn the event loop until a full turn completes without deferral.
     async fn settle(&mut self) {
-        for _ in 0..1_000 {
-            if self.hud.tick() {
-                return;
-            }
-            tokio::task::yield_now().await;
+        let deadline = Instant::now() + WAIT;
+        while !self.hud.tick() {
+            assert!(Instant::now() < deadline, "event loop never settled");
+            tokio::time::sleep(POLL).await;
         }
-        panic!("event loop never settled");
     }
 
     fn shown(&self, zone_surface: &str) -> usize {
@@ -228,14 +234,18 @@ impl Poc {
     /// Turn the event loop until `ready` holds, within a bounded number of
     /// turns (the work it waits on runs on other tasks, never on a timer).
     async fn wait_for(&mut self, what: &str, ready: impl Fn(&HeadlessEventLoopHarness) -> bool) {
-        for _ in 0..200_000 {
+        let deadline = Instant::now() + WAIT;
+        loop {
             self.hud.tick();
             if ready(&self.hud) {
                 return;
             }
-            tokio::task::yield_now().await;
+            assert!(
+                Instant::now() < deadline,
+                "{what}: not reached within {WAIT:?}"
+            );
+            tokio::time::sleep(POLL).await;
         }
-        panic!("{what}: not reached within 200000 event-loop turns");
     }
 
     /// Connect a gRPC agent and complete the handshake: one round trip.
@@ -481,7 +491,7 @@ impl HungAgent {
     /// Send `requests`, packed into as few HTTP/2 DATA frames as flow control
     /// allows (a server drops a client that floods it with tiny frames), waiting
     /// for capacity. Never reads a reply.
-    async fn send_all(&mut self, requests: Vec<ClientPayload>) {
+    async fn send_all(&mut self, requests: Vec<ClientPayload>) -> bool {
         use bytes::BufMut;
         use prost::Message;
         let mut frames = bytes::BytesMut::new();
@@ -503,24 +513,26 @@ impl HungAgent {
             // The server may drop a connection that floods it; that ends the send.
             let Some(Ok(granted)) = std::future::poll_fn(|cx| self.send.poll_capacity(cx)).await
             else {
-                return;
+                return false;
             };
             let chunk = frames.split_to(granted.min(frames.len()));
             if self.send.send_data(chunk, false).is_err() {
-                return;
+                return false;
             }
         }
+        true
     }
 
-    /// Keep sending `requests` in the background, then hold the connection
-    /// open, silent.
-    fn keep_sending(mut self, requests: Vec<ClientPayload>) -> tokio::task::JoinHandle<()> {
-        tokio::spawn(async move {
-            for batch in requests.chunks(250) {
-                self.send_all(batch.to_vec()).await;
-            }
-            std::future::pending::<()>().await;
-        })
+    /// Keep sending `request()`s in the background until aborted. Once the
+    /// server stops reading (its handler is blocked on a full send buffer)
+    /// flow control parks the sender, so this stops by itself.
+    fn keep_sending(
+        mut self,
+        request: impl Fn() -> ClientPayload + Send + 'static,
+    ) -> tokio::task::JoinHandle<()> {
+        tokio::spawn(
+            async move { while self.send_all((0..250).map(|_| request()).collect()).await {} },
+        )
     }
 }
 
@@ -940,14 +952,22 @@ impl Poc {
     /// Turn the event loop until the server's send buffer to `agent` is full:
     /// the agent has stopped reading and its next reply blocks its handler.
     async fn wait_until_hung(&mut self, agent: &str) {
-        for _ in 0..200_000 {
-            if self.hud.session_backed_up(agent).await {
-                return;
+        let deadline = Instant::now() + WAIT;
+        loop {
+            // A handler wedged holding the shared state would hang this lock.
+            let backed_up = tokio::time::timeout(WAIT, self.hud.session_backed_up(agent)).await;
+            match backed_up {
+                Ok(true) => return,
+                Ok(false) => {}
+                Err(_) => panic!("shared state locked for {WAIT:?} while waiting on {agent}"),
             }
+            assert!(
+                Instant::now() < deadline,
+                "{agent} never backed up within {WAIT:?}"
+            );
             self.hud.tick();
-            tokio::task::yield_now().await;
+            tokio::time::sleep(POLL).await;
         }
-        panic!("{agent} never backed up");
     }
 
     /// A `hud_input` long-poll the operator never reads: parked in the MCP
@@ -981,7 +1001,7 @@ async fn poc_override_safe_mode_wins_with_hung_grpc_agent() {
             surface: format!("zone:{}", "z".repeat(2_000)),
         })
     };
-    let flood = hung.keep_sending((0..800).map(|_| big_clear()).collect());
+    let flood = hung.keep_sending(big_clear);
     poc.wait_until_hung("resident").await;
     let poll = poc.park_long_poll();
 
@@ -1034,7 +1054,7 @@ async fn poc_override_exit_safe_mode_with_agent_hung_during_it() {
             timing: None,
         })
     };
-    let flood = hung.keep_sending((0..8_000).map(|_| write()).collect());
+    let flood = hung.keep_sending(write);
     poc.wait_until_hung("resident").await;
 
     poc.hud.press_safe_mode_hotkey();

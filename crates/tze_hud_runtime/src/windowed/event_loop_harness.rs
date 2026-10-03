@@ -354,22 +354,18 @@ impl HeadlessEventLoopHarness {
     /// hold it briefly, so this waits them out (the test thread holds nothing
     /// else, so it cannot deadlock).
     fn scene(&self) -> tokio::sync::OwnedMutexGuard<SceneGraph> {
-        let mut scene = None;
-        for _ in 0..10_000_000 {
+        let deadline = std::time::Instant::now() + SCENE_WAIT;
+        loop {
             if let Ok(state) = self.app.state.shared_state.try_lock() {
-                scene = Some(Arc::clone(&state.scene));
-                break;
+                let scene = Arc::clone(&state.scene);
+                drop(state);
+                if let Ok(guard) = scene.try_lock_owned() {
+                    return guard;
+                }
             }
+            assert!(std::time::Instant::now() < deadline, "{BUSY}");
             std::thread::yield_now();
         }
-        let scene = scene.expect(BUSY);
-        for _ in 0..10_000_000 {
-            if let Ok(guard) = Arc::clone(&scene).try_lock_owned() {
-                return guard;
-            }
-            std::thread::yield_now();
-        }
-        panic!("{BUSY}");
     }
 
     /// The MCP endpoint `with_network` bound.
@@ -609,8 +605,7 @@ impl HeadlessEventLoopHarness {
     /// Dismiss every tile on screen the way the hover close button does, through
     /// the runtime's real viewer-dismiss entry (`InProcessPortalDriver::viewer_dismiss_tile`).
     pub fn viewer_dismiss_all_tiles(&mut self) {
-        let state = self.app.state.shared_state.try_lock().expect(BUSY);
-        let mut scene = state.scene.try_lock().expect(BUSY);
+        let mut scene = self.scene();
         let ids: Vec<SceneId> = scene.tiles.keys().copied().collect();
         let expiries: Vec<_> = ids
             .into_iter()
@@ -776,7 +771,10 @@ impl HeadlessEventLoopHarness {
     }
 }
 
-const BUSY: &str = "scene stayed locked by another task";
+const BUSY: &str = "scene stayed locked by another task for 30 s";
+
+/// How long a scene query waits out a network task holding the scene.
+const SCENE_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
 
 impl Drop for HeadlessEventLoopHarness {
     /// Stop the MCP accept loop with the harness.
