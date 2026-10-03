@@ -5,8 +5,8 @@
 
 pub mod auth;
 pub mod convert;
-pub mod dedup;
-pub mod lease;
+pub(crate) mod dedup;
+pub(crate) mod lease;
 pub mod session;
 pub mod session_server;
 pub mod subscriptions;

@@ -150,12 +150,6 @@ impl DedupWindow {
     pub fn len(&self) -> usize {
         self.cache.len()
     }
-
-    /// Return true if the window currently holds no entries.
-    #[cfg(test)]
-    pub fn is_empty(&self) -> bool {
-        self.cache.is_empty()
-    }
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
