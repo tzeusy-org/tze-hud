@@ -7,7 +7,7 @@
 Ambient-background exemplar user-test scenario.
 
 Exercises the ambient-background zone on a live deployed HUD via MCP
-`publish_to_zone`. Validates solid-color background fills, latest-wins
+`hud_publish`. Validates solid-color background fills, latest-wins
 replacement semantics, static-image acceptance, and rapid-replacement stress.
 
 4 phases:
@@ -15,7 +15,7 @@ replacement semantics, static-image acceptance, and rapid-replacement stress.
   2. Warm amber      — replace with warm amber (latest-wins), 3s pause
   3. Static image    — publish static_image content type (placeholder), 2s pause
   4. Rapid replace   — publish 10 different colors in succession,
-                       verify only the last (saturated green) via list_zones
+                       verify only the last (saturated green) via hud_surfaces
 
 Usage:
   ambient_background_exemplar.py --url http://host:9090
@@ -123,7 +123,6 @@ def publish_solid_color(
     label: str,
     color: dict[str, float],
     ttl_us: int = 0,
-    namespace: str = "ambient-bg-test",
 ) -> dict[str, Any]:
     """Publish a solid_color background via MCP hud_publish."""
     content: dict[str, Any] = {"type": "solid_color", **color}
@@ -149,7 +148,6 @@ def publish_static_image(
     token: str,
     req_id: int,
     resource_id: str,
-    namespace: str = "ambient-bg-test",
 ) -> dict[str, Any]:
     """Publish a static_image background via MCP hud_publish."""
     content: dict[str, Any] = {"type": "static_image", "resource_id": resource_id}
@@ -167,9 +165,19 @@ def publish_static_image(
     return response
 
 
-def list_zones(url: str, token: str, req_id: int) -> dict[str, Any]:
+def list_surfaces(url: str, token: str, req_id: int) -> dict[str, Any]:
     """Query the hud_surfaces tool and return the parsed response."""
     return rpc_call(url, token, "hud_surfaces", {}, req_id)
+
+
+def find_zone_entry(surfaces_response: dict[str, Any]) -> dict[str, Any] | None:
+    """Return the ``zone:<ZONE_NAME>`` entry of a hud_surfaces result, or None.
+
+    The result is ``{"surfaces": [{"s": "zone:name", "held": true, ...}]}``;
+    ``held`` is omitted when the agent holds nothing there.
+    """
+    surfaces = surfaces_response.get("result", {}).get("surfaces", [])
+    return next((e for e in surfaces if e.get("s") == f"zone:{ZONE_NAME}"), None)
 
 
 # ---------------------------------------------------------------------------
@@ -187,7 +195,7 @@ def phase1_dark_blue(url: str, token: str, req_id: int) -> tuple[int, bool]:
     """
     print("\n--- Phase 1: Dark blue background ---", flush=True)
     response = publish_solid_color(
-        url, token, req_id, "dark-blue", COLOR_DARK_BLUE, namespace="ambient-test-p1"
+        url, token, req_id, "dark-blue", COLOR_DARK_BLUE
     )
     ok = "error" not in response
     print(
@@ -211,7 +219,7 @@ def phase2_warm_amber(url: str, token: str, req_id: int) -> tuple[int, bool]:
     """
     print("\n--- Phase 2: Warm amber replacement (latest-wins) ---", flush=True)
     response = publish_solid_color(
-        url, token, req_id, "warm-amber", COLOR_WARM_AMBER, namespace="ambient-test-p2"
+        url, token, req_id, "warm-amber", COLOR_WARM_AMBER
     )
     ok = "error" not in response
     print(
@@ -236,7 +244,7 @@ def phase3_static_image(url: str, token: str, req_id: int) -> tuple[int, bool]:
     """
     print("\n--- Phase 3: Static image (placeholder) ---", flush=True)
     response = publish_static_image(
-        url, token, req_id, PLACEHOLDER_RESOURCE_ID, namespace="ambient-test-p3"
+        url, token, req_id, PLACEHOLDER_RESOURCE_ID
     )
     ok = "error" not in response
     print(
@@ -256,8 +264,8 @@ def phase4_rapid_replacement(
     Phase 4: Rapid-replacement stress test — 10 colors in sequence.
 
     Publishes 10 different solid colors without delay between them, then
-    queries list_zones to confirm the zone is occupied (has_content=true).
-    list_zones reports a boolean occupancy flag, not a publication count;
+    queries hud_surfaces to confirm the zone is held (held=true).
+    hud_surfaces reports a boolean flag, not a publication count;
     the Replace policy guarantees at most 1 active publication.
     Visual check: the final color (bright green) should be visible.
 
@@ -270,31 +278,30 @@ def phase4_rapid_replacement(
     any_failed = False
     for label, color in RAPID_COLORS:
         response = publish_solid_color(
-            url, token, req_id, label, color, namespace="ambient-test-p4"
+            url, token, req_id, label, color
         )
         if "error" in response:
             any_failed = True
         req_id += 1
 
-    # Query list_zones to verify final occupancy.
-    zones_response = list_zones(url, token, req_id)
+    # Query hud_surfaces to verify final occupancy.
+    zones_response = list_surfaces(url, token, req_id)
     req_id += 1
     occupancy_ok = False
     if "result" in zones_response:
-        zones = zones_response["result"].get("zones", [])
-        bg_zone = next((z for z in zones if z.get("name") == ZONE_NAME), None)
+        bg_zone = find_zone_entry(zones_response)
         if bg_zone is not None:
-            has_content = bg_zone.get("has_content", False)
-            occupancy_ok = has_content
-            occupancy_status = "Occupied (has_content=true)" if has_content else "Empty (has_content=false)"
+            held = bool(bg_zone.get("held", False))
+            occupancy_ok = held
+            occupancy_status = "Held (held=true)" if held else "Not held"
         else:
-            occupancy_status = f"zone '{ZONE_NAME}' not found in list_zones response"
+            occupancy_status = f"zone '{ZONE_NAME}' not found in hud_surfaces response"
     else:
-        occupancy_status = f"list_zones error: {zones_response.get('error')}"
+        occupancy_status = f"hud_surfaces error: {zones_response.get('error')}"
         any_failed = True
 
     print(
-        f"\n  [occupancy check] list_zones reports ambient-background: {occupancy_status}",
+        f"\n  [occupancy check] hud_surfaces reports ambient-background: {occupancy_status}",
         flush=True,
     )
     print(

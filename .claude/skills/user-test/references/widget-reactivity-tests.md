@@ -85,7 +85,7 @@ python3 .claude/skills/user-test/scripts/publish_widget_batch.py \
   --messages-file .claude/skills/user-test/scripts/status-indicator-validation-test.json
 ```
 
-Expected result: MCP returns an error response (`WIDGET_PARAMETER_INVALID_VALUE`) for `status=do-not-disturb`. The widget display must not change. Report whether the error response matches expectation.
+Expected result: MCP returns an error response (`WIDGET_PARAMETER_INVALID`) for `status=do-not-disturb`. The widget display must not change. Report whether the error response matches expectation.
 
 ### Step 7: Widget Reactivity Test (Progress Bar)
 

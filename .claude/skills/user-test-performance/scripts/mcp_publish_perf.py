@@ -214,7 +214,7 @@ def main() -> int:
     parser.add_argument("--count", type=int, default=100, help="Number of publishes")
     parser.add_argument("--concurrency", type=int, default=1, help="Parallel worker count")
     parser.add_argument("--duration-ms", type=int, default=0, help="Target total duration (sequential pacing only)")
-    parser.add_argument("--namespace", default="user-test-performance", help="Publish namespace")
+    parser.add_argument("--namespace", default="user-test-performance", help="Ignored (publisher is the PSK's agent); kept for old command lines")
     parser.add_argument("--ttl-us", type=int, default=60_000_000, help="TTL in microseconds")
     parser.add_argument("--preflight", action="store_true", help="Call hud_surfaces before benchmark")
 

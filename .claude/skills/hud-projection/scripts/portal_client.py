@@ -158,6 +158,10 @@ def cmd_clear(args):
     emit(call_tool("hud_clear", arguments))
 
 
+def cmd_hold(args):
+    emit(call_tool("hud_hold", {"surface": f"portal:{args.id}", "ttl_ms": args.ttl_ms}))
+
+
 def build_parser():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
@@ -193,6 +197,11 @@ def build_parser():
     sp = sub.add_parser("ack")
     sp.add_argument("--input-id", required=True, action="append")
     sp.set_defaults(func=cmd_ack)
+
+    sp = sub.add_parser("hold", help="keep a quiet portal attached (ttl 0 = until clear)")
+    sp.add_argument("--id", required=True)
+    sp.add_argument("--ttl-ms", type=int, required=True)
+    sp.set_defaults(func=cmd_hold)
 
     sp = sub.add_parser("clear")
     sp.add_argument("--id", required=True)

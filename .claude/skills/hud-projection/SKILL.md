@@ -53,6 +53,8 @@ zones and widgets (`docs/api.md`):
 - `status` sets the lifecycle state: `attached`, `active`, `degraded`,
   `hud_unavailable`, or `detached`.
 - `expects_reply: true` arms the composer.
+- A portal publish rejects `ttl_ms` and `delay_ms` with `INVALID_ARGUMENT`;
+  portal lifetime is set only by `hud_hold`.
 - `hud_input` returns input from every surface you hold, oldest first,
   including notification action presses. Unacked items are redelivered, so
   ack each one once handled; the ack rides on your next poll.

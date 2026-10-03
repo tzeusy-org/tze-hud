@@ -46,7 +46,7 @@ DEFAULT_TTL_MS = 8000
 
 ZONE_NAME = "notification-area"
 
-# Simulated agent namespaces
+# Simulated agent labels (log output only; the publisher is the PSK's agent)
 AGENTS = {
     "alpha": "alpha",
     "beta": "beta",
@@ -118,7 +118,6 @@ def publish_notification(
     icon: str,
     urgency: int,
     ttl_ms: int,
-    namespace: str,
 ) -> dict[str, Any]:
     """Publish a single NotificationPayload to the notification-area zone."""
     content: dict[str, Any] = {
@@ -173,7 +172,6 @@ def phase1_initial_burst(
             icon=icon,
             urgency=urgency,
             ttl_ms=ttl_ms,
-            namespace=AGENTS[agent],
         )
         req_id += 1
 
@@ -216,7 +214,6 @@ def phase2_stack_growth(
             icon=icon,
             urgency=urgency,
             ttl_ms=ttl_ms,
-            namespace=AGENTS[agent],
         )
         req_id += 1
 
@@ -309,7 +306,6 @@ def phase4_max_depth_eviction(
             icon=icon,
             urgency=urgency,
             ttl_ms=ttl_ms,
-            namespace=AGENTS[agent],
         )
         req_id += 1
 
