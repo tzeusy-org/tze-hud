@@ -525,11 +525,8 @@ async fn run_headless(dev_mode: bool) -> Result<(), Box<dyn std::error::Error>> 
             "error must reference tile budget: {err_msg}"
         );
 
-        // Clean up the demo tab and lease.
-        // Use delete_tab (public API) rather than tabs.remove: it removes tiles
-        // belonging to the tab, handles active_tab fallback, and bumps version.
+        // Clean up the demo lease.
         scene.revoke_lease(demo_lease).ok();
-        scene.delete_tab(demo_tab).ok();
         println!("  Budget enforcement validated: tile budget rejection confirmed.");
     }
 

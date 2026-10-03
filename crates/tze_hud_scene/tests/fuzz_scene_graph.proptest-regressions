@@ -4,5 +4,4 @@
 #
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
-cc 8e092c35a8cde9a74591c30617ff1c5e9f11a2eaae2e5b39d35edbdddfec1d8e # shrinks to ops = [DeleteTab, CreateTab { name: "a", display_order: 0 }, CreateTile { z_order: 85 }, CreateTile { z_order: 85 }]
 cc b64b6e95be8a0d552cb4d195c4f0ad47056c0d823d23badd020bcb1ecb5ae0b1 # shrinks to ops = [GrantLease, CreateSyncGroup, CreateTab { name: "a", display_order: 0 }, CreateTab { name: "A", display_order: 0 }, CreateTab { name: "a", display_order: 0 }, CreateTab { name: "A", display_order: 0 }, CreateTab { name: "A", display_order: 0 }, CreateTab { name: "A", display_order: 0 }, CreateTab { name: "A", display_order: 0 }, CreateTile { z_order: 1 }, CreateTile { z_order: 1 }, CreateTile { z_order: 1 }, GrantLease, CreateTile { z_order: 1 }, CreateTile { z_order: 1 }, JoinSyncGroup, CreateTile { z_order: 1 }, CreateTile { z_order: 1 }, CreateTile { z_order: 1 }, CreateTile { z_order: 1 }, CreateTile { z_order: 1 }, CreateTile { z_order: 1 }, RevokeLease]

@@ -195,38 +195,6 @@ impl SceneGraph {
         Ok(())
     }
 
-    /// Update the z-order of a tile.
-    ///
-    /// Requires an active lease.
-    /// z_order must be < ZONE_TILE_Z_MIN.
-    pub fn update_tile_z_order(
-        &mut self,
-        tile_id: SceneId,
-        z_order: u32,
-        agent_namespace: &str,
-    ) -> Result<(), ValidationError> {
-        let lease_id = self.get_tile_lease_checked(tile_id, agent_namespace)?;
-        self.require_active_lease(lease_id)?;
-        self.require_active_lease(lease_id)?;
-
-        if z_order >= ZONE_TILE_Z_MIN {
-            return Err(ValidationError::InvalidField {
-                field: "z_order".into(),
-                reason: format!(
-                    "z_order 0x{z_order:08X} is >= ZONE_TILE_Z_MIN (0x{ZONE_TILE_Z_MIN:08X}); reserved for runtime zone tiles"
-                ),
-            });
-        }
-
-        let tile = self
-            .tiles
-            .get_mut(&tile_id)
-            .expect("tile_id existence verified by get_tile_lease_checked");
-        tile.z_order = z_order;
-        self.version += 1;
-        Ok(())
-    }
-
     /// Update the opacity of a tile.
     ///
     /// Opacity must be in [0.0, 1.0]. Requires an active lease.
@@ -274,28 +242,6 @@ impl SceneGraph {
             .get_mut(&tile_id)
             .expect("tile_id existence verified by get_tile_lease_checked");
         tile.input_mode = input_mode;
-        self.version += 1;
-        Ok(())
-    }
-
-    /// Update the expiry timestamp of a tile.
-    ///
-    /// Requires an active lease.
-    pub fn update_tile_expiry(
-        &mut self,
-        tile_id: SceneId,
-        expires_at: Option<u64>,
-        agent_namespace: &str,
-    ) -> Result<(), ValidationError> {
-        let lease_id = self.get_tile_lease_checked(tile_id, agent_namespace)?;
-        self.require_active_lease(lease_id)?;
-        self.require_active_lease(lease_id)?;
-
-        let tile = self
-            .tiles
-            .get_mut(&tile_id)
-            .expect("tile_id existence verified by get_tile_lease_checked");
-        tile.expires_at = expires_at;
         self.version += 1;
         Ok(())
     }

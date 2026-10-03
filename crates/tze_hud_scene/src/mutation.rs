@@ -82,7 +82,7 @@ pub enum SceneMutation {
     // field, so capability enforcement at the batch-apply layer must be done
     // by the transport/session layer (gRPC handler) before calling
     // `apply_batch`. The scene graph's `create_tab_with_lease` /
-    // `delete_tab_with_lease` / etc. checked variants are available for
+    // etc. checked variants are available for
     // direct callers that have a lease in scope.
     //
     // Tab mutations in `apply_single_mutation` call the unchecked graph
@@ -90,12 +90,6 @@ pub enum SceneMutation {
     // before dispatching the batch.
     /// Create a new tab. RFC 0001 §2.2.
     CreateTab { name: String, display_order: u32 },
-    /// Delete a tab and all its tiles. RFC 0001 §2.2.
-    DeleteTab { tab_id: SceneId },
-    /// Rename a tab. RFC 0001 §2.2.
-    RenameTab { tab_id: SceneId, new_name: String },
-    /// Change the display_order of a tab. RFC 0001 §2.2.
-    ReorderTab { tab_id: SceneId, new_order: u32 },
     /// Switch the active tab. RFC 0001 §2.2.
     SwitchActiveTab { tab_id: SceneId },
     // ── Tile mutations (require create_tiles / modify_own_tiles) ──────────
@@ -109,19 +103,12 @@ pub enum SceneMutation {
     },
     /// Update tile bounds. RFC 0001 §2.3.
     UpdateTileBounds { tile_id: SceneId, bounds: Rect },
-    /// Update tile z-order. RFC 0001 §2.3.
-    UpdateTileZOrder { tile_id: SceneId, z_order: u32 },
     /// Update tile opacity (must be in [0.0, 1.0]). RFC 0001 §2.3.
     UpdateTileOpacity { tile_id: SceneId, opacity: f32 },
     /// Update tile input mode. RFC 0001 §2.3.
     UpdateTileInputMode {
         tile_id: SceneId,
         input_mode: InputMode,
-    },
-    /// Update tile expiry timestamp. RFC 0001 §2.3.
-    UpdateTileExpiry {
-        tile_id: SceneId,
-        expires_at: Option<u64>,
     },
     /// Delete a tile and all its nodes. RFC 0001 §2.3.
     DeleteTile { tile_id: SceneId },
@@ -283,16 +270,11 @@ impl SceneMutation {
     pub fn type_name(&self) -> &'static str {
         match self {
             SceneMutation::CreateTab { .. } => "CreateTab",
-            SceneMutation::DeleteTab { .. } => "DeleteTab",
-            SceneMutation::RenameTab { .. } => "RenameTab",
-            SceneMutation::ReorderTab { .. } => "ReorderTab",
             SceneMutation::SwitchActiveTab { .. } => "SwitchActiveTab",
             SceneMutation::CreateTile { .. } => "CreateTile",
             SceneMutation::UpdateTileBounds { .. } => "UpdateTileBounds",
-            SceneMutation::UpdateTileZOrder { .. } => "UpdateTileZOrder",
             SceneMutation::UpdateTileOpacity { .. } => "UpdateTileOpacity",
             SceneMutation::UpdateTileInputMode { .. } => "UpdateTileInputMode",
-            SceneMutation::UpdateTileExpiry { .. } => "UpdateTileExpiry",
             SceneMutation::DeleteTile { .. } => "DeleteTile",
             SceneMutation::SetTileRoot { .. } => "SetTileRoot",
             SceneMutation::AddNode { .. } => "AddNode",
@@ -581,8 +563,8 @@ impl SceneGraph {
     /// Extract the lease_id for a mutation, if applicable.
     ///
     /// For `CreateTile` the lease_id is embedded in the mutation directly.
-    /// For tile-targeting mutations (`UpdateTileBounds`, `UpdateTileZOrder`,
-    /// `UpdateTileOpacity`, `UpdateTileInputMode`, `UpdateTileExpiry`,
+    /// For tile-targeting mutations (`UpdateTileBounds`,
+    /// `UpdateTileOpacity`, `UpdateTileInputMode`,
     /// `DeleteTile`, `SetTileRoot`, `AddNode`, `UpdateNodeContent`) the lease is
     /// derived from the tile in the graph. This enables Stage 1 to catch
     /// expired/revoked leases for all mutation types, not just `CreateTile`.
@@ -594,10 +576,8 @@ impl SceneGraph {
             SceneMutation::CreateTile { lease_id, .. } => Some(*lease_id),
             // Tile-targeting mutations: derive lease from the tile's recorded lease_id.
             SceneMutation::UpdateTileBounds { tile_id, .. }
-            | SceneMutation::UpdateTileZOrder { tile_id, .. }
             | SceneMutation::UpdateTileOpacity { tile_id, .. }
             | SceneMutation::UpdateTileInputMode { tile_id, .. }
-            | SceneMutation::UpdateTileExpiry { tile_id, .. }
             | SceneMutation::DeleteTile { tile_id }
             | SceneMutation::SetTileRoot { tile_id, .. }
             | SceneMutation::AddNode { tile_id, .. }
@@ -718,18 +698,6 @@ impl SceneGraph {
                 let id = self.create_tab(name, *display_order)?;
                 Ok(vec![id])
             }
-            SceneMutation::DeleteTab { tab_id } => {
-                self.delete_tab(*tab_id)?;
-                Ok(vec![])
-            }
-            SceneMutation::RenameTab { tab_id, new_name } => {
-                self.rename_tab(*tab_id, new_name)?;
-                Ok(vec![])
-            }
-            SceneMutation::ReorderTab { tab_id, new_order } => {
-                self.reorder_tab(*tab_id, *new_order)?;
-                Ok(vec![])
-            }
             SceneMutation::SwitchActiveTab { tab_id } => {
                 self.switch_active_tab(*tab_id)?;
                 Ok(vec![])
@@ -751,10 +719,6 @@ impl SceneGraph {
                 self.update_tile_bounds(*tile_id, *bounds, namespace)?;
                 Ok(vec![])
             }
-            SceneMutation::UpdateTileZOrder { tile_id, z_order } => {
-                self.update_tile_z_order(*tile_id, *z_order, namespace)?;
-                Ok(vec![])
-            }
             SceneMutation::UpdateTileOpacity { tile_id, opacity } => {
                 self.update_tile_opacity(*tile_id, *opacity, namespace)?;
                 Ok(vec![])
@@ -764,13 +728,6 @@ impl SceneGraph {
                 input_mode,
             } => {
                 self.update_tile_input_mode(*tile_id, *input_mode, namespace)?;
-                Ok(vec![])
-            }
-            SceneMutation::UpdateTileExpiry {
-                tile_id,
-                expires_at,
-            } => {
-                self.update_tile_expiry(*tile_id, *expires_at, namespace)?;
                 Ok(vec![])
             }
             SceneMutation::DeleteTile { tile_id } => {
