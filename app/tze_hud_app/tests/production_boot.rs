@@ -11,42 +11,10 @@
 //! If startup silently falls back to a default/headless policy, these assertions
 //! fail even when runtime construction itself succeeds.
 
-use std::path::Path;
-use toml::Value;
 use tze_hud_runtime::HeadlessRuntime;
 use tze_hud_runtime::headless::HeadlessConfig;
 
 const PRODUCTION_CONFIG: &str = include_str!("../config/production.toml");
-const REPO_ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
-
-fn canonical_config_for_headless() -> String {
-    let mut config: Value = PRODUCTION_CONFIG
-        .parse()
-        .expect("production.toml must be valid TOML");
-
-    let widget_bundle_paths: Vec<Value> = [
-        format!("{REPO_ROOT}/widget_bundles"),
-        format!("{REPO_ROOT}/assets/widget_bundles"),
-        format!("{REPO_ROOT}/assets/widgets"),
-    ]
-    .into_iter()
-    .filter(|path| Path::new(path).is_dir())
-    .map(Value::String)
-    .collect();
-
-    assert!(
-        !widget_bundle_paths.is_empty(),
-        "expected at least one widget bundle root under {REPO_ROOT}"
-    );
-
-    // HeadlessConfig only accepts config_toml (string) and does not carry
-    // config_file_path, so relative asset paths cannot be resolved against
-    // app/tze_hud_app/config/. Rebase only asset roots for deterministic CI.
-    config["widget_bundles"]["paths"] = Value::Array(widget_bundle_paths);
-
-    toml::to_string(&config).expect("headless canonical config must serialize")
-}
-
 fn canonical_headless_config() -> HeadlessConfig {
     HeadlessConfig {
         width: 320,
@@ -56,7 +24,7 @@ fn canonical_headless_config() -> HeadlessConfig {
         agents: tze_hud_scene::config::AgentDirectory::unrestricted(
             "canonical-app-production-boot-test",
         ),
-        config_toml: Some(canonical_config_for_headless()),
+        config_toml: Some(PRODUCTION_CONFIG.to_string()),
     }
 }
 
@@ -71,7 +39,7 @@ async fn canonical_app_production_config_boot_succeeds() {
 }
 
 #[tokio::test]
-async fn canonical_app_production_config_registers_declared_state() {
+async fn production_config_boots_with_builtin_widget_bundles() {
     let runtime = HeadlessRuntime::new(canonical_headless_config())
         .await
         .expect("runtime must start with canonical app production config");

@@ -133,9 +133,9 @@ Basic rendering confirmed working (colored backdrops, text, stacking, TTL expiry
 3. **Regression verification** — reran gauge widget test suites plus live Windows publish cycle; publish path and bindings remain healthy after redesign.
 
 **Files changed:**
-- `assets/widgets/gauge/background.svg`
-- `assets/widgets/gauge/fill.svg`
-- `assets/widgets/gauge/widget.toml`
+- `assets/widget_bundles/gauge/background.svg`
+- `assets/widget_bundles/gauge/fill.svg`
+- `assets/widget_bundles/gauge/widget.toml`
 - `crates/tze_hud_widget/tests/gauge_param_validation.rs`
 - `crates/tze_hud_widget/tests/gauge_interpolation.rs`
 - `crates/tze_hud_widget/tests/gauge_perf_and_cache.rs`

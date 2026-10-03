@@ -4,16 +4,9 @@
 # Deploy alongside the compiled binary as tze_hud.toml in the same directory
 # (the runtime's CWD auto-resolution picks up ./tze_hud.toml first).
 #
-# On Windows, copy both tze_hud.exe and this file as tze_hud.toml to C:\tze_hud\.
-# The widget_bundles/ directory must also be deployed there:
-#
-#   C:\tze_hud\
-#     tze_hud.exe
-#     tze_hud.toml          (this file, renamed)
-#     widget_bundles\
-#       gauge\
-#       progress-bar\
-#       status-indicator\
+# On Windows, copy tze_hud.exe and this file as tze_hud.toml next to it. No other
+# files are needed: the gauge, progress-bar and status-indicator widget bundles
+# are built into the exe.
 #
 # Usage:
 #   tze_hud --window-mode overlay
@@ -34,16 +27,11 @@
 [runtime]
 profile = "full-display"
 
-# Widget bundle directories scanned at startup.
-# Paths are resolved relative to this config file's parent directory.
-# Each path is a root whose immediate subdirectories are scanned for widget.toml.
-#
-# When deploying to Windows, copy all three bundle directories alongside the exe:
-#   widget_bundles/gauge/
-#   widget_bundles/progress-bar/
-#   widget_bundles/status-indicator/
-[widget_bundles]
-paths = ["widget_bundles"]
+# Widget bundles: gauge, progress-bar and status-indicator are built into the
+# exe. To override one (or add your own), add a [widget_bundles] table with
+# `paths = ["dir"]` (relative to this file); each subdirectory holding a
+# widget.toml is loaded, and a bundle with the same type name replaces the
+# built-in one.
 
 # Design tokens: overrides of the canonical defaults, shared by every zone,
 # widget SVG, and the portal. Rounded black-tinted notification cards with a

@@ -94,6 +94,13 @@ def run_checks(smoke: Smoke) -> None:
     assert text_zones, f"hud_surfaces lists no text zone: {surfaces}"
     print(f"ok  hud_surfaces lists {len(surfaces)} surfaces")
 
+    widgets = sorted(s["s"] for s in surfaces if s["s"].startswith("widget:"))
+    expected = ["widget:main-gauge", "widget:main-progress", "widget:main-status"]
+    assert widgets == expected, f"hud_surfaces widgets: expected {expected}, got {widgets}"
+    gauge = smoke.ok("hud_publish", {"surface": "widget:main-gauge", "params": {"level": 0.5, "label": "CI"}})
+    assert gauge.get("ok") is True, f"hud_publish widget:main-gauge: {gauge}"
+    print("ok  built-in widgets listed; hud_publish widget:main-gauge")
+
     zone = text_zones[0]
     published = smoke.ok("hud_publish", {"surface": zone, "content": "CI smoke", "ttl_ms": 5000})
     assert published.get("ok") is True, f"hud_publish {zone}: {published}"

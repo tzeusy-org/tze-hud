@@ -81,13 +81,13 @@ fn gauge_test_tokens() -> HashMap<String, String> {
     ])
 }
 
-/// Path to the production gauge bundle (`assets/widgets/gauge/`).
+/// Path to the production gauge bundle (`assets/widget_bundles/gauge/`).
 fn production_gauge_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("..")
         .join("..")
         .join("assets")
-        .join("widgets")
+        .join("widget_bundles")
         .join("gauge")
 }
 

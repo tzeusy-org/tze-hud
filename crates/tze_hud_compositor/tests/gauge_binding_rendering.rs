@@ -27,7 +27,7 @@
 //! - widget-system/spec.md §Requirement: SVG Layer Parameter Bindings
 //! - widget-system/spec.md §Requirement: Widget Parameter Interpolation
 //! - openspec/changes/exemplar-gauge-widget/tasks.md §6, §8
-//! - assets/widgets/gauge/ (production bundle)
+//! - assets/widget_bundles/gauge/ (production bundle)
 
 use std::collections::HashMap;
 
@@ -39,7 +39,7 @@ use tze_hud_scene::types::{
 
 // ─── Production fill.svg (after token resolution) ────────────────────────────
 //
-// This is the token-resolved form of assets/widgets/gauge/fill.svg.
+// This is the token-resolved form of assets/widget_bundles/gauge/fill.svg.
 // Token placeholders are substituted with canonical values so the SVG parses
 // cleanly in resvg and the element attributes are in their initial "default"
 // state before any parameter bindings are applied.
@@ -91,7 +91,7 @@ const PRODUCTION_FILL_SVG: &str = r##"<?xml version="1.0" encoding="UTF-8"?>
 
 // ─── Production gauge binding definitions ─────────────────────────────────────
 //
-// Mirror the bindings declared in assets/widgets/gauge/widget.toml so tests
+// Mirror the bindings declared in assets/widget_bundles/gauge/widget.toml so tests
 // can call resolve_binding_value without loading the bundle from disk.
 
 fn level_height_binding() -> WidgetBinding {
