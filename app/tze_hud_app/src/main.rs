@@ -150,6 +150,8 @@ OPTIONS:
                            Internal (POST /admin/restart): started by a running
                            instance, which this one replaces once its first frame
                            is up. Not for manual use.
+    --updated-from <sha>   Internal (POST /admin/update): the previous build's sha;
+                           shows the "Updated to ..." toast. Not for manual use.
     --help                 Print this help and exit
     --version              Print version and exit
 
@@ -224,6 +226,9 @@ struct StartupOptions {
     /// `--handoff <spec>`: started by a running instance's restart; report
     /// ready after the first frame and take over from it.
     handoff_child: Option<handoff::ChildSpec>,
+    /// `--updated-from <sha>`: started by `POST /admin/update`; show the
+    /// "Updated to ..." toast. The value is the previous build's sha.
+    updated_from: Option<String>,
 }
 
 impl Default for StartupOptions {
@@ -250,6 +255,7 @@ impl Default for StartupOptions {
             purge: false,
             handoff: false,
             handoff_child: None,
+            updated_from: None,
         }
     }
 }
@@ -433,6 +439,16 @@ fn parse_options(args: &[String]) -> Result<StartupOptions, String> {
             "--install" => opts.install = true,
             "--uninstall" => opts.uninstall = true,
             "--purge" => opts.purge = true,
+            "--updated-from" => {
+                i += 1;
+                let sha = args
+                    .get(i)
+                    .filter(|v| {
+                        (7..=40).contains(&v.len()) && v.bytes().all(|b| b.is_ascii_hexdigit())
+                    })
+                    .ok_or("--updated-from requires a hex git sha")?;
+                opts.updated_from = Some(sha.clone());
+            }
             "--handoff" => match args.get(i + 1).filter(|next| !next.starts_with("--")) {
                 // A restart's `--handoff <ip:port:nonce>`.
                 Some(spec) => {
@@ -1101,6 +1117,7 @@ set {DEV_ALLOW_INSECURE_STARTUP_ENV}=1 only in debug/dev runs if you need fallba
             args: args.clone(),
         }),
         handoff: opts.handoff_child.take().map(HandoffChild::new),
+        updated_from: opts.updated_from.take(),
     };
 
     let runtime = WindowedRuntime::new(config);
@@ -1182,7 +1199,8 @@ mod tests {
                         || o.uninstall
                         || o.purge
                         || o.handoff
-                        || o.handoff_child.is_some())
+                        || o.handoff_child.is_some()
+                        || o.updated_from.is_some())
                 );
             }),
             ("install", &[], &["--install"], |o| {
@@ -1206,6 +1224,9 @@ mod tests {
                 ],
                 |o| assert!(!o.handoff && o.handoff_child.is_some() && o.mcp_port == 9),
             ),
+            ("updated-from", &[], &["--updated-from", "0123abc"], |o| {
+                assert_eq!(o.updated_from.as_deref(), Some("0123abc"))
+            }),
             ("print-attach-info", &[], &["--print-attach-info"], |o| {
                 assert!(o.print_attach_info)
             }),
@@ -1369,6 +1390,12 @@ mod tests {
                 &[],
                 &["--handoff", "10.0.0.1:4242:abcdef0123456789"],
                 &["--handoff", "not loopback"],
+            ),
+            (
+                "updated-from not a sha",
+                &[],
+                &["--updated-from", "not-hex!"],
+                &["--updated-from"],
             ),
             (
                 "unknown flag",

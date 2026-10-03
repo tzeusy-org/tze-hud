@@ -158,7 +158,12 @@ pub fn child_args(original: &[String]) -> Vec<String> {
     let mut out = Vec::with_capacity(original.len());
     let mut it = original.iter().peekable();
     while let Some(arg) = it.next() {
-        if arg.starts_with("--handoff=") {
+        if arg.starts_with("--handoff=") || arg.starts_with("--updated-from=") {
+            continue;
+        }
+        if arg == "--updated-from" {
+            // The relaunch is not the update: drop the value too.
+            it.next();
             continue;
         }
         if arg == "--handoff" {
@@ -201,8 +206,20 @@ pub fn spawn_child(
     args: &[String],
     spec: &ChildSpec,
 ) -> io::Result<Box<dyn ChildProc>> {
+    spawn_child_with(exe, args, &[], spec)
+}
+
+/// [`spawn_child`] with `extra` arguments (fixed by the caller, never from a
+/// request) appended after the cleaned argv.
+pub fn spawn_child_with(
+    exe: &std::path::Path,
+    args: &[String],
+    extra: &[String],
+    spec: &ChildSpec,
+) -> io::Result<Box<dyn ChildProc>> {
     let mut cmd = std::process::Command::new(exe);
     cmd.args(child_args(args))
+        .args(extra)
         .arg("--handoff")
         .arg(spec.arg_value())
         .stdin(std::process::Stdio::null())
@@ -712,6 +729,15 @@ mod tests {
         assert_eq!(child_args(&spec), base);
         assert_eq!(
             child_args(&a(&["--handoff=127.0.0.1:1:abcdef0123", "--mcp-port", "9"])),
+            a(&["--mcp-port", "9"])
+        );
+        // The update marker is one-shot: a relaunch never inherits it.
+        assert_eq!(
+            child_args(&a(&["--updated-from", "abc1234", "--mcp-port", "9"])),
+            a(&["--mcp-port", "9"])
+        );
+        assert_eq!(
+            child_args(&a(&["--updated-from=abc1234", "--mcp-port", "9"])),
             a(&["--mcp-port", "9"])
         );
         // A bare --handoff before another flag keeps that flag.

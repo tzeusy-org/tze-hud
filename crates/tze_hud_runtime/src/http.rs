@@ -5,8 +5,8 @@
 //! [`route`], and answered with a [`Response`] carrying a byte body.
 //!
 //! Routes today: `POST /` and `POST /mcp` -> MCP; `GET /admin/status`,
-//! `GET /admin/logs`, and `GET /admin/screenshot` -> operator endpoints (admin
-//! PSK only). `/pair` is
+//! `GET /admin/logs`, `GET /admin/screenshot`, `POST /admin/restart` and
+//! `POST /admin/update` -> operator endpoints (admin PSK only). `/pair` is
 //! reserved for T6 and plugs in as a new [`Route`] variant.
 //! Unknown paths get a bare 404, known paths with the wrong method a bare 405
 //! with an `Allow` header (no JSON-RPC body in either case).
@@ -194,6 +194,8 @@ pub enum AdminRoute {
     Screenshot,
     /// `POST /admin/restart`: relaunch this exe with its own arguments.
     Restart,
+    /// `POST /admin/update`: pull, verify and install a signed release.
+    Update,
 }
 
 /// Gate for every `/admin/*` request, run before any admin data is read:
@@ -228,7 +230,10 @@ pub fn route(method: &str, path: &str) -> Route {
         ("GET", "/admin/logs") => Route::Admin(AdminRoute::Logs),
         ("GET", "/admin/screenshot") => Route::Admin(AdminRoute::Screenshot),
         ("POST", "/admin/restart") => Route::Admin(AdminRoute::Restart),
-        (_, "/admin/restart") => Route::Respond(Response::method_not_allowed("POST")),
+        ("POST", "/admin/update") => Route::Admin(AdminRoute::Update),
+        (_, "/admin/restart" | "/admin/update") => {
+            Route::Respond(Response::method_not_allowed("POST"))
+        }
         (_, "/admin/status" | "/admin/logs" | "/admin/screenshot") => {
             Route::Respond(Response::method_not_allowed("GET"))
         }
@@ -416,17 +421,19 @@ mod tests {
             route("POST", "/admin/logs"),
             Route::Respond(Response::method_not_allowed("GET"))
         );
-        // Restart changes state: POST only, never GET (or anything else).
-        assert_eq!(
-            route("POST", "/admin/restart"),
-            Route::Admin(AdminRoute::Restart)
-        );
-        for method in ["GET", "PUT", "DELETE", "HEAD"] {
-            assert_eq!(
-                route(method, "/admin/restart"),
-                Route::Respond(Response::method_not_allowed("POST")),
-                "{method}"
-            );
+        // Restart and update change state: POST only, never GET (or anything else).
+        for (path, which) in [
+            ("/admin/restart", AdminRoute::Restart),
+            ("/admin/update", AdminRoute::Update),
+        ] {
+            assert_eq!(route("POST", path), Route::Admin(which));
+            for method in ["GET", "PUT", "DELETE", "HEAD"] {
+                assert_eq!(
+                    route(method, path),
+                    Route::Respond(Response::method_not_allowed("POST")),
+                    "{method} {path}"
+                );
+            }
         }
         assert_eq!(
             route("GET", "/admin/other"),

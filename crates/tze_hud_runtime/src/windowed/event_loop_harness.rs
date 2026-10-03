@@ -287,6 +287,7 @@ impl HeadlessEventLoopHarness {
             presents: None,
             capture: None,
             restart: None,
+            update: None,
             bind_gate: None,
         };
         let (_mcp_task, mcp_addrs) = crate::mcp::start_mcp_http_server_with_render_wake(

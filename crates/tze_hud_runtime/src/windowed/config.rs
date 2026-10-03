@@ -125,6 +125,9 @@ pub struct WindowedConfig {
     /// Set when this instance was started with `--handoff <spec>` by a running
     /// one: report ready after the first frame, take over, then bind the ports.
     pub handoff: Option<crate::operator::handoff::HandoffChild>,
+    /// Set when `POST /admin/update` started this instance (`--updated-from
+    /// <old sha>`): show the "Updated to ..." toast.
+    pub updated_from: Option<String>,
 }
 
 impl Default for WindowedConfig {
@@ -143,6 +146,7 @@ impl Default for WindowedConfig {
             benchmark: None,
             quiescent_efficiency: None,
             relaunch: None,
+            updated_from: None,
             handoff: None,
         }
     }

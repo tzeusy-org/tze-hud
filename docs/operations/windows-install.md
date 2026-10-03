@@ -84,8 +84,38 @@ the MCP port with its PSK as the bearer:
 | `GET /admin/screenshot` | `image/png` of the HUD's own frame at the window size (what the compositor draws, not an OS capture); rendered once per request, so idle cost is unchanged. One at a time (429), 503 if the compositor does not answer within 3 s |
 | `POST /admin/restart` | 202 `{"restarting":true}`, then the HUD relaunches itself (see below). POST only; the request body is ignored. 429 `BUSY` while one is in progress |
 
+| `POST /admin/update` | `{"channel":"dev"}`, `"stable"` (latest release) or a tag such as `"v1.2.3"`. Downloads, verifies and installs a signed release (see Update below). 200 `{"up_to_date":true}`, 202 `{"updating":true,"sha":...}`, 400 bad body, 409 `NOT_INSTALLED`, 429 `BUSY`, 502 `UPDATE_FAILED` |
+
 Without a valid PSK the answer is 401; with one lacking `admin`, 403
 `{"code":"NOT_ADMIN","hint":...}`.
+
+## Update
+
+`POST /admin/update` is pull-only: the HUD fetches `tze_hud.exe` and
+`tze_hud.exe.minisig` for the channel from
+`https://github.com/tzeusy-org/tze-hud/releases` with the system `curl.exe`
+(`TZE_HUD_RELEASES_URL` overrides the base, for testing). Nothing in the request
+picks a URL, path or argument. It only works on the installed copy
+(`%LOCALAPPDATA%\Programs\tze_hud\tze_hud.exe`); anything else gets
+`NOT_INSTALLED`.
+
+Before any file is replaced, the exe is checked against the minisign public key
+compiled into the running HUD (`app/tze_hud_app/minisign.pub`), and the signed
+trusted comment `tze_hud <ref> <sha>` must name the requested channel (`dev`
+for `dev`, the tag for a tag, any `v*` tag for `stable`). A tampered exe,
+another key, or a build signed for another channel is refused. A release whose
+sha is the running sha answers `up_to_date`. The release workflow signs
+`tze_hud <channel> <sha>`, so dev builds say `dev`, not `main`.
+
+A verified exe is staged beside the installed one, the running exe is renamed
+to `tze_hud.old.exe`, the new one takes its name, and the restart handoff below
+runs against it with `--updated-from <old sha>`. If the new build does not
+report ready within 30 s, it is killed, `tze_hud.exe` is put back, and the old
+HUD keeps running. The new HUD toasts `Updated to dev-<sha7>`; a failure toasts
+`Update failed; still on dev-<sha7>`, `last_update` in `/admin/status` is
+`{ok, sha, error}`, and the cause (download, signature, channel, handoff) is in
+the log. Over HTTP every failure is the same `UPDATE_FAILED`. Downloads are
+capped (256 MiB, 120 s per file).
 
 ## Restart and handoff
 
