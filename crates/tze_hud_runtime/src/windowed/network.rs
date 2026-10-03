@@ -165,7 +165,7 @@ pub(super) fn start_network_services_with_render_wake(
     let service = HudSessionImpl::from_deps(SessionDeps {
         resource_budget: runtime_context.resource_budget(),
         budget_enforcer: Some(std::sync::Arc::new(
-            crate::RuntimeMutationBudgetEnforcer::with_limits(
+            crate::mutation_budget_bridge::RuntimeMutationBudgetEnforcer::with_limits(
                 runtime_context.operational_envelope.max_resident_sessions,
                 runtime_context.operational_envelope.max_leased_tiles,
                 runtime_context

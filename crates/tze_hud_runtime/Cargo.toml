@@ -58,8 +58,6 @@ tze_hud_protocol = { path = "../tze_hud_protocol", version = "0.1.0", features =
 # test-util enables tokio's virtual-time control (start_paused/advance) used by
 # the resident gRPC bridge reconnect/backoff + lease-renewal unit tests.
 tokio = { workspace = true, features = ["test-util"] }
-blake3 = { workspace = true }
-proptest = { workspace = true }
 
 [[test]]
 name = "pixel_readback"

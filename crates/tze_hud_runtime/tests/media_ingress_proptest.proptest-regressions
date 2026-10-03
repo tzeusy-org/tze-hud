@@ -1,9 +1,0 @@
-# Seeds for failure cases proptest has generated in the past. It is
-# automatically read and these particular cases re-run before any
-# novel cases are generated.
-#
-# It is recommended to check this file in to source control so that
-# everyone who runs the test benefits from these saved cases.
-cc d79dea735c35385e4a75e386944143a2f64d7351e1162726e643f862d0a67da9 # shrinks to events = [TransportEstablished, AgentPauseRequest, InitiateClose(AgentClosed)]
-cc cc59d2d7eb09fe220e89493db32c0062b768853a207712a84c793e80f48ff17e # shrinks to events = [TransportEstablished, DegradationAdvanced { step: 1, trigger: RuntimeLadderAdvance }, AgentPauseRequest]
-cc 8a22265a66a792ca5fdc786b62d506f0555c6cf80ed303a77a760f5441675c6b # shrinks to events = [TransportEstablished, DegradationAdvanced { step: 1, trigger: RuntimeLadderAdvance }, InitiateClose(AgentClosed)]

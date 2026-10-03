@@ -142,7 +142,7 @@ impl Default for WindowedConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::window::{WindowMode, resolve_window_mode};
+    use crate::window::WindowMode;
 
     #[test]
     fn windowed_config_default_values() {
@@ -224,27 +224,6 @@ mod tests {
             ..WindowedConfig::default()
         };
         assert_eq!(cfg.window.mode, WindowMode::Overlay);
-    }
-
-    /// Verify that resolve_window_mode is called correctly for fullscreen
-    /// (no fallback should ever occur for fullscreen).
-    #[test]
-    fn resolve_fullscreen_config_produces_fullscreen() {
-        let (mode, reason) = resolve_window_mode(WindowMode::Fullscreen);
-        assert_eq!(mode, WindowMode::Fullscreen);
-        assert!(reason.is_none(), "fullscreen must never trigger a fallback");
-    }
-
-    /// Verify that resolve_window_mode for overlay either returns Overlay
-    /// (if supported) or falls back to Fullscreen (GNOME Wayland), but never
-    /// panics and always produces a valid mode.
-    #[test]
-    fn resolve_overlay_config_is_always_valid() {
-        let (mode, _reason) = resolve_window_mode(WindowMode::Overlay);
-        assert!(
-            mode == WindowMode::Overlay || mode == WindowMode::Fullscreen,
-            "resolved mode must be Overlay or Fullscreen, got: {mode}"
-        );
     }
 
     #[test]

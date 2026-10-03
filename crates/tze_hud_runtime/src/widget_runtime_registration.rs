@@ -5,7 +5,6 @@
 //! bytes for compositor-side registration.
 
 use tze_hud_compositor::widget::WidgetRenderer;
-pub use tze_hud_widget::{RuntimeWidgetAssetError, register_runtime_widget_svg_asset};
 
 /// Register pending widget SVG assets in the compositor widget renderer.
 pub fn process_pending_widget_svgs<I>(
@@ -23,7 +22,6 @@ pub fn process_pending_widget_svgs<I>(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::collections::HashMap;
     use tze_hud_scene::graph::SceneGraph;
     use tze_hud_scene::types::{
@@ -31,6 +29,7 @@ mod tests {
         WidgetDefinition, WidgetParamType, WidgetParameterDeclaration, WidgetParameterValue,
         WidgetSvgLayer,
     };
+    use tze_hud_widget::register_runtime_widget_svg_asset;
 
     fn make_scene() -> SceneGraph {
         let mut scene = SceneGraph::new(800.0, 600.0);
