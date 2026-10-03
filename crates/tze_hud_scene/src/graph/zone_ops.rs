@@ -720,7 +720,9 @@ impl SceneGraph {
     ///
     /// Per spec: "ClearZone clears all publications by the agent in the specified zone."
     /// If no publications exist for the publisher, this is a no-op (but still succeeds).
-    /// The publisher's pending scheduled publishes to the zone are cancelled too.
+    /// Pending scheduled publishes are untouched (a batch `ClearZone` followed by
+    /// a later batch's publish is the replace pattern); the verbs use
+    /// [`Self::clear_zone_and_cancel_pending`].
     pub fn clear_zone_for_publisher(
         &mut self,
         zone_name: &str,
@@ -731,7 +733,6 @@ impl SceneGraph {
                 name: zone_name.to_string(),
             });
         }
-        self.cancel_scheduled_zone_publishes(zone_name, publisher_namespace);
         if let Some(publishes) = self.zone_registry.active_publishes.get_mut(zone_name) {
             let before = publishes.len();
             publishes.retain(|r| r.publisher_namespace != publisher_namespace);
@@ -739,6 +740,18 @@ impl SceneGraph {
                 self.version += 1;
             }
         }
+        Ok(())
+    }
+
+    /// The `hud_clear` / `Clear` verb: [`Self::clear_zone_for_publisher`] plus
+    /// cancelling the publisher's not-yet-presented publishes to the zone.
+    pub fn clear_zone_and_cancel_pending(
+        &mut self,
+        zone_name: &str,
+        publisher_namespace: &str,
+    ) -> Result<(), ValidationError> {
+        self.clear_zone_for_publisher(zone_name, publisher_namespace)?;
+        self.cancel_scheduled_zone_publishes(zone_name, publisher_namespace);
         Ok(())
     }
 

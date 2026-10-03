@@ -706,7 +706,7 @@ pub async fn hud_clear(ctx: &ToolCtx<'_>, args: Value) -> McpResult<Value> {
         Surface::Zone(zone) => {
             let mut scene = ctx.scene.lock().await;
             scene
-                .clear_zone_for_publisher(&zone, &ns)
+                .clear_zone_and_cancel_pending(&zone, &ns)
                 .map_err(|e| scene_error(&e))?;
         }
         Surface::Widget(widget) => {

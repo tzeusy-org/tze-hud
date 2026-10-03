@@ -95,6 +95,8 @@ portal is degraded after 30 s with no publish, poll, or hold, and reclaimed
 **`hud_clear`** `{surface*, reason?}` releases a zone publication, a widget
 instance, or a portal (detach). On a zone it also cancels the caller's own
 delayed publishes that haven't presented yet; other agents' are untouched.
+The gRPC `Hold` and `Clear` behave the same on zones. A `ClearZone` inside a
+mutation batch clears only active publications and never cancels pending ones.
 
 **`hud_input`** `{ack?: [input_id], wait_ms?, max_items?}`
 
