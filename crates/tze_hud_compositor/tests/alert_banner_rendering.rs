@@ -69,6 +69,8 @@
 //! - openspec/changes/exemplar-alert-banner/specs/exemplar-alert-banner/spec.md
 //!   §Requirement: Alert-Banner Integration Test Suite
 
+mod common;
+
 use tze_hud_compositor::{Compositor, CompositorError, surface::HeadlessSurface};
 use tze_hud_scene::graph::SceneGraph;
 use tze_hud_scene::types::{NotificationPayload, ZoneContent, ZoneRegistry};
@@ -87,7 +89,7 @@ async fn make_compositor_and_surface(w: u32, h: u32) -> Option<(Compositor, Head
         eprintln!("skipping GPU test: TZE_HUD_SKIP_GPU_TESTS=1");
         return None;
     }
-    match Compositor::new_headless(w, h).await {
+    match common::new_headless_serialized(w, h).await {
         Ok(compositor) => {
             let surface = HeadlessSurface::new(&compositor.device, w, h);
             Some((compositor, surface))

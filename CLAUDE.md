@@ -41,8 +41,8 @@ requirements. Do not restore them or design against them.
 ## Commands
 
 See `AGENTS.md` for the `just` recipes (`just ci` mirrors the blocking CI gates)
-and operational notes. Don't run `cargo test -p tze_hud_compositor` bare; the
-pixel-readback GPU test deadlocks headless without Mesa llvmpipe.
+and operational notes. Run GPU tests with `just test-gpu` (llvmpipe-only), not bare
+`cargo test -p tze_hud_compositor`. Set `PROTOC` if `/usr/bin/protoc` is older than 3.15.
 
 ## LLM Self-Projection
 

@@ -13,6 +13,10 @@ use tze_hud_scene::graph::SceneGraph;
 /// it does not protect against separate test binary runs.
 static ENV_VAR_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+/// Serializes headless device creation: concurrent wgpu/Vulkan construction
+/// from the parallel libtest harness can wedge the driver (see `just test-gpu`).
+static GPU_INIT_MUTEX: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 #[test]
 fn adapter_identity_preserves_actual_wgpu_fields_without_a_gpu() {
     let identity = CompositorAdapterInfo::from(wgpu::AdapterInfo {
@@ -200,7 +204,11 @@ async fn make_compositor_and_surface(w: u32, h: u32) -> Option<(Compositor, Head
         eprintln!("SKIPPED (no GPU) reason: TZE_HUD_SKIP_GPU_TESTS=1 is set");
         return None;
     }
-    match Compositor::new_headless(w, h).await {
+    let built = {
+        let _guard = GPU_INIT_MUTEX.lock().await;
+        Compositor::new_headless(w, h).await
+    };
+    match built {
         Ok(compositor) => {
             let surface = HeadlessSurface::new(&compositor.device, w, h);
             Some((compositor, surface))
@@ -1993,7 +2001,10 @@ async fn test_new_headless_with_force_software_env_var() {
     unsafe {
         std::env::set_var("HEADLESS_FORCE_SOFTWARE", "1");
     }
-    let result = Compositor::new_headless(64, 64).await;
+    let result = {
+        let _gpu = GPU_INIT_MUTEX.lock().await;
+        Compositor::new_headless(64, 64).await
+    };
     unsafe {
         std::env::remove_var("HEADLESS_FORCE_SOFTWARE");
     }
@@ -12665,6 +12676,9 @@ async fn composer_caret_quad_emitted_at_expected_position() {
         placeholder: None,
     });
     compositor.prime_composer_scroll_offset(&scene);
+    // Pin the blink to the "on" phase; a slow host can otherwise let the
+    // wall-clock phase flip between compositor creation and this call.
+    compositor.composer_caret_blink_start = std::time::Instant::now();
 
     let mut verts: Vec<crate::pipeline::RectVertex> = Vec::new();
     compositor.append_composer_caret_vertices(&scene, &mut verts, 320.0, 200.0);
