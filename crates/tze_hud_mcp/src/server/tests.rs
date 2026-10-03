@@ -562,6 +562,108 @@ async fn delayed_notification_expiry_matches_immediate() {
     }
 }
 
+/// Two agents that may both use `zone:subtitle`, with their bearers.
+fn two_agents() -> (McpServer, TestClock, CallerContext, CallerContext) {
+    let clock = TestClock::new(1_000);
+    let mut agents = AgentDirectory::default();
+    for (id, key) in [("a", "a-key"), ("b", "b-key")] {
+        agents.insert(id, hash_psk(key), vec!["publish_zone:subtitle".to_string()]);
+    }
+    let server = McpServer::new(scene(&clock)).with_config(McpConfig::with_agents(agents.shared()));
+    (
+        server,
+        clock,
+        CallerContext::with_bearer("a-key"),
+        CallerContext::with_bearer("b-key"),
+    )
+}
+
+async fn delayed_subtitle(server: &McpServer, who: &CallerContext, delay_ms: u64, ttl_ms: u64) {
+    let (v, is_error) = call_as(
+        server,
+        who,
+        "hud_publish",
+        json!({"surface": "zone:subtitle", "content": "x", "delay_ms": delay_ms, "ttl_ms": ttl_ms}),
+    )
+    .await;
+    assert!(!is_error, "{v}");
+}
+
+/// `hud_clear` before the due time cancels the caller's pending publish and
+/// its wake deadline (idle costs nothing); only the caller's, never another
+/// agent's.
+#[tokio::test]
+async fn clear_cancels_only_own_pending_delayed_publish() {
+    let (server, clock, a, b) = two_agents();
+    delayed_subtitle(&server, &a, 5000, 0).await;
+    delayed_subtitle(&server, &b, 8000, 0).await;
+    let (v, _) = call_as(
+        &server,
+        &a,
+        "hud_clear",
+        json!({"surface": "zone:subtitle"}),
+    )
+    .await;
+    assert_eq!(v, json!({"ok": true}));
+    {
+        let scene = server.scene.lock().await;
+        assert_eq!(scene.scheduled_batches.len(), 1, "b's batch survives");
+        assert_eq!(
+            scene.next_timed_content_wall_us(),
+            Some(1_000_000 + 8_000_000)
+        );
+    }
+    clock.advance(8_000);
+    let mut scene = server.scene.lock().await;
+    scene.apply_due_batches();
+    let pubs = &scene.zone_registry.active_publishes["subtitle"];
+    assert_eq!(pubs.len(), 1);
+    assert_eq!(pubs[0].publisher_namespace, "b");
+    // Own cancellation leaves no stale deadline behind.
+    assert_eq!(scene.next_timed_content_wall_us(), None);
+}
+
+/// With nothing else pending, cancelling leaves no wake deadline at all.
+#[tokio::test]
+async fn clear_of_last_pending_publish_drops_the_wake_deadline() {
+    let (server, clock, a, _) = two_agents();
+    delayed_subtitle(&server, &a, 5000, 0).await;
+    call_as(
+        &server,
+        &a,
+        "hud_clear",
+        json!({"surface": "zone:subtitle"}),
+    )
+    .await;
+    clock.advance(10_000);
+    let mut scene = server.scene.lock().await;
+    assert_eq!(scene.next_timed_content_wall_us(), None);
+    scene.apply_due_batches();
+    assert!(scene.zone_registry.active_publishes.is_empty());
+}
+
+/// `hud_hold` reaches a pending publish: the new ttl counts from
+/// presentation (`0` = until cleared), and another agent's hold finds nothing.
+#[tokio::test]
+async fn hold_retimes_own_pending_delayed_publish() {
+    let (server, clock, a, b) = two_agents();
+    delayed_subtitle(&server, &a, 5000, 1000).await;
+    let hold = json!({"surface": "zone:subtitle", "ttl_ms": 3000});
+    let (err, is_error) = call_as(&server, &b, "hud_hold", hold.clone()).await;
+    assert!(is_error);
+    assert_eq!(err["code"], "NOT_HELD");
+    let (v, _) = call_as(&server, &a, "hud_hold", hold).await;
+    assert_eq!(v, json!({"ok": true, "expires_in_ms": 3000}));
+    clock.advance(5_000);
+    let mut scene = server.scene.lock().await;
+    scene.apply_due_batches();
+    let rec = &scene.zone_registry.active_publishes["subtitle"][0];
+    assert_eq!(
+        rec.expires_at_wall_us,
+        Some(1_000_000 + 5_000_000 + 3_000_000)
+    );
+}
+
 #[tokio::test]
 async fn delay_beyond_horizon_is_timestamp_too_future() {
     let (server, _) = server();

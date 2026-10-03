@@ -659,14 +659,21 @@ impl SceneGraph {
     }
 
     /// Set the expiry of every publication `publisher_namespace` holds on
-    /// `zone` (`None` = until cleared). Returns whether it held any.
+    /// `zone` (`None` = until cleared), including its not-yet-presented
+    /// scheduled publishes (whose expiry counts from presentation). Returns
+    /// whether it held any.
     pub fn hold_zone_publications(
         &mut self,
         zone: &str,
         publisher_namespace: &str,
         expires_at_wall_us: Option<u64>,
     ) -> bool {
-        let mut held = false;
+        let now_us = self.clock.now_us();
+        let mut held = self.hold_scheduled_zone_publishes(
+            zone,
+            publisher_namespace,
+            expires_at_wall_us.map(|at| at.saturating_sub(now_us)),
+        );
         for r in self
             .zone_registry
             .active_publishes
@@ -713,6 +720,7 @@ impl SceneGraph {
     ///
     /// Per spec: "ClearZone clears all publications by the agent in the specified zone."
     /// If no publications exist for the publisher, this is a no-op (but still succeeds).
+    /// The publisher's pending scheduled publishes to the zone are cancelled too.
     pub fn clear_zone_for_publisher(
         &mut self,
         zone_name: &str,
@@ -723,6 +731,7 @@ impl SceneGraph {
                 name: zone_name.to_string(),
             });
         }
+        self.cancel_scheduled_zone_publishes(zone_name, publisher_namespace);
         if let Some(publishes) = self.zone_registry.active_publishes.get_mut(zone_name) {
             let before = publishes.len();
             publishes.retain(|r| r.publisher_namespace != publisher_namespace);

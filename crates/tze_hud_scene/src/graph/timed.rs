@@ -30,6 +30,58 @@ impl SceneGraph {
         });
     }
 
+    /// Drop `namespace`'s pending publishes to `zone` (they have not
+    /// materialized, so `clear` has nothing else to remove). Other agents'
+    /// batches, and the rest of a mixed batch, are untouched; an emptied batch
+    /// disappears, taking its wake deadline with it. Returns how many
+    /// publishes were cancelled.
+    pub fn cancel_scheduled_zone_publishes(&mut self, zone: &str, namespace: &str) -> usize {
+        let mut cancelled = 0;
+        for s in &mut self.scheduled_batches {
+            if s.batch.agent_namespace == namespace {
+                let before = s.batch.mutations.len();
+                s.batch.mutations.retain(|m| !is_publish_to(m, zone));
+                cancelled += before - s.batch.mutations.len();
+            }
+        }
+        self.scheduled_batches
+            .retain(|s| !s.batch.mutations.is_empty());
+        cancelled
+    }
+
+    /// Retime `namespace`'s pending publishes to `zone` as a hold would an
+    /// active one, except that the expiry counts from presentation
+    /// (`present_at + ttl_ms`; `None` holds until cleared). Returns whether
+    /// any were pending.
+    pub fn hold_scheduled_zone_publishes(
+        &mut self,
+        zone: &str,
+        namespace: &str,
+        ttl_us: Option<u64>,
+    ) -> bool {
+        let mut held = false;
+        for s in &mut self.scheduled_batches {
+            if s.batch.agent_namespace != namespace {
+                continue;
+            }
+            for m in &mut s.batch.mutations {
+                if let SceneMutation::PublishToZone {
+                    zone_name,
+                    expires_at_wall_us,
+                    held: is_held,
+                    ..
+                } = m
+                    && zone_name == zone
+                {
+                    *expires_at_wall_us = ttl_us.map(|t| s.present_at_wall_us.saturating_add(t));
+                    *is_held = ttl_us.is_none();
+                    held = true;
+                }
+            }
+        }
+        held
+    }
+
     /// Apply every scheduled batch whose `present_at` has arrived, oldest
     /// deadline first. Returns each batch's result so callers can report
     /// late rejections.
@@ -113,4 +165,8 @@ fn target_tile_id(mutation: &SceneMutation) -> Option<SceneId> {
         | SceneMutation::UpdateNodeContent { tile_id, .. } => Some(*tile_id),
         _ => None,
     }
+}
+
+fn is_publish_to(mutation: &SceneMutation, zone: &str) -> bool {
+    matches!(mutation, SceneMutation::PublishToZone { zone_name, .. } if zone_name == zone)
 }
