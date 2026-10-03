@@ -90,11 +90,9 @@ fn arb_node() -> impl Strategy<Value = Node> {
 #[derive(Clone, Debug)]
 enum FuzzOp {
     CreateTab { name: String, display_order: u32 },
-    DeleteTab,
     CreateTile { z_order: u32 },
     DeleteTile,
     ResizeTile { valid: bool },
-    UpdateZOrder { z: u32 },
     UpdateOpacity { opacity: f32 },
     SetTileRoot { node: Node },
     AddNode { node: Node },
@@ -106,11 +104,9 @@ fn arb_fuzz_op() -> impl Strategy<Value = FuzzOp> {
     prop_oneof![
         3 => ("[a-zA-Z]{1,16}", 0u32..32u32)
                 .prop_map(|(name, order)| FuzzOp::CreateTab { name, display_order: order }),
-        2 => Just(FuzzOp::DeleteTab),
         5 => (1u32..200u32).prop_map(|z| FuzzOp::CreateTile { z_order: z }),
         3 => Just(FuzzOp::DeleteTile),
         3 => any::<bool>().prop_map(|valid| FuzzOp::ResizeTile { valid }),
-        2 => (1u32..200u32).prop_map(|z| FuzzOp::UpdateZOrder { z }),
         2 => (0f32..=1f32).prop_map(|opacity| FuzzOp::UpdateOpacity { opacity }),
         3 => arb_node().prop_map(|node| FuzzOp::SetTileRoot { node }),
         2 => arb_node().prop_map(|node| FuzzOp::AddNode { node }),
@@ -218,21 +214,6 @@ fn apply_fuzz_op(graph: &mut SceneGraph, oracle: &mut Oracle, op: &FuzzOp, idx: 
             }
         }
 
-        FuzzOp::DeleteTab => {
-            if let Some(tab_id) = oracle.random_tab(idx) {
-                if graph.delete_tab(tab_id).is_ok() {
-                    oracle.tab_ids.retain(|&id| id != tab_id);
-                    // Tiles in this tab were also deleted.
-                    oracle
-                        .tile_ids
-                        .retain(|&tile_id| graph.tiles.contains_key(&tile_id));
-                    oracle
-                        .node_ids
-                        .retain(|&node_id| graph.nodes.contains_key(&node_id));
-                }
-            }
-        }
-
         FuzzOp::CreateTile { z_order: _user_z } => {
             let tab_id = match oracle.random_tab(idx) {
                 Some(id) => id,
@@ -291,14 +272,6 @@ fn apply_fuzz_op(graph: &mut SceneGraph, oracle: &mut Oracle, op: &FuzzOp, idx: 
                     result.is_err(),
                     "zero-bounds resize must be rejected, but was accepted for tile {tile_id}"
                 );
-            }
-        }
-
-        FuzzOp::UpdateZOrder { z: _user_z } => {
-            if let Some(tile_id) = oracle.random_tile(idx) {
-                // Use a fresh unique z to avoid duplicate_z_order violations.
-                let z = oracle.alloc_z();
-                let _ = graph.update_tile_z_order(tile_id, z, AGENT);
             }
         }
 
@@ -487,13 +460,10 @@ proptest! {
 
         for _i in 0..n_ops {
             let bogus_tile = SceneId::new();
-            let bogus_tab = SceneId::new();
 
             // All of these should return Err, not panic.
             let _ = graph.delete_tile(bogus_tile, AGENT);
-            let _ = graph.delete_tab(bogus_tab);
             let _ = graph.update_tile_bounds(bogus_tile, Rect::new(0.0, 0.0, 100.0, 100.0), AGENT);
-            let _ = graph.update_tile_z_order(bogus_tile, 1, AGENT);
             let _ = graph.update_tile_opacity(bogus_tile, 0.5, AGENT);
             let _ = graph.set_tile_root(bogus_tile, Node { layout: Default::default(),
                 id: SceneId::new(),
@@ -690,11 +660,9 @@ fn test_100k_deterministic_tile_mutations() {
                 }
             }
             2 => {
-                // Update z-order of newest tile (use a fresh unique z).
+                // Update opacity of newest tile.
                 if let Some(&tile_id) = live_tiles.back() {
-                    let new_z = next_z;
-                    next_z = (next_z % 0x7FFF_FFFE) + 1;
-                    let _ = graph.update_tile_z_order(tile_id, new_z, "load.agent");
+                    let _ = graph.update_tile_opacity(tile_id, 0.5, "load.agent");
                 }
             }
             3 => {

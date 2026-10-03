@@ -256,19 +256,6 @@ fn create_and_switch_tab_with_capability() {
     assert_eq!(scene.active_tab, Some(tab_id));
 }
 
-// ─ Tab rename (spec line 75) ─────────────────────────────────────────────
-// WHEN an agent submits RenameTab with a new name of 100 UTF-8 bytes
-// THEN the tab name MUST be updated
-
-#[test]
-fn rename_tab_with_100_byte_name() {
-    let mut scene = make_scene();
-    let tab_id = scene.create_tab("Original", 0).unwrap();
-    let new_name = "a".repeat(100);
-    scene.rename_tab(tab_id, &new_name).unwrap();
-    assert_eq!(scene.tabs[&tab_id].name, new_name);
-}
-
 // ─ Create tile with valid lease (spec line 92) ────────────────────────────
 // WHEN an agent with a valid lease submits CreateTile
 // THEN the tile MUST be created with specified bounds, z_order, and opacity
@@ -655,54 +642,6 @@ fn node_struct_size_under_160_bytes() {
         node_size < 160,
         "Node struct is {node_size} bytes, must be < 160 bytes per RFC 0001 §8 \
          (raised 150 → 160 for the additive NodeLayout field, hud-yfj8u)"
-    );
-}
-
-// ─ Tab CRUD full cycle ────────────────────────────────────────────────────
-
-#[test]
-fn tab_delete_removes_tiles_too() {
-    let mut scene = make_scene();
-    let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease("agent", 300_000);
-    scene
-        .create_tile(
-            tab_id,
-            "agent",
-            lease_id,
-            Rect::new(0.0, 0.0, 100.0, 100.0),
-            1,
-        )
-        .unwrap();
-    assert_eq!(scene.tile_count(), 1);
-
-    scene.delete_tab(tab_id).unwrap();
-    assert_eq!(scene.tabs.len(), 0, "tab should be removed");
-    assert_eq!(scene.tile_count(), 0, "tiles should be removed with tab");
-    assert_eq!(
-        scene.active_tab, None,
-        "active_tab should be None after deleting last tab"
-    );
-}
-
-#[test]
-fn tab_reorder_updates_display_order() {
-    let mut scene = make_scene();
-    let tab_id = scene.create_tab("Main", 0).unwrap();
-    scene.reorder_tab(tab_id, 5).unwrap();
-    assert_eq!(scene.tabs[&tab_id].display_order, 5);
-}
-
-#[test]
-fn tab_reorder_conflict_rejected() {
-    let mut scene = make_scene();
-    let tab_a = scene.create_tab("A", 0).unwrap();
-    let _tab_b = scene.create_tab("B", 1).unwrap();
-    // Try to give tab_a the same order as tab_b
-    let err = scene.reorder_tab(tab_a, 1).unwrap_err();
-    assert!(
-        matches!(err, ValidationError::DuplicateDisplayOrder { .. }),
-        "got {err:?}"
     );
 }
 

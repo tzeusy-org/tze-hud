@@ -106,7 +106,6 @@ impl SceneGraph {
 fn target_tile_id(mutation: &SceneMutation) -> Option<SceneId> {
     match mutation {
         SceneMutation::UpdateTileBounds { tile_id, .. }
-        | SceneMutation::UpdateTileZOrder { tile_id, .. }
         | SceneMutation::UpdateTileOpacity { tile_id, .. }
         | SceneMutation::UpdateTileInputMode { tile_id, .. }
         | SceneMutation::SetTileRoot { tile_id, .. }

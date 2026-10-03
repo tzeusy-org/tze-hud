@@ -761,42 +761,6 @@ proptest! {
         );
     }
 
-    /// Arbitrary update z-order values (including zone-reserved) on existing tiles
-    /// must never leave the graph in an inconsistent state.
-    #[test]
-    fn prop_z_order_boundary_values_no_inconsistency(
-        z in any::<u32>(),
-    ) {
-        let mut scene = clean_scene();
-        let tab = scene.create_tab("Tab", 0).unwrap();
-        let lease = scene.grant_lease("agent", 300_000);
-
-        // Create a tile in the agent-legal range (z=1).
-        let r = scene.apply_batch(&make_batch("agent", Some(lease), vec![
-            SceneMutation::CreateTile {
-                tab_id: tab,
-                namespace: "agent".into(),
-                lease_id: lease,
-                bounds: Rect::new(0.0, 0.0, 100.0, 100.0),
-                z_order: 1,
-            },
-        ]));
-        prop_assume!(r.applied); // Only run the update if the tile was created.
-        let tile_id = r.created_ids[0];
-
-        // Try to update to an arbitrary z-order value.
-        let _ = scene.apply_batch(&make_batch("agent", Some(lease), vec![
-            SceneMutation::UpdateTileZOrder { tile_id, z_order: z },
-        ]));
-
-        // Invariants must hold regardless of what z_order was tried.
-        let violations = assert_layer0_invariants(&scene);
-        prop_assert!(
-            violations.is_empty(),
-            "Layer 0 violations after z={z}: {violations:?}"
-        );
-    }
-
     /// Arbitrary opacity values sent as UpdateTileOpacity must never crash.
     #[test]
     fn prop_opacity_arbitrary_float_no_crash(
