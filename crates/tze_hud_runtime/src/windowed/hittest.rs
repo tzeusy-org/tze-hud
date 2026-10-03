@@ -228,6 +228,7 @@ impl WinitApp {
             &self.state.hit_regions,
         ) || self.state.left_button_down
             || self.cursor_over_focused_portal_affordance();
+        self.state.overlay_capturing = should_capture;
         if let Some(window) = &self.state.window {
             if let Err(e) = window.set_cursor_hittest(should_capture) {
                 tracing::trace!(

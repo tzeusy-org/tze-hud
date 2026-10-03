@@ -590,6 +590,8 @@ pub struct Compositor {
     /// typing.  Computed per-frame in `collect_composer_text_item`; the model is
     /// never in this loop.
     pub(crate) composer_caret_blink_start: std::time::Instant,
+    /// Caret phase the idle gate last reported (`None` = no composer active).
+    pub(crate) composer_caret_rendered_phase: Option<bool>,
     /// Per-frame composer layout state (hud-zlfi4 single-line caret-follow +
     /// hud-nx7yq.1 multi-line wrap / upward growth / vertical scroll).
     ///
@@ -823,6 +825,7 @@ impl Compositor {
             resize_grip_hover: None,
             local_composer: None,
             composer_caret_blink_start: std::time::Instant::now(),
+            composer_caret_rendered_phase: None,
             composer_layout: image_cache::ComposerLayout::default(),
         })
     }
@@ -1144,6 +1147,7 @@ impl Compositor {
             resize_grip_hover: None,
             local_composer: None,
             composer_caret_blink_start: std::time::Instant::now(),
+            composer_caret_rendered_phase: None,
             composer_layout: image_cache::ComposerLayout::default(),
         };
 
@@ -1533,7 +1537,9 @@ impl Compositor {
     ///
     /// Taking the value (`.take()`) resets the slot to `None` so the
     /// same update is not applied twice.
-    pub fn drain_local_composer_state(&mut self) {
+    ///
+    /// Returns `true` when a new draft (keystroke / caret move) was applied.
+    pub fn drain_local_composer_state(&mut self) -> bool {
         let new_draft = apply_composer_slot(&self.local_composer_state, &mut self.local_composer);
         if new_draft {
             // Reset the blink phase so the caret is solid right after typing or
@@ -1551,6 +1557,7 @@ impl Compositor {
         if let Ok(slot) = self.resize_grip_hover_state.lock() {
             self.resize_grip_hover = *slot;
         }
+        new_draft
     }
 
     /// Drain the local composer echo slot and report whether the idle render
@@ -1568,30 +1575,37 @@ impl Compositor {
     ///    would only ever be drained inside `render_frame`, which the gate may
     ///    skip (chicken-and-egg).
     /// 2. **Caret blink.** While a composer is focused the caret toggles off the
-    ///    wall clock ([`caret_visible_at`]). Treating an active composer as dirty
-    ///    keeps it blinking; this is the deliberately simple correctness fix
-    ///    (continuous render only while focused — optimizable later to render
-    ///    only at blink-toggle boundaries).
+    ///    wall clock ([`caret_visible_at`]). The gate is dirty only when the
+    ///    phase differs from the last one it reported, so an idle focused
+    ///    composer renders once per toggle (see
+    ///    [`Compositor::next_animation_deadline`], which schedules the wake), not
+    ///    every frame.
     ///
-    /// Returns `true` while a composer is focused/visible (pending echo just
-    /// applied, or caret still blinking) **and** for the single frame on which a
-    /// composer deactivates (so the overlay is cleared from the screen). Returns
-    /// `false` once the composer is gone, so the truly-static idle case (no
-    /// composer focus, no pending echo) still skips render/present.
+    /// Returns `true` for a pending echo, a caret-phase toggle, a composer
+    /// activating, and the single frame on which it deactivates (so the overlay
+    /// is cleared from the screen); `false` otherwise, including an idle focused
+    /// composer between toggles.
     ///
     /// [`caret_visible_at`]: image_cache::caret_visible_at
     pub fn drain_local_composer_and_needs_render(&mut self) -> bool {
         let was_active = self.local_composer.is_some();
         let previous_focus_ring_owner = self.focus_ring_owner;
         let previous_resize_grip_hover = self.resize_grip_hover;
-        self.drain_local_composer_state();
+        let draft_applied = self.drain_local_composer_state();
         let is_active = self.local_composer.is_some();
-        // `is_active`  → focused composer: caret blink + any pending echo.
-        // `was_active` → covers the deactivation transition frame: the overlay
-        //                was drawn last frame and must be cleared by one render
-        //                even though `local_composer` is now `None`.
-        is_active
-            || was_active
+        // The caret only changes pixels when its phase flips; between toggles an
+        // idle focused composer costs nothing (`next_animation_deadline` wakes us
+        // at the next toggle).
+        let caret_visible = is_active
+            .then(|| image_cache::caret_visible_at(self.composer_caret_blink_start.elapsed()));
+        let caret_toggled = caret_visible != self.composer_caret_rendered_phase;
+        self.composer_caret_rendered_phase = caret_visible;
+        // `draft_applied` → pending echo / caret move.
+        // `was_active != is_active` → activation, and the deactivation frame that
+        //                clears the overlay drawn last frame.
+        draft_applied
+            || was_active != is_active
+            || caret_toggled
             || focus_or_grip_changed(
                 previous_focus_ring_owner,
                 self.focus_ring_owner,

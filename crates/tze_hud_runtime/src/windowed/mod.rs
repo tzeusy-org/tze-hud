@@ -419,6 +419,11 @@ struct WindowedRuntimeState {
     /// on whether the cursor is inside any of these regions.  Empty means all
     /// events pass through.
     hit_regions: Vec<HitRegion>,
+    /// Whether the overlay currently captures the pointer (last
+    /// `set_cursor_hittest` value). While `false` the OS delivers no pointer
+    /// events, so a low-rate cursor poll is the only way to notice the cursor
+    /// entering an interactive region.
+    overlay_capturing: bool,
     /// External static hit-regions configured by callers.
     static_hit_regions: Vec<HitRegion>,
     /// Runtime-managed widget hover trackers keyed by widget instance_name.
@@ -981,6 +986,16 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                 ));
             }
         }
+        let snapshot = self.state.pipeline.hit_test_snapshot.load();
+        let interactive = !self.state.hit_regions.is_empty()
+            || !snapshot.drag_handles.is_empty()
+            || snapshot.tiles.iter().any(|tile| tile.has_scroll_config);
+        deadlines.extend(wake::cursor_poll_deadline(
+            now,
+            self.state.effective_mode == WindowMode::Overlay,
+            interactive,
+            !self.state.overlay_capturing,
+        ));
         let has_deferred_scene_work = portal_drain.is_deferred()
             || !self.state.pending_input_capture_commands.is_empty()
             || !self.state.pending_keyboard_events.is_empty();
@@ -1728,6 +1743,19 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                                 timed_deadline = timed_deadline
                                     .into_iter()
                                     .chain(Some(deadline))
+                                    .min_by_key(|candidate| candidate.at);
+                            }
+                            // A notification counting down to its fade and a
+                            // focused composer's caret both change pixels at a
+                            // known instant with no other event. Wake exactly
+                            // then instead of rendering every frame in between.
+                            if let Some(at) = compositor.next_animation_deadline() {
+                                timed_deadline = timed_deadline
+                                    .into_iter()
+                                    .chain(Some(Deadline::new(
+                                        at,
+                                        crate::idle_efficiency::RuntimeWakeupSource::TtlDeadline,
+                                    )))
                                     .min_by_key(|candidate| candidate.at);
                             }
                         } else {
@@ -2769,6 +2797,7 @@ impl WindowedRuntime {
             window: None,
             effective_mode,
             hit_regions: Vec::new(),
+            overlay_capturing: false,
             static_hit_regions: Vec::new(),
             widget_hover_trackers: std::collections::HashMap::new(),
             pending_mode_switch: None,

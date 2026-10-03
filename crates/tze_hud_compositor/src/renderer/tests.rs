@@ -9836,6 +9836,176 @@ async fn idle_render_gate_skips_static_scene_renders_on_change_or_animation() {
     );
 }
 
+fn caret_test_draft() -> LocalComposerState {
+    LocalComposerState {
+        text: "hi".to_owned(),
+        cursor_byte: 2,
+        selection_anchor: 2,
+        at_capacity: false,
+        node_id: tze_hud_scene::types::SceneId::new(),
+        placeholder: None,
+    }
+}
+
+/// An idle focused composer schedules its next wake at the caret toggle
+/// boundary, not at the next frame.
+#[tokio::test]
+async fn caret_blink_wakes_at_toggle_not_every_frame() {
+    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(320, 200).await);
+    assert_eq!(
+        compositor.next_animation_deadline(),
+        None,
+        "no composer, no deadline"
+    );
+    *compositor.local_composer_state.lock().unwrap() = Some(Some(caret_test_draft()));
+    assert!(compositor.drain_local_composer_and_needs_render());
+
+    let start = compositor.composer_caret_blink_start;
+    assert_eq!(
+        compositor.next_animation_deadline(),
+        Some(start + CARET_BLINK_HALF_PERIOD),
+        "first wake is the solid -> hidden toggle"
+    );
+    // Many frames inside the solid phase: none dirty, deadline unmoved.
+    for _ in 0..100 {
+        assert!(!compositor.drain_local_composer_and_needs_render());
+    }
+    assert_eq!(
+        compositor.next_animation_deadline(),
+        Some(start + CARET_BLINK_HALF_PERIOD)
+    );
+    // Past the toggle the following boundary is one half-period later.
+    compositor.composer_caret_blink_start = std::time::Instant::now()
+        .checked_sub(CARET_BLINK_HALF_PERIOD)
+        .expect("test clock must have enough uptime to rewind one half-period");
+    assert_eq!(
+        compositor.next_animation_deadline(),
+        Some(compositor.composer_caret_blink_start + CARET_BLINK_HALF_PERIOD * 2)
+    );
+}
+
+fn countdown_notification_scene() -> SceneGraph {
+    let mut scene = SceneGraph::new(1280.0, 720.0);
+    scene.register_zone(ZoneDefinition {
+        id: SceneId::new(),
+        name: "notification-area".to_owned(),
+        description: "countdown".to_owned(),
+        geometry_policy: GeometryPolicy::Relative {
+            x_pct: 0.0,
+            y_pct: 0.0,
+            width_pct: 1.0,
+            height_pct: 1.0,
+        },
+        accepted_media_types: vec![ZoneMediaType::ShortTextWithIcon],
+        rendering_policy: RenderingPolicy::default(),
+        contention_policy: ContentionPolicy::Stack { max_depth: 5 },
+        max_publishers: 8,
+        transport_constraint: None,
+        auto_clear_ms: Some(8_000),
+        ephemeral: false,
+        layer_attachment: LayerAttachment::Chrome,
+    });
+    scene
+        .publish_to_zone(
+            "notification-area",
+            ZoneContent::Notification(NotificationPayload {
+                text: "hello".to_owned(),
+                icon: String::new(),
+                urgency: 1,
+                ttl_ms: None,
+                title: String::new(),
+                actions: Vec::new(),
+            }),
+            "agent-a",
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    scene
+}
+
+/// A visible notification counting down to its fade is not in flight: the
+/// gate stays idle until the fade starts, and the loop wakes exactly then.
+#[tokio::test]
+async fn notification_countdown_is_not_inflight_animation() {
+    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(320, 200).await);
+    let scene = countdown_notification_scene();
+    compositor.update_publication_animations(&scene);
+
+    assert!(
+        !compositor.has_inflight_animation(&scene),
+        "a notification still counting down must not hold the loop at 60 fps"
+    );
+    let state = compositor.pub_animation_states["notification-area"]
+        .values()
+        .next()
+        .unwrap();
+    assert_eq!(
+        compositor.next_animation_deadline(),
+        Some(state.first_seen + std::time::Duration::from_millis(state.ttl_ms)),
+        "the wake is the fade start"
+    );
+
+    // Past the TTL the next tick starts the fade, which is in flight.
+    for zone in compositor.pub_animation_states.values_mut() {
+        for s in zone.values_mut() {
+            s.first_seen = std::time::Instant::now() - std::time::Duration::from_secs(9);
+        }
+    }
+    compositor.update_publication_animations(&scene);
+    assert!(compositor.has_inflight_animation(&scene));
+    assert_eq!(
+        compositor.next_animation_deadline(),
+        None,
+        "once fading, frames (not a deadline) drive the animation"
+    );
+}
+
+/// Count of frames the idle gate would present across a notification
+/// lifetime, driven by the deadline the runtime would sleep on: one render
+/// when the notification appears, then only the fade (no 60 fps countdown).
+#[tokio::test]
+async fn idle_with_notification_renders_only_at_fade() {
+    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(320, 200).await);
+    let scene = countdown_notification_scene();
+    compositor.update_publication_animations(&scene);
+    let (origin, ttl) = {
+        let s = compositor.pub_animation_states["notification-area"]
+            .values()
+            .next()
+            .unwrap();
+        (s.first_seen, std::time::Duration::from_millis(s.ttl_ms))
+    };
+
+    // Virtual clock: step to each wake the loop would take. Rewinding
+    // `first_seen` by the virtual elapsed time stands in for waiting.
+    let mut renders_before_fade = 0;
+    let mut wakes = 0;
+    while let Some(deadline) = compositor.next_animation_deadline() {
+        wakes += 1;
+        let virtual_now = deadline - origin;
+        assert_eq!(virtual_now, ttl, "the only wake before the fade is the TTL");
+        for zone in compositor.pub_animation_states.values_mut() {
+            for s in zone.values_mut() {
+                s.first_seen = origin - virtual_now;
+            }
+        }
+        compositor.update_publication_animations(&scene);
+        if compositor.has_inflight_animation(&scene) {
+            break;
+        }
+        renders_before_fade += 1;
+        assert!(wakes < 3, "must not keep waking without a fade");
+    }
+    assert_eq!(wakes, 1, "one wake for the whole countdown");
+    assert_eq!(
+        renders_before_fade, 0,
+        "no frames rendered during countdown"
+    );
+    assert!(compositor.has_inflight_animation(&scene), "fade renders");
+}
+
 /// Idle render gate — composer carve-out (hud-ilivg / hud-r3ax6).
 ///
 /// The local draft echo and the caret blink are driven off out-of-band state
@@ -9847,7 +10017,7 @@ async fn idle_render_gate_skips_static_scene_renders_on_change_or_animation() {
 /// This pins the gate's composer input across the full lifecycle:
 ///   1. no composer                       → needs_render = false  (idle skips)
 ///   2. pending echo (slot Some(Some))    → needs_render = true   (renders)
-///   3. focused, no new keystroke         → needs_render = true   (caret blinks)
+///   3. focused, no new keystroke         → needs_render only at caret toggles
 ///   4. deactivation (slot Some(None))    → needs_render = true   (clears overlay)
 ///   5. gone                              → needs_render = false  (idle skips)
 #[tokio::test]
@@ -9884,16 +10054,26 @@ async fn idle_render_gate_renders_for_composer_echo_and_caret_blink() {
         "draining before the gate must have applied the pending draft"
     );
 
-    // ── 3. No new keystroke, composer still focused → caret keeps blinking. ──
-    // The slot is empty now, but an active composer must keep rendering across
-    // blink-toggle boundaries (treated as always-dirty while focused).
+    // ── 3. Focused, no keystroke: the gate wakes only at caret toggles. ──
     assert!(
         compositor.local_composer_state.lock().unwrap().is_none(),
         "slot must have been drained to None by the previous call"
     );
     assert!(
+        !compositor.drain_local_composer_and_needs_render(),
+        "between blink toggles an idle focused composer MUST NOT render"
+    );
+    // Rewind one half-period: the phase flips solid -> hidden exactly once.
+    compositor.composer_caret_blink_start = std::time::Instant::now()
+        .checked_sub(CARET_BLINK_HALF_PERIOD)
+        .expect("test clock must have enough uptime to rewind one half-period");
+    assert!(
         compositor.drain_local_composer_and_needs_render(),
-        "a focused composer with no new keystroke MUST keep rendering so the caret blinks"
+        "a caret phase toggle MUST render one frame"
+    );
+    assert!(
+        !compositor.drain_local_composer_and_needs_render(),
+        "the toggled phase is rendered once, then idle again"
     );
 
     // ── 4. Deactivation: slot delivers Some(None) → render once to clear. ──

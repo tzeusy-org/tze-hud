@@ -2143,6 +2143,7 @@ mod tests {
             window: None,
             effective_mode: WindowMode::Fullscreen,
             hit_regions: Vec::new(),
+            overlay_capturing: false,
             static_hit_regions: Vec::new(),
             widget_hover_trackers: std::collections::HashMap::new(),
             pending_mode_switch: None,
