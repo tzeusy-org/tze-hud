@@ -11,25 +11,15 @@
 //!
 //! Per runtime-kernel/spec.md Requirement: Headless Mode (line 198):
 //! "No conditional compilation for the render path."
-//!
-//! ## Two-pass rendering (content → chrome)
-//!
-//! [`Compositor::render_frame_with_chrome`] implements the three-layer ordering required by
-//! the chrome sovereignty contract:
-//!   1. Background + content pass (`LoadOp::Clear` — clears and draws agent tiles)
-//!   2. Chrome pass (`LoadOp::Load` — draws chrome on top of content, preserving pixels)
-//!
-//! This separation is the architectural foundation for future render-skip redaction
-//! (capture-safe architecture): the content and chrome passes are structurally independent.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex as StdMutex};
 
 use crate::markdown::MarkdownScope;
 use crate::pipeline::{
-    ChromeDrawCmd, ROUNDED_RECT_OVERLAY_SHADER, ROUNDED_RECT_SHADER, RectVertex,
-    RoundedRectDrawCmd, RoundedRectVertex, create_texture_rect_bind_group_layout,
-    create_texture_rect_pipeline, rect_vertices,
+    ROUNDED_RECT_OVERLAY_SHADER, ROUNDED_RECT_SHADER, RectVertex, RoundedRectDrawCmd,
+    RoundedRectVertex, create_texture_rect_bind_group_layout, create_texture_rect_pipeline,
+    rect_vertices,
 };
 use crate::surface::{CompositorSurface, HeadlessSurface, SurfaceRecoveryOutcome, WindowSurface};
 use crate::text::{TextItem, TextRasterizer};

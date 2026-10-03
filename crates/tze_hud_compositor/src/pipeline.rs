@@ -1,23 +1,6 @@
-//! Render pipeline — vertex types, chrome draw commands, and shader configuration.
+//! Render pipeline — vertex types and shader configuration.
 
 use bytemuck::{Pod, Zeroable};
-
-/// A chrome draw command: a colored rectangle to be rendered in the chrome pass.
-///
-/// The chrome render pass (which runs AFTER the content pass) converts these into
-/// GPU vertex data using the shared rect pipeline. Chrome draw commands are produced
-/// by the shell's `ChromeRenderer` and consumed by `Compositor::render_frame_with_chrome`.
-///
-/// This type lives in the compositor crate (not the runtime crate) so the compositor
-/// can accept chrome commands without a circular dependency.
-#[derive(Clone, Debug)]
-pub struct ChromeDrawCmd {
-    pub x: f32,
-    pub y: f32,
-    pub width: f32,
-    pub height: f32,
-    pub color: [f32; 4],
-}
 
 /// Vertex for rendering colored rectangles.
 #[repr(C)]

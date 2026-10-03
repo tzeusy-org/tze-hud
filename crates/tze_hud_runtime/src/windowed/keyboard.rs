@@ -159,7 +159,7 @@ fn is_bare_tab_chord(key: &str, modifiers: &KeyboardModifiers) -> bool {
 }
 
 /// Decode the reserved subset implemented by [`crate::shell::handle_shortcut`].
-/// Safe-mode and monitor-cycle chords intentionally return `None`: production
+/// Safe-mode, monitor-cycle, and mute chords intentionally return `None`: production
 /// handles those at the earlier winit OS-event stage, while in-process callers
 /// still consume them through [`ShellReservedShortcut`] without agent delivery.
 fn chrome_shortcut(raw: &RawKeyDownEvent) -> Option<ChromeShortcut> {
@@ -167,13 +167,12 @@ fn chrome_shortcut(raw: &RawKeyDownEvent) -> Option<ChromeShortcut> {
         return None;
     }
     match (raw.key.as_str(), raw.modifiers.shift) {
-        ("Tab", false) => Some(ChromeShortcut::NextTab),
-        ("Tab", true) => Some(ChromeShortcut::PrevTab),
+        ("Tab", false) => Some(ChromeShortcut::Next),
+        ("Tab", true) => Some(ChromeShortcut::Prev),
         ("1" | "2" | "3" | "4" | "5" | "6" | "7" | "8", false) => {
-            raw.key.parse::<usize>().ok().map(ChromeShortcut::GotoTab)
+            raw.key.parse::<usize>().ok().map(ChromeShortcut::Goto)
         }
-        ("9", false) => Some(ChromeShortcut::LastTab),
-        ("m" | "M", true) => Some(ChromeShortcut::MuteToggle),
+        ("9", false) => Some(ChromeShortcut::Last),
         _ => None,
     }
 }
@@ -414,7 +413,8 @@ impl WinitApp {
     /// Execute a shell-reserved shortcut locally before any portal/composer or
     /// focused-agent route (RFC 0007 §2.3; input-model Event Routing
     /// Resolution). Tab shortcuts update the authoritative scene and its
-    /// lock-free event-loop mirror; mute remains the v1-reserved chrome noop.
+    /// lock-free event-loop mirror. Other reserved chords (for example
+    /// Ctrl+Shift+M) are consumed without any action.
     ///
     /// The bounded lock/defer behavior matches other deliberate keyboard
     /// actions in this module. On contention the caller requeues the original
@@ -425,19 +425,6 @@ impl WinitApp {
             // event stage. Synthetic/in-process entry still consumes them.
             return ShellShortcutOutcome::Consumed;
         };
-
-        if shortcut == ChromeShortcut::MuteToggle {
-            let mut chrome = match self.state.chrome_state.try_write() {
-                Ok(chrome) => chrome,
-                Err(std::sync::TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
-                Err(std::sync::TryLockError::WouldBlock) => {
-                    return ShellShortcutOutcome::Busy;
-                }
-            };
-            let result = handle_shortcut(&mut chrome, shortcut);
-            debug_assert!(result.consumed);
-            return ShellShortcutOutcome::Consumed;
-        }
 
         let Some(state) = spin_acquire(&self.state.shared_state, INTERACTION_LOCK_BUDGET) else {
             return ShellShortcutOutcome::Busy;

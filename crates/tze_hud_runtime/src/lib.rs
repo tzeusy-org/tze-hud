@@ -8,7 +8,7 @@
 //! |-----------|--------|------|
 //! | Resource accounting | `tze_hud_resource` | Decoded-byte budget registry; GC; dedup |
 //! | Mutation budgets | `tze_hud_runtime::mutation_budget_bridge` | Per-session and aggregate hard caps |
-//! | Override state | `tze_hud_runtime::shell::SafeModeController` | Sole writer of freeze/safe-mode flags |
+//! | Override state | `tze_hud_runtime::shell::safe_mode` | Sole writer of safe-mode state |
 //! | Scene orchestration | `tze_hud_runtime` (this crate) | Wires authority modules; drives pipeline |
 //!
 //! ## Threads
@@ -52,7 +52,7 @@ pub mod portal_projection_driver;
 pub mod portal_tokens;
 pub(crate) mod runtime_context;
 pub(crate) mod scene_startup;
-pub mod shell;
+pub(crate) mod shell;
 #[cfg(test)]
 pub(crate) mod test_support;
 pub mod threads;
@@ -70,6 +70,6 @@ pub use pipeline::{
     INPUT_TO_NEXT_PRESENT_BUDGET_US, STAGE3_BUDGET_US, STAGE4_BUDGET_US, STAGE5_BUDGET_US,
 };
 pub use shell::chrome::{ChromeState, collect_diagnostic};
-pub use shell::{
+pub use shell::freeze::{
     EnqueueResult, FreezeQueue, MutationTrafficClass, QueuedMutation, classify_mutation_batch,
 };

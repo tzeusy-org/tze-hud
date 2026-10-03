@@ -23,19 +23,17 @@ fn adapter_identity_preserves_actual_wgpu_fields_without_a_gpu() {
 
 // ── Chrome layer pixel tests ──────────────────────────────────────────────
 
-/// Layer 1 pixel test: chrome layer is always visible above max-z-order agent tile.
+/// Invariant 3 pixel test: the safe-mode overlay is drawn by the windowed frame
+/// above even the highest-z agent tile, so no agent content can occlude it.
 ///
-/// Acceptance criterion: "Layer 1 pixel tests confirm chrome always visible above
-/// max-z-order agent tile."
-///
-/// This test renders a bright red tile at max z-order (u32::MAX) then renders a
-/// distinctive chrome rectangle over the same region. The chrome pixels (pure green)
-/// must overwrite the red tile pixels.
+/// Builds the same scene twice through `build_windowed_frame` and captures the
+/// pixels: without the overlay the max-z red tile shows through; with it the
+/// tile is dimmed.
 #[tokio::test]
 async fn test_chrome_always_above_max_zorder_tile() {
-    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(256, 256).await);
+    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);
+    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
 
-    // Agent tile at max valid agent z-order with bright red content.
     // Agent tiles must use z_order < ZONE_TILE_Z_MIN (0x8000_0000); u32::MAX is
     // reserved for runtime zone tiles (scene-graph/spec.md §Zone Layer Attachment).
     use tze_hud_scene::types::ZONE_TILE_Z_MIN;
@@ -67,141 +65,31 @@ async fn test_chrome_always_above_max_zorder_tile() {
             },
         )
         .unwrap();
-
-    // Chrome draw command: bright green rectangle covering the full surface.
-    // In NDC space, this will overwrite all tile content.
-    let chrome_cmds = vec![crate::pipeline::ChromeDrawCmd {
-        x: 0.0,
-        y: 0.0,
-        width: 256.0,
-        height: 40.0,                // tab bar height
-        color: [0.0, 1.0, 0.0, 1.0], // pure green — distinctive chrome marker
-    }];
-
     compositor.prime_markdown_cache(&scene);
     compositor.prime_truncation_cache(&scene);
-    compositor.render_frame_with_chrome(&scene, &surface, &chrome_cmds);
-    compositor.device.poll(wgpu::Maintain::Wait);
 
-    let pixels = surface.read_pixels(&compositor.device);
-
-    // Check the top-left pixel region (where chrome covers the tile).
-    // In sRGB, linear [0,1,0] green becomes approximately [0, 255, 0].
-    // We look for pixels that are distinctly green (G > 200, R < 50).
-    let chrome_top_pixel = &pixels[0..4]; // first pixel (top-left)
+    let format = wgpu::TextureFormat::Rgba8UnormSrgb;
+    let build = compositor.build_windowed_frame(&mut scene, 256, 256);
+    let plain = compositor
+        .capture_windowed_frame(build, format)
+        .expect("capture");
+    let center = (128 * 256 + 128) * 4;
     assert!(
-        chrome_top_pixel[1] > 150, // green channel dominant
-        "chrome green channel should be dominant at top: {chrome_top_pixel:?}"
-    );
-    // The tile red should NOT bleed through chrome.
-    assert!(
-        chrome_top_pixel[0] < 50,
-        "agent tile red must not show through chrome: {chrome_top_pixel:?}"
-    );
-}
-
-/// Layer 1 pixel test: chrome hit-test priority — chrome is always drawn last.
-///
-/// Verifies the separable render pass architecture: content pass first (agent tiles),
-/// chrome pass second (chrome elements). The two-pass structure guarantees chrome
-/// always occupies the final pixels regardless of content.
-#[tokio::test]
-async fn test_chrome_pass_uses_load_op_load() {
-    // Render a scene with a blue agent tile + a chrome red stripe.
-    // Blue content should persist where chrome doesn't cover; red should cover where it does.
-    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(256, 256).await);
-
-    let mut scene = SceneGraph::new(256.0, 256.0);
-    let tab_id = scene.create_tab("test", 0).unwrap();
-    let lease_id = scene.grant_lease("agent", 60_000);
-    let tile_id = scene
-        .create_tile(
-            tab_id,
-            "agent",
-            lease_id,
-            Rect::new(0.0, 0.0, 256.0, 256.0),
-            1,
-        )
-        .unwrap();
-    scene
-        .set_tile_root(
-            tile_id,
-            Node {
-                layout: Default::default(),
-                id: SceneId::new(),
-                children: vec![],
-                data: NodeData::SolidColor(SolidColorNode {
-                    // Blue tile — fills entire surface in content pass.
-                    color: Rgba::new(0.0, 0.0, 1.0, 1.0),
-                    bounds: Rect::new(0.0, 0.0, 256.0, 256.0),
-                    radius: None,
-                }),
-            },
-        )
-        .unwrap();
-
-    // Chrome: red stripe only in top half (rows 0..128).
-    let chrome_cmds = vec![crate::pipeline::ChromeDrawCmd {
-        x: 0.0,
-        y: 0.0,
-        width: 256.0,
-        height: 128.0,
-        color: [1.0, 0.0, 0.0, 1.0], // pure red
-    }];
-
-    compositor.prime_markdown_cache(&scene);
-    compositor.prime_truncation_cache(&scene);
-    compositor.render_frame_with_chrome(&scene, &surface, &chrome_cmds);
-    compositor.device.poll(wgpu::Maintain::Wait);
-
-    let pixels = surface.read_pixels(&compositor.device);
-
-    // Top row: chrome (red) should dominate.
-    let top_px = &pixels[0..4];
-    assert!(
-        top_px[0] > 150,
-        "top pixel should be red (chrome): {top_px:?}"
-    );
-    assert!(
-        top_px[2] < 50,
-        "top pixel blue (tile) must be suppressed by chrome: {top_px:?}"
+        plain.rgba[center] > 200,
+        "without the overlay the max-z tile is plain red: {:?}",
+        &plain.rgba[center..center + 4]
     );
 
-    // Bottom row: content (blue) should persist — chrome didn't cover it.
-    // Row 255 starts at pixel offset 255*256*4.
-    let bottom_row_offset = 255 * 256 * 4;
-    let bottom_px = &pixels[bottom_row_offset..bottom_row_offset + 4];
+    compositor.set_safe_mode_overlay(true);
+    let build = compositor.build_windowed_frame(&mut scene, 256, 256);
+    let dimmed = compositor
+        .capture_windowed_frame(build, format)
+        .expect("capture");
     assert!(
-        bottom_px[2] > 150,
-        "bottom pixel should be blue (tile content, no chrome): {bottom_px:?}"
+        dimmed.rgba[center] < plain.rgba[center] - 40,
+        "the safe-mode overlay must cover the max-z tile: {:?}",
+        &dimmed.rgba[center..center + 4]
     );
-    assert!(
-        bottom_px[0] < 50,
-        "bottom pixel red should be absent (no chrome): {bottom_px:?}"
-    );
-}
-
-/// Verify that render_frame_with_chrome renders correctly even when chrome_cmds is empty.
-#[tokio::test]
-async fn test_two_pass_with_empty_chrome_cmds() {
-    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(256, 256).await);
-    let scene = scene_with_node(Node {
-        layout: Default::default(),
-        id: SceneId::new(),
-        children: vec![],
-        data: NodeData::SolidColor(SolidColorNode {
-            color: Rgba::new(0.5, 0.5, 0.5, 1.0),
-            bounds: Rect::new(0.0, 0.0, 256.0, 256.0),
-            radius: None,
-        }),
-    });
-    // Empty chrome cmds — must not panic.
-    compositor.prime_markdown_cache(&scene);
-    compositor.prime_truncation_cache(&scene);
-    compositor.render_frame_with_chrome(&scene, &surface, &[]);
-    compositor.device.poll(wgpu::Maintain::Wait);
-    let pixels = surface.read_pixels(&compositor.device);
-    assert_eq!(pixels.len(), 256 * 256 * 4);
 }
 
 // ── Headless parity tests ─────────────────────────────────────────────────

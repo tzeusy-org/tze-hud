@@ -12,7 +12,8 @@ use std::sync::{Arc, RwLock, atomic::Ordering};
 
 use tokio::sync::{Mutex, mpsc};
 
-use crate::shell::{ChromeState, SafeModeController};
+use crate::shell::ChromeState;
+use crate::shell::safe_mode::{enter_safe_mode, exit_safe_mode};
 use crate::threads::ShutdownToken;
 use tze_hud_protocol::session::SharedState;
 use tze_hud_scene::render_wake::RenderWakeNotifier;
@@ -68,10 +69,9 @@ async fn toggle_safe_mode(
     render_wake: &RenderWakeNotifier,
 ) {
     let active = shared.lock().await.safe_mode_atomic.load(Ordering::Acquire);
-    let mut ctrl = SafeModeController::new_headless(Arc::clone(shared), Arc::clone(chrome));
     match action_for_toggle(active) {
         SafeModeAction::Enter => {
-            let result = ctrl.enter_safe_mode_viewer_action().await;
+            let result = enter_safe_mode(shared, chrome).await;
             tracing::info!(
                 leases_suspended = result.leases_suspended,
                 sessions_notified = result.sessions_notified,
@@ -80,7 +80,7 @@ async fn toggle_safe_mode(
             render_wake.notify();
         }
         SafeModeAction::Exit => {
-            let result = ctrl.exit_safe_mode().await;
+            let result = exit_safe_mode(shared, chrome).await;
             tracing::info!(
                 exited = result.exited,
                 leases_resumed = result.leases_resumed,

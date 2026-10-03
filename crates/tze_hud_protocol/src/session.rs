@@ -61,7 +61,7 @@ pub struct SharedState {
     /// thread (`dispatch_key_down_event` / `dispatch_key_up_event` /
     /// `dispatch_character_event` hot paths) without acquiring the
     /// `SharedState` mutex.  Writers (exclusively
-    /// `SafeModeController::enter_safe_mode` and `exit_safe_mode`) store with
+    /// `shell::safe_mode::enter_safe_mode` and `exit_safe_mode`) store with
     /// `Ordering::Release`; readers load with `Ordering::Acquire`.  The
     /// Release-Acquire pair guarantees that any stores preceding the flag
     /// write are visible to the event thread once it observes the raised flag,
