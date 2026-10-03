@@ -1648,7 +1648,7 @@ impl Compositor {
     /// Cumulative markdown-cache-miss count on the render path (hud-u4lq2). See
     /// [`Self::markdown_cache_miss_count`]'s field doc for what a nonzero,
     /// growing count means. Currently consumed only by
-    /// `renderer::tests::reused_compositor_across_scenes_lands_markdown_primer_hud_u4lq2`
+    /// `renderer::tests::markdown_primer::reused_compositor_across_scenes_lands_markdown_primer_hud_u4lq2`
     /// and its sibling baseline test; `#[allow(dead_code)]` covers the non-test
     /// build (the field itself keeps incrementing regardless, for log-visible
     /// `tracing::warn!` observability at the call site in `text.rs`).
