@@ -1032,94 +1032,23 @@ pub(crate) use tze_hud_scene::resolve_token_placeholders;
 
 #[cfg(test)]
 mod tests {
-    use super::{is_valid_widget_type_id, validate_runtime_svg_registration};
-
-    // Valid ids.
-    #[test]
-    fn valid_single_letter() {
-        assert!(is_valid_widget_type_id("a"));
-    }
-
-    #[test]
-    fn valid_simple_name() {
-        assert!(is_valid_widget_type_id("gauge"));
-    }
-
-    #[test]
-    fn valid_with_digits() {
-        assert!(is_valid_widget_type_id("widget123"));
-    }
-
-    #[test]
-    fn valid_with_hyphens() {
-        assert!(is_valid_widget_type_id("my-widget"));
-    }
-
-    #[test]
-    fn valid_complex_name() {
-        assert!(is_valid_widget_type_id("a1b2-c3d4"));
-    }
-
-    #[test]
-    fn valid_trailing_digit() {
-        assert!(is_valid_widget_type_id("progress-bar2"));
-    }
-
-    // Invalid ids.
-    #[test]
-    fn invalid_empty() {
-        assert!(!is_valid_widget_type_id(""));
-    }
-
-    #[test]
-    fn invalid_starts_with_digit() {
-        assert!(!is_valid_widget_type_id("1gauge"));
-    }
-
-    #[test]
-    fn invalid_starts_with_hyphen() {
-        assert!(!is_valid_widget_type_id("-gauge"));
-    }
-
-    #[test]
-    fn invalid_uppercase() {
-        assert!(!is_valid_widget_type_id("Gauge"));
-    }
-
-    #[test]
-    fn invalid_all_uppercase() {
-        assert!(!is_valid_widget_type_id("GAUGE"));
-    }
-
-    #[test]
-    fn invalid_contains_uppercase() {
-        assert!(!is_valid_widget_type_id("my-Gauge"));
-    }
-
-    #[test]
-    fn invalid_space() {
-        assert!(!is_valid_widget_type_id("my gauge"));
-    }
-
-    #[test]
-    fn invalid_underscore() {
-        assert!(!is_valid_widget_type_id("my_gauge"));
-    }
-
-    #[test]
-    fn invalid_dot() {
-        assert!(!is_valid_widget_type_id("my.gauge"));
-    }
-
-    #[test]
-    fn invalid_slash() {
-        assert!(!is_valid_widget_type_id("my/gauge"));
-    }
-
-    // ─── resolve_token_placeholders ──────────────────────────────────────────────
-
-    use super::resolve_token_placeholders;
+    use super::{
+        is_valid_widget_type_id, resolve_token_placeholders, validate_runtime_svg_registration,
+    };
     use std::collections::HashMap;
+
+    #[test]
+    fn widget_type_id_accepts_only_lowercase_kebab() {
+        for ok in ["a", "gauge", "widget123", "my-widget", "a1b2-c3d4"] {
+            assert!(is_valid_widget_type_id(ok), "{ok:?} should be valid");
+        }
+        for bad in [
+            "", "1gauge", "-gauge", "Gauge", "my-Gauge", "my gauge", "my_gauge", "my.gauge",
+            "my/gauge",
+        ] {
+            assert!(!is_valid_widget_type_id(bad), "{bad:?} should be invalid");
+        }
+    }
 
     fn token_map(pairs: &[(&str, &str)]) -> HashMap<String, String> {
         pairs
@@ -1128,362 +1057,129 @@ mod tests {
             .collect()
     }
 
-    /// Single placeholder is substituted with the token value.
+    /// (case, tokens, input, expected output). Covers prefixed and bare forms,
+    /// escapes, XML-comment skipping, no recursive substitution, and every
+    /// near-miss that must pass through verbatim instead of erroring.
     #[test]
-    fn single_placeholder_substituted() {
-        let tokens = token_map(&[("color.primary", "#ff0000")]);
-        let input = r##"<rect fill="{{token.color.primary}}"/>"##;
-        let result = resolve_token_placeholders(input, &tokens).unwrap();
-        assert_eq!(result, r##"<rect fill="#ff0000"/>"##);
-    }
-
-    /// Multiple placeholders in one attribute value are all substituted.
-    #[test]
-    fn multiple_placeholders_in_one_attribute() {
-        let tokens = token_map(&[("fg", "white"), ("bg", "black")]);
-        let input = r#"<text fill="{{token.fg}}" stroke="{{token.bg}}">x</text>"#;
-        let result = resolve_token_placeholders(input, &tokens).unwrap();
-        assert_eq!(result, r#"<text fill="white" stroke="black">x</text>"#);
-    }
-
-    /// Escaped braces `\{\{` / `\}\}` are preserved as literal `{{` / `}}`.
-    ///
-    /// The spec escape format requires each brace to be individually escaped:
-    /// `\{\{` (not `\{{`) and `\}\}` (not `\}}`).
-    #[test]
-    fn escaped_braces_preserved_as_literals() {
-        let tokens = token_map(&[]);
-        // Each brace is individually escaped: \{ \{ and \} \}
-        let input = r"no placeholder \{\{ here \}\} either";
-        let result = resolve_token_placeholders(input, &tokens).unwrap();
-        assert_eq!(result, "no placeholder {{ here }} either");
-    }
-
-    /// An unresolved token (valid syntax, key absent from map) produces an error.
-    #[test]
-    fn unresolved_token_yields_error() {
-        let tokens = token_map(&[]);
-        let input = r#"<rect fill="{{token.missing.key}}"/>"#;
-        let err = resolve_token_placeholders(input, &tokens).unwrap_err();
-        assert_eq!(err, "missing.key");
-    }
-
-    /// Resolved values are never re-scanned (no recursive substitution).
-    #[test]
-    fn no_recursive_substitution() {
-        // The value itself looks like a placeholder; it must NOT be re-resolved.
-        let tokens = token_map(&[("a", "{{token.b}}"), ("b", "SHOULD_NOT_APPEAR")]);
-        let input = r#"<text>{{token.a}}</text>"#;
-        let result = resolve_token_placeholders(input, &tokens).unwrap();
-        // The value "{{token.b}}" is inserted verbatim; it should NOT be expanded.
-        assert_eq!(result, r#"<text>{{token.b}}</text>"#);
-    }
-
-    /// Placeholder inside a `<style>` block is resolved identically to any attribute.
-    #[test]
-    fn placeholder_inside_style_block() {
-        let tokens = token_map(&[("color.accent", "blue")]);
-        let input = "<style>.cls { fill: {{token.color.accent}}; }</style>";
-        let result = resolve_token_placeholders(input, &tokens).unwrap();
-        assert_eq!(result, "<style>.cls { fill: blue; }</style>");
-    }
-
-    /// `{{ token.key }}` with whitespace inside braces is NOT treated as a placeholder.
-    #[test]
-    fn whitespace_inside_braces_not_a_placeholder() {
-        let tokens = token_map(&[("color.primary", "SHOULD_NOT_APPEAR")]);
-        // The spec requires no whitespace inside braces.
-        let input = r#"<rect fill="{{ token.color.primary }}"/>"#;
-        // Should pass through unchanged (no match).
-        let result = resolve_token_placeholders(input, &tokens).unwrap();
-        assert_eq!(result, input);
-    }
-
-    /// A bare-form placeholder with a valid key that is absent from the map yields an error.
-    ///
-    /// Previously `{{other.key}}` was passed through unchanged because it lacked the
-    /// `token.` prefix.  With bare-key support, ANY valid-syntax `{{key}}` is treated
-    /// as a token placeholder and produces an error when the key is absent.
-    #[test]
-    fn bare_key_absent_from_map_yields_error() {
-        let tokens = token_map(&[]);
-        let input = "{{other.key}} stays put";
-        let err = resolve_token_placeholders(input, &tokens).unwrap_err();
-        assert_eq!(err, "other.key");
-    }
-
-    /// A bare `{{}}` (empty inner) is passed through unchanged.
-    #[test]
-    fn empty_braces_passed_through() {
-        let tokens = token_map(&[]);
-        let result = resolve_token_placeholders("{{}}", &tokens).unwrap();
-        assert_eq!(result, "{{}}");
-    }
-
-    /// Unclosed `{{` is passed through unchanged without panicking.
-    #[test]
-    fn unclosed_braces_passed_through() {
-        let tokens = token_map(&[]);
-        let result = resolve_token_placeholders("{{ no close", &tokens).unwrap();
-        assert_eq!(result, "{{ no close");
-    }
-
-    /// A key whose first segment contains an underscore is NOT a valid placeholder.
-    ///
-    /// The spec pattern `[a-z][a-z0-9]*(\.[a-z][a-z0-9_]*)*)` disallows
-    /// underscores in the first segment; only subsequent segments permit them.
-    #[test]
-    fn underscore_in_first_segment_not_a_placeholder() {
-        // `my_key` starts with a valid letter but the first segment contains `_`.
-        let tokens = token_map(&[("my_key", "SHOULD_NOT_APPEAR")]);
-        let input = "{{token.my_key}} stays put";
-        // Should pass through unchanged — `my_key` fails the first-segment rule.
-        let result = resolve_token_placeholders(input, &tokens).unwrap();
-        assert_eq!(result, "{{token.my_key}} stays put");
-    }
-
-    /// When `{{token.<key>}}` has a `token.` prefix but the stripped key is invalid,
-    /// the whole sequence is passed through — it is NOT re-interpreted as a bare
-    /// key `token.<key>`.  The `token.` prefix has priority: once the prefix is
-    /// detected, only the stripped part is validated, and bare-form fallback is
-    /// suppressed.
-    ///
-    /// This means `{{token.foo_bar}}` and `{{token.my_key}}` are both passed through
-    /// unchanged even though `token.foo_bar` and `token.my_key` would pass
-    /// `is_valid_token_key` as bare keys.
-    #[test]
-    fn prefixed_form_with_invalid_stripped_key_does_not_fall_back_to_bare() {
-        // `foo_bar` has underscore in its first (and only) segment — invalid as a
-        // stripped key.  `token.foo_bar` would be a valid bare key, but the
-        // `token.` prefix precludes bare-form fallback.
-        let tokens = token_map(&[("token.foo_bar", "SHOULD_NOT_APPEAR")]);
-        let input = "{{token.foo_bar}} stays put";
-        let result = resolve_token_placeholders(input, &tokens).unwrap();
-        assert_eq!(result, "{{token.foo_bar}} stays put");
-    }
-
-    /// Underscores in a subsequent (non-first) segment are valid.
-    #[test]
-    fn underscore_in_subsequent_segment_is_valid() {
-        let tokens = token_map(&[("color.text_primary", "#00ff00")]);
-        let input = r##"<rect fill="{{token.color.text_primary}}"/>"##;
-        let result = resolve_token_placeholders(input, &tokens).unwrap();
-        assert_eq!(result, r##"<rect fill="#00ff00"/>"##);
-    }
-
-    /// Non-ASCII (multi-byte UTF-8) content outside placeholders is preserved intact.
-    #[test]
-    fn non_ascii_content_preserved() {
-        let tokens = token_map(&[("color.primary", "red")]);
-        // U+00E9 (é) is a 2-byte UTF-8 sequence.
-        let input = "<!-- caf\u{00e9} -->{{token.color.primary}}";
-        let result = resolve_token_placeholders(input, &tokens).unwrap();
-        assert_eq!(result, "<!-- caf\u{00e9} -->red");
-    }
-
-    // ─── Bare-key form (no `token.` prefix) ──────────────────────────────────────
-
-    /// Bare `{{key}}` form (spec-preferred) resolves directly against the token map.
-    #[test]
-    fn bare_key_single_placeholder_substituted() {
-        let tokens = token_map(&[("color.text.primary", "#ffffff")]);
-        let input = r##"<text fill="{{color.text.primary}}">hi</text>"##;
-        let result = resolve_token_placeholders(input, &tokens).unwrap();
-        assert_eq!(result, r##"<text fill="#ffffff">hi</text>"##);
-    }
-
-    /// Bare-form and prefixed-form placeholders are resolved identically when they
-    /// reference the same token key.
-    #[test]
-    fn bare_key_and_prefixed_key_equivalent() {
-        let tokens = token_map(&[("color.primary", "#ff0000")]);
-        let bare =
-            resolve_token_placeholders(r##"<rect fill="{{color.primary}}"/>"##, &tokens).unwrap();
-        let prefixed =
-            resolve_token_placeholders(r##"<rect fill="{{token.color.primary}}"/>"##, &tokens)
-                .unwrap();
-        assert_eq!(bare, r##"<rect fill="#ff0000"/>"##);
-        assert_eq!(prefixed, r##"<rect fill="#ff0000"/>"##);
-    }
-
-    /// Multiple bare-form placeholders in one SVG attribute are all substituted.
-    #[test]
-    fn bare_key_multiple_placeholders() {
-        let tokens = token_map(&[("fg", "white"), ("bg", "black")]);
-        let input = r#"<text fill="{{fg}}" stroke="{{bg}}">x</text>"#;
-        let result = resolve_token_placeholders(input, &tokens).unwrap();
-        assert_eq!(result, r#"<text fill="white" stroke="black">x</text>"#);
-    }
-
-    /// Bare-form placeholder inside a `<style>` block is resolved identically.
-    #[test]
-    fn bare_key_inside_style_block() {
-        let tokens = token_map(&[("color.accent", "blue")]);
-        let input = "<style>.cls { fill: {{color.accent}}; }</style>";
-        let result = resolve_token_placeholders(input, &tokens).unwrap();
-        assert_eq!(result, "<style>.cls { fill: blue; }</style>");
-    }
-
-    /// A bare-form placeholder whose key has an underscore in the first segment is
-    /// NOT a valid placeholder (passes through unchanged / treated as not a placeholder).
-    ///
-    /// Note: since an invalid-syntax inner text is passed through as `{{...}}`, the
-    /// outer caller sees unchanged output rather than an error.
-    #[test]
-    fn bare_key_underscore_in_first_segment_not_a_placeholder() {
-        let tokens = token_map(&[("my_key", "SHOULD_NOT_APPEAR")]);
-        let input = "{{my_key}} stays put";
-        // `my_key` fails the first-segment rule (underscore not allowed there),
-        // so the `{{my_key}}` sequence is passed through literally.
-        let result = resolve_token_placeholders(input, &tokens).unwrap();
-        assert_eq!(result, "{{my_key}} stays put");
-    }
-
-    /// A mix of bare-form and prefixed-form placeholders in the same SVG are both resolved.
-    #[test]
-    fn bare_and_prefixed_mix_both_resolved() {
-        let tokens = token_map(&[
-            ("color.text.primary", "#ffffff"),
-            ("color.backdrop.default", "#000000"),
-        ]);
-        let input = r##"fill="{{color.text.primary}}" stroke="{{token.color.backdrop.default}}""##;
-        let result = resolve_token_placeholders(input, &tokens).unwrap();
-        assert_eq!(result, r##"fill="#ffffff" stroke="#000000""##);
-    }
-
-    /// Reference subtitle SVG uses bare-form token placeholders — all must resolve.
-    ///
-    /// This mirrors the real reference profile SVG pattern used in production.
-    #[test]
-    fn reference_profile_bare_tokens_resolve() {
-        let tokens = token_map(&[
-            ("color.text.primary", "#ffffff"),
-            ("color.outline.default", "#000000"),
-            ("typography.subtitle.family", "sans-serif"),
-            ("typography.subtitle.size", "48"),
-            ("typography.subtitle.weight", "700"),
-            ("stroke.outline.width", "2"),
-        ]);
-        // Simulate a simplified version of the reference subtitle outlined-text SVG.
-        let input = r#"<text
-  font-family="{{typography.subtitle.family}}"
-  font-size="{{typography.subtitle.size}}"
-  font-weight="{{typography.subtitle.weight}}"
-  fill="{{color.text.primary}}"
-  stroke="{{color.outline.default}}"
-  stroke-width="{{stroke.outline.width}}">Subtitle</text>"#;
-        let result = resolve_token_placeholders(input, &tokens).unwrap();
-        assert!(result.contains(r#"font-family="sans-serif""#));
-        assert!(result.contains(r#"font-size="48""#));
-        assert!(result.contains(r##"fill="#ffffff""##));
-        assert!(result.contains(r##"stroke="#000000""##));
-        assert!(!result.contains("{{"));
-    }
-
-    // ─── XML comment skipping ─────────────────────────────────────────────────────
-
-    /// A token placeholder inside an XML comment is NOT resolved.
-    ///
-    /// SVG authors use `<!-- {{token.key}} -->` for documentation examples.
-    /// The resolver must leave such regions verbatim to avoid spurious errors.
-    #[test]
-    fn token_inside_xml_comment_not_resolved() {
-        // The token IS in the map, but the placeholder is inside a comment.
-        let tokens = token_map(&[("color.primary", "#ff0000")]);
-        let input = r#"<!-- use {{token.color.primary}} here -->"#;
-        let result = resolve_token_placeholders(input, &tokens).unwrap();
-        // Comment must be preserved verbatim — no substitution.
-        assert_eq!(result, input);
-    }
-
-    /// A token placeholder outside an XML comment IS resolved normally.
-    #[test]
-    fn token_outside_xml_comment_is_resolved() {
-        let tokens = token_map(&[("color.primary", "#ff0000")]);
-        let input = r##"<!-- doc comment --><rect fill="{{token.color.primary}}"/>"##;
-        let result = resolve_token_placeholders(input, &tokens).unwrap();
-        assert_eq!(result, r##"<!-- doc comment --><rect fill="#ff0000"/>"##);
-    }
-
-    /// Comment before AND after a live token: the comment is preserved; the
-    /// token that precedes the second comment and the token that follows are
-    /// both resolved.
-    #[test]
-    fn comment_between_live_tokens() {
-        let tokens = token_map(&[("fg", "white"), ("bg", "black")]);
-        let input =
-            r#"<text fill="{{fg}}"><!-- note: {{bg}} is backdrop --></text><rect fill="{{bg}}"/>"#;
-        let result = resolve_token_placeholders(input, &tokens).unwrap();
-        assert_eq!(
-            result,
-            r#"<text fill="white"><!-- note: {{bg}} is backdrop --></text><rect fill="black"/>"#
+    fn placeholder_resolution_table() {
+        type Case = (
+            &'static str,
+            &'static [(&'static str, &'static str)],
+            &'static str,
+            &'static str,
         );
+        let cases: &[Case] = &[
+            (
+                "prefixed",
+                &[("color.primary", "#f00")],
+                "{{token.color.primary}}",
+                "#f00",
+            ),
+            (
+                "bare",
+                &[("color.primary", "#f00")],
+                "{{color.primary}}",
+                "#f00",
+            ),
+            (
+                "multiple, mixed forms",
+                &[("fg", "white"), ("bg", "black")],
+                r#"<t fill="{{fg}}" stroke="{{token.bg}}"/>"#,
+                r#"<t fill="white" stroke="black"/>"#,
+            ),
+            (
+                "inside style block",
+                &[("c.a", "blue")],
+                "<style>.x { fill: {{c.a}}; }</style>",
+                "<style>.x { fill: blue; }</style>",
+            ),
+            (
+                "no recursive substitution",
+                &[("a", "{{token.b}}"), ("b", "BAD")],
+                "{{token.a}}",
+                "{{token.b}}",
+            ),
+            (
+                "underscore allowed after first segment",
+                &[("color.text_primary", "#0f0")],
+                "{{token.color.text_primary}}",
+                "#0f0",
+            ),
+            (
+                "non-ascii preserved",
+                &[("c", "red")],
+                "<!-- caf\u{e9} -->{{c}}",
+                "<!-- caf\u{e9} -->red",
+            ),
+            (
+                "escaped braces become literals",
+                &[],
+                r"\{\{ x \}\}",
+                "{{ x }}",
+            ),
+            (
+                "whitespace inside braces",
+                &[("k", "BAD")],
+                "{{ token.k }}",
+                "{{ token.k }}",
+            ),
+            ("empty braces", &[], "{{}}", "{{}}"),
+            ("unclosed braces", &[], "{{ no close", "{{ no close"),
+            (
+                "underscore in first segment",
+                &[("my_key", "BAD")],
+                "{{my_key}}",
+                "{{my_key}}",
+            ),
+            (
+                "prefixed invalid key does not fall back to bare",
+                &[("token.foo_bar", "BAD")],
+                "{{token.foo_bar}}",
+                "{{token.foo_bar}}",
+            ),
+            (
+                "comment skipped, live tokens around it resolved",
+                &[("fg", "white"), ("bg", "black")],
+                "{{fg}}<!-- {{bg}} -->{{bg}}",
+                "white<!-- {{bg}} -->black",
+            ),
+            (
+                "multi-line comment verbatim",
+                &[("k", "BAD")],
+                "<!--\n {{token.k}}\n--><r/>",
+                "<!--\n {{token.k}}\n--><r/>",
+            ),
+            (
+                "unclosed comment swallows rest",
+                &[("k", "BAD")],
+                "<!-- {{k}}",
+                "<!-- {{k}}",
+            ),
+            (
+                "sequential comments",
+                &[("a", "A"), ("b", "B")],
+                "<!-- {{a}} --><!-- {{b}} -->",
+                "<!-- {{a}} --><!-- {{b}} -->",
+            ),
+        ];
+        for (name, tokens, input, want) in cases {
+            let got = resolve_token_placeholders(input, &token_map(tokens))
+                .unwrap_or_else(|k| panic!("{name}: unexpected unresolved token {k:?}"));
+            assert_eq!(&got, want, "{name}");
+        }
     }
 
-    /// Multi-line XML comment containing a token placeholder: the entire
-    /// comment region (including newlines) is emitted verbatim.
+    /// A syntactically valid placeholder whose key is absent reports that key
+    /// (prefixed or bare form), so authors see which token is missing.
     #[test]
-    fn multiline_comment_with_token_not_resolved() {
-        let tokens = token_map(&[("color.text.primary", "#ffffff")]);
-        let input = "<!--\n  Example: fill=\"{{token.color.text.primary}}\"\n--><rect/>";
-        let result = resolve_token_placeholders(input, &tokens).unwrap();
-        assert_eq!(
-            result,
-            "<!--\n  Example: fill=\"{{token.color.text.primary}}\"\n--><rect/>"
-        );
-    }
-
-    /// An unclosed XML comment (`<!--` with no `-->`) causes the rest of the
-    /// input to be emitted verbatim — no token resolution, no panic.
-    #[test]
-    fn unclosed_xml_comment_emits_rest_verbatim() {
-        let tokens = token_map(&[("color.primary", "#ff0000")]);
-        let input = "<!-- unclosed {{token.color.primary}}";
-        let result = resolve_token_placeholders(input, &tokens).unwrap();
-        assert_eq!(result, input);
-    }
-
-    /// A bare-form token placeholder inside an XML comment is also NOT resolved.
-    #[test]
-    fn bare_token_inside_xml_comment_not_resolved() {
-        let tokens = token_map(&[("color.text.primary", "#ffffff")]);
-        let input = r#"<!-- e.g. {{color.text.primary}} -->"#;
-        let result = resolve_token_placeholders(input, &tokens).unwrap();
-        assert_eq!(result, input);
-    }
-
-    /// Multiple sequential XML comments, each with a token placeholder, are
-    /// all emitted verbatim.
-    #[test]
-    fn multiple_xml_comments_none_resolved() {
-        let tokens = token_map(&[("a", "AAA"), ("b", "BBB")]);
-        let input = "<!-- {{a}} --><!-- {{b}} -->";
-        let result = resolve_token_placeholders(input, &tokens).unwrap();
-        assert_eq!(result, input);
-    }
-
-    /// Tokens before, inside, and after a comment: only the outside tokens
-    /// are resolved; the inside one is preserved.
-    #[test]
-    fn tokens_before_inside_and_after_comment() {
-        let tokens = token_map(&[
-            ("color.text.primary", "#ffffff"),
-            ("color.backdrop.default", "#000000"),
-        ]);
-        let input = concat!(
-            r##"<rect fill="{{color.backdrop.default}}"/>"##,
-            r##"<!-- doc: {{color.text.primary}} -->"##,
-            r##"<text fill="{{color.text.primary}}">hi</text>"##,
-        );
-        let result = resolve_token_placeholders(input, &tokens).unwrap();
-        assert_eq!(
-            result,
-            concat!(
-                r##"<rect fill="#000000"/>"##,
-                r##"<!-- doc: {{color.text.primary}} -->"##,
-                r##"<text fill="#ffffff">hi</text>"##,
-            )
-        );
+    fn unresolved_placeholder_reports_the_missing_key() {
+        for (input, key) in [
+            (r#"<rect fill="{{token.missing.key}}"/>"#, "missing.key"),
+            ("{{other.key}} stays put", "other.key"),
+        ] {
+            let err = resolve_token_placeholders(input, &HashMap::new()).unwrap_err();
+            assert_eq!(err, key, "{input}");
+        }
     }
 
     #[test]
