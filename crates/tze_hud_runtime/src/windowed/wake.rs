@@ -92,6 +92,18 @@ pub(super) fn cursor_entry_armed(
     overlay && has_interactive_regions && in_passthrough
 }
 
+/// The listen mode to apply when the armed state changes; `None` if unchanged.
+pub(super) fn device_events_transition(
+    was_listening: bool,
+    armed: bool,
+) -> Option<winit::event_loop::DeviceEvents> {
+    (was_listening != armed).then_some(if armed {
+        winit::event_loop::DeviceEvents::Always
+    } else {
+        winit::event_loop::DeviceEvents::Never
+    })
+}
+
 pub(super) fn deadline_from_wall_us(
     deadline_wall_us: u64,
     source: RuntimeWakeupSource,
@@ -579,6 +591,15 @@ mod tests {
                 winit::event_loop::ControlFlow::WaitUntil(at)
             );
         }
+    }
+
+    #[test]
+    fn device_events_transition_changes_only_on_edges() {
+        use winit::event_loop::DeviceEvents::{Always, Never};
+        assert_eq!(super::device_events_transition(false, true), Some(Always));
+        assert_eq!(super::device_events_transition(true, false), Some(Never));
+        assert_eq!(super::device_events_transition(true, true), None);
+        assert_eq!(super::device_events_transition(false, false), None);
     }
 
     #[test]

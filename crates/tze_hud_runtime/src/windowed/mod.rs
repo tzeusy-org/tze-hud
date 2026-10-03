@@ -81,7 +81,7 @@ use tokio::sync::Mutex;
 use winit::application::ApplicationHandler;
 use winit::event::{DeviceEvent, DeviceId};
 use winit::event::{ElementState, MouseButton, StartCause, WindowEvent};
-use winit::event_loop::{ActiveEventLoop, ControlFlow, DeviceEvents, EventLoop};
+use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::window::{Fullscreen, Window, WindowAttributes, WindowId, WindowLevel};
 
 use crate::scene_startup::run_scene_startup;
@@ -857,9 +857,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
         _device_id: DeviceId,
         event: DeviceEvent,
     ) {
-        if matches!(event, DeviceEvent::MouseMotion { .. }) {
-            self.on_raw_mouse_motion();
-        }
+        self.on_device_event(&event);
     }
 
     fn user_event(&mut self, _event_loop: &ActiveEventLoop, _event: RuntimeWakeEvent) {
@@ -1016,19 +1014,8 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                 ));
             }
         }
-        let cursor_entry_armed = self.cursor_entry_armed();
-        self.state.cursor_entry.signature =
-            cursor_entry_armed.then(|| self.cursor_entry_signature());
-        if std::mem::replace(&mut self.state.cursor_entry.listening, cursor_entry_armed)
-            != cursor_entry_armed
-        {
-            // Raw mouse input is requested only while a click could be hidden
-            // by passthrough, so an idle HUD receives no input wakeups.
-            event_loop.listen_device_events(if cursor_entry_armed {
-                DeviceEvents::Always
-            } else {
-                DeviceEvents::Never
-            });
+        if let Some(listen) = self.sync_cursor_entry_listening() {
+            event_loop.listen_device_events(listen);
         }
         let has_deferred_scene_work = portal_drain.is_deferred()
             || !self.state.pending_input_capture_commands.is_empty()

@@ -236,6 +236,31 @@ impl WinitApp {
         )
     }
 
+    /// Route a winit device event: only raw mouse motion matters.
+    pub(super) fn on_device_event(&mut self, event: &winit::event::DeviceEvent) {
+        if matches!(event, winit::event::DeviceEvent::MouseMotion { .. }) {
+            self.on_raw_mouse_motion();
+        }
+    }
+
+    /// Recompute whether raw mouse input is needed, reseed the quiet-check
+    /// signature, and return the winit listen mode to apply if it changed.
+    ///
+    /// Known limitation (accepted, hud-asw8c): winit emits `MouseMotion` only
+    /// for relative mouse reports (`MOUSE_MOVE_RELATIVE`), so absolute-pointer
+    /// devices (RDP sessions, VM tablets) never trigger entry detection; the
+    /// old 30 Hz poll covered them. The target is a physical Windows desktop;
+    /// no fallback poll. While armed, a mouse reporting at up to 1 kHz wakes
+    /// the loop per report (cheap quiet check; zero wakes when still).
+    pub(super) fn sync_cursor_entry_listening(
+        &mut self,
+    ) -> Option<winit::event_loop::DeviceEvents> {
+        let armed = self.cursor_entry_armed();
+        self.state.cursor_entry.signature = armed.then(|| self.cursor_entry_signature());
+        let was = std::mem::replace(&mut self.state.cursor_entry.listening, armed);
+        wake::device_events_transition(was, armed)
+    }
+
     /// A raw mouse-motion event arrived (`RIDEV_INPUTSINK` on Windows, so it
     /// is delivered even while the overlay is click-through). Queue a cursor
     /// check for this turn when armed; a no-op otherwise.
@@ -591,7 +616,7 @@ mod tests {
         assert_eq!(
             local,
             Some((40.0, 80.0)),
-            "cursor polling must convert desktop coordinates into overlay-window coordinates"
+            "cursor refresh must convert desktop coordinates into overlay-window coordinates"
         );
     }
 
@@ -604,7 +629,7 @@ mod tests {
         assert_eq!(
             origin,
             Some(monitor_origin),
-            "Windows overlay cursor polling should use the monitor origin if the window origin \
+            "Windows overlay cursor refresh should use the monitor origin if the window origin \
              query fails"
         );
     }

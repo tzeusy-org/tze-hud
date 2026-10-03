@@ -1944,6 +1944,38 @@ mod tests {
         step(&mut harness.app, 10.0, true, None, false);
     }
 
+    /// The device-event wiring: only mouse motion ticks, and arming/disarming
+    /// yields the listen mode exactly once per edge.
+    #[test]
+    fn device_event_wiring_routes_motion_and_syncs_listening() {
+        use crate::window::{HitRegion, WindowMode};
+        use winit::event::{DeviceEvent, ElementState};
+        use winit::event_loop::DeviceEvents;
+
+        let mut harness = HeadlessEventLoopHarness::new();
+        let app = &mut harness.app;
+        app.state.effective_mode = WindowMode::Overlay;
+        app.state.hit_regions = vec![HitRegion::new(100.0, 100.0, 50.0, 50.0)];
+        app.state.overlay_capturing = false;
+
+        assert_eq!(
+            app.sync_cursor_entry_listening(),
+            Some(DeviceEvents::Always)
+        );
+        assert_eq!(app.sync_cursor_entry_listening(), None);
+
+        app.on_device_event(&DeviceEvent::Button {
+            button: 0,
+            state: ElementState::Pressed,
+        });
+        assert!(!app.state.cursor_entry.tick, "non-motion is ignored");
+        app.on_device_event(&DeviceEvent::MouseMotion { delta: (1.0, 0.0) });
+        assert!(app.state.cursor_entry.tick);
+
+        app.state.overlay_capturing = true;
+        assert_eq!(app.sync_cursor_entry_listening(), Some(DeviceEvents::Never));
+    }
+
     /// Raw mouse motion queues a cursor check only while armed; a due timer
     /// deadline always owes main work and never a cursor-only check.
     #[test]
