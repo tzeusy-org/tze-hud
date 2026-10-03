@@ -2705,12 +2705,17 @@ impl WidgetRenderer {
             None => return (current_params.clone(), false),
         };
 
-        let anim = match &entry.animation {
+        let anim = match &mut entry.animation {
             Some(a) => a,
             None => return (current_params.clone(), false),
         };
 
-        let elapsed_ms = now_us.saturating_sub(anim.start_us) as f32 / 1000.0;
+        // A clock that stepped backward would pin elapsed at 0 and stall the
+        // transition forever; restart it from the new now instead.
+        if now_us < anim.start_us {
+            anim.start_us = now_us;
+        }
+        let elapsed_ms = (now_us - anim.start_us) as f32 / 1000.0;
         let duration_ms = anim.duration_ms as f32;
         // Under RENDERING_SIMPLIFIED or higher degradation, snap to final values
         // immediately to avoid per-frame re-rasterization.

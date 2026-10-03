@@ -65,7 +65,7 @@ impl super::Compositor {
         wr.begin_sync();
 
         let registry = &scene.widget_registry;
-        let now_us = scene.now_wall_us();
+        let now_us = scene.now_monotonic_us();
 
         // Collect instances that need texture updates. Widgets without active
         // publications are not visible; clear their cached texture so clear/TTL

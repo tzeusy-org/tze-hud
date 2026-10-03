@@ -257,3 +257,67 @@ async fn transition_stops_waking_after_completion() {
         "no raster after the transition lands"
     );
 }
+
+#[tokio::test]
+async fn rewound_clock_still_lands_and_stops_waking() {
+    let Some(mut rig) = Rig::new().await else {
+        return;
+    };
+    rig.clock.advance(10_000);
+    rig.publish([("level", WidgetParameterValue::F32(1.0))], 200);
+    rig.step(0);
+    rig.clock.set(1_000); // step far backward mid-transition
+    rig.render();
+    assert!(
+        rig.compositor
+            .widget_renderer()
+            .unwrap()
+            .has_active_transition()
+    );
+    assert_eq!(level(&rig.step(250)), 1.0);
+    assert!(
+        !rig.compositor
+            .widget_renderer()
+            .unwrap()
+            .has_active_transition()
+    );
+    assert!(rig.compositor.next_animation_deadline().is_none());
+}
+
+#[tokio::test]
+async fn retarget_mid_flight_is_continuous_and_uses_the_new_duration() {
+    let Some(mut rig) = Rig::new().await else {
+        return;
+    };
+    rig.publish([("level", WidgetParameterValue::F32(1.0))], 200);
+    rig.step(0);
+    let before = level(&rig.step(100)); // ~0.5 on screen
+    rig.publish([("level", WidgetParameterValue::F32(0.0))], 400);
+    let start = level(&rig.step(0));
+    assert!(
+        (start - before).abs() < 0.01,
+        "continuous: {before} -> {start}"
+    );
+    let mid = level(&rig.step(200));
+    assert!(
+        (mid - before / 2.0).abs() < 0.01,
+        "halfway at the new 400 ms, got {mid}"
+    );
+    assert_eq!(
+        level(&rig.step(200)),
+        0.0,
+        "lands exactly on the new target"
+    );
+}
+
+#[tokio::test]
+async fn each_publish_keeps_its_own_transition_ms() {
+    let Some(mut rig) = Rig::new().await else {
+        return;
+    };
+    rig.publish([("level", WidgetParameterValue::F32(0.5))], 200);
+    let first = rig.scene.widget_registry.active_publishes[GAUGE][0].transition_ms;
+    rig.publish([("level", WidgetParameterValue::F32(1.0))], 750);
+    let second = rig.scene.widget_registry.active_publishes[GAUGE][0].transition_ms;
+    assert_eq!((first, second), (200, 750));
+}
