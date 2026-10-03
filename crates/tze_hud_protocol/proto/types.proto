@@ -539,100 +539,12 @@ message GeometryPolicyProto {
   }
 }
 
-// Text alignment for zone content.
-enum TextAlignProto {
-  TEXT_ALIGN_PROTO_UNSPECIFIED = 0;
-  TEXT_ALIGN_PROTO_START       = 1;
-  TEXT_ALIGN_PROTO_CENTER      = 2;
-  TEXT_ALIGN_PROTO_END         = 3;
-}
-
-// Font family for zone text rendering.
-enum FontFamilyProto {
-  FONT_FAMILY_PROTO_UNSPECIFIED      = 0;  // absent = compositor default (SystemSansSerif)
-  FONT_FAMILY_PROTO_SYSTEM_SANS      = 1;
-  FONT_FAMILY_PROTO_SYSTEM_MONOSPACE = 2;
-  FONT_FAMILY_PROTO_SYSTEM_SERIF     = 3;
-}
-
 // Text overflow mode for zone text rendering.
 enum TextOverflowProto {
   TEXT_OVERFLOW_PROTO_UNSPECIFIED = 0;  // absent = compositor default (Clip)
   TEXT_OVERFLOW_PROTO_CLIP        = 1;
   TEXT_OVERFLOW_PROTO_ELLIPSIS    = 2;
 }
-
-// Rendering policy for zone content presentation.
-// All fields optional; absent = compositor default.
-// Fields 1-4 are the original fields and MUST NOT be renumbered.
-message RenderingPolicyProto {
-  float             font_size_px       = 1;   // 0.0 = not set
-  Rgba              backdrop           = 2;   // Zero alpha = not set
-  TextAlignProto    text_align         = 3;   // UNSPECIFIED = compositor default
-  float             margin_px          = 4;   // 0.0 = not set
-  FontFamilyProto   font_family        = 5;   // UNSPECIFIED = compositor default
-  uint32            font_weight        = 6;   // 0 = not set (valid range 100-900)
-  Rgba              text_color         = 7;   // Zero alpha = not set
-  float             backdrop_opacity   = 8;   // -1.0 = not set sentinel; valid [0.0, 1.0]
-  Rgba              outline_color      = 9;   // Zero alpha = not set
-  float             outline_width      = 10;  // 0.0 = not set
-  float             margin_horizontal  = 11;  // -1.0 = not set sentinel; valid >= 0.0
-  float             margin_vertical    = 12;  // -1.0 = not set sentinel; valid >= 0.0
-  uint32            transition_in_ms   = 13;  // 0 = not set
-  uint32            transition_out_ms  = 14;  // 0 = not set
-  TextOverflowProto overflow           = 15;  // UNSPECIFIED = compositor default (Clip)
-  float             backdrop_radius    = 16;  // -1.0 = not set sentinel; valid >= 0.0
-}
-
-// Contention policy values (used as enum int in ZoneDefinitionProto).
-enum ContentionPolicyProto {
-  CONTENTION_POLICY_UNSPECIFIED  = 0;
-  CONTENTION_POLICY_LATEST_WINS  = 1;
-  CONTENTION_POLICY_REPLACE      = 2;
-  CONTENTION_POLICY_STACK        = 3;
-  CONTENTION_POLICY_MERGE_BY_KEY = 4;
-}
-
-message ZoneDefinitionProto {
-  string               id                   = 1;
-  string               name                 = 2;
-  string               description          = 3;
-  GeometryPolicyProto  geometry_policy      = 4;
-  repeated string      accepted_media_types = 5;   // ZoneMediaType names
-  RenderingPolicyProto rendering_policy     = 6;
-  ContentionPolicyProto contention_policy   = 7;
-  uint32               max_publishers       = 8;
-  uint64               auto_clear_ms        = 9;   // 0 = no auto-clear
-  // Stack/MergeByKey parameters
-  uint32               stack_max_depth      = 10;  // For Stack policy
-  uint32               merge_max_keys       = 11;  // For MergeByKey policy
-  // When true, publishes to this zone are fire-and-forget (no ZonePublishResult).
-  // When false (default), publishes are transactional (RFC 0005 §3.1, §8.6).
-  bool                 ephemeral            = 12;
-}
-
-message ZonePublishRecordProto {
-  string          zone_name             = 1;
-  string          publisher_namespace   = 2;
-  ZoneContent     content               = 3;
-  uint64          published_at_wall_us  = 4;  // UTC wall clock timestamp in microseconds
-  string          merge_key             = 5;  // Empty if not MergeByKey
-
-  // Snapshot parity fields (WM-S2b types.proto delta §4). Required so that
-  // SceneSnapshot carries complete publication state for reconnect reconciliation
-  // without transport internals (RFC 0014 §3.6, WM-S2b snapshot inclusion rules).
-  uint64          expires_at_wall_us    = 6;  // Absolute expiry UTC µs (0 = no expiry)
-  string          content_classification = 7; // Empty = unclassified (RFC 0009 A1 viewer-class)
-  repeated uint64 breakpoints           = 8;  // StreamText reveal breakpoints (byte offsets); empty = reveal all at once
-}
-
-message ZoneRegistrySnapshotProto {
-  repeated ZoneDefinitionProto    zones           = 1;
-  repeated ZonePublishRecordProto active_publishes = 2;
-}
-
-
-
 
 // ─── Element Discovery ───────────────────────────────────────────────────────
 
@@ -657,30 +569,6 @@ message ListElementsResponse {
 
 // ─── Widget Types ─────────────────────────────────────────────────────────────
 
-// Parameter types supported by the widget system (v1: f32, string, color, enum).
-enum WidgetParamTypeProto {
-  WIDGET_PARAM_TYPE_UNSPECIFIED = 0;
-  WIDGET_PARAM_TYPE_F32         = 1;
-  WIDGET_PARAM_TYPE_STRING      = 2;
-  WIDGET_PARAM_TYPE_COLOR       = 3;
-  WIDGET_PARAM_TYPE_ENUM        = 4;
-}
-
-// Constraints for a widget parameter (bounds for f32, max length for string,
-// allowed values for enum; absent fields mean unconstrained).
-//
-// Note: f32 fields cannot use 0.0 as a sentinel because 0.0 is a valid
-// constraint value.  The has_* companion booleans disambiguate Some(0.0) from
-// None.  has_f32_min=false means "no minimum constraint" regardless of f32_min.
-message WidgetParamConstraintsProto {
-  float  f32_min          = 1;  // f32 range minimum; only meaningful when has_f32_min=true
-  float  f32_max          = 2;  // f32 range maximum; only meaningful when has_f32_max=true
-  uint32 string_max_bytes = 3;  // String max length in UTF-8 bytes (0 = default 1024)
-  repeated string enum_allowed_values = 4;  // Allowed enum values
-  bool   has_f32_min      = 5;  // true iff f32_min is set (disambiguates Some(0.0) from None)
-  bool   has_f32_max      = 6;  // true iff f32_max is set (disambiguates Some(0.0) from None)
-}
-
 // A typed parameter value (oneof carries exactly one variant).
 message WidgetParameterValueProto {
   string param_name = 1;
@@ -690,103 +578,4 @@ message WidgetParameterValueProto {
     Rgba   color_value  = 4;
     string enum_value   = 5;
   }
-}
-
-// A single parameter declaration in a widget's parameter schema.
-message WidgetParameterDeclarationProto {
-  string                    name          = 1;
-  WidgetParamTypeProto      param_type    = 2;
-  WidgetParameterValueProto default_value = 3;
-  WidgetParamConstraintsProto constraints = 4;
-}
-
-// The full parameter schema for a widget type (ordered list of declarations).
-message WidgetParameterSchemaProto {
-  repeated WidgetParameterDeclarationProto parameters = 1;
-}
-
-// How a parameter value is mapped to an SVG attribute.
-message WidgetBindingMappingProto {
-  oneof mapping {
-    WidgetLinearMappingProto   linear   = 1;
-    bool                       direct   = 2;  // true = direct (value as-is)
-    WidgetDiscreteMappingProto discrete = 3;
-  }
-}
-
-message WidgetLinearMappingProto {
-  float attr_min = 1;
-  float attr_max = 2;
-}
-
-message WidgetDiscreteMappingProto {
-  map<string, string> value_map = 1;  // enum value → SVG attribute value
-}
-
-// A single parameter-to-SVG-attribute binding.
-message WidgetBindingProto {
-  string                    param          = 1;  // Parameter name from schema
-  string                    target_element = 2;  // SVG element ID
-  string                    target_attribute = 3;  // SVG attribute name (or "text-content")
-  WidgetBindingMappingProto mapping        = 4;
-}
-
-// An SVG layer in a widget type definition.
-message WidgetSvgLayerProto {
-  string                   svg_file = 1;  // Filename within the bundle
-  repeated WidgetBindingProto bindings = 2;
-}
-
-// A full widget type definition.
-message WidgetDefinitionProto {
-  string                     id                        = 1;  // kebab-case unique id
-  string                     name                      = 2;  // human-readable name
-  string                     description               = 3;
-  WidgetParameterSchemaProto parameter_schema          = 4;
-  repeated WidgetSvgLayerProto layers                  = 5;
-  GeometryPolicyProto        default_geometry_policy   = 6;
-  RenderingPolicyProto       default_rendering_policy  = 7;
-  ContentionPolicyProto      default_contention_policy = 8;
-  bool                       ephemeral                 = 9;
-  // Stack/MergeByKey parameters (mirror of ZoneDefinitionProto fields 10-11).
-  // 0 = use runtime default (8 for Stack, 16 for MergeByKey).
-  uint32                     stack_max_depth           = 10;  // For Stack policy
-  uint32                     merge_max_keys            = 11;  // For MergeByKey policy
-}
-
-// A widget instance — a widget type bound to a specific tab.
-message WidgetInstanceProto {
-  string              widget_type_name   = 1;  // References WidgetDefinitionProto.id
-  bytes               tab_id             = 2;  // 16-byte SceneId of the tab
-  GeometryPolicyProto geometry_override  = 3;  // Optional override; absent = use type default
-  ContentionPolicyProto contention_override = 4; // Optional override; absent = use type default
-  string              instance_name      = 5;  // Addressing key (instance_id or widget_type_name)
-  repeated WidgetParameterValueProto current_params = 6;
-}
-
-// A recorded widget publication.
-message WidgetPublishRecordProto {
-  string              widget_name          = 1;
-  string              publisher_namespace  = 2;
-  repeated WidgetParameterValueProto params = 3;
-  uint64              published_at_wall_us = 4;
-  string              merge_key           = 5;  // Empty if not MergeByKey
-  uint64              expires_at_wall_us  = 6;  // 0 = no expiry
-  uint32              transition_ms       = 7;
-}
-
-// Resolved occupancy state for a widget instance after contention policy.
-message WidgetOccupancyProto {
-  string              widget_name         = 1;
-  bytes               tab_id              = 2;  // 16-byte SceneId
-  repeated WidgetPublishRecordProto active_publications = 3;
-  uint32              occupant_count      = 4;
-  repeated WidgetParameterValueProto effective_params = 5;
-}
-
-// Snapshot of the widget registry (all types + instances + active publishes).
-message WidgetRegistrySnapshotProto {
-  repeated WidgetDefinitionProto     widget_types     = 1;
-  repeated WidgetInstanceProto       widget_instances = 2;
-  repeated WidgetPublishRecordProto  active_publishes = 3;
 }
