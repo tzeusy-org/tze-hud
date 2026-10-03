@@ -7,6 +7,7 @@
 #   just fmt       # format check
 #   just clippy    # lint check
 #   just test      # unit tests (workspace, excludes integration)
+#   just test-gpu  # compositor + pixel_readback GPU tests on llvmpipe
 #   just test-integration   # integration headless suites
 #   just production-boot    # vertical_slice production config boot
 #   just canonical-app-boot # canonical app production config boot
@@ -14,16 +15,16 @@
 #   just idle-efficiency-checker # fail-closed idle artifact contract tests
 #   just ci        # full CI gate (all jobs in dependency order, excluding GPU/Windows-only)
 #
-# GPU / pixel-readback tests (test-gpu-pixel-readback in CI) are intentionally
-# excluded from `just ci` because they require Mesa llvmpipe or a hardware GPU
-# and are marked informational-only (continue-on-error) in CI anyway.
-# Run explicitly with:
-#   HEADLESS_FORCE_SOFTWARE=1 LLVMPIPE_CI=1 TZE_HUD_REQUIRE_GPU=1 \
-#     cargo test -p tze_hud_compositor --test pixel_readback --features headless,dev-mode
+# GPU tests (compositor render tests + runtime pixel_readback) are excluded from
+# `just ci`. Run them with `just test-gpu`, which pins the Vulkan loader to Mesa
+# llvmpipe: with a hardware ICD (e.g. NVIDIA) next to it, concurrent device
+# construction can wedge the driver. Do not run bare `cargo test -p
+# tze_hud_compositor` on a host with a hardware GPU ICD; use `just test-gpu`.
 #
-# WARNING: do NOT run `cargo test -p tze_hud_compositor` directly — the
-# pixel_readback GPU test deadlocks on headless systems without llvmpipe.
-# Use the explicit --test flag shown above to select a specific test binary.
+# Building needs protoc >= 3.15; if /usr/bin/protoc is older, set PROTOC=/path/to/protoc.
+
+# Mesa llvmpipe Vulkan ICD (mesa-vulkan-drivers); GPU recipes use it when present.
+lvp := "/usr/share/vulkan/icd.d/lvp_icd.x86_64.json"
 
 # Default recipe: fast compilation gate
 default: check
@@ -50,13 +51,26 @@ clippy:
 
 # Unit and crate tests — excludes integration package (mirror CI test-unit job)
 # Requires Mesa llvmpipe (libvulkan1 + mesa-vulkan-drivers) for GPU compositor tests.
-# Set HEADLESS_FORCE_SOFTWARE=1 to use software GPU adapter (llvmpipe).
+# Uses the llvmpipe ICD when installed so a hardware ICD is never loaded.
 test:
+    if [ -f {{lvp}} ]; then export VK_ICD_FILENAMES={{lvp}}; fi; \
     HEADLESS_FORCE_SOFTWARE=1 TZE_HUD_REQUIRE_GPU=1 \
         cargo test \
             --workspace \
             --all-targets \
             --exclude integration
+
+# GPU tests on llvmpipe only: compositor render tests and runtime pixel_readback.
+# Fails if the llvmpipe ICD is missing; GPU tests must run, never skip.
+# Builds first so the 15-minute timeout bounds test execution, not compilation.
+test-gpu:
+    test -f {{lvp}} || { echo "missing {{lvp}} (install mesa-vulkan-drivers)"; exit 1; }
+    cargo test -p tze_hud_compositor --all-targets --no-run
+    cargo test -p tze_hud_runtime --test pixel_readback --features headless,dev-mode --no-run
+    VK_ICD_FILENAMES={{lvp}} HEADLESS_FORCE_SOFTWARE=1 LLVMPIPE_CI=1 TZE_HUD_REQUIRE_GPU=1 \
+        timeout 900 cargo test -p tze_hud_compositor --all-targets
+    VK_ICD_FILENAMES={{lvp}} HEADLESS_FORCE_SOFTWARE=1 LLVMPIPE_CI=1 TZE_HUD_REQUIRE_GPU=1 \
+        timeout 900 cargo test -p tze_hud_runtime --test pixel_readback --features headless,dev-mode
 
 # Pure-Python contract tests for the versioned idle artifact gate and its
 # startup-atomic Windows launcher.

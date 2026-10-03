@@ -56,7 +56,7 @@ Each local recipe maps to a CI job:
 | `production-boot` | `production-boot-vertical-slice` | vertical-slice production-config boot |
 | `canonical-app-boot` | `canonical-app-production-boot` | canonical app production-config boot |
 | `dev-mode-guard` | `dev-mode-guard` | dev-mode excluded from release default features |
-| — (raw `cargo test --test pixel_readback`) | `test-gpu-pixel-readback` | GPU pixel-readback; needs Mesa llvmpipe headless, excluded from `just ci` |
+| `test-gpu` | — | compositor + runtime pixel-readback GPU tests on Mesa llvmpipe; excluded from `just ci` |
 | — | `cargo-deny` | dependency/advisory policy (`deny.toml`) |
 
 Slower suites run weekly, on demand, or on PRs labelled `perf-assert`, never as
@@ -341,7 +341,7 @@ cargo test -p tze_hud_protocol -- --nocapture
 ### Runtime/render validation tests
 
 ```bash
-cargo test -p tze_hud_runtime --test pixel_readback -- --nocapture
+just test-gpu
 ```
 
 ### Integration tests
