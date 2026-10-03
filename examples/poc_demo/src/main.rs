@@ -73,6 +73,7 @@ async fn main() -> Result<()> {
         mcp_psk,
         pace: Duration::from_millis(pace_ms),
         human_wait: Duration::from_secs(human_wait_s),
+        held: None,
     };
     match stage.as_str() {
         "zones" => poc_demo::zones(&target).await,
@@ -92,15 +93,10 @@ async fn main() -> Result<()> {
 /// A PSK from `<var>` or the file named by `<var>_FILE`.
 fn credential(var: &str) -> Result<String> {
     if let Ok(psk) = std::env::var(var) {
-        return Ok(psk.trim().to_string());
+        return poc_demo::psk_from_file_text(&psk).map_err(|e| format!("{var}: {e}").into());
     }
     let file = std::env::var(format!("{var}_FILE"))
         .map_err(|_| format!("set {var} or {var}_FILE (see --help)"))?;
     let text = std::fs::read_to_string(&file).map_err(|e| format!("read {var}_FILE: {e}"))?;
-    // `curl .../pair > file` saves the JSON reply; accept it as is.
-    let psk = serde_json::from_str::<serde_json::Value>(&text)
-        .ok()
-        .and_then(|reply| reply["psk"].as_str().map(str::to_string))
-        .unwrap_or(text);
-    Ok(psk.trim().to_string())
+    poc_demo::psk_from_file_text(&text).map_err(|e| format!("{var}_FILE: {e}").into())
 }

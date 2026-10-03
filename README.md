@@ -119,6 +119,8 @@ cargo run -p poc_demo -- override-hang   # claim a tile, stop reading; press clo
 cargo run -p poc_demo -- all             # all of the above, with the portal step in between
 ```
 
+`override-hang` only idles for `--human-wait-s` with its tile claimed, not reading the stream and not flooding the session; it sets the scene for you to press close or the safe-mode chord and does not itself verify the override (`poc_acceptance`'s `HungAgent` does).
+
 `--mcp`, `--grpc`, `--agent` (the id the tile PSK was paired as, default
 `claude`), `--pace-ms` and `--human-wait-s` are in `--help`. Windows is the
 target; from another machine point `--mcp`/`--grpc` at the HUD's Tailscale

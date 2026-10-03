@@ -3,9 +3,11 @@
 //! would serve them.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use poc_demo::{Result, Target};
+use serde_json::json;
 use tze_hud_runtime::windowed::{HeadlessEventLoopHarness, WindowedConfig};
 use tze_hud_scene::SystemClock;
 
@@ -46,6 +48,7 @@ fn target(hud: &HeadlessEventLoopHarness, human_wait: Duration) -> Target {
         tile_psk: PSK.to_string(),
         pace: Duration::ZERO,
         human_wait,
+        held: None,
     }
 }
 
@@ -76,25 +79,71 @@ async fn drive(
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn zones_and_widgets_run_against_the_shipped_config() {
     let mut hud = boot().await;
+
+    // The viewer presses Ship; the stage must ack it, so nothing is redelivered.
+    let t = target(&hud, Duration::from_secs(30));
+    let mut pressed = false;
+    drive(&mut hud, poc_demo::zones(&t), |hud| {
+        if let Some((x, y)) = hud.notification_action_center("ship")
+            && !std::mem::replace(&mut pressed, true)
+        {
+            hud.click(x, y);
+        }
+    })
+    .await;
+    let mut redelivered = None;
+    drive(
+        &mut hud,
+        async {
+            redelivered = Some(poc_demo::Mcp(&t).call("hud_input", json!({})).await?);
+            Ok(())
+        },
+        |_| {},
+    )
+    .await;
+    assert_eq!(
+        redelivered.expect("polled")["items"],
+        json!([]),
+        "the action press was acked"
+    );
+
     let t = target(&hud, Duration::ZERO);
-    drive(&mut hud, poc_demo::zones(&t), |_| {}).await;
     drive(&mut hud, poc_demo::widgets(&t), |_| {}).await;
 }
 
-/// The tile stage ends on the runtime's `Reclaimed` when the viewer presses the
-/// tile's close button, and on its own `Clear` when nobody does.
+/// The tile stage ends on `Reclaimed` when the viewer dismisses the tile after
+/// `Hold`, on `NOT_HELD` (or `Reclaimed`) when the dismiss lands any earlier,
+/// and on its own `Clear` when nobody dismisses.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn tile_stage_handles_viewer_dismiss_and_clears_otherwise() {
+async fn tile_stage_ends_on_viewer_dismiss_at_any_point_and_clears_otherwise() {
     let mut hud = boot().await;
 
-    let t = target(&hud, Duration::from_secs(30));
+    let held = Arc::new(AtomicBool::new(false));
+    let t = Target {
+        held: Some(held.clone()),
+        ..target(&hud, Duration::from_secs(30))
+    };
     drive(&mut hud, poc_demo::tile(&t), |hud| {
-        if hud.tile_count() == 1 && hud.tile_texts() == ["tests passed"] {
+        if held.load(Ordering::SeqCst) {
             hud.viewer_dismiss_all_tiles();
         }
     })
     .await;
-    assert_eq!(hud.tile_count(), 0, "dismiss reclaimed the tile");
+    assert_eq!(hud.tile_count(), 0, "dismiss after Hold reclaimed the tile");
+
+    // Dismissed as soon as the update is on screen: before Hold is acked.
+    let t = target(&hud, Duration::from_secs(30));
+    drive(&mut hud, poc_demo::tile(&t), |hud| {
+        if hud.tile_texts() == ["tests passed"] {
+            hud.viewer_dismiss_all_tiles();
+        }
+    })
+    .await;
+    assert_eq!(
+        hud.tile_count(),
+        0,
+        "an early dismiss is not a stage failure"
+    );
 
     let t = target(&hud, Duration::ZERO);
     drive(&mut hud, poc_demo::tile(&t), |_| {}).await;

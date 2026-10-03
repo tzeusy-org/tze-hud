@@ -13,7 +13,8 @@
 //!
 //! PSKs come from the environment or a file and are never printed.
 
-use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use serde_json::{Value, json};
@@ -60,6 +61,9 @@ pub struct Target {
     pub pace: Duration,
     /// How long a stage waits on a human (notification press, tile dismiss).
     pub human_wait: Duration,
+    /// Set once the tile stage's `Hold` is acked, so a driver (a test playing
+    /// the viewer) can act at exactly that point.
+    pub held: Option<Arc<AtomicBool>>,
 }
 
 /// MCP over HTTP: one tool call per connection, tokens counted per call.
@@ -301,11 +305,23 @@ impl Session {
                 Reply::RequestResult(r) if r.seq == seq => {
                     return if r.ok {
                         Ok(r)
+                    } else if r.code == "NOT_HELD" {
+                        // The viewer dismissed the tile before this request landed.
+                        Err(Box::new(Reclaimed(format!(
+                            "{} dismissed: NOT_HELD",
+                            r.hint
+                        ))))
                     } else {
                         Err(format!("{}: {}", r.code, r.hint).into())
                     };
                 }
-                Reply::Reclaimed(r) => return Err(Box::new(Reclaimed(r))),
+                Reply::Reclaimed(r) => {
+                    return Err(Box::new(Reclaimed(format!(
+                        "{} reclaimed: {:?}",
+                        r.surface,
+                        r.why()
+                    ))));
+                }
                 _ => {}
             }
         }
@@ -337,13 +353,14 @@ impl Session {
     }
 }
 
-/// The runtime took the tile back while a request was in flight.
+/// The runtime took the tile back (the viewer dismissed it) while a request
+/// was in flight, or before it was sent.
 #[derive(Debug)]
-struct Reclaimed(wire::Reclaimed);
+struct Reclaimed(String);
 
 impl std::fmt::Display for Reclaimed {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} reclaimed: {:?}", self.0.surface, self.0.why())
+        f.write_str(&self.0)
     }
 }
 
@@ -411,6 +428,9 @@ async fn claim_update_hold(target: &Target) -> Result<()> {
         }))
         .await?;
     println!("  Hold         {surface} ttl {} ms", held.ttl_ms);
+    if let Some(flag) = &target.held {
+        flag.store(true, Ordering::SeqCst);
+    }
 
     println!(
         "\nClose the tile with its close button to see Reclaimed ({} s)...",
@@ -437,9 +457,12 @@ async fn claim_update_hold(target: &Target) -> Result<()> {
     Ok(())
 }
 
-/// Override: claim a tile, then stop reading the stream. The viewer's close
-/// button and safe mode must still win; this process then exits without a
-/// `SessionClose`, so the runtime reclaims the orphan after its grace period.
+/// Override: claim a tile, then idle for `human_wait` without reading the
+/// stream or flooding the session. This only sets the scene for a person to
+/// press the tile's close button or the safe-mode chord; it does not verify
+/// the override (`tests/integration/poc_acceptance.rs`'s `HungAgent` backs the
+/// server's send buffer up and asserts it). On exit there is no `SessionClose`,
+/// so the runtime reclaims the orphan after its grace period.
 pub async fn override_hang(target: &Target) -> Result<()> {
     let mcp = Mcp(target);
     mcp.narrate(
@@ -453,7 +476,9 @@ pub async fn override_hang(target: &Target) -> Result<()> {
         target.human_wait.as_secs()
     );
     tokio::time::sleep(target.human_wait).await;
-    println!("  exiting without SessionClose: the orphaned tile is reclaimed after grace");
+    println!(
+        "  idle time over; exiting without SessionClose: the orphaned tile is reclaimed after grace"
+    );
     Ok(())
 }
 
@@ -494,5 +519,43 @@ fn text_root(text: &str) -> NodeProto {
     NodeProto {
         data: Some(node_proto::Data::TextMarkdown(text_node(text))),
         ..Default::default()
+    }
+}
+
+/// The PSK in a credential file's text: the bare key, or the JSON reply of
+/// `POST /pair` (`curl .../pair > file`). Errors never echo the contents.
+pub fn psk_from_file_text(text: &str) -> Result<String> {
+    let psk = if text.trim_start().starts_with('{') {
+        serde_json::from_str::<Value>(text)
+            .ok()
+            .and_then(|reply| reply["psk"].as_str().map(str::to_string))
+            .ok_or("JSON credential file has no \"psk\" field")?
+    } else {
+        text.to_string()
+    };
+    let psk = psk.trim();
+    if psk.is_empty() {
+        return Err("credential is empty".into());
+    }
+    Ok(psk.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::psk_from_file_text;
+
+    #[test]
+    fn credential_files_hold_a_bare_psk_or_a_pair_reply() {
+        assert_eq!(psk_from_file_text("abc123\n").unwrap(), "abc123");
+        assert_eq!(
+            psk_from_file_text(r#"{"agent":"c","psk":"abc123"}"#).unwrap(),
+            "abc123"
+        );
+        assert!(psk_from_file_text(" \n").is_err());
+        let err = psk_from_file_text(r#"{"agent":"secret-looking"}"#).unwrap_err();
+        assert!(
+            !err.to_string().contains("secret-looking"),
+            "must not echo the file"
+        );
     }
 }
