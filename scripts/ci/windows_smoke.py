@@ -136,6 +136,7 @@ def check_admin(smoke: Smoke) -> None:
     status, body = smoke.get("/admin/status")
     info = json.loads(body)
     assert status == 200 and info["pid"] and info["sha"], f"/admin/status: {body}"
+    assert "safe_mode_hotkey" in info, f"/admin/status lacks safe_mode_hotkey: {body}"
     # run_checks and the settle wait precede this, so the HUD should be idle.
     cpu = info["cpu_pct_2s"]
     assert isinstance(cpu, (int, float)) and cpu < 5, f"idle HUD cpu_pct_2s={cpu}, expected < 5"

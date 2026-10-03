@@ -2665,6 +2665,26 @@ impl WindowedRuntime {
             tracing::info!("MCP HTTP server disabled (mcp_port = 0)");
         }
 
+        // ── Safe-mode global hotkey (hud-jm8nq.10) ─────────────────────────────
+        // A dedicated Windows thread owns the RegisterHotKey registration and
+        // signals the bridge task; its outcome feeds the banner and
+        // `/admin/status`, so it starts before the banner prints. The unfocused
+        // click-through overlay never receives the keystroke itself. Needs the network runtime (the bridge
+        // is async); without one there is nothing to suspend anyway.
+        #[cfg(target_os = "windows")]
+        if let Some(ref rt) = network_rt {
+            let toggle_tx = safe_mode_toggle::spawn_safe_mode_toggle_bridge(
+                rt.rt.handle(),
+                Arc::clone(&shared_state),
+                Arc::clone(&chrome_state),
+                render_wake.clone(),
+                shutdown.clone(),
+            );
+            let status =
+                global_hotkey::spawn_global_hotkey(runtime_context.safe_mode_hotkey, toggle_tx);
+            crate::operator::status::set_safe_mode_hotkey(status);
+        }
+
         // ── Non-secret startup banner (hud-ylwqc) ──────────────────────────────
         // Print a minimal, self-describing banner to stdout *unconditionally*.
         // The runtime's tracing subscriber is gated on `TZE_HUD_LOG`, so with it
@@ -2679,25 +2699,12 @@ impl WindowedRuntime {
         // never advertises an endpoint that did not actually come up.
         println!(
             "{}",
-            render_startup_banner(&grpc_bound_addrs, &mcp_bound_addrs)
+            render_startup_banner(
+                &grpc_bound_addrs,
+                &mcp_bound_addrs,
+                &crate::operator::status::safe_mode_hotkey()
+            )
         );
-
-        // ── Safe-mode global hotkey (hud-jm8nq.10) ─────────────────────────────
-        // A dedicated Windows thread owns the RegisterHotKey registration and
-        // signals the bridge task; the unfocused click-through overlay never
-        // receives the keystroke itself. Needs the network runtime (the bridge
-        // is async); without one there is nothing to suspend anyway.
-        #[cfg(target_os = "windows")]
-        if let Some(ref rt) = network_rt {
-            let toggle_tx = safe_mode_toggle::spawn_safe_mode_toggle_bridge(
-                rt.rt.handle(),
-                Arc::clone(&shared_state),
-                Arc::clone(&chrome_state),
-                render_wake.clone(),
-                shutdown.clone(),
-            );
-            global_hotkey::spawn_global_hotkey(runtime_context.safe_mode_hotkey, toggle_tx);
-        }
 
         let portal_projection_driver =
             crate::portal_projection_driver::InProcessPortalDriver::new();
