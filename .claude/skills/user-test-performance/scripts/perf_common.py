@@ -9,7 +9,12 @@ import hashlib
 import json
 import os
 import subprocess
+import sys
+from pathlib import Path
 from typing import Any
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "user-test" / "scripts"))
+import hud_env  # noqa: E402
 
 
 SCHEMA_VERSION = 1
@@ -123,7 +128,10 @@ def resolve_target_endpoint(
     direct_endpoint: str | None,
     endpoint_key: str,
 ) -> tuple[str, str, dict[str, Any]]:
-    """Resolve endpoint from direct override or target registry."""
+    """Resolve endpoint from direct override, HUD_HOST, or target registry."""
+    if direct_endpoint is None and target_id is None and os.environ.get("HUD_HOST"):
+        endpoint = hud_env.mcp_url() if endpoint_key == "mcp_url" else hud_env.grpc_target()
+        return "hud-host", endpoint, {"description": "HUD_HOST", "network_scope": "tailnet"}
     registry = load_target_registry(targets_file)
     resolved_id = target_id or registry.get("default_target_id")
     if not resolved_id:

@@ -1,4 +1,4 @@
 interface:
   display_name: "User Test"
-  short_description: "Build+deploy Windows exe over SSH, then zone publish test flow"
-  default_prompt: "Run the user-test automated cross-machine HUD flow using hud-user and a full app exe: verify hud-user SSH key auth, deploy provided .exe to windows-host.example via SSH/SCP with auto task/direct launch fallback, verify MCP HTTP is reachable, then publish configurable zone messages."
+  short_description: "Pair, update the Windows HUD, publish test content, screenshot"
+  default_prompt: "Run the user-test flow against the Windows HUD with no remote shell: pair with the on-screen code (hud_pair.py), update with hud_admin.py update --channel dev, publish zone and widget test messages, capture hud_admin.py screenshot, and read hud_admin.py logs on failure."

@@ -18,26 +18,26 @@ replacement semantics, static-image acceptance, and rapid-replacement stress.
                        verify only the last (saturated green) via hud_surfaces
 
 Usage:
-  ambient_background_exemplar.py --url http://host:9090
-  ambient_background_exemplar.py --url http://host:9090 --psk-env MY_PSK
+  ambient_background_exemplar.py
+  ambient_background_exemplar.py --psk-env MY_PSK
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 import time
 import urllib.error
 import urllib.request
 from typing import Any
 
+import hud_env
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
-DEFAULT_PSK_ENV = "TZE_HUD_PSK"
 
 ZONE_NAME = "ambient-background"
 
@@ -330,16 +330,13 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--url",
-        required=True,
-        help="MCP HTTP URL of the running HUD (e.g. http://host:9090)",
+        default=None,
+        help="MCP URL (default: derived from HUD_HOST)",
     )
     parser.add_argument(
         "--psk-env",
-        default=DEFAULT_PSK_ENV,
-        help=(
-            f"Environment variable containing the pre-shared key"
-            f" (default: {DEFAULT_PSK_ENV})"
-        ),
+        default=None,
+        help="Read the PSK from this environment variable instead of the paired file",
     )
     return parser.parse_args()
 
@@ -347,19 +344,15 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
 
-    token = os.getenv(args.psk_env, "")
-    if not token:
-        print(
-            f"ERROR: environment variable {args.psk_env} is empty or unset",
-            file=sys.stderr,
-        )
+    try:
+        url, token = hud_env.resolve(args.url, args.psk_env)
+    except hud_env.HudEnvError as error:
+        print(f"ERROR: {error}", file=sys.stderr)
         return 2
 
-    url: str = args.url
 
     print("Ambient Background Exemplar User-Test", flush=True)
     print(f"  HUD URL : {url}", flush=True)
-    print(f"  PSK env : {args.psk_env}", flush=True)
     print(f"  Zone    : {ZONE_NAME}", flush=True)
     print(
         "  Phases  : dark-blue | warm-amber replacement | static-image | rapid-replace x10",

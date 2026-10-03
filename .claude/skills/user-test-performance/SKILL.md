@@ -64,8 +64,11 @@ Targets are defined in:
 
 - `./.claude/skills/user-test-performance/reference/targets.json`
 
-Start with one target (`user-test-windows-tailnet`, same host as `/user-test`),
-then add more (for example, a remote MacBook target) under new `target_id` keys.
+Set `HUD_HOST` (and pair once with `/user-test`'s `hud_pair.py`) and the MCP and
+gRPC scripts target that host with no `--target-id`; the PSK is read from
+`~/.config/tze-hud/<host>.psk` (`--psk-env NAME` overrides). A `--target-id`
+or `--url`/`--target` takes precedence. Add more targets (for example, a remote
+MacBook) under new `target_id` keys.
 
 ## Scripts
 
@@ -87,8 +90,8 @@ then add more (for example, a remote MacBook target) under new `target_id` keys.
     `agent-gamma` by default.
   - Defaults to a 60-minute paced soak (`--duration-s 3600`) and writes per-agent
     artifacts plus `soak_summary.json` under `benchmarks/soak/<timestamp>/`.
-  - Use with the benchmark Windows config (`app/tze_hud_app/config/benchmark.toml`)
-    and benchmark scheduled task (`scripts/windows/install_benchmark_hud_task.ps1`).
+  - Needs the benchmark Windows config (`app/tze_hud_app/config/benchmark.toml`)
+    and a host-local launch; it has not been ported to the pairing flow yet.
 - `scripts/compare_results.py`
   - Compares candidate vs baseline runs from `reference/results.csv`.
   - Reports metric deltas and threshold pass/fail for regression gates.
@@ -176,36 +179,6 @@ python3 .claude/skills/user-test-performance/scripts/compare_results.py \
   --target-id user-test-windows-tailnet \
   --transport mcp_http \
   --mode widget
-```
-
-### 6) Install the benchmark Windows launch task
-
-Copy `app/tze_hud_app/config/benchmark.toml` to `C:\tze_hud\benchmark.toml`, then
-register the benchmark task from Windows:
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass `
-  -File C:\tze_hud\install_benchmark_hud_task.ps1 `
-  -BaseDir C:\tze_hud `
-  -Psk $env:TZE_HUD_PSK
-schtasks /Run /TN TzeHudBenchmarkOverlay
-```
-
-The installer stores the PSK as a DPAPI-protected file for the task user and the
-runner passes it to `tze_hud.exe` through `TZE_HUD_PSK`. It only stops an
-existing benchmark-config `tze_hud.exe` process before relaunching; it does not
-kill the production `TzeHudOverlay` process by executable name.
-
-### 7) Three-agent 60-minute widget soak
-
-```bash
-python3 .claude/skills/user-test-performance/scripts/widget_soak_runner.py \
-  --target-id user-test-windows-tailnet \
-  --duration-s 3600 \
-  --rate-rps 1 \
-  --windows-live-metrics-path 'C:\tze_hud\perf\hud-wydpo\windowed_live_metrics.json' \
-  --sample-windows-resources \
-  --ssh-identity ~/.ssh/hud-ssh-key
 ```
 
 ## Traceability and Threshold Flags

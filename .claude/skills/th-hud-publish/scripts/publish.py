@@ -4,20 +4,20 @@ Publish zone messages to a running tze_hud instance (MCP `hud_publish`).
 
 Usage:
   # List the surfaces this PSK may use
-  publish.py --url http://host:9090/mcp --psk-env HUD_MCP_PSK --list-surfaces
+  publish.py --list-surfaces
 
   # Single inline publish (string content)
-  publish.py --url http://host:9090/mcp --zone alert-banner --content "Hello"
+  publish.py --zone alert-banner --content "Hello"
 
   # Single inline publish (typed content; `type` is inferred from the zone)
-  publish.py --url http://host:9090/mcp --zone status-bar \
+  publish.py --zone status-bar \
     --content '{"entries":{"build":"passing"}}' --key build-status
 
   # Clear your publication from a zone
-  publish.py --url http://host:9090/mcp --zone subtitle --clear
+  publish.py --zone subtitle --clear
 
   # Batch publish from file
-  publish.py --url http://host:9090/mcp --messages-file msgs.json
+  publish.py --messages-file msgs.json
 
 Message objects: {"zone": "...", "content": ..., "key"?: "...", "ttl_ms"?: N}.
 Content is a plain string, or an object for structured zones
@@ -29,11 +29,14 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 import urllib.error
 import urllib.request
+from pathlib import Path
 from typing import Any
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "user-test" / "scripts"))
+import hud_env  # noqa: E402
 
 
 def call_tool(
@@ -126,11 +129,10 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Publish zone messages to a tze_hud MCP endpoint"
     )
-    parser.add_argument("--url", required=True, help="MCP HTTP URL (e.g. http://host:9090/mcp)")
+    parser.add_argument("--url", help="MCP URL (default: derived from HUD_HOST)")
     parser.add_argument(
         "--psk-env",
-        default="HUD_MCP_PSK",
-        help="Environment variable holding the agent PSK (default: HUD_MCP_PSK)",
+        help="Read the PSK from this environment variable instead of the paired file",
     )
     parser.add_argument("--list-surfaces", action="store_true", help="Call hud_surfaces and print results")
     parser.add_argument("--messages-file", help="Path to JSON array of message objects")
@@ -149,9 +151,10 @@ def main() -> int:
     if has_inline and args.messages_file:
         parser.error("cannot combine --content with --messages-file")
 
-    token = os.getenv(args.psk_env, "")
-    if not token:
-        print(f"ERROR: environment variable {args.psk_env} is empty or unset", file=sys.stderr)
+    try:
+        args.url, token = hud_env.resolve(args.url, args.psk_env)
+    except hud_env.HudEnvError as error:
+        print(f"ERROR: {error}", file=sys.stderr)
         return 2
 
     try:

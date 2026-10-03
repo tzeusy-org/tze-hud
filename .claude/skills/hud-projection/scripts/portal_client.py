@@ -11,19 +11,20 @@ Every command is one standard MCP `tools/call` to the runtime (`docs/api.md`):
   clear    --id ID              hud_clear   {surface: portal:ID}
 
 The first publish to a portal attaches it. The portal is keyed by your agent
-identity (the PSK), so no command handles a token. Environment: HUD_MCP_URL
-(e.g. http://host:9090/mcp) and the agent PSK in HUD_PSK (or TZE_HUD_PSK /
-HUD_MCP_PSK / MCP_TEST_PSK).
+identity (the PSK), so no command handles a token. Environment: HUD_HOST
+(the HUD's host); the PSK is read from ~/.config/tze-hud/<host>.psk, written
+by `.claude/skills/user-test/scripts/hud_pair.py`.
 """
 
 import argparse
 import json
-import os
 import sys
 import urllib.error
 import urllib.request
+from pathlib import Path
 
-PSK_ENV_VARS = ("HUD_PSK", "TZE_HUD_PSK", "HUD_MCP_PSK", "MCP_TEST_PSK")
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "user-test" / "scripts"))
+import hud_env  # noqa: E402
 
 
 class ToolError(Exception):
@@ -40,19 +41,12 @@ def die(msg, code=1):
     sys.exit(code)
 
 
-def mcp_url():
-    url = os.environ.get("HUD_MCP_URL")
-    if not url:
-        die("HUD_MCP_URL is not set")
-    return url
-
-
-def psk():
-    for name in PSK_ENV_VARS:
-        value = os.environ.get(name)
-        if value:
-            return value
-    die(f"no PSK in {', '.join(PSK_ENV_VARS)}")
+def endpoint():
+    """(mcp_url, psk) from HUD_HOST and the paired PSK file."""
+    try:
+        return hud_env.resolve()
+    except hud_env.HudEnvError as error:
+        die(str(error))
 
 
 def rpc(method, params, request_id=1):
@@ -60,11 +54,12 @@ def rpc(method, params, request_id=1):
     body = json.dumps(
         {"jsonrpc": "2.0", "id": request_id, "method": method, "params": params}
     ).encode()
+    url, token = endpoint()
     request = urllib.request.Request(
-        mcp_url(),
+        url,
         data=body,
         headers={
-            "Authorization": f"Bearer {psk()}",
+            "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
             "Accept": "application/json, text/event-stream",
         },

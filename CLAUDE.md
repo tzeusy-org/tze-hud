@@ -50,10 +50,12 @@ To project this session onto the HUD, use the **`hud-projection`** skill
 (`.claude/skills/hud-projection/SKILL.md`). It is cooperative opt-in
 projection through the MCP verbs on `portal:<id>`: `hud_publish` (the first
 publish attaches), `hud_input` (replies, acked in the same call), and
-`hud_clear` (detach). Send your agent's PSK as the MCP bearer; its
-`[agents.<id>] allow` list in the HUD's `agents.toml` (PSK hashes only, beside
-the config) must include `portal` (`scripts/quickstart.sh` pairs
-`[agents.claude]` with `allow = ["*"]`). For one-shot
+`hud_clear` (detach). Set `HUD_HOST` and pair once with the code the HUD shows
+(`.claude/skills/user-test/scripts/hud_pair.py --code <code>`); the PSK goes to
+`~/.config/tze-hud/$HUD_HOST.psk` and is the MCP bearer (the project `.mcp.json`
+sends it; `HUD_HOST` must be a bare host there). The paired agent gets
+`allow = ["*"]`; an `[agents.<id>] allow` list in the HUD's `agents.toml` (PSK
+hashes only, beside the config) must include `portal`. For one-shot
 zone publishing, use **`th-hud-publish`**.
 
 ## Issue Tracking

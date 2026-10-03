@@ -23,12 +23,13 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 import time
 import urllib.error
 import urllib.request
 from typing import Any
+
+import hud_env
 
 
 def rpc_call(url: str, token: str, tool: str, arguments: dict[str, Any], request_id: int) -> dict[str, Any]:
@@ -82,17 +83,18 @@ def load_messages(path: str) -> list[dict[str, Any]]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Publish MCP zone message batch")
-    parser.add_argument("--url", required=True, help="MCP HTTP URL, e.g. http://host:9090")
-    parser.add_argument("--psk-env", default="MCP_TEST_PSK", help="Environment variable containing PSK")
+    parser.add_argument("--url", help="MCP URL (default: derived from HUD_HOST)")
+    parser.add_argument("--psk-env", help="Read the PSK from this environment variable instead of the paired file")
     parser.add_argument("--messages-file", required=True, help="Path to JSON array of message objects")
     parser.add_argument("--ttl-ms", type=int, default=60_000, help="Default TTL in milliseconds")
     parser.add_argument("--delay-ms", type=int, default=0, help="Delay between publishes")
     parser.add_argument("--list-surfaces", action="store_true", help="Call hud_surfaces before publishing")
     args = parser.parse_args()
 
-    token = os.getenv(args.psk_env, "")
-    if not token:
-        print(f"ERROR: env var {args.psk_env} is empty or unset", file=sys.stderr)
+    try:
+        args.url, token = hud_env.resolve(args.url, args.psk_env)
+    except hud_env.HudEnvError as error:
+        print(f"ERROR: {error}", file=sys.stderr)
         return 2
 
     try:
