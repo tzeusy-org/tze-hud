@@ -3582,18 +3582,6 @@ fn test_suspension_timeout_revokes() {
     assert_eq!(scene.tile_count(), 0);
 }
 
-// ─── Renewal Policy Tests ───────────────────────────────────────────
-
-#[test]
-fn test_renewal_policy_defaults_to_manual() {
-    let mut scene = SceneGraph::new(1920.0, 1080.0);
-    let lease_id = scene.grant_lease("test", 60_000);
-    assert_eq!(
-        scene.leases[&lease_id].renewal_policy,
-        RenewalPolicy::Manual
-    );
-}
-
 // Spec §Requirement: Priority Assignment (lease-governance/spec.md lines 49-60)
 // Spec §Requirement: Priority Sort Semantics (lease-governance/spec.md lines 62-69)
 
@@ -4917,4 +4905,26 @@ fn viewer_dismiss_tile_revokes_lease_in_any_live_state() {
             "another agent's publication survives"
         );
     }
+}
+
+/// Hard cap: one session cannot hold more than 64 live leases; releasing one
+/// frees a slot. (The per-session and runtime-wide caps are both 64, so the
+/// runtime-wide check is the one that fires for a single session.)
+#[test]
+fn test_lease_hard_cap_rejects_65th_live_lease() {
+    let mut scene = SceneGraph::new(1920.0, 1080.0);
+    let session = SceneId::new();
+    let leases: Vec<SceneId> = (0..SceneGraph::MAX_LEASES_PER_SESSION)
+        .map(|_| scene.grant_lease_for_session("agent", session, 60_000))
+        .collect();
+
+    let err = scene
+        .try_grant_lease_for_session("agent", session, 60_000)
+        .expect_err("65th live lease must be rejected");
+    assert!(matches!(err, LeaseError::CapsExceeded(_)), "{err:?}");
+
+    scene.revoke_lease(leases[0]).expect("revoke");
+    scene
+        .try_grant_lease_for_session("agent", session, 60_000)
+        .expect("a terminal lease frees its slot");
 }

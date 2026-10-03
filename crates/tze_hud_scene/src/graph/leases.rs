@@ -126,7 +126,6 @@ impl SceneGraph {
                 state: LeaseState::Active,
                 granted_at_ms: now_ms,
                 ttl_ms,
-                renewal_policy: RenewalPolicy::default(),
                 resource_budget,
                 spatial_budget: Default::default(),
                 suspended_at_ms: None,

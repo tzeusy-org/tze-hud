@@ -994,7 +994,7 @@ impl TestSceneRegistry {
         let leases: Vec<SceneId> = agents
             .iter()
             .map(|ns| {
-                use crate::types::{Lease, LeaseState, RenewalPolicy, ResourceBudget};
+                use crate::types::{Lease, LeaseState, ResourceBudget};
                 let id = SceneId::new();
                 graph.leases.insert(
                     id,
@@ -1005,7 +1005,6 @@ impl TestSceneRegistry {
                         state: LeaseState::Active,
                         granted_at_ms: clock.0,
                         ttl_ms: 300_000,
-                        renewal_policy: RenewalPolicy::default(),
                         resource_budget: ResourceBudget::default(),
                         spatial_budget: Default::default(),
                         suspended_at_ms: None,
@@ -1950,7 +1949,7 @@ fn grant_lease_at(
     granted_at_ms: u64,
     ttl_ms: u64,
 ) -> SceneId {
-    use crate::types::{Lease, LeaseState, RenewalPolicy, ResourceBudget};
+    use crate::types::{Lease, LeaseState, ResourceBudget};
 
     let id = SceneId::new();
     graph.leases.insert(
@@ -1962,7 +1961,6 @@ fn grant_lease_at(
             state: LeaseState::Active,
             granted_at_ms,
             ttl_ms,
-            renewal_policy: RenewalPolicy::default(),
             resource_budget: ResourceBudget::default(),
             spatial_budget: Default::default(),
             suspended_at_ms: None,
