@@ -1033,6 +1033,103 @@ pub(super) fn resolve_notification_action_tokens(
     }
 }
 
+/// Resolved tokens for the viewer close button shown on a hovered tile.
+#[derive(Clone, Debug)]
+pub(super) struct TileCloseTokens {
+    pub(super) size_px: f32,
+    pub(super) margin_px: f32,
+    /// Button fill (linear-light RGBA, as `parse_hex_color` returns).
+    pub(super) background: Rgba,
+    /// Color of the x mark (linear-light RGBA).
+    pub(super) glyph_color: Rgba,
+    pub(super) glyph_stroke_px: f32,
+}
+
+// Fallbacks MUST stay in sync with `tze_hud_config`'s `CANONICAL_TOKENS`
+// entries `tile.close_button.*` (the crates are intentionally unlinked).
+const TILE_CLOSE_DEFAULT_SIZE_PX: f32 = 22.0;
+const TILE_CLOSE_DEFAULT_MARGIN_PX: f32 = 6.0;
+const TILE_CLOSE_DEFAULT_BACKGROUND_HEX: &str = "#000000B3";
+const TILE_CLOSE_DEFAULT_GLYPH_HEX: &str = "#FFFFFF";
+const TILE_CLOSE_DEFAULT_GLYPH_STROKE_PX: f32 = 2.0;
+
+pub(super) fn resolve_tile_close_tokens(token_map: &HashMap<String, String>) -> TileCloseTokens {
+    let px = |key: &str, default: f32, min: f32| {
+        token_map
+            .get(key)
+            .and_then(|v| v.trim_end_matches("px").parse::<f32>().ok())
+            .filter(|v| v.is_finite() && *v >= min)
+            .unwrap_or(default)
+    };
+    TileCloseTokens {
+        size_px: px("tile.close_button.size_px", TILE_CLOSE_DEFAULT_SIZE_PX, 1.0),
+        margin_px: px(
+            "tile.close_button.margin_px",
+            TILE_CLOSE_DEFAULT_MARGIN_PX,
+            0.0,
+        ),
+        background: resolve_token_color(token_map, "tile.close_button.background")
+            .or_else(|| parse_hex_color(TILE_CLOSE_DEFAULT_BACKGROUND_HEX))
+            .unwrap_or(Rgba::WHITE),
+        glyph_color: resolve_token_color(token_map, "tile.close_button.glyph_color")
+            .or_else(|| parse_hex_color(TILE_CLOSE_DEFAULT_GLYPH_HEX))
+            .unwrap_or(Rgba::WHITE),
+        glyph_stroke_px: px(
+            "tile.close_button.glyph_stroke_px",
+            TILE_CLOSE_DEFAULT_GLYPH_STROKE_PX,
+            0.5,
+        ),
+    }
+}
+
+/// Bounds of the viewer close button: a square inset from the tile's top-right
+/// corner, shrunk to fit a tile smaller than the button.
+///
+/// The single geometry source for both the drawn button
+/// (`append_tile_close_button_vertices`) and its pointer hit region
+/// (`populate_zone_hit_regions`), so a press always lands on what is drawn.
+pub(super) fn tile_close_button_bounds(tile: Rect, tokens: &TileCloseTokens) -> Rect {
+    let size = tokens.size_px.min(tile.width).min(tile.height).max(1.0);
+    let margin = tokens
+        .margin_px
+        .min((tile.width - size).max(0.0))
+        .min((tile.height - size).max(0.0));
+    Rect::new(
+        tile.x + tile.width - size - margin,
+        tile.y + margin,
+        size,
+        size,
+    )
+}
+
+/// Squares forming the x mark centered in `button`: two diagonals of
+/// stroke-sized squares spanning the central 40% of the button.
+pub(super) fn tile_close_glyph_rects(button: Rect, tokens: &TileCloseTokens) -> Vec<Rect> {
+    let stroke = tokens.glyph_stroke_px.min(button.width).max(0.5);
+    let span = (button.width * 0.4).max(stroke);
+    let steps = ((span / stroke).round() as usize).max(2);
+    let origin_x = button.x + (button.width - span) / 2.0;
+    let origin_y = button.y + (button.height - span) / 2.0;
+    let mut rects = Vec::with_capacity(steps * 2);
+    for i in 0..steps {
+        let t = i as f32 / (steps - 1) as f32;
+        let along = t * (span - stroke);
+        rects.push(Rect::new(
+            origin_x + along,
+            origin_y + along,
+            stroke,
+            stroke,
+        ));
+        rects.push(Rect::new(
+            origin_x + along,
+            origin_y + (span - stroke) - along,
+            stroke,
+            stroke,
+        ));
+    }
+    rects
+}
+
 /// Resolved visual tokens for the local composer echo overlay.
 ///
 /// Populated from the compositor token map in

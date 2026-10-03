@@ -1075,3 +1075,81 @@ fn effective_tile_z_order_returns_boosted_key_during_drag() {
         "after drag cleared: effective z_order returns to raw value"
     );
 }
+
+/// The viewer close button is drawn and hit-testable only on the hovered agent
+/// tile, at one token-driven geometry for both, and a press on it resolves to
+/// `DismissTile` before the tile's own regions. Draw-command level.
+#[tokio::test]
+async fn tile_close_button_draw_and_hit_region_share_token_geometry() {
+    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
+    compositor
+        .token_map
+        .insert("tile.close_button.size_px".into(), "30".into());
+    compositor
+        .token_map
+        .insert("tile.close_button.background".into(), "#336699".into());
+
+    let mut scene = SceneGraph::new(1280.0, 720.0);
+    let tab = scene.create_tab("Main", 0).unwrap();
+    let lease = scene.grant_lease("agent", 60_000);
+    let tile = scene
+        .create_tile(
+            tab,
+            "agent",
+            lease,
+            Rect::new(100.0, 100.0, 400.0, 300.0),
+            10,
+        )
+        .unwrap();
+
+    // No hover: nothing drawn, nothing to hit.
+    let mut resting: Vec<crate::pipeline::RectVertex> = Vec::new();
+    compositor.append_tile_close_button_vertices(&scene, &mut resting, 1280.0, 720.0);
+    compositor.populate_zone_hit_regions(&mut scene, 1280.0, 720.0);
+    assert!(resting.is_empty());
+    assert!(scene.overlay.zone_hit_regions.is_empty());
+
+    compositor.tile_close_hover = Some(tile);
+    let mut vertices: Vec<crate::pipeline::RectVertex> = Vec::new();
+    compositor.append_tile_close_button_vertices(&scene, &mut vertices, 1280.0, 720.0);
+    compositor.populate_zone_hit_regions(&mut scene, 1280.0, 720.0);
+
+    let region = scene
+        .overlay
+        .zone_hit_regions
+        .iter()
+        .find(|r| matches!(r.kind, ZoneInteractionKind::DismissTile { .. }))
+        .expect("hovered tile must register a close hit region");
+    let b = region.bounds;
+    assert_eq!((b.width, b.height), (30.0, 30.0), "size comes from tokens");
+    assert!(
+        b.x + b.width <= 500.0 && b.y >= 100.0 && b.x > 100.0,
+        "button sits inside the tile's top-right corner: {b:?}"
+    );
+    let tokens = crate::renderer::token_colors::resolve_tile_close_tokens(&compositor.token_map);
+    let fill = compositor.gpu_color(tokens.background);
+    let quad = crate::pipeline::rect_vertices(b.x, b.y, b.width, b.height, 1280.0, 720.0, fill);
+    assert!(
+        vertices.windows(6).any(|w| w
+            .iter()
+            .zip(&quad)
+            .all(|(a, q)| a.position == q.position && a.color == q.color)),
+        "token-filled quad must be drawn at the hit region bounds"
+    );
+
+    let hit = scene.hit_test(b.x + b.width / 2.0, b.y + b.height / 2.0);
+    assert!(
+        matches!(
+            hit,
+            HitResult::ZoneInteraction {
+                kind: ZoneInteractionKind::DismissTile { tile_id },
+                ..
+            } if tile_id == tile
+        ),
+        "press on the button resolves to DismissTile, got {hit:?}"
+    );
+    assert!(
+        matches!(scene.hit_test(150.0, 350.0), HitResult::TileHit { .. }),
+        "the rest of the tile is unchanged"
+    );
+}

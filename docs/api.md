@@ -29,6 +29,14 @@ discovery.
 
 MCP `tools/list` has five tools. The resident tile API is gRPC only.
 
+**Viewer dismiss.** Hovering an agent tile or portal shows a close button
+(`tile.close_button.*` tokens). Pressing it reclaims the tile's lease on the
+spot, with no agent round trip: a gRPC agent gets `Reclaimed{OVERRIDE}` for
+`tile:<id>`. A dismissed portal is detached; the agent's next `hud_publish` to
+`portal:<id>` attaches a fresh one (its old token is dead), `hud_hold` answers
+`NOT_HELD`, `hud_clear` succeeds as a no-op, and `hud_input` forgets the
+holding.
+
 ## MCP tools
 
 Standard MCP over JSON-RPC 2.0 (HTTP POST): `initialize`,

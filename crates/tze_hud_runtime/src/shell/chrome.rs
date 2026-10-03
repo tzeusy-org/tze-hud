@@ -378,12 +378,27 @@ pub fn handle_shortcut(state: &mut ChromeState, shortcut: ChromeShortcut) -> Sho
 /// Works even if the agent is disconnected or in the reconnect grace period.
 #[derive(Clone, Debug)]
 pub struct DismissTileResult {
-    /// Whether the tile was found and removed.
-    pub tile_removed: bool,
-    /// The SceneId of the dismissed tile (for audit events and lease revocation).
-    pub tile_id: Option<SceneId>,
-    /// Whether the grace period was cancelled (agent was in grace period).
-    pub grace_period_cancelled: bool,
+    /// The terminal lease transition. `Some` when the tile's lease was
+    /// reclaimed; forward it to the owning session
+    /// (`Reclaimed{OVERRIDE}`). `None` when the tile or lease was already gone.
+    pub expiry: Option<tze_hud_scene::types::LeaseExpiry>,
+}
+
+/// Viewer dismiss of a tile (hover close button): reclaim its lease now.
+///
+/// The single entry for the human override on a tile. It runs on the input
+/// thread's own scene lock, so the tile is gone before the next frame and no
+/// agent round trip is involved. The caller publishes `expiry` after releasing
+/// the lock. Portal tiles go through
+/// `InProcessPortalDriver::viewer_dismiss_tile`, which also drops the
+/// projection.
+pub fn dismiss_tile(
+    scene: &mut tze_hud_scene::graph::SceneGraph,
+    tile_id: SceneId,
+) -> DismissTileResult {
+    DismissTileResult {
+        expiry: scene.viewer_dismiss_tile(tile_id),
+    }
 }
 
 /// Revocation reason sent to the agent as part of `LeaseResponse`.
@@ -391,7 +406,7 @@ pub struct DismissTileResult {
 /// RFC 0007 §4.1 / RFC 0008 `RevokeReason` enum.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RevokeReason {
-    /// Viewer dismissed the tile via the X button.
+    /// Viewer dismissed the tile via the close button.
     ViewerDismissed,
     /// Viewer dismissed all tiles ("Dismiss All" affordance).
     ViewerDismissedAll,

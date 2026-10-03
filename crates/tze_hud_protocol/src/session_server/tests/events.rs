@@ -167,6 +167,75 @@ async fn short_ttl_expiry_reaches_owning_connected_agent_once_after_cleanup() {
     server.abort();
 }
 
+/// A viewer dismiss of a tile (hover close button) reclaims its lease with no
+/// agent involvement; the owning connected agent gets exactly one
+/// `Reclaimed{OVERRIDE}` naming the dismissed tile. Real tonic client.
+#[tokio::test]
+async fn viewer_dismiss_tile_pushes_reclaimed_override() {
+    use std::time::Duration;
+
+    let clock = tze_hud_scene::TestClock::new(1_000);
+    let (mut client, server, state, lease_expirations) =
+        setup_test_with_lease_expiry_clock(clock).await;
+    let (tx, _handshake, mut stream) = handshake(&mut client, "dismiss-agent", "test-key").await;
+
+    tx.send(ClientMessage {
+        sequence: 2,
+        timestamp_wall_us: now_wall_us(),
+        payload: Some(ClientPayload::ClaimTile(ClaimTile {
+            ttl_ms: 60_000,
+            ..Default::default()
+        })),
+    })
+    .await
+    .unwrap();
+    let (lease_id, tile_id) = match next_server_msg(&mut stream).await.payload {
+        Some(ServerPayload::RequestResult(RequestResult {
+            ok: true,
+            lease_id,
+            ids,
+            ..
+        })) => (
+            bytes_to_scene_id(&lease_id).expect("lease id"),
+            bytes_to_scene_id(&ids[0]).expect("tile id"),
+        ),
+        other => panic!("expected a granted ClaimTile, got {other:?}"),
+    };
+
+    let expiry = {
+        let shared = state.lock().await;
+        let mut scene = shared.scene.lock().await;
+        let expiry = scene
+            .viewer_dismiss_tile(tile_id)
+            .expect("viewer dismiss reclaims the lease");
+        assert_eq!(expiry.terminal_state, LeaseState::Revoked);
+        assert_eq!(scene.tile_count(), 0, "the tile is gone immediately");
+        expiry
+    };
+    assert_eq!(lease_expirations.publish(expiry.into()), 1);
+
+    let reclaimed = tokio::time::timeout(Duration::from_secs(1), stream.next())
+        .await
+        .expect("Reclaimed must arrive promptly")
+        .expect("stream stays open")
+        .expect("valid message");
+    match reclaimed.payload {
+        Some(ServerPayload::Reclaimed(Reclaimed {
+            surface,
+            why,
+            lease_id: reclaimed_lease,
+        })) => {
+            assert_eq!(why, ReclaimReason::Override as i32);
+            assert_eq!(reclaimed_lease, scene_id_to_bytes(lease_id));
+            assert_eq!(surface, crate::session_server::verbs::tile_surface(tile_id));
+        }
+        other => panic!("expected Reclaimed, got {other:?}"),
+    }
+
+    drop(tx);
+    server.abort();
+}
+
 async fn setup_test_with_input_capture_channel(
     input_capture_wake: tze_hud_scene::render_wake::RenderWakeNotifier,
 ) -> (

@@ -336,8 +336,11 @@ fn shell_status_snapshot_exposes_no_portal_identity_or_transcript() {
 #[test]
 fn shell_dismiss_override_removes_portal_tile() {
     let (mut scene, _clock, _tab_id, lease_id, tile_id) = create_portal_scene(120_000);
-    // Shell dismiss maps to lease revocation for content-layer tiles.
-    scene.revoke_lease(lease_id).expect("shell dismiss revoke");
+    // The hover close button's viewer-dismiss entry reclaims the tile's lease.
+    let expiry = scene
+        .viewer_dismiss_tile(tile_id)
+        .expect("viewer dismiss reclaims the portal lease");
+    assert_eq!(expiry.lease_id, lease_id);
     assert!(
         !scene.tiles.contains_key(&tile_id),
         "shell override dismiss must remove portal tile"
@@ -735,10 +738,12 @@ fn shell_snapshot_exposes_no_first_class_surface_identity_or_transcript() {
 #[test]
 fn shell_dismiss_override_prunes_first_class_surface() {
     let (mut scene, _clock, _tab_id, lease_id, tile_id) = create_first_class_portal_scene(120_000);
-    // Shell dismiss maps to lease revocation for content-layer tiles; the
-    // first-class surface overlay must be pruned with the tile, leaving no
-    // dangling descriptor.
-    scene.revoke_lease(lease_id).expect("shell dismiss revoke");
+    // Viewer dismiss reclaims the lease; the first-class surface overlay must be
+    // pruned with the tile, leaving no dangling descriptor.
+    let expiry = scene
+        .viewer_dismiss_tile(tile_id)
+        .expect("viewer dismiss reclaims the portal lease");
+    assert_eq!(expiry.lease_id, lease_id);
     assert!(
         !scene.tiles.contains_key(&tile_id),
         "shell override dismiss must remove the host tile"

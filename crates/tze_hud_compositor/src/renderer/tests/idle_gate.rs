@@ -377,6 +377,18 @@ async fn idle_render_gate_renders_for_composer_echo_and_caret_blink() {
     *compositor.resize_grip_hover_state.lock().unwrap() = None;
     assert!(compositor.drain_local_composer_and_needs_render());
     assert!(!compositor.drain_local_composer_and_needs_render());
+
+    // The viewer close-button hover target dirties the gate once per change and
+    // not while it stays put (hud-jm8nq.11: no per-frame redraw while idle).
+    *compositor.tile_close_hover_state.lock().unwrap() = Some(tile_id);
+    assert!(compositor.drain_local_composer_and_needs_render());
+    assert!(
+        !compositor.drain_local_composer_and_needs_render(),
+        "an unchanged close-hover target must not keep the idle gate dirty"
+    );
+    *compositor.tile_close_hover_state.lock().unwrap() = None;
+    assert!(compositor.drain_local_composer_and_needs_render());
+    assert!(!compositor.drain_local_composer_and_needs_render());
 }
 
 #[test]

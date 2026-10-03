@@ -60,6 +60,7 @@ pub use chrome::{
     SystemHealth,
     TabBarPosition,
     collect_diagnostic,
+    dismiss_tile,
     handle_shortcut,
     strip_chrome_from_topology,
 };

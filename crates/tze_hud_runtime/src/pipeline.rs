@@ -58,6 +58,9 @@ pub struct TileBoundsEntry {
     /// Whether this tile has scroll configuration and therefore accepts portal
     /// resize affordance pointer gestures.
     pub has_scroll_config: bool,
+    /// Whether the viewer close button may show on this tile: an agent tile on
+    /// the active tab that captures pointer input.
+    pub dismissible: bool,
 }
 
 /// One runtime chrome drag-handle entry in the hit-test snapshot.
@@ -87,6 +90,9 @@ impl HitTestSnapshot {
                 z_order: t.z_order,
                 namespace: t.namespace.clone(),
                 has_scroll_config: scene.tile_scroll_config(t.id).is_some(),
+                dismissible: scene.active_tab == Some(t.tab_id)
+                    && t.input_mode != tze_hud_scene::types::InputMode::Passthrough
+                    && t.z_order < tze_hud_scene::types::ZONE_TILE_Z_MIN,
             })
             .collect();
         // Sort descending by z_order for hit-testing (highest z tested first)
@@ -115,6 +121,16 @@ impl HitTestSnapshot {
                 && y >= t.bounds.y
                 && y < t.bounds.y + t.bounds.height
         })
+    }
+
+    /// The tile a pointer at (x, y) is over that may show a viewer close
+    /// button: the highest-z dismissible tile containing the point.
+    pub fn close_hover_target(&self, x: f32, y: f32) -> Option<tze_hud_scene::SceneId> {
+        let entry = self
+            .tiles
+            .iter()
+            .find(|t| t.dismissible && t.bounds.contains_point(x, y))?;
+        tze_hud_scene::SceneId::from_bytes_le(&entry.tile_id_bytes)
     }
 
     /// Test whether a display-space point hits any runtime drag handle.

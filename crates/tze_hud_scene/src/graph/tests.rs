@@ -4742,3 +4742,40 @@ mod inline_subtree_materialization {
         assert_eq!(scene.node_count(), 0, "no partial materialization");
     }
 }
+
+/// Viewer dismiss reclaims the tile's whole lease (human override), also while
+/// the lease is orphaned or suspended, and reports the terminal transition once.
+#[test]
+fn viewer_dismiss_tile_revokes_lease_in_any_live_state() {
+    let mut scene = SceneGraph::new(1920.0, 1080.0);
+    let tab = scene.create_tab("Main", 0).unwrap();
+    let make = |scene: &mut SceneGraph, now| {
+        let lease = scene.grant_lease("agent", 60_000);
+        let tile = scene
+            .create_tile(tab, "agent", lease, Rect::new(0.0, 0.0, 100.0, 100.0), 1)
+            .unwrap();
+        (lease, tile, now)
+    };
+
+    let (lease, tile, _) = make(&mut scene, 0);
+    let expiry = scene
+        .viewer_dismiss_tile(tile)
+        .expect("active lease reclaimed");
+    assert_eq!(expiry.lease_id, lease);
+    assert_eq!(expiry.previous_state, LeaseState::Active);
+    assert_eq!(expiry.terminal_state, LeaseState::Revoked);
+    assert_eq!(expiry.removed_tiles, vec![tile]);
+    assert!(!scene.tiles.contains_key(&tile));
+    assert!(
+        scene.viewer_dismiss_tile(tile).is_none(),
+        "a second dismiss finds nothing to reclaim"
+    );
+
+    let (lease, tile, _) = make(&mut scene, 0);
+    scene.disconnect_lease(&lease, 1_000).unwrap();
+    let expiry = scene
+        .viewer_dismiss_tile(tile)
+        .expect("orphaned lease reclaimed");
+    assert_eq!(expiry.previous_state, LeaseState::Orphaned);
+    assert_eq!(expiry.terminal_state, LeaseState::Revoked);
+}

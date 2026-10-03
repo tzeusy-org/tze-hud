@@ -402,6 +402,11 @@ impl Compositor {
         // Colored/sized from `tile.disconnect_badge.*`; reads `Tile::visual_hint`.
         self.append_disconnect_badge_vertices(scene, &mut vertices, sw, sh);
 
+        // ── Viewer close button on the hovered tile (hud-jm8nq.11) ─────────────
+        // Drawn only for the runtime-plumbed hover target; tokens come from
+        // `tile.close_button.*`.
+        self.append_tile_close_button_vertices(scene, &mut vertices, sw, sh);
+
         // Update zone animation states (fade-in/fade-out) before rendering.
         self.update_zone_animations(scene);
         // §6.3 portal transition: advance per-portal-tile fade animations

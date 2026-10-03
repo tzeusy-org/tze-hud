@@ -463,6 +463,32 @@ pub static CANONICAL_TOKENS: &[CanonicalToken] = &[
         description: "Disconnection badge square extent on orphaned tiles (px)",
         default_value: "16",
     },
+    // Viewer close button shown on a hovered tile (docs/invariants.md section 3).
+    CanonicalToken {
+        key: "tile.close_button.size_px",
+        description: "Hover close button square extent on tiles (px)",
+        default_value: "22",
+    },
+    CanonicalToken {
+        key: "tile.close_button.margin_px",
+        description: "Inset of the hover close button from the tile's top-right corner (px)",
+        default_value: "6",
+    },
+    CanonicalToken {
+        key: "tile.close_button.background",
+        description: "Fill of the hover close button (RGBA hex)",
+        default_value: "#000000B3",
+    },
+    CanonicalToken {
+        key: "tile.close_button.glyph_color",
+        description: "Color of the hover close button's x mark (RGBA hex)",
+        default_value: "#FFFFFF",
+    },
+    CanonicalToken {
+        key: "tile.close_button.glyph_stroke_px",
+        description: "Stroke thickness of the hover close button's x mark (px)",
+        default_value: "2",
+    },
     // Safe-mode overlay (docs/invariants.md section 5), drawn by the compositor.
     CanonicalToken {
         key: "safe_mode.overlay.color",

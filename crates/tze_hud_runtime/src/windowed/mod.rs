@@ -86,7 +86,7 @@ use winit::window::{Fullscreen, Window, WindowAttributes, WindowId, WindowLevel}
 use crate::scene_startup::run_scene_startup;
 use tze_hud_compositor::{
     Compositor, CompositorSurface, FocusRingOwnerHandle, LocalComposerStateHandle,
-    PortalViewerEchoQueue, ResizeGripHoverHandle, WindowSurface,
+    PortalViewerEchoQueue, ResizeGripHoverHandle, TileCloseHoverHandle, WindowSurface,
 };
 use tze_hud_config::resolve_runtime_widget_asset_store;
 use tze_hud_input::{
@@ -552,6 +552,13 @@ struct WindowedRuntimeState {
     /// tile's grip mark to `hover_color`. Cloned from
     /// `compositor.resize_grip_hover_state` at init.
     resize_grip_hover_state: ResizeGripHoverHandle,
+    /// Shared handle carrying the tile the pointer is over, whose viewer close
+    /// button the compositor shows (hud-jm8nq.11). Written each `about_to_wait`
+    /// from the polled cursor; cloned from `compositor.tile_close_hover_state`.
+    tile_close_hover_state: TileCloseHoverHandle,
+    /// True after `CursorLeft` until the next `CursorMoved`: the pointer is
+    /// outside the window, so no tile is hovered.
+    cursor_left_window: bool,
     /// Reverse channel (hud-21o6x): the compositor publishes the active composer's
     /// wrapped-line layout here each frame; this (main) thread reads it before
     /// dispatching ArrowUp/ArrowDown so the caret can step between soft-wrapped
@@ -766,6 +773,10 @@ impl WinitApp {
         // lights that tile's grip in hover_color. Same per-frame + latest-wins
         // cadence as the focus-ring push above.
         self.push_resize_grip_hover();
+        // Publish the tile under the pointer so the compositor shows its viewer
+        // close button (hud-jm8nq.11). Same per-frame + latest-wins cadence;
+        // an unchanged target costs the compositor nothing.
+        self.push_tile_close_hover();
         // Retry any keyboard events that were deferred because the scene lock
         // was busy during dispatch (hud-2fz34).  Runs after composer flush so
         // deferred keystrokes re-enter the same path as fresh ones.
@@ -974,9 +985,14 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
             }
         }
         let snapshot = self.state.pipeline.hit_test_snapshot.load();
+        // A dismissible tile counts as interactive: in passthrough the pointer
+        // must be polled to show its viewer close button (hud-jm8nq.11).
         let interactive = !self.state.hit_regions.is_empty()
             || !snapshot.drag_handles.is_empty()
-            || snapshot.tiles.iter().any(|tile| tile.has_scroll_config);
+            || snapshot
+                .tiles
+                .iter()
+                .any(|tile| tile.has_scroll_config || tile.dismissible);
         deadlines.extend(wake::cursor_poll_deadline(
             now,
             self.state.effective_mode == WindowMode::Overlay,
@@ -1334,6 +1350,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
         self.state.viewer_echo_queue = Arc::clone(&compositor.viewer_echo_queue);
         self.state.focus_ring_owner_state = Arc::clone(&compositor.focus_ring_owner_state);
         self.state.resize_grip_hover_state = Arc::clone(&compositor.resize_grip_hover_state);
+        self.state.tile_close_hover_state = Arc::clone(&compositor.tile_close_hover_state);
         // Reverse channel: read the compositor's per-frame wrapped-line layout for
         // soft-wrap vertical caret movement (hud-21o6x).
         self.state.composer_visual_layout = Arc::clone(&compositor.composer_visual_layout);
@@ -2093,11 +2110,20 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                 }
                 self.state.cursor_x = position.x as f32;
                 self.state.cursor_y = position.y as f32;
+                self.state.cursor_left_window = false;
 
                 if self.synthesize_left_release_if_physically_up() {
                     return;
                 }
                 self.enqueue_pointer_event(PointerEventKind::Move);
+            }
+
+            // Pointer left the window: hide any hover close button.
+            WindowEvent::CursorLeft { .. } => {
+                if let Some(source) = wake_source {
+                    self.state.wake.mark_main_work_pending(source);
+                }
+                self.state.cursor_left_window = true;
             }
 
             // ── Pointer: button press/release ──────────────────────────────
@@ -2324,6 +2350,7 @@ fn main_work_source_for_window_event(
             Some(RuntimeWakeupSource::Resize)
         }
         WindowEvent::CursorMoved { .. }
+        | WindowEvent::CursorLeft { .. }
         | WindowEvent::MouseInput {
             button: MouseButton::Left,
             ..
@@ -2731,6 +2758,8 @@ impl WindowedRuntime {
             focus_ring_owner_state: Arc::new(StdMutex::new(None)),
             // Placeholder; replaced in resumed() with the compositor's Arc (hud-wgiys).
             resize_grip_hover_state: Arc::new(StdMutex::new(None)),
+            tile_close_hover_state: Arc::new(StdMutex::new(None)),
+            cursor_left_window: false,
             // Placeholder; replaced in resumed() with the compositor's Arc (hud-21o6x).
             composer_visual_layout: Arc::new(StdMutex::new(None)),
             portal_projection_driver,

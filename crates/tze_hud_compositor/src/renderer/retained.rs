@@ -446,6 +446,7 @@ impl Compositor {
             // a full-frame concern until it has its own bounded evidence lane.
             && self.focus_ring_owner.is_none()
             && self.resize_grip_hover.is_none()
+            && self.tile_close_hover.is_none()
             && self.local_composer.is_none()
     }
 }

@@ -46,8 +46,9 @@ use super::token_colors::{
     ComposerOverlayTokens, ComposerVerticalAnchor, TILE_BG_DEFAULT, TILE_BG_STATIC_IMAGE,
     TILE_BG_TEXT_MARKDOWN, linear_to_srgb, resolve_composer_overlay_tokens,
     resolve_disconnect_badge_tokens, resolve_focus_ring_tokens, resolve_resize_grip_tokens,
-    resolve_section_gap_px, resolve_tile_bg_token, resolve_tile_spacing_tokens,
-    resolve_viewer_echo_tokens, srgb_to_linear,
+    resolve_section_gap_px, resolve_tile_bg_token, resolve_tile_close_tokens,
+    resolve_tile_spacing_tokens, resolve_viewer_echo_tokens, srgb_to_linear,
+    tile_close_button_bounds, tile_close_glyph_rects,
 };
 use super::{Compositor, CompositorDegradationPolicy};
 
@@ -843,6 +844,58 @@ impl Compositor {
                 badge.size_px,
             );
             Self::append_clipped_rect_vertices(tile, rect, sw, sh, color, vertices);
+        }
+    }
+
+    /// The tile whose viewer close button is showing this frame: the
+    /// runtime-plumbed [`tile_close_hover`] target, when it is a visible agent
+    /// tile (zone-reserved z-band tiles are runtime-owned and not dismissible
+    /// this way).
+    ///
+    /// [`tile_close_hover`]: super::Compositor::tile_close_hover
+    pub(super) fn tile_close_target<'a>(&self, scene: &'a SceneGraph) -> Option<&'a Tile> {
+        let id = self.tile_close_hover?;
+        self.policy_visible_tiles(scene)
+            .into_iter()
+            .find(|t| t.id == id && t.z_order < ZONE_TILE_Z_MIN)
+    }
+
+    /// Emit the viewer close button (token-styled fill and x mark) on the
+    /// hovered tile. Geometry comes from `tile_close_button_bounds`, the same
+    /// function the hit region uses. Draws nothing unless a tile is hovered, so
+    /// an idle HUD pays nothing.
+    pub(super) fn append_tile_close_button_vertices(
+        &self,
+        scene: &SceneGraph,
+        vertices: &mut Vec<RectVertex>,
+        sw: f32,
+        sh: f32,
+    ) {
+        let Some(tile) = self.tile_close_target(scene) else {
+            return;
+        };
+        let tokens = resolve_tile_close_tokens(&self.token_map);
+        let button = tile_close_button_bounds(tile.bounds, &tokens);
+        vertices.extend_from_slice(&rect_vertices(
+            button.x,
+            button.y,
+            button.width,
+            button.height,
+            sw,
+            sh,
+            self.gpu_color(tokens.background),
+        ));
+        let glyph = self.gpu_color(tokens.glyph_color);
+        for rect in tile_close_glyph_rects(button, &tokens) {
+            vertices.extend_from_slice(&rect_vertices(
+                rect.x,
+                rect.y,
+                rect.width,
+                rect.height,
+                sw,
+                sh,
+                glyph,
+            ));
         }
     }
 

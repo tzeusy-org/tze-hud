@@ -736,6 +736,10 @@ impl HeadlessRuntime {
                         );
                     }
                     ZoneInteractionKind::DragHandle { .. } => {}
+                    ZoneInteractionKind::DismissTile { tile_id } => {
+                        // Headless has no session bridge; reclaim the lease locally.
+                        crate::shell::dismiss_tile(scene, *tile_id);
+                    }
                     ZoneInteractionKind::JumpToLatest { tile_id } => {
                         let changed = self
                             .input_processor

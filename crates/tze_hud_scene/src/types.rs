@@ -2014,6 +2014,15 @@ pub enum ZoneInteractionKind {
         /// Tile the pill belongs to.
         tile_id: SceneId,
     },
+    /// Runtime close button shown on a hovered agent tile (hud-jm8nq.11).
+    ///
+    /// Activating this is a viewer override: the tile's lease is revoked and its
+    /// agent receives `Reclaimed{OVERRIDE}`. The `interaction_id` follows the
+    /// pattern `"tile-close:{tile_id}"`.
+    DismissTile {
+        /// Tile the button belongs to.
+        tile_id: SceneId,
+    },
 }
 
 /// Element class for runtime drag handle interactions.
