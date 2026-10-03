@@ -850,7 +850,7 @@ pub struct SolidColorNode {
 /// post-strip positions; if stripping is skipped when runs are present the
 /// offsets are used as-is.
 ///
-/// # Invariants (enforced by `tze_hud_scene::invariants`)
+/// # Invariants (enforced at construction)
 /// - `start_byte < end_byte`
 /// - both `start_byte` and `end_byte` must be ≤ `content.len()`
 /// - both must fall on valid UTF-8 character boundaries

@@ -82,9 +82,29 @@ pub struct SceneSpec {
 
 // ─── Invariant violation ─────────────────────────────────────────────────────
 
-// InvariantViolation is defined in `invariants` (its canonical home) and
-// re-exported here for backward compatibility with existing test_scenes consumers.
-pub use crate::invariants::InvariantViolation;
+/// A Layer 0 invariant that was violated.
+#[derive(Clone, Debug, PartialEq)]
+pub struct InvariantViolation {
+    /// Short machine-readable label, e.g. `"orphan_tile"`.
+    pub code: &'static str,
+    /// Human-readable diagnostic message.
+    pub message: String,
+}
+
+impl InvariantViolation {
+    pub fn new(code: &'static str, message: impl Into<String>) -> Self {
+        Self {
+            code,
+            message: message.into(),
+        }
+    }
+}
+
+impl std::fmt::Display for InvariantViolation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "[{}] {}", self.code, self.message)
+    }
+}
 
 // ─── Test scene registry ──────────────────────────────────────────────────────
 
