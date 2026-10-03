@@ -109,7 +109,7 @@ impl WindowedRuntimeState {
         WindowedRuntimeState {
             wake: super::wake::WindowedWake::disconnected(),
             scheduled_main_deadline: None,
-            cursor_poll: super::wake::CursorPollState::default(),
+            cursor_entry: super::wake::CursorEntryState::default(),
             config: super::WindowedConfig::default(),
             compositor_handle: None,
             network_rt: None,
@@ -1839,8 +1839,8 @@ mod tests {
     }
 
     #[test]
-    fn armed_cursor_poll_never_wakes_compositor_until_hover_changes() {
-        use super::super::wake::{CURSOR_POLL_INTERVAL, CursorPollTurn};
+    fn armed_cursor_entry_never_wakes_compositor_until_hover_changes() {
+        use super::super::wake::CursorEntryTurn;
         use crate::window::{HitRegion, WindowMode};
 
         let mut harness = HeadlessEventLoopHarness::new();
@@ -1866,8 +1866,8 @@ mod tests {
             ));
             ids
         };
-        let seeded = harness.app.cursor_poll_signature();
-        harness.app.state.cursor_poll.signature = Some(seeded);
+        let seeded = harness.app.cursor_entry_signature();
+        harness.app.state.cursor_entry.signature = Some(seeded);
 
         let wake = harness.app.state.wake.clone();
         let compositor_before = wake.compositor().checkpoint();
@@ -1879,14 +1879,11 @@ mod tests {
         let shared = harness.shared_state();
         let guard = shared.try_lock().expect(BUSY);
         let _scene = guard.scene.try_lock().expect(BUSY);
-        let now = std::time::Instant::now();
         for _ in 0..100 {
-            let CursorPollTurn::Quiet { next } = harness.app.cursor_poll_turn(now) else {
+            let CursorEntryTurn::Quiet { next } = harness.app.cursor_entry_turn() else {
                 panic!("an unchanged cursor must stay on the quiet path");
             };
-            let next = next.expect("poll stays armed in passthrough");
-            assert!(next.main_only);
-            assert_eq!(next.at, now + CURSOR_POLL_INTERVAL);
+            assert!(next.is_none(), "no periodic deadline is ever armed");
         }
         assert_eq!(wake.compositor().checkpoint(), compositor_before);
         assert_eq!(wake.main_work_generation(), main_work_before);
@@ -1895,23 +1892,24 @@ mod tests {
         // Entering a region is a hover change: one full turn, one wake.
         harness.app.state.cursor_x = 120.0;
         harness.app.state.cursor_y = 120.0;
-        assert_eq!(harness.app.cursor_poll_turn(now), CursorPollTurn::FullTurn);
+        assert_eq!(harness.app.cursor_entry_turn(), CursorEntryTurn::FullTurn);
         assert_eq!(wake.main_work_generation(), main_work_before + 1);
         assert!(wake.finish_main_work(wake.main_work_checkpoint()));
         assert_eq!(wake.compositor().checkpoint(), compositor_before + 1);
 
-        // Capture flip (passthrough -> capturing) disarms the poll: no deadline.
+        // Capture flip (passthrough -> capturing) disarms raw input.
         harness.app.state.overlay_capturing = true;
+        assert!(!harness.app.cursor_entry_armed());
         assert!(matches!(
-            harness.app.cursor_poll_turn(now),
-            CursorPollTurn::Quiet { next: None }
+            harness.app.cursor_entry_turn(),
+            CursorEntryTurn::Quiet { next: None }
         ));
         assert_eq!(wake.compositor().checkpoint(), compositor_before + 1);
 
         // Leaving the region is the next change: exactly one more wake.
         harness.app.state.cursor_x = 10.0;
         harness.app.state.overlay_capturing = false;
-        assert_eq!(harness.app.cursor_poll_turn(now), CursorPollTurn::FullTurn);
+        assert_eq!(harness.app.cursor_entry_turn(), CursorEntryTurn::FullTurn);
         assert!(wake.finish_main_work(wake.main_work_checkpoint()));
         assert_eq!(wake.compositor().checkpoint(), compositor_before + 2);
 
@@ -1925,9 +1923,9 @@ mod tests {
             app.state.cursor_y = 250.0;
             app.state.cursor_left_window = left;
             assert_eq!(app.close_hover_target(), target);
-            let turn = app.cursor_poll_turn(now);
+            let turn = app.cursor_entry_turn();
             if wakes {
-                assert_eq!(turn, CursorPollTurn::FullTurn);
+                assert_eq!(turn, CursorEntryTurn::FullTurn);
                 assert!(
                     app.state
                         .wake
@@ -1935,7 +1933,7 @@ mod tests {
                 );
                 expected += 1;
             } else {
-                assert!(matches!(turn, CursorPollTurn::Quiet { .. }));
+                assert!(matches!(turn, CursorEntryTurn::Quiet { .. }));
             }
             assert_eq!(app.state.wake.compositor().checkpoint(), expected);
         };
@@ -1946,28 +1944,59 @@ mod tests {
         step(&mut harness.app, 10.0, true, None, false);
     }
 
-    /// A due main-only poll deadline owes no compositor notification; any other
-    /// due deadline does.
+    /// The device-event wiring: only mouse motion ticks, and arming/disarming
+    /// yields the listen mode exactly once per edge.
     #[test]
-    fn resume_time_poll_deadline_owes_no_main_work_but_others_do() {
+    fn device_event_wiring_routes_motion_and_syncs_listening() {
+        use crate::window::{HitRegion, WindowMode};
+        use winit::event::{DeviceEvent, ElementState};
+        use winit::event_loop::DeviceEvents;
+
+        let mut harness = HeadlessEventLoopHarness::new();
+        let app = &mut harness.app;
+        app.state.effective_mode = WindowMode::Overlay;
+        app.state.hit_regions = vec![HitRegion::new(100.0, 100.0, 50.0, 50.0)];
+        app.state.overlay_capturing = false;
+
+        assert_eq!(
+            app.sync_cursor_entry_listening(),
+            Some(DeviceEvents::Always)
+        );
+        assert_eq!(app.sync_cursor_entry_listening(), None);
+
+        app.on_device_event(&DeviceEvent::Button {
+            button: 0,
+            state: ElementState::Pressed,
+        });
+        assert!(!app.state.cursor_entry.tick, "non-motion is ignored");
+        app.on_device_event(&DeviceEvent::MouseMotion { delta: (1.0, 0.0) });
+        assert!(app.state.cursor_entry.tick);
+
+        app.state.overlay_capturing = true;
+        assert_eq!(app.sync_cursor_entry_listening(), Some(DeviceEvents::Never));
+    }
+
+    /// Raw mouse motion queues a cursor check only while armed; a due timer
+    /// deadline always owes main work and never a cursor-only check.
+    #[test]
+    fn raw_mouse_motion_ticks_only_while_armed() {
         use super::super::wake::Deadline;
         use crate::idle_efficiency::RuntimeWakeupSource::AnimationDeadline;
 
         let mut harness = HeadlessEventLoopHarness::new();
+        harness.app.on_raw_mouse_motion();
+        assert!(!harness.app.state.cursor_entry.tick, "unarmed: ignored");
+
+        harness.app.state.cursor_entry.listening = true;
+        harness.app.on_raw_mouse_motion();
+        assert!(harness.app.state.cursor_entry.tick);
+
+        harness.app.state.cursor_entry.tick = false;
         let now = std::time::Instant::now();
         let before = harness.app.state.wake.main_work_generation();
-        harness.app.state.scheduled_main_deadline = Some(Deadline {
-            main_only: true,
-            ..Deadline::new(now, AnimationDeadline)
-        });
-        harness.app.on_resume_time_reached(now);
-        assert!(harness.app.state.cursor_poll.tick);
-        assert_eq!(harness.app.state.wake.main_work_generation(), before);
-
-        harness.app.state.cursor_poll.tick = false;
         harness.app.state.scheduled_main_deadline = Some(Deadline::new(now, AnimationDeadline));
         harness.app.on_resume_time_reached(now);
-        assert!(!harness.app.state.cursor_poll.tick);
+        assert!(!harness.app.state.cursor_entry.tick);
         assert_eq!(harness.app.state.wake.main_work_generation(), before + 1);
     }
 }

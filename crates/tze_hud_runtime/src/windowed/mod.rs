@@ -79,6 +79,7 @@ use std::time::Instant;
 
 use tokio::sync::Mutex;
 use winit::application::ApplicationHandler;
+use winit::event::{DeviceEvent, DeviceId};
 use winit::event::{ElementState, MouseButton, StartCause, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::window::{Fullscreen, Window, WindowAttributes, WindowId, WindowLevel};
@@ -216,7 +217,7 @@ use self::network::{
 };
 use self::portal::PortalProjectionDrain;
 use self::wake::{
-    CursorPollTurn, Deadline, RuntimeWakeEvent, WindowedWake, control_flow_for_deadlines,
+    CursorEntryTurn, Deadline, RuntimeWakeEvent, WindowedWake, control_flow_for_deadlines,
     deadline_from_wall_us,
 };
 use crate::portal_projection_driver::PortalWakeDeadline;
@@ -276,7 +277,7 @@ struct WindowedRuntimeState {
     config: WindowedConfig,
     wake: WindowedWake,
     scheduled_main_deadline: Option<Deadline>,
-    cursor_poll: wake::CursorPollState,
+    cursor_entry: wake::CursorEntryState,
     /// Compositor thread handle (stored so it can be joined on shutdown).
     compositor_handle: Option<std::thread::JoinHandle<()>>,
     /// Network runtime for gRPC / MCP.
@@ -410,8 +411,9 @@ struct WindowedRuntimeState {
     hit_regions: Vec<HitRegion>,
     /// Whether the overlay currently captures the pointer (last
     /// `set_cursor_hittest` value). While `false` the OS delivers no pointer
-    /// events, so a low-rate cursor poll is the only way to notice the cursor
-    /// entering an interactive region.
+    /// events, so raw mouse input (winit `DeviceEvent::MouseMotion`, listened
+    /// for only while armed) is how the cursor entering an interactive region
+    /// is noticed.
     overlay_capturing: bool,
     /// External static hit-regions configured by callers.
     static_hit_regions: Vec<HitRegion>,
@@ -746,10 +748,8 @@ impl WinitApp {
 }
 
 impl WinitApp {
-    /// Service a timer wake: count it and, for a due main-owned deadline, either
-    /// owe a compositor notification (full turn) or, for a main-only cursor
-    /// poll tick, defer to `cursor_poll_turn`, which creates main work only if
-    /// something changed.
+    /// Service a timer wake: count it and, for a due main-owned deadline, owe a
+    /// compositor notification (full turn).
     fn on_resume_time_reached(&mut self, now: Instant) {
         let Some(deadline) = self
             .state
@@ -763,15 +763,6 @@ impl WinitApp {
             .wake
             .counters()
             .record_main_wakeup(deadline.source);
-        let other_due = self
-            .state
-            .cursor_poll
-            .other_deadline
-            .is_some_and(|other| other.at <= now);
-        if deadline.main_only && !other_due {
-            self.state.cursor_poll.tick = true;
-            return;
-        }
         // Main-owned deadlines (portal liveness/cadence, hover, and chrome
         // expiry) mutate the scene later in `about_to_wait`. Mark a
         // post-mutation compositor notification as owed; a pre-mutation wake can
@@ -860,8 +851,17 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
         }
     }
 
+    fn device_event(
+        &mut self,
+        _event_loop: &ActiveEventLoop,
+        _device_id: DeviceId,
+        event: DeviceEvent,
+    ) {
+        self.on_device_event(&event);
+    }
+
     fn user_event(&mut self, _event_loop: &ActiveEventLoop, _event: RuntimeWakeEvent) {
-        self.state.cursor_poll.tick = false;
+        self.state.cursor_entry.tick = false;
         let source = self.state.wake.take_main_source();
         self.state.wake.counters().record_main_wakeup(source);
     }
@@ -876,8 +876,8 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
     /// Pending mode switches must therefore be handled here in `about_to_wait`
     /// rather than in `resumed()`.
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-        if std::mem::take(&mut self.state.cursor_poll.tick) {
-            if let CursorPollTurn::Quiet { next } = self.cursor_poll_turn(Instant::now()) {
+        if std::mem::take(&mut self.state.cursor_entry.tick) {
+            if let CursorEntryTurn::Quiet { next } = self.cursor_entry_turn() {
                 self.state.scheduled_main_deadline = next;
                 event_loop.set_control_flow(next.map_or(ControlFlow::Wait, |deadline| {
                     ControlFlow::WaitUntil(deadline.at)
@@ -1014,16 +1014,9 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                 ));
             }
         }
-        deadlines.extend(self.cursor_poll_deadline_at(now));
-        self.state.cursor_poll.other_deadline = deadlines
-            .iter()
-            .copied()
-            .filter(|deadline| !deadline.main_only)
-            .min_by_key(|deadline| deadline.at);
-        self.state.cursor_poll.signature = deadlines
-            .iter()
-            .any(|deadline| deadline.main_only)
-            .then(|| self.cursor_poll_signature());
+        if let Some(listen) = self.sync_cursor_entry_listening() {
+            event_loop.listen_device_events(listen);
+        }
         let has_deferred_scene_work = portal_drain.is_deferred()
             || !self.state.pending_input_capture_commands.is_empty()
             || !self.state.pending_keyboard_events.is_empty();
@@ -2121,7 +2114,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
         _window_id: WindowId,
         event: WindowEvent,
     ) {
-        self.state.cursor_poll.tick = false;
+        self.state.cursor_entry.tick = false;
         let wake_source = main_work_source_for_window_event(&event);
         match event {
             // ── Close ──────────────────────────────────────────────────────
@@ -2815,7 +2808,7 @@ impl WindowedRuntime {
             config: cfg,
             wake,
             scheduled_main_deadline: None,
-            cursor_poll: wake::CursorPollState::default(),
+            cursor_entry: wake::CursorEntryState::default(),
             compositor_handle: None,
             network_rt,
             network_handles,

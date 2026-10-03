@@ -4,10 +4,8 @@ use tze_hud_scene::SceneId;
 use tze_hud_scene::graph::SceneGraph;
 use winit::window::CursorIcon;
 
-use std::time::Instant;
-
 use super::WinitApp;
-use super::wake::{self, CursorPollSignature, CursorPollTurn, Deadline};
+use super::wake::{self, CursorEntrySignature, CursorEntryTurn};
 use crate::idle_efficiency::RuntimeWakeupSource;
 use crate::window::{HitRegion, WindowMode, should_capture_pointer_event};
 
@@ -181,10 +179,11 @@ fn screen_cursor_to_window_cursor(
 impl WinitApp {
     /// Refresh cursor position from OS state when passthrough is active.
     ///
-    /// In overlay mode on Windows, `set_cursor_hittest(false)` can prevent
-    /// `CursorMoved` delivery to winit. Polling global cursor position ensures
-    /// hit-testing can flip back to capture when the cursor enters an active
-    /// widget hover region.
+    /// In overlay mode on Windows, `set_cursor_hittest(false)` prevents
+    /// `CursorMoved` delivery to winit. Raw mouse input still arrives (see
+    /// [`WinitApp::on_raw_mouse_motion`]); reading the global cursor position
+    /// on it lets hit-testing flip back to capture when the cursor enters an
+    /// active region.
     pub(super) fn refresh_cursor_position_from_os(&mut self) {
         if self.state.effective_mode == WindowMode::Overlay {
             #[cfg(target_os = "windows")]
@@ -220,9 +219,9 @@ impl WinitApp {
         }
     }
 
-    /// The next cursor poll deadline, armed only while passthrough could hide a
-    /// click from an interactive region (see [`wake::cursor_poll_deadline`]).
-    pub(super) fn cursor_poll_deadline_at(&self, now: Instant) -> Option<Deadline> {
+    /// True while raw mouse input must wake the loop, because passthrough could
+    /// hide a click from an interactive region (see [`wake::cursor_entry_armed`]).
+    pub(super) fn cursor_entry_armed(&self) -> bool {
         let snapshot = self.state.pipeline.hit_test_snapshot.load();
         let interactive = !self.state.hit_regions.is_empty()
             || !snapshot.drag_handles.is_empty()
@@ -230,12 +229,45 @@ impl WinitApp {
                 .tiles
                 .iter()
                 .any(|tile| tile.has_scroll_config || tile.dismissible);
-        wake::cursor_poll_deadline(
-            now,
+        wake::cursor_entry_armed(
             self.state.effective_mode == WindowMode::Overlay,
             interactive,
             !self.state.overlay_capturing,
         )
+    }
+
+    /// Route a winit device event: only raw mouse motion matters.
+    pub(super) fn on_device_event(&mut self, event: &winit::event::DeviceEvent) {
+        if matches!(event, winit::event::DeviceEvent::MouseMotion { .. }) {
+            self.on_raw_mouse_motion();
+        }
+    }
+
+    /// Recompute whether raw mouse input is needed, reseed the quiet-check
+    /// signature, and return the winit listen mode to apply if it changed.
+    ///
+    /// Known limitation (accepted, hud-asw8c): winit emits `MouseMotion` only
+    /// for relative mouse reports (`MOUSE_MOVE_RELATIVE`), so absolute-pointer
+    /// devices (RDP sessions, VM tablets) never trigger entry detection; the
+    /// old 30 Hz poll covered them. The target is a physical Windows desktop;
+    /// no fallback poll. While armed, a mouse reporting at up to 1 kHz wakes
+    /// the loop per report (cheap quiet check; zero wakes when still).
+    pub(super) fn sync_cursor_entry_listening(
+        &mut self,
+    ) -> Option<winit::event_loop::DeviceEvents> {
+        let armed = self.cursor_entry_armed();
+        self.state.cursor_entry.signature = armed.then(|| self.cursor_entry_signature());
+        let was = std::mem::replace(&mut self.state.cursor_entry.listening, armed);
+        wake::device_events_transition(was, armed)
+    }
+
+    /// A raw mouse-motion event arrived (`RIDEV_INPUTSINK` on Windows, so it
+    /// is delivered even while the overlay is click-through). Queue a cursor
+    /// check for this turn when armed; a no-op otherwise.
+    pub(super) fn on_raw_mouse_motion(&mut self) {
+        if self.state.cursor_entry.listening {
+            self.state.cursor_entry.tick = true;
+        }
     }
 
     /// The dismissible tile whose viewer close button the cursor is over, from
@@ -253,9 +285,9 @@ impl WinitApp {
     }
 
     /// Lock-free view of what the cursor currently hovers or would capture.
-    pub(super) fn cursor_poll_signature(&self) -> CursorPollSignature {
+    pub(super) fn cursor_entry_signature(&self) -> CursorEntrySignature {
         let (x, y) = (self.state.cursor_x, self.state.cursor_y);
-        CursorPollSignature {
+        CursorEntrySignature {
             capture: should_capture_pointer_event(
                 WindowMode::Overlay,
                 x,
@@ -273,18 +305,18 @@ impl WinitApp {
         }
     }
 
-    /// Service a due cursor poll tick on the main thread alone.
+    /// Service a raw mouse-motion check on the main thread alone.
     ///
     /// Costs a cursor read plus lock-free snapshot reads: no scene lock, no
     /// compositor wake, no main-work debt. Only a hover/capture change (or any
-    /// other pending work) returns [`CursorPollTurn::FullTurn`], after marking
+    /// other pending work) returns [`CursorEntryTurn::FullTurn`], after marking
     /// main work pending so the full turn publishes exactly one compositor
     /// wake. The capture flip itself still happens in that turn on the main
     /// thread, before anything waits on the compositor.
-    pub(super) fn cursor_poll_turn(&mut self, now: Instant) -> CursorPollTurn {
+    pub(super) fn cursor_entry_turn(&mut self) -> CursorEntryTurn {
         self.refresh_cursor_position_from_os();
-        let signature = self.cursor_poll_signature();
-        let previous = self.state.cursor_poll.signature.replace(signature);
+        let signature = self.cursor_entry_signature();
+        let previous = self.state.cursor_entry.signature.replace(signature);
         let has_other_work = self.state.shutdown.is_triggered()
             || self.state.pending_mode_switch.is_some()
             || self.state.left_button_down
@@ -296,16 +328,11 @@ impl WinitApp {
             self.state
                 .wake
                 .mark_main_work_pending(RuntimeWakeupSource::AnimationDeadline);
-            return CursorPollTurn::FullTurn;
+            return CursorEntryTurn::FullTurn;
         }
-        let next = [
-            self.cursor_poll_deadline_at(now),
-            self.state.cursor_poll.other_deadline,
-        ]
-        .into_iter()
-        .flatten()
-        .min_by_key(|deadline| deadline.at);
-        CursorPollTurn::Quiet { next }
+        CursorEntryTurn::Quiet {
+            next: self.state.scheduled_main_deadline,
+        }
     }
 
     /// Update overlay passthrough/capture state from current cursor+regions.
@@ -589,7 +616,7 @@ mod tests {
         assert_eq!(
             local,
             Some((40.0, 80.0)),
-            "cursor polling must convert desktop coordinates into overlay-window coordinates"
+            "cursor refresh must convert desktop coordinates into overlay-window coordinates"
         );
     }
 
@@ -602,7 +629,7 @@ mod tests {
         assert_eq!(
             origin,
             Some(monitor_origin),
-            "Windows overlay cursor polling should use the monitor origin if the window origin \
+            "Windows overlay cursor refresh should use the monitor origin if the window origin \
              query fails"
         );
     }
