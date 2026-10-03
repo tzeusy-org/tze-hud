@@ -1,0 +1,30 @@
+[package]
+name = "poc_demo"
+description = "POC demo: drives zones, widgets, a resident tile and a hung-agent override against a live tze_hud"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "poc_demo"
+path = "src/main.rs"
+
+[dependencies]
+tze_hud_protocol = { path = "../../crates/tze_hud_protocol", version = "0.1.0" }
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
+tonic = { workspace = true }
+serde_json = { workspace = true }
+tiktoken-rs = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+tze_hud_runtime = { path = "../../crates/tze_hud_runtime", version = "0.1.0", features = ["dev-mode", "test-harness"] }
+tze_hud_scene = { path = "../../crates/tze_hud_scene", version = "0.1.0" }
+tze_hud_config = { path = "../../crates/tze_hud_config", version = "0.1.0" }
+
+[lints]
+workspace = true
