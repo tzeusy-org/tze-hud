@@ -8,7 +8,6 @@ license.workspace = true
 [dependencies]
 tze_hud_scene = { path = "../tze_hud_scene", version = "0.1.0" }
 serde = { workspace = true }
-serde_json = { workspace = true }
 toml = { workspace = true }
 tracing = { workspace = true }
 
