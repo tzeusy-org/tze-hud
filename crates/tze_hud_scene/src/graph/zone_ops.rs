@@ -516,6 +516,17 @@ impl SceneGraph {
         transition_ms: u32,
         expires_at_wall_us: Option<u64>,
     ) -> Result<bool, ValidationError> {
+        // ── Step 0: Safe mode ────────────────────────────────────────────────
+        // A Suspended lease means the human paused this agent; widget publishes
+        // are refused like zone publishes. (No lease at all is allowed here.)
+        if self.resolve_lease_state_for_namespace(publisher_namespace)
+            == Some(LeaseState::Suspended)
+        {
+            return Err(ValidationError::ZonePublishSafeModeActive {
+                namespace: publisher_namespace.to_string(),
+            });
+        }
+
         // ── Step 1: Resolve the widget instance ──────────────────────────────
         let instance_name = widget_name;
         let instance = self

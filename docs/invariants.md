@@ -44,6 +44,10 @@ shell state exposes no portal identity or transcript.
   `test_overlay_renders_from_chrome_state_only_after_critical_error`
 - `integration` `shell_dismiss_override_removes_portal_tile`,
   `shell_status_snapshot_exposes_no_portal_identity_or_transcript`
+- `tze_hud_mcp` `hud_publish_in_safe_mode_returns_safe_mode_active`,
+  `safe_mode_does_not_regrant_suspended_mcp_lease`,
+  `resume_restores_mcp_publishing`
+- `tze_hud_scene` `widget_publish_with_suspended_lease_is_safe_mode_active`
 - `tze_hud_compositor` `test_chrome_always_above_max_zorder_tile`
 
 ## 4. Disconnect is not release
@@ -71,6 +75,8 @@ the TTL clock and preserves lease identity; resuming continues it.
 - `tze_hud_runtime` `test_ttl_excluded_during_suspension`,
   `test_lease_identity_preserved_across_suspend_resume`
 - `tze_hud_scene` `test_lease_suspend_from_active`, `test_lease_resume_from_suspended`
+- `tze_hud_mcp` `safe_mode_does_not_regrant_suspended_mcp_lease`,
+  `resume_restores_mcp_publishing`
 
 ## 6. Degradation changes drawing, never state
 

@@ -10,9 +10,9 @@ use tze_hud_scene::config::hash_psk;
 use tze_hud_scene::{
     PendingAction, SceneId, TestClock,
     types::{
-        ContentionPolicy, GeometryPolicy, RenderingPolicy, Rgba, WidgetDefinition, WidgetInstance,
-        WidgetParamConstraints, WidgetParamType, WidgetParameterDeclaration, WidgetParameterValue,
-        ZoneContent, ZoneRegistry,
+        ContentionPolicy, GeometryPolicy, LeaseState, RenderingPolicy, Rgba, WidgetDefinition,
+        WidgetInstance, WidgetParamConstraints, WidgetParamType, WidgetParameterDeclaration,
+        WidgetParameterValue, ZoneContent, ZoneRegistry,
     },
 };
 
@@ -954,4 +954,143 @@ async fn status_bar_keys_merge_and_update() {
         .find(|r| r.merge_key.as_deref() == Some("weather"))
         .unwrap();
     assert!(matches!(&weather.content, ZoneContent::StatusBar(p) if p.entries["weather"] == "75F"));
+}
+
+// ── Safe mode ────────────────────────────────────────────────────────────────
+
+fn set_safe_mode(server: &McpServer, on: bool) {
+    server
+        .safe_mode
+        .store(on, std::sync::atomic::Ordering::Release);
+}
+
+#[tokio::test]
+async fn hud_publish_in_safe_mode_returns_safe_mode_active() {
+    let (server, _) = server();
+    let (server, mock) = mock_portal(server);
+    // Held before safe mode, so hud_hold has something to extend.
+    for surface in ["zone:subtitle", "widget:gauge"] {
+        let args = match surface {
+            "widget:gauge" => json!({"surface": surface, "params": {"level": 0.5}}),
+            _ => json!({"surface": surface, "content": "a"}),
+        };
+        call(&server, "hud_publish", args).await;
+    }
+    call(
+        &server,
+        "hud_publish",
+        json!({"surface": "portal:main", "content": "before"}),
+    )
+    .await;
+    server
+        .scene
+        .lock()
+        .await
+        .push_pending_action(PendingAction {
+            publisher_namespace: AgentDirectory::unrestricted(psk())
+                .resolve(&psk(), "")
+                .unwrap()
+                .agent_id,
+            zone_name: "notification-area".into(),
+            callback_id: "approve".into(),
+        });
+
+    set_safe_mode(&server, true);
+    for surface in ["zone:subtitle", "widget:gauge", "portal:main"] {
+        let publish = match surface {
+            "widget:gauge" => json!({"surface": surface, "params": {"level": 0.9}}),
+            _ => json!({"surface": surface, "content": "during"}),
+        };
+        let err = call_err(&server, "hud_publish", publish).await;
+        assert_eq!(err["code"], "SAFE_MODE_ACTIVE", "publish {surface}");
+        let err = call_err(
+            &server,
+            "hud_hold",
+            json!({"surface": surface, "ttl_ms": 1000}),
+        )
+        .await;
+        assert_eq!(err["code"], "SAFE_MODE_ACTIVE", "hold {surface}");
+    }
+    assert_eq!(
+        mock.lock().unwrap().outputs.len(),
+        1,
+        "nothing reached the portal driver during safe mode"
+    );
+
+    // Reading stays open: already-queued input is still delivered.
+    let v = call(&server, "hud_input", json!({})).await;
+    assert_eq!(v["items"][0]["action"], "approve");
+}
+
+#[tokio::test]
+async fn safe_mode_does_not_regrant_suspended_mcp_lease() {
+    let (server, _) = server();
+    call(
+        &server,
+        "hud_publish",
+        json!({"surface": "zone:subtitle", "content": "a"}),
+    )
+    .await;
+    // The runtime suspends leases on safe-mode entry.
+    let lease = {
+        let mut scene = server.scene.lock().await;
+        let id = *scene.leases.keys().next().expect("one MCP lease");
+        scene.suspend_lease(&id, 1).expect("suspend");
+        id
+    };
+    for args in [
+        json!({"surface": "zone:subtitle", "content": "b"}),
+        json!({"surface": "widget:gauge", "params": {"level": 0.5}}),
+    ] {
+        let err = call_err(&server, "hud_publish", args).await;
+        assert_eq!(err["code"], "SAFE_MODE_ACTIVE");
+    }
+    let scene = server.scene.lock().await;
+    assert_eq!(
+        scene.leases.len(),
+        1,
+        "no fresh lease around the Suspended one"
+    );
+    assert_eq!(scene.leases[&lease].state, LeaseState::Suspended);
+}
+
+#[tokio::test]
+async fn resume_restores_mcp_publishing() {
+    let (server, _) = server();
+    call(
+        &server,
+        "hud_publish",
+        json!({"surface": "zone:subtitle", "content": "a"}),
+    )
+    .await;
+    set_safe_mode(&server, true);
+    let lease = {
+        let mut scene = server.scene.lock().await;
+        let id = *scene.leases.keys().next().unwrap();
+        scene.suspend_lease(&id, 1).unwrap();
+        id
+    };
+    call_err(
+        &server,
+        "hud_publish",
+        json!({"surface": "zone:subtitle", "content": "b"}),
+    )
+    .await;
+
+    set_safe_mode(&server, false);
+    server.scene.lock().await.resume_lease(&lease, 2).unwrap();
+    call(
+        &server,
+        "hud_publish",
+        json!({"surface": "zone:subtitle", "content": "c"}),
+    )
+    .await;
+    call(
+        &server,
+        "hud_publish",
+        json!({"surface": "widget:gauge", "params": {"level": 0.5}}),
+    )
+    .await;
+    let scene = server.scene.lock().await;
+    assert_eq!(scene.leases.len(), 1, "the original lease serves again");
 }
