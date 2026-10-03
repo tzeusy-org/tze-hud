@@ -10,7 +10,6 @@ name = "dashboard_tile_agent"
 path = "src/main.rs"
 
 [features]
-headless = ["tze_hud_runtime/headless"]
 ## Enable dev-mode to allow `config_toml: None` (unrestricted capability grants).
 ## TEST/DEV ONLY — never use in production deployments.
 dev-mode = ["tze_hud_runtime/dev-mode"]

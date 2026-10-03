@@ -6,7 +6,6 @@ edition.workspace = true
 license.workspace = true
 
 [features]
-headless = ["tze_hud_compositor/headless"]
 ## Enable dev-mode: allows `HeadlessConfig { config_toml: None }` to start with
 ## unrestricted capability grants. MUST NOT be enabled in production builds.
 ## Safe to enable in tests (which also compile under `cfg(test)`) and examples.
@@ -65,14 +64,14 @@ path = "tests/pixel_readback.rs"
 # dev-mode required because pixel_helpers.rs uses config_toml: None.
 # Integration tests are separate binaries; cfg(test) is set in them but NOT
 # in the library they link, so the dev-mode feature must be explicit here.
-required-features = ["headless", "dev-mode"]
+required-features = ["dev-mode"]
 
 [[test]]
 name = "present_ack"
 path = "tests/present_ack.rs"
 # hud-91uu6: headless present-ack producer test uses HeadlessConfig
 # { config_toml: None } (dev-mode) and the headless render surface.
-required-features = ["headless", "dev-mode"]
+required-features = ["dev-mode"]
 
 [lints]
 workspace = true

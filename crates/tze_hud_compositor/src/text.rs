@@ -778,12 +778,6 @@ impl TextRasterizer {
         );
     }
 
-    /// Number of agent-uploaded fonts currently loaded into the `FontSystem`.
-    #[inline]
-    pub fn loaded_font_count(&self) -> usize {
-        self.loaded_font_ids.len()
-    }
-
     /// Returns `true` if the font identified by `resource_id` has already been
     /// loaded into the `FontSystem`.
     #[inline]
@@ -2448,9 +2442,7 @@ impl TextItem {
 
     /// Build a `TextItem` for zone text content driven by a [`RenderingPolicy`].
     ///
-    /// This is the primary factory method for zone rendering — replaces the
-    /// old `from_zone_stream_text` / `from_zone_notification` hardcoded-color
-    /// variants.  All visual properties are read from `policy`; no hardcoded
+    /// This is the factory method for zone rendering.  All visual properties are read from `policy`; no hardcoded
     /// colors or font choices.
     ///
     /// `x`, `y`, `w`, `h` are the zone geometry in physical pixels.
@@ -2519,97 +2511,6 @@ impl TextItem {
             styled_runs: Box::default(),
             viewport: TruncationViewport::HeadAnchored,
             // Zone items do not carry MarkdownTokens; use the canonical default.
-            line_height_multiplier: crate::markdown::MarkdownTokens::default()
-                .line_height_multiplier,
-        }
-    }
-
-    /// Build a `TextItem` for zone `StreamText` content.
-    ///
-    /// `x`, `y`, `w`, `h` are the zone geometry in physical pixels.
-    ///
-    /// # Deprecation note
-    ///
-    /// Prefer [`TextItem::from_zone_policy`] which reads all visual properties
-    /// from `RenderingPolicy`.  This method retains explicit parameters for
-    /// callers that do not yet have a policy (e.g. benchmarks).
-    pub fn from_zone_stream_text(
-        text: &str,
-        x: f32,
-        y: f32,
-        w: f32,
-        h: f32,
-        font_size_px: f32,
-        color: [u8; 4],
-    ) -> Self {
-        let margin = 8.0_f32;
-        TextItem {
-            text: Arc::from(text),
-            pixel_x: x + margin,
-            pixel_y: y + margin,
-            bounds_width: (w - margin * 2.0).max(1.0),
-            bounds_height: (h - margin * 2.0).max(1.0),
-            clip_pixel_x: x + margin,
-            clip_pixel_y: y + margin,
-            clip_bounds_width: (w - margin * 2.0).max(1.0),
-            clip_bounds_height: (h - margin * 2.0).max(1.0),
-            font_size_px: font_size_px.clamp(6.0, 200.0),
-            font_family: FontFamily::SystemSansSerif,
-            font_weight: 400,
-            color,
-            alignment: TextAlign::Start,
-            overflow: TextOverflow::Clip,
-            outline_color: None,
-            outline_width: None,
-            opacity: 1.0,
-            color_runs: Box::default(),
-            styled_runs: Box::default(),
-            viewport: TruncationViewport::HeadAnchored,
-            line_height_multiplier: crate::markdown::MarkdownTokens::default()
-                .line_height_multiplier,
-        }
-    }
-
-    /// Build a `TextItem` for zone `ShortTextWithIcon` / `Notification` content.
-    ///
-    /// For v1, only the `text` field of [`NotificationPayload`] is rendered. Icon
-    /// rendering is stubbed — there is no texture pipeline yet.
-    ///
-    /// `x`, `y`, `w`, `h` are the zone geometry in physical pixels.
-    ///
-    /// [`NotificationPayload`]: tze_hud_scene::types::NotificationPayload
-    pub fn from_zone_notification(
-        text: &str,
-        x: f32,
-        y: f32,
-        w: f32,
-        h: f32,
-        font_size_px: f32,
-        color: [u8; 4],
-    ) -> Self {
-        let margin = 8.0_f32;
-        TextItem {
-            text: Arc::from(text),
-            pixel_x: x + margin,
-            pixel_y: y + margin,
-            bounds_width: (w - margin * 2.0).max(1.0),
-            bounds_height: (h - margin * 2.0).max(1.0),
-            clip_pixel_x: x + margin,
-            clip_pixel_y: y + margin,
-            clip_bounds_width: (w - margin * 2.0).max(1.0),
-            clip_bounds_height: (h - margin * 2.0).max(1.0),
-            font_size_px: font_size_px.clamp(6.0, 200.0),
-            font_family: FontFamily::SystemSansSerif,
-            font_weight: 400,
-            color,
-            alignment: TextAlign::Start,
-            overflow: TextOverflow::Clip,
-            outline_color: None,
-            outline_width: None,
-            opacity: 1.0,
-            color_runs: Box::default(),
-            styled_runs: Box::default(),
-            viewport: TruncationViewport::HeadAnchored,
             line_height_multiplier: crate::markdown::MarkdownTokens::default()
                 .line_height_multiplier,
         }
@@ -3509,49 +3410,6 @@ mod tests {
         // Linear 0.5 → sRGB ~0.735 → ~187 u8
         let v = linear_to_srgb_u8(0.5);
         assert!(v > 180 && v < 200, "midpoint sRGB: {v}");
-    }
-
-    #[test]
-    fn text_item_from_zone_stream_text_insets_margin() {
-        let item = TextItem::from_zone_stream_text(
-            "hello",
-            100.0,
-            200.0,
-            400.0,
-            100.0,
-            14.0,
-            [255, 255, 255, 255],
-        );
-        // margin = 8px on each side
-        assert_eq!(item.pixel_x, 108.0);
-        assert_eq!(item.pixel_y, 208.0);
-        assert_eq!(item.bounds_width, 384.0);
-        assert_eq!(item.bounds_height, 84.0);
-        // New fields default correctly.
-        assert!(item.outline_color.is_none());
-        assert!(item.outline_width.is_none());
-        assert_eq!(item.opacity, 1.0);
-    }
-
-    #[test]
-    fn text_item_from_zone_notification_insets_margin_and_uses_text() {
-        let item = TextItem::from_zone_notification(
-            "Alert: ready",
-            50.0,
-            10.0,
-            300.0,
-            60.0,
-            18.0,
-            [255, 255, 255, 220],
-        );
-        // margin = 8px on each side
-        assert_eq!(item.pixel_x, 58.0);
-        assert_eq!(item.pixel_y, 18.0);
-        assert_eq!(item.bounds_width, 284.0);
-        assert_eq!(item.bounds_height, 44.0);
-        assert_eq!(&*item.text, "Alert: ready");
-        assert_eq!(item.font_size_px, 18.0);
-        assert_eq!(item.color, [255, 255, 255, 220]);
     }
 
     #[test]

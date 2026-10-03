@@ -38,7 +38,7 @@ proof executable. This compiles only; do not run the executable on Linux.
 ```bash
 SOURCE_COMMIT=$(git rev-parse HEAD)
 cargo build --release --target x86_64-pc-windows-gnu \
-  -p render_artifacts --features headless --bin vertical-flow-readback
+  -p render_artifacts --bin vertical-flow-readback
 PROOF_EXE=target/x86_64-pc-windows-gnu/release/vertical-flow-readback.exe
 sha256sum "$PROOF_EXE"
 ```
@@ -46,8 +46,8 @@ sha256sum "$PROOF_EXE"
 Run the offline gates before requesting the GPU window:
 
 ```bash
-cargo test -p render_artifacts --features headless --lib vertical_flow_proof
-cargo test -p render_artifacts --features headless \
+cargo test -p render_artifacts --lib vertical_flow_proof
+cargo test -p render_artifacts \
   --bin vertical-flow-readback
 python3 -m unittest scripts.ci.test_vertical_flow_readback_controller -v
 ```

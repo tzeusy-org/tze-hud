@@ -2660,13 +2660,6 @@ impl WidgetRenderer {
         );
     }
 
-    /// Mark a widget instance as dirty so it will be re-rasterized on the next frame.
-    pub fn mark_dirty(&mut self, instance_name: &str) {
-        if let Some(entry) = self.textures.get_mut(instance_name) {
-            entry.dirty = true;
-        }
-    }
-
     /// Mark a widget instance as dirty and start a transition animation.
     pub fn start_transition(
         &mut self,
@@ -3164,12 +3157,6 @@ impl WidgetRenderer {
         }
     }
 
-    /// Update the render pipeline's output format (e.g. on swapchain reconfiguration).
-    pub fn update_format(&mut self, device: &wgpu::Device, new_format: wgpu::TextureFormat) {
-        self.texture_pipeline =
-            Self::create_texture_pipeline(device, &self.texture_bind_group_layout, new_format);
-    }
-
     /// Get a reference to the texture entry for an instance (for testing / inspection).
     /// Total SVG rasterizations performed for `instance_name` so far.
     pub fn raster_count(&self, instance_name: &str) -> u64 {
@@ -3200,11 +3187,6 @@ impl WidgetRenderer {
         {
             ledger.release_evicted(tze_hud_resource::ResidentClass::WidgetRaster, &id);
         }
-    }
-
-    /// Returns true if any widget instance has an active animation (needs re-rasterize).
-    pub fn has_active_animations(&self) -> bool {
-        self.textures.values().any(|e| e.animation.is_some())
     }
 }
 

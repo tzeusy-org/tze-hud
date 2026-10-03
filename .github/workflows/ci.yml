@@ -491,7 +491,7 @@ jobs:
   # in CI (configured via the LLVMPIPE_CI env var in the test harness).
   #
   # To run locally:
-  #   cargo test -p tze_hud_runtime --test pixel_readback --features headless,dev-mode
+  #   cargo test -p tze_hud_runtime --test pixel_readback --features dev-mode
   #
   # This job is INFORMATIONAL only on PRs and does not block merge.
   # Enable blocking by changing `continue-on-error: true` to `false` once
@@ -532,7 +532,7 @@ jobs:
           cargo test \
             -p tze_hud_runtime \
             --test pixel_readback \
-            --features headless,dev-mode \
+            --features dev-mode \
             -- --nocapture
         env:
           HEADLESS_FORCE_SOFTWARE: "1"

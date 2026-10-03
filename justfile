@@ -68,11 +68,11 @@ test:
 test-gpu:
     test -f {{lvp}} || { echo "missing {{lvp}} (install mesa-vulkan-drivers)"; exit 1; }
     cargo test -p tze_hud_compositor --all-targets --no-run
-    cargo test -p tze_hud_runtime --test pixel_readback --features headless,dev-mode --no-run
+    cargo test -p tze_hud_runtime --test pixel_readback --features dev-mode --no-run
     VK_ICD_FILENAMES={{lvp}} HEADLESS_FORCE_SOFTWARE=1 LLVMPIPE_CI=1 TZE_HUD_REQUIRE_GPU=1 \
         timeout 900 cargo test -p tze_hud_compositor --all-targets
     VK_ICD_FILENAMES={{lvp}} HEADLESS_FORCE_SOFTWARE=1 LLVMPIPE_CI=1 TZE_HUD_REQUIRE_GPU=1 \
-        timeout 900 cargo test -p tze_hud_runtime --test pixel_readback --features headless,dev-mode
+        timeout 900 cargo test -p tze_hud_runtime --test pixel_readback --features dev-mode
 
 # Pure-Python contract tests for the versioned idle artifact gate and its
 # startup-atomic Windows launcher.

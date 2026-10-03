@@ -478,6 +478,13 @@ async fn portal_resize_scales_and_clamps_text_font() {
     assert!((compositor.scaled_portal_font(16.0, tile, &scene) - 9.0).abs() < 1e-4);
 }
 
+/// Run the drag-handle hit-region population exactly as `render_frame_headless`
+/// does: collect the entries, then populate the scene overlay from them.
+fn populate_drag_handles(compositor: &Compositor, scene: &mut SceneGraph, sw: f32, sh: f32) {
+    let handles = compositor.collect_drag_handle_entries(scene, sw, sh);
+    compositor.populate_drag_handle_hit_regions_from(scene, handles);
+}
+
 #[tokio::test]
 async fn drag_handle_regions_cover_visible_tile_zone_and_widget() {
     let (compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);
@@ -591,7 +598,7 @@ async fn drag_handle_regions_cover_visible_tile_zone_and_widget() {
         )
         .unwrap();
 
-    compositor.populate_drag_handle_hit_regions(&mut scene, 1920.0, 1080.0);
+    populate_drag_handles(&compositor, &mut scene, 1920.0, 1080.0);
 
     let kinds: Vec<_> = scene
         .overlay
@@ -675,7 +682,7 @@ async fn drag_handle_hit_test_wins_on_passthrough_tile() {
         tile.input_mode = InputMode::Passthrough;
     }
 
-    compositor.populate_drag_handle_hit_regions(&mut scene, 1920.0, 1080.0);
+    populate_drag_handles(&compositor, &mut scene, 1920.0, 1080.0);
     let handle = scene
         .overlay
         .drag_handle_hit_regions
@@ -708,7 +715,7 @@ async fn drag_handle_hit_test_wins_on_passthrough_tile() {
 /// Stale entries in `drag_handle_states` must be pruned when the
 /// corresponding element is removed from the scene.
 ///
-/// Verifies that `populate_drag_handle_hit_regions` retains only the keys
+/// Verifies that the per-frame drag-handle population retains only the keys
 /// that are still present in the current `drag_handle_hit_regions` set —
 /// the zero-allocation `iter().any()` retain used after [hud-tdtr7] must
 /// have identical semantics to the previous `HashSet`-based approach.
@@ -730,7 +737,7 @@ async fn drag_handle_states_stale_entries_pruned_on_repopulate() {
         .unwrap();
 
     // First populate: tile present → one drag handle and a live state entry.
-    compositor.populate_drag_handle_hit_regions(&mut scene, 1920.0, 1080.0);
+    populate_drag_handles(&compositor, &mut scene, 1920.0, 1080.0);
     assert_eq!(
         scene.overlay.drag_handle_hit_regions.len(),
         1,
@@ -759,14 +766,14 @@ async fn drag_handle_states_stale_entries_pruned_on_repopulate() {
 
     // Second populate: no tiles → no drag handles.  Both state entries
     // (previously-live and phantom) must be pruned.
-    compositor.populate_drag_handle_hit_regions(&mut scene, 1920.0, 1080.0);
+    populate_drag_handles(&compositor, &mut scene, 1920.0, 1080.0);
     assert!(
         scene.overlay.drag_handle_hit_regions.is_empty(),
         "no hit regions expected after tile removal"
     );
     assert!(
         scene.overlay.drag_handle_states.is_empty(),
-        "stale drag_handle_states must be pruned by populate_drag_handle_hit_regions; \
+        "stale drag_handle_states must be pruned by drag-handle repopulation; \
              previously-live id={live_id:?} and phantom must both be removed"
     );
 }
