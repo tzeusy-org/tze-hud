@@ -757,6 +757,7 @@ mod tests {
             }),
             Arc::new(|| {}),
             std::time::Duration::from_millis(300),
+            crate::operator::handoff::Busy::default(),
         ));
         let first = handle_admin(Restart, &post(Some("root-psk")), &src).await;
         assert_eq!(first.status, 202);
@@ -830,6 +831,7 @@ mod tests {
                 Arc::new(|| {}),
                 std::time::Duration::from_millis(50),
                 Box::new(|_| {}),
+                crate::operator::handoff::Busy::default(),
             )
         };
         let body_of = |r: &crate::http::Response| String::from_utf8_lossy(&r.body).into_owned();

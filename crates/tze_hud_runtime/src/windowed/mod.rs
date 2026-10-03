@@ -2630,11 +2630,14 @@ impl WindowedRuntime {
             h.gate().install_quit(Arc::clone(&quit));
             h.gate().clone()
         });
+        // Restart and update both replace the running exe: one in-flight flag.
+        let busy = crate::operator::handoff::Busy::default();
         let restart = cfg.relaunch.as_ref().map(|r| {
             crate::operator::handoff::RestartHandle::new(
                 r.exe.clone(),
                 r.args.clone(),
                 Arc::clone(&quit),
+                busy.clone(),
             )
         });
 
@@ -2652,6 +2655,7 @@ impl WindowedRuntime {
                 crate::operator::status::build_label(),
                 Arc::clone(&quit),
                 Box::new(move |title| card.set(toast_now(title))),
+                busy.clone(),
             ))
         });
         if cfg.updated_from.is_some() {

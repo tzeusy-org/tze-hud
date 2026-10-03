@@ -336,11 +336,51 @@ pub enum RestartError {
 
 type Spawner = dyn Fn(&ChildSpec) -> io::Result<Box<dyn ChildProc>> + Send + Sync;
 
+/// The one in-flight flag for everything that replaces the running exe
+/// (restart and update): either endpoint answers BUSY while the other runs.
+/// Cheap to clone; share one between the handles.
+#[derive(Clone, Default)]
+pub struct Busy(Arc<AtomicBool>);
+
+/// Holds [`Busy`] until dropped, so an early return or a panic cannot wedge
+/// it. [`Self::keep`] is for the one case where this instance is about to exit.
+pub struct BusyGuard {
+    flag: Arc<AtomicBool>,
+    keep: bool,
+}
+
+impl Busy {
+    pub fn try_acquire(&self) -> Option<BusyGuard> {
+        if self.0.swap(true, Ordering::AcqRel) {
+            return None;
+        }
+        Some(BusyGuard {
+            flag: Arc::clone(&self.0),
+            keep: false,
+        })
+    }
+}
+
+impl BusyGuard {
+    /// Stay busy for good (the process is shutting down).
+    pub fn keep(mut self) {
+        self.keep = true;
+    }
+}
+
+impl Drop for BusyGuard {
+    fn drop(&mut self) {
+        if !self.keep {
+            self.flag.store(false, Ordering::Release);
+        }
+    }
+}
+
 struct RestartInner {
     spawn: Box<Spawner>,
     quit: Quit,
     timeout: Duration,
-    busy: AtomicBool,
+    busy: Busy,
     last: Mutex<Option<Result<Ready, String>>>,
 }
 
@@ -357,20 +397,21 @@ impl std::fmt::Debug for RestartHandle {
 
 impl RestartHandle {
     /// Restart `exe` with `original_args` (this process's own argv).
-    pub fn new(exe: PathBuf, original_args: Vec<String>, quit: Quit) -> Self {
+    pub fn new(exe: PathBuf, original_args: Vec<String>, quit: Quit, busy: Busy) -> Self {
         Self::with_spawner(
             Box::new(move |spec| spawn_child(&exe, &original_args, spec)),
             quit,
             HANDOFF_TIMEOUT,
+            busy,
         )
     }
 
-    pub fn with_spawner(spawn: Box<Spawner>, quit: Quit, timeout: Duration) -> Self {
+    pub fn with_spawner(spawn: Box<Spawner>, quit: Quit, timeout: Duration, busy: Busy) -> Self {
         Self(Arc::new(RestartInner {
             spawn,
             quit,
             timeout,
-            busy: AtomicBool::new(false),
+            busy,
             last: Mutex::new(None),
         }))
     }
@@ -378,9 +419,7 @@ impl RestartHandle {
     /// Start a restart in the background and return at once. The caller
     /// answers 202; the outcome shows up in [`Self::last_json`].
     pub fn request(&self) -> Result<(), RestartError> {
-        if self.0.busy.swap(true, Ordering::AcqRel) {
-            return Err(RestartError::Busy);
-        }
+        let guard = self.0.busy.try_acquire().ok_or(RestartError::Busy)?;
         let inner = Arc::clone(&self.0);
         let started = std::thread::Builder::new()
             .name("restart".into())
@@ -389,20 +428,24 @@ impl RestartHandle {
                 let result = handoff(|spec| (inner.spawn)(spec), inner.timeout, move || quit());
                 match &result {
                     // Stay busy: this instance is shutting down.
-                    Ok(ready) => tracing::info!(
-                        pid = ready.pid,
-                        "restart: new instance is ready; shutting down"
-                    ),
+                    Ok(ready) => {
+                        tracing::info!(
+                            pid = ready.pid,
+                            "restart: new instance is ready; shutting down"
+                        );
+                        guard.keep();
+                    }
                     Err(e) => {
                         tracing::error!(error = %e, "restart failed; staying up");
-                        inner.busy.store(false, Ordering::Release);
+                        // Free before `last` is visible: a retry may follow it.
+                        drop(guard);
                     }
                 }
                 *inner.last.lock().unwrap_or_else(|e| e.into_inner()) =
                     Some(result.map_err(|e| e.to_string()));
             });
+        // A failed spawn drops the closure, and with it the guard.
         if started.is_err() {
-            self.0.busy.store(false, Ordering::Release);
             return Err(RestartError::Unavailable);
         }
         Ok(())
@@ -762,6 +805,7 @@ mod tests {
                 q.fetch_add(1, Ordering::SeqCst);
             }),
             SHORT,
+            Busy::default(),
         );
         assert_eq!(h.last_json(), Value::Null);
         h.request().unwrap();
@@ -775,6 +819,22 @@ mod tests {
         assert_eq!(quit_calls.load(Ordering::SeqCst), 0);
         // The silent child timed out, so the old instance may try again.
         h.request().unwrap();
+    }
+
+    #[test]
+    fn busy_guard_releases_on_drop_and_panic_but_not_when_kept() {
+        let busy = Busy::default();
+        let g = busy.try_acquire().unwrap();
+        assert!(busy.try_acquire().is_none());
+        drop(g);
+        let b = busy.clone();
+        let _ = std::thread::spawn(move || {
+            let _g = b.try_acquire().unwrap();
+            panic!("holder panics");
+        })
+        .join();
+        busy.try_acquire().unwrap().keep();
+        assert!(busy.try_acquire().is_none());
     }
 
     #[tokio::test]

@@ -19,14 +19,13 @@ use std::fs::{self, File};
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use minisign_verify::{PublicKey, Signature};
 use serde_json::{Value, json};
 
-use super::handoff::{self, ChildProc, ChildSpec, Quit};
+use super::handoff::{self, Busy, BusyGuard, ChildProc, ChildSpec, Quit};
 use super::install::{InstallPaths, same_path};
 
 /// The release signing public key (the file the release workflow verifies
@@ -44,6 +43,10 @@ const MAX_SIG_BYTES: u64 = 4096;
 const STAGED_EXE: &str = "tze_hud.update.exe";
 const STAGED_SIG: &str = "tze_hud.update.minisig";
 /// Constant failure text for the wire and `last_update.error`.
+/// `last_update.error` when the rollback itself failed (the wire answer stays
+/// the constant `UPDATE_FAILED`).
+const ROLLBACK_FAILED_HINT: &str =
+    "update failed and the previous exe could not be restored; reinstall from the release";
 const FAILED_HINT: &str = "update failed; the running version is unchanged (see the runtime log)";
 
 // ── Channel ──────────────────────────────────────────────────────────────────
@@ -144,7 +147,11 @@ fn system_curl() -> PathBuf {
 fn curl_args(url: &str, out: &Path, timeout: Duration, max_bytes: u64) -> Vec<std::ffi::OsString> {
     let https = url.starts_with("https://");
     let mut args: Vec<std::ffi::OsString> = vec![
+        // First: ignore any .curlrc, which could inject options.
+        "-q".into(),
         "-fsSL".into(),
+        "--max-redirs".into(),
+        "5".into(),
         "--max-time".into(),
         timeout.as_secs().max(1).to_string().into(),
         "--max-filesize".into(),
@@ -212,6 +219,8 @@ pub enum Failure {
     Channel,
     Io(&'static str),
     Handoff(String),
+    /// The new exe failed and the previous one could not be put back.
+    RestoreFailed,
 }
 
 /// Check `exe` against `sig_text` with `public_key`, then the trusted comment
@@ -328,42 +337,71 @@ pub fn stage(
 // ── Swap ─────────────────────────────────────────────────────────────────────
 
 /// Park the running exe as `tze_hud.old.exe`, move the staged exe into place
-/// and run `handoff`. If anything fails, `tze_hud.exe` is the original again.
+/// and run `handoff`. If anything fails, `tze_hud.exe` is the original again
+/// ([`Failure::RestoreFailed`] when even that is impossible).
 pub fn swap_in(
     paths: &InstallPaths,
+    handoff: impl FnOnce() -> Result<(), String>,
+) -> Result<(), Failure> {
+    swap_in_with(paths, &|p: &Path| fs::remove_file(p), handoff)
+}
+
+/// [`swap_in`] with the delete operation injectable (a locked file on
+/// Windows refuses deletion; the swap must not depend on it succeeding).
+fn swap_in_with(
+    paths: &InstallPaths,
+    remove: &dyn Fn(&Path) -> io::Result<()>,
     handoff: impl FnOnce() -> Result<(), String>,
 ) -> Result<(), Failure> {
     let (staged, _) = staged_paths(paths);
     if !staged.is_file() {
         return Err(Failure::Io("staged exe missing"));
     }
-    match fs::remove_file(&paths.old_exe) {
+    match remove(&paths.old_exe) {
         Ok(()) => {}
         Err(e) if e.kind() == io::ErrorKind::NotFound => {}
         Err(_) => return Err(Failure::Io("clear tze_hud.old.exe")),
     }
     fs::rename(&paths.exe, &paths.old_exe).map_err(|_| Failure::Io("park tze_hud.exe"))?;
     if fs::rename(&staged, &paths.exe).is_err() {
-        restore(paths);
+        let restored = restore(paths, remove);
         discard_staged(paths);
-        return Err(Failure::Io("move staged exe into place"));
+        return Err(match restored {
+            Ok(()) => Failure::Io("move staged exe into place"),
+            Err(f) => f,
+        });
     }
     // A panicking handoff must not leave the unproven exe in place.
     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(handoff))
         .unwrap_or_else(|_| Err("handoff panicked".to_owned()));
     if let Err(why) = outcome {
-        restore(paths);
-        return Err(Failure::Handoff(why));
+        return Err(match restore(paths, remove) {
+            Ok(()) => Failure::Handoff(why),
+            Err(f) => f,
+        });
     }
     Ok(())
 }
 
-/// Put `tze_hud.old.exe` back as `tze_hud.exe`, dropping whatever is there.
-fn restore(paths: &InstallPaths) {
-    let _ = fs::remove_file(&paths.exe);
-    if let Err(e) = fs::rename(&paths.old_exe, &paths.exe) {
-        tracing::error!(error = %e, "update rollback could not restore tze_hud.exe");
+/// Put `tze_hud.old.exe` back as `tze_hud.exe`. The failed exe is renamed
+/// aside to `tze_hud.failed.exe` rather than deleted: a mapped or
+/// scanner-locked file can be renamed but not deleted, and a leftover from an
+/// earlier attempt is replaced best-effort.
+fn restore(paths: &InstallPaths, remove: &dyn Fn(&Path) -> io::Result<()>) -> Result<(), Failure> {
+    let failed = paths.failed_exe();
+    let _ = remove(&failed);
+    match fs::rename(&paths.exe, &failed) {
+        Ok(()) => {}
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+        Err(e) => {
+            tracing::error!(error = %e, "update rollback could not move the failed exe aside");
+            return Err(Failure::RestoreFailed);
+        }
     }
+    fs::rename(&paths.old_exe, &paths.exe).map_err(|e| {
+        tracing::error!(error = %e, "update rollback could not restore tze_hud.exe");
+        Failure::RestoreFailed
+    })
 }
 
 // ── Handle ───────────────────────────────────────────────────────────────────
@@ -418,40 +456,9 @@ struct Inner {
     quit: Quit,
     timeout: Duration,
     notify: Box<Notify>,
-    busy: AtomicBool,
-    last: Mutex<Option<Result<String, ()>>>,
-}
-
-/// Clears the busy flag when dropped, so an early return or a panic cannot
-/// leave updates (and restarts' sibling flag) wedged. [`Self::keep`] is for the
-/// one case where this instance is about to exit.
-struct BusyGuard {
-    inner: Arc<Inner>,
-    keep: bool,
-}
-
-impl BusyGuard {
-    fn acquire(inner: &Arc<Inner>) -> Option<Self> {
-        if inner.busy.swap(true, Ordering::AcqRel) {
-            return None;
-        }
-        Some(Self {
-            inner: Arc::clone(inner),
-            keep: false,
-        })
-    }
-
-    fn keep(mut self) {
-        self.keep = true;
-    }
-}
-
-impl Drop for BusyGuard {
-    fn drop(&mut self) {
-        if !self.keep {
-            self.inner.busy.store(false, Ordering::Release);
-        }
-    }
+    busy: Busy,
+    /// `Ok(sha)` or the error text shown in `last_update`.
+    last: Mutex<Option<Result<String, &'static str>>>,
 }
 
 /// Self-update for the installed exe. One update at a time; cheap to clone.
@@ -473,6 +480,7 @@ impl UpdateHandle {
     /// Update `paths.exe`, which must be `current_exe`. The new instance gets
     /// `original_args` plus `--updated-from <current_sha>`. `notify` shows a
     /// toast.
+    #[expect(clippy::too_many_arguments, reason = "wiring from the runtime")]
     pub fn new(
         paths: InstallPaths,
         current_exe: PathBuf,
@@ -481,6 +489,7 @@ impl UpdateHandle {
         current_label: String,
         quit: Quit,
         notify: Box<Notify>,
+        busy: Busy,
     ) -> Self {
         let exe = paths.exe.clone();
         let extra = ["--updated-from".to_owned(), current_sha.clone()];
@@ -495,6 +504,7 @@ impl UpdateHandle {
             quit,
             handoff::HANDOFF_TIMEOUT,
             notify,
+            busy,
         )
     }
 
@@ -510,6 +520,7 @@ impl UpdateHandle {
         quit: Quit,
         timeout: Duration,
         notify: Box<Notify>,
+        busy: Busy,
     ) -> Self {
         Self(Arc::new(Inner {
             cfg,
@@ -522,7 +533,7 @@ impl UpdateHandle {
             quit,
             timeout,
             notify,
-            busy: AtomicBool::new(false),
+            busy,
             last: Mutex::new(None),
         }))
     }
@@ -537,7 +548,7 @@ impl UpdateHandle {
         if !same_path(&inner.current_exe, &inner.paths.exe) {
             return Err(UpdateError::NotInstalled);
         }
-        let guard = BusyGuard::acquire(inner).ok_or(UpdateError::Busy)?;
+        let guard = inner.busy.try_acquire().ok_or(UpdateError::Busy)?;
         let staged = stage(
             &inner.cfg,
             &inner.public_key,
@@ -571,16 +582,28 @@ impl UpdateHandle {
         match &*self.0.last.lock().unwrap_or_else(|e| e.into_inner()) {
             None => Value::Null,
             Some(Ok(sha)) => json!({"ok": true, "sha": sha, "error": Value::Null}),
-            Some(Err(())) => json!({"ok": false, "sha": Value::Null, "error": FAILED_HINT}),
+            Some(Err(why)) => json!({"ok": false, "sha": Value::Null, "error": why}),
         }
     }
 }
 
 impl Inner {
     fn record_failure(&self, why: &Failure) {
-        tracing::error!(cause = ?why, "update failed; still on the running version");
-        *self.last.lock().unwrap_or_else(|e| e.into_inner()) = Some(Err(()));
-        (self.notify)(format!("Update failed; still on {}", self.current_label));
+        tracing::error!(cause = ?why, "update failed");
+        let (error, toast) = if *why == Failure::RestoreFailed {
+            // The one case where "still on <version>" would be false.
+            (
+                ROLLBACK_FAILED_HINT,
+                "Update failed; reinstall tze_hud".to_owned(),
+            )
+        } else {
+            (
+                FAILED_HINT,
+                format!("Update failed; still on {}", self.current_label),
+            )
+        };
+        *self.last.lock().unwrap_or_else(|e| e.into_inner()) = Some(Err(error));
+        (self.notify)(toast);
     }
 
     fn swap_and_handoff(&self, release: Release, guard: BusyGuard) {
@@ -612,6 +635,7 @@ mod tests {
     use super::*;
     use std::io::Write;
     use std::net::TcpListener;
+    use std::sync::atomic::Ordering;
 
     // A throwaway keypair (secret discarded) and signatures over `PAYLOAD`,
     // made with the minisign crate's `sign` (prehashed, as the release
@@ -873,7 +897,10 @@ mod tests {
         assert_eq!(
             args("https://h/x"),
             [
+                "-q",
                 "-fsSL",
+                "--max-redirs",
+                "5",
                 "--max-time",
                 "120",
                 "--max-filesize",
@@ -888,7 +915,11 @@ mod tests {
                 "https://h/x"
             ]
         );
-        assert_eq!(args("http://127.0.0.1:1/x")[5..7], ["--proto", "=http"]);
+        assert!(
+            args("http://127.0.0.1:1/x")
+                .windows(2)
+                .any(|w| w == ["--proto", "=http"])
+        );
     }
 
     #[test]
@@ -913,7 +944,9 @@ mod tests {
         // The handoff ran against the new exe, then the old one came back.
         assert_eq!(*seen_during.lock().unwrap(), PAYLOAD);
         assert_eq!(fs::read(&paths.exe).unwrap(), OLD_EXE);
-        assert_eq!(dir_listing(&paths), ["tze_hud.exe"]);
+        // The failed exe was moved aside, not deleted.
+        assert_eq!(fs::read(paths.failed_exe()).unwrap(), PAYLOAD);
+        assert_eq!(dir_listing(&paths), ["tze_hud.exe", "tze_hud.failed.exe"]);
 
         // A panicking handoff is a failed handoff.
         let paths = installed("swap_panic");
@@ -926,6 +959,115 @@ mod tests {
         let paths = installed("swap_none");
         assert!(matches!(swap_in(&paths, || Ok(())), Err(Failure::Io(_))));
         assert_eq!(dir_listing(&paths), ["tze_hud.exe"]);
+    }
+
+    #[test]
+    fn rollback_renames_the_failed_exe_aside_when_it_cannot_be_deleted() {
+        // Windows refuses to delete a mapped or scanner-locked exe: every
+        // delete fails here, and a stale leftover is already in the way.
+        let locked = |p: &Path| -> io::Result<()> {
+            if p.exists() {
+                Err(io::ErrorKind::PermissionDenied.into())
+            } else {
+                Err(io::ErrorKind::NotFound.into())
+            }
+        };
+        let paths = installed("swap_locked");
+        fs::write(staged_paths(&paths).0, PAYLOAD).unwrap();
+        fs::write(paths.failed_exe(), b"leftover from an earlier rollback").unwrap();
+        let r = swap_in_with(&paths, &locked, || Err("never ready".into()));
+        assert!(matches!(r, Err(Failure::Handoff(_))));
+        assert_eq!(fs::read(&paths.exe).unwrap(), OLD_EXE);
+        assert_eq!(fs::read(paths.failed_exe()).unwrap(), PAYLOAD);
+        assert!(!paths.old_exe.exists());
+    }
+
+    #[test]
+    fn a_rollback_that_cannot_restore_is_reported_distinctly() {
+        let paths = installed("swap_unrestorable");
+        fs::write(staged_paths(&paths).0, PAYLOAD).unwrap();
+        // The parked exe vanishes during the handoff, so nothing can be put back.
+        let r = swap_in(&paths, || {
+            fs::remove_file(&paths.old_exe).unwrap();
+            Err("never ready".into())
+        });
+        assert_eq!(r, Err(Failure::RestoreFailed));
+
+        let server = serve(release_files("/releases/download/dev", PAYLOAD, SIG_DEV_A));
+        let paths = installed("handle_unrestorable");
+        let toasts = Arc::new(Mutex::new(Vec::new()));
+        let t = Arc::clone(&toasts);
+        let old = paths.old_exe.clone();
+        let handle = UpdateHandle::with_parts(
+            cfg(&server.base),
+            TEST_KEY.to_owned(),
+            paths.clone(),
+            paths.exe.clone(),
+            "old".into(),
+            "dev-oldsha1".into(),
+            Box::new(move |_| {
+                // The same loss, mid-handoff, through the handle.
+                let _ = fs::remove_file(&old);
+                Ok(Box::new(Fake(Some("exit 3".into()))))
+            }),
+            Arc::new(|| {}),
+            Duration::from_millis(300),
+            Box::new(move |s| t.lock().unwrap().push(s)),
+            Busy::default(),
+        );
+        assert!(matches!(handle.request("dev"), Ok(Outcome::Started { .. })));
+        wait_until("rollback failure", || !toasts.lock().unwrap().is_empty());
+        assert_eq!(
+            *toasts.lock().unwrap(),
+            ["Update failed; reinstall tze_hud"]
+        );
+        assert_eq!(handle.last_json()["error"], ROLLBACK_FAILED_HINT);
+    }
+
+    #[test]
+    fn update_and_restart_exclude_each_other_through_one_busy_flag() {
+        use super::handoff::{RestartError, RestartHandle};
+        let busy = Busy::default();
+        let server = serve(release_files("/releases/download/dev", PAYLOAD, SIG_DEV_A));
+        let paths = installed("shared_busy");
+        // The update's spawner parks until released, holding the flag.
+        let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+        let release_rx = Mutex::new(release_rx);
+        let update = UpdateHandle::with_parts(
+            cfg(&server.base),
+            TEST_KEY.to_owned(),
+            paths.clone(),
+            paths.exe.clone(),
+            "old".into(),
+            "dev-old".into(),
+            Box::new(move |_| {
+                let _ = release_rx.lock().unwrap().recv();
+                Err(io::Error::other("no spawn"))
+            }),
+            Arc::new(|| {}),
+            Duration::from_millis(50),
+            Box::new(|_| {}),
+            busy.clone(),
+        );
+        let restart = RestartHandle::with_spawner(
+            Box::new(|_| Ok(Box::new(Fake(None)))),
+            Arc::new(|| {}),
+            Duration::from_millis(400),
+            busy.clone(),
+        );
+        // Update running: restart is refused.
+        assert!(matches!(update.request("dev"), Ok(Outcome::Started { .. })));
+        assert_eq!(restart.request(), Err(RestartError::Busy));
+        release_tx.send(()).unwrap();
+        wait_until("update finished", || busy.try_acquire().is_some());
+
+        // Restart running (its silent child times out after 400 ms): update is refused.
+        restart.request().unwrap();
+        assert_eq!(update.request("dev"), Err(UpdateError::Busy));
+        wait_until("restart finished", || !restart.last_json().is_null());
+        // Both flags were released by their guards.
+        assert!(matches!(update.request("dev"), Ok(Outcome::Started { .. })));
+        let _ = release_tx.send(());
     }
 
     struct Fake(Option<String>);
@@ -959,6 +1101,7 @@ mod tests {
             Arc::new(|| {}),
             Duration::from_millis(300),
             Box::new(move |s| t.lock().unwrap().push(s)),
+            Busy::default(),
         );
         Rig {
             handle,
@@ -1022,6 +1165,7 @@ mod tests {
             }),
             Duration::from_secs(5),
             Box::new(|_| {}),
+            Busy::default(),
         );
         assert!(matches!(handle.request("dev"), Ok(Outcome::Started { .. })));
         wait_until("handoff", || quits.load(Ordering::SeqCst) == 1);
@@ -1056,6 +1200,7 @@ mod tests {
             Arc::new(|| {}),
             Duration::from_millis(50),
             Box::new(|_| {}),
+            Busy::default(),
         );
         assert_eq!(outside.request("dev"), Err(UpdateError::NotInstalled));
     }
@@ -1064,6 +1209,7 @@ mod tests {
     fn a_panic_on_the_update_thread_does_not_wedge_updates() {
         let server = serve(release_files("/releases/download/dev", PAYLOAD, SIG_DEV_A));
         let paths = installed("handle_panic");
+        let probe = Busy::default();
         let handle = UpdateHandle::with_parts(
             cfg(&server.base),
             TEST_KEY.to_owned(),
@@ -1076,10 +1222,11 @@ mod tests {
             Duration::from_millis(50),
             // Runs on the update thread after the rollback.
             Box::new(|_| panic!("toast sink panics")),
+            probe.clone(),
         );
         assert!(matches!(handle.request("dev"), Ok(Outcome::Started { .. })));
         wait_until("busy cleared by unwinding", || {
-            !handle.0.busy.load(Ordering::Acquire)
+            probe.try_acquire().is_some()
         });
         assert_eq!(fs::read(&paths.exe).unwrap(), OLD_EXE);
         assert!(matches!(handle.request("dev"), Ok(Outcome::Started { .. })));

@@ -110,12 +110,25 @@ sha is the running sha answers `up_to_date`. The release workflow signs
 A verified exe is staged beside the installed one, the running exe is renamed
 to `tze_hud.old.exe`, the new one takes its name, and the restart handoff below
 runs against it with `--updated-from <old sha>`. If the new build does not
-report ready within 30 s, it is killed, `tze_hud.exe` is put back, and the old
-HUD keeps running. The new HUD toasts `Updated to dev-<sha7>`; a failure toasts
+report ready within 30 s, it is killed, the failed exe is renamed aside to
+`tze_hud.failed.exe` (never deleted in place, since a locked exe cannot be
+deleted; cleaned up at the next start like `tze_hud.old.exe`), `tze_hud.exe` is
+put back, and the old HUD keeps running. If even the put-back fails,
+`last_update.error` and the toast say to reinstall (the HTTP answer stays
+`UPDATE_FAILED`). Update and restart share one in-flight flag: while either
+runs, the other answers 429 `BUSY`. The new HUD toasts `Updated to dev-<sha7>`; a failure toasts
 `Update failed; still on dev-<sha7>`, `last_update` in `/admin/status` is
 `{ok, sha, error}`, and the cause (download, signature, channel, handoff) is in
 the log. Over HTTP every failure is the same `UPDATE_FAILED`. Downloads are
-capped (256 MiB, 120 s per file).
+capped (256 MiB, 120 s per file, 5 redirects) and curl runs with `-q`, so no
+`.curlrc` can add options.
+
+Accepted limits: `TZE_HUD_RELEASES_URL` may be plain `http` (it exists for
+testing); safety then rests on the signature alone. Any validly signed build
+of the same channel is accepted, including an older one, so there is no
+downgrade or replay protection. The window between verifying the staged exe
+and renaming it into place is open to another process running as the same
+user, who could already replace the installed exe directly.
 
 ## Restart and handoff
 

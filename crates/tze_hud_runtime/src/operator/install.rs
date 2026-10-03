@@ -21,6 +21,8 @@ pub const APP_DIR_NAME: &str = "tze_hud";
 pub const EXE_NAME: &str = "tze_hud.exe";
 /// The previous exe, parked here while a running instance holds the lock on it.
 pub const OLD_EXE_NAME: &str = "tze_hud.old.exe";
+/// A new exe that failed its handoff and was renamed aside by a rollback.
+pub const FAILED_EXE_NAME: &str = "tze_hud.failed.exe";
 /// `HKCU` Run value name.
 pub const RUN_VALUE_NAME: &str = "tze_hud";
 pub const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
@@ -103,6 +105,11 @@ impl InstallPaths {
     }
 
     /// The command line autostart and the post-install relaunch both use.
+    /// `<install_dir>\tze_hud.failed.exe`
+    pub fn failed_exe(&self) -> PathBuf {
+        self.install_dir.join(FAILED_EXE_NAME)
+    }
+
     pub fn run_command(&self) -> String {
         format!(
             "\"{}\" --config \"{}\" --window-mode overlay",
@@ -254,12 +261,14 @@ pub fn stage_files(
     })
 }
 
-/// Delete the exe parked by a previous upgrade. Best effort.
+/// Delete the exes parked by a previous upgrade or a rolled-back one. Best effort.
 pub fn cleanup_old_exe(paths: &InstallPaths) {
-    if let Err(e) = fs::remove_file(&paths.old_exe)
-        && e.kind() != io::ErrorKind::NotFound
-    {
-        tracing::debug!(error = %e, "could not remove tze_hud.old.exe");
+    for path in [&paths.old_exe, &paths.failed_exe()] {
+        if let Err(e) = fs::remove_file(path)
+            && e.kind() != io::ErrorKind::NotFound
+        {
+            tracing::debug!(error = %e, path = %path.display(), "could not remove a parked exe");
+        }
     }
 }
 
