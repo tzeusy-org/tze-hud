@@ -625,6 +625,64 @@ async fn prime_truncation_cache_is_commit_primed_before_render_frame_headless() 
     );
 }
 
+/// The mid-resize re-prime cadence gate bounds re-prime cost while still
+/// picking up the settled geometry: a scene change inside the interval is
+/// deferred (marker unchanged), and once the interval has elapsed the next
+/// prime advances to the latest scene version. Time is controlled by
+/// setting `resize_reprime_last_at` (future = inside the interval, far past =
+/// elapsed) so there are no sleeps and no wall-clock races.
+#[tokio::test]
+async fn resize_reprime_cadence_defers_inside_interval_then_primes_settled_geometry() {
+    use tze_hud_scene::types::{
+        FontFamily, NodeData, Rect, TextAlign, TextMarkdownNode, TextOverflow,
+    };
+
+    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(64, 64).await);
+    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
+
+    let node = Node {
+        layout: Default::default(),
+        id: SceneId::new(),
+        children: vec![],
+        data: NodeData::TextMarkdown(TextMarkdownNode {
+            content: "The quick brown fox jumps over the lazy dog.".repeat(4),
+            bounds: Rect::new(0.0, 0.0, 64.0, 16.0),
+            font_size_px: 12.0,
+            font_family: FontFamily::SystemMonospace,
+            color: tze_hud_scene::types::Rgba::WHITE,
+            background: None,
+            alignment: TextAlign::Start,
+            overflow: TextOverflow::Ellipsis,
+            color_runs: Box::default(),
+        }),
+    };
+    let mut scene = scene_with_node(node);
+
+    // First prime ever (no prior timestamp) is never deferred.
+    compositor.prime_truncation_cache(&scene);
+    assert_eq!(compositor.truncation_cache_scene_version, scene.version);
+    let primed_version = scene.version;
+
+    // A geometry change inside the interval is deferred.
+    scene.version += 1;
+    compositor.resize_reprime_last_at =
+        Some(std::time::Instant::now() + std::time::Duration::from_secs(3600));
+    compositor.prime_truncation_cache(&scene);
+    assert_eq!(
+        compositor.truncation_cache_scene_version, primed_version,
+        "re-prime inside the cadence interval must be deferred"
+    );
+
+    // Once the interval has elapsed the settled geometry is primed.
+    compositor.resize_reprime_last_at =
+        std::time::Instant::now().checked_sub(std::time::Duration::from_secs(3600));
+    compositor.prime_truncation_cache(&scene);
+    assert_eq!(
+        compositor.truncation_cache_scene_version, scene.version,
+        "re-prime after the interval elapsed must pick up the latest scene version"
+    );
+}
+
 /// hud-uyhpn benchmark: a portal drag-move is position-only, so it must NOT
 /// re-prime the version-gated content caches. This measures re-primes per drag
 /// frame two ways over the REAL cache gates:

@@ -414,3 +414,40 @@ fn resolve_tile_bg_token_default_override() {
         c.b
     );
 }
+
+/// Pins the user-visible design-token fallback colors (linear sRGB) the
+/// compositor paints when a token is absent: text/markdown tile background and
+/// notification urgency low/normal. These are the compositor-side mirror of the
+/// token defaults in `tze_hud_config` (see `CANONICAL_TOKENS` in
+/// `crates/tze_hud_config/src/tokens.rs`); change them together, or an
+/// unconfigured HUD silently changes color.
+#[test]
+fn token_fallback_colors_match_canonical_defaults() {
+    let empty: HashMap<String, String> = HashMap::new();
+    let tile_bg = resolve_tile_bg_token(
+        &empty,
+        "color.tile.background.text_markdown",
+        TILE_BG_TEXT_MARKDOWN,
+    );
+    let cases = [
+        ("tile bg text_markdown", tile_bg, [0.15, 0.15, 0.25]),
+        (
+            "notification urgency low",
+            urgency_to_notification_color(0, &empty),
+            [0.0, 0.0, 0.0],
+        ),
+        (
+            "notification urgency normal",
+            urgency_to_notification_color(1, &empty),
+            [0.0037, 0.007, 0.0194],
+        ),
+    ];
+    for (name, got, want) in cases {
+        for (ch, (g, w)) in [got.r, got.g, got.b].into_iter().zip(want).enumerate() {
+            assert!(
+                (g - w).abs() < 1e-4,
+                "{name} channel {ch}: got {g}, want {w}"
+            );
+        }
+    }
+}
