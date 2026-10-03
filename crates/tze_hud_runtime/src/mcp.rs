@@ -77,6 +77,10 @@ pub struct McpServerConfig {
     /// opens (the old instance still holds the ports), retrying for
     /// [`crate::operator::handoff::BIND_RETRY`].
     pub bind_gate: Option<crate::operator::handoff::BindGate>,
+
+    /// First-run pairing behind `POST /pair`; the route answers
+    /// `PAIRING_CLOSED` without one.
+    pub pairing: Option<Arc<crate::pairing::Pairing>>,
 }
 
 /// Start the MCP HTTP server on the calling Tokio runtime.
@@ -171,13 +175,18 @@ pub async fn start_mcp_http_server_with_render_wake(
     crate::operator::status::process_start();
     let admin = Arc::new(StatusSource {
         agents: config.agents.clone(),
-        // In deferred mode this fills in as the listeners bind.
-        binds: Arc::new(std::sync::Mutex::new(local_addrs.clone())),
+        // In deferred mode this fills in as the listeners bind. Pairing reads
+        // the same list for the address it shows and hands out.
+        binds: match &config.pairing {
+            Some(pairing) => pairing.binds(&local_addrs),
+            None => Arc::new(std::sync::Mutex::new(local_addrs.clone())),
+        },
         safe_mode: Arc::clone(&safe_mode),
         presents: config.presents.clone(),
         capture: config.capture.clone(),
         restart: config.restart.clone(),
         update: config.update.clone(),
+        pairing: config.pairing.clone(),
         log_path: crate::operator::logs::log_path(),
     });
 
@@ -391,7 +400,7 @@ async fn handle_connection(
     server: Arc<McpServer>,
     admin: Arc<StatusSource>,
 ) {
-    use crate::http::{self, ReadError, Response, Route};
+    use crate::http::{self, OperatorCode, OperatorError, ReadError, Response, Route};
     use tokio::io::AsyncWriteExt;
 
     let response = match http::read_request(&mut stream, http::READ_TIMEOUT).await {
@@ -403,6 +412,13 @@ async fn handle_connection(
                 let body = std::str::from_utf8(&req.body).unwrap_or("");
                 Response::json(server.dispatch(body, &ctx).await)
             }
+            Route::Pair => match &admin.pairing {
+                Some(pairing) => pairing.pair(&req.body),
+                None => Response::operator_error(
+                    403,
+                    &OperatorError::new(OperatorCode::PairingClosed, "pairing is not available"),
+                ),
+            },
             Route::Admin(which) => handle_admin(which, &req, &admin).await,
             Route::Respond(resp) => resp,
         },
@@ -550,6 +566,7 @@ mod tests {
             restart: None,
             update: None,
             bind_gate: None,
+            pairing: None,
         }
     }
 
@@ -642,6 +659,7 @@ mod tests {
             capture: None,
             restart: None,
             update: None,
+            pairing: None,
             log_path,
         }
     }
@@ -1040,6 +1058,7 @@ mod tests {
             restart: None,
             update: None,
             bind_gate: None,
+            pairing: None,
         };
         let shutdown = ShutdownToken::new();
 
@@ -1084,6 +1103,7 @@ mod tests {
             restart: None,
             update: None,
             bind_gate: None,
+            pairing: None,
         };
         let shutdown = ShutdownToken::new();
         let (handle, addrs) = start_mcp_http_server(make_scene(), config, shutdown.clone(), None)
@@ -1118,6 +1138,7 @@ mod tests {
             restart: None,
             update: None,
             bind_gate: None,
+            pairing: None,
         };
         let shutdown = ShutdownToken::new();
         let (handle, addrs) = start_mcp_http_server(
@@ -1162,6 +1183,7 @@ mod tests {
             restart: None,
             update: None,
             bind_gate: None,
+            pairing: None,
         };
         let shutdown = ShutdownToken::new();
 
@@ -1202,6 +1224,7 @@ mod tests {
             restart: None,
             update: None,
             bind_gate: None,
+            pairing: None,
         };
         let shutdown = ShutdownToken::new();
 
@@ -1274,6 +1297,7 @@ mod tests {
             restart: None,
             update: None,
             bind_gate: None,
+            pairing: None,
         };
         let shutdown = ShutdownToken::new();
 
@@ -1314,6 +1338,7 @@ mod tests {
             restart: None,
             update: None,
             bind_gate: None,
+            pairing: None,
         };
         let shutdown = ShutdownToken::new();
 

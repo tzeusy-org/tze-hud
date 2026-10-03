@@ -144,6 +144,9 @@ OPTIONS:
                            instance. Keeps %APPDATA%\tze_hud (config, paired agents).
     --purge                With --uninstall: also delete %APPDATA%\tze_hud and
                            %LOCALAPPDATA%\tze_hud (config, agents, logs)
+    --pair                 Ask the running instance to show a pairing code on the
+                           HUD, then exit. An agent trades the code for its key
+                           with POST /pair (Ctrl+Shift+P on the HUD does the same).
     --handoff              Wait up to 35 s for a previous instance to exit instead
                            of exiting 0 because one is already running
     --handoff <ip:port:nonce>
@@ -221,6 +224,8 @@ struct StartupOptions {
     uninstall: bool,
     /// `--purge` (with `--uninstall`): also delete config and data dirs.
     purge: bool,
+    /// `--pair`: ask the running instance to open pairing, then exit.
+    pair: bool,
     /// `--handoff`: wait for a previous instance to exit before starting.
     handoff: bool,
     /// `--handoff <spec>`: started by a running instance's restart; report
@@ -253,6 +258,7 @@ impl Default for StartupOptions {
             install: false,
             uninstall: false,
             purge: false,
+            pair: false,
             handoff: false,
             handoff_child: None,
             updated_from: None,
@@ -449,6 +455,7 @@ fn parse_options(args: &[String]) -> Result<StartupOptions, String> {
                     .ok_or("--updated-from requires a hex git sha")?;
                 opts.updated_from = Some(sha.clone());
             }
+            "--pair" => opts.pair = true,
             "--handoff" => match args.get(i + 1).filter(|next| !next.starts_with("--")) {
                 // A restart's `--handoff <ip:port:nonce>`.
                 Some(spec) => {
@@ -821,6 +828,16 @@ fn run_uninstall(paths: &InstallPaths, purge: bool) -> ! {
     }
 }
 
+/// `--pair`: ask the running instance to open pairing, then exit.
+fn run_pair() -> ! {
+    if install::signal_pair() {
+        println!("pairing code is on the HUD; valid for 5 minutes");
+        std::process::exit(0);
+    }
+    eprintln!("error: no running tze_hud to pair with (start it first; --pair is Windows only)");
+    std::process::exit(1);
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Bind the standard handles to the launching terminal ONCE, before any
     // output is produced (hud-q2glv). This is the GUI-subsystem console fix
@@ -877,6 +894,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         use std::io::Write;
         let _ = std::io::stdout().flush();
         std::process::exit(0);
+    }
+
+    // ── `--pair`: signal the running instance and exit ────────────────────────
+    if opts.pair {
+        run_pair();
     }
 
     // ── Install / uninstall / single instance (T6) ────────────────────────────
@@ -1198,6 +1220,7 @@ mod tests {
                         || o.install
                         || o.uninstall
                         || o.purge
+                        || o.pair
                         || o.handoff
                         || o.handoff_child.is_some()
                         || o.updated_from.is_some())
@@ -1209,6 +1232,7 @@ mod tests {
             ("uninstall --purge", &[], &["--uninstall", "--purge"], |o| {
                 assert!(o.uninstall && o.purge);
             }),
+            ("pair", &[], &["--pair"], |o| assert!(o.pair)),
             ("handoff", &[], &["--handoff"], |o| {
                 assert!(o.handoff && o.handoff_child.is_none())
             }),

@@ -223,6 +223,8 @@ pub struct StatusSource {
     pub restart: Option<crate::operator::handoff::RestartHandle>,
     /// Self-update behind `POST /admin/update`.
     pub update: Option<crate::operator::update::UpdateHandle>,
+    /// First-run pairing behind `POST /pair`.
+    pub pairing: Option<Arc<crate::pairing::Pairing>>,
 }
 
 /// Window over which `cpu_pct_2s` is sampled.

@@ -32,6 +32,9 @@ pub const MUTEX_NAME: &str = "Local\\tze_hud";
 /// Named event the uninstaller (and an upgrading installer) signals to ask the
 /// running instance to shut down cleanly.
 pub const QUIT_EVENT_NAME: &str = "Local\\tze_hud.quit";
+/// Named event `tze_hud --pair` signals to ask the running instance to open
+/// pairing and show a code.
+pub const PAIR_EVENT_NAME: &str = "Local\\tze_hud.pair";
 /// How long `--handoff` waits for the previous instance to release the mutex.
 pub const HANDOFF_WAIT: Duration = Duration::from_secs(35);
 
@@ -417,11 +420,29 @@ pub fn spawn_quit_listener(on_quit: impl FnOnce() + Send + 'static) {
     let _ = on_quit;
 }
 
+/// Run `on_pair` each time another process signals the pair event. The
+/// listener thread sleeps in the kernel between signals. No-op off Windows.
+pub fn spawn_pair_listener(on_pair: impl Fn() + Send + 'static) {
+    #[cfg(windows)]
+    win::spawn_pair_listener(on_pair);
+    #[cfg(not(windows))]
+    let _ = on_pair;
+}
+
+/// Ask a running instance to open pairing. True if one was listening; always
+/// false off Windows.
+pub fn signal_pair() -> bool {
+    #[cfg(windows)]
+    return win::signal_pair();
+    #[cfg(not(windows))]
+    false
+}
+
 #[cfg(windows)]
 mod win {
     use super::{
-        APP_PATHS_KEY, Acquire, InstallPaths, InstanceGuard, MUTEX_NAME, QUIT_EVENT_NAME, RUN_KEY,
-        RUN_VALUE_NAME,
+        APP_PATHS_KEY, Acquire, InstallPaths, InstanceGuard, MUTEX_NAME, PAIR_EVENT_NAME,
+        QUIT_EVENT_NAME, RUN_KEY, RUN_VALUE_NAME,
     };
     use std::ffi::{OsStr, OsString, c_void};
     use std::io;
@@ -557,7 +578,16 @@ mod win {
 
     /// Ask a running instance to shut down. True if one was listening.
     pub(super) fn signal_quit() -> bool {
-        let name = wide(QUIT_EVENT_NAME);
+        signal(QUIT_EVENT_NAME)
+    }
+
+    /// Ask a running instance to open pairing. True if one was listening.
+    pub(super) fn signal_pair() -> bool {
+        signal(PAIR_EVENT_NAME)
+    }
+
+    fn signal(event_name: &str) -> bool {
+        let name = wide(event_name);
         // SAFETY: `name` is a live NUL-terminated buffer; the handle is closed.
         unsafe {
             let Ok(event) = OpenEventW(EVENT_MODIFY_STATE, false, PCWSTR(name.as_ptr())) else {
@@ -600,6 +630,37 @@ mod win {
                 return Acquire::AlreadyRunning;
             }
             std::thread::sleep(Duration::from_millis(250));
+        }
+    }
+
+    pub(super) fn spawn_pair_listener(on_pair: impl Fn() + Send + 'static) {
+        let name = wide(PAIR_EVENT_NAME);
+        // Auto-reset: each signal wakes the listener once.
+        // SAFETY: `name` is a live NUL-terminated buffer.
+        let event = match unsafe { CreateEventW(None, false, false, PCWSTR(name.as_ptr())) } {
+            Ok(e) => e.0 as usize,
+            Err(e) => {
+                tracing::warn!(error = %e, "pair event unavailable; --pair disabled");
+                return;
+            }
+        };
+        let spawned = std::thread::Builder::new()
+            .name("pair-listener".into())
+            .spawn(move || {
+                loop {
+                    // SAFETY: the event handle lives for the process lifetime.
+                    let waited =
+                        unsafe { WaitForSingleObject(HANDLE(event as *mut c_void), INFINITE) };
+                    if waited != WAIT_OBJECT_0 {
+                        tracing::warn!("pair event wait failed; --pair disabled");
+                        return;
+                    }
+                    tracing::info!("pair event signalled");
+                    on_pair();
+                }
+            });
+        if let Err(e) = spawned {
+            tracing::warn!(error = %e, "could not start pair listener");
         }
     }
 

@@ -8,7 +8,8 @@ attach/poll/detach a portal, and a structured error.
 
 The seeded agent also holds `admin`, so the operator endpoints
 (/admin/status, /admin/logs, /admin/screenshot) are checked too, and last
-POST /admin/restart: the HUD relaunches itself, the new process (a different
+POST /admin/restart (after a `--pair` check: /pair is closed until asked, then
+refuses a wrong code): the HUD relaunches itself, the new process (a different
 pid, uptime reset) answers with the same PSK, and the old process exits.
 
 The config is copied to a temp dir with a seeded agents.toml beside it holding
@@ -250,6 +251,34 @@ def check_admin(smoke: Smoke) -> None:
     check_screenshot(smoke)
 
 
+def pair_post(smoke: Smoke, code: str) -> tuple[int, bytes]:
+    base = smoke.url.rsplit("/", 1)[0]
+    body = json.dumps({"agent": "ci-pair", "code": code}).encode()
+    req = urllib.request.Request(base + "/pair", data=body)  # no bearer: the code is the credential
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return resp.status, resp.read()
+    except urllib.error.HTTPError as err:
+        return err.code, err.read()
+
+
+def check_pair(smoke: Smoke, exe: Path) -> None:
+    """/pair is closed while agents exist; `--pair` opens it, and a wrong code is refused."""
+    status, body = pair_post(smoke, "000000")
+    assert status == 403 and b"PAIRING_CLOSED" in body, f"/pair before --pair: {status} {body[:200]!r}"
+    done = subprocess.run([str(exe), "--pair"], capture_output=True, text=True, timeout=30)
+    assert done.returncode == 0, f"--pair: exit {done.returncode} {done.stderr.strip()}"
+    # The signal is asynchronous: PAIRING_CLOSED until the listener has opened pairing.
+    deadline = time.monotonic() + 10
+    while True:
+        status, body = pair_post(smoke, "not-a-code")
+        if b"PAIRING_CLOSED" not in body or time.monotonic() >= deadline:
+            break
+        time.sleep(0.25)
+    assert status == 403 and b"PAIR_CODE_INVALID" in body, f"/pair wrong code: {status} {body[:200]!r}"
+    print("ok  /pair closed until --pair, then a wrong code -> 403 PAIR_CODE_INVALID")
+
+
 def kill_pid(pid: int) -> None:
     if sys.platform == "win32":
         subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)], capture_output=True)
@@ -349,6 +378,7 @@ def main() -> int:
         check_admin(smoke)
         assert proc.poll() is None, f"tze_hud exited after the checks (code {proc.returncode})"
         print("ok  HUD still running after the checks")
+        check_pair(smoke, args.exe)
         restarted_pid = check_restart(smoke, proc)
         return 0
     except AssertionError as err:

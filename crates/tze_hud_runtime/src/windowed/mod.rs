@@ -329,6 +329,9 @@ struct WindowedRuntimeState {
     /// Runtime system card / toast slot. Runtime-owned and never in the scene
     /// graph, so agents cannot observe it; setting it wakes the render loop.
     system_card: crate::shell::system_card::SystemCardHandle,
+    /// First-run pairing (`None` when the MCP port is disabled); Ctrl+Shift+P
+    /// and `--pair` open it.
+    pairing: Option<Arc<crate::pairing::Pairing>>,
     /// Input channel (ring buffer) — main thread writes, compositor thread reads.
     input_ring: Arc<std::sync::Mutex<std::collections::VecDeque<InputEvent>>>,
     /// Pending Stage 1/2 input latency samples for the next compositor frame.
@@ -2279,6 +2282,15 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                                     .insert("F9".to_string());
                                 return;
                             }
+                            PhysicalKey::Code(KeyCode::KeyP) => {
+                                if let Some(pairing) = &self.state.pairing {
+                                    pairing.open();
+                                }
+                                self.state
+                                    .consumed_shell_shortcut_keydowns
+                                    .insert(physical_key_to_key_code_str(&event.physical_key));
+                                return;
+                            }
                             PhysicalKey::Code(KeyCode::F8) => {
                                 self.cycle_monitor(event_loop, -1);
                                 self.state
@@ -2582,6 +2594,17 @@ impl WindowedRuntime {
         let active_tab_mirror = Arc::new(std::sync::Mutex::new(None));
         let chrome_state = Arc::new(std::sync::RwLock::new(crate::shell::ChromeState::new()));
         let system_card = crate::shell::system_card::SystemCardHandle::new(render_wake.clone());
+        let cfg_agents_empty = cfg.agents.load().is_empty();
+        let pairing = (cfg.mcp_port > 0).then(|| {
+            Arc::new(crate::pairing::Pairing::system(
+                Arc::clone(&cfg.agents),
+                tze_hud_config::agents_path_for(
+                    cfg.config_file_path.as_deref().map(std::path::Path::new),
+                ),
+                system_card.clone(),
+                cfg.grpc_port,
+            ))
+        });
         let resident_limits = runtime_context.resident_store_limits();
         let shared_state = Arc::new(Mutex::new(SharedState {
             scene: Arc::clone(&shared_scene),
@@ -2765,6 +2788,7 @@ impl WindowedRuntime {
                     restart,
                     update,
                     bind_gate,
+                    pairing: pairing.clone(),
                 };
                 let mcp_shutdown = shutdown.clone();
                 match rt.rt.block_on(start_mcp_http_server_with_render_wake(
@@ -2795,6 +2819,16 @@ impl WindowedRuntime {
             }
         } else {
             tracing::info!("MCP HTTP server disabled (mcp_port = 0)");
+        }
+
+        // First run: no agent exists, so show a pairing code. `tze_hud --pair`
+        // opens it again later.
+        if let Some(pairing) = &pairing {
+            if cfg_agents_empty {
+                pairing.open();
+            }
+            let pairing = Arc::clone(pairing);
+            crate::operator::install::spawn_pair_listener(move || pairing.open());
         }
 
         // ── Safe-mode global hotkey (hud-jm8nq.10) ─────────────────────────────
@@ -2842,6 +2876,7 @@ impl WindowedRuntime {
             crate::portal_projection_driver::InProcessPortalDriver::new();
 
         let app_state = WindowedRuntimeState {
+            pairing,
             config: cfg,
             wake,
             scheduled_main_deadline: None,

@@ -17,12 +17,6 @@ pub(crate) mod chrome;
 #[expect(dead_code, reason = "freeze is never activated; see hud-bstmy.5.6")]
 pub(crate) mod freeze;
 pub(crate) mod safe_mode;
-// The card producers (pairing, update and event toasts) are not wired yet; this
-// expectation fails to compile once they are, which is the cue to drop it.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "card producers are not wired yet")
-)]
 pub(crate) mod system_card;
 
 pub(crate) use chrome::{
