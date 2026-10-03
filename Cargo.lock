@@ -2515,7 +2515,6 @@ dependencies = [
  "tze_hud_compositor",
  "tze_hud_runtime",
  "tze_hud_scene",
- "tze_hud_telemetry",
 ]
 
 [[package]]
@@ -3580,7 +3579,6 @@ dependencies = [
  "toml 0.8.23",
  "tracing",
  "tze_hud_scene",
- "tze_hud_widget",
 ]
 
 [[package]]
@@ -3598,17 +3596,13 @@ dependencies = [
 name = "tze_hud_mcp"
 version = "0.1.0"
 dependencies = [
- "blake3",
- "quick-xml 0.41.0",
  "serde",
  "serde_json",
- "subtle",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
  "tze_hud_projection",
  "tze_hud_scene",
- "uuid",
 ]
 
 [[package]]
@@ -3652,7 +3646,6 @@ dependencies = [
  "tze_hud_protocol",
  "tze_hud_resource",
  "tze_hud_scene",
- "tze_hud_telemetry",
  "tze_hud_widget",
  "uuid",
 ]
@@ -3887,10 +3880,8 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 name = "vertical_slice"
 version = "0.1.0"
 dependencies = [
- "serde_json",
  "tokio",
  "tokio-stream",
- "tonic",
  "tze_hud_compositor",
  "tze_hud_config",
  "tze_hud_input",
@@ -3898,8 +3889,6 @@ dependencies = [
  "tze_hud_runtime",
  "tze_hud_scene",
  "tze_hud_telemetry",
- "wgpu",
- "winit",
 ]
 
 [[package]]

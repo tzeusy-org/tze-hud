@@ -11,6 +11,8 @@
 #   just test-integration   # integration headless suites
 #   just production-boot    # vertical_slice production config boot
 #   just canonical-app-boot # canonical app production config boot
+#   just deps-unused        # cargo machete: unused dependencies (blocking in CI)
+#   just dead-code <crate>  # advisory list of dead pub items in one crate
 #   just dev-mode-guard     # verify dev-mode is not in release default features
 #   just idle-efficiency-checker # fail-closed idle artifact contract tests
 #   just ci        # full CI gate (all jobs in dependency order, excluding GPU/Windows-only)
@@ -132,9 +134,20 @@ dev-mode-guard:
     cargo metadata --format-version 1 --no-deps \
         | python3 scripts/ci/check_dev_mode_defaults.py
 
+# Unused dependencies via cargo-machete (cargo install --locked cargo-machete).
+# Needs no build. False positives go in [package.metadata.cargo-machete] ignored.
+deps-unused:
+    cargo machete
+
+# Advisory dead-item list for one crate: narrows its pub items to pub(crate) in a
+# temp copy (keeping names other crates use) and prints rustc dead_code warnings.
+# Example: just dead-code tze_hud_telemetry
+dead-code crate:
+    python3 scripts/dead_code.py {{crate}}
+
 # ── Full local CI sweep ───────────────────────────────────────────────────────
 
 # Run all CI gates that are feasible locally (excludes Windows perf budget and
 # GPU pixel-readback, which need specific hardware or Mesa llvmpipe + GPU).
 # Runs in the same logical order as CI: fast-fail gates first, then tests.
-ci: check fmt clippy dev-mode-guard idle-efficiency-checker test test-integration test-python token-footprint production-boot canonical-app-boot
+ci: check fmt clippy deps-unused dev-mode-guard idle-efficiency-checker test test-integration test-python token-footprint production-boot canonical-app-boot

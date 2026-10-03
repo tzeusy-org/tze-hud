@@ -14,7 +14,6 @@ dev-mode = []
 [dependencies]
 tze_hud_scene = { path = "../tze_hud_scene", version = "0.1.0" }
 tze_hud_widget = { path = "../tze_hud_widget", version = "0.1.0" }
-tze_hud_telemetry = { path = "../tze_hud_telemetry", version = "0.1.0" }
 tze_hud_resource = { path = "../tze_hud_resource", version = "0.1.0" }
 tokio = { workspace = true }
 tonic = { workspace = true }
@@ -51,6 +50,10 @@ tempfile = { workspace = true }
 
 [build-dependencies]
 tonic-build = "0.13"
+
+[package.metadata.cargo-machete]
+# Referenced only by the tonic-build generated code (`::prost::Message` derives).
+ignored = ["prost"]
 
 [lints]
 workspace = true

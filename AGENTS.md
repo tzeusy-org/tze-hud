@@ -15,6 +15,8 @@ just test            # cargo test --workspace --all-targets --exclude integratio
 just test-integration # integration headless suites
 just production-boot # vertical_slice production config boot
 just canonical-app-boot # canonical app production config boot
+just deps-unused     # cargo machete: unused dependencies
+just dead-code <crate> # advisory dead pub-item list for one crate
 just dev-mode-guard  # verify dev-mode not in release default features
 just ci              # full CI sweep (all of the above in order)
 ```

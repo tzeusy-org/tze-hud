@@ -25,11 +25,7 @@ tze_hud_protocol = { path = "../../crates/tze_hud_protocol", version = "0.1.0" }
 tze_hud_input = { path = "../../crates/tze_hud_input", version = "0.1.0" }
 tze_hud_telemetry = { path = "../../crates/tze_hud_telemetry", version = "0.1.0" }
 tokio = { workspace = true }
-tonic = { workspace = true }
 tokio-stream = { workspace = true }
-wgpu = { workspace = true }
-winit = { workspace = true }
-serde_json = { workspace = true }
 
 [dev-dependencies]
 # dev-mode activated for test builds: tests/budget_assertions.rs uses config_toml: None
