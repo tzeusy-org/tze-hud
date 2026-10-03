@@ -743,6 +743,38 @@ impl InProcessPortalDriver {
         self.drive.detach(projection_id);
     }
 
+    /// Viewer dismiss of a tile from the hover close button.
+    ///
+    /// If the tile belongs to a portal projection, the projection is dropped
+    /// from the authority and the drive map first, so the next `hud_publish` to
+    /// that portal (stale owner token) attaches a fresh one and `hud_input`
+    /// forgets the holding. The tile's lease is then reclaimed like any other
+    /// viewer dismiss ([`crate::shell::dismiss_tile`]). Local and immediate;
+    /// nothing waits on the agent.
+    pub fn viewer_dismiss_tile(
+        &mut self,
+        scene: &mut SceneGraph,
+        tile_id: SceneId,
+    ) -> crate::shell::DismissTileResult {
+        if let Some(lease_id) = scene.tiles.get(&tile_id).map(|t| t.lease_id) {
+            let projection_id = self
+                .drive
+                .entries
+                .iter()
+                .find(|(_, entry)| entry.scene_lease_id == Some(lease_id))
+                .map(|(id, _)| id.clone());
+            if let Some(projection_id) = projection_id {
+                self.authority.expire_projection(&projection_id);
+                self.drive.forget(&projection_id);
+                tracing::info!(
+                    proj_id = %projection_id,
+                    "portal: viewer dismissed surface — projection dropped"
+                );
+            }
+        }
+        crate::shell::dismiss_tile(scene, tile_id)
+    }
+
     /// Latch a single attached projection's upstream as ungracefully dropped
     /// (hud-5i16d), flipping it to the degraded treatment.
     ///
@@ -5492,6 +5524,65 @@ mod tests {
         assert!(
             driver.authority_mut().next_due_projection_id().is_none(),
             "hud-bsr7u: no portal may remain due after detach + drain"
+        );
+    }
+
+    /// Viewer dismiss of a portal tile drops the projection and reclaims the
+    /// driver's lease; the old owner token is dead (the MCP layer treats that as
+    /// "attach fresh on the next `hud_publish`"), and a fresh attach + publish
+    /// materialises a new tile under a new lease.
+    #[test]
+    fn viewer_dismiss_portal_detaches_and_next_publish_reattaches() {
+        let mut driver = InProcessPortalDriver::new();
+        let mut scene = SceneGraph::new(1920.0, 1080.0);
+        let mut processor = InputProcessor::new();
+        let tab_id = scene.create_tab("Main", 0).unwrap();
+
+        let token = attach_and_get_token(&mut driver, "proj-dismiss");
+        driver.attach_projection("proj-dismiss", Vec::new());
+        publish(&mut driver, "proj-dismiss", &token, "live transcript", 100);
+        driver.drain_inner(&mut scene, &mut processor, Some(tab_id), 100);
+        let old_lease = driver.drive.entries["proj-dismiss"]
+            .scene_lease_id
+            .expect("portal lease");
+        let tile_id = *scene.tiles.keys().next().expect("portal tile");
+
+        let dismissed = driver.viewer_dismiss_tile(&mut scene, tile_id);
+
+        let expiry = dismissed.expiry.expect("portal lease reclaimed");
+        assert_eq!(expiry.lease_id, old_lease);
+        assert_eq!(scene.tile_count(), 0, "tile removed immediately");
+        assert!(!scene.lease_is_active(&old_lease));
+        assert!(!driver.drive.entries.contains_key("proj-dismiss"));
+        let stale = driver.authority_mut().handle_publish_output(
+            PublishOutputRequest {
+                envelope: test_envelope(
+                    ProjectionOperation::PublishOutput,
+                    "proj-dismiss",
+                    "pub-stale",
+                ),
+                owner_token: token,
+                output_text: "after dismiss".to_string(),
+                output_kind: OutputKind::Assistant,
+                content_classification: ContentClassification::Private,
+                logical_unit_id: None,
+                coalesce_key: None,
+                expects_reply: false,
+            },
+            "test-caller",
+            200,
+        );
+        assert!(!stale.accepted, "the dismissed portal's token is dead");
+
+        let token = attach_and_get_token_at(&mut driver, "proj-dismiss", 300);
+        driver.attach_projection("proj-dismiss", Vec::new());
+        publish(&mut driver, "proj-dismiss", &token, "fresh", 300);
+        driver.drain_inner(&mut scene, &mut processor, Some(tab_id), 300);
+        assert_eq!(scene.tile_count(), 1, "re-attach paints a fresh portal");
+        assert_ne!(
+            driver.drive.entries["proj-dismiss"].scene_lease_id,
+            Some(old_lease),
+            "the fresh portal gets a new lease"
         );
     }
 

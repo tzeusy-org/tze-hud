@@ -167,6 +167,24 @@ impl SceneGraph {
         Ok(())
     }
 
+    /// Viewer dismiss of a tile: the human override reclaims the tile's whole
+    /// lease (invariant 3). Every tile and zone/widget publication the lease
+    /// owns is removed and the lease ends `Revoked`, in any non-terminal state
+    /// (Active, Orphaned, Suspended), with no agent veto.
+    ///
+    /// Returns the `LeaseExpiry` the runtime forwards to the owning session
+    /// (which sends `Reclaimed{OVERRIDE}`), or `None` for an unknown tile or an
+    /// already-terminal lease.
+    pub fn viewer_dismiss_tile(&mut self, tile_id: SceneId) -> Option<LeaseExpiry> {
+        let lease_id = self.tiles.get(&tile_id)?.lease_id;
+        if self.leases.get(&lease_id)?.state.is_terminal() {
+            return None;
+        }
+        let expiry = self.reap_lease(lease_id, LeaseState::Revoked);
+        self.version += 1;
+        Some(expiry)
+    }
+
     /// Whether a lease is present AND in the `Active` state (mutations allowed).
     ///
     /// Returns `false` for an unknown lease, or for a lease in any non-Active

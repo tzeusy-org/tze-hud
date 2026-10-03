@@ -27,7 +27,7 @@ use super::Compositor;
 use super::draw_cmds::DragHandleEntry;
 use super::token_colors::{
     notification_action_button_bounds, notification_dismiss_bounds, resolve_jump_to_latest_tokens,
-    resolve_scroll_indicator_tokens,
+    resolve_scroll_indicator_tokens, resolve_tile_close_tokens, tile_close_button_bounds,
 };
 use crate::pipeline::{RectVertex, rect_vertices};
 
@@ -222,6 +222,28 @@ impl Compositor {
                 tab_order,
             });
             tab_order += 1;
+        }
+
+        // ── Viewer close button hit region (hud-jm8nq.11) ────────────────────
+        // Only the hovered tile has a button, at the exact bounds the renderer
+        // draws (`tile_close_button_bounds`). Pointer-up on it dismisses the
+        // tile locally; the agent never sees the press.
+        if let Some(tile) = self.tile_close_target(scene) {
+            let tile_id = tile.id;
+            let bounds =
+                tile_close_button_bounds(tile.bounds, &resolve_tile_close_tokens(&self.token_map));
+            scene.overlay.zone_hit_regions.insert(
+                0,
+                ZoneHitRegion {
+                    zone_name: "__chrome_tile_close__".to_string(),
+                    published_at_wall_us: 0,
+                    publisher_namespace: "runtime".to_string(),
+                    bounds,
+                    kind: ZoneInteractionKind::DismissTile { tile_id },
+                    interaction_id: format!("tile-close:{tile_id}"),
+                    tab_order,
+                },
+            );
         }
     }
 }

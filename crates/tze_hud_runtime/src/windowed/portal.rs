@@ -2148,6 +2148,8 @@ mod tests {
             input_history_seed_states: std::collections::HashMap::new(),
             focus_ring_owner_state: Arc::new(StdMutex::new(None)),
             resize_grip_hover_state: Arc::new(StdMutex::new(None)),
+            tile_close_hover_state: Arc::new(StdMutex::new(None)),
+            cursor_left_window: false,
             composer_visual_layout: Arc::new(StdMutex::new(None)),
             portal_projection_driver: crate::portal_projection_driver::InProcessPortalDriver::new(),
             portal_op_rx: None,

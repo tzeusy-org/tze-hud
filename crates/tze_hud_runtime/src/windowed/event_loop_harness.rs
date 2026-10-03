@@ -163,6 +163,8 @@ impl WindowedRuntimeState {
             input_history_seed_states: HashMap::new(),
             focus_ring_owner_state: Arc::new(StdMutex::new(None)),
             resize_grip_hover_state: Arc::new(StdMutex::new(None)),
+            tile_close_hover_state: Arc::new(StdMutex::new(None)),
+            cursor_left_window: false,
             composer_visual_layout: Arc::new(StdMutex::new(None)),
             portal_projection_driver: crate::portal_projection_driver::InProcessPortalDriver::new(),
             portal_op_rx: None,
@@ -442,6 +444,25 @@ impl HeadlessEventLoopHarness {
             .active_publishes
             .get(zone)
             .map_or(0, Vec::len)
+    }
+
+    /// Dismiss every tile on screen the way the hover close button does, through
+    /// the runtime's real viewer-dismiss entry (`InProcessPortalDriver::viewer_dismiss_tile`).
+    pub fn viewer_dismiss_all_tiles(&mut self) {
+        let state = self.app.state.shared_state.try_lock().expect(BUSY);
+        let mut scene = state.scene.try_lock().expect(BUSY);
+        let ids: Vec<SceneId> = scene.tiles.keys().copied().collect();
+        let expiries: Vec<_> = ids
+            .into_iter()
+            .filter_map(|id| {
+                self.app
+                    .state
+                    .portal_projection_driver
+                    .viewer_dismiss_tile(&mut scene, id)
+                    .expiry
+            })
+            .collect();
+        super::publish_lease_expiries(self.app.state.lease_expirations.as_ref(), expiries);
     }
 
     /// Number of tiles on screen (portal surfaces included).
@@ -747,6 +768,90 @@ mod tests {
             1,
             "an action press must not dismiss the notification"
         );
+    }
+
+    /// Hovering a tile publishes it as the close-button target (and not while the
+    /// pointer is outside the window); a press on the close button, dispatched
+    /// through the real pointer-up path, removes the tile on the spot and
+    /// publishes one `Revoked` lease notice for its agent's `Reclaimed{OVERRIDE}`.
+    #[test]
+    fn viewer_close_button_dismisses_hovered_tile_and_notifies_owner() {
+        use tze_hud_scene::types::{LeaseState, ZoneHitRegion};
+
+        let mut harness = HeadlessEventLoopHarness::new();
+        let sender = tze_hud_protocol::session_server::LeaseExpirySender::default();
+        let mut notices = sender.subscribe();
+        harness.app.state.lease_expirations = Some(sender);
+        let (lease_id, tile_id) = {
+            let shared = harness.app.state.shared_state.blocking_lock();
+            let mut scene = shared.scene.blocking_lock();
+            *scene = SceneGraph::new(1920.0, 1080.0);
+            let tab = scene.create_tab("Main", 0).unwrap();
+            let lease = scene.grant_lease("agent", 60_000);
+            let tile = scene
+                .create_tile(
+                    tab,
+                    "agent",
+                    lease,
+                    Rect::new(100.0, 100.0, 400.0, 300.0),
+                    5,
+                )
+                .unwrap();
+            harness.app.state.pipeline.hit_test_snapshot.store(Arc::new(
+                crate::pipeline::HitTestSnapshot::from_scene(&scene),
+            ));
+            (lease, tile)
+        };
+
+        let hover = |app: &mut WinitApp, x: f32, y: f32| {
+            app.state.cursor_x = x;
+            app.state.cursor_y = y;
+            app.push_tile_close_hover();
+            *app.state.tile_close_hover_state.lock().unwrap()
+        };
+        assert_eq!(hover(&mut harness.app, 300.0, 200.0), Some(tile_id));
+        assert_eq!(hover(&mut harness.app, 900.0, 900.0), None);
+        harness.app.state.cursor_left_window = true;
+        assert_eq!(hover(&mut harness.app, 300.0, 200.0), None);
+        harness.app.state.cursor_left_window = false;
+
+        // The compositor registers the button's hit region once the tile is
+        // hovered; stand in for it here (the harness has no compositor).
+        let (bx, by) = (450.0, 110.0);
+        harness
+            .app
+            .state
+            .shared_state
+            .blocking_lock()
+            .scene
+            .blocking_lock()
+            .overlay
+            .zone_hit_regions
+            .push(ZoneHitRegion {
+                zone_name: "__chrome_tile_close__".into(),
+                published_at_wall_us: 0,
+                publisher_namespace: "runtime".into(),
+                bounds: Rect::new(bx - 10.0, by - 10.0, 20.0, 20.0),
+                kind: ZoneInteractionKind::DismissTile { tile_id },
+                interaction_id: format!("tile-close:{tile_id}"),
+                tab_order: 0,
+            });
+        harness.click(bx, by);
+        harness.drain();
+
+        assert_eq!(harness.tile_count(), 0, "dismiss is local and immediate");
+        let notice = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .unwrap()
+            .block_on(async {
+                tokio::time::timeout(std::time::Duration::from_secs(1), notices.recv()).await
+            })
+            .expect("the dismissed tile's owner is notified")
+            .expect("notice");
+        assert_eq!(notice.lease_id, lease_id);
+        assert_eq!(notice.terminal_state, LeaseState::Revoked);
+        assert_eq!(notice.removed_tiles, vec![tile_id]);
     }
 
     /// Install one ordinary focused button (not a portal composer/control) and

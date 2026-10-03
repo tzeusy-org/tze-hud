@@ -4742,3 +4742,94 @@ mod inline_subtree_materialization {
         assert_eq!(scene.node_count(), 0, "no partial materialization");
     }
 }
+
+/// Viewer dismiss reclaims the tile's whole lease (human override) from every
+/// live state (Active, Orphaned, Suspended), reports the transition once, takes
+/// every tile and zone publication the lease owns, and leaves other agents alone.
+#[test]
+fn viewer_dismiss_tile_revokes_lease_in_any_live_state() {
+    let mut scene = SceneGraph::new(1920.0, 1080.0);
+    scene.zone_registry = ZoneRegistry::with_defaults();
+    let tab = scene.create_tab("Main", 0).unwrap();
+    let tile_for = |scene: &mut SceneGraph, ns: &str, lease| {
+        scene
+            .create_tile(tab, ns, lease, Rect::new(0.0, 0.0, 100.0, 100.0), 1)
+            .unwrap()
+    };
+
+    let bystander_lease = scene.grant_lease("other", 60_000);
+    let bystander_tile = tile_for(&mut scene, "other", bystander_lease);
+    scene
+        .publish_to_zone_for_lease(
+            "pip",
+            ZoneContent::SolidColor(Rgba::WHITE),
+            "other",
+            None,
+            None,
+            None,
+            Vec::new(),
+            Some(bystander_lease),
+        )
+        .unwrap();
+
+    for previous in [
+        LeaseState::Active,
+        LeaseState::Orphaned,
+        LeaseState::Suspended,
+    ] {
+        let lease = scene.grant_lease("agent", 60_000);
+        let (tile, second) = (
+            tile_for(&mut scene, "agent", lease),
+            tile_for(&mut scene, "agent", lease),
+        );
+        scene
+            .publish_to_zone_for_lease(
+                "subtitle",
+                ZoneContent::StreamText("agent".into()),
+                "agent",
+                None,
+                None,
+                None,
+                Vec::new(),
+                Some(lease),
+            )
+            .unwrap();
+        match previous {
+            LeaseState::Orphaned => scene.disconnect_lease(&lease, 1_000).unwrap(),
+            LeaseState::Suspended => scene.suspend_lease(&lease, 1_000).unwrap(),
+            _ => {}
+        }
+
+        let expiry = scene.viewer_dismiss_tile(tile).expect("lease reclaimed");
+        assert_eq!(expiry.lease_id, lease);
+        assert_eq!(expiry.previous_state, previous);
+        assert_eq!(expiry.terminal_state, LeaseState::Revoked);
+        let mut removed = expiry.removed_tiles.clone();
+        removed.sort();
+        let mut both = vec![tile, second];
+        both.sort();
+        assert_eq!(removed, both, "dismiss reclaims the lease's other tile too");
+        assert!(!scene.tiles.contains_key(&tile) && !scene.tiles.contains_key(&second));
+        assert!(
+            scene
+                .zone_registry
+                .active_for_zone("subtitle")
+                .iter()
+                .all(|r| r.publisher_namespace != "agent"),
+            "the lease's zone publication is reclaimed"
+        );
+        assert!(
+            scene.viewer_dismiss_tile(tile).is_none(),
+            "a second dismiss finds nothing to reclaim"
+        );
+        assert!(scene.tiles.contains_key(&bystander_tile));
+        assert!(
+            scene
+                .zone_registry
+                .active_for_zone("pip")
+                .iter()
+                .any(|r| r.publisher_namespace == "other"),
+            "another agent's publication survives"
+        );
+    }
+}

@@ -94,6 +94,11 @@ pub use focus_ring::{FocusRingOwner, FocusRingOwnerHandle};
 /// tile's grip to `portal.window.resize_grip.hover_color`. Latest-wins — a plain
 /// overwrite-and-read, mirroring [`FocusRingOwnerHandle`].
 pub type ResizeGripHoverHandle = Arc<StdMutex<Option<SceneId>>>;
+
+/// Shared single-slot handle carrying the tile the pointer is over, whose viewer
+/// close button the compositor should show (hud-jm8nq.11). Same latest-wins
+/// overwrite-and-read contract as [`ResizeGripHoverHandle`].
+pub type TileCloseHoverHandle = Arc<StdMutex<Option<SceneId>>>;
 use image_cache::apply_composer_slot;
 pub use image_cache::{
     ComposerVisualLayoutHandle, ImageTextureEntry, LocalComposerState, LocalComposerStateHandle,
@@ -577,6 +582,12 @@ pub struct Compositor {
     /// when the pointer is over that portal's bottom-right resize corner; `None`
     /// otherwise (every grip renders resting).
     pub(crate) resize_grip_hover: Option<SceneId>,
+    /// Shared handle carrying the tile whose viewer close button is showing
+    /// (pointer over the tile). Drained at frame start into `tile_close_hover`.
+    pub tile_close_hover_state: TileCloseHoverHandle,
+    /// Most-recently drained close-button hover target for this frame. `Some(tile)`
+    /// draws that tile's close button and registers its hit region.
+    pub(crate) tile_close_hover: Option<SceneId>,
     /// Most-recently drained local composer state for this frame.
     ///
     /// Populated by draining `local_composer_state` at frame start.
@@ -841,6 +852,8 @@ impl Compositor {
             focus_ring_owner: None,
             resize_grip_hover_state: Arc::new(StdMutex::new(None)),
             resize_grip_hover: None,
+            tile_close_hover_state: Arc::new(StdMutex::new(None)),
+            tile_close_hover: None,
             local_composer: None,
             composer_caret_blink_start: std::time::Instant::now(),
             composer_caret_rendered_phase: None,
@@ -1164,6 +1177,8 @@ impl Compositor {
             focus_ring_owner: None,
             resize_grip_hover_state: Arc::new(StdMutex::new(None)),
             resize_grip_hover: None,
+            tile_close_hover_state: Arc::new(StdMutex::new(None)),
+            tile_close_hover: None,
             local_composer: None,
             composer_caret_blink_start: std::time::Instant::now(),
             composer_caret_rendered_phase: None,
@@ -1576,6 +1591,9 @@ impl Compositor {
         if let Ok(slot) = self.resize_grip_hover_state.lock() {
             self.resize_grip_hover = *slot;
         }
+        if let Ok(slot) = self.tile_close_hover_state.lock() {
+            self.tile_close_hover = *slot;
+        }
         new_draft
     }
 
@@ -1610,6 +1628,7 @@ impl Compositor {
         let was_active = self.local_composer.is_some();
         let previous_focus_ring_owner = self.focus_ring_owner;
         let previous_resize_grip_hover = self.resize_grip_hover;
+        let previous_tile_close_hover = self.tile_close_hover;
         let draft_applied = self.drain_local_composer_state();
         let is_active = self.local_composer.is_some();
         // The caret only changes pixels when its phase flips; between toggles an
@@ -1625,6 +1644,7 @@ impl Compositor {
         draft_applied
             || was_active != is_active
             || caret_toggled
+            || previous_tile_close_hover != self.tile_close_hover
             || focus_or_grip_changed(
                 previous_focus_ring_owner,
                 self.focus_ring_owner,

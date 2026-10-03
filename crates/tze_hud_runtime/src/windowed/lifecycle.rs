@@ -1395,6 +1395,29 @@ impl WinitApp {
         }
     }
 
+    /// Publish the tile under the pointer to the compositor so it shows that
+    /// tile's viewer close button (hud-jm8nq.11).
+    ///
+    /// Resolved from the polled cursor and the lock-free hit-test snapshot, so
+    /// it works in passthrough overlay mode (where the OS delivers no pointer
+    /// events and `refresh_cursor_position_from_os` supplies the cursor) and
+    /// needs no scene lock. Latest-wins: the compositor renders only when the
+    /// target changes, so an idle HUD stays idle.
+    pub(super) fn push_tile_close_hover(&self) {
+        let target = (!self.state.cursor_left_window)
+            .then(|| {
+                self.state
+                    .pipeline
+                    .hit_test_snapshot
+                    .load()
+                    .close_hover_target(self.state.cursor_x, self.state.cursor_y)
+            })
+            .flatten();
+        if let Ok(mut slot) = self.state.tile_close_hover_state.lock() {
+            *slot = target;
+        }
+    }
+
     pub(super) fn drain_input_capture_commands(&mut self) {
         while let Ok(command) = self.state.input_capture_rx.try_recv() {
             self.state.pending_input_capture_commands.push_back(command);
@@ -1626,6 +1649,9 @@ impl WinitApp {
         // `portal_resize_outcome` carries the geometry snapshot from a pointer-driven
         // portal resize step so that `dispatch_portal_geometry_event` can be called
         // without holding the scene lock.
+        // Terminal lease transitions from viewer dismisses (hover close button),
+        // published to the owning sessions once the scene lock is released.
+        let mut viewer_dismiss_expiries: Vec<tze_hud_scene::types::LeaseExpiry> = Vec::new();
         let drag_released: Option<DragReleasedData>;
         let portal_resize_outcome: Option<PortalResizePointerOutcome>;
         // Flag set when a composer focus-lost transition is detected inside the
@@ -1949,6 +1975,23 @@ impl WinitApp {
                             ZoneInteractionKind::DragHandle { .. } => {
                                 // Handled by the drag state machine below — not here.
                             }
+                            ZoneInteractionKind::DismissTile { tile_id } => {
+                                // Human override: reclaim the tile's lease on
+                                // this thread's own scene lock, so the tile is
+                                // gone before the next frame. The agent learns
+                                // of it via `Reclaimed{OVERRIDE}`, published
+                                // after the lock is released.
+                                let dismissed = self
+                                    .state
+                                    .portal_projection_driver
+                                    .viewer_dismiss_tile(&mut scene, *tile_id);
+                                tracing::debug!(
+                                    tile_id = ?tile_id,
+                                    reclaimed = dismissed.expiry.is_some(),
+                                    "viewer dismiss: tile close button pressed"
+                                );
+                                viewer_dismiss_expiries.extend(dismissed.expiry);
+                            }
                             ZoneInteractionKind::JumpToLatest { tile_id } => {
                                 // Local feedback first: snap the tile's
                                 // viewport back to the tail synchronously, in
@@ -2066,6 +2109,12 @@ impl WinitApp {
         if let Some(released) = drag_released {
             self.persist_drag_release(released);
         }
+
+        // ── Post-lock: tell the dismissed tiles' agents ───────────────────────
+        super::publish_lease_expiries(
+            self.state.lease_expirations.as_ref(),
+            viewer_dismiss_expiries,
+        );
 
         // ── Post-lock: broadcast geometry event after pointer-affordance resize ─
         // Tile bounds were already updated inside the lock (local-first).  We

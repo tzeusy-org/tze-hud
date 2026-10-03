@@ -48,6 +48,13 @@ shell state exposes no portal identity or transcript.
 - `tze_hud_config` `safe_mode_hotkey_defaults_overrides_and_rejects_garbage`
 - `integration` `shell_dismiss_override_removes_portal_tile`,
   `shell_status_snapshot_exposes_no_portal_identity_or_transcript`
+- viewer dismiss (hover close button): `tze_hud_scene`
+  `viewer_dismiss_tile_revokes_lease_in_any_live_state`; `tze_hud_protocol`
+  `viewer_dismiss_tile_pushes_reclaimed_override`; `tze_hud_runtime`
+  `viewer_dismiss_portal_detaches_and_next_publish_reattaches`,
+  `viewer_close_button_dismisses_hovered_tile_and_notifies_owner`; `integration`
+  `poc_portal_viewer_dismiss_then_mcp_verbs`;
+  `tze_hud_compositor` `tile_close_button_draw_and_hit_region_share_token_geometry`
 - `tze_hud_mcp` `hud_publish_in_safe_mode_returns_safe_mode_active`,
   `safe_mode_does_not_regrant_suspended_mcp_lease`,
   `resume_restores_mcp_publishing`
