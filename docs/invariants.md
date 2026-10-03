@@ -55,6 +55,12 @@ shell state exposes no portal identity or transcript.
   `viewer_close_button_dismisses_hovered_tile_and_notifies_owner`; `integration`
   `poc_portal_viewer_dismiss_then_mcp_verbs`;
   `tze_hud_compositor` `tile_close_button_draw_and_hit_region_share_token_geometry`
+- hung agents (a raw HTTP/2 client that stops reading until the server's send
+  buffer to it is full): `integration`
+  `poc_override_safe_mode_wins_with_hung_grpc_agent`,
+  `poc_override_exit_safe_mode_with_agent_hung_during_it`; a responsive agent
+  is told, `poc_override_notifies_the_agent` (`SessionSuspended`,
+  `SessionResumed`, `Reclaimed{OVERRIDE}`)
 - `tze_hud_mcp` `hud_publish_in_safe_mode_returns_safe_mode_active`,
   `safe_mode_does_not_regrant_suspended_mcp_lease`,
   `resume_restores_mcp_publishing`
@@ -80,7 +86,9 @@ rest of the agent's namespace.
   `grpc_grace_expiry_reclaims_orphaned_lease_and_rejects_resume`
 - `tze_hud_runtime` (headless frame sweep) `render_frame_reclaims_orphaned_lease_after_grace`
 - `tze_hud_compositor` (badge draw command) `orphaned_tile_emits_disconnection_badge_draw_cmd`
-- `integration` (POC acceptance) `poc_portal_abandoned_is_reclaimed`
+- `integration` (POC acceptance, over gRPC and MCP with `production.toml`)
+  `poc_portal_abandoned_is_reclaimed`, `poc_tile_claim_with_placement_two_round_trips`,
+  `poc_tile_update_then_orphan_then_reclaim_after_grace`
 - `tze_hud_scene` `tile_lease_reap_keeps_same_namespace_mcp_publications`,
   `revoked_lease_clears_only_its_publications`
 

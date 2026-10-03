@@ -297,6 +297,15 @@ impl HudSession for HudSessionImpl {
             // Transition: Handshaking/Resuming → Active (RFC 0005 §1.1)
             session.transition(SessionState::Active);
 
+            // Safe mode reaches this stream through the registry: it needs
+            // the outbound sender to send `SessionSuspended`/`SessionResumed`.
+            // `remove_session` at cleanup drops it.
+            state
+                .lock()
+                .await
+                .sessions
+                .register_server_message_tx(&session.session_id, tx.clone());
+
             // Register the durable input lane only after the session has an
             // authenticated namespace. This prevents unrelated or incomplete
             // sessions from accumulating transactional input for other agents.

@@ -1338,7 +1338,11 @@ name = "integration"
 version = "0.1.0"
 dependencies = [
  "blake3",
+ "bytes",
+ "h2",
+ "http",
  "image",
+ "prost",
  "serde",
  "serde_json",
  "tiktoken-rs",

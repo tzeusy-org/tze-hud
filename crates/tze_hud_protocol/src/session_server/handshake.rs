@@ -116,7 +116,6 @@ pub(super) async fn handle_session_init(
         subscriptions::filter_subscriptions(&init.initial_subscriptions, &granted_capabilities);
 
     let session_uuid = uuid::Uuid::now_v7();
-    let session_id = session_uuid.to_string();
     let namespace = identity.agent_id.clone();
     let resume_token = uuid::Uuid::now_v7().as_bytes().to_vec();
     let scene_session_id = tze_hud_scene::SceneId::from_uuid(session_uuid);
@@ -148,14 +147,17 @@ pub(super) async fn handle_session_init(
     }
 
     // Register session in the session registry and capture upload rate config.
-    let upload_rate_limit_bytes_per_sec = {
+    let (session_id, upload_rate_limit_bytes_per_sec) = {
         let mut st = state.lock().await;
-        let _ = st.sessions.register(&namespace, &granted_capabilities);
-        st.resource_store.upload_rate_limit_bytes_per_sec()
+        let registered = st.sessions.register(&namespace, &granted_capabilities);
+        (
+            registered.session_id,
+            st.resource_store.upload_rate_limit_bytes_per_sec(),
+        )
     };
     let session_open_at = now_wall_us();
     let mut session = StreamSession {
-        session_id: session_id.clone(),
+        session_id,
         namespace: namespace.clone(),
         agent_name: namespace.clone(),
         capabilities: granted_capabilities,
@@ -297,7 +299,6 @@ pub(super) async fn handle_session_resume(
 
     // Step 3: Build restored session.
     let session_uuid = uuid::Uuid::now_v7();
-    let session_id = session_uuid.to_string();
     let namespace = identity.agent_id.clone();
     // Issue a fresh single-use token for the resumed session (RFC 0005 §6.3).
     let new_resume_token = uuid::Uuid::now_v7().as_bytes().to_vec();
@@ -345,15 +346,18 @@ pub(super) async fn handle_session_resume(
     // Register the resumed agent in the session registry so shared-state
     // operations (e.g. lease grant, broadcast) can find it, and capture the
     // current upload-rate configuration for this session.
-    let upload_rate_limit_bytes_per_sec = {
+    let (session_id, upload_rate_limit_bytes_per_sec) = {
         let mut st = state.lock().await;
-        let _ = st.sessions.register(&namespace, &identity.permissions);
-        st.resource_store.upload_rate_limit_bytes_per_sec()
+        let registered = st.sessions.register(&namespace, &identity.permissions);
+        (
+            registered.session_id,
+            st.resource_store.upload_rate_limit_bytes_per_sec(),
+        )
     };
 
     let session_open_at = now_wall_us();
     let mut session = StreamSession {
-        session_id: session_id.clone(),
+        session_id,
         namespace: namespace.clone(),
         agent_name: namespace.clone(),
         // Permissions come from the current config, not the pre-disconnect set.
