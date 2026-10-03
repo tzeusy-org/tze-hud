@@ -11,14 +11,18 @@ just check           # cargo check (fast compilation gate)
 just fmt             # cargo fmt --check
 just fmt-fix         # cargo fmt (apply formatting)
 just clippy          # cargo clippy --workspace --all-targets -D warnings
-just test            # cargo test --workspace --all-targets --exclude integration
+just test            # cargo test --workspace --all-targets --exclude integration (incl. GPU + pixel_readback)
+just test-gpu        # GPU subset only (compositor + pixel_readback), llvmpipe-pinned
 just test-integration # integration headless suites
+just test-python     # pure-Python suites (pytest + scripts/ci unittest)
+just token-footprint # deterministic LLM-facing token-footprint gate
+just idle-efficiency-checker # fail-closed idle artifact contract tests
 just production-boot # vertical_slice production config boot
 just canonical-app-boot # canonical app production config boot
 just deps-unused     # cargo machete: unused dependencies
 just dead-code <crate> # advisory dead pub-item list for one crate
-just dev-mode-guard  # verify dev-mode not in release default features
-just ci              # full CI sweep (all of the above in order)
+just dev-mode-guard  # verify dev-mode is not enabled in any package's default-build dependency closure
+just ci              # full local CI sweep (all blocking gates except test-gpu, which `test` already covers)
 ```
 
 The toolchain is pinned in `rust-toolchain.toml` (Rust 1.88, matching CI and the

@@ -6,22 +6,29 @@
 #   just           # run the default gate (check)
 #   just fmt       # format check
 #   just clippy    # lint check
-#   just test      # unit tests (workspace, excludes integration)
-#   just test-gpu  # compositor + pixel_readback GPU tests on llvmpipe
+#   just test      # workspace tests (excludes integration), incl. GPU + pixel_readback tests
+#   just test-gpu  # GPU subset only (compositor + pixel_readback), llvmpipe-pinned, with timeouts
 #   just test-integration   # integration headless suites
+#   just test-python        # pure-Python suites (pytest + scripts/ci unittest)
+#   just token-footprint    # deterministic LLM-facing token-footprint gate
 #   just production-boot    # vertical_slice production config boot
 #   just canonical-app-boot # canonical app production config boot
 #   just deps-unused        # cargo machete: unused dependencies (blocking in CI)
 #   just dead-code <crate>  # advisory list of dead pub items in one crate
-#   just dev-mode-guard     # verify dev-mode is not in release default features
+#   just dev-mode-guard     # verify dev-mode is not enabled in any package's default build
 #   just idle-efficiency-checker # fail-closed idle artifact contract tests
-#   just ci        # full CI gate (all jobs in dependency order, excluding Windows-only; test-gpu is separate)
+#   just ci        # full local gate sweep (see the `ci` recipe; no Windows-only jobs)
+#
+# GPU tests (compositor render tests + runtime pixel_readback) already run inside
+# `just test` and therefore `just ci`, as they do in the blocking CI test-unit job
+# (workspace feature unification enables tze_hud_runtime/dev-mode, so pixel_readback
+# is built and run). `just test-gpu` runs just that GPU subset and fails if the
+# llvmpipe ICD is missing (the strict GPU lane).
 #
 # Every recipe that builds a GPU device pins the Vulkan loader to Mesa llvmpipe
 # when its ICD is installed: with a hardware ICD (e.g. NVIDIA) next to it,
-# concurrent device construction can wedge the driver. `just test-gpu` (compositor
-# + pixel_readback, fails if llvmpipe is missing) is the strict GPU lane. Do not
-# run bare `cargo test -p tze_hud_compositor` on a host with a hardware GPU ICD.
+# concurrent device construction can wedge the driver. Do not run bare
+# `cargo test -p tze_hud_compositor` on a host with a hardware GPU ICD.
 #
 # Building needs protoc >= 3.15; if /usr/bin/protoc is older, set PROTOC=/path/to/protoc.
 
@@ -52,7 +59,9 @@ clippy:
 # ── Tests ────────────────────────────────────────────────────────────────────
 
 # Unit and crate tests — excludes integration package (mirror CI test-unit job)
-# Requires Mesa llvmpipe (libvulkan1 + mesa-vulkan-drivers) for GPU compositor tests.
+# Includes the GPU compositor tests and runtime pixel_readback (the latter via
+# workspace feature unification). Requires Mesa llvmpipe (libvulkan1 +
+# mesa-vulkan-drivers).
 # Uses the llvmpipe ICD when installed so a hardware ICD is never loaded.
 test:
     if [ -f {{lvp}} ]; then export VK_ICD_FILENAMES={{lvp}}; fi; \
@@ -152,7 +161,8 @@ dead-code crate:
 
 # ── Full local CI sweep ───────────────────────────────────────────────────────
 
-# Run all CI gates that are feasible locally (excludes Windows perf budget and
-# GPU pixel-readback, which need specific hardware or Mesa llvmpipe + GPU).
+# Run all CI gates that are feasible locally. GPU and pixel_readback tests are
+# included via `test` (they need Mesa llvmpipe); excluded are the Windows-only
+# jobs, the windows-gnu clippy cross-target, cargo-deny, and the weekly perf lanes.
 # Runs in the same logical order as CI: fast-fail gates first, then tests.
 ci: check fmt clippy deps-unused dev-mode-guard idle-efficiency-checker test test-integration test-python token-footprint production-boot canonical-app-boot

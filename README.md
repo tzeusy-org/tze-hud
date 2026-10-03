@@ -43,7 +43,8 @@ The rest of this README is command-first and focused on four workflows:
 ## Required Gates / CI
 
 CI (`.github/workflows/ci.yml`) runs the gates below on every PR; `just ci`
-reproduces the blocking set locally (requires [just](https://github.com/casey/just)).
+reproduces the blocking set locally except `clippy-windows-gnu` and `cargo-deny`
+(requires [just](https://github.com/casey/just)).
 Each local recipe maps to a CI job:
 
 | Local recipe (`just …`) | CI job | Checks |
@@ -51,12 +52,17 @@ Each local recipe maps to a CI job:
 | `check` | `check` | `cargo check` (fast compile gate) |
 | `fmt` | `fmt` | `cargo fmt --check` |
 | `clippy` | `clippy` | `cargo clippy --workspace --all-targets -D warnings` |
-| `test` | `test-unit` | workspace unit tests (excludes `integration`) |
+| `test` | `test-unit` | workspace tests (excludes `integration`), including the GPU compositor tests and `pixel_readback` on Mesa llvmpipe |
 | `test-integration` | `test-integration` | headless integration suites |
+| `token-footprint` | `test-integration` | deterministic LLM-facing token-footprint gate |
+| `test-python` | `user-test-python-suite` | pure-Python suites (pytest + `scripts/ci` unittest) |
 | `production-boot` | `production-boot-vertical-slice` | vertical-slice production-config boot |
 | `canonical-app-boot` | `canonical-app-production-boot` | canonical app production-config boot |
-| `dev-mode-guard` | `dev-mode-guard` | dev-mode excluded from release default features |
-| `test-gpu` | — | compositor + runtime pixel-readback GPU tests on Mesa llvmpipe; excluded from `just ci` |
+| `dev-mode-guard` | `dev-mode-guard` | dev-mode not enabled in any package's default-build dependency closure (shipped binary included) |
+| `deps-unused` | `check` | `cargo machete`: unused dependencies |
+| `idle-efficiency-checker` | `check` | fail-closed idle artifact contract tests |
+| `test-gpu` | — | GPU subset of `test` only (compositor + `pixel_readback`), llvmpipe-pinned with timeouts; already covered by `test`, so not a separate `just ci` step |
+| — | `clippy-windows-gnu` | clippy on the `x86_64-pc-windows-gnu` target for the crates carrying `cfg(windows)` code |
 | — | `cargo-deny` | dependency/advisory policy (`deny.toml`) |
 
 Slower suites run weekly, on demand, or on PRs labelled `perf-assert`, never as
