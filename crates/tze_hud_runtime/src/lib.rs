@@ -62,6 +62,7 @@ pub mod element_store;
 pub mod font_loader;
 pub mod gpu_lock;
 pub mod headless;
+pub mod http;
 pub mod idle_efficiency;
 pub mod mcp;
 pub mod mutation_budget_bridge;

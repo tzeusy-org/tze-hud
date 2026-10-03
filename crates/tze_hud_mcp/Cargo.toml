@@ -22,12 +22,6 @@ uuid = { workspace = true }
 blake3 = { workspace = true }
 quick-xml = { workspace = true }
 
-[features]
-# Enable the reference HTTP server (run_http). Requires tokio's full feature set.
-# Note: tze_hud_runtime always enables this feature (`features = ["http"]`) so
-# in practice it is unconditionally active whenever the runtime is linked.
-http = []
-
 [dev-dependencies]
 tokio = { workspace = true }
 
