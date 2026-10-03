@@ -920,6 +920,7 @@ mod tests {
             capture: None,
             restart: None,
             bind_gate: None,
+            update: None,
             pairing: Some(Arc::clone(&pairing)),
         };
         let scene = Arc::new(tokio::sync::Mutex::new(
