@@ -187,6 +187,16 @@ impl TestSceneRegistry {
 
     // ─── Scene builders ───────────────────────────────────────────────────
 
+    /// Scene graph on a `SimulatedClock` pinned at `clock`, so lease-expiry sweeps
+    /// (e.g. the headless runtime's per-frame sweep) compare against the scene's
+    /// construction time, not the real wall clock (`ClockMs::FIXED` = Jan 2025).
+    fn new_graph(&self, clock: ClockMs) -> SceneGraph {
+        use crate::clock::SimulatedClock;
+        use std::sync::Arc;
+        let sim_clock = Arc::new(SimulatedClock::new(clock.0 * 1_000));
+        SceneGraph::new_with_clock(self.display_width, self.display_height, sim_clock)
+    }
+
     /// `empty_scene` — no tabs, no tiles. Validates clean initialisation.
     fn build_empty_scene(&self, _clock: ClockMs) -> (SceneGraph, SceneSpec) {
         let graph = SceneGraph::new(self.display_width, self.display_height);
@@ -205,7 +215,7 @@ impl TestSceneRegistry {
 
     /// `single_tile_solid` — one tab, one tile with a text content node.
     fn build_single_tile_solid(&self, clock: ClockMs) -> (SceneGraph, SceneSpec) {
-        let mut graph = SceneGraph::new(self.display_width, self.display_height);
+        let mut graph = self.new_graph(clock);
 
         let tab_id = graph.create_tab("Main", 0).expect("create_tab failed");
 
@@ -259,7 +269,7 @@ impl TestSceneRegistry {
 
     /// `three_tiles_no_overlap` — one tab, three non-overlapping tiles (text + hit_region + solid).
     fn build_three_tiles_no_overlap(&self, clock: ClockMs) -> (SceneGraph, SceneSpec) {
-        let mut graph = SceneGraph::new(self.display_width, self.display_height);
+        let mut graph = self.new_graph(clock);
 
         let tab_id = graph.create_tab("Dashboard", 0).expect("create_tab failed");
 
@@ -365,7 +375,7 @@ impl TestSceneRegistry {
     /// Creates 60 tiles on a single tab (default budget is 64). This exercises the scene graph
     /// under load and validates that bookkeeping remains consistent near capacity.
     fn build_max_tiles_stress(&self, clock: ClockMs) -> (SceneGraph, SceneSpec) {
-        let mut graph = SceneGraph::new(self.display_width, self.display_height);
+        let mut graph = self.new_graph(clock);
 
         let tab_id = graph.create_tab("Stress", 0).expect("create_tab failed");
 
@@ -453,7 +463,7 @@ impl TestSceneRegistry {
     /// Validates z-order composition: the compositing layer must respect z_order even when
     /// tile bounds intersect. Layer 0 invariant: all z-orders are distinct per tab.
     fn build_overlapping_tiles_zorder(&self, clock: ClockMs) -> (SceneGraph, SceneSpec) {
-        let mut graph = SceneGraph::new(self.display_width, self.display_height);
+        let mut graph = self.new_graph(clock);
 
         let tab_id = graph.create_tab("Overlap", 0).expect("create_tab failed");
 
@@ -530,7 +540,7 @@ impl TestSceneRegistry {
     /// Validates the alpha blending path. Layer 0: opacity is in [0.0, 1.0].
     /// Layer 1 pixel expectation: ±2/channel blending tolerance.
     fn build_overlay_transparency(&self, clock: ClockMs) -> (SceneGraph, SceneSpec) {
-        let mut graph = SceneGraph::new(self.display_width, self.display_height);
+        let mut graph = self.new_graph(clock);
 
         let tab_id = graph.create_tab("Overlay", 0).expect("create_tab failed");
 
@@ -605,7 +615,7 @@ impl TestSceneRegistry {
     ///
     /// Layer 0: each tab's tiles are independent; z_orders are unique per tab (not globally).
     fn build_tab_switch(&self, clock: ClockMs) -> (SceneGraph, SceneSpec) {
-        let mut graph = SceneGraph::new(self.display_width, self.display_height);
+        let mut graph = self.new_graph(clock);
 
         let tab_a = graph.create_tab("TabA", 0).expect("create_tab failed");
         let tab_b = graph.create_tab("TabB", 1).expect("create_tab failed");
@@ -780,7 +790,7 @@ impl TestSceneRegistry {
     /// Validates the focus tree (per-tab, at most one focus owner) and focus cycling
     /// per input-model/spec.md lines 11-22 and 78-89.
     fn build_input_highlight(&self, clock: ClockMs) -> (SceneGraph, SceneSpec) {
-        let mut graph = SceneGraph::new(self.display_width, self.display_height);
+        let mut graph = self.new_graph(clock);
 
         let tab_id = graph.create_tab("Input", 0).expect("create_tab failed");
 
@@ -858,7 +868,7 @@ impl TestSceneRegistry {
     /// `coalesced_dashboard` — 12 tiles with sequential mutations demonstrating state-stream
     /// coalescing. Validates atomic batch semantics per scene-graph/spec.md lines 142-157.
     fn build_coalesced_dashboard(&self, clock: ClockMs) -> (SceneGraph, SceneSpec) {
-        let mut graph = SceneGraph::new(self.display_width, self.display_height);
+        let mut graph = self.new_graph(clock);
 
         let tab_id = graph.create_tab("Dashboard", 0).expect("create_tab failed");
 
@@ -952,7 +962,7 @@ impl TestSceneRegistry {
 
     /// `three_agents_contention` — 3 agents with overlapping z-order requests.
     fn build_three_agents_contention(&self, clock: ClockMs) -> (SceneGraph, SceneSpec) {
-        let mut graph = SceneGraph::new(self.display_width, self.display_height);
+        let mut graph = self.new_graph(clock);
 
         let tab_id = graph
             .create_tab("Contention", 0)
@@ -1066,7 +1076,7 @@ impl TestSceneRegistry {
     /// Validates the hit-test pipeline: chrome-first, z-descending, reverse tree order per
     /// input-model/spec.md line 264. Passthrough tiles let pointer events fall through.
     fn build_overlay_passthrough_regions(&self, clock: ClockMs) -> (SceneGraph, SceneSpec) {
-        let mut graph = SceneGraph::new(self.display_width, self.display_height);
+        let mut graph = self.new_graph(clock);
 
         let tab_id = graph
             .create_tab("Passthrough", 0)
@@ -1336,7 +1346,7 @@ impl TestSceneRegistry {
     /// `chatty_dashboard_touch` — dashboard layout with HitRegionNode tiles ready for
     /// high-frequency input injection (<100µs hit-test for 50 tiles).
     fn build_chatty_dashboard_touch(&self, clock: ClockMs) -> (SceneGraph, SceneSpec) {
-        let mut graph = SceneGraph::new(self.display_width, self.display_height);
+        let mut graph = self.new_graph(clock);
 
         let tab_id = graph.create_tab("Chatty", 0).expect("create_tab failed");
 
@@ -1402,7 +1412,7 @@ impl TestSceneRegistry {
     /// Renamed from `zone_test` in the canonical scene list. Validates zone registry
     /// operations and tile-to-zone mapping per scene-graph/spec.md lines 198-200.
     fn build_zone_publish_subtitle(&self, clock: ClockMs) -> (SceneGraph, SceneSpec) {
-        let mut graph = SceneGraph::new(self.display_width, self.display_height);
+        let mut graph = self.new_graph(clock);
 
         let tab_id = graph.create_tab("Subtitle", 0).expect("create_tab failed");
 
@@ -1486,7 +1496,7 @@ impl TestSceneRegistry {
     /// semantic is documented in the SceneSpec description so higher validation layers
     /// can inject wrong-type publishes and assert the error.
     fn build_zone_reject_wrong_type(&self, clock: ClockMs) -> (SceneGraph, SceneSpec) {
-        let mut graph = SceneGraph::new(self.display_width, self.display_height);
+        let mut graph = self.new_graph(clock);
 
         let tab_id = graph.create_tab("TypedZone", 0).expect("create_tab failed");
 
@@ -1568,7 +1578,7 @@ impl TestSceneRegistry {
     ///
     /// Per scene-graph/spec.md lines 185-196.
     fn build_zone_conflict_two_publishers(&self, clock: ClockMs) -> (SceneGraph, SceneSpec) {
-        let mut graph = SceneGraph::new(self.display_width, self.display_height);
+        let mut graph = self.new_graph(clock);
 
         let tab_id = graph.create_tab("Conflict", 0).expect("create_tab failed");
 
@@ -1657,7 +1667,7 @@ impl TestSceneRegistry {
     ///
     /// Validates the full zone publish lifecycle per scene-graph/spec.md lines 185-200.
     fn build_zone_orchestrate_then_publish(&self, clock: ClockMs) -> (SceneGraph, SceneSpec) {
-        let mut graph = SceneGraph::new(self.display_width, self.display_height);
+        let mut graph = self.new_graph(clock);
 
         let tab_id = graph
             .create_tab("Orchestrate", 0)
@@ -1802,7 +1812,7 @@ impl TestSceneRegistry {
     /// After the grace period the lease is cleaned up, removing the tile from the zone's
     /// visual footprint. Per lease-governance/spec.md lines 132-155.
     fn build_zone_disconnect_cleanup(&self, clock: ClockMs) -> (SceneGraph, SceneSpec) {
-        let mut graph = SceneGraph::new(self.display_width, self.display_height);
+        let mut graph = self.new_graph(clock);
 
         let tab_id = graph
             .create_tab("ZoneCleanup", 0)
