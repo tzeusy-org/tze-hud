@@ -12779,6 +12779,8 @@ async fn composer_caret_quad_emitted_at_expected_position() {
         node_id: hit_id,
         placeholder: None,
     });
+    // Pin the solid blink phase: GPU setup under load can outlast one half-period.
+    compositor.composer_caret_blink_start = std::time::Instant::now();
     compositor.prime_composer_scroll_offset(&scene);
 
     let mut verts: Vec<crate::pipeline::RectVertex> = Vec::new();
