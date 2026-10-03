@@ -47,6 +47,7 @@ pub(crate) mod idle_efficiency;
 pub(crate) mod mcp;
 pub(crate) mod mutation_budget_bridge;
 pub(crate) mod net_addrs;
+pub mod operator;
 pub(crate) mod pipeline;
 pub(crate) mod portal_cadence;
 pub mod portal_projection_driver;

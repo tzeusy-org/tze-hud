@@ -272,6 +272,7 @@ impl HeadlessEventLoopHarness {
             bind_addrs: vec![SocketAddr::from(([127, 0, 0, 1], 0))],
             late_tailnet_port: None,
             agents: Arc::clone(&cfg.agents),
+            presents: None,
         };
         let (_mcp_task, mcp_addrs) = crate::mcp::start_mcp_http_server(
             scene_handle,

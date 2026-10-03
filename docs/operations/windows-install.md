@@ -37,3 +37,22 @@ Set-Content agents.toml "[agents.claude]`npsk_sha256 = `"$hash`"`nallow = [`"*`"
 
 Give `$psk` to the agent host and do not store it on the HUD side.
 `app/tze_hud_app/config/production.toml` is the reference config.
+
+## Logs and operator endpoints
+
+The overlay has no console, so tracing also goes to `tze_hud.log` in
+`%LOCALAPPDATA%\tze_hud\logs` (override with `TZE_HUD_LOG_DIR`; elsewhere
+`<temp>/tze_hud/logs`). It rotates to `tze_hud.log.1` at 10 MB. File level is
+`info`; set `TZE_HUD_FILE_LOG` to change it. Panics go to `hud-diag.log` in the
+same directory.
+
+An agent whose `allow` includes `admin` (`*` does not grant it) can read, on
+the MCP port with its PSK as the bearer:
+
+| Request | Response |
+|---|---|
+| `GET /admin/status` | JSON: `version`, `sha`, `channel`, `pid`, `uptime_s`, `binds`, `agents` (`id`, `admin`), `safe_mode`, `frames_presented`, `cpu_pct_2s` (sampled over 2 s, so the call takes about 2 s), `cpu_pct_avg` (percent of one core), `last_update` (null until updates land) |
+| `GET /admin/logs?tail=N` | `text/plain`, the last N lines (default 100, max 2000) across the rotation |
+
+Without a valid PSK the answer is 401; with one lacking `admin`, 403
+`{"code":"NOT_ADMIN","hint":...}`.

@@ -55,6 +55,9 @@ jobs:
           "$dir\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
 
       - name: Build tze_hud.exe (release, static CRT)
+        env:
+          # Reported by /admin/status: `dev` on main, the tag on tags, else `ci`.
+          TZE_HUD_CHANNEL: ${{ github.ref == 'refs/heads/main' && 'dev' || (startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'ci') }}
         run: cargo build --release --locked -p tze_hud_app --bin tze_hud
 
       - name: Boot smoke (production config, MCP lifecycle)

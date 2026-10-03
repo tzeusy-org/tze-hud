@@ -683,6 +683,50 @@ fn render_attach_info_block(opts: &StartupOptions) -> String {
     block
 }
 
+/// Stdout logging (gated by `TZE_HUD_LOG`, JSON if `TZE_HUD_LOG_JSON=1`) plus
+/// a durable plain-text file in the log directory (`info` unless
+/// `TZE_HUD_FILE_LOG` says otherwise), because the overlay has no console.
+fn init_logging() {
+    use tracing_subscriber::Layer;
+    use tracing_subscriber::layer::SubscriberExt;
+    use tracing_subscriber::util::SubscriberInitExt;
+    use tracing_subscriber::{EnvFilter, fmt};
+
+    let stdout_filter = EnvFilter::from_env("TZE_HUD_LOG");
+    let stdout = if std::env::var("TZE_HUD_LOG_JSON").as_deref() == Ok("1") {
+        fmt::layer().json().with_filter(stdout_filter).boxed()
+    } else {
+        fmt::layer().with_filter(stdout_filter).boxed()
+    };
+
+    let log_path = tze_hud_runtime::operator::logs::log_path();
+    let (file, file_err) = match tze_hud_runtime::operator::logs::RotatingFile::open(
+        log_path.clone(),
+        tze_hud_runtime::operator::logs::MAX_LOG_BYTES,
+    ) {
+        Ok(f) => (Some(f), None),
+        Err(e) => (None, Some(e)),
+    };
+    let file_layer = file.map(|f| {
+        let filter =
+            EnvFilter::try_from_env("TZE_HUD_FILE_LOG").unwrap_or_else(|_| EnvFilter::new("info"));
+        fmt::layer()
+            .with_ansi(false)
+            .with_writer(move || tze_hud_runtime::operator::logs::LogWriter(f.clone()))
+            .with_filter(filter)
+    });
+    tracing_subscriber::registry()
+        .with(stdout)
+        .with(file_layer)
+        .init();
+    match file_err {
+        None => tracing::info!(path = %log_path.display(), "log file"),
+        Some(e) => {
+            tracing::warn!(path = %log_path.display(), error = %e, "log file unavailable; logging to stdout only")
+        }
+    }
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Bind the standard handles to the launching terminal ONCE, before any
     // output is produced (hud-q2glv). This is the GUI-subsystem console fix
@@ -705,18 +749,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // (the pre-hud-q2glv default) was always immune (Codex P2 on PR #1143).
     ignore_console_ctrl_c();
 
-    // Initialise structured logging. JSON if TZE_HUD_LOG_JSON=1.
-    let log_json = std::env::var("TZE_HUD_LOG_JSON").as_deref() == Ok("1");
-    if log_json {
-        tracing_subscriber::fmt()
-            .json()
-            .with_env_filter(tracing_subscriber::EnvFilter::from_env("TZE_HUD_LOG"))
-            .init();
-    } else {
-        tracing_subscriber::fmt()
-            .with_env_filter(tracing_subscriber::EnvFilter::from_env("TZE_HUD_LOG"))
-            .init();
-    }
+    init_logging();
+    tze_hud_runtime::operator::status::set_build_info(
+        tze_hud_runtime::operator::status::BuildInfo {
+            sha: env!("TZE_HUD_GIT_SHA_FULL").to_owned(),
+            channel: env!("TZE_HUD_CHANNEL").to_owned(),
+        },
+    );
 
     // hud-pi5wx: file-based panic hook so a silent compositor/render-thread panic
     // leaves a durable trail — the overlay deployment captures no stdout/stderr.

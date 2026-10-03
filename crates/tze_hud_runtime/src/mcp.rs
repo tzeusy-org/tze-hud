@@ -32,6 +32,7 @@ use tze_hud_mcp::{McpConfig, McpServer};
 use tze_hud_scene::config::SharedAgents;
 use tze_hud_scene::graph::SceneGraph;
 
+use crate::operator::status::StatusSource;
 use crate::threads::ShutdownToken;
 
 // ─── MCP lifecycle ────────────────────────────────────────────────────────────
@@ -55,6 +56,10 @@ pub struct McpServerConfig {
     /// `allow` gate, shared with gRPC. The bearer token must be a paired
     /// agent's PSK; the agent's namespace is its id.
     pub agents: SharedAgents,
+
+    /// Present-frame counters reported by `/admin/status` (`frames_presented`
+    /// is null without them).
+    pub presents: Option<Arc<crate::idle_efficiency::IdleEfficiencyCounters>>,
 }
 
 /// Start the MCP HTTP server on the calling Tokio runtime.
@@ -129,6 +134,15 @@ pub async fn start_mcp_http_server_with_render_wake(
         tracing::info!(addr = %addr, "MCP HTTP listener bound");
     }
 
+    crate::operator::status::process_start();
+    let admin = Arc::new(StatusSource {
+        agents: config.agents.clone(),
+        binds: Arc::new(std::sync::Mutex::new(local_addrs.clone())),
+        safe_mode: Arc::clone(&safe_mode),
+        presents: config.presents.clone(),
+        log_path: crate::operator::logs::log_path(),
+    });
+
     let mut server_builder = McpServer::with_shared_scene(scene)
         .with_config(McpConfig::with_agents(config.agents.clone()))
         .with_render_wake_notifier(render_wake)
@@ -144,6 +158,7 @@ pub async fn start_mcp_http_server_with_render_wake(
         loops.push(tokio::spawn(run_accept_loop(
             listener,
             Arc::clone(&server),
+            Arc::clone(&admin),
             shutdown.clone(),
             addr,
         )));
@@ -154,8 +169,12 @@ pub async fn start_mcp_http_server_with_render_wake(
             .iter()
             .any(|a| !crate::net_addrs::tailnet_addrs(&[a.ip()]).is_empty())
     {
-        let (server, shutdown, shutdown_w) =
-            (Arc::clone(&server), shutdown.clone(), shutdown.clone());
+        let (server, admin, shutdown, shutdown_w) = (
+            Arc::clone(&server),
+            Arc::clone(&admin),
+            shutdown.clone(),
+            shutdown.clone(),
+        );
         tokio::spawn(async move {
             let watcher = crate::net_addrs::watch_for_tailnet(|ip| {
                 let addr = SocketAddr::new(ip, port);
@@ -165,9 +184,15 @@ pub async fn start_mcp_http_server_with_render_wake(
                 }) {
                     Ok(listener) => {
                         tracing::info!(addr = %addr, "MCP HTTP listener bound (Tailscale address appeared)");
+                        admin
+                            .binds
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .push(addr);
                         tokio::spawn(run_accept_loop(
                             listener,
                             Arc::clone(&server),
+                            Arc::clone(&admin),
                             shutdown.clone(),
                             addr,
                         ));
@@ -212,6 +237,7 @@ async fn wait_shutdown(shutdown: &ShutdownToken) {
 async fn run_accept_loop(
     listener: TcpListener,
     server: Arc<McpServer>,
+    admin: Arc<StatusSource>,
     shutdown: ShutdownToken,
     local_addr: SocketAddr,
 ) {
@@ -240,7 +266,8 @@ async fn run_accept_loop(
                 match accept_result {
                     Ok((stream, peer)) => {
                         let srv = Arc::clone(&server);
-                        tokio::spawn(handle_connection(stream, peer, srv));
+                        let admin = Arc::clone(&admin);
+                        tokio::spawn(handle_connection(stream, peer, srv, admin));
                     }
                     Err(e) => {
                         tracing::error!(
@@ -263,6 +290,7 @@ async fn handle_connection(
     mut stream: tokio::net::TcpStream,
     peer: SocketAddr,
     server: Arc<McpServer>,
+    admin: Arc<StatusSource>,
 ) {
     use crate::http::{self, ReadError, Response, Route};
     use tokio::io::AsyncWriteExt;
@@ -276,6 +304,7 @@ async fn handle_connection(
                 let body = std::str::from_utf8(&req.body).unwrap_or("");
                 Response::json(server.dispatch(body, &ctx).await)
             }
+            Route::Admin(which) => handle_admin(which, &req, &admin).await,
             Route::Respond(resp) => resp,
         },
         Err(ReadError::Malformed) => Response::bad_request(),
@@ -288,6 +317,36 @@ async fn handle_connection(
 
     if let Err(e) = stream.write_all(&response.to_bytes()).await {
         tracing::debug!(peer = %peer, error = %e, "MCP: write error");
+    }
+}
+
+/// Serve an `/admin/*` request. Authentication and the `admin` check come
+/// before any admin data is read.
+async fn handle_admin(
+    which: crate::http::AdminRoute,
+    req: &crate::http::Request,
+    admin: &StatusSource,
+) -> crate::http::Response {
+    use crate::http::{AdminRoute, Response, admin_guard, query_param};
+    let identity = req
+        .bearer
+        .as_deref()
+        .and_then(|token| admin.agents.load().resolve(token, "").ok());
+    if let Err(denied) = admin_guard(identity.as_ref()) {
+        return denied;
+    }
+    match which {
+        AdminRoute::Status => Response::json(admin.render().await.to_string()),
+        AdminRoute::Logs => {
+            let tail = match query_param(&req.query, "tail") {
+                None => 100,
+                Some(v) => match v.parse::<usize>() {
+                    Ok(n) => n,
+                    Err(_) => return Response::bad_request(),
+                },
+            };
+            Response::text(crate::operator::logs::tail(&admin.log_path, tail))
+        }
     }
 }
 
@@ -309,6 +368,7 @@ mod tests {
             bind_addrs: vec![format!("127.0.0.1:{port}").parse().unwrap()],
             late_tailnet_port: None,
             agents: tze_hud_scene::config::AgentDirectory::unrestricted(psk).shared(),
+            presents: None,
         }
     }
 
@@ -374,6 +434,156 @@ mod tests {
         let r = http_raw(addr, &post("/nope")).await;
         assert!(r.starts_with("HTTP/1.1 404 "), "{r}");
         assert!(!r.contains("jsonrpc"));
+        shutdown.trigger(crate::threads::ShutdownReason::Clean);
+        handle.await.expect("task");
+    }
+
+    fn admin_source(log_path: std::path::PathBuf) -> StatusSource {
+        let mut dir = tze_hud_scene::config::AgentDirectory::default();
+        let perms = |p: &[&str]| p.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        dir.insert(
+            "root",
+            tze_hud_scene::config::hash_psk("root-psk"),
+            perms(&["*", "operator_admin"]),
+        );
+        dir.insert(
+            "star",
+            tze_hud_scene::config::hash_psk("star-psk"),
+            perms(&["*"]),
+        );
+        StatusSource {
+            agents: dir.shared(),
+            binds: Arc::new(std::sync::Mutex::new(vec![
+                "127.0.0.1:9090".parse().unwrap(),
+            ])),
+            safe_mode: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            presents: None,
+            log_path,
+        }
+    }
+
+    fn admin_get(path_and_query: &str, bearer: Option<&str>) -> crate::http::Request {
+        let (path, query) = path_and_query
+            .split_once('?')
+            .unwrap_or((path_and_query, ""));
+        crate::http::Request {
+            method: "GET".into(),
+            path: path.into(),
+            query: query.into(),
+            bearer: bearer.map(str::to_owned),
+            body: Vec::new(),
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn admin_requires_the_admin_entry_not_just_star() {
+        use crate::http::AdminRoute::{Logs, Status};
+        let src = admin_source(std::env::temp_dir().join("tze_hud_no_such.log"));
+        for (bearer, status) in [
+            (None, 401),
+            (Some("wrong"), 401),
+            (Some("star-psk"), 403),
+            (Some("root-psk"), 200),
+        ] {
+            for which in [Status, Logs] {
+                let req = admin_get("/admin/x", bearer);
+                let r = handle_admin(which, &req, &src).await;
+                assert_eq!(r.status, status, "{bearer:?} {which:?}");
+                if status == 403 {
+                    assert!(String::from_utf8_lossy(&r.body).contains("NOT_ADMIN"));
+                }
+            }
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn admin_status_has_every_key_and_no_secrets() {
+        let src = admin_source(std::env::temp_dir().join("tze_hud_no_such.log"));
+        let r = handle_admin(
+            crate::http::AdminRoute::Status,
+            &admin_get("/admin/status", Some("root-psk")),
+            &src,
+        )
+        .await;
+        let text = String::from_utf8(r.body).unwrap();
+        assert!(!text.contains("psk") || text.contains("\"id\""), "{text}");
+        let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+        for key in [
+            "version",
+            "sha",
+            "channel",
+            "pid",
+            "uptime_s",
+            "binds",
+            "agents",
+            "safe_mode",
+            "frames_presented",
+            "cpu_pct_2s",
+            "cpu_pct_avg",
+            "last_update",
+        ] {
+            assert!(v.get(key).is_some(), "missing {key}: {text}");
+        }
+        assert_eq!(
+            v["agents"],
+            serde_json::json!([{"id":"root","admin":true},{"id":"star","admin":false}])
+        );
+        assert_eq!(v["binds"], serde_json::json!(["127.0.0.1:9090"]));
+        if cfg!(target_os = "linux") {
+            assert!(
+                v["cpu_pct_2s"].is_number() && v["cpu_pct_avg"].is_number(),
+                "{text}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn admin_logs_returns_the_requested_tail() {
+        use std::io::Write;
+        let path =
+            std::env::temp_dir().join(format!("tze_hud_admin_logs_{}.log", std::process::id()));
+        let mut f = std::fs::File::create(&path).unwrap();
+        for i in 0..20 {
+            writeln!(f, "line {i}").unwrap();
+        }
+        let src = admin_source(path.clone());
+        let get = |q: &'static str| {
+            let src = &src;
+            async move {
+                handle_admin(
+                    crate::http::AdminRoute::Logs,
+                    &admin_get(q, Some("root-psk")),
+                    src,
+                )
+                .await
+            }
+        };
+        let r = get("/admin/logs?tail=5").await;
+        assert_eq!(r.content_type, "text/plain; charset=utf-8");
+        assert_eq!(String::from_utf8(r.body).unwrap().lines().count(), 5);
+        assert_eq!(get("/admin/logs?tail=abc").await.status, 400);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn admin_routes_are_served_over_the_socket() {
+        let shutdown = ShutdownToken::new();
+        let (handle, addrs) =
+            start_mcp_http_server(make_scene(), make_config(0, "k"), shutdown.clone(), None)
+                .await
+                .expect("start");
+        // The dev PSK resolves to an unrestricted `*` identity: no admin.
+        let r = http_raw(
+            addrs[0],
+            "GET /admin/status HTTP/1.1\r\nAuthorization: Bearer k\r\n\r\n",
+        )
+        .await;
+        assert!(
+            r.starts_with("HTTP/1.1 403 ") && r.contains("NOT_ADMIN"),
+            "{r}"
+        );
+        let r = http_raw(addrs[0], "GET /admin/logs HTTP/1.1\r\n\r\n").await;
+        assert!(r.starts_with("HTTP/1.1 401 "), "{r}");
         shutdown.trigger(crate::threads::ShutdownReason::Clean);
         handle.await.expect("task");
     }
@@ -456,6 +666,7 @@ mod tests {
             bind_addrs: vec![addr],
             late_tailnet_port: None,
             agents: tze_hud_scene::config::AgentDirectory::unrestricted("test-key").shared(),
+            presents: None,
         };
         let shutdown = ShutdownToken::new();
 
@@ -495,6 +706,7 @@ mod tests {
             ],
             late_tailnet_port: None,
             agents: tze_hud_scene::config::AgentDirectory::unrestricted("test-key").shared(),
+            presents: None,
         };
         let shutdown = ShutdownToken::new();
         let (handle, addrs) = start_mcp_http_server(make_scene(), config, shutdown.clone(), None)
@@ -524,6 +736,7 @@ mod tests {
             bind_addrs: addrs.iter().map(|a| a.parse().unwrap()).collect(),
             late_tailnet_port: None,
             agents: agents.clone(),
+            presents: None,
         };
         let shutdown = ShutdownToken::new();
         let (handle, addrs) = start_mcp_http_server(
@@ -563,6 +776,7 @@ mod tests {
             bind_addrs: vec![addr],
             late_tailnet_port: None,
             agents: tze_hud_scene::config::AgentDirectory::unrestricted("real-key").shared(),
+            presents: None,
         };
         let shutdown = ShutdownToken::new();
 
@@ -598,6 +812,7 @@ mod tests {
             bind_addrs: vec![addr],
             late_tailnet_port: None,
             agents: tze_hud_scene::config::AgentDirectory::unrestricted("correct-key").shared(),
+            presents: None,
         };
         let shutdown = ShutdownToken::new();
 
@@ -665,6 +880,7 @@ mod tests {
             bind_addrs: vec![addr],
             late_tailnet_port: None,
             agents: tze_hud_scene::config::AgentDirectory::unrestricted("test-key").shared(),
+            presents: None,
         };
         let shutdown = ShutdownToken::new();
 
@@ -700,6 +916,7 @@ mod tests {
             bind_addrs: vec![addr],
             late_tailnet_port: None,
             agents: tze_hud_scene::config::AgentDirectory::unrestricted("key").shared(),
+            presents: None,
         };
         let shutdown = ShutdownToken::new();
 
