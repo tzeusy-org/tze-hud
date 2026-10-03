@@ -149,3 +149,32 @@ async fn tile_stage_ends_on_viewer_dismiss_at_any_point_and_clears_otherwise() {
     drive(&mut hud, poc_demo::tile(&t), |_| {}).await;
     assert_eq!(hud.tile_count(), 0, "the stage cleared its own tile");
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn snapshot_counts_a_held_tile_and_not_a_cleared_one() {
+    let mut hud = boot().await;
+    let held = Arc::new(AtomicBool::new(false));
+    let t = Target {
+        held: Some(held.clone()),
+        ..target(&hud, Duration::from_secs(3))
+    };
+    assert_eq!(poc_demo::tile_count(&t).await.unwrap(), 0);
+    drive(
+        &mut hud,
+        async {
+            let observed = async {
+                while !held.load(Ordering::SeqCst) {
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                }
+                poc_demo::tile_count(&t).await
+            };
+            let (stage, count) = tokio::join!(poc_demo::tile(&t), observed);
+            stage?;
+            assert_eq!(count?, 1, "the held tile is in a fresh session's snapshot");
+            Ok(())
+        },
+        |_| {},
+    )
+    .await;
+    assert_eq!(poc_demo::tile_count(&t).await.unwrap(), 0);
+}

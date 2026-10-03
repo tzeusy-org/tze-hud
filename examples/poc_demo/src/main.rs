@@ -14,6 +14,7 @@ STAGES:
   widgets         typed parameter updates on the gauge and progress widgets
   tile            resident gRPC tile: ClaimTile, MutationBatch, Hold, Reclaimed
   override-hang   claim a tile, then stop reading its stream
+  snapshot        print `tiles <n>`: the tile count in a fresh session's SceneSnapshot
   all             zones, widgets, tile, the portal instructions, override-hang
 
 OPTIONS:
@@ -53,7 +54,16 @@ async fn main() -> Result<()> {
         }
     }
     let stage = stage.ok_or(format!("missing stage\n\n{USAGE}"))?;
-    if !["zones", "widgets", "tile", "override-hang", "all"].contains(&stage.as_str()) {
+    if ![
+        "zones",
+        "widgets",
+        "tile",
+        "override-hang",
+        "snapshot",
+        "all",
+    ]
+    .contains(&stage.as_str())
+    {
         return Err(format!("unknown stage {stage}\n\n{USAGE}").into());
     }
 
@@ -80,6 +90,7 @@ async fn main() -> Result<()> {
         "widgets" => poc_demo::widgets(&target).await,
         "tile" => poc_demo::tile(&target).await,
         "override-hang" => poc_demo::override_hang(&target).await,
+        "snapshot" => poc_demo::snapshot(&target).await,
         _ => {
             poc_demo::zones(&target).await?;
             poc_demo::widgets(&target).await?;
