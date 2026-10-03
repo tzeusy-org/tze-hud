@@ -226,7 +226,7 @@ fn shipped_bundles_need_their_tokens() {
 }
 
 #[test]
-fn status_indicator_status_maps_each_value_to_its_own_color() {
+fn status_indicator_status_maps_each_value_to_its_color() {
     let def = load_shipped("status-indicator").definition;
     let binding = def
         .layers
@@ -237,13 +237,50 @@ fn status_indicator_status_maps_each_value_to_its_own_color() {
     let WidgetBindingMapping::Discrete { value_map } = &binding.mapping else {
         panic!("status must be a discrete binding");
     };
-    let mut colors: Vec<_> = ["online", "away", "busy", "offline"]
-        .iter()
-        .map(|s| value_map[*s].clone())
-        .collect();
-    colors.sort();
-    colors.dedup();
-    assert_eq!(colors.len(), 4, "each status needs a distinct color");
+    let want: std::collections::BTreeMap<String, String> = [
+        ("online", "#4FB543"),
+        ("away", "#D97706"),
+        ("busy", "#DC2626"),
+        ("offline", "#6B7280"),
+    ]
+    .into_iter()
+    .map(|(k, v)| (k.to_string(), v.to_string()))
+    .collect();
+    assert_eq!(value_map, &want);
+}
+
+/// Shipped gauge and progress-bar SVGs take every color from design tokens.
+/// status-indicator/indicator.svg is exempt: its status/theme glyph colors are
+/// intentional literals.
+#[test]
+fn gauge_and_progress_bar_svgs_have_no_hardcoded_hex_colors() {
+    for (bundle, files) in [
+        ("gauge", ["background.svg", "fill.svg"]),
+        ("progress-bar", ["track.svg", "fill.svg"]),
+    ] {
+        for file in files {
+            let raw = std::fs::read_to_string(shipped_path(bundle).join(file)).unwrap();
+            // Drop XML comments; they may mention colors in prose.
+            let mut text = String::new();
+            let mut rest = raw.as_str();
+            while let Some(i) = rest.find("<!--") {
+                text.push_str(&rest[..i]);
+                rest = rest[i..].split_once("-->").map_or("", |(_, r)| r);
+            }
+            text.push_str(rest);
+            for (i, _) in text.match_indices('#') {
+                let digits = text[i + 1..]
+                    .chars()
+                    .take_while(char::is_ascii_hexdigit)
+                    .count();
+                assert!(
+                    !(3..=8).contains(&digits),
+                    "{bundle}/{file}: hardcoded hex literal near {:?}",
+                    &text[i..(i + 1 + digits)]
+                );
+            }
+        }
+    }
 }
 
 // ─── Publishing to shipped widgets ────────────────────────────────────────────
