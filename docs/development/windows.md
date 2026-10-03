@@ -7,6 +7,12 @@ scripts, Beads, and some Linux-only test lanes. For installing a released
 binary rather than building one, see
 [`../operations/windows-install.md`](../operations/windows-install.md).
 
+There are two ways to work on this machine:
+
+- **Native.** Edit and build on Windows. Most of this doc covers that.
+- **WSL2.** Keep the repo and agents in Linux, and run only the HUD as a
+  Windows process. See [Developing from WSL2](#developing-from-wsl2).
+
 Linux CI (`ci.yml`) is still the merge gate. The Windows CI job (`windows.yml`)
 builds the release exe, boot-smokes it, and runs an install and uninstall
 smoke test. Linux CI also runs clippy for the `windows-gnu` target. Neither
@@ -115,10 +121,10 @@ installed one first:
 
 If there is no `--config`, the config is resolved in this order:
 `TZE_HUD_CONFIG`, then `.\tze_hud.toml`, then
-`%APPDATA%\tze_hud\config.toml`. `[widget_bundles]` paths resolve relative to
-the config file, so `--config app\tze_hud_app\config\production.toml` uses
-the repo's bundles. `TZE_HUD_DEV_ALLOW_INSECURE_STARTUP=1` allows a debug run
-with no config.
+`%APPDATA%\tze_hud\config.toml`. The gauge, progress-bar, and
+status-indicator widget bundles are built into the exe, so a config file is
+the only other file it needs. `TZE_HUD_DEV_ALLOW_INSECURE_STARTUP=1` allows a
+debug run with no config.
 
 Agents are paired into `agents.toml` beside the resolved config, which holds
 only PSK SHA-256 digests. With the repo config, that file is
@@ -219,6 +225,104 @@ cargo build --release --locked -p tze_hud_app --bin tze_hud
 python scripts/ci/windows_smoke.py --exe target/release/tze_hud.exe --config app/tze_hud_app/config/production.toml
 python scripts/ci/windows_install_smoke.py --exe target/release/tze_hud.exe
 ```
+
+## Developing from WSL2
+
+The HUD has to be a native Windows process: a Linux build inside WSL (WSLg)
+cannot draw a transparent always-on-top overlay over the Windows desktop.
+Everything else can stay in WSL, including the repo, `just ci`, Beads, and
+Claude Code. That makes WSL a Linux dev box that happens to share the screen,
+so the rest of this doc's Windows tooling setup isn't needed. No code changes
+are needed for this setup. The one hard requirement is networking.
+
+### Networking: use mirrored mode
+
+The HUD listens only on `127.0.0.1` and the host's Tailscale addresses
+(`crates/tze_hud_runtime/src/net_addrs.rs`). There is no bind-all switch, and
+none should be added. With WSL2's default NAT networking, `127.0.0.1` inside
+WSL is the VM's own loopback, not Windows', so agents in WSL can't reach the
+HUD. Turn on mirrored networking (Windows 11 22H2 or later) in
+`%USERPROFILE%\.wslconfig`:
+
+```ini
+[wsl2]
+networkingMode=mirrored
+```
+
+Then run `wsl --shutdown` and reopen WSL. After that,
+`http://127.0.0.1:9090/mcp` from WSL reaches the HUD's MCP port, and gRPC is
+reachable on `127.0.0.1:50051`, so:
+
+- Skill scripts and Claude Code MCP configs use `127.0.0.1` as they would on
+  Windows: `HUD_MCP_URL=http://127.0.0.1:9090/mcp`, with the paired PSK as the
+  bearer.
+- Pairing works from WSL:
+  `curl -s http://127.0.0.1:9090/pair -d '{"agent":"claude","code":"<code>"}'`.
+
+If mirrored mode isn't available, the fallback is the tailnet. Run Tailscale
+inside WSL as its own node, and point agents at the Windows host's Tailscale IP
+(the HUD shows it on the pairing card).
+
+### Getting a Windows build of the HUD
+
+Choose one of these:
+
+- **Cross-compile in WSL.** This is the fastest loop:
+
+  ```sh
+  rustup target add x86_64-pc-windows-gnu
+  sudo apt install mingw-w64
+  cargo build --release --target x86_64-pc-windows-gnu -p tze_hud_app --bin tze_hud
+  ```
+
+  - The output is `target/x86_64-pc-windows-gnu/release/tze_hud.exe`.
+  - On 2026-10-04, a Linux build imported only Windows system DLLs and
+    embedded the DPI manifest (`windres` comes from mingw-w64).
+  - It has not been run on Windows yet.
+  - It is the GNU flavor, not the MSVC build CI ships, so confirm anything
+    toolchain-sensitive against a CI build.
+- **Use CI's build.** `gh release download dev -R tzeusy-org/tze-hud -p "tze_hud.exe*"`
+  gets the rolling build of `main`. For a PR, download the `tze_hud-windows-msvc`
+  artifact from its `windows` workflow run.
+- **Build natively** on the Windows side, with a separate checkout and the
+  toolchain from [One-time setup](#one-time-setup).
+
+### Running it from WSL
+
+WSL interop can start `.exe` files directly. A process started that way runs
+as your Windows user, in your desktop session, so it should get a real
+overlay. This hasn't been confirmed on this machine. If the window comes up
+grey and opaque, start it from a Windows terminal instead.
+
+- Copy the exe and its config to a Windows directory, and run it from there.
+  The exe and the config are the only files it needs, because widget bundles
+  are built in. Running it from the Linux filesystem would put the paired
+  `agents.toml` beside the config, over a `\\wsl.localhost\...` path that
+  hasn't been tested.
+- Paths passed to the exe must be Windows paths. Convert them with
+  `wslpath -w`.
+- Stop the HUD from WSL with `taskkill.exe /IM tze_hud.exe /F`. Ctrl+C in the
+  WSL terminal is ignored, the same as natively.
+
+```sh
+dst=/mnt/c/Users/<you>/tze_hud-dev
+mkdir -p "$dst" && cp -f target/x86_64-pc-windows-gnu/release/tze_hud.exe "$dst/"
+cp -f app/tze_hud_app/config/production.toml "$dst/tze_hud.toml"
+"$dst/tze_hud.exe" --config "$(wslpath -w "$dst/tze_hud.toml")" --window-mode overlay &
+```
+
+The [one-instance](#one-instance-per-user) and
+[always-pass-arguments](#always-pass-arguments-to-a-dev-build) rules still
+apply. Stop the installed HUD before starting a dev build, and always pass
+arguments.
+
+### Gates in WSL
+
+`just ci` runs as it does on any Linux host. For GPU tests, install
+`mesa-vulkan-drivers` and `libvulkan1`, so the recipes pin llvmpipe instead of
+the WSL GPU driver. Also install `protoc` 3.15 or later, and `mingw-w64` for
+`clippy-windows-gnu`. Keep the checkout on the WSL filesystem (`~/...`), not
+`/mnt/c`, because cargo and git over the Windows mount are many times slower.
 
 ## Beads
 
