@@ -1,6 +1,6 @@
 //! Narrow retained-render path used by the canonical change-efficiency proof.
 //!
-//! This module deliberately does not consume `SceneDiff` or any reconnect/WAL
+//! This module deliberately does not consume any reconnect/WAL
 //! protocol state.  It owns a private compositor snapshot and accepts only the
 //! bounded fifty-tile headless scene used by the Layer 3 evidence lane.  Every
 //! other scene stays on the established full-frame renderer.
@@ -134,7 +134,7 @@ enum RetainedPlan {
 
 /// Typed, compositor-private planner for the exact retained evidence envelope.
 ///
-/// It has no SceneDiff/WAL input: planning is derived solely from the prior
+/// It has no WAL input: planning is derived solely from the prior
 /// private snapshot and the live scene about to be rendered.
 struct InvalidationPlanner;
 

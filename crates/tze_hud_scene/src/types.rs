@@ -569,18 +569,6 @@ pub struct Tab {
     pub name: String,
     pub display_order: u32,
     pub created_at_ms: u64,
-    /// Optional bare event name that triggers automatic tab activation.
-    ///
-    /// Per scene-events/spec.md §9.1–§9.4 (Requirement: tab_switch_on_event Contract):
-    /// - Names a scene-level event that triggers automatic activation of this tab.
-    /// - Agent events match against the bare name (before namespace prefixing) for
-    ///   agent-independence: "doorbell.ring" fires for ANY agent emitting "doorbell.ring".
-    /// - System events (system.* prefix) are excluded from matching.
-    /// - Successful switch generates ActiveTabChangedEvent (event_type "scene.tab.active_changed").
-    ///
-    /// Set to `None` to disable event-triggered tab switching for this tab.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tab_switch_on_event: Option<String>,
 }
 
 /// Per-agent resource envelope enforced by the budget enforcement ladder.
@@ -894,114 +882,6 @@ pub struct TextMarkdownNode {
     pub color_runs: Box<[TextColorRun]>,
 }
 
-/// Cursor style hint forwarded to the host OS pointer layer.
-///
-/// The runtime updates the system cursor to the resolved style whenever
-/// the pointer hovers over a HitRegionNode — no agent roundtrip required.
-/// Source: RFC 0004 §7.1, input-model/spec.md line 249.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub enum CursorStyle {
-    /// Platform default arrow cursor.
-    #[default]
-    Default,
-    /// Text-insertion I-beam.
-    Text,
-    /// Pointer (pointing hand) — conventional for links/buttons.
-    Pointer,
-    /// Move cursor (four-directional arrows).
-    Move,
-    /// Crosshair for precision targeting.
-    Crosshair,
-    /// Grab (open hand).
-    Grab,
-    /// Grabbing (closed hand).
-    Grabbing,
-    /// Not-allowed / forbidden.
-    NotAllowed,
-    /// Resize — north-south.
-    ResizeNS,
-    /// Resize — east-west.
-    ResizeEW,
-    /// Resize — northwest-southeast diagonal.
-    ResizeNWSE,
-    /// Resize — northeast-southwest diagonal.
-    ResizeNESW,
-}
-
-/// Event delivery filter mask for a HitRegionNode.
-///
-/// **Data model only in v1.** This struct carries the mask values set by the
-/// owning agent; the filtering logic (suppressing event delivery when a flag is
-/// `false`) is implemented in the input-dispatch layer (input model epic,
-/// post-v1 or separate bead).  Until that layer is wired, all event types
-/// reach the agent regardless of this mask.
-///
-/// When the filtering layer is active, a flag of `false` suppresses the
-/// corresponding event type before it reaches the owning agent's EventBatch,
-/// saving agent bandwidth.  All flags default to `true`.
-///
-/// The runtime still performs hit-testing and local-state updates regardless
-/// of mask values.  `event_mask` controls agent delivery only — it is never
-/// consulted by the hit-test spatial query.
-///
-/// Source: RFC 0004 §7.1, input-model/spec.md lines 249, 253-255.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct EventMask {
-    /// Deliver PointerDownEvent to the owning agent.
-    pub pointer_down: bool,
-    /// Deliver PointerUpEvent to the owning agent.
-    pub pointer_up: bool,
-    /// Deliver PointerMoveEvent to the owning agent.
-    pub pointer_move: bool,
-    /// Deliver PointerEnterEvent to the owning agent.
-    pub pointer_enter: bool,
-    /// Deliver PointerLeaveEvent to the owning agent.
-    pub pointer_leave: bool,
-    /// Deliver ClickEvent to the owning agent.
-    pub click: bool,
-    /// Deliver DoubleClickEvent to the owning agent.
-    pub double_click: bool,
-    /// Deliver ContextMenuEvent to the owning agent.
-    pub context_menu: bool,
-    /// Deliver KeyDownEvent / KeyUpEvent / CharacterEvent to the owning agent.
-    pub keyboard: bool,
-}
-
-impl Default for EventMask {
-    /// All event types delivered by default.
-    fn default() -> Self {
-        Self {
-            pointer_down: true,
-            pointer_up: true,
-            pointer_move: true,
-            pointer_enter: true,
-            pointer_leave: true,
-            click: true,
-            double_click: true,
-            context_menu: true,
-            keyboard: true,
-        }
-    }
-}
-
-/// ARIA-compatible accessibility metadata for a HitRegionNode.
-///
-/// Enables screen readers and assistive technologies to understand the
-/// interactive element's role, label, and state.
-/// Source: RFC 0004 §7.1, input-model/spec.md line 249.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AccessibilityMeta {
-    /// ARIA role string (e.g., "button", "link", "checkbox").
-    /// Empty string means no explicit role — inferred from context.
-    pub role: String,
-    /// Accessible label.  Used by screen readers as the element's name.
-    pub label: String,
-    /// ARIA description (longer contextual hint, supplemental to label).
-    pub description: String,
-    /// Whether the element is currently disabled from an accessibility standpoint.
-    pub disabled: bool,
-}
-
 /// Per-node visual style overrides applied locally without an agent roundtrip.
 ///
 /// These are compositor-managed overrides — the agent provides the values; the
@@ -1090,11 +970,6 @@ pub enum HitResult {
 /// on hit, without waiting for the owning agent to acknowledge.  This satisfies
 /// the "local feedback first" doctrine.
 ///
-/// # Event filtering
-/// `event_mask` controls which event types are forwarded to the owning agent.
-/// The runtime always performs the spatial query and local-state update;
-/// `event_mask` only suppresses agent delivery.
-///
 /// Source: RFC 0004 §7.1, RFC 0001 §2.4, input-model/spec.md lines 248-259.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct HitRegionNode {
@@ -1117,9 +992,6 @@ pub struct HitRegionNode {
     /// Source: RFC 0004 §7.1 / input-model/spec.md line 120.
     #[serde(default)]
     pub release_on_up: bool,
-    /// Cursor style hint shown while the pointer hovers over this node.
-    #[serde(default)]
-    pub cursor_style: CursorStyle,
     /// Tooltip text shown after the pointer has hovered for 500 ms.
     /// `None` means no tooltip.
     ///
@@ -1131,9 +1003,6 @@ pub struct HitRegionNode {
     /// budget (verified empirically — see hud-se6hs).
     #[serde(default)]
     pub tooltip: Box<Option<String>>,
-    /// Per-event-type delivery filter.  All events enabled by default.
-    #[serde(default)]
-    pub event_mask: EventMask,
     /// When `true`, keystroke events targeting this focused node are intercepted
     /// by the runtime's `ComposerDraftManager` and routed into a `ComposerDraft`
     /// buffer instead of being forwarded to the owning agent as raw key events.
@@ -1161,13 +1030,6 @@ pub struct HitRegionNode {
     /// Follow-up to hud-evk0j (source: hud-se6hs).
     #[serde(default)]
     pub composer_placeholder: Box<Option<String>>,
-    /// ARIA-compatible accessibility metadata.
-    ///
-    /// Boxed to keep `HitRegionNode` (and therefore `Node`) within the
-    /// 150-byte struct budget (scene-graph/spec.md line 302, RFC 0001 §8).
-    /// `AccessibilityMeta` is zero by default; boxing costs only 8 bytes when empty.
-    #[serde(default)]
-    pub accessibility: Box<AccessibilityMeta>,
     /// Compositor-applied visual style overrides for hover/press/focus states.
     ///
     /// Boxed to stay within the 150-byte `Node` struct budget
@@ -1224,17 +1086,6 @@ impl HitResult {
     pub fn is_zone_interaction(&self) -> bool {
         matches!(self, HitResult::ZoneInteraction { .. })
     }
-
-    /// Extract the `interaction_id` for [`HitResult::ZoneInteraction`] results.
-    ///
-    /// Returns `None` for all other variants.
-    pub fn zone_interaction_id(&self) -> Option<&str> {
-        if let HitResult::ZoneInteraction { interaction_id, .. } = self {
-            Some(interaction_id.as_str())
-        } else {
-            None
-        }
-    }
 }
 
 impl Default for HitRegionNode {
@@ -1247,11 +1098,8 @@ impl Default for HitRegionNode {
             auto_capture: false,
             release_on_up: false,
             accepts_composer_input: false,
-            cursor_style: CursorStyle::Default,
             tooltip: Box::default(),
-            event_mask: EventMask::default(),
             composer_placeholder: Box::default(),
-            accessibility: Box::default(),
             local_style: Box::default(),
         }
     }
@@ -2006,15 +1854,6 @@ pub enum ContentionPolicy {
     Replace,
 }
 
-/// Transport constraint for zone publishing.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum TransportConstraint {
-    /// Content must arrive via gRPC session stream.
-    GrpcOnly,
-    /// Content may arrive via MCP tool call.
-    McpAllowed,
-}
-
 /// Full zone definition per RFC 0001 §2.5.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ZoneDefinition {
@@ -2026,7 +1865,6 @@ pub struct ZoneDefinition {
     pub rendering_policy: RenderingPolicy,
     pub contention_policy: ContentionPolicy,
     pub max_publishers: u32,
-    pub transport_constraint: Option<TransportConstraint>,
     /// Auto-clear timeout in milliseconds; None = no auto-clear.
     pub auto_clear_ms: Option<u64>,
     /// When true, publishes to this zone are fire-and-forget (no ZonePublishResult).
@@ -2719,18 +2557,6 @@ impl WidgetRegistry {
         )
     }
 
-    /// Resolve absolute pixel bounds for a widget instance at the given display size.
-    pub fn resolve_geometry_rect_for_instance(
-        &self,
-        instance_name: &str,
-        user_override: Option<&GeometryPolicy>,
-        display_width: f32,
-        display_height: f32,
-    ) -> Option<Rect> {
-        self.resolve_geometry_policy_for_instance(instance_name, user_override)
-            .map(|policy| geometry_policy_to_absolute_rect(policy, display_width, display_height))
-    }
-
     /// Get the current active publish(es) for a widget instance.
     pub fn active_for_widget(&self, instance_name: &str) -> &[WidgetPublishRecord] {
         self.active_publishes
@@ -3079,7 +2905,6 @@ impl ZoneRegistry {
             rendering_policy: RenderingPolicy::default(),
             contention_policy: ContentionPolicy::MergeByKey { max_keys: 32 },
             max_publishers: 16,
-            transport_constraint: None,
             auto_clear_ms: None,
             ephemeral: false,
             layer_attachment: LayerAttachment::Chrome,
@@ -3100,7 +2925,6 @@ impl ZoneRegistry {
             rendering_policy: RenderingPolicy::default(),
             contention_policy: ContentionPolicy::Stack { max_depth: 5 },
             max_publishers: 16,
-            transport_constraint: None,
             auto_clear_ms: Some(8_000),
             ephemeral: false,
             layer_attachment: LayerAttachment::Chrome,
@@ -3121,7 +2945,6 @@ impl ZoneRegistry {
             rendering_policy: RenderingPolicy::default(),
             contention_policy: ContentionPolicy::LatestWins,
             max_publishers: 1,
-            transport_constraint: None,
             auto_clear_ms: None,
             ephemeral: false,
             layer_attachment: LayerAttachment::Content,
@@ -3142,7 +2965,6 @@ impl ZoneRegistry {
             rendering_policy: RenderingPolicy::default(),
             contention_policy: ContentionPolicy::Replace,
             max_publishers: 1,
-            transport_constraint: None,
             auto_clear_ms: None,
             ephemeral: false,
             layer_attachment: LayerAttachment::Content,
@@ -3163,7 +2985,6 @@ impl ZoneRegistry {
             rendering_policy: RenderingPolicy::default(),
             contention_policy: ContentionPolicy::Replace,
             max_publishers: 1,
-            transport_constraint: None,
             auto_clear_ms: None,
             ephemeral: false,
             layer_attachment: LayerAttachment::Background,
@@ -3239,7 +3060,6 @@ impl ZoneRegistry {
             // 8 different agents; keeping max_publishers=1 ensures no single agent
             // can flood the stack.
             max_publishers: 1,
-            transport_constraint: None,
             auto_clear_ms: Some(10_000),
             ephemeral: false,
             layer_attachment: LayerAttachment::Chrome,
@@ -3282,19 +3102,6 @@ impl ZoneRegistry {
             config_override.copied(),
             Some(zone.geometry_policy),
         )
-    }
-
-    /// Resolve absolute pixel bounds for a zone at the given display size.
-    pub fn resolve_geometry_rect_for_zone(
-        &self,
-        zone_name: &str,
-        user_override: Option<&GeometryPolicy>,
-        config_override: Option<&GeometryPolicy>,
-        display_width: f32,
-        display_height: f32,
-    ) -> Option<Rect> {
-        self.resolve_geometry_policy_for_zone(zone_name, user_override, config_override)
-            .map(|policy| geometry_policy_to_absolute_rect(policy, display_width, display_height))
     }
 
     /// Query zones that accept a given media type.
@@ -3340,14 +3147,6 @@ impl ZoneRegistry {
             active_publications: pubs,
             occupant_count,
         })
-    }
-
-    /// Query zones by layer attachment.
-    pub fn zones_with_attachment(&self, attachment: LayerAttachment) -> Vec<&ZoneDefinition> {
-        self.zones
-            .values()
-            .filter(|z| z.layer_attachment == attachment)
-            .collect()
     }
 
     /// Snapshot the registry (all definitions + all active publishes).
@@ -3902,7 +3701,6 @@ mod tests {
             rendering_policy: RenderingPolicy::default(),
             contention_policy: ContentionPolicy::LatestWins,
             max_publishers: 1,
-            transport_constraint: None,
             auto_clear_ms: None,
             ephemeral: false,
             layer_attachment: LayerAttachment::Content,

@@ -400,13 +400,6 @@ impl SceneGraph {
         Ok(())
     }
 
-    /// Remove local-first scroll config and offset state for a tile.
-    pub fn clear_tile_scroll_config(&mut self, tile_id: SceneId) {
-        self.overlay.tile_scroll_configs.remove(&tile_id);
-        self.overlay.tile_scroll_offsets.remove(&tile_id);
-        self.overlay.displayed_tile_scroll_offsets.remove(&tile_id);
-    }
-
     /// Get the registered local-first scroll config for a tile.
     pub fn tile_scroll_config(&self, tile_id: SceneId) -> Option<TileScrollConfig> {
         self.overlay.tile_scroll_configs.get(&tile_id).copied()
@@ -603,11 +596,6 @@ impl SceneGraph {
         self.require_active_lease(lease_id)?;
         self.clear_tile_composer_interaction(tile_id);
         Ok(())
-    }
-
-    /// Get the composer interaction hit-region spec for a tile, if any.
-    pub fn tile_composer_interaction(&self, tile_id: SceneId) -> Option<&HitRegionNode> {
-        self.overlay.tile_composer_interactions.get(&tile_id)
     }
 
     // ── Portal surface (hud-tc153) ──────────────────

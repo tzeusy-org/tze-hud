@@ -1219,7 +1219,7 @@ impl Compositor {
     ///
     /// Retained diagnostics receive successful reconfiguration at the same
     /// private fan-out point. Draining this lifecycle evidence still avoids
-    /// widening SceneDiff, WAL, protobuf, or agent-visible APIs.
+    /// widening WAL, protobuf, or agent-visible APIs.
     #[allow(dead_code)] // Available for compositor-private lifecycle inspection.
     pub(crate) fn take_latest_surface_recovery(&mut self) -> Option<SurfaceRecoveryOutcome> {
         self.latest_surface_recovery.take()

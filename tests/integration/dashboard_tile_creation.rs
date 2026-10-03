@@ -53,8 +53,8 @@ use tze_hud_scene::{
     ResourceId, SceneGraph, SceneId, TestClock, ValidationErrorCode, ZONE_TILE_Z_MIN,
     mutation::{MutationBatch, SceneMutation},
     types::{
-        CursorStyle, FontFamily, HitRegionNode, ImageFitMode, InputMode, Node, NodeData, Rect,
-        Rgba, SolidColorNode, StaticImageNode, TextAlign, TextMarkdownNode, TextOverflow,
+        FontFamily, HitRegionNode, ImageFitMode, InputMode, Node, NodeData, Rect, Rgba,
+        SolidColorNode, StaticImageNode, TextAlign, TextMarkdownNode, TextOverflow,
     },
 };
 
@@ -313,7 +313,6 @@ fn make_refresh_node() -> Node {
             accepts_pointer: true,
             auto_capture: true,
             release_on_up: true,
-            cursor_style: CursorStyle::Pointer,
             tooltip: Box::new(Some("Refresh dashboard content".to_string())),
             ..Default::default()
         }),
@@ -337,7 +336,6 @@ fn make_dismiss_node() -> Node {
             accepts_pointer: true,
             auto_capture: true,
             release_on_up: true,
-            cursor_style: CursorStyle::Pointer,
             tooltip: Box::new(Some("Dismiss this tile".to_string())),
             ..Default::default()
         }),
@@ -1122,7 +1120,6 @@ fn hit_region_nodes_have_correct_interaction_ids_and_flags() {
         assert!(hr.accepts_pointer);
         assert!(hr.auto_capture);
         assert!(hr.release_on_up);
-        assert_eq!(hr.cursor_style, CursorStyle::Pointer);
     } else {
         panic!("refresh must be HitRegionNode");
     }
@@ -1133,7 +1130,6 @@ fn hit_region_nodes_have_correct_interaction_ids_and_flags() {
         assert!(hr.accepts_pointer);
         assert!(hr.auto_capture);
         assert!(hr.release_on_up);
-        assert_eq!(hr.cursor_style, CursorStyle::Pointer);
     } else {
         panic!("dismiss must be HitRegionNode");
     }

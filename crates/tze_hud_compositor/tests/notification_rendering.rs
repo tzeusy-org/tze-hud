@@ -151,7 +151,6 @@ fn register_notification_zone(scene: &mut SceneGraph) {
         },
         contention_policy: ContentionPolicy::Stack { max_depth: 5 },
         max_publishers: 16,
-        transport_constraint: None,
         auto_clear_ms: None,
         ephemeral: false,
         layer_attachment: LayerAttachment::Chrome,

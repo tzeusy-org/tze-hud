@@ -8,7 +8,6 @@
 //! - input_to_local_ack p99 < 4ms  (4_000 µs)
 //! - Hit-test p99 < 100µs
 //! - Transaction validation p99 < 200µs
-//! - Scene diff p99 < 500µs
 //!
 //! ## Pixel assertions (Layer 1)
 //! Render a known scene and verify background, tile, and z-order pixels are
@@ -43,7 +42,6 @@ use tze_hud_compositor::HeadlessSurface;
 use tze_hud_input::{PointerEvent, PointerEventKind};
 use tze_hud_runtime::HeadlessRuntime;
 use tze_hud_runtime::headless::HeadlessConfig;
-use tze_hud_scene::diff::SceneDiff;
 use tze_hud_scene::graph::SceneGraph;
 use tze_hud_scene::mutation::{MutationBatch, SceneMutation};
 use tze_hud_scene::perf_budget::test_budget;
@@ -554,70 +552,6 @@ fn test_transaction_validation_p99_within_budget() {
         let raw_p99 = validation_bucket.p99().unwrap_or(0);
         eprintln!(
             "[SKIP-TIMING] transaction_validation raw_p99={raw_p99}us; \
-             set TZE_HUD_PERF_ASSERT=1 to enforce budget"
-        );
-    }
-}
-
-/// Assert that scene diff p99 is under the 500µs budget.
-///
-/// Computes diffs between before/after snapshots of a scene with 10 tiles and
-/// verifies the p99 latency across 50 iterations.
-#[test]
-fn test_scene_diff_p99_within_budget() {
-    use tze_hud_scene::perf_budget::budgets::SCENE_DIFF_BUDGET_US;
-    let budget_us = test_budget(SCENE_DIFF_BUDGET_US);
-    const DIFF_COUNT: usize = 50;
-
-    let mut diff_bucket = LatencyBucket::new("diff");
-
-    for i in 0..DIFF_COUNT {
-        let mut scene = SceneGraph::new(1920.0, 1080.0);
-        let tab = scene.create_tab("Main", 0).unwrap();
-        let lease = scene.grant_lease("agent", 60_000);
-
-        // Build a scene with a handful of tiles
-        for j in 0..10 {
-            scene
-                .create_tile(
-                    tab,
-                    "agent",
-                    lease,
-                    Rect::new(
-                        (j as f32 * 100.0) % 1600.0,
-                        (i as f32 * 20.0) % 900.0,
-                        90.0,
-                        70.0,
-                    ),
-                    j as u32 + 1,
-                )
-                .unwrap();
-        }
-
-        let snapshot = scene.clone();
-
-        // Add one more tile
-        scene
-            .create_tile(tab, "agent", lease, Rect::new(5.0, 5.0, 50.0, 50.0), 99)
-            .unwrap();
-
-        let start = std::time::Instant::now();
-        let diff = SceneDiff::compute(&snapshot, &scene);
-        let elapsed_us = start.elapsed().as_micros() as u64;
-        diff_bucket.record(elapsed_us);
-
-        assert!(!diff.is_empty(), "diff should detect the new tile");
-    }
-
-    // Timing assertion: gated — wall-clock budget.  (hud-1aswu.3)
-    if perf_assert_enabled() {
-        diff_bucket
-            .assert_p99_under(budget_us)
-            .expect("scene diff p99 budget");
-    } else {
-        let raw_p99 = diff_bucket.p99().unwrap_or(0);
-        eprintln!(
-            "[SKIP-TIMING] scene_diff raw_p99={raw_p99}us; \
              set TZE_HUD_PERF_ASSERT=1 to enforce budget"
         );
     }

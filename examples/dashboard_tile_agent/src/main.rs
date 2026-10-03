@@ -4118,18 +4118,18 @@ mod tests {
     /// tasks.md §10.1: auto-renewal fires at 75% TTL (45 seconds) — agent receives
     ///   LeaseResponse with granted=true and updated expiry.
     ///
-    /// Layer 0 test using `TtlState` with an injected `SimulatedClock`:
+    /// Layer 0 test using `TtlState` with an injected `TestClock`:
     ///   - Create a `TtlState` with `ttl_ms=60_000` and `AutoRenew` policy.
     ///   - Advance clock to 44 999 ms (just below 75%) → poll returns Ok.
     ///   - Advance clock to 45 000 ms (exactly 75%) → poll returns AutoRenewDue.
     ///   - Reset renewal window and advance to 90 000 ms → fires again.
     #[test]
     fn test_auto_renewal_fires_at_75_percent_ttl() {
-        use tze_hud_scene::clock::SimulatedClock;
+        use tze_hud_scene::clock::TestClock;
         use tze_hud_scene::lease::{RenewalPolicy, TtlCheck, TtlState};
 
         let ttl_ms = 60_000u64;
-        let clock = SimulatedClock::new(0); // start at t=0 us
+        let clock = TestClock::from_us(0); // start at t=0 us
         let mut ttl = TtlState::new_activated(ttl_ms, RenewalPolicy::AutoRenew, clock.clone());
 
         // Before 75%: poll returns Ok.
@@ -4258,7 +4258,7 @@ mod tests {
     ///   lease to EXPIRED and removes tile.
     ///
     /// Layer 0 test using `SceneGraph::expire_leases` on a `SceneGraph` with an
-    /// injected `SimulatedClock`:
+    /// injected `TestClock`:
     ///   - Disconnect the lease at t=1 000 ms.
     ///   - Advance clock to t=1 000 + 30 000 + 1 = 31 001 ms (grace expired).
     ///   - Call `expire_leases` → lease MUST be Expired; tile MUST be removed.
@@ -4266,11 +4266,11 @@ mod tests {
     fn test_grace_expiry_removes_tile() {
         use std::sync::Arc;
         use tze_hud_scene::Rect;
-        use tze_hud_scene::clock::SimulatedClock;
+        use tze_hud_scene::clock::TestClock;
         use tze_hud_scene::graph::SceneGraph;
         use tze_hud_scene::types::LeaseState;
 
-        let clock = SimulatedClock::new(1_000 * 1_000); // start at 1 s in µs
+        let clock = TestClock::from_us(1_000 * 1_000); // start at 1 s in µs
         let mut scene = SceneGraph::new_with_clock(1920.0, 1080.0, Arc::new(clock.clone()));
 
         let tab_id = scene.create_tab("Test", 0).expect("create_tab");
@@ -4296,7 +4296,7 @@ mod tests {
             .expect("disconnect_lease must succeed");
 
         // Advance clock past the grace period (30 001 ms after disconnect).
-        // SimulatedClock uses µs; current = 1 000 000 µs. Target = 31 001 ms.
+        // TestClock uses µs; current = 1 000 000 µs. Target = 31 001 ms.
         let target_us = (disconnect_ms + 30_001) * 1_000;
         clock.set_us(target_us);
 
@@ -4623,14 +4623,14 @@ mod tests {
     fn test_disconnect_during_lifecycle_triggers_orphan_path() {
         use std::sync::Arc;
         use tze_hud_scene::Rect;
-        use tze_hud_scene::clock::SimulatedClock;
+        use tze_hud_scene::clock::TestClock;
         use tze_hud_scene::graph::SceneGraph;
         use tze_hud_scene::lease::TileVisualHint;
         use tze_hud_scene::types::LeaseState;
 
         // ── Step 1: Build a scene with the dashboard tile ─────────────────────
-        // Use a SimulatedClock so we can advance time precisely for the grace period.
-        let clock = SimulatedClock::new(0); // t=0 µs
+        // Use a TestClock so we can advance time precisely for the grace period.
+        let clock = TestClock::from_us(0); // t=0 µs
         let mut scene = SceneGraph::new_with_clock(1920.0, 1080.0, Arc::new(clock.clone()));
 
         let tab_id = scene.create_tab("Main", 0).expect("create_tab — §12.2");

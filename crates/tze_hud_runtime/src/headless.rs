@@ -2030,7 +2030,6 @@ default_tab = true
             rendering_policy: RenderingPolicy::default(),
             contention_policy: ContentionPolicy::Stack { max_depth: 8 },
             max_publishers: 8,
-            transport_constraint: None,
             auto_clear_ms: None,
             ephemeral: false,
             layer_attachment: LayerAttachment::Chrome,

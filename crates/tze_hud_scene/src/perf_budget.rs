@@ -15,8 +15,6 @@ pub mod budgets {
     pub const HIT_TEST_BUDGET_US: u64 = 100;
     /// Transaction validation per mutation batch.
     pub const TRANSACTION_VALIDATION_BUDGET_US: u64 = 200;
-    /// Scene diff computation.
-    pub const SCENE_DIFF_BUDGET_US: u64 = 500;
     /// Event dispatch to an agent (hit-test, session lookup, serialization, enqueue).
     pub const EVENT_DISPATCH_BUDGET_US: u64 = 2_000;
 }

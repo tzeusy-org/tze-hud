@@ -8,7 +8,6 @@
 //! and assertable without any GPU context.
 
 pub mod clock;
-pub mod diff;
 pub mod element_store;
 pub mod error_codes;
 pub mod graph;
@@ -27,8 +26,7 @@ pub mod config;
 pub mod events;
 pub mod lease;
 
-pub use clock::{Clock, SimulatedClock, SystemClock, TestClock};
-pub use diff::{DiffEntry, SceneDiff};
+pub use clock::{Clock, SystemClock, TestClock};
 pub use element_store::{
     ElementStore, ElementStoreEntry, ElementType, ZERO_GEOMETRY_POLICY,
     fallback_geometry_for_element,

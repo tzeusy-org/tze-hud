@@ -67,9 +67,8 @@ use tze_hud_scene::{
     lease::{ORPHAN_GRACE_PERIOD_MS, TileVisualHint},
     mutation::{MutationBatch, SceneMutation},
     types::{
-        CursorStyle, FontFamily, HitRegionNode, ImageFitMode, InputMode, LeaseExpiry, Node,
-        NodeData, Rect, Rgba, SolidColorNode, StaticImageNode, TextAlign, TextMarkdownNode,
-        TextOverflow,
+        FontFamily, HitRegionNode, ImageFitMode, InputMode, LeaseExpiry, Node, NodeData, Rect,
+        Rgba, SolidColorNode, StaticImageNode, TextAlign, TextMarkdownNode, TextOverflow,
     },
 };
 
@@ -283,7 +282,6 @@ fn make_refresh_node() -> Node {
             accepts_pointer: true,
             auto_capture: true,
             release_on_up: true,
-            cursor_style: CursorStyle::Pointer,
             tooltip: Box::new(Some("Refresh dashboard content".to_string())),
             ..Default::default()
         }),
@@ -302,7 +300,6 @@ fn make_dismiss_node() -> Node {
             accepts_pointer: true,
             auto_capture: true,
             release_on_up: true,
-            cursor_style: CursorStyle::Pointer,
             tooltip: Box::new(Some("Dismiss this tile".to_string())),
             ..Default::default()
         }),

@@ -135,8 +135,7 @@ pub struct DoubleClickEvent {
 /// Right-click context menu request (spec lines 433-435).
 ///
 /// Produced by the event preprocessor directly from right-click, bypassing
-/// the gesture recognizer pipeline. Only dispatched when
-/// `event_mask.context_menu == true`.
+/// the gesture recognizer pipeline.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ContextMenuEvent {
     pub fields: PointerFields,
