@@ -83,7 +83,8 @@ test-integration:
             --test text_stream_portal_coalescing \
             --test text_stream_portal_governance \
             --test drag_reposition \
-            --test movable_elements_e2e
+            --test movable_elements_e2e \
+            --test poc_acceptance
 
 # vertical_slice production config boot (mirror CI production-boot-vertical-slice job)
 production-boot:

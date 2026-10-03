@@ -1394,11 +1394,7 @@ impl WinitApp {
     /// tail even if the viewer had scrolled up, matching "submitting your own
     /// reply reveals it" (don't strand the viewer scrolled-up).
     fn append_raw_tile_viewer_echo(&mut self, tile_id: tze_hud_scene::SceneId, text: String) {
-        let submitted_at_wall_us = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_micros()
-            .min(u128::from(u64::MAX)) as u64;
+        let submitted_at_wall_us = self.state.portal_projection_driver.now_wall_us();
 
         if let Ok(state) = self.state.shared_state.try_lock()
             && let Ok(mut scene) = state.scene.try_lock()
@@ -1505,11 +1501,7 @@ impl WinitApp {
         tile_id: tze_hud_scene::SceneId,
         batch: &tze_hud_input::DraftNotificationBatch,
     ) -> bool {
-        let submitted_at_wall_us = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_micros()
-            .min(u128::from(u64::MAX)) as u64;
+        let submitted_at_wall_us = self.state.portal_projection_driver.now_wall_us();
 
         if let Some(feedback) = self
             .state

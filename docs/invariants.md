@@ -19,6 +19,8 @@ dashboard: an agent can say "show this for 8 seconds" in one call.
 - `tze_hud_protocol` (gRPC session) `grpc_zone_publish_ttl_sets_expiry_and_is_swept`,
   `grpc_zone_publish_expires_at_is_swept`, `grpc_zone_publish_present_at_is_held_until_due`,
   `grpc_batch_present_at_holds_content_until_due`, `grpc_batch_expires_at_sweeps_tile`
+- `integration` (POC acceptance, MCP end to end) `poc_zone_notification_ttl_disappears_unattended`,
+  `poc_zone_delay_ms_appears_on_schedule`
 
 ## 2. Three message classes, kept distinct
 
@@ -58,6 +60,8 @@ ends, the runtime reclaims everything with no agent help.
 - `tze_hud_protocol` (gRPC session) `grpc_disconnect_orphans_leases_and_badges_tiles`,
   `grpc_resume_within_grace_restores_same_lease_and_tile`,
   `grpc_grace_expiry_reclaims_orphaned_lease_and_rejects_resume`
+- `tze_hud_runtime` (headless frame sweep) `render_frame_reclaims_orphaned_lease_after_grace`
+- `integration` (POC acceptance) `poc_portal_abandoned_is_reclaimed`
 
 ## 5. Leases hold time; safe mode pauses it
 
@@ -103,6 +107,10 @@ Anything with a deadline (TTL, grace periods, degradation windows, expiry)
 reads time from an injectable clock (`TestClock`, or `*_at(now)` methods), so
 its tests are deterministic and never sleep. Keep this even if replay
 tooling goes in T4.
+
+- `integration` (POC acceptance: zone TTL, `delay_ms`, and portal liveness
+  and lease grace all advanced by one `TestClock`) `poc_portal_abandoned_is_reclaimed`,
+  `poc_zone_notification_ttl_disappears_unattended`, `poc_zone_delay_ms_appears_on_schedule`
 
 ## Deferred ideas (notes, not code)
 

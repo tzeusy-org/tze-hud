@@ -1346,6 +1346,7 @@ dependencies = [
  "image",
  "serde",
  "serde_json",
+ "tiktoken-rs",
  "tokio",
  "tokio-stream",
  "tonic",

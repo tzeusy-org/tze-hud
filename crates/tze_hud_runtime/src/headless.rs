@@ -458,12 +458,11 @@ impl HeadlessRuntime {
             scene_guard.drain_pending_widget_svg_assets(),
         );
 
-        // Timed content (invariant 1), then expired zone and widget
-        // publications, all cleared before the next frame.
-        scene_guard.apply_due_batches();
-        scene_guard.drain_expired_tiles();
-        scene_guard.drain_expired_zone_publications();
-        scene_guard.drain_expired_widget_publications();
+        // Timed content, expired publications, and elapsed leases
+        // (invariants 1 and 4), all cleared before the next frame. Headless
+        // keeps no session fan-out for the returned expiries; the scene-side
+        // reclaim is what matters here.
+        let _ = crate::pipeline::sweep_timed_scene_state(&mut scene_guard);
 
         // Drain the removal notification queue populated by remove_tile_and_nodes.
         // Without this, the queue grows unboundedly in headless / server runtimes
@@ -1727,6 +1726,66 @@ mod tests {
         // render_frame should succeed without a gRPC server
         let telemetry = runtime.render_frame().await;
         assert!(telemetry.frame_time_us > 0, "frame time must be non-zero");
+    }
+
+    /// An orphaned lease is reclaimed by the frame sweep once its grace ends,
+    /// with no agent help (invariant 4) — headless runs the same sweep as the
+    /// windowed compositor.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn render_frame_reclaims_orphaned_lease_after_grace() {
+        let config = HeadlessConfig {
+            width: 64,
+            height: 64,
+            grpc_port: 0,
+            bind_all_interfaces: false,
+            agents: AgentDirectory::unrestricted("test"),
+            config_toml: None,
+        };
+        let _runtime_guard = crate::test_support::lock_headless_runtime().await;
+        let mut runtime = HeadlessRuntime::new(config).await.expect("runtime init");
+        let clock = tze_hud_scene::TestClock::new(1_000);
+        let (lease_id, tile_id) = {
+            let state = runtime.shared_state().lock().await;
+            let mut scene = state.scene.lock().await;
+            *scene = SceneGraph::new_with_clock(64.0, 64.0, Arc::new(clock.clone()));
+            let tab_id = scene.create_tab("Main", 0).expect("tab");
+            let lease_id = scene.grant_lease("agent", 600_000);
+            let tile_id = scene
+                .create_tile(
+                    tab_id,
+                    "agent",
+                    lease_id,
+                    Rect::new(0.0, 0.0, 32.0, 32.0),
+                    1,
+                )
+                .expect("tile");
+            let now_ms = scene.now_millis();
+            scene
+                .disconnect_lease(&lease_id, now_ms)
+                .expect("orphan the lease");
+            (lease_id, tile_id)
+        };
+
+        clock.advance(SceneGraph::DEFAULT_GRACE_PERIOD_MS - 1);
+        runtime.render_frame().await;
+        {
+            let state = runtime.shared_state().lock().await;
+            let scene = state.scene.lock().await;
+            assert!(scene.tiles.contains_key(&tile_id), "kept within grace");
+        }
+
+        clock.advance(1);
+        runtime.render_frame().await;
+        let state = runtime.shared_state().lock().await;
+        let scene = state.scene.lock().await;
+        assert!(!scene.tiles.contains_key(&tile_id), "tile reclaimed");
+        assert!(
+            scene
+                .leases
+                .get(&lease_id)
+                .is_none_or(|lease| lease.state.is_terminal()),
+            "lease reclaimed"
+        );
     }
 
     /// Verify that read_pixels returns the correct buffer size after a render.
