@@ -29,11 +29,6 @@
 //!     This gives the same semantic as the XShape extension / wlr-layer-shell approach
 //!     while using winit's cross-platform API.
 //!
-//! ## GNOME Wayland fallback (spec §Unsupported overlay fallback, line 185)
-//!
-//! `resolve_window_mode()` detects GNOME Wayland (no layer-shell) and falls back
-//! to fullscreen with a startup warning logged.
-//!
 //! ## Runtime mode switching
 //!
 //! Mode switching is supported but disruptive (requires surface recreation, spec
@@ -116,7 +111,6 @@ use crate::runtime_context::SharedRuntimeContext;
 use crate::threads::{CompositorReady, NetworkRuntime, ShutdownToken, spawn_compositor_thread};
 use crate::widget_hover::WidgetHoverTracker;
 use crate::widget_runtime_registration::process_pending_widget_svgs;
-use crate::window::resolve_window_mode;
 use crate::window::{HitRegion, WindowMode};
 
 /// RAII guard that raises the OS timer resolution to 1 ms for its lifetime.
@@ -2420,12 +2414,7 @@ impl WindowedRuntime {
         let render_wake = wake.render_notifier();
         let portal_ingress_wake = wake.main_work_notifier();
 
-        // Resolve the effective window mode, applying platform fallback checks.
-        // Spec §Unsupported overlay fallback (line 185): if overlay is requested
-        // on GNOME Wayland (no layer-shell), fall back to fullscreen with a
-        // startup warning.  resolve_window_mode() emits the warning internally
-        // when a fallback occurs; no additional logging needed here.
-        let (effective_mode, _fallback_reason) = resolve_window_mode(cfg.window.mode);
+        let effective_mode = cfg.window.mode;
 
         // Build shared state (scene + sessions).
         let width = cfg.window.width as f32;

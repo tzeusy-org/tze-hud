@@ -610,7 +610,6 @@ impl HeadlessRuntime {
         telemetry.active_leases = compositor_telemetry.active_leases;
         telemetry.mutations_applied = compositor_telemetry.mutations_applied;
         telemetry.hit_region_updates = compositor_telemetry.hit_region_updates;
-        telemetry.telemetry_overflow_count = self.pipeline.telemetry_overflow_count();
         // Propagate commit-time markdown prime cost (hud-380dl).
         // Non-zero only when scene.version changed this frame (new/changed content
         // required a parse pass); zero on steady-state frames (cache hit, no work).
@@ -696,7 +695,7 @@ impl HeadlessRuntime {
         let service = HudSessionImpl::from_deps(SessionDeps {
             resource_budget: self.runtime_context.resource_budget(),
             budget_enforcer: Some(std::sync::Arc::new(
-                crate::RuntimeMutationBudgetEnforcer::with_limits(
+                crate::mutation_budget_bridge::RuntimeMutationBudgetEnforcer::with_limits(
                     self.runtime_context
                         .operational_envelope
                         .max_resident_sessions,

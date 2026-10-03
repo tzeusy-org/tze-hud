@@ -24,7 +24,6 @@ use tze_hud_telemetry::{
 use crate::channels::{InputEvent, InputEventKind, frame_ready_channel};
 use crate::threads::ShutdownToken;
 use crate::window::WindowMode;
-use crate::window::resolve_window_mode;
 
 use super::input_dispatch::{
     dispatch_capture_released_event, dispatch_focus_event, dispatch_pointer_event,
@@ -2240,12 +2239,8 @@ impl WinitApp {
         self.state.frame_ready_tx = Some(new_tx);
         self.state.frame_ready_rx = new_rx;
 
-        // Apply the new mode (with platform fallback check).
-        // resolve_window_mode() emits the fallback warning internally;
-        // no duplicate logging needed here.
-        let (resolved_mode, _) = resolve_window_mode(new_mode);
-        self.state.effective_mode = resolved_mode;
-        self.state.config.window.mode = resolved_mode;
+        self.state.effective_mode = new_mode;
+        self.state.config.window.mode = new_mode;
     }
 
     /// Cycle the overlay to the next (+1) or previous (-1) monitor.

@@ -1,6 +1,6 @@
 //! # window
 //!
-//! Window mode abstraction per runtime-kernel/spec.md §Window Modes (line 172).
+//! Window mode abstraction.
 //!
 //! ## Two modes, one API
 //!
@@ -13,10 +13,6 @@
 //! Runtime mode switching is supported but disruptive — it requires surface
 //! recreation.
 //!
-//! ## Fallback behaviour
-//!
-//! On GNOME Wayland (no `wlr-layer-shell`), overlay mode silently degrades to
-//! fullscreen with a startup warning logged (spec line 186).
 
 use std::fmt;
 
@@ -41,40 +37,6 @@ impl fmt::Display for WindowMode {
         match self {
             WindowMode::Fullscreen => write!(f, "fullscreen"),
             WindowMode::Overlay => write!(f, "overlay"),
-        }
-    }
-}
-
-// ─── Platform overlay support ─────────────────────────────────────────────────
-
-/// Describes platform-specific overlay support detection results.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum OverlaySupport {
-    /// Full overlay support available (e.g., X11, Windows, macOS).
-    Supported,
-    /// Overlay requested but unavailable on this platform/compositor.
-    /// The runtime falls back to fullscreen with a warning.
-    FallbackToFullscreen { reason: FallbackReason },
-}
-
-/// Reason why overlay mode fell back to fullscreen.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum FallbackReason {
-    /// GNOME Wayland — no `wlr-layer-shell` extension available.
-    GnomeWaylandNoLayerShell,
-    /// Generic unsupported platform.
-    Unsupported(String),
-}
-
-impl fmt::Display for FallbackReason {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            FallbackReason::GnomeWaylandNoLayerShell => {
-                write!(f, "GNOME Wayland: wlr-layer-shell not available")
-            }
-            FallbackReason::Unsupported(msg) => {
-                write!(f, "unsupported platform: {msg}")
-            }
         }
     }
 }
@@ -129,67 +91,6 @@ impl Default for WindowConfig {
             height: 1080,
             title: "tze_hud".to_string(),
         }
-    }
-}
-
-// ─── Effective mode resolution ────────────────────────────────────────────────
-
-/// Resolve the effective window mode, performing platform fallback checks.
-///
-/// Spec line 186: "WHEN runtime starts in overlay mode on GNOME Wayland
-/// (no layer-shell) THEN runtime MUST fall back to fullscreen silently
-/// with startup warning logged."
-pub fn resolve_window_mode(requested: WindowMode) -> (WindowMode, Option<FallbackReason>) {
-    if requested == WindowMode::Overlay {
-        // Detect overlay availability.
-        match check_overlay_support() {
-            OverlaySupport::Supported => (WindowMode::Overlay, None),
-            OverlaySupport::FallbackToFullscreen { reason } => {
-                tracing::warn!(
-                    reason = %reason,
-                    "overlay mode unavailable; falling back to fullscreen"
-                );
-                (WindowMode::Fullscreen, Some(reason))
-            }
-        }
-    } else {
-        (WindowMode::Fullscreen, None)
-    }
-}
-
-/// Detect whether overlay mode is available on the current platform.
-///
-/// This is a best-effort heuristic based on environment variables and
-/// compiled platform. Full Wayland protocol negotiation happens inside
-/// winit/raw-window-handle integration and is deferred to the windowed
-/// runtime (out of scope for this bead). Here we provide the scaffolding
-/// that callers can override with real probe results.
-pub fn check_overlay_support() -> OverlaySupport {
-    #[cfg(target_os = "linux")]
-    {
-        check_overlay_support_linux()
-    }
-    #[cfg(not(target_os = "linux"))]
-    {
-        // macOS and Windows generally support borderless always-on-top windows.
-        OverlaySupport::Supported
-    }
-}
-
-#[cfg(target_os = "linux")]
-fn check_overlay_support_linux() -> OverlaySupport {
-    // Probe: if WAYLAND_DISPLAY is set and XDG_CURRENT_DESKTOP looks like GNOME,
-    // we assume layer-shell is not available (GNOME does not support it as of 2026).
-    let is_wayland = std::env::var("WAYLAND_DISPLAY").is_ok();
-    let desktop = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default();
-    let is_gnome = desktop.to_lowercase().contains("gnome");
-
-    if is_wayland && is_gnome {
-        OverlaySupport::FallbackToFullscreen {
-            reason: FallbackReason::GnomeWaylandNoLayerShell,
-        }
-    } else {
-        OverlaySupport::Supported
     }
 }
 
@@ -346,34 +247,5 @@ mod tests {
         assert_eq!(cfg.mode, WindowMode::Fullscreen);
         assert_eq!(cfg.width, 1920);
         assert_eq!(cfg.height, 1080);
-    }
-
-    // ── resolve_window_mode ───────────────────────────────────────────────────
-
-    #[test]
-    fn resolve_fullscreen_stays_fullscreen() {
-        let (mode, reason) = resolve_window_mode(WindowMode::Fullscreen);
-        assert_eq!(mode, WindowMode::Fullscreen);
-        assert!(reason.is_none());
-    }
-
-    // Overlay support varies by environment; we just verify no panic occurs.
-    #[test]
-    fn resolve_overlay_does_not_panic() {
-        let (mode, _reason) = resolve_window_mode(WindowMode::Overlay);
-        // Result is either Overlay or Fullscreen-fallback — both are valid.
-        assert!(mode == WindowMode::Overlay || mode == WindowMode::Fullscreen);
-    }
-
-    // ── FallbackReason display ───────────────────────────────────────────────
-
-    #[test]
-    fn fallback_reason_display() {
-        let r = FallbackReason::GnomeWaylandNoLayerShell;
-        let s = format!("{r}");
-        assert!(s.contains("GNOME"));
-
-        let r2 = FallbackReason::Unsupported("test".to_string());
-        assert!(format!("{r2}").contains("test"));
     }
 }

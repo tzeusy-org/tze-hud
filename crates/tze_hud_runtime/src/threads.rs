@@ -1,86 +1,16 @@
 //! # threads
 //!
-//! Thread spawning, priority elevation, and shutdown coordination per
-//! runtime-kernel/spec.md §Thread Model (line 19) and §Graceful Shutdown (line 333).
+//! Compositor thread spawning, main-thread priority elevation, and the
+//! shutdown token shared by the runtime's threads.
 //!
-//! ## Thread model (spec §Thread Model)
-//!
-//! The runtime starts exactly four groups of threads at startup and spawns
-//! no new OS threads during normal operation:
-//!
-//! 1. **Main thread** — winit event loop, input drain, local feedback,
-//!    surface.present(). Elevated to real-time priority at startup.
-//! 2. **Compositor thread** — scene commit, render encode, GPU submit.
-//!    Owns `wgpu::Device` and `wgpu::Queue` exclusively.
-//! 3. **Network thread(s)** — Tokio multi-thread runtime for gRPC server,
-//!    MCP bridge, session management.
-//! 4. **Telemetry thread** — async structured emission.
-//!
-//! ## Priority elevation (spec §Main Thread Responsibilities, lines 43-45)
-//!
-//! - Linux:   `SCHED_RR` real-time scheduling
-//! - macOS:   `QOS_CLASS_USER_INTERACTIVE`
-//! - Windows: `THREAD_PRIORITY_TIME_CRITICAL`
-//!
-//! Failure to elevate MUST NOT fail startup — log warning and continue.
-//!
-//! ## Graceful shutdown (spec §Graceful Shutdown, line 333)
-//!
-//! 1. Stop accepting new connections
-//! 2. Drain active mutations (configurable timeout, default 500 ms)
-//! 3. Revoke all leases without waiting for acknowledgement
-//! 4. Flush telemetry (configurable grace period, default 200 ms)
-//! 5. Terminate agent sessions
-//! 6. GPU drain via `device.poll(Wait)`
-//! 7. Release resources (reference counts reach zero)
-//! 8. Exit process (0 = clean, non-zero = error)
+//! Priority elevation is best-effort: Linux uses `SCHED_RR`, Windows uses
+//! `THREAD_PRIORITY_TIME_CRITICAL`. Failure to elevate never fails startup.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
 
 use tokio::runtime::Runtime;
 use tokio::sync::{broadcast, oneshot};
-
-// ─── Shutdown configuration ───────────────────────────────────────────────────
-
-/// Configurable timeouts for graceful shutdown.
-#[derive(Debug, Clone)]
-pub struct ShutdownConfig {
-    /// How long to wait for active mutations to drain before forceful shutdown.
-    /// Valid range: [0 ms, 60 000 ms]. Default: 500 ms.
-    pub drain_timeout_ms: u64,
-    /// How long to wait for telemetry to flush.
-    /// Valid range: [0 ms, 10 000 ms]. Default: 200 ms.
-    pub telemetry_grace_ms: u64,
-}
-
-impl Default for ShutdownConfig {
-    fn default() -> Self {
-        Self {
-            drain_timeout_ms: 500,
-            telemetry_grace_ms: 200,
-        }
-    }
-}
-
-impl ShutdownConfig {
-    /// Build with explicit timeouts. Panics if values are out-of-spec range.
-    pub fn new(drain_timeout_ms: u64, telemetry_grace_ms: u64) -> Self {
-        assert!(
-            drain_timeout_ms <= 60_000,
-            "drain_timeout_ms must be ≤ 60 000"
-        );
-        assert!(
-            telemetry_grace_ms <= 10_000,
-            "telemetry_grace_ms must be ≤ 10 000"
-        );
-        Self {
-            drain_timeout_ms,
-            telemetry_grace_ms,
-        }
-    }
-}
 
 // ─── Shutdown token ───────────────────────────────────────────────────────────
 
@@ -154,15 +84,11 @@ pub fn elevate_main_thread_priority() -> bool {
     {
         elevate_linux()
     }
-    #[cfg(target_os = "macos")]
-    {
-        elevate_macos()
-    }
     #[cfg(target_os = "windows")]
     {
         elevate_windows()
     }
-    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
     {
         tracing::warn!("thread priority elevation not implemented for this platform");
         false
@@ -191,28 +117,6 @@ fn elevate_linux() -> bool {
     }
 }
 
-#[cfg(target_os = "macos")]
-fn elevate_macos() -> bool {
-    // QOS_CLASS_USER_INTERACTIVE via pthread_set_qos_class_self_np.
-    // Available on macOS 10.10+.
-    extern "C" {
-        fn pthread_set_qos_class_self_np(qos_class: u32, relative_priority: i32) -> i32;
-    }
-    const QOS_CLASS_USER_INTERACTIVE: u32 = 0x21;
-    // SAFETY: calling a known macOS system function with documented args.
-    let ret = unsafe { pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0) };
-    if ret == 0 {
-        tracing::info!("main thread elevated to QOS_CLASS_USER_INTERACTIVE");
-        true
-    } else {
-        tracing::warn!(
-            "failed to elevate main thread QoS (ret {}); continuing at normal priority",
-            ret
-        );
-        false
-    }
-}
-
 #[cfg(target_os = "windows")]
 fn elevate_windows() -> bool {
     use windows::Win32::System::Threading::{
@@ -234,27 +138,7 @@ fn elevate_windows() -> bool {
     }
 }
 
-// ─── Thread roles ─────────────────────────────────────────────────────────────
-
-/// Identifies the four fixed thread roles in the runtime.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ThreadRole {
-    Main,
-    Compositor,
-    Network,
-    Telemetry,
-}
-
 // ─── Compositor thread ────────────────────────────────────────────────────────
-
-/// Handle returned when the compositor thread is spawned.
-///
-/// Dropping this handle does NOT kill the thread — use `ShutdownToken` to
-/// signal it to exit, then join via the returned `JoinHandle`.
-pub struct CompositorThreadHandle {
-    pub join_handle: std::thread::JoinHandle<()>,
-    pub ready_rx: oneshot::Receiver<CompositorReady>,
-}
 
 /// Signal sent by the compositor thread when it has finished initialising.
 pub struct CompositorReady {
@@ -278,9 +162,9 @@ where
     std::thread::Builder::new()
         .name("tze-compositor".to_string())
         .spawn(move || {
-            tracing::info!(role = ?ThreadRole::Compositor, "compositor thread started");
+            tracing::info!("compositor thread started");
             f(shutdown, ready_tx);
-            tracing::info!(role = ?ThreadRole::Compositor, "compositor thread exiting");
+            tracing::info!("compositor thread exiting");
         })
         .expect("failed to spawn compositor thread")
 }
@@ -305,135 +189,9 @@ impl NetworkRuntime {
     }
 }
 
-// ─── Telemetry thread ─────────────────────────────────────────────────────────
-
-/// Spawn the telemetry emission thread.
-///
-/// The closure `f` should drain telemetry records and emit them (e.g., to
-/// stdout as JSON). It receives the shutdown token so it can flush on exit.
-pub fn spawn_telemetry_thread<F>(shutdown: ShutdownToken, f: F) -> std::thread::JoinHandle<()>
-where
-    F: FnOnce(ShutdownToken) + Send + 'static,
-{
-    std::thread::Builder::new()
-        .name("tze-telemetry".to_string())
-        .spawn(move || {
-            tracing::info!(role = ?ThreadRole::Telemetry, "telemetry thread started");
-            f(shutdown);
-            tracing::info!(role = ?ThreadRole::Telemetry, "telemetry thread exiting");
-        })
-        .expect("failed to spawn telemetry thread")
-}
-
-// ─── Shutdown sequencer ───────────────────────────────────────────────────────
-
-/// Execute the spec-mandated graceful shutdown sequence.
-///
-/// This function is called from the main thread (or a shutdown-coordinator
-/// task) after the shutdown token has been triggered.
-///
-/// The GPU drain step requires access to `wgpu::Device`; callers provide a
-/// callback for that step to keep this module free of wgpu imports.
-///
-/// Returns `0` for clean shutdown, `1` for error/GPU-lost shutdown.
-#[allow(clippy::too_many_arguments)]
-pub async fn graceful_shutdown(
-    reason: ShutdownReason,
-    config: &ShutdownConfig,
-    stop_accepting: impl FnOnce(),
-    drain_mutations: impl std::future::Future<Output = ()>,
-    revoke_all_leases: impl FnOnce(),
-    flush_telemetry: impl std::future::Future<Output = ()>,
-    terminate_sessions: impl FnOnce(),
-    gpu_drain: impl FnOnce(),
-) -> i32 {
-    tracing::info!(?reason, "beginning graceful shutdown sequence");
-
-    // Step 1: Stop accepting new connections.
-    stop_accepting();
-    tracing::debug!("shutdown step 1/8: stopped accepting connections");
-
-    // Step 2: Drain active mutations with timeout.
-    let drain_timeout = Duration::from_millis(config.drain_timeout_ms);
-    tokio::select! {
-        _ = drain_mutations => {
-            tracing::debug!("shutdown step 2/8: mutations drained");
-        }
-        _ = tokio::time::sleep(drain_timeout) => {
-            tracing::warn!(
-                "shutdown step 2/8: drain timeout ({} ms) reached; proceeding",
-                config.drain_timeout_ms
-            );
-        }
-    }
-
-    // Step 3: Revoke all leases (fire-and-forget, no ack required).
-    revoke_all_leases();
-    tracing::debug!("shutdown step 3/8: leases revoked");
-
-    // Step 4: Flush telemetry with grace period.
-    let telem_grace = Duration::from_millis(config.telemetry_grace_ms);
-    tokio::select! {
-        _ = flush_telemetry => {
-            tracing::debug!("shutdown step 4/8: telemetry flushed");
-        }
-        _ = tokio::time::sleep(telem_grace) => {
-            tracing::warn!(
-                "shutdown step 4/8: telemetry grace ({} ms) reached; proceeding",
-                config.telemetry_grace_ms
-            );
-        }
-    }
-
-    // Step 5: Terminate agent sessions.
-    terminate_sessions();
-    tracing::debug!("shutdown step 5/8: agent sessions terminated");
-
-    // Step 6: GPU drain.
-    gpu_drain();
-    tracing::debug!("shutdown step 6/8: GPU drained");
-
-    // Steps 7 & 8: Resources released as Rust drops happen; exit code follows.
-    let exit_code = match reason {
-        ShutdownReason::Clean => 0,
-        ShutdownReason::GpuDeviceLost | ShutdownReason::Fatal(_) => 1,
-    };
-    tracing::info!(exit_code, "shutdown sequence complete");
-    exit_code
-}
-
-// ─── Tests ────────────────────────────────────────────────────────────────────
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // ── ShutdownConfig ───────────────────────────────────────────────────────
-
-    #[test]
-    fn shutdown_config_default_values() {
-        let cfg = ShutdownConfig::default();
-        assert_eq!(cfg.drain_timeout_ms, 500, "spec default 500 ms");
-        assert_eq!(cfg.telemetry_grace_ms, 200, "spec default 200 ms");
-    }
-
-    #[test]
-    fn shutdown_config_valid_boundaries() {
-        let _ = ShutdownConfig::new(0, 0);
-        let _ = ShutdownConfig::new(60_000, 10_000);
-    }
-
-    #[test]
-    #[should_panic(expected = "drain_timeout_ms must be ≤ 60 000")]
-    fn shutdown_config_rejects_drain_timeout_out_of_range() {
-        let _ = ShutdownConfig::new(60_001, 0);
-    }
-
-    #[test]
-    #[should_panic(expected = "telemetry_grace_ms must be ≤ 10 000")]
-    fn shutdown_config_rejects_telemetry_grace_out_of_range() {
-        let _ = ShutdownConfig::new(0, 10_001);
-    }
 
     // ── ShutdownToken ────────────────────────────────────────────────────────
 
@@ -495,94 +253,5 @@ mod tests {
             .unwrap();
         assert!(result.ok);
         handle.join().expect("compositor thread panicked");
-    }
-
-    #[test]
-    fn spawn_telemetry_thread_and_join() {
-        let token = ShutdownToken::new();
-        let handle = spawn_telemetry_thread(token, |_shutdown| {
-            // No work — smoke test.
-        });
-        handle.join().expect("telemetry thread panicked");
-    }
-
-    // ── Graceful shutdown ────────────────────────────────────────────────────
-
-    #[tokio::test]
-    async fn graceful_shutdown_clean_returns_zero() {
-        let config = ShutdownConfig::default();
-        let exit_code = graceful_shutdown(
-            ShutdownReason::Clean,
-            &config,
-            || {},    // stop_accepting
-            async {}, // drain_mutations
-            || {},    // revoke_all_leases
-            async {}, // flush_telemetry
-            || {},    // terminate_sessions
-            || {},    // gpu_drain
-        )
-        .await;
-        assert_eq!(exit_code, 0);
-    }
-
-    #[tokio::test]
-    async fn graceful_shutdown_gpu_lost_returns_nonzero() {
-        let config = ShutdownConfig::default();
-        let exit_code = graceful_shutdown(
-            ShutdownReason::GpuDeviceLost,
-            &config,
-            || {},
-            async {},
-            || {},
-            async {},
-            || {},
-            || {},
-        )
-        .await;
-        assert_ne!(exit_code, 0);
-    }
-
-    #[tokio::test]
-    async fn graceful_shutdown_drain_timeout_does_not_hang() {
-        let config = ShutdownConfig::new(50, 10); // very short timeouts
-        let exit_code = graceful_shutdown(
-            ShutdownReason::Clean,
-            &config,
-            || {},
-            // Simulates a slow drain — longer than the timeout.
-            tokio::time::sleep(Duration::from_millis(10_000)),
-            || {},
-            async {},
-            || {},
-            || {},
-        )
-        .await;
-        // Should still complete (timeout hit) and return 0 (clean reason).
-        assert_eq!(exit_code, 0);
-    }
-
-    // ── Thread priority elevation ─────────────────────────────────────────────
-
-    #[test]
-    fn elevate_main_thread_priority_does_not_panic() {
-        // On CI (unprivileged) this returns false; on privileged hosts, true.
-        // Either way it must not panic.
-        let _ = elevate_main_thread_priority();
-    }
-
-    // ── No dynamic thread spawning ───────────────────────────────────────────
-
-    /// Verify that thread-count constants reflect the fixed set of threads.
-    /// This is a static assertion rather than a runtime one; we just verify
-    /// the role enum covers exactly the four spec-mandated threads.
-    #[test]
-    fn thread_roles_cover_exactly_four_roles() {
-        let roles = [
-            ThreadRole::Main,
-            ThreadRole::Compositor,
-            ThreadRole::Network,
-            ThreadRole::Telemetry,
-        ];
-        assert_eq!(roles.len(), 4, "spec mandates exactly 4 thread roles");
     }
 }

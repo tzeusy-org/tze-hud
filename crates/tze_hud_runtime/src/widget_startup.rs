@@ -295,20 +295,6 @@ pub fn init_widget_registry(
     svg_assets
 }
 
-// ─── Helper: collect tab_name → SceneId from scene graph ──────────────────────
-
-/// Build a map from tab name to its `SceneId` from the current scene graph.
-///
-/// Useful at runtime startup after tabs have been created, before calling
-/// `init_widget_registry`.
-pub fn collect_tab_name_to_id(scene: &SceneGraph) -> HashMap<String, SceneId> {
-    scene
-        .tabs
-        .iter()
-        .map(|(id, tab)| (tab.name.clone(), *id))
-        .collect()
-}
-
 // ─── Unit tests ───────────────────────────────────────────────────────────────
 
 #[cfg(test)]
