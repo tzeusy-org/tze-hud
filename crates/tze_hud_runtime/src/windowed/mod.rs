@@ -222,6 +222,15 @@ use self::wake::{
 };
 use crate::portal_projection_driver::PortalWakeDeadline;
 
+/// A toast starting now (wall clock, as the compositor's expiry uses).
+fn toast_now(title: String) -> crate::shell::system_card::SystemCard {
+    let now_us = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_micros() as u64;
+    crate::shell::system_card::SystemCard::toast(title, now_us)
+}
+
 fn publish_degradation_transition(
     controller: &crate::degradation::DegradationController,
     event: tze_hud_telemetry::DegradationEvent,
@@ -2621,13 +2630,40 @@ impl WindowedRuntime {
             h.gate().install_quit(Arc::clone(&quit));
             h.gate().clone()
         });
+        // Restart and update both replace the running exe: one in-flight flag.
+        let busy = crate::operator::handoff::Busy::default();
         let restart = cfg.relaunch.as_ref().map(|r| {
             crate::operator::handoff::RestartHandle::new(
                 r.exe.clone(),
                 r.args.clone(),
                 Arc::clone(&quit),
+                busy.clone(),
             )
         });
+
+        // Self-update needs the installed layout; a copy run from elsewhere
+        // answers NOT_INSTALLED.
+        let update = cfg.relaunch.as_ref().and_then(|r| {
+            let paths = crate::operator::install::InstallPaths::from_env().ok()?;
+            let card = system_card.clone();
+            let sha = crate::operator::status::build_sha();
+            Some(crate::operator::update::UpdateHandle::new(
+                paths,
+                r.exe.clone(),
+                r.args.clone(),
+                sha,
+                crate::operator::status::build_label(),
+                Arc::clone(&quit),
+                Box::new(move |title| card.set(toast_now(title))),
+                busy.clone(),
+            ))
+        });
+        if cfg.updated_from.is_some() {
+            system_card.set(toast_now(format!(
+                "Updated to {}",
+                crate::operator::status::build_label()
+            )));
+        }
 
         // ── Network runtime + gRPC + MCP HTTP servers ──────────────────────────
         // Spawn the Tokio multi-thread runtime for all network tasks (gRPC, MCP).
@@ -2727,6 +2763,7 @@ impl WindowedRuntime {
                     presents: Some(Arc::clone(wake.counters())),
                     capture: Some(capture_endpoint),
                     restart,
+                    update,
                     bind_gate,
                 };
                 let mcp_shutdown = shutdown.clone();

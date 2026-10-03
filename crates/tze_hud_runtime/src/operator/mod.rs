@@ -7,3 +7,4 @@ pub mod install;
 pub mod logs;
 pub mod screenshot;
 pub mod status;
+pub mod update;

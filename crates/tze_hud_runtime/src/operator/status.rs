@@ -140,6 +140,14 @@ pub fn build_sha() -> String {
         .map_or_else(|| "unknown".to_owned(), |b| b.sha.clone())
 }
 
+/// `<channel>-<sha7>`, how toasts name this build.
+pub fn build_label() -> String {
+    BUILD_INFO.get().map_or_else(
+        || "unknown".to_owned(),
+        |b| super::update::label(&b.channel, &b.sha),
+    )
+}
+
 /// Process start, as far as this crate can tell: the first time it is asked.
 pub fn process_start() -> Instant {
     *PROCESS_START.get_or_init(Instant::now)
@@ -213,6 +221,8 @@ pub struct StatusSource {
     pub capture: Option<crate::operator::screenshot::CaptureEndpoint>,
     /// Relaunch behind `POST /admin/restart`.
     pub restart: Option<crate::operator::handoff::RestartHandle>,
+    /// Self-update behind `POST /admin/update`.
+    pub update: Option<crate::operator::update::UpdateHandle>,
 }
 
 /// Window over which `cpu_pct_2s` is sampled.
@@ -267,8 +277,11 @@ impl StatusSource {
             "frames_presented": self.presents.as_ref().map(|c| c.snapshot().presents),
             "cpu_pct_2s": cpu_pct_2s,
             "cpu_pct_avg": cpu_pct_avg,
-            // No updater yet (separate bead); the key is reserved.
-            "last_update": Value::Null,
+            // Outcome of the last update attempt: null, or {ok, sha, error}.
+            "last_update": self
+                .update
+                .as_ref()
+                .map_or(Value::Null, |u| u.last_json()),
             // Outcome of the last restart that did not hand over (a successful
             // one ends this process): null, or {ok, pid, error}.
             "last_restart": self

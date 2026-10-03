@@ -116,6 +116,10 @@ jobs:
       - name: Sign and verify against the committed public key
         env:
           MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+          # The same channel the exe was built with (TZE_HUD_CHANNEL). The
+          # trusted comment carries it so a self-update can refuse a build
+          # signed for another channel (a dev build says `dev`, not `main`).
+          RELEASE_CHANNEL: ${{ github.ref == 'refs/heads/main' && 'dev' || (startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'ci') }}
         run: |
           set -euo pipefail
           if [ -z "${MINISIGN_SECRET_KEY}" ]; then
@@ -125,7 +129,7 @@ jobs:
           umask 077
           key="$RUNNER_TEMP/minisign.key"
           printf '%s\n' "$MINISIGN_SECRET_KEY" > "$key"
-          minisign -S -s "$key" -m dist/tze_hud.exe -t "tze_hud ${GITHUB_REF_NAME} ${GITHUB_SHA}"
+          minisign -S -s "$key" -m dist/tze_hud.exe -t "tze_hud ${RELEASE_CHANNEL} ${GITHUB_SHA}"
           rm -f "$key"
           minisign -V -p app/tze_hud_app/minisign.pub -m dist/tze_hud.exe
 

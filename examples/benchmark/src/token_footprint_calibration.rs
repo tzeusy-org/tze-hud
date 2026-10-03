@@ -337,6 +337,7 @@ mod calibration {
             presents: None,
             capture: None,
             restart: None,
+            update: None,
             bind_gate: None,
         };
         let (server_task, addresses) =

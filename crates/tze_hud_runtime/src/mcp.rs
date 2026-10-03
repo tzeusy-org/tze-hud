@@ -69,6 +69,10 @@ pub struct McpServerConfig {
     /// without one.
     pub restart: Option<crate::operator::handoff::RestartHandle>,
 
+    /// Self-update behind `POST /admin/update`; the endpoint answers 503
+    /// without one.
+    pub update: Option<crate::operator::update::UpdateHandle>,
+
     /// Set on a handed-over instance: listeners are bound only once the gate
     /// opens (the old instance still holds the ports), retrying for
     /// [`crate::operator::handoff::BIND_RETRY`].
@@ -173,6 +177,7 @@ pub async fn start_mcp_http_server_with_render_wake(
         presents: config.presents.clone(),
         capture: config.capture.clone(),
         restart: config.restart.clone(),
+        update: config.update.clone(),
         log_path: crate::operator::logs::log_path(),
     });
 
@@ -414,6 +419,50 @@ async fn handle_connection(
     }
 }
 
+/// `POST /admin/update {"channel": ...}`: download and verify on a blocking
+/// thread, answer, and let the swap and handoff continue in the background.
+async fn update_response(
+    update: &crate::operator::update::UpdateHandle,
+    body: &[u8],
+) -> crate::http::Response {
+    use crate::http::{OperatorCode, OperatorError, Response};
+    use crate::operator::update::{Outcome, UpdateError};
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Body {
+        channel: String,
+    }
+    let Ok(Body { channel }) = serde_json::from_slice(body) else {
+        return Response::operator_error(
+            400,
+            &OperatorError::new(OperatorCode::UpdateFailed, UpdateError::BadChannel.hint()),
+        );
+    };
+    let handle = update.clone();
+    let result = tokio::task::spawn_blocking(move || handle.request(&channel))
+        .await
+        .unwrap_or(Err(UpdateError::Failed));
+    let (status, code) = match result {
+        Ok(Outcome::UpToDate) => return Response::json(r#"{"up_to_date":true}"#),
+        Ok(Outcome::Started { sha }) => {
+            return Response {
+                status: 202,
+                ..Response::json(serde_json::json!({"updating": true, "sha": sha}).to_string())
+            };
+        }
+        Err(UpdateError::BadChannel) => (400, OperatorCode::UpdateFailed),
+        Err(UpdateError::NotInstalled) => (409, OperatorCode::NotInstalled),
+        Err(UpdateError::Busy) => (429, OperatorCode::Busy),
+        Err(UpdateError::Unavailable) => (503, OperatorCode::Unavailable),
+        Err(UpdateError::Failed) => (502, OperatorCode::UpdateFailed),
+    };
+    let hint = match &result {
+        Err(e) => e.hint(),
+        Ok(_) => unreachable!("successes returned above"),
+    };
+    Response::operator_error(status, &OperatorError::new(code, hint))
+}
+
 /// Serve an `/admin/*` request. Authentication and the `admin` check come
 /// before any admin data is read.
 async fn handle_admin(
@@ -461,6 +510,10 @@ async fn handle_admin(
                 Err(RestartError::Unavailable) => unavailable("could not start the restart"),
             },
         },
+        AdminRoute::Update => match &admin.update {
+            None => unavailable("this runtime cannot update itself"),
+            Some(update) => update_response(update, &req.body).await,
+        },
         AdminRoute::Logs => {
             let tail = match query_param(&req.query, "tail") {
                 None => 100,
@@ -495,6 +548,7 @@ mod tests {
             presents: None,
             capture: None,
             restart: None,
+            update: None,
             bind_gate: None,
         }
     }
@@ -587,6 +641,7 @@ mod tests {
             presents: None,
             capture: None,
             restart: None,
+            update: None,
             log_path,
         }
     }
@@ -702,6 +757,7 @@ mod tests {
             }),
             Arc::new(|| {}),
             std::time::Duration::from_millis(300),
+            crate::operator::handoff::Busy::default(),
         ));
         let first = handle_admin(Restart, &post(Some("root-psk")), &src).await;
         assert_eq!(first.status, 202);
@@ -719,6 +775,93 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
         assert_eq!(spawned.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn admin_update_is_guarded_and_answers_constant_errors() {
+        use crate::http::AdminRoute::Update;
+        use crate::operator::install::InstallPaths;
+        use crate::operator::update::{UpdateConfig, UpdateHandle};
+        let mut src = admin_source(std::env::temp_dir().join("tze_hud_no_such.log"));
+        let post = |bearer: Option<&str>, body: &str| {
+            let mut req = admin_get("/admin/update", bearer);
+            req.method = "POST".into();
+            req.body = body.as_bytes().to_vec();
+            req
+        };
+        let ok = r#"{"channel":"dev"}"#;
+        assert_eq!(
+            handle_admin(Update, &post(None, ok), &src).await.status,
+            401
+        );
+        assert_eq!(
+            handle_admin(Update, &post(Some("star-psk"), ok), &src)
+                .await
+                .status,
+            403
+        );
+        // Guarded first, then 503 without an updater (headless).
+        assert_eq!(
+            handle_admin(Update, &post(Some("root-psk"), ok), &src)
+                .await
+                .status,
+            503
+        );
+
+        let paths = InstallPaths::from_dirs(
+            std::path::Path::new("/nonexistent/Local"),
+            std::path::Path::new("/nonexistent/Roaming"),
+        );
+        // Nothing listens on this base: a download failure must surface as the
+        // one constant UPDATE_FAILED answer.
+        let cfg = UpdateConfig {
+            base_url: "http://127.0.0.1:1/releases".into(),
+            curl: "curl".into(),
+            fetch_timeout: std::time::Duration::from_secs(2),
+        };
+        let handle = |exe: &std::path::Path| {
+            UpdateHandle::with_parts(
+                cfg.clone(),
+                crate::operator::update::PUBLIC_KEY.to_owned(),
+                paths.clone(),
+                exe.to_path_buf(),
+                "old".into(),
+                "dev-old".into(),
+                Box::new(|_| unreachable!("no handoff without a verified release")),
+                Arc::new(|| {}),
+                std::time::Duration::from_millis(50),
+                Box::new(|_| {}),
+                crate::operator::handoff::Busy::default(),
+            )
+        };
+        let body_of = |r: &crate::http::Response| String::from_utf8_lossy(&r.body).into_owned();
+
+        src.update = Some(handle(&paths.exe));
+        for bad in [
+            "",
+            "{}",
+            r#"{"channel":"main"}"#,
+            r#"{"channel":"dev","url":"x"}"#,
+        ] {
+            let r = handle_admin(Update, &post(Some("root-psk"), bad), &src).await;
+            assert_eq!(r.status, 400, "{bad:?}");
+        }
+        let failed = handle_admin(Update, &post(Some("root-psk"), ok), &src).await;
+        assert_eq!(failed.status, 502);
+        assert!(body_of(&failed).contains("UPDATE_FAILED"));
+        // Every failure cause reads the same on the wire.
+        let again = handle_admin(
+            Update,
+            &post(Some("root-psk"), r#"{"channel":"v1.2.3"}"#),
+            &src,
+        )
+        .await;
+        assert_eq!(failed.body, again.body);
+
+        src.update = Some(handle(std::path::Path::new("/elsewhere/tze_hud.exe")));
+        let outside = handle_admin(Update, &post(Some("root-psk"), ok), &src).await;
+        assert_eq!(outside.status, 409);
+        assert!(body_of(&outside).contains("NOT_INSTALLED"));
     }
 
     #[tokio::test(start_paused = true)]
@@ -895,6 +1038,7 @@ mod tests {
             presents: None,
             capture: None,
             restart: None,
+            update: None,
             bind_gate: None,
         };
         let shutdown = ShutdownToken::new();
@@ -938,6 +1082,7 @@ mod tests {
             presents: None,
             capture: None,
             restart: None,
+            update: None,
             bind_gate: None,
         };
         let shutdown = ShutdownToken::new();
@@ -971,6 +1116,7 @@ mod tests {
             presents: None,
             capture: None,
             restart: None,
+            update: None,
             bind_gate: None,
         };
         let shutdown = ShutdownToken::new();
@@ -1014,6 +1160,7 @@ mod tests {
             presents: None,
             capture: None,
             restart: None,
+            update: None,
             bind_gate: None,
         };
         let shutdown = ShutdownToken::new();
@@ -1053,6 +1200,7 @@ mod tests {
             presents: None,
             capture: None,
             restart: None,
+            update: None,
             bind_gate: None,
         };
         let shutdown = ShutdownToken::new();
@@ -1124,6 +1272,7 @@ mod tests {
             presents: None,
             capture: None,
             restart: None,
+            update: None,
             bind_gate: None,
         };
         let shutdown = ShutdownToken::new();
@@ -1163,6 +1312,7 @@ mod tests {
             presents: None,
             capture: None,
             restart: None,
+            update: None,
             bind_gate: None,
         };
         let shutdown = ShutdownToken::new();

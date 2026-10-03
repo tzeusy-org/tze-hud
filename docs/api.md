@@ -134,6 +134,13 @@ allow = ["zone:*", "widget:gauge", "portal", "tiles"]
   one exits. If it does not report within 30 s, it is killed and the old
   process keeps running (`/admin/status` `last_restart` says why). One at a
   time (429 `BUSY`).
+  `POST /admin/update` `{"channel":"dev"|"stable"|"v1.2.3"}` (POST only) pulls
+  a signed release (see `docs/operations/windows-install.md`). It answers
+  `{"up_to_date":true}` when the release is the running build, 202
+  `{"updating":true,"sha":...}` once the download verified (the swap and
+  handoff continue; `last_update` is `{ok, sha, error}`), 400 for a bad body,
+  409 `NOT_INSTALLED` when not running from the install path, 429 `BUSY`, and
+  502 `UPDATE_FAILED` with one constant hint for every failure cause.
 - The operator's local tools (cleanup, composer paste, SVG asset upload) are
   off the model surface: CLI/config, or gRPC for tooling.
 
