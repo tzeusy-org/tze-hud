@@ -488,22 +488,16 @@ mod tests {
         assert!(banner.contains("tze_hud runtime ready"), "header missing");
     }
 
-    /// The attach-info block must never contain a configured PSK value; the
-    /// paste-ready snippet always uses a placeholder.
+    /// The paste-ready snippet carries a PSK placeholder, never a real value
+    /// (`render_attach_info` takes no PSK, so this placeholder is the guard).
     #[test]
-    fn attach_info_never_contains_psk() {
-        let psk = "SUPER-SECRET-PSK-2f9c1a7e-do-not-leak";
+    fn attach_info_uses_psk_placeholder() {
         let mcp: std::net::SocketAddr = "127.0.0.1:9090".parse().unwrap();
         let grpc: std::net::SocketAddr = "127.0.0.1:50051".parse().unwrap();
         let info = render_attach_info(Some(mcp), Some(grpc), Some("/etc/tze_hud/config.toml"));
-
-        assert!(
-            !info.contains(psk),
-            "attach info must not leak the PSK:\n{info}"
-        );
         assert!(
             info.contains("Bearer <your agent's PSK>"),
-            "JSON snippet must use a PSK placeholder:\n{info}"
+            "snippet must use a PSK placeholder:\n{info}"
         );
     }
 

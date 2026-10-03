@@ -166,14 +166,4 @@ mod tests {
             "default mode must be fullscreen (spec §Window Modes)"
         );
     }
-
-    /// `grpc_port = 0` is the explicit "compositor-only" intent.
-    #[test]
-    fn windowed_config_grpc_port_zero_is_compositor_only() {
-        let cfg = WindowedConfig {
-            grpc_port: 0,
-            ..WindowedConfig::default()
-        };
-        assert_eq!(cfg.grpc_port, 0);
-    }
 }

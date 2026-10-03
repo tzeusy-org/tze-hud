@@ -2339,7 +2339,7 @@ mod tests {
     /// The drain must stop after the queue length it started with, even when new
     /// events arrive mid-drain; those wait for the next wake. Without the bound a
     /// steady producer turns one tick into an endless dispatch storm (the
-    /// composer-echo livelock). The real-path drain tests never enqueue
+    /// composer-echo livelock) and honour Break. The real-path drain tests never enqueue
     /// mid-drain, so this is the only guard on the bound.
     #[test]
     fn keyboard_drain_stops_at_initial_queue_length_when_events_arrive_mid_drain() {
@@ -2365,5 +2365,27 @@ mod tests {
 
         assert_eq!(iters, initial_events, "drain ran past its initial bound");
         assert_eq!(queue.len(), initial_events, "arrivals must stay queued");
+
+        // A Break (inner dispatch re-queued the front event) must stop the drain
+        // at once, leaving the rest queued in FIFO order.
+        let mut queue: VecDeque<PendingKeyboardEvent> = [
+            key_down("a", 1_000),
+            key_down("b", 2_000),
+            key_down("c", 3_000),
+        ]
+        .into_iter()
+        .collect();
+        let mut iters = 0usize;
+        drain_keyboard_queue_bounded(queue.len(), || {
+            iters += 1;
+            let event = queue.pop_front().expect("within limit");
+            queue.push_back(event);
+            restore_front_requeued_event(&mut queue, queue.len() - 1);
+            ControlFlow::Break(())
+        });
+        assert_eq!(iters, 1, "drain must honour ControlFlow::Break");
+        assert_key_down(&queue[0], "a");
+        assert_key_down(&queue[1], "b");
+        assert_key_down(&queue[2], "c");
     }
 }
