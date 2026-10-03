@@ -657,24 +657,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f27ae1dd37df86211c42e150270f82743308803d90a6f6e6651cd730d5e1732f"
 
 [[package]]
-name = "dashboard_tile_agent"
-version = "0.1.0"
-dependencies = [
- "blake3",
- "image",
- "tokio",
- "tokio-stream",
- "tonic",
- "tze_hud_config",
- "tze_hud_input",
- "tze_hud_protocol",
- "tze_hud_resource",
- "tze_hud_runtime",
- "tze_hud_scene",
- "uuid",
-]
-
-[[package]]
 name = "dashmap"
 version = "6.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2177,6 +2159,22 @@ dependencies = [
  "fdeflate",
  "flate2",
  "miniz_oxide",
+]
+
+[[package]]
+name = "poc_demo"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "tiktoken-rs",
+ "tokio",
+ "tokio-stream",
+ "tonic",
+ "tze_hud_config",
+ "tze_hud_protocol",
+ "tze_hud_runtime",
+ "tze_hud_scene",
+ "uuid",
 ]
 
 [[package]]
