@@ -24,11 +24,16 @@ the committed public key.
 ## Run
 
 Until first-run install and pairing land (T6 in `docs/scope.md`), run it with
-a config and a PSK:
+a config and an `agents.toml` beside it. The HUD stores only each agent's PSK
+SHA-256; the agent keeps the PSK and sends it as its bearer:
 
 ```powershell
-$env:TZE_HUD_PSK = "<a long random value>"
+$psk = -join ((1..32) | ForEach-Object { '{0:x2}' -f (Get-Random -Maximum 256) })
+$sha = [System.Security.Cryptography.SHA256]::Create()
+$hash = -join ($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($psk)) | ForEach-Object { $_.ToString('x2') })
+Set-Content agents.toml "[agents.claude]`npsk_sha256 = `"$hash`"`nallow = [`"*`"]" -Encoding ascii
 .\tze_hud.exe --config tze_hud.toml --window-mode overlay
 ```
 
+Give `$psk` to the agent host and do not store it on the HUD side.
 `app/tze_hud_app/config/production.toml` is the reference config.

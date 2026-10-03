@@ -19,7 +19,6 @@
 //! | `--height <px>`     | `TZE_HUD_WINDOW_HEIGHT`| auto¹        | Window height in pixels.                 |
 //! | `--grpc-port <port>`| `TZE_HUD_GRPC_PORT`    | `50051`      | gRPC listen port (0 to disable).         |
 //! | `--mcp-port <port>` | `TZE_HUD_MCP_PORT`     | `9090`       | MCP HTTP listen port (0 to disable).     |
-//! | `--psk <key>`       | `TZE_HUD_PSK`          | `tze-hud-key`| Pre-shared key for session authentication.|
 //! | —                    | `TZE_HUD_PROJECTION_OPERATOR_AUTHORITY` | unset | Operator credential for projection cleanup. |
 //! | `--fps <n>`         | `TZE_HUD_FPS`          | `60`         | Target frames per second.                |
 //! | `--bind-all-interfaces` | `TZE_HUD_BIND_ALL_INTERFACES` | `false` | Bind gRPC+MCP on `0.0.0.0` (LAN/remote opt-in; default is loopback). |
@@ -47,11 +46,18 @@
 //! 5. `%APPDATA%\tze_hud\config.toml` (Windows)
 //!
 //! The loader schema is driven by `[runtime]` and `[[tabs]]` (plus optional
-//! sections such as `[agents]`, `[widget_bundles]`, and `[design_tokens]`).
+//! sections such as `[widget_bundles]` and `[design_tokens]`).
 //! Legacy `[display]`/`[network]` config tables are not part of the current schema.
 //!
+//! ## Agents
+//!
+//! Agents authenticate with per-agent PSKs. Only each PSK's SHA-256 is stored,
+//! in `agents.toml` next to the resolved config file (or in the platform
+//! config dir, `tze_hud/agents.toml`, when there is none). A missing file means
+//! nothing is paired yet; an unreadable or invalid one fails strict startup.
+//!
 //! In the canonical operator path, startup is fail-closed: a readable, valid
-//! config file is required and the trivial default PSK is rejected. Debug/dev
+//! config file is required. Debug/dev
 //! runs may explicitly opt into insecure fallback behavior by setting
 //! `TZE_HUD_DEV_ALLOW_INSECURE_STARTUP=1`.
 //! Passing `--config` with a path that does not exist or cannot be read is a
@@ -73,17 +79,17 @@
 //! tze_hud --grpc-port 0
 //! ```
 
-use tze_hud_config::{reload_config, resolve_config_path};
+use tze_hud_config::{agents_file, agents_path_for, reload_config, resolve_config_path};
 use tze_hud_runtime::gpu_lock::GpuLock;
 use tze_hud_runtime::window::{WindowConfig, WindowMode};
 use tze_hud_runtime::windowed::{
     WindowedBenchmarkConfig, WindowedConfig, WindowedQuiescentEfficiencyConfig, WindowedRuntime,
 };
+use tze_hud_scene::config::AgentDirectory;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const GIT_SHA: &str = env!("TZE_HUD_GIT_SHA");
 const BIN_NAME: &str = "tze_hud";
-const DEFAULT_PSK: &str = "tze-hud-key";
 const DEV_ALLOW_INSECURE_STARTUP_ENV: &str = "TZE_HUD_DEV_ALLOW_INSECURE_STARTUP";
 const PROJECTION_OPERATOR_AUTHORITY_ENV: &str = "TZE_HUD_PROJECTION_OPERATOR_AUTHORITY";
 
@@ -108,8 +114,6 @@ OPTIONS:
                            (env: TZE_HUD_GRPC_PORT)
     --mcp-port <port>      MCP HTTP listen port; 0 to disable  [default: 9090]
                            (env: TZE_HUD_MCP_PORT)
-    --psk <key>            Pre-shared key for session authentication  [default: tze-hud-key]
-                           (env: TZE_HUD_PSK)
     (env only) TZE_HUD_PROJECTION_OPERATOR_AUTHORITY
                            Operator credential for cooperative projection cleanup.
                            When unset, operator cleanup is denied fail-closed.
@@ -146,12 +150,12 @@ NOTES:
     HeadlessRuntime.
 
     Canonical startup is fail-closed: a readable, valid config file is required.
-    Strict mode also rejects the trivial default PSK value.
+    Agents authenticate with per-agent PSKs whose SHA-256 hashes live in
+    agents.toml next to the config file; an invalid agents.toml fails startup.
     For debug/dev runs only, set TZE_HUD_DEV_ALLOW_INSECURE_STARTUP=1 to permit
     fallback startup behavior without a config file. In canonical startup, the
     required config file uses the loader schema rooted at [runtime] and [[tabs]]
-    (plus optional sections such as [agents], [widget_bundles], and
-    [design_tokens]). In insecure dev mode, the same schema applies when a
+    (plus optional sections such as [widget_bundles] and [design_tokens]). In insecure dev mode, the same schema applies when a
     config file is provided. Legacy [display]/[network] tables are unsupported.
     CLI flags override individual settings from the config file.
     Passing --config with a path that does not exist or cannot be read is an error.
@@ -182,7 +186,6 @@ struct StartupOptions {
     explicit_height: bool,
     grpc_port: u16,
     mcp_port: u16,
-    psk: String,
     /// Optional operator credential used only for cooperative projection cleanup.
     projection_operator_authority: Option<String>,
     fps: u32,
@@ -221,7 +224,6 @@ impl Default for StartupOptions {
             explicit_height: false,
             grpc_port: 50051,
             mcp_port: 9090,
-            psk: DEFAULT_PSK.to_string(),
             projection_operator_authority: None,
             fps: 60,
             bind_all_interfaces: false,
@@ -262,8 +264,42 @@ fn startup_security_mode() -> StartupSecurityMode {
     )
 }
 
-fn psk_is_trivial_default(psk: &str) -> bool {
-    psk == DEFAULT_PSK
+/// Load the paired agents from `agents.toml` beside the config file (or in the
+/// platform config dir with no config). A missing file is an empty store; an
+/// unreadable or invalid one fails strict startup.
+fn load_agents(
+    config_file_path: Option<&str>,
+    security_mode: StartupSecurityMode,
+) -> AgentDirectory {
+    let Some(path) = agents_path_for(config_file_path.map(std::path::Path::new)) else {
+        tracing::warn!("no platform config dir for agents.toml; no agent can authenticate");
+        return AgentDirectory::default();
+    };
+    match agents_file::load(&path).and_then(|file| file.directory()) {
+        Ok(agents) => {
+            if agents.is_empty() {
+                tracing::warn!(
+                    path = %path.display(),
+                    "no paired agents; no agent can authenticate until one is paired"
+                );
+            } else {
+                tracing::info!(path = %path.display(), "paired agents loaded");
+            }
+            agents
+        }
+        Err(e) if security_mode == StartupSecurityMode::Strict => {
+            eprintln!("error: {}: {e}", path.display());
+            std::process::exit(1);
+        }
+        Err(e) => {
+            tracing::warn!(
+                path = %path.display(),
+                error = %e,
+                "agents file unusable; no agent can authenticate"
+            );
+            AgentDirectory::default()
+        }
+    }
 }
 
 fn validate_config_toml_for_startup(toml_src: &str) -> Result<(), String> {
@@ -325,9 +361,6 @@ fn parse_options(args: &[String]) -> Result<StartupOptions, String> {
         opts.mcp_port = v
             .parse::<u16>()
             .map_err(|_| format!("TZE_HUD_MCP_PORT: invalid port: {v:?}"))?;
-    }
-    if let Ok(v) = std::env::var("TZE_HUD_PSK") {
-        opts.psk = v;
     }
     if let Ok(v) = std::env::var(PROJECTION_OPERATOR_AUTHORITY_ENV) {
         let trimmed = v.trim();
@@ -447,13 +480,6 @@ fn parse_options(args: &[String]) -> Result<StartupOptions, String> {
                     .parse::<u16>()
                     .map_err(|_| format!("--mcp-port: invalid port: {val:?}"))?;
             }
-            "--psk" => {
-                i += 1;
-                opts.psk = args
-                    .get(i)
-                    .cloned()
-                    .ok_or_else(|| "--psk requires a key argument".to_string())?;
-            }
             "--fps" => {
                 i += 1;
                 let val = args
@@ -532,26 +558,6 @@ fn parse_options(args: &[String]) -> Result<StartupOptions, String> {
     }
 
     Ok(opts)
-}
-
-/// Returns a copy of `args` with the value following `--psk` replaced
-/// by `<redacted>` so startup diagnostic logs never capture the secret in plain text.
-fn redact_sensitive_args(args: Vec<String>) -> Vec<String> {
-    let mut out = Vec::with_capacity(args.len());
-    let mut i = 0;
-    while i < args.len() {
-        if args[i] == "--psk" {
-            out.push(args[i].clone());
-            i += 1;
-            if i < args.len() {
-                out.push("<redacted>".to_string());
-            }
-        } else {
-            out.push(args[i].clone());
-        }
-        i += 1;
-    }
-    out
 }
 
 fn parse_window_mode(s: &str) -> Result<WindowMode, String> {
@@ -877,14 +883,6 @@ set {DEV_ALLOW_INSECURE_STARTUP_ENV}=1 only in debug/dev runs if you need fallba
             std::process::exit(1);
         }
 
-        if psk_is_trivial_default(&opts.psk) {
-            eprintln!(
-                "error: refusing startup with default PSK value {DEFAULT_PSK:?} in strict mode"
-            );
-            eprintln!("hint: set --psk <strong-key> or TZE_HUD_PSK to a non-default secret.");
-            std::process::exit(1);
-        }
-
         let toml_src = config_toml
             .as_ref()
             .expect("strict mode already checked config_toml presence");
@@ -945,6 +943,8 @@ set {DEV_ALLOW_INSECURE_STARTUP_ENV}=1 only in debug/dev runs if you need fallba
         "tze_hud runtime starting"
     );
 
+    let agents = load_agents(config_file_path.as_deref(), security_mode);
+
     let config = WindowedConfig {
         window: WindowConfig {
             mode: opts.window_mode,
@@ -955,7 +955,7 @@ set {DEV_ALLOW_INSECURE_STARTUP_ENV}=1 only in debug/dev runs if you need fallba
         overlay_auto_size,
         grpc_port: opts.grpc_port,
         mcp_port: opts.mcp_port,
-        psk: opts.psk,
+        agents: agents.shared(),
         projection_operator_authority: opts.projection_operator_authority,
         target_fps: opts.fps,
         config_toml,
@@ -966,20 +966,6 @@ set {DEV_ALLOW_INSECURE_STARTUP_ENV}=1 only in debug/dev runs if you need fallba
         quiescent_efficiency,
         bind_all_interfaces: opts.bind_all_interfaces,
     };
-
-    // Diagnostic: write resolved config to disk so we can verify args were parsed.
-    // PSK is redacted so the log file never captures the secret in plain text.
-    let diag = format!(
-        "mode={} width={} height={} auto_size={} grpc={} mcp={}\nargs={:?}\n",
-        opts.window_mode,
-        opts.width,
-        opts.height,
-        overlay_auto_size,
-        opts.grpc_port,
-        opts.mcp_port,
-        redact_sensitive_args(std::env::args().collect()),
-    );
-    let _ = std::fs::write("C:\\tze_hud\\logs\\startup_diag.txt", &diag);
 
     let runtime = WindowedRuntime::new(config);
     runtime.run()
@@ -1008,7 +994,6 @@ mod tests {
                 "TZE_HUD_WINDOW_HEIGHT",
                 "TZE_HUD_GRPC_PORT",
                 "TZE_HUD_MCP_PORT",
-                "TZE_HUD_PSK",
                 "TZE_HUD_PROJECTION_OPERATOR_AUTHORITY",
                 "TZE_HUD_BIND_ALL_INTERFACES",
                 "TZE_HUD_FPS",
@@ -1236,18 +1221,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_options_psk() {
-        let _guard = ENV_VAR_MUTEX.lock().unwrap();
-        // Safety: single-threaded within ENV_VAR_MUTEX guard.
-        unsafe {
-            std::env::remove_var("TZE_HUD_PSK");
-        }
-        let args: Vec<String> = vec!["--psk".to_string(), "my-secret-key".to_string()];
-        let opts = parse_options(&args).unwrap();
-        assert_eq!(opts.psk, "my-secret-key");
-    }
-
-    #[test]
     fn parse_options_print_attach_info_flag() {
         let _guard = ENV_VAR_MUTEX.lock().unwrap();
         clear_parse_options_env();
@@ -1289,7 +1262,7 @@ mod tests {
     }
 
     #[test]
-    fn render_attach_info_block_has_sections_and_hides_psk() {
+    fn render_attach_info_block_has_sections() {
         let _guard = ENV_VAR_MUTEX.lock().unwrap();
         clear_parse_options_env();
         // Explicit (nonexistent) config path keeps resolution deterministic and
@@ -1298,14 +1271,9 @@ mod tests {
             config_path: Some("/nonexistent/tze_hud.toml".to_string()),
             mcp_port: 9090,
             grpc_port: 50051,
-            psk: "SUPER-SECRET-PSK-9f2c-do-not-leak".to_string(),
             ..StartupOptions::default()
         };
         let block = render_attach_info_block(&opts);
-        assert!(
-            !block.contains(&opts.psk),
-            "attach-info block must not leak the configured PSK:\n{block}"
-        );
         assert!(
             block.contains("http://127.0.0.1:9090/mcp"),
             "MCP endpoint URL missing:\n{block}"
@@ -1406,12 +1374,6 @@ mod tests {
     }
 
     #[test]
-    fn psk_is_trivial_default_detects_default_only() {
-        assert!(psk_is_trivial_default(DEFAULT_PSK));
-        assert!(!psk_is_trivial_default("test-psk-do-not-use"));
-    }
-
-    #[test]
     fn validate_config_toml_for_startup_accepts_minimal_valid_config() {
         let toml = r#"
 [runtime]
@@ -1453,12 +1415,15 @@ profile = "full-display"
     fn parse_options_unknown_flag_returns_error() {
         let _guard = ENV_VAR_MUTEX.lock().unwrap();
         clear_parse_options_env();
-        let args: Vec<String> = vec!["--unknown-flag".to_string()];
-        let err = parse_options(&args).unwrap_err();
-        assert!(
-            err.contains("unknown flag"),
-            "error should mention unknown flag"
-        );
+        // `--psk` is gone: agents authenticate with paired PSKs (agents.toml).
+        for flag in ["--unknown-flag", "--psk"] {
+            let args: Vec<String> = vec![flag.to_string(), "value".to_string()];
+            let err = parse_options(&args).unwrap_err();
+            assert!(
+                err.contains(&format!("unknown flag: {flag}")),
+                "error should mention unknown flag: {err}"
+            );
+        }
     }
 
     #[test]
@@ -1714,43 +1679,5 @@ profile = "full-display"
             std::env::remove_var("TZE_HUD_WINDOW_WIDTH");
             std::env::remove_var("TZE_HUD_WINDOW_HEIGHT");
         }
-    }
-
-    // ── redact_sensitive_args (hud-9bi85) ─────────────────────────────────────
-
-    /// `--psk` value is replaced with `<redacted>`.
-    #[test]
-    fn redact_sensitive_args_redacts_psk_value() {
-        let args = vec![
-            "tze_hud".to_string(),
-            "--psk".to_string(),
-            "super-secret".to_string(),
-            "--fps".to_string(),
-        ];
-        let redacted = redact_sensitive_args(args);
-        assert_eq!(redacted[1], "--psk");
-        assert_eq!(redacted[2], "<redacted>");
-        assert_eq!(redacted[3], "--fps");
-    }
-
-    /// Args without `--psk` are returned unchanged.
-    #[test]
-    fn redact_sensitive_args_passthrough_when_no_psk() {
-        let args = vec![
-            "tze_hud".to_string(),
-            "--fps".to_string(),
-            "--grpc-port".to_string(),
-            "50051".to_string(),
-        ];
-        let expected = args.clone();
-        assert_eq!(redact_sensitive_args(args), expected);
-    }
-
-    /// Trailing `--psk` with no following value does not panic.
-    #[test]
-    fn redact_sensitive_args_trailing_psk_flag_does_not_panic() {
-        let args = vec!["tze_hud".to_string(), "--psk".to_string()];
-        let redacted = redact_sensitive_args(args);
-        assert_eq!(redacted, vec!["tze_hud", "--psk"]);
     }
 }

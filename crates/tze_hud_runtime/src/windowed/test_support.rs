@@ -47,7 +47,7 @@ pub(super) fn scene_with_capture_tile() -> (SceneGraph, SceneId) {
 
 pub(super) fn make_shared_state() -> Arc<TokioMutex<SharedState>> {
     let scene = Arc::new(TokioMutex::new(SceneGraph::new(1920.0, 1080.0)));
-    let sessions = SessionRegistry::new("test-psk");
+    let sessions = SessionRegistry::new();
     Arc::new(TokioMutex::new(SharedState {
         scene,
         sessions,

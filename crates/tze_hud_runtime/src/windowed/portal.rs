@@ -2117,7 +2117,6 @@ mod tests {
             network_handles: Vec::new(),
             runtime_context: Arc::new(RuntimeContext::headless_default()),
             _runtime_widget_store: None,
-            fallback_unrestricted: false,
             shared_state,
             safe_mode_atomic,
             active_tab_mirror,

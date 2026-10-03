@@ -6,11 +6,12 @@
 # emits a single JSON result object on stdout.
 #
 # SECRET HANDLING (critical):
-#   The runtime's single-PSK model requires --psk == $TZE_HUD_MCP_RESIDENT_PRINCIPAL.
-#   This script reads the PSK from the host environment itself
+#   The runtime stores only agents' PSK hashes, in agents.toml beside the
+#   config. This script reads the PSK from the host environment itself
 #   (TZE_HUD_MCP_RESIDENT_PRINCIPAL, User scope first, then process scope) and
-#   bakes it into the scheduled-task action. The PSK is NEVER accepted as a
-#   parameter, NEVER passed on the Linux/SSH command line, and NEVER logged.
+#   pairs it as agent `claude` (allow = ["*"]) by writing its SHA-256 there.
+#   The PSK is NEVER accepted as a parameter, NEVER passed on the Linux/SSH
+#   command line or the task action, and NEVER logged.
 #
 # TRANSPARENCY (critical):
 #   The action executes tze_hud.exe DIRECTLY via New-ScheduledTaskAction -Execute.
@@ -19,8 +20,8 @@
 #   produces a grey/opaque overlay instead of a transparent one. Do not "fix" the
 #   launch by adding a wrapper or a `>` redirect.
 #
-# Mirrors the known-good C:\tze_hud\hud-8dht5\start-portal-hud.ps1, with PSK
-# sourced from the host env instead of a -Psk parameter.
+# Mirrors the known-good C:\tze_hud\hud-8dht5\start-portal-hud.ps1, with the
+# agent paired from the host env instead of a -Psk parameter.
 
 param(
     [string]$TaskName   = 'TzeHudPortalDeploy',
@@ -68,10 +69,17 @@ try {
         $pskSource = 'Process'
     }
     if ([string]::IsNullOrEmpty($psk)) {
-        throw 'TZE_HUD_MCP_RESIDENT_PRINCIPAL is not set in the host environment; cannot derive --psk'
+        throw 'TZE_HUD_MCP_RESIDENT_PRINCIPAL is not set in the host environment; cannot pair the agent'
     }
     $result.psk_source = $pskSource
     Add-Step 'resolve-psk' 'ok' "source=$pskSource len=$($psk.Length)"
+
+    # ── Pair the PSK: only its SHA-256 goes into agents.toml beside the config ─
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    $hash = -join ($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($psk)) | ForEach-Object { $_.ToString('x2') })
+    $agentsPath = Join-Path (Split-Path -Parent $ConfigPath) 'agents.toml'
+    Set-Content -Path $agentsPath -Encoding ascii -Value "[agents.claude]`npsk_sha256 = `"$hash`"`nallow = [`"*`"]"
+    Add-Step 'pair-agent' 'ok' "agents=$agentsPath"
 
     if (-not (Test-Path $ExePath)) { throw "exe not found at $ExePath" }
 
@@ -86,7 +94,7 @@ try {
 
     # ── Register the overlay task (exe-direct, NO wrapper, NO redirect) ───────
     Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
-    $argline = "--config $ConfigPath --window-mode overlay --bind-all-interfaces --grpc-port $GrpcPort --mcp-port $McpPort --psk $psk"
+    $argline = "--config $ConfigPath --window-mode overlay --bind-all-interfaces --grpc-port $GrpcPort --mcp-port $McpPort"
     $action = New-ScheduledTaskAction -Execute $ExePath -Argument $argline -WorkingDirectory $WorkingDir
     # ExecutionTimeLimit MUST be unlimited (PT0S) — the overlay is a long-lived
     # presence runtime, not a batch job. A finite limit makes Windows TERMINATE

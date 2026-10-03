@@ -101,7 +101,11 @@ This writes two files in the current directory (both idempotent):
   `[[tabs]]`. A text-stream portal renders into that **Main** tab using the
   runtime's built-in zero-config placement, size, and design-token defaults —
   no widget wiring is required for session projection.
-- `tze_hud.psk` — a freshly generated strong pre-shared key (`chmod 600`).
+- `tze_hud.psk` — a freshly generated strong pre-shared key (`chmod 600`),
+  kept by the agent side as its MCP bearer.
+- `agents.toml` — next to the config: pairs that PSK as agent `claude` with
+  `allow = ["*"]`, storing only the PSK's SHA-256. The runtime never sees the
+  PSK itself.
 
 To scaffold those files and also create a secret-bearing MCP client config,
 run `scripts/quickstart.sh --emit-mcp-config=tze-hud.mcp.json`. The output file
@@ -122,13 +126,19 @@ name        = "Main"
 default_tab = true
 TOML
 
-export TZE_HUD_PSK="$(openssl rand -hex 24)"
+( umask 077; openssl rand -hex 24 > tze_hud.psk )
+cat > agents.toml <<TOML
+[agents.claude]
+psk_sha256 = "$(tr -d '[:space:]' < tze_hud.psk | sha256sum | cut -d' ' -f1)"
+allow      = ["*"]
+TOML
 ```
 
-> **Why a config and a non-trivial PSK are mandatory:** canonical startup is
-> *fail-closed*. Launching with no readable config, or with the trivial default
-> PSK `tze-hud-key`, is a hard startup error — by design, so an unconfigured
-> runtime never binds a port. The quickstart script satisfies both for you.
+> **Why a config and a paired agent are mandatory:** canonical startup is
+> *fail-closed*. Launching with no readable config, or an invalid
+> `agents.toml`, is a hard startup error. With no `agents.toml` the runtime
+> starts but rejects every request until an agent is paired. The quickstart
+> script sets up both for you.
 
 ---
 
@@ -141,7 +151,6 @@ scripts/quickstart.sh --window-mode overlay
 or equivalently, by hand:
 
 ```bash
-export TZE_HUD_PSK="$(cat tze_hud.psk)"   # see the note below
 ./target/release/tze_hud \
   --config tze_hud.toml \
   --window-mode overlay \
@@ -149,10 +158,8 @@ export TZE_HUD_PSK="$(cat tze_hud.psk)"   # see the note below
   --grpc-port 50051
 ```
 
-> Pass the PSK via the `TZE_HUD_PSK` **environment variable** (as above), not the
-> `--psk` CLI flag. On a multi-user host, argv is world-readable (`ps`,
-> `/proc/<pid>/cmdline`), so a CLI PSK leaks the bearer; the env var is visible
-> only to the process owner.
+The runtime takes no PSK: it authenticates each request against the hashes
+in `agents.toml` next to `--config`.
 
 A window opens. The MCP listener is on `http://127.0.0.1:9090/mcp` (loopback
 only by default — add `--bind-all-interfaces` to expose it on the LAN).
@@ -165,7 +172,7 @@ listening without turning on logging:
 ────────────────────────────────────────────────────────────────────
  tze_hud runtime ready
    gRPC   : 127.0.0.1:50051
-   MCP    : http://127.0.0.1:9090/mcp   (auth: Authorization: Bearer <TZE_HUD_PSK>)
+   MCP    : http://127.0.0.1:9090/mcp   (auth: Authorization: Bearer <agent PSK>)
    attach : invoke the `hud-projection` skill in an LLM session, or run
             scripts/quickstart.sh — see docs/QUICKSTART.md
 ────────────────────────────────────────────────────────────────────
@@ -176,9 +183,9 @@ attach hint, never the PSK. (A disabled service — `--mcp-port 0` or
 `--grpc-port 0` — shows as `disabled`.)
 
 > **Identity is the PSK.** The MCP bearer identifies an agent, and that
-> agent's `allow` list in the config decides which tools it may call. The
-> generated config has `[agents.claude]` with `psk_env = "TZE_HUD_PSK"` and
-> `allow = ["*"]`, so sending the PSK as the MCP `Authorization: Bearer` gets
+> agent's `allow` list in `agents.toml` decides which tools it may call. The
+> generated `agents.toml` pairs `[agents.claude]` with `allow = ["*"]`, so
+> sending the PSK from `tze_hud.psk` as the MCP `Authorization: Bearer` gets
 > you the portal tools. A disallowed call fails with `NOT_ALLOWED` and a hint
 > naming the `allow` entry to add.
 
@@ -260,9 +267,10 @@ curl -s -X POST http://127.0.0.1:9090/mcp \
 | Symptom | Cause / fix |
 |---|---|
 | `canonical startup requires a readable config file` | No config resolved. Run from a dir containing `tze_hud.toml`, or pass `--config <path>`. `quickstart.sh` scaffolds one. |
-| `refusing startup with default PSK value "tze-hud-key"` | Set a non-trivial PSK (`--psk` / `TZE_HUD_PSK`). `quickstart.sh` generates one. |
+| `agents.toml: invalid agents.toml` | A `psk_sha256` is not 64 hex characters or an `allow` entry is unknown; the message names the field. |
+| Every MCP call is `-32004` unauthenticated | The bearer's SHA-256 is not in `agents.toml` next to the config. Re-run `quickstart.sh` or add the hash. |
 | Nothing printed on stdout after launch | The runtime always prints a one-time non-secret startup banner (bind addrs + attach hint). *Structured* logs beyond it are gated behind the `TZE_HUD_LOG` env filter — run with `TZE_HUD_LOG=info` for detailed startup/bind logs. (`quickstart.sh` prints the attach block regardless.) |
-| Portal call returns `NOT_ALLOWED` | The bearer's agent lacks `portal` in its `allow` list. Add it (or `*`) to that `[agents.<id>]` table, as the hint says. |
+| Portal call returns `NOT_ALLOWED` | The bearer's agent lacks `portal` in its `allow` list. Add it (or `*`) to that `[agents.<id>]` table in `agents.toml`, as the hint says, and restart. |
 | `No active tab` on the autonomous test VM | WARP-VM-specific: the config's `[[tabs]]` did not materialize. Restart the HUD task; tabs are not creatable over MCP. Not seen on a normal GPU desktop. |
 | Window won't open on a headless box | Expected — you need a real display server. Use overlay/fullscreen on a desktop, or the TigerVNC path in `README.md`. |
 

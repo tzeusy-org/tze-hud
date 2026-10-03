@@ -8,7 +8,7 @@ use tze_hud_protocol::proto::session::hud_session_server::HudSessionServer;
 use tze_hud_protocol::proto::session::runtime_service_server::RuntimeServiceServer;
 use tze_hud_protocol::session::SharedState;
 use tze_hud_protocol::session_server::{HudSessionImpl, SessionDeps};
-use tze_hud_scene::config::ConfigLoader;
+use tze_hud_scene::config::{ConfigLoader, SharedAgents};
 
 use super::WindowedConfig;
 use super::config::select_grpc_bind_host;
@@ -18,33 +18,18 @@ use crate::threads::NetworkRuntime;
 
 /// Build a `RuntimeContext` from the windowed config.
 ///
-/// When `cfg.config_toml` is `Some`, the TOML is parsed and validated. On
-/// success, each `[agents.<id>]` table's `allow` list and PSK are loaded into
-/// the context. The fallback policy is `Guest` (configured agents only).
-///
-/// When `cfg.config_toml` is `None` (no config file), the context falls back to
-/// `RuntimeContext::headless_default()` and `fallback_unrestricted = true` for
-/// dev-friendly behaviour (any PSK-authenticated agent gets all capabilities).
+/// When `cfg.config_toml` is `Some`, the TOML is parsed and validated into
+/// the context's profile budgets. When it is `None` (no config file), the
+/// context is `RuntimeContext::headless_default()`.
 ///
 /// Parse or validation errors are logged as warnings and cause a graceful
 /// fallback to `headless_default()` so the runtime can still start.
-///
-/// Returns `(runtime_context, fallback_unrestricted)`.
-pub(super) fn build_runtime_context(cfg: &WindowedConfig) -> (SharedRuntimeContext, bool) {
+pub(super) fn build_runtime_context(cfg: &WindowedConfig) -> SharedRuntimeContext {
     match &cfg.config_toml {
         None => {
             // No config file - fall back to headless default.
-            tracing::debug!(
-                "windowed runtime: no config TOML provided; \
-                 using headless_default (all agents unrestricted)"
-            );
-            (
-                Arc::new(
-                    RuntimeContext::headless_default()
-                        .with_fallback_policy(crate::runtime_context::FallbackPolicy::Unrestricted),
-                ),
-                true,
-            )
+            tracing::debug!("windowed runtime: no config TOML provided; using headless_default");
+            Arc::new(RuntimeContext::headless_default())
         }
         Some(toml_src) => {
             // Parse the TOML.
@@ -58,7 +43,7 @@ pub(super) fn build_runtime_context(cfg: &WindowedConfig) -> (SharedRuntimeConte
                         "windowed runtime: config TOML parse error; \
                          falling back to headless_default"
                     );
-                    return (Arc::new(RuntimeContext::headless_default()), false);
+                    return Arc::new(RuntimeContext::headless_default());
                 }
             };
 
@@ -81,7 +66,7 @@ pub(super) fn build_runtime_context(cfg: &WindowedConfig) -> (SharedRuntimeConte
                          falling back to headless_default",
                         errors.len()
                     );
-                    return (Arc::new(RuntimeContext::headless_default()), false);
+                    return Arc::new(RuntimeContext::headless_default());
                 }
             };
 
@@ -89,17 +74,10 @@ pub(super) fn build_runtime_context(cfg: &WindowedConfig) -> (SharedRuntimeConte
 
             tracing::info!(
                 profile = %resolved.profile.name,
-                agents = resolved.agent_capabilities.len(),
-                "windowed runtime: config loaded; \
-                 agent allow lists applied from [agents.<id>]"
+                "windowed runtime: config loaded"
             );
 
-            let ctx = RuntimeContext::from_config_with_hot(
-                resolved,
-                crate::runtime_context::FallbackPolicy::Guest,
-                hot,
-            );
-            (Arc::new(ctx), false)
+            Arc::new(RuntimeContext::from_config_with_hot(resolved, hot))
         }
     }
 }
@@ -146,18 +124,16 @@ type NetworkServices = (
 #[cfg(test)]
 pub(super) fn start_network_services(
     grpc_port: u16,
-    psk: &str,
+    agents: SharedAgents,
     shared_state: Arc<Mutex<SharedState>>,
     runtime_context: SharedRuntimeContext,
-    fallback_unrestricted: bool,
     bind_all_interfaces: bool,
 ) -> Result<NetworkServices, Box<dyn std::error::Error>> {
     start_network_services_with_render_wake(
         grpc_port,
-        psk,
+        agents,
         shared_state,
         runtime_context,
-        fallback_unrestricted,
         bind_all_interfaces,
         tze_hud_scene::render_wake::RenderWakeNotifier::default(),
     )
@@ -166,10 +142,9 @@ pub(super) fn start_network_services(
 #[allow(clippy::type_complexity)]
 pub(super) fn start_network_services_with_render_wake(
     grpc_port: u16,
-    psk: &str,
+    agents: SharedAgents,
     shared_state: Arc<Mutex<SharedState>>,
     runtime_context: SharedRuntimeContext,
-    fallback_unrestricted: bool,
     bind_all_interfaces: bool,
     render_wake: tze_hud_scene::render_wake::RenderWakeNotifier,
 ) -> Result<NetworkServices, Box<dyn std::error::Error>> {
@@ -198,16 +173,8 @@ pub(super) fn start_network_services_with_render_wake(
         .parse()
         .map_err(|e| format!("windowed runtime: invalid gRPC address (port {grpc_port}): {e}"))?;
 
-    // Wire config-driven agent identity (allow lists + per-agent PSKs).
-    let mut agents = runtime_context.agent_directory(psk);
-    agents.fallback_permissions = if fallback_unrestricted {
-        vec!["*".to_string()]
-    } else {
-        Vec::new()
-    };
     let service = HudSessionImpl::from_deps(SessionDeps {
-        agent_resource_budgets: runtime_context.snapshot_agent_resource_budgets(),
-        fallback_resource_budget: runtime_context.fallback_resource_budget(),
+        resource_budget: runtime_context.resource_budget(),
         budget_enforcer: Some(std::sync::Arc::new(
             crate::RuntimeMutationBudgetEnforcer::with_limits(
                 runtime_context.operational_envelope.max_resident_sessions,
@@ -318,7 +285,7 @@ pub(super) fn render_startup_banner(
     }
     match mcp_addr {
         Some(addr) => lines.push(format!(
-            "   MCP    : {}   (auth: Authorization: Bearer <TZE_HUD_PSK>)",
+            "   MCP    : {}   (auth: Authorization: Bearer <agent PSK>)",
             mcp_endpoint_url(addr)
         )),
         None => lines.push("   MCP    : disabled".to_string()),
@@ -413,10 +380,9 @@ pub fn render_attach_info(
 
     lines.push(String::new());
     lines.push(
-        " Auth: every MCP request must send the pre-shared key (PSK) as a bearer token:"
-            .to_string(),
+        " Auth: every MCP request must send your agent's paired PSK as a bearer token:".to_string(),
     );
-    lines.push("     Authorization: Bearer <your PSK — the value of TZE_HUD_PSK>".to_string());
+    lines.push("     Authorization: Bearer <your agent's PSK>".to_string());
 
     lines.push(String::new());
     lines.push(" Projection (the portal_projection_* tools):".to_string());
@@ -424,9 +390,9 @@ pub fn render_attach_info(
         "   The MCP Authorization: Bearer PSK identifies your agent; its [agents.<id>]".to_string(),
     );
     lines.push(
-        "   allow list must include \"portal\" (shipped configs: [agents.claude] reads".to_string(),
+        "   allow list must include \"portal\" (agents.toml next to the config holds".to_string(),
     );
-    lines.push("   TZE_HUD_PSK with allow = [\"*\"]).".to_string());
+    lines.push("   each agent's PSK SHA-256 and allow list).".to_string());
     lines.push("   (This command never prints the PSK value itself.)".to_string());
 
     lines.push(String::new());
@@ -444,7 +410,7 @@ pub fn render_attach_info(
                 "         \"type\": \"url\",".to_string(),
                 format!("         \"url\": \"{url}\","),
                 "         \"headers\": {".to_string(),
-                "           \"Authorization\": \"Bearer <PSK from TZE_HUD_PSK>\"".to_string(),
+                "           \"Authorization\": \"Bearer <your agent's PSK>\"".to_string(),
                 "         }".to_string(),
                 "       }".to_string(),
                 "     }".to_string(),
@@ -551,7 +517,7 @@ mod tests {
             "JSON snippet missing:\n{info}"
         );
         assert!(
-            info.contains("<PSK from TZE_HUD_PSK>"),
+            info.contains("Bearer <your agent's PSK>"),
             "JSON snippet must use a PSK placeholder:\n{info}"
         );
     }
@@ -608,7 +574,7 @@ mod tests {
             _degradation_notices,
             lease_expirations,
             grpc_addr,
-        ) = start_network_services(0, "test-psk", shared_state, ctx, true, false)
+        ) = start_network_services(0, Default::default(), shared_state, ctx, false)
             .expect("start_network_services should not fail for port 0");
         assert!(
             rt.is_none(),
@@ -654,7 +620,7 @@ mod tests {
             _degradation_notices,
             lease_expirations,
             grpc_addr,
-        ) = start_network_services(port, "test-psk", shared_state, ctx, true, true)
+        ) = start_network_services(port, Default::default(), shared_state, ctx, true)
             .expect("start_network_services should not error for a valid port");
         assert!(
             rt.is_some(),
@@ -701,7 +667,7 @@ mod tests {
                 _degradation_notices,
                 _lease_expirations,
                 _grpc_addr,
-            ) = start_network_services(0, "psk", shared_state, ctx, false, false)
+            ) = start_network_services(0, Default::default(), shared_state, ctx, false)
                 .expect("port-0 must not error");
             assert!(rt.is_none());
             assert!(handles.is_empty());
@@ -729,7 +695,7 @@ mod tests {
         let shared_state = make_shared_state();
         let ctx: SharedRuntimeContext = Arc::new(RuntimeContext::headless_default());
         let (rt, handles, _, _, _, _, _, _) =
-            start_network_services(port, "psk", shared_state, ctx, false, false)
+            start_network_services(port, Default::default(), shared_state, ctx, false)
                 .expect("loopback bind must succeed on a freshly allocated ephemeral port");
         assert!(rt.is_some(), "loopback bind must create a NetworkRuntime");
         assert!(!handles.is_empty(), "loopback bind must spawn task handles");
@@ -749,7 +715,7 @@ mod tests {
         let shared_state = make_shared_state();
         let ctx: SharedRuntimeContext = Arc::new(RuntimeContext::headless_default());
         let (rt, handles, _, _, _, _, _, _) =
-            start_network_services(port, "psk", shared_state, ctx, false, true)
+            start_network_services(port, Default::default(), shared_state, ctx, true)
                 .expect("all-interfaces bind must succeed on a freshly allocated ephemeral port");
         assert!(
             rt.is_some(),
@@ -764,75 +730,18 @@ mod tests {
         }
     }
 
-    /// Acceptance criterion 2: when no config TOML is provided, the runtime
-    /// falls back to headless_default() with fallback_unrestricted = true.
+    /// When no config TOML is provided, the runtime uses headless_default().
     #[test]
     fn build_runtime_context_no_config_toml_uses_headless_default() {
         let cfg = WindowedConfig {
             config_toml: None,
             ..WindowedConfig::default()
         };
-        let (ctx, fallback_unrestricted) = build_runtime_context(&cfg);
-        // Fallback unrestricted should be true (dev-friendly default).
-        assert!(
-            fallback_unrestricted,
-            "no-config path must set fallback_unrestricted=true"
-        );
-        // Profile name must be "headless" (headless_default behaviour).
+        let ctx = build_runtime_context(&cfg);
         assert_eq!(
             ctx.profile.name, "headless",
             "no-config path must use the headless profile"
         );
-        // Dev mode: an agent without a table is unrestricted.
-        let any = ctx.agent_directory("psk").resolve("psk", "anyone").unwrap();
-        assert!(any.allows("create_tiles"));
-    }
-
-    /// Acceptance criterion 1: when a valid config TOML is provided, each
-    /// agent's `allow` list is parsed and applied.
-    #[test]
-    fn build_runtime_context_with_valid_config_applies_capability_grants() {
-        let toml = r#"
-[runtime]
-profile = "full-display"
-
-[[tabs]]
-name = "Main"
-
-[agents.weather-agent]
-allow = ["tiles"]
-"#;
-        let cfg = WindowedConfig {
-            config_toml: Some(toml.to_string()),
-            ..WindowedConfig::default()
-        };
-        let (ctx, fallback_unrestricted) = build_runtime_context(&cfg);
-        // Config-driven path: fallback must be Guest (not unrestricted).
-        assert!(
-            !fallback_unrestricted,
-            "config-driven path must set fallback_unrestricted=false"
-        );
-        // Registered agent capabilities must be applied.
-        let caps = ctx.agent_capabilities("weather-agent");
-        assert!(
-            caps.is_some(),
-            "weather-agent must appear in the capability registry"
-        );
-        let caps = caps.unwrap();
-        assert!(
-            caps.contains(&"create_tiles".to_string()),
-            "weather-agent must have create_tiles grant"
-        );
-        assert!(
-            caps.contains(&"modify_own_tiles".to_string()),
-            "weather-agent must have modify_own_tiles grant"
-        );
-        // An agent without a table gets nothing under the Guest fallback.
-        let unknown = ctx
-            .agent_directory("psk")
-            .resolve("psk", "unknown-agent")
-            .unwrap();
-        assert!(unknown.permissions.is_empty());
     }
 
     /// Acceptance criterion 1: config-driven context uses the full-display profile.
@@ -849,7 +758,7 @@ name = "Main"
             config_toml: Some(toml.to_string()),
             ..WindowedConfig::default()
         };
-        let (ctx, _) = build_runtime_context(&cfg);
+        let ctx = build_runtime_context(&cfg);
         assert_eq!(
             ctx.profile.name, "full-display",
             "config-driven path must use the profile specified in the TOML"
@@ -865,13 +774,7 @@ name = "Main"
             config_toml: Some(bad_toml.to_string()),
             ..WindowedConfig::default()
         };
-        let (ctx, fallback_unrestricted) = build_runtime_context(&cfg);
-        // Must fall back gracefully to headless, but NOT unrestricted.
-        // An operator who provided a config intended to restrict capabilities.
-        assert!(
-            !fallback_unrestricted,
-            "parse-error path must NOT fall back to unrestricted"
-        );
+        let ctx = build_runtime_context(&cfg);
         assert_eq!(
             ctx.profile.name, "headless",
             "parse-error path must fall back to headless profile"
@@ -891,13 +794,7 @@ profile = "full-display"
             config_toml: Some(invalid_toml.to_string()),
             ..WindowedConfig::default()
         };
-        let (ctx, fallback_unrestricted) = build_runtime_context(&cfg);
-        // Must fall back gracefully to headless, but NOT unrestricted.
-        // An operator who provided a config intended to restrict capabilities.
-        assert!(
-            !fallback_unrestricted,
-            "validation-error path must NOT fall back to unrestricted"
-        );
+        let ctx = build_runtime_context(&cfg);
         assert_eq!(
             ctx.profile.name, "headless",
             "validation-error path must fall back to headless profile"

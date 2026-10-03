@@ -105,8 +105,8 @@ one-command connectivity trial (attach, greeting, poll), use
 ## Setup
 
 Point your MCP client at the runtime (see `settings.template.json`) with your
-agent's PSK as the bearer. The shipped configs give `[agents.claude]`, which
-reads `TZE_HUD_PSK`, `allow = ["*"]`.
+agent's PSK as the bearer. `scripts/quickstart.sh` pairs that PSK as
+`[agents.claude]` with `allow = ["*"]` in the HUD's `agents.toml`.
 
 ## Source of truth
 

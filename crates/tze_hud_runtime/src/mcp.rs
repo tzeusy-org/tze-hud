@@ -29,7 +29,7 @@ use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 use tze_hud_mcp::{McpConfig, McpServer};
-use tze_hud_scene::config::AgentDirectory;
+use tze_hud_scene::config::SharedAgents;
 use tze_hud_scene::graph::SceneGraph;
 
 use crate::threads::ShutdownToken;
@@ -47,10 +47,10 @@ pub struct McpServerConfig {
     /// Conventionally `0.0.0.0:<port>` or `127.0.0.1:<port>`.
     pub bind_addr: SocketAddr,
 
-    /// Credential → agent directory for MCP authentication and the `allow`
-    /// gate. The bearer token (or JSON-RPC `_auth`) must be the runtime PSK or
-    /// an agent's own PSK; the agent's namespace is its id.
-    pub agents: AgentDirectory,
+    /// Live credential → agent directory for MCP authentication and the
+    /// `allow` gate, shared with gRPC. The bearer token must be a paired
+    /// agent's PSK; the agent's namespace is its id.
+    pub agents: SharedAgents,
 }
 
 /// Start the MCP HTTP server task on the calling Tokio runtime.
@@ -61,7 +61,7 @@ pub struct McpServerConfig {
 /// # Parameters
 ///
 /// * `scene`           — shared scene graph for MCP tool dispatch.
-/// * `config`          — MCP server configuration (bind address, PSK).
+/// * `config`          — MCP server configuration (bind address, agents).
 /// * `shutdown`        — token that stops the accept loop when triggered.
 /// * `portal_op_tx` — optional channel sender for portal projection operations
 ///   (hud-bq0gl.2).  When `Some`, the MCP server forwards portal surface
@@ -306,7 +306,7 @@ mod tests {
     fn make_config(port: u16, psk: &str) -> McpServerConfig {
         McpServerConfig {
             bind_addr: format!("127.0.0.1:{port}").parse().unwrap(),
-            agents: AgentDirectory::unrestricted(psk),
+            agents: tze_hud_scene::config::AgentDirectory::unrestricted(psk).shared(),
         }
     }
 
@@ -363,7 +363,7 @@ mod tests {
         let scene = make_scene();
         let config = McpServerConfig {
             bind_addr: addr,
-            agents: AgentDirectory::unrestricted("test-key"),
+            agents: tze_hud_scene::config::AgentDirectory::unrestricted("test-key").shared(),
         };
         let shutdown = ShutdownToken::new();
 
@@ -402,7 +402,7 @@ mod tests {
         let scene = make_scene();
         let config = McpServerConfig {
             bind_addr: addr,
-            agents: AgentDirectory::unrestricted("real-key"),
+            agents: tze_hud_scene::config::AgentDirectory::unrestricted("real-key").shared(),
         };
         let shutdown = ShutdownToken::new();
 
@@ -436,7 +436,7 @@ mod tests {
         let scene = make_scene();
         let config = McpServerConfig {
             bind_addr: addr,
-            agents: AgentDirectory::unrestricted("correct-key"),
+            agents: tze_hud_scene::config::AgentDirectory::unrestricted("correct-key").shared(),
         };
         let shutdown = ShutdownToken::new();
 
@@ -503,7 +503,7 @@ mod tests {
 
         let config = McpServerConfig {
             bind_addr: addr,
-            agents: AgentDirectory::unrestricted("test-key"),
+            agents: tze_hud_scene::config::AgentDirectory::unrestricted("test-key").shared(),
         };
         let shutdown = ShutdownToken::new();
 
@@ -537,7 +537,7 @@ mod tests {
         let scene = make_scene();
         let config = McpServerConfig {
             bind_addr: addr,
-            agents: AgentDirectory::unrestricted("key"),
+            agents: tze_hud_scene::config::AgentDirectory::unrestricted("key").shared(),
         };
         let shutdown = ShutdownToken::new();
 

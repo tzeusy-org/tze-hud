@@ -93,7 +93,6 @@ impl WindowedRuntimeState {
             network_handles: Vec::new(),
             runtime_context: Arc::new(crate::runtime_context::RuntimeContext::headless_default()),
             _runtime_widget_store: None,
-            fallback_unrestricted: true,
             shared_state,
             safe_mode_atomic,
             active_tab_mirror,
@@ -170,7 +169,7 @@ impl SharedStateBuilder {
         use tokio::sync::Mutex as TokioMutex;
         tze_hud_protocol::session::SharedState {
             scene: Arc::new(TokioMutex::new(SceneGraph::new(1920.0, 1080.0))),
-            sessions: tze_hud_protocol::session::SessionRegistry::new("test-psk"),
+            sessions: tze_hud_protocol::session::SessionRegistry::new(),
             resource_store: tze_hud_resource::ResourceStore::new(
                 tze_hud_resource::ResourceStoreConfig::default(),
             ),

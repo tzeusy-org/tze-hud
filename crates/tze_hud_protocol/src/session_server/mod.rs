@@ -211,8 +211,7 @@ impl HudSession for HudSessionImpl {
         let mut inbound = request.into_inner();
         let state = self.state.clone();
         let agents = self.agents.clone();
-        let agent_resource_budgets = self.agent_resource_budgets.clone();
-        let fallback_resource_budget = self.fallback_resource_budget.clone();
+        let resource_budget = self.resource_budget.clone();
         let budget_enforcer = self.budget_enforcer.clone();
         let render_wake = self.render_wake.clone();
         let degradation_notices = self.degradation_notices.clone();
@@ -279,12 +278,12 @@ impl HudSession for HudSessionImpl {
                 }
             };
 
-            // Process handshake
+            // Process handshake against the agents paired as of now.
+            let agents = agents.load_full();
             let handshake_ctx = HandshakeCtx {
                 state: &state,
                 agents: &agents,
-                agent_resource_budgets: &agent_resource_budgets,
-                fallback_resource_budget: &fallback_resource_budget,
+                resource_budget: &resource_budget,
                 budget_enforcer: budget_enforcer.as_ref(),
                 peer_ip,
             };

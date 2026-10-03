@@ -6,7 +6,7 @@
 //!   SIGHUP and `RuntimeService.ReloadConfig` gRPC trigger a live reload.
 //!   No section is hot-reloadable today; a reload re-validates the whole
 //!   config and warns about frozen sections that changed.
-//!   Frozen fields (require restart): `[runtime]`, `[[tabs]]`, `[agents]`.
+//!   Frozen fields (require restart): `[runtime]`, `[[tabs]]`.
 //!   On reload: entire config re-validated; validation errors returned without
 //!   applying new config.
 //!
@@ -21,7 +21,6 @@
 //! |---------------------------------|-----------------|
 //! | `[runtime]`                     | Frozen (restart required) |
 //! | `[[tabs]]`                      | Frozen (restart required) |
-//! | `[agents]`                      | Frozen (restart required) |
 //! | `[design_tokens]`               | Frozen (restart required) |
 //! | `[widget_runtime_assets]`       | Frozen (restart required) |
 //!
@@ -56,7 +55,7 @@ pub enum FieldClassification {
 
 /// Returns the reload classification for a top-level configuration section.
 ///
-/// `section_path` is the dotted section name (e.g., `"runtime"`, `"agents"`).
+/// `section_path` is the dotted section name (e.g., `"runtime"`, `"tabs"`).
 /// Every section is frozen at startup today.
 pub fn section_classification(_section_path: &str) -> FieldClassification {
     FieldClassification::Frozen
@@ -68,7 +67,6 @@ pub fn section_classification(_section_path: &str) -> FieldClassification {
 pub const FROZEN_SECTIONS: &[&str] = &[
     "runtime",
     "tabs",
-    "agents",
     "display_profile",
     "includes",
     "design_tokens",
@@ -95,7 +93,7 @@ pub fn check_frozen_section_changes(
 ) -> bool {
     // Compare serialized representations of the frozen sections.
     // We use serde_json::Value for order-independent structural comparison so
-    // that HashMap fields (design_tokens, agents)
+    // that HashMap fields (design_tokens)
     // do not produce false-positive warnings due to non-deterministic map
     // iteration order in Rust's HashMap.
     let mut any_changed = false;
@@ -121,7 +119,6 @@ pub fn check_frozen_section_changes(
     check_frozen_field!(display_profile, "display_profile");
     check_frozen_field!(design_tokens, "design_tokens");
     check_frozen_field!(widget_runtime_assets, "widget_runtime_assets");
-    check_frozen_field!(agents, "agents");
 
     any_changed
 }
@@ -281,10 +278,6 @@ name = "Main"
         );
         assert_eq!(section_classification("tabs"), FieldClassification::Frozen);
         assert_eq!(
-            section_classification("agents.registered"),
-            FieldClassification::Frozen
-        );
-        assert_eq!(
             section_classification("display_profile"),
             FieldClassification::Frozen
         );
@@ -314,9 +307,6 @@ profile = "full-display"
 
 [[tabs]]
 name = "Main"
-
-[agents.claude]
-allow = ["*"]
 "#;
         let result = reload_config(toml);
         assert!(

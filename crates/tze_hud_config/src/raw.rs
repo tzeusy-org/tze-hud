@@ -158,27 +158,6 @@ pub struct RawZoneType {
     pub layer: Option<String>,
 }
 
-// ─── [agents] ────────────────────────────────────────────────────────────────
-
-/// `[agents.<id>]` tables — one per trusted agent, keyed by agent id.
-pub type RawAgents = HashMap<String, RawAgent>;
-
-/// One trusted agent: identity, allow list, and optional budget overrides.
-#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct RawAgent {
-    /// Environment variable holding this agent's PSK. The PSK identifies the
-    /// agent; it never appears in the config file.
-    pub psk_env: Option<String>,
-    /// Surfaces the agent may use: `zone:<name|*>`, `widget:<name|*>`,
-    /// `portal`, `tiles`, or `*`.
-    #[serde(default)]
-    pub allow: Vec<String>,
-    pub max_tiles: Option<u32>,
-    pub max_texture_mb: Option<u32>,
-    pub max_update_hz: Option<u32>,
-}
-
 // ─── [widget_bundles] ────────────────────────────────────────────────────────
 
 /// `[widget_bundles]` table — optional.
@@ -303,7 +282,9 @@ pub struct RawConfig {
     pub tabs: Vec<RawTab>,
 
     pub zones: Option<RawZones>,
-    pub agents: Option<RawAgents>,
+    /// `[agents]` is rejected: agents live in `agents.toml`. Accepts any
+    /// value so presence can be reported with a hint.
+    pub agents: Option<AnyValue>,
     /// Optional widget bundle directories to scan at startup.
     pub widget_bundles: Option<RawWidgetBundles>,
     /// Optional runtime widget asset store configuration.

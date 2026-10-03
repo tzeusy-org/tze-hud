@@ -95,7 +95,7 @@ async fn next_server_msg(
 }
 
 /// Agents whose `allow` list is deliberately narrow, for the denial tests.
-/// Every other agent id falls back to unrestricted (no `[agents]` configured).
+/// Every other agent id the dev PSK claims is unrestricted.
 fn restricted_test_agents() -> HashMap<String, Vec<String>> {
     let agents: [(&str, &[&str]); 5] = [
         ("no-input-agent", &["create_tiles", "read_scene_topology"]),
@@ -2380,7 +2380,7 @@ async fn test_fifo_preserved_when_mutation_arrives_during_drain_window() {
 
     let state: Arc<Mutex<SharedState>> = Arc::new(Mutex::new(SharedState {
         scene: Arc::new(Mutex::new(SceneGraph::new(800.0, 600.0))),
-        sessions: crate::session::SessionRegistry::new("test-key"),
+        sessions: crate::session::SessionRegistry::new(),
         resource_store: ResourceStore::new(ResourceStoreConfig::default()),
         widget_asset_store: crate::session::WidgetAssetStore::default(),
         runtime_widget_store: None,
@@ -2517,7 +2517,7 @@ async fn test_freeze_retransmit_deduped_applied_exactly_once() {
     // Shared state: scene is frozen.
     let state: Arc<Mutex<SharedState>> = Arc::new(Mutex::new(SharedState {
         scene: Arc::new(Mutex::new(SceneGraph::new(800.0, 600.0))),
-        sessions: crate::session::SessionRegistry::new("test-key"),
+        sessions: crate::session::SessionRegistry::new(),
         resource_store: ResourceStore::new(ResourceStoreConfig::default()),
         widget_asset_store: crate::session::WidgetAssetStore::default(),
         runtime_widget_store: None,
@@ -3225,13 +3225,11 @@ async fn test_handle_session_init_local_socket_non_loopback_auth_failed() {
     let non_loopback_ip: std::net::IpAddr = "10.0.0.5".parse().unwrap();
 
     let agents = tze_hud_scene::config::AgentDirectory::unrestricted("test-key");
-    let budgets = HashMap::new();
-    let fallback_budget = ResourceBudget::default();
+    let budget = ResourceBudget::default();
     let ctx = HandshakeCtx {
         state: &state,
         agents: &agents,
-        agent_resource_budgets: &budgets,
-        fallback_resource_budget: &fallback_budget,
+        resource_budget: &budget,
         budget_enforcer: None,
         peer_ip: Some(non_loopback_ip),
     };
@@ -3309,13 +3307,11 @@ async fn test_handle_session_resume_local_socket_non_loopback_auth_failed() {
     let non_loopback_ip: std::net::IpAddr = "10.0.0.5".parse().unwrap();
 
     let agents = tze_hud_scene::config::AgentDirectory::unrestricted("test-key");
-    let budgets = HashMap::new();
-    let fallback_budget = ResourceBudget::default();
+    let budget = ResourceBudget::default();
     let ctx = HandshakeCtx {
         state: &state,
         agents: &agents,
-        agent_resource_budgets: &budgets,
-        fallback_resource_budget: &fallback_budget,
+        resource_budget: &budget,
         budget_enforcer: None,
         peer_ip: Some(non_loopback_ip),
     };

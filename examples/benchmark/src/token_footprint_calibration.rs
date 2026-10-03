@@ -86,7 +86,7 @@ mod calibration {
             height: 1080,
             grpc_port: 0,
             bind_all_interfaces: false,
-            psk: PSK.to_string(),
+            agents: tze_hud_scene::config::AgentDirectory::unrestricted(PSK),
             config_toml: Some(String::new()),
         }
     }
@@ -333,7 +333,7 @@ mod calibration {
         let shutdown = ShutdownToken::new();
         let config = McpServerConfig {
             bind_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
-            agents: tze_hud_scene::config::AgentDirectory::unrestricted(PSK),
+            agents: tze_hud_scene::config::AgentDirectory::unrestricted(PSK).shared(),
         };
         let (server_task, address) =
             start_mcp_http_server(scene, config, shutdown.clone(), Some(portal_tx.clone())).await?;

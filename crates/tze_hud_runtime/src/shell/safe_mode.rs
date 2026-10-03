@@ -703,7 +703,7 @@ mod tests {
         use std::sync::atomic::AtomicBool;
         Arc::new(Mutex::new(SharedState {
             scene: Arc::new(Mutex::new(SceneGraph::new(1920.0, 1080.0))),
-            sessions: SessionRegistry::new("test-key"),
+            sessions: SessionRegistry::new(),
             resource_store: tze_hud_resource::ResourceStore::new(
                 tze_hud_resource::ResourceStoreConfig::default(),
             ),
@@ -1279,10 +1279,7 @@ mod tests {
         let (tx, mut rx) = mpsc::channel(8);
         {
             let mut st = shared.lock().await;
-            let session = st
-                .sessions
-                .authenticate("agent.notify_test", "test-key", &[])
-                .expect("auth should succeed");
+            let session = st.sessions.register("agent.notify_test", &[]);
             let registered = st
                 .sessions
                 .register_server_message_tx(&session.session_id, tx);

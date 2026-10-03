@@ -85,6 +85,8 @@ bytemuck = { version = "1", features = ["derive"] }
 blake3 = "1"
 getrandom = "0.3"
 arc-swap = "1"
+# PSK digests in the agents store (only a hash is stored).
+sha2 = "0.10"
 # Image decode for resource validation and integration test helpers.
 # default-features = false: crates opt in to the specific codec features they need.
 image = { version = "0.25", default-features = false }

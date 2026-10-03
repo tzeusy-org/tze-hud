@@ -825,7 +825,7 @@ async fn tmux_pilot_drives_portal_over_existing_primary_session_stream()
         height: DISPLAY_H as u32,
         grpc_port,
         bind_all_interfaces: false,
-        psk: TEST_PSK.to_string(),
+        agents: tze_hud_scene::config::AgentDirectory::unrestricted(TEST_PSK),
         config_toml: None,
     };
     let runtime = HeadlessRuntime::new(config).await?;
@@ -920,7 +920,7 @@ async fn non_tmux_adapter_drives_portal_over_existing_primary_session_stream()
         height: DISPLAY_H as u32,
         grpc_port,
         bind_all_interfaces: false,
-        psk: TEST_PSK.to_string(),
+        agents: tze_hud_scene::config::AgentDirectory::unrestricted(TEST_PSK),
         config_toml: None,
     };
     let runtime = HeadlessRuntime::new(config).await?;

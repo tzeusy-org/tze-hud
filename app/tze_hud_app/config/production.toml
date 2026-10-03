@@ -111,12 +111,5 @@ width  = 252
 height = 96
 
 # ── Agents ────────────────────────────────────────────────────────────────────
-# Identity comes from the PSK; `allow` is the whole permission model.
-# Entries: "zone:<name|*>", "widget:<name|*>", "portal", "tiles", "*".
-# Agents without a table here get nothing under this config.
-
-# The operator's own LLM sessions (MCP and hud-projection). Reads the runtime
-# PSK, so a caller presenting TZE_HUD_PSK is this agent.
-[agents.claude]
-psk_env = "TZE_HUD_PSK"
-allow = ["*"]
+# Agents are not configured here. Pairing adds each agent's PSK SHA-256 and
+# `allow` list to agents.toml next to this file.

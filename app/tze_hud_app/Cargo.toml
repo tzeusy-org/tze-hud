@@ -12,12 +12,12 @@ path = "src/main.rs"
 [dependencies]
 tze_hud_runtime = { path = "../../crates/tze_hud_runtime", version = "0.1.0" }
 tze_hud_config = { path = "../../crates/tze_hud_config", version = "0.1.0" }
+tze_hud_scene = { path = "../../crates/tze_hud_scene", version = "0.1.0" }
 tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 
 [dev-dependencies]
-tze_hud_scene = { path = "../../crates/tze_hud_scene", version = "0.1.0" }
 toml = { workspace = true }
 
 # Build scripts compile for the host even when Cargo targets Windows, so this

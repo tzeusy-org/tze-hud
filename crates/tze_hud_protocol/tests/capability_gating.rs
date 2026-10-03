@@ -14,7 +14,7 @@ use tze_hud_protocol::proto::session::auth_credential::Credential;
 use tze_hud_protocol::proto::session::{
     AuthCredential, LocalSocketCredential, PreSharedKeyCredential,
 };
-use tze_hud_scene::config::AgentDirectory;
+use tze_hud_scene::config::{AgentDirectory, hash_psk};
 
 fn loopback() -> Option<IpAddr> {
     Some("127.0.0.1".parse().unwrap())
@@ -23,14 +23,10 @@ fn loopback() -> Option<IpAddr> {
 // ─── Identity ────────────────────────────────────────────────────────────────
 
 fn directory() -> AgentDirectory {
-    let mut dir = AgentDirectory {
-        runtime_psk: "runtime".to_string(),
-        ..Default::default()
-    };
-    dir.agent_psks
-        .insert("claude".to_string(), "claude-psk".to_string());
-    dir.permissions.insert(
-        "claude".to_string(),
+    let mut dir = AgentDirectory::default();
+    dir.insert(
+        "claude",
+        hash_psk("claude-psk"),
         vec!["publish_zone:subtitle".to_string()],
     );
     dir
@@ -44,7 +40,7 @@ fn psk(key: &str) -> AuthCredential {
     }
 }
 
-/// An agent's own PSK identifies it and yields its allow-derived permissions.
+/// A paired agent's PSK identifies it and yields its allow-derived permissions.
 #[test]
 fn own_psk_identifies_agent_with_allow_permissions() {
     let id = identify_session(&directory(), Some(&psk("claude-psk")), "", "claude", None).unwrap();
@@ -62,27 +58,25 @@ fn own_psk_cannot_claim_other_agent() {
     assert!(!err.hint.is_empty());
 }
 
-/// An agent with its own PSK cannot be claimed with the runtime PSK.
+/// An unpaired PSK identifies no one, whatever id it claims.
 #[test]
-fn runtime_psk_cannot_claim_agent_with_own_psk() {
-    assert!(identify_session(&directory(), Some(&psk("runtime")), "", "claude", None).is_err());
+fn unpaired_psk_is_rejected() {
+    for claim in ["claude", "stranger", ""] {
+        assert!(identify_session(&directory(), Some(&psk("runtime")), "", claim, None).is_err());
+    }
 }
 
-/// An agent without a table gets the fallback permissions (none here).
+/// Loopback LocalSocketCredential is treated like the dev PSK: it claims an
+/// id under a dev directory and identifies no one in production.
 #[test]
-fn unconfigured_agent_gets_fallback_permissions() {
-    let id = identify_session(&directory(), Some(&psk("runtime")), "", "stranger", None).unwrap();
-    assert!(id.permissions.is_empty());
-}
-
-/// Loopback LocalSocketCredential is treated like the runtime PSK.
-#[test]
-fn local_socket_from_loopback_resolves_claimed_agent() {
+fn local_socket_from_loopback_resolves_only_under_dev_psk() {
     let cred = AuthCredential {
         credential: Some(Credential::LocalSocket(LocalSocketCredential::default())),
     };
-    let id = identify_session(&directory(), Some(&cred), "", "stranger", loopback()).unwrap();
+    let dev = AgentDirectory::unrestricted("dev");
+    let id = identify_session(&dev, Some(&cred), "", "stranger", loopback()).unwrap();
     assert_eq!(id.agent_id, "stranger");
+    assert!(identify_session(&directory(), Some(&cred), "", "stranger", loopback()).is_err());
 }
 
 // ─── Authentication ───────────────────────────────────────────────────────────

@@ -66,42 +66,5 @@ y = 40
 width = 252
 height = 96
 
-# Canonical Rust publish-load harness identity.
-[agents.widget-publish-load-harness]
-allow = ["widget:main-progress"]
-
-# Three-agent live soak identities. These retain the manual raw-tile/demo grants
-# used by existing Windows user-tests and add only the publish scopes needed by
-# widget and MCP zone performance runs.
-[agents.agent-alpha]
-allow = [
-    "tiles",
-    "widget:main-progress",
-    "widget:main-gauge",
-    "widget:main-status",
-    "zone:subtitle",
-    "zone:notification-area",
-    "zone:status-bar",
-]
-
-[agents.agent-beta]
-allow = [
-    "tiles",
-    "widget:main-progress",
-    "widget:main-gauge",
-    "widget:main-status",
-    "zone:subtitle",
-    "zone:notification-area",
-    "zone:status-bar",
-]
-
-[agents.agent-gamma]
-allow = [
-    "tiles",
-    "widget:main-progress",
-    "widget:main-gauge",
-    "widget:main-status",
-    "zone:subtitle",
-    "zone:notification-area",
-    "zone:status-bar",
-]
+# Agents (the publish-load harness, the three-agent soak identities) are not
+# configured here: pair them into agents.toml next to this file.

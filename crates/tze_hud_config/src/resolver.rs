@@ -72,7 +72,7 @@ pub fn resolve_config_path(cli_path: Option<&str>) -> Result<String, Vec<String>
 ///
 /// - Linux/macOS: `$XDG_CONFIG_HOME` if set, else `$HOME/.config`
 /// - Windows: `%APPDATA%`
-fn xdg_config_home() -> Option<PathBuf> {
+pub(crate) fn xdg_config_home() -> Option<PathBuf> {
     #[cfg(target_os = "windows")]
     {
         std::env::var("APPDATA").ok().map(PathBuf::from)

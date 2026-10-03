@@ -176,15 +176,16 @@ Schema version and compatibility policy:
 Canonical operator config path:
 - `app/tze_hud_app/config/production.toml` (deploy this as `tze_hud.toml` beside the binary)
 
-Window mode, endpoint ports, and PSK are controlled via CLI flags / environment
-variables (`--window-mode`, `--grpc-port`, `--mcp-port`, `--psk`) rather than
-legacy config tables. Legacy `[display]`/`[network]` tables are not part of the
+Window mode and endpoint ports are controlled via CLI flags / environment
+variables (`--window-mode`, `--grpc-port`, `--mcp-port`) rather than
+legacy config tables. Agents are paired in `agents.toml` beside the config,
+which stores only the SHA-256 of each agent's PSK (`docs/api.md`). Legacy `[display]`/`[network]` tables are not part of the
 current loader schema.
 
 Canonical startup is fail-closed:
 - missing or unreadable config is a hard startup error
 - invalid loader-schema config is a hard startup error
-- trivial default PSK (`tze-hud-key`) is rejected in strict startup mode
+- an unreadable or invalid `agents.toml` is a hard startup error
 
 Development-only escape hatch:
 - `TZE_HUD_DEV_ALLOW_INSECURE_STARTUP=1` is honored only in debug builds

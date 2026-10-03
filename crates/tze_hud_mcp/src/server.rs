@@ -7,9 +7,11 @@
 //! ## Authentication
 //!
 //! Every request carries a PSK as the HTTP `Authorization: Bearer` value. The
-//! PSK resolves to an agent identity (`[agents.<id>]`): the agent id is the
-//! namespace, and its `allow` list is the whole permission model. With no PSK
-//! configured every request is rejected. The PSK is never echoed.
+//! PSK resolves to a paired agent (`[agents.<id>]` in `agents.toml`): the
+//! agent id is the namespace, and its `allow` list is the whole permission
+//! model. The directory is shared live with gRPC and read per request, so a
+//! newly paired agent works on its next call. With no agents every request is
+//! rejected. The PSK is never echoed.
 //!
 //! ## Results
 //!
@@ -21,7 +23,7 @@
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{debug, warn};
-use tze_hud_scene::config::AgentDirectory;
+use tze_hud_scene::config::{AgentDirectory, SharedAgents};
 use tze_hud_scene::graph::SceneGraph;
 use tze_hud_scene::render_wake::RenderWakeNotifier;
 
@@ -61,34 +63,28 @@ impl CallerContext {
 #[derive(Clone, Debug, Default)]
 pub struct McpConfig {
     /// A caller's PSK resolves to an agent id (its namespace) and its
-    /// allow-list permissions. With no PSKs, every call is rejected.
-    pub agents: AgentDirectory,
+    /// allow-list permissions. With no agents, every call is rejected.
+    pub agents: SharedAgents,
 }
 
 impl McpConfig {
-    /// Accept the given runtime PSK with unrestricted permissions (dev/test).
+    /// Accept the given dev PSK with unrestricted permissions (dev/test).
     pub fn with_psk(key: impl Into<String>) -> Self {
-        Self {
-            agents: AgentDirectory::unrestricted(key),
-        }
+        Self::with_agents(AgentDirectory::unrestricted(key).shared())
     }
 
-    /// Use a configured agent directory.
-    pub fn with_agents(agents: AgentDirectory) -> Self {
+    /// Use the live agent directory shared with the runtime.
+    pub fn with_agents(agents: SharedAgents) -> Self {
         Self { agents }
     }
 
-    /// Load the runtime PSK from `MCP_TEST_PSK` (test harnesses). Unset means
+    /// Load a dev PSK from `MCP_TEST_PSK` (test harnesses). Unset means
     /// every call is rejected.
     pub fn from_env() -> Self {
         match std::env::var("MCP_TEST_PSK") {
             Ok(k) => Self::with_psk(k),
             Err(_) => Self::default(),
         }
-    }
-
-    fn has_credentials(&self) -> bool {
-        !self.agents.runtime_psk.is_empty() || !self.agents.agent_psks.is_empty()
     }
 }
 
@@ -206,13 +202,10 @@ impl McpServer {
             return respond(McpResponse::err(id, JsonRpcError::invalid_request()));
         }
 
-        let identity = if self.config.has_credentials() {
-            ctx.bearer_token
-                .as_deref()
-                .and_then(|key| self.config.agents.resolve(key, "").ok())
-        } else {
-            None
-        };
+        let identity = ctx
+            .bearer_token
+            .as_deref()
+            .and_then(|key| self.config.agents.load().resolve(key, "").ok());
         let Some(identity) = identity else {
             warn!(method = %request.method, "MCP: authentication failed");
             return respond(McpResponse::err(id, JsonRpcError::unauthenticated()));

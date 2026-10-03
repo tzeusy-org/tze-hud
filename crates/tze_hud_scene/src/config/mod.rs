@@ -6,7 +6,10 @@
 //! and supporting types — no implementation is provided here.
 
 pub mod agents;
-pub use agents::{AgentDirectory, AgentIdentity, AuthRejection, DEFAULT_MCP_AGENT_ID};
+pub use agents::{
+    AgentDirectory, AgentIdentity, AuthRejection, DEFAULT_MCP_AGENT_ID, PskDigest, SharedAgents,
+    hash_psk,
+};
 
 // ─── Error Codes ─────────────────────────────────────────────────────────────
 
@@ -30,7 +33,10 @@ pub enum ConfigErrorCode {
     UnknownZoneType,
     UnknownAllowEntry,
     InvalidEventName,
-    AgentBudgetExceedsProfile,
+    /// `[agents]` in the config file; agents live in `agents.toml` (pairing).
+    AgentsInConfigFile,
+    /// An `agents.toml` `psk_sha256` is not 64 hex characters.
+    InvalidPskHash,
     InvalidReservedFraction,
     InvalidFpsRange,
     ConfigIncludesNotSupported,
@@ -107,9 +113,6 @@ pub struct DisplayProfile {
     pub max_font_resident_mb: u32,
     pub max_agents: u32,
     /// Maximum agent update rate in Hz (per-agent state-stream ceiling).
-    ///
-    /// Per-agent `max_update_hz` MUST NOT exceed this value.
-    /// Violations produce `CONFIG_AGENT_BUDGET_EXCEEDS_PROFILE`.
     pub max_agent_update_hz: u32,
     pub target_fps: u32,
     pub min_fps: u32,
@@ -174,14 +177,6 @@ impl DisplayProfile {
 
 // ─── Resolved Config ──────────────────────────────────────────────────────────
 
-/// Validated optional per-agent budget overrides retained at config freeze.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct RegisteredAgentBudgetOverrides {
-    pub max_tiles: Option<u32>,
-    pub max_texture_mb: Option<u32>,
-    pub max_update_hz: Option<u32>,
-}
-
 /// A fully validated, frozen configuration.
 ///
 /// Returned by `ConfigLoader::freeze()`.
@@ -189,12 +184,6 @@ pub struct RegisteredAgentBudgetOverrides {
 pub struct ResolvedConfig {
     pub profile: DisplayProfile,
     pub tab_names: Vec<String>,
-    /// Internal permissions per configured agent, expanded from its `allow` list.
-    pub agent_capabilities: std::collections::HashMap<String, Vec<String>>,
-    /// Per-agent PSK environment variable names (`[agents.<id>] psk_env`).
-    pub agent_psk_env: std::collections::HashMap<String, String>,
-    /// Per-agent budget overrides keyed by registered agent name.
-    pub agent_budget_overrides: std::collections::HashMap<String, RegisteredAgentBudgetOverrides>,
     /// Sourced TOML file path.
     pub source_path: Option<String>,
 }
@@ -208,7 +197,7 @@ pub struct ResolvedConfig {
 /// - Search configuration file chain (CLI → env → cwd → XDG) in order.
 /// - Enforce built-in profile budget values exactly.
 /// - Prevent budget escalation in custom profiles.
-/// - Validate `[agents.<id>] allow` entries.
+/// - Reject `[agents]` (agents live in `agents.toml`).
 /// - Collect ALL validation errors before reporting.
 /// - Reject `includes` fields (post-v1 reserved).
 pub trait ConfigLoader {

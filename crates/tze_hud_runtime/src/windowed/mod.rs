@@ -289,8 +289,6 @@ struct WindowedRuntimeState {
     runtime_context: SharedRuntimeContext,
     /// Keeps the durable runtime widget asset store alive for runtime lifetime.
     _runtime_widget_store: Option<RuntimeWidgetStore>,
-    /// Whether unknown agents receive unrestricted capabilities.
-    fallback_unrestricted: bool,
     /// Shared scene + session state.
     shared_state: Arc<Mutex<SharedState>>,
     /// Lock-free mirror of `SharedState.safe_mode_active` for the winit event thread.
@@ -2383,8 +2381,7 @@ impl WindowedRuntime {
     /// Returns an error if the winit event loop or window creation fails.
     pub fn run(self) -> Result<(), Box<dyn std::error::Error>> {
         let cfg = self.config;
-        let (runtime_context, fallback_unrestricted): (SharedRuntimeContext, bool) =
-            build_runtime_context(&cfg);
+        let runtime_context: SharedRuntimeContext = build_runtime_context(&cfg);
 
         let event_loop = EventLoop::<RuntimeWakeEvent>::with_user_event().build()?;
         event_loop.set_control_flow(ControlFlow::Wait);
@@ -2487,7 +2484,7 @@ impl WindowedRuntime {
                 element_store_bootstrap.path,
             )
         };
-        let sessions = tze_hud_protocol::session::SessionRegistry::new(&cfg.psk);
+        let sessions = tze_hud_protocol::session::SessionRegistry::new();
         let (input_capture_tx, input_capture_rx) = tokio::sync::mpsc::unbounded_channel();
         let safe_mode_atomic = Arc::new(std::sync::atomic::AtomicBool::new(false));
         // Lock-free mirror of `scene.active_tab` for the winit event thread's
@@ -2533,17 +2530,6 @@ impl WindowedRuntime {
         let pending_input_latency = Arc::new(StdMutex::new(VecDeque::new()));
         let shutdown = ShutdownToken::new();
 
-        // ── RuntimeContext ─────────────────────────────────────────────────────
-        // Build the RuntimeContext from the config file when one is provided, or
-        // fall back to headless_default() when no config file is present.
-        //
-        // Config-driven path: parse the TOML, validate, freeze into a ResolvedConfig,
-        // and extract the HotReloadableConfig for the initial hot sections.
-        // The fallback_policy (Guest vs Unrestricted) is determined by whether
-        // a config file is present:
-        //   - Config present → Guest (registered agents only, all others denied).
-        //   - No config → Unrestricted (dev-friendly; any PSK-authenticated agent
-        //     gets all capabilities without a registration entry).
         // ── Network runtime + gRPC + MCP HTTP servers ──────────────────────────
         // Spawn the Tokio multi-thread runtime for all network tasks (gRPC, MCP).
         // The runtime is created before the winit event loop so that network
@@ -2570,10 +2556,9 @@ impl WindowedRuntime {
             grpc_bound_addr,
         ) = start_network_services_with_render_wake(
             cfg.grpc_port,
-            &cfg.psk,
+            Arc::clone(&cfg.agents),
             shared_state.clone(),
             Arc::clone(&runtime_context),
-            fallback_unrestricted,
             bind_all,
             render_wake.clone(),
         )?;
@@ -2643,7 +2628,7 @@ impl WindowedRuntime {
                     bind_addr: format!("{mcp_bind_host}:{}", cfg.mcp_port)
                         .parse()
                         .expect("valid MCP bind addr"),
-                    agents: runtime_context.agent_directory(&cfg.psk),
+                    agents: Arc::clone(&cfg.agents),
                 };
                 let mcp_shutdown = shutdown.clone();
                 match rt.rt.block_on(start_mcp_http_server_with_render_wake(
@@ -2760,7 +2745,6 @@ impl WindowedRuntime {
             network_handles,
             runtime_context,
             _runtime_widget_store: runtime_widget_store,
-            fallback_unrestricted,
             shared_state,
             safe_mode_atomic,
             active_tab_mirror,

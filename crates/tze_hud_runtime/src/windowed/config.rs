@@ -85,8 +85,9 @@ pub struct WindowedConfig {
     ///
     /// Default: `false`.
     pub bind_all_interfaces: bool,
-    /// Pre-shared key for session authentication (gRPC and MCP).
-    pub psk: String,
+    /// Paired agents (loaded from `agents.toml`), shared live by gRPC and
+    /// MCP. Empty means no agent can authenticate until one is paired.
+    pub agents: tze_hud_scene::config::SharedAgents,
     /// Optional operator-authority credential for cooperative projection cleanup.
     ///
     /// When unset, owner cleanup remains available through owner tokens, while
@@ -96,10 +97,9 @@ pub struct WindowedConfig {
     pub target_fps: u32,
     /// Raw TOML content of the configuration file, if one was loaded.
     ///
-    /// When `Some`, the windowed runtime parses this at startup and applies the
-    /// each `[agents.<id>]` allow list and PSK to the `RuntimeContext`.
-    /// When `None`, the runtime falls back to `RuntimeContext::headless_default()`
-    /// with every agent unrestricted (dev).
+    /// When `Some`, the windowed runtime parses this at startup and builds the
+    /// `RuntimeContext` from it. When `None`, the runtime falls back to
+    /// `RuntimeContext::headless_default()` (dev).
     ///
     /// ## Source
     ///
@@ -143,7 +143,7 @@ impl Default for WindowedConfig {
             overlay_auto_size: true,
             grpc_port: 50051,
             mcp_port: 9090,
-            psk: "tze-hud-key".to_string(),
+            agents: Default::default(),
             projection_operator_authority: None,
             target_fps: 60,
             config_toml: None,
@@ -183,7 +183,10 @@ mod tests {
         assert_eq!(cfg.target_fps, 60);
         assert_eq!(cfg.grpc_port, 50051);
         assert_eq!(cfg.mcp_port, 9090);
-        assert!(!cfg.psk.is_empty());
+        assert!(
+            cfg.agents.load().is_empty(),
+            "no agent is paired by default"
+        );
         assert!(cfg.benchmark.is_none());
         assert!(
             cfg.projection_operator_authority.is_none(),

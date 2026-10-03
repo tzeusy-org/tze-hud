@@ -1,16 +1,29 @@
 //! Agent identity: which agent a PSK belongs to, and what it may do.
 //!
 //! Shared by the MCP and gRPC boundaries so both resolve identity the same
-//! way. Pure and I/O-free: PSK values are resolved from the environment by the
-//! runtime before this is built.
+//! way. Only a SHA-256 digest of each agent's PSK is held; the plaintext PSK
+//! never reaches the runtime's storage. The directory is loaded from
+//! `agents.toml` by `tze_hud_config::agents_file` and shared live as
+//! [`SharedAgents`], so swapping in a new directory takes effect on the next
+//! request or handshake without a restart.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
+use arc_swap::ArcSwap;
+use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 
-/// Namespace used for MCP callers presenting the runtime PSK when no
-/// configured agent owns that PSK.
+/// Agent id for a dev PSK presented with no claimed id (MCP).
 pub const DEFAULT_MCP_AGENT_ID: &str = "mcp";
+
+/// SHA-256 digest of a PSK, as stored in `agents.toml`.
+pub type PskDigest = [u8; 32];
+
+/// Hash a PSK for storage and comparison.
+pub fn hash_psk(psk: &str) -> PskDigest {
+    Sha256::digest(psk.as_bytes()).into()
+}
 
 /// A resolved caller: its agent id (which is also its namespace) and its
 /// internal permissions (expanded from the `allow` list).
@@ -44,49 +57,85 @@ pub struct AuthRejection {
     pub hint: String,
 }
 
-/// The runtime's trusted agents.
-#[derive(Clone, Debug, Default)]
-pub struct AgentDirectory {
-    /// The runtime PSK (`--psk` / `TZE_HUD_PSK`). Empty means "none".
-    pub runtime_psk: String,
-    /// Agent id → its own PSK (from `psk_env`).
-    pub agent_psks: HashMap<String, String>,
-    /// Agent id → internal permissions expanded from `allow`.
-    pub permissions: HashMap<String, Vec<String>>,
-    /// Permissions for an agent with no `[agents.<id>]` table. `["*"]` when no
-    /// agents are configured (dev/test); empty in production.
-    pub fallback_permissions: Vec<String>,
+#[derive(Clone)]
+struct PairedAgent {
+    psk_sha256: PskDigest,
+    permissions: Vec<String>,
 }
 
-fn ct_eq(a: &str, b: &str) -> bool {
-    a.as_bytes().ct_eq(b.as_bytes()).into()
+/// The runtime's trusted agents, keyed by agent id.
+#[derive(Clone, Default)]
+pub struct AgentDirectory {
+    agents: HashMap<String, PairedAgent>,
+    /// Plaintext dev/test PSK that may claim any agent id. Only
+    /// [`AgentDirectory::unrestricted`] sets it.
+    dev_psk: Option<String>,
+}
+
+/// The live agent directory shared by MCP and gRPC. `store` a new directory
+/// to add or remove agents without a restart.
+pub type SharedAgents = Arc<ArcSwap<AgentDirectory>>;
+
+impl std::fmt::Debug for AgentDirectory {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut ids: Vec<&String> = self.agents.keys().collect();
+        ids.sort();
+        f.debug_struct("AgentDirectory")
+            .field("agents", &ids)
+            .field("dev_psk", &self.dev_psk.as_ref().map(|_| "<redacted>"))
+            .finish()
+    }
 }
 
 impl AgentDirectory {
-    /// A directory with only a runtime PSK and unrestricted agents (dev/test).
-    pub fn unrestricted(runtime_psk: impl Into<String>) -> Self {
+    /// Dev/test directory: `dev_psk` identifies any claimed agent id (or
+    /// [`DEFAULT_MCP_AGENT_ID`] with none). A claimed id with an entry gets
+    /// that entry's permissions; any other id is unrestricted. An empty
+    /// `dev_psk` adds nothing.
+    pub fn unrestricted(dev_psk: impl Into<String>) -> Self {
+        let dev_psk = dev_psk.into();
         Self {
-            runtime_psk: runtime_psk.into(),
-            fallback_permissions: vec!["*".to_string()],
-            ..Default::default()
+            agents: HashMap::new(),
+            dev_psk: (!dev_psk.is_empty()).then_some(dev_psk),
         }
     }
 
-    fn permissions_for(&self, agent_id: &str) -> Vec<String> {
-        self.permissions
-            .get(agent_id)
-            .cloned()
-            .unwrap_or_else(|| self.fallback_permissions.clone())
+    /// Add or replace an agent by the SHA-256 digest of its PSK.
+    pub fn insert(
+        &mut self,
+        agent_id: impl Into<String>,
+        psk_sha256: PskDigest,
+        permissions: Vec<String>,
+    ) {
+        self.agents.insert(
+            agent_id.into(),
+            PairedAgent {
+                psk_sha256,
+                permissions,
+            },
+        );
+    }
+
+    /// True when `agent_id` has an entry.
+    pub fn contains(&self, agent_id: &str) -> bool {
+        self.agents.contains_key(agent_id)
+    }
+
+    /// True when no credential can authenticate.
+    pub fn is_empty(&self) -> bool {
+        self.agents.is_empty() && self.dev_psk.is_none()
+    }
+
+    /// Wrap the directory for live sharing.
+    pub fn shared(self) -> SharedAgents {
+        Arc::new(ArcSwap::from_pointee(self))
     }
 
     /// Resolve a credential to an agent.
     ///
-    /// - A credential equal to an agent's own PSK identifies that agent;
-    ///   `claimed_id`, if non-empty, must match it.
-    /// - The runtime PSK identifies `claimed_id` (gRPC), or, with no claimed
-    ///   id (MCP), the configured agent whose own PSK is the runtime PSK, else
-    ///   [`DEFAULT_MCP_AGENT_ID`]. An agent with its own distinct PSK cannot be
-    ///   claimed with the runtime PSK.
+    /// The credential is hashed and compared in constant time against every
+    /// stored digest; a match identifies that agent, and `claimed_id`, if
+    /// non-empty, must name it. The dev PSK identifies `claimed_id` instead.
     pub fn resolve(
         &self,
         credential: &str,
@@ -95,52 +144,57 @@ impl AgentDirectory {
         if credential.is_empty() {
             return Err(reject("no PSK presented"));
         }
-        let is_runtime = !self.runtime_psk.is_empty() && ct_eq(credential, &self.runtime_psk);
-        if !is_runtime {
-            let owner = self
-                .agent_psks
-                .iter()
-                .find(|(_, psk)| ct_eq(credential, psk))
-                .map(|(id, _)| id.clone());
-            let Some(agent_id) = owner else {
-                return Err(reject("PSK does not match any agent"));
-            };
-            if !claimed_id.is_empty() && claimed_id != agent_id {
-                return Err(AuthRejection {
-                    code: "AUTH_FAILED",
-                    message: format!("PSK belongs to agent {agent_id:?}, not {claimed_id:?}"),
-                    hint: "present the PSK from this agent's own psk_env".into(),
-                });
-            }
-            let permissions = self.permissions_for(&agent_id);
-            return Ok(AgentIdentity {
-                agent_id,
-                permissions,
-            });
-        }
-        let agent_id = if claimed_id.is_empty() {
-            self.agent_psks
-                .iter()
-                .find(|(_, psk)| ct_eq(psk, &self.runtime_psk))
-                .map(|(id, _)| id.clone())
-                .unwrap_or_else(|| DEFAULT_MCP_AGENT_ID.to_string())
-        } else {
-            claimed_id.to_string()
-        };
-        if let Some(own) = self.agent_psks.get(&agent_id)
-            && !ct_eq(own, &self.runtime_psk)
+        if let Some(dev_psk) = &self.dev_psk
+            && bool::from(credential.as_bytes().ct_eq(dev_psk.as_bytes()))
         {
+            return Ok(self.dev_identity(claimed_id));
+        }
+        let digest = hash_psk(credential);
+        let mut owner = None;
+        for (id, agent) in &self.agents {
+            if bool::from(digest.ct_eq(&agent.psk_sha256)) {
+                owner = Some((id, agent));
+            }
+        }
+        let Some((agent_id, agent)) = owner else {
+            return Err(reject("PSK does not match any paired agent"));
+        };
+        if !claimed_id.is_empty() && claimed_id != agent_id {
             return Err(AuthRejection {
                 code: "AUTH_FAILED",
-                message: format!("agent {agent_id:?} has its own PSK"),
-                hint: "present the PSK from this agent's psk_env, not the runtime PSK".into(),
+                message: format!("PSK belongs to agent {agent_id:?}, not {claimed_id:?}"),
+                hint: "present this agent's own PSK".into(),
             });
         }
-        let permissions = self.permissions_for(&agent_id);
         Ok(AgentIdentity {
-            agent_id,
-            permissions,
+            agent_id: agent_id.clone(),
+            permissions: agent.permissions.clone(),
         })
+    }
+
+    /// Resolve a loopback local-socket caller: identified like the dev PSK,
+    /// and rejected when there is none (production).
+    pub fn resolve_local(&self, claimed_id: &str) -> Result<AgentIdentity, AuthRejection> {
+        match self.dev_psk {
+            Some(_) => Ok(self.dev_identity(claimed_id)),
+            None => Err(reject("local-socket credentials identify no paired agent")),
+        }
+    }
+
+    fn dev_identity(&self, claimed_id: &str) -> AgentIdentity {
+        let agent_id = if claimed_id.is_empty() {
+            DEFAULT_MCP_AGENT_ID
+        } else {
+            claimed_id
+        };
+        let permissions = self
+            .agents
+            .get(agent_id)
+            .map_or_else(|| vec!["*".to_string()], |a| a.permissions.clone());
+        AgentIdentity {
+            agent_id: agent_id.to_string(),
+            permissions,
+        }
     }
 }
 
@@ -148,8 +202,7 @@ fn reject(message: &str) -> AuthRejection {
     AuthRejection {
         code: "AUTH_FAILED",
         message: message.to_string(),
-        hint: "send the runtime PSK or the agent's own PSK as the bearer / auth_credential"
-            .to_string(),
+        hint: "send the agent's paired PSK as the bearer / auth_credential".to_string(),
     }
 }
 
@@ -158,51 +211,48 @@ mod tests {
     use super::*;
 
     fn dir() -> AgentDirectory {
-        AgentDirectory {
-            runtime_psk: "runtime".into(),
-            agent_psks: [
-                ("claude".to_string(), "runtime".to_string()),
-                ("bot".to_string(), "bot-key".to_string()),
-            ]
-            .into(),
-            permissions: [
-                ("claude".to_string(), vec!["*".to_string()]),
-                ("bot".to_string(), vec!["publish_zone:*".to_string()]),
-            ]
-            .into(),
-            fallback_permissions: vec![],
-        }
+        let mut dir = AgentDirectory::default();
+        dir.insert("claude", hash_psk("claude-key"), vec!["*".to_string()]);
+        dir.insert(
+            "bot",
+            hash_psk("bot-key"),
+            vec!["publish_zone:*".to_string()],
+        );
+        dir
     }
 
     #[test]
-    fn own_psk_identifies_agent() {
+    fn resolve_accepts_the_psk_whose_hash_is_stored_and_rejects_others() {
         let id = dir().resolve("bot-key", "").unwrap();
         assert_eq!(id.agent_id, "bot");
         assert!(id.allows("publish_zone:subtitle"));
         assert!(!id.allows("create_tiles"));
-    }
-
-    #[test]
-    fn runtime_psk_without_claim_resolves_to_agent_owning_it() {
-        assert_eq!(dir().resolve("runtime", "").unwrap().agent_id, "claude");
-    }
-
-    #[test]
-    fn runtime_psk_cannot_claim_agent_with_own_psk() {
         assert_eq!(
-            dir().resolve("runtime", "bot").unwrap_err().code,
-            "AUTH_FAILED"
+            dir().resolve("claude-key", "claude").unwrap().agent_id,
+            "claude"
         );
-        assert!(dir().resolve("bot-key", "claude").is_err());
+
+        for (psk, claim) in [("nope", ""), ("", ""), ("bot-key", "claude")] {
+            assert_eq!(dir().resolve(psk, claim).unwrap_err().code, "AUTH_FAILED");
+        }
+        // The stored value is the digest, never the PSK.
+        assert!(!format!("{:?}", dir()).contains("bot-key"));
     }
 
     #[test]
-    fn unknown_agent_gets_fallback_and_wrong_psk_fails() {
-        let id = dir().resolve("runtime", "stranger").unwrap();
-        assert!(id.permissions.is_empty());
-        assert!(dir().resolve("nope", "").is_err());
-        let open = AgentDirectory::unrestricted("k").resolve("k", "").unwrap();
+    fn dev_psk_claims_any_id_with_entry_permissions_or_unrestricted() {
+        let mut dev = AgentDirectory::unrestricted("dev");
+        dev.insert("bot", hash_psk("bot-key"), vec!["publish_zone:*".into()]);
+        let open = dev.resolve("dev", "").unwrap();
         assert_eq!(open.agent_id, DEFAULT_MCP_AGENT_ID);
         assert!(open.allows("resident_mcp"));
+        assert!(!dev.resolve("dev", "bot").unwrap().allows("create_tiles"));
+        assert!(
+            dev.resolve("dev", "stranger")
+                .unwrap()
+                .allows("create_tiles")
+        );
+        assert!(AgentDirectory::unrestricted("").is_empty());
+        assert!(!format!("{dev:?}").contains("\"dev\""));
     }
 }
