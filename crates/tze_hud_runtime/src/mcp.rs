@@ -279,6 +279,7 @@ async fn handle_connection(
             Route::Respond(resp) => resp,
         },
         Err(ReadError::Malformed) => Response::bad_request(),
+        Err(ReadError::NotImplemented) => Response::not_implemented(),
         Err(e) => {
             tracing::debug!(peer = %peer, error = ?e, "MCP: dropping connection");
             return;
@@ -373,6 +374,52 @@ mod tests {
         let r = http_raw(addr, &post("/nope")).await;
         assert!(r.starts_with("HTTP/1.1 404 "), "{r}");
         assert!(!r.contains("jsonrpc"));
+        shutdown.trigger(crate::threads::ShutdownReason::Clean);
+        handle.await.expect("task");
+    }
+
+    #[tokio::test]
+    async fn mcp_http_rejects_ambiguous_requests_before_dispatch() {
+        let shutdown = ShutdownToken::new();
+        let (handle, addrs) =
+            start_mcp_http_server(make_scene(), make_config(0, "k"), shutdown.clone(), None)
+                .await
+                .expect("start");
+        let addr = addrs[0];
+        let body = r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#;
+        let n = body.len();
+        let auth = "Authorization: Bearer k\r\n";
+        let cases = [
+            (
+                "400",
+                format!("POST / HTTP/1.1\r\n{auth}Content-Length: x\r\n\r\n{body}"),
+            ),
+            (
+                "400",
+                format!(
+                    "POST / HTTP/1.1\r\n{auth}Content-Length: {n}\r\nContent-Length: {n}\r\n\r\n{body}"
+                ),
+            ),
+            (
+                "400",
+                format!(
+                    "POST / HTTP/1.1\r\n{auth}Authorization: Bearer k\r\nContent-Length: {n}\r\n\r\n{body}"
+                ),
+            ),
+            (
+                "400",
+                format!("POST / HTTP/1.1 junk\r\n{auth}Content-Length: {n}\r\n\r\n{body}"),
+            ),
+            (
+                "501",
+                format!("POST / HTTP/1.1\r\n{auth}Transfer-Encoding: chunked\r\n\r\n{body}"),
+            ),
+        ];
+        for (status, req) in cases {
+            let r = http_raw(addr, &req).await;
+            assert!(r.starts_with(&format!("HTTP/1.1 {status} ")), "{req}: {r}");
+            assert!(!r.contains("jsonrpc"), "{r}");
+        }
         shutdown.trigger(crate::threads::ShutdownReason::Clean);
         handle.await.expect("task");
     }
