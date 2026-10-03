@@ -656,8 +656,8 @@ pub async fn hud_hold(ctx: &ToolCtx<'_>, args: Value) -> McpResult<Value> {
     match surface {
         Surface::Zone(zone) => {
             let mut scene = ctx.scene.lock().await;
-            let expires = expiry(now_us(&scene));
-            if !scene.hold_zone_publications(&zone, &ns, expires) {
+            let ttl_us = (p.ttl_ms > 0).then(|| p.ttl_ms.saturating_mul(1_000));
+            if !scene.hold_zone_publications(&zone, &ns, ttl_us) {
                 return Err(not_held(&p.surface));
             }
             ensure_lease(ctx, &mut scene)?;

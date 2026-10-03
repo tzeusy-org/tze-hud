@@ -658,22 +658,18 @@ impl SceneGraph {
         Ok(())
     }
 
-    /// Set the expiry of every publication `publisher_namespace` holds on
-    /// `zone` (`None` = until cleared), including its not-yet-presented
-    /// scheduled publishes (whose expiry counts from presentation). Returns
-    /// whether it held any.
+    /// Expire every publication `publisher_namespace` holds on `zone` `ttl_us`
+    /// from now (`None` = until cleared). Its not-yet-presented scheduled
+    /// publishes take the same ttl counted from presentation. Returns whether
+    /// it held any.
     pub fn hold_zone_publications(
         &mut self,
         zone: &str,
         publisher_namespace: &str,
-        expires_at_wall_us: Option<u64>,
+        ttl_us: Option<u64>,
     ) -> bool {
-        let now_us = self.clock.now_us();
-        let mut held = self.hold_scheduled_zone_publishes(
-            zone,
-            publisher_namespace,
-            expires_at_wall_us.map(|at| at.saturating_sub(now_us)),
-        );
+        let expires_at_wall_us = ttl_us.map(|t| self.clock.now_us().saturating_add(t));
+        let mut held = self.hold_scheduled_zone_publishes(zone, publisher_namespace, ttl_us);
         for r in self
             .zone_registry
             .active_publishes

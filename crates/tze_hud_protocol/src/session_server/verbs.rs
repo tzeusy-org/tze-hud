@@ -746,7 +746,8 @@ pub(super) async fn handle_hold(
         };
         match &surface {
             Surface::Zone(zone) => {
-                if scene.hold_zone_publications(zone, &session.namespace, expires) {
+                let ttl_us = (hold.ttl_ms > 0).then(|| hold.ttl_ms.saturating_mul(1_000));
+                if scene.hold_zone_publications(zone, &session.namespace, ttl_us) {
                     held_ttl
                 } else {
                     not_held(seq, &hold.surface)
