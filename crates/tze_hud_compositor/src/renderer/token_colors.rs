@@ -958,6 +958,81 @@ pub(super) fn notification_dismiss_bounds(
     )
 }
 
+/// Height of the notification action-button row (bottom strip of the slot).
+pub(super) const NOTIFICATION_ACTION_BUTTON_H_PX: f32 = 22.0;
+
+/// Horizontal inset of the action-button row from the slot edges.
+pub(super) const NOTIFICATION_ACTION_INSET_PX: f32 = 9.0;
+
+/// Bounds of each notification action button, left to right.
+///
+/// The single geometry source for both the drawn buttons and the pointer hit
+/// regions (`populate_notification_hit_regions`), so a press always lands on
+/// what is drawn. `n_actions` must already be capped at
+/// `MAX_NOTIFICATION_ACTIONS`.
+pub(super) fn notification_action_button_bounds(
+    zx: f32,
+    slot_y: f32,
+    zw: f32,
+    effective_slot_h: f32,
+    n_actions: usize,
+) -> Vec<Rect> {
+    if n_actions == 0 {
+        return Vec::new();
+    }
+    let btn_w = (zw - NOTIFICATION_ACTION_INSET_PX * 2.0).max(1.0) / n_actions as f32;
+    let action_y = (slot_y + effective_slot_h - NOTIFICATION_ACTION_BUTTON_H_PX).max(slot_y);
+    (0..n_actions)
+        .map(|i| {
+            Rect::new(
+                zx + NOTIFICATION_ACTION_INSET_PX + i as f32 * btn_w,
+                action_y,
+                btn_w,
+                NOTIFICATION_ACTION_BUTTON_H_PX.min(effective_slot_h),
+            )
+        })
+        .collect()
+}
+
+/// Resolved tokens for notification action buttons.
+#[derive(Clone, Debug)]
+pub(super) struct NotificationActionTokens {
+    /// Button fill (linear-light RGBA, as `parse_hex_color` returns).
+    pub(super) background: Rgba,
+    pub(super) font_size_px: f32,
+    pub(super) font_weight: u16,
+}
+
+// Fallbacks MUST stay in sync with `tze_hud_config`'s `CANONICAL_TOKENS`
+// entries `notification.action.background` and
+// `typography.notification.action.*` (the crates are intentionally unlinked).
+const NOTIFICATION_ACTION_DEFAULT_BACKGROUND_HEX: &str = "#FFFFFF26";
+const NOTIFICATION_ACTION_DEFAULT_FONT_SIZE_PX: f32 = 12.0;
+const NOTIFICATION_ACTION_DEFAULT_FONT_WEIGHT: u16 = 600;
+
+pub(super) fn resolve_notification_action_tokens(
+    token_map: &HashMap<String, String>,
+) -> NotificationActionTokens {
+    let background = resolve_token_color(token_map, "notification.action.background")
+        .or_else(|| parse_hex_color(NOTIFICATION_ACTION_DEFAULT_BACKGROUND_HEX))
+        .unwrap_or(Rgba::WHITE);
+    let font_size_px = token_map
+        .get("typography.notification.action.font_size_px")
+        .and_then(|v| v.trim_end_matches("px").parse::<f32>().ok())
+        .filter(|v| v.is_finite())
+        .unwrap_or(NOTIFICATION_ACTION_DEFAULT_FONT_SIZE_PX)
+        .clamp(6.0, 200.0);
+    let font_weight = token_map
+        .get("typography.notification.action.font_weight")
+        .and_then(|v| v.parse::<u16>().ok())
+        .unwrap_or(NOTIFICATION_ACTION_DEFAULT_FONT_WEIGHT);
+    NotificationActionTokens {
+        background,
+        font_size_px,
+        font_weight,
+    }
+}
+
 /// Resolved visual tokens for the local composer echo overlay.
 ///
 /// Populated from the compositor token map in

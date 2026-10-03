@@ -2934,6 +2934,108 @@ async fn test_lifecycle_sentinel_keeps_cached_markdown_render_path() {
     );
 }
 
+/// Notification action buttons are drawn at exactly the bounds the pointer
+/// hit regions register, in token-styled fill, with their labels. Two
+/// notifications (the older one titled, so slot heights differ) exercise the
+/// shared slot layout. Draw-command level (no pixel readback).
+#[tokio::test]
+async fn notification_actions_layout_matches_hit_regions() {
+    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
+    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
+    compositor
+        .token_map
+        .insert("notification.action.background".into(), "#336699".into());
+
+    let mut scene = SceneGraph::new(1280.0, 720.0);
+    scene.create_tab("Main", 0).unwrap();
+    scene.register_zone(ZoneDefinition {
+        id: SceneId::new(),
+        name: "notification-area".to_owned(),
+        description: "notification area zone".to_owned(),
+        geometry_policy: GeometryPolicy::Relative {
+            x_pct: 0.6,
+            y_pct: 0.0,
+            width_pct: 0.35,
+            height_pct: 0.5,
+        },
+        accepted_media_types: vec![ZoneMediaType::ShortTextWithIcon],
+        rendering_policy: RenderingPolicy {
+            font_size_px: Some(16.0),
+            backdrop: Some(Rgba::new(0.0, 0.0, 0.0, 1.0)),
+            ..Default::default()
+        },
+        contention_policy: ContentionPolicy::Stack { max_depth: 8 },
+        max_publishers: 4,
+        transport_constraint: None,
+        auto_clear_ms: None,
+        ephemeral: false,
+        layer_attachment: LayerAttachment::Chrome,
+    });
+    let action = |label: &str| tze_hud_scene::types::NotificationAction {
+        label: label.to_owned(),
+        callback_id: label.to_lowercase(),
+    };
+    for (ns, title, labels) in [
+        ("a", "Deploy", vec!["Ship", "Hold"]),
+        ("b", "", vec!["Open"]),
+    ] {
+        scene
+            .publish_to_zone(
+                "notification-area",
+                ZoneContent::Notification(NotificationPayload {
+                    text: "body".to_owned(),
+                    icon: String::new(),
+                    urgency: 1,
+                    ttl_ms: None,
+                    title: title.to_owned(),
+                    actions: labels.into_iter().map(action).collect(),
+                }),
+                ns,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+    }
+
+    compositor.populate_zone_hit_regions(&mut scene, 1280.0, 720.0);
+    let mut vertices: Vec<crate::pipeline::RectVertex> = Vec::new();
+    compositor.render_zone_content(&scene, &mut vertices, &mut Vec::new(), 1280.0, 720.0, None);
+    let items = compositor.collect_text_items(&scene, 1280.0, 720.0);
+
+    let fill = compositor.gpu_color(
+        crate::renderer::token_colors::resolve_notification_action_tokens(&compositor.token_map)
+            .background,
+    );
+    let mut checked = 0;
+    for region in &scene.overlay.zone_hit_regions {
+        let tze_hud_scene::types::ZoneInteractionKind::Action { callback_id } = &region.kind else {
+            continue;
+        };
+        let b = region.bounds;
+        let quad = crate::pipeline::rect_vertices(b.x, b.y, b.width, b.height, 1280.0, 720.0, fill);
+        assert!(
+            vertices.windows(6).any(|w| w
+                .iter()
+                .zip(&quad)
+                .all(|(a, b)| a.position == b.position && a.color == b.color)),
+            "no token-filled quad drawn at hit region of {callback_id}: {b:?}"
+        );
+        let label = callback_id.to_uppercase()[..1].to_string() + &callback_id[1..];
+        let item = items
+            .iter()
+            .find(|i| &*i.text == label.as_str())
+            .unwrap_or_else(|| panic!("no label text item for {callback_id}"));
+        assert_eq!((item.pixel_x, item.bounds_width), (b.x, b.width));
+        assert!(
+            item.pixel_y >= b.y && item.pixel_y + item.font_size_px <= b.y + b.height,
+            "label for {callback_id} must sit inside its button"
+        );
+        checked += 1;
+    }
+    assert_eq!(checked, 3, "all three actions must have hit regions");
+}
+
 /// Notification with opaque backdrop: backdrop_opacity=0.9 overrides
 /// the backdrop color's alpha.  The backdrop quad should be rendered with
 /// effective alpha = 0.9.

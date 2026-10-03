@@ -325,7 +325,10 @@ impl HeadlessEventLoopHarness {
         };
         let _ = crate::pipeline::sweep_timed_scene_state(&mut scene);
         tze_hud_compositor::renderer::hit_regions::populate_notification_hit_regions(
-            &mut scene, width, height,
+            &mut scene,
+            width,
+            height,
+            &std::collections::HashMap::new(),
         );
         settled
     }
@@ -664,6 +667,86 @@ mod tests {
             },
             timestamp_mono_us: MonoUs(ts),
         })
+    }
+
+    /// A pointer press on a notification action button, dispatched through the
+    /// real `lifecycle.rs` pointer-up path, queues the action for `hud_input`
+    /// and leaves the notification on screen (only the dismiss button removes it).
+    #[test]
+    fn pointer_up_on_action_enqueues_pending_action() {
+        use tze_hud_scene::{
+            ContentionPolicy, GeometryPolicy, LayerAttachment, NotificationAction,
+            NotificationPayload, RenderingPolicy, ZoneContent, ZoneDefinition, ZoneMediaType,
+        };
+
+        let mut harness = HeadlessEventLoopHarness::new();
+        {
+            let shared = harness.app.state.shared_state.blocking_lock();
+            let mut scene = shared.scene.blocking_lock();
+            *scene = SceneGraph::new(1920.0, 1080.0);
+            scene.create_tab("Main", 0).unwrap();
+            scene.register_zone(ZoneDefinition {
+                id: SceneId::new(),
+                name: "notification-area".to_string(),
+                description: "notifications".to_string(),
+                geometry_policy: GeometryPolicy::Relative {
+                    x_pct: 0.6,
+                    y_pct: 0.0,
+                    width_pct: 0.35,
+                    height_pct: 0.3,
+                },
+                accepted_media_types: vec![ZoneMediaType::ShortTextWithIcon],
+                rendering_policy: RenderingPolicy::default(),
+                contention_policy: ContentionPolicy::Stack { max_depth: 5 },
+                max_publishers: 4,
+                transport_constraint: None,
+                auto_clear_ms: None,
+                layer_attachment: LayerAttachment::Chrome,
+                ephemeral: false,
+            });
+            scene
+                .publish_to_zone(
+                    "notification-area",
+                    ZoneContent::Notification(NotificationPayload {
+                        text: "Ship v2?".to_string(),
+                        icon: String::new(),
+                        urgency: 1,
+                        ttl_ms: None,
+                        title: "Deploy".to_string(),
+                        actions: vec![NotificationAction {
+                            label: "Ship".to_string(),
+                            callback_id: "ship".to_string(),
+                        }],
+                    }),
+                    "notif-agent",
+                    None,
+                    None,
+                    None,
+                )
+                .unwrap();
+        }
+        while !harness.tick() {}
+
+        let (x, y) = harness
+            .notification_action_center("ship")
+            .expect("the Ship button has a hit region");
+        harness.click(x, y);
+        harness.drain();
+
+        let shared = harness.app.state.shared_state.blocking_lock();
+        let mut scene = shared.scene.blocking_lock();
+        let actions = scene.take_pending_actions("notif-agent");
+        assert_eq!(actions.len(), 1, "one press queues one action");
+        assert_eq!(actions[0].callback_id, "ship");
+        assert_eq!(actions[0].zone_name, "notification-area");
+        assert_eq!(
+            scene
+                .zone_registry
+                .active_for_zone("notification-area")
+                .len(),
+            1,
+            "an action press must not dismiss the notification"
+        );
     }
 
     /// Install one ordinary focused button (not a portal composer/control) and
