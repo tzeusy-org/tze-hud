@@ -15,13 +15,13 @@
 #   just dead-code <crate>  # advisory list of dead pub items in one crate
 #   just dev-mode-guard     # verify dev-mode is not in release default features
 #   just idle-efficiency-checker # fail-closed idle artifact contract tests
-#   just ci        # full CI gate (all jobs in dependency order, excluding GPU/Windows-only)
+#   just ci        # full CI gate (all jobs in dependency order, excluding Windows-only; test-gpu is separate)
 #
-# GPU tests (compositor render tests + runtime pixel_readback) are excluded from
-# `just ci`. Run them with `just test-gpu`, which pins the Vulkan loader to Mesa
-# llvmpipe: with a hardware ICD (e.g. NVIDIA) next to it, concurrent device
-# construction can wedge the driver. Do not run bare `cargo test -p
-# tze_hud_compositor` on a host with a hardware GPU ICD; use `just test-gpu`.
+# Every recipe that builds a GPU device pins the Vulkan loader to Mesa llvmpipe
+# when its ICD is installed: with a hardware ICD (e.g. NVIDIA) next to it,
+# concurrent device construction can wedge the driver. `just test-gpu` (compositor
+# + pixel_readback, fails if llvmpipe is missing) is the strict GPU lane. Do not
+# run bare `cargo test -p tze_hud_compositor` on a host with a hardware GPU ICD.
 #
 # Building needs protoc >= 3.15; if /usr/bin/protoc is older, set PROTOC=/path/to/protoc.
 
@@ -83,6 +83,7 @@ idle-efficiency-checker:
 # Integration headless suites (mirror CI test-integration job)
 # Runs every integration target.
 test-integration:
+    if [ -f {{lvp}} ]; then export VK_ICD_FILENAMES={{lvp}}; fi; \
     HEADLESS_FORCE_SOFTWARE=1 cargo test -p integration --tests
 
 # Pure-Python suites (mirror CI user-test-python-suite job and scripts/ci tests)
@@ -98,9 +99,11 @@ test-python:
 # Deterministic LLM-facing token-footprint gate (mirror CI test-integration job)
 token-footprint:
     mkdir -p test_results/token-footprint
+    if [ -f {{lvp}} ]; then export VK_ICD_FILENAMES={{lvp}}; fi; \
     HEADLESS_FORCE_SOFTWARE=1 cargo run -p benchmark --features headless \
         --bin token_footprint_calibration -- \
         --output test_results/token-footprint/measurement.json
+    if [ -f {{lvp}} ]; then export VK_ICD_FILENAMES={{lvp}}; fi; \
     HEADLESS_FORCE_SOFTWARE=1 cargo run -p benchmark --features headless \
         --bin token_footprint_calibration -- \
         --output test_results/token-footprint/repeat.json
@@ -112,6 +115,7 @@ token-footprint:
 
 # vertical_slice production config boot (mirror CI production-boot-vertical-slice job)
 production-boot:
+    if [ -f {{lvp}} ]; then export VK_ICD_FILENAMES={{lvp}}; fi; \
     HEADLESS_FORCE_SOFTWARE=1 \
         cargo test \
             -p vertical_slice \
@@ -120,6 +124,7 @@ production-boot:
 
 # Canonical app production config boot (mirror CI canonical-app-production-boot job)
 canonical-app-boot:
+    if [ -f {{lvp}} ]; then export VK_ICD_FILENAMES={{lvp}}; fi; \
     HEADLESS_FORCE_SOFTWARE=1 \
         cargo test \
             -p tze_hud_app \
