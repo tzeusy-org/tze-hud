@@ -2,25 +2,18 @@
 //!
 //! # Purpose
 //!
-//! Complements the deterministic point-value tests in `invariants.rs` with
-//! property-based verification: for any randomly-generated valid scene,
-//! `check_all()` must return an empty violation set.
-//!
-//! # Spec references
-//!
-//! - validation-framework/spec.md lines 23-26: property-based over point-value tests.
-//! - validation-framework/spec.md Layer 0 budget: <2 seconds total per 10,000 iterations.
-//! - heart-and-soul/validation.md DR-V4: all randomness seeded and deterministic.
+//! Property-based verification: for any randomly-generated valid scene,
+//! `assert_layer0_invariants()` must return an empty violation set.
 //!
 //! # Strategy Overview
 //!
 //! Three proptest strategies cover the key axes of the spec:
 //!
 //! 1. `arb_valid_scene_graph` — random SceneGraphs satisfying all structural
-//!    invariants; verifies that check_all() always returns empty.
+//!    invariants; verifies that assert_layer0_invariants() always returns empty.
 //!
 //! 2. `arb_valid_then_valid_mutations` — random valid scenes followed by valid
-//!    MutationBatches; verifies post-mutation scenes still pass check_all().
+//!    MutationBatches; verifies post-mutation scenes still pass assert_layer0_invariants().
 //!
 //! 3. `arb_valid_then_invalid_mutation` — random valid scenes followed by an
 //!    invalid mutation; verifies (a) batch is rejected and (b) scene is unchanged.
@@ -30,9 +23,8 @@
 
 use proptest::prelude::*;
 use tze_hud_scene::{
-    MAX_BATCH_SIZE,
+    MAX_BATCH_SIZE, assert_layer0_invariants,
     graph::SceneGraph,
-    invariants::check_all,
     mutation::{MutationBatch, SceneMutation},
     types::{Rect, SceneId},
 };
@@ -95,7 +87,7 @@ fn arb_tab_name() -> impl Strategy<Value = String> {
 
 /// Generates random but structurally valid SceneGraphs.
 ///
-/// Invariant: `check_all()` must return empty for every generated graph.
+/// Invariant: `assert_layer0_invariants()` must return empty for every generated graph.
 #[derive(Debug)]
 struct ValidSceneParams {
     tab_count: usize,
@@ -153,20 +145,20 @@ fn build_valid_scene(params: &ValidSceneParams) -> SceneGraph {
 proptest! {
     #![proptest_config(proptest_config())]
 
-    // ── Strategy 1: Random valid scene → check_all returns empty ────────────
+    // ── Strategy 1: Random valid scene → assert_layer0_invariants returns empty ────────────
 
     /// FOR ALL randomly generated valid SceneGraphs:
-    /// THEN check_all() returns no violations.
+    /// THEN assert_layer0_invariants() returns no violations.
     ///
     /// This is the fundamental property: our construction API must produce
     /// graphs that satisfy all Layer 0 invariants.
     #[test]
-    fn prop_valid_scene_passes_check_all(params in arb_valid_scene_params()) {
+    fn prop_valid_scene_passes_assert_layer0_invariants(params in arb_valid_scene_params()) {
         let graph = build_valid_scene(&params);
-        let violations = check_all(&graph);
+        let violations = assert_layer0_invariants(&graph);
         prop_assert!(
             violations.is_empty(),
-            "valid scene failed check_all:\n{}",
+            "valid scene failed assert_layer0_invariants:\n{}",
             violations.iter().map(|v| v.to_string()).collect::<Vec<_>>().join("\n")
         );
     }
@@ -174,11 +166,11 @@ proptest! {
     // ── Strategy 2: Random valid scene + valid mutations → still valid ───────
 
     /// FOR ALL valid scenes + valid mutations applied atomically:
-    /// THEN post-mutation scene still passes check_all().
+    /// THEN post-mutation scene still passes assert_layer0_invariants().
     ///
     /// Verifies that the graph stays valid through incremental construction.
     #[test]
-    fn prop_valid_scene_after_valid_mutations_passes_check_all(
+    fn prop_valid_scene_after_valid_mutations_passes_assert_layer0_invariants(
         tab_name in arb_tab_name(),
         namespace in arb_namespace(),
         extra_bounds in arb_tile_bounds(),
@@ -213,10 +205,10 @@ proptest! {
             prop_assume!(result.applied, "batch failed — skip this input");
         }
 
-        let violations = check_all(&graph);
+        let violations = assert_layer0_invariants(&graph);
         prop_assert!(
             violations.is_empty(),
-            "post-mutation scene failed check_all:\n{}",
+            "post-mutation scene failed assert_layer0_invariants:\n{}",
             violations.iter().map(|v| v.to_string()).collect::<Vec<_>>().join("\n")
         );
     }
@@ -293,11 +285,11 @@ proptest! {
             "version must not increment after rejected batch"
         );
 
-        // Property 3: scene must still pass check_all
-        let violations = check_all(&graph);
+        // Property 3: scene must still pass assert_layer0_invariants
+        let violations = assert_layer0_invariants(&graph);
         prop_assert!(
             violations.is_empty(),
-            "scene after rejected mutation must pass check_all:\n{}",
+            "scene after rejected mutation must pass assert_layer0_invariants:\n{}",
             violations.iter().map(|v| v.to_string()).collect::<Vec<_>>().join("\n")
         );
     }
@@ -341,10 +333,10 @@ proptest! {
             }
         }
 
-        let violations = check_all(&graph);
+        let violations = assert_layer0_invariants(&graph);
         prop_assert!(
             violations.is_empty(),
-            "multi-agent scene failed check_all:\n{}",
+            "multi-agent scene failed assert_layer0_invariants:\n{}",
             violations.iter().map(|v| v.to_string()).collect::<Vec<_>>().join("\n")
         );
     }
@@ -408,10 +400,10 @@ proptest! {
             );
         }
 
-        let violations = check_all(&graph);
+        let violations = assert_layer0_invariants(&graph);
         prop_assert!(
             violations.is_empty(),
-            "zone-registry scene failed check_all:\n{}",
+            "zone-registry scene failed assert_layer0_invariants:\n{}",
             violations.iter().map(|v| v.to_string()).collect::<Vec<_>>().join("\n")
         );
     }
