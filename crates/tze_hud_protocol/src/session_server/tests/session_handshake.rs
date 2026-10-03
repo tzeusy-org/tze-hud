@@ -467,7 +467,6 @@ fn test_validate_sequence_unit() {
         resource_budget: ResourceBudget::default(),
         budget_enforcer: None,
         subscriptions: Vec::new(),
-        subscription_filters: std::collections::HashMap::new(),
         server_sequence: 0,
         resume_token: Vec::new(),
         last_heartbeat_ms: 0,
@@ -950,5 +949,25 @@ async fn test_psk_with_capability_allows_input_events_subscription() {
             );
         }
         other => panic!("Expected SessionEstablished, got: {other:?}"),
+    }
+}
+
+/// Removed client requests (subscription change, input focus/capture, widget
+/// asset register, element listing) are reserved field numbers: a peer that
+/// still sends one decodes to an empty payload, which the server ignores.
+#[test]
+fn removed_client_request_numbers_decode_to_empty_payload() {
+    use prost::Message;
+    for field in [24u64, 27, 28, 29, 34, 39] {
+        // tag = field << 3 | length-delimited, then an empty message body.
+        let mut wire = vec![0x08, 0x07];
+        prost::encoding::encode_varint(field << 3 | 2, &mut wire);
+        wire.push(0x00);
+        let msg = ClientMessage::decode(wire.as_slice()).expect("unknown field is skipped");
+        assert_eq!(msg.sequence, 7);
+        assert!(
+            msg.payload.is_none(),
+            "field {field} must not map to a payload"
+        );
     }
 }

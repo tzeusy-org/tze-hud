@@ -298,7 +298,7 @@ impl RuntimeContext {
                 "lease_defaults": ["SceneGraph::try_grant_lease_for_session_with_budget"],
                 "aggregate_scene_resources": ["RuntimeMutationBudgetEnforcer"],
                 "resource": ["ResourceStore", "Compositor::image_bytes", "Compositor::image_texture_cache"],
-                "widget_source": ["WidgetAssetStore(gRPC fallback)", "WidgetAssetRegistry(MCP metadata-only)", "WidgetRenderer::svgs"],
+                "widget_source": ["WidgetAssetRegistry(MCP metadata-only)", "WidgetRenderer::svgs"],
                 "widget_raster": ["WidgetRenderer::textures"],
                 "font": ["FontBytesStore", "glyphon::FontSystem"],
                 "durable_disk_excluded": ["RuntimeWidgetStore"],

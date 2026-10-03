@@ -302,12 +302,6 @@ impl HeadlessRuntime {
                 },
                 runtime_context.resident_ledger.clone(),
             ),
-            widget_asset_store:
-                tze_hud_protocol::session::WidgetAssetStore::new_with_limits_and_resident_ledger(
-                    resident_limits.widget_source_bytes,
-                    resident_limits.widget_namespace_bytes,
-                    runtime_context.resident_ledger.clone(),
-                ),
             runtime_widget_store: runtime_widget_store.clone(),
             element_store: element_store_bootstrap.store,
             element_store_path: Some(element_store_bootstrap.path),

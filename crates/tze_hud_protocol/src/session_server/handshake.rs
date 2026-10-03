@@ -164,7 +164,6 @@ pub(super) async fn handle_session_init(
         resource_budget,
         budget_enforcer: budget_enforcer.cloned(),
         subscriptions: sub_result.active.clone(),
-        subscription_filters: std::collections::HashMap::new(),
         server_sequence: 0,
         resume_token: resume_token.clone(),
         last_heartbeat_ms: now_ms(),
@@ -366,9 +365,6 @@ pub(super) async fn handle_session_resume(
         budget_enforcer: budget_enforcer.cloned(),
         // Restore subscription set from before the disconnect.
         subscriptions: prior_entry.subscriptions.clone(),
-        // Subscription filters are not persisted across reconnects; agents must re-send
-        // subscribe_filter entries after resuming if they still need prefix filtering.
-        subscription_filters: std::collections::HashMap::new(),
         server_sequence: 0,
         resume_token: new_resume_token.clone(),
         last_heartbeat_ms: now_ms(),

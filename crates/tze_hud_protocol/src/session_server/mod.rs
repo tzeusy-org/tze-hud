@@ -22,7 +22,6 @@
 //! - Resuming → Active (valid resume token)
 //! - Resuming → Closed (expired/invalid token)
 
-use crate::convert;
 // DedupWindow is used transitively in `mod tests { use super::* }`.
 #[allow(unused_imports)]
 use crate::dedup::{CachedResult, DedupWindow};
@@ -34,13 +33,8 @@ use crate::proto::session::client_message::Payload as ClientPayload;
 use crate::proto::session::hud_session_server::HudSession;
 use crate::proto::session::server_message::Payload as ServerPayload;
 use crate::proto::session::*;
-use crate::proto::{ElementInfo, ListElementsRequest, ListElementsResponse};
 use crate::session::{SESSION_EVENT_CHANNEL_CAPACITY, SharedState};
-use crate::subscriptions;
 use crate::token::DEFAULT_GRACE_PERIOD_MS;
-use quick_xml::Reader;
-use quick_xml::events::Event;
-use std::collections::HashMap;
 use std::sync::Arc;
 // Duration and Instant are used transitively in `mod tests { use super::* }`.
 #[allow(unused_imports)]
@@ -49,12 +43,8 @@ use tokio::sync::Mutex;
 use tonic::{Request, Response, Status};
 use tze_hud_resource::{
     ResourceError as StoreResourceError, ResourceStored as StoreResourceStored,
-    RuntimeWidgetStoreError, RuntimeWidgetStorePutOutcome as DurablePutOutcome,
 };
-use tze_hud_scene::element_store::{ElementStoreEntry, ElementType};
-use tze_hud_scene::graph::SceneGraph;
 use tze_hud_scene::types::*;
-use tze_hud_widget::{RuntimeWidgetAssetError, register_runtime_widget_svg_asset};
 
 // ─── Submodules (SS-1..SS-7h) ────────────────────────────────────────────────
 
@@ -63,18 +53,15 @@ pub mod degradation_notice_bus;
 mod element_persist;
 pub mod freeze_queue;
 pub mod handshake;
-pub mod input;
 pub mod input_event_bus;
 pub mod lease_expiry_bus;
 pub mod lifecycle;
 pub mod mutations;
 pub mod service;
 pub mod stream_session;
-pub mod subscriptions_cap;
 pub mod traffic;
 pub mod upload;
 pub mod verbs;
-pub mod widgets;
 
 pub use budget_gate::{
     MutationBudgetDecision, MutationBudgetEnforcer, MutationBudgetUsage,
@@ -90,23 +77,15 @@ use element_persist::{
 #[allow(unused_imports)]
 use freeze_queue::{FREEZE_QUEUE_CAPACITY, FreezeEnqueueResult, SessionFreezeQueue};
 use handshake::{HandshakeCtx, handle_session_init, handle_session_resume};
-use input::{
-    handle_input_capture_release, handle_input_capture_request, handle_input_focus_request,
-};
-// scene_node_contains is used transitively in `mod tests { use super::* }`.
-#[allow(unused_imports)]
-use input::scene_node_contains;
 pub use input_event_bus::{InputEventReceiver, InputEventRecvError, InputEventSender};
 pub use lease_expiry_bus::{LeaseExpiryNotice, LeaseExpiryReceiver, LeaseExpirySender};
 pub use lifecycle::SessionState;
 use mutations::{apply_queued_batch_to_scene, handle_mutation_batch};
 pub use service::{HudSessionImpl, SessionDeps};
 use stream_session::StreamSession;
-use subscriptions_cap::{handle_list_elements_request, handle_subscription_change};
 pub use traffic::{TrafficClass, classify_server_payload};
 use upload::{UploadWorkerCommand, UploadWorkerEvent, run_upload_worker};
 use verbs::{handle_claim_tile, handle_clear, handle_hold, handle_publish};
-use widgets::handle_widget_asset_register;
 // UploadByteRateLimiter is used transitively in `mod tests { use super::* }`.
 #[allow(unused_imports)]
 use upload::UploadByteRateLimiter;
@@ -611,44 +590,11 @@ async fn handle_client_message(
         ClientPayload::Hold(hold) => {
             handle_hold(state, session, tx, client_sequence, hold, render_wake).await;
         }
-        ClientPayload::SubscriptionChange(change) => {
-            handle_subscription_change(session, tx, change).await;
-        }
-        ClientPayload::ListElementsRequest(request) => {
-            handle_list_elements_request(state, session, tx, client_sequence, request).await;
-        }
         ClientPayload::Heartbeat(hb) => {
             handle_heartbeat(session, tx, hb).await;
         }
-        ClientPayload::InputFocusRequest(req) => {
-            // Synchronous focus request (RFC 0005 §3.8).
-            // v1 grants focus unconditionally (arbitration deferred to post-v1).
-            handle_input_focus_request(session, tx, req).await;
-        }
-        ClientPayload::InputCaptureRequest(req) => {
-            // Synchronous capture request (RFC 0005 §3.8).
-            handle_input_capture_request(state, session, tx, req).await;
-        }
-        ClientPayload::InputCaptureRelease(rel) => {
-            // Asynchronous capture release (RFC 0005 §3.8).
-            // Confirmed by CaptureReleasedEvent in EventBatch (field 34).
-            handle_input_capture_release(state, session, tx, rel).await;
-        }
         ClientPayload::SessionClose(_close) => {
             // Graceful disconnect: the main loop ends the stream after this returns.
-        }
-        // Widget asset register/upload (session-protocol spec §Requirement: Widget Asset Registration via Session Stream).
-        // Always transactional; every request receives WidgetAssetRegisterResult.
-        ClientPayload::WidgetAssetRegister(register) => {
-            handle_widget_asset_register(
-                state,
-                session,
-                tx,
-                client_sequence,
-                register,
-                render_wake,
-            )
-            .await;
         }
         ClientPayload::ResourceUploadStart(start) => {
             let _ = upload_command_tx
@@ -1036,7 +982,7 @@ impl StreamSession {
             Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
                 // Missed notifications. Log and continue — the element
                 // store state is persistent so a future snapshot or
-                // ListElementsRequest will reflect the current position.
+                // The element store will reflect the current position.
                 let _ = n; // suppress unused warning; production: tracing::warn!
                 LoopAction::Continue
             }

@@ -565,15 +565,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "crc32c"
-version = "0.6.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3a47af21622d091a8f0fb295b88bc886ac74efcc613efc19f5d0b21de5c89e47"
-dependencies = [
- "rustc_version",
-]
-
-[[package]]
 name = "crc32fast"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3627,10 +3618,8 @@ name = "tze_hud_protocol"
 version = "0.1.0"
 dependencies = [
  "blake3",
- "crc32c",
  "proptest",
  "prost",
- "quick-xml 0.41.0",
  "serde_json",
  "subtle",
  "tempfile",
@@ -3643,7 +3632,6 @@ dependencies = [
  "tze_hud_protocol",
  "tze_hud_resource",
  "tze_hud_scene",
- "tze_hud_widget",
  "uuid",
 ]
 

@@ -15,8 +15,7 @@ use tze_hud_protocol::proto::{
     KeyDownEvent, PointerDownEvent, PointerMoveEvent, PointerUpEvent,
 };
 use tze_hud_protocol::subscriptions::{
-    apply_subscription_change, category, filter_event_batch, filter_subscriptions,
-    is_focus_variant, is_input_variant,
+    category, filter_event_batch, filter_subscriptions, is_focus_variant, is_input_variant,
 };
 
 // ─── Category-to-capability mapping ─────────────────────────────────────────
@@ -94,24 +93,6 @@ fn degradation_notices_mandatory_cannot_be_removed() {
             .contains(&category::DEGRADATION_NOTICES.to_string()),
         "DEGRADATION_NOTICES must always be active (mandatory)"
     );
-
-    // Attempt to unsubscribe is silently ignored
-    let current = vec![
-        category::DEGRADATION_NOTICES.to_string(),
-        category::LEASE_CHANGES.to_string(),
-    ];
-    let after_remove = apply_subscription_change(
-        &current,
-        &[],
-        &[category::DEGRADATION_NOTICES.to_string()],
-        &[],
-    );
-    assert!(
-        after_remove
-            .active
-            .contains(&category::DEGRADATION_NOTICES.to_string()),
-        "DEGRADATION_NOTICES removal attempt must be silently ignored"
-    );
 }
 
 /// LEASE_CHANGES is always active — mandatory subscription.
@@ -121,17 +102,6 @@ fn lease_changes_mandatory_always_active() {
     assert!(
         result.active.contains(&category::LEASE_CHANGES.to_string()),
         "LEASE_CHANGES must always be active (mandatory)"
-    );
-
-    // Attempt to unsubscribe is silently ignored
-    let current = vec![category::LEASE_CHANGES.to_string()];
-    let after_remove =
-        apply_subscription_change(&current, &[], &[category::LEASE_CHANGES.to_string()], &[]);
-    assert!(
-        after_remove
-            .active
-            .contains(&category::LEASE_CHANGES.to_string()),
-        "LEASE_CHANGES removal attempt must be silently ignored"
     );
 }
 
@@ -144,57 +114,6 @@ fn unknown_subscription_category_is_denied() {
         "unknown subscription categories must be denied"
     );
     assert!(!result.active.contains(&"UNKNOWN_CATEGORY_XYZ".to_string()));
-}
-
-/// Mid-session subscription change: adding with capability succeeds.
-#[test]
-fn mid_session_add_subscription_with_capability() {
-    let current = vec![
-        category::DEGRADATION_NOTICES.to_string(),
-        category::LEASE_CHANGES.to_string(),
-    ];
-    let caps = vec!["read_scene_topology".to_string()];
-    let result = apply_subscription_change(
-        &current,
-        &[category::SCENE_TOPOLOGY.to_string()],
-        &[],
-        &caps,
-    );
-    assert!(
-        result
-            .active
-            .contains(&category::SCENE_TOPOLOGY.to_string())
-    );
-    assert!(result.denied.is_empty());
-    assert!(
-        result
-            .active
-            .contains(&category::DEGRADATION_NOTICES.to_string())
-    );
-    assert!(result.active.contains(&category::LEASE_CHANGES.to_string()));
-}
-
-/// Mid-session subscription change: removing an optional subscription succeeds.
-#[test]
-fn mid_session_remove_optional_subscription() {
-    let current = vec![
-        category::DEGRADATION_NOTICES.to_string(),
-        category::LEASE_CHANGES.to_string(),
-        category::SCENE_TOPOLOGY.to_string(),
-    ];
-    let result =
-        apply_subscription_change(&current, &[], &[category::SCENE_TOPOLOGY.to_string()], &[]);
-    assert!(
-        !result
-            .active
-            .contains(&category::SCENE_TOPOLOGY.to_string())
-    );
-    assert!(
-        result
-            .active
-            .contains(&category::DEGRADATION_NOTICES.to_string())
-    );
-    assert!(result.active.contains(&category::LEASE_CHANGES.to_string()));
 }
 
 // ─── EventBatch variant filtering ────────────────────────────────────────────

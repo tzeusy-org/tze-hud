@@ -199,7 +199,7 @@ message FocusLostEvent {
   FocusLostReason reason         = 4;
 }
 
-// Capture released event — confirms async InputCaptureRelease (transactional).
+// Capture released event — runtime-side capture release (transactional).
 enum CaptureReleasedReason {
   CAPTURE_RELEASED_REASON_UNSPECIFIED   = 0;
   CAPTURE_RELEASED_REASON_AGENT_RELEASED = 1;

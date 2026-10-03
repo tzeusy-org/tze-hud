@@ -4,13 +4,12 @@
 //!
 //! Subscription categories control which event types are delivered to an agent.
 //! Some categories are always active (mandatory); others require specific granted
-//! capabilities. The runtime validates subscriptions at session init and on every
-//! mid-session [`SubscriptionChange`].
+//! capabilities. The runtime validates subscriptions at session init.
 //!
 //! # Mandatory subscriptions
 //!
 //! `DEGRADATION_NOTICES` and `LEASE_CHANGES` are always active regardless of what
-//! the agent requests or what capabilities it has. These cannot be removed.
+//! the agent requests or what capabilities it has.
 //!
 //! # Capability requirements
 //!
@@ -135,61 +134,6 @@ pub fn filter_subscriptions(
         if is_mandatory(cat.as_str()) {
             // Mandatory categories: always active (also added unconditionally below,
             // but handle here to avoid double-insertion from requested list)
-            if !active.contains(cat) {
-                active.push(cat.clone());
-            }
-        } else if has_required_capability(cat.as_str(), granted_capabilities) {
-            if !active.contains(cat) {
-                active.push(cat.clone());
-            }
-        } else {
-            denied.push(cat.clone());
-        }
-    }
-
-    // Ensure mandatory subscriptions are always present
-    for &mandatory in category::MANDATORY {
-        let s = mandatory.to_string();
-        if !active.contains(&s) {
-            active.push(s);
-        }
-    }
-
-    SubscriptionFilterResult { active, denied }
-}
-
-/// Apply a mid-session subscription change (RFC 0005 §7.3).
-///
-/// Processes `add` and `remove` lists against the current subscription set,
-/// enforcing capability requirements on additions. Mandatory subscriptions
-/// cannot be removed.
-///
-/// Returns a [`SubscriptionFilterResult`] where:
-/// - `active` is the full subscription set after applying the change.
-/// - `denied` contains categories from `add` that were denied.
-pub fn apply_subscription_change(
-    current: &[String],
-    add: &[String],
-    remove: &[String],
-    granted_capabilities: &[String],
-) -> SubscriptionFilterResult {
-    // Start from current subscriptions
-    let mut active: Vec<String> = current.to_vec();
-    let mut denied: Vec<String> = Vec::new();
-
-    // Process removals first (mandatory cannot be removed)
-    for cat in remove {
-        if is_mandatory(cat.as_str()) {
-            // Silently ignore attempts to remove mandatory categories
-        } else {
-            active.retain(|s| s != cat);
-        }
-    }
-
-    // Process additions
-    for cat in add {
-        if is_mandatory(cat.as_str()) {
-            // Already present (or will be added below); nothing to deny
             if !active.contains(cat) {
                 active.push(cat.clone());
             }
@@ -398,86 +342,6 @@ mod tests {
         let result = filter_subscriptions(&["TELEMETRY_FRAMES".to_string()], &[]);
         assert!(!result.active.contains(&"TELEMETRY_FRAMES".to_string()));
         assert!(result.denied.contains(&"TELEMETRY_FRAMES".to_string()));
-    }
-
-    #[test]
-    fn test_mandatory_not_removable() {
-        // WHEN lease is revoked, agent SHALL receive LeaseResponse regardless of subscriptions
-        // (spec lines 459-461) — ensured by mandatory always being present
-        let current = vec![
-            category::DEGRADATION_NOTICES.to_string(),
-            category::LEASE_CHANGES.to_string(),
-        ];
-        let result = apply_subscription_change(
-            &current,
-            &[],
-            &[
-                category::DEGRADATION_NOTICES.to_string(),
-                category::LEASE_CHANGES.to_string(),
-            ],
-            &[],
-        );
-        assert!(
-            result
-                .active
-                .contains(&category::DEGRADATION_NOTICES.to_string()),
-            "DEGRADATION_NOTICES cannot be removed"
-        );
-        assert!(
-            result.active.contains(&category::LEASE_CHANGES.to_string()),
-            "LEASE_CHANGES cannot be removed"
-        );
-    }
-
-    #[test]
-    fn test_mid_session_add_subscription_with_capability() {
-        // WHEN agent sends SubscriptionChange(add=[SCENE_TOPOLOGY]) with required capability
-        // THEN runtime responds with SubscriptionChangeResult listing SCENE_TOPOLOGY in active_subscriptions
-        // (spec lines 470-472)
-        let current = vec![
-            category::DEGRADATION_NOTICES.to_string(),
-            category::LEASE_CHANGES.to_string(),
-        ];
-        let caps = vec!["read_scene_topology".to_string()];
-        let result =
-            apply_subscription_change(&current, &["SCENE_TOPOLOGY".to_string()], &[], &caps);
-        assert!(result.active.contains(&"SCENE_TOPOLOGY".to_string()));
-        assert!(result.denied.is_empty());
-        // Mandatory subscriptions still present
-        assert!(
-            result
-                .active
-                .contains(&category::DEGRADATION_NOTICES.to_string())
-        );
-        assert!(result.active.contains(&category::LEASE_CHANGES.to_string()));
-    }
-
-    #[test]
-    fn test_mid_session_add_denied_without_capability() {
-        let current = vec![
-            category::DEGRADATION_NOTICES.to_string(),
-            category::LEASE_CHANGES.to_string(),
-        ];
-        let result = apply_subscription_change(&current, &["SCENE_TOPOLOGY".to_string()], &[], &[]);
-        assert!(!result.active.contains(&"SCENE_TOPOLOGY".to_string()));
-        assert!(result.denied.contains(&"SCENE_TOPOLOGY".to_string()));
-    }
-
-    #[test]
-    fn test_mid_session_remove_optional_subscription() {
-        let current = vec![
-            category::DEGRADATION_NOTICES.to_string(),
-            category::LEASE_CHANGES.to_string(),
-            "SCENE_TOPOLOGY".to_string(),
-        ];
-        let result = apply_subscription_change(&current, &[], &["SCENE_TOPOLOGY".to_string()], &[]);
-        assert!(!result.active.contains(&"SCENE_TOPOLOGY".to_string()));
-        assert!(
-            result
-                .active
-                .contains(&category::DEGRADATION_NOTICES.to_string())
-        );
-        assert!(result.active.contains(&category::LEASE_CHANGES.to_string()));
     }
 
     // ─── EventBatch variant filtering tests ──────────────────────────────────
