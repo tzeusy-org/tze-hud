@@ -121,5 +121,6 @@ agent's PSK as the bearer. `scripts/quickstart.sh` pairs that PSK as
 
 - Don't publish secrets into the portal.
 - Keep fragments small; never resend the whole transcript.
-- Treat `NOT_ALLOWED` on a portal (another agent holds that id) as a stop;
-  pick another id or ask the user.
+- Treat `NOT_ALLOWED` on a portal as a stop: your `[agents.<id>] allow`
+  list lacks `portal`; ask the user. (Portal ids are per agent, so another
+  agent's `portal:<id>` never blocks yours.)
