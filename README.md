@@ -91,11 +91,47 @@ The toolchain is pinned in `rust-toolchain.toml` (Rust 1.88, matching CI and the
 Live media (GStreamer/WebRTC) is out of scope; see `docs/vision.md`.
 
 ### Demo and Reference Binaries
+- `poc_demo` (`examples/poc_demo/`): The POC demo client; see [Demo](#demo). It drives a *running* `tze_hud`, it is not a runtime itself.
 - `vertical_slice` (`examples/vertical_slice/`): Development reference: a headless resident gRPC agent running the lifecycle verbs (`ClaimTile`, `Publish`, `Hold`, `Clear`). **Not** intended for operations or remote deployment.
 - `benchmark` (`examples/benchmark/`): Performance profiling reference.
 - `render_artifacts` (`examples/render_artifacts/`): GPU rendering artifact generation.
 
 **Rule**: Automation and cross-machine workflows MUST target the canonical app binary, not demo binaries.
+
+## Demo
+
+`poc_demo` drives a live app (MCP on `127.0.0.1:9090`, gRPC on `127.0.0.1:50051`)
+through each lifecycle stage in one or two calls, narrates every stage in
+`zone:subtitle`, and prints the model-visible tokens each MCP call costs
+(compare `docs/api.md` "Token budgets"). Run the app with
+`app/tze_hud_app/config/production.toml` (it has the zones and the
+`main-gauge`/`main-progress` widgets), pair an agent
+(`docs/operations/windows-install.md`), and hand its PSK over by environment
+or file. A PSK is never printed.
+
+```bash
+export TZE_HUD_PSK_FILE=~/.config/tze_hud/claude.psk   # or TZE_HUD_PSK; a saved POST /pair reply works
+# optional: TZE_HUD_TILE_PSK(_FILE) for a separate resident-tile agent, plus --agent <its id>
+cargo run -p poc_demo -- zones           # notification TTL, delay_ms, action press -> hud_input
+cargo run -p poc_demo -- widgets         # typed gauge/progress updates
+cargo run -p poc_demo -- tile            # ClaimTile(placement+root), MutationBatch, Hold, Reclaimed
+cargo run -p poc_demo -- override-hang   # claim a tile, stop reading; press close or the safe-mode chord
+cargo run -p poc_demo -- all             # all of the above, with the portal step in between
+```
+
+`--mcp`, `--grpc`, `--agent` (the id the tile PSK was paired as, default
+`claude`), `--pace-ms` and `--human-wait-s` are in `--help`. Windows is the
+target; from another machine point `--mcp`/`--grpc` at the HUD's Tailscale
+address.
+
+**Portal step (not simulated).** The portal demo is a real Claude Code session:
+run the `hud-projection` skill (`.claude/skills/hud-projection/SKILL.md`). Its
+first `hud_publish` to `portal:<id>` attaches, typed replies come back through
+`hud_input`, and `hud_clear` detaches. `poc_demo all` prints this instead of
+faking it.
+
+`cargo test -p poc_demo` runs the zones, widgets and tile stages against the
+GPU-free headless runtime.
 
 ## 1) Build on Linux / Windows
 
