@@ -1128,7 +1128,6 @@ async fn test_list_elements_request_supports_filters_and_override_metadata() {
             rendering_policy: RenderingPolicy::default(),
             contention_policy: ContentionPolicy::LatestWins,
             max_publishers: 2,
-            transport_constraint: None,
             auto_clear_ms: None,
             ephemeral: false,
             layer_attachment: LayerAttachment::Content,
@@ -4277,7 +4276,6 @@ async fn test_ephemeral_zone_no_publish_result() {
                 rendering_policy: RenderingPolicy::default(),
                 contention_policy: ContentionPolicy::LatestWins,
                 max_publishers: 1,
-                transport_constraint: None,
                 auto_clear_ms: None,
                 ephemeral: true, // <-- ephemeral zone
                 layer_attachment: LayerAttachment::Content,
@@ -4387,7 +4385,6 @@ async fn test_durable_zone_publish_result() {
                 rendering_policy: RenderingPolicy::default(),
                 contention_policy: ContentionPolicy::LatestWins,
                 max_publishers: 4,
-                transport_constraint: None,
                 auto_clear_ms: None,
                 ephemeral: false, // <-- durable zone
                 layer_attachment: LayerAttachment::Content,

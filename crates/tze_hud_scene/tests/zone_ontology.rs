@@ -54,7 +54,6 @@ fn make_subtitle_zone() -> ZoneDefinition {
         rendering_policy: RenderingPolicy::default(),
         contention_policy: ContentionPolicy::LatestWins,
         max_publishers: 2,
-        transport_constraint: None,
         auto_clear_ms: None,
         layer_attachment: LayerAttachment::Content,
         ephemeral: false,
@@ -207,7 +206,6 @@ fn contention_stack_evicts_oldest_at_max_depth() {
         rendering_policy: RenderingPolicy::default(),
         contention_policy: ContentionPolicy::Stack { max_depth: 3 },
         max_publishers: 8,
-        transport_constraint: None,
         auto_clear_ms: None,
         layer_attachment: LayerAttachment::Chrome,
         ephemeral: false,
@@ -284,7 +282,6 @@ fn contention_merge_by_key_same_key_replaces() {
         rendering_policy: RenderingPolicy::default(),
         contention_policy: ContentionPolicy::MergeByKey { max_keys: 16 },
         max_publishers: 8,
-        transport_constraint: None,
         auto_clear_ms: None,
         layer_attachment: LayerAttachment::Chrome,
         ephemeral: false,
@@ -370,7 +367,6 @@ fn contention_replace_evicts_current() {
         rendering_policy: RenderingPolicy::default(),
         contention_policy: ContentionPolicy::Replace,
         max_publishers: 2,
-        transport_constraint: None,
         auto_clear_ms: None,
         layer_attachment: LayerAttachment::Content,
         ephemeral: false,
@@ -555,7 +551,6 @@ fn static_image_content_publishes_successfully() {
         rendering_policy: RenderingPolicy::default(),
         contention_policy: ContentionPolicy::Replace,
         max_publishers: 1,
-        transport_constraint: None,
         auto_clear_ms: None,
         layer_attachment: LayerAttachment::Background,
         ephemeral: false,
@@ -627,7 +622,6 @@ fn clear_zone_for_publisher_only_removes_own_publications() {
         rendering_policy: RenderingPolicy::default(),
         contention_policy: ContentionPolicy::Stack { max_depth: 10 },
         max_publishers: 8,
-        transport_constraint: None,
         auto_clear_ms: None,
         layer_attachment: LayerAttachment::Content,
         ephemeral: false,
@@ -729,9 +723,9 @@ fn publish_without_expiry_stores_none() {
 #[test]
 fn drain_expired_zone_publications_removes_past_due() {
     use std::sync::Arc;
-    use tze_hud_scene::SimulatedClock;
+    use tze_hud_scene::TestClock;
 
-    let clock = Arc::new(SimulatedClock::new(1_000_000)); // t=1s
+    let clock = Arc::new(TestClock::from_us(1_000_000)); // t=1s
     let mut scene = SceneGraph::new_with_clock(1920.0, 1080.0, clock.clone());
     scene.register_zone(make_subtitle_zone());
 
@@ -763,9 +757,9 @@ fn drain_expired_zone_publications_removes_past_due() {
 #[test]
 fn drain_expired_leaves_no_expiry_publications() {
     use std::sync::Arc;
-    use tze_hud_scene::SimulatedClock;
+    use tze_hud_scene::TestClock;
 
-    let clock = Arc::new(SimulatedClock::new(1_000_000));
+    let clock = Arc::new(TestClock::from_us(1_000_000));
     let mut scene = SceneGraph::new_with_clock(1920.0, 1080.0, clock.clone());
     scene.register_zone(make_subtitle_zone());
 
@@ -790,9 +784,9 @@ fn drain_expired_leaves_no_expiry_publications() {
 #[test]
 fn drain_expired_mixed_keeps_live_removes_dead() {
     use std::sync::Arc;
-    use tze_hud_scene::SimulatedClock;
+    use tze_hud_scene::TestClock;
 
-    let clock = Arc::new(SimulatedClock::new(1_000_000));
+    let clock = Arc::new(TestClock::from_us(1_000_000));
     let mut scene = SceneGraph::new_with_clock(1920.0, 1080.0, clock.clone());
 
     // Use a Stack zone so multiple publications coexist
@@ -810,7 +804,6 @@ fn drain_expired_mixed_keeps_live_removes_dead() {
         rendering_policy: RenderingPolicy::default(),
         contention_policy: ContentionPolicy::Stack { max_depth: 8 },
         max_publishers: 8,
-        transport_constraint: None,
         auto_clear_ms: None,
         ephemeral: false,
         layer_attachment: LayerAttachment::Chrome,
@@ -863,9 +856,9 @@ fn drain_expired_mixed_keeps_live_removes_dead() {
 #[test]
 fn drain_expired_increments_version_only_when_changed() {
     use std::sync::Arc;
-    use tze_hud_scene::SimulatedClock;
+    use tze_hud_scene::TestClock;
 
-    let clock = Arc::new(SimulatedClock::new(1_000_000));
+    let clock = Arc::new(TestClock::from_us(1_000_000));
     let mut scene = SceneGraph::new_with_clock(1920.0, 1080.0, clock.clone());
     scene.register_zone(make_subtitle_zone());
 
@@ -1004,7 +997,6 @@ fn make_status_bar_zone() -> ZoneDefinition {
         rendering_policy: RenderingPolicy::default(),
         contention_policy: ContentionPolicy::MergeByKey { max_keys: 32 },
         max_publishers: 16,
-        transport_constraint: None,
         auto_clear_ms: None,
         layer_attachment: LayerAttachment::Chrome,
         ephemeral: false,
@@ -1134,9 +1126,9 @@ fn exemplar_status_bar_clear_per_publisher() {
 #[test]
 fn exemplar_status_bar_lease_expiry_isolation() {
     use std::sync::Arc;
-    use tze_hud_scene::SimulatedClock;
+    use tze_hud_scene::TestClock;
 
-    let clock = Arc::new(SimulatedClock::new(1_000_000)); // t=1s
+    let clock = Arc::new(TestClock::from_us(1_000_000)); // t=1s
     let mut scene = SceneGraph::new_with_clock(1920.0, 1080.0, clock.clone());
     scene.register_zone(make_status_bar_zone());
 
@@ -1472,9 +1464,9 @@ fn exemplar_status_bar_key_removal_empty_value() {
 fn exemplar_status_bar_key_removal_ttl_expiry() {
     // [hud-t1in.2]: MergeByKey — TTL expiry removes the publication.
     use std::sync::Arc;
-    use tze_hud_scene::SimulatedClock;
+    use tze_hud_scene::TestClock;
 
-    let clock = Arc::new(SimulatedClock::new(1_000_000)); // t=1s
+    let clock = Arc::new(TestClock::from_us(1_000_000)); // t=1s
     let mut scene = SceneGraph::new_with_clock(1920.0, 1080.0, clock.clone());
     scene.zone_registry = tze_hud_scene::types::ZoneRegistry::with_defaults();
 
@@ -1698,7 +1690,6 @@ mod proptests {
                 rendering_policy: RenderingPolicy::default(),
                 contention_policy: ContentionPolicy::LatestWins,
                 max_publishers: 16,
-                transport_constraint: None,
                 auto_clear_ms: None,
                 layer_attachment: LayerAttachment::Content,
                 ephemeral: false,
@@ -1733,7 +1724,6 @@ mod proptests {
                 rendering_policy: RenderingPolicy::default(),
                 contention_policy: ContentionPolicy::Replace,
                 max_publishers: 16,
-                transport_constraint: None,
                 auto_clear_ms: None,
                 layer_attachment: LayerAttachment::Content,
                 ephemeral: false,
@@ -1769,7 +1759,6 @@ mod proptests {
                 rendering_policy: RenderingPolicy::default(),
                 contention_policy: ContentionPolicy::Stack { max_depth },
                 max_publishers: 64,
-                transport_constraint: None,
                 auto_clear_ms: None,
                 layer_attachment: LayerAttachment::Chrome,
                 ephemeral: false,
@@ -1823,7 +1812,6 @@ mod proptests {
                 rendering_policy: RenderingPolicy::default(),
                 contention_policy: ContentionPolicy::MergeByKey { max_keys },
                 max_publishers: 16,
-                transport_constraint: None,
                 auto_clear_ms: None,
                 layer_attachment: LayerAttachment::Chrome,
                 ephemeral: false,
@@ -1905,12 +1893,10 @@ fn forest_green() -> ZoneContent {
 /// Helper: build a SceneGraph with a simulated clock and the default zone registry.
 ///
 /// Returns `(scene, clock)` so the caller can advance time independently.
-fn make_ambient_scene(
-    start_us: u64,
-) -> (SceneGraph, std::sync::Arc<tze_hud_scene::SimulatedClock>) {
+fn make_ambient_scene(start_us: u64) -> (SceneGraph, std::sync::Arc<tze_hud_scene::TestClock>) {
     use std::sync::Arc;
-    use tze_hud_scene::SimulatedClock;
-    let clock = Arc::new(SimulatedClock::new(start_us));
+    use tze_hud_scene::TestClock;
+    let clock = Arc::new(TestClock::from_us(start_us));
     let mut scene = SceneGraph::new_with_clock(1920.0, 1080.0, clock.clone());
     scene.zone_registry = tze_hud_scene::types::ZoneRegistry::with_defaults();
     (scene, clock)

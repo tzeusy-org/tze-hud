@@ -546,7 +546,6 @@ async fn test_ambient_background_zorder_below_content_zones() {
         rendering_policy: RenderingPolicy::default(),
         contention_policy: ContentionPolicy::Replace,
         max_publishers: 1,
-        transport_constraint: None,
         auto_clear_ms: None,
         ephemeral: false,
         layer_attachment: LayerAttachment::Content,

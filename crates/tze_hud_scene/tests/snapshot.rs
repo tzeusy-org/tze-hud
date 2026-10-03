@@ -13,8 +13,7 @@
 //! - BTreeMap used for all map types (determinism guaranteed at compile time)
 
 use tze_hud_scene::{
-    Node, NodeData, Rect, ResourceId, SceneGraphSnapshot, SceneGraphWidgetRegistry,
-    SceneGraphZoneRegistry, SceneId, StaticImageNode,
+    Node, NodeData, Rect, ResourceId, SceneGraphSnapshot, SceneId, StaticImageNode,
     graph::SceneGraph,
     test_scenes::{ClockMs, TestSceneRegistry},
     types::ImageFitMode,
@@ -512,39 +511,6 @@ fn snapshot_zone_conflict_deterministic() {
         snap2.to_json().unwrap(),
         "zone_conflict_two_publishers: snapshots must be deterministic"
     );
-}
-
-// ── Scenario: Incremental diff not available (spec line 347) ─────────────────
-// This is a compile-time / design assertion — there is no SceneDiff in SceneGraphSnapshot.
-
-#[test]
-fn snapshot_does_not_expose_incremental_diff() {
-    // Structural test: SceneGraphSnapshot has no SceneDiff field.
-    // This verifies the v1 constraint at the type level.
-    let snap = SceneGraphSnapshot {
-        sequence: 0,
-        snapshot_wall_us: 0,
-        snapshot_mono_us: 0,
-        tabs: std::collections::BTreeMap::new(),
-        tiles: std::collections::BTreeMap::new(),
-        nodes: std::collections::BTreeMap::new(),
-        portal_surfaces: std::collections::BTreeMap::new(),
-        zone_registry: SceneGraphZoneRegistry {
-            zone_types: std::collections::BTreeMap::new(),
-            zone_instances: vec![],
-            active_publications: std::collections::BTreeMap::new(),
-        },
-        widget_registry: SceneGraphWidgetRegistry {
-            widget_types: std::collections::BTreeMap::new(),
-            widget_instances: vec![],
-            active_publications: std::collections::BTreeMap::new(),
-        },
-        active_tab: None,
-        display_area: Rect::new(0.0, 0.0, 1920.0, 1080.0),
-        checksum: String::new(),
-    };
-    // If this compiles, no SceneDiff field exists (post-v1 constraint satisfied).
-    let _ = snap;
 }
 
 // ── proptest: random scene state produces deterministic snapshots ─────────────

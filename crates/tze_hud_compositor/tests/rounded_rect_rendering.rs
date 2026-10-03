@@ -116,7 +116,6 @@ fn register_rounded_zone(scene: &mut SceneGraph, radius: Option<f32>) -> &'stati
         },
         contention_policy: ContentionPolicy::LatestWins,
         max_publishers: 1,
-        transport_constraint: None,
         auto_clear_ms: None,
         ephemeral: false,
         layer_attachment: LayerAttachment::Content,
@@ -286,7 +285,6 @@ async fn test_no_backdrop_no_rounded_rect() {
         },
         contention_policy: ContentionPolicy::LatestWins,
         max_publishers: 1,
-        transport_constraint: None,
         auto_clear_ms: None,
         ephemeral: false,
         layer_attachment: LayerAttachment::Content,
@@ -362,7 +360,6 @@ async fn test_background_layer_rounded_rect_renders_backdrop() {
         },
         contention_policy: ContentionPolicy::LatestWins,
         max_publishers: 1,
-        transport_constraint: None,
         auto_clear_ms: None,
         ephemeral: false,
         // Background layer — must be collected before Content/Chrome zones.

@@ -375,7 +375,6 @@ proptest! {
                 rendering_policy: Default::default(),
                 contention_policy: ContentionPolicy::LatestWins,
                 max_publishers: 1,
-                transport_constraint: None,
                 auto_clear_ms: None,
                 ephemeral: false,
                 layer_attachment: Default::default(),

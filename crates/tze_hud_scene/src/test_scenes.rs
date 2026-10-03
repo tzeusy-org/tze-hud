@@ -207,13 +207,13 @@ impl TestSceneRegistry {
 
     // ─── Scene builders ───────────────────────────────────────────────────
 
-    /// Scene graph on a `SimulatedClock` pinned at `clock`, so lease-expiry sweeps
+    /// Scene graph on a `TestClock` pinned at `clock`, so lease-expiry sweeps
     /// (e.g. the headless runtime's per-frame sweep) compare against the scene's
     /// construction time, not the real wall clock (`ClockMs::FIXED` = Jan 2025).
     fn new_graph(&self, clock: ClockMs) -> SceneGraph {
-        use crate::clock::SimulatedClock;
+        use crate::clock::TestClock;
         use std::sync::Arc;
-        let sim_clock = Arc::new(SimulatedClock::new(clock.0 * 1_000));
+        let sim_clock = Arc::new(TestClock::from_us(clock.0 * 1_000));
         SceneGraph::new_with_clock(self.display_width, self.display_height, sim_clock)
     }
 
@@ -743,7 +743,7 @@ impl TestSceneRegistry {
     ///
     /// The lease is granted with TTL = 1ms relative to `clock`.  The scene as-built has
     /// state = ACTIVE.  To test expiry, callers must call `expire_leases(now_ms)` with a
-    /// `now_ms` value past the TTL.  The graph runs on a `SimulatedClock` pinned at `clock`
+    /// `now_ms` value past the TTL.  The graph runs on a `TestClock` pinned at `clock`
     /// (via `new_graph`), so automatic sweeps (e.g. the headless per-frame sweep) never see
     /// the lease as expired; expiry testing requires passing `now_ms` directly to
     /// `expire_leases(now_ms)`.
@@ -1225,14 +1225,14 @@ impl TestSceneRegistry {
     /// - Thesis 3: Multiple agents coexist (disconnect/reconnect does not affect others)
     /// - validation-framework spec §Test Scene Registry lines 160-172
     fn build_disconnect_reclaim_multiagent(&self, clock: ClockMs) -> (SceneGraph, SceneSpec) {
-        // Use a SimulatedClock fixed at `clock.0` so that lease-expiry checks
+        // Use a TestClock fixed at `clock.0` so that lease-expiry checks
         // compare against the scene's construction timestamp rather than the real system
         // clock. This avoids false `LeaseExpired` errors when session_lifecycle tests run
         // years after the lease `granted_at_ms` (ClockMs::FIXED = Jan 2025).
-        use crate::clock::SimulatedClock;
+        use crate::clock::TestClock;
         use std::sync::Arc;
-        // SimulatedClock::new takes microseconds; ClockMs stores milliseconds.
-        let sim_clock = Arc::new(SimulatedClock::new(clock.0 * 1_000));
+        // TestClock::new takes microseconds; ClockMs stores milliseconds.
+        let sim_clock = Arc::new(TestClock::from_us(clock.0 * 1_000));
         let mut graph =
             SceneGraph::new_with_clock(self.display_width, self.display_height, sim_clock);
 
@@ -1456,7 +1456,6 @@ impl TestSceneRegistry {
                 rendering_policy: RenderingPolicy::default(),
                 contention_policy: ContentionPolicy::LatestWins,
                 max_publishers: 1,
-                transport_constraint: None,
                 auto_clear_ms: None,
                 ephemeral: false,
                 layer_attachment: LayerAttachment::Content,
@@ -1541,7 +1540,6 @@ impl TestSceneRegistry {
                 rendering_policy: RenderingPolicy::default(),
                 contention_policy: ContentionPolicy::LatestWins,
                 max_publishers: 2,
-                transport_constraint: None,
                 auto_clear_ms: None,
                 ephemeral: false,
                 layer_attachment: LayerAttachment::Content,
@@ -1623,7 +1621,6 @@ impl TestSceneRegistry {
                 rendering_policy: RenderingPolicy::default(),
                 contention_policy: ContentionPolicy::LatestWins,
                 max_publishers: 2,
-                transport_constraint: None,
                 auto_clear_ms: None,
                 ephemeral: false,
                 layer_attachment: LayerAttachment::Chrome,
@@ -1748,7 +1745,6 @@ impl TestSceneRegistry {
                     rendering_policy: RenderingPolicy::default(),
                     contention_policy: *contention,
                     max_publishers: 4,
-                    transport_constraint: None,
                     auto_clear_ms: None,
                     ephemeral: false,
                     layer_attachment: LayerAttachment::Chrome,
@@ -1859,7 +1855,6 @@ impl TestSceneRegistry {
                 rendering_policy: RenderingPolicy::default(),
                 contention_policy: ContentionPolicy::LatestWins,
                 max_publishers: 1,
-                transport_constraint: None,
                 auto_clear_ms: None,
                 ephemeral: false,
                 layer_attachment: LayerAttachment::Content,
@@ -3083,7 +3078,6 @@ mod tests {
                 rendering_policy: RenderingPolicy::default(),
                 contention_policy: ContentionPolicy::LatestWins,
                 max_publishers: 1,
-                transport_constraint: None,
                 auto_clear_ms: None,
                 ephemeral: false,
                 layer_attachment: LayerAttachment::Content,

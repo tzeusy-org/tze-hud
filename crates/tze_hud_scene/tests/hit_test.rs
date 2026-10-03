@@ -23,7 +23,6 @@ use tze_hud_scene::{
     HitRegionNode, HitResult, InputMode, Node, NodeData, Rect, Rgba, SceneId, SolidColorNode,
     graph::SceneGraph,
     test_scenes::{ClockMs, TestSceneRegistry},
-    types::{CursorStyle, EventMask},
 };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -584,22 +583,6 @@ fn hit_result_is_some_none_helpers() {
     assert_eq!(passthrough.tile_id(), None);
 }
 
-// ─── Event mask field accessible ─────────────────────────────────────────────
-
-#[test]
-fn event_mask_default_all_enabled() {
-    let mask = EventMask::default();
-    assert!(mask.pointer_down);
-    assert!(mask.pointer_up);
-    assert!(mask.pointer_move);
-    assert!(mask.pointer_enter);
-    assert!(mask.pointer_leave);
-    assert!(mask.click);
-    assert!(mask.double_click);
-    assert!(mask.context_menu);
-    assert!(mask.keyboard);
-}
-
 #[test]
 fn hit_region_node_new_fields_accessible() {
     let node = HitRegionNode {
@@ -609,21 +592,13 @@ fn hit_region_node_new_fields_accessible() {
         accepts_pointer: true,
         auto_capture: true,
         release_on_up: true,
-        cursor_style: CursorStyle::Pointer,
         tooltip: Box::new(Some("Click to submit".to_string())),
-        event_mask: EventMask {
-            pointer_move: false,
-            ..Default::default()
-        },
         ..Default::default()
     };
 
     assert!(node.auto_capture);
     assert!(node.release_on_up);
-    assert_eq!(node.cursor_style, CursorStyle::Pointer);
     assert_eq!(*node.tooltip, Some("Click to submit".to_string()));
-    assert!(!node.event_mask.pointer_move);
-    assert!(node.event_mask.click); // not overridden — still true
 }
 
 // ─── Layer 0 invariants on hit-test test scenes ───────────────────────────────

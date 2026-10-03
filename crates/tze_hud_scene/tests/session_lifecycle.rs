@@ -1532,7 +1532,6 @@ fn make_stream_text_zone(name: &str) -> tze_hud_scene::types::ZoneDefinition {
         rendering_policy: RenderingPolicy::default(),
         contention_policy: ContentionPolicy::LatestWins,
         max_publishers: 4,
-        transport_constraint: None,
         auto_clear_ms: None,
         ephemeral: false,
         layer_attachment: LayerAttachment::Content,
