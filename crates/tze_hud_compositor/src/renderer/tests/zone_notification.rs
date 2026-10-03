@@ -587,87 +587,37 @@ async fn test_notification_area_does_not_use_severity_tokens() {
 
 // ── Notification urgency token tests ─────────────────────────────────────
 
-/// urgency_to_notification_color: urgency > 3 is clamped to critical (3).
+/// Notification urgency colours: urgency above 3 clamps to critical, and a
+/// `color.notification.urgency.*` token overrides the fallback (sRGB hex decoded
+/// to linear).
 #[test]
-fn test_notification_urgency_clamped_above_3() {
+fn test_notification_urgency_color_tokens() {
     let no_tokens = HashMap::new();
-    let critical3 = urgency_to_notification_color(3, &no_tokens);
-    let clamped4 = urgency_to_notification_color(4, &no_tokens);
-    let clamped100 = urgency_to_notification_color(100, &no_tokens);
-    assert_eq!(
-        critical3.r, clamped4.r,
-        "urgency=4 should clamp to urgency=3"
-    );
-    assert_eq!(
-        critical3.g, clamped4.g,
-        "urgency=4 should clamp to urgency=3"
-    );
-    assert_eq!(
-        critical3.b, clamped4.b,
-        "urgency=4 should clamp to urgency=3"
-    );
-    assert_eq!(
-        critical3.r, clamped100.r,
-        "urgency=100 should clamp to urgency=3"
-    );
-}
+    let critical = urgency_to_notification_color(3, &no_tokens);
+    for urgency in [4, 100] {
+        let clamped = urgency_to_notification_color(urgency, &no_tokens);
+        assert_eq!(
+            (clamped.r, clamped.g, clamped.b),
+            (critical.r, critical.g, critical.b),
+            "urgency={urgency} must clamp to critical"
+        );
+    }
 
-/// Profile token override: color.notification.urgency.low overrides fallback.
-#[test]
-fn test_notification_urgency_low_token_override() {
-    let mut token_map = HashMap::new();
-    // Override low with pure cyan (#00FFFF) — clearly distinct from default.
-    token_map.insert(
-        "color.notification.urgency.low".to_string(),
-        "#00FFFF".to_string(),
-    );
-    let color = urgency_to_notification_color(0, &token_map);
-    assert!(
-        color.r < 0.1,
-        "custom low token R should be ~0.0 (cyan), got {}",
-        color.r
-    );
-    assert!(
-        color.g > 0.9,
-        "custom low token G should be ~1.0 (cyan), got {}",
-        color.g
-    );
-    assert!(
-        color.b > 0.9,
-        "custom low token B should be ~1.0 (cyan), got {}",
-        color.b
-    );
-}
-
-/// Profile token override: color.notification.urgency.critical overrides fallback.
-#[test]
-fn test_notification_urgency_critical_token_override() {
-    let mut token_map = HashMap::new();
-    // Override critical with the exemplar's dark red-black token.
-    token_map.insert(
-        "color.notification.urgency.critical".to_string(),
-        "#450612".to_string(),
-    );
-    let color = urgency_to_notification_color(3, &token_map);
-    assert!(
-        (color.r - 0.0595).abs() < 0.004,
-        "custom critical token R should decode from sRGB hex to ~0.0595 linear, got {}",
-        color.r
-    );
-    assert!(
-        (color.g - 0.0018).abs() < 0.002,
-        "custom critical token G should decode from sRGB hex to ~0.0018 linear, got {}",
-        color.g
-    );
-    assert!(
-        (color.b - 0.0060).abs() < 0.002,
-        "custom critical token B should decode from sRGB hex to ~0.0060 linear, got {}",
-        color.b
-    );
-    assert!(
-        color.r > color.b && color.b > color.g,
-        "custom critical token should retain a red-black R > B > G ordering"
-    );
+    // (urgency, token, hex, expected linear rgb)
+    let overrides = [
+        (0, "low", "#00FFFF", [0.0, 1.0, 1.0]),
+        (3, "critical", "#450612", [0.0595, 0.0018, 0.0060]),
+    ];
+    for (urgency, name, hex, expected) in overrides {
+        let tokens = HashMap::from([(
+            format!("color.notification.urgency.{name}"),
+            hex.to_string(),
+        )]);
+        let c = urgency_to_notification_color(urgency, &tokens);
+        for (got, want) in [c.r, c.g, c.b].into_iter().zip(expected) {
+            assert!((got - want).abs() < 0.004, "{name} token {hex}: got {c:?}");
+        }
+    }
 }
 
 /// notification-area urgency-tinted backdrop: renders backdrop at 0.8 opacity.
@@ -946,108 +896,30 @@ async fn test_notification_area_border_uses_border_default_token() {
 
 // ── Token-resolved severity color tests ───────────────────────────────────
 
-/// Custom `color.severity.warning` token overrides the hardcoded SEVERITY_WARNING
-/// constant for urgency=2.
+/// `color.severity.*` tokens override the fallback constants (info covers urgency
+/// 0 and 1); an invalid token value is ignored and the constant stays.
 #[test]
-fn test_custom_severity_warning_token_overrides_constant() {
-    let mut token_map = HashMap::new();
-    // Custom warning: bright green (#00FF00) — clearly distinct from amber.
-    token_map.insert("color.severity.warning".to_string(), "#00FF00".to_string());
-    let color = urgency_to_severity_color(2, &token_map);
-    assert!(
-        color.g > 0.9,
-        "custom warning token G should be ~1.0 (green), got {}",
-        color.g
-    );
-    assert!(
-        color.r < 0.1,
-        "custom warning token R should be ~0.0 (green), got {}",
-        color.r
-    );
-    assert!(
-        color.b < 0.1,
-        "custom warning token B should be ~0.0 (green), got {}",
-        color.b
-    );
-}
-
-/// Custom `color.severity.critical` token overrides the hardcoded SEVERITY_CRITICAL.
-#[test]
-fn test_custom_severity_critical_token_overrides_constant() {
-    let mut token_map = HashMap::new();
-    // Custom critical: bright magenta (#FF00FF).
-    token_map.insert("color.severity.critical".to_string(), "#FF00FF".to_string());
-    let color = urgency_to_severity_color(3, &token_map);
-    assert!(
-        color.r > 0.9,
-        "custom critical R should be ~1.0 (magenta), got {}",
-        color.r
-    );
-    assert!(
-        color.b > 0.9,
-        "custom critical B should be ~1.0 (magenta), got {}",
-        color.b
-    );
-    assert!(
-        color.g < 0.1,
-        "custom critical G should be ~0.0 (magenta), got {}",
-        color.g
-    );
-}
-
-/// Custom `color.severity.info` token overrides the hardcoded SEVERITY_INFO.
-#[test]
-fn test_custom_severity_info_token_overrides_constant() {
-    let mut token_map = HashMap::new();
-    // Custom info: pure red (#FF0000) — clearly distinct from default blue.
-    token_map.insert("color.severity.info".to_string(), "#FF0000".to_string());
-    let color0 = urgency_to_severity_color(0, &token_map);
-    let color1 = urgency_to_severity_color(1, &token_map);
-    for (urgency, color) in [(0, color0), (1, color1)] {
-        assert!(
-            color.r > 0.9,
-            "custom info urgency={urgency} R should be ~1.0 (red), got {}",
-            color.r
-        );
-        assert!(
-            color.g < 0.1,
-            "custom info urgency={urgency} G should be ~0.0 (red), got {}",
-            color.g
-        );
-        assert!(
-            color.b < 0.1,
-            "custom info urgency={urgency} B should be ~0.0 (red), got {}",
-            color.b
-        );
+fn test_severity_color_tokens_override_or_fall_back() {
+    // (urgencies, token, value, expected linear rgb within 0.1)
+    let cases: [(&[u32], &str, &str, [f32; 3]); 4] = [
+        (&[2], "warning", "#00FF00", [0.0, 1.0, 0.0]),
+        (&[3], "critical", "#FF00FF", [1.0, 0.0, 1.0]),
+        (&[0, 1], "info", "#FF0000", [1.0, 0.0, 0.0]),
+        // Fallback SEVERITY_WARNING (#FFB800): linear R 1.0, G ~0.72, B 0.0.
+        (&[2], "warning", "not-a-color", [1.0, 0.72, 0.0]),
+    ];
+    for (urgencies, name, value, expected) in cases {
+        let tokens = HashMap::from([(format!("color.severity.{name}"), value.to_string())]);
+        for &urgency in urgencies {
+            let c = urgency_to_severity_color(urgency, &tokens);
+            for (got, want) in [c.r, c.g, c.b].into_iter().zip(expected) {
+                assert!(
+                    (got - want).abs() < 0.1,
+                    "{name}={value} urgency={urgency}: got {c:?}"
+                );
+            }
+        }
     }
-}
-
-/// Invalid/absent token values fall back to hardcoded constants.
-#[test]
-fn test_invalid_severity_token_value_falls_back_to_constant() {
-    let mut token_map = HashMap::new();
-    // Not a valid hex color — should be ignored.
-    token_map.insert(
-        "color.severity.warning".to_string(),
-        "not-a-color".to_string(),
-    );
-    let color = urgency_to_severity_color(2, &token_map);
-    // Falls back to SEVERITY_WARNING (#FFB800): R~1.0, G~0.72, B~0.0.
-    assert!(
-        color.r > 0.9,
-        "fallback warning R should be ~1.0, got {}",
-        color.r
-    );
-    assert!(
-        color.g > 0.5,
-        "fallback warning G should be >0.5, got {}",
-        color.g
-    );
-    assert!(
-        color.b < 0.1,
-        "fallback warning B should be ~0.0, got {}",
-        color.b
-    );
 }
 
 /// Custom severity tokens in [design_tokens] affect alert-banner backdrop colors.
