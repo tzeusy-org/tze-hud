@@ -3796,22 +3796,15 @@ mod tests {
     #[test]
     fn text_mask_alpha_bounds_tracks_non_transparent_pixels() {
         let mut mask = tiny_skia::Pixmap::new(8, 6).expect("test mask allocation");
+        // Fully transparent mask: no bounds, so tint compositing is skipped.
+        assert!(text_mask_alpha_bounds(mask.as_ref()).is_none());
+
         mask.pixels_mut()[2 + 8] =
             tiny_skia::PremultipliedColorU8::from_rgba(128, 128, 128, 128).unwrap();
         mask.pixels_mut()[5 + 4 * 8] =
             tiny_skia::PremultipliedColorU8::from_rgba(255, 255, 255, 255).unwrap();
 
         assert_eq!(text_mask_alpha_bounds(mask.as_ref()), Some((2, 1, 6, 5)));
-    }
-
-    #[test]
-    fn text_mask_alpha_bounds_returns_none_for_empty_mask() {
-        let mask = tiny_skia::Pixmap::new(8, 6).expect("test mask allocation");
-
-        assert!(
-            text_mask_alpha_bounds(mask.as_ref()).is_none(),
-            "fully transparent text masks should skip tint compositing"
-        );
     }
 
     #[test]
@@ -4027,47 +4020,47 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_svg_attribute_replaces_existing() {
-        let svg = r#"<svg><rect id="bar" width="50" fill="blue"/></svg>"#;
-        let result = apply_svg_attribute(svg, "bar", "width", "80");
-        assert!(
-            result.contains("width=\"80\""),
-            "should replace existing width: {result}"
-        );
-        assert!(
-            !result.contains("width=\"50\""),
-            "should not contain old value: {result}"
-        );
-    }
-
-    #[test]
-    fn test_apply_svg_attribute_inserts_new() {
-        let svg = r#"<svg><rect id="bar" fill="blue"/></svg>"#;
-        let result = apply_svg_attribute(svg, "bar", "height", "100");
-        assert!(
-            result.contains("height=\"100\""),
-            "should insert new attribute: {result}"
-        );
-    }
-
-    #[test]
-    fn test_apply_svg_attribute_unknown_element_noop() {
+    fn apply_svg_attribute_cases() {
+        // (case, svg, element, attr, value, must_contain, must_not_contain)
+        let cases = [
+            (
+                "replaces existing",
+                r#"<svg><rect id="bar" width="50" fill="blue"/></svg>"#,
+                "bar",
+                "width",
+                "80",
+                "width=\"80\"",
+                "width=\"50\"",
+            ),
+            (
+                "inserts new",
+                r#"<svg><rect id="bar" fill="blue"/></svg>"#,
+                "bar",
+                "height",
+                "100",
+                "height=\"100\"",
+                "height=\"50\"",
+            ),
+            (
+                "replaces text content",
+                r#"<svg><text id="label">Old Label</text></svg>"#,
+                "label",
+                "text-content",
+                "New Label",
+                ">New Label<",
+                "Old Label",
+            ),
+        ];
+        for (name, svg, id, attr, value, has, lacks) in cases {
+            let out = apply_svg_attribute(svg, id, attr, value);
+            assert!(out.contains(has), "{name}: missing {has:?} in {out}");
+            assert!(!out.contains(lacks), "{name}: still has {lacks:?} in {out}");
+        }
         let svg = r#"<svg><rect id="bar" width="50"/></svg>"#;
-        let result = apply_svg_attribute(svg, "nonexistent", "width", "80");
-        assert_eq!(result, svg, "unknown element should leave SVG unchanged");
-    }
-
-    #[test]
-    fn test_apply_svg_text_content() {
-        let svg = r#"<svg><text id="label">Old Label</text></svg>"#;
-        let result = apply_svg_attribute(svg, "label", "text-content", "New Label");
-        assert!(
-            result.contains(">New Label<"),
-            "should replace text content: {result}"
-        );
-        assert!(
-            !result.contains("Old Label"),
-            "should not contain old text: {result}"
+        assert_eq!(
+            apply_svg_attribute(svg, "nonexistent", "width", "80"),
+            svg,
+            "unknown element leaves SVG unchanged"
         );
     }
 
@@ -4277,15 +4270,9 @@ mod tests {
     // ── Rgba → SVG color string tests ─────────────────────────────────────────
 
     #[test]
-    fn test_rgba_to_svg_color_opaque() {
-        let color = Rgba::new(1.0, 0.0, 0.0, 1.0);
-        assert_eq!(rgba_to_svg_color(&color), "#ff0000");
-    }
-
-    #[test]
-    fn test_rgba_to_svg_color_with_alpha() {
-        let color = Rgba::new(1.0, 0.0, 0.0, 0.5);
-        let s = rgba_to_svg_color(&color);
+    fn rgba_to_svg_color_formats_by_alpha() {
+        assert_eq!(rgba_to_svg_color(&Rgba::new(1.0, 0.0, 0.0, 1.0)), "#ff0000");
+        let s = rgba_to_svg_color(&Rgba::new(1.0, 0.0, 0.0, 0.5));
         assert!(
             s.starts_with("rgba(255,0,0,"),
             "should use rgba format: {s}"
@@ -4347,21 +4334,27 @@ mod tests {
     }
 
     #[test]
-    fn snap_composite_rect_rounds_fractional_origin() {
-        let (x, y, w, h) = snap_composite_rect(2213.3333, 10.6667, 336.0, 128.0, 2560.0, 1440.0);
-        assert_eq!(x, 2213.0);
-        assert_eq!(y, 11.0);
-        assert_eq!(w, 336.0);
-        assert_eq!(h, 128.0);
-    }
-
-    #[test]
-    fn snap_composite_rect_clamps_to_surface_bounds() {
-        let (x, y, w, h) = snap_composite_rect(2500.9, 1430.2, 120.0, 40.0, 2560.0, 1440.0);
-        assert_eq!(x, 2440.0);
-        assert_eq!(y, 1400.0);
-        assert_eq!(w, 120.0);
-        assert_eq!(h, 40.0);
+    fn snap_composite_rect_rounds_and_clamps() {
+        // (case, rect (x, y, w, h), expected) on a 2560x1440 surface.
+        let cases = [
+            (
+                "rounds fractional origin",
+                (2213.3333, 10.6667, 336.0, 128.0),
+                (2213.0, 11.0, 336.0, 128.0),
+            ),
+            (
+                "clamps to surface bounds",
+                (2500.9, 1430.2, 120.0, 40.0),
+                (2440.0, 1400.0, 120.0, 40.0),
+            ),
+        ];
+        for (name, (x, y, w, h), expected) in cases {
+            assert_eq!(
+                snap_composite_rect(x, y, w, h, 2560.0, 1440.0),
+                expected,
+                "case: {name}"
+            );
+        }
     }
 
     // ── Reference gauge rasterization tests ──────────────────────────────────

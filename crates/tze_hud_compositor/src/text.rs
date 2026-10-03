@@ -3518,153 +3518,126 @@ mod tests {
         );
     }
 
-    // ── from_zone_policy tests [hud-sc0a.8] ──────────────────────────────────
+    // ── from_zone_policy: RenderingPolicy → TextItem field mapping ───────────
 
     #[test]
-    fn from_zone_policy_reads_font_size_and_color() {
+    fn from_zone_policy_maps_policy_fields() {
         use tze_hud_scene::types::{RenderingPolicy, Rgba};
-        let policy = RenderingPolicy {
-            font_size_px: Some(24.0),
-            text_color: Some(Rgba::new(1.0, 0.0, 0.0, 1.0)), // red
-            ..Default::default()
-        };
-        let item = TextItem::from_zone_policy("hello", 0.0, 0.0, 300.0, 80.0, &policy, 1.0);
-        assert_eq!(item.font_size_px, 24.0);
-        // Red channel (R=1.0 linear → 255 sRGB).
-        assert_eq!(item.color[0], 255, "R should be max (red)");
-        assert_eq!(item.color[1], 0, "G should be 0");
+        type Check = fn(&TextItem);
+        // (case, policy, opacity, check) — `zone` is placed at (100, 200).
+        let cases: Vec<(&str, RenderingPolicy, f32, Check)> = vec![
+            (
+                "font size and color",
+                RenderingPolicy {
+                    font_size_px: Some(24.0),
+                    text_color: Some(Rgba::new(1.0, 0.0, 0.0, 1.0)),
+                    ..Default::default()
+                },
+                1.0,
+                |i| {
+                    assert_eq!(i.font_size_px, 24.0);
+                    assert_eq!((i.color[0], i.color[1]), (255, 0));
+                },
+            ),
+            (
+                "outline propagated",
+                RenderingPolicy {
+                    outline_color: Some(Rgba::BLACK),
+                    outline_width: Some(2.0),
+                    ..Default::default()
+                },
+                1.0,
+                |i| {
+                    assert!(i.outline_color.is_some());
+                    assert_eq!(i.outline_width, Some(2.0));
+                },
+            ),
+            (
+                "zero outline width suppresses outline",
+                RenderingPolicy {
+                    outline_color: Some(Rgba::BLACK),
+                    outline_width: Some(0.0),
+                    ..Default::default()
+                },
+                1.0,
+                |i| {
+                    assert!(i.outline_color.is_none());
+                    assert!(i.outline_width.is_none());
+                },
+            ),
+            (
+                "opacity halves alpha",
+                RenderingPolicy {
+                    text_color: Some(Rgba::WHITE),
+                    ..Default::default()
+                },
+                0.5,
+                |i| assert!((i.color[3] as i32 - 127).abs() <= 2, "alpha {}", i.color[3]),
+            ),
+            (
+                "default margin is 8px",
+                RenderingPolicy::default(),
+                1.0,
+                |i| assert_eq!((i.pixel_x, i.pixel_y), (108.0, 208.0)),
+            ),
+            (
+                "margin_px fallback",
+                RenderingPolicy {
+                    margin_px: Some(20.0),
+                    ..Default::default()
+                },
+                1.0,
+                |i| assert_eq!((i.pixel_x, i.pixel_y), (120.0, 220.0)),
+            ),
+            (
+                "bold weight propagated",
+                RenderingPolicy {
+                    font_weight: Some(700),
+                    ..Default::default()
+                },
+                1.0,
+                |i| assert_eq!(i.font_weight, 700),
+            ),
+            (
+                "weight defaults to regular",
+                RenderingPolicy::default(),
+                1.0,
+                |i| assert_eq!(i.font_weight, 400),
+            ),
+            (
+                "overflow defaults to clip",
+                RenderingPolicy::default(),
+                1.0,
+                |i| assert_eq!(i.overflow, TextOverflow::Clip),
+            ),
+            (
+                "overflow ellipsis propagated",
+                RenderingPolicy {
+                    overflow: Some(TextOverflow::Ellipsis),
+                    ..Default::default()
+                },
+                1.0,
+                |i| assert_eq!(i.overflow, TextOverflow::Ellipsis),
+            ),
+            (
+                "overflow clip explicit",
+                RenderingPolicy {
+                    overflow: Some(TextOverflow::Clip),
+                    ..Default::default()
+                },
+                1.0,
+                |i| assert_eq!(i.overflow, TextOverflow::Clip),
+            ),
+        ];
+        for (name, policy, opacity, check) in cases {
+            let item =
+                TextItem::from_zone_policy("text", 100.0, 200.0, 400.0, 100.0, &policy, opacity);
+            // Wrap so a failing row names itself.
+            let r = std::panic::catch_unwind(|| check(&item));
+            assert!(r.is_ok(), "from_zone_policy case failed: {name}");
+        }
     }
 
-    #[test]
-    fn from_zone_policy_outline_fields_propagated() {
-        use tze_hud_scene::types::{RenderingPolicy, Rgba};
-        let policy = RenderingPolicy {
-            outline_color: Some(Rgba::BLACK),
-            outline_width: Some(2.0),
-            ..Default::default()
-        };
-        let item = TextItem::from_zone_policy("outlined", 0.0, 0.0, 300.0, 80.0, &policy, 1.0);
-        assert!(item.outline_color.is_some(), "outline_color should be Some");
-        assert_eq!(item.outline_width.unwrap(), 2.0);
-    }
-
-    #[test]
-    fn from_zone_policy_outline_width_zero_suppresses_outline() {
-        use tze_hud_scene::types::{RenderingPolicy, Rgba};
-        let policy = RenderingPolicy {
-            outline_color: Some(Rgba::BLACK),
-            outline_width: Some(0.0), // zero = no outline
-            ..Default::default()
-        };
-        let item = TextItem::from_zone_policy("no_outline", 0.0, 0.0, 300.0, 80.0, &policy, 1.0);
-        assert!(
-            item.outline_color.is_none(),
-            "outline_color should be None when outline_width=0"
-        );
-        assert!(item.outline_width.is_none());
-    }
-
-    #[test]
-    fn from_zone_policy_opacity_applied_to_alpha() {
-        use tze_hud_scene::types::{RenderingPolicy, Rgba};
-        let policy = RenderingPolicy {
-            text_color: Some(Rgba::new(1.0, 1.0, 1.0, 1.0)),
-            ..Default::default()
-        };
-        // opacity=0.5 should halve the alpha.
-        let item = TextItem::from_zone_policy("faded", 0.0, 0.0, 300.0, 80.0, &policy, 0.5);
-        let alpha = item.color[3];
-        // 255 * 0.5 = 127 (±2 for rounding).
-        assert!(
-            (alpha as i32 - 127).abs() <= 2,
-            "opacity=0.5 should halve alpha (got {alpha})"
-        );
-    }
-
-    #[test]
-    fn from_zone_policy_default_margins_used_when_none() {
-        use tze_hud_scene::types::RenderingPolicy;
-        let policy = RenderingPolicy::default(); // margin_horizontal/vertical = None
-        let item = TextItem::from_zone_policy("text", 100.0, 200.0, 400.0, 100.0, &policy, 1.0);
-        // Default margin = 8px on each side.
-        assert_eq!(item.pixel_x, 108.0, "default margin_h = 8.0");
-        assert_eq!(item.pixel_y, 208.0, "default margin_v = 8.0");
-    }
-
-    #[test]
-    fn rgba_to_srgb_u8_black_and_white() {
-        use tze_hud_scene::types::Rgba;
-        let black = rgba_to_srgb_u8(Rgba::BLACK);
-        assert_eq!(black, [0, 0, 0, 255]);
-        let white = rgba_to_srgb_u8(Rgba::WHITE);
-        assert_eq!(white, [255, 255, 255, 255]);
-    }
-
-    #[test]
-    fn from_zone_policy_margin_px_fallback() {
-        // When margin_horizontal/vertical are None but margin_px is set,
-        // margin_px should be used (spec §Extended RenderingPolicy).
-        use tze_hud_scene::types::RenderingPolicy;
-        let policy = RenderingPolicy {
-            margin_px: Some(20.0),
-            // margin_horizontal/margin_vertical intentionally None
-            ..Default::default()
-        };
-        let item = TextItem::from_zone_policy("text", 0.0, 0.0, 400.0, 100.0, &policy, 1.0);
-        assert_eq!(
-            item.pixel_x, 20.0,
-            "margin_px fallback should apply to horizontal margin"
-        );
-        assert_eq!(
-            item.pixel_y, 20.0,
-            "margin_px fallback should apply to vertical margin"
-        );
-    }
-
-    #[test]
-    fn apply_opacity_to_color_halves_alpha() {
-        let color = [200u8, 100, 50, 200];
-        let result = apply_opacity_to_color(color, 0.5);
-        assert_eq!(result[0], 200, "RGB channels unchanged");
-        assert_eq!(result[1], 100);
-        assert_eq!(result[2], 50);
-        // 200 * 0.5 = 100.
-        assert_eq!(result[3], 100, "alpha halved");
-    }
-
-    // ── font_weight tests [hud-w3o6.2] ───────────────────────────────────────
-
-    /// font_weight=700 is propagated from RenderingPolicy to TextItem.
-    ///
-    /// Acceptance criterion §Alert-Banner Heading Typography:
-    ///   "typography.heading.weight (700/bold)"
-    #[test]
-    fn from_zone_policy_font_weight_bold_propagated() {
-        use tze_hud_scene::types::RenderingPolicy;
-        let policy = RenderingPolicy {
-            font_weight: Some(700),
-            ..Default::default()
-        };
-        let item = TextItem::from_zone_policy("bold text", 0.0, 0.0, 300.0, 60.0, &policy, 1.0);
-        assert_eq!(
-            item.font_weight, 700,
-            "font_weight=700 (bold) must be propagated from RenderingPolicy to TextItem"
-        );
-    }
-
-    /// font_weight defaults to 400 (regular) when not set in RenderingPolicy.
-    #[test]
-    fn from_zone_policy_font_weight_defaults_to_regular() {
-        use tze_hud_scene::types::RenderingPolicy;
-        let policy = RenderingPolicy::default(); // font_weight = None
-        let item = TextItem::from_zone_policy("regular text", 0.0, 0.0, 300.0, 60.0, &policy, 1.0);
-        assert_eq!(
-            item.font_weight, 400,
-            "font_weight must default to 400 (regular) when not set"
-        );
-    }
-
-    /// from_text_markdown_node defaults font_weight to 400 (regular).
     #[test]
     fn from_text_markdown_node_font_weight_defaults_to_regular() {
         use tze_hud_scene::types::{Rect, Rgba, TextMarkdownNode};
@@ -3680,708 +3653,169 @@ mod tests {
             color_runs: Box::default(),
         };
         let item = TextItem::from_text_markdown_node(&node, 0.0, 0.0);
+        assert_eq!(item.font_weight, 400);
+    }
+
+    #[test]
+    fn rgba_to_srgb_u8_black_and_white() {
+        use tze_hud_scene::types::Rgba;
+        assert_eq!(rgba_to_srgb_u8(Rgba::BLACK), [0, 0, 0, 255]);
+        assert_eq!(rgba_to_srgb_u8(Rgba::WHITE), [255, 255, 255, 255]);
+    }
+
+    #[test]
+    fn apply_opacity_to_color_halves_alpha() {
         assert_eq!(
-            item.font_weight, 400,
-            "from_text_markdown_node must default font_weight to 400"
+            apply_opacity_to_color([200u8, 100, 50, 200], 0.5),
+            [200, 100, 50, 100],
+            "RGB unchanged, alpha halved"
         );
     }
 
-    /// from_zone_policy defaults overflow to Clip when policy.overflow is None.
+    // ── color_run_spans: run list → styled spans ─────────────────────────────
+
+    /// Each row: text, runs `(start, end, rgb)` in input order, and the expected
+    /// `(slice, Some(rgb) | None-for-base-attrs)` spans. Later runs win overlaps
+    /// regardless of start order; `\n` is never a split point.
     #[test]
-    fn from_zone_policy_overflow_defaults_to_clip() {
-        let policy = RenderingPolicy::default();
-        let item = TextItem::from_zone_policy("text", 0.0, 0.0, 200.0, 40.0, &policy, 1.0);
-        assert_eq!(
-            item.overflow,
-            TextOverflow::Clip,
-            "overflow should default to Clip when policy.overflow is None"
+    fn color_run_spans_cases() {
+        const RED: [u8; 4] = [255, 0, 0, 255];
+        const GREEN: [u8; 4] = [0, 255, 0, 255];
+        const BLUE: [u8; 4] = [0, 0, 255, 255];
+        const ORANGE: [u8; 4] = [255, 128, 0, 255];
+        type Rgb = Option<(u8, u8, u8)>;
+        const R: Rgb = Some((255, 0, 0));
+        const G: Rgb = Some((0, 255, 0));
+        const B: Rgb = Some((0, 0, 255));
+        const O: Rgb = Some((255, 128, 0));
+
+        type Case = (
+            &'static str,
+            &'static str,
+            Vec<(usize, usize, [u8; 4])>,
+            Vec<(&'static str, Rgb)>,
         );
-    }
-
-    /// from_zone_policy propagates Ellipsis overflow from policy.
-    #[test]
-    fn from_zone_policy_overflow_ellipsis_propagated() {
-        let policy = RenderingPolicy {
-            overflow: Some(TextOverflow::Ellipsis),
-            ..RenderingPolicy::default()
-        };
-        let item = TextItem::from_zone_policy("text", 0.0, 0.0, 200.0, 40.0, &policy, 1.0);
-        assert_eq!(
-            item.overflow,
-            TextOverflow::Ellipsis,
-            "overflow should be Ellipsis when policy.overflow is Some(Ellipsis)"
-        );
-    }
-
-    /// from_zone_policy propagates explicit Clip overflow from policy.
-    #[test]
-    fn from_zone_policy_overflow_clip_explicit_propagated() {
-        let policy = RenderingPolicy {
-            overflow: Some(TextOverflow::Clip),
-            ..RenderingPolicy::default()
-        };
-        let item = TextItem::from_zone_policy("text", 0.0, 0.0, 200.0, 40.0, &policy, 1.0);
-        assert_eq!(
-            item.overflow,
-            TextOverflow::Clip,
-            "overflow should be Clip when policy.overflow is Some(Clip)"
-        );
-    }
-
-    // ── color_run_spans single-pass tests [hud-9pmd] ─────────────────────────
-
-    /// Single colored run covering the entire text produces one span with color.
-    #[test]
-    fn color_run_spans_single_run_full_text() {
-        let text = "hello";
-        let runs = [ColorRunItem {
-            start_byte: 0,
-            end_byte: 5,
-            color: [255, 0, 0, 255],
-        }];
-        let base = Attrs::new();
-        let spans = color_run_spans(text, &runs, base);
-        assert_eq!(spans.len(), 1, "one run covering full text → one span");
-        assert_eq!(spans[0].0, "hello");
-        // The span must carry an explicit color (not base_attrs which has no color_opt).
-        assert!(
-            spans[0].1.color_opt.is_some(),
-            "run span must have a color_opt set"
-        );
-    }
-
-    /// Two runs with a gap in between produce three spans: gap, run, run.
-    #[test]
-    fn color_run_spans_two_runs_with_gap() {
-        let text = "hello world";
-        // "hello" → red, " " → unstyled gap, "world" → blue
-        let runs = [
-            ColorRunItem {
-                start_byte: 0,
-                end_byte: 5,
-                color: [255, 0, 0, 255],
-            },
-            ColorRunItem {
-                start_byte: 6,
-                end_byte: 11,
-                color: [0, 0, 255, 255],
-            },
-        ];
-        let base = Attrs::new();
-        let spans = color_run_spans(text, &runs, base);
-        // Expect: [("hello", red), (" ", base), ("world", blue)]
-        assert_eq!(spans.len(), 3, "two runs with gap → three spans");
-        assert_eq!(spans[0].0, "hello");
-        assert!(spans[0].1.color_opt.is_some(), "first run must have color");
-        assert_eq!(spans[1].0, " ", "gap between runs must be unstyled");
-        assert!(
-            spans[1].1.color_opt.is_none(),
-            "gap span must use base_attrs (no color_opt)"
-        );
-        assert_eq!(spans[2].0, "world");
-        assert!(spans[2].1.color_opt.is_some(), "second run must have color");
-    }
-
-    /// A run followed by trailing unstyled text produces run + trailing span.
-    #[test]
-    fn color_run_spans_trailing_unstyled() {
-        let text = "hello world";
-        let runs = [ColorRunItem {
-            start_byte: 0,
-            end_byte: 5,
-            color: [255, 0, 0, 255],
-        }];
-        let base = Attrs::new();
-        let spans = color_run_spans(text, &runs, base);
-        assert_eq!(spans.len(), 2, "run + trailing unstyled → two spans");
-        assert_eq!(spans[0].0, "hello");
-        assert_eq!(spans[1].0, " world");
-        assert!(
-            spans[1].1.color_opt.is_none(),
-            "trailing span must use base_attrs"
-        );
-    }
-
-    /// Empty runs slice falls back to a single full-text base-attrs span.
-    #[test]
-    fn color_run_spans_empty_runs_fallback() {
-        let text = "no color";
-        let spans = color_run_spans(text, &[], Attrs::new());
-        assert_eq!(spans.len(), 1, "no runs → single fallback span");
-        assert_eq!(spans[0].0, "no color");
-        assert!(
-            spans[0].1.color_opt.is_none(),
-            "fallback span must use base_attrs"
-        );
-    }
-
-    /// Out-of-bounds run end is clamped; no panic.
-    #[test]
-    fn color_run_spans_clamped_out_of_bounds_run() {
-        let text = "hi";
-        let runs = [ColorRunItem {
-            start_byte: 0,
-            end_byte: 999, // way beyond text length
-            color: [0, 255, 0, 255],
-        }];
-        let base = Attrs::new();
-        let spans = color_run_spans(text, &runs, base);
-        // Should produce one span covering the full text with color.
-        assert_eq!(spans.len(), 1);
-        assert_eq!(spans[0].0, "hi");
-        assert!(spans[0].1.color_opt.is_some());
-    }
-
-    /// Degenerate run (start >= end) is skipped; remaining text is returned unstyled.
-    #[test]
-    fn color_run_spans_degenerate_run_skipped() {
-        let text = "text";
-        let runs = [ColorRunItem {
-            start_byte: 2,
-            end_byte: 2, // zero-length: should be skipped
-            color: [255, 0, 0, 255],
-        }];
-        let base = Attrs::new();
-        let spans = color_run_spans(text, &runs, base);
-        // Zero-length run → no gap before it (cursor=0, run_start=2), and run is skipped.
-        // cursor stays at 0, so trailing text "text" is emitted as unstyled.
-        // But the fallback at the end also covers this — spans should be non-empty.
-        assert!(
-            !spans.is_empty(),
-            "degenerate run must not produce empty spans"
-        );
-        let combined: String = spans.iter().map(|(s, _)| *s).collect();
-        assert_eq!(
-            combined, "text",
-            "all text must be covered even with degenerate run"
-        );
-    }
-
-    /// color_run_spans produces correct slices for multi-byte UTF-8 characters.
-    #[test]
-    fn color_run_spans_multibyte_utf8() {
-        // "é" is 2 bytes (0xC3 0xA9), "world" is 5 bytes → total 7 bytes
-        let text = "éworld";
-        let runs = [ColorRunItem {
-            start_byte: 0,
-            end_byte: 2, // "é"
-            color: [255, 0, 0, 255],
-        }];
-        let base = Attrs::new();
-        let spans = color_run_spans(text, &runs, base);
-        assert_eq!(spans.len(), 2);
-        assert_eq!(spans[0].0, "é");
-        assert_eq!(spans[1].0, "world");
-    }
-
-    // ── Overlap / out-of-order tests [hud-qu8k4] ─────────────────────────────
-
-    /// Two overlapping runs: later run wins on the intersection.
-    ///
-    /// Input: red 0..10, blue 5..15 on "0123456789abcde" (15 bytes).
-    /// Expected: red 0..5, blue 5..15.
-    #[test]
-    fn color_run_spans_two_runs_overlap_later_wins() {
-        let text = "0123456789abcde"; // 15 ASCII bytes
-        let red = [255u8, 0, 0, 255];
-        let blue = [0u8, 0, 255, 255];
-        let runs = [
-            ColorRunItem {
-                start_byte: 0,
-                end_byte: 10,
-                color: red,
-            },
-            ColorRunItem {
-                start_byte: 5,
-                end_byte: 15,
-                color: blue,
-            },
-        ];
-        let base = Attrs::new();
-        let spans = color_run_spans(text, &runs, base);
-
-        // Reconstruct text coverage.
-        let combined: String = spans.iter().map(|(s, _)| *s).collect();
-        assert_eq!(combined, text, "all text must be covered");
-
-        // First span: "01234" (bytes 0..5) — red.
-        assert_eq!(spans[0].0, &text[0..5], "red prefix should be 0..5");
-        assert!(spans[0].1.color_opt.is_some(), "first span must be colored");
-        let red_color = spans[0].1.color_opt.unwrap();
-        assert_eq!(
-            (red_color.r(), red_color.g(), red_color.b()),
-            (255, 0, 0),
-            "first span should be red"
-        );
-
-        // Second span: "56789abcde" (bytes 5..15) — blue (later run wins intersection).
-        assert_eq!(spans[1].0, &text[5..15], "blue span should cover 5..15");
-        assert!(
-            spans[1].1.color_opt.is_some(),
-            "second span must be colored"
-        );
-        let blue_color = spans[1].1.color_opt.unwrap();
-        assert_eq!(
-            (blue_color.r(), blue_color.g(), blue_color.b()),
-            (0, 0, 255),
-            "second span should be blue (later-writer-wins)"
-        );
-
-        assert_eq!(spans.len(), 2, "no trailing unstyled text expected");
-    }
-
-    /// Three runs: middle run overlaps both outer runs; middle (later) wins intersection.
-    ///
-    /// Input: red 0..8, green 4..12, blue 10..15 on 15-byte ASCII.
-    /// Expected: red 0..4, green 4..12, blue 12..15.
-    #[test]
-    fn color_run_spans_three_runs_middle_overlaps_outer() {
-        let text = "0123456789abcde"; // 15 ASCII bytes
-        let red = [255u8, 0, 0, 255];
-        let green = [0u8, 255, 0, 255];
-        let blue = [0u8, 0, 255, 255];
-        // red: 0..8, green: 4..12 (overlaps red and blue), blue: 10..15
-        let runs = [
-            ColorRunItem {
-                start_byte: 0,
-                end_byte: 8,
-                color: red,
-            },
-            ColorRunItem {
-                start_byte: 4,
-                end_byte: 12,
-                color: green,
-            },
-            ColorRunItem {
-                start_byte: 10,
-                end_byte: 15,
-                color: blue,
-            },
-        ];
-        let base = Attrs::new();
-        let spans = color_run_spans(text, &runs, base);
-
-        let combined: String = spans.iter().map(|(s, _)| *s).collect();
-        assert_eq!(combined, text, "all 15 bytes must be covered");
-
-        // Verify the color at the start of each expected segment.
-        // Expected layout: red[0..4], green[4..12], blue[12..15].
-        // (green wins 4..12; blue wins 10..15 — within green's range 10..12 is disputed;
-        //  blue is the latest run touching 10..12, so blue wins.)
-        // Actually: blue(10..15) is later than green(4..12), so blue wins 10..12 too.
-        // Expected: red[0..4], green[4..10], blue[10..15].
-        let segment_texts: Vec<&str> = spans.iter().map(|(s, _)| *s).collect();
-        assert_eq!(segment_texts[0], &text[0..4], "segment 0 = red[0..4]");
-        assert_eq!(segment_texts[1], &text[4..10], "segment 1 = green[4..10]");
-        assert_eq!(segment_texts[2], &text[10..15], "segment 2 = blue[10..15]");
-
-        let c0 = spans[0].1.color_opt.unwrap();
-        assert_eq!((c0.r(), c0.g(), c0.b()), (255, 0, 0), "seg0 = red");
-        let c1 = spans[1].1.color_opt.unwrap();
-        assert_eq!((c1.r(), c1.g(), c1.b()), (0, 255, 0), "seg1 = green");
-        let c2 = spans[2].1.color_opt.unwrap();
-        assert_eq!((c2.r(), c2.g(), c2.b()), (0, 0, 255), "seg2 = blue");
-    }
-
-    /// Unsorted input (run B before run A by start_byte) produces the same
-    /// output as the equivalent sorted input.
-    #[test]
-    fn color_run_spans_unsorted_input_same_as_sorted() {
-        let text = "hello world"; // 11 bytes
-        let red = [255u8, 0, 0, 255];
-        let blue = [0u8, 0, 255, 255];
-
-        // Sorted order: red 0..5, blue 6..11.
-        let sorted_runs = [
-            ColorRunItem {
-                start_byte: 0,
-                end_byte: 5,
-                color: red,
-            },
-            ColorRunItem {
-                start_byte: 6,
-                end_byte: 11,
-                color: blue,
-            },
-        ];
-        // Reversed order: same runs but blue listed first.
-        let unsorted_runs = [
-            ColorRunItem {
-                start_byte: 6,
-                end_byte: 11,
-                color: blue,
-            },
-            ColorRunItem {
-                start_byte: 0,
-                end_byte: 5,
-                color: red,
-            },
+        let cases: Vec<Case> = vec![
+            (
+                "single full run",
+                "hello",
+                vec![(0, 5, RED)],
+                vec![("hello", R)],
+            ),
+            (
+                "two runs with gap",
+                "hello world",
+                vec![(0, 5, RED), (6, 11, BLUE)],
+                vec![("hello", R), (" ", None), ("world", B)],
+            ),
+            (
+                "trailing unstyled",
+                "hello world",
+                vec![(0, 5, RED)],
+                vec![("hello", R), (" world", None)],
+            ),
+            (
+                "empty runs fall back",
+                "no color",
+                vec![],
+                vec![("no color", None)],
+            ),
+            (
+                "end clamped to text",
+                "hi",
+                vec![(0, 999, GREEN)],
+                vec![("hi", G)],
+            ),
+            (
+                "zero-length run skipped",
+                "text",
+                vec![(2, 2, RED)],
+                vec![("text", None)],
+            ),
+            (
+                "multibyte boundary",
+                "éworld",
+                vec![(0, 2, RED)],
+                vec![("é", R), ("world", None)],
+            ),
+            (
+                "overlap: later wins",
+                "0123456789abcde",
+                vec![(0, 10, RED), (5, 15, BLUE)],
+                vec![("01234", R), ("56789abcde", B)],
+            ),
+            (
+                "three runs: middle overlapped by later",
+                "0123456789abcde",
+                vec![(0, 8, RED), (4, 12, GREEN), (10, 15, BLUE)],
+                vec![("0123", R), ("456789", G), ("abcde", B)],
+            ),
+            (
+                "unsorted input equals sorted",
+                "hello world",
+                vec![(6, 11, BLUE), (0, 5, RED)],
+                vec![("hello", R), (" ", None), ("world", B)],
+            ),
+            (
+                "adjacent runs stay separate",
+                "abcdef",
+                vec![(0, 3, RED), (3, 6, BLUE)],
+                vec![("abc", R), ("def", B)],
+            ),
+            (
+                "nested inner wins, outer resumes",
+                "0123456789ab",
+                vec![(0, 12, RED), (4, 8, BLUE)],
+                vec![("0123", R), ("4567", B), ("89ab", R)],
+            ),
+            (
+                "higher index wins though it starts earlier",
+                "0123456789abcde",
+                vec![(5, 15, BLUE), (0, 10, RED)],
+                vec![("0123456789", R), ("abcde", B)],
+            ),
+            (
+                "degenerate dropped, oob clamped, same-color merged",
+                "hello",
+                vec![(2, 2, RED), (3, 100, RED), (0, 3, RED)],
+                vec![("hello", R)],
+            ),
+            (
+                "run crosses newlines as one span",
+                "line 1\nline 2\nline 3",
+                vec![(3, 16, ORANGE)],
+                vec![("lin", None), ("e 1\nline 2\nli", O), ("ne 3", None)],
+            ),
+            (
+                "per-line runs: newline gaps unstyled",
+                "red line\nblue line\ngreen line",
+                vec![(0, 8, RED), (9, 18, BLUE), (19, 29, GREEN)],
+                vec![
+                    ("red line", R),
+                    ("\n", None),
+                    ("blue line", B),
+                    ("\n", None),
+                    ("green line", G),
+                ],
+            ),
         ];
 
-        let base = Attrs::new();
-        let sorted_spans = color_run_spans(text, &sorted_runs, base);
-        let unsorted_spans = color_run_spans(text, &unsorted_runs, base);
-
-        // Text coverage must be identical.
-        let sorted_text: String = sorted_spans.iter().map(|(s, _)| *s).collect();
-        let unsorted_text: String = unsorted_spans.iter().map(|(s, _)| *s).collect();
-        assert_eq!(sorted_text, unsorted_text, "text coverage must match");
-
-        // Span count must match.
-        assert_eq!(
-            sorted_spans.len(),
-            unsorted_spans.len(),
-            "span count must match"
-        );
-
-        // Each span's slice and color must match.
-        for i in 0..sorted_spans.len() {
-            assert_eq!(
-                sorted_spans[i].0, unsorted_spans[i].0,
-                "span[{i}] text slice must match"
-            );
-            assert_eq!(
-                sorted_spans[i].1.color_opt, unsorted_spans[i].1.color_opt,
-                "span[{i}] color must match"
-            );
+        for (name, text, runs, expected) in cases {
+            let runs: Vec<ColorRunItem> = runs
+                .into_iter()
+                .map(|(start_byte, end_byte, color)| ColorRunItem {
+                    start_byte,
+                    end_byte,
+                    color,
+                })
+                .collect();
+            let spans = color_run_spans(text, &runs, Attrs::new());
+            let got: Vec<(&str, Rgb)> = spans
+                .iter()
+                .map(|(s, a)| (*s, a.color_opt.map(|c| (c.r(), c.g(), c.b()))))
+                .collect();
+            assert_eq!(got, expected, "case: {name}");
         }
-    }
-
-    /// Adjacent (touching) non-overlapping runs are preserved as separate spans.
-    #[test]
-    fn color_run_spans_adjacent_non_overlapping() {
-        let text = "abcdef"; // 6 bytes
-        let red = [255u8, 0, 0, 255];
-        let blue = [0u8, 0, 255, 255];
-        // run A: 0..3 ("abc"), run B: 3..6 ("def") — adjacent, no overlap.
-        let runs = [
-            ColorRunItem {
-                start_byte: 0,
-                end_byte: 3,
-                color: red,
-            },
-            ColorRunItem {
-                start_byte: 3,
-                end_byte: 6,
-                color: blue,
-            },
-        ];
-        let base = Attrs::new();
-        let spans = color_run_spans(text, &runs, base);
-
-        let combined: String = spans.iter().map(|(s, _)| *s).collect();
-        assert_eq!(combined, text, "full text must be covered");
-        assert_eq!(spans.len(), 2, "two adjacent runs → two spans (no gap)");
-        assert_eq!(spans[0].0, "abc");
-        assert_eq!(spans[1].0, "def");
-
-        let c0 = spans[0].1.color_opt.unwrap();
-        assert_eq!((c0.r(), c0.g(), c0.b()), (255, 0, 0), "first span = red");
-        let c1 = spans[1].1.color_opt.unwrap();
-        assert_eq!((c1.r(), c1.g(), c1.b()), (0, 0, 255), "second span = blue");
-    }
-
-    /// Fully nested run: inner run (later) wins; outer run retains prefix and
-    /// suffix around the inner region.
-    ///
-    /// Input: red 0..12, blue 4..8 on "0123456789ab" (12 bytes).
-    /// Expected: red 0..4, blue 4..8, red 8..12.
-    #[test]
-    fn color_run_spans_nested_inner_wins() {
-        let text = "0123456789ab"; // 12 ASCII bytes
-        let red = [255u8, 0, 0, 255];
-        let blue = [0u8, 0, 255, 255];
-        let runs = [
-            ColorRunItem {
-                start_byte: 0,
-                end_byte: 12,
-                color: red,
-            },
-            ColorRunItem {
-                start_byte: 4,
-                end_byte: 8,
-                color: blue,
-            }, // nested inside red
-        ];
-        let base = Attrs::new();
-        let spans = color_run_spans(text, &runs, base);
-
-        let combined: String = spans.iter().map(|(s, _)| *s).collect();
-        assert_eq!(combined, text, "all 12 bytes must be covered");
-
-        assert_eq!(spans.len(), 3, "nested inner run → prefix + inner + suffix");
-        assert_eq!(spans[0].0, &text[0..4]);
-        assert_eq!(spans[1].0, &text[4..8]);
-        assert_eq!(spans[2].0, &text[8..12]);
-
-        let c0 = spans[0].1.color_opt.unwrap();
-        assert_eq!((c0.r(), c0.g(), c0.b()), (255, 0, 0), "prefix = red");
-        let c1 = spans[1].1.color_opt.unwrap();
-        assert_eq!(
-            (c1.r(), c1.g(), c1.b()),
-            (0, 0, 255),
-            "inner = blue (later wins)"
-        );
-        let c2 = spans[2].1.color_opt.unwrap();
-        assert_eq!(
-            (c2.r(), c2.g(), c2.b()),
-            (255, 0, 0),
-            "suffix = red (resumed)"
-        );
-    }
-
-    /// Higher original-index run wins even when it starts earlier than the
-    /// lower-index run.
-    ///
-    /// Input: blue(index 0) = 5..15, red(index 1) = 0..10 on 15-byte ASCII.
-    /// Red has the higher original index so it wins bytes 5..10.
-    /// Expected: red 0..10, blue 10..15.
-    #[test]
-    fn color_run_spans_higher_index_earlier_start_wins() {
-        let text = "0123456789abcde"; // 15 ASCII bytes
-        let red = [255u8, 0, 0, 255];
-        let blue = [0u8, 0, 255, 255];
-        // blue is index 0, red is index 1 — red (higher index) must win the overlap.
-        let runs = [
-            ColorRunItem {
-                start_byte: 5,
-                end_byte: 15,
-                color: blue,
-            },
-            ColorRunItem {
-                start_byte: 0,
-                end_byte: 10,
-                color: red,
-            },
-        ];
-        let base = Attrs::new();
-        let spans = color_run_spans(text, &runs, base);
-
-        let combined: String = spans.iter().map(|(s, _)| *s).collect();
-        assert_eq!(combined, text, "all 15 bytes must be covered");
-
-        // Expected: red[0..10], blue[10..15].
-        assert_eq!(spans.len(), 2, "higher-index-wins overlap → two spans");
-        assert_eq!(spans[0].0, &text[0..10], "span 0 = red 0..10");
-        assert_eq!(spans[1].0, &text[10..15], "span 1 = blue 10..15");
-
-        let c0 = spans[0].1.color_opt.unwrap();
-        assert_eq!(
-            (c0.r(), c0.g(), c0.b()),
-            (255, 0, 0),
-            "red (higher index) wins 0..10"
-        );
-        let c1 = spans[1].1.color_opt.unwrap();
-        assert_eq!(
-            (c1.r(), c1.g(), c1.b()),
-            (0, 0, 255),
-            "blue covers unclaimed 10..15"
-        );
-    }
-
-    /// Zero-length and out-of-bounds runs are silently dropped.
-    #[test]
-    fn color_run_spans_degenerate_runs_dropped() {
-        let text = "hello"; // 5 bytes
-        let red = [255u8, 0, 0, 255];
-        let runs = [
-            // zero-length: start == end
-            ColorRunItem {
-                start_byte: 2,
-                end_byte: 2,
-                color: red,
-            },
-            // out-of-bounds: extends past text.len()
-            ColorRunItem {
-                start_byte: 3,
-                end_byte: 100,
-                color: red,
-            },
-            // valid run
-            ColorRunItem {
-                start_byte: 0,
-                end_byte: 3,
-                color: red,
-            },
-        ];
-        let base = Attrs::new();
-        let spans = color_run_spans(text, &runs, base);
-
-        let combined: String = spans.iter().map(|(s, _)| *s).collect();
-        assert_eq!(combined, text, "all text must be covered");
-
-        // Degenerate run at 2..2 is dropped.
-        // Out-of-bounds 3..100 is clamped to 3..5 and still applies.
-        // Valid 0..3 covers "hel". Clamped 3..5 covers "lo".
-        // Both are red, and they're adjacent — so they should merge into one span.
-        assert_eq!(spans.len(), 1, "adjacent same-color spans should merge");
-        let c0 = spans[0].1.color_opt.unwrap();
-        assert_eq!((c0.r(), c0.g(), c0.b()), (255, 0, 0));
-    }
-
-    // ── color_run_spans multiline tests [hud-vwggh] ───────────────────────────
-
-    /// A single color run spanning bytes that cross two `\n` boundaries is
-    /// produced as one contiguous styled span.
-    ///
-    /// text  = "line 1\nline 2\nline 3"  (20 bytes)
-    ///          0123456 789012 3456789
-    ///                ^           ^
-    ///         run:  3..16  →  "e 1\nline 2\nli"
-    ///
-    /// Expected spans:
-    ///   [0] "lin"          (bytes 0..3)   — unstyled prefix on line 1
-    ///   [1] "e 1\nline 2\nli" (bytes 3..16) — single colored span crossing both \n
-    ///   [2] "ne 3"         (bytes 16..20) — unstyled suffix on line 3
-    ///
-    /// This verifies that `color_run_spans` does not split on `\n` itself and
-    /// that the resulting string slices include the newline characters verbatim.
-    /// `set_rich_text` (glyphon) handles the actual line splitting during shaping.
-    #[test]
-    fn color_run_spans_cross_newline_single_run() {
-        let text = "line 1\nline 2\nline 3";
-        // byte layout: "line 1"=0..6, '\n'=6, "line 2"=7..13, '\n'=13, "line 3"=14..20
-        let runs = [ColorRunItem {
-            start_byte: 3,
-            end_byte: 16, // spans "e 1\nline 2\nli"
-            color: [255, 128, 0, 255],
-        }];
-        let base = Attrs::new();
-        let spans = color_run_spans(text, &runs, base);
-
-        assert_eq!(
-            spans.len(),
-            3,
-            "cross-newline run must produce: prefix + colored + suffix"
-        );
-
-        // Unstyled prefix (part of line 1 before the run).
-        assert_eq!(spans[0].0, "lin", "prefix span must be 'lin'");
-        assert!(
-            spans[0].1.color_opt.is_none(),
-            "prefix span must use base_attrs (no color)"
-        );
-
-        // Colored span crossing both newlines — the slice includes the '\n' chars.
-        assert_eq!(
-            spans[1].0, "e 1\nline 2\nli",
-            "colored span must include both newline characters verbatim"
-        );
-        assert!(
-            spans[1].1.color_opt.is_some(),
-            "colored span must carry color_opt"
-        );
-
-        // Unstyled suffix (part of line 3 after the run end).
-        assert_eq!(spans[2].0, "ne 3", "suffix span must be 'ne 3'");
-        assert!(
-            spans[2].1.color_opt.is_none(),
-            "suffix span must use base_attrs (no color)"
-        );
-
-        // Sanity: concatenating all spans reconstructs the original text.
-        let reconstructed: String = spans.iter().map(|(s, _)| *s).collect();
-        assert_eq!(
-            reconstructed, text,
-            "spans must reconstruct the original text exactly"
-        );
-    }
-
-    /// Three color runs each constrained to one line produce per-line color spans
-    /// with the `\n` separator characters falling into unstyled gap spans between
-    /// them.  No color bleeds across a newline boundary.
-    ///
-    /// text  = "red line\nblue line\ngreen line"  (29 bytes)
-    ///          01234567  8 9012345678  9012345678
-    ///
-    /// Runs:  [0..8] red, [9..18] blue, [19..29] green
-    ///
-    /// Expected spans (5 total):
-    ///   [0] "red line"  (0..8)   — red
-    ///   [1] "\n"        (8..9)   — unstyled gap
-    ///   [2] "blue line" (9..18)  — blue
-    ///   [3] "\n"        (18..19) — unstyled gap
-    ///   [4] "green line"(19..29) — green
-    #[test]
-    fn color_run_spans_per_line_runs_no_bleed() {
-        let text = "red line\nblue line\ngreen line";
-        // byte layout: "red line"=0..8, '\n'=8, "blue line"=9..18, '\n'=18, "green line"=19..29
-        let red = [255, 0, 0, 255];
-        let blue = [0, 0, 255, 255];
-        let green = [0, 200, 0, 255];
-        let runs = [
-            ColorRunItem {
-                start_byte: 0,
-                end_byte: 8,
-                color: red,
-            },
-            ColorRunItem {
-                start_byte: 9,
-                end_byte: 18,
-                color: blue,
-            },
-            ColorRunItem {
-                start_byte: 19,
-                end_byte: 29,
-                color: green,
-            },
-        ];
-        let base = Attrs::new();
-        let spans = color_run_spans(text, &runs, base);
-
-        assert_eq!(
-            spans.len(),
-            5,
-            "3 per-line runs with \\n gaps must produce 5 spans (run, \\n, run, \\n, run)"
-        );
-
-        // Line 1: red
-        assert_eq!(spans[0].0, "red line", "first span must be 'red line'");
-        assert!(
-            spans[0].1.color_opt.is_some(),
-            "line-1 span must carry color_opt"
-        );
-
-        // Gap: the '\n' between line 1 and line 2 is unstyled.
-        assert_eq!(
-            spans[1].0, "\n",
-            "gap between line 1 and line 2 must be '\\n'"
-        );
-        assert!(
-            spans[1].1.color_opt.is_none(),
-            "newline gap must use base_attrs — no color bleed from line-1 run"
-        );
-
-        // Line 2: blue
-        assert_eq!(spans[2].0, "blue line", "second span must be 'blue line'");
-        assert!(
-            spans[2].1.color_opt.is_some(),
-            "line-2 span must carry color_opt"
-        );
-
-        // Gap: the '\n' between line 2 and line 3 is unstyled.
-        assert_eq!(
-            spans[3].0, "\n",
-            "gap between line 2 and line 3 must be '\\n'"
-        );
-        assert!(
-            spans[3].1.color_opt.is_none(),
-            "newline gap must use base_attrs — no color bleed from line-2 run"
-        );
-
-        // Line 3: green
-        assert_eq!(spans[4].0, "green line", "third span must be 'green line'");
-        assert!(
-            spans[4].1.color_opt.is_some(),
-            "line-3 span must carry color_opt"
-        );
-
-        // Sanity: concatenating all spans reconstructs the original text.
-        let reconstructed: String = spans.iter().map(|(s, _)| *s).collect();
-        assert_eq!(
-            reconstructed, text,
-            "spans must reconstruct the original text exactly"
-        );
     }
 
     // ── TruncationCache tests (hud-wgq7j) ────────────────────────────────────
@@ -4526,6 +3960,10 @@ mod tests {
             .get_by_key(&key_narrow)
             .expect("narrow must be cached");
         let wide_result = cache.get_by_key(&key_wide).expect("wide must be cached");
+        assert_eq!(
+            wide_result.text, content,
+            "text that fits the wide box passes through unchanged"
+        );
         assert!(
             wide_result.text.len() >= narrow_result.text.len(),
             "wider bounds must produce an equal-or-longer result"
@@ -4969,50 +4407,6 @@ mod tests {
         assert!(
             cache.is_empty(),
             "is_empty() must return true after clear()"
-        );
-    }
-
-    /// Frame-path lookup is O(1): get_by_key with a pre-computed key returns
-    /// the result without touching font_system.
-    #[test]
-    fn truncation_cache_frame_path_lookup_is_o1() {
-        let mut fs = FontSystem::new();
-        let mut cache = TruncationCache::new();
-
-        let content = "Short text for O(1) lookup test";
-        let key = TruncationKey::new(
-            content,
-            200.0,
-            50.0,
-            16.0,
-            FontFamily::SystemSansSerif,
-            400,
-            TruncationViewport::HeadAnchored,
-        );
-
-        // Prime once (commit-time cost).
-        cache.prime(
-            key,
-            content,
-            200.0,
-            50.0,
-            16.0,
-            FontFamily::SystemSansSerif,
-            400,
-            TruncationViewport::HeadAnchored,
-            1.4,
-            &mut fs,
-        );
-
-        // Frame-path: get_by_key must return Some without touching font_system.
-        let result = cache.get_by_key(&key);
-        assert!(result.is_some(), "frame-path lookup must hit after prime");
-
-        // Result must not be truncated for a 200px-wide box and short text.
-        let result = result.unwrap();
-        assert!(
-            result.text.contains("Short text"),
-            "short text must pass through unchanged"
         );
     }
 
