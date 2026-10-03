@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -64,9 +65,12 @@ def load_psk(raw: str | None = None, env: str | None = None) -> str:
         return os.environ[env]
     path = psk_path(raw)
     try:
-        value = path.read_text(encoding="utf-8").strip()
+        mode = path.stat().st_mode & 0o777
+        value = path.read_text(encoding="utf-8").strip() if not mode & 0o077 else ""
     except OSError:
-        value = ""
+        mode, value = 0, ""
+    if mode & 0o077:
+        raise HudEnvError(f"{path} is mode {mode:03o}; run chmod 600 on it (or re-pair)")
     if not value:
         raise HudEnvError(f"no PSK at {path}; pair first: hud_pair.py --code <code>")
     return value
@@ -83,6 +87,8 @@ def main(argv: list[str]) -> int:
         print("usage: hud_env.py mcp-headers", file=sys.stderr)
         return 2
     try:
+        if re.search(r"[:/@]", os.environ.get("HUD_HOST", "")):
+            raise HudEnvError("HUD_HOST must be a bare host for .mcp.json (no scheme or port)")
         print(json.dumps({"Authorization": f"Bearer {load_psk()}"}))
     except HudEnvError as error:
         print(f"hud_env: {error}", file=sys.stderr)

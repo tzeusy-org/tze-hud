@@ -1,9 +1,1 @@
-{
-  "mcpServers": {
-    "tze-hud-windows": {
-      "type": "http",
-      "url": "http://${HUD_HOST}:9090/mcp",
-      "headersHelper": "python3 .claude/skills/user-test/scripts/hud_env.py mcp-headers"
-    }
-  }
-}
+{}

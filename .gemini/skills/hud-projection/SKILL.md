@@ -100,8 +100,11 @@ python3 $CLIENT clear   --id my-session
 
 ## MCP client
 
-Merge `settings.template.json` into your MCP settings. Its `headersHelper`
-sends the paired PSK as the bearer, so no secret sits in the config.
+The repo's `.mcp.json` already defines `tze-hud` (template:
+`mcp.template.json`). Set `HUD_HOST` to the **bare** host (no port or scheme;
+the URL appends `:9090`); its `headersHelper` sends the paired PSK as the
+bearer, so no secret sits in the config. Claude Code runs the helper from the
+project dir after you trust the workspace.
 
 ## Source of truth
 

@@ -42,8 +42,10 @@ may publish to.
 
 ### 2. MCP server configuration
 
-Merge the `mcpServers` entry from `settings.template.json` into your MCP
-settings. Its `headersHelper` sends the paired PSK as the bearer.
+The repo's `.mcp.json` already defines `tze-hud` (template:
+`mcp.template.json`). Set `HUD_HOST` to the **bare** host (no port or scheme;
+the URL appends `:9090`). Its `headersHelper` sends the paired PSK as the
+bearer.
 
 ### 3. Verify connectivity
 

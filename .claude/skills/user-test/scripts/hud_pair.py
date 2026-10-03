@@ -14,6 +14,7 @@ import argparse
 import json
 import os
 import sys
+import tempfile
 import urllib.error
 import urllib.request
 
@@ -21,14 +22,17 @@ import hud_env
 
 
 def write_psk(path, psk: str) -> None:
-    """Write `psk` to `path` as 0600 without ever exposing it at a wider mode."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".tmp")
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as handle:
-        handle.write(psk + "\n")
-    os.chmod(tmp, 0o600)
-    os.replace(tmp, path)
+    """Write `psk` to `path`, created 0600 (mkstemp: O_EXCL, no symlink follow) in a 0700 dir."""
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    os.chmod(path.parent, 0o700)
+    fd, tmp = tempfile.mkstemp(prefix=path.name + ".", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(psk + "\n")
+        os.replace(tmp, path)
+    except BaseException:
+        os.unlink(tmp)
+        raise
 
 
 def pair(host: str | None, agent: str, code: str, admin: bool) -> dict:

@@ -99,6 +99,7 @@ def test_write_failure_has_no_traceback_and_no_psk(hud):
     (psk_file(home) / "x").write_text("x")
     result = pair(host, home)
     assert result.returncode == 1
+    assert "hud_pair: IsADirectoryError talking to the HUD or writing the PSK file" in result.stderr
     assert "Traceback" not in result.stderr
     assert "ab" * 31 not in result.stdout + result.stderr
 
@@ -128,3 +129,44 @@ def test_admin_sends_the_paired_psk_as_bearer(hud):
     )
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout) == {"path": "/admin/logs?tail=5"}
+
+
+def test_pair_creates_a_private_dir_and_ignores_planted_files(hud):
+    host, home = hud
+    victim = home / "victim"
+    victim.write_text("keep")
+    config = psk_file(home).parent
+    config.mkdir(parents=True, mode=0o755)
+    config.chmod(0o755)
+    (config / "127.0.0.1.psk.tmp").symlink_to(victim)  # the old fixed tmp name
+    (config / "127.0.0.1.psk").symlink_to(victim)  # replaced, not followed
+    assert pair(host, home).returncode == 0
+    assert victim.read_text() == "keep"
+    assert stat.S_IMODE(config.stat().st_mode) == 0o700
+    assert not psk_file(home).is_symlink()
+    assert stat.S_IMODE(psk_file(home).stat().st_mode) == 0o600
+
+
+def test_load_psk_refuses_a_group_or_world_readable_file(hud, monkeypatch):
+    host, home = hud
+    monkeypatch.syspath_prepend(str(SCRIPTS))
+    monkeypatch.setenv("HOME", str(home))
+    import hud_env
+
+    pair(host, home)
+    psk_file(home).chmod(0o640)
+    with pytest.raises(hud_env.HudEnvError, match="mode 640") as refused:
+        hud_env.load_psk("127.0.0.1")
+    assert psk_file(home).read_text().strip() not in str(refused.value)
+
+
+def test_mcp_headers_needs_a_bare_host(hud):
+    host, home = hud
+    pair(host, home)
+    env = {**os.environ, "HOME": str(home), "HUD_HOST": "127.0.0.1"}
+    run = lambda e: subprocess.run(  # noqa: E731
+        [sys.executable, str(SCRIPTS / "hud_env.py"), "mcp-headers"], capture_output=True, text=True, env=e
+    )
+    assert json.loads(run(env).stdout)["Authorization"].startswith("Bearer ")
+    bad = run({**env, "HUD_HOST": "127.0.0.1:9090"})
+    assert bad.returncode == 1 and "bare host" in bad.stderr and not bad.stdout
