@@ -42,6 +42,9 @@ llvmpipe when the ICD is installed. Don't run bare `cargo test -p tze_hud_compos
 Vulkan ICD (recorded hangs were NVIDIA driver threads). Building needs protoc >= 3.15; set
 `PROTOC=/path/to/protoc` if `/usr/bin/protoc` is older.
 
+On Windows, `just` needs Git for Windows' `sh` and a real `python3`; setup, the
+per-recipe status, and runtime differences are in `docs/development/windows.md`.
+
 ## Quick Reference
 
 ```bash
