@@ -5,45 +5,19 @@
 //! This crate provides `TzeHudConfig`, the concrete implementation of the
 //! `ConfigLoader` trait defined in `tze_hud_scene::config`.
 //!
-//! ## Scope
-//!
-//! ### rig-j90m (TOML schema and file loading)
-//! - TOML Configuration Format (v1-mandatory)
-//! - Configuration File Resolution Order (v1-mandatory)
-//! - Minimal Valid Configuration (v1-mandatory)
-//! - Structured Validation Error Collection (v1-mandatory)
-//! - Tab Configuration Validation (v1-mandatory)
-//! - Reserved Fraction Validation (v1-mandatory)
-//! - FPS Range Validation (v1-mandatory)
-//! - Degradation Threshold Ordering (v1-mandatory)
-//! - Scene Event Naming Convention (v1-mandatory)
-//! - Schema Export (v1-mandatory)
-//! - Layered Config Composition guard (v1-reserved: hard error)
-//!
-//! ### rig-umgy (Display profile resolution)
-//! - Display Profile full-display (v1-mandatory)
-//! - Display Profile headless (v1-mandatory)
-//! - Profile Auto-Detection (v1-mandatory)
-//! - Profile Budget Escalation Prevention (v1-mandatory)
-//! - Profile Extends Conflict Detection (v1-mandatory)
-//! - Headless Virtual Display (v1-mandatory)
-//!
-//! ### rig-mop4 (Zone registry, agent registration, hot-reload)
-//! - Zone Registry Configuration (v1-mandatory)
-//! - Paired agents (`agents.toml`: PSK hashes and allow lists)
-//! - Configuration Reload (v1-mandatory)
+//! Covers TOML parsing and validation, file resolution, the built-in display
+//! profiles (`full-display`, `headless`), zone and widget registries, design
+//! tokens, paired agents (`agents.toml`), and reload classification.
 
 pub mod agents_file;
 pub mod allow;
 pub mod loader;
 pub mod policy_builder;
 pub mod portal_tokens;
-pub mod profile;
 pub mod raw;
 pub mod reload;
 pub mod resolver;
 pub mod runtime_widget_assets;
-pub mod schema;
 #[cfg(test)]
 mod tests;
 pub mod tokens;
@@ -83,10 +57,6 @@ pub use portal_tokens::{
     PORTAL_TOKEN_WINDOW_RESIZE_STEP_PX, PortalPartTokens, TimestampGranularity,
     resolve_portal_tokens,
 };
-pub use profile::{
-    AutoDetectResult, HeadlessSignal, auto_detect_profile, resolve_headless_dimensions,
-    resolve_profile, validate_display_profile,
-};
 pub use reload::{
     FROZEN_SECTIONS, FieldClassification, HotReloadableConfig, SighupHandler,
     check_frozen_section_changes, reload_config, section_classification,
@@ -97,7 +67,6 @@ pub use runtime_widget_assets::{
     DEFAULT_MAX_TOTAL_BYTES as DEFAULT_WIDGET_RUNTIME_MAX_TOTAL_BYTES,
     RuntimeWidgetAssetStoreConfig, resolve_runtime_widget_asset_store, resolve_store_path,
 };
-pub use schema::print_schema;
 pub use widgets::{
     LoadedWidgetType, build_widget_instance, validate_widget_bundles, validate_widget_instances,
 };

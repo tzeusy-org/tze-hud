@@ -5,11 +5,7 @@
 //! permissive — all fields except the structurally-required ones are `Option`
 //! so that we can collect all missing/invalid-value errors in the validation
 //! phase rather than failing at deserialisation.
-//!
-//! All of these types derive `schemars::JsonSchema` so that the `--print-schema`
-//! feature can generate a full JSON Schema from them.
 
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -17,90 +13,25 @@ use std::collections::HashMap;
 
 /// Wrapper that accepts any TOML value during deserialization.
 ///
-/// Used exclusively for the `includes` field to detect its presence and
-/// report a hard error (v1-reserved; post-v1 only).
+/// Used for keys that are rejected outright (`includes`, `[agents]`,
+/// `[display_profile]`) so their presence can be reported with a hint, and for
+/// widget `initial_params` values.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct AnyValue(pub toml::Value);
-
-impl JsonSchema for AnyValue {
-    fn schema_name() -> String {
-        "AnyValue".to_string()
-    }
-
-    fn json_schema(_gen: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
-        // Represents any JSON value.
-        schemars::schema::Schema::Bool(true)
-    }
-}
 
 // ─── [runtime] ───────────────────────────────────────────────────────────────
 
 /// `[runtime]` table — required.
-#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct RawRuntime {
     /// Display profile name.  Must be present.
     pub profile: Option<String>,
-
-    /// Write the JSON Schema at startup and continue running.
-    #[serde(default)]
-    pub emit_schema: bool,
-
-    /// Virtual display width for headless mode (default 1920).
-    pub headless_width: Option<u32>,
-
-    /// Virtual display height for headless mode (default 1080).
-    pub headless_height: Option<u32>,
-}
-
-// ─── [display_profile] ───────────────────────────────────────────────────────
-
-/// `[display_profile]` table — optional; used for custom profiles that extend
-/// a built-in.
-#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
-pub struct RawDisplayProfile {
-    /// Built-in profile to extend (only `full-display`; NOT `headless`).
-    pub extends: Option<String>,
-
-    /// Override: max tiles.
-    pub max_tiles: Option<u32>,
-    /// Override: max texture memory in MiB.
-    pub max_texture_mb: Option<u32>,
-    /// Override: aggregate runtime-owned resident memory in MiB.
-    pub max_runtime_resident_mb: Option<u32>,
-    /// Override: scene resource/image resident memory in MiB.
-    pub max_resource_resident_mb: Option<u32>,
-    /// Override: retained widget source resident memory in MiB.
-    pub max_widget_asset_resident_mb: Option<u32>,
-    /// Override: widget raster cache resident memory in MiB.
-    pub max_widget_raster_cache_mb: Option<u32>,
-    /// Override: font resident memory in MiB.
-    pub max_font_resident_mb: Option<u32>,
-    /// Override: max simultaneous agents.
-    pub max_agents: Option<u32>,
-    /// Override: max media streams.
-    pub max_media_streams: Option<u32>,
-    /// Override: max agent update Hz.
-    pub max_agent_update_hz: Option<u32>,
-    /// Override: target FPS.
-    pub target_fps: Option<u32>,
-    /// Override: minimum FPS.
-    pub min_fps: Option<u32>,
-    /// Override: per-surface bound (bytes) on the input a single uncached
-    /// truncation may shape before the compositor's viewport-adjacent-window
-    /// fallback engages (spec.md §324/§331). Unset → the resolved profile keeps
-    /// `DEFAULT_MAX_TRUNCATION_INPUT_BYTES` (4096).
-    pub max_truncation_input_bytes: Option<u32>,
-
-    /// Override: allow background zones.
-    pub allow_background_zones: Option<bool>,
-    /// Override: allow chrome zones.
-    pub allow_chrome_zones: Option<bool>,
 }
 
 // ─── [[tabs]] ────────────────────────────────────────────────────────────────
 
 /// A single entry in the `[[tabs]]` array.
-#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct RawTab {
     /// Human-readable tab name.  Must be unique.
     pub name: Option<String>,
@@ -108,16 +39,6 @@ pub struct RawTab {
     /// Whether this is the default tab.
     #[serde(default)]
     pub default_tab: bool,
-
-    /// Default tile layout for this tab.
-    pub default_layout: Option<String>,
-
-    /// Scene event name that triggers an automatic switch to this tab.
-    /// Empty string = no auto-switch.
-    pub tab_switch_on_event: Option<String>,
-
-    /// Layout fractions.
-    pub layout: Option<RawTabLayout>,
 
     /// Zone types active on this tab.
     ///
@@ -136,23 +57,14 @@ pub struct RawTab {
     pub widgets: Vec<RawTabWidget>,
 }
 
-/// Layout fractions within a tab.
-#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
-pub struct RawTabLayout {
-    pub reserved_top_fraction: Option<f64>,
-    pub reserved_bottom_fraction: Option<f64>,
-    pub reserved_left_fraction: Option<f64>,
-    pub reserved_right_fraction: Option<f64>,
-}
-
 // ─── [zones] ─────────────────────────────────────────────────────────────────
 
 /// `[zones]` table — optional.  Custom zone type definitions.
-#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct RawZones(pub HashMap<String, RawZoneType>);
 
 /// A single custom zone type definition.
-#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct RawZoneType {
     pub policy: Option<String>,
     pub layer: Option<String>,
@@ -168,7 +80,7 @@ pub struct RawZoneType {
 ///
 /// Absence of this section means no widget types are loaded (empty registry).
 /// This is valid — the runtime starts with an empty widget registry.
-#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct RawWidgetBundles {
     /// Array of directory paths to scan for widget bundles.
     /// Each path is resolved relative to the config file's parent directory.
@@ -180,7 +92,7 @@ pub struct RawWidgetBundles {
 ///
 /// Configures the durable runtime widget SVG asset store used for assets
 /// registered while the runtime is active.
-#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct RawWidgetRuntimeAssets {
     /// Root directory for durable widget SVG blobs + metadata index.
     /// Relative paths are resolved against the config file parent directory.
@@ -192,7 +104,7 @@ pub struct RawWidgetRuntimeAssets {
 }
 
 /// A `[[tabs.widgets]]` entry declaring a widget instance on a tab.
-#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct RawTabWidget {
     /// Widget type name (must match a loaded bundle's widget type name).
     pub widget_type: Option<String>,
@@ -222,7 +134,7 @@ pub struct RawTabWidget {
 }
 
 /// Inline geometry override for a widget instance.
-#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct RawWidgetGeometry {
     /// Absolute pixel x-coordinate (top-left origin).
     pub x: Option<f32>,
@@ -252,7 +164,7 @@ pub struct RawWidgetGeometry {
 /// or literal string).
 ///
 /// Unknown keys (non-canonical) are accepted and passed through unchanged.
-#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct RawDesignTokens(pub HashMap<String, String>);
 
 // ─── Top-level document ──────────────────────────────────────────────────────
@@ -261,7 +173,7 @@ pub struct RawDesignTokens(pub HashMap<String, String>);
 ///
 /// All sections are optional to allow maximum error collection; the validator
 /// enforces required fields.
-#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct RawConfig {
     /// Optional config schema version. Absent is treated as the current
     /// supported version (back-compatible for existing v1 configs); a value
@@ -276,7 +188,9 @@ pub struct RawConfig {
     pub includes: Option<AnyValue>,
 
     pub runtime: Option<RawRuntime>,
-    pub display_profile: Option<RawDisplayProfile>,
+    /// `[display_profile]` is rejected: the two built-in profiles are fixed.
+    /// Accepts any value so presence can be reported with a hint.
+    pub display_profile: Option<AnyValue>,
 
     #[serde(default)]
     pub tabs: Vec<RawTab>,

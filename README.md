@@ -166,7 +166,7 @@ Minimal valid config requirements:
 
 Schema version and compatibility policy:
 - An optional top-level `schema_version` (integer) declares the config schema the
-  document targets. It appears in the exported JSON schema (`--print-schema`).
+  document targets.
 - **Absent** → treated as the current supported version, so existing v1 configs
   load unchanged.
 - **Within the supported range** → loads and proceeds to normal validation.

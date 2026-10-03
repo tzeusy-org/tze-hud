@@ -1,41 +1,14 @@
 //! `TzeHudConfig` — concrete implementation of `ConfigLoader`.
 //!
-//! This module implements all v1-mandatory validation requirements from
-//! `configuration/spec.md` that belong to beads rig-j90m and rig-umgy:
-//!
-//! **rig-j90m** (TOML schema and file loading):
-//! - TOML parse errors with line + column (§TOML Configuration Format)
-//! - File resolution order (§Configuration File Resolution Order)
-//! - Minimal valid config: `[runtime]` + `profile` + ≥1 `[[tabs]]` (§Minimal Valid Configuration)
-//! - Layered config (`includes`) rejected (§Layered Config Composition, v1-reserved)
-//! - All validation errors collected before reporting (§Structured Validation Error Collection)
-//! - Tab uniqueness, default_tab count, layout enum (§Tab Configuration Validation)
-//! - Reserved fraction sums (§Reserved Fraction Validation)
-//! - FPS range: target_fps >= min_fps (§FPS Range Validation)
-//! - Degradation threshold ordering (§Degradation Threshold Ordering)
-//! - Scene event naming convention (§Scene Event Naming Convention)
-//!
-//! **rig-umgy** (Display profile resolution):
-//! - `extends = "headless"` rejection (§Display Profile headless)
-//! - Profile budget escalation prevention (§Profile Budget Escalation Prevention)
-//! - Profile capability escalation prevention (§Profile Budget Escalation Prevention)
-//! - Profile/extends conflict detection (§Profile Extends Conflict Detection)
-//! - Headless virtual display dimensions (§Headless Virtual Display)
-//!
-//! Validation items delegated to other beads:
-//! - Capability vocabulary (rig-9yfh): `CONFIG_UNKNOWN_CAPABILITY`, reserved event
-//!   prefix in capability grants.
-//! - Privacy / zone registry / agent registration (rig-mop4).
-//!   Note: per-tab zone-type reference validation (`validate_tab_zone_references`)
-//!   is invoked here at step (4b), but the implementation lives in the `zones` module.
+//! Validation collects every error before reporting. Rejected-by-design keys
+//! (`includes`, `[agents]`, `[display_profile]`) fail with a hint.
 
 use std::collections::HashMap;
 
 use tze_hud_scene::config::{
-    ConfigError, ConfigErrorCode, ConfigLoader, ParseError, ResolvedConfig,
+    ConfigError, ConfigErrorCode, ConfigLoader, DisplayProfile, ParseError, ResolvedConfig,
 };
 
-use crate::profile;
 use crate::raw::RawConfig;
 use crate::resolver;
 use crate::runtime_widget_assets;
@@ -54,33 +27,6 @@ pub const CURRENT_CONFIG_SCHEMA_VERSION: u32 = 1;
 /// `CONFIG_SCHEMA_VERSION_UNSUPPORTED` (configuration spec §Config Schema Version
 /// and Compatibility Policy).
 pub const MAX_SUPPORTED_CONFIG_SCHEMA_VERSION: u32 = 1;
-
-// ─── Regex helper ────────────────────────────────────────────────────────────
-
-/// Scene event name pattern: `^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$`
-fn is_valid_event_name(name: &str) -> bool {
-    if name.is_empty() {
-        // Empty string is explicitly valid (no auto-switch).
-        return true;
-    }
-    fn valid_segment(s: &str) -> bool {
-        if s.is_empty() {
-            return false;
-        }
-        let mut chars = s.chars();
-        match chars.next() {
-            Some(c) if c.is_ascii_lowercase() => {}
-            _ => return false,
-        }
-        chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
-    }
-    // Use split_once to avoid a Vec allocation; the second part must not contain
-    // a dot (valid_segment rejects it since '.' is not in [a-z0-9_]).
-    match name.split_once('.') {
-        Some((source, action)) => valid_segment(source) && valid_segment(action),
-        None => false,
-    }
-}
 
 // ─── TzeHudConfig ─────────────────────────────────────────────────────────────
 
@@ -201,45 +147,24 @@ impl ConfigLoader for TzeHudConfig {
             validate_profile(p, &mut errors);
         }
 
-        // ── (3) [display_profile] extends + budget escalation (rig-umgy) ─────
-        profile::validate_display_profile(&self.raw, &mut errors);
+        // ── (3) [display_profile] is rejected; the built-in profiles are fixed ──
+        if self.raw.display_profile.is_some() {
+            errors.push(ConfigError {
+                code: ConfigErrorCode::DisplayProfileNotSupported,
+                field_path: "display_profile".into(),
+                expected: "no [display_profile] table".into(),
+                got: "[display_profile] present".into(),
+                hint: "remove [display_profile]; choose [runtime].profile = \"full-display\" \
+                       or \"headless\""
+                    .into(),
+            });
+        }
 
         // ── (4) [[tabs]] — at least one, names unique, ≤1 default ────────────
         validate_tabs(&self.raw, &mut errors);
 
         // ── (4b) Per-tab zone-type reference validation ───────────────────────
         zones::validate_tab_zone_references(&self.raw, &mut errors);
-
-        // ── (5) Reserved fractions ────────────────────────────────────────────
-        for (i, tab) in self.raw.tabs.iter().enumerate() {
-            if let Some(layout) = &tab.layout {
-                validate_reserved_fractions(i, layout, &mut errors);
-            }
-        }
-
-        // ── (6) FPS range ─────────────────────────────────────────────────────
-        if let Some(dp) = &self.raw.display_profile {
-            validate_fps_range(dp.target_fps, dp.min_fps, &mut errors);
-        }
-
-        // ── (7) Degradation thresholds ────────────────────────────────────────
-
-        // ── (8) Scene event naming convention (tab_switch_on_event) ──────────
-        for (i, tab) in self.raw.tabs.iter().enumerate() {
-            if let Some(event) = &tab.tab_switch_on_event
-                && !is_valid_event_name(event)
-            {
-                errors.push(ConfigError {
-                        code: ConfigErrorCode::InvalidEventName,
-                        field_path: format!("tabs[{i}].tab_switch_on_event"),
-                        expected: "empty string or <source>.<action> matching ^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$".into(),
-                        got: format!("{event:?}"),
-                        hint: format!(
-                            "use lowercase dotted format e.g. \"doorbell.ring\"; got {event:?}"
-                        ),
-                    });
-            }
-        }
 
         // ── (10) Zone registry ────────────────────────────────────────────────
         if let Some(zone_registry) = &self.raw.zones {
@@ -297,21 +222,14 @@ impl ConfigLoader for TzeHudConfig {
             return Err(errors);
         }
 
-        // Resolve effective profile.
-        //
-        // DESIGN NOTE: `ConfigLoader::freeze()` is a trait method that cannot accept
-        // runtime GPU parameters. We use synthetic values (8192 MB VRAM / 60 Hz) so that
-        // `profile = "auto"` resolves to `full-display` rather than `Ambiguous` in test
-        // and validation contexts. The env-var-based headless signals ($DISPLAY, /.dockerenv)
-        // still take precedence and are checked by `auto_detect_profile()` first.
-        //
-        // Production runtimes that need accurate auto-detection MUST call
-        // `profile::resolve_profile(&raw, actual_gpu_vram_mb, actual_refresh_hz)` directly
-        // before calling `freeze()`, and use the resulting `DisplayProfile` instead of the one
-        // embedded in `ResolvedConfig` when `profile = "auto"`.
-        let profile = profile::resolve_profile(
-            &self.raw, /*gpu_vram_mb=*/ 8192, /*refresh_hz=*/ 60,
-        )?;
+        // `validate()` already rejected unknown profile names.
+        let profile = self
+            .raw
+            .runtime
+            .as_ref()
+            .and_then(|r| r.profile.as_deref())
+            .and_then(DisplayProfile::builtin)
+            .expect("validated config names a built-in profile");
 
         let tab_names = self
             .raw
@@ -374,16 +292,14 @@ fn parse_toml_location(msg: &str) -> (u32, u32) {
 /// Validate the profile string value and append any errors.
 fn validate_profile(profile: &str, errors: &mut Vec<ConfigError>) {
     match profile {
-        "full-display" | "headless" | "auto" | "custom" => {}
+        "full-display" | "headless" => {}
         other => {
             errors.push(ConfigError {
                 code: ConfigErrorCode::UnknownProfile,
                 field_path: "runtime.profile".into(),
-                expected: "\"full-display\", \"headless\", \"auto\", or \"custom\"".into(),
+                expected: "\"full-display\" or \"headless\"".into(),
                 got: format!("{other:?}"),
-                hint: format!(
-                    "unknown profile {other:?}; valid values: full-display, headless, auto, custom"
-                ),
+                hint: format!("unknown profile {other:?}; valid values: full-display, headless"),
             });
         }
     }
@@ -449,98 +365,6 @@ fn validate_tabs(raw: &RawConfig, errors: &mut Vec<ConfigError>) {
                 });
             }
         }
-
-        // Layout enum validation.
-        if let Some(layout) = &tab.default_layout {
-            match layout.as_str() {
-                "grid" | "columns" | "freeform" => {}
-                other => {
-                    errors.push(ConfigError {
-                        code: ConfigErrorCode::UnknownLayout,
-                        field_path: format!("tabs[{i}].default_layout"),
-                        expected: "\"grid\", \"columns\", or \"freeform\"".into(),
-                        got: format!("{other:?}"),
-                        hint: format!(
-                            "unknown layout {other:?}; valid values: grid, columns, freeform"
-                        ),
-                    });
-                }
-            }
-        }
-    }
-}
-
-/// Validate reserved fraction sums for a single tab's layout.
-fn validate_reserved_fractions(
-    tab_idx: usize,
-    layout: &crate::raw::RawTabLayout,
-    errors: &mut Vec<ConfigError>,
-) {
-    let top = layout.reserved_top_fraction.unwrap_or(0.0);
-    let bottom = layout.reserved_bottom_fraction.unwrap_or(0.0);
-    let left = layout.reserved_left_fraction.unwrap_or(0.0);
-    let right = layout.reserved_right_fraction.unwrap_or(0.0);
-
-    // Each fraction must be in [0.0, 1.0].
-    for (name, val) in [
-        ("reserved_top_fraction", top),
-        ("reserved_bottom_fraction", bottom),
-        ("reserved_left_fraction", left),
-        ("reserved_right_fraction", right),
-    ] {
-        if !(0.0..=1.0).contains(&val) {
-            errors.push(ConfigError {
-                code: ConfigErrorCode::InvalidReservedFraction,
-                field_path: format!("tabs[{tab_idx}].layout.{name}"),
-                expected: "value in [0.0, 1.0]".into(),
-                got: format!("{val}"),
-                hint: format!("{name} must be between 0.0 and 1.0 inclusive"),
-            });
-        }
-    }
-
-    // Vertical sum must be < 1.0.
-    if top + bottom >= 1.0 {
-        errors.push(ConfigError {
-            code: ConfigErrorCode::InvalidReservedFraction,
-            field_path: format!("tabs[{tab_idx}].layout"),
-            expected: "reserved_top_fraction + reserved_bottom_fraction < 1.0".into(),
-            got: format!("{top} + {bottom} = {}", top + bottom),
-            hint: "no vertical space remains for agent tiles; reduce top or bottom fraction".into(),
-        });
-    }
-
-    // Horizontal sum must be < 1.0.
-    if left + right >= 1.0 {
-        errors.push(ConfigError {
-            code: ConfigErrorCode::InvalidReservedFraction,
-            field_path: format!("tabs[{tab_idx}].layout"),
-            expected: "reserved_left_fraction + reserved_right_fraction < 1.0".into(),
-            got: format!("{left} + {right} = {}", left + right),
-            hint: "no horizontal space remains for agent tiles; reduce left or right fraction"
-                .into(),
-        });
-    }
-}
-
-/// Validate FPS range for an explicit display_profile override.
-fn validate_fps_range(
-    target_fps: Option<u32>,
-    min_fps: Option<u32>,
-    errors: &mut Vec<ConfigError>,
-) {
-    if let (Some(target), Some(min)) = (target_fps, min_fps)
-        && target < min
-    {
-        errors.push(ConfigError {
-            code: ConfigErrorCode::InvalidFpsRange,
-            field_path: "display_profile".into(),
-            expected: format!("target_fps ({target}) >= min_fps ({min})"),
-            got: format!("target_fps={target}, min_fps={min}"),
-            hint: format!(
-                "target_fps must be >= min_fps; set target_fps >= {min} or lower min_fps"
-            ),
-        });
     }
 }
 
@@ -569,33 +393,6 @@ mod unit_tests {
         assert_eq!(c, 1, "column should default to 1");
     }
 
-    // ── event name validation ─────────────────────────────────────────────────
-
-    #[test]
-    fn test_event_name_valid() {
-        assert!(is_valid_event_name("doorbell.ring"));
-        assert!(is_valid_event_name("door_bell.ring_now"));
-        assert!(is_valid_event_name("src123.act456"));
-    }
-
-    #[test]
-    fn test_event_name_empty_is_valid() {
-        assert!(is_valid_event_name(""), "empty string must be valid");
-    }
-
-    #[test]
-    fn test_event_name_invalid_patterns() {
-        assert!(
-            !is_valid_event_name("Doorbell-Ring"),
-            "uppercase not allowed"
-        );
-        assert!(!is_valid_event_name("doorbell"), "no dot");
-        assert!(!is_valid_event_name(".ring"), "empty source");
-        assert!(!is_valid_event_name("doorbell."), "empty action");
-        assert!(!is_valid_event_name("1doorbell.ring"), "starts with digit");
-        assert!(!is_valid_event_name("door.bell.ring"), "more than one dot");
-    }
-
     // ── profile validation ────────────────────────────────────────────────────
 
     #[test]
@@ -616,7 +413,7 @@ mod unit_tests {
 
     #[test]
     fn test_validate_profile_known_profiles_no_error() {
-        for p in &["full-display", "headless", "auto", "custom"] {
+        for p in &["full-display", "headless"] {
             let mut errors = Vec::new();
             validate_profile(p, &mut errors);
             assert!(errors.is_empty(), "profile {p:?} should not produce errors");
@@ -679,67 +476,5 @@ mod unit_tests {
                 .any(|e| matches!(e.code, ConfigErrorCode::MultipleDefaultTabs)),
             "multiple default_tab=true should produce error"
         );
-    }
-
-    // ── reserved fractions ────────────────────────────────────────────────────
-
-    #[test]
-    fn test_reserved_fractions_sum_to_one_invalid() {
-        let layout = crate::raw::RawTabLayout {
-            reserved_top_fraction: Some(0.5),
-            reserved_bottom_fraction: Some(0.5),
-            ..Default::default()
-        };
-        let mut errors = Vec::new();
-        validate_reserved_fractions(0, &layout, &mut errors);
-        assert!(
-            errors
-                .iter()
-                .any(|e| matches!(e.code, ConfigErrorCode::InvalidReservedFraction)),
-            "top + bottom = 1.0 should be invalid"
-        );
-    }
-
-    #[test]
-    fn test_reserved_fractions_valid_no_error() {
-        let layout = crate::raw::RawTabLayout {
-            reserved_top_fraction: Some(0.1),
-            reserved_bottom_fraction: Some(0.1),
-            reserved_left_fraction: Some(0.0),
-            reserved_right_fraction: Some(0.0),
-        };
-        let mut errors = Vec::new();
-        validate_reserved_fractions(0, &layout, &mut errors);
-        assert!(
-            errors.is_empty(),
-            "valid fractions should not produce errors"
-        );
-    }
-
-    // ── FPS range ─────────────────────────────────────────────────────────────
-
-    #[test]
-    fn test_fps_range_target_below_min_invalid() {
-        let mut errors = Vec::new();
-        validate_fps_range(Some(15), Some(30), &mut errors);
-        assert!(
-            errors
-                .iter()
-                .any(|e| matches!(e.code, ConfigErrorCode::InvalidFpsRange))
-        );
-    }
-
-    #[test]
-    fn test_fps_range_target_equals_min_valid() {
-        let mut errors = Vec::new();
-        validate_fps_range(Some(30), Some(30), &mut errors);
-        assert!(errors.is_empty());
-    }
-
-    #[test]
-    fn test_fps_range_target_above_min_valid() {
-        let mut errors = Vec::new();
-        validate_fps_range(Some(60), Some(30), &mut errors);
-        assert!(errors.is_empty());
     }
 }

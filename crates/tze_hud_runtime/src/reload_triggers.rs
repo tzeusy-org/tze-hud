@@ -272,12 +272,7 @@ default_tab = true
         // Parses OK but fails validation (unknown classification value).
         r#"
 [runtime]
-profile = "custom"
-
-[display_profile]
-extends = "full-display"
-target_fps = 15
-min_fps = 30
+profile = "mobile"
 
 [[tabs]]
 name = "Main"

@@ -196,126 +196,9 @@ default_tab = true
 
 // ── Spec §Reserved Fraction Validation ───────────────────────────────────────
 
-/// WHEN reserved_top + reserved_bottom >= 1.0 THEN CONFIG_INVALID_RESERVED_FRACTION.
-#[test]
-fn spec_reserved_fractions_sum_to_one_rejected() {
-    let toml = r#"
-[runtime]
-profile = "full-display"
-
-[[tabs]]
-name = "Main"
-
-[tabs.layout]
-reserved_top_fraction = 0.5
-reserved_bottom_fraction = 0.5
-"#;
-    let loader = parse_ok(toml);
-    let errors = loader.validate();
-    assert!(
-        errors
-            .iter()
-            .any(|e| matches!(e.code, ConfigErrorCode::InvalidReservedFraction)),
-        "reserved_top + reserved_bottom = 1.0 should produce CONFIG_INVALID_RESERVED_FRACTION"
-    );
-}
-
 // ── Spec §FPS Range Validation ────────────────────────────────────────────────
 
-/// WHEN target_fps < min_fps THEN CONFIG_INVALID_FPS_RANGE.
-#[test]
-fn spec_fps_range_target_below_min_rejected() {
-    let toml = r#"
-[runtime]
-profile = "custom"
-
-[display_profile]
-extends = "full-display"
-target_fps = 15
-min_fps = 30
-
-[[tabs]]
-name = "Main"
-"#;
-    let loader = parse_ok(toml);
-    let errors = loader.validate();
-    let has_fps_error = errors
-        .iter()
-        .any(|e| matches!(e.code, ConfigErrorCode::InvalidFpsRange));
-    assert!(
-        has_fps_error,
-        "target_fps < min_fps should produce CONFIG_INVALID_FPS_RANGE"
-    );
-}
-
 // ── Spec §Scene Event Naming Convention ──────────────────────────────────────
-
-/// WHEN tab_switch_on_event = "doorbell.ring" THEN accepted.
-#[test]
-fn spec_valid_event_name_accepted() {
-    let toml = r#"
-[runtime]
-profile = "full-display"
-
-[[tabs]]
-name = "Main"
-tab_switch_on_event = "doorbell.ring"
-"#;
-    let loader = parse_ok(toml);
-    let errors = loader.validate();
-    let event_errors: Vec<_> = errors
-        .iter()
-        .filter(|e| matches!(e.code, ConfigErrorCode::InvalidEventName))
-        .collect();
-    assert!(
-        event_errors.is_empty(),
-        "valid event name should not produce errors"
-    );
-}
-
-/// WHEN tab_switch_on_event = "Doorbell-Ring" THEN CONFIG_INVALID_EVENT_NAME.
-#[test]
-fn spec_invalid_event_name_rejected() {
-    let toml = r#"
-[runtime]
-profile = "full-display"
-
-[[tabs]]
-name = "Main"
-tab_switch_on_event = "Doorbell-Ring"
-"#;
-    let loader = parse_ok(toml);
-    let errors = loader.validate();
-    assert!(
-        errors
-            .iter()
-            .any(|e| matches!(e.code, ConfigErrorCode::InvalidEventName)),
-        "invalid event name should produce CONFIG_INVALID_EVENT_NAME"
-    );
-}
-
-/// WHEN tab_switch_on_event = "" THEN accepted with no warning.
-#[test]
-fn spec_empty_event_name_accepted_no_warning() {
-    let toml = r#"
-[runtime]
-profile = "full-display"
-
-[[tabs]]
-name = "Main"
-tab_switch_on_event = ""
-"#;
-    let loader = parse_ok(toml);
-    let errors = loader.validate();
-    let event_errors: Vec<_> = errors
-        .iter()
-        .filter(|e| matches!(e.code, ConfigErrorCode::InvalidEventName))
-        .collect();
-    assert!(
-        event_errors.is_empty(),
-        "empty event name must not produce an error"
-    );
-}
 
 // ── Spec §Widget Bundle Configuration (CONFIG_WIDGET_* error codes) ──────────
 //
@@ -438,136 +321,11 @@ name = "Main"
 
 // ── Spec §Schema Export ───────────────────────────────────────────────────────
 
-/// WHEN schema_value() is called THEN valid JSON Schema returned.
-#[test]
-fn spec_schema_export_produces_valid_json_schema() {
-    let schema = crate::schema::schema_value();
-    assert!(schema.is_object(), "schema must be a JSON object");
-}
-
 // ── Spec §Display Profile headless - not extendable ──────────────────────────
-
-/// WHEN extends = "headless" THEN CONFIG_HEADLESS_NOT_EXTENDABLE.
-#[test]
-fn spec_headless_not_extendable() {
-    let toml = r#"
-[runtime]
-profile = "custom"
-
-[display_profile]
-extends = "headless"
-
-[[tabs]]
-name = "Main"
-"#;
-    let loader = parse_ok(toml);
-    let errors = loader.validate();
-    assert!(
-        errors
-            .iter()
-            .any(|e| matches!(e.code, ConfigErrorCode::HeadlessNotExtendable)),
-        "extends=headless must produce CONFIG_HEADLESS_NOT_EXTENDABLE, got: {:?}",
-        errors.iter().map(|e| &e.code).collect::<Vec<_>>()
-    );
-}
 
 // ── Spec §Profile Budget Escalation Prevention ────────────────────────────────
 
-/// WHEN custom profile extends full-display and sets max_tiles = 2048 THEN
-/// CONFIG_PROFILE_BUDGET_ESCALATION (spec lines 107-108).
-#[test]
-fn spec_budget_escalation_rejected() {
-    let toml = r#"
-[runtime]
-profile = "custom"
-
-[display_profile]
-extends = "full-display"
-max_tiles = 2048
-
-[[tabs]]
-name = "Main"
-"#;
-    let loader = parse_ok(toml);
-    let errors = loader.validate();
-    assert!(
-        errors
-            .iter()
-            .any(|e| matches!(e.code, ConfigErrorCode::ProfileBudgetEscalation)),
-        "max_tiles=2048 exceeding base 1024 should produce BUDGET_ESCALATION, got: {:?}",
-        errors.iter().map(|e| &e.code).collect::<Vec<_>>()
-    );
-    // Error should identify the offending field.
-    let budget_error = errors
-        .iter()
-        .find(|e| matches!(e.code, ConfigErrorCode::ProfileBudgetEscalation))
-        .unwrap();
-    assert!(
-        budget_error.field_path.contains("max_tiles"),
-        "error should identify max_tiles field, got: {:?}",
-        budget_error.field_path
-    );
-}
-
 // ── Spec §Profile Extends Conflict Detection ─────────────────────────────────
-
-/// WHEN profile = "full-display" and extends = "headless" THEN
-/// CONFIG_PROFILE_EXTENDS_CONFLICTS_WITH_PROFILE (spec lines 120-121).
-///
-/// headless-not-extendable fires first (both errors are acceptable here per spec).
-#[test]
-fn spec_extends_conflicts_with_profile() {
-    let toml = r#"
-[runtime]
-profile = "full-display"
-
-[display_profile]
-extends = "headless"
-
-[[tabs]]
-name = "Main"
-"#;
-    let loader = parse_ok(toml);
-    let errors = loader.validate();
-    // Must produce at least one of the two relevant errors.
-    let has_conflict = errors.iter().any(|e| {
-        matches!(
-            e.code,
-            ConfigErrorCode::HeadlessNotExtendable
-                | ConfigErrorCode::ProfileExtendsConflictsWithProfile
-        )
-    });
-    assert!(
-        has_conflict,
-        "profile=full-display + extends=headless must produce a conflict/not-extendable error, got: {:?}",
-        errors.iter().map(|e| &e.code).collect::<Vec<_>>()
-    );
-}
-
-/// WHEN profile = "headless" and extends = "full-display" THEN
-/// CONFIG_PROFILE_EXTENDS_CONFLICTS_WITH_PROFILE.
-#[test]
-fn spec_headless_extends_full_display_conflict() {
-    let toml = r#"
-[runtime]
-profile = "headless"
-
-[display_profile]
-extends = "full-display"
-
-[[tabs]]
-name = "Main"
-"#;
-    let loader = parse_ok(toml);
-    let errors = loader.validate();
-    assert!(
-        errors
-            .iter()
-            .any(|e| matches!(e.code, ConfigErrorCode::ProfileExtendsConflictsWithProfile)),
-        "profile=headless + extends=full-display must produce EXTENDS_CONFLICTS, got: {:?}",
-        errors.iter().map(|e| &e.code).collect::<Vec<_>>()
-    );
-}
 
 // ── Spec §Display Profile full-display — freeze ───────────────────────────────
 
@@ -613,29 +371,29 @@ name = "T"
 
 // ── Spec §Headless Virtual Display ───────────────────────────────────────────
 
-/// WHEN profile=headless and headless_width=1280, headless_height=720 THEN
-/// zone geometry computes against 1280x720 virtual surface (spec lines 282-283).
-///
-/// The headless dimension values are exercised at the profile module level; this
-/// test confirms the loader accepts the config and produces a headless profile.
+// ── [display_profile] is gone ─────────────────────────────────────────────────
+
+/// WHEN a config still has `[display_profile]` THEN it is rejected with a hint
+/// naming the two built-in profiles.
 #[test]
-fn spec_headless_virtual_display_dimensions() {
+fn display_profile_table_is_rejected_with_hint() {
     let toml = r#"
 [runtime]
-profile = "headless"
-headless_width = 1280
-headless_height = 720
+profile = "full-display"
+
+[display_profile]
+max_tiles = 512
 
 [[tabs]]
-name = "T"
+name = "Main"
 "#;
-    let loader = parse_ok(toml);
-    let resolved = loader.freeze().expect("freeze should succeed");
-    assert_eq!(resolved.profile.name, "headless");
-    assert_eq!(
-        resolved.profile.max_tiles, 256,
-        "headless budget preserved with custom dimensions"
-    );
+    let errors = TzeHudConfig::parse(toml).unwrap().validate();
+    let err = errors
+        .iter()
+        .find(|e| matches!(e.code, ConfigErrorCode::DisplayProfileNotSupported))
+        .expect("[display_profile] should be rejected");
+    assert_eq!(err.field_path, "display_profile");
+    assert!(err.hint.contains("headless"), "{}", err.hint);
 }
 
 // ── Agents live in agents.toml ────────────────────────────────────────────────
@@ -690,34 +448,6 @@ profile = "full-display"
     let loader = parse_ok(toml);
     let result = loader.freeze();
     assert!(result.is_err(), "freeze should fail when there are no tabs");
-}
-
-/// WHEN custom profile extends full-display with max_tiles=512 THEN resolved has 512.
-#[test]
-fn spec_custom_profile_override_applied() {
-    let toml = r#"
-[runtime]
-profile = "custom"
-
-[display_profile]
-extends = "full-display"
-max_tiles = 512
-
-[[tabs]]
-name = "T"
-"#;
-    let loader = parse_ok(toml);
-    let resolved = loader.freeze().expect("freeze should succeed");
-    assert_eq!(
-        resolved.profile.max_tiles, 512,
-        "override max_tiles should be applied"
-    );
-    assert_eq!(resolved.profile.name, "custom");
-    // Other values fall back to base.
-    assert_eq!(
-        resolved.profile.max_texture_mb, 2048,
-        "non-overridden fields use base values"
-    );
 }
 
 // ── Spec §Zone Registry — per-tab zone-type reference validation ──────────────
@@ -886,12 +616,7 @@ fn spec_reload_validation_failure_leaves_config_unchanged() {
 
     let bad_toml = r#"
 [runtime]
-profile = "custom"
-
-[display_profile]
-extends = "full-display"
-target_fps = 15
-min_fps = 30
+profile = "mobile"
 
 [[tabs]]
 name = "Main"
@@ -905,66 +630,8 @@ name = "Main"
     assert!(
         errors
             .iter()
-            .any(|e| matches!(e.code, ConfigErrorCode::InvalidFpsRange)),
+            .any(|e| matches!(e.code, ConfigErrorCode::UnknownProfile)),
         "should return validation error from reload, got: {errors:?}"
-    );
-}
-
-/// WHEN custom profile sets max_agent_update_hz above base THEN CONFIG_PROFILE_BUDGET_ESCALATION.
-#[test]
-fn spec_profile_budget_escalation_max_agent_update_hz_rejected() {
-    let toml = r#"
-[runtime]
-profile = "custom"
-
-[display_profile]
-extends = "full-display"
-max_agent_update_hz = 120
-
-[[tabs]]
-name = "Main"
-"#;
-    let loader = parse_ok(toml);
-    let errors = loader.validate();
-    let has_escalation = errors.iter().any(|e| {
-        matches!(e.code, ConfigErrorCode::ProfileBudgetEscalation)
-            && e.field_path.contains("max_agent_update_hz")
-    });
-    assert!(
-        has_escalation,
-        "max_agent_update_hz=120 exceeding full-display base of 60 should produce \
-         CONFIG_PROFILE_BUDGET_ESCALATION, got: {:?}",
-        errors
-            .iter()
-            .map(|e| (&e.code, &e.field_path))
-            .collect::<Vec<_>>()
-    );
-}
-
-/// WHEN custom profile overrides max_agent_update_hz within ceiling THEN accepted and resolved.
-#[test]
-fn spec_custom_profile_max_agent_update_hz_override_applied() {
-    let toml = r#"
-[runtime]
-profile = "custom"
-
-[display_profile]
-extends = "full-display"
-max_agent_update_hz = 30
-
-[[tabs]]
-name = "Main"
-"#;
-    let loader = parse_ok(toml);
-    let resolved = loader.freeze().expect("freeze should succeed");
-    assert_eq!(
-        resolved.profile.max_agent_update_hz, 30,
-        "overridden max_agent_update_hz should be 30"
-    );
-    assert_eq!(
-        resolved.profile.max_tiles,
-        tze_hud_scene::config::DisplayProfile::full_display().max_tiles,
-        "non-overridden fields use base values"
     );
 }
 

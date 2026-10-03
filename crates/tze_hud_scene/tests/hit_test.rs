@@ -160,7 +160,7 @@ fn widget_passthrough_skips_to_agent_tile_below() {
         .unwrap();
 
     // Widget tile: overlaps agent tile, z=20, Passthrough (widget default).
-    // Bounds: (250, 150, 700×500) — extends beyond agent tile.
+    // Bounds: (250, 150, 700×500) — reaches past agent tile.
     // No interactive nodes (per spec, widgets are display-only).
     let widget_tile = scene
         .create_tile(
