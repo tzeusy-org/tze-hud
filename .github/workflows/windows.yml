@@ -2,7 +2,9 @@
 #
 # windows-build — native x86_64-pc-windows-msvc release build on a Windows
 #   runner, then boots the binary with the production config (WARP software
-#   rendering) and drives the MCP lifecycle (scripts/ci/windows_smoke.py).
+#   rendering) and drives the MCP lifecycle (scripts/ci/windows_smoke.py),
+#   then exercises self-install, single instance, and uninstall
+#   (scripts/ci/windows_install_smoke.py).
 #   Runs on every PR, merge-queue entry, push to main, and v* tag.
 # release — signs the exe with minisign (secret MINISIGN_SECRET_KEY; public key
 #   app/tze_hud_app/minisign.pub) and publishes it:
@@ -63,6 +65,10 @@ jobs:
       - name: Boot smoke (production config, MCP lifecycle)
         timeout-minutes: 5
         run: python scripts/ci/windows_smoke.py --exe target/release/tze_hud.exe --config app/tze_hud_app/config/production.toml
+
+      - name: Install, single-instance, uninstall smoke
+        timeout-minutes: 5
+        run: python scripts/ci/windows_install_smoke.py --exe target/release/tze_hud.exe
 
       - name: Stage artifact
         shell: bash
