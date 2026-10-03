@@ -55,18 +55,21 @@ fn retry_delay(elapsed: Duration) -> Duration {
 /// Wait for a Tailscale address to appear and hand each new one to `bind`.
 ///
 /// Tailscale often comes up after the HUD (logon ordering), so a listener that
-/// only looked at startup would miss it. Returns once `bind` has been given at
-/// least one address, so a steady state costs nothing. Spawn this only when no
-/// Tailscale address was present at startup.
-pub async fn watch_for_tailnet(mut bind: impl FnMut(IpAddr)) {
+/// only looked at startup would miss it. `bind` returns whether it bound the
+/// address; an address whose bind failed is offered again on the next look.
+/// Returns once at least one address is bound, so a steady state costs nothing.
+/// Spawn this only when no Tailscale address was bound at startup.
+pub async fn watch_for_tailnet(mut bind: impl FnMut(IpAddr) -> bool) {
     let start = tokio::time::Instant::now();
+    let mut bound: Vec<IpAddr> = Vec::new();
     loop {
         tokio::time::sleep(retry_delay(start.elapsed())).await;
-        let found = tailnet_addrs(&local_ips());
-        if !found.is_empty() {
-            for ip in found {
-                bind(ip);
+        for ip in tailnet_addrs(&local_ips()) {
+            if !bound.contains(&ip) && bind(ip) {
+                bound.push(ip);
             }
+        }
+        if !bound.is_empty() {
             return;
         }
     }

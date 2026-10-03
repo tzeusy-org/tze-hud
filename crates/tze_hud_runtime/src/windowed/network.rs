@@ -259,8 +259,12 @@ pub(super) fn start_network_services_with_render_wake(
                     Ok(l) => {
                         tracing::info!(addr = %addr, "gRPC listener bound (Tailscale address appeared)");
                         tokio::spawn(accept_into(l, conn_tx.clone()));
+                        true
                     }
-                    Err(e) => tracing::warn!(addr = %addr, error = %e, "gRPC: failed to bind Tailscale address"),
+                    Err(e) => {
+                        tracing::warn!(addr = %addr, error = %e, "gRPC: failed to bind Tailscale address");
+                        false
+                    }
                 }
             }));
     }

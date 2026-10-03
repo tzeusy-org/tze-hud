@@ -729,7 +729,7 @@ impl HeadlessRuntime {
     /// The `RuntimeService.ReloadConfig` RPC accepts a TOML string, validates it,
     /// and atomically applies the hot-reloadable sections via `RuntimeContext`.
     ///
-    /// The server binds to `addr` (e.g. `"0.0.0.0:50052"`). It is independent of
+    /// The server binds to `addr` (e.g. `"127.0.0.1:50052"`). It is independent of
     /// the `HudSession` gRPC server — you may co-host them on the same port via
     /// `tonic::transport::Server::builder().add_service(...).add_service(...)`.
     ///

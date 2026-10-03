@@ -110,9 +110,15 @@ pub async fn start_mcp_http_server_with_render_wake(
     portal_ingress_wake: tze_hud_scene::render_wake::RenderWakeNotifier,
     safe_mode: Arc<std::sync::atomic::AtomicBool>,
 ) -> std::io::Result<(tokio::task::JoinHandle<()>, Vec<SocketAddr>)> {
+    // The first address is loopback and must bind; a Tailscale address that
+    // fails to bind is skipped with a warning.
     let mut listeners = Vec::with_capacity(config.bind_addrs.len());
-    for addr in &config.bind_addrs {
-        listeners.push(TcpListener::bind(addr).await?);
+    for (i, addr) in config.bind_addrs.iter().enumerate() {
+        match TcpListener::bind(addr).await {
+            Ok(l) => listeners.push(l),
+            Err(e) if i == 0 => return Err(e),
+            Err(e) => tracing::warn!(addr = %addr, error = %e, "MCP HTTP: failed to bind address"),
+        }
     }
     let local_addrs = listeners
         .iter()
@@ -148,25 +154,36 @@ pub async fn start_mcp_http_server_with_render_wake(
             .iter()
             .any(|a| !crate::net_addrs::tailnet_addrs(&[a.ip()]).is_empty())
     {
-        let (server, shutdown) = (Arc::clone(&server), shutdown.clone());
-        tokio::spawn(crate::net_addrs::watch_for_tailnet(move |ip| {
-            let (server, shutdown) = (Arc::clone(&server), shutdown.clone());
-            let addr = SocketAddr::new(ip, port);
-            // Bind synchronously so a failure is logged here, then adopt the
-            // listener into the runtime.
-            match std::net::TcpListener::bind(addr).and_then(|l| {
-                l.set_nonblocking(true)?;
-                TcpListener::from_std(l)
-            }) {
-                Ok(listener) => {
-                    tracing::info!(addr = %addr, "MCP HTTP listener bound (Tailscale address appeared)");
-                    tokio::spawn(run_accept_loop(listener, server, shutdown, addr));
+        let (server, shutdown, shutdown_w) =
+            (Arc::clone(&server), shutdown.clone(), shutdown.clone());
+        tokio::spawn(async move {
+            let watcher = crate::net_addrs::watch_for_tailnet(|ip| {
+                let addr = SocketAddr::new(ip, port);
+                match std::net::TcpListener::bind(addr).and_then(|l| {
+                    l.set_nonblocking(true)?;
+                    TcpListener::from_std(l)
+                }) {
+                    Ok(listener) => {
+                        tracing::info!(addr = %addr, "MCP HTTP listener bound (Tailscale address appeared)");
+                        tokio::spawn(run_accept_loop(
+                            listener,
+                            Arc::clone(&server),
+                            shutdown.clone(),
+                            addr,
+                        ));
+                        true
+                    }
+                    Err(e) => {
+                        tracing::warn!(addr = %addr, error = %e, "MCP HTTP: failed to bind Tailscale address");
+                        false
+                    }
                 }
-                Err(e) => {
-                    tracing::warn!(addr = %addr, error = %e, "MCP HTTP: failed to bind Tailscale address")
-                }
+            });
+            tokio::select! {
+                _ = watcher => {}
+                _ = wait_shutdown(&shutdown_w) => {}
             }
-        }));
+        });
     }
 
     let handle = tokio::spawn(async move {
@@ -176,6 +193,18 @@ pub async fn start_mcp_http_server_with_render_wake(
     });
 
     Ok((handle, local_addrs))
+}
+
+/// Resolves once `shutdown` has been triggered (checks the flag too, so a
+/// trigger that predates the subscription is not missed).
+async fn wait_shutdown(shutdown: &ShutdownToken) {
+    let mut rx = shutdown.subscribe();
+    while !shutdown.is_triggered() {
+        tokio::select! {
+            _ = rx.recv() => return,
+            _ = tokio::time::sleep(std::time::Duration::from_secs(1)) => {}
+        }
+    }
 }
 
 /// Internal accept loop — runs until the shutdown token is triggered or the
@@ -474,6 +503,41 @@ mod tests {
 
         shutdown.trigger(crate::threads::ShutdownReason::Clean);
         handle.await.expect("task");
+    }
+
+    /// Only the loopback listener is fatal: a Tailscale address that cannot
+    /// bind (192.0.2.1 is not local) is skipped, a loopback failure is not.
+    #[tokio::test]
+    async fn mcp_http_only_loopback_bind_failure_is_fatal() {
+        let agents = tze_hud_scene::config::AgentDirectory::unrestricted("k").shared();
+        let cfg = |addrs: [&str; 2]| McpServerConfig {
+            bind_addrs: addrs.iter().map(|a| a.parse().unwrap()).collect(),
+            late_tailnet_port: None,
+            agents: agents.clone(),
+        };
+        let shutdown = ShutdownToken::new();
+        let (handle, addrs) = start_mcp_http_server(
+            make_scene(),
+            cfg(["127.0.0.1:0", "192.0.2.1:0"]),
+            shutdown.clone(),
+            None,
+        )
+        .await
+        .expect("a failing non-loopback bind must not fail startup");
+        assert_eq!(addrs.len(), 1);
+        shutdown.trigger(crate::threads::ShutdownReason::Clean);
+        handle.await.expect("task");
+
+        assert!(
+            start_mcp_http_server(
+                make_scene(),
+                cfg(["192.0.2.1:0", "127.0.0.1:0"]),
+                ShutdownToken::new(),
+                None,
+            )
+            .await
+            .is_err()
+        );
     }
 
     #[tokio::test]
