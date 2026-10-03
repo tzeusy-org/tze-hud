@@ -13,14 +13,11 @@ dev-mode = []
 
 [dependencies]
 tze_hud_scene = { path = "../tze_hud_scene", version = "0.1.0" }
-tze_hud_widget = { path = "../tze_hud_widget", version = "0.1.0" }
 tze_hud_resource = { path = "../tze_hud_resource", version = "0.1.0" }
 tokio = { workspace = true }
 tonic = { workspace = true }
 prost = { workspace = true }
 blake3 = { workspace = true }
-quick-xml = { workspace = true }
-crc32c = "0.6"
 serde_json = { workspace = true }
 # toml is used by the element-store persistence helper in session_server.
 # Serialization for ElementStore data was moved out of tze_hud_scene (which is

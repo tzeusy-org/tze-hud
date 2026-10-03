@@ -40,31 +40,13 @@ message ClientMessage {
     // Scene mutations
     MutationBatch     mutation_batch     = 20;
 
-    // Subscriptions
-    SubscriptionChange subscription_change = 24;
-
-    // Input control (RFC 0004 §8.3.1, RFC 0005 §3.8)
-    InputFocusRequest    input_focus_request    = 27;
-    InputCaptureRequest  input_capture_request  = 28;
-    InputCaptureRelease  input_capture_release  = 29;
-
     // Keepalive
     Heartbeat         heartbeat          = 31;
 
-
-    // Widget asset registration/upload (session-protocol spec §Requirement: Widget Asset Registration via Session Stream).
-    // Two-stage flow: metadata preflight + optional payload upload.
-    // Requires allow entry "tiles" or "widget:<name>".
-    WidgetAssetRegister widget_asset_register = 34;
-
     // Resident scene-resource upload (RFC 0011; session-protocol spec §Resident Upload Handshake).
-    // Scene resources MUST use this family instead of WidgetAssetRegister.
     ResourceUploadStart    resource_upload_start    = 36;
     ResourceUploadChunk    resource_upload_chunk    = 37;
     ResourceUploadComplete resource_upload_complete = 38;
-
-    // Element discovery over session stream (persistent-movable-elements change).
-    tze_hud.protocol.v1.ListElementsRequest list_elements_request = 39;
 
     // Lifecycle verbs (docs/api.md). Each request gets one RequestResult,
     // except publishes to ephemeral zones/widgets (fire-and-forget).
@@ -91,6 +73,12 @@ message ClientMessage {
   reserved 21, 22, 23, 25, 35;
   reserved "lease_request", "lease_renew", "lease_release", "zone_publish",
     "widget_publish";
+  // Removed in T5 S6: requests no client sent (mid-session subscription
+  // changes, input focus/capture control, widget asset registration, element
+  // discovery).
+  reserved 24, 27, 28, 29, 34, 39;
+  reserved "subscription_change", "input_focus_request", "input_capture_request",
+    "input_capture_release", "widget_asset_register", "list_elements_request";
 }
 
 // ─── Server -> Client envelope ────────────────────────────────────────────────
@@ -123,31 +111,17 @@ message ServerMessage {
     // IME, scroll, command events). Variants are filtered per RFC 0005 §7.1 before delivery.
     tze_hud.protocol.v1.EventBatch event_batch   = 34;
 
-    // Subscription acknowledgement (RFC 0005 §7.3)
-    SubscriptionChangeResult subscription_change_result = 39;
-
     // Scene-resource upload responses (RFC 0011 resident upload flow).
     ResourceUploadAccepted resource_upload_accepted = 41;
     ResourceStored         resource_stored          = 42;
-
-    // Input control responses (RFC 0004 §8.3.1, RFC 0005 §3.8)
-    InputFocusResponse    input_focus_response    = 43;
-    InputCaptureResponse  input_capture_response  = 44;
 
     // Degradation notice (RFC 0005 §3.4, §7.1).
     // Transactional — never dropped. Delivered to ALL active sessions unconditionally
     // on degradation level change, regardless of subscription configuration.
     DegradationNotice     degradation_notice      = 46;
 
-    // Widget asset register result (session-protocol spec §Requirement: Widget Asset Registration via Session Stream).
-    // Sent for every WidgetAssetRegister request (transactional).
-    WidgetAssetRegisterResult widget_asset_register_result = 48;
-
     // Scene-resource upload-specific semantic errors (RFC 0011 resident upload flow).
     ResourceErrorResponse resource_error_response = 49;
-
-    // Element discovery response for ListElementsRequest (field 39).
-    tze_hud.protocol.v1.ListElementsResponse list_elements_response = 50;
 
     // Element repositioned event — emitted on drag completion or reset-to-default.
     // Subscription: SCENE_TOPOLOGY (requires allow entry "tiles").
@@ -199,6 +173,11 @@ message ServerMessage {
   reserved 15, 20, 21, 40, 47;
   reserved "runtime_error", "mutation_result", "lease_response",
     "zone_publish_result", "widget_publish_result";
+  // Removed in T5 S6 with the requests they answered.
+  reserved 39, 43, 44, 48, 50;
+  reserved "subscription_change_result", "input_focus_response",
+    "input_capture_response", "widget_asset_register_result",
+    "list_elements_response";
 }
 
 // ─── Authentication credentials (RFC 0005 §1.4) ──────────────────────────────
@@ -513,69 +492,6 @@ message Reclaimed {
   bytes lease_id = 3;
 }
 
-// ─── Subscription messages ────────────────────────────────────────────────────
-
-// A subscription request pairing a category with an optional finer-grained
-// event type prefix filter (RFC 0010 §7.2, spec line 179).
-//
-// When filter_prefix is non-empty, only events whose type starts with that
-// prefix are delivered (e.g., "scene.zone." within SCENE_TOPOLOGY).
-// When empty, the category's default prefix applies.
-message SubscriptionEntry {
-  string category      = 1;  // Category name (SHOUTY_SNAKE_CASE)
-  string filter_prefix = 2;  // Optional finer-grained prefix; empty = use category default
-}
-
-// Client changes event subscriptions.
-message SubscriptionChange {
-  repeated string            subscribe        = 1;  // Categories to add (no filter; use category default)
-  repeated string            unsubscribe      = 2;  // Categories to remove
-  repeated SubscriptionEntry subscribe_filter = 3;  // Categories to add with explicit prefix filter
-}
-
-// Server acknowledges subscription change (RFC 0005 §7.3).
-// Echoes the full active subscription set after the change.
-// Denied additions (not in allow list) appear in denied_subscriptions.
-// SHALL NOT reuse MutationResult; this is a dedicated ack type.
-message SubscriptionChangeResult {
-  repeated string active_subscriptions = 1;  // Full active set after change
-  repeated string denied_subscriptions = 2;  // Requested but denied (not in allow list)
-}
-
-
-
-
-
-
-
-// ─── Widget asset registration messages ─────────────────────────────────────
-
-// Client registers/uploads a runtime widget SVG asset by strong content hash.
-// Two-stage behavior:
-// 1) metadata-only preflight for dedup short-circuit
-// 2) payload upload only when hash is unknown
-message WidgetAssetRegister {
-  string widget_type_id          = 1;  // Kebab-case widget type id
-  string svg_filename            = 2;  // Logical filename (must be .svg)
-  bytes  content_hash_blake3     = 3;  // 32-byte canonical strong hash identity
-  uint32 transport_crc32c        = 4;  // Optional fast transport integrity checksum (0 = omitted)
-  uint64 total_size_bytes        = 5;  // Declared payload byte size
-  bytes  inline_svg_bytes        = 6;  // Optional inline payload
-  bool   metadata_only_preflight = 7;  // True = dedup preflight only
-}
-
-// Server response to WidgetAssetRegister (transactional).
-message WidgetAssetRegisterResult {
-  uint64 request_sequence = 1;  // Sequence of the WidgetAssetRegister that triggered this
-  bool   accepted         = 2;
-  string widget_type_id   = 3;
-  string svg_filename     = 4;
-  string asset_handle     = 5;  // Runtime handle when accepted=true
-  bool   was_deduplicated = 6;  // True when hash existed and payload transfer was skipped
-  string error_code       = 7;  // Machine-readable error code (if accepted=false)
-  string error_message    = 8;  // Human-readable reason (if accepted=false)
-}
-
 // ─── Resident scene-resource upload messages ─────────────────────────────────
 
 enum ResourceType {
@@ -724,51 +640,6 @@ message SceneSnapshot {
   // different semantics in the pre-spec SceneSnapshot format.
   reserved "scene_json", "version";
 }
-
-
-// ─── Input control messages (RFC 0004 §8.3.1, RFC 0005 §3.8) ─────────────────
-
-// Client requests keyboard focus for one of its tiles.
-// Synchronous: runtime responds with InputFocusResponse correlated by sequence.
-message InputFocusRequest {
-  bytes tile_id  = 1;  // Target tile (16-byte UUIDv7); empty = release focus
-}
-
-// Server response to InputFocusRequest.
-message InputFocusResponse {
-  bytes  tile_id = 1;  // Tile the focus decision applies to
-  bool   granted = 2;  // true = focus granted; false = denied or released
-  string reason  = 3;  // Human-readable reason on denial
-}
-
-// Client requests exclusive capture of an input device (e.g. pointer, keyboard).
-// Synchronous: runtime responds with InputCaptureResponse correlated by sequence.
-message InputCaptureRequest {
-  bytes  tile_id     = 1;  // Tile requesting capture (16-byte UUIDv7)
-  string device_kind = 2;  // "pointer" | "keyboard" | "touch"
-  bytes  node_id     = 3;  // Optional HitRegionNode to capture (16-byte UUIDv7)
-  string device_id   = 4;  // Optional pointer device id; empty = primary pointer
-  bool   release_on_up = 5; // Release pointer capture on PointerUp
-}
-
-// Server response to InputCaptureRequest.
-message InputCaptureResponse {
-  bytes  tile_id     = 1;  // Tile the capture decision applies to
-  string device_kind = 2;  // Mirrors InputCaptureRequest.device_kind
-  bool   granted     = 3;  // true = capture granted; false = denied
-  string reason      = 4;  // Human-readable reason on denial
-}
-
-// Client voluntarily releases a previously captured input device.
-// Asynchronous: confirmed by CaptureReleasedEvent in the next EventBatch (field 34).
-message InputCaptureRelease {
-  bytes  tile_id     = 1;  // Tile releasing capture (16-byte UUIDv7)
-  string device_kind = 2;  // "pointer" | "keyboard" | "touch"
-  string device_id   = 3;  // Optional pointer device id; empty = primary pointer
-}
-
-
-
 
 
 // ─── Degradation (RFC 0005 §3.4, §7.1) ───────────────────────────────────────

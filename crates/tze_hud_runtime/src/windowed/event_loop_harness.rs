@@ -195,7 +195,6 @@ impl SharedStateBuilder {
             resource_store: tze_hud_resource::ResourceStore::new(
                 tze_hud_resource::ResourceStoreConfig::default(),
             ),
-            widget_asset_store: tze_hud_protocol::session::WidgetAssetStore::default(),
             runtime_widget_store: None,
             element_store: tze_hud_scene::element_store::ElementStore::default(),
             element_store_path: None,

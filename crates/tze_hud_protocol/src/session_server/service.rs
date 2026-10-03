@@ -173,7 +173,6 @@ impl HudSessionImpl {
             scene: Arc::new(Mutex::new(scene)),
             sessions: crate::session::SessionRegistry::new(),
             resource_store: ResourceStore::new(ResourceStoreConfig::default()),
-            widget_asset_store: crate::session::WidgetAssetStore::default(),
             runtime_widget_store: None,
             element_store: tze_hud_scene::element_store::ElementStore::default(),
             element_store_path: None,

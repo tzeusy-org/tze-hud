@@ -14,8 +14,8 @@ use tze_hud_scene::graph::SceneGraph;
 use crate::proto::session::ServerMessage;
 use crate::token::TokenStore;
 
-/// Runtime input-capture command sent from the gRPC session plane to the local
-/// input processor owned by the compositor/window thread.
+/// Runtime input-capture command for the local input processor owned by the
+/// compositor/window thread.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InputCaptureCommand {
     Request {
@@ -27,91 +27,6 @@ pub enum InputCaptureCommand {
     Release {
         device_id: u32,
     },
-}
-
-/// Stored runtime widget SVG asset metadata/content keyed by strong hash.
-#[derive(Debug, Clone)]
-pub struct WidgetAssetRecord {
-    pub asset_handle: String,
-    pub widget_type_id: String,
-    pub svg_filename: String,
-    pub owner_namespace: String,
-    pub bytes: Vec<u8>,
-}
-
-/// In-memory runtime widget asset register/upload store.
-#[derive(Debug, Clone)]
-pub struct WidgetAssetStore {
-    /// Content-addressed entries keyed by BLAKE3 hash bytes.
-    pub by_hash: HashMap<[u8; 32], WidgetAssetRecord>,
-    /// Aggregate stored bytes across all widget assets.
-    pub total_bytes: u64,
-    /// Aggregate stored bytes per publishing namespace.
-    pub per_namespace_bytes: HashMap<String, u64>,
-    /// Global store budget cap.
-    pub max_total_bytes: u64,
-    /// Per-namespace store budget cap.
-    pub max_namespace_bytes: u64,
-    resident_ledger: Option<tze_hud_resource::ResidentLedger>,
-}
-
-impl WidgetAssetStore {
-    pub fn new_with_limits(max_total_bytes: u64, max_namespace_bytes: u64) -> Self {
-        Self {
-            by_hash: HashMap::new(),
-            total_bytes: 0,
-            per_namespace_bytes: HashMap::new(),
-            max_total_bytes,
-            max_namespace_bytes,
-            resident_ledger: None,
-        }
-    }
-
-    pub fn new_with_limits_and_resident_ledger(
-        max_total_bytes: u64,
-        max_namespace_bytes: u64,
-        resident_ledger: tze_hud_resource::ResidentLedger,
-    ) -> Self {
-        Self {
-            by_hash: HashMap::new(),
-            total_bytes: 0,
-            per_namespace_bytes: HashMap::new(),
-            max_total_bytes,
-            max_namespace_bytes,
-            resident_ledger: Some(resident_ledger),
-        }
-    }
-
-    pub fn reserve_resident_payload(
-        &self,
-        allocation_id: &str,
-        bytes: u64,
-    ) -> Result<bool, tze_hud_resource::ResidentReserveError> {
-        match &self.resident_ledger {
-            Some(ledger) => ledger.reserve(
-                tze_hud_resource::ResidentClass::WidgetSource,
-                allocation_id,
-                bytes,
-            ),
-            None => Ok(false),
-        }
-    }
-
-    pub fn release_resident_payload(&self, allocation_id: &str) -> bool {
-        self.resident_ledger.as_ref().is_some_and(|ledger| {
-            ledger.release(
-                tze_hud_resource::ResidentClass::WidgetSource,
-                &tze_hud_resource::AllocationId::from(allocation_id),
-            )
-        })
-    }
-}
-
-impl Default for WidgetAssetStore {
-    fn default() -> Self {
-        // Conservative in-memory limits for the v1 protocol layer.
-        Self::new_with_limits(64 * 1024 * 1024, 16 * 1024 * 1024)
-    }
 }
 
 /// Shared state between the gRPC server and the compositor.
@@ -130,9 +45,7 @@ pub struct SharedState {
     pub sessions: SessionRegistry,
     /// Resident scene-resource upload store (RFC 0011 on HudSession stream).
     pub resource_store: ResourceStore,
-    pub widget_asset_store: WidgetAssetStore,
     /// Durable runtime widget asset store (v1 scoped durability exception).
-    /// When `None`, widget asset registration uses in-memory fallback semantics.
     pub runtime_widget_store: Option<RuntimeWidgetStore>,
     /// Persistent element identity store (zone/widget/tile Scene IDs).
     pub element_store: ElementStore,
@@ -190,8 +103,8 @@ pub struct SharedState {
     /// and discards all per-session freeze queues.
     pub freeze_active: bool,
     /// Optional bridge for session-plane pointer capture requests. Windowed
-    /// runtime installs this so gRPC InputCaptureRequest/InputCaptureRelease
-    /// mutates the same InputProcessor used for OS pointer routing.
+    /// runtime installs the receiving end; the gRPC session plane no longer
+    /// sends commands (the capture requests were removed in T5 S6).
     pub input_capture_tx: Option<mpsc::UnboundedSender<InputCaptureCommand>>,
     /// Main-loop-only wake paired with `input_capture_tx`. Successful command
     /// enqueue uses this to wake the sole windowed consumer without creating a
@@ -360,27 +273,5 @@ impl SessionRegistry {
         } else {
             false
         }
-    }
-}
-
-#[cfg(test)]
-mod resident_widget_asset_tests {
-    use super::*;
-
-    #[test]
-    fn grpc_widget_payload_uses_widget_source_class() {
-        let ledger =
-            tze_hud_resource::ResidentLedger::new(tze_hud_resource::ResidentLedgerLimits {
-                aggregate_bytes: 4,
-                resource_bytes: 0,
-                widget_source_bytes: 4,
-                widget_raster_bytes: 0,
-                font_bytes: 0,
-            });
-        let store = WidgetAssetStore::new_with_limits_and_resident_ledger(4, 4, ledger.clone());
-
-        assert!(store.reserve_resident_payload("grpc:too-large", 5).is_err());
-        assert_eq!(ledger.snapshot().aggregate_bytes, 0);
-        assert_eq!(ledger.snapshot().widget_source_bytes, 0);
     }
 }

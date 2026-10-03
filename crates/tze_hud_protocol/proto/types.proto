@@ -546,27 +546,6 @@ enum TextOverflowProto {
   TEXT_OVERFLOW_PROTO_ELLIPSIS    = 2;
 }
 
-// ─── Element Discovery ───────────────────────────────────────────────────────
-
-message ListElementsRequest {
-  optional string namespace_filter = 1;  // Prefix match against stored namespace key
-  optional string element_type     = 2;  // "tile" | "zone" | "widget"
-}
-
-message ElementInfo {
-  bytes              element_id            = 1;  // 16-byte SceneId
-  string             element_type          = 2;  // "tile" | "zone" | "widget"
-  string             namespace             = 3;
-  GeometryPolicyProto current_geometry     = 4;
-  bool               has_user_override     = 5;
-  uint64             created_at_ms         = 6;
-  uint64             last_published_at_ms  = 7;
-}
-
-message ListElementsResponse {
-  repeated ElementInfo elements = 1;
-}
-
 // ─── Widget Types ─────────────────────────────────────────────────────────────
 
 // A typed parameter value (oneof carries exactly one variant).

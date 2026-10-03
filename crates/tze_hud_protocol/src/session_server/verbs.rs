@@ -809,11 +809,7 @@ mod tests {
     /// shared closed set (invariant 8).
     #[test]
     fn grpc_codes_are_in_the_shared_set() {
-        let sources = [
-            include_str!("verbs.rs"),
-            include_str!("mutations.rs"),
-            include_str!("subscriptions_cap.rs"),
-        ];
+        let sources = [include_str!("verbs.rs"), include_str!("mutations.rs")];
         let re = regex_lite_codes();
         for src in sources {
             for code in re(src) {

@@ -22,8 +22,7 @@ pub enum TrafficClass {
 /// Classify an outbound `ServerMessage` payload into its traffic class.
 ///
 /// - Session lifecycle responses, RequestResult, Reclaimed,
-///   SubscriptionChangeResult, Reclaimed,
-///   SessionSuspended, SessionResumed, and input-control responses are Transactional.
+///   SessionSuspended, and SessionResumed are Transactional.
 /// - SceneSnapshot and EventBatch are StateStream.
 /// - Heartbeat echoes are Ephemeral.
 pub fn classify_server_payload(payload: &ServerPayload) -> TrafficClass {
@@ -36,15 +35,12 @@ pub fn classify_server_payload(payload: &ServerPayload) -> TrafficClass {
         | ServerPayload::SessionResumed(_) => TrafficClass::Transactional,
 
         // Mutation / lease responses — transactional
-        ServerPayload::RequestResult(_)
-        | ServerPayload::Reclaimed(_)
-        | ServerPayload::SubscriptionChangeResult(_)
-        | ServerPayload::InputFocusResponse(_)
-        | ServerPayload::InputCaptureResponse(_) => TrafficClass::Transactional,
+        ServerPayload::RequestResult(_) | ServerPayload::Reclaimed(_) => {
+            TrafficClass::Transactional
+        }
 
-        // Widget and resource-upload responses — transactional.
-        ServerPayload::WidgetAssetRegisterResult(_)
-        | ServerPayload::ResourceUploadAccepted(_)
+        // Resource-upload responses — transactional.
+        ServerPayload::ResourceUploadAccepted(_)
         | ServerPayload::ResourceStored(_)
         | ServerPayload::ResourceErrorResponse(_) => TrafficClass::Transactional,
 
@@ -60,9 +56,6 @@ pub fn classify_server_payload(payload: &ServerPayload) -> TrafficClass {
 
         // Heartbeat echo — ephemeral (droppable, latest-wins)
         ServerPayload::Heartbeat(_) => TrafficClass::Ephemeral,
-
-        // Element discovery response — transactional
-        ServerPayload::ListElementsResponse(_) => TrafficClass::Transactional,
 
         // Element repositioned event — transactional (drag completion / reset-to-default)
         ServerPayload::ElementRepositioned(_) => TrafficClass::Transactional,

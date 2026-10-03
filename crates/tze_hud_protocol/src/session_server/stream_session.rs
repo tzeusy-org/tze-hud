@@ -27,12 +27,6 @@ pub(super) struct StreamSession {
     pub(super) resource_budget: ResourceBudget,
     pub(super) budget_enforcer: Option<SharedMutationBudgetEnforcer>,
     pub(super) subscriptions: Vec<String>,
-    /// Fine-grained event type prefix filters per subscription category (RFC 0010 §7.2).
-    ///
-    /// When an agent subscribes with a `filter_prefix` (via `SubscriptionChange.subscribe_filter`),
-    /// the filter is stored here keyed by category name. Categories not present in this map
-    /// use the category's default prefix. Filters are removed when the category is unsubscribed.
-    pub(super) subscription_filters: std::collections::HashMap<String, String>,
     pub(super) server_sequence: u64,
     pub(super) resume_token: Vec<u8>,
     pub(super) last_heartbeat_ms: u64,

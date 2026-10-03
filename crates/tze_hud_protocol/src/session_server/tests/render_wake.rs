@@ -11,7 +11,6 @@ fn direct_handler_test_session(namespace: &str, capabilities: Vec<String>) -> St
         resource_budget: ResourceBudget::default(),
         budget_enforcer: None,
         subscriptions: Vec::new(),
-        subscription_filters: std::collections::HashMap::new(),
         server_sequence: 0,
         resume_token: Vec::new(),
         last_heartbeat_ms: 0,
