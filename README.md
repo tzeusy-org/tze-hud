@@ -116,6 +116,7 @@ cargo run -p poc_demo -- zones           # notification TTL, delay_ms, action pr
 cargo run -p poc_demo -- widgets         # typed gauge/progress updates
 cargo run -p poc_demo -- tile            # ClaimTile(placement+root), MutationBatch, Hold, Reclaimed
 cargo run -p poc_demo -- override-hang   # claim a tile, stop reading; press close or the safe-mode chord
+cargo run -p poc_demo -- snapshot        # print `tiles <n>` from a fresh session's SceneSnapshot (CI uses it)
 cargo run -p poc_demo -- all             # all of the above, with the portal step in between
 ```
 

@@ -482,6 +482,29 @@ pub async fn override_hang(target: &Target) -> Result<()> {
     Ok(())
 }
 
+/// Tiles in the `SceneSnapshot` a fresh session is sent on connect.
+pub async fn tile_count(target: &Target) -> Result<usize> {
+    let mut session = Session::connect(&target.grpc, &target.tile_agent, &target.tile_psk).await?;
+    let snapshot = loop {
+        if let Reply::SceneSnapshot(s) = session.next_reply().await? {
+            break s;
+        }
+    };
+    let scene: Value = serde_json::from_str(&snapshot.snapshot_json)?;
+    let tiles = scene["tiles"]
+        .as_object()
+        .ok_or("snapshot has no tiles map")?;
+    Ok(tiles.len())
+}
+
+/// Snapshot: print `tiles <n>`. A driver such as the Windows CI smoke compares
+/// counts before a claim, while the claimant is orphaned, and after the grace
+/// period.
+pub async fn snapshot(target: &Target) -> Result<()> {
+    println!("tiles {}", tile_count(target).await?);
+    Ok(())
+}
+
 /// `tile:<uuid>` from the 16 id bytes a `ClaimTile` reply carries.
 fn tile_surface(id: &[u8]) -> String {
     let hex: String = id.iter().map(|b| format!("{b:02x}")).collect();

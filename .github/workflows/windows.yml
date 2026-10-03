@@ -3,7 +3,9 @@
 # windows-build — native x86_64-pc-windows-msvc release build on a Windows
 #   runner, then boots the binary with the production config (WARP software
 #   rendering) and drives the MCP lifecycle (scripts/ci/windows_smoke.py),
-#   then exercises self-install, single instance, and uninstall
+#   (also: widget and notification TTL, delay_ms, and a killed resident tile
+#   reclaimed after its grace, plus an informational idle-with-content
+#   measurement), then exercises self-install, single instance, and uninstall
 #   (scripts/ci/windows_install_smoke.py).
 #   Runs on every PR, merge-queue entry, push to main, and v* tag.
 # release — signs the exe with minisign (secret MINISIGN_SECRET_KEY; public key
@@ -62,9 +64,22 @@ jobs:
           TZE_HUD_CHANNEL: ${{ github.ref == 'refs/heads/main' && 'dev' || (startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'ci') }}
         run: cargo build --release --locked -p tze_hud_app --bin tze_hud
 
-      - name: Boot smoke (production config, MCP lifecycle)
+      - name: Build poc_demo.exe (resident-tile driver for the smoke)
+        run: cargo build --release --locked -p poc_demo --bin poc_demo
+
+      - name: Boot smoke (production config, MCP lifecycle, POC stages)
+        timeout-minutes: 10
+        run: python scripts/ci/windows_smoke.py --exe target/release/tze_hud.exe --poc-demo target/release/poc_demo.exe --config app/tze_hud_app/config/production.toml
+
+      # Informational, not a gate: boots a second HUD under the runtime's own
+      # idle measurement (5 s settle + 60 s), with held content on screen, and
+      # checks it presents nothing for the interval. continue-on-error keeps a
+      # WARP timing flake from failing the build until the owner decides to
+      # require it (see the PR that added it for the stability record).
+      - name: Quiescent with content (informational)
+        continue-on-error: true
         timeout-minutes: 5
-        run: python scripts/ci/windows_smoke.py --exe target/release/tze_hud.exe --config app/tze_hud_app/config/production.toml
+        run: python scripts/ci/windows_smoke.py --quiescent-with-content --exe target/release/tze_hud.exe --config app/tze_hud_app/config/production.toml
 
       - name: Install, single-instance, uninstall smoke
         timeout-minutes: 5
