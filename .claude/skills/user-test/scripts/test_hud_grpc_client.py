@@ -45,6 +45,13 @@ from hud_grpc_client import (
 from proto_gen import session_pb2, types_pb2
 
 
+# These tests pre-load every response into the client queue, so nothing waits
+# on I/O and no timeout should ever elapse. The timeout is only a hang guard
+# (the deadline is wall-clock; a tight value flakes whenever a loaded CI runner
+# stalls the process, hud-stzok). It is not part of the behavior under test.
+HANG_GUARD_S = 30.0
+
+
 class HudGrpcClientTests(unittest.IsolatedAsyncioTestCase):
     @unittest.skipIf(Image is None, "Pillow is required for PNG avatar tests")
     def test_make_avatar_png_is_32_by_32_png(self):
@@ -230,7 +237,7 @@ class HudGrpcClientTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(RuntimeError, "RESOURCE_HASH_MISMATCH"):
             await client._await_resource_upload_result(
                 request_sequence=23,
-                timeout=0.1,
+                timeout=HANG_GUARD_S,
             )
 
     async def test_wait_for_does_not_drop_unmatched_messages(self):
@@ -251,9 +258,9 @@ class HudGrpcClientTests(unittest.IsolatedAsyncioTestCase):
         await client._response_queue.put(result)
         await client._response_queue.put(reclaimed)
 
-        reclaimed_resp = await client._wait_for("reclaimed", timeout=0.1)
+        reclaimed_resp = await client._wait_for("reclaimed", timeout=HANG_GUARD_S)
         self.assertEqual(reclaimed_resp.reclaimed.why, session_pb2.RECLAIM_REASON_EXPIRED)
-        result_resp = await client._wait_for("request_result", timeout=0.1)
+        result_resp = await client._wait_for("request_result", timeout=HANG_GUARD_S)
         self.assertEqual(result_resp.request_result.batch_id, b"\x01" * 16)
 
     async def test_wait_for_matcher_does_not_replay_wrong_deferred_payload(self):
@@ -268,12 +275,12 @@ class HudGrpcClientTests(unittest.IsolatedAsyncioTestCase):
 
         resp = await client._wait_for(
             "request_result",
-            timeout=0.1,
+            timeout=HANG_GUARD_S,
             matcher=lambda msg: msg.request_result.batch_id == b"\x42" * 16,
         )
 
         self.assertEqual(resp.request_result.batch_id, b"\x42" * 16)
-        deferred_resp = await client._wait_for("request_result", timeout=0.1)
+        deferred_resp = await client._wait_for("request_result", timeout=HANG_GUARD_S)
         self.assertEqual(deferred_resp.request_result.batch_id, b"\x41" * 16)
 
     async def test_await_resource_upload_result_does_not_drop_other_responses(self):
@@ -298,10 +305,10 @@ class HudGrpcClientTests(unittest.IsolatedAsyncioTestCase):
 
         stored = await client._await_resource_upload_result(
             request_sequence=5,
-            timeout=0.1,
+            timeout=HANG_GUARD_S,
         )
         self.assertEqual(stored.request_sequence, 5)
-        mutation_resp = await client._wait_for("request_result", timeout=0.1)
+        mutation_resp = await client._wait_for("request_result", timeout=HANG_GUARD_S)
         self.assertEqual(mutation_resp.request_result.batch_id, b"\x11" * 16)
 
     async def test_upload_png_resource_rejects_payload_over_inline_limit(self):
