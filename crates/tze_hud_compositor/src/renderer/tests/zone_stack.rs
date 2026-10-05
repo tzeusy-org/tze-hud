@@ -75,44 +75,23 @@ async fn test_stack_zone_renders_separate_backdrop_per_publication() {
     let mut vertices: Vec<crate::pipeline::RectVertex> = Vec::new();
     compositor.render_zone_content(&scene, &mut vertices, &mut Vec::new(), 1280.0, 720.0, None);
 
-    // Two publications → two backdrop quads (6 verts each) + border quads.
-    // Each Notification slot emits:
-    //   1 backdrop quad (6) + 4 border quads (24) + 4 dismiss-button border quads (24) = 54.
-    // Total: 2 × 54 = 108 vertices.
-    // We assert at least 12 (2 backdrops) and a multiple of 6.
-    assert!(
-        vertices.len() >= 12,
-        "Stack zone with 2 publications must emit at least 12 vertices (2 backdrop quads), got {}",
-        vertices.len()
-    );
+    // Two publications → two backdrop quads (6 verts each). Their borders and
+    // dismiss outlines are SDF commands (collect_all_rounded_rect_cmds).
     assert_eq!(
-        vertices.len() % 6,
-        0,
-        "vertex count must be a multiple of 6 (each quad = 6 vertices), got {}",
+        vertices.len(),
+        12,
+        "Stack zone with 2 publications must emit 2 backdrop quads, got {} vertices",
         vertices.len()
     );
 
-    // The first backdrop quad's top-left y should be 0 (zone starts at y_pct=0.0 → y=0).
-    // The second backdrop quad's top-left y should be ~slot_h after the first slot.
-    // zone_h = 720 * 0.5556 ≈ 400; slot_h is content-sized per stack_slot_height.
-    // Vertices are in NDC; we check the first and Nth vertex y values differ.
-    // rect_vertices emits 6 verts per quad in positions [x,y] NDC.
-    // Each notification slot emits:
-    //   6  backdrop quad vertices
-    //   24 border quads (4 quads × 6 verts each)
-    //   24 dismiss-button border quads (4 quads × 6 verts each)
-    //   = 54 vertices per slot.
-    // The second backdrop quad therefore starts at vertex index 54.
+    // Each slot starts at its own y. Vertices are NDC [x, y]; the second
+    // backdrop quad starts at vertex 6.
     let first_quad_y = vertices[0].position[1];
-    // Find second backdrop by skipping first slot (54 vertices: 6 backdrop + 24 border + 24 dismiss border).
-    let second_quad_idx = 54; // 6 backdrop + 4 border quads + 4 dismiss-button border quads (6 each)
-    if vertices.len() > second_quad_idx {
-        let second_quad_y = vertices[second_quad_idx].position[1];
-        assert!(
-            (first_quad_y - second_quad_y).abs() > 0.01,
-            "second Stack slot must start at a different y than the first; got first={first_quad_y:.4}, second={second_quad_y:.4}"
-        );
-    }
+    let second_quad_y = vertices[6].position[1];
+    assert!(
+        (first_quad_y - second_quad_y).abs() > 0.01,
+        "second Stack slot must start at a different y than the first; got first={first_quad_y:.4}, second={second_quad_y:.4}"
+    );
 }
 
 /// Stack zone: collect_text_items must produce a separate TextItem for

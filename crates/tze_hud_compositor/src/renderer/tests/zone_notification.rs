@@ -684,16 +684,9 @@ async fn test_notification_area_backdrop_uses_0_8_opacity() {
     );
 }
 
-/// notification-area border rendering: 1px 4-quad border is emitted after the
-/// urgency-tinted backdrop quad.
-///
-/// For a Stack zone with one Notification publish, render_zone_content should emit:
-///   - 6 vertices for the backdrop quad
-///   - up to 24 vertices (4 × 6) for the border quads
-#[tokio::test]
-async fn test_notification_area_emits_border_quads() {
-    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
-
+/// A Stack `notification-area` scene with one urgency-0 notification, for the
+/// border tests. `radius` sets `backdrop_radius` (None = flat backdrop).
+fn bordered_notification_scene(radius: Option<f32>) -> SceneGraph {
     let mut scene = SceneGraph::new(1280.0, 720.0);
     scene.register_zone(ZoneDefinition {
         id: SceneId::new(),
@@ -708,6 +701,7 @@ async fn test_notification_area_emits_border_quads() {
         accepted_media_types: vec![ZoneMediaType::ShortTextWithIcon],
         rendering_policy: RenderingPolicy {
             backdrop: Some(Rgba::new(0.05, 0.05, 0.05, 1.0)),
+            backdrop_radius: radius,
             font_size_px: Some(18.0),
             ..Default::default()
         },
@@ -734,30 +728,126 @@ async fn test_notification_area_emits_border_quads() {
             None,
         )
         .unwrap();
-
-    let mut vertices: Vec<crate::pipeline::RectVertex> = Vec::new();
-    compositor.render_zone_content(&scene, &mut vertices, &mut Vec::new(), 1280.0, 720.0, None);
-
-    // One backdrop (6 vertices) + up to 4 border quads (6 each) = 6 + 24 = 30 max.
-    // Minimum: 6 (backdrop) + 6 (at least top edge border) = 12.
-    assert!(
-        vertices.len() >= 12,
-        "expected at least 12 vertices (backdrop + border), got {}",
-        vertices.len()
-    );
-    // Total should be 6 * N for some N ≥ 2 (backdrop + at least one border quad).
-    assert_eq!(
-        vertices.len() % 6,
-        0,
-        "vertex count must be a multiple of 6 (each quad = 6 vertices), got {}",
-        vertices.len()
-    );
+    scene
 }
 
-/// alert-banner does NOT emit border quads — border rendering is only for
+/// The notification card border and dismiss outline are SDF borders, not flat
+/// quads. On a flat backdrop (no radius) the flat pass emits only the backdrop
+/// and the SDF pass adds a border-only card shape plus the dismiss outline; on
+/// a rounded backdrop the border rides on the backdrop's own SDF shape.
+#[tokio::test]
+async fn test_notification_card_border_is_an_sdf_border() {
+    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
+
+    let flat = bordered_notification_scene(None);
+    let mut vertices: Vec<crate::pipeline::RectVertex> = Vec::new();
+    compositor.render_zone_content(&flat, &mut vertices, &mut Vec::new(), 1280.0, 720.0, None);
+    assert_eq!(vertices.len(), 6, "flat pass: backdrop quad only");
+
+    let (x, y, w) = (960.0, 14.4, 307.2);
+    let cmds = compositor
+        .collect_all_rounded_rect_cmds(&flat, 1280.0, 720.0)
+        .chrome;
+    assert_eq!(cmds.len(), 2, "card border + dismiss outline: {cmds:?}");
+    let card = &cmds[0];
+    assert_eq!(card.color, [0.0; 4], "border-only over the flat backdrop");
+    assert_eq!(card.radius, 0.0);
+    assert!((card.x - x).abs() < 0.01 && (card.y - y).abs() < 0.01);
+    assert!((card.width - w).abs() < 0.01, "card spans the slot width");
+    assert_eq!(card.border.map(|b| b.width), Some(1.0));
+    let dismiss = &cmds[1];
+    assert_eq!(dismiss.color, [0.0; 4]);
+    assert_eq!(dismiss.border.map(|b| b.width), Some(1.0));
+    assert!(
+        (dismiss.x + dismiss.width - (x + w)).abs() < 0.01,
+        "dismiss at the right edge"
+    );
+
+    let rounded = bordered_notification_scene(Some(12.0));
+    let mut vertices: Vec<crate::pipeline::RectVertex> = Vec::new();
+    compositor.render_zone_content(
+        &rounded,
+        &mut vertices,
+        &mut Vec::new(),
+        1280.0,
+        720.0,
+        None,
+    );
+    assert!(
+        vertices.is_empty(),
+        "rounded backdrop and borders all go to the SDF pass"
+    );
+    let cmds = compositor
+        .collect_all_rounded_rect_cmds(&rounded, 1280.0, 720.0)
+        .chrome;
+    assert_eq!(cmds.len(), 2, "card + dismiss outline: {cmds:?}");
+    assert_eq!(cmds[0].radius, 12.0);
+    assert!(cmds[0].color[3] > 0.7, "card carries its fill");
+    assert_eq!(cmds[0].border.map(|b| b.width), Some(1.0));
+}
+
+/// Pixel check of the SDF border on a rounded card (fullscreen, opaque border
+/// token): just inside the rounded corner is border colour, the middle is
+/// fill, and the bounding-box corner outside the curve stays clear.
+#[tokio::test]
+async fn test_rounded_card_border_follows_the_corner() {
+    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
+    let mut tokens = HashMap::new();
+    tokens.insert("color.border.default".to_string(), "#00FF00".to_string());
+    tokens.insert(
+        "color.notification.urgency.low".to_string(),
+        "#FF0000".to_string(),
+    );
+    compositor.set_token_map(tokens);
+    let mut scene = bordered_notification_scene(Some(16.0));
+    compositor.prime_markdown_cache(&scene);
+    compositor.prime_truncation_cache(&scene);
+    compositor.render_frame_headless(&mut scene, &surface);
+
+    let pixels = surface.read_pixels(&compositor.device);
+    let px = |x: usize, y: usize| -> [u8; 4] {
+        let i = (y * 1280 + x) * 4;
+        [pixels[i], pixels[i + 1], pixels[i + 2], pixels[i + 3]]
+    };
+    // Zone top-left (960, 14.4), radius 16. In the corner box, the pixel whose
+    // centre is closest to 0.5 px inside the curve (mid-border, 1 px wide) on
+    // the curved part of the edge (both offsets past 4 px) is border.
+    let (x0, y0, r) = (960.0_f32, 14.4_f32, 16.0_f32);
+    let sdf = |cx: f32, cy: f32| {
+        let (qx, qy) = (x0 + r - cx, y0 + r - cy);
+        (qx * qx + qy * qy).sqrt() - r
+    };
+    let border_px = (964..976)
+        .flat_map(|x| (19..30).map(move |y| (x, y)))
+        .min_by(|a, b| {
+            let da = (sdf(a.0 as f32 + 0.5, a.1 as f32 + 0.5) + 0.5).abs();
+            let db = (sdf(b.0 as f32 + 0.5, b.1 as f32 + 0.5) + 0.5).abs();
+            da.total_cmp(&db)
+        })
+        .unwrap();
+    let border = px(border_px.0, border_px.1);
+    assert!(
+        border[1] > 150 && border[1] > border[0] + 60,
+        "corner pixel {border_px:?} inside the radius must be border green, got {border:?}"
+    );
+    let slot_h = compositor
+        .collect_all_rounded_rect_cmds(&scene, 1280.0, 720.0)
+        .chrome[0]
+        .height;
+    let fill = px(960 + 184, (y0 + slot_h * 0.5) as usize);
+    assert!(
+        fill[0] > 150 && fill[1] < 100,
+        "card middle must be fill red, got {fill:?}"
+    );
+    let outside = px(960, 14 + 1);
+    let clear = px(10, 700);
+    assert_eq!(outside, clear, "outside the curve stays clear");
+}
+
+/// alert-banner gets no border — the card border is only for
 /// non-alert-banner notification zones.
 #[tokio::test]
-async fn test_alert_banner_does_not_emit_border_quads() {
+async fn test_alert_banner_has_no_border() {
     let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
 
     let mut scene = SceneGraph::new(1280.0, 720.0);
@@ -805,12 +895,18 @@ async fn test_alert_banner_does_not_emit_border_quads() {
     let mut vertices: Vec<crate::pipeline::RectVertex> = Vec::new();
     compositor.render_zone_content(&scene, &mut vertices, &mut Vec::new(), 1280.0, 720.0, None);
 
-    // alert-banner: only 6 vertices (one backdrop quad, no border).
+    // alert-banner: only 6 vertices (one backdrop quad) and no SDF border.
     assert_eq!(
         vertices.len(),
         6,
-        "alert-banner must emit exactly 6 vertices (backdrop only, no border), got {}",
+        "alert-banner must emit exactly 6 vertices (backdrop only), got {}",
         vertices.len()
+    );
+    let rr = compositor.collect_all_rounded_rect_cmds(&scene, 1280.0, 720.0);
+    assert!(
+        rr.chrome.is_empty(),
+        "alert-banner must emit no border: {:?}",
+        rr.chrome
     );
 }
 
@@ -824,73 +920,14 @@ async fn test_notification_area_border_uses_border_default_token() {
     token_map.insert("color.border.default".to_string(), "#00FFFF".to_string());
     compositor.set_token_map(token_map);
 
-    let mut scene = SceneGraph::new(1280.0, 720.0);
-    scene.register_zone(ZoneDefinition {
-        id: SceneId::new(),
-        name: "notification-area".to_owned(),
-        description: "notification area border token test".to_owned(),
-        geometry_policy: GeometryPolicy::Relative {
-            x_pct: 0.75,
-            y_pct: 0.02,
-            width_pct: 0.24,
-            height_pct: 0.30,
-        },
-        accepted_media_types: vec![ZoneMediaType::ShortTextWithIcon],
-        rendering_policy: RenderingPolicy {
-            backdrop: Some(Rgba::new(0.05, 0.05, 0.05, 1.0)),
-            font_size_px: Some(18.0),
-            ..Default::default()
-        },
-        contention_policy: ContentionPolicy::Stack { max_depth: 8 },
-        max_publishers: 4,
-        auto_clear_ms: None,
-        ephemeral: false,
-        layer_attachment: LayerAttachment::Chrome,
-    });
-    scene
-        .publish_to_zone(
-            "notification-area",
-            ZoneContent::Notification(NotificationPayload {
-                text: "cyan border".to_owned(),
-                icon: String::new(),
-                urgency: 0,
-                ttl_ms: None,
-                title: String::new(),
-                actions: Vec::new(),
-            }),
-            "test",
-            None,
-            None,
-            None,
-        )
-        .unwrap();
-
-    let mut vertices: Vec<crate::pipeline::RectVertex> = Vec::new();
-    compositor.render_zone_content(&scene, &mut vertices, &mut Vec::new(), 1280.0, 720.0, None);
-
-    // vertices[0..6] = backdrop quad (urgency low color)
-    // vertices[6..] = border quads (should be cyan: R≈0, G≈1, B≈1)
+    let scene = bordered_notification_scene(None);
+    let cmds = compositor
+        .collect_all_rounded_rect_cmds(&scene, 1280.0, 720.0)
+        .chrome;
+    let border = cmds[0].border.expect("card border").color;
     assert!(
-        vertices.len() > 6,
-        "expected border quads after backdrop, only got {}",
-        vertices.len()
-    );
-    // Check border quad color (vertex index 6 is the first border vertex).
-    let border_v = &vertices[6];
-    assert!(
-        border_v.color[0] < 0.1,
-        "border R should be ~0.0 (cyan token), got {}",
-        border_v.color[0]
-    );
-    assert!(
-        border_v.color[1] > 0.9,
-        "border G should be ~1.0 (cyan token), got {}",
-        border_v.color[1]
-    );
-    assert!(
-        border_v.color[2] > 0.9,
-        "border B should be ~1.0 (cyan token), got {}",
-        border_v.color[2]
+        border[0] < 0.1 && border[1] > 0.9 && border[2] > 0.9,
+        "card border must be the cyan token, got {border:?}"
     );
 }
 

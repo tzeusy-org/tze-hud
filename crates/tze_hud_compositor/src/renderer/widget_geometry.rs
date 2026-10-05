@@ -18,16 +18,15 @@
 //!   its bounds and the configured `DragHandleStyle`.
 //! - `collect_drag_handle_entries` — build the full `Vec<DragHandleEntry>` for
 //!   the current frame covering tiles, zones, and widgets.
-//! - `append_drag_handle_vertices` — emit GPU vertices for all drag handles,
-//!   including the 2px highlight border when a drag is active.
+//! - `drag_highlight_cmds` — SDF border commands for the active-drag highlight.
+//! - `append_drag_handle_vertices` — emit GPU vertices for all drag handles.
 
 use tze_hud_scene::graph::SceneGraph;
 use tze_hud_scene::types::*;
 
 use super::Compositor;
 use super::draw_cmds::DragHandleEntry;
-use super::token_colors::emit_drag_highlight_border;
-use crate::pipeline::{RectVertex, rect_vertices};
+use crate::pipeline::{RectVertex, RoundedRectDrawCmd, rect_vertices};
 
 impl Compositor {
     fn resolve_widget_geometry(
@@ -210,6 +209,36 @@ impl Compositor {
         entries
     }
 
+    /// The active-drag highlight: a `DRAG_HIGHLIGHT_BORDER_PX` inside border
+    /// on the dragged element's bounds, drawn by the SDF pipeline just before
+    /// the drag-handle pass (so above widgets). Per the drag-to-reposition
+    /// spec: no drop shadows, scale pulses, or animated transitions.
+    pub(super) fn drag_highlight_cmds(
+        &self,
+        scene: &SceneGraph,
+        handles: &[DragHandleEntry],
+    ) -> Vec<RoundedRectDrawCmd> {
+        // White at 0.9 alpha: visible on light and dark backgrounds.
+        const HIGHLIGHT: Rgba = Rgba {
+            r: 1.0,
+            g: 1.0,
+            b: 1.0,
+            a: 0.9,
+        };
+        handles
+            .iter()
+            .filter(|entry| scene.is_drag_active(entry.element_id))
+            .map(|entry| {
+                self.border_only_cmd(
+                    entry.element_bounds,
+                    0.0,
+                    tze_hud_input::DRAG_HIGHLIGHT_BORDER_PX,
+                    HIGHLIGHT,
+                )
+            })
+            .collect()
+    }
+
     pub(super) fn append_drag_handle_vertices(
         &self,
         scene: &SceneGraph,
@@ -233,28 +262,10 @@ impl Compositor {
             }
             .clamp(0.0, 1.0);
 
-            // V1-compatible drag visual feedback: 2px highlight border around
-            // the element being dragged. Per spec: no drop shadows, no scale
-            // pulses, no animated transitions.
-            if is_active_drag {
-                // DRAG_HIGHLIGHT_COLOR: white at 0.9 alpha — visible on both
-                // light and dark backgrounds without design-token dependency.
-                let highlight_color = [1.0_f32, 1.0, 1.0, 0.9];
-                emit_drag_highlight_border(
-                    vertices,
-                    entry.element_bounds.x,
-                    entry.element_bounds.y,
-                    entry.element_bounds.width,
-                    entry.element_bounds.height,
-                    sw,
-                    sh,
-                    highlight_color,
-                );
-            }
-
             // Header-band handles are invisible (hud-643dv): the client draws the
             // header chrome, so the band paints no grip fill/glyph of its own — it
-            // only contributes the active-drag highlight border above. Painting a
+            // only contributes the active-drag highlight border
+            // (`drag_highlight_cmds`). Painting a
             // translucent slab over the whole header would double-draw the client
             // header and look wrong.
             if entry.is_header_band {

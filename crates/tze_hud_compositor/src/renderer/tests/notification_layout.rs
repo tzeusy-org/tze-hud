@@ -406,62 +406,6 @@ async fn test_notification_text_inset_from_backdrop_edges() {
     );
 }
 
-/// Flat-rect stack notifications render an outlined dismiss affordance with no fill.
-#[tokio::test]
-async fn test_notification_stack_emits_dismiss_outline_quads() {
-    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
-
-    let mut scene = SceneGraph::new(1280.0, 720.0);
-    scene.register_zone(ZoneDefinition {
-        id: SceneId::new(),
-        name: "notification-area".to_owned(),
-        description: "dismiss outline test".to_owned(),
-        geometry_policy: GeometryPolicy::Relative {
-            x_pct: 0.0,
-            y_pct: 0.0,
-            width_pct: 0.25,
-            height_pct: 0.5,
-        },
-        accepted_media_types: vec![ZoneMediaType::ShortTextWithIcon],
-        rendering_policy: RenderingPolicy {
-            backdrop: Some(Rgba::new(0.1, 0.1, 0.1, 0.9)),
-            ..Default::default()
-        },
-        contention_policy: ContentionPolicy::Stack { max_depth: 5 },
-        max_publishers: 8,
-        auto_clear_ms: Some(8_000),
-        ephemeral: false,
-        layer_attachment: LayerAttachment::Chrome,
-    });
-
-    scene
-        .publish_to_zone(
-            "notification-area",
-            ZoneContent::Notification(NotificationPayload {
-                text: "Dismiss outline".to_owned(),
-                icon: String::new(),
-                urgency: 1,
-                ttl_ms: None,
-                title: String::new(),
-                actions: Vec::new(),
-            }),
-            "agent-a",
-            None,
-            None,
-            None,
-        )
-        .unwrap();
-
-    let mut vertices: Vec<crate::pipeline::RectVertex> = Vec::new();
-    compositor.render_zone_content(&scene, &mut vertices, &mut Vec::new(), 1280.0, 720.0, None);
-
-    assert_eq!(
-        vertices.len(),
-        54,
-        "notification slot should emit backdrop + card border + dismiss outline"
-    );
-}
-
 // ── Two-line notification rendering [hud-ltgk.3] ──────────────────────────
 //
 // Spec §Two-line notification layout:
@@ -842,8 +786,8 @@ async fn test_rounded_notification_backdrop_uses_two_line_slot_height() {
     let rr = compositor.collect_all_rounded_rect_cmds(&scene, 1280.0, 720.0);
     assert_eq!(
         rr.chrome.len(),
-        1,
-        "single rounded notification should produce exactly one rounded rect cmd"
+        2,
+        "single rounded notification: one card cmd, then its dismiss outline"
     );
 
     let expected_h = Compositor::notification_slot_height(

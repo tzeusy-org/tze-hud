@@ -553,10 +553,10 @@ impl super::Compositor {
                                 // When the zone's RenderingPolicy explicitly sets
                                 // margin_horizontal/margin_vertical, those values take
                                 // precedence (e.g. alert-banner uses margin_horizontal=8).
-                                const NOTIFICATION_BORDER_PX: f32 = 1.0;
                                 const NOTIFICATION_PADDING_PX: f32 = 8.0;
                                 const NOTIFICATION_INSET: f32 =
-                                    NOTIFICATION_BORDER_PX + NOTIFICATION_PADDING_PX;
+                                    super::token_colors::NOTIFICATION_BORDER_WIDTH_PX
+                                        + NOTIFICATION_PADDING_PX;
                                 // Horizontal inset: policy margin_horizontal > margin_px > 9px
                                 let inset_h = policy
                                     .margin_horizontal

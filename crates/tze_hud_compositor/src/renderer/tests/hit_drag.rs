@@ -838,8 +838,8 @@ async fn drag_handle_opacity_switches_to_active_on_hover_state() {
 /// 1. **Z-order boost** (implicit: caller bumps z via `drag_active_elements`)
 /// 2. **Opacity increase**: handle alpha must equal `opacity_active` (same as
 ///    hovered), not `opacity_idle`, when the element is in `drag_active_elements`.
-/// 3. **2px highlight border**: vertex count must be greater than the idle count
-///    (border quads are additional vertices).
+/// 3. **2px highlight border**: one SDF border-only command on the element
+///    bounds (`drag_highlight_cmds`), absent when idle.
 #[tokio::test]
 async fn drag_visual_feedback_applied_during_active_drag() {
     let (compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);
@@ -887,7 +887,6 @@ async fn drag_visual_feedback_applied_during_active_drag() {
         1080.0,
     );
     let drag_alpha = drag_vertices[0].color[3];
-    let drag_count = drag_vertices.len();
 
     // Opacity must be at the active level (same as hover) — not idle.
     assert!(
@@ -895,12 +894,19 @@ async fn drag_visual_feedback_applied_during_active_drag() {
         "drag active handle alpha ({drag_alpha}) must be greater than idle alpha ({idle_alpha})"
     );
 
-    // The 2px highlight border adds 4 additional quads × 6 vertices each = 24 extra vertices
-    // (min — degenerate small rects may produce fewer).  We just assert more than idle.
-    assert!(
-        drag_count > idle_count,
-        "drag active must emit more vertices than idle (border adds quads); \
-             idle={idle_count}, drag={drag_count}"
+    // The highlight is a 2px SDF border on the element bounds, not grip quads.
+    assert_eq!(
+        drag_vertices.len(),
+        idle_count,
+        "highlight adds no flat quads"
+    );
+    let highlight = compositor.drag_highlight_cmds(&scene, std::slice::from_ref(handle));
+    assert_eq!(highlight.len(), 1, "one highlight border while dragging");
+    assert_eq!((highlight[0].x, highlight[0].width), (120.0, 320.0));
+    assert_eq!(highlight[0].color, [0.0; 4], "border only");
+    assert_eq!(
+        highlight[0].border.map(|b| b.width),
+        Some(tze_hud_input::DRAG_HIGHLIGHT_BORDER_PX)
     );
 
     // Clear and verify feedback is removed
