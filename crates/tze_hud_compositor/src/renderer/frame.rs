@@ -2,6 +2,7 @@ use std::borrow::Cow;
 
 use super::*;
 use crate::display::FrameTarget;
+use crate::pipeline::RoundedRectClip;
 
 /// One display window's view of a [`WindowedFrameBuild`], in that window's
 /// pixel / NDC space (see [`Compositor::target_view`]).
@@ -1024,26 +1025,52 @@ impl Compositor {
         }
         let visible =
             |x: f32, y: f32, cw: f32, ch: f32| x < w && y < h && x + cw > 0.0 && y + ch > 0.0;
-        for cmd in tv
-            .textured_cmds
-            .iter()
-            .filter(|c| visible(c.x, c.y, c.w, c.h))
-        {
-            cmd.resource_id.hash(&mut hasher);
-            hash_f32s(&mut hasher, &[cmd.x, cmd.y, cmd.w, cmd.h]);
-            hash_f32s(&mut hasher, &cmd.uv_rect);
-            hash_f32s(&mut hasher, &cmd.tint);
+        // Destructure exhaustively: a new draw-command field must be hashed
+        // (or explicitly ignored) here, or a window would keep stale pixels.
+        for cmd in tv.textured_cmds.iter() {
+            let TexturedDrawCmd {
+                resource_id,
+                x,
+                y,
+                w: cw,
+                h: ch,
+                uv_rect,
+                tint,
+            } = cmd;
+            if !visible(*x, *y, *cw, *ch) {
+                continue;
+            }
+            resource_id.hash(&mut hasher);
+            hash_f32s(&mut hasher, &[*x, *y, *cw, *ch]);
+            hash_f32s(&mut hasher, uv_rect);
+            hash_f32s(&mut hasher, tint);
         }
         for list in [&tv.rr_background, &tv.rr_post, &tv.drag_highlight_cmds] {
             0xD8u8.hash(&mut hasher);
-            for cmd in list.iter().filter(|c| visible(c.x, c.y, c.width, c.height)) {
-                hash_f32s(
-                    &mut hasher,
-                    &[cmd.x, cmd.y, cmd.width, cmd.height, cmd.radius],
-                );
-                hash_f32s(&mut hasher, &cmd.color);
-                if let Some(clip) = cmd.clip {
-                    hash_f32s(&mut hasher, &[clip.x, clip.y, clip.width, clip.height]);
+            for cmd in list.iter() {
+                let RoundedRectDrawCmd {
+                    x,
+                    y,
+                    width,
+                    height,
+                    radius,
+                    color,
+                    clip,
+                } = cmd;
+                if !visible(*x, *y, *width, *height) {
+                    continue;
+                }
+                hash_f32s(&mut hasher, &[*x, *y, *width, *height, *radius]);
+                hash_f32s(&mut hasher, color);
+                clip.is_some().hash(&mut hasher);
+                if let Some(RoundedRectClip {
+                    x,
+                    y,
+                    width,
+                    height,
+                }) = clip
+                {
+                    hash_f32s(&mut hasher, &[*x, *y, *width, *height]);
                 }
             }
         }

@@ -23,8 +23,11 @@ pub const MAX_PNG_BYTES: usize = 32 * 1024 * 1024;
 
 /// One capture request; the compositor answers on `reply`.
 pub struct CaptureRequest {
-    /// Display index as `/admin/status` lists them; 0 is the primary.
-    pub display: usize,
+    /// Which display: `None` is the primary, `Some(name)` a secondary by
+    /// its display name (resolved from the `/admin/status` index by the
+    /// endpoint, so a reordered or lost secondary can never be confused
+    /// with another).
+    pub display: Option<String>,
     pub reply: oneshot::Sender<Result<CapturedFrame, CaptureError>>,
 }
 
@@ -98,7 +101,7 @@ impl ScreenshotError {
             Self::Failed(why) => (503, OperatorCode::Unavailable, why.clone()),
             Self::NoSuchDisplay(i) => (
                 404,
-                OperatorCode::BadRequest,
+                OperatorCode::NoSuchDisplay,
                 format!("no display {i}; /admin/status lists the connected displays"),
             ),
         };
@@ -110,7 +113,6 @@ impl From<CaptureError> for ScreenshotError {
     fn from(e: CaptureError) -> Self {
         match e {
             CaptureError::TooLarge { .. } => Self::TooLarge,
-            CaptureError::NoSuchDisplay(i) => Self::NoSuchDisplay(i),
             other => Self::Failed(other.to_string()),
         }
     }
@@ -133,7 +135,14 @@ pub fn capture_channel(wake: impl Fn() + Send + Sync + 'static) -> (CaptureEndpo
 impl CaptureEndpoint {
     /// Ask the compositor for display `display`'s frame (0 = primary) and
     /// return it PNG-encoded.
-    pub async fn capture_png(&self, display: usize) -> Result<Vec<u8>, ScreenshotError> {
+    pub async fn capture_png(&self, index: usize) -> Result<Vec<u8>, ScreenshotError> {
+        let display = match index {
+            0 => None,
+            i => Some(
+                crate::operator::status::display_name(i)
+                    .ok_or(ScreenshotError::NoSuchDisplay(index))?,
+            ),
+        };
         let _permit = self
             .in_flight
             .try_acquire()
@@ -144,6 +153,9 @@ impl CaptureEndpoint {
             .map_err(|_| ScreenshotError::Unavailable("the compositor is not running"))?;
         (self.wake)();
         let frame = match tokio::time::timeout(CAPTURE_TIMEOUT, answer).await {
+            Ok(Ok(Err(CaptureError::NoSuchDisplay(_)))) => {
+                return Err(ScreenshotError::NoSuchDisplay(index));
+            }
             Ok(Ok(frame)) => frame?,
             Ok(Err(_)) | Err(_) => {
                 return Err(ScreenshotError::Unavailable(

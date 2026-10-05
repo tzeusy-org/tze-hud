@@ -599,3 +599,31 @@ async fn zone_assigned_to_secondary_display_renders_there() {
     );
     assert_ne!(frames[0].1, frames[1].1, "the secondary shows the zone");
 }
+
+/// Invariant 3 on every display: flipping safe mode changes what a
+/// secondary window shows, so it presents the overlay (and its removal) even
+/// though the scene did not change.
+#[tokio::test]
+async fn safe_mode_flip_changes_secondary_signature() {
+    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);
+    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
+    let side = crate::FrameTarget {
+        x: 256.0,
+        y: 0.0,
+        width: 256,
+        height: 256,
+        primary: false,
+    };
+    let mut scene = SceneGraph::new(256.0, 256.0);
+    compositor.prime_markdown_cache(&scene);
+    compositor.prime_truncation_cache(&scene);
+    let mut signatures = Vec::new();
+    for safe_mode in [false, true, false] {
+        compositor.set_safe_mode_overlay(safe_mode);
+        let build = compositor.build_windowed_frame(&mut scene, 256, 256);
+        signatures.push(compositor.frame_signature(&build, &side));
+    }
+    assert_ne!(signatures[0], signatures[1], "entering safe mode repaints");
+    assert_ne!(signatures[1], signatures[2], "leaving safe mode repaints");
+    assert_eq!(signatures[0], signatures[2]);
+}

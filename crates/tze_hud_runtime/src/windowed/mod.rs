@@ -451,6 +451,9 @@ struct WindowedRuntimeState {
     /// The window the cursor was last reported in; `CursorMoved` positions
     /// are relative to it.
     cursor_window: Option<WindowId>,
+    /// Times each secondary's window was recreated after its surface was
+    /// lost; capped so a persistently failing monitor is left alone.
+    secondary_recreates: std::collections::HashMap<String, u32>,
     /// Window that received the current left-button press; it keeps
     /// capturing until release.
     press_window: Option<WindowId>,
@@ -1426,6 +1429,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
         let system_card_for_compositor = self.state.system_card.clone();
         let capture_inbox = self.state.capture_inbox.clone();
         let display_targets = Arc::clone(&self.state.display_targets);
+        let displays_dirty = Arc::clone(&self.state.displays_dirty);
         // A handed-over instance reports ready after its first submitted frame.
         let handoff_child = cfg.handoff.clone();
         let telemetry_collector = TelemetryCollector::new();
@@ -1633,10 +1637,11 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                             secondaries = targets
                                 .secondaries
                                 .iter()
-                                .map(|(surface, origin)| displays::SecondaryTarget {
+                                .map(|(name, surface, origin)| displays::SecondaryTarget {
+                                    name: name.clone(),
                                     surface: Arc::clone(surface),
                                     origin: *origin,
-                                    last_signature: None,
+                                    ledger: Default::default(),
                                 })
                                 .collect();
                             true
@@ -1653,25 +1658,39 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                             .swap(0, std::sync::atomic::Ordering::AcqRel);
                         if w > 0 && h > 0 {
                             target.surface.reconfigure(w, h, &compositor.device);
-                            target.last_signature = None;
+                            target.ledger.invalidate();
                             displays_need_frame = true;
                         }
                         let recovery =
                             compositor.attempt_pending_surface_recovery(target.surface.as_ref());
                         if recovery.reconfigured_surface() {
-                            target.last_signature = None;
+                            target.ledger.invalidate();
                             displays_need_frame = true;
                         }
                         if recovery.is_terminal() {
-                            // A secondary is not worth the HUD: drop it and keep
-                            // rendering the primary.
+                            // A secondary is not worth the HUD: stop rendering
+                            // it and have the main thread close and recreate
+                            // its window (until then it is click-through and
+                            // shows its last frame).
                             tracing::error!(
-                                origin = ?target.origin,
-                                "secondary display surface lost; no longer rendering it"
+                                display = %target.name,
+                                "secondary display surface lost; asking the main thread to recreate it"
+                            );
+                            display_targets
+                                .lock()
+                                .unwrap_or_else(|e| e.into_inner())
+                                .lost
+                                .push(target.name.clone());
+                            displays_dirty.store(true, std::sync::atomic::Ordering::Release);
+                            compositor_wake.notify_main(
+                                crate::idle_efficiency::RuntimeWakeupSource::Resize,
                             );
                         }
                         !recovery.is_terminal()
                     });
+                    // A secondary whose last present failed (acquire timeout,
+                    // occluded) is owed a frame even if the scene is idle.
+                    displays_need_frame |= secondaries.iter().any(|t| t.ledger.owed());
 
                     // ── Surface recovery check ───────────────────────────
                     // `WindowSurface::acquire_frame` queues real Lost/Outdated
@@ -1955,7 +1974,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                             for target in &mut secondaries {
                                 let frame_target = target.frame_target();
                                 let signature = compositor.frame_signature(&build, &frame_target);
-                                if target.last_signature == Some(signature) {
+                                if !target.ledger.needs_present(signature) {
                                     continue;
                                 }
                                 let outcome = compositor.present_windowed_frame_to(
@@ -1969,10 +1988,9 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                                 if outcome.gpu_submitted {
                                     compositor_wake.counters().record_gpu_submission();
                                 }
-                                if outcome.telemetry.stage7_gpu_submit_us > 0 {
-                                    target.last_signature = Some(signature);
-                                    secondary_submitted = true;
-                                }
+                                let submitted = outcome.telemetry.stage7_gpu_submit_us > 0;
+                                target.ledger.record(signature, submitted);
+                                secondary_submitted |= submitted;
                             }
                             let compositor_telemetry = present_outcome.telemetry;
                             let frame_submitted = compositor_telemetry.stage7_gpu_submit_us > 0;
@@ -2098,9 +2116,12 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                         // Lock released: render offscreen, copy once, reply.
                         if let Some((req, build)) = capture_job {
                             let (w, h) = build.size();
-                            let target = match req.display {
-                                0 => Some(tze_hud_compositor::FrameTarget::primary(w, h)),
-                                i => secondaries.get(i - 1).map(|t| t.frame_target()),
+                            let target = match &req.display {
+                                None => Some(tze_hud_compositor::FrameTarget::primary(w, h)),
+                                Some(name) => secondaries
+                                    .iter()
+                                    .find(|t| &t.name == name)
+                                    .map(|t| t.frame_target()),
                             };
                             let result = match target {
                                 Some(target) => compositor.capture_windowed_frame(
@@ -2109,7 +2130,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                                     surface_for_compositor.format(),
                                 ),
                                 None => Err(tze_hud_compositor::CaptureError::NoSuchDisplay(
-                                    req.display,
+                                    req.display.clone().unwrap_or_default(),
                                 )),
                             };
                             let _ = req.reply.send(result);
@@ -2354,9 +2375,9 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                 }
                 // Positions are window-relative; scene coordinates are
                 // relative to the primary window.
-                let (origin_x, origin_y) = self.window_scene_origin(secondary);
-                self.state.cursor_x = position.x as f32 + origin_x;
-                self.state.cursor_y = position.y as f32 + origin_y;
+                let (x, y) = self.cursor_to_scene(secondary, (position.x, position.y));
+                self.state.cursor_x = x;
+                self.state.cursor_y = y;
                 self.state.cursor_window = Some(window_id);
                 self.state.cursor_left_window = false;
 
@@ -2422,6 +2443,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                     self.enqueue_pointer_event(kind);
                     if state == ElementState::Released {
                         self.state.left_button_down = false;
+                        self.state.press_window = None;
                         end_os_mouse_capture();
                         self.update_overlay_cursor_hittest();
                     }
@@ -3100,6 +3122,7 @@ impl WindowedRuntime {
             surface_factory: None,
             zone_displays,
             cursor_window: None,
+            secondary_recreates: Default::default(),
             press_window: None,
             global_tokens: startup_compositor_tokens,
             element_repositioned_tx,

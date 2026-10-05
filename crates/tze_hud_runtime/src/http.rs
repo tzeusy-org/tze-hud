@@ -162,6 +162,8 @@ pub enum OperatorCode {
     Unavailable,
     /// The frame exceeds the capture size limits.
     TooLarge,
+    /// No connected display has the requested index.
+    NoSuchDisplay,
 }
 
 /// Body of an operator-endpoint error: `{"code","hint"}`.

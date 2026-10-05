@@ -174,7 +174,8 @@ Windows, `--print-attach-info` plus pairing is the more direct path.
   zones = ["notification-area"]
   ```
 
-  A zone placed on a monitor that is not connected falls back to the primary.
+  A zone placed on a monitor that is not connected falls back to the primary;
+  the log warns and `/admin/status` `unplaced_zones` lists it.
   Tiles, portals and widgets stay on the primary. Plugging, unplugging or
   rescaling a monitor opens or closes its window; no restart needed (changing
   `[displays]` itself does need one). Explicit `--width`/`--height` gives a

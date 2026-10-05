@@ -2115,6 +2115,7 @@ mod tests {
             surface_factory: None,
             zone_displays: Default::default(),
             cursor_window: None,
+            secondary_recreates: Default::default(),
             press_window: None,
             global_tokens: std::collections::HashMap::new(),
             element_repositioned_tx: None,

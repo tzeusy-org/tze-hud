@@ -131,15 +131,37 @@ pub struct DisplayStatus {
     pub zones: Vec<String>,
 }
 
-static DISPLAYS: Mutex<Vec<DisplayStatus>> = Mutex::new(Vec::new());
+/// Overlaid displays plus configured zone placements whose display is not
+/// connected (`(zone, display)`; those zones render on the primary).
+/// `(zone, configured display)`.
+type UnplacedZone = (String, String);
+
+static DISPLAYS: Mutex<(Vec<DisplayStatus>, Vec<UnplacedZone>)> =
+    Mutex::new((Vec::new(), Vec::new()));
 
 /// Record the overlaid displays (main thread, on startup and every change).
-pub fn set_displays(displays: Vec<DisplayStatus>) {
-    *DISPLAYS.lock().unwrap_or_else(|e| e.into_inner()) = displays;
+pub fn set_displays(displays: Vec<DisplayStatus>, unplaced_zones: Vec<UnplacedZone>) {
+    *DISPLAYS.lock().unwrap_or_else(|e| e.into_inner()) = (displays, unplaced_zones);
 }
 
-fn displays_json() -> Value {
-    json!(*DISPLAYS.lock().unwrap_or_else(|e| e.into_inner()))
+/// The name of display `index` in `/admin/status` order, if connected.
+pub fn display_name(index: usize) -> Option<String> {
+    DISPLAYS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .0
+        .get(index)
+        .map(|d| d.name.clone())
+}
+
+fn displays_json() -> (Value, Value) {
+    let guard = DISPLAYS.lock().unwrap_or_else(|e| e.into_inner());
+    let unplaced: Vec<Value> = guard
+        .1
+        .iter()
+        .map(|(zone, display)| json!({"zone": zone, "display": display}))
+        .collect();
+    (json!(guard.0), json!(unplaced))
 }
 
 /// The recorded hotkey outcome, `NotApplicable` until one is set.
@@ -301,6 +323,7 @@ impl StatusSource {
             .unwrap_or_else(|e| crate::firewall::TailnetInbound::Unknown {
                 error: e.to_string(),
             });
+        let (displays, unplaced_zones) = displays_json();
         json!({
             "version": env!("CARGO_PKG_VERSION"),
             "sha": build.map_or("unknown", |b| b.sha.as_str()),
@@ -313,7 +336,8 @@ impl StatusSource {
             "agents": agents,
             "safe_mode": self.safe_mode.load(Ordering::Relaxed),
             "safe_mode_hotkey": safe_mode_hotkey().to_json(),
-            "displays": displays_json(),
+            "displays": displays,
+            "unplaced_zones": unplaced_zones,
             "frames_presented": self.presents.as_ref().map(|c| c.snapshot().presents),
             "cpu_pct_2s": cpu_pct_2s,
             "cpu_pct_avg": cpu_pct_avg,

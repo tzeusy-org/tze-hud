@@ -152,18 +152,55 @@ pub(super) struct SecondaryDisplay {
 pub(super) struct DisplayTargets {
     pub generation: u64,
     pub layout: DisplayLayout,
-    /// Secondary surfaces and their scene origins.
-    pub secondaries: Vec<(Arc<WindowSurface>, (i32, i32))>,
+    /// Secondary display names, surfaces and scene origins.
+    pub secondaries: Vec<(String, Arc<WindowSurface>, (i32, i32))>,
+    /// Secondaries whose surface the compositor gave up on (terminal loss);
+    /// the main thread closes and recreates their windows.
+    pub lost: Vec<String>,
 }
 
 pub(super) type SharedDisplayTargets = Arc<StdMutex<DisplayTargets>>;
 
+/// Whether one secondary window shows the latest frame built for it.
+#[derive(Debug, Default)]
+pub(super) struct PresentLedger {
+    /// Signature of the last frame presented; `None` forces a present.
+    presented: Option<u64>,
+    /// True after a present attempt failed (acquire timeout/occluded); the
+    /// compositor owes this window a frame until one submits.
+    owed: bool,
+}
+
+impl PresentLedger {
+    /// A frame with `signature` must be presented here.
+    pub fn needs_present(&self, signature: u64) -> bool {
+        self.presented != Some(signature)
+    }
+
+    /// Record a present attempt of `signature`.
+    pub fn record(&mut self, signature: u64, submitted: bool) {
+        if submitted {
+            self.presented = Some(signature);
+        }
+        self.owed = !submitted;
+    }
+
+    /// Forget what is on screen (reconfigured or new surface).
+    pub fn invalidate(&mut self) {
+        self.presented = None;
+    }
+
+    pub fn owed(&self) -> bool {
+        self.owed
+    }
+}
+
 /// Compositor-thread view of one secondary.
 pub(super) struct SecondaryTarget {
+    pub name: String,
     pub surface: Arc<WindowSurface>,
     pub origin: (i32, i32),
-    /// Signature of the last frame presented here; `None` forces a present.
-    pub last_signature: Option<u64>,
+    pub ledger: PresentLedger,
 }
 
 impl SecondaryTarget {
@@ -210,28 +247,90 @@ pub(super) fn secondary_index(secondaries: &[SecondaryDisplay], id: WindowId) ->
     secondaries.iter().position(|s| s.window.id() == id)
 }
 
-/// Index of the secondary whose scene rect contains `(x, y)`.
-pub(super) fn secondary_at(
-    secondaries: &[SecondaryDisplay],
-    primary: &MonitorSpec,
-    x: f32,
-    y: f32,
-) -> Option<usize> {
-    secondaries
-        .iter()
-        .position(|s| s.spec.scene_rect(primary).contains_point(x, y))
+/// One of the overlay windows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum OverlayWindow {
+    Primary,
+    Secondary(usize),
 }
 
+/// Which overlay window (if any) captures the pointer. Only one window ever
+/// captures; every other overlay stays click-through.
+///
+/// - `capture == false`: none.
+/// - A held press keeps capturing on the window it started in, wherever the
+///   cursor is, so the release arrives there.
+/// - Otherwise the window whose monitor contains the cursor. A cursor over a
+///   monitor with no overlay window captures nowhere.
+pub(super) fn capture_window(
+    capture: bool,
+    pressed: Option<OverlayWindow>,
+    cursor: (f32, f32),
+    primary: &MonitorSpec,
+    secondaries: &[MonitorSpec],
+) -> Option<OverlayWindow> {
+    if !capture {
+        return None;
+    }
+    if pressed.is_some() {
+        return pressed;
+    }
+    let (x, y) = cursor;
+    if primary.scene_rect(primary).contains_point(x, y) {
+        return Some(OverlayWindow::Primary);
+    }
+    secondaries
+        .iter()
+        .position(|m| m.scene_rect(primary).contains_point(x, y))
+        .map(OverlayWindow::Secondary)
+}
+
+/// Scene coordinates of a window-relative cursor position.
+pub(super) fn window_to_scene(
+    position: (f64, f64),
+    window: Option<&MonitorSpec>,
+    primary: Option<&MonitorSpec>,
+) -> (f32, f32) {
+    let (ox, oy) = match (window, primary) {
+        (Some(window), Some(primary)) => window.scene_origin(primary),
+        _ => (0, 0),
+    };
+    (position.0 as f32 + ox as f32, position.1 as f32 + oy as f32)
+}
+
+/// Configured zone placements whose display is not connected:
+/// `(zone, configured display)`, sorted.
+pub(super) fn unplaced_zones(
+    zone_displays: &HashMap<String, String>,
+    connected: &[&str],
+) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = zone_displays
+        .iter()
+        .filter(|(_, display)| {
+            !connected.contains(&tze_hud_compositor::normalize_display_name(display).as_str())
+        })
+        .map(|(zone, display)| (zone.clone(), display.clone()))
+        .collect();
+    out.sort();
+    out
+}
+
+/// Recreating a lost secondary is retried this many times per display.
+const MAX_SECONDARY_RECREATES: u32 = 3;
+
 impl super::WinitApp {
-    /// Scene origin of a window: `(0, 0)` for the primary (`None`).
-    pub(super) fn window_scene_origin(&self, secondary: Option<usize>) -> (f32, f32) {
-        match (secondary, self.state.primary_monitor.as_ref()) {
-            (Some(i), Some(primary)) => {
-                let (x, y) = self.state.secondaries[i].spec.scene_origin(primary);
-                (x as f32, y as f32)
-            }
-            _ => (0.0, 0.0),
-        }
+    /// Scene coordinates of a cursor position reported by a window
+    /// (`secondary` = `None` for the primary).
+    pub(super) fn cursor_to_scene(
+        &self,
+        secondary: Option<usize>,
+        position: (f64, f64),
+    ) -> (f32, f32) {
+        window_to_scene(
+            position,
+            secondary.map(|i| &self.state.secondaries[i].spec),
+            self.state.primary_monitor.as_ref(),
+        )
     }
 
     /// Reconcile the overlay windows with the connected monitors: move the
@@ -281,6 +380,48 @@ impl super::WinitApp {
             let _ = primary_window
                 .request_inner_size(winit::dpi::PhysicalSize::new(primary.width, primary.height));
         }
+        // Windows whose surface the compositor lost for good: close them and
+        // let the diff below recreate them, a bounded number of times.
+        let lost: Vec<String> = std::mem::take(
+            &mut self
+                .state
+                .display_targets
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .lost,
+        );
+        let mut lost_any = false;
+        for name in lost {
+            if let Some(i) = self
+                .state
+                .secondaries
+                .iter()
+                .position(|s| s.spec.name == name)
+            {
+                self.state.secondaries.remove(i);
+                lost_any = true;
+            }
+            let attempts = self
+                .state
+                .secondary_recreates
+                .entry(name.clone())
+                .or_default();
+            *attempts += 1;
+            if *attempts > MAX_SECONDARY_RECREATES {
+                tracing::error!(display = %name, "secondary overlay surface keeps failing; leaving that monitor without an overlay");
+            } else {
+                tracing::warn!(display = %name, attempt = *attempts, "secondary overlay surface lost; recreating its window");
+            }
+        }
+        let desired: Vec<MonitorSpec> = desired
+            .into_iter()
+            .filter(|m| {
+                self.state
+                    .secondary_recreates
+                    .get(&m.name)
+                    .is_none_or(|n| *n <= MAX_SECONDARY_RECREATES)
+            })
+            .collect();
         // A moved primary origin shifts every secondary's scene origin.
         let origin_moved = previous.is_some_and(|p| (p.x, p.y) != (primary.x, primary.y));
         let current: Vec<MonitorSpec> = self
@@ -294,7 +435,7 @@ impl super::WinitApp {
         } else {
             plan_secondary_changes(&current, &desired)
         };
-        if remove.is_empty() && add.is_empty() && !primary_changed && !first_sync {
+        if remove.is_empty() && add.is_empty() && !primary_changed && !first_sync && !lost_any {
             return;
         }
         for i in remove {
@@ -395,7 +536,7 @@ impl super::WinitApp {
             width: primary.width,
             height: primary.height,
             primary: true,
-            zones: Vec::new(),
+            zones: zones_on(&primary.name),
         }];
         status.extend(specs.iter().map(|m| {
             let (x, y) = m.scene_origin(primary);
@@ -409,7 +550,18 @@ impl super::WinitApp {
                 zones: zones_on(&m.name),
             }
         }));
-        crate::operator::status::set_displays(status);
+        let mut connected: Vec<&str> = vec![primary.name.as_str()];
+        connected.extend(specs.iter().map(|m| m.name.as_str()));
+        let unplaced = unplaced_zones(&self.state.zone_displays, &connected);
+        for (zone, configured) in &unplaced {
+            tracing::warn!(
+                %zone,
+                %configured,
+                connected = ?connected,
+                "zone placed on a display that is not connected; it renders on the primary"
+            );
+        }
+        crate::operator::status::set_displays(status, unplaced);
         {
             let mut targets = self
                 .state
@@ -422,7 +574,13 @@ impl super::WinitApp {
                 .state
                 .secondaries
                 .iter()
-                .map(|s| (Arc::clone(&s.surface), s.spec.scene_origin(primary)))
+                .map(|s| {
+                    (
+                        s.spec.name.clone(),
+                        Arc::clone(&s.surface),
+                        s.spec.scene_origin(primary),
+                    )
+                })
                 .collect();
         }
         self.state
@@ -439,38 +597,48 @@ impl super::WinitApp {
         presented
     }
 
-    /// Apply the overlay capture decision per window: only the window under
-    /// the cursor (or the one holding a press) captures; every other overlay
-    /// stays click-through.
+    /// Apply the overlay capture decision per window (see [`capture_window`]).
     pub(super) fn apply_overlay_hittest(&mut self, capture: bool) {
-        let target = if self.state.left_button_down {
-            self.state.press_window.and_then(|id| {
-                if self.state.window.as_ref().is_some_and(|w| w.id() == id) {
-                    Some(None)
-                } else {
-                    secondary_index(&self.state.secondaries, id).map(Some)
-                }
-            })
-        } else {
-            None
+        let window_of = |id: WindowId| {
+            if self.state.window.as_ref().is_some_and(|w| w.id() == id) {
+                Some(OverlayWindow::Primary)
+            } else {
+                secondary_index(&self.state.secondaries, id).map(OverlayWindow::Secondary)
+            }
         };
-        let target = target.unwrap_or_else(|| match self.state.primary_monitor.as_ref() {
-            Some(primary) => secondary_at(
-                &self.state.secondaries,
-                primary,
-                self.state.cursor_x,
-                self.state.cursor_y,
-            ),
-            None => None,
-        });
+        let pressed = self
+            .state
+            .left_button_down
+            .then_some(self.state.press_window)
+            .flatten()
+            .and_then(window_of);
+        let target = match self.state.primary_monitor.as_ref() {
+            Some(primary) => {
+                let specs: Vec<MonitorSpec> = self
+                    .state
+                    .secondaries
+                    .iter()
+                    .map(|s| s.spec.clone())
+                    .collect();
+                capture_window(
+                    capture,
+                    pressed,
+                    (self.state.cursor_x, self.state.cursor_y),
+                    primary,
+                    &specs,
+                )
+            }
+            // No monitor model (window not created yet): primary only.
+            None => capture.then_some(OverlayWindow::Primary),
+        };
         if let Some(window) = &self.state.window {
-            let primary_capture = capture && target.is_none();
+            let primary_capture = target == Some(OverlayWindow::Primary);
             if let Err(e) = window.set_cursor_hittest(primary_capture) {
                 tracing::trace!(error = %e, capture = primary_capture, "overlay: set_cursor_hittest failed");
             }
         }
         for (i, overlay) in self.state.secondaries.iter_mut().enumerate() {
-            let want = capture && target == Some(i);
+            let want = target == Some(OverlayWindow::Secondary(i));
             if want != overlay.capturing {
                 overlay.capturing = want;
                 tracing::debug!(
@@ -496,6 +664,10 @@ pub(super) fn take_dirty(flag: &DisplaysDirty) -> bool {
 /// Watch for `WM_DISPLAYCHANGE` (monitor added, removed or re-moded) on a
 /// hidden top-level window owned by a dedicated thread, blocked in
 /// `GetMessageW` (zero idle cost). Each change sets `dirty` and calls `wake`.
+///
+/// Call once per process (from the first `resumed`): the thread, its window
+/// and the leaked `Watch` live for the rest of the process and are never torn
+/// down; the OS reclaims them at exit.
 #[cfg(target_os = "windows")]
 pub(super) fn spawn_display_change_watcher(dirty: DisplaysDirty, wake: impl Fn() + Send + 'static) {
     use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
@@ -655,5 +827,98 @@ mod tests {
             Some(Rect::new(17.0, -2160.0, 3840.0, 2160.0))
         );
         assert_eq!(layout.zone_display_rect("pip"), None);
+    }
+
+    #[test]
+    fn capture_false_leaves_every_window_click_through() {
+        let (primary, secondaries) = rig();
+        for pressed in [None, Some(OverlayWindow::Secondary(0))] {
+            assert_eq!(
+                capture_window(false, pressed, (100.0, 100.0), &primary, &secondaries),
+                None
+            );
+        }
+    }
+
+    #[test]
+    fn capture_goes_to_the_window_under_the_cursor() {
+        let (primary, secondaries) = rig();
+        let at = |x, y| capture_window(true, None, (x, y), &primary, &secondaries);
+        assert_eq!(at(100.0, 100.0), Some(OverlayWindow::Primary));
+        assert_eq!(at(4000.0, -1000.0), Some(OverlayWindow::Secondary(0)));
+        assert_eq!(at(100.0, -100.0), Some(OverlayWindow::Secondary(1)));
+    }
+
+    #[test]
+    fn held_press_keeps_capture_on_its_window_while_cursor_is_elsewhere() {
+        let (primary, secondaries) = rig();
+        let pressed = Some(OverlayWindow::Secondary(0));
+        assert_eq!(
+            capture_window(true, pressed, (100.0, 100.0), &primary, &secondaries),
+            pressed,
+            "cursor over the primary, press started on DISPLAY6"
+        );
+    }
+
+    #[test]
+    fn cursor_over_a_monitor_without_an_overlay_captures_nowhere() {
+        let (primary, secondaries) = rig();
+        assert_eq!(
+            capture_window(true, None, (-500.0, 500.0), &primary, &secondaries),
+            None,
+            "the primary must not capture input meant for another monitor"
+        );
+    }
+
+    #[test]
+    fn secondary_cursor_positions_map_to_scene_coordinates() {
+        let (primary, secondaries) = rig();
+        assert_eq!(
+            window_to_scene((10.0, 20.0), Some(&secondaries[0]), Some(&primary)),
+            (3867.0, -1059.0)
+        );
+        assert_eq!(
+            window_to_scene((10.0, 20.0), None, Some(&primary)),
+            (10.0, 20.0),
+            "primary positions are already scene coordinates"
+        );
+        let offset_primary = spec("DISPLAY7", -100, 50);
+        assert_eq!(
+            window_to_scene((0.0, 0.0), Some(&secondaries[1]), Some(&offset_primary)),
+            (117.0, -2210.0)
+        );
+    }
+
+    #[test]
+    fn failed_present_stays_owed_until_one_submits() {
+        let mut ledger = PresentLedger::default();
+        assert!(ledger.needs_present(7), "a new window always presents");
+        ledger.record(7, false);
+        assert!(ledger.owed(), "an occluded/timed-out acquire owes a frame");
+        assert!(ledger.needs_present(7), "the same frame is retried");
+        ledger.record(7, true);
+        assert!(!ledger.owed());
+        assert!(
+            !ledger.needs_present(7),
+            "unchanged content does not re-present"
+        );
+        assert!(ledger.needs_present(8));
+        ledger.invalidate();
+        assert!(
+            ledger.needs_present(7),
+            "a reconfigured surface presents again"
+        );
+    }
+
+    #[test]
+    fn zones_on_disconnected_displays_are_reported_unplaced() {
+        let zones = HashMap::from([
+            ("subtitle".to_string(), r"\\.\display9".to_string()),
+            ("pip".to_string(), "DISPLAY6".to_string()),
+        ]);
+        assert_eq!(
+            unplaced_zones(&zones, &["DISPLAY7", "DISPLAY6"]),
+            vec![("subtitle".to_string(), r"\\.\display9".to_string())]
+        );
     }
 }

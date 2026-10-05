@@ -161,6 +161,7 @@ impl WindowedRuntimeState {
             surface_factory: None,
             zone_displays: Default::default(),
             cursor_window: None,
+            secondary_recreates: Default::default(),
             press_window: None,
             global_tokens: HashMap::new(),
             element_repositioned_tx: None,
@@ -1276,7 +1277,7 @@ mod tests {
         );
     }
 
-    /// Ctrl+Shift+F8/F9 are consumed one stage earlier by the real winit path,
+    /// Ctrl+Shift+P is consumed one stage earlier by the real winit path,
     /// so the Stage-2 router can observe only their release. The complete
     /// reserved set remains shell-owned even for that release-only route.
     #[test]
@@ -1284,12 +1285,12 @@ mod tests {
         let mut harness = HeadlessEventLoopHarness::new();
         let (_tile_id, _node_id, mut rx) = install_button(&mut harness, true);
 
-        harness.enqueue(ctrl_key_up("F9", "F9", true, 1_100));
+        harness.enqueue(ctrl_key_up("KeyP", "P", true, 1_100));
         harness.drain();
 
         assert!(
             received_events(&mut rx).is_empty(),
-            "the monitor-cycle KeyUp must remain shell-owned after Stage 1 consumed its KeyDown"
+            "the pairing KeyUp must remain shell-owned after Stage 1 consumed its KeyDown"
         );
     }
 
