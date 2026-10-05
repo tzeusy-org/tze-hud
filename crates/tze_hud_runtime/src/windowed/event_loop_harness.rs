@@ -162,6 +162,7 @@ impl WindowedRuntimeState {
             zone_displays: Default::default(),
             cursor_window: None,
             secondary_recreates: Default::default(),
+            overlay_refits: Default::default(),
             press_window: None,
             global_tokens: HashMap::new(),
             element_repositioned_tx: None,

@@ -454,6 +454,9 @@ struct WindowedRuntimeState {
     /// Times each secondary's window was recreated after its surface was
     /// lost; capped so a persistently failing monitor is left alone.
     secondary_recreates: std::collections::HashMap<String, u32>,
+    /// Recent re-fits of each overlay window to its monitor, by monitor
+    /// name; bounds a fight with the OS over a window's size.
+    overlay_refits: std::collections::HashMap<String, displays::RefitBudget>,
     /// Window that received the current left-button press; it keeps
     /// capturing until release.
     press_window: Option<WindowId>,
@@ -2338,7 +2341,17 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                 if let Some(source) = wake_source {
                     self.state.wake.mark_main_work_pending(source);
                 }
-                let surface = &self.state.secondaries[secondary.unwrap_or_default()].surface;
+                let display = &self.state.secondaries[secondary.unwrap_or_default()];
+                if (physical_size.width, physical_size.height)
+                    != (display.spec.width, display.spec.height)
+                {
+                    // The OS resized an overlay off its monitor (topology or
+                    // DPI change); re-fit it on the next turn.
+                    self.state
+                        .displays_dirty
+                        .store(true, std::sync::atomic::Ordering::Release);
+                }
+                let surface = &display.surface;
                 surface
                     .pending_resize_height
                     .store(physical_size.height, std::sync::atomic::Ordering::Release);
@@ -2360,6 +2373,17 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
             WindowEvent::Resized(physical_size) => {
                 if let Some(source) = wake_source {
                     self.state.wake.mark_main_work_pending(source);
+                }
+                if self.state.effective_mode == WindowMode::Overlay
+                    && self.state.config.overlay_auto_size
+                    && self.state.primary_monitor.as_ref().is_some_and(|m| {
+                        (physical_size.width, physical_size.height) != (m.width, m.height)
+                    })
+                {
+                    // Same for the primary: it stays pinned to its monitor.
+                    self.state
+                        .displays_dirty
+                        .store(true, std::sync::atomic::Ordering::Release);
                 }
                 if physical_size.width > 0 && physical_size.height > 0 {
                     self.state.config.window.width = physical_size.width;
@@ -3157,6 +3181,7 @@ impl WindowedRuntime {
             zone_displays,
             cursor_window: None,
             secondary_recreates: Default::default(),
+            overlay_refits: Default::default(),
             press_window: None,
             global_tokens: startup_compositor_tokens,
             element_repositioned_tx,

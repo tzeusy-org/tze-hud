@@ -475,6 +475,50 @@ pub(super) fn unplaced_zones(
     out
 }
 
+/// Where an overlay window must be moved/resized to cover `spec` again, if it
+/// drifted (`None` when it already covers it). `outer_position` is `None`
+/// when the platform cannot report it; only the size is checked then.
+pub(super) fn overlay_refit(
+    outer_position: Option<(i32, i32)>,
+    inner_size: (u32, u32),
+    spec: &MonitorSpec,
+) -> Option<((i32, i32), (u32, u32))> {
+    let position = (spec.x, spec.y);
+    let size = (spec.width, spec.height);
+    let fitted = outer_position.is_none_or(|p| p == position) && inner_size == size;
+    (!fitted).then_some((position, size))
+}
+
+/// Re-fits allowed per window per [`REFIT_WINDOW`].
+const MAX_REFITS: u32 = 5;
+const REFIT_WINDOW: Duration = Duration::from_secs(10);
+
+/// Bounds re-fitting one window: if the OS keeps resizing it, give up for a
+/// while instead of trading resize events with it forever.
+#[derive(Debug, Default, Clone, Copy)]
+pub(super) struct RefitBudget {
+    window_start: Option<Instant>,
+    used: u32,
+}
+
+impl RefitBudget {
+    /// Spend one re-fit at `now` if the budget allows it.
+    pub fn take(&mut self, now: Instant) -> bool {
+        if self
+            .window_start
+            .is_none_or(|start| now.duration_since(start) >= REFIT_WINDOW)
+        {
+            self.window_start = Some(now);
+            self.used = 0;
+        }
+        if self.used >= MAX_REFITS {
+            return false;
+        }
+        self.used += 1;
+        true
+    }
+}
+
 /// Recreating a lost secondary is retried this many times per display.
 const MAX_SECONDARY_RECREATES: u32 = 3;
 
@@ -535,10 +579,6 @@ impl super::WinitApp {
         let primary_changed = multi && previous.as_ref() != Some(&primary);
         if primary_changed && !first_sync {
             tracing::info!(primary = %primary.name, "primary monitor changed; moving the primary overlay");
-            primary_window
-                .set_outer_position(winit::dpi::PhysicalPosition::new(primary.x, primary.y));
-            let _ = primary_window
-                .request_inner_size(winit::dpi::PhysicalSize::new(primary.width, primary.height));
         }
         // Windows whose surface the compositor lost for good: close them and
         // let the diff below recreate them, a bounded number of times. A
@@ -605,6 +645,9 @@ impl super::WinitApp {
             plan_secondary_changes(&current, &desired)
         };
         if remove.is_empty() && add.is_empty() && !primary_changed && !first_sync && !lost_any {
+            if multi {
+                self.refit_overlay_windows(&primary_window, &primary);
+            }
             return;
         }
         for i in remove {
@@ -646,6 +689,55 @@ impl super::WinitApp {
             }
         }
         self.publish_displays(&primary);
+        if multi {
+            self.refit_overlay_windows(&primary_window, &primary);
+        }
+    }
+
+    /// Pin every overlay window to its monitor's bounds. A topology or DPI
+    /// change lets Windows move and resize them (seen: 237x39, and 3862x2182
+    /// on a 3840x2160 monitor); nothing else would put them back.
+    fn refit_overlay_windows(&mut self, primary_window: &Arc<Window>, primary: &MonitorSpec) {
+        let now = Instant::now();
+        let windows = std::iter::once((primary_window, primary))
+            .chain(self.state.secondaries.iter().map(|s| (&s.window, &s.spec)));
+        for (window, spec) in windows {
+            let size = window.inner_size();
+            let position = window.outer_position().ok().map(|p| (p.x, p.y));
+            let Some(((x, y), (width, height))) =
+                overlay_refit(position, (size.width, size.height), spec)
+            else {
+                continue;
+            };
+            let budget = self
+                .state
+                .overlay_refits
+                .entry(spec.name.clone())
+                .or_default();
+            if !budget.take(now) {
+                tracing::warn!(
+                    overlay = %spec.name,
+                    width = size.width,
+                    height = size.height,
+                    "overlay window keeps being resized off its monitor; not re-fitting for now"
+                );
+                continue;
+            }
+            tracing::info!(
+                overlay = %spec.name,
+                from_x = position.map(|p| p.0),
+                from_y = position.map(|p| p.1),
+                from_width = size.width,
+                from_height = size.height,
+                x,
+                y,
+                width,
+                height,
+                "re-fitting overlay window to its monitor"
+            );
+            window.set_outer_position(winit::dpi::PhysicalPosition::new(x, y));
+            let _ = window.request_inner_size(winit::dpi::PhysicalSize::new(width, height));
+        }
     }
 
     /// The overlay on `name` was recreated too often and is no longer tried.
@@ -1198,6 +1290,41 @@ mod tests {
             next_secondary_retry([&ledger], late),
             Some(late + PRESENT_RETRY_FLOOR)
         );
+    }
+
+    /// The sizes Windows left the overlays at during the owner's replug.
+    #[test]
+    fn overlays_resized_off_their_monitor_are_refitted() {
+        let d8 = spec("DISPLAY8", 17, -2160);
+        assert_eq!(overlay_refit(Some((17, -2160)), (3840, 2160), &d8), None);
+        for drifted in [(3862, 2182), (237, 39)] {
+            assert_eq!(
+                overlay_refit(Some((17, -2160)), drifted, &d8),
+                Some(((17, -2160), (3840, 2160))),
+                "{drifted:?}"
+            );
+        }
+        assert_eq!(
+            overlay_refit(Some((6, -2171)), (3840, 2160), &d8),
+            Some(((17, -2160), (3840, 2160))),
+            "moved but the right size"
+        );
+        assert_eq!(
+            overlay_refit(None, (3840, 2160), &d8),
+            None,
+            "no position reported: the size alone decides"
+        );
+    }
+
+    #[test]
+    fn refits_are_bounded_when_the_os_keeps_resizing() {
+        let t0 = Instant::now();
+        let mut budget = RefitBudget::default();
+        for i in 0..MAX_REFITS {
+            assert!(budget.take(t0 + Duration::from_millis(u64::from(i))));
+        }
+        assert!(!budget.take(t0 + Duration::from_secs(1)), "budget spent");
+        assert!(budget.take(t0 + REFIT_WINDOW), "a new window restores it");
     }
 
     #[test]
