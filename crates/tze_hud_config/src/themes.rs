@@ -36,6 +36,10 @@ const BUILTIN_THEMES: &[(&str, &str)] = &[
         "classic",
         include_str!("../../../assets/themes/classic.toml"),
     ),
+    (
+        "blueprint",
+        include_str!("../../../assets/themes/blueprint.toml"),
+    ),
 ];
 
 /// Names of the built-in themes, in declaration order.
@@ -156,8 +160,9 @@ mod tests {
     /// Tonal Glass is the design-system baseline: it sets every semantic
     /// token so it reads as a complete template for new themes.
     #[test]
-    fn tonal_glass_sets_every_semantic_token() {
-        let theme = builtin_theme("tonal-glass").unwrap();
+    fn full_themes_set_every_semantic_token() {
+        // `classic` only restates the pre-redesign overrides; every other
+        // built-in theme must define the whole semantic palette.
         let semantic = [
             "color.surface",
             "color.on_",
@@ -176,9 +181,13 @@ mod tests {
             "font.",
             "type.",
         ];
-        for t in CANONICAL_TOKENS {
-            if t.key != "color.outline.default" && semantic.iter().any(|p| t.key.starts_with(p)) {
-                assert!(theme.contains_key(t.key), "tonal-glass misses {}", t.key);
+        for name in builtin_theme_names().filter(|n| *n != "classic") {
+            let theme = builtin_theme(name).unwrap();
+            for t in CANONICAL_TOKENS {
+                if t.key != "color.outline.default" && semantic.iter().any(|p| t.key.starts_with(p))
+                {
+                    assert!(theme.contains_key(t.key), "{name} misses {}", t.key);
+                }
             }
         }
     }

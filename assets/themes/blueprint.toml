@@ -1,0 +1,127 @@
+# Blueprint — a dark theme after Palantir's Blueprint design system
+# (https://github.com/palantir/blueprint, Apache-2.0). Colour values are
+# Blueprint's published palette (packages/colors/src/_colors.scss); sizes and
+# motion follow its core variables (4 px spacing, 4 px radius, 100 ms
+# transitions). Not affiliated with or endorsed by Palantir.
+#
+# Format: see tonal-glass.toml. Sizes are logical px.
+#
+# Character: denser and squarer than Tonal Glass. Neutral dark-gray surfaces,
+# Blueprint's intent colours (blue primary, green success, orange warning,
+# red danger) in their dark-theme text shades, near-opaque panels.
+
+# ── Surfaces: black, then dark-gray1..4 ─────────────────────────────────────
+"color.surface"                   = "#111418"   # black
+"color.surface.container.low"     = "#1C2127"   # dark-gray1 (dark app background)
+"color.surface.container"         = "#252A31"   # dark-gray2 (dark card)
+"color.surface.container.high"    = "#2F343C"   # dark-gray3 (dark popover)
+"color.surface.container.highest" = "#383E47"   # dark-gray4
+"opacity.surface"                 = "0.96"
+"opacity.scrim"                   = "0.70"      # overlay backdrop rgba(black, 0.7)
+
+# ── Roles ───────────────────────────────────────────────────────────────────
+"color.on_surface"                = "#F6F7F9"   # light-gray5 (dark text)
+"color.on_surface.variant"        = "#ABB3BF"   # gray4 (dark muted text)
+"color.outline"                   = "#5F6B7C"   # gray1
+"color.outline.variant"           = "#404854"   # dark-gray5
+"color.primary"                   = "#4C90F0"   # blue4 (dark intent text)
+"color.on_primary"                = "#FFFFFF"
+"color.primary.container"         = "#2D72D2"   # blue3 (primary button fill)
+"color.on_primary.container"      = "#FFFFFF"
+"color.success"                   = "#72CA9B"   # green5
+"color.caution"                   = "#FBB360"   # orange5
+"color.caution.container"         = "#77450D"   # orange1
+"color.on_caution.container"      = "#F6F7F9"   # light-gray5
+"color.error"                     = "#FA999C"   # red5
+"color.error.container"           = "#8E292C"   # red1
+"color.on_error.container"        = "#F6F7F9"   # light-gray5
+
+# ── State layers (minimal-button hover/active tints) ────────────────────────
+"state.hover.opacity"             = "0.15"
+"state.pressed.opacity"           = "0.30"
+"focus.ring.width"                = "2"
+"focus.ring.offset"               = "2"
+
+# ── Motion: $pt-transition-duration 100 ms, ease-out curve ──────────────────
+"motion.enter.ms"                 = "200"
+"motion.exit.ms"                  = "100"
+"motion.state.ms"                 = "100"
+"motion.enter.easing"             = "decelerate"
+"motion.exit.easing"              = "accelerate"
+
+# ── Shape: $pt-border-radius 4 px ───────────────────────────────────────────
+"shape.xs"                        = "2"
+"shape.s"                         = "4"
+"shape.m"                         = "4"
+"shape.l"                         = "4"
+"shape.xl"                        = "8"
+"shape.full"                      = "999"
+
+# ── Spacing: $pt-spacing 4 px ───────────────────────────────────────────────
+"space.xs"                        = "4"
+"space.s"                         = "8"
+"space.m"                         = "12"
+"space.l"                         = "16"
+"space.xl"                        = "20"
+"space.xxl"                       = "28"
+
+# ── Type: Blueprint's system stack resolves to Segoe UI on Windows ──────────
+# Sizes follow $pt-font-size 14 / small 12 / large 16 and the h3-h5 heading
+# sizes; line heights use Blueprint's 1.28581 ratio, rounded.
+"font.sans"                        = "Segoe UI"
+"font.mono"                        = "Consolas"
+
+"type.code.display.family"         = "Consolas"
+"type.code.display.size"           = "36"
+"type.code.display.line_height"    = "40"
+"type.code.display.weight"         = "600"
+"type.caption.display.family"      = "Segoe UI"
+"type.caption.display.size"        = "22"
+"type.caption.display.line_height" = "28"
+"type.caption.display.weight"      = "600"
+"type.headline.s.family"           = "Segoe UI"
+"type.headline.s.size"             = "18"
+"type.headline.s.line_height"      = "24"
+"type.headline.s.weight"           = "600"
+"type.title.m.family"              = "Segoe UI"
+"type.title.m.size"                = "16"
+"type.title.m.line_height"         = "20"
+"type.title.m.weight"              = "600"
+"type.body.m.family"               = "Segoe UI"
+"type.body.m.size"                 = "14"
+"type.body.m.line_height"          = "18"
+"type.body.m.weight"               = "400"
+"type.label.m.family"              = "Segoe UI"
+"type.label.m.size"                = "12"
+"type.label.m.line_height"         = "16"
+"type.label.m.weight"              = "400"
+"type.label.s.family"              = "Segoe UI"
+"type.label.s.size"                = "11"
+"type.label.s.line_height"         = "14"
+"type.label.s.weight"              = "400"
+"type.readout.family"              = "Consolas"
+"type.readout.size"                = "13"
+"type.readout.line_height"         = "18"
+"type.readout.weight"              = "400"
+
+# ── Legacy keys the current renderer reads (see tonal-glass.toml) ───────────
+"color.text.primary"                  = "#F6F7F9"   # on_surface
+"color.text.secondary"                = "#ABB3BF"   # on_surface.variant
+"color.text.accent"                   = "#4C90F0"   # primary
+"color.border.default"                = "#404854"   # outline.variant
+"color.backdrop.default"              = "#2F343C"   # surface.container.high
+"color.severity.info"                 = "#4C90F0"   # primary
+"color.severity.warning"              = "#FBB360"   # caution
+"color.severity.error"                = "#FA999C"   # error
+"opacity.backdrop.opaque"             = "0.96"      # opacity.surface
+"border.radius.medium"                = "4"         # shape.m
+"color.notification.urgency.low"      = "#252A31"   # surface.container
+"color.notification.urgency.normal"   = "#2F343C"   # surface.container.high
+"color.notification.urgency.urgent"   = "#77450D"   # caution.container
+"color.notification.urgency.critical" = "#8E292C"   # error.container
+"portal.divider.color"                = "#404854"   # outline.variant
+"system_card.background"              = "#2F343CF5" # surface.container.high @ 0.96
+"system_card.accent.color"            = "#4C90F0"   # primary
+"typography.body.size"                = "14"
+"typography.body.weight"              = "400"
+"spacing.padding.medium"              = "8"
