@@ -1,5 +1,10 @@
 use super::*;
 
+fn primary_of(build: &super::frame::WindowedFrameBuild) -> crate::FrameTarget {
+    let (w, h) = build.size();
+    crate::FrameTarget::primary(w, h)
+}
+
 #[test]
 fn adapter_identity_preserves_actual_wgpu_fields_without_a_gpu() {
     let identity = CompositorAdapterInfo::from(wgpu::AdapterInfo {
@@ -71,7 +76,7 @@ async fn test_chrome_always_above_max_zorder_tile() {
     let format = wgpu::TextureFormat::Rgba8UnormSrgb;
     let build = compositor.build_windowed_frame(&mut scene, 256, 256);
     let plain = compositor
-        .capture_windowed_frame(build, format)
+        .capture_windowed_frame(&build, &primary_of(&build), format)
         .expect("capture");
     let center = (128 * 256 + 128) * 4;
     assert!(
@@ -83,7 +88,7 @@ async fn test_chrome_always_above_max_zorder_tile() {
     compositor.set_safe_mode_overlay(true);
     let build = compositor.build_windowed_frame(&mut scene, 256, 256);
     let dimmed = compositor
-        .capture_windowed_frame(build, format)
+        .capture_windowed_frame(&build, &primary_of(&build), format)
         .expect("capture");
     assert!(
         dimmed.rgba[center] < plain.rgba[center] - 40,
@@ -139,7 +144,11 @@ async fn test_system_card_drawn_above_safe_mode_overlay_and_content() {
 
     let build = compositor.build_windowed_frame(&mut scene, 800, 600);
     let frame = compositor
-        .capture_windowed_frame(build, wgpu::TextureFormat::Rgba8UnormSrgb)
+        .capture_windowed_frame(
+            &build,
+            &primary_of(&build),
+            wgpu::TextureFormat::Rgba8UnormSrgb,
+        )
         .expect("capture");
 
     // Default card geometry: 420 wide, centred. Tall enough that the centre
@@ -300,13 +309,21 @@ async fn capture_windowed_frame_reads_back_the_built_frame() {
 
     let build = compositor.build_windowed_frame(&mut scene, 320, 200);
     let frame = compositor
-        .capture_windowed_frame(build, wgpu::TextureFormat::Rgba8UnormSrgb)
+        .capture_windowed_frame(
+            &build,
+            &primary_of(&build),
+            wgpu::TextureFormat::Rgba8UnormSrgb,
+        )
         .expect("capture");
     assert_eq!((frame.width, frame.height), (320, 200));
     assert_eq!(frame.rgba.len(), 320 * 200 * 4);
 
     let build = compositor.build_windowed_frame(&mut scene, 320, 200);
-    let unsupported = compositor.capture_windowed_frame(build, wgpu::TextureFormat::Rgba16Float);
+    let unsupported = compositor.capture_windowed_frame(
+        &build,
+        &primary_of(&build),
+        wgpu::TextureFormat::Rgba16Float,
+    );
     assert!(matches!(
         unsupported,
         Err(crate::CaptureError::UnsupportedFormat(_))
@@ -372,4 +389,113 @@ async fn test_new_headless_with_force_software_env_var() {
         Err(CompositorError::NoAdapter) => {}
         Err(e) => panic!("unexpected error with HEADLESS_FORCE_SOFTWARE=1: {e}"),
     }
+}
+
+// ── Multi-display targets (hud-1pt5h) ──────────────────────────────────────
+
+/// A 128x128 tile of `color` at the scene origin.
+fn corner_tile_scene(color: Rgba) -> SceneGraph {
+    let mut scene = SceneGraph::new(256.0, 256.0);
+    let tab_id = scene.create_tab("test", 0).unwrap();
+    let lease_id = scene.grant_lease("agent", 60_000);
+    let tile_id = scene
+        .create_tile(
+            tab_id,
+            "agent",
+            lease_id,
+            Rect::new(0.0, 0.0, 128.0, 128.0),
+            1,
+        )
+        .unwrap();
+    scene
+        .set_tile_root(
+            tile_id,
+            Node {
+                layout: Default::default(),
+                id: SceneId::new(),
+                children: vec![],
+                data: NodeData::SolidColor(SolidColorNode {
+                    color,
+                    bounds: Rect::new(0.0, 0.0, 128.0, 128.0),
+                    radius: None,
+                }),
+            },
+        )
+        .unwrap();
+    scene
+}
+
+/// A display window up and to the left of the primary sees the scene origin
+/// at its own (128, 128): the shared frame is translated, not stretched.
+#[tokio::test]
+async fn offset_display_target_shows_scene_translated() {
+    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);
+    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
+    let mut scene = corner_tile_scene(Rgba::new(1.0, 0.0, 0.0, 1.0));
+    compositor.prime_markdown_cache(&scene);
+    compositor.prime_truncation_cache(&scene);
+
+    let build = compositor.build_windowed_frame(&mut scene, 256, 256);
+    let target = crate::FrameTarget {
+        x: -128.0,
+        y: -128.0,
+        width: 256,
+        height: 256,
+        primary: false,
+    };
+    let frame = compositor
+        .capture_windowed_frame(&build, &target, wgpu::TextureFormat::Rgba8UnormSrgb)
+        .expect("capture");
+    let px = |x: usize, y: usize| &frame.rgba[(y * 256 + x) * 4..(y * 256 + x) * 4 + 4];
+    assert!(
+        px(200, 200)[0] > 200,
+        "tile lands at the target's lower right: {:?}",
+        px(200, 200)
+    );
+    assert!(
+        px(50, 50)[0] < 100,
+        "nothing at the target's upper left: {:?}",
+        px(50, 50)
+    );
+}
+
+/// A window's signature only reflects content inside it: changing a tile on
+/// the primary leaves a window that does not overlap it unchanged.
+#[tokio::test]
+async fn frame_signature_ignores_content_outside_the_target() {
+    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);
+    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
+    let away = crate::FrameTarget {
+        x: 1000.0,
+        y: 0.0,
+        width: 256,
+        height: 256,
+        primary: false,
+    };
+    let overlapping = crate::FrameTarget {
+        x: -64.0,
+        y: -64.0,
+        width: 256,
+        height: 256,
+        primary: false,
+    };
+    let mut signatures = Vec::new();
+    for color in [Rgba::new(1.0, 0.0, 0.0, 1.0), Rgba::new(0.0, 1.0, 0.0, 1.0)] {
+        let mut scene = corner_tile_scene(color);
+        compositor.prime_markdown_cache(&scene);
+        compositor.prime_truncation_cache(&scene);
+        let build = compositor.build_windowed_frame(&mut scene, 256, 256);
+        signatures.push((
+            compositor.frame_signature(&build, &away),
+            compositor.frame_signature(&build, &overlapping),
+        ));
+    }
+    assert_eq!(
+        signatures[0].0, signatures[1].0,
+        "off-window change is invisible"
+    );
+    assert_ne!(
+        signatures[0].1, signatures[1].1,
+        "on-window change is visible"
+    );
 }

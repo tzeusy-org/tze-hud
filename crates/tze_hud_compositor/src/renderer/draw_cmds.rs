@@ -21,6 +21,7 @@ use tze_hud_scene::types::*;
 ///
 /// These are collected separately from color quads because they use a
 /// different vertex layout and render pipeline.
+#[derive(Clone)]
 pub(super) struct TexturedDrawCmd {
     pub(super) resource_id: ResourceId,
     /// Pixel-space position and size of the destination rectangle.

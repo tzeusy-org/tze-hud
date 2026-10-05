@@ -619,6 +619,10 @@ pub struct Compositor {
     /// redaction / safe-mode / focus rules as the rest of the draft (it is only
     /// ever applied while the composer overlay itself renders).
     pub(crate) composer_layout: image_cache::ComposerLayout,
+    /// Connected displays and the zone → display assignment. Zones assigned to
+    /// a connected non-primary display resolve against that display's rect
+    /// (scene coordinates); everything else resolves against the canvas.
+    pub(crate) display_layout: crate::display::DisplayLayout,
 }
 
 /// Partitioned rounded-rectangle draw commands organized by layer.
@@ -657,6 +661,17 @@ pub(crate) struct EncodeInputs {
     /// Whether the system card's text was prepared on the overlay text layer and
     /// must be replayed by [`Compositor::encode_system_card_pass`] (hud-w5zon).
     render_card_text: bool,
+}
+
+/// Scene-read inputs for the encode stage, before any glyphon prepare, in
+/// canvas pixels. A windowed frame keeps these so each display window can
+/// map and prepare its own view after the scene lock is released.
+pub(crate) struct EncodeSources {
+    pub(crate) rr_background: Vec<RoundedRectDrawCmd>,
+    pub(crate) rr_post: Vec<RoundedRectDrawCmd>,
+    pub(crate) text_items: Vec<TextItem>,
+    /// System card text (primary display only).
+    pub(crate) card_items: Vec<TextItem>,
 }
 
 /// Per-zone Stack slot layout, computed once per zone per frame by
@@ -705,6 +720,25 @@ impl ZoneSlotLayout {
                 let effective_slot_h = slot_h.min(zone_bottom - slot_y);
                 (pub_idx, slot_y, effective_slot_h)
             })
+    }
+}
+
+/// [`Compositor::zone_geometry`] for callers without a compositor (the
+/// GPU-free notification hit-region path).
+pub(crate) fn zone_geometry_in(
+    layout: &crate::display::DisplayLayout,
+    zone_name: &str,
+    policy: &GeometryPolicy,
+    sw: f32,
+    sh: f32,
+) -> (f32, f32, f32, f32) {
+    match layout.zone_display_rect(zone_name) {
+        Some(display) => {
+            let (x, y, w, h) =
+                Compositor::resolve_zone_geometry(policy, display.width, display.height);
+            (x + display.x, y + display.y, w, h)
+        }
+        None => Compositor::resolve_zone_geometry(policy, sw, sh),
     }
 }
 
@@ -866,6 +900,7 @@ impl Compositor {
             composer_caret_blink_start: std::time::Instant::now(),
             composer_caret_rendered_phase: None,
             composer_layout: image_cache::ComposerLayout::default(),
+            display_layout: crate::display::DisplayLayout::default(),
         })
     }
 
@@ -1194,6 +1229,7 @@ impl Compositor {
             composer_caret_blink_start: std::time::Instant::now(),
             composer_caret_rendered_phase: None,
             composer_layout: image_cache::ComposerLayout::default(),
+            display_layout: crate::display::DisplayLayout::default(),
         };
 
         let window_surface = WindowSurface::new(surface, config);
@@ -1203,6 +1239,30 @@ impl Compositor {
     /// Identity of the adapter selected when this compositor was created.
     pub fn adapter_info(&self) -> &CompositorAdapterInfo {
         &self.adapter_info
+    }
+
+    /// Install the display layout zones resolve against (see
+    /// [`crate::display::DisplayLayout`]).
+    pub fn set_display_layout(&mut self, layout: crate::display::DisplayLayout) {
+        self.display_layout = layout;
+    }
+
+    /// The installed display layout.
+    pub fn display_layout(&self) -> &crate::display::DisplayLayout {
+        &self.display_layout
+    }
+
+    /// Resolve a zone's geometry in canvas (scene) pixels: against its
+    /// assigned display when that display is connected, else against the
+    /// canvas `sw`×`sh`.
+    pub(super) fn zone_geometry(
+        &self,
+        zone_name: &str,
+        policy: &GeometryPolicy,
+        sw: f32,
+        sh: f32,
+    ) -> (f32, f32, f32, f32) {
+        zone_geometry_in(&self.display_layout, zone_name, policy, sw, sh)
     }
 
     /// Fan out an actual window-surface lifecycle outcome without widening any
@@ -2222,6 +2282,27 @@ impl Compositor {
         surf_w: u32,
         surf_h: u32,
     ) -> EncodeInputs {
+        let sources = self.collect_encode_sources(scene, surf_w, surf_h);
+        self.prepare_encode_inputs(
+            sources.rr_background,
+            sources.rr_post,
+            &sources.text_items,
+            &sources.card_items,
+            surf_w,
+            surf_h,
+        )
+    }
+
+    /// The scene-read half of [`Self::collect_encode_inputs`]: rounded-rect
+    /// commands and text items, in canvas pixels, without glyphon prepare.
+    /// The windowed build keeps these so each display window prepares its own
+    /// view after the scene lock is dropped.
+    fn collect_encode_sources(
+        &mut self,
+        scene: &SceneGraph,
+        surf_w: u32,
+        surf_h: u32,
+    ) -> EncodeSources {
         let sw = surf_w as f32;
         let sh = surf_h as f32;
 
@@ -2237,13 +2318,38 @@ impl Compositor {
         // The shared frame builder primes composer / viewer-echo layout before
         // emitting any flat geometry, so text consumes the same resolved layout
         // rather than reflowing after the composer chrome has been staged.
-
         let has_text_rasterizer = self.text_rasterizer.is_some();
         let text_items: Vec<TextItem> = if has_text_rasterizer {
             self.collect_text_items(scene, sw, sh)
         } else {
             vec![]
         };
+        let card_items = if has_text_rasterizer {
+            self.system_card_text_items(sw, sh)
+        } else {
+            vec![]
+        };
+        EncodeSources {
+            rr_background,
+            rr_post,
+            text_items,
+            card_items,
+        }
+    }
+
+    /// The glyphon-prepare half of [`Self::collect_encode_inputs`], for one
+    /// `surf_w`×`surf_h` target whose items are already in its pixel space.
+    fn prepare_encode_inputs(
+        &mut self,
+        rr_background: Vec<crate::pipeline::RoundedRectDrawCmd>,
+        rr_post: Vec<crate::pipeline::RoundedRectDrawCmd>,
+        text_items: &[TextItem],
+        card_items: &[TextItem],
+        surf_w: u32,
+        surf_h: u32,
+    ) -> EncodeInputs {
+        let sw = surf_w as f32;
+        let sh = surf_h as f32;
         // Phase A: prepare glyphon buffers (requires mutable tr borrow). Drop the
         // borrow immediately after so Phase B can call self.gpu_color_raw.
         //
@@ -2257,7 +2363,7 @@ impl Compositor {
                 if text_items.is_empty() {
                     None
                 } else {
-                    Some(tr.prepare_text_items(&self.device, &self.queue, &text_items))
+                    Some(tr.prepare_text_items(&self.device, &self.queue, text_items))
                 }
             } else {
                 None
@@ -2296,14 +2402,9 @@ impl Compositor {
         // System card text: prepared on its own glyphon layer so the final
         // `encode_system_card_pass` can draw it above every other pass. Empty
         // (no card) means no prepare and no extra pass.
-        let card_items = if has_text_rasterizer {
-            self.system_card_text_items(sw, sh)
-        } else {
-            vec![]
-        };
         let render_card_text = match self.text_rasterizer {
             Some(ref mut tr) if !card_items.is_empty() => {
-                match tr.prepare_overlay_text_items(&self.device, &self.queue, &card_items) {
+                match tr.prepare_overlay_text_items(&self.device, &self.queue, card_items) {
                     Ok(_) => true,
                     Err(e) => {
                         tracing::warn!(error = %e, "system card text prepare failed");

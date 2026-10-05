@@ -79,7 +79,8 @@ pub fn unpad_to_rgba(
 }
 
 impl Compositor {
-    /// Render a built frame offscreen in `format` and read it back.
+    /// Render a built frame offscreen in `format`, as display window `target`
+    /// shows it, and read it back.
     ///
     /// Blocks the calling (compositor) thread for one submit and map. Does not
     /// acquire or present a swapchain image and does not advance any render
@@ -90,11 +91,12 @@ impl Compositor {
     /// the compositor thread and freeze the HUD.
     pub fn capture_windowed_frame(
         &mut self,
-        build: WindowedFrameBuild,
+        build: &WindowedFrameBuild,
+        target: &crate::display::FrameTarget,
         format: wgpu::TextureFormat,
     ) -> Result<CapturedFrame, CaptureError> {
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            self.capture_inner(build, format)
+            self.capture_inner(build, target, format)
         }))
         .unwrap_or_else(|_| {
             tracing::error!("admin capture panicked in the GPU path; request failed");
@@ -104,10 +106,11 @@ impl Compositor {
 
     fn capture_inner(
         &mut self,
-        build: WindowedFrameBuild,
+        build: &WindowedFrameBuild,
+        frame_target: &crate::display::FrameTarget,
         format: wgpu::TextureFormat,
     ) -> Result<CapturedFrame, CaptureError> {
-        let (width, height) = build.size();
+        let (width, height) = (frame_target.width, frame_target.height);
         if !capture_size_ok(width, height) {
             return Err(CaptureError::TooLarge { width, height });
         }
@@ -128,7 +131,7 @@ impl Compositor {
             view_formats: &[],
         });
         let view = target.create_view(&wgpu::TextureViewDescriptor::default());
-        let (mut encoder, _) = self.encode_windowed_passes(&build, &view);
+        let (mut encoder, _) = self.encode_windowed_passes(build, frame_target, &view);
 
         let bytes_per_row = (width * 4).div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT)
             * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;

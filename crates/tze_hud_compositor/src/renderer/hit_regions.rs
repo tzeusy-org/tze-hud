@@ -141,7 +141,13 @@ impl Compositor {
     /// return `ZoneInteraction` for zone affordances based on the most recently
     /// rendered layout.
     pub fn populate_zone_hit_regions(&self, scene: &mut SceneGraph, sw: f32, sh: f32) {
-        let mut tab_order = populate_notification_hit_regions(scene, sw, sh, &self.token_map);
+        let mut tab_order = populate_notification_hit_regions_in(
+            scene,
+            &self.display_layout,
+            sw,
+            sh,
+            &self.token_map,
+        );
 
         // ── Jump-to-latest pill hit region (hud-9ci61) ───────────────────────
         // Recomputed here (not only at render time) so windowed hit-testing,
@@ -281,6 +287,24 @@ pub fn populate_notification_hit_regions(
     sh: f32,
     token_map: &HashMap<String, String>,
 ) -> u32 {
+    populate_notification_hit_regions_in(
+        scene,
+        &crate::display::DisplayLayout::default(),
+        sw,
+        sh,
+        token_map,
+    )
+}
+
+/// [`populate_notification_hit_regions`] with zones resolved through a
+/// multi-display `layout` (regions land in scene coordinates).
+pub fn populate_notification_hit_regions_in(
+    scene: &mut SceneGraph,
+    layout: &crate::display::DisplayLayout,
+    sw: f32,
+    sh: f32,
+    token_map: &HashMap<String, String>,
+) -> u32 {
     scene.overlay.zone_hit_regions.clear();
     let mut tab_order: u32 = 0;
 
@@ -308,7 +332,8 @@ pub fn populate_notification_hit_regions(
         }
 
         let policy = &zone_def.rendering_policy;
-        let (zx, zy, zw, zh) = Compositor::resolve_zone_geometry(&zone_def.geometry_policy, sw, sh);
+        let (zx, zy, zw, zh) =
+            super::zone_geometry_in(layout, zone_name, &zone_def.geometry_policy, sw, sh);
         let layout =
             Compositor::zone_slot_layout_with_tokens(token_map, zone_name, publishes, policy, zh);
 

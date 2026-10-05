@@ -290,7 +290,7 @@ impl super::Compositor {
                 continue;
             }
 
-            let (zx, zy, zw, zh) = Self::resolve_zone_geometry(&zone_def.geometry_policy, sw, sh);
+            let (zx, zy, zw, zh) = self.zone_geometry(zone_name, &zone_def.geometry_policy, sw, sh);
 
             match zone_def.contention_policy {
                 ContentionPolicy::Stack { .. } => {
@@ -451,7 +451,7 @@ impl super::Compositor {
             };
 
             // Resolve zone geometry to pixel bounds.
-            let (zx, zy, zw, zh) = Self::resolve_zone_geometry(&zone_def.geometry_policy, sw, sh);
+            let (zx, zy, zw, zh) = self.zone_geometry(zone_name, &zone_def.geometry_policy, sw, sh);
 
             let policy = &zone_def.rendering_policy;
 
