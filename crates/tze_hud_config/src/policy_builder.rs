@@ -414,7 +414,7 @@ mod tests {
         // spec: WHEN color.text.primary = "#00FF00" THEN text_color = Rgba(0,1,0,1)
         let mut config_tokens = DesignTokenMap::new();
         config_tokens.insert("color.text.primary".to_string(), "#00FF00".to_string());
-        let tokens = resolve_tokens(&config_tokens, &DesignTokenMap::new());
+        let tokens = resolve_tokens(&DesignTokenMap::new(), &config_tokens);
 
         let mut policy = RenderingPolicy::default();
         apply_token_defaults_for_zone("subtitle", &mut policy, &tokens);

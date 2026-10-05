@@ -46,6 +46,8 @@ pub enum ConfigErrorCode {
     InvalidTokenKey,
     /// A token value string could not be parsed into the expected format.
     TokenValueParseError,
+    /// `[design_tokens] theme` names no built-in theme.
+    UnknownTheme,
     Other(String),
 }
 

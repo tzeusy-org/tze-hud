@@ -19,6 +19,7 @@ pub mod resolver;
 pub mod runtime_widget_assets;
 #[cfg(test)]
 mod tests;
+pub mod themes;
 pub mod tokens;
 pub mod validate;
 pub mod widgets;

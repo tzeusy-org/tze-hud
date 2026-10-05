@@ -239,6 +239,61 @@ down to the lifecycle.
   in-process portal driver. The session server rejects them from agents with
   `INVALID_ARGUMENT`.
 
+## Design tokens and themes
+
+Agents never send styling. Every color, size, radius, font, and timing
+the runtime draws with is a design token in the config file, resolved
+once at startup and applied through `RenderingPolicy`, widget SVG
+`{{token.key}}` placeholders, and the compositor token map. The
+canonical keys, their descriptions, and their defaults are in
+`CANONICAL_TOKENS` (`crates/tze_hud_config/src/tokens.rs`).
+
+**A theme is a named set of token values, with no layout logic.** The
+built-in themes are `assets/themes/<name>.toml`, compiled into the exe:
+`tonal-glass` (the default) and `classic` (the look before the redesign).
+Config picks one with the reserved key `theme`:
+
+```toml
+[design_tokens]
+theme = "tonal-glass"              # unset means tonal-glass
+"border.radius.medium" = "12"      # any other key overrides one token
+```
+
+Tokens resolve in three layers, each winning over the one before:
+canonical defaults, then the selected theme, then the other
+`[design_tokens]` entries. `tze_hud_config::themes::resolve_config_tokens`
+does this as a pure function, so a later live theme swap can run it
+again. An unknown theme name fails config validation with
+`UnknownTheme`, and the error lists the available themes. Keep config
+overrides for values specific to one deployment. The visual design
+belongs in a theme.
+
+**Semantic families** (Tonal Glass values; sizes are logical px):
+
+| Family | Keys |
+|---|---|
+| Surfaces | `color.surface`, `color.surface.container`, `color.surface.container.{low,high,highest}`, `opacity.surface`, `opacity.scrim` |
+| Roles | `color.on_surface[.variant]`, `color.outline[.variant]`, `color.primary`, `color.on_primary`, `color.[on_]primary.container`, `color.success`, `color.caution`, `color.error`, `color.[on_]caution.container`, `color.[on_]error.container` |
+| State | `state.hover.opacity`, `state.pressed.opacity`, `focus.ring.width`, `focus.ring.offset` |
+| Motion | `motion.{enter,exit,state}.ms`, `motion.{enter,exit}.easing` (`linear`, `standard`, `decelerate`, `accelerate`) |
+| Shape | `shape.{xs,s,m,l,xl,full}` (corner radius) |
+| Spacing | `space.{xs,s,m,l,xl,xxl}` (4 px grid) |
+| Type | `font.sans`, `font.mono`, and `type.<role>.{family,size,line_height,weight}` for the roles `code.display`, `caption.display`, `headline.s`, `title.m`, `body.m`, `label.m`, `label.s`, `readout` |
+
+Font family values are free-form family names. A name that is not loaded
+falls back to the renderer's default face for its role. The older keys
+(`color.text.*`, `color.backdrop.default`, `border.radius.*`,
+`typography.*`, `color.notification.urgency.*`, and so on) still work.
+`tonal-glass` maps them onto the semantic palette until each element is
+restyled to read the semantic keys directly.
+
+**Adding a theme:** add `assets/themes/<name>.toml` as a flat map of
+quoted canonical keys to string values, then add it to `BUILTIN_THEMES`
+in `crates/tze_hud_config/src/themes.rs`. Keys a theme leaves out keep
+their canonical defaults. A unit test checks that every built-in theme
+uses only canonical keys and that each value parses as its token's kind
+(color, number, family name, or easing).
+
 ## Token budgets
 
 `token_footprint` (CI) records o200k tokens per flow two ways: **wire** (the

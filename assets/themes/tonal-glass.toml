@@ -1,0 +1,134 @@
+# Tonal Glass — the default built-in theme (hud-h51u7).
+#
+# A theme is token values only: a flat map of design-token keys to values,
+# resolved canonical defaults -> this theme -> config [design_tokens].
+# Every key must be a canonical token (crates/tze_hud_config/src/tokens.rs)
+# and every value must parse as that token's kind (colour, number, family,
+# easing). Sizes are logical px.
+#
+# Dark tonal surfaces (no shadows/blur: elevation is a lighter container),
+# one cool primary accent, muted status roles.
+
+# ── Surfaces (tonal elevation, lowest -> highest) ──────────────────────────
+"color.surface"                   = "#0F1216"
+"color.surface.container.low"     = "#161A20"
+"color.surface.container"         = "#1B2028"
+"color.surface.container.high"    = "#222833"
+"color.surface.container.highest" = "#2A313D"
+"opacity.surface"                 = "0.92"
+"opacity.scrim"                   = "0.72"
+
+# ── Roles ───────────────────────────────────────────────────────────────────
+"color.on_surface"                = "#E8EBF0"
+"color.on_surface.variant"        = "#A9B1BE"
+"color.outline"                   = "#5A6475"
+"color.outline.variant"           = "#343B47"
+"color.primary"                   = "#8AB4FF"
+"color.on_primary"                = "#0B1B36"
+"color.primary.container"         = "#1E3A66"
+"color.on_primary.container"      = "#D6E3FF"
+"color.success"                   = "#7BD88F"
+"color.caution"                   = "#F2C14E"
+"color.caution.container"         = "#4A3A10"
+"color.on_caution.container"      = "#FFE7A8"
+"color.error"                     = "#FF8A80"
+"color.error.container"           = "#5C1A17"
+"color.on_error.container"        = "#FFDAD6"
+
+# ── State layers ────────────────────────────────────────────────────────────
+"state.hover.opacity"             = "0.08"
+"state.pressed.opacity"           = "0.12"
+"focus.ring.width"                = "2"
+"focus.ring.offset"               = "2"
+
+# ── Motion ──────────────────────────────────────────────────────────────────
+"motion.enter.ms"                 = "180"
+"motion.exit.ms"                  = "120"
+"motion.state.ms"                 = "100"
+"motion.enter.easing"             = "decelerate"
+"motion.exit.easing"              = "accelerate"
+
+# ── Shape (corner radius) ───────────────────────────────────────────────────
+"shape.xs"                        = "4"
+"shape.s"                         = "8"
+"shape.m"                         = "12"
+"shape.l"                         = "16"
+"shape.xl"                        = "28"
+"shape.full"                      = "999"
+
+# ── Spacing (4 px grid) ─────────────────────────────────────────────────────
+"space.xs"                        = "4"
+"space.s"                         = "8"
+"space.m"                         = "12"
+"space.l"                         = "16"
+"space.xl"                        = "24"
+"space.xxl"                       = "32"
+
+# ── Type ────────────────────────────────────────────────────────────────────
+# Family names are free-form; a family that is not loaded falls back to the
+# renderer's default face (IBM Plex is bundled by hud-h51u7.2).
+"font.sans"                        = "IBM Plex Sans"
+"font.mono"                        = "IBM Plex Mono"
+
+"type.code.display.family"         = "IBM Plex Mono"
+"type.code.display.size"           = "40"
+"type.code.display.line_height"    = "48"
+"type.code.display.weight"         = "500"
+"type.caption.display.family"      = "IBM Plex Sans"
+"type.caption.display.size"        = "26"
+"type.caption.display.line_height" = "34"
+"type.caption.display.weight"      = "600"
+"type.headline.s.family"           = "IBM Plex Sans"
+"type.headline.s.size"             = "20"
+"type.headline.s.line_height"      = "28"
+"type.headline.s.weight"           = "600"
+"type.title.m.family"              = "IBM Plex Sans"
+"type.title.m.size"                = "16"
+"type.title.m.line_height"         = "24"
+"type.title.m.weight"              = "600"
+"type.body.m.family"               = "IBM Plex Sans"
+"type.body.m.size"                 = "14"
+"type.body.m.line_height"          = "20"
+"type.body.m.weight"               = "400"
+"type.label.m.family"              = "IBM Plex Sans"
+"type.label.m.size"                = "12"
+"type.label.m.line_height"         = "16"
+"type.label.m.weight"              = "500"
+"type.label.s.family"              = "IBM Plex Sans"
+"type.label.s.size"                = "11"
+"type.label.s.line_height"         = "16"
+"type.label.s.weight"              = "500"
+"type.readout.family"              = "IBM Plex Mono"
+"type.readout.size"                = "14"
+"type.readout.line_height"         = "20"
+"type.readout.weight"              = "500"
+
+# ── Legacy keys the current renderer reads ──────────────────────────────────
+# Mapped onto the semantic palette so today's elements pick up Tonal Glass
+# colours before they are restyled (hud-h51u7.4). Delete each mapping when
+# its consumer moves to the semantic tokens.
+"color.text.primary"                  = "#E8EBF0"   # on_surface
+"color.text.secondary"                = "#A9B1BE"   # on_surface.variant
+"color.text.accent"                   = "#8AB4FF"   # primary
+"color.border.default"                = "#343B47"   # outline.variant
+"color.backdrop.default"              = "#222833"   # surface.container.high
+"color.severity.info"                 = "#8AB4FF"   # primary
+"color.severity.warning"              = "#F2C14E"   # caution
+"color.severity.error"                = "#FF8A80"   # error
+"opacity.backdrop.opaque"             = "0.92"      # opacity.surface
+"border.radius.medium"                = "16"        # shape.l
+"color.notification.urgency.low"      = "#1B2028"   # surface.container
+"color.notification.urgency.normal"   = "#222833"   # surface.container.high
+"color.notification.urgency.urgent"   = "#4A3A10"   # caution.container
+"color.notification.urgency.critical" = "#5C1A17"   # error.container
+"portal.divider.color"                = "#343B47"   # outline.variant
+"system_card.background"              = "#222833EB" # surface.container.high @ 0.92
+"system_card.accent.color"            = "#8AB4FF"   # primary
+
+# Carried over unchanged from the pre-theme production config (restyled in
+# hud-h51u7.4).
+"typography.body.size"                 = "15"
+"typography.body.weight"               = "500"
+"spacing.padding.medium"               = "10"
+"typography.notification.body.scale"   = "0.90"
+"typography.notification.title.weight" = "700"
