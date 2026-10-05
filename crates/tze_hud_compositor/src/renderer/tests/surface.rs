@@ -499,3 +499,103 @@ async fn frame_signature_ignores_content_outside_the_target() {
         "on-window change is visible"
     );
 }
+
+/// A zone assigned to a secondary display renders in that display's window
+/// and its hit regions move with it; the primary no longer shows it.
+#[tokio::test]
+async fn zone_assigned_to_secondary_display_renders_there() {
+    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);
+    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
+    compositor.set_display_layout(crate::DisplayLayout::new(
+        vec![
+            crate::DisplayRect {
+                name: "MAIN".into(),
+                rect: Rect::new(0.0, 0.0, 256.0, 256.0),
+                primary: true,
+            },
+            crate::DisplayRect {
+                name: "SIDE".into(),
+                rect: Rect::new(256.0, -128.0, 256.0, 256.0),
+                primary: false,
+            },
+        ],
+        &HashMap::from([("notif".to_string(), "side".to_string())]),
+    ));
+    let side = crate::FrameTarget {
+        x: 256.0,
+        y: -128.0,
+        width: 256,
+        height: 256,
+        primary: false,
+    };
+
+    let mut frames = Vec::new();
+    for publish in [false, true] {
+        let mut scene = SceneGraph::new(256.0, 256.0);
+        let _tab = scene.create_tab("Main", 0).unwrap();
+        scene.register_zone(tze_hud_scene::types::ZoneDefinition {
+            id: SceneId::new(),
+            name: "notif".to_string(),
+            description: "Stack zone".to_string(),
+            geometry_policy: tze_hud_scene::types::GeometryPolicy::Relative {
+                x_pct: 0.1,
+                y_pct: 0.1,
+                width_pct: 0.8,
+                height_pct: 0.5,
+            },
+            accepted_media_types: vec![tze_hud_scene::types::ZoneMediaType::ShortTextWithIcon],
+            rendering_policy: tze_hud_scene::types::RenderingPolicy {
+                font_size_px: Some(16.0),
+                ..Default::default()
+            },
+            contention_policy: ContentionPolicy::Stack { max_depth: 5 },
+            max_publishers: 8,
+            auto_clear_ms: None,
+            layer_attachment: tze_hud_scene::types::LayerAttachment::Chrome,
+            ephemeral: false,
+        });
+        if publish {
+            scene
+                .publish_to_zone(
+                    "notif",
+                    ZoneContent::Notification(NotificationPayload {
+                        text: "Hello".to_string(),
+                        icon: String::new(),
+                        urgency: 1,
+                        ttl_ms: None,
+                        title: String::new(),
+                        actions: Vec::new(),
+                    }),
+                    "agent-a",
+                    None,
+                    None,
+                    None,
+                )
+                .unwrap();
+        }
+        compositor.prime_markdown_cache(&scene);
+        compositor.prime_truncation_cache(&scene);
+        let build = compositor.build_windowed_frame(&mut scene, 256, 256);
+        let format = wgpu::TextureFormat::Rgba8UnormSrgb;
+        let primary = compositor
+            .capture_windowed_frame(&build, &primary_of(&build), format)
+            .expect("capture primary");
+        let secondary = compositor
+            .capture_windowed_frame(&build, &side, format)
+            .expect("capture secondary");
+        if publish {
+            compositor.populate_zone_hit_regions(&mut scene, 256.0, 256.0);
+            let dismiss = scene.overlay.zone_hit_regions[0].bounds;
+            assert!(
+                dismiss.x >= 256.0 && dismiss.y >= -128.0 && dismiss.y < 128.0,
+                "hit regions are in scene space on the secondary: {dismiss:?}"
+            );
+        }
+        frames.push((primary.rgba, secondary.rgba));
+    }
+    assert_eq!(
+        frames[0].0, frames[1].0,
+        "the primary does not show the zone"
+    );
+    assert_ne!(frames[0].1, frames[1].1, "the secondary shows the zone");
+}
