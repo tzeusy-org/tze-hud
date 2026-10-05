@@ -1115,8 +1115,8 @@ mod tests {
     // without a GPU-backed `TextRasterizer` at all.
     //
     // Simulate "an uploaded font changed what a generic family resolves to" by
-    // remapping the Monospace generic slot from the bundled fixed-width DejaVu
-    // Sans Mono face to the bundled proportional DejaVu Serif face — using only
+    // remapping the Monospace generic slot from the bundled fixed-width IBM Plex
+    // Mono face to the bundled proportional DejaVu Serif face — using only
     // the crate's own bundled assets (`fonts::bundled_font_system`), no
     // fabricated font bytes. A fixed-width-vs-proportional swap at a fixed wrap
     // width is a large enough character-width delta to change wrapped line count

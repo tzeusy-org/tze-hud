@@ -44,7 +44,7 @@ use tze_hud_scene::types::{
 };
 use wgpu::{Device, MultisampleState, Queue};
 
-use crate::fonts::bundled_font_system;
+use crate::fonts::{FontConfig, ResolvedFonts, build_font_system};
 use crate::overflow::{self, TruncationResult, TruncationViewport};
 
 /// Default line-height multiplier: `line_height_px = font_size_px × this`.
@@ -388,6 +388,14 @@ pub struct TextRasterizer {
     /// The ID is the raw 32-byte BLAKE3 digest (`ResourceId` wire form) of
     /// the font bytes, matching the key used by `tze_hud_resource::FontBytesStore`.
     loaded_font_ids: HashSet<[u8; 32]>,
+    /// Bytes of every agent-uploaded font, in load order, so a rasterizer
+    /// rebuilt for a new [`FontConfig`] can carry them over
+    /// ([`TextRasterizer::take_uploaded_fonts`]).  Shared with fontdb (no copy).
+    uploaded_fonts: Vec<([u8; 32], Arc<Vec<u8>>)>,
+    /// Normalized font configuration this rasterizer was built for.
+    font_config: FontConfig,
+    /// Family each font role resolved to.
+    resolved_fonts: ResolvedFonts,
     /// Truncation result cache for `TextOverflow::Ellipsis` items.
     ///
     /// Keyed on `(content_hash, bounds_width, bounds_height, font_size_px,
@@ -697,22 +705,31 @@ impl TextRasterizer {
     /// This must be called after the wgpu `Device` and `Queue` are available
     /// (i.e. after `Compositor::new_headless` or `new_windowed`).
     pub fn new(device: &Device, queue: &Queue, format: wgpu::TextureFormat) -> Self {
-        // Build a self-contained FontSystem from bundled fonts only — no OS
-        // system-font scan.  This makes the compositor reliable on kiosk/minimal
-        // hosts (headless servers, containers, Windows Nano) where system fonts
-        // are absent or incomplete.  Agent-uploaded fonts are still accepted
-        // afterwards via `load_font_bytes`.
-        //
-        // `bundled_font_system()` uses `FontSystem::new_with_locale_and_db` to
-        // skip `db.load_system_fonts()` and sets family mappings so that
-        // `Family::SansSerif / Monospace / Serif` resolve to the bundled DejaVu
-        // faces rather than the cosmic-text defaults ("Fira Mono" / "Fira Sans" /
-        // "DejaVu Serif") which may not match the faces we actually loaded.
-        let font_system = bundled_font_system();
+        Self::with_font_config(device, queue, format, &FontConfig::default())
+    }
+
+    /// Create a text rasterizer whose font roles follow `font_config`.
+    ///
+    /// The font system never scans OS font directories (see [`crate::fonts`]):
+    /// it holds the bundled faces, the configured fonts dir, and only those
+    /// Windows system families the config names.  With the default config it
+    /// is fully deterministic.  Agent-uploaded fonts are accepted afterwards
+    /// via `load_font_bytes`.
+    pub fn with_font_config(
+        device: &Device,
+        queue: &Queue,
+        format: wgpu::TextureFormat,
+        font_config: &FontConfig,
+    ) -> Self {
+        let font_config = font_config.clone().normalized();
+        let (font_system, resolved_fonts) = build_font_system(&font_config);
 
         tracing::info!(
             font_face_count = font_system.db().faces().count(),
-            "TextRasterizer initialised with bundled fonts (no system-font scan)"
+            sans = %resolved_fonts.sans,
+            mono = %resolved_fonts.mono,
+            serif = %resolved_fonts.serif,
+            "TextRasterizer initialised (no system-font scan)"
         );
 
         let swash_cache = SwashCache::new();
@@ -731,6 +748,9 @@ impl TextRasterizer {
             renderer,
             overlay_renderer,
             loaded_font_ids: HashSet::new(),
+            uploaded_fonts: Vec::new(),
+            font_config,
+            resolved_fonts,
             truncation_cache: TruncationCache::new(),
             shape_call_count: 0,
             shape_cache: HashMap::new(),
@@ -775,9 +795,13 @@ impl TextRasterizer {
             return;
         }
 
-        self.font_system.db_mut().load_font_data(data.to_vec());
+        let bytes = Arc::new(data.to_vec());
+        self.font_system
+            .db_mut()
+            .load_font_source(glyphon::fontdb::Source::Binary(bytes.clone()));
 
         self.loaded_font_ids.insert(resource_id);
+        self.uploaded_fonts.push((resource_id, bytes));
 
         // A new face can change font fallback / substitution for text that was
         // already shaped, so every cached shaped buffer is now potentially stale
@@ -791,6 +815,24 @@ impl TextRasterizer {
             bytes = data.len(),
             "agent-uploaded font loaded into FontSystem"
         );
+    }
+
+    /// The (normalized) font configuration this rasterizer was built for.
+    #[inline]
+    pub fn font_config(&self) -> &FontConfig {
+        &self.font_config
+    }
+
+    /// The concrete family each font role resolved to.
+    #[inline]
+    pub fn resolved_fonts(&self) -> &ResolvedFonts {
+        &self.resolved_fonts
+    }
+
+    /// Agent-uploaded fonts loaded so far, as `(resource_id, bytes)` in load
+    /// order — for replaying into a rebuilt rasterizer.
+    pub fn take_uploaded_fonts(&mut self) -> Vec<([u8; 32], Arc<Vec<u8>>)> {
+        std::mem::take(&mut self.uploaded_fonts)
     }
 
     /// Returns `true` if the font identified by `resource_id` has already been
@@ -3373,7 +3415,7 @@ mod tests {
     /// asserts `> 1` line, so it fails on the old policy and passes on the new one.
     #[test]
     fn overlong_unbroken_token_wraps_at_glyph_level_within_box() {
-        let mut fs = bundled_font_system();
+        let mut fs = crate::fonts::bundled_font_system();
         let font_size_px = 16.0;
         let lhm = 1.4;
         let wrap_width = 80.0;
@@ -3406,7 +3448,7 @@ mod tests {
     /// content that fits.
     #[test]
     fn short_token_stays_single_line() {
-        let mut fs = bundled_font_system();
+        let mut fs = crate::fonts::bundled_font_system();
         let widths = composer_wrap_line_widths(&mut fs, "hi", 400.0, 16.0, 1.4);
         assert_eq!(widths.len(), 1, "a short token must not wrap");
     }
@@ -3415,7 +3457,7 @@ mod tests {
     /// policy (regression guard: WordOrGlyph must not change ordinary word wrap).
     #[test]
     fn spaced_text_still_word_wraps() {
-        let mut fs = bundled_font_system();
+        let mut fs = crate::fonts::bundled_font_system();
         let text = "word ".repeat(40); // ~200 chars, many spaces
         let widths = composer_wrap_line_widths(&mut fs, &text, 80.0, 16.0, 1.4);
         assert!(

@@ -15,7 +15,10 @@ pub mod text;
 pub mod vertical_flow;
 pub mod widget;
 
-pub use fonts::{BUNDLED_FONT_FACE_COUNT, bundled_font_sources, bundled_font_system};
+pub use fonts::{
+    BUNDLED_FONT_FACE_COUNT, FontConfig, ResolvedFonts, build_font_system, bundled_font_sources,
+    bundled_font_system,
+};
 pub use markdown::{
     MarkdownCache, MarkdownPrimer, MarkdownTokens, ParsedMarkdown, PrimeJob, StyleAttr, StyledSpan,
 };

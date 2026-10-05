@@ -48,7 +48,8 @@ pub fn run_scene_startup(
         .as_ref()
         .map(|dt| dt.0.clone())
         .unwrap_or_default();
-    let global_tokens = resolve_config_tokens(&config_tokens);
+    let mut global_tokens = resolve_config_tokens(&config_tokens);
+    resolve_font_dir(&mut global_tokens, config_parent);
     tracing::info!(
         token_count = global_tokens.len(),
         "scene_startup: design tokens loaded"
@@ -83,6 +84,35 @@ pub fn run_scene_startup(
         global_tokens,
         widget_svg_assets,
     }
+}
+
+// ─── Fonts directory ──────────────────────────────────────────────────────────
+
+/// Point the `font.dir` token at the operator fonts directory, made absolute so
+/// the compositor needs no config path.
+///
+/// An explicit `font.dir` resolves relative to `config_parent`; otherwise
+/// `<config_parent>/fonts` is used when it is a directory.  With no
+/// `config_parent` (headless tests) nothing is inferred, keeping fonts bundled.
+fn resolve_font_dir(tokens: &mut DesignTokenMap, config_parent: Option<&Path>) {
+    use tze_hud_compositor::fonts::TOKEN_FONT_DIR;
+    let dir = match (tokens.get(TOKEN_FONT_DIR), config_parent) {
+        (Some(dir), Some(parent)) => parent.join(dir.trim()),
+        (Some(_), None) => return,
+        (None, Some(parent)) => {
+            let dir = parent.join("fonts");
+            if !dir.is_dir() {
+                return;
+            }
+            dir
+        }
+        (None, None) => return,
+    };
+    tracing::info!(dir = %dir.display(), "scene_startup: fonts dir");
+    tokens.insert(
+        TOKEN_FONT_DIR.to_owned(),
+        dir.to_string_lossy().into_owned(),
+    );
 }
 
 // ─── Config-declared tab bootstrap ────────────────────────────────────────────
@@ -167,6 +197,38 @@ mod tests {
     use super::*;
     use tze_hud_config::raw::{RawConfig, RawDesignTokens};
     use tze_hud_scene::graph::SceneGraph;
+
+    #[test]
+    fn font_dir_defaults_to_existing_config_fonts_dir_and_resolves_relative() {
+        let parent = std::env::temp_dir().join(format!("tze_hud_font_dir_{}", std::process::id()));
+        std::fs::create_dir_all(&parent).unwrap();
+
+        // No fonts/ beside the config: nothing inferred.
+        let mut tokens = DesignTokenMap::new();
+        resolve_font_dir(&mut tokens, Some(&parent));
+        assert!(!tokens.contains_key("font.dir"));
+
+        std::fs::create_dir_all(parent.join("fonts")).unwrap();
+        resolve_font_dir(&mut tokens, Some(&parent));
+        assert_eq!(
+            tokens.get("font.dir").map(String::as_str),
+            Some(parent.join("fonts").to_string_lossy().as_ref())
+        );
+
+        // An explicit relative dir resolves against the config dir.
+        let mut tokens: DesignTokenMap = [("font.dir".to_owned(), "my-fonts".to_owned())].into();
+        resolve_font_dir(&mut tokens, Some(&parent));
+        assert_eq!(
+            tokens.get("font.dir").map(String::as_str),
+            Some(parent.join("my-fonts").to_string_lossy().as_ref())
+        );
+
+        // No config dir (headless): nothing inferred.
+        let mut tokens = DesignTokenMap::new();
+        resolve_font_dir(&mut tokens, None);
+        assert!(tokens.is_empty());
+        std::fs::remove_dir_all(&parent).ok();
+    }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 

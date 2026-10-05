@@ -637,3 +637,61 @@ async fn test_stage6_budget_with_text_rendering_active() {
              spec target={STAGE6_BUDGET_US} µs). All timings (sorted): {timings:?}"
     );
 }
+
+/// Font roles follow the token map: `font.*` tokens rebuild the rasterizer for
+/// the new families (keeping agent-uploaded fonts), default-equivalent tokens
+/// are a no-op, and the config survives a later `init_text_renderer`.
+#[tokio::test]
+async fn font_tokens_select_role_families_and_rebuild_only_on_change() {
+    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(64, 64).await);
+    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
+    assert_eq!(
+        compositor.resolved_fonts(),
+        Some(&crate::fonts::ResolvedFonts::default())
+    );
+
+    // A real face as the "uploaded" font, so it must survive the rebuild.
+    let uploaded_id = [0x5A; 32];
+    let face = include_bytes!("../../../fonts/ibm-plex/IBMPlexMono-Regular.ttf");
+    assert!(compositor.load_font_bytes(uploaded_id, face));
+    let faces_before = compositor
+        .text_rasterizer
+        .as_ref()
+        .unwrap()
+        .font_face_count();
+
+    let tokens = |sans: &str| -> HashMap<String, String> {
+        [("font.sans".to_owned(), sans.to_owned())].into()
+    };
+    // Mark the live rasterizer; a rebuild replaces it (counter back to 0).
+    let marker = |c: &Compositor| c.text_rasterizer.as_ref().unwrap().shape_call_count;
+    compositor
+        .text_rasterizer
+        .as_mut()
+        .unwrap()
+        .shape_call_count = 12_345;
+
+    // The default spelled out normalizes to the default config: no rebuild.
+    compositor.set_token_map(tokens("IBM Plex Sans"));
+    assert_eq!(
+        marker(&compositor),
+        12_345,
+        "default-equivalent tokens rebuilt"
+    );
+
+    compositor.set_token_map(tokens("DejaVu Sans"));
+    assert_eq!(marker(&compositor), 0, "changed font.sans did not rebuild");
+    let resolved = compositor.resolved_fonts().unwrap().clone();
+    assert_eq!(resolved.sans, "DejaVu Sans");
+    assert_eq!(resolved.mono, crate::fonts::DEFAULT_MONO_FAMILY);
+    let rasterizer = compositor.text_rasterizer.as_ref().unwrap();
+    assert!(
+        rasterizer.has_font(&uploaded_id),
+        "uploaded font carried over"
+    );
+    assert_eq!(rasterizer.font_face_count(), faces_before);
+
+    // Re-init (surface format change) keeps the configured roles.
+    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
+    assert_eq!(compositor.resolved_fonts().unwrap().sans, "DejaVu Sans");
+}
