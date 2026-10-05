@@ -300,11 +300,13 @@ pub fn create_texture_rect_pipeline(
     })
 }
 
-/// A rounded rectangle draw command: a colored rectangle with SDF corner radius.
+/// A rounded rectangle draw command: an SDF-shaded rectangle with a corner
+/// radius, a fill, and an optional inside border.
 ///
-/// Produced by the compositor when a zone's `RenderingPolicy` has
-/// `backdrop_radius` set.  Consumed by the SDF pipeline in
-/// `Compositor::encode_rounded_rect_pass`.
+/// Produced for zone backdrops with `backdrop_radius`, tile rounded nodes,
+/// notification card borders and the drag highlight. Consumed by the SDF
+/// pipeline in `Compositor::encode_rounded_rect_pass`. A border-only shape has
+/// a transparent `color` (`[0.0; 4]`).
 #[derive(Clone, Debug)]
 pub struct RoundedRectDrawCmd {
     /// Original rounded rectangle shape used by the SDF.
@@ -313,10 +315,24 @@ pub struct RoundedRectDrawCmd {
     pub width: f32,
     pub height: f32,
     pub radius: f32,
+    /// Fill colour, in `gpu_color` form (premultiplied in overlay mode).
     pub color: [f32; 4],
+    /// Inside border, following the rounded edge.
+    pub border: Option<RoundedRectBorder>,
     /// Optional raster bounds. When present, the draw quad is clipped to this
     /// rectangle while the SDF still evaluates against the original shape.
     pub clip: Option<RoundedRectClip>,
+}
+
+/// An inside border drawn by the SDF shader: the band where
+/// `-width < sdf <= 0`, anti-aliased like the fill edge. Its inner edge is the
+/// shape offset inward by `width`, so corners stay concentric.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RoundedRectBorder {
+    /// Border width in physical pixels.
+    pub width: f32,
+    /// Border colour, in `gpu_color` form like the fill.
+    pub color: [f32; 4],
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -330,13 +346,13 @@ pub struct RoundedRectClip {
 /// Vertex for rendering SDF rounded rectangles.
 ///
 /// The fragment shader receives per-vertex geometry (rect center + half-size +
-/// radius) and recomputes the SDF at each pixel to produce anti-aliased rounded
-/// corners.  All positional fields use pixel coordinates; they are converted to
-/// NDC in the vertex shader.
+/// radius + border) and recomputes the SDF at each pixel to produce
+/// anti-aliased rounded corners and borders. All positional fields use pixel
+/// coordinates; they are converted to NDC in the vertex shader.
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
 pub struct RoundedRectVertex {
-    /// NDC position of this vertex (computed by `rounded_rect_vertices`).
+    /// NDC position of this vertex (computed by `rounded_rect_cmd_vertices`).
     pub position: [f32; 2],
     /// Pixel-space position of this vertex (passed through to fragment shader).
     pub frag_pos: [f32; 2],
@@ -346,128 +362,92 @@ pub struct RoundedRectVertex {
     pub rect_half_size: [f32; 2],
     /// Corner radius in pixels.
     pub radius: f32,
-    /// RGBA color as returned by `gpu_color` (non-premultiplied in fullscreen
+    /// Fill RGBA as returned by `gpu_color` (non-premultiplied in fullscreen
     /// mode; premultiplied in overlay mode).
     pub color: [f32; 4],
+    /// Inside border width in pixels; 0 draws no border.
+    pub border_width: f32,
+    /// Border RGBA, same form as `color`.
+    pub border_color: [f32; 4],
 }
 
-// Pod requires no padding; add a manual size assertion if needed.
-// RoundedRectVertex size: 2+2+2+2+1+4 = 13 f32 = 52 bytes.
+// RoundedRectVertex size: 2+2+2+2+1+4+1+4 = 18 f32 = 72 bytes (no padding).
 
 impl RoundedRectVertex {
     pub fn desc() -> wgpu::VertexBufferLayout<'static> {
         use std::mem::size_of;
+        const fn at(
+            floats: usize,
+            location: u32,
+            format: wgpu::VertexFormat,
+        ) -> wgpu::VertexAttribute {
+            wgpu::VertexAttribute {
+                offset: (floats * size_of::<f32>()) as wgpu::BufferAddress,
+                shader_location: location,
+                format,
+            }
+        }
+        const ATTRIBUTES: [wgpu::VertexAttribute; 8] = [
+            at(0, 0, wgpu::VertexFormat::Float32x2),  // position
+            at(2, 1, wgpu::VertexFormat::Float32x2),  // frag_pos
+            at(4, 2, wgpu::VertexFormat::Float32x2),  // rect_center
+            at(6, 3, wgpu::VertexFormat::Float32x2),  // rect_half_size
+            at(8, 4, wgpu::VertexFormat::Float32),    // radius
+            at(9, 5, wgpu::VertexFormat::Float32x4),  // color
+            at(13, 6, wgpu::VertexFormat::Float32),   // border_width
+            at(14, 7, wgpu::VertexFormat::Float32x4), // border_color
+        ];
         wgpu::VertexBufferLayout {
             array_stride: size_of::<RoundedRectVertex>() as wgpu::BufferAddress,
             step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &[
-                // @location(0) position: vec2<f32>
-                wgpu::VertexAttribute {
-                    offset: 0,
-                    shader_location: 0,
-                    format: wgpu::VertexFormat::Float32x2,
-                },
-                // @location(1) frag_pos: vec2<f32>
-                wgpu::VertexAttribute {
-                    offset: size_of::<[f32; 2]>() as wgpu::BufferAddress,
-                    shader_location: 1,
-                    format: wgpu::VertexFormat::Float32x2,
-                },
-                // @location(2) rect_center: vec2<f32>
-                wgpu::VertexAttribute {
-                    offset: size_of::<[f32; 4]>() as wgpu::BufferAddress,
-                    shader_location: 2,
-                    format: wgpu::VertexFormat::Float32x2,
-                },
-                // @location(3) rect_half_size: vec2<f32>
-                wgpu::VertexAttribute {
-                    offset: size_of::<[f32; 6]>() as wgpu::BufferAddress,
-                    shader_location: 3,
-                    format: wgpu::VertexFormat::Float32x2,
-                },
-                // @location(4) radius: f32
-                wgpu::VertexAttribute {
-                    offset: size_of::<[f32; 8]>() as wgpu::BufferAddress,
-                    shader_location: 4,
-                    format: wgpu::VertexFormat::Float32,
-                },
-                // @location(5) color: vec4<f32>
-                wgpu::VertexAttribute {
-                    offset: size_of::<[f32; 9]>() as wgpu::BufferAddress,
-                    shader_location: 5,
-                    format: wgpu::VertexFormat::Float32x4,
-                },
-            ],
+            attributes: &ATTRIBUTES,
         }
     }
 }
 
-/// Generate 6 vertices (2 triangles) for a rounded-rectangle quad.
+/// Generate 6 vertices (2 triangles) for one rounded-rectangle command, or
+/// `None` when the shape or its clip is empty.
 ///
-/// `x`, `y`, `w`, `h` are in pixel coordinates (top-left origin).
-/// `screen_w` / `screen_h` are the surface dimensions used to convert to NDC.
-/// `radius` is the corner radius in pixels.
-/// `color` is premultiplied RGBA.
-#[allow(clippy::too_many_arguments)]
-pub fn rounded_rect_vertices(
-    x: f32,
-    y: f32,
-    w: f32,
-    h: f32,
+/// The raster quad covers `cmd.clip` when set, else the shape; the SDF always
+/// evaluates against the shape, so a clipped edge does not become a new
+/// rounded corner or border. `screen_w` / `screen_h` convert pixels to NDC.
+pub fn rounded_rect_cmd_vertices(
+    cmd: &RoundedRectDrawCmd,
     screen_w: f32,
     screen_h: f32,
-    radius: f32,
-    color: [f32; 4],
-) -> [RoundedRectVertex; 6] {
-    rounded_rect_vertices_with_draw_bounds(
-        x, y, w, h, x, y, w, h, screen_w, screen_h, radius, color,
-    )
-}
+) -> Option<[RoundedRectVertex; 6]> {
+    if cmd.width <= 0.0 || cmd.height <= 0.0 {
+        return None;
+    }
+    let (draw_x, draw_y, draw_w, draw_h) = match cmd.clip {
+        Some(c) if c.width <= 0.0 || c.height <= 0.0 => return None,
+        Some(c) => (c.x, c.y, c.width, c.height),
+        None => (cmd.x, cmd.y, cmd.width, cmd.height),
+    };
 
-/// Generate 6 vertices for a rounded rectangle whose raster quad may be
-/// smaller than the original SDF shape.
-///
-/// `draw_*` bounds determine where fragments are emitted. `shape_*` bounds
-/// determine the rounded rectangle SDF center and half-size. This is used when
-/// tile scrolling clips a rounded node to the tile viewport: the clipped edge
-/// must not become a new rounded corner.
-#[allow(clippy::too_many_arguments)]
-pub fn rounded_rect_vertices_with_draw_bounds(
-    draw_x: f32,
-    draw_y: f32,
-    draw_w: f32,
-    draw_h: f32,
-    shape_x: f32,
-    shape_y: f32,
-    shape_w: f32,
-    shape_h: f32,
-    screen_w: f32,
-    screen_h: f32,
-    radius: f32,
-    color: [f32; 4],
-) -> [RoundedRectVertex; 6] {
     // NDC corners
     let left_ndc = (draw_x / screen_w) * 2.0 - 1.0;
     let right_ndc = ((draw_x + draw_w) / screen_w) * 2.0 - 1.0;
     let top_ndc = 1.0 - (draw_y / screen_h) * 2.0;
     let bottom_ndc = 1.0 - ((draw_y + draw_h) / screen_h) * 2.0;
 
-    // Pixel-space center and half-size for the SDF.
-    let cx = shape_x + shape_w * 0.5;
-    let cy = shape_y + shape_h * 0.5;
-    let hx = shape_w * 0.5;
-    let hy = shape_h * 0.5;
+    let (border_width, border_color) = cmd
+        .border
+        .filter(|b| b.width > 0.0)
+        .map_or((0.0, [0.0; 4]), |b| (b.width, b.color));
 
     let v = |px: f32, py: f32, ndc_x: f32, ndc_y: f32| RoundedRectVertex {
         position: [ndc_x, ndc_y],
         frag_pos: [px, py],
-        rect_center: [cx, cy],
-        rect_half_size: [hx, hy],
-        radius,
-        color,
+        rect_center: [cmd.x + cmd.width * 0.5, cmd.y + cmd.height * 0.5],
+        rect_half_size: [cmd.width * 0.5, cmd.height * 0.5],
+        radius: cmd.radius,
+        color: cmd.color,
+        border_width,
+        border_color,
     };
 
-    [
+    Some([
         // Triangle 1
         v(draw_x, draw_y, left_ndc, top_ndc),
         v(draw_x + draw_w, draw_y, right_ndc, top_ndc),
@@ -476,24 +456,14 @@ pub fn rounded_rect_vertices_with_draw_bounds(
         v(draw_x + draw_w, draw_y, right_ndc, top_ndc),
         v(draw_x + draw_w, draw_y + draw_h, right_ndc, bottom_ndc),
         v(draw_x, draw_y + draw_h, left_ndc, bottom_ndc),
-    ]
+    ])
 }
 
-/// WGSL shader for SDF rounded rectangle rendering (fullscreen / straight-alpha mode).
-///
-/// Fragment stage:
-/// - Computes the signed distance from `frag_pos` to the nearest point on the
-///   rounded rectangle (standard box SDF with per-corner radius).
-/// - Converts distance to an alpha via `smoothstep` for sub-pixel anti-aliasing.
-/// - Applies coverage to the alpha channel only (RGB passes through unchanged).
-///
-/// The pipeline uses `BlendState::ALPHA_BLENDING` (straight-alpha), so the
-/// fragment output must be non-premultiplied: keeping RGB unmodified and only
-/// scaling alpha ensures the GPU blend equation applies coverage exactly once.
-///
-/// In overlay mode use `ROUNDED_RECT_OVERLAY_SHADER` + `PREMULTIPLIED_ALPHA_BLENDING`
-/// instead — see `create_rounded_rect_overlay_pipeline`.
-pub const ROUNDED_RECT_SHADER: &str = r#"
+/// WGSL shared by both rounded-rect shaders: vertex stage, SDF, and the
+/// border/fill split. Each shader appends its own `fs_main`.
+macro_rules! rounded_rect_shader_common {
+    () => {
+        r#"
 struct VertexInput {
     @location(0) position:       vec2<f32>,
     @location(1) frag_pos:       vec2<f32>,
@@ -501,6 +471,8 @@ struct VertexInput {
     @location(3) rect_half_size: vec2<f32>,
     @location(4) radius:         f32,
     @location(5) color:          vec4<f32>,
+    @location(6) border_width:   f32,
+    @location(7) border_color:   vec4<f32>,
 };
 
 struct VertexOutput {
@@ -510,125 +482,104 @@ struct VertexOutput {
     @location(2) rect_half_size: vec2<f32>,
     @location(3) radius:         f32,
     @location(4) color:          vec4<f32>,
+    @location(5) border_width:   f32,
+    @location(6) border_color:   vec4<f32>,
 };
 
 @vertex
 fn vs_main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
-    out.clip_position = vec4<f32>(in.position, 0.0, 1.0);
+    out.clip_position  = vec4<f32>(in.position, 0.0, 1.0);
     out.frag_pos       = in.frag_pos;
     out.rect_center    = in.rect_center;
     out.rect_half_size = in.rect_half_size;
     out.radius         = in.radius;
     out.color          = in.color;
+    out.border_width   = in.border_width;
+    out.border_color   = in.border_color;
     return out;
 }
 
 /// Standard 2D SDF for a rounded rectangle.
 ///
-/// `p`    — point to evaluate (pixel space, origin = rect center).
-/// `b`    — half-size of the rectangle (positive).
-/// `r`    — corner radius.
+/// `p` — point to evaluate (pixel space, origin = rect center).
+/// `b` — half-size of the rectangle (positive).
+/// `r` — corner radius.
 /// Returns the signed distance: negative inside, positive outside.
 fn sdf_rounded_box(p: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {
     let q = abs(p) - b + vec2<f32>(r, r);
     return length(max(q, vec2<f32>(0.0, 0.0))) + min(max(q.x, q.y), 0.0) - r;
 }
 
+/// Shape coverage (x) and fill weight (y) for this fragment.
+///
+/// Coverage is a 1 px feather around the outer edge: smoothstep(0.5, -0.5, d)
+/// goes 0 -> 1 as d goes +0.5 -> -0.5. The fill weight is the same feather
+/// around the inner edge `d = -border_width`, so the border is the band
+/// `-border_width < d <= 0` with the fill edge's AA on both sides. Offsetting
+/// the SDF keeps inner corners concentric (radius r - border_width).
+fn coverage_and_fill(in: VertexOutput) -> vec2<f32> {
+    let d = sdf_rounded_box(in.frag_pos - in.rect_center, in.rect_half_size, in.radius);
+    let coverage = smoothstep(0.5, -0.5, d);
+    var fill = 1.0;
+    if (in.border_width > 0.0) {
+        fill = smoothstep(0.5, -0.5, d + in.border_width);
+    }
+    return vec2<f32>(coverage, fill);
+}
+"#
+    };
+}
+
+/// WGSL shader for SDF rounded rectangle rendering (fullscreen / straight-alpha mode).
+///
+/// The pipeline uses `BlendState::ALPHA_BLENDING` (straight alpha), so the
+/// output must be non-premultiplied with coverage applied to alpha only;
+/// scaling RGB too would apply coverage twice and darken edges. Border and
+/// fill are mixed in premultiplied space (so a transparent fill does not tint
+/// the border) and un-premultiplied for output.
+///
+/// In overlay mode use `ROUNDED_RECT_OVERLAY_SHADER` + `PREMULTIPLIED_ALPHA_BLENDING`
+/// instead — see `create_rounded_rect_overlay_pipeline`.
+pub const ROUNDED_RECT_SHADER: &str = concat!(
+    rounded_rect_shader_common!(),
+    r#"
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    // Compute signed distance from this fragment to the rounded rect boundary.
-    let p = in.frag_pos - in.rect_center;
-    let d = sdf_rounded_box(p, in.rect_half_size, in.radius);
-
-    // Anti-aliased edge: 1 pixel feather.
-    // smoothstep(0.5, -0.5, d) transitions from 0→1 as d goes from +0.5→-0.5.
-    let alpha = smoothstep(0.5, -0.5, d);
-
-    // Apply coverage to alpha only.  The pipeline uses ALPHA_BLENDING, which
-    // performs: result = src.rgb * src.a + dst.rgb * (1 - src.a).
-    // The vertex color (in.color) arrives as non-premultiplied RGBA, so we
-    // must keep RGB unmodified and only scale the alpha channel by coverage.
-    // Scaling all four channels by alpha (as in premultiplied blending) would
-    // cause the GPU to apply coverage again during blending, darkening edges.
-    return vec4<f32>(in.color.rgb, in.color.a * alpha);
+    let cf = coverage_and_fill(in);
+    let a = mix(in.border_color.a, in.color.a, cf.y);
+    let rgb_pm = mix(in.border_color.rgb * in.border_color.a, in.color.rgb * in.color.a, cf.y);
+    var rgb = vec3<f32>(0.0, 0.0, 0.0);
+    if (a > 0.0) {
+        rgb = rgb_pm / a;
+    }
+    return vec4<f32>(rgb, a * cf.x);
 }
-"#;
+"#
+);
 
 /// WGSL shader for SDF rounded rectangle rendering in overlay / premultiplied-alpha mode.
 ///
-/// Identical SDF geometry to `ROUNDED_RECT_SHADER`, but the fragment output
-/// scales **all four channels** by the coverage alpha.  This is required when
-/// the pipeline uses `BlendState::PREMULTIPLIED_ALPHA_BLENDING`, whose blend
-/// equation is:
-///
-/// ```text
-/// result.rgb = src.rgb           + dst.rgb * (1 - src.a)
-/// result.a   = src.a * 1         + dst.a   * (1 - src.a)
-/// ```
-///
-/// In overlay mode the vertex colors are premultiplied by `gpu_color`
-/// (`src.rgb = actual.rgb * actual.a`).  Scaling everything by coverage gives:
-///
-/// ```text
-/// out = vec4(premul_rgb * cov, premul_a * cov)
-/// ```
-///
-/// which the premultiplied blend equation composites correctly:
+/// Same geometry as `ROUNDED_RECT_SHADER`. Vertex colours are premultiplied by
+/// `gpu_color` (`src.rgb = actual.rgb * actual.a`), so border and fill mix
+/// directly and all four channels scale by coverage, which the
+/// `PREMULTIPLIED_ALPHA_BLENDING` equation composites correctly:
 ///
 /// ```text
 /// result.rgb = premul_rgb * cov + dst.rgb * (1 - premul_a * cov)
 /// ```
 ///
 /// DWM then composites the framebuffer (already premultiplied) with the desktop.
-pub const ROUNDED_RECT_OVERLAY_SHADER: &str = r#"
-struct VertexInput {
-    @location(0) position:       vec2<f32>,
-    @location(1) frag_pos:       vec2<f32>,
-    @location(2) rect_center:    vec2<f32>,
-    @location(3) rect_half_size: vec2<f32>,
-    @location(4) radius:         f32,
-    @location(5) color:          vec4<f32>,
-};
-
-struct VertexOutput {
-    @builtin(position) clip_position: vec4<f32>,
-    @location(0) frag_pos:       vec2<f32>,
-    @location(1) rect_center:    vec2<f32>,
-    @location(2) rect_half_size: vec2<f32>,
-    @location(3) radius:         f32,
-    @location(4) color:          vec4<f32>,
-};
-
-@vertex
-fn vs_main(in: VertexInput) -> VertexOutput {
-    var out: VertexOutput;
-    out.clip_position = vec4<f32>(in.position, 0.0, 1.0);
-    out.frag_pos       = in.frag_pos;
-    out.rect_center    = in.rect_center;
-    out.rect_half_size = in.rect_half_size;
-    out.radius         = in.radius;
-    out.color          = in.color;
-    return out;
-}
-
-fn sdf_rounded_box(p: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {
-    let q = abs(p) - b + vec2<f32>(r, r);
-    return length(max(q, vec2<f32>(0.0, 0.0))) + min(max(q.x, q.y), 0.0) - r;
-}
-
+pub const ROUNDED_RECT_OVERLAY_SHADER: &str = concat!(
+    rounded_rect_shader_common!(),
+    r#"
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    let p = in.frag_pos - in.rect_center;
-    let d = sdf_rounded_box(p, in.rect_half_size, in.radius);
-    let alpha = smoothstep(0.5, -0.5, d);
-
-    // Overlay mode: vertex color is already premultiplied (rgb = actual.rgb * actual.a).
-    // Scale all four channels by coverage so the premultiplied blend equation
-    // composites the anti-aliased edge correctly.
-    return vec4<f32>(in.color.rgb * alpha, in.color.a * alpha);
+    let cf = coverage_and_fill(in);
+    return mix(in.border_color, in.color, cf.y) * cf.x;
 }
-"#;
+"#
+);
 
 /// The shader source for rendering colored rectangles.
 pub const RECT_SHADER: &str = r#"

@@ -29,16 +29,18 @@ use tze_hud_scene::types::*;
 use wgpu::util::DeviceExt;
 
 use crate::pipeline::{
-    RoundedRectClip, RoundedRectDrawCmd, RoundedRectVertex, rounded_rect_vertices,
-    rounded_rect_vertices_with_draw_bounds, textured_rect_vertices,
+    RoundedRectBorder, RoundedRectClip, RoundedRectDrawCmd, RoundedRectVertex,
+    rounded_rect_cmd_vertices, textured_rect_vertices,
 };
 
 use super::LayerPartitionedRoundedRectCmds;
 use super::draw_cmds::TexturedDrawCmd;
 use super::tile_render::node_uses_display_tile_scroll;
 use super::token_colors::{
-    NOTIFICATION_BACKDROP_OPACITY, STATIC_IMAGE_PLACEHOLDER_COLOR, is_alert_banner_zone,
-    linear_to_srgb, srgb_to_linear, urgency_to_notification_color, urgency_to_severity_color,
+    NOTIFICATION_BACKDROP_OPACITY, NOTIFICATION_BORDER_WIDTH_PX, STATIC_IMAGE_PLACEHOLDER_COLOR,
+    is_alert_banner_zone, linear_to_srgb, notification_dismiss_bounds,
+    resolve_border_default_color, resolve_notification_control_color, srgb_to_linear,
+    urgency_to_notification_color, urgency_to_severity_color,
 };
 
 #[inline]
@@ -331,16 +333,15 @@ impl super::Compositor {
         }
     }
 
-    /// Collect all rounded-rectangle draw commands in a single pass, partitioned by layer.
+    /// Collect all zone draw commands for the SDF pipeline in a single pass,
+    /// partitioned by layer.
     ///
-    /// Zones with `backdrop_radius` in their `RenderingPolicy` are collected and
-    /// partitioned into separate vectors for Background, Content, and Chrome layers.
-    /// This replaces three separate calls to `collect_rounded_rect_cmds` with one
-    /// efficient pass through the zone registry.
-    ///
-    /// These zones are excluded from the flat-rect backdrop pass
-    /// (`render_zone_content`) and rendered instead by `encode_rounded_rect_pass`
-    /// using the SDF pipeline.
+    /// - Zones with `backdrop_radius` (when not degraded) draw their backdrop
+    ///   here instead of in the flat-rect pass (`render_zone_content`).
+    /// - Non-alert-banner notification cards always get their border here, and
+    ///   the dismiss control its outline: on the rounded backdrop itself, or as
+    ///   a border-only shape over the flat backdrop (no radius, or
+    ///   `Simplified` degradation, which draws backdrops square).
     ///
     /// Mirrors the backdrop-resolution logic in `render_zone_content` so color
     /// derivation (severity tokens, urgency colors, opacity) is consistent.
@@ -355,9 +356,7 @@ impl super::Compositor {
             content: Vec::new(),
             chrome: Vec::new(),
         };
-        if self.degradation_policy.level >= tze_hud_scene::DegradationLevel::Simplified {
-            return result;
-        }
+        let degraded = self.degradation_policy.level >= tze_hud_scene::DegradationLevel::Simplified;
 
         for (zone_name, publishes) in &scene.zone_registry.active_publishes {
             if publishes.is_empty() {
@@ -367,92 +366,73 @@ impl super::Compositor {
                 Some(z) => z,
                 None => continue,
             };
+            let policy = &zone_def.rendering_policy;
+            // Backdrop drawn by the SDF pass (else by the flat pass, square).
+            let sdf_radius = match policy.backdrop_radius {
+                Some(r) if r > 0.0 && !degraded => Some(r),
+                _ => None,
+            };
+            let notification_cards = !is_alert_banner_zone(zone_name);
+            // A flat-backdrop zone only needs this pass for notification borders.
+            if sdf_radius.is_none()
+                && !(notification_cards
+                    && publishes
+                        .iter()
+                        .any(|p| matches!(p.content, ZoneContent::Notification(_))))
+            {
+                continue;
+            }
 
-            // Only collect zones with a backdrop_radius — others use the flat rect path.
-            let radius = match zone_def.rendering_policy.backdrop_radius {
-                Some(r) if r > 0.0 => r,
-                _ => continue,
+            let (x, y, w, h) = Self::resolve_zone_geometry(&zone_def.geometry_policy, sw, sh);
+            let out = match zone_def.layer_attachment {
+                LayerAttachment::Background => &mut result.background,
+                LayerAttachment::Content => &mut result.content,
+                LayerAttachment::Chrome => &mut result.chrome,
+            };
+            // Same rule as render_zone_content: degraded frames snap animations.
+            let anim_opacity = if degraded {
+                1.0
+            } else {
+                self.zone_animation_states
+                    .get(zone_name)
+                    .map(|s| s.current_opacity())
+                    .unwrap_or(1.0)
             };
 
-            let policy = &zone_def.rendering_policy;
-            let (x, y, w, h) = Self::resolve_zone_geometry(&zone_def.geometry_policy, sw, sh);
-            // Clamp radius against the zone's full dimensions as a first-pass
-            // upper bound. For Stack zones, each slot height (effective_slot_h)
-            // may be smaller than h, so per-slot clamping is applied below.
-            let max_r_zone = (w * 0.5).min(h * 0.5).max(0.0);
-            let radius = radius.min(max_r_zone);
-
-            let anim_opacity = self
-                .zone_animation_states
-                .get(zone_name)
-                .map(|s| s.current_opacity())
-                .unwrap_or(1.0);
-
-            // Resolve backdrop color using the same logic as render_zone_content.
             match zone_def.contention_policy {
                 ContentionPolicy::Stack { .. } => {
                     // Slot geometry is computed once by zone_slot_layout and shared
                     // with collect_text_items / render_zone_content (hud-qlerb).
                     let layout = self.zone_slot_layout(zone_name, publishes, policy, h);
-
                     for (pub_idx, slot_y, effective_slot_h) in layout.iter_visible(y) {
                         let record = &publishes[pub_idx];
-
-                        let pub_opacity = self.pub_opacity(zone_name, record);
-                        let combined_opacity = (anim_opacity * pub_opacity).clamp(0.0, 1.0);
-
-                        let is_notification_content =
-                            matches!(&record.content, ZoneContent::Notification(_));
-                        let backdrop_rgba: Option<Rgba> = match &record.content {
-                            ZoneContent::SolidColor(rgba) => Some(*rgba),
-                            ZoneContent::StaticImage(_) => Some(STATIC_IMAGE_PLACEHOLDER_COLOR),
-                            ZoneContent::Notification(n) if is_alert_banner_zone(zone_name) => {
-                                if policy.backdrop.is_some() {
-                                    Some(urgency_to_severity_color(n.urgency, &self.token_map))
-                                } else {
-                                    None
-                                }
-                            }
-                            ZoneContent::Notification(n) => {
-                                if policy.backdrop.is_some() {
-                                    let mut color =
-                                        urgency_to_notification_color(n.urgency, &self.token_map);
-                                    color.a = NOTIFICATION_BACKDROP_OPACITY;
-                                    Some(color)
-                                } else {
-                                    None
-                                }
-                            }
-                            _ => policy.backdrop,
-                        };
-
-                        if let Some(mut rgba) = backdrop_rgba {
-                            if !is_notification_content || is_alert_banner_zone(zone_name) {
-                                if let Some(opacity) = policy.backdrop_opacity {
-                                    rgba.a = opacity.clamp(0.0, 1.0);
-                                }
-                            }
-                            rgba.a *= combined_opacity;
-                            // Re-clamp radius per slot: effective_slot_h may be
-                            // smaller than the zone height (e.g., last slot in a
-                            // stack), so the radius must not exceed half the slot.
-                            let slot_radius =
-                                radius.min((w * 0.5).min(effective_slot_h * 0.5).max(0.0));
-                            let cmd = RoundedRectDrawCmd {
-                                x,
-                                y: slot_y,
-                                width: w,
-                                height: effective_slot_h,
-                                radius: slot_radius,
-                                color: self.gpu_color(rgba),
-                                clip: None,
-                            };
-                            // Partition by layer
-                            match zone_def.layer_attachment {
-                                LayerAttachment::Background => result.background.push(cmd),
-                                LayerAttachment::Content => result.content.push(cmd),
-                                LayerAttachment::Chrome => result.chrome.push(cmd),
-                            }
+                        let opacity =
+                            (anim_opacity * self.pub_opacity(zone_name, record)).clamp(0.0, 1.0);
+                        let slot = Rect::new(x, slot_y, w, effective_slot_h);
+                        let pushed = self.push_zone_backdrop_cmd(
+                            out,
+                            zone_name,
+                            policy,
+                            &record.content,
+                            slot,
+                            sdf_radius,
+                            opacity,
+                        );
+                        // Dismiss control outline, as in render_zone_content.
+                        if pushed
+                            && notification_cards
+                            && matches!(record.content, ZoneContent::Notification(_))
+                        {
+                            let mut color =
+                                resolve_notification_control_color(policy, &self.token_map);
+                            color.a *= opacity;
+                            let b = notification_dismiss_bounds(x, slot_y, w, effective_slot_h);
+                            out.push(self.border_only_cmd(
+                                b,
+                                0.0,
+                                NOTIFICATION_BORDER_WIDTH_PX,
+                                color,
+                            ));
                         }
                     }
                 }
@@ -460,59 +440,121 @@ impl super::Compositor {
                 | ContentionPolicy::LatestWins
                 | ContentionPolicy::Replace => {
                     let latest = &publishes[publishes.len() - 1];
-                    let is_notification_content =
-                        matches!(&latest.content, ZoneContent::Notification(_));
-                    let backdrop_rgba: Option<Rgba> = match &latest.content {
-                        ZoneContent::SolidColor(rgba) => Some(*rgba),
-                        ZoneContent::StaticImage(_) => Some(STATIC_IMAGE_PLACEHOLDER_COLOR),
-                        ZoneContent::Notification(n) if is_alert_banner_zone(zone_name) => {
-                            if policy.backdrop.is_some() {
-                                Some(urgency_to_severity_color(n.urgency, &self.token_map))
-                            } else {
-                                None
-                            }
-                        }
-                        ZoneContent::Notification(n) => {
-                            if policy.backdrop.is_some() {
-                                let mut color =
-                                    urgency_to_notification_color(n.urgency, &self.token_map);
-                                color.a = NOTIFICATION_BACKDROP_OPACITY;
-                                Some(color)
-                            } else {
-                                None
-                            }
-                        }
-                        _ => policy.backdrop,
-                    };
-
-                    if let Some(mut rgba) = backdrop_rgba {
-                        if !is_notification_content || is_alert_banner_zone(zone_name) {
-                            if let Some(opacity) = policy.backdrop_opacity {
-                                rgba.a = opacity.clamp(0.0, 1.0);
-                            }
-                        }
-                        rgba.a *= anim_opacity.clamp(0.0, 1.0);
-                        let cmd = RoundedRectDrawCmd {
-                            x,
-                            y,
-                            width: w,
-                            height: h,
-                            radius,
-                            color: self.gpu_color(rgba),
-                            clip: None,
-                        };
-                        // Partition by layer
-                        match zone_def.layer_attachment {
-                            LayerAttachment::Background => result.background.push(cmd),
-                            LayerAttachment::Content => result.content.push(cmd),
-                            LayerAttachment::Chrome => result.chrome.push(cmd),
-                        }
-                    }
+                    self.push_zone_backdrop_cmd(
+                        out,
+                        zone_name,
+                        policy,
+                        &latest.content,
+                        Rect::new(x, y, w, h),
+                        sdf_radius,
+                        anim_opacity.clamp(0.0, 1.0),
+                    );
                 }
             }
         }
 
         result
+    }
+
+    /// Push the SDF command for one zone backdrop (a Stack slot or the whole
+    /// zone): the rounded backdrop when `sdf_radius` is set, else just the
+    /// notification-card border over the flat backdrop. Returns whether the
+    /// publication has a backdrop at all (the dismiss outline follows it).
+    #[allow(clippy::too_many_arguments)]
+    fn push_zone_backdrop_cmd(
+        &self,
+        out: &mut Vec<RoundedRectDrawCmd>,
+        zone_name: &str,
+        policy: &RenderingPolicy,
+        content: &ZoneContent,
+        slot: Rect,
+        sdf_radius: Option<f32>,
+        opacity: f32,
+    ) -> bool {
+        let alert_banner = is_alert_banner_zone(zone_name);
+        let is_card = matches!(content, ZoneContent::Notification(_)) && !alert_banner;
+        let backdrop_rgba: Option<Rgba> = match content {
+            ZoneContent::SolidColor(rgba) => Some(*rgba),
+            ZoneContent::StaticImage(_) => Some(STATIC_IMAGE_PLACEHOLDER_COLOR),
+            ZoneContent::Notification(n) if alert_banner => policy
+                .backdrop
+                .map(|_| urgency_to_severity_color(n.urgency, &self.token_map)),
+            ZoneContent::Notification(n) => policy.backdrop.map(|_| {
+                let mut color = urgency_to_notification_color(n.urgency, &self.token_map);
+                color.a = NOTIFICATION_BACKDROP_OPACITY;
+                color
+            }),
+            _ => policy.backdrop,
+        };
+        let Some(mut rgba) = backdrop_rgba else {
+            return false;
+        };
+        // Clamp the radius per slot: a slot may be shorter than the zone.
+        let radius = sdf_radius
+            .map(|r| r.min((slot.width * 0.5).min(slot.height * 0.5)).max(0.0))
+            .unwrap_or(0.0);
+        let border = is_card.then(|| {
+            let mut color = resolve_border_default_color(&self.token_map);
+            color.a *= opacity;
+            RoundedRectBorder {
+                width: NOTIFICATION_BORDER_WIDTH_PX,
+                color: self.gpu_color(color),
+            }
+        });
+        if sdf_radius.is_some() {
+            // Notification cards keep their fixed opacity; others take the policy's.
+            if !is_card {
+                if let Some(o) = policy.backdrop_opacity {
+                    rgba.a = o.clamp(0.0, 1.0);
+                }
+            }
+            rgba.a *= opacity;
+            out.push(RoundedRectDrawCmd {
+                x: slot.x,
+                y: slot.y,
+                width: slot.width,
+                height: slot.height,
+                radius,
+                color: self.gpu_color(rgba),
+                border,
+                clip: None,
+            });
+        } else if let Some(border) = border {
+            out.push(RoundedRectDrawCmd {
+                x: slot.x,
+                y: slot.y,
+                width: slot.width,
+                height: slot.height,
+                radius: 0.0,
+                color: [0.0; 4],
+                border: Some(border),
+                clip: None,
+            });
+        }
+        true
+    }
+
+    /// A transparent shape with only an inside border of `width` px.
+    pub(super) fn border_only_cmd(
+        &self,
+        bounds: Rect,
+        radius: f32,
+        width: f32,
+        color: Rgba,
+    ) -> RoundedRectDrawCmd {
+        RoundedRectDrawCmd {
+            x: bounds.x,
+            y: bounds.y,
+            width: bounds.width,
+            height: bounds.height,
+            radius,
+            color: [0.0; 4],
+            border: Some(RoundedRectBorder {
+                width,
+                color: self.gpu_color(color),
+            }),
+            clip: None,
+        }
     }
 
     pub(super) fn collect_tile_rounded_rect_cmds(
@@ -607,6 +649,7 @@ impl super::Compositor {
                             a: sc.color.a * tile_opacity,
                             ..sc.color
                         }),
+                        border: None,
                         clip: Some(RoundedRectClip {
                             x: clipped.x,
                             y: clipped.y,
@@ -649,35 +692,11 @@ impl super::Compositor {
         }
 
         // Build vertex buffer from all commands.
-        let mut vertices: Vec<RoundedRectVertex> = Vec::with_capacity(cmds.len() * 6);
-        for cmd in cmds {
-            if cmd.width <= 0.0 || cmd.height <= 0.0 {
-                continue;
-            }
-            if let Some(clip) = cmd.clip {
-                if clip.width <= 0.0 || clip.height <= 0.0 {
-                    continue;
-                }
-                vertices.extend_from_slice(&rounded_rect_vertices_with_draw_bounds(
-                    clip.x,
-                    clip.y,
-                    clip.width,
-                    clip.height,
-                    cmd.x,
-                    cmd.y,
-                    cmd.width,
-                    cmd.height,
-                    sw,
-                    sh,
-                    cmd.radius,
-                    cmd.color,
-                ));
-            } else {
-                vertices.extend_from_slice(&rounded_rect_vertices(
-                    cmd.x, cmd.y, cmd.width, cmd.height, sw, sh, cmd.radius, cmd.color,
-                ));
-            }
-        }
+        let vertices: Vec<RoundedRectVertex> = cmds
+            .iter()
+            .filter_map(|cmd| rounded_rect_cmd_vertices(cmd, sw, sh))
+            .flatten()
+            .collect();
         if vertices.is_empty() {
             return;
         }

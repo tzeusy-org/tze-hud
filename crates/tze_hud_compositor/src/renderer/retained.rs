@@ -314,6 +314,10 @@ impl Compositor {
         {
             return None;
         }
+        // An active-drag highlight needs the SDF pass this lane does not run.
+        if !self.drag_highlight_cmds(scene, &drag_handles).is_empty() {
+            return None;
+        }
         let mut drag_handle_vertices = Vec::new();
         self.append_drag_handle_vertices(
             scene,

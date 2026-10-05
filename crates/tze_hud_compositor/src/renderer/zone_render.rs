@@ -34,10 +34,8 @@ use super::draw_cmds::TexturedDrawCmd;
 use super::token_colors::{
     ICON_SIZE_PX, NOTIFICATION_BACKDROP_OPACITY, NOTIFICATION_BODY_SCALE,
     NOTIFICATION_ICON_SIZE_PX, NOTIFICATION_INTER_LINE_GAP, STATIC_IMAGE_PLACEHOLDER_COLOR,
-    emit_border_quads, is_alert_banner_zone, notification_action_button_bounds,
-    notification_dismiss_bounds, resolve_border_default_color, resolve_notification_action_tokens,
-    resolve_notification_control_color, sort_alert_banner_indices, urgency_to_notification_color,
-    urgency_to_severity_color,
+    is_alert_banner_zone, notification_action_button_bounds, resolve_notification_action_tokens,
+    sort_alert_banner_indices, urgency_to_notification_color, urgency_to_severity_color,
 };
 use crate::pipeline::RectVertex;
 use crate::pipeline::rect_vertices;
@@ -51,8 +49,8 @@ impl Compositor {
     ///   backdrop color with the urgency-derived `color.severity.*` token color.
     /// - For non-alert-banner zones with `Notification` content, overrides the
     ///   backdrop color with the urgency-derived `color.notification.urgency.*`
-    ///   token color at 0.8 opacity, and renders a 1px 4-quad border using
-    ///   `color.border.default`.
+    ///   token color at 0.8 opacity. Its `color.border.default` border is an
+    ///   SDF command from `collect_all_rounded_rect_cmds`.
     /// - Applies the zone's current animation opacity (fade-in/fade-out).
     /// - Skips the backdrop quad when `rendering_policy.backdrop` is `None`.
     ///
@@ -143,7 +141,8 @@ impl Compositor {
                         // Determine backdrop color.
                         // alert-banner: urgency → color.severity.* tokens
                         // non-alert-banner Notification: urgency → color.notification.urgency.* tokens
-                        //   with fixed 0.8 opacity and 1px 4-quad border
+                        //   with fixed 0.8 opacity; its border and dismiss outline are SDF
+                        //   commands (collect_all_rounded_rect_cmds)
                         // SolidColor: always its own color
                         // StaticImage: warm-gray placeholder quad (full GPU texture deferred)
                         // Other: policy.backdrop
@@ -224,41 +223,6 @@ impl Compositor {
                                     sh,
                                     self.gpu_color(rgba),
                                 ));
-
-                                // For non-alert-banner Notification content: emit 1px 4-quad border.
-                                if is_notification_content && !is_alert_banner_zone(zone_name) {
-                                    let mut border_color =
-                                        resolve_border_default_color(&self.token_map);
-                                    border_color.a *= combined_opacity;
-                                    emit_border_quads(
-                                        vertices,
-                                        x,
-                                        slot_y,
-                                        w,
-                                        effective_slot_h,
-                                        sw,
-                                        sh,
-                                        self.gpu_color(border_color),
-                                    );
-                                }
-                            }
-
-                            if is_notification_content && !is_alert_banner_zone(zone_name) {
-                                let dismiss_bounds =
-                                    notification_dismiss_bounds(x, slot_y, w, effective_slot_h);
-                                let mut control_color =
-                                    resolve_notification_control_color(policy, &self.token_map);
-                                control_color.a *= combined_opacity;
-                                emit_border_quads(
-                                    vertices,
-                                    dismiss_bounds.x,
-                                    dismiss_bounds.y,
-                                    dismiss_bounds.width,
-                                    dismiss_bounds.height,
-                                    sw,
-                                    sh,
-                                    self.gpu_color(control_color),
-                                );
                             }
                         }
 
@@ -416,23 +380,6 @@ impl Compositor {
                                 sh,
                                 self.gpu_color(rgba),
                             ));
-
-                            // For non-alert-banner Notification content: emit 1px 4-quad border.
-                            if is_notification_content && !is_alert_banner_zone(zone_name) {
-                                let mut border_color =
-                                    resolve_border_default_color(&self.token_map);
-                                border_color.a *= anim_opacity.clamp(0.0, 1.0);
-                                emit_border_quads(
-                                    vertices,
-                                    x,
-                                    y,
-                                    w,
-                                    h,
-                                    sw,
-                                    sh,
-                                    self.gpu_color(border_color),
-                                );
-                            }
                         }
                     }
 

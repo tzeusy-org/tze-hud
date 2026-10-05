@@ -30,6 +30,8 @@ pub struct WindowedFrameBuild {
     encode_inputs: EncodeInputs,
     /// Precomputed drag-handle chrome vertices.
     drag_handle_vertices: Vec<RectVertex>,
+    /// Active-drag highlight borders, drawn just before the drag-handle pass.
+    drag_highlight_cmds: Vec<RoundedRectDrawCmd>,
     /// Precomputed keyboard focus-ring chrome vertices.
     focus_ring_vertices: Vec<RectVertex>,
     /// Precomputed drag-handle reset context-menu chrome vertices.
@@ -589,6 +591,7 @@ impl Compositor {
         let drag_handles = self.collect_drag_handle_entries(scene, sw, sh);
         let mut drag_handle_vertices: Vec<RectVertex> = Vec::new();
         self.append_drag_handle_vertices(scene, &drag_handles, &mut drag_handle_vertices, sw, sh);
+        let drag_highlight_cmds = self.drag_highlight_cmds(scene, &drag_handles);
 
         // ── Widget texture sync: rasterize dirty SVGs BEFORE frame acquisition.
         // SVG rasterization can be slow; if a resize event arrives while we hold
@@ -635,6 +638,7 @@ impl Compositor {
             textured_cmds,
             encode_inputs,
             drag_handle_vertices,
+            drag_highlight_cmds,
             focus_ring_vertices,
             context_menu_vertices,
             safe_mode_vertices,
@@ -772,6 +776,7 @@ impl Compositor {
 
         // ── Widget pass: composite pre-synced textures above zone content ────
         self.encode_widget_pass_prepared(&mut encoder, view, &build.widget_quads, sw, sh);
+        self.encode_rounded_rect_pass(&mut encoder, view, &build.drag_highlight_cmds, sw, sh);
         self.encode_drag_handle_pass(&mut encoder, view, &build.drag_handle_vertices);
 
         // ── Keyboard focus ring (chrome layer, hud-k6yvb) ───────────────────
@@ -923,6 +928,7 @@ impl Compositor {
         let drag_handles = self.collect_drag_handle_entries(scene, sw, sh);
         let mut drag_handle_vertices: Vec<RectVertex> = Vec::new();
         self.append_drag_handle_vertices(scene, &drag_handles, &mut drag_handle_vertices, sw, sh);
+        let drag_highlight_cmds = self.drag_highlight_cmds(scene, &drag_handles);
 
         // ── Widget texture sync before frame acquisition (same as windowed path).
         self.sync_widget_textures(scene, self.degradation_level);
@@ -962,6 +968,7 @@ impl Compositor {
 
         // ── Widget pass: composite pre-synced textures above zone content ────
         self.encode_widget_pass(&mut encoder, &frame.view, &scene.widget_registry, sw, sh);
+        self.encode_rounded_rect_pass(&mut encoder, &frame.view, &drag_highlight_cmds, sw, sh);
         self.encode_drag_handle_pass(&mut encoder, &frame.view, &drag_handle_vertices);
 
         // ── Keyboard focus ring (chrome layer, hud-k6yvb) ───────────────────

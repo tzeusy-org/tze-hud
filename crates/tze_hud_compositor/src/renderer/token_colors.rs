@@ -958,6 +958,10 @@ pub(super) fn notification_dismiss_bounds(
     )
 }
 
+/// Width of the notification card border and the dismiss-control outline,
+/// drawn by the SDF pipeline (`RoundedRectBorder`).
+pub(super) const NOTIFICATION_BORDER_WIDTH_PX: f32 = 1.0;
+
 /// Height of the notification action-button row (bottom strip of the slot).
 pub(super) const NOTIFICATION_ACTION_BUTTON_H_PX: f32 = 22.0;
 
@@ -1399,144 +1403,6 @@ pub(super) fn resolve_composer_overlay_tokens(
         anchor,
         caret_width_px,
         content_inset_px,
-    }
-}
-
-/// Emit 4 thin 1px border quads positioned inside the given backdrop rectangle.
-///
-/// Produces a 1px inset border using four axis-aligned rectangles:
-///   - top:    (x, y, w, 1)
-///   - bottom: (x, y+h-1, w, 1)
-///   - left:   (x, y+1, 1, h-2)
-///   - right:  (x+w-1, y+1, 1, h-2)
-///
-/// The border is drawn inside the backdrop bounds (does not extend outside).
-/// When `h < 2` or `w < 1`, the degenerate dimension quads are skipped (size ≤ 0
-/// after the inset). Top/bottom edges require `w >= 1` to avoid degenerate quads
-/// with zero or negative width.
-///
-/// `sw`/`sh` are the screen dimensions passed through to `rect_vertices`.
-// All arguments are required primitive geometry inputs (x, y, w, h, sw, sh) plus
-// a color; grouping them into a struct would create an arbitrary named bundle
-// with no semantic benefit over the flat list already documented above.
-#[allow(clippy::too_many_arguments)]
-pub(super) fn emit_border_quads(
-    vertices: &mut Vec<crate::pipeline::RectVertex>,
-    x: f32,
-    y: f32,
-    w: f32,
-    h: f32,
-    sw: f32,
-    sh: f32,
-    border_color: [f32; 4],
-) {
-    use crate::pipeline::rect_vertices;
-    const BORDER_PX: f32 = 1.0;
-    // Top edge.
-    if h >= BORDER_PX && w >= BORDER_PX {
-        vertices.extend_from_slice(&rect_vertices(x, y, w, BORDER_PX, sw, sh, border_color));
-    }
-    // Bottom edge.
-    if h >= BORDER_PX * 2.0 && w >= BORDER_PX {
-        vertices.extend_from_slice(&rect_vertices(
-            x,
-            y + h - BORDER_PX,
-            w,
-            BORDER_PX,
-            sw,
-            sh,
-            border_color,
-        ));
-    }
-    // Left edge (inset 1px top and bottom to avoid corner overlap).
-    if h > BORDER_PX * 2.0 && w >= BORDER_PX {
-        vertices.extend_from_slice(&rect_vertices(
-            x,
-            y + BORDER_PX,
-            BORDER_PX,
-            h - BORDER_PX * 2.0,
-            sw,
-            sh,
-            border_color,
-        ));
-    }
-    // Right edge (inset 1px top and bottom to avoid corner overlap).
-    if h > BORDER_PX * 2.0 && w >= BORDER_PX * 2.0 {
-        vertices.extend_from_slice(&rect_vertices(
-            x + w - BORDER_PX,
-            y + BORDER_PX,
-            BORDER_PX,
-            h - BORDER_PX * 2.0,
-            sw,
-            sh,
-            border_color,
-        ));
-    }
-}
-
-/// Emit a 2px inset highlight border around the given rectangle.
-///
-/// Used for v1-compatible drag visual feedback: a 2px border on the element
-/// being dragged. Two quads are emitted per edge (stacked 1px each) to achieve
-/// the 2px width.
-///
-/// Per the drag-to-reposition spec: MUST NOT require drop shadows, scale
-/// pulses, or animated transitions.
-// All arguments are required primitive geometry inputs (x, y, w, h, sw, sh) plus
-// a color; same rationale as emit_border_quads — a struct would be a name-only
-// wrapper with no cohesion beyond this single call site.
-#[allow(clippy::too_many_arguments)]
-pub(super) fn emit_drag_highlight_border(
-    vertices: &mut Vec<crate::pipeline::RectVertex>,
-    x: f32,
-    y: f32,
-    w: f32,
-    h: f32,
-    sw: f32,
-    sh: f32,
-    color: [f32; 4],
-) {
-    use crate::pipeline::rect_vertices;
-    const BORDER_PX: f32 = 2.0;
-    // Top edge.
-    if h >= BORDER_PX && w >= BORDER_PX {
-        vertices.extend_from_slice(&rect_vertices(x, y, w, BORDER_PX, sw, sh, color));
-    }
-    // Bottom edge.
-    if h >= BORDER_PX * 2.0 && w >= BORDER_PX {
-        vertices.extend_from_slice(&rect_vertices(
-            x,
-            y + h - BORDER_PX,
-            w,
-            BORDER_PX,
-            sw,
-            sh,
-            color,
-        ));
-    }
-    // Left edge (inset by BORDER_PX top and bottom to avoid corner overlap).
-    if h > BORDER_PX * 2.0 && w >= BORDER_PX {
-        vertices.extend_from_slice(&rect_vertices(
-            x,
-            y + BORDER_PX,
-            BORDER_PX,
-            h - BORDER_PX * 2.0,
-            sw,
-            sh,
-            color,
-        ));
-    }
-    // Right edge (inset by BORDER_PX top and bottom to avoid corner overlap).
-    if h > BORDER_PX * 2.0 && w >= BORDER_PX * 2.0 {
-        vertices.extend_from_slice(&rect_vertices(
-            x + w - BORDER_PX,
-            y + BORDER_PX,
-            BORDER_PX,
-            h - BORDER_PX * 2.0,
-            sw,
-            sh,
-            color,
-        ));
     }
 }
 
