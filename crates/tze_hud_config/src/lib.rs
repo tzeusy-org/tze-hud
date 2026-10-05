@@ -11,6 +11,7 @@
 
 pub mod agents_file;
 pub mod allow;
+pub mod config_write;
 pub mod loader;
 pub mod policy_builder;
 pub mod portal_tokens;
@@ -29,6 +30,7 @@ pub use agents_file::{
     AGENTS_FILE_NAME, AgentRecord, AgentsFile, AgentsFileError, agents_path_for,
 };
 pub use allow::{allow_to_permissions, validate_allow_entry};
+pub use config_write::{ConfigWriteError, TokenUpdate, set_design_tokens};
 pub use loader::TzeHudConfig;
 pub use policy_builder::{
     apply_token_defaults_for_zone, build_all_effective_policies, build_effective_policy,
