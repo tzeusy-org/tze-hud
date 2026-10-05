@@ -4924,21 +4924,26 @@ fn viewer_dismiss_tile_revokes_lease_in_any_live_state() {
     }
 }
 
-/// Hard cap: one session cannot hold more than 64 live leases; releasing one
-/// frees a slot. (The per-session and runtime-wide caps are both 64, so the
-/// runtime-wide check is the one that fires for a single session.)
+/// Hard cap: the runtime-wide cap rejects the 65th live lease even from one
+/// session; releasing one frees a slot.
 #[test]
 fn test_lease_hard_cap_rejects_65th_live_lease() {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let session = SceneId::new();
-    let leases: Vec<SceneId> = (0..SceneGraph::MAX_LEASES_PER_SESSION)
+    let leases: Vec<SceneId> = (0..SceneGraph::MAX_RUNTIME_LEASES)
         .map(|_| scene.grant_lease_for_session("agent", session, 60_000))
         .collect();
 
     let err = scene
         .try_grant_lease_for_session("agent", session, 60_000)
         .expect_err("65th live lease must be rejected");
-    assert!(matches!(err, LeaseError::CapsExceeded(_)), "{err:?}");
+    assert!(
+        matches!(
+            err,
+            LeaseError::CapsExceeded(CapsError::MaxRuntimeLeasesExceeded { .. })
+        ),
+        "{err:?}"
+    );
 
     scene.revoke_lease(leases[0]).expect("revoke");
     scene
