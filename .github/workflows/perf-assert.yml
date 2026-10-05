@@ -58,7 +58,7 @@ jobs:
   # TZE_HUD_PERF_ASSERT=1 so timing assertions are active. Budgets come from
   # tze_hud_scene::perf_budget::test_budget (TZE_HUD_TEST_BUDGET_SLACK).
   # Covers:
-  #   - crates/tze_hud_compositor/src/markdown.rs (adversarial_*_flood_completes_fast)
+  #   - crates/tze_hud_compositor/src/markdown.rs (adversarial_floods_stay_within_budget)
 
   perf-assert-unit:
     name: Perf assert (workspace unit tests)
