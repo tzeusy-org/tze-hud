@@ -113,6 +113,10 @@ windows = { version = "0.58", features = [
     # RegCreateKeyExW needs Win32_Security for its SECURITY_ATTRIBUTES arg.
     "Win32_System_Registry",
     "Win32_Security",
+    # Monitor EDID identity (windowed::monitor_identity): DisplayConfig + SetupAPI.
+    "Win32_Devices_Display",
+    "Win32_Devices_DeviceAndDriverInstallation",
+    "Win32_Graphics_Gdi",
 ] }
 
 # ── Workspace-wide lint policy ────────────────────────────────────────────────
