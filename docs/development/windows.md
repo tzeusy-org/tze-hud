@@ -258,8 +258,8 @@ failed on the reference machine (WSL 3.0.1.0, observed 2026-10-04):
 - Loopback to Windows listeners started after WSL booted hangs. Windows
   shows `SYN_RECEIVED`, while WSL stays in `SYN-SENT`. This matches
   [microsoft/WSL#40343](https://github.com/microsoft/WSL/issues/40343).
-  Listeners that existed before WSL booted, such as VS Code's forwarded
-  ports, kept working.
+  VS Code's forwarded ports kept working; the cause of the difference is
+  unknown.
 - Mirrored mode also copies the Windows Tailscale addresses onto WSL's `eth0`.
   Linux then treats them as local, so the tailnet route to the HUD is
   unreachable too.

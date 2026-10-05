@@ -54,6 +54,10 @@ fix()  { printf '  fixed   %s\n' "$*"; }
 miss() { printf '  MISSING %s\n' "$*"; missing=1; }
 warn() { printf '  warn    %s\n' "$*"; }
 section() { printf '\n%s\n' "$*"; }
+install_cargo_tool() {
+    if command -v cargo-binstall >/dev/null; then cargo binstall -y --locked "$1"
+    else cargo install --locked "$1"; fi
+}
 
 # ── apt packages ────────────────────────────────────────────────────────────
 section "apt packages"
@@ -66,12 +70,16 @@ for pkg in "${APT_PACKAGES[@]}"; do
     fi
 done
 if ((${#apt_missing[@]})); then
-    cmd="sudo apt-get install -y --no-install-recommends ${apt_missing[*]}"
+    install=(sudo apt-get install -y --no-install-recommends "${apt_missing[@]}")
     if ((!CHECK_ONLY)) && sudo -n true 2>/dev/null; then
-        sudo apt-get update -q && $cmd && fix "${apt_missing[*]}"
+        if sudo apt-get update -q && "${install[@]}"; then
+            fix "${apt_missing[*]}"
+        else
+            miss "${apt_missing[*]} (apt-get failed; see output above)"
+        fi
     else
         miss "${apt_missing[*]}"
-        echo "          run: $cmd"
+        echo "          run: ${install[*]}"
     fi
 fi
 
@@ -79,7 +87,7 @@ fi
 section "commands"
 for entry in "${REQUIRED_COMMANDS[@]}"; do
     c=${entry%%:*}
-    if command -v "$c" >/dev/null; then ok "$c"; else miss "$c ($([[ $entry == *:* ]] && echo "${entry#*:}"))"; fi
+    if command -v "$c" >/dev/null; then ok "$c"; else miss "$c (${entry#*:})"; fi
 done
 if command -v protoc >/dev/null; then
     v=$(protoc --version | awk '{print $2}')
@@ -91,24 +99,27 @@ section "rust"
 if ! command -v rustup >/dev/null; then
     miss "rustup (https://rustup.rs)"
 else
-    # `rustup show active-toolchain` installs the pinned toolchain if needed.
+    # With no arguments, `rustup toolchain install` installs the toolchain
+    # pinned by rust-toolchain.toml.
     if ((CHECK_ONLY)); then
         ok "rustup ($(rustup --version 2>/dev/null | awk '{print $2}'))"
-    else
-        rustup toolchain install >/dev/null 2>&1 || true
+    elif rustup toolchain install --no-self-update >/dev/null; then
         ok "toolchain $(rustup show active-toolchain | awk '{print $1}')"
+    else
+        miss "pinned toolchain (rustup toolchain install failed)"
     fi
     installed=$(rustup target list --installed)
     for t in "${RUST_TARGETS[@]}"; do
         if grep -qx "$t" <<<"$installed"; then ok "target $t"
         elif ((CHECK_ONLY)); then miss "target $t"
-        else rustup target add "$t" >/dev/null && fix "target $t"; fi
+        elif rustup target add "$t" >/dev/null; then fix "target $t"
+        else miss "target $t (rustup target add failed)"; fi
     done
     for tool in "${CARGO_TOOLS[@]}"; do
         if command -v "$tool" >/dev/null; then ok "$tool"
         elif ((CHECK_ONLY)); then warn "$tool (optional; its just gate skips)"
-        elif command -v cargo-binstall >/dev/null; then cargo binstall -y --locked "$tool" && fix "$tool"
-        else cargo install --locked "$tool" && fix "$tool"; fi
+        elif install_cargo_tool "$tool"; then fix "$tool"
+        else warn "$tool install failed (optional; its just gate skips)"; fi
     done
 fi
 
@@ -122,9 +133,12 @@ if command -v uv >/dev/null; then
             miss "$VENV is absent or out of date with $PY_REQUIREMENTS"
         fi
     else
-        [[ -x $VENV/bin/python3 ]] || uv venv -q "$VENV"
-        uv pip install -q --python "$VENV/bin/python3" -r "$PY_REQUIREMENTS"
-        ok "$PY_REQUIREMENTS installed into $VENV"
+        if { [[ -x $VENV/bin/python3 ]] || uv venv -q "$VENV"; } \
+            && uv pip install -q --python "$VENV/bin/python3" -r "$PY_REQUIREMENTS"; then
+            ok "$PY_REQUIREMENTS installed into $VENV"
+        else
+            miss "$VENV install failed (see uv output above)"
+        fi
     fi
 fi
 
@@ -155,7 +169,9 @@ if grep -qi microsoft /proc/sys/kernel/osrelease 2>/dev/null; then
     fi
     mem_gb=$(awk '/MemTotal/ {printf "%d", $2/1048576}' /proc/meminfo)
     ((mem_gb >= 12)) || warn "${mem_gb} GB RAM: release links may OOM; use -j 8 or raise .wslconfig memory="
-    [[ $PWD == /mnt/* ]] && warn "checkout is on /mnt; cargo and git run far slower than on ~/"
+    if [[ $PWD == /mnt/* ]]; then
+        warn "checkout is on /mnt; cargo and git run far slower than on ~/"
+    fi
 fi
 
 echo
