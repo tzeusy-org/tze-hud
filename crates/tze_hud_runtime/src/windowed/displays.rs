@@ -319,6 +319,22 @@ impl super::WinitApp {
                 }
             }
         }
+        // Resizes delivered while a window was being created were not routed
+        // to its surface; catch the surface up to the window.
+        for display in &self.state.secondaries {
+            let size = display.window.inner_size();
+            let current = tze_hud_compositor::CompositorSurface::size(display.surface.as_ref());
+            if size.width > 0 && size.height > 0 && (size.width, size.height) != current {
+                display
+                    .surface
+                    .pending_resize_height
+                    .store(size.height, Ordering::Release);
+                display
+                    .surface
+                    .pending_resize_width
+                    .store(size.width, Ordering::Release);
+            }
+        }
         self.publish_displays(&primary);
     }
 
@@ -453,11 +469,16 @@ impl super::WinitApp {
                 tracing::trace!(error = %e, capture = primary_capture, "overlay: set_cursor_hittest failed");
             }
         }
-        for (i, display) in self.state.secondaries.iter_mut().enumerate() {
+        for (i, overlay) in self.state.secondaries.iter_mut().enumerate() {
             let want = capture && target == Some(i);
-            if want != display.capturing {
-                display.capturing = want;
-                if let Err(e) = display.window.set_cursor_hittest(want) {
+            if want != overlay.capturing {
+                overlay.capturing = want;
+                tracing::debug!(
+                    name = overlay.spec.name.as_str(),
+                    capture = want,
+                    "overlay: secondary capture changed"
+                );
+                if let Err(e) = overlay.window.set_cursor_hittest(want) {
                     tracing::trace!(error = %e, capture = want, "overlay: set_cursor_hittest failed");
                 }
             }

@@ -2294,6 +2294,14 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                     .wake
                     .notify_compositor(crate::idle_efficiency::RuntimeWakeupSource::Resize);
             }
+            // A secondary still being created (not yet registered) resizes
+            // too; its surface is sized when it is registered.
+            WindowEvent::Resized(_)
+                if self
+                    .state
+                    .window
+                    .as_ref()
+                    .is_some_and(|w| w.id() != window_id) => {}
             WindowEvent::Resized(physical_size) => {
                 if let Some(source) = wake_source {
                     self.state.wake.mark_main_work_pending(source);
@@ -2372,6 +2380,14 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
 
             // ── Pointer: button press/release ──────────────────────────────
             WindowEvent::MouseInput { state, button, .. } => {
+                tracing::debug!(
+                    ?state,
+                    ?button,
+                    secondary = ?secondary,
+                    x = self.state.cursor_x,
+                    y = self.state.cursor_y,
+                    "main thread: mouse input"
+                );
                 if let Some(source) = wake_source {
                     self.state.wake.mark_main_work_pending(source);
                 }
