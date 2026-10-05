@@ -59,10 +59,12 @@ Surfaces on that lifecycle, in priority order:
 - **No hardcoded styling.** Visuals come from flat design tokens, resolved in
   layers: canonical defaults, then the selected theme, then `[design_tokens]`
   overrides. Themes (token values only, Tonal Glass by default) and fonts are
-  the owner's choice and switch without a restart. Models never choose them.
+  the owner's choice, set in the config or an in-HUD settings card, and switch
+  without a restart. Models never choose them.
 - **Every screen, natively.** The HUD puts one overlay on each monitor, at
-  that monitor's resolution and scale. The primary monitor keeps the default
-  layout. Agents need no notion of displays unless they opt into one.
+  that monitor's resolution and scale, times one owner-set UI scale. The
+  primary monitor keeps the default layout. Agents need no notion of displays
+  unless they opt into one.
 
 ## Trust model
 
