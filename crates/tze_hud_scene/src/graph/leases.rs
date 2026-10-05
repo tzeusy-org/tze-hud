@@ -17,16 +17,6 @@ impl SceneGraph {
     /// Maximum leases across all agents in the entire runtime (spec §Lease Caps).
     pub const MAX_RUNTIME_LEASES: usize = 64;
 
-    /// Default maximum leases per session (spec §Lease Caps: "max 8 default").
-    ///
-    /// Exposed for session-layer policy use; the scene graph enforces the hard cap
-    /// (`MAX_LEASES_PER_SESSION`) when `try_grant_lease_for_session` is called.
-    /// Session managers SHOULD use this constant for soft-limit enforcement.
-    pub const DEFAULT_MAX_LEASES_PER_SESSION: usize = 8;
-
-    /// Hard maximum leases per session (spec §Lease Caps: "64 hard max").
-    pub const MAX_LEASES_PER_SESSION: usize = 64;
-
     /// Maximum tiles per lease (spec §Lease Caps).
     pub const MAX_TILES_PER_LEASE: u32 = 64;
 
@@ -57,7 +47,6 @@ impl SceneGraph {
     ///
     /// Enforces the lease caps:
     /// - Max 64 leases per runtime across all agents (`MAX_RUNTIME_LEASES`).
-    /// - Max 64 leases per session hard cap (`MAX_LEASES_PER_SESSION`).
     pub fn try_grant_lease_for_session(
         &mut self,
         namespace: &str,
@@ -96,23 +85,6 @@ impl SceneGraph {
                     limit: Self::MAX_RUNTIME_LEASES,
                 },
             ));
-        }
-
-        // Check per-session cap (if session_id is non-nil)
-        if !session_id.is_nil() {
-            let session_count = self
-                .leases
-                .values()
-                .filter(|l| l.session_id == session_id && !l.state.is_terminal())
-                .count();
-            if session_count >= Self::MAX_LEASES_PER_SESSION {
-                return Err(LeaseError::CapsExceeded(
-                    CapsError::MaxSessionLeasesExceeded {
-                        current: session_count,
-                        limit: Self::MAX_LEASES_PER_SESSION,
-                    },
-                ));
-            }
         }
 
         let id = SceneId::new();

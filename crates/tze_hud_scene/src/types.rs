@@ -1201,8 +1201,6 @@ impl LeaseState {
 pub enum CapsError {
     /// Runtime-wide lease limit (64) exceeded — spec §Requirement: Lease Caps.
     MaxRuntimeLeasesExceeded { current: usize, limit: usize },
-    /// Per-session lease hard limit (64) exceeded — spec §Requirement: Lease Caps.
-    MaxSessionLeasesExceeded { current: usize, limit: usize },
     /// Tile-per-lease limit (64) exceeded — spec §Requirement: Lease Caps.
     MaxTilesPerLeaseExceeded { current: u32, limit: u32 },
     /// Node-per-tile limit (64) exceeded — spec §Requirement: Lease Caps.
@@ -1214,9 +1212,6 @@ impl std::fmt::Display for CapsError {
         match self {
             CapsError::MaxRuntimeLeasesExceeded { current, limit } => {
                 write!(f, "MAX_RUNTIME_LEASES_EXCEEDED: {current} / {limit}")
-            }
-            CapsError::MaxSessionLeasesExceeded { current, limit } => {
-                write!(f, "MAX_SESSION_LEASES_EXCEEDED: {current} / {limit}")
             }
             CapsError::MaxTilesPerLeaseExceeded { current, limit } => {
                 write!(f, "MAX_TILES_PER_LEASE_EXCEEDED: {current} / {limit}")
