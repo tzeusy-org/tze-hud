@@ -1511,6 +1511,10 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                 // thread's `display_targets` whenever its generation moves.
                 let mut secondaries: Vec<displays::SecondaryTarget> = Vec::new();
                 let mut display_targets_generation = 0u64;
+                // Surfaces already reported lost: a republished target list
+                // that still carries one (the main thread had not processed
+                // the loss yet) must not report it again.
+                let mut reported_lost: Vec<Arc<tze_hud_compositor::WindowSurface>> = Vec::new();
                 crate::diag::diag_write("compositor thread: frame loop STARTED");
 
                 tracing::info!(
@@ -1634,9 +1638,18 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                         } else {
                             display_targets_generation = targets.generation;
                             compositor.set_display_layout(targets.layout.clone());
+                            reported_lost.retain(|lost| {
+                                targets
+                                    .secondaries
+                                    .iter()
+                                    .any(|(_, surface, _)| Arc::ptr_eq(surface, lost))
+                            });
                             secondaries = targets
                                 .secondaries
                                 .iter()
+                                .filter(|(_, surface, _)| {
+                                    !reported_lost.iter().any(|lost| Arc::ptr_eq(surface, lost))
+                                })
                                 .map(|(name, surface, origin)| displays::SecondaryTarget {
                                     name: name.clone(),
                                     surface: Arc::clone(surface),
@@ -1679,8 +1692,8 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                             display_targets
                                 .lock()
                                 .unwrap_or_else(|e| e.into_inner())
-                                .lost
-                                .push(target.name.clone());
+                                .report_lost(&target.name);
+                            reported_lost.push(Arc::clone(&target.surface));
                             displays_dirty.store(true, std::sync::atomic::Ordering::Release);
                             compositor_wake.notify_main(
                                 crate::idle_efficiency::RuntimeWakeupSource::Resize,
@@ -1689,8 +1702,8 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                         !recovery.is_terminal()
                     });
                     // A secondary whose last present failed (acquire timeout,
-                    // occluded) is owed a frame even if the scene is idle.
-                    displays_need_frame |= secondaries.iter().any(|t| t.ledger.owed());
+                    // occluded, asleep) is retried on its own backoff deadline
+                    // (`displays::frame_plan`), never at frame cadence.
 
                     // ── Surface recovery check ───────────────────────────
                     // `WindowSurface::acquire_frame` queues real Lost/Outdated
@@ -1823,7 +1836,12 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                             benchmark_state.is_some(),
                             surface_repaint_pending,
                         );
-                        continue_at_cadence |= needs_render;
+                        let plan = displays::frame_plan(
+                            needs_render,
+                            secondaries.iter().map(|t| &t.ledger),
+                            Instant::now(),
+                        );
+                        continue_at_cadence |= plan.cadence;
 
                         // ── Admin screenshot (build half) ─────────────────
                         // Runs AFTER the idle gate on purpose: the build steps
@@ -1846,10 +1864,16 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                             (req, compositor.build_windowed_frame(&mut scene, w, h))
                         });
 
-                        if !needs_render {
+                        if !plan.full {
                             // Idle: scene unchanged and nothing animating. Release
                             // the lock without building vertices, encoding, or
-                            // signalling the main thread to present.
+                            // signalling the main thread to present. A secondary
+                            // whose retry came due gets a build, presented to it
+                            // alone (nothing animates, so building steps nothing).
+                            let retry_build = plan.retry_only.then(|| {
+                                let (w, h) = surface_for_compositor.size();
+                                compositor.build_windowed_frame(&mut scene, w, h)
+                            });
                             let scene_deadline_wall_us = scene
                                 .next_publication_expiry_wall_us()
                                 .into_iter()
@@ -1868,6 +1892,20 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                                 lease_expirations.as_ref(),
                                 terminal_lease_expiries,
                             );
+                            if let Some(build) = retry_build
+                                && displays::present_to_secondaries(
+                                    &mut compositor,
+                                    &build,
+                                    &mut secondaries,
+                                    compositor_wake.counters(),
+                                    &display_targets,
+                                )
+                            {
+                                let _ = frame_ready_tx.send(true);
+                                compositor_wake.notify_main(
+                                    crate::idle_efficiency::RuntimeWakeupSource::FrameReady,
+                                );
+                            }
                             let now_us = degradation_clock_start.elapsed().as_micros() as u64;
                             if let Some(event) = degradation_controller.record_quiescent_at(now_us)
                             {
@@ -1970,28 +2008,13 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                             }
                             // Secondary windows present the same build, each
                             // only when what it shows changed.
-                            let mut secondary_submitted = false;
-                            for target in &mut secondaries {
-                                let frame_target = target.frame_target();
-                                let signature = compositor.frame_signature(&build, &frame_target);
-                                if !target.ledger.needs_present(signature) {
-                                    continue;
-                                }
-                                let outcome = compositor.present_windowed_frame_to(
-                                    &build,
-                                    &frame_target,
-                                    target.surface.as_ref(),
-                                );
-                                if outcome.surface_acquired {
-                                    compositor_wake.counters().record_surface_acquisition();
-                                }
-                                if outcome.gpu_submitted {
-                                    compositor_wake.counters().record_gpu_submission();
-                                }
-                                let submitted = outcome.telemetry.stage7_gpu_submit_us > 0;
-                                target.ledger.record(signature, submitted);
-                                secondary_submitted |= submitted;
-                            }
+                            let secondary_submitted = displays::present_to_secondaries(
+                                &mut compositor,
+                                &build,
+                                &mut secondaries,
+                                compositor_wake.counters(),
+                                &display_targets,
+                            );
                             let compositor_telemetry = present_outcome.telemetry;
                             let frame_submitted = compositor_telemetry.stage7_gpu_submit_us > 0;
                             surface_repaint_pending = update_surface_repaint_pending(
@@ -2191,9 +2214,20 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                             crate::idle_efficiency::RuntimeWakeupSource::AnimationDeadline,
                         )
                     });
+                    let secondary_retry = displays::next_secondary_retry(
+                        secondaries.iter().map(|t| &t.ledger),
+                        Instant::now(),
+                    )
+                    .map(|at| {
+                        Deadline::new(
+                            at,
+                            crate::idle_efficiency::RuntimeWakeupSource::AnimationDeadline,
+                        )
+                    });
                     let next_deadline = cadence_deadline
                         .into_iter()
                         .chain(timed_deadline)
+                        .chain(secondary_retry)
                         .min_by_key(|candidate| candidate.at);
                     let observed = compositor_wake
                         .compositor()

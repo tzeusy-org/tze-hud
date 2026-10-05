@@ -150,12 +150,15 @@ allow = ["zone:*", "widget:gauge", "portal", "tiles"]
   `/admin/status` `displays` lists the overlaid monitors, primary first:
   `{name, x, y, width, height, primary, zones}` in scene pixels (the primary's
   top-left is 0,0; others may be negative) and the zones configured onto each;
-  `unplaced_zones` lists `{zone, display}` placements whose display is not
-  connected (those zones render on the primary).
+  `unplaced_zones` lists `{zone, display, reason}` placements with no overlay
+  window, rendering on the primary instead: `reason` is `not_connected`, or
+  `overlay_failed` when that monitor's overlay surface was lost and recreated
+  3 times in a row (it is retried when the monitor is reconnected).
   `/admin/screenshot` returns a PNG of the frame the compositor draws (not an
   OS capture; overlay alpha is as composited) for one display:
   `?display=<i>` indexes `displays` (default 0, the primary; 404
-  `NO_SUCH_DISPLAY` for an index that is not connected or not rendering). One render on request, no cost
+  `NO_SUCH_DISPLAY` for an index not in `displays`, or one whose overlay closed
+  since `displays` was read; indexes shift on hot-plug, so re-read status). One render on request, no cost
   while idle, never cached, one at a time (429 `BUSY`), 503 `UNAVAILABLE` after
   3 s or without a display, 422 `TOO_LARGE` past 8192 px per side, 16 Mpx, or a 32 MiB PNG. It
   is not exposed through MCP tools or gRPC.

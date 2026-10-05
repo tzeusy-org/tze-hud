@@ -131,10 +131,26 @@ pub struct DisplayStatus {
     pub zones: Vec<String>,
 }
 
-/// Overlaid displays plus configured zone placements whose display is not
-/// connected (`(zone, display)`; those zones render on the primary).
-/// `(zone, configured display)`.
-type UnplacedZone = (String, String);
+/// A configured zone placement (`[displays.<NAME>]`) that has no overlay
+/// window; the zone renders on the primary instead.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize)]
+pub struct UnplacedZone {
+    pub zone: String,
+    /// The display name the zone is configured for.
+    pub display: String,
+    pub reason: UnplacedReason,
+}
+
+/// Why a configured display has no overlay window.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UnplacedReason {
+    /// No connected monitor has that name.
+    NotConnected,
+    /// The monitor is connected, but its overlay surface kept failing and the
+    /// runtime stopped recreating it.
+    OverlayFailed,
+}
 
 static DISPLAYS: Mutex<(Vec<DisplayStatus>, Vec<UnplacedZone>)> =
     Mutex::new((Vec::new(), Vec::new()));
@@ -156,12 +172,7 @@ pub fn display_name(index: usize) -> Option<String> {
 
 fn displays_json() -> (Value, Value) {
     let guard = DISPLAYS.lock().unwrap_or_else(|e| e.into_inner());
-    let unplaced: Vec<Value> = guard
-        .1
-        .iter()
-        .map(|(zone, display)| json!({"zone": zone, "display": display}))
-        .collect();
-    (json!(guard.0), json!(unplaced))
+    (json!(guard.0), json!(guard.1))
 }
 
 /// The recorded hotkey outcome, `NotApplicable` until one is set.

@@ -15,6 +15,9 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
+use std::time::{Duration, Instant};
+
+use crate::operator::status::{UnplacedReason, UnplacedZone};
 
 use tze_hud_compositor::{DisplayLayout, DisplayRect, FrameTarget, WindowSurface};
 use tze_hud_scene::Rect;
@@ -155,34 +158,92 @@ pub(super) struct DisplayTargets {
     /// Secondary display names, surfaces and scene origins.
     pub secondaries: Vec<(String, Arc<WindowSurface>, (i32, i32))>,
     /// Secondaries whose surface the compositor gave up on (terminal loss);
-    /// the main thread closes and recreates their windows.
+    /// the main thread closes and recreates their windows. Each name is
+    /// listed at most once.
     pub lost: Vec<String>,
+    /// Secondaries that presented successfully since they were published;
+    /// the main thread forgets their recreate count.
+    pub healthy: Vec<String>,
+}
+
+impl DisplayTargets {
+    /// Report `name`'s surface as lost (once, however often it is seen).
+    pub fn report_lost(&mut self, name: &str) {
+        if !self.lost.iter().any(|n| n == name) {
+            self.lost.push(name.to_owned());
+        }
+    }
+
+    /// Report that `name` presented a frame.
+    pub fn report_healthy(&mut self, name: &str) {
+        if !self.healthy.iter().any(|n| n == name) {
+            self.healthy.push(name.to_owned());
+        }
+    }
 }
 
 pub(super) type SharedDisplayTargets = Arc<StdMutex<DisplayTargets>>;
 
+/// First retry after a failed secondary present; doubles per failure.
+const PRESENT_RETRY_MIN: Duration = Duration::from_millis(100);
+/// Ceiling for the secondary present retry backoff.
+const PRESENT_RETRY_MAX: Duration = Duration::from_secs(2);
+
 /// Whether one secondary window shows the latest frame built for it.
+///
+/// A failed present (acquire timeout, occluded or asleep monitor) leaves the
+/// window owed a frame, retried on a backoff deadline rather than at frame
+/// cadence, so a window that keeps failing costs a few attempts a second at
+/// most and never keeps the HUD rendering.
 #[derive(Debug, Default)]
 pub(super) struct PresentLedger {
     /// Signature of the last frame presented; `None` forces a present.
     presented: Option<u64>,
-    /// True after a present attempt failed (acquire timeout/occluded); the
-    /// compositor owes this window a frame until one submits.
-    owed: bool,
+    /// Set while owed: when to retry and the backoff that produced it.
+    retry: Option<(Instant, Duration)>,
+    /// A present has submitted since this ledger was created.
+    ever_presented: bool,
 }
 
 impl PresentLedger {
-    /// A frame with `signature` must be presented here.
+    /// A frame with `signature` differs from what is on screen.
     pub fn needs_present(&self, signature: u64) -> bool {
         self.presented != Some(signature)
     }
 
-    /// Record a present attempt of `signature`.
-    pub fn record(&mut self, signature: u64, submitted: bool) {
+    /// A present may be attempted at `now` (not backing off).
+    pub fn ready(&self, now: Instant) -> bool {
+        self.retry.is_none_or(|(at, _)| now >= at)
+    }
+
+    /// Owed a frame and the retry time has come.
+    pub fn retry_due(&self, now: Instant) -> bool {
+        self.retry.is_some_and(|(at, _)| now >= at)
+    }
+
+    /// When the owed frame should be retried.
+    pub fn retry_at(&self) -> Option<Instant> {
+        self.retry.map(|(at, _)| at)
+    }
+
+    /// Record a present attempt of `signature` made at `now`. Returns true
+    /// the first time a present submits.
+    pub fn record(&mut self, signature: u64, submitted: bool, now: Instant) -> bool {
         if submitted {
             self.presented = Some(signature);
+            self.retry = None;
+            return !std::mem::replace(&mut self.ever_presented, true);
         }
-        self.owed = !submitted;
+        let backoff = self
+            .retry
+            .map_or(PRESENT_RETRY_MIN, |(_, b)| (b * 2).min(PRESENT_RETRY_MAX));
+        self.retry = Some((now + backoff, backoff));
+        false
+    }
+
+    /// The window already shows the current frame: nothing is owed.
+    pub fn settle(&mut self) {
+        self.retry = None;
     }
 
     /// Forget what is on screen (reconfigured or new surface).
@@ -190,8 +251,9 @@ impl PresentLedger {
         self.presented = None;
     }
 
+    #[cfg(test)]
     pub fn owed(&self) -> bool {
-        self.owed
+        self.retry.is_some()
     }
 }
 
@@ -214,6 +276,92 @@ impl SecondaryTarget {
             primary: false,
         }
     }
+}
+
+/// What one compositor iteration renders.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct FramePlan {
+    /// Build and present the primary (and every secondary that changed).
+    pub full: bool,
+    /// Build only to retry secondaries whose backoff ran out; the primary is
+    /// neither rebuilt for hit-testing nor presented.
+    pub retry_only: bool,
+    /// Keep waking at frame cadence.
+    pub cadence: bool,
+}
+
+/// Decide the iteration's work: `scene_needs_render` is the primary's idle
+/// gate. Owed secondaries never set `cadence`; they wake on their own retry
+/// deadline ([`next_secondary_retry`]).
+pub(super) fn frame_plan<'a>(
+    scene_needs_render: bool,
+    ledgers: impl IntoIterator<Item = &'a PresentLedger>,
+    now: Instant,
+) -> FramePlan {
+    let retry_due = !scene_needs_render && ledgers.into_iter().any(|l| l.retry_due(now));
+    FramePlan {
+        full: scene_needs_render,
+        retry_only: retry_due,
+        cadence: scene_needs_render,
+    }
+}
+
+/// Floor for a retry wake that is already due but was not handled this
+/// iteration (scene lock missed, or it came due mid-iteration): soon, but
+/// never a spin.
+const PRESENT_RETRY_FLOOR: Duration = Duration::from_millis(10);
+
+/// When to wake for the earliest owed secondary retry.
+pub(super) fn next_secondary_retry<'a>(
+    ledgers: impl IntoIterator<Item = &'a PresentLedger>,
+    now: Instant,
+) -> Option<Instant> {
+    ledgers
+        .into_iter()
+        .filter_map(PresentLedger::retry_at)
+        .min()
+        .map(|at| at.max(now + PRESENT_RETRY_FLOOR))
+}
+
+/// Present `build` to each secondary that shows something else and is not
+/// backing off. Returns whether any present submitted.
+pub(super) fn present_to_secondaries(
+    compositor: &mut tze_hud_compositor::Compositor,
+    build: &tze_hud_compositor::renderer::frame::WindowedFrameBuild,
+    secondaries: &mut [SecondaryTarget],
+    counters: &crate::idle_efficiency::IdleEfficiencyCounters,
+    display_targets: &SharedDisplayTargets,
+) -> bool {
+    let mut any_submitted = false;
+    for target in secondaries {
+        let frame_target = target.frame_target();
+        let signature = compositor.frame_signature(build, &frame_target);
+        if !target.ledger.needs_present(signature) {
+            // Already on screen (content returned to what was presented).
+            target.ledger.settle();
+            continue;
+        }
+        if !target.ledger.ready(Instant::now()) {
+            continue;
+        }
+        let outcome =
+            compositor.present_windowed_frame_to(build, &frame_target, target.surface.as_ref());
+        if outcome.surface_acquired {
+            counters.record_surface_acquisition();
+        }
+        if outcome.gpu_submitted {
+            counters.record_gpu_submission();
+        }
+        let submitted = outcome.telemetry.stage7_gpu_submit_us > 0;
+        if target.ledger.record(signature, submitted, Instant::now()) {
+            display_targets
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .report_healthy(&target.name);
+        }
+        any_submitted |= submitted;
+    }
+    any_submitted
 }
 
 /// Attributes for an overlay window covering `spec` (shared by the primary
@@ -303,13 +451,25 @@ pub(super) fn window_to_scene(
 pub(super) fn unplaced_zones(
     zone_displays: &HashMap<String, String>,
     connected: &[&str],
-) -> Vec<(String, String)> {
-    let mut out: Vec<(String, String)> = zone_displays
+    failed: &[&str],
+) -> Vec<UnplacedZone> {
+    let mut out: Vec<UnplacedZone> = zone_displays
         .iter()
-        .filter(|(_, display)| {
-            !connected.contains(&tze_hud_compositor::normalize_display_name(display).as_str())
+        .filter_map(|(zone, display)| {
+            let name = tze_hud_compositor::normalize_display_name(display);
+            let reason = if failed.contains(&name.as_str()) {
+                UnplacedReason::OverlayFailed
+            } else if connected.contains(&name.as_str()) {
+                return None;
+            } else {
+                UnplacedReason::NotConnected
+            };
+            Some(UnplacedZone {
+                zone: zone.clone(),
+                display: display.clone(),
+                reason,
+            })
         })
-        .map(|(zone, display)| (zone.clone(), display.clone()))
         .collect();
     out.sort();
     out
@@ -381,26 +541,40 @@ impl super::WinitApp {
                 .request_inner_size(winit::dpi::PhysicalSize::new(primary.width, primary.height));
         }
         // Windows whose surface the compositor lost for good: close them and
-        // let the diff below recreate them, a bounded number of times.
-        let lost: Vec<String> = std::mem::take(
-            &mut self
+        // let the diff below recreate them, a bounded number of times. A
+        // window that presented since forgets its count first, so only
+        // consecutive failures disable a monitor.
+        let (lost, healthy) = {
+            let mut targets = self
                 .state
                 .display_targets
                 .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .lost,
-        );
+                .unwrap_or_else(|e| e.into_inner());
+            (
+                std::mem::take(&mut targets.lost),
+                std::mem::take(&mut targets.healthy),
+            )
+        };
+        for name in &healthy {
+            self.state.secondary_recreates.remove(name);
+        }
+        // A monitor that is gone starts over if it comes back.
+        self.state
+            .secondary_recreates
+            .retain(|name, _| desired.iter().any(|m| &m.name == name));
         let mut lost_any = false;
         for name in lost {
-            if let Some(i) = self
+            let Some(i) = self
                 .state
                 .secondaries
                 .iter()
                 .position(|s| s.spec.name == name)
-            {
-                self.state.secondaries.remove(i);
-                lost_any = true;
-            }
+            else {
+                // Already closed (unplugged, or reported twice).
+                continue;
+            };
+            self.state.secondaries.remove(i);
+            lost_any = true;
             let attempts = self
                 .state
                 .secondary_recreates
@@ -408,19 +582,14 @@ impl super::WinitApp {
                 .or_default();
             *attempts += 1;
             if *attempts > MAX_SECONDARY_RECREATES {
-                tracing::error!(display = %name, "secondary overlay surface keeps failing; leaving that monitor without an overlay");
+                tracing::error!(overlay = %name, attempts = *attempts - 1, "secondary overlay surface keeps failing; leaving that monitor without an overlay");
             } else {
-                tracing::warn!(display = %name, attempt = *attempts, "secondary overlay surface lost; recreating its window");
+                tracing::warn!(overlay = %name, attempt = *attempts, "secondary overlay surface lost; recreating its window");
             }
         }
         let desired: Vec<MonitorSpec> = desired
             .into_iter()
-            .filter(|m| {
-                self.state
-                    .secondary_recreates
-                    .get(&m.name)
-                    .is_none_or(|n| *n <= MAX_SECONDARY_RECREATES)
-            })
+            .filter(|m| !self.overlay_disabled(&m.name))
             .collect();
         // A moved primary origin shifts every secondary's scene origin.
         let origin_moved = previous.is_some_and(|p| (p.x, p.y) != (primary.x, primary.y));
@@ -477,6 +646,14 @@ impl super::WinitApp {
             }
         }
         self.publish_displays(&primary);
+    }
+
+    /// The overlay on `name` was recreated too often and is no longer tried.
+    fn overlay_disabled(&self, name: &str) -> bool {
+        self.state
+            .secondary_recreates
+            .get(name)
+            .is_some_and(|n| *n > MAX_SECONDARY_RECREATES)
     }
 
     fn create_secondary(
@@ -552,14 +729,28 @@ impl super::WinitApp {
         }));
         let mut connected: Vec<&str> = vec![primary.name.as_str()];
         connected.extend(specs.iter().map(|m| m.name.as_str()));
-        let unplaced = unplaced_zones(&self.state.zone_displays, &connected);
-        for (zone, configured) in &unplaced {
-            tracing::warn!(
-                %zone,
-                %configured,
-                connected = ?connected,
-                "zone placed on a display that is not connected; it renders on the primary"
-            );
+        let failed: Vec<&str> = self
+            .state
+            .secondary_recreates
+            .keys()
+            .map(String::as_str)
+            .filter(|name| self.overlay_disabled(name))
+            .collect();
+        let unplaced = unplaced_zones(&self.state.zone_displays, &connected, &failed);
+        for u in &unplaced {
+            match u.reason {
+                UnplacedReason::NotConnected => tracing::warn!(
+                    zone = %u.zone,
+                    configured = %u.display,
+                    connected = ?connected,
+                    "zone placed on a display that is not connected; it renders on the primary"
+                ),
+                UnplacedReason::OverlayFailed => tracing::warn!(
+                    zone = %u.zone,
+                    configured = %u.display,
+                    "zone placed on a display whose overlay kept failing; it renders on the primary"
+                ),
+            }
         }
         crate::operator::status::set_displays(status, unplaced);
         {
@@ -891,34 +1082,162 @@ mod tests {
 
     #[test]
     fn failed_present_stays_owed_until_one_submits() {
+        let t0 = Instant::now();
         let mut ledger = PresentLedger::default();
         assert!(ledger.needs_present(7), "a new window always presents");
-        ledger.record(7, false);
+        assert!(!ledger.record(7, false, t0));
         assert!(ledger.owed(), "an occluded/timed-out acquire owes a frame");
         assert!(ledger.needs_present(7), "the same frame is retried");
-        ledger.record(7, true);
+        assert!(!ledger.ready(t0), "but not before the backoff");
+        assert!(ledger.ready(t0 + PRESENT_RETRY_MIN));
+        assert!(
+            ledger.record(7, true, t0 + PRESENT_RETRY_MIN),
+            "the first successful present is reported"
+        );
         assert!(!ledger.owed());
         assert!(
             !ledger.needs_present(7),
             "unchanged content does not re-present"
         );
         assert!(ledger.needs_present(8));
+        assert!(
+            !ledger.record(8, true, t0),
+            "only the first success is reported"
+        );
         ledger.invalidate();
         assert!(
-            ledger.needs_present(7),
+            ledger.needs_present(8),
             "a reconfigured surface presents again"
         );
     }
 
     #[test]
-    fn zones_on_disconnected_displays_are_reported_unplaced() {
+    fn present_retry_backs_off_to_a_ceiling_and_resets_on_success() {
+        let t0 = Instant::now();
+        let mut ledger = PresentLedger::default();
+        let mut now = t0;
+        let mut gaps = Vec::new();
+        for _ in 0..8 {
+            ledger.record(1, false, now);
+            let at = ledger.retry_at().expect("owed after a failure");
+            gaps.push(at - now);
+            now = at;
+        }
+        let ms: Vec<u128> = gaps.iter().map(Duration::as_millis).collect();
+        assert_eq!(ms, [100, 200, 400, 800, 1600, 2000, 2000, 2000]);
+        ledger.record(1, true, now);
+        assert_eq!(ledger.retry_at(), None);
+        ledger.record(2, false, now);
+        assert_eq!(
+            ledger.retry_at(),
+            Some(now + PRESENT_RETRY_MIN),
+            "success resets the backoff"
+        );
+    }
+
+    /// N1: a secondary whose present always fails must not drive the HUD at
+    /// frame cadence. Simulate the compositor loop for 10 s of an idle scene:
+    /// it wakes only on the retry deadline, never at cadence, and the
+    /// primary is never rebuilt.
+    #[test]
+    fn permanently_failing_secondary_does_not_schedule_cadence_frames() {
+        let t0 = Instant::now();
+        let mut ledger = PresentLedger::default();
+        // The layout change that opened the window presented once and failed.
+        ledger.record(1, false, t0);
+        let mut now = t0;
+        let mut attempts = 0;
+        while now < t0 + Duration::from_secs(10) {
+            let plan = frame_plan(false, [&ledger], now);
+            assert!(!plan.cadence, "an owed secondary never sets frame cadence");
+            assert!(
+                !plan.full,
+                "the primary is not rebuilt for a secondary retry"
+            );
+            if plan.retry_only {
+                attempts += 1;
+                ledger.record(1, false, now);
+            }
+            now = next_secondary_retry([&ledger], now).expect("the retry stays scheduled");
+        }
+        // Retries at 0.1, 0.3, 0.7, 1.5, 3.1, 5.1, 7.1 and 9.1 s: 8 attempts
+        // in 10 s, where frame cadence would have been 600.
+        assert_eq!(attempts, 8);
+    }
+
+    #[test]
+    fn scene_work_keeps_cadence_and_idle_without_owed_secondaries_sleeps() {
+        let now = Instant::now();
+        let healthy = PresentLedger::default();
+        assert_eq!(
+            frame_plan(true, [&healthy], now),
+            FramePlan {
+                full: true,
+                retry_only: false,
+                cadence: true
+            }
+        );
+        assert_eq!(
+            frame_plan(false, [&healthy], now),
+            FramePlan {
+                full: false,
+                retry_only: false,
+                cadence: false
+            }
+        );
+        assert_eq!(next_secondary_retry([&healthy], now), None);
+    }
+
+    #[test]
+    fn an_overdue_retry_still_wakes_but_never_spins() {
+        let t0 = Instant::now();
+        let mut ledger = PresentLedger::default();
+        ledger.record(1, false, t0);
+        let late = t0 + Duration::from_secs(1);
+        assert_eq!(
+            next_secondary_retry([&ledger], late),
+            Some(late + PRESENT_RETRY_FLOOR)
+        );
+    }
+
+    #[test]
+    fn a_lost_display_is_reported_once() {
+        let mut targets = DisplayTargets::default();
+        targets.report_lost("DISPLAY6");
+        targets.report_lost("DISPLAY6");
+        targets.report_lost("DISPLAY8");
+        assert_eq!(targets.lost, ["DISPLAY6", "DISPLAY8"]);
+        targets.report_healthy("DISPLAY6");
+        targets.report_healthy("DISPLAY6");
+        assert_eq!(targets.healthy, ["DISPLAY6"]);
+    }
+
+    #[test]
+    fn zones_on_disconnected_or_failed_displays_are_reported_unplaced() {
         let zones = HashMap::from([
             ("subtitle".to_string(), r"\\.\display9".to_string()),
             ("pip".to_string(), "DISPLAY6".to_string()),
+            ("ticker".to_string(), "DISPLAY7".to_string()),
         ]);
+        let unplaced = |zone: &str, display: &str, reason| UnplacedZone {
+            zone: zone.into(),
+            display: display.into(),
+            reason,
+        };
         assert_eq!(
-            unplaced_zones(&zones, &["DISPLAY7", "DISPLAY6"]),
-            vec![("subtitle".to_string(), r"\\.\display9".to_string())]
+            unplaced_zones(&zones, &["DISPLAY7", "DISPLAY6"], &[]),
+            vec![unplaced(
+                "subtitle",
+                r"\\.\display9",
+                UnplacedReason::NotConnected
+            )]
+        );
+        assert_eq!(
+            unplaced_zones(&zones, &["DISPLAY6"], &["DISPLAY7"]),
+            vec![
+                unplaced("subtitle", r"\\.\display9", UnplacedReason::NotConnected),
+                unplaced("ticker", "DISPLAY7", UnplacedReason::OverlayFailed),
+            ]
         );
     }
 }

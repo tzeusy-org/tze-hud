@@ -175,7 +175,11 @@ Windows, `--print-attach-info` plus pairing is the more direct path.
   ```
 
   A zone placed on a monitor that is not connected falls back to the primary;
-  the log warns and `/admin/status` `unplaced_zones` lists it.
+  the log warns and `/admin/status` `unplaced_zones` lists it. So does a zone on
+  a monitor whose overlay surface failed 3 times in a row (reason
+  `overlay_failed`; unplug and replug, or restart, to retry). A monitor that is
+  asleep or occluded is retried on a backoff (100 ms doubling to 2 s), so it
+  does not keep the HUD rendering.
   Tiles, portals and widgets stay on the primary. Plugging, unplugging or
   rescaling a monitor opens or closes its window; no restart needed (changing
   `[displays]` itself does need one). Explicit `--width`/`--height` gives a

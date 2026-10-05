@@ -80,7 +80,9 @@ pub enum ScreenshotError {
     TooLarge,
     /// The GPU readback or PNG encode failed.
     Failed(String),
-    /// The requested display index is not connected.
+    /// The requested display index is not in `/admin/status`, or it is but
+    /// the compositor is not rendering that display (its overlay was closed
+    /// or lost between the status read and the capture, e.g. on hot-plug).
     NoSuchDisplay(usize),
 }
 
@@ -102,7 +104,10 @@ impl ScreenshotError {
             Self::NoSuchDisplay(i) => (
                 404,
                 OperatorCode::NoSuchDisplay,
-                format!("no display {i}; /admin/status lists the connected displays"),
+                format!(
+                    "no display {i} is being rendered; re-read /admin/status (indexes \
+                     shift when monitors are plugged or unplugged)"
+                ),
             ),
         };
         Response::operator_error(status, &OperatorError::new(code, hint))
