@@ -421,8 +421,8 @@ impl WinitApp {
     /// event at FIFO front rather than leaking it through the agent path.
     fn handle_shell_reserved_shortcut(&mut self, raw: &RawKeyDownEvent) -> ShellShortcutOutcome {
         let Some(shortcut) = chrome_shortcut(raw) else {
-            // Ctrl+Shift+F8/F9 are handled at the OS
-            // event stage. Synthetic/in-process entry still consumes them.
+            // Ctrl+Shift+P is handled at the OS event stage.
+            // Synthetic/in-process entry still consumes it.
             return ShellShortcutOutcome::Consumed;
         };
 
@@ -589,7 +589,7 @@ impl WinitApp {
         // Shell-reserved shortcuts (Ctrl+Tab, Ctrl+1..9, Ctrl+Shift+M, etc.)
         // MUST win over portal resize hotkeys and MUST never reach agents.
         //
-        // Note: Ctrl+Shift+F8/F9 (monitor cycling) is handled even earlier —
+        // Note: Ctrl+Shift+P (pairing) is handled even earlier —
         // in the OS event path (Stage 1, `WindowEvent::KeyboardInput`) — so it
         // never reaches this function at all.  The `is_reserved` check below
         // handles the remaining reserved set that does reach here.

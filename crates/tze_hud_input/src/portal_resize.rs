@@ -70,8 +70,8 @@ use serde::{Deserialize, Serialize};
 /// resize MUST NOT consume it.
 ///
 /// The reserved set mirrors `ChromeShortcut` (in
-/// `tze_hud_runtime::shell::chrome`) and the monitor-cycling shortcuts
-/// (`Ctrl+Shift+F8/F9`) that are handled at the OS-event stage.  It is
+/// `tze_hud_runtime::shell::chrome`) and the pairing shortcut
+/// (`Ctrl+Shift+P`) that is handled at the OS-event stage.  It is
 /// replicated here so that `tze_hud_input` can classify a key before any
 /// portal resize attempt without depending on the runtime crate.
 ///
@@ -104,8 +104,7 @@ impl ShellReservedShortcut {
     /// | `Ctrl+9` | LastTab |
     /// | `Ctrl+Shift+M` | MuteToggle (v1-reserved) |
     /// | `Ctrl+Shift+Escape` | SafeMode toggle |
-    /// | `Ctrl+Shift+F8` | Monitor cycle prev |
-    /// | `Ctrl+Shift+F9` | Monitor cycle next |
+    /// | `Ctrl+Shift+P` | Show a pairing code |
     pub fn is_reserved(key: &str, ctrl: bool, shift: bool, alt: bool) -> bool {
         // Reserved shortcuts never require Alt.
         if !ctrl || alt {
@@ -121,9 +120,9 @@ impl ShellReservedShortcut {
             ("m" | "M", true) => true, // Ctrl+Shift+M
             // Safe mode toggle
             ("Escape", true) => true, // Ctrl+Shift+Escape
-            // Monitor cycling (also returned early at the OS stage, but model here
-            // so the reserved-set is complete for in-process callers)
-            ("F8" | "F9", true) => true, // Ctrl+Shift+F8 / F9
+            // Pairing (also returned early at the OS stage, but model here so
+            // the reserved set is complete for in-process callers)
+            ("p" | "P", true) => true, // Ctrl+Shift+P
             _ => false,
         }
     }
@@ -2168,15 +2167,17 @@ mod tests {
     }
 
     #[test]
-    fn shell_reserved_ctrl_shift_f8_f9_monitor_cycle() {
+    fn shell_reserved_ctrl_shift_p_pairing_and_no_monitor_cycle() {
         assert!(
-            ShellReservedShortcut::is_reserved("F8", true, true, false),
-            "Ctrl+Shift+F8 must be reserved (monitor cycle prev)"
+            ShellReservedShortcut::is_reserved("P", true, true, false),
+            "Ctrl+Shift+P must be reserved (pairing)"
         );
-        assert!(
-            ShellReservedShortcut::is_reserved("F9", true, true, false),
-            "Ctrl+Shift+F9 must be reserved (monitor cycle next)"
-        );
+        for key in ["F8", "F9"] {
+            assert!(
+                !ShellReservedShortcut::is_reserved(key, true, true, false),
+                "Ctrl+Shift+{key} is no longer a shell shortcut"
+            );
+        }
     }
 
     #[test]
