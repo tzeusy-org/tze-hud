@@ -281,7 +281,8 @@ belongs in a theme.
 | Type | `font.sans`, `font.mono`, and `type.<role>.{family,size,line_height,weight}` for the roles `code.display`, `caption.display`, `headline.s`, `title.m`, `body.m`, `label.m`, `label.s`, `readout` |
 
 Font family values are free-form family names. A name that is not loaded
-falls back to the renderer's default face for its role. The older keys
+falls back to the renderer's default face for its role (see
+[Fonts](#fonts) for how names resolve). The older keys
 (`color.text.*`, `color.backdrop.default`, `border.radius.*`,
 `typography.*`, `color.notification.urgency.*`, and so on) still work.
 `tonal-glass` maps them onto the semantic palette until each element is
