@@ -20,6 +20,8 @@
 #   just clippy-windows-gnu # clippy on the windows-gnu target (skips if target/mingw missing)
 #   just cargo-deny         # advisories/licenses/bans/sources (skips if cargo-deny missing)
 #   just overlay-harness-contract # pwsh overlay-harness contract test (skips if pwsh missing)
+#   just bootstrap # install/report dev-host deps (scripts/dev-bootstrap.sh; --check to report only)
+#   just build-windows # cross-build tze_hud.exe for x86_64-pc-windows-gnu
 #   just ci        # full local gate sweep (see the `ci` recipe; no Windows-only jobs)
 #
 # GPU tests (compositor render tests + runtime pixel_readback) already run inside
@@ -37,6 +39,9 @@
 
 # Mesa llvmpipe Vulkan ICD (mesa-vulkan-drivers); GPU recipes use it when present.
 lvp := "/usr/share/vulkan/icd.d/lvp_icd.x86_64.json"
+
+# Python for the pytest suites: the bootstrap venv when present (CI has none).
+py := if path_exists(".venv/bin/python3") == "true" { ".venv/bin/python3" } else { "python3" }
 
 # Default recipe: fast compilation gate
 default: check
@@ -99,14 +104,14 @@ test-integration:
     HEADLESS_FORCE_SOFTWARE=1 cargo test -p integration --tests
 
 # Pure-Python suites (mirror CI user-test-python-suite job and scripts/ci tests)
-# Needs: pip install grpcio protobuf pillow blake3 pytest
+# Needs scripts/requirements-dev.txt; `just bootstrap` installs it into .venv.
 test-python:
-    python3 -m pytest \
+    {{py}} -m pytest \
         .claude/skills/user-test/tests/ \
         .claude/skills/user-test/scripts/test_hud_grpc_client.py \
         scripts/tests/ \
         -q
-    python3 -m unittest discover -s scripts/ci
+    {{py}} -m unittest discover -s scripts/ci
 
 # Deterministic LLM-facing token-footprint gate (mirror CI test-integration job)
 token-footprint:
@@ -201,6 +206,18 @@ overlay-harness-contract:
 # Example: just dead-code tze_hud_telemetry
 dead-code crate:
     python3 scripts/dead_code.py {{crate}}
+
+# ── Dev host ─────────────────────────────────────────────────────────────────
+
+# Idempotent; re-run after adding deps. `just bootstrap --check` reports only.
+# Install or report everything this dev host needs
+bootstrap *args:
+    scripts/dev-bootstrap.sh {{args}}
+
+# Output: target/x86_64-pc-windows-gnu/release/tze_hud.exe. Pass e.g. `-j 8` on low-RAM hosts.
+# Cross-build the HUD exe from Linux/WSL (needs `just bootstrap`)
+build-windows *args:
+    cargo build --release --target x86_64-pc-windows-gnu -p tze_hud_app --bin tze_hud {{args}}
 
 # ── Full local CI sweep ───────────────────────────────────────────────────────
 

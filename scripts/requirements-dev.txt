@@ -1,0 +1,7 @@
+# Python deps for `just test-python` and the CI user-test-python-suite job.
+# scripts/dev-bootstrap.sh installs these into .venv.
+grpcio>=1.80.0
+protobuf>=6.31.1
+pillow>=11.0.0
+blake3>=1.0.0
+pytest>=8.0.0
