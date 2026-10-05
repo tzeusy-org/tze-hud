@@ -71,27 +71,44 @@ pub fn append_rotating(path: &Path, buf: &[u8], cap: u64) -> io::Result<()> {
 struct State {
     file: File,
     size: u64,
+    /// The rename to `.1` succeeded but reopening `path` failed: `file` still
+    /// writes to `.1`. Retry only the reopen; rotating again would delete
+    /// `.1` and leave `file` on an unlinked inode.
+    reopen_pending: bool,
 }
+
+type Opener = fn(&Path) -> io::Result<File>;
 
 /// Append-only log file that rotates to `<path>.1` when it reaches `cap`.
 pub struct RotatingFile {
     path: PathBuf,
     cap: u64,
     state: Mutex<State>,
+    /// [`open_append`]; replaceable in tests to fail the reopen.
+    open: Opener,
 }
 
 impl RotatingFile {
     /// Open (creating the directory and file) for appending.
     pub fn open(path: PathBuf, cap: u64) -> io::Result<Arc<Self>> {
+        Self::open_with(path, cap, open_append)
+    }
+
+    fn open_with(path: PathBuf, cap: u64, open: Opener) -> io::Result<Arc<Self>> {
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir)?;
         }
-        let file = open_append(&path)?;
+        let file = open(&path)?;
         let size = file.metadata()?.len();
         Ok(Arc::new(Self {
             path,
             cap,
-            state: Mutex::new(State { file, size }),
+            state: Mutex::new(State {
+                file,
+                size,
+                reopen_pending: false,
+            }),
+            open,
         }))
     }
 
@@ -99,14 +116,18 @@ impl RotatingFile {
         let mut st = self.state.lock().unwrap_or_else(|e| e.into_inner());
         // A failed rotation keeps the line: it goes to the file still open
         // (past the cap, or the just-rotated `.1` if the reopen fails), and
-        // the next write tries again.
-        if st.size > 0
-            && st.size + buf.len() as u64 > self.cap
-            && rotate(&self.path).is_ok()
-            && let Ok(file) = open_append(&self.path)
-        {
-            st.file = file;
-            st.size = 0;
+        // the next write retries the step that failed.
+        let rotate_now = st.reopen_pending
+            || (st.size > 0 && st.size + buf.len() as u64 > self.cap && rotate(&self.path).is_ok());
+        if rotate_now {
+            match (self.open)(&self.path) {
+                Ok(file) => {
+                    st.file = file;
+                    st.size = 0;
+                    st.reopen_pending = false;
+                }
+                Err(_) => st.reopen_pending = true,
+            }
         }
         st.file.write_all(buf)?;
         st.size += buf.len() as u64;
@@ -252,6 +273,37 @@ mod tests {
                 "{p:?} past the cap, nothing dropped"
             );
         }
+    }
+
+    #[test]
+    fn a_failed_reopen_after_rotating_retries_only_the_reopen() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        static FAIL_OPEN: AtomicBool = AtomicBool::new(false);
+        fn flaky(p: &Path) -> io::Result<File> {
+            if FAIL_OPEN.load(Ordering::SeqCst) {
+                return Err(io::Error::other("cannot open"));
+            }
+            open_append(p)
+        }
+        let path = temp("reopen");
+        let mut w = LogWriter(RotatingFile::open_with(path.clone(), 30, flaky).unwrap());
+        w.write_all(b"one xxxxxxxxxxxxxxxxxxxxx\n").unwrap();
+        FAIL_OPEN.store(true, Ordering::SeqCst);
+        // Rotates `one` to .1, the reopen fails: these land in .1, which must
+        // survive (no second rotation deletes it).
+        w.write_all(b"two xxxxxxxxxxxxxxxxxxxxx\n").unwrap();
+        w.write_all(b"three xxxxxxxxxxxxxxxxxxx\n").unwrap();
+        FAIL_OPEN.store(false, Ordering::SeqCst);
+        w.write_all(b"four\n").unwrap();
+        w.write_all(b"five\n").unwrap();
+        let old = std::fs::read_to_string(rotated(&path)).unwrap();
+        assert_eq!(
+            old.lines()
+                .map(|l| &l[..l.find(' ').unwrap_or(l.len())])
+                .collect::<Vec<_>>(),
+            ["one", "two", "three"]
+        );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "four\nfive\n");
     }
 
     #[test]
