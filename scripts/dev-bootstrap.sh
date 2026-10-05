@@ -83,6 +83,13 @@ if ((${#apt_missing[@]})); then
     fi
 fi
 
+# The llvmpipe ICD the justfile pins GPU recipes to (its `lvp` variable).
+if compgen -G '/usr/share/vulkan/icd.d/lvp_icd*.json' >/dev/null; then
+    ok "llvmpipe Vulkan ICD"
+else
+    miss "llvmpipe Vulkan ICD (/usr/share/vulkan/icd.d/lvp_icd*.json; mesa-vulkan-drivers)"
+fi
+
 # ── Commands ────────────────────────────────────────────────────────────────
 section "commands"
 for entry in "${REQUIRED_COMMANDS[@]}"; do

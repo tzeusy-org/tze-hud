@@ -38,7 +38,8 @@
 # Building needs protoc >= 3.15; if /usr/bin/protoc is older, set PROTOC=/path/to/protoc.
 
 # Mesa llvmpipe Vulkan ICD (mesa-vulkan-drivers); GPU recipes use it when present.
-lvp := "/usr/share/vulkan/icd.d/lvp_icd.x86_64.json"
+# Older Mesa names it lvp_icd.x86_64.json; Mesa 25+ (Ubuntu 26.04) lvp_icd.json.
+lvp := if path_exists("/usr/share/vulkan/icd.d/lvp_icd.x86_64.json") == "true" { "/usr/share/vulkan/icd.d/lvp_icd.x86_64.json" } else { "/usr/share/vulkan/icd.d/lvp_icd.json" }
 
 # Python for the pytest suites: the bootstrap venv when present (CI has none).
 py := if path_exists(".venv/bin/python3") == "true" { ".venv/bin/python3" } else { "python3" }
