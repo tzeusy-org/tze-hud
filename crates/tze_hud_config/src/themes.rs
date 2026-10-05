@@ -91,8 +91,11 @@ pub fn selected_theme_name(config_tokens: &DesignTokenMap) -> &str {
 /// not in the result.
 ///
 /// Pure, so a later live theme swap can re-run it. An unknown theme name is
-/// rejected by config validation ([`validate_theme`]); here it falls back to
-/// [`DEFAULT_THEME`] with a warning so startup never fails on it.
+/// rejected by config validation ([`validate_theme`]), which fails strict
+/// startup. Only the dev insecure-startup override
+/// (`TZE_HUD_DEV_ALLOW_INSECURE_STARTUP`) runs with invalid config; there it
+/// falls back to [`DEFAULT_THEME`] with a warning, like that mode's other
+/// permissive fallbacks.
 pub fn resolve_config_tokens(config_tokens: &DesignTokenMap) -> DesignTokenMap {
     let name = selected_theme_name(config_tokens);
     let theme = builtin_theme(name).unwrap_or_else(|| {
