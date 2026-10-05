@@ -1,7 +1,7 @@
 # Beads Coordination Backup Runbook
 
-This repository's implementation tracker lives in the `hud` Beads database under
-`mayor/rig/`. Treat it as coordination state: blocker notes, deferrals, and
+This repository's implementation tracker lives in the `hud` Beads database, served
+by the Dolt server that `.beads/` points at. Treat it as coordination state: blocker notes, deferrals, and
 handoff details can exist only in Beads until they are summarized in tracked
 docs.
 

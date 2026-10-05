@@ -68,7 +68,7 @@ fn build_expanded_state(
             },
             provider_kind: ProviderKind::Codex,
             display_name: format!("{projection_id} (styling test)"),
-            workspace_hint: Some("mayor/rig".to_string()),
+            workspace_hint: Some("tze-hud".to_string()),
             repository_hint: None,
             icon_profile_hint: None,
             content_classification: ContentClassification::Private,
