@@ -178,6 +178,7 @@ mod hittest;
 mod input_dispatch;
 mod keyboard;
 mod lifecycle;
+mod monitor_identity;
 mod network;
 mod portal;
 mod safe_mode_toggle;
@@ -2488,6 +2489,7 @@ impl WindowedRuntime {
 
         let event_loop = EventLoop::<RuntimeWakeEvent>::with_user_event().build()?;
         event_loop.set_control_flow(ControlFlow::Wait);
+        monitor_identity::log_monitor_identities();
         let wake = WindowedWake::new(event_loop.create_proxy());
         let render_wake = wake.render_notifier();
         let portal_ingress_wake = wake.main_work_notifier();
