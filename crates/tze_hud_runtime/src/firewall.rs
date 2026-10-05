@@ -137,30 +137,38 @@ pub fn decide(
     let app_ok = |r: &Rule| {
         r.application
             .as_deref()
-            .is_none_or(|a| a.is_empty() || normalize_path(a) == exe)
+            .is_none_or(|a| a.is_empty() || normalize_path(&expand_env(a, &env_lookup)) == exe)
     };
-    let ports_hit = |r: &Rule, all: bool| {
+    // A block rule applies if it hits any of our ports.
+    let blocks_a_port = |r: &Rule| {
         let spec = r.local_ports.as_deref().unwrap_or("*");
-        let hit = |p: &u16| port_in(spec, *p);
-        if all {
-            ports.iter().all(hit)
-        } else {
-            ports.iter().any(hit) || ports.is_empty()
-        }
+        ports.is_empty() || ports.iter().any(|p| port_in(spec, *p))
     };
 
     let candidates = snap.rules.iter().filter(applicable).filter(|r| proto_ok(r));
     if let Some(r) = candidates.clone().find(|r| {
-        !r.allow && app_ok(r) && ports_hit(r, false) && remote_hits(&r.remote_addresses, false)
+        !r.allow && app_ok(r) && blocks_a_port(r) && remote_hits(&r.remote_addresses, false)
     }) {
         return TailnetInbound::Blocked {
             reason: BlockReason::BlockRule,
             rule: Some(r.name.clone()),
         };
     }
-    if candidates.clone().any(|r| {
-        r.allow && app_ok(r) && ports_hit(r, true) && remote_hits(&r.remote_addresses, true)
-    }) {
+    // Coverage is per port across the union of allow rules, so one rule per
+    // port (the common setup) is enough. Block rules above stay any-match.
+    let allows = || {
+        candidates
+            .clone()
+            .filter(|r| r.allow && app_ok(r) && remote_hits(&r.remote_addresses, true))
+    };
+    let covered = if ports.is_empty() {
+        allows().next().is_some()
+    } else {
+        ports
+            .iter()
+            .all(|p| allows().any(|r| port_in(r.local_ports.as_deref().unwrap_or("*"), *p)))
+    };
+    if covered {
         return TailnetInbound::Allowed;
     }
     if snap.default_block & active != 0 {
@@ -170,6 +178,50 @@ pub fn decide(
         };
     }
     TailnetInbound::Allowed
+}
+
+/// Expand `%VAR%` references (rule paths such as `%ProgramFiles%\\x.exe`);
+/// unknown variables are left as written.
+fn expand_env(s: &str, lookup: &dyn Fn(&str) -> Option<String>) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(start) = rest.find('%') {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + 1..];
+        match after
+            .find('%')
+            .and_then(|end| lookup(&after[..end]).map(|v| (end, v)))
+        {
+            Some((end, value)) => {
+                out.push_str(&value);
+                rest = &after[end + 1..];
+            }
+            None => {
+                out.push('%');
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+fn env_lookup(name: &str) -> Option<String> {
+    std::env::var(name).ok()
+}
+
+/// Ports to check: those of the tailnet binds plus `extra`, minus 0 (a
+/// disabled listener) and duplicates.
+fn probe_ports(tailnet: &[SocketAddr], extra: &[u16]) -> Vec<u16> {
+    let mut ports: Vec<u16> = tailnet
+        .iter()
+        .map(SocketAddr::port)
+        .chain(extra.iter().copied())
+        .collect();
+    ports.retain(|p| *p != 0);
+    ports.sort_unstable();
+    ports.dedup();
+    ports
 }
 
 fn normalize_path(p: &str) -> String {
@@ -298,10 +350,7 @@ impl FirewallProbe {
             if !cfg!(target_os = "windows") || tailnet.is_empty() {
                 return TailnetInbound::NotApplicable;
             }
-            let mut ports: Vec<u16> = tailnet.iter().map(SocketAddr::port).collect();
-            ports.extend(&extra_ports);
-            ports.sort_unstable();
-            ports.dedup();
+            let ports = probe_ports(&tailnet, &extra_ports);
             let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("tze_hud.exe"));
             decide(true, &read_snapshot(), &exe, &ports)
         })
@@ -582,6 +631,34 @@ mod tests {
         private_active.current = PROFILE_PRIVATE;
         private_active.enabled = PROFILE_PRIVATE;
         assert_eq!(run(private_active), blocked_by("deny-private"));
+    }
+
+    #[test]
+    fn one_allow_rule_per_port_covers_all_ports() {
+        let split = vec![
+            ports(rule("mcp", true), "9090"),
+            ports(rule("grpc", true), "50051"),
+        ];
+        assert_eq!(run(snap(split)), TailnetInbound::Allowed);
+        // Both ports must be covered by some rule.
+        assert!(run(snap(vec![ports(rule("mcp", true), "9090")])).is_blocked());
+    }
+
+    #[test]
+    fn rule_paths_expand_environment_variables() {
+        let lookup = |k: &str| (k == "ProgramFiles").then(|| r"C:\Program Files".to_owned());
+        assert_eq!(
+            expand_env(r"%ProgramFiles%\tze_hud\tze_hud.exe", &lookup),
+            EXE
+        );
+        assert_eq!(expand_env("100%", &lookup), "100%");
+        assert_eq!(expand_env(r"%Nope%\x", &lookup), r"%Nope%\x");
+    }
+
+    #[test]
+    fn probe_ports_are_the_bound_ones_without_zero_or_duplicates() {
+        let binds: Vec<SocketAddr> = vec!["100.100.1.2:9290".parse().unwrap()];
+        assert_eq!(probe_ports(&binds, &[50051, 0, 9290]), vec![9290, 50051]);
     }
 
     #[test]
