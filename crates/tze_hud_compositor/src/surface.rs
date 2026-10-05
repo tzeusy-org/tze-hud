@@ -312,8 +312,9 @@ pub trait CompositorSurface: Send + 'static {
 /// `pending_resize`. The compositor thread detects a non-zero pending resize at
 /// the start of each frame cycle and calls `reconfigure()`.
 pub struct WindowSurface {
-    /// The underlying wgpu surface (window-backed swapchain).
-    pub surface: wgpu::Surface<'static>,
+    /// The underlying wgpu surface (window-backed swapchain). Dropped by hand
+    /// (see `Drop`) so its swapchain teardown runs under [`gpu_queue_lock`].
+    pub surface: std::mem::ManuallyDrop<wgpu::Surface<'static>>,
     /// Current surface configuration.
     pub config: std::sync::Mutex<wgpu::SurfaceConfiguration>,
     /// Current width in pixels (kept in sync with config).
@@ -390,6 +391,44 @@ impl LogThrottle {
 /// Interval between acquire-timeout log lines for one window.
 const ACQUIRE_TIMEOUT_LOG_INTERVAL: std::time::Duration = std::time::Duration::from_secs(10);
 
+/// Serializes every swapchain operation that touches the device's one
+/// `VkQueue` from more than one thread (hud-1pt5h).
+///
+/// wgpu-hal (Vulkan) tears a swapchain down -- on `Surface::configure` of a
+/// configured surface and on `Surface` drop -- with `vkDeviceWaitIdle`, which
+/// requires external synchronization of every queue on the device. wgpu only
+/// orders `vkQueuePresentKHR` against its own submits, not against that wait.
+/// With one window this was moot: the only present (main thread) was for the
+/// same surface the compositor was reconfiguring, whose pending texture it had
+/// just cleared. With one window per monitor the main thread presents window
+/// B while the compositor reconfigures or drops window A, which is what a
+/// monitor unplug/replug does to every window at once, and an unsynchronized
+/// `vkDeviceWaitIdle` racing a present can hang the driver.
+///
+/// Held around main-thread `present()`, every `configure()` (compositor
+/// reconfigure, new-surface creation) and the surface drop. Never held while
+/// taking a swapchain slot lock: the order is always slot, then this.
+pub fn gpu_queue_lock() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+impl Drop for WindowSurface {
+    fn drop(&mut self) {
+        // An acquired-but-unpresented texture must go before its swapchain.
+        let pending = self
+            .swapchain
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .pending
+            .take();
+        let _queue = gpu_queue_lock();
+        drop(pending);
+        // SAFETY: dropped exactly once, here; `self.surface` is not used again.
+        unsafe { std::mem::ManuallyDrop::drop(&mut self.surface) };
+    }
+}
+
 impl WindowSurface {
     /// Create a `WindowSurface` from an already-configured `wgpu::Surface`.
     ///
@@ -402,7 +441,7 @@ impl WindowSurface {
         let width = config.width;
         let height = config.height;
         Self {
-            surface,
+            surface: std::mem::ManuallyDrop::new(surface),
             config: std::sync::Mutex::new(config),
             width: std::sync::atomic::AtomicU32::new(width),
             height: std::sync::atomic::AtomicU32::new(height),
@@ -551,7 +590,10 @@ impl WindowSurface {
             .expect("WindowSurface config lock poisoned");
         cfg.width = w;
         cfg.height = h;
-        self.surface.configure(device, &cfg);
+        {
+            let _queue = gpu_queue_lock();
+            self.surface.configure(device, &cfg);
+        }
         self.width.store(w, std::sync::atomic::Ordering::Release);
         self.height.store(h, std::sync::atomic::Ordering::Release);
         tracing::info!(width = w, height = h, "WindowSurface reconfigured");
@@ -609,6 +651,7 @@ impl WindowSurface {
         }
 
         if let Some(texture) = slot.pending.take() {
+            let _queue = gpu_queue_lock();
             texture.present();
             self.presented_frame_count
                 .fetch_add(1, std::sync::atomic::Ordering::Release);
@@ -792,7 +835,10 @@ impl SurfaceFactory {
         let max_dim = self.device.limits().max_texture_dimension_2d;
         config.width = width.clamp(1, max_dim);
         config.height = height.clamp(1, max_dim);
-        surface.configure(&self.device, &config);
+        {
+            let _queue = gpu_queue_lock();
+            surface.configure(&self.device, &config);
+        }
         Ok(WindowSurface::new(surface, config))
     }
 }
