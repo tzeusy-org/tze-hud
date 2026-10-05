@@ -6,7 +6,7 @@
 //! The gate is intentionally CI-visible:
 //! - startup must succeed
 //! - config-declared widget instances/types must be registered
-//! - config `[design_tokens]` must be visible in zone policy
+//! - the config-selected theme (`[design_tokens] theme`) must be visible in zone policy
 //!
 //! If startup silently falls back to a default/headless policy, these assertions
 //! fail even when runtime construction itself succeeds.
@@ -66,8 +66,9 @@ async fn production_config_boots_with_builtin_widget_bundles() {
         );
     }
 
-    // production.toml's [design_tokens] sets color.text.primary = #F5F7FA.
-    // Verify the resolved zone policy reflects that override, not default fallback.
+    // production.toml selects the tonal-glass theme, which sets
+    // color.text.primary = #E8EBF0. Verify the resolved zone policy reflects
+    // the theme, not the canonical fallback.
     let notification_zone = scene
         .zone_registry
         .zones
@@ -79,16 +80,16 @@ async fn production_config_boots_with_builtin_widget_bundles() {
         .expect("notification-area text_color must be populated");
 
     let expected = (
-        245.0f32 / 255.0f32,
-        247.0f32 / 255.0f32,
-        250.0f32 / 255.0f32,
+        232.0f32 / 255.0f32,
+        235.0f32 / 255.0f32,
+        240.0f32 / 255.0f32,
     );
     let eps = 1e-3f32;
     assert!(
         (text_color.r - expected.0).abs() < eps
             && (text_color.g - expected.1).abs() < eps
             && (text_color.b - expected.2).abs() < eps,
-        "expected notification-area text_color to resolve to #F5F7FA from [design_tokens], got ({:.4}, {:.4}, {:.4})",
+        "expected notification-area text_color to resolve to #E8EBF0 from the tonal-glass theme, got ({:.4}, {:.4}, {:.4})",
         text_color.r,
         text_color.g,
         text_color.b

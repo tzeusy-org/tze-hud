@@ -4,8 +4,8 @@
 //! - Key validation pattern `[a-z][a-z0-9]*(\.[a-z][a-z0-9_]*)*`
 //! - Four token value parsers: color hex, numeric, font family, literal string
 //! - Canonical token schema (~28 required keys with fallback defaults)
-//! - Three-layer profile-scoped token resolution:
-//!   profile overrides → global config → canonical fallbacks
+//! - Three-layer token resolution:
+//!   canonical fallbacks → selected theme ([`crate::themes`]) → config overrides
 //!
 //! ## Error codes produced
 //!
@@ -577,46 +577,510 @@ pub static CANONICAL_TOKENS: &[CanonicalToken] = &[
         description: "Gap between claimed tiles stacked at one anchor (px)",
         default_value: "12",
     },
+    // Semantic surfaces (tonal elevation, lowest -> highest; hud-h51u7)
+    CanonicalToken {
+        key: "color.surface",
+        description: "Base surface color (lowest tonal level)",
+        default_value: "#0F1216",
+    },
+    CanonicalToken {
+        key: "color.surface.container.low",
+        description: "Low-emphasis container surface",
+        default_value: "#161A20",
+    },
+    CanonicalToken {
+        key: "color.surface.container",
+        description: "Default container surface (cards, panels)",
+        default_value: "#1B2028",
+    },
+    CanonicalToken {
+        key: "color.surface.container.high",
+        description: "Raised container surface",
+        default_value: "#222833",
+    },
+    CanonicalToken {
+        key: "color.surface.container.highest",
+        description: "Highest container surface (menus, focused cards)",
+        default_value: "#2A313D",
+    },
+    CanonicalToken {
+        key: "opacity.surface",
+        description: "Opacity of container surfaces over the desktop (0.0-1.0)",
+        default_value: "0.92",
+    },
+    CanonicalToken {
+        key: "opacity.scrim",
+        description: "Opacity of full-surface scrims behind modal content (0.0-1.0)",
+        default_value: "0.72",
+    },
+    // Semantic roles
+    CanonicalToken {
+        key: "color.on_surface",
+        description: "Primary content (text, icons) on any surface",
+        default_value: "#E8EBF0",
+    },
+    CanonicalToken {
+        key: "color.on_surface.variant",
+        description: "Secondary/muted content on any surface",
+        default_value: "#A9B1BE",
+    },
+    CanonicalToken {
+        key: "color.outline",
+        description: "Emphasized outline (focus-adjacent borders, dividers that must read)",
+        default_value: "#5A6475",
+    },
+    CanonicalToken {
+        key: "color.outline.variant",
+        description: "Subtle outline (hairline card borders, separators)",
+        default_value: "#343B47",
+    },
+    CanonicalToken {
+        key: "color.primary",
+        description: "Primary accent (active state, links, progress)",
+        default_value: "#8AB4FF",
+    },
+    CanonicalToken {
+        key: "color.on_primary",
+        description: "Content on a primary fill",
+        default_value: "#0B1B36",
+    },
+    CanonicalToken {
+        key: "color.primary.container",
+        description: "Low-emphasis primary fill",
+        default_value: "#1E3A66",
+    },
+    CanonicalToken {
+        key: "color.on_primary.container",
+        description: "Content on a primary container",
+        default_value: "#D6E3FF",
+    },
+    CanonicalToken {
+        key: "color.success",
+        description: "Success/healthy status",
+        default_value: "#7BD88F",
+    },
+    CanonicalToken {
+        key: "color.caution",
+        description: "Caution/warning status",
+        default_value: "#F2C14E",
+    },
+    CanonicalToken {
+        key: "color.caution.container",
+        description: "Caution container fill",
+        default_value: "#4A3A10",
+    },
+    CanonicalToken {
+        key: "color.on_caution.container",
+        description: "Content on a caution container",
+        default_value: "#FFE7A8",
+    },
+    CanonicalToken {
+        key: "color.error",
+        description: "Error/critical status",
+        default_value: "#FF8A80",
+    },
+    CanonicalToken {
+        key: "color.error.container",
+        description: "Error container fill",
+        default_value: "#5C1A17",
+    },
+    CanonicalToken {
+        key: "color.on_error.container",
+        description: "Content on an error container",
+        default_value: "#FFDAD6",
+    },
+    // State layers and focus
+    CanonicalToken {
+        key: "state.hover.opacity",
+        description: "Opacity of the on-surface state layer while hovered (0.0-1.0)",
+        default_value: "0.08",
+    },
+    CanonicalToken {
+        key: "state.pressed.opacity",
+        description: "Opacity of the on-surface state layer while pressed (0.0-1.0)",
+        default_value: "0.12",
+    },
+    CanonicalToken {
+        key: "focus.ring.width",
+        description: "Keyboard focus ring stroke width (logical px)",
+        default_value: "2",
+    },
+    CanonicalToken {
+        key: "focus.ring.offset",
+        description: "Gap between an element and its focus ring (logical px)",
+        default_value: "2",
+    },
+    // Motion (easing names: see MOTION_EASINGS)
+    CanonicalToken {
+        key: "motion.enter.ms",
+        description: "Enter transition duration (ms)",
+        default_value: "180",
+    },
+    CanonicalToken {
+        key: "motion.exit.ms",
+        description: "Exit transition duration (ms)",
+        default_value: "120",
+    },
+    CanonicalToken {
+        key: "motion.state.ms",
+        description: "State-change (hover/press) transition duration (ms)",
+        default_value: "100",
+    },
+    CanonicalToken {
+        key: "motion.enter.easing",
+        description: "Enter transition easing curve",
+        default_value: "decelerate",
+    },
+    CanonicalToken {
+        key: "motion.exit.easing",
+        description: "Exit transition easing curve",
+        default_value: "accelerate",
+    },
+    // Shape scale (corner radius, logical px)
+    CanonicalToken {
+        key: "shape.xs",
+        description: "Extra-small corner radius",
+        default_value: "4",
+    },
+    CanonicalToken {
+        key: "shape.s",
+        description: "Small corner radius",
+        default_value: "8",
+    },
+    CanonicalToken {
+        key: "shape.m",
+        description: "Medium corner radius",
+        default_value: "12",
+    },
+    CanonicalToken {
+        key: "shape.l",
+        description: "Large corner radius",
+        default_value: "16",
+    },
+    CanonicalToken {
+        key: "shape.xl",
+        description: "Extra-large corner radius",
+        default_value: "28",
+    },
+    CanonicalToken {
+        key: "shape.full",
+        description: "Fully rounded (pill) corner radius",
+        default_value: "999",
+    },
+    // Spacing scale (4 px grid, logical px)
+    CanonicalToken {
+        key: "space.xs",
+        description: "Extra-small spacing",
+        default_value: "4",
+    },
+    CanonicalToken {
+        key: "space.s",
+        description: "Small spacing",
+        default_value: "8",
+    },
+    CanonicalToken {
+        key: "space.m",
+        description: "Medium spacing",
+        default_value: "12",
+    },
+    CanonicalToken {
+        key: "space.l",
+        description: "Large spacing",
+        default_value: "16",
+    },
+    CanonicalToken {
+        key: "space.xl",
+        description: "Extra-large spacing",
+        default_value: "24",
+    },
+    CanonicalToken {
+        key: "space.xxl",
+        description: "Double-extra-large spacing",
+        default_value: "32",
+    },
+    // Type scale (family / size / line height / weight)
+    CanonicalToken {
+        key: "font.sans",
+        description: "Sans-serif font family name (free-form; unloaded names fall back)",
+        default_value: "IBM Plex Sans",
+    },
+    CanonicalToken {
+        key: "font.mono",
+        description: "Monospace font family name (free-form; unloaded names fall back)",
+        default_value: "IBM Plex Mono",
+    },
+    CanonicalToken {
+        key: "type.code.display.family",
+        description: "Pairing-code display: font family name",
+        default_value: "IBM Plex Mono",
+    },
+    CanonicalToken {
+        key: "type.code.display.size",
+        description: "Pairing-code display: font size (logical px)",
+        default_value: "40",
+    },
+    CanonicalToken {
+        key: "type.code.display.line_height",
+        description: "Pairing-code display: line height (logical px)",
+        default_value: "48",
+    },
+    CanonicalToken {
+        key: "type.code.display.weight",
+        description: "Pairing-code display: font weight (CSS numeric)",
+        default_value: "500",
+    },
+    CanonicalToken {
+        key: "type.caption.display.family",
+        description: "Subtitle/caption display: font family name",
+        default_value: "IBM Plex Sans",
+    },
+    CanonicalToken {
+        key: "type.caption.display.size",
+        description: "Subtitle/caption display: font size (logical px)",
+        default_value: "26",
+    },
+    CanonicalToken {
+        key: "type.caption.display.line_height",
+        description: "Subtitle/caption display: line height (logical px)",
+        default_value: "34",
+    },
+    CanonicalToken {
+        key: "type.caption.display.weight",
+        description: "Subtitle/caption display: font weight (CSS numeric)",
+        default_value: "600",
+    },
+    CanonicalToken {
+        key: "type.headline.s.family",
+        description: "Small headline: font family name",
+        default_value: "IBM Plex Sans",
+    },
+    CanonicalToken {
+        key: "type.headline.s.size",
+        description: "Small headline: font size (logical px)",
+        default_value: "20",
+    },
+    CanonicalToken {
+        key: "type.headline.s.line_height",
+        description: "Small headline: line height (logical px)",
+        default_value: "28",
+    },
+    CanonicalToken {
+        key: "type.headline.s.weight",
+        description: "Small headline: font weight (CSS numeric)",
+        default_value: "600",
+    },
+    CanonicalToken {
+        key: "type.title.m.family",
+        description: "Medium title (card titles): font family name",
+        default_value: "IBM Plex Sans",
+    },
+    CanonicalToken {
+        key: "type.title.m.size",
+        description: "Medium title (card titles): font size (logical px)",
+        default_value: "16",
+    },
+    CanonicalToken {
+        key: "type.title.m.line_height",
+        description: "Medium title (card titles): line height (logical px)",
+        default_value: "24",
+    },
+    CanonicalToken {
+        key: "type.title.m.weight",
+        description: "Medium title (card titles): font weight (CSS numeric)",
+        default_value: "600",
+    },
+    CanonicalToken {
+        key: "type.body.m.family",
+        description: "Medium body text: font family name",
+        default_value: "IBM Plex Sans",
+    },
+    CanonicalToken {
+        key: "type.body.m.size",
+        description: "Medium body text: font size (logical px)",
+        default_value: "14",
+    },
+    CanonicalToken {
+        key: "type.body.m.line_height",
+        description: "Medium body text: line height (logical px)",
+        default_value: "20",
+    },
+    CanonicalToken {
+        key: "type.body.m.weight",
+        description: "Medium body text: font weight (CSS numeric)",
+        default_value: "400",
+    },
+    CanonicalToken {
+        key: "type.label.m.family",
+        description: "Medium label (buttons, chips): font family name",
+        default_value: "IBM Plex Sans",
+    },
+    CanonicalToken {
+        key: "type.label.m.size",
+        description: "Medium label (buttons, chips): font size (logical px)",
+        default_value: "12",
+    },
+    CanonicalToken {
+        key: "type.label.m.line_height",
+        description: "Medium label (buttons, chips): line height (logical px)",
+        default_value: "16",
+    },
+    CanonicalToken {
+        key: "type.label.m.weight",
+        description: "Medium label (buttons, chips): font weight (CSS numeric)",
+        default_value: "500",
+    },
+    CanonicalToken {
+        key: "type.label.s.family",
+        description: "Small label (metadata): font family name",
+        default_value: "IBM Plex Sans",
+    },
+    CanonicalToken {
+        key: "type.label.s.size",
+        description: "Small label (metadata): font size (logical px)",
+        default_value: "11",
+    },
+    CanonicalToken {
+        key: "type.label.s.line_height",
+        description: "Small label (metadata): line height (logical px)",
+        default_value: "16",
+    },
+    CanonicalToken {
+        key: "type.label.s.weight",
+        description: "Small label (metadata): font weight (CSS numeric)",
+        default_value: "500",
+    },
+    CanonicalToken {
+        key: "type.readout.family",
+        description: "Numeric readout (gauges, timers): font family name",
+        default_value: "IBM Plex Mono",
+    },
+    CanonicalToken {
+        key: "type.readout.size",
+        description: "Numeric readout (gauges, timers): font size (logical px)",
+        default_value: "14",
+    },
+    CanonicalToken {
+        key: "type.readout.line_height",
+        description: "Numeric readout (gauges, timers): line height (logical px)",
+        default_value: "20",
+    },
+    CanonicalToken {
+        key: "type.readout.weight",
+        description: "Numeric readout (gauges, timers): font weight (CSS numeric)",
+        default_value: "500",
+    },
+    // Notification card renderer keys (defaults match the compositor fallbacks)
+    CanonicalToken {
+        key: "color.notification.urgency.low",
+        description: "Notification card backdrop, urgency low",
+        default_value: "#000000",
+    },
+    CanonicalToken {
+        key: "color.notification.urgency.normal",
+        description: "Notification card backdrop, urgency normal",
+        default_value: "#0C1426",
+    },
+    CanonicalToken {
+        key: "color.notification.urgency.urgent",
+        description: "Notification card backdrop, urgency urgent",
+        default_value: "#2A1E08",
+    },
+    CanonicalToken {
+        key: "color.notification.urgency.critical",
+        description: "Notification card backdrop, urgency critical",
+        default_value: "#450612",
+    },
+    CanonicalToken {
+        key: "typography.notification.body.scale",
+        description: "Notification body line size relative to the title (0.5-1.0)",
+        default_value: "0.85",
+    },
+    CanonicalToken {
+        key: "typography.notification.title.weight",
+        description: "Notification title font weight (CSS numeric)",
+        default_value: "700",
+    },
 ];
 
 // ─── Token resolution ─────────────────────────────────────────────────────────
 
-/// Resolve the effective design token map using three-layer precedence:
-/// 1. Profile-scoped overrides (passed in as `profile_tokens`)
-/// 2. Global config `[design_tokens]` section
-/// 3. Canonical fallback defaults
+/// Resolve the effective design token map using three-layer precedence
+/// (lowest to highest):
+/// 1. Canonical fallback defaults ([`CANONICAL_TOKENS`])
+/// 2. Theme tokens (`theme_tokens`, see [`crate::themes`])
+/// 3. Config `[design_tokens]` overrides (`config_tokens`)
 ///
-/// The returned map contains ALL canonical tokens (via fallbacks) plus any
-/// non-canonical tokens from config or profile layers.
-///
-/// # Arguments
-///
-/// * `config_tokens` — tokens from the global `[design_tokens]` section (may be empty)
-/// * `profile_tokens` — per-profile token overrides (may be empty); applied on top
+/// Pure function of its inputs, so a later live theme swap can re-run it and
+/// re-apply the result. The returned map contains ALL canonical tokens (via
+/// fallbacks) plus any non-canonical tokens from the theme or config layers.
+/// Callers holding a raw `[design_tokens]` table (which may carry the
+/// reserved `theme` selector) use [`crate::themes::resolve_config_tokens`].
 pub fn resolve_tokens(
+    theme_tokens: &DesignTokenMap,
     config_tokens: &DesignTokenMap,
-    profile_tokens: &DesignTokenMap,
 ) -> DesignTokenMap {
     let mut resolved = DesignTokenMap::with_capacity(
-        CANONICAL_TOKENS.len() + config_tokens.len() + profile_tokens.len(),
+        CANONICAL_TOKENS.len() + theme_tokens.len() + config_tokens.len(),
     );
-
-    // Layer 3 (lowest priority): canonical fallback defaults
     for token in CANONICAL_TOKENS {
         resolved.insert(token.key.to_string(), token.default_value.to_string());
     }
-
-    // Layer 2: global config overrides
-    for (k, v) in config_tokens {
-        resolved.insert(k.clone(), v.clone());
+    for layer in [theme_tokens, config_tokens] {
+        for (k, v) in layer {
+            resolved.insert(k.clone(), v.clone());
+        }
     }
-
-    // Layer 1 (highest priority): profile-scoped overrides
-    for (k, v) in profile_tokens {
-        resolved.insert(k.clone(), v.clone());
-    }
-
     resolved
+}
+
+/// Easing curve names accepted by `motion.*.easing` tokens.
+///
+/// The compositor's curves (`renderer/easing.rs`) map as: `linear` ->
+/// `Linear`, `standard` -> `EaseInOut`, `decelerate` -> `EaseOutQuad`.
+/// `accelerate` (ease-in) has no compositor curve yet; it is added when a
+/// consumer of `motion.exit.easing` lands (hud-h51u7.4).
+pub const MOTION_EASINGS: &[&str] = &["linear", "standard", "decelerate", "accelerate"];
+
+/// Look up a canonical token definition by key.
+pub fn canonical_token(key: &str) -> Option<&'static CanonicalToken> {
+    CANONICAL_TOKENS.iter().find(|t| t.key == key)
+}
+
+/// Check `value` against the kind of the canonical token `key`.
+///
+/// The kind is inferred from the key and its canonical default: font family
+/// keys (`font.*`, `*.family`) take any non-empty family name (free-form, so
+/// fonts stay user-configurable); `*.easing` keys take a [`MOTION_EASINGS`]
+/// name; a color default requires `#RRGGBB`/`#RRGGBBAA`; a numeric default
+/// requires a finite number; anything else must be non-empty.
+///
+/// Returns a human-readable description of the expected value on failure.
+/// Non-canonical keys are rejected.
+pub fn validate_canonical_value(key: &str, value: &str) -> Result<(), String> {
+    let Some(token) = canonical_token(key) else {
+        return Err("a canonical token key".into());
+    };
+    let (ok, expected) = if key.starts_with("font.") || key.ends_with(".family") {
+        (
+            !value.trim().is_empty(),
+            "a non-empty font family name".into(),
+        )
+    } else if key.ends_with(".easing") {
+        (
+            MOTION_EASINGS.contains(&value),
+            format!("one of {}", MOTION_EASINGS.join(", ")),
+        )
+    } else if parse_color_hex(token.default_value).is_some() {
+        (
+            parse_color_hex(value).is_some(),
+            "a color #RRGGBB or #RRGGBBAA".into(),
+        )
+    } else if parse_numeric(token.default_value).is_some() {
+        (parse_numeric(value).is_some(), "a finite number".into())
+    } else {
+        (!value.is_empty(), "a non-empty value".into())
+    };
+    if ok { Ok(()) } else { Err(expected) }
 }
 
 // ─── Validation ───────────────────────────────────────────────────────────────
@@ -855,26 +1319,66 @@ mod tests {
     fn test_resolve_tokens_config_overrides_fallback() {
         let mut config_tokens = DesignTokenMap::new();
         config_tokens.insert("color.text.primary".to_string(), "#FF0000".to_string());
-        let map = resolve_tokens(&config_tokens, &DesignTokenMap::new());
+        let map = resolve_tokens(&DesignTokenMap::new(), &config_tokens);
         assert_eq!(map["color.text.primary"], "#FF0000");
     }
 
+    /// Precedence is canonical < theme < config.
     #[test]
-    fn test_resolve_tokens_profile_overrides_config() {
-        let mut config_tokens = DesignTokenMap::new();
-        config_tokens.insert("color.text.primary".to_string(), "#FF0000".to_string());
-        let mut profile_tokens = DesignTokenMap::new();
-        profile_tokens.insert("color.text.primary".to_string(), "#00FF00".to_string());
-        let map = resolve_tokens(&config_tokens, &profile_tokens);
-        assert_eq!(map["color.text.primary"], "#00FF00");
+    fn test_resolve_tokens_layer_order() {
+        let mut theme = DesignTokenMap::new();
+        theme.insert("color.text.primary".into(), "#00FF00".into());
+        theme.insert("color.text.secondary".into(), "#00FF00".into());
+        let mut config = DesignTokenMap::new();
+        config.insert("color.text.primary".into(), "#FF0000".into());
+        let map = resolve_tokens(&theme, &config);
+        assert_eq!(map["color.text.primary"], "#FF0000", "config beats theme");
+        assert_eq!(
+            map["color.text.secondary"], "#00FF00",
+            "theme beats canonical"
+        );
+        assert_eq!(
+            map["color.text.accent"],
+            canonical_token("color.text.accent").unwrap().default_value,
+            "canonical fills the rest"
+        );
     }
 
     #[test]
     fn test_resolve_tokens_non_canonical_keys_accepted() {
         let mut config_tokens = DesignTokenMap::new();
         config_tokens.insert("custom.brand.color".to_string(), "#ABCDEF".to_string());
-        let map = resolve_tokens(&config_tokens, &DesignTokenMap::new());
+        let map = resolve_tokens(&DesignTokenMap::new(), &config_tokens);
         assert_eq!(map["custom.brand.color"], "#ABCDEF");
+    }
+
+    #[test]
+    fn test_canonical_keys_unique_and_defaults_valid() {
+        let mut seen = std::collections::HashSet::new();
+        for t in CANONICAL_TOKENS {
+            assert!(seen.insert(t.key), "duplicate canonical key {}", t.key);
+            assert_eq!(
+                validate_canonical_value(t.key, t.default_value),
+                Ok(()),
+                "canonical default of {} must be valid",
+                t.key
+            );
+        }
+    }
+
+    #[test]
+    fn test_validate_canonical_value_kinds() {
+        assert!(validate_canonical_value("color.surface", "#123456").is_ok());
+        assert!(validate_canonical_value("color.surface", "blue").is_err());
+        assert!(validate_canonical_value("shape.m", "12").is_ok());
+        assert!(validate_canonical_value("shape.m", "12px").is_err());
+        assert!(validate_canonical_value("motion.enter.easing", "decelerate").is_ok());
+        assert!(validate_canonical_value("motion.enter.easing", "bouncy").is_err());
+        // Family names are free-form, not a closed keyword set.
+        assert!(validate_canonical_value("font.sans", "Some Custom Face").is_ok());
+        assert!(validate_canonical_value("type.body.m.family", "Inter").is_ok());
+        assert!(validate_canonical_value("font.mono", "").is_err());
+        assert!(validate_canonical_value("not.a.token", "1").is_err());
     }
 
     // ── validate_design_tokens ────────────────────────────────────────────────

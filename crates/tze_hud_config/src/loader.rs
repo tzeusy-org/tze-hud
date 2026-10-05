@@ -12,6 +12,7 @@ use tze_hud_scene::config::{
 use crate::raw::RawConfig;
 use crate::resolver;
 use crate::runtime_widget_assets;
+use crate::themes;
 use crate::tokens;
 use crate::widgets;
 use crate::zones;
@@ -226,6 +227,7 @@ impl ConfigLoader for TzeHudConfig {
 
         // ── (14) Design token key validation ──────────────────────────────────
         tokens::validate_design_tokens(&self.raw, &mut errors);
+        themes::validate_theme(&self.raw, &mut errors);
 
         errors
     }

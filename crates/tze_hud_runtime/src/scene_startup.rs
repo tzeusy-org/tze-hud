@@ -2,7 +2,8 @@
 //!
 //! Runs once before sessions are accepted:
 //!
-//! 1. Resolve `[design_tokens]` over the canonical fallbacks → global token map.
+//! 1. Resolve canonical fallbacks → selected theme → `[design_tokens]`
+//!    overrides → global token map.
 //! 2. Materialize every `[[tabs]]` entry as a scene tab.
 //! 3. Load widget bundles (SVG `{{token.key}}` placeholders resolved against
 //!    the global token map) and register widget definitions and instances.
@@ -16,7 +17,8 @@ use std::path::Path;
 
 use tze_hud_config::policy_builder::build_all_effective_policies;
 use tze_hud_config::raw::RawConfig;
-use tze_hud_config::tokens::{DesignTokenMap, resolve_tokens};
+use tze_hud_config::themes::resolve_config_tokens;
+use tze_hud_config::tokens::DesignTokenMap;
 use tze_hud_scene::types::{RenderingPolicy, ZoneRegistry};
 
 use crate::widget_startup::init_widget_registry;
@@ -24,7 +26,7 @@ use crate::widget_startup::init_widget_registry;
 /// Result of [`run_scene_startup`]. The zone and widget registries are
 /// installed in the scene; what remains is for the compositor.
 pub struct SceneStartupResult {
-    /// Fully resolved global token map (canonical fallbacks + config overrides).
+    /// Fully resolved global token map (canonical fallbacks, theme, config overrides).
     /// Pass to `compositor.set_token_map()`.
     pub global_tokens: DesignTokenMap,
     /// SVG assets from widget bundles for compositor registration.
@@ -46,7 +48,7 @@ pub fn run_scene_startup(
         .as_ref()
         .map(|dt| dt.0.clone())
         .unwrap_or_default();
-    let global_tokens = resolve_tokens(&config_tokens, &DesignTokenMap::new());
+    let global_tokens = resolve_config_tokens(&config_tokens);
     tracing::info!(
         token_count = global_tokens.len(),
         "scene_startup: design tokens loaded"
@@ -174,27 +176,28 @@ mod tests {
 
     // ── Step 2: Design token loading ──────────────────────────────────────────
 
-    /// WHEN [design_tokens] is absent THEN global tokens contain canonical fallbacks only.
+    /// WHEN [design_tokens] is absent THEN global tokens are the canonical
+    /// fallbacks under the default theme.
     #[test]
-    fn absent_design_tokens_uses_canonical_fallbacks() {
+    fn absent_design_tokens_uses_default_theme() {
         let raw = RawConfig::default();
         let mut scene = make_scene();
         let result = run_scene_startup(&raw, None, &mut scene);
 
-        // color.text.primary has canonical fallback "#FFFFFF"
         assert_eq!(
-            result
-                .global_tokens
-                .get("color.text.primary")
-                .map(|s| s.as_str()),
-            Some("#FFFFFF"),
-            "absent [design_tokens] should produce canonical fallback for color.text.primary"
+            result.global_tokens,
+            tze_hud_config::themes::resolve_config_tokens(&DesignTokenMap::new()),
         );
-        // All canonical tokens should be present
+        assert_eq!(
+            result.global_tokens.get("color.text.primary"),
+            tze_hud_config::themes::builtin_theme(tze_hud_config::themes::DEFAULT_THEME)
+                .unwrap()
+                .get("color.text.primary"),
+            "absent [design_tokens] should produce the default theme's color.text.primary"
+        );
         assert!(
-            result.global_tokens.len() >= 20,
-            "should have at least 20 canonical tokens, got {}",
-            result.global_tokens.len()
+            result.global_tokens.len() >= tze_hud_config::tokens::CANONICAL_TOKENS.len(),
+            "every canonical token must be present"
         );
     }
 
