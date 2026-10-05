@@ -408,6 +408,27 @@ impl InputProcessor {
         self.process_scroll_for_tile(tile_id, event.delta_x, event.delta_y, scene)
     }
 
+    /// Register `tile_id` in `scroll_state` from its scene `TileScrollConfig`
+    /// (no-op if the scene has none). Entries are created lazily, so this is
+    /// also where entries for destroyed tiles (the scene drops their config on
+    /// destroy) are swept, keeping both registration paths leak-free.
+    fn register_scroll_tile(&mut self, tile_id: SceneId, scene: &SceneGraph) {
+        let Some(config) = scene.tile_scroll_config(tile_id) else {
+            return;
+        };
+        self.scroll_state
+            .retain_tiles(|id| scene.tile_scroll_config(id).is_some());
+        self.scroll_state.register_tile(
+            tile_id,
+            ScrollConfig {
+                scrollable_x: config.scrollable_x,
+                scrollable_y: config.scrollable_y,
+                content_width: config.content_width,
+                content_height: config.content_height,
+            },
+        );
+    }
+
     fn process_scroll_for_tile(
         &mut self,
         tile_id: SceneId,
@@ -415,21 +436,9 @@ impl InputProcessor {
         delta_y: f32,
         scene: &mut SceneGraph,
     ) -> Option<ScrollOffsetChangedEvent> {
-        let config = scene.tile_scroll_config(tile_id)?;
+        scene.tile_scroll_config(tile_id)?;
         if !self.scroll_state.is_scrollable(tile_id) {
-            // Entries are created lazily here; sweep ones whose tile was
-            // destroyed (scene drops its config on destroy) so they can't accumulate.
-            self.scroll_state
-                .retain_tiles(|id| scene.tile_scroll_config(id).is_some());
-            self.scroll_state.register_tile(
-                tile_id,
-                ScrollConfig {
-                    scrollable_x: config.scrollable_x,
-                    scrollable_y: config.scrollable_y,
-                    content_width: config.content_width,
-                    content_height: config.content_height,
-                },
-            );
+            self.register_scroll_tile(tile_id, scene);
         }
 
         self.scroll_state
@@ -513,19 +522,9 @@ impl InputProcessor {
         // user has scrolled).  This mirrors the auto-registration in
         // `process_scroll_event`.
         if !self.scroll_state.is_scrollable(tile_id) {
-            if let Some(config) = scene.tile_scroll_config(tile_id) {
-                // content_height starts at 0 (total pixels); the caller's
-                // new_content_height_px drives the first update below.
-                self.scroll_state.register_tile(
-                    tile_id,
-                    ScrollConfig {
-                        scrollable_x: config.scrollable_x,
-                        scrollable_y: config.scrollable_y,
-                        content_width: config.content_width,
-                        content_height: config.content_height,
-                    },
-                );
-            }
+            // content_height starts at 0 (total pixels); the caller's
+            // new_content_height_px drives the first update below.
+            self.register_scroll_tile(tile_id, scene);
         }
 
         let changed = self.scroll_state.notify_content_appended(
@@ -2136,6 +2135,28 @@ mod tests {
             .register_tile_scroll_config(tile_b, tze_hud_scene::TileScrollConfig::vertical())
             .unwrap();
         processor.process_scroll_event(&wheel(650.0), &mut scene);
+
+        assert!(processor.scroll_state.is_scrollable(tile_b));
+        assert!(!processor.scroll_state.is_scrollable(tile_a));
+    }
+
+    #[test]
+    fn scroll_state_of_destroyed_tile_is_swept_on_append_path() {
+        let (mut scene, tile_a) = setup_scrollable_scene();
+        let mut processor = InputProcessor::new();
+        processor.notify_tile_content_appended(tile_a, 500.0, 300.0, 20.0, &mut scene);
+        assert!(processor.scroll_state.is_scrollable(tile_a));
+
+        scene.delete_tile(tile_a, "test").unwrap();
+        let tab = scene.active_tab.unwrap();
+        let lease = scene.grant_lease("test", 60_000);
+        let tile_b = scene
+            .create_tile(tab, "test", lease, Rect::new(600.0, 100.0, 400.0, 300.0), 1)
+            .unwrap();
+        scene
+            .register_tile_scroll_config(tile_b, tze_hud_scene::TileScrollConfig::vertical())
+            .unwrap();
+        processor.notify_tile_content_appended(tile_b, 500.0, 300.0, 20.0, &mut scene);
 
         assert!(processor.scroll_state.is_scrollable(tile_b));
         assert!(!processor.scroll_state.is_scrollable(tile_a));
