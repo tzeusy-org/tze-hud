@@ -1958,6 +1958,17 @@ pub struct NotificationPayload {
     pub actions: Vec<NotificationAction>,
 }
 
+impl NotificationPayload {
+    /// No title and no body: it would render as an empty card. Both publish
+    /// planes reject it with `INVALID_ARGUMENT`.
+    pub fn is_blank(&self) -> bool {
+        self.title.trim().is_empty() && self.text.trim().is_empty()
+    }
+}
+
+/// Hint for a rejected blank notification, shared by both planes.
+pub const BLANK_NOTIFICATION_HINT: &str = "notification needs a title or body";
+
 /// Maximum number of action buttons rendered per notification slot.
 pub const MAX_NOTIFICATION_ACTIONS: usize = 3;
 

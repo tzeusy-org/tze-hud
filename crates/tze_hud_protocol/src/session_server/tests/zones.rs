@@ -49,6 +49,33 @@ async fn test_zone_publish_result() {
         }
         other => panic!("Expected ZonePublishResult, got: {other:?}"),
     }
+
+    // A notification with no title and no body would render an empty card.
+    tx.send(ClientMessage {
+        sequence: 3,
+        timestamp_wall_us: now_wall_us(),
+        payload: Some(ClientPayload::Publish(Publish {
+            surface: "zone:notification-area".to_string(),
+            content: Some(crate::proto::ZoneContent {
+                payload: Some(crate::proto::zone_content::Payload::Notification(
+                    Default::default(),
+                )),
+            }),
+            ..Default::default()
+        })),
+    })
+    .await
+    .unwrap();
+    match stream.next().await.unwrap().unwrap().payload {
+        Some(ServerPayload::RequestResult(r)) => {
+            assert_eq!(
+                (r.seq, r.ok, r.code.as_str()),
+                (3, false, "INVALID_ARGUMENT")
+            );
+            assert!(r.hint.contains("title or body"), "{}", r.hint);
+        }
+        other => panic!("Expected RequestResult, got: {other:?}"),
+    }
 }
 
 // ─── Zone publish acknowledgement ────────────────────────────────────────────
