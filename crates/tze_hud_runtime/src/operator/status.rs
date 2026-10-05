@@ -225,6 +225,8 @@ pub struct StatusSource {
     pub update: Option<crate::operator::update::UpdateHandle>,
     /// First-run pairing behind `POST /pair`.
     pub pairing: Option<Arc<crate::pairing::Pairing>>,
+    /// Windows Firewall check behind `tailnet_inbound`.
+    pub firewall: Arc<crate::firewall::FirewallProbe>,
 }
 
 /// Window over which `cpu_pct_2s` is sampled.
@@ -266,6 +268,13 @@ impl StatusSource {
             .iter()
             .map(ToString::to_string)
             .collect();
+        // COM enumeration is slow on a cache miss; keep it off the async workers.
+        let firewall = Arc::clone(&self.firewall);
+        let tailnet_inbound = tokio::task::spawn_blocking(move || firewall.current())
+            .await
+            .unwrap_or_else(|e| crate::firewall::TailnetInbound::Unknown {
+                error: e.to_string(),
+            });
         json!({
             "version": env!("CARGO_PKG_VERSION"),
             "sha": build.map_or("unknown", |b| b.sha.as_str()),
@@ -273,6 +282,8 @@ impl StatusSource {
             "pid": std::process::id(),
             "uptime_s": uptime.as_secs(),
             "binds": binds,
+            // Whether Windows Firewall lets remote agents reach the tailnet bind.
+            "tailnet_inbound": tailnet_inbound.to_json(),
             "agents": agents,
             "safe_mode": self.safe_mode.load(Ordering::Relaxed),
             "safe_mode_hotkey": safe_mode_hotkey().to_json(),

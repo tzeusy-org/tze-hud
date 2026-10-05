@@ -88,6 +88,38 @@ clears when the code expires. The code is on screen, so an agent holding an
 
 `app/tze_hud_app/config/production.toml` is the reference (and default) config.
 
+## Remote agents
+
+The HUD listens on loopback and on each Tailscale address of the machine
+(`100.64.0.0/10`, `fd7a:115c:a1e0::/48`), on the MCP/pairing port (9090) and the
+gRPC port (50051). It never binds a wildcard address. Agents on other tailnet
+machines reach it only if Windows Firewall lets inbound TCP to those ports in.
+
+The HUD reads the firewall policy (no admin needed) when the pairing card opens
+and when `/admin/status` is requested, never per frame, and reports
+`tailnet_inbound`:
+
+| State | Meaning |
+|---|---|
+| `allowed` | an enabled inbound allow rule covers `tze_hud.exe` or its ports for the tailnet, or the firewall is off for the active profile |
+| `blocked` | an enabled inbound block rule matches (`reason: block_rule`, `rule` names it), or no allow rule exists and the default inbound action is Block (`no_allow_rule`) |
+| `unknown` | the policy could not be read (`error`), for example a third-party firewall |
+| `not_applicable` | no Tailscale address is bound, or not Windows |
+
+When `blocked`, the pairing card (shown for a tailnet address) adds a line,
+"Windows Firewall blocks remote agents". A block rule wins over any allow rule;
+only rules on a currently active profile count. To fix it, add an inbound allow
+rule for `tze_hud.exe` (an elevated PowerShell):
+
+```powershell
+New-NetFirewallRule -DisplayName "tze_hud" -Direction Inbound -Action Allow `
+  -Program "$env:LOCALAPPDATA\Programs\tze_hud\tze_hud.exe" -Protocol TCP `
+  -RemoteAddress 100.64.0.0/10,fd7a:115c:a1e0::/48
+```
+
+Adjust `-Program` to where `tze_hud.exe` is installed; remove a conflicting block
+rule if `rule` names one. Loopback agents are never affected.
+
 ## Logs and operator endpoints
 
 The overlay has no console, so tracing also goes to `tze_hud.log` in
@@ -101,7 +133,7 @@ the MCP port with its PSK as the bearer:
 
 | Request | Response |
 |---|---|
-| `GET /admin/status` | JSON: `version`, `sha`, `channel`, `pid`, `uptime_s`, `binds`, `agents` (`id`, `admin`), `safe_mode`, `safe_mode_hotkey` (`chord`, `registered`, `error`; `null` when no hotkey is active (non-Windows, or no network runtime); `registered: null` means registration is still pending; `registered: false` means another program owns the chord and there is no human override, also shown in the startup banner and logged at error level), `frames_presented`, `cpu_pct_2s` (sampled over 2 s, so the call takes about 2 s), `cpu_pct_avg` (percent of one core), `last_update` (null until updates land), `last_restart` (`null`, or `{ok, pid, error}` for the last restart that did not hand over) |
+| `GET /admin/status` | JSON: `version`, `sha`, `channel`, `pid`, `uptime_s`, `binds`, `tailnet_inbound` (`state`: `allowed`, `blocked`, `unknown` or `not_applicable`; when `blocked`, also `reason` (`block_rule` or `no_allow_rule`), `rule` (the blocking rule's name, or `null`) and `fix`; `unknown` carries `error`; cached for 5 s), `agents` (`id`, `admin`), `safe_mode`, `safe_mode_hotkey` (`chord`, `registered`, `error`; `null` when no hotkey is active (non-Windows, or no network runtime); `registered: null` means registration is still pending; `registered: false` means another program owns the chord and there is no human override, also shown in the startup banner and logged at error level), `frames_presented`, `cpu_pct_2s` (sampled over 2 s, so the call takes about 2 s), `cpu_pct_avg` (percent of one core), `last_update` (null until updates land), `last_restart` (`null`, or `{ok, pid, error}` for the last restart that did not hand over) |
 | `GET /admin/logs?tail=N` | `text/plain`, the last N lines (default 100, max 2000) across the rotation |
 | `GET /admin/screenshot` | `image/png` of the HUD's own frame at the window size (what the compositor draws, not an OS capture); rendered once per request, so idle cost is unchanged. One at a time (429), 503 if the compositor does not answer within 3 s |
 | `POST /admin/restart` | 202 `{"restarting":true}`, then the HUD relaunches itself (see below). POST only; the request body is ignored. 429 `BUSY` while one is in progress |

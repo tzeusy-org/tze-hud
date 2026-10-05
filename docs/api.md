@@ -144,7 +144,7 @@ allow = ["zone:*", "widget:gauge", "portal", "tiles"]
   negotiation and no resident principal.
 - `admin` is an operator entry, outside the model surface: it opens
   `GET /admin/status`, `GET /admin/logs`, and `GET /admin/screenshot` on the
-  MCP port, and `*` does not grant it. `/admin/status` includes `safe_mode_hotkey`
+  MCP port, and `*` does not grant it. `/admin/status` includes `tailnet_inbound` (`state`: `allowed`, `blocked`, `unknown`, `not_applicable`; `reason`, `rule` and `fix` when `blocked`; `error` when `unknown`): whether Windows Firewall lets remote agents reach the tailnet bind, and `safe_mode_hotkey`
   (`chord`, `registered`, `error`; `null` when no hotkey is active; `registered: null` while pending): `registered: false`
   means the human safe-mode chord is owned by another program.
   `/admin/screenshot` returns a PNG of the frame the compositor draws (not an

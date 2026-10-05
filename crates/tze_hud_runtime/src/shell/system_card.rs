@@ -77,6 +77,19 @@ impl SystemCardHandle {
         self.render_wake.notify();
     }
 
+    /// Replace the card with `new` only if `expected` is still the one showing
+    /// (a newer code must not be overwritten by a late background result).
+    pub fn replace_if_current(&self, expected: &SystemCard, new: SystemCard) -> bool {
+        let mut slot = self.slot.write().unwrap_or_else(|e| e.into_inner());
+        if slot.as_ref() != Some(expected) {
+            return false;
+        }
+        *slot = Some(new);
+        drop(slot);
+        self.render_wake.notify();
+        true
+    }
+
     /// Remove the card, waking the render loop only if one was showing.
     pub fn clear(&self) {
         let had = self

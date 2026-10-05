@@ -173,20 +173,28 @@ pub async fn start_mcp_http_server_with_render_wake(
     };
 
     crate::operator::status::process_start();
+    // In deferred mode this fills in as the listeners bind. Pairing reads
+    // the same list for the address it shows and hands out.
+    let binds = match &config.pairing {
+        Some(pairing) => pairing.binds(&local_addrs),
+        None => Arc::new(std::sync::Mutex::new(local_addrs.clone())),
+    };
     let admin = Arc::new(StatusSource {
         agents: config.agents.clone(),
-        // In deferred mode this fills in as the listeners bind. Pairing reads
-        // the same list for the address it shows and hands out.
-        binds: match &config.pairing {
-            Some(pairing) => pairing.binds(&local_addrs),
-            None => Arc::new(std::sync::Mutex::new(local_addrs.clone())),
-        },
         safe_mode: Arc::clone(&safe_mode),
         presents: config.presents.clone(),
         capture: config.capture.clone(),
         restart: config.restart.clone(),
         update: config.update.clone(),
         pairing: config.pairing.clone(),
+        firewall: match &config.pairing {
+            Some(pairing) => pairing.firewall(),
+            None => Arc::new(crate::firewall::FirewallProbe::system(
+                Arc::clone(&binds),
+                Vec::new(),
+            )),
+        },
+        binds,
         log_path: crate::operator::logs::log_path(),
     });
 
@@ -660,6 +668,12 @@ mod tests {
             restart: None,
             update: None,
             pairing: None,
+            firewall: Arc::new(crate::firewall::FirewallProbe::new(|| {
+                crate::firewall::TailnetInbound::Blocked {
+                    reason: crate::firewall::BlockReason::NoAllowRule,
+                    rule: None,
+                }
+            })),
             log_path,
         }
     }
@@ -901,6 +915,7 @@ mod tests {
             "pid",
             "uptime_s",
             "binds",
+            "tailnet_inbound",
             "agents",
             "safe_mode",
             "frames_presented",
@@ -916,6 +931,9 @@ mod tests {
             serde_json::json!([{"id":"root","admin":true},{"id":"star","admin":false}])
         );
         assert_eq!(v["binds"], serde_json::json!(["127.0.0.1:9090"]));
+        assert_eq!(v["tailnet_inbound"]["state"], "blocked");
+        assert_eq!(v["tailnet_inbound"]["reason"], "no_allow_rule");
+        assert!(v["tailnet_inbound"]["fix"].is_string(), "{text}");
         if cfg!(target_os = "linux") {
             assert!(
                 v["cpu_pct_2s"].is_number() && v["cpu_pct_avg"].is_number(),

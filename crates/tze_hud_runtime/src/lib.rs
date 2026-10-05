@@ -40,6 +40,7 @@ pub(crate) mod channels;
 pub(crate) mod degradation;
 pub mod diag;
 pub mod element_store;
+pub(crate) mod firewall;
 pub mod headless;
 pub mod http;
 pub(crate) mod idle_efficiency;
