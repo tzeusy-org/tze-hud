@@ -639,6 +639,11 @@ impl ScrollState {
         self.tiles.insert(tile_id, state);
     }
 
+    /// Drop entries for tiles `keep` rejects (e.g. destroyed tiles).
+    pub fn retain_tiles(&mut self, mut keep: impl FnMut(SceneId) -> bool) {
+        self.tiles.retain(|id, _| keep(*id));
+    }
+
     /// Returns true if a tile is registered as scrollable.
     pub fn is_scrollable(&self, tile_id: SceneId) -> bool {
         self.tiles.contains_key(&tile_id)
