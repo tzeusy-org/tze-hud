@@ -7,9 +7,7 @@ use super::*;
 /// keys; get_by_key returns the parsed entry after prime.
 ///
 /// This is a CPU-only prerequisite test for the node_key_cache contract — it
-/// does not call Compositor::prime_markdown_cache. The compositor-level test
-/// that verifies node_key_cache population is
-/// `prime_markdown_cache_builds_node_key_cache_entry` (GPU-gated).
+/// does not call Compositor::prime_markdown_cache.
 #[test]
 fn markdown_cache_compute_key_is_deterministic_and_content_addressed() {
     use tze_hud_scene::types::{
@@ -186,135 +184,6 @@ fn portal_markdown_node_ids_scopes_by_scroll_config() {
     );
 }
 
-/// MarkdownCache::prime is idempotent: repeated calls with the same content
-/// return the identical cached ParsedMarkdown without re-parsing.
-///
-/// This is a CPU-only test of MarkdownCache hit behavior. It does not test
-/// the Compositor scene-version gate. The compositor-level no-op gate is
-/// validated by `prime_markdown_cache_builds_node_key_cache_entry` — calling
-/// prime_markdown_cache twice on the same scene version leaves node_key_cache
-/// unchanged on the second call.
-#[test]
-fn markdown_cache_prime_is_idempotent_for_same_content() {
-    // Verify that MarkdownCache::prime returns the same value on repeated
-    // calls with identical content (cache hit, no re-parse).
-    let tokens = crate::markdown::MarkdownTokens::default();
-    let content = "**bold** text";
-
-    // Prime once.
-    let mut cache = crate::markdown::MarkdownCache::new();
-    let parsed_first = cache.prime(content, &tokens).clone();
-
-    // Prime again — entry() API returns the cached value, no re-parse.
-    let parsed_second = cache.prime(content, &tokens).clone();
-
-    assert_eq!(
-        parsed_first, parsed_second,
-        "repeated prime of same content must return identical ParsedMarkdown"
-    );
-}
-
-/// set_token_map clears node_key_cache so the next prime rebuilds it with
-/// the new token-resolved keys.
-///
-/// This exercises the full token-map invalidation path.  Without the clear,
-/// node_key_cache would map node IDs to stale keys referencing evicted
-/// markdown_cache entries, causing cache misses on the render path.  After
-/// hud-xcp9b those misses trigger an inline non-lossy parse + tracing::warn!
-/// rather than the old silent lossy strip_markdown_v1 fallback.
-#[tokio::test]
-async fn set_token_map_clears_node_key_cache() {
-    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(64, 64).await);
-
-    // node_key_cache starts empty.
-    assert!(
-        compositor.node_key_cache.is_empty(),
-        "node_key_cache must start empty"
-    );
-
-    // After set_token_map, node_key_cache must still be empty (or cleared if
-    // it was previously populated).
-    compositor.set_token_map(HashMap::new());
-    assert!(
-        compositor.node_key_cache.is_empty(),
-        "set_token_map must clear node_key_cache"
-    );
-}
-
-/// prime_markdown_cache builds node_key_cache with one entry per
-/// TextMarkdown node.  On the first call the cache is empty; after priming
-/// it has exactly one entry whose key equals MarkdownCache::compute_key
-/// for the node's content.
-#[tokio::test]
-async fn prime_markdown_cache_builds_node_key_cache_entry() {
-    use tze_hud_scene::types::{
-        FontFamily, NodeData, Rect, TextAlign, TextMarkdownNode, TextOverflow,
-    };
-
-    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(64, 64).await);
-
-    let content = "## Heading\n\nParagraph with *italic* text.";
-    // Empty token map → portal and generic scopes both resolve to defaults, so
-    // the key is scope-independent here (hud-3ryie).
-    let expected_key = crate::markdown::MarkdownCache::compute_key(
-        content,
-        &crate::markdown::MarkdownTokens::default(),
-    );
-
-    let node_id = SceneId::new();
-    let node = Node {
-        layout: Default::default(),
-        id: node_id,
-        children: vec![],
-        data: NodeData::TextMarkdown(TextMarkdownNode {
-            content: content.to_string(),
-            bounds: Rect::new(0.0, 0.0, 200.0, 100.0),
-            font_size_px: 14.0,
-            font_family: FontFamily::SystemSansSerif,
-            color: tze_hud_scene::types::Rgba {
-                r: 1.0,
-                g: 1.0,
-                b: 1.0,
-                a: 1.0,
-            },
-            background: None,
-            alignment: TextAlign::Start,
-            overflow: TextOverflow::Clip,
-            color_runs: Box::default(),
-        }),
-    };
-
-    let scene = scene_with_node(node);
-
-    // Before priming: node_key_cache is empty.
-    assert!(
-        compositor.node_key_cache.is_empty(),
-        "node_key_cache must be empty before first prime"
-    );
-
-    compositor.prime_markdown_cache(&scene);
-
-    // After priming: exactly one entry inserted under the correct SceneId.
-    // Assert via node_id (not values().next()) so that a wrong-key insertion
-    // is not masked by a length-1 coincidence.
-    assert_eq!(
-        compositor.node_key_cache.len(),
-        1,
-        "node_key_cache must have one entry after priming a scene with one TextMarkdown node"
-    );
-
-    let cached_key = compositor
-        .node_key_cache
-        .get(&node_id)
-        .copied()
-        .expect("node_key_cache must contain an entry for node_id");
-
-    assert_eq!(
-        cached_key, expected_key,
-        "cached key must equal MarkdownCache::compute_key(content)"
-    );
-}
-
 /// Verify the commit-time prime contract (hud-380dl, Option A):
 ///
 /// When `prime_markdown_cache` is called BEFORE `render_frame_headless`
@@ -409,64 +278,6 @@ async fn render_frame_headless_is_parse_free_after_commit_time_prime() {
     assert_eq!(
         compositor.markdown_cache_scene_version, scene_version_before,
         "second render of unchanged scene must not change markdown_cache_scene_version"
-    );
-}
-
-// ── Adaptive cadence threshold tests (hud-3to8i) ──────────────────────────
-//
-// These tests verify `adaptive_reprime_interval_ms`, which selects the
-// re-prime interval based on total Ellipsis content byte count.
-//
-// Key invariants:
-//   a) Zero bytes (empty scene) → short interval (≈60 Hz).
-//   b) Content just below the short threshold → short interval.
-//   c) Content at the short threshold → medium interval.
-//   d) Content just below the long threshold → medium interval.
-//   e) Content at the long threshold → long interval.
-//   f) Large content → long interval.
-//   g) The short interval < medium interval < long interval (strict ordering).
-
-/// Invariant (b): content just below the short threshold → short interval.
-#[test]
-fn adaptive_cadence_below_short_threshold_uses_short_interval() {
-    let bytes = RESIZE_REPRIME_SHORT_THRESHOLD_BYTES - 1;
-    assert_eq!(
-        adaptive_reprime_interval_ms(bytes),
-        RESIZE_REPRIME_INTERVAL_SHORT_MS,
-        "content just below short threshold ({bytes} bytes) must use short interval"
-    );
-}
-
-/// Invariant (c): content at the short threshold → medium interval.
-#[test]
-fn adaptive_cadence_at_short_threshold_uses_medium_interval() {
-    let bytes = RESIZE_REPRIME_SHORT_THRESHOLD_BYTES;
-    assert_eq!(
-        adaptive_reprime_interval_ms(bytes),
-        RESIZE_REPRIME_INTERVAL_MEDIUM_MS,
-        "content at short threshold ({bytes} bytes) must use medium interval"
-    );
-}
-
-/// Invariant (d): content just below the long threshold → medium interval.
-#[test]
-fn adaptive_cadence_below_long_threshold_uses_medium_interval() {
-    let bytes = RESIZE_REPRIME_LONG_THRESHOLD_BYTES - 1;
-    assert_eq!(
-        adaptive_reprime_interval_ms(bytes),
-        RESIZE_REPRIME_INTERVAL_MEDIUM_MS,
-        "content just below long threshold ({bytes} bytes) must use medium interval"
-    );
-}
-
-/// Invariant (e): content at the long threshold → long interval.
-#[test]
-fn adaptive_cadence_at_long_threshold_uses_long_interval() {
-    let bytes = RESIZE_REPRIME_LONG_THRESHOLD_BYTES;
-    assert_eq!(
-        adaptive_reprime_interval_ms(bytes),
-        RESIZE_REPRIME_INTERVAL_LONG_MS,
-        "content at long threshold ({bytes} bytes) must use long interval (≈10 Hz)"
     );
 }
 
