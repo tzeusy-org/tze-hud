@@ -12,8 +12,9 @@
 //!
 //! Path resolution: `TZE_HUD_DIAG_LOG` env var if set, else
 //! `hud-diag.log` in the log directory (see [`crate::operator::logs::log_dir`]).
+//! It rotates to `.1` at [`crate::operator::logs::MAX_LOG_BYTES`], like the
+//! main log, so a panic loop cannot fill the disk.
 
-use std::io::Write;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -40,14 +41,11 @@ pub fn diag_write(line: &str) {
         .name()
         .unwrap_or("unnamed")
         .to_string();
-    if let Ok(mut f) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(diag_path())
-    {
-        let _ = writeln!(f, "[{ms}ms][{thread}] {line}");
-        let _ = f.flush();
-    }
+    let _ = crate::operator::logs::append_rotating(
+        &diag_path(),
+        format!("[{ms}ms][{thread}] {line}\n").as_bytes(),
+        crate::operator::logs::MAX_LOG_BYTES,
+    );
 }
 
 /// Install a global panic hook that records every panic (any thread, including
