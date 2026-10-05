@@ -306,7 +306,6 @@ design token:
 "font.sans" = "Inter"         # default "IBM Plex Sans"
 "font.mono" = "Cascadia Code" # default "IBM Plex Mono"
 "font.serif" = "Georgia"      # default "DejaVu Serif"
-"font.dir" = "fonts"          # default: <config dir>/fonts, if it exists
 ```
 
 A family name resolves to the first match, compared case-insensitively:
@@ -314,8 +313,12 @@ A family name resolves to the first match, compared case-insensitively:
 1. **Bundled:** `IBM Plex Sans` (400, 400 italic, 500, 600, 700), `IBM Plex
    Mono` (400, 500), `DejaVu Sans`, `DejaVu Sans Mono`, `DejaVu Serif`
    (400, 700).
-2. **Fonts dir:** every `*.ttf|otf|ttc|otc` file directly in `font.dir` is
-   loaded at startup. A relative path is relative to the config file.
+2. **Fonts dir:** every `*.ttf|otf|ttc|otc` file directly in a `fonts`
+   directory beside the config file is loaded at startup, if that directory
+   exists. The location is fixed by convention, not configurable: a path is
+   not a design value. (The runtime passes it to the compositor under the
+   internal key `runtime.fonts_dir`, which `[design_tokens]` rejects with
+   `CONFIG_INVALID_TOKEN_KEY`.)
 3. **Windows system font, by name:** the HKLM/HKCU `...\Windows
    NT\CurrentVersion\Fonts` registry entries matching the name are loaded,
    and only those. The runtime never scans system font directories, so

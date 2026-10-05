@@ -88,29 +88,25 @@ pub fn run_scene_startup(
 
 // ─── Fonts directory ──────────────────────────────────────────────────────────
 
-/// Point the `font.dir` token at the operator fonts directory, made absolute so
-/// the compositor needs no config path.
+/// Set the runtime-internal fonts-dir key to `<config_parent>/fonts` (made
+/// absolute so the compositor needs no config path) when that directory
+/// exists; otherwise remove it.
 ///
-/// An explicit `font.dir` resolves relative to `config_parent`; otherwise
-/// `<config_parent>/fonts` is used when it is a directory.  With no
-/// `config_parent` (headless tests) nothing is inferred, keeping fonts bundled.
+/// The key is never user config — config validation rejects it in
+/// `[design_tokens]` — and any value that slipped in is overwritten or
+/// dropped here.  With no `config_parent` (headless tests) fonts stay bundled.
 fn resolve_font_dir(tokens: &mut DesignTokenMap, config_parent: Option<&Path>) {
-    use tze_hud_compositor::fonts::TOKEN_FONT_DIR;
-    let dir = match (tokens.get(TOKEN_FONT_DIR), config_parent) {
-        (Some(dir), Some(parent)) => parent.join(dir.trim()),
-        (Some(_), None) => return,
-        (None, Some(parent)) => {
-            let dir = parent.join("fonts");
-            if !dir.is_dir() {
-                return;
-            }
-            dir
-        }
-        (None, None) => return,
+    use tze_hud_compositor::fonts::RUNTIME_FONTS_DIR_KEY;
+    tokens.remove(RUNTIME_FONTS_DIR_KEY);
+    let Some(dir) = config_parent
+        .map(|p| p.join("fonts"))
+        .filter(|d| d.is_dir())
+    else {
+        return;
     };
     tracing::info!(dir = %dir.display(), "scene_startup: fonts dir");
     tokens.insert(
-        TOKEN_FONT_DIR.to_owned(),
+        RUNTIME_FONTS_DIR_KEY.to_owned(),
         dir.to_string_lossy().into_owned(),
     );
 }
@@ -199,35 +195,40 @@ mod tests {
     use tze_hud_scene::graph::SceneGraph;
 
     #[test]
-    fn font_dir_defaults_to_existing_config_fonts_dir_and_resolves_relative() {
+    fn fonts_dir_is_config_dir_fonts_when_present_and_never_user_set() {
+        use tze_hud_compositor::fonts::RUNTIME_FONTS_DIR_KEY as KEY;
         let parent = std::env::temp_dir().join(format!("tze_hud_font_dir_{}", std::process::id()));
         std::fs::create_dir_all(&parent).unwrap();
+        let smuggled = || -> DesignTokenMap { [(KEY.to_owned(), "/elsewhere".to_owned())].into() };
 
-        // No fonts/ beside the config: nothing inferred.
-        let mut tokens = DesignTokenMap::new();
+        // No fonts/ beside the config: key absent, a smuggled value dropped.
+        let mut tokens = smuggled();
         resolve_font_dir(&mut tokens, Some(&parent));
-        assert!(!tokens.contains_key("font.dir"));
+        assert!(!tokens.contains_key(KEY));
 
+        // fonts/ exists: key is its absolute path, overriding any smuggled value.
         std::fs::create_dir_all(parent.join("fonts")).unwrap();
+        let mut tokens = smuggled();
         resolve_font_dir(&mut tokens, Some(&parent));
         assert_eq!(
-            tokens.get("font.dir").map(String::as_str),
+            tokens.get(KEY).map(String::as_str),
             Some(parent.join("fonts").to_string_lossy().as_ref())
         );
 
-        // An explicit relative dir resolves against the config dir.
-        let mut tokens: DesignTokenMap = [("font.dir".to_owned(), "my-fonts".to_owned())].into();
-        resolve_font_dir(&mut tokens, Some(&parent));
-        assert_eq!(
-            tokens.get("font.dir").map(String::as_str),
-            Some(parent.join("my-fonts").to_string_lossy().as_ref())
-        );
-
         // No config dir (headless): nothing inferred.
-        let mut tokens = DesignTokenMap::new();
+        let mut tokens = smuggled();
         resolve_font_dir(&mut tokens, None);
         assert!(tokens.is_empty());
         std::fs::remove_dir_all(&parent).ok();
+    }
+
+    /// The config crate's reserved-key list must name the compositor's key.
+    #[test]
+    fn runtime_fonts_dir_key_is_reserved_in_config_validation() {
+        assert!(
+            tze_hud_config::tokens::RESERVED_RUNTIME_TOKEN_KEYS
+                .contains(&tze_hud_compositor::fonts::RUNTIME_FONTS_DIR_KEY)
+        );
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

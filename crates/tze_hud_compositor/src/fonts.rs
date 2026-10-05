@@ -50,7 +50,8 @@
 //!
 //! A [`FontConfig`] names a family per role (free-form strings, normally the
 //! `font.sans` / `font.mono` / `font.serif` design tokens; see
-//! [`FontConfig::from_token_map`]).  [`build_font_system`] resolves each name,
+//! [`FontConfig::from_token_map`]) plus the fonts directory, which the runtime
+//! sets to `<config dir>/fonts` when it exists (not user-configurable).  [`build_font_system`] resolves each name,
 //! first match wins:
 //!
 //! 1. a bundled family (`"IBM Plex Sans"`, `"IBM Plex Mono"`, `"DejaVu Sans"`,
@@ -136,9 +137,13 @@ pub const TOKEN_FONT_SANS: &str = "font.sans";
 pub const TOKEN_FONT_MONO: &str = "font.mono";
 /// Design-token key naming the serif role's family.
 pub const TOKEN_FONT_SERIF: &str = "font.serif";
-/// Design-token key holding the absolute fonts directory (set by the runtime
-/// to `<config dir>/fonts` when that directory exists).
-pub const TOKEN_FONT_DIR: &str = "font.dir";
+/// Runtime-internal token-map key carrying the absolute fonts directory.
+///
+/// Not user config: the runtime sets it to `<config dir>/fonts` when that
+/// directory exists, and config validation rejects it in `[design_tokens]`
+/// (a filesystem path is not a design value).  It rides the token map only
+/// because that is the existing channel into the compositor.
+pub const RUNTIME_FONTS_DIR_KEY: &str = "runtime.fonts_dir";
 
 // ── Configuration ─────────────────────────────────────────────────────────────
 
@@ -160,15 +165,15 @@ pub struct FontConfig {
 }
 
 impl FontConfig {
-    /// Read the `font.sans`, `font.mono`, `font.serif` and `font.dir` keys of a
-    /// resolved design-token map.  Absent keys leave the role at its default.
+    /// Read the `font.sans`, `font.mono` and `font.serif` tokens and the
+    /// runtime-set [`RUNTIME_FONTS_DIR_KEY`] from a resolved token map.  Absent keys leave the role at its default.
     pub fn from_token_map(tokens: &HashMap<String, String>) -> Self {
         let get = |key: &str| tokens.get(key).cloned();
         Self {
             sans: get(TOKEN_FONT_SANS),
             mono: get(TOKEN_FONT_MONO),
             serif: get(TOKEN_FONT_SERIF),
-            fonts_dir: get(TOKEN_FONT_DIR).map(PathBuf::from),
+            fonts_dir: get(RUNTIME_FONTS_DIR_KEY).map(PathBuf::from),
         }
         .normalized()
     }
@@ -700,7 +705,7 @@ mod tests {
             (TOKEN_FONT_SANS, "IBM Plex Sans"),
             (TOKEN_FONT_MONO, "monospace"),
             (TOKEN_FONT_SERIF, "  Georgia "),
-            (TOKEN_FONT_DIR, "/cfg/fonts"),
+            (RUNTIME_FONTS_DIR_KEY, "/cfg/fonts"),
         ]
         .into_iter()
         .map(|(k, v)| (k.to_owned(), v.to_owned()))

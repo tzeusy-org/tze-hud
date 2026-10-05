@@ -1530,7 +1530,8 @@ impl Compositor {
     /// to derive alert-banner backdrop colors, falling back to hardcoded constants
     /// when a key is absent or unparseable.
     pub fn set_token_map(&mut self, map: HashMap<String, String>) {
-        // `font.sans` / `font.mono` / `font.serif` / `font.dir` select the
+        // `font.sans` / `font.mono` / `font.serif` (and the runtime-set fonts
+        // dir, `fonts::RUNTIME_FONTS_DIR_KEY`) select the
         // font roles; a no-op unless they changed (see `set_font_config`).
         self.set_font_config(crate::fonts::FontConfig::from_token_map(&map));
         // Rebuild markdown tokens from the new map so heading weights, link
