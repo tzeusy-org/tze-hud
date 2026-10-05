@@ -72,7 +72,7 @@ Store or exits without doing anything. Fix it one of these ways:
 - Or install Python with `winget install Python.Python.3.12`, then check that
   `python3 --version` prints a version.
 
-For `just test-python`, run `pip install grpcio protobuf pillow blake3 pytest`.
+For `just test-python`, run `pip install -r scripts/requirements-dev.txt`.
 
 ### Build speed
 
@@ -233,33 +233,39 @@ Claude Code. That makes WSL a Linux dev box that happens to share the screen,
 so the rest of this doc's Windows tooling setup isn't needed. No code changes
 are needed for this setup. The one hard requirement is networking.
 
-### Networking: use mirrored mode
+### Networking: NAT plus the tailnet
 
 The HUD listens only on `127.0.0.1` and the host's Tailscale addresses
 (`crates/tze_hud_runtime/src/net_addrs.rs`). There is no bind-all switch, and
-none should be added. With WSL2's default NAT networking, `127.0.0.1` inside
-WSL is the VM's own loopback, not Windows', so agents in WSL can't reach the
-HUD. Turn on mirrored networking (Windows 11 22H2 or later) in
-`%USERPROFILE%\.wslconfig`:
+none should be added. So an agent in WSL reaches the HUD one of two ways:
+over Windows loopback (mirrored mode), or over the tailnet.
 
-```ini
-[wsl2]
-networkingMode=mirrored
-```
+Use the tailnet. Run Tailscale inside WSL as its own node (`sudo tailscale up`),
+keep WSL on its default NAT networking, and point agents at the Windows host's
+Tailscale name or IP (the HUD shows it on the pairing card):
 
-Then run `wsl --shutdown` and reopen WSL. After that,
-`http://127.0.0.1:9090/mcp` from WSL reaches the HUD's MCP port, and gRPC is
-reachable on `127.0.0.1:50051`, so:
+- `HUD_HOST=<windows-tailscale-name>` for the skill scripts, and
+  `curl -s http://<windows-tailscale-ip>:9090/pair -d '{"agent":"claude","code":"<code>"}'`
+  to pair by hand.
+- Inbound tailnet traffic crosses Windows Firewall. Accept the firewall prompt
+  on the HUD's first launch, or add a program rule for a dev exe path from an
+  admin PowerShell:
+  `New-NetFirewallRule -DisplayName 'tze_hud dev' -Direction Inbound -Program '<path>\tze_hud.exe' -Protocol TCP -Action Allow`.
 
-- Skill scripts and Claude Code MCP configs use `127.0.0.1` as they would on
-  Windows: `HUD_MCP_URL=http://127.0.0.1:9090/mcp`, with the paired PSK as the
-  bearer.
-- Pairing works from WSL:
-  `curl -s http://127.0.0.1:9090/pair -d '{"agent":"claude","code":"<code>"}'`.
+Mirrored mode (`networkingMode=mirrored`) looks like the simpler option, but it
+failed on the reference machine (WSL 3.0.1.0, observed 2026-10-04):
 
-If mirrored mode isn't available, the fallback is the tailnet. Run Tailscale
-inside WSL as its own node, and point agents at the Windows host's Tailscale IP
-(the HUD shows it on the pairing card).
+- Loopback to Windows listeners started after WSL booted hangs. Windows
+  shows `SYN_RECEIVED`, while WSL stays in `SYN-SENT`. This matches
+  [microsoft/WSL#40343](https://github.com/microsoft/WSL/issues/40343).
+  Listeners that existed before WSL booted, such as VS Code's forwarded
+  ports, kept working.
+- Mirrored mode also copies the Windows Tailscale addresses onto WSL's `eth0`.
+  Linux then treats them as local, so the tailnet route to the HUD is
+  unreachable too.
+- VS Code on Windows can hold common localhost ports (9090, 3307) for its port
+  forwarding, which in mirrored mode WSL shares. If the HUD logs
+  `failed to bind MCP HTTP server`, pass `--mcp-port <free port>`.
 
 ### Getting a Windows build of the HUD
 
@@ -268,15 +274,15 @@ Choose one of these:
 - **Cross-compile in WSL.** This is the fastest loop:
 
   ```sh
-  rustup target add x86_64-pc-windows-gnu
-  sudo apt install mingw-w64
-  cargo build --release --target x86_64-pc-windows-gnu -p tze_hud_app --bin tze_hud
+  just bootstrap        # scripts/dev-bootstrap.sh: mingw-w64, the Rust target, .venv, ...
+  just build-windows    # add `-j 8` if the link runs out of memory
   ```
 
   - The output is `target/x86_64-pc-windows-gnu/release/tze_hud.exe`.
   - On 2026-10-04, a Linux build imported only Windows system DLLs and
     embedded the DPI manifest (`windres` comes from mingw-w64).
-  - It has not been run on Windows yet.
+  - On 2026-10-05, it ran on Windows as an overlay. It paired from WSL over
+    the tailnet and rendered zones and widgets published over MCP.
   - It is the GNU flavor, not the MSVC build CI ships, so confirm anything
     toolchain-sensitive against a CI build.
 - **Use CI's build.** `gh release download dev -R tzeusy-org/tze-hud -p "tze_hud.exe*"`
@@ -288,9 +294,9 @@ Choose one of these:
 ### Running it from WSL
 
 WSL interop can start `.exe` files directly. A process started that way runs
-as your Windows user, in your desktop session, so it should get a real
-overlay. This hasn't been confirmed on this machine. If the window comes up
-grey and opaque, start it from a Windows terminal instead.
+as your Windows user, in your desktop session, and gets a real overlay
+(confirmed 2026-10-05). If the window comes up grey and opaque, start it from
+a Windows terminal instead.
 
 - Copy the exe and its config to a Windows directory, and run it from there.
   The exe and the config are the only files it needs, because widget bundles
@@ -316,10 +322,18 @@ arguments.
 
 ### Gates in WSL
 
-`just ci` runs as it does on any Linux host. For GPU tests, install
-`mesa-vulkan-drivers` and `libvulkan1`, so the recipes pin llvmpipe instead of
-the WSL GPU driver. Also install `protoc` 3.15 or later, and `mingw-w64` for
-`clippy-windows-gnu`. Keep the checkout on the WSL filesystem (`~/...`), not
+`just ci` runs as it does on any Linux host. Run `just bootstrap` first, and
+again whenever a dependency is added. It is idempotent, and it installs or
+reports everything the gates need. That includes `mesa-vulkan-drivers` and
+`libvulkan1`, so GPU recipes pin llvmpipe instead of the WSL GPU driver,
+`protoc` 3.15 or later, `mingw-w64` for `clippy-windows-gnu`, and the Python
+venv for `just test-python`. Without passwordless sudo, it prints the
+`apt-get install` line to run, and `just bootstrap --check` reports without
+installing. It also checks WSL interop, networking mode, and Tailscale. New
+dependencies go in its manifest at the top of `scripts/dev-bootstrap.sh`, and
+Python packages go in `scripts/requirements-dev.txt`, which CI also uses.
+
+Keep the checkout on the WSL filesystem (`~/...`), not
 `/mnt/c`, because cargo and git over the Windows mount are many times slower.
 
 ## Beads

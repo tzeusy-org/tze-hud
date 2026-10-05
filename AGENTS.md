@@ -7,6 +7,8 @@ This project uses **bd** (beads) for issue tracking. Run `bd onboard` to get sta
 The repo ships a `justfile` that reproduces CI gates locally. Requires [just](https://github.com/casey/just).
 
 ```bash
+just bootstrap       # install/report dev-host deps (idempotent; --check reports only)
+just build-windows   # cross-build tze_hud.exe (x86_64-pc-windows-gnu) from Linux/WSL
 just check           # cargo check (fast compilation gate)
 just fmt             # cargo fmt --check
 just fmt-fix         # cargo fmt (apply formatting)

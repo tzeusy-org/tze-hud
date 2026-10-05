@@ -412,12 +412,7 @@ jobs:
           python-version: "3.11"
       - name: Install Python test dependencies
         run: |
-          pip install --quiet \
-            "grpcio>=1.80.0" \
-            "protobuf>=6.31.1" \
-            "pillow>=11.0.0" \
-            "blake3>=1.0.0" \
-            "pytest>=8.0.0"
+          pip install --quiet -r scripts/requirements-dev.txt
       - name: Run pure-Python user-test suite
         run: |
           python3 -m pytest \
