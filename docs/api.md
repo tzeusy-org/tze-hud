@@ -250,7 +250,9 @@ canonical keys, their descriptions, and their defaults are in
 
 **A theme is a named set of token values, with no layout logic.** The
 built-in themes are `assets/themes/<name>.toml`, compiled into the exe:
-`tonal-glass` (the default) and `classic` (the look before the redesign).
+`tonal-glass` (the default), `blueprint` (after Palantir's open-source
+Blueprint dark theme: neutral grays, 4 px corners, Segoe UI), and `classic`
+(the look before the redesign).
 Config picks one with the reserved key `theme`:
 
 ```toml
