@@ -552,6 +552,13 @@ fn publish_zone(
     else {
         return fail(seq, "INVALID_ARGUMENT", "zone publish needs content");
     };
+    if matches!(&content, tze_hud_scene::types::ZoneContent::Notification(n) if n.is_blank()) {
+        return fail(
+            seq,
+            "INVALID_ARGUMENT",
+            tze_hud_scene::types::BLANK_NOTIFICATION_HINT,
+        );
+    }
     if !publish.breakpoints.is_empty()
         && !matches!(content, tze_hud_scene::types::ZoneContent::StreamText(_))
     {

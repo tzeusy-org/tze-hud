@@ -176,6 +176,7 @@ Only an unusable request (bad JSON, unknown method or tool, missing or
 unknown PSK) is a JSON-RPC error.
 
 - The message isn't repeated. The hint names the next call.
+- Typed zone content is strict: an unknown or nested key is `INVALID_ARGUMENT` with the allowed keys in the hint, and so is empty content (a notification with no title or body, `stream_text` without text, `solid_color` missing r/g/b; over gRPC, a blank notification).
 - Codes are a closed set shared by both planes (invariant 8;
   `crates/tze_hud_scene/src/error_codes.rs` `ERROR_CODES`, kept in sync with
   this list by a test). gRPC `RequestResult.code` uses the same set, checked

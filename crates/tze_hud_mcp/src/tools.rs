@@ -800,6 +800,50 @@ pub async fn hud_input(ctx: &ToolCtx<'_>, args: Value) -> McpResult<Value> {
 
 // ─── Content parsing ─────────────────────────────────────────────────────────
 
+/// Keys each typed content object may carry, with the shape a nested wrapper
+/// (`{"notification":{..}}`) should have been sent as.
+const CONTENT_KEYS: &[(&str, &[&str], &str)] = &[
+    ("stream_text", &["type", "text"], r#"{"text":..}"#),
+    (
+        "notification",
+        &[
+            "type", "title", "body", "text", "icon", "urgency", "ttl_ms", "actions",
+        ],
+        r#"{"title":..,"body":..}"#,
+    ),
+    ("status_bar", &["type", "entries"], r#"{"entries":{..}}"#),
+    (
+        "solid_color",
+        &["type", "r", "g", "b", "a"],
+        r#"{"r":..,"g":..,"b":..}"#,
+    ),
+    (
+        "static_image",
+        &["type", "resource_id"],
+        r#"{"resource_id":..}"#,
+    ),
+];
+
+/// Reject any key `ty` content does not read, so a wrong shape fails loudly
+/// instead of rendering defaults.
+fn reject_unknown_keys(obj: &serde_json::Map<String, Value>, ty: &str) -> Result<(), McpError> {
+    let Some((_, allowed, _)) = CONTENT_KEYS.iter().find(|(t, ..)| *t == ty) else {
+        return Ok(());
+    };
+    let Some(key) = obj.keys().find(|k| !allowed.contains(&k.as_str())) else {
+        return Ok(());
+    };
+    if let Some((_, _, shape)) = CONTENT_KEYS.iter().find(|(t, ..)| t == key) {
+        return Err(invalid(format!(
+            "content is not nested; send {key} fields directly: {shape}"
+        )));
+    }
+    Err(invalid(format!(
+        "unknown field `{key}` in {ty} content; allowed: {}",
+        allowed.join(", ")
+    )))
+}
+
 /// Parse the polymorphic `content` field into a `ZoneContent`.
 ///
 /// - Plain string → `StreamText`
@@ -816,12 +860,14 @@ fn parse_zone_content(content: &Value) -> Result<ZoneContent, McpError> {
                         "object content must have a \"type\" field (one of: stream_text, notification, status_bar, solid_color, static_image)".to_string(),
                     )
                 })?;
+            reject_unknown_keys(obj, type_str)?;
             match type_str {
                 "stream_text" => {
                     let text = obj
                         .get("text")
                         .and_then(|v| v.as_str())
-                        .unwrap_or_default()
+                        .filter(|t| !t.is_empty())
+                        .ok_or_else(|| invalid("stream_text content needs a non-empty \"text\""))?
                         .to_string();
                     Ok(ZoneContent::StreamText(text))
                 }
@@ -884,14 +930,18 @@ fn parse_zone_content(content: &Value) -> Result<ZoneContent, McpError> {
                             ))
                         }
                     };
-                    Ok(ZoneContent::Notification(NotificationPayload {
+                    let n = NotificationPayload {
                         text,
                         icon,
                         urgency,
                         ttl_ms,
                         title,
                         actions,
-                    }))
+                    };
+                    if n.is_blank() {
+                        return Err(invalid(tze_hud_scene::types::BLANK_NOTIFICATION_HINT));
+                    }
+                    Ok(ZoneContent::Notification(n))
                 }
                 "status_bar" => {
                     let entries: HashMap<String, String> = obj
@@ -912,9 +962,15 @@ fn parse_zone_content(content: &Value) -> Result<ZoneContent, McpError> {
                     Ok(ZoneContent::StatusBar(StatusBarPayload { entries }))
                 }
                 "solid_color" => {
-                    let r = obj.get("r").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
-                    let g = obj.get("g").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
-                    let b = obj.get("b").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+                    let channel = |k: &str| {
+                        obj.get(k)
+                            .and_then(Value::as_f64)
+                            .map(|v| v as f32)
+                            .ok_or_else(|| {
+                                invalid("solid_color content needs numeric r, g and b (a optional)")
+                            })
+                    };
+                    let (r, g, b) = (channel("r")?, channel("g")?, channel("b")?);
                     let a = obj.get("a").and_then(|v| v.as_f64()).unwrap_or(1.0) as f32;
                     Ok(ZoneContent::SolidColor(Rgba { r, g, b, a }))
                 }

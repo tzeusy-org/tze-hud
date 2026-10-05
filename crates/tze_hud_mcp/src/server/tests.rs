@@ -294,6 +294,44 @@ async fn bad_arguments_are_invalid_argument_tool_errors() {
     .await;
     assert_eq!(err["code"], "INVALID_ARGUMENT");
     assert!(err["hint"].as_str().unwrap().contains("content"), "{err}");
+
+    // Typed zone content: a wrong shape fails with a hint, never renders defaults.
+    for (surface, content, hint) in [
+        (
+            "zone:notification-area",
+            json!({"notification": {"title": "Hi", "body": "there"}}),
+            "not nested",
+        ),
+        (
+            "zone:status-bar",
+            json!({"entries": {"a": "1"}, "label": "x"}),
+            "allowed: type, entries",
+        ),
+        (
+            "zone:pip",
+            json!({"type": "solid_color", "r": 1, "g": 0, "b": 0, "alpha": 1}),
+            "allowed: type, r, g, b, a",
+        ),
+        (
+            "zone:subtitle",
+            json!({"type": "stream_text", "body": "x"}),
+            "allowed: type, text",
+        ),
+        (
+            "zone:notification-area",
+            json!({"urgency": 2}),
+            "title or body",
+        ),
+    ] {
+        let err = call_err(
+            &server,
+            "hud_publish",
+            json!({"surface": surface, "content": content}),
+        )
+        .await;
+        assert_eq!(err["code"], "INVALID_ARGUMENT", "{content}");
+        assert!(err["hint"].as_str().unwrap().contains(hint), "{err}");
+    }
 }
 
 #[tokio::test]
