@@ -291,220 +291,230 @@ impl HudSession for HudSessionImpl {
                 return; // Handshake failed, error already sent
             };
 
-            // Transition: Handshaking/Resuming → Active (RFC 0005 §1.1)
-            session.transition(SessionState::Active);
+            // The handshake registered this session; from here on, every exit
+            // (early `break 'active`, panic, task cancellation) must unregister
+            // it. Normal exits run the full cleanup below and disarm the guard.
+            let mut registry_guard = RegistryGuard::new(state.clone(), session.session_id.clone());
 
-            // Safe mode reaches this stream through the registry: it needs
-            // the outbound sender to send `SessionSuspended`/`SessionResumed`.
-            // `remove_session` at cleanup drops it.
-            state
-                .lock()
-                .await
-                .sessions
-                .register_server_message_tx(&session.session_id, tx.clone());
+            // Everything between registration and cleanup runs inside this
+            // labeled block so no early exit can skip the cleanup below.
+            'active: {
+                // Transition: Handshaking/Resuming → Active (RFC 0005 §1.1)
+                session.transition(SessionState::Active);
 
-            // Register the durable input lane only after the session has an
-            // authenticated namespace. This prevents unrelated or incomplete
-            // sessions from accumulating transactional input for other agents.
-            let mut input_event_rx = feeds.input_events.subscribe(session.namespace.clone());
+                // Safe mode reaches this stream through the registry: it needs
+                // the outbound sender to send `SessionSuspended`/`SessionResumed`.
+                // `remove_session` at cleanup drops it.
+                state
+                    .lock()
+                    .await
+                    .sessions
+                    .register_server_message_tx(&session.session_id, tx.clone());
 
-            // Send SceneSnapshot after successful handshake (RFC 0005 §1.3, §6.4)
-            {
-                let st = state.lock().await;
-                let wall_us = now_wall_us();
-                let mono_us: u64 = now_mono_us();
-                let (snap_json, checksum, sequence_number) = {
-                    let scene = st.scene.lock().await;
-                    let graph_snap = scene.take_snapshot(wall_us, mono_us);
-                    let snap_json = graph_snap
-                        .to_json()
-                        .unwrap_or_else(|e| format!("{{\"error\": \"{e}\"}}"));
-                    let checksum = graph_snap.checksum.clone();
-                    let sequence_number = scene.sequence_number;
-                    (snap_json, checksum, sequence_number)
-                };
+                // Register the durable input lane only after the session has an
+                // authenticated namespace. This prevents unrelated or incomplete
+                // sessions from accumulating transactional input for other agents.
+                let mut input_event_rx = feeds.input_events.subscribe(session.namespace.clone());
+
+                // Send SceneSnapshot after successful handshake (RFC 0005 §1.3, §6.4)
+                {
+                    let st = state.lock().await;
+                    let wall_us = now_wall_us();
+                    let mono_us: u64 = now_mono_us();
+                    let (snap_json, checksum, sequence_number) = {
+                        let scene = st.scene.lock().await;
+                        let graph_snap = scene.take_snapshot(wall_us, mono_us);
+                        let snap_json = graph_snap
+                            .to_json()
+                            .unwrap_or_else(|e| format!("{{\"error\": \"{e}\"}}"));
+                        let checksum = graph_snap.checksum.clone();
+                        let sequence_number = scene.sequence_number;
+                        (snap_json, checksum, sequence_number)
+                    };
+                    let seq = session.next_server_seq();
+                    drop(st);
+                    let _ = tx
+                        .send(Ok(ServerMessage {
+                            sequence: seq,
+                            timestamp_wall_us: now_wall_us(),
+                            payload: Some(ServerPayload::SceneSnapshot(SceneSnapshot {
+                                snapshot_json: snap_json,
+                                sequence: sequence_number,
+                                snapshot_wall_us: wall_us,
+                                snapshot_mono_us: mono_us,
+                                blake3_checksum: checksum,
+                            })),
+                        }))
+                        .await;
+                }
+
+                // Atomically subscribe after the coherent scene snapshot, then send
+                // the captured current policy before any later transition or
+                // incremental event. RFC 0005 requires this for both new sessions
+                // and resumes, including when the current level is Normal.
+                let (mut degradation_rx, current_degradation) =
+                    degradation_notices.subscribe_with_current();
                 let seq = session.next_server_seq();
-                drop(st);
-                let _ = tx
+                if tx
                     .send(Ok(ServerMessage {
                         sequence: seq,
                         timestamp_wall_us: now_wall_us(),
-                        payload: Some(ServerPayload::SceneSnapshot(SceneSnapshot {
-                            snapshot_json: snap_json,
-                            sequence: sequence_number,
-                            snapshot_wall_us: wall_us,
-                            snapshot_mono_us: mono_us,
-                            blake3_checksum: checksum,
-                        })),
+                        payload: Some(ServerPayload::DegradationNotice(current_degradation)),
                     }))
-                    .await;
-            }
-
-            // Atomically subscribe after the coherent scene snapshot, then send
-            // the captured current policy before any later transition or
-            // incremental event. RFC 0005 requires this for both new sessions
-            // and resumes, including when the current level is Normal.
-            let (mut degradation_rx, current_degradation) =
-                degradation_notices.subscribe_with_current();
-            let seq = session.next_server_seq();
-            if tx
-                .send(Ok(ServerMessage {
-                    sequence: seq,
-                    timestamp_wall_us: now_wall_us(),
-                    payload: Some(ServerPayload::DegradationNotice(current_degradation)),
-                }))
-                .await
-                .is_err()
-            {
-                return;
-            }
-
-            let upload_rate_limit_bytes_per_sec =
-                session.resource_upload_rate_limiter.limit_bytes_per_second;
-            let (upload_command_tx, upload_command_rx) =
-                tokio::sync::mpsc::channel::<UploadWorkerCommand>(64);
-            let (upload_event_tx, mut upload_event_rx) =
-                tokio::sync::mpsc::channel::<UploadWorkerEvent>(64);
-            tokio::spawn(run_upload_worker(
-                state.clone(),
-                session.namespace.clone(),
-                upload_command_rx,
-                upload_event_tx,
-                upload_rate_limit_bytes_per_sec,
-                render_wake.clone(),
-            ));
-
-            // Main message loop
-            //
-            // The loop exits for one of three reasons:
-            //   1. Stream EOF (graceful): agent closed the stream.
-            //   2. Stream error: transport-level error.
-            //   3. Heartbeat timeout: no message for heartbeat_missed_threshold × interval.
-            //
-            // In cases (2) and (3) the disconnect is ungraceful; leases become orphaned.
-            // In case (1) the disconnect may be graceful (SessionClose was sent) or
-            // ungraceful (agent dropped the connection without sending SessionClose).
-            //
-            // The loop also listens on `degradation_rx` for transactional DegradationNotice
-            // broadcasts (RFC 0005 §3.4). These are delivered unconditionally to all active
-            // sessions regardless of subscription config and are never dropped.
-            loop {
-                // Use heartbeat timeout for receive (RFC 0005 §1.6, §3.6)
-                let timeout_duration =
-                    tokio::time::Duration::from_millis(DEFAULT_HEARTBEAT_TIMEOUT_MS);
-
-                // ── Unfreeze drain: apply queued mutations if freeze just cleared ──
-                // When the shell sets SharedState.freeze_active = false, queued
-                // mutations are applied at the start of the next loop iteration
-                // so they are delivered in the next available frame batch
-                // (system-shell/spec.md §Freeze Scene: "Unfreeze applies queued
-                //  mutations in submission order in the next available frame batch").
-                //
-                // IMPORTANT: Use `apply_queued_batch_to_scene` (not
-                // `handle_mutation_batch`) here. Each queued batch has already
-                // received an immediate `MutationResult(accepted=true)` when it
-                // was enqueued. Re-using `handle_mutation_batch` would send a
-                // second result for the same batch_id, violating RFC 0005 §2.1.
+                    .await
+                    .is_err()
                 {
-                    let freeze_active = state.lock().await.freeze_active;
-                    if !freeze_active && !session.freeze_queue.is_empty() {
-                        let queued = session.freeze_queue.drain();
-                        let mut applied_render_work = false;
-                        for queued_batch in queued {
-                            applied_render_work |=
-                                apply_queued_batch_to_scene(&state, session, queued_batch).await;
-                        }
-                        if applied_render_work {
-                            render_wake.notify();
-                        }
-                    }
+                    break 'active;
                 }
 
-                tokio::select! {
-                    // ── Inbound client message ────────────────────────────────
-                    msg_result = tokio::time::timeout(timeout_duration, inbound.message()) => {
-                        match session.on_client_message(
-                            msg_result,
-                            &state,
-                            &tx,
-                            &upload_command_tx,
-                            &render_wake,
-                        ).await {
-                            LoopAction::Continue => continue,
-                            LoopAction::Break => break,
+                let upload_rate_limit_bytes_per_sec =
+                    session.resource_upload_rate_limiter.limit_bytes_per_second;
+                let (upload_command_tx, upload_command_rx) =
+                    tokio::sync::mpsc::channel::<UploadWorkerCommand>(64);
+                let (upload_event_tx, mut upload_event_rx) =
+                    tokio::sync::mpsc::channel::<UploadWorkerEvent>(64);
+                tokio::spawn(run_upload_worker(
+                    state.clone(),
+                    session.namespace.clone(),
+                    upload_command_rx,
+                    upload_event_tx,
+                    upload_rate_limit_bytes_per_sec,
+                    render_wake.clone(),
+                ));
+
+                // Main message loop
+                //
+                // The loop exits for one of three reasons:
+                //   1. Stream EOF (graceful): agent closed the stream.
+                //   2. Stream error: transport-level error.
+                //   3. Heartbeat timeout: no message for heartbeat_missed_threshold × interval.
+                //
+                // In cases (2) and (3) the disconnect is ungraceful; leases become orphaned.
+                // In case (1) the disconnect may be graceful (SessionClose was sent) or
+                // ungraceful (agent dropped the connection without sending SessionClose).
+                //
+                // The loop also listens on `degradation_rx` for transactional DegradationNotice
+                // broadcasts (RFC 0005 §3.4). These are delivered unconditionally to all active
+                // sessions regardless of subscription config and are never dropped.
+                loop {
+                    // Use heartbeat timeout for receive (RFC 0005 §1.6, §3.6)
+                    let timeout_duration =
+                        tokio::time::Duration::from_millis(DEFAULT_HEARTBEAT_TIMEOUT_MS);
+
+                    // ── Unfreeze drain: apply queued mutations if freeze just cleared ──
+                    // When the shell sets SharedState.freeze_active = false, queued
+                    // mutations are applied at the start of the next loop iteration
+                    // so they are delivered in the next available frame batch
+                    // (system-shell/spec.md §Freeze Scene: "Unfreeze applies queued
+                    //  mutations in submission order in the next available frame batch").
+                    //
+                    // IMPORTANT: Use `apply_queued_batch_to_scene` (not
+                    // `handle_mutation_batch`) here. Each queued batch has already
+                    // received an immediate `MutationResult(accepted=true)` when it
+                    // was enqueued. Re-using `handle_mutation_batch` would send a
+                    // second result for the same batch_id, violating RFC 0005 §2.1.
+                    {
+                        let freeze_active = state.lock().await.freeze_active;
+                        if !freeze_active && !session.freeze_queue.is_empty() {
+                            let queued = session.freeze_queue.drain();
+                            let mut applied_render_work = false;
+                            for queued_batch in queued {
+                                applied_render_work |=
+                                    apply_queued_batch_to_scene(&state, session, queued_batch)
+                                        .await;
+                            }
+                            if applied_render_work {
+                                render_wake.notify();
+                            }
                         }
                     }
 
-                    upload_event = upload_event_rx.recv() => {
-                        if let LoopAction::Break = session.on_upload_event(upload_event, &tx).await {
-                            break;
+                    tokio::select! {
+                        // ── Inbound client message ────────────────────────────────
+                        msg_result = tokio::time::timeout(timeout_duration, inbound.message()) => {
+                            match session.on_client_message(
+                                msg_result,
+                                &state,
+                                &tx,
+                                &upload_command_tx,
+                                &render_wake,
+                            ).await {
+                                LoopAction::Continue => continue,
+                                LoopAction::Break => break,
+                            }
                         }
-                    }
 
-                    // ── DegradationNotice broadcast (RFC 0005 §3.4, §7.1) ────
-                    //
-                    // Transactional — delivered unconditionally to all active sessions
-                    // regardless of subscription config. Never dropped.
-                    degradation_notice = degradation_rx.recv() => {
-                        if let LoopAction::Break = session.on_degradation(degradation_notice, &tx).await {
-                            break;
+                        upload_event = upload_event_rx.recv() => {
+                            if let LoopAction::Break = session.on_upload_event(upload_event, &tx).await {
+                                break;
+                            }
                         }
-                    }
 
-                    // ── Terminal lease transition from the compositor ─────────
-                    //
-                    // `SceneGraph::expire_leases()` owns the transition and
-                    // resource cleanup. This per-session durable lane owns the
-                    // corresponding wire notification, filtered by lease id.
-                    lease_expiry = feeds.lease_expiry.recv() => {
-                        if let LoopAction::Break = session.on_lease_expiry(lease_expiry, &tx).await {
-                            break;
+                        // ── DegradationNotice broadcast (RFC 0005 §3.4, §7.1) ────
+                        //
+                        // Transactional — delivered unconditionally to all active sessions
+                        // regardless of subscription config. Never dropped.
+                        degradation_notice = degradation_rx.recv() => {
+                            if let LoopAction::Break = session.on_degradation(degradation_notice, &tx).await {
+                                break;
+                            }
                         }
-                    }
 
-                    // ── Runtime-injected input EventBatch (hud-i6yd.6) ───────────
-                    //
-                    // The compositor input pipeline (Stage 2) assembles ClickEvent /
-                    // CommandInputEvent batches for the owning agent and injects them
-                    // here via `HudSessionImpl::inject_input_event`. Only batches
-                    // addressed to this session's namespace are forwarded; others are
-                    // silently discarded.
-                    //
-                    // Delivery is gated on subscription: the batch is filtered through
-                    // `subscriptions::filter_event_batch` before sending. If the agent
-                    // is not subscribed to INPUT_EVENTS / FOCUS_EVENTS the batch is
-                    // dropped silently (no error response).
-                    input_event_result = input_event_rx.recv() => {
-                        if let LoopAction::Break = session.on_input_event(input_event_result, &tx).await {
-                            break;
+                        // ── Terminal lease transition from the compositor ─────────
+                        //
+                        // `SceneGraph::expire_leases()` owns the transition and
+                        // resource cleanup. This per-session durable lane owns the
+                        // corresponding wire notification, filtered by lease id.
+                        lease_expiry = feeds.lease_expiry.recv() => {
+                            if let LoopAction::Break = session.on_lease_expiry(lease_expiry, &tx).await {
+                                break;
+                            }
                         }
-                    }
 
-                    // ── ElementRepositionedEvent broadcast (hud-bs2q.6) ──────────
-                    //
-                    // Emitted after drag completion or reset-to-default. Delivered to
-                    // agents subscribed to SCENE_TOPOLOGY (requires read_scene_topology).
-                    // Transactional — never coalesced or dropped. Agent cannot reject.
-                    element_repositioned_result = feeds.element_repositioned.recv() => {
-                        if let LoopAction::Break = session.on_element_repositioned(element_repositioned_result, &tx).await {
-                            break;
+                        // ── Runtime-injected input EventBatch (hud-i6yd.6) ───────────
+                        //
+                        // The compositor input pipeline (Stage 2) assembles ClickEvent /
+                        // CommandInputEvent batches for the owning agent and injects them
+                        // here via `HudSessionImpl::inject_input_event`. Only batches
+                        // addressed to this session's namespace are forwarded; others are
+                        // silently discarded.
+                        //
+                        // Delivery is gated on subscription: the batch is filtered through
+                        // `subscriptions::filter_event_batch` before sending. If the agent
+                        // is not subscribed to INPUT_EVENTS / FOCUS_EVENTS the batch is
+                        // dropped silently (no error response).
+                        input_event_result = input_event_rx.recv() => {
+                            if let LoopAction::Break = session.on_input_event(input_event_result, &tx).await {
+                                break;
+                            }
                         }
-                    }
 
-                    // ── FramePresented broadcast (hud-91uu6) ─────────────────────
-                    //
-                    // Batch-correlated present acknowledgment: pairs the accepted
-                    // MutationBatch.batch_ids composited into a presented frame with
-                    // that frame's present wall-clock. Delivered to agents subscribed
-                    // to TELEMETRY_FRAMES (requires read_telemetry). State-stream —
-                    // coalesced/droppable under backpressure. Agent cannot reject.
-                    frame_presented_result = feeds.frame_presented.recv() => {
-                        if let LoopAction::Break = session.on_frame_presented(
-                            frame_presented_result,
-                            &degradation_notices,
-                            &tx,
-                        ).await {
-                            break;
+                        // ── ElementRepositionedEvent broadcast (hud-bs2q.6) ──────────
+                        //
+                        // Emitted after drag completion or reset-to-default. Delivered to
+                        // agents subscribed to SCENE_TOPOLOGY (requires read_scene_topology).
+                        // Transactional — never coalesced or dropped. Agent cannot reject.
+                        element_repositioned_result = feeds.element_repositioned.recv() => {
+                            if let LoopAction::Break = session.on_element_repositioned(element_repositioned_result, &tx).await {
+                                break;
+                            }
+                        }
+
+                        // ── FramePresented broadcast (hud-91uu6) ─────────────────────
+                        //
+                        // Batch-correlated present acknowledgment: pairs the accepted
+                        // MutationBatch.batch_ids composited into a presented frame with
+                        // that frame's present wall-clock. Delivered to agents subscribed
+                        // to TELEMETRY_FRAMES (requires read_telemetry). State-stream —
+                        // coalesced/droppable under backpressure. Agent cannot reject.
+                        frame_presented_result = feeds.frame_presented.recv() => {
+                            if let LoopAction::Break = session.on_frame_presented(
+                                frame_presented_result,
+                                &degradation_notices,
+                                &tx,
+                            ).await {
+                                break;
+                            }
                         }
                     }
                 }
@@ -522,6 +532,7 @@ impl HudSession for HudSessionImpl {
             let (resource_store, namespace_for_cleanup) = {
                 let mut st = state.lock().await;
                 st.sessions.remove_session(&session.session_id);
+                registry_guard.disarm();
 
                 // Only sessions that completed the handshake get a grace period.
                 if !session.resume_token.is_empty() {
@@ -562,6 +573,47 @@ impl HudSession for HudSessionImpl {
         // Return the receiver stream as the response
         let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
         Ok(Response::new(Box::pin(stream)))
+    }
+}
+
+/// Unregisters a session (and its outbound sender) if the handler task dies
+/// before the normal cleanup runs, e.g. on panic or runtime shutdown. Normal
+/// exits call [`RegistryGuard::disarm`] after removing the entry themselves.
+/// Removal only: lease orphaning stays in the normal cleanup path.
+struct RegistryGuard {
+    state: Arc<Mutex<SharedState>>,
+    session_id: String,
+    armed: bool,
+}
+
+impl RegistryGuard {
+    fn new(state: Arc<Mutex<SharedState>>, session_id: String) -> Self {
+        Self {
+            state,
+            session_id,
+            armed: true,
+        }
+    }
+
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for RegistryGuard {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+        // The registry lock is async; hand removal to the runtime if one is
+        // still alive (if it is not, the whole registry is going away anyway).
+        if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+            let state = self.state.clone();
+            let session_id = std::mem::take(&mut self.session_id);
+            runtime.spawn(async move {
+                state.lock().await.sessions.remove_session(&session_id);
+            });
+        }
     }
 }
 
