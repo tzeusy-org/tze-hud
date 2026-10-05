@@ -4,6 +4,8 @@ The project is being cut back from a general "agent presence engine" to an
 MCP/gRPC layer for the HUD real-estate lifecycle (see [vision.md](vision.md)).
 Tranches T0–T4 removed what doesn't serve that; T5 redesigned the API that
 remains. T6–T8 prove the result on Windows and shrink the code to match.
+T9–T10 are owner-directed additions: per-monitor overlays and a swappable
+visual design.
 Each tranche must still build, pass tests, and boot the overlay.
 
 ## Keep
@@ -16,7 +18,7 @@ Each tranche must still build, pass tests, and boot the overlay.
 | MCP tools (zones, widgets, portal) | `tze_hud_mcp` |
 | gRPC resident session (tiles, events) | `tze_hud_protocol` |
 | SVG widgets + asset store | `tze_hud_widget`, `tze_hud_resource` |
-| Config + flat design tokens | `tze_hud_config` |
+| Config, flat design tokens, built-in themes | `tze_hud_config` |
 | Frame/idle telemetry | `tze_hud_telemetry` |
 | App binary | `app/tze_hud_app` |
 
@@ -33,6 +35,8 @@ Each tranche must still build, pass tests, and boot the overlay.
 | T6 | Windows delivery without SSH, then prove the POC on it. (1) CI builds `x86_64-pc-windows-msvc` natively on a Windows runner, boots it under WARP with an MCP smoke, and publishes minisign-signed releases (rolling `dev` from main, `v*` tags). (2) The exe self-installs per user (`%LOCALAPPDATA%`, `HKCU` Run autostart, no admin). (3) It listens on loopback and the Tailscale address only. (4) First-run pairing: the HUD shows a one-time code, an agent host trades it for a per-agent PSK (`POST /pair`; only a hash is stored); delete `--psk`, the default PSK, and `--bind-all-interfaces`. (5) `/admin/*` operator endpoints (status, logs, screenshot of the HUD's own frame, restart, signed pull-only self-update with health handoff), off the MCP surface. (6) Rewrite `user-test`/`hud-projection` around the paired PSK; delete SSH deploy tooling. Then run POC acceptance on the owner's host; close stale draft PRs | in progress (1) |
 | T7 | Portal as a runtime feature: projection state lives in the runtime keyed by PSK identity. Delete the external-authority design: owner tokens, audit log, provider-neutral contract, `projection_authority` binary, `resident_grpc` adapter. Fold the `PROJECTION_*` error codes into the shared set. Internal interfaces may break; the MCP surface and token footprint must not regress. Target: portal code (projection, driver, windowed portal, composer) under ~12k lines from ~45k | planned |
 | T8 | Code and test diet, crate by crate (compositor, runtime, scene, protocol, input first): delete code without a current user, replace oversized test files with behavior tests tied to `invariants.md`, add `tze_hud_resource` tests, a local llvmpipe recipe for compositor tests, and strip pre-reset references (openspec, RFCs, doctrine) from comments and protos | planned |
+| T9 | Owner-directed 2026-10-05, alongside T6 rather than after the POC. Per-monitor overlays: one window and surface per monitor sharing one scene, the default with no flag; delete `--monitor` and monitor cycling; logical (dp) token sizes scaled per monitor (bead `hud-1pt5h`) | in progress |
+| T10 | Owner-directed 2026-10-05. Swappable visual design: themes as a token layer between canonical defaults and `[design_tokens]` overrides, with Tonal Glass as the default; semantic token families (surfaces, roles, state, motion, shape, spacing, type); configurable fonts (bundled IBM Plex, fonts beside the config, Windows fonts by name); live theme and font switching; every element restyled to use tokens only (bead `hud-h51u7`). This reverses T4's removal of component profiles for themes only: themes hold token values, never layout | in progress |
 
 ## POC acceptance
 

@@ -2,7 +2,7 @@
 
 tze_hud is a well-designed, extremely performant MCP/gRPC layer that lets
 models generate and manage the **real-estate lifecycle** of a HUD over the
-user's screen. The renderer is a means; the product is the API through which
+user's screens. The renderer is a means; the product is the API through which
 a model claims space, fills it, keeps it current, hears from the human, and
 gives it back.
 
@@ -56,7 +56,13 @@ Surfaces on that lifecycle, in priority order:
   proportion to what changed.
 - **Local feedback first.** Hover, press, focus, and composer typing never
   wait on a round trip.
-- **No hardcoded styling.** Visuals come from a flat `[design_tokens]` table.
+- **No hardcoded styling.** Visuals come from flat design tokens, resolved in
+  layers: canonical defaults, then the selected theme, then `[design_tokens]`
+  overrides. Themes (token values only, Tonal Glass by default) and fonts are
+  the owner's choice and switch without a restart. Models never choose them.
+- **Every screen, natively.** The HUD puts one overlay on each monitor, at
+  that monitor's resolution and scale. The primary monitor keeps the default
+  layout. Agents need no notion of displays unless they opt into one.
 
 ## Trust model
 
@@ -99,7 +105,6 @@ against hostile agents beyond that.
 - Live media (video, audio, WebRTC, GStreamer) and clocked media sync.
 - Mobile, glasses, VR, macOS/Linux deployment, accessibility bridges.
 - Multi-tenant governance: policy engines, quiet hours, privacy redaction.
-- Swappable component profiles (tokens only).
 - A window manager, browser shell, notification engine, or UI framework.
 
 ## Technology
