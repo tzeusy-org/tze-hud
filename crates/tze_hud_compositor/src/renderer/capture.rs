@@ -36,6 +36,8 @@ pub enum CaptureError {
     UnsupportedFormat(wgpu::TextureFormat),
     #[error("GPU readback failed: {0}")]
     Readback(String),
+    #[error("no display {0}; /admin/status lists the connected displays")]
+    NoSuchDisplay(usize),
 }
 
 /// Whether `format` stores bytes as B,G,R,A (`Ok(true)`) or R,G,B,A

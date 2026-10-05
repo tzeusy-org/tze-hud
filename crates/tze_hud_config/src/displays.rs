@@ -77,10 +77,9 @@ mod tests {
 
     #[test]
     fn assigns_known_zones_to_displays() {
-        let raw: RawConfig = toml::from_str(
-            "[displays.DISPLAY6]\nzones = [\"notification-area\", \"subtitle\"]\n",
-        )
-        .unwrap();
+        let raw: RawConfig =
+            toml::from_str("[displays.DISPLAY6]\nzones = [\"notification-area\", \"subtitle\"]\n")
+                .unwrap();
         let map = zone_display_assignments(&raw);
         assert_eq!(map.get("subtitle").map(String::as_str), Some("DISPLAY6"));
         assert_eq!(map.len(), 2);

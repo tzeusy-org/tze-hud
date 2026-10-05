@@ -623,6 +623,8 @@ pub struct Compositor {
     /// a connected non-primary display resolve against that display's rect
     /// (scene coordinates); everything else resolves against the canvas.
     pub(crate) display_layout: crate::display::DisplayLayout,
+    /// Creates surfaces for additional display windows (windowed only).
+    surface_factory: Option<crate::surface::SurfaceFactory>,
 }
 
 /// Partitioned rounded-rectangle draw commands organized by layer.
@@ -901,6 +903,7 @@ impl Compositor {
             composer_caret_rendered_phase: None,
             composer_layout: image_cache::ComposerLayout::default(),
             display_layout: crate::display::DisplayLayout::default(),
+            surface_factory: None,
         })
     }
 
@@ -1156,6 +1159,12 @@ impl Compositor {
             ..Default::default()
         });
 
+        let surface_factory = crate::surface::SurfaceFactory {
+            instance: instance.clone(),
+            adapter: adapter.clone(),
+            device: device.clone(),
+            template: config.clone(),
+        };
         let compositor = Self {
             device,
             queue,
@@ -1230,6 +1239,7 @@ impl Compositor {
             composer_caret_rendered_phase: None,
             composer_layout: image_cache::ComposerLayout::default(),
             display_layout: crate::display::DisplayLayout::default(),
+            surface_factory: Some(surface_factory),
         };
 
         let window_surface = WindowSurface::new(surface, config);
@@ -1239,6 +1249,12 @@ impl Compositor {
     /// Identity of the adapter selected when this compositor was created.
     pub fn adapter_info(&self) -> &CompositorAdapterInfo {
         &self.adapter_info
+    }
+
+    /// Factory for the surfaces of additional display windows; `None` for a
+    /// headless compositor.
+    pub fn surface_factory(&self) -> Option<crate::surface::SurfaceFactory> {
+        self.surface_factory.clone()
     }
 
     /// Install the display layout zones resolve against (see

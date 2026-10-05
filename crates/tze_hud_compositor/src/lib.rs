@@ -35,6 +35,8 @@ pub use renderer::{
     LocalComposerStateHandle, PortalViewerEchoQueue, ResizeGripHoverHandle, SystemCardKind,
     SystemCardModel, TileCloseHoverHandle, ViewerEchoAppend, ViewerEchoEntry, ViewerEchoStore,
 };
-pub use surface::{CompositorFrame, CompositorSurface, HeadlessSurface, WindowSurface};
+pub use surface::{
+    CompositorFrame, CompositorSurface, HeadlessSurface, SurfaceFactory, WindowSurface,
+};
 pub use text::{LINE_HEIGHT_MULTIPLIER, StyledRunItem, TextItem, TextRasterizer};
 pub use widget::{WidgetRenderer, interpolate_param};

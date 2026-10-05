@@ -703,6 +703,56 @@ impl WindowSurface {
     }
 }
 
+/// Creates [`WindowSurface`]s for additional display windows on the same
+/// instance, adapter and device as the compositor's primary surface, with the
+/// primary's format, present mode and alpha mode (one compositor renders all
+/// of them, so the format must match its pipelines).
+#[derive(Clone)]
+pub struct SurfaceFactory {
+    pub(crate) instance: wgpu::Instance,
+    pub(crate) adapter: wgpu::Adapter,
+    pub(crate) device: wgpu::Device,
+    pub(crate) template: wgpu::SurfaceConfiguration,
+}
+
+impl SurfaceFactory {
+    /// Create and configure a surface for `window` at `width` x `height`.
+    pub fn create(
+        &self,
+        window: std::sync::Arc<winit::window::Window>,
+        width: u32,
+        height: u32,
+    ) -> Result<WindowSurface, String> {
+        let surface = self
+            .instance
+            .create_surface(window)
+            .map_err(|e| format!("create_surface: {e}"))?;
+        let caps = surface.get_capabilities(&self.adapter);
+        if !caps.formats.contains(&self.template.format) {
+            return Err(format!(
+                "display surface does not support the primary format {:?}",
+                self.template.format
+            ));
+        }
+        let mut config = self.template.clone();
+        if !caps.alpha_modes.contains(&config.alpha_mode) {
+            config.alpha_mode = caps
+                .alpha_modes
+                .first()
+                .copied()
+                .ok_or("display surface reports no alpha modes")?;
+        }
+        if !caps.present_modes.contains(&config.present_mode) {
+            config.present_mode = wgpu::PresentMode::Fifo;
+        }
+        let max_dim = self.device.limits().max_texture_dimension_2d;
+        config.width = width.clamp(1, max_dim);
+        config.height = height.clamp(1, max_dim);
+        surface.configure(&self.device, &config);
+        Ok(WindowSurface::new(surface, config))
+    }
+}
+
 impl CompositorSurface for WindowSurface {
     /// Acquire the next swapchain image from the OS compositor.
     ///

@@ -10,9 +10,9 @@
 //! tokens, and paired agents (`agents.toml`).
 
 pub mod agents_file;
-pub mod displays;
 pub mod allow;
 pub mod config_write;
+pub mod displays;
 pub mod loader;
 pub mod policy_builder;
 pub mod portal_tokens;

@@ -318,7 +318,6 @@ impl WinitApp {
         let signature = self.cursor_entry_signature();
         let previous = self.state.cursor_entry.signature.replace(signature);
         let has_other_work = self.state.shutdown.is_triggered()
-            || self.state.pending_mode_switch.is_some()
             || self.state.left_button_down
             || self.state.quiescent_efficiency.is_some()
             || !self.state.pending_input_capture_commands.is_empty()
@@ -348,15 +347,7 @@ impl WinitApp {
         ) || self.state.left_button_down
             || self.cursor_over_focused_portal_affordance();
         self.state.overlay_capturing = should_capture;
-        if let Some(window) = &self.state.window {
-            if let Err(e) = window.set_cursor_hittest(should_capture) {
-                tracing::trace!(
-                    error = %e,
-                    capture = should_capture,
-                    "overlay: set_cursor_hittest failed"
-                );
-            }
-        }
+        self.apply_overlay_hittest(should_capture);
     }
 
     /// Resolve the focused portal tile's display-space rect from the lock-free

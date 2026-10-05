@@ -116,6 +116,32 @@ pub fn report_outcome(tx: &std::sync::mpsc::Sender<HotkeyStatus>, status: Hotkey
     }
 }
 
+/// One overlaid display for `/admin/status`; its list index is the
+/// `/admin/screenshot?display=<i>` index (0 = primary).
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+pub struct DisplayStatus {
+    pub name: String,
+    /// Origin in scene pixels (the primary's top-left is 0,0).
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+    pub primary: bool,
+    /// Zones configured onto this display (`[displays.<NAME>]`).
+    pub zones: Vec<String>,
+}
+
+static DISPLAYS: Mutex<Vec<DisplayStatus>> = Mutex::new(Vec::new());
+
+/// Record the overlaid displays (main thread, on startup and every change).
+pub fn set_displays(displays: Vec<DisplayStatus>) {
+    *DISPLAYS.lock().unwrap_or_else(|e| e.into_inner()) = displays;
+}
+
+fn displays_json() -> Value {
+    json!(*DISPLAYS.lock().unwrap_or_else(|e| e.into_inner()))
+}
+
 /// The recorded hotkey outcome, `NotApplicable` until one is set.
 pub fn safe_mode_hotkey() -> HotkeyStatus {
     SAFE_MODE_HOTKEY
@@ -287,6 +313,7 @@ impl StatusSource {
             "agents": agents,
             "safe_mode": self.safe_mode.load(Ordering::Relaxed),
             "safe_mode_hotkey": safe_mode_hotkey().to_json(),
+            "displays": displays_json(),
             "frames_presented": self.presents.as_ref().map(|c| c.snapshot().presents),
             "cpu_pct_2s": cpu_pct_2s,
             "cpu_pct_avg": cpu_pct_avg,
