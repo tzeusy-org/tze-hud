@@ -353,7 +353,42 @@ pub struct WindowSurface {
     /// Windowed benchmarks use this as the presentation acknowledgement; a
     /// compositor-side build or submit attempt is not itself a displayed frame.
     presented_frame_count: std::sync::atomic::AtomicU64,
+    /// Rate limit for acquire-timeout logs: an occluded or asleep window
+    /// times out on every attempt.
+    timeout_log: LogThrottle,
 }
+
+/// Lets one log line through per `interval` and counts the ones it drops.
+#[derive(Debug)]
+pub(crate) struct LogThrottle {
+    interval: std::time::Duration,
+    state: std::sync::Mutex<(Option<std::time::Instant>, u64)>,
+}
+
+impl LogThrottle {
+    pub(crate) fn new(interval: std::time::Duration) -> Self {
+        Self {
+            interval,
+            state: std::sync::Mutex::new((None, 0)),
+        }
+    }
+
+    /// `Some(suppressed)` when a line may be logged at `now` (with the count
+    /// dropped since the last one), `None` when it should be dropped.
+    pub(crate) fn allow(&self, now: std::time::Instant) -> Option<u64> {
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        let (last, suppressed) = &mut *state;
+        if last.is_some_and(|at| now.duration_since(at) < self.interval) {
+            *suppressed += 1;
+            return None;
+        }
+        *last = Some(now);
+        Some(std::mem::take(suppressed))
+    }
+}
+
+/// Interval between acquire-timeout log lines for one window.
+const ACQUIRE_TIMEOUT_LOG_INTERVAL: std::time::Duration = std::time::Duration::from_secs(10);
 
 impl WindowSurface {
     /// Create a `WindowSurface` from an already-configured `wgpu::Surface`.
@@ -380,6 +415,7 @@ impl WindowSurface {
             pending_resize_width: std::sync::atomic::AtomicU32::new(0),
             pending_resize_height: std::sync::atomic::AtomicU32::new(0),
             presented_frame_count: std::sync::atomic::AtomicU64::new(0),
+            timeout_log: LogThrottle::new(ACQUIRE_TIMEOUT_LOG_INTERVAL),
         }
     }
 
@@ -636,10 +672,16 @@ impl WindowSurface {
         self.observe_wgpu_acquire_failure(&err);
         match err {
             wgpu::SurfaceError::Timeout => {
-                tracing::warn!(
-                    error = %err,
-                    "WindowSurface::acquire_frame: timeout acquiring texture; retrying once"
-                );
+                // One throttle covers both lines: a window that keeps timing
+                // out (occluded, asleep) would otherwise log every attempt.
+                let log = self.timeout_log.allow(std::time::Instant::now());
+                if let Some(suppressed) = log {
+                    tracing::warn!(
+                        error = %err,
+                        suppressed,
+                        "WindowSurface::acquire_frame: timeout acquiring texture; retrying once"
+                    );
+                }
                 match self.surface.get_current_texture() {
                     Ok(t) => {
                         let v = t
@@ -650,12 +692,14 @@ impl WindowSurface {
                     }
                     Err(e2) => {
                         self.observe_wgpu_acquire_failure(&e2);
-                        tracing::error!(
-                            first_error = %err,
-                            second_error = %e2,
-                            "WindowSurface::acquire_frame: retry after timeout also failed; \
-                             skipping frame (runtime will retry next cycle)"
-                        );
+                        if log.is_some() {
+                            tracing::error!(
+                                first_error = %err,
+                                second_error = %e2,
+                                "WindowSurface::acquire_frame: retry after timeout also failed; \
+                                 skipping frame (runtime will retry later)"
+                            );
+                        }
                         None
                     }
                 }
@@ -1056,6 +1100,25 @@ impl CompositorSurface for HeadlessSurface {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn log_throttle_passes_one_line_per_interval_and_counts_drops() {
+        let throttle = LogThrottle::new(std::time::Duration::from_secs(10));
+        let t0 = std::time::Instant::now();
+        assert_eq!(throttle.allow(t0), Some(0));
+        for i in 1..=119 {
+            let at = t0 + std::time::Duration::from_millis(i * 8);
+            assert_eq!(throttle.allow(at), None, "attempt {i} inside the interval");
+        }
+        assert_eq!(
+            throttle.allow(t0 + std::time::Duration::from_secs(10)),
+            Some(119)
+        );
+        assert_eq!(
+            throttle.allow(t0 + std::time::Duration::from_secs(11)),
+            None
+        );
+    }
 
     #[test]
     fn test_assert_pixel_color_passes_within_tolerance() {
