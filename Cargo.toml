@@ -59,6 +59,8 @@ criterion = { version = "0.5", features = ["html_reports"] }
 
 # Config
 toml = "0.8"
+# Comment-preserving edits of tze_hud.toml (same major as `toml` 0.8).
+toml_edit = "0.22"
 
 # XML parsing (SVG validation for widget asset bundle system)
 quick-xml = "0.41"
