@@ -26,11 +26,38 @@ fn is_tailnet(ip: &IpAddr) -> bool {
     }
 }
 
-/// Every address this host currently has (empty if enumeration fails).
+/// Every address this host currently has, except tailnet-range addresses on
+/// non-Tailscale interfaces (empty if enumeration fails).
+///
+/// `100.64.0.0/10` is shared address space that ISPs and other VPNs also use,
+/// so the range alone does not mean Tailscale. Everything downstream that
+/// treats a tailnet-range address as Tailscale (`listen_addrs`,
+/// `watch_for_tailnet`, the late-bind check, the pairing endpoint) only ever
+/// sees addresses that passed this interface filter.
 pub fn local_ips() -> Vec<IpAddr> {
     if_addrs::get_if_addrs()
-        .map(|ifs| ifs.iter().map(|i| i.ip()).collect())
+        .map(|ifs| {
+            usable_ips(
+                &ifs.iter()
+                    .map(|i| (i.name.as_str(), i.ip()))
+                    .collect::<Vec<_>>(),
+            )
+        })
         .unwrap_or_default()
+}
+
+/// Tailscale's adapter is `Tailscale` on Windows and `tailscale0` on Linux.
+fn is_tailscale_iface(name: &str) -> bool {
+    name.to_ascii_lowercase().starts_with("tailscale")
+}
+
+/// Keep an address unless it is in the tailnet range on a non-Tailscale
+/// interface. `(interface name, address)` in, addresses out.
+fn usable_ips(ifs: &[(&str, IpAddr)]) -> Vec<IpAddr> {
+    ifs.iter()
+        .filter(|(name, ip)| !is_tailnet(ip) || is_tailscale_iface(name))
+        .map(|(_, ip)| *ip)
+        .collect()
 }
 
 /// The addresses to listen on given the host's addresses: IPv4 loopback first,
@@ -120,6 +147,27 @@ mod tests {
                 "127.0.0.1:9090".parse::<SocketAddr>().unwrap(),
                 "100.100.1.2:9090".parse().unwrap()
             ]
+        );
+    }
+
+    #[test]
+    fn tailnet_range_counts_only_on_a_tailscale_interface() {
+        let ip = |s: &str| s.parse::<IpAddr>().unwrap();
+        let ifs = [
+            ("Ethernet", ip("192.168.1.5")),
+            ("Ethernet", ip("100.72.0.9")),
+            ("OtherVPN", ip("fd7a:115c:a1e0::7")),
+            ("Tailscale", ip("100.100.1.2")),
+            ("tailscale0", ip("fd7a:115c:a1e0::1")),
+        ];
+        let usable = usable_ips(&ifs);
+        assert_eq!(
+            usable,
+            ips(&["192.168.1.5", "100.100.1.2", "fd7a:115c:a1e0::1"])
+        );
+        assert_eq!(
+            tailnet_addrs(&usable),
+            ips(&["100.100.1.2", "fd7a:115c:a1e0::1"])
         );
     }
 

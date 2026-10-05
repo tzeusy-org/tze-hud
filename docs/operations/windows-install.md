@@ -59,7 +59,9 @@ directories and the two registry entries is touched.
 ## Pair an agent
 
 With no agents paired, the HUD shows a 6-digit code and its Tailscale address
-on a card. Give the code to the agent, which trades it for its key:
+on a card. The Tailscale address is one in `100.64.0.0/10` or `fd7a:115c:a1e0::/48` on
+an interface named `Tailscale*`; such an address on any other adapter (ISP or
+other-VPN carrier-grade NAT) is ignored. Give the code to the agent, which trades it for its key:
 
 ```sh
 curl -s http://<tailscale-ip>:9090/pair -d '{"agent":"claude","code":"482913"}'
