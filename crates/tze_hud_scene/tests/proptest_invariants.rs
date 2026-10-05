@@ -475,3 +475,20 @@ proptest! {
         }
     }
 }
+
+// ─── Negative check ───────────────────────────────────────────────────────────
+
+/// The properties above only ever expect an empty violation list, so a checker
+/// that always returned empty would pass them all. One deliberate violation
+/// must be reported.
+#[test]
+fn checker_reports_a_dangling_active_tab() {
+    let mut scene = SceneGraph::new(1920.0, 1080.0);
+    assert!(assert_layer0_invariants(&scene).is_empty());
+    scene.active_tab = Some(SceneId::new());
+    let codes: Vec<_> = assert_layer0_invariants(&scene)
+        .iter()
+        .map(|v| v.code)
+        .collect();
+    assert_eq!(codes, ["missing_active_tab"]);
+}
