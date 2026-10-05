@@ -117,9 +117,39 @@ pub(crate) fn monitor_identities() -> Vec<MonitorIdentity> {
     }
 }
 
+/// Outcome of one registry read attempt into a fixed buffer.
+pub(crate) enum RegRead {
+    /// Read succeeded; this many bytes are valid.
+    Done(usize),
+    /// Buffer too small (`ERROR_MORE_DATA`); the value needs this many bytes.
+    NeedBytes(usize),
+    Failed,
+}
+
+/// Run `read` with a buffer, growing it to the size the registry asks for
+/// (EDIDs with extension blocks exceed 256 bytes).
+pub(crate) fn read_growing(mut read: impl FnMut(&mut [u8]) -> RegRead) -> Option<Vec<u8>> {
+    let mut buf = vec![0u8; 256];
+    for _ in 0..3 {
+        match read(&mut buf) {
+            RegRead::Done(n) => {
+                buf.truncate(n);
+                return Some(buf);
+            }
+            RegRead::NeedBytes(n) if n > buf.len() => buf.resize(n, 0),
+            RegRead::NeedBytes(_) | RegRead::Failed => return None,
+        }
+    }
+    None
+}
+
 /// Log one debug line per monitor identity. Safe to call anywhere off the
 /// frame path.
 pub(crate) fn log_monitor_identities() {
+    // No FFI work unless someone will read the line.
+    if !tracing::enabled!(tracing::Level::DEBUG) {
+        return;
+    }
     for id in monitor_identities() {
         tracing::debug!(
             gdi = %id.gdi_name,
@@ -137,7 +167,7 @@ pub(crate) fn log_monitor_identities() {
 
 #[cfg(target_os = "windows")]
 mod win {
-    use super::{Connector, MonitorIdentity, parse_edid, path_instance};
+    use super::{Connector, MonitorIdentity, RegRead, parse_edid, path_instance, read_growing};
     use windows::Win32::Devices::DeviceAndDriverInstallation::{
         DICS_FLAG_GLOBAL, DIGCF_DEVICEINTERFACE, DIGCF_PRESENT, DIREG_DEV, HDEVINFO,
         SP_DEVICE_INTERFACE_DATA, SP_DEVINFO_DATA, SetupDiDestroyDeviceInfoList,
@@ -150,7 +180,7 @@ mod win {
         DISPLAYCONFIG_TARGET_DEVICE_NAME, DisplayConfigGetDeviceInfo, GUID_DEVINTERFACE_MONITOR,
         GetDisplayConfigBufferSizes, QDC_ONLY_ACTIVE_PATHS, QueryDisplayConfig,
     };
-    use windows::Win32::Foundation::ERROR_SUCCESS;
+    use windows::Win32::Foundation::{ERROR_MORE_DATA, ERROR_SUCCESS};
     use windows::Win32::System::Registry::{HKEY, KEY_READ, RegCloseKey, RegQueryValueExW};
     use windows::core::{PCWSTR, w};
 
@@ -309,27 +339,32 @@ mod win {
         let key: HKEY = unsafe {
             SetupDiOpenDevRegKey(set, &info, DICS_FLAG_GLOBAL.0, 0, DIREG_DEV, KEY_READ.0).ok()?
         };
-        let mut buf = vec![0u8; 256];
-        let mut len = buf.len() as u32;
-        // SAFETY: buf/len describe a writable buffer; key is open.
-        let rc = unsafe {
-            RegQueryValueExW(
-                key,
-                w!("EDID"),
-                None,
-                None,
-                Some(buf.as_mut_ptr()),
-                Some(&mut len),
-            )
-        };
+        let value = read_growing(|buf| {
+            let mut len = buf.len() as u32;
+            // SAFETY: buf/len describe a writable buffer; key is open.
+            let rc = unsafe {
+                RegQueryValueExW(
+                    key,
+                    w!("EDID"),
+                    None,
+                    None,
+                    Some(buf.as_mut_ptr()),
+                    Some(&mut len),
+                )
+            };
+            if rc == ERROR_SUCCESS {
+                RegRead::Done(len as usize)
+            } else if rc == ERROR_MORE_DATA {
+                RegRead::NeedBytes(len as usize)
+            } else {
+                RegRead::Failed
+            }
+        });
         // SAFETY: key was opened above and is closed once.
         unsafe {
             let _ = RegCloseKey(key);
         }
-        (rc == ERROR_SUCCESS).then(|| {
-            buf.truncate(len as usize);
-            buf
-        })
+        value
     }
 }
 
@@ -380,6 +415,24 @@ mod tests {
         bad_header[1] = 0;
         assert_eq!(parse_edid(&bad_header), Err(EdidError::BadHeader));
         assert_eq!(parse_edid(&[0; 64]), Err(EdidError::TooShort));
+    }
+
+    #[test]
+    fn read_growing_retries_with_the_size_the_registry_asks_for() {
+        let value: Vec<u8> = (0..384u32).map(|i| i as u8).collect();
+        let mut calls = 0;
+        let got = read_growing(|buf| {
+            calls += 1;
+            if buf.len() < value.len() {
+                return RegRead::NeedBytes(value.len());
+            }
+            buf[..value.len()].copy_from_slice(&value);
+            RegRead::Done(value.len())
+        });
+        assert_eq!((got, calls), (Some(value), 2));
+        assert_eq!(read_growing(|_| RegRead::Failed), None);
+        // A registry that never settles does not loop forever.
+        assert_eq!(read_growing(|b| RegRead::NeedBytes(b.len() + 1)), None);
     }
 
     #[test]
