@@ -487,6 +487,13 @@ pub struct Compositor {
     /// called again (surface resize / format change replaces the rasterizer,
     /// resetting its cache to the default bound).
     configured_max_truncation_input_bytes: Option<usize>,
+    /// Font roles the text rasterizer is built for (normalized); applied via
+    /// [`Compositor::set_font_config`] and re-applied by
+    /// [`Compositor::init_text_renderer`].
+    configured_fonts: crate::fonts::FontConfig,
+    /// Surface format the text rasterizer was last initialized for, so a font
+    /// config change can rebuild it.
+    text_format: Option<wgpu::TextureFormat>,
     /// Instant of the last completed `prime_truncation_cache` run.
     ///
     /// Used by the adaptive mid-drag re-truncation cadence gate (hud-ghhxa,
@@ -834,6 +841,8 @@ impl Compositor {
             truncation_cache_scene_version: u64::MAX,
             truncation_cache_scene_instance: None,
             configured_max_truncation_input_bytes: None,
+            configured_fonts: crate::fonts::FontConfig::default(),
+            text_format: None,
             resize_reprime_last_at: None,
             resize_reprime_content_bytes: 0,
             image_bytes: HashMap::new(),
@@ -1160,6 +1169,8 @@ impl Compositor {
             truncation_cache_scene_version: u64::MAX,
             truncation_cache_scene_instance: None,
             configured_max_truncation_input_bytes: None,
+            configured_fonts: crate::fonts::FontConfig::default(),
+            text_format: None,
             resize_reprime_last_at: None,
             resize_reprime_content_bytes: 0,
             image_bytes: HashMap::new(),
@@ -1519,6 +1530,10 @@ impl Compositor {
     /// to derive alert-banner backdrop colors, falling back to hardcoded constants
     /// when a key is absent or unparseable.
     pub fn set_token_map(&mut self, map: HashMap<String, String>) {
+        // `font.sans` / `font.mono` / `font.serif` (and the runtime-set fonts
+        // dir, `fonts::RUNTIME_FONTS_DIR_KEY`) select the
+        // font roles; a no-op unless they changed (see `set_font_config`).
+        self.set_font_config(crate::fonts::FontConfig::from_token_map(&map));
         // Rebuild markdown tokens from the new map so heading weights, link
         // colors, and code family are in sync with the current theme.
         // Clear the markdown cache so existing entries are re-parsed with the

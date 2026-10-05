@@ -384,7 +384,20 @@ impl super::Compositor {
     /// Calling this multiple times replaces the existing rasterizer (e.g. on
     /// surface resize or format change).
     pub fn init_text_renderer(&mut self, format: wgpu::TextureFormat) {
-        let mut rasterizer = TextRasterizer::new(&self.device, &self.queue, format);
+        let mut rasterizer = TextRasterizer::with_font_config(
+            &self.device,
+            &self.queue,
+            format,
+            &self.configured_fonts,
+        );
+        // Carry agent-uploaded fonts over: their residency is already reserved
+        // and agents do not re-upload on a renderer rebuild.
+        if let Some(old) = &mut self.text_rasterizer {
+            for (resource_id, bytes) in old.take_uploaded_fonts() {
+                rasterizer.load_font_bytes(resource_id, &bytes);
+            }
+        }
+        self.text_format = Some(format);
         // Re-apply any operator-configured truncation-input bound: a fresh
         // TextRasterizer starts at the TruncationCache default, so re-init on
         // resize / format change would otherwise silently revert an applied
@@ -418,6 +431,36 @@ impl super::Compositor {
                 .truncation_cache
                 .set_max_truncation_input_bytes(bytes);
         }
+    }
+
+    /// Select the family for each font role (sans / mono / serif) and the
+    /// operator fonts directory; see [`crate::fonts`] for name resolution and
+    /// fallback.  This is the entry point for theme / design-token font
+    /// selection; [`Compositor::set_token_map`] calls it with
+    /// [`FontConfig::from_token_map`](crate::fonts::FontConfig::from_token_map).
+    ///
+    /// No-op when the normalized config is unchanged (so re-applying the same
+    /// tokens costs nothing).  Otherwise the config is retained, and an
+    /// initialized text rasterizer is rebuilt for it (new font system and glyph
+    /// atlas — font ids are not stable across font systems) with uploaded
+    /// fonts carried over, and cached truncation points are invalidated.
+    pub fn set_font_config(&mut self, config: crate::fonts::FontConfig) {
+        let config = config.normalized();
+        if config == self.configured_fonts {
+            return;
+        }
+        self.configured_fonts = config;
+        if let Some(format) = self.text_format {
+            self.init_text_renderer(format);
+            self.truncation_cache_scene_version = u64::MAX;
+            self.truncation_cache_scene_instance = None;
+        }
+    }
+
+    /// The family each font role currently resolves to, or `None` before the
+    /// text renderer is initialized.
+    pub fn resolved_fonts(&self) -> Option<&crate::fonts::ResolvedFonts> {
+        self.text_rasterizer.as_ref().map(|r| r.resolved_fonts())
     }
 
     /// Load raw font bytes (TTF or OTF) from an agent upload into glyphon's

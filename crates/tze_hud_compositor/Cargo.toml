@@ -26,6 +26,10 @@ resvg = { workspace = true }
 tiny-skia = { workspace = true }
 ab_glyph = { workspace = true }
 
+# Named system-font lookup reads the Windows font registry (fonts::system).
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true }
+
 [dev-dependencies]
 tokio = { workspace = true }
 criterion = { workspace = true }

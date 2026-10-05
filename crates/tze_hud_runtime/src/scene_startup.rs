@@ -48,7 +48,8 @@ pub fn run_scene_startup(
         .as_ref()
         .map(|dt| dt.0.clone())
         .unwrap_or_default();
-    let global_tokens = resolve_config_tokens(&config_tokens);
+    let mut global_tokens = resolve_config_tokens(&config_tokens);
+    resolve_font_dir(&mut global_tokens, config_parent);
     tracing::info!(
         token_count = global_tokens.len(),
         "scene_startup: design tokens loaded"
@@ -83,6 +84,31 @@ pub fn run_scene_startup(
         global_tokens,
         widget_svg_assets,
     }
+}
+
+// ─── Fonts directory ──────────────────────────────────────────────────────────
+
+/// Set the runtime-internal fonts-dir key to `<config_parent>/fonts` (made
+/// absolute so the compositor needs no config path) when that directory
+/// exists; otherwise remove it.
+///
+/// The key is never user config — config validation rejects it in
+/// `[design_tokens]` — and any value that slipped in is overwritten or
+/// dropped here.  With no `config_parent` (headless tests) fonts stay bundled.
+fn resolve_font_dir(tokens: &mut DesignTokenMap, config_parent: Option<&Path>) {
+    use tze_hud_compositor::fonts::RUNTIME_FONTS_DIR_KEY;
+    tokens.remove(RUNTIME_FONTS_DIR_KEY);
+    let Some(dir) = config_parent
+        .map(|p| p.join("fonts"))
+        .filter(|d| d.is_dir())
+    else {
+        return;
+    };
+    tracing::info!(dir = %dir.display(), "scene_startup: fonts dir");
+    tokens.insert(
+        RUNTIME_FONTS_DIR_KEY.to_owned(),
+        dir.to_string_lossy().into_owned(),
+    );
 }
 
 // ─── Config-declared tab bootstrap ────────────────────────────────────────────
@@ -167,6 +193,43 @@ mod tests {
     use super::*;
     use tze_hud_config::raw::{RawConfig, RawDesignTokens};
     use tze_hud_scene::graph::SceneGraph;
+
+    #[test]
+    fn fonts_dir_is_config_dir_fonts_when_present_and_never_user_set() {
+        use tze_hud_compositor::fonts::RUNTIME_FONTS_DIR_KEY as KEY;
+        let parent = std::env::temp_dir().join(format!("tze_hud_font_dir_{}", std::process::id()));
+        std::fs::create_dir_all(&parent).unwrap();
+        let smuggled = || -> DesignTokenMap { [(KEY.to_owned(), "/elsewhere".to_owned())].into() };
+
+        // No fonts/ beside the config: key absent, a smuggled value dropped.
+        let mut tokens = smuggled();
+        resolve_font_dir(&mut tokens, Some(&parent));
+        assert!(!tokens.contains_key(KEY));
+
+        // fonts/ exists: key is its absolute path, overriding any smuggled value.
+        std::fs::create_dir_all(parent.join("fonts")).unwrap();
+        let mut tokens = smuggled();
+        resolve_font_dir(&mut tokens, Some(&parent));
+        assert_eq!(
+            tokens.get(KEY).map(String::as_str),
+            Some(parent.join("fonts").to_string_lossy().as_ref())
+        );
+
+        // No config dir (headless): nothing inferred.
+        let mut tokens = smuggled();
+        resolve_font_dir(&mut tokens, None);
+        assert!(tokens.is_empty());
+        std::fs::remove_dir_all(&parent).ok();
+    }
+
+    /// The config crate's reserved-key list must name the compositor's key.
+    #[test]
+    fn runtime_fonts_dir_key_is_reserved_in_config_validation() {
+        assert!(
+            tze_hud_config::tokens::RESERVED_RUNTIME_TOKEN_KEYS
+                .contains(&tze_hud_compositor::fonts::RUNTIME_FONTS_DIR_KEY)
+        );
+    }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 

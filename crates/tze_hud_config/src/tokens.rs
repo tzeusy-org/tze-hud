@@ -1085,15 +1085,36 @@ pub fn validate_canonical_value(key: &str, value: &str) -> Result<(), String> {
 
 // ─── Validation ───────────────────────────────────────────────────────────────
 
+/// Token-map keys the runtime sets itself; they are not design values, so
+/// `[design_tokens]` may not set them.
+///
+/// - `runtime.fonts_dir`: absolute `<config dir>/fonts` when it exists
+///   (`tze_hud_compositor::fonts::RUNTIME_FONTS_DIR_KEY`).
+pub const RESERVED_RUNTIME_TOKEN_KEYS: &[&str] = &["runtime.fonts_dir"];
+
 /// Validate the `[design_tokens]` section of a `RawConfig`.
 ///
 /// Produces `CONFIG_INVALID_TOKEN_KEY` for any key that does not match the
-/// required pattern. Non-canonical keys are accepted silently.
+/// required pattern or is reserved for the runtime
+/// ([`RESERVED_RUNTIME_TOKEN_KEYS`]). Non-canonical keys are accepted silently.
 pub fn validate_design_tokens(raw: &RawConfig, errors: &mut Vec<ConfigError>) {
     let Some(tokens) = &raw.design_tokens else {
         return;
     };
     for key in tokens.0.keys() {
+        if RESERVED_RUNTIME_TOKEN_KEYS.contains(&key.as_str()) {
+            errors.push(ConfigError {
+                code: ConfigErrorCode::InvalidTokenKey,
+                field_path: format!("design_tokens.{key}"),
+                expected: "a design token, not a runtime-reserved key".into(),
+                got: key.clone(),
+                hint: format!(
+                    "{key:?} is set by the runtime; put font files in a `fonts` \
+                     directory beside the config file instead"
+                ),
+            });
+            continue;
+        }
         if !is_valid_token_key(key) {
             errors.push(ConfigError {
                 code: ConfigErrorCode::InvalidTokenKey,
@@ -1382,6 +1403,23 @@ mod tests {
     }
 
     // ── validate_design_tokens ────────────────────────────────────────────────
+
+    #[test]
+    fn test_validate_rejects_runtime_reserved_key() {
+        use crate::raw::RawDesignTokens;
+        let mut tokens = HashMap::new();
+        tokens.insert("runtime.fonts_dir".to_string(), "C:/fonts".to_string());
+        let raw = RawConfig {
+            design_tokens: Some(RawDesignTokens(tokens)),
+            ..Default::default()
+        };
+        let mut errors = Vec::new();
+        validate_design_tokens(&raw, &mut errors);
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].code, ConfigErrorCode::InvalidTokenKey);
+        assert_eq!(errors[0].field_path, "design_tokens.runtime.fonts_dir");
+        assert!(errors[0].hint.contains("fonts"));
+    }
 
     #[test]
     fn test_validate_no_design_tokens_section_ok() {

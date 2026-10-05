@@ -929,6 +929,12 @@ impl PrimitiveText {
         }
 
         let scaled_font = font.as_scaled(font_size_px);
+        // The fast path has no per-glyph fallback: text with a code point the
+        // default sans face lacks (symbols, box drawing, …) takes the resvg path,
+        // which falls back across every bundled face.
+        if content.chars().any(|ch| scaled_font.glyph_id(ch).0 == 0) {
+            return None;
+        }
         let cache_key = self.direct_text_mask_cache_key(content, &crop, pixel_width, pixel_height);
         if let Some(cached) = text_svg_layer_cache()
             .lock()
@@ -1745,8 +1751,17 @@ fn shared_widget_fontdb() -> Arc<resvg::usvg::fontdb::Database> {
     static FONTDB: OnceLock<Arc<resvg::usvg::fontdb::Database>> = OnceLock::new();
     FONTDB
         .get_or_init(|| {
-            let mut db = resvg::usvg::fontdb::Database::new();
-            db.load_system_fonts();
+            // Bundled faces only, same as the glyphon font system (see
+            // `crate::fonts`): deterministic and free of a system-font scan.
+            // resvg links its own fontdb version, so load from raw bytes.
+            use resvg::usvg::fontdb;
+            let mut db = fontdb::Database::new();
+            for bytes in crate::fonts::bundled_face_bytes() {
+                db.load_font_source(fontdb::Source::Binary(Arc::new(bytes)));
+            }
+            db.set_sans_serif_family(crate::fonts::DEFAULT_SANS_FAMILY);
+            db.set_monospace_family(crate::fonts::DEFAULT_MONO_FAMILY);
+            db.set_serif_family(crate::fonts::DEFAULT_SERIF_FAMILY);
             Arc::new(db)
         })
         .clone()
