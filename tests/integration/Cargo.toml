@@ -108,13 +108,14 @@ path = "poc_acceptance.rs"
 #
 # dev-mode is required because multi_agent.rs uses config_toml: None.
 # Integration tests are separate binaries; cfg(test) is set in them but NOT
-# in the library they link, so dev-mode must be enabled explicitly here.
+# in the library they link, so dev-mode is enabled explicitly (in
+# [dev-dependencies] below).
 [dependencies]
-tze_hud_scene = { path = "../../crates/tze_hud_scene", version = "0.1.0", features = ["test-support"] }
+tze_hud_scene = { path = "../../crates/tze_hud_scene", version = "0.1.0" }
 tze_hud_input = { path = "../../crates/tze_hud_input", version = "0.1.0" }
 tze_hud_compositor = { path = "../../crates/tze_hud_compositor", version = "0.1.0" }
-tze_hud_runtime = { path = "../../crates/tze_hud_runtime", version = "0.1.0", features = ["dev-mode", "test-harness"] }
-tze_hud_protocol = { path = "../../crates/tze_hud_protocol", version = "0.1.0", features = ["dev-mode"] }
+tze_hud_runtime = { path = "../../crates/tze_hud_runtime", version = "0.1.0" }
+tze_hud_protocol = { path = "../../crates/tze_hud_protocol", version = "0.1.0" }
 tze_hud_projection = { path = "../../crates/tze_hud_projection", version = "0.1.0", features = ["resident-grpc"] }
 tze_hud_config = { path = "../../crates/tze_hud_config", version = "0.1.0" }
 tze_hud_resource = { path = "../../crates/tze_hud_resource", version = "0.1.0" }
@@ -133,6 +134,14 @@ h2 = "0.4"
 http = "1"
 bytes = "1"
 prost = { workspace = true }
+
+# The crate has only [[test]] targets, so its test-only features are enabled
+# here, not in [dependencies]: feature unification then keeps test_scenes and
+# dev-mode out of a whole-workspace release build.
+[dev-dependencies]
+tze_hud_scene = { path = "../../crates/tze_hud_scene", version = "0.1.0", features = ["test-support"] }
+tze_hud_runtime = { path = "../../crates/tze_hud_runtime", version = "0.1.0", features = ["dev-mode", "test-harness"] }
+tze_hud_protocol = { path = "../../crates/tze_hud_protocol", version = "0.1.0", features = ["dev-mode"] }
 
 [lints]
 workspace = true
