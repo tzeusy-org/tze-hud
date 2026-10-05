@@ -373,7 +373,14 @@ pub(super) fn overlay_window_attributes(title: String, spec: &MonitorSpec) -> Wi
         .with_position(winit::dpi::PhysicalPosition::new(spec.x, spec.y))
         .with_transparent(true)
         .with_decorations(false)
-        .with_window_level(WindowLevel::AlwaysOnTop);
+        .with_window_level(WindowLevel::AlwaysOnTop)
+        // Not resizable or maximizable: without WS_THICKFRAME/WS_MAXIMIZEBOX
+        // Windows cannot (re-)maximize an overlay after a topology change,
+        // which it did, leaving it at the monitor rect plus 11 px invisible
+        // borders (-11,-11 3862x2182) and undoing every re-fit.
+        .with_resizable(false)
+        .with_enabled_buttons(winit::window::WindowButtons::empty())
+        .with_maximized(false);
     #[cfg(target_os = "windows")]
     {
         use winit::platform::windows::WindowAttributesExtWindows;
@@ -677,15 +684,8 @@ impl super::WinitApp {
         for display in &self.state.secondaries {
             let size = display.window.inner_size();
             let current = tze_hud_compositor::CompositorSurface::size(display.surface.as_ref());
-            if size.width > 0 && size.height > 0 && (size.width, size.height) != current {
-                display
-                    .surface
-                    .pending_resize_height
-                    .store(size.height, Ordering::Release);
-                display
-                    .surface
-                    .pending_resize_width
-                    .store(size.width, Ordering::Release);
+            if (size.width, size.height) != current {
+                display.surface.request_resize(size.width, size.height);
             }
         }
         self.publish_displays(&primary);
@@ -735,6 +735,10 @@ impl super::WinitApp {
                 height,
                 "re-fitting overlay window to its monitor"
             );
+            // A maximized window ignores position and size requests.
+            if window.is_maximized() {
+                window.set_maximized(false);
+            }
             window.set_outer_position(winit::dpi::PhysicalPosition::new(x, y));
             let _ = window.request_inner_size(winit::dpi::PhysicalSize::new(width, height));
         }
@@ -1308,6 +1312,17 @@ mod tests {
             overlay_refit(Some((6, -2171)), (3840, 2160), &d8),
             Some(((17, -2160), (3840, 2160))),
             "moved but the right size"
+        );
+        // Windows' maximized geometry from replug3.log: the monitor rect plus
+        // its 11 px invisible resize borders on every side.
+        let d7 = spec("DISPLAY7", 0, 0);
+        assert_eq!(
+            overlay_refit(Some((-11, -11)), (3862, 2182), &d7),
+            Some(((0, 0), (3840, 2160)))
+        );
+        assert_eq!(
+            overlay_refit(Some((6, -2171)), (3862, 2182), &d8),
+            Some(((17, -2160), (3840, 2160)))
         );
         assert_eq!(
             overlay_refit(None, (3840, 2160), &d8),

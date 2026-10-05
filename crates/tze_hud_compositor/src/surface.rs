@@ -340,15 +340,12 @@ pub struct WindowSurface {
     /// Pending recovery lifecycle state, written by actual acquire failures and
     /// consumed by the compositor thread before its next frame build.
     surface_recovery: std::sync::Mutex<SurfaceRecoveryState>,
-    /// Pending resize dimensions signalled from the main thread to the
-    /// compositor thread. `(0, 0)` means no resize pending.
-    ///
-    /// The main thread stores `(new_width, new_height)` atomically on
-    /// `WindowEvent::Resized`. The compositor thread reads this at the start of
-    /// each frame, applies `reconfigure()` with the new dimensions using its
-    /// owned `wgpu::Device`, then resets both fields to `0`.
-    pub pending_resize_width: std::sync::atomic::AtomicU32,
-    pub pending_resize_height: std::sync::atomic::AtomicU32,
+    /// Pending resize signalled from the main thread to the compositor
+    /// thread, packed `width << 32 | height`; `0` means none. One atomic so a
+    /// request is never torn, and taken with a swap so a request made while
+    /// the compositor reconfigures for an older one is kept, not erased.
+    /// See [`Self::request_resize`] / [`Self::take_pending_resize`].
+    pending_resize: std::sync::atomic::AtomicU64,
     /// Number of swapchain textures actually presented by the main thread.
     ///
     /// Windowed benchmarks use this as the presentation acknowledgement; a
@@ -386,6 +383,15 @@ impl LogThrottle {
         *last = Some(now);
         Some(std::mem::take(suppressed))
     }
+}
+
+/// `width << 32 | height`, or `None` for a zero dimension.
+fn pack_resize(width: u32, height: u32) -> Option<u64> {
+    (width > 0 && height > 0).then(|| (u64::from(width) << 32) | u64::from(height))
+}
+
+fn unpack_resize(packed: u64) -> Option<(u32, u32)> {
+    (packed != 0).then_some(((packed >> 32) as u32, packed as u32))
 }
 
 /// Interval between acquire-timeout log lines for one window.
@@ -451,11 +457,28 @@ impl WindowSurface {
             })),
             swapchain_done: std::sync::Arc::new(std::sync::Condvar::new()),
             surface_recovery: std::sync::Mutex::new(SurfaceRecoveryState::default()),
-            pending_resize_width: std::sync::atomic::AtomicU32::new(0),
-            pending_resize_height: std::sync::atomic::AtomicU32::new(0),
+            pending_resize: std::sync::atomic::AtomicU64::new(0),
             presented_frame_count: std::sync::atomic::AtomicU64::new(0),
             timeout_log: LogThrottle::new(ACQUIRE_TIMEOUT_LOG_INTERVAL),
         }
+    }
+
+    /// Ask the compositor thread to reconfigure to `width` x `height` (main
+    /// thread, on `WindowEvent::Resized`). A newer request replaces an
+    /// unconsumed one; a zero dimension is ignored.
+    pub fn request_resize(&self, width: u32, height: u32) {
+        if let Some(packed) = pack_resize(width, height) {
+            self.pending_resize
+                .store(packed, std::sync::atomic::Ordering::Release);
+        }
+    }
+
+    /// Take the latest resize request, if any (compositor thread).
+    pub fn take_pending_resize(&self) -> Option<(u32, u32)> {
+        unpack_resize(
+            self.pending_resize
+                .swap(0, std::sync::atomic::Ordering::AcqRel),
+        )
     }
 
     /// Texture format the swapchain is configured with.
@@ -518,7 +541,7 @@ impl WindowSurface {
     /// Reconfigure the surface after a window resize.
     ///
     /// MUST be called from the compositor thread (it owns the `wgpu::Device`).
-    /// The main thread signals a resize via `pending_resize_width/height`.
+    /// The main thread signals a resize via [`Self::request_resize`].
     pub fn reconfigure(&self, new_width: u32, new_height: u32, device: &wgpu::Device) {
         if new_width == 0 || new_height == 0 {
             // Zero-size surface is invalid — skip reconfiguration.
@@ -1146,6 +1169,43 @@ impl CompositorSurface for HeadlessSurface {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resize_requests_pack_whole_and_ignore_zero() {
+        assert_eq!(
+            pack_resize(3840, 2160).and_then(unpack_resize),
+            Some((3840, 2160))
+        );
+        assert_eq!(
+            pack_resize(u32::MAX, 1).and_then(unpack_resize),
+            Some((u32::MAX, 1))
+        );
+        assert_eq!(pack_resize(0, 2160), None);
+        assert_eq!(pack_resize(3840, 0), None);
+        assert_eq!(unpack_resize(0), None);
+    }
+
+    /// The replug lost-update: a request made while the compositor is
+    /// reconfiguring for an older one must survive (the old code read, then
+    /// reconfigured, then stored 0, erasing the newer request).
+    #[test]
+    fn a_resize_requested_during_a_reconfigure_is_not_lost() {
+        let pending = std::sync::atomic::AtomicU64::new(0);
+        let request = |w, h| {
+            pending.store(
+                pack_resize(w, h).unwrap(),
+                std::sync::atomic::Ordering::Release,
+            )
+        };
+        let take = || unpack_resize(pending.swap(0, std::sync::atomic::Ordering::AcqRel));
+        request(3862, 2182);
+        let first = take();
+        // ... compositor reconfigures to `first`; meanwhile the re-fit lands:
+        request(3840, 2160);
+        assert_eq!(first, Some((3862, 2182)));
+        assert_eq!(take(), Some((3840, 2160)));
+        assert_eq!(take(), None);
+    }
 
     #[test]
     fn log_throttle_passes_one_line_per_interval_and_counts_drops() {

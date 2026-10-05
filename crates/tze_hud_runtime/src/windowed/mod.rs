@@ -1597,34 +1597,20 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                     let degradation_work_start = Instant::now();
 
                     // ── Resize check ───────────────────────────────────────
-                    // The main thread writes pending_resize_width/height on
-                    // WindowEvent::Resized. We detect and apply it here because
-                    // the compositor thread owns the wgpu::Device required by
-                    // surface.reconfigure().
-                    //
-                    // Read width last (it was written last by the main thread)
-                    // to avoid a torn read: if the main thread is mid-write we
-                    // will see the old width and skip this cycle; the resize
-                    // will be applied on the next frame instead.
-                    let pending_w = surface_for_compositor
-                        .pending_resize_width
-                        .load(std::sync::atomic::Ordering::Acquire);
-                    let pending_h = surface_for_compositor
-                        .pending_resize_height
-                        .load(std::sync::atomic::Ordering::Acquire);
-                    if pending_w > 0 && pending_h > 0 {
+                    // The main thread requests a resize on
+                    // WindowEvent::Resized; it is applied here because the
+                    // compositor thread owns the wgpu::Device required by
+                    // surface.reconfigure(). Taking the request is one swap,
+                    // so a newer one made during the reconfigure is applied
+                    // next iteration instead of being erased.
+                    if let Some((pending_w, pending_h)) =
+                        surface_for_compositor.take_pending_resize()
+                    {
                         surface_for_compositor.reconfigure(
                             pending_w,
                             pending_h,
                             &compositor.device,
                         );
-                        // Reset pending resize (store 0 to signal "handled").
-                        surface_for_compositor
-                            .pending_resize_width
-                            .store(0, std::sync::atomic::Ordering::Release);
-                        surface_for_compositor
-                            .pending_resize_height
-                            .store(0, std::sync::atomic::Ordering::Release);
                         // Update compositor's cached dimensions.
                         compositor.width = pending_w;
                         compositor.height = pending_h;
@@ -1664,15 +1650,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                         }
                     };
                     secondaries.retain_mut(|target| {
-                        let w = target
-                            .surface
-                            .pending_resize_width
-                            .swap(0, std::sync::atomic::Ordering::AcqRel);
-                        let h = target
-                            .surface
-                            .pending_resize_height
-                            .swap(0, std::sync::atomic::Ordering::AcqRel);
-                        if w > 0 && h > 0 {
+                        if let Some((w, h)) = target.surface.take_pending_resize() {
                             target.surface.reconfigure(w, h, &compositor.device);
                             target.ledger.invalidate();
                             displays_need_frame = true;
@@ -2351,13 +2329,9 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                         .displays_dirty
                         .store(true, std::sync::atomic::Ordering::Release);
                 }
-                let surface = &display.surface;
-                surface
-                    .pending_resize_height
-                    .store(physical_size.height, std::sync::atomic::Ordering::Release);
-                surface
-                    .pending_resize_width
-                    .store(physical_size.width, std::sync::atomic::Ordering::Release);
+                display
+                    .surface
+                    .request_resize(physical_size.width, physical_size.height);
                 self.state
                     .wake
                     .notify_compositor(crate::idle_efficiency::RuntimeWakeupSource::Resize);
@@ -2408,19 +2382,13 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                     // The compositor thread owns the wgpu::Device and is the
                     // only thread that can safely call surface.configure().
                     //
-                    // We write the new dimensions atomically. The compositor
-                    // thread reads `pending_resize_width/height` at the start of
-                    // each frame cycle, calls `surface.reconfigure()` when
-                    // non-zero, and resets both fields to 0.
-                    //
-                    // Write height first so the compositor never sees a
-                    // partially-updated pair (width updated, height stale).
-                    surface
-                        .pending_resize_height
-                        .store(physical_size.height, std::sync::atomic::Ordering::Release);
-                    surface
-                        .pending_resize_width
-                        .store(physical_size.width, std::sync::atomic::Ordering::Release);
+                    // The compositor takes the request at the top of its next
+                    // iteration; wake it, since an idle compositor would
+                    // otherwise apply it only when something else woke it.
+                    surface.request_resize(physical_size.width, physical_size.height);
+                    self.state
+                        .wake
+                        .notify_compositor(crate::idle_efficiency::RuntimeWakeupSource::Resize);
                 }
             }
 

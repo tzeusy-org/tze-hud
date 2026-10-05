@@ -182,9 +182,10 @@ Windows, `--print-attach-info` plus pairing is the more direct path.
   does not keep the HUD rendering.
   Tiles, portals and widgets stay on the primary. Plugging, unplugging or
   rescaling a monitor opens or closes its window; no restart needed (changing
-  `[displays]` itself does need one). Windows may move or resize the overlays
-  during the change; each one, the primary included, is pinned back to its
-  monitor's bounds afterwards (at most 5 times per 10 s if Windows keeps
+  `[displays]` itself does need one). The overlays are not resizable or
+  maximizable, so Windows cannot re-maximize them; if it still moves or
+  resizes one during the change, each one, the primary included, is pinned
+  back to its monitor's bounds afterwards (at most 5 times per 10 s if Windows keeps
   fighting it, logged as a warning). Explicit `--width`/`--height` gives a
   single window on the primary. Screenshot one monitor with
   `hud_admin.py screenshot --display N` (or `--all`).
