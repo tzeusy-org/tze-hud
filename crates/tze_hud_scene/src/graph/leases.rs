@@ -17,12 +17,6 @@ impl SceneGraph {
     /// Maximum leases across all agents in the entire runtime (spec §Lease Caps).
     pub const MAX_RUNTIME_LEASES: usize = 64;
 
-    /// Default maximum leases per session (spec §Lease Caps: "max 8 default").
-    ///
-    /// Exposed for session-layer policy use; the scene graph itself enforces only
-    /// the runtime-wide cap (`MAX_RUNTIME_LEASES`).
-    pub const DEFAULT_MAX_LEASES_PER_SESSION: usize = 8;
-
     /// Maximum tiles per lease (spec §Lease Caps).
     pub const MAX_TILES_PER_LEASE: u32 = 64;
 

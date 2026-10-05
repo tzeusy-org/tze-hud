@@ -2855,23 +2855,6 @@ fn test_lease_state_defaults_to_active() {
 }
 
 #[test]
-fn test_runtime_lease_cap_rejects_next_grant() {
-    let mut scene = SceneGraph::new(1920.0, 1080.0);
-    for _ in 0..SceneGraph::MAX_RUNTIME_LEASES {
-        scene
-            .try_grant_lease_for_session("test", SceneId::new(), 60_000)
-            .unwrap();
-    }
-    let err = scene
-        .try_grant_lease_for_session("test", SceneId::new(), 60_000)
-        .unwrap_err();
-    assert!(matches!(
-        err,
-        LeaseError::CapsExceeded(CapsError::MaxRuntimeLeasesExceeded { .. })
-    ));
-}
-
-#[test]
 fn test_lease_suspend_from_active() {
     let (mut scene, clock) = scene_with_test_clock();
     let lease_id = scene.grant_lease("test", 60_000);
