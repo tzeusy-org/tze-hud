@@ -25,7 +25,7 @@ pub mod themes;
 pub mod tokens;
 pub mod validate;
 pub mod widgets;
-pub mod zones;
+pub(crate) mod zones;
 
 pub use agents_file::{
     AGENTS_FILE_NAME, AgentRecord, AgentsFile, AgentsFileError, agents_path_for,
@@ -71,4 +71,3 @@ pub use validate::validate_config;
 pub use widgets::{
     LoadedWidgetType, build_widget_instance, validate_widget_bundles, validate_widget_instances,
 };
-pub use zones::{BUILTIN_ZONE_TYPES, is_known_zone_type, validate_zone_type_ref, validate_zones};

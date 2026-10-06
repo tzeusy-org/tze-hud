@@ -456,6 +456,7 @@ async fn test_three_agents_contention() -> Result<(), Box<dyn std::error::Error>
 
     // ── Phase 7: Compositor frame rendering ─────────────────────────────────
 
+    // render_frame records this frame in the collector used by the artifact below.
     let frame = runtime.render_frame().await;
 
     // Verify the compositor renders correctly with all three agents active.
@@ -467,13 +468,6 @@ async fn test_three_agents_contention() -> Result<(), Box<dyn std::error::Error>
         frame.active_leases >= 2,
         "compositor must see one active lease per claimed tile"
     );
-
-    // Record frame time for telemetry (informational — not a calibrated pass/fail).
-    runtime
-        .telemetry
-        .summary_mut()
-        .frame_time
-        .record(frame.frame_time_us);
 
     // ── Phase 8: Emit JSON artifacts ────────────────────────────────────────
 

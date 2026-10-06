@@ -26,7 +26,7 @@ use crate::raw::RawConfig;
 /// A flat, immutable (after startup) map of design tokens.
 ///
 /// Keys follow the pattern `[a-z][a-z0-9]*(\.[a-z][a-z0-9_]*)*`.
-/// Values are opaque strings until explicitly parsed via `TokenValue`.
+/// Values are opaque strings until parsed by the consumer for their expected type.
 pub type DesignTokenMap = HashMap<String, String>;
 
 // ─── Token key validation ─────────────────────────────────────────────────────
@@ -36,7 +36,7 @@ pub type DesignTokenMap = HashMap<String, String>;
 /// Segment rules:
 /// - First segment: starts with `[a-z]`, followed by `[a-z0-9]*`
 /// - Subsequent segments (after `.`): starts with `[a-z]`, followed by `[a-z0-9_]*`
-pub fn is_valid_token_key(key: &str) -> bool {
+fn is_valid_token_key(key: &str) -> bool {
     if key.is_empty() {
         return false;
     }
@@ -104,28 +104,13 @@ pub struct Rgba {
 /// Any other value returns `None`. This is intentionally a free function
 /// (not a method on `FontFamily`) because `FontFamily` is defined in
 /// `tze_hud_scene::types` and we use it directly.
-pub fn font_family_from_keyword(s: &str) -> Option<FontFamily> {
+fn font_family_from_keyword(s: &str) -> Option<FontFamily> {
     match s {
         "system-ui" | "sans-serif" => Some(FontFamily::SystemSansSerif),
         "monospace" => Some(FontFamily::SystemMonospace),
         "serif" => Some(FontFamily::SystemSerif),
         _ => None,
     }
-}
-
-/// A parsed token value.
-///
-/// Parsing is attempted in order:
-/// 1. Color hex (`#RRGGBB` or `#RRGGBBAA`) → `Color(Rgba)`
-/// 2. Numeric (decimal) → `Numeric(f32)`
-/// 3. Font family keyword → `Font(FontFamily)`
-/// 4. Everything else → `Literal(String)`
-#[derive(Clone, Debug, PartialEq)]
-pub enum TokenValue {
-    Color(Rgba),
-    Numeric(f32),
-    Font(FontFamily),
-    Literal(String),
 }
 
 // ─── Value parsers ────────────────────────────────────────────────────────────
@@ -183,28 +168,8 @@ pub fn parse_numeric(s: &str) -> Option<f32> {
 /// Parse a font family keyword.
 ///
 /// Whitespace trimming is not performed; the input must match exactly.
-pub fn parse_font_family(s: &str) -> Option<FontFamily> {
+pub(crate) fn parse_font_family(s: &str) -> Option<FontFamily> {
     font_family_from_keyword(s)
-}
-
-/// Parse a token value string into a `TokenValue`.
-///
-/// Order of precedence:
-/// 1. Color hex
-/// 2. Numeric
-/// 3. Font family
-/// 4. Literal string (always succeeds)
-pub fn parse_token_value(s: &str) -> TokenValue {
-    if let Some(color) = parse_color_hex(s) {
-        return TokenValue::Color(color);
-    }
-    if let Some(n) = parse_numeric(s) {
-        return TokenValue::Numeric(n);
-    }
-    if let Some(f) = parse_font_family(s) {
-        return TokenValue::Font(f);
-    }
-    TokenValue::Literal(s.to_string())
 }
 
 // ─── Canonical token schema ───────────────────────────────────────────────────
@@ -1039,10 +1004,10 @@ pub fn resolve_tokens(
 /// `Linear`, `standard` -> `EaseInOut`, `decelerate` -> `EaseOutQuad`.
 /// `accelerate` (ease-in) has no compositor curve yet; it is added when a
 /// consumer of `motion.exit.easing` lands (hud-h51u7.4).
-pub const MOTION_EASINGS: &[&str] = &["linear", "standard", "decelerate", "accelerate"];
+const MOTION_EASINGS: &[&str] = &["linear", "standard", "decelerate", "accelerate"];
 
 /// Look up a canonical token definition by key.
-pub fn canonical_token(key: &str) -> Option<&'static CanonicalToken> {
+pub(crate) fn canonical_token(key: &str) -> Option<&'static CanonicalToken> {
     CANONICAL_TOKENS.iter().find(|t| t.key == key)
 }
 
@@ -1056,7 +1021,7 @@ pub fn canonical_token(key: &str) -> Option<&'static CanonicalToken> {
 ///
 /// Returns a human-readable description of the expected value on failure.
 /// Non-canonical keys are rejected.
-pub fn validate_canonical_value(key: &str, value: &str) -> Result<(), String> {
+pub(crate) fn validate_canonical_value(key: &str, value: &str) -> Result<(), String> {
     let Some(token) = canonical_token(key) else {
         return Err("a canonical token key".into());
     };
@@ -1097,7 +1062,7 @@ pub const RESERVED_RUNTIME_TOKEN_KEYS: &[&str] = &["runtime.fonts_dir"];
 /// Produces `CONFIG_INVALID_TOKEN_KEY` for any key that does not match the
 /// required pattern or is reserved for the runtime
 /// ([`RESERVED_RUNTIME_TOKEN_KEYS`]). Non-canonical keys are accepted silently.
-pub fn validate_design_tokens(raw: &RawConfig, errors: &mut Vec<ConfigError>) {
+pub(crate) fn validate_design_tokens(raw: &RawConfig, errors: &mut Vec<ConfigError>) {
     let Some(tokens) = &raw.design_tokens else {
         return;
     };
@@ -1287,33 +1252,6 @@ mod tests {
         assert!(parse_font_family("").is_none());
         // Whitespace is NOT trimmed — must match exactly
         assert!(parse_font_family(" sans-serif").is_none());
-    }
-
-    // ── parse_token_value dispatch ────────────────────────────────────────────
-
-    #[test]
-    fn test_parse_token_value_color() {
-        let tv = parse_token_value("#FF0000");
-        assert!(matches!(tv, TokenValue::Color(_)));
-    }
-
-    #[test]
-    fn test_parse_token_value_numeric() {
-        let tv = parse_token_value("16");
-        assert!(matches!(tv, TokenValue::Numeric(n) if (n - 16.0).abs() < 1e-4));
-    }
-
-    #[test]
-    fn test_parse_token_value_font() {
-        use tze_hud_scene::types::FontFamily;
-        let tv = parse_token_value("monospace");
-        assert_eq!(tv, TokenValue::Font(FontFamily::SystemMonospace));
-    }
-
-    #[test]
-    fn test_parse_token_value_literal() {
-        let tv = parse_token_value("my-custom-value");
-        assert_eq!(tv, TokenValue::Literal("my-custom-value".to_string()));
     }
 
     // ── Fallback resolution ───────────────────────────────────────────────────

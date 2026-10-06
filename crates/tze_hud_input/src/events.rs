@@ -35,16 +35,6 @@ pub enum HitTestResult {
     Passthrough,
 }
 
-impl HitTestResult {
-    /// Whether this hit requires agent notification.
-    pub fn requires_agent_dispatch(&self) -> bool {
-        matches!(
-            self,
-            HitTestResult::NodeHit { .. } | HitTestResult::TileHit { .. }
-        )
-    }
-}
-
 // ─── Route target ─────────────────────────────────────────────────────────────
 
 /// Resolved routing target for an event after hit-test.
@@ -121,21 +111,10 @@ impl LocalStateUpdate {
         self
     }
 
-    /// Set focused state and return self for chaining.
-    pub fn with_focused(mut self, focused: bool) -> Self {
-        self.focused = Some(focused);
-        self
-    }
-
     /// Mark this update as a rollback (pressed → false with 100ms animation).
     pub fn with_rollback(mut self) -> Self {
         self.rollback = true;
         self
-    }
-
-    /// Returns true if any state bit is set (non-trivial update).
-    pub fn has_changes(&self) -> bool {
-        self.pressed.is_some() || self.hovered.is_some() || self.focused.is_some()
     }
 }
 
@@ -158,28 +137,6 @@ pub struct ScrollOffsetUpdate {
     /// Origin — `true` = user input, `false` = agent request.
     #[serde(default)]
     pub user_initiated: bool,
-}
-
-impl ScrollOffsetUpdate {
-    /// Construct a user-initiated scroll offset update (absolute).
-    pub fn from_user(tile_id: SceneId, offset_x: f32, offset_y: f32) -> Self {
-        Self {
-            tile_id,
-            offset_x,
-            offset_y,
-            user_initiated: true,
-        }
-    }
-
-    /// Construct an agent-requested scroll offset update (absolute).
-    pub fn from_agent(tile_id: SceneId, offset_x: f32, offset_y: f32) -> Self {
-        Self {
-            tile_id,
-            offset_x,
-            offset_y,
-            user_initiated: false,
-        }
-    }
 }
 
 /// Batch of local state changes produced during Stage 2 Local Feedback.
@@ -214,31 +171,9 @@ impl SceneLocalPatch {
         self.node_updates.is_empty() && self.scroll_updates.is_empty()
     }
 
-    /// Add a node state update (builder-friendly alias for push_state).
+    /// Add a node state update.
     pub fn push_state(&mut self, update: LocalStateUpdate) {
         self.node_updates.push(update);
-    }
-
-    /// Add a scroll offset update.
-    pub fn push_scroll(&mut self, update: ScrollOffsetUpdate) {
-        self.scroll_updates.push(update);
-    }
-
-    /// Add a node state update (convenience form).
-    pub fn update_node(
-        &mut self,
-        node_id: SceneId,
-        pressed: Option<bool>,
-        hovered: Option<bool>,
-        focused: Option<bool>,
-    ) {
-        self.node_updates.push(LocalStateUpdate {
-            node_id,
-            pressed,
-            hovered,
-            focused,
-            rollback: false,
-        });
     }
 
     /// Merge another patch into this one (in-place coalescing).
@@ -285,43 +220,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn hit_test_result_requires_dispatch() {
-        assert!(
-            HitTestResult::NodeHit {
-                tile_id: SceneId::new(),
-                node_id: SceneId::new()
-            }
-            .requires_agent_dispatch()
-        );
-        assert!(
-            HitTestResult::TileHit {
-                tile_id: SceneId::new()
-            }
-            .requires_agent_dispatch()
-        );
-        assert!(
-            !HitTestResult::ChromeHit {
-                element_id: "tab-bar".to_string()
-            }
-            .requires_agent_dispatch()
-        );
-        assert!(!HitTestResult::Passthrough.requires_agent_dispatch());
-    }
-
-    #[test]
     fn scene_local_patch_empty_by_default() {
         let patch = SceneLocalPatch::new();
         assert!(patch.is_empty());
-    }
-
-    #[test]
-    fn scene_local_patch_update_node() {
-        let mut patch = SceneLocalPatch::new();
-        let node_id = SceneId::new();
-        patch.update_node(node_id, Some(true), None, None);
-        assert!(!patch.is_empty());
-        assert_eq!(patch.node_updates[0].node_id, node_id);
-        assert_eq!(patch.node_updates[0].pressed, Some(true));
-        assert_eq!(patch.node_updates[0].hovered, None);
     }
 }
