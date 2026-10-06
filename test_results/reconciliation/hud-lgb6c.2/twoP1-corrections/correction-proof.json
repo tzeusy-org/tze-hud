@@ -1,0 +1,200 @@
+{
+  "at": "2026-10-06T16:31:19.600692+00:00",
+  "issue": "hud-lgb6c.2",
+  "PR": 1382,
+  "review": "hud-j1jzs",
+  "bounded_packet_sha256": "981d896136d3994602bca42f32d7a288b4f29b61d1762bfebefeafa6951e1c9f",
+  "executed_source": "c38928b77420a1a1959760c12f9a6f4a1af79781",
+  "reviewed_before_source": "c54f477665695a16a2b61a05c82345b7b0b35d07",
+  "corrections": {
+    "F1": "Real app prepare_startup dispatches strict private/public one-shot outcomes before ordinary logging/build-info/diagnostics; normal valid startup retains initialization. Existing parser fixtures execute that production seam with injected no-file initialization.",
+    "F2": "Only a failed child original-token open after original PID/image/creation validation gets one already-assigned SeDebug retry. BOOL plus assignment checked; exact previous state restored explicitly before policy work, Drop backstop on unwind/failure; same-account first success unchanged. No account grants/fallback/recursive UAC."
+  },
+  "correction_test_delta": "+0 ~3 -0",
+  "original_feature_ledger": "+5 ~3 -0",
+  "current_local_gates": {
+    "fmt": {
+      "exit": 0,
+      "source_head_before": "9d4652fb867cad625ec02e2a62014faae9ddaa77",
+      "source_head_after": "9d4652fb867cad625ec02e2a62014faae9ddaa77",
+      "source_equal": true,
+      "raw_sha256": "16d325ea49e3c0c4529c65190ab96b3451dcee35398186fd341ec3e334329fc3",
+      "Rust_result_lines": [],
+      "skip_lines": []
+    },
+    "windows-gnu-all-targets": {
+      "exit": 101,
+      "source_head_before": "9d4652fb867cad625ec02e2a62014faae9ddaa77",
+      "source_head_after": "9d4652fb867cad625ec02e2a62014faae9ddaa77",
+      "source_equal": true,
+      "raw_sha256": "17fd65a86db51181f38d05a1c0596b073a0186c9a066d801ee90bfd997aaf178",
+      "Rust_result_lines": [],
+      "skip_lines": []
+    },
+    "fmt-corrected": {
+      "exit": 0,
+      "source_head_before": "c38928b77420a1a1959760c12f9a6f4a1af79781",
+      "source_head_after": "c38928b77420a1a1959760c12f9a6f4a1af79781",
+      "source_equal": true,
+      "raw_sha256": "16d325ea49e3c0c4529c65190ab96b3451dcee35398186fd341ec3e334329fc3",
+      "Rust_result_lines": [],
+      "skip_lines": []
+    },
+    "windows-gnu-all-targets-retry": {
+      "exit": 0,
+      "source_head_before": "c38928b77420a1a1959760c12f9a6f4a1af79781",
+      "source_head_after": "c38928b77420a1a1959760c12f9a6f4a1af79781",
+      "source_equal": true,
+      "raw_sha256": "f2e2ad8a5480379c2b742fdc489d4124b5153d409c627e9296a338ba0d9eb626",
+      "Rust_result_lines": [],
+      "skip_lines": []
+    },
+    "app-parser": {
+      "exit": 0,
+      "source_head_before": "c38928b77420a1a1959760c12f9a6f4a1af79781",
+      "source_head_after": "c38928b77420a1a1959760c12f9a6f4a1af79781",
+      "source_equal": true,
+      "raw_sha256": "25382ef9817050f0e7d4648871230d15632e2040bbedb3b73e2f4a591ba0cc6d",
+      "Rust_result_lines": [
+        "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 11 filtered out; finished in 0.00s"
+      ],
+      "skip_lines": []
+    },
+    "runtime-firewall": {
+      "exit": 0,
+      "source_head_before": "c38928b77420a1a1959760c12f9a6f4a1af79781",
+      "source_head_after": "c38928b77420a1a1959760c12f9a6f4a1af79781",
+      "source_equal": true,
+      "raw_sha256": "6568eed407c6cb5c9a05335f2c558213b494f2a49c6612b8a97ff2aea22c1ce5",
+      "Rust_result_lines": [
+        "test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 515 filtered out; finished in 0.02s"
+      ],
+      "skip_lines": []
+    },
+    "pairing-card": {
+      "exit": 0,
+      "source_head_before": "c38928b77420a1a1959760c12f9a6f4a1af79781",
+      "source_head_after": "c38928b77420a1a1959760c12f9a6f4a1af79781",
+      "source_equal": true,
+      "raw_sha256": "b4f93651dffc5998cbb9fc082676185d48f5520170b706335bddfc52b22af39a",
+      "Rust_result_lines": [
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 532 filtered out; finished in 0.00s"
+      ],
+      "skip_lines": []
+    },
+    "workspace-check": {
+      "exit": 0,
+      "source_head_before": "c38928b77420a1a1959760c12f9a6f4a1af79781",
+      "source_head_after": "c38928b77420a1a1959760c12f9a6f4a1af79781",
+      "source_equal": true,
+      "raw_sha256": "db39cc07d0a761ce1e30f7d43d1af955529041d2ed6fe0ae8d1793e5659633e8",
+      "Rust_result_lines": [],
+      "skip_lines": []
+    },
+    "workspace-all-targets-clippy": {
+      "exit": 0,
+      "source_head_before": "c38928b77420a1a1959760c12f9a6f4a1af79781",
+      "source_head_after": "c38928b77420a1a1959760c12f9a6f4a1af79781",
+      "source_equal": true,
+      "raw_sha256": "5bc993ac770d569559da05ba08bbe2351d07b675f4871788f3f8127ca32b7d4a",
+      "Rust_result_lines": [],
+      "skip_lines": []
+    },
+    "final-normal-ci": {
+      "exit": 0,
+      "source_head_before": "c38928b77420a1a1959760c12f9a6f4a1af79781",
+      "source_head_after": "c38928b77420a1a1959760c12f9a6f4a1af79781",
+      "source_equal": true,
+      "raw_sha256": "d3b5d1f982e8ba5d1127658bec7b5343169d65c6574c761568408a2069b1a3e3",
+      "Rust_result_lines": [
+        "test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.47s",
+        "test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.33s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.22s",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.20s",
+        "test result: ok. 591 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 8.32s",
+        "test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s",
+        "test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s",
+        "test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.29s",
+        "test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.41s",
+        "test result: ok. 171 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s",
+        "test result: ok. 404 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s",
+        "test result: ok. 42 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 209 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s",
+        "test result: ok. 205 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.15s",
+        "test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.69s",
+        "test result: ok. 33 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s",
+        "test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 86 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 533 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.81s",
+        "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 39 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.56s",
+        "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.24s",
+        "test result: ok. 315 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s",
+        "test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.15s",
+        "test result: ok. 20 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s",
+        "test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.14s",
+        "test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.29s",
+        "test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 46 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s",
+        "test result: ok. 51 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s",
+        "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.16s",
+        "test result: ok. 30 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.32s",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s",
+        "test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s",
+        "test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s",
+        "test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s",
+        "test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.35s",
+        "test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.49s",
+        "test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.28s",
+        "test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s",
+        "test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.63s",
+        "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 20 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s",
+        "test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.19s",
+        "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.50s"
+      ],
+      "skip_lines": [
+        "SKIPPED: overlay-harness-contract needs PowerShell (pwsh)"
+      ]
+    }
+  },
+  "Windows": "PENDING at publication; GNU compile is not native execution. Existing corrected-head Windows MSVC release/native five plus parser two required before author handoff.",
+  "limits": [
+    "No live UAC/firewall/account policy/alternate-admin host test; existing hud-lgb6c.3 remains separate.",
+    "Native duplicate-token fixture exercises production privilege scope on disposable tokens; no real process/thread token changes and no alternate-account UAC proof.",
+    "No native restore-API failure injection; explicit checked source error branch fails before transaction.",
+    "Normal local CI PERF_ASSERT unset; pass totals do not establish measured latency or hard-p99 coverage."
+  ],
+  "protected_contract": "No public schema/signature/default-feature/ports/install/tool/auth/journal/policy changes; all other tracked source paths unchanged from c54. Current72 definitions/T7 preserved; original counters/Node160/Tile200 unchanged.",
+  "resource_release": {
+    "receipt_sha256": "2ca50fef03907c2382ccd342718d9d2da1522ab9fdee7dab8635110a0c094be4",
+    "root_ACK_sha256": "6fcfeaad9722efc20c4240e10d32a4639d8f81e9d4252888126998641e661876",
+    "local_Cargo_after_release": "none"
+  }
+}

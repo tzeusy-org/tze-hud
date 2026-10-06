@@ -1,0 +1,20 @@
+    Checking tze_hud_scene v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-lgb6c.2/crates/tze_hud_scene)
+    Checking tze_hud_resource v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-lgb6c.2/crates/tze_hud_resource)
+   Compiling tze_hud_protocol v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-lgb6c.2/crates/tze_hud_protocol)
+    Checking tze_hud_config v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-lgb6c.2/crates/tze_hud_config)
+    Checking tze_hud_projection v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-lgb6c.2/crates/tze_hud_projection)
+    Checking tze_hud_input v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-lgb6c.2/crates/tze_hud_input)
+    Checking tze_hud_telemetry v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-lgb6c.2/crates/tze_hud_telemetry)
+    Checking tze_hud_compositor v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-lgb6c.2/crates/tze_hud_compositor)
+    Checking tze_hud_mcp v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-lgb6c.2/crates/tze_hud_mcp)
+    Checking tze_hud_widget v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-lgb6c.2/crates/tze_hud_widget)
+    Checking tze_hud_runtime v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-lgb6c.2/crates/tze_hud_runtime)
+   Compiling tze_hud_app v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-lgb6c.2/app/tze_hud_app)
+error[E0433]: failed to resolve: use of unresolved module or unlinked crate `serde_json`
+    --> app/tze_hud_app/src/main.rs:1650:23
+     |
+1650 |         let payload = serde_json::json!({
+     |                       ^^^^^^^^^^ use of unresolved module or unlinked crate `serde_json`
+
+For more information about this error, try `rustc --explain E0433`.
+error: could not compile `tze_hud_app` (bin "tze_hud" test) due to 1 previous error

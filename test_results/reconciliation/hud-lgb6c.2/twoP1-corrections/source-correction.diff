@@ -1,0 +1,512 @@
+diff --git a/app/tze_hud_app/src/main.rs b/app/tze_hud_app/src/main.rs
+index 81e30aac..feb77162 100644
+--- a/app/tze_hud_app/src/main.rs
++++ b/app/tze_hud_app/src/main.rs
+@@ -288,6 +288,33 @@ impl Default for StartupOptions {
+     }
+ }
+ 
++#[derive(Debug)]
++enum StartupAction {
++    Normal(StartupOptions),
++    Remote(
++        tze_hud_runtime::remote_firewall::RemoteAction,
++        StartupOptions,
++    ),
++    Child(tze_hud_runtime::remote_firewall::ChildRequest),
++}
++
++/// One-shot helpers must never open ordinary environment-selected log files,
++/// including when rejecting private input. Only normal startup initializes them.
++fn prepare_startup(
++    args: &[String],
++    initialize_normal: impl FnOnce(),
++) -> Result<StartupAction, String> {
++    if let Some(request) = tze_hud_runtime::remote_firewall::parse_private_child(args)? {
++        return Ok(StartupAction::Child(request));
++    }
++    let opts = parse_options(args)?;
++    if let Some(action) = opts.remote_action {
++        return Ok(StartupAction::Remote(action, opts));
++    }
++    initialize_normal();
++    Ok(StartupAction::Normal(opts))
++}
++
+ #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+ enum StartupSecurityMode {
+     Strict,
+@@ -964,62 +991,60 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
+     // (the pre-hud-q2glv default) was always immune (Codex P2 on PR #1143).
+     ignore_console_ctrl_c();
+ 
+-    init_logging();
+-    tze_hud_runtime::operator::status::set_build_info(
+-        tze_hud_runtime::operator::status::BuildInfo {
+-            sha: env!("TZE_HUD_GIT_SHA_FULL").to_owned(),
+-            channel: env!("TZE_HUD_CHANNEL").to_owned(),
+-        },
+-    );
+-
+-    // hud-pi5wx: file-based panic hook so a silent compositor/render-thread panic
+-    // leaves a durable trail — the overlay deployment captures no stdout/stderr.
+-    tze_hud_runtime::diag::install_panic_hook();
+-
+     // Collect CLI args, skipping argv[0] (the binary name).
+     let args: Vec<String> = std::env::args().skip(1).collect();
+ 
+-    match tze_hud_runtime::remote_firewall::parse_private_child(&args) {
+-        Ok(Some(request)) => {
+-            finish_remote(tze_hud_runtime::remote_firewall::execute_child(request))
+-        }
+-        Ok(None) => {}
+-        Err(error) => finish_remote(Err(error)),
+-    }
+-
+-    let mut opts = parse_options(&args).unwrap_or_else(|e| {
+-        eprintln!("error: {e}");
++    let startup = prepare_startup(&args, || {
++        init_logging();
++        tze_hud_runtime::operator::status::set_build_info(
++            tze_hud_runtime::operator::status::BuildInfo {
++                sha: env!("TZE_HUD_GIT_SHA_FULL").to_owned(),
++                channel: env!("TZE_HUD_CHANNEL").to_owned(),
++            },
++        );
++        // Keep normal runtime panic diagnostics; helper results use only the
++        // protected result transport and the attached console.
++        tze_hud_runtime::diag::install_panic_hook();
++    })
++    .unwrap_or_else(|error| {
++        eprintln!("error: {error}");
+         std::process::exit(1);
+     });
+ 
+-    // This one-shot path precedes install/cleanup, instance lock, agents, GPU
+-    // and listeners. Explicit config validation never supplies listen ports.
+-    if let Some(action) = opts.remote_action {
+-        if let Some(path) = opts.config_path.as_deref() {
+-            let validation = resolve_config_path(Some(path))
+-                .map_err(|_| "explicit configuration file was not found".to_string())
+-                .and_then(|path| {
+-                    std::fs::read_to_string(path)
+-                        .map_err(|e| format!("cannot read explicit configuration: {e}"))
+-                })
+-                .and_then(|text| {
+-                    tze_hud_config::validate_config(&text).map_err(|errors| {
+-                        errors
+-                            .iter()
+-                            .map(|e| format!("{}: {}", e.field_path, e.hint))
+-                            .collect::<Vec<_>>()
+-                            .join("; ")
++    let mut opts = match startup {
++        StartupAction::Normal(opts) => opts,
++        StartupAction::Child(request) => {
++            finish_remote(tze_hud_runtime::remote_firewall::execute_child(request))
++        }
++        // This one-shot path precedes ordinary logs/diagnostics, install/cleanup,
++        // instance lock, agents, GPU and listeners. Config never supplies ports.
++        StartupAction::Remote(action, opts) => {
++            if let Some(path) = opts.config_path.as_deref() {
++                let validation = resolve_config_path(Some(path))
++                    .map_err(|_| "explicit configuration file was not found".to_string())
++                    .and_then(|path| {
++                        std::fs::read_to_string(path)
++                            .map_err(|e| format!("cannot read explicit configuration: {e}"))
+                     })
+-                });
+-            if let Err(error) = validation {
+-                finish_remote(Err(error));
++                    .and_then(|text| {
++                        tze_hud_config::validate_config(&text).map_err(|errors| {
++                            errors
++                                .iter()
++                                .map(|e| format!("{}: {}", e.field_path, e.hint))
++                                .collect::<Vec<_>>()
++                                .join("; ")
++                        })
++                    });
++                if let Err(error) = validation {
++                    finish_remote(Err(error));
++                }
+             }
++            finish_remote(tze_hud_runtime::remote_firewall::execute(
++                action,
++                [opts.mcp_port, opts.grpc_port],
++            ));
+         }
+-        finish_remote(tze_hud_runtime::remote_firewall::execute(
+-            action,
+-            [opts.mcp_port, opts.grpc_port],
+-        ));
+-    }
++    };
+ 
+     // ── Attach-info fast path (hud-b7c0m) ─────────────────────────────────────
+     // Print the MCP attach-info block and exit *before* acquiring the GPU lock,
+@@ -1324,7 +1349,8 @@ mod tests {
+ 
+     type Env<'a> = &'a [(&'a str, &'a str)];
+ 
+-    /// Run `parse_options` with exactly `env` set (all other parse env cleared).
++    /// Exercise the real startup dispatch with exactly `env` set, without
++    /// opening files or executing a remote operation.
+     fn parse_with_env(env: Env, args: &[&str]) -> Result<StartupOptions, String> {
+         let _guard = ENV_VAR_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+         clear_parse_options_env();
+@@ -1335,7 +1361,23 @@ mod tests {
+             }
+         }
+         let args: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+-        let result = parse_options(&args);
++        let initialized = std::cell::Cell::new(false);
++        let result =
++            prepare_startup(&args, || initialized.set(true)).map(|startup| match startup {
++                StartupAction::Normal(opts) => {
++                    assert!(initialized.get());
++                    opts
++                }
++                StartupAction::Remote(action, opts) => {
++                    assert!(!initialized.get());
++                    assert_eq!(opts.remote_action, Some(action));
++                    opts
++                }
++                StartupAction::Child(_) => panic!("unexpected private child in public parser case"),
++            });
++        if result.is_err() {
++            assert!(!initialized.get());
++        }
+         clear_parse_options_env();
+         result
+     }
+@@ -1600,6 +1642,28 @@ mod tests {
+                 .unwrap_or_else(|e| panic!("case {name:?} should parse, got: {e}"));
+             check(&opts);
+         }
++        // Valid private input also bypasses ordinary initialization and the
++        // alternate administrator's startup environment. No child is executed.
++        let _guard = ENV_VAR_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
++        clear_parse_options_env();
++        unsafe { std::env::set_var("TZE_HUD_MCP_PORT", "invalid") };
++        let payload = serde_json::json!({
++            "version": 1, "action": "allow", "program": "C:\\HUD\\tze_hud.exe",
++            "ports": [9090, 50051], "parent_pid": 123, "parent_created": 456,
++            "nonce": "1234567890abcdef1234567890abcdef"
++        })
++        .to_string();
++        let initialized = std::cell::Cell::new(false);
++        assert!(matches!(
++            prepare_startup(
++                &[tze_hud_runtime::remote_firewall::CHILD_FLAG.into(), payload],
++                || initialized.set(true)
++            )
++            .unwrap(),
++            StartupAction::Child(_)
++        ));
++        assert!(!initialized.get());
++        clear_parse_options_env();
+     }
+ 
+     /// Every distinct (env, args) -> error case; the message must carry the hint.
+@@ -1658,7 +1722,13 @@ mod tests {
+                 "remote invalid private flag",
+                 &[],
+                 &["--tze-hud-firewall-child"],
+-                &["unknown flag"],
++                &["invalid internal firewall arguments"],
++            ),
++            (
++                "remote invalid private payload",
++                &[("TZE_HUD_MCP_PORT", "invalid")],
++                &["--tze-hud-firewall-child", "{}"],
++                &["invalid internal firewall payload"],
+             ),
+             (
+                 "handoff spec off loopback",
+diff --git a/crates/tze_hud_runtime/src/firewall/remote/windows.rs b/crates/tze_hud_runtime/src/firewall/remote/windows.rs
+index 3521fd23..35be5347 100644
+--- a/crates/tze_hud_runtime/src/firewall/remote/windows.rs
++++ b/crates/tze_hud_runtime/src/firewall/remote/windows.rs
+@@ -202,6 +202,146 @@ fn token(process: HANDLE) -> Result<Handle, String> {
+     .map_err(|e| failure("original process token", e))?;
+     Ok(Handle(handle))
+ }
++
++/// Temporarily enable one privilege already assigned to this token. The saved
++/// state contains only attributes actually changed by AdjustTokenPrivileges.
++/// This never grants account policy or removes a privilege.
++struct PrivilegeScope<'a> {
++    token: &'a Handle,
++    previous: TOKEN_PRIVILEGES,
++    restored: bool,
++}
++impl<'a> PrivilegeScope<'a> {
++    fn enable(token: &'a Handle, name: PCWSTR) -> Result<Self, String> {
++        let mut luid = LUID::default();
++        // SAFETY: the synchronous call writes one LUID for a valid constant.
++        unsafe { LookupPrivilegeValueW(PCWSTR::null(), name, &mut luid) }
++            .map_err(|e| failure("lookup original-token privilege", e))?;
++        let requested = TOKEN_PRIVILEGES {
++            PrivilegeCount: 1,
++            Privileges: [LUID_AND_ATTRIBUTES {
++                Luid: luid,
++                Attributes: SE_PRIVILEGE_ENABLED,
++            }],
++        };
++        let mut scope = Self {
++            token,
++            previous: TOKEN_PRIVILEGES::default(),
++            restored: false,
++        };
++        // SAFETY: only one privilege can change, and previous has room for that
++        // complete state. Capture last-error immediately: BOOL success alone
++        // also represents ERROR_NOT_ALL_ASSIGNED and cannot authorize a retry.
++        unsafe { SetLastError(ERROR_SUCCESS) };
++        let adjusted = unsafe {
++            AdjustTokenPrivileges(
++                token.0,
++                false,
++                Some(&requested),
++                std::mem::size_of::<TOKEN_PRIVILEGES>() as u32,
++                Some(&mut scope.previous),
++                None,
++            )
++        };
++        let status = unsafe { GetLastError() };
++        let enabled = adjusted
++            .map_err(|e| failure("enable original-token privilege", e))
++            .and_then(|()| {
++                if status == ERROR_SUCCESS {
++                    Ok(())
++                } else {
++                    Err(format!(
++                        "original-token privilege not assigned/enabled (Windows error {})",
++                        status.0
++                    ))
++                }
++            });
++        if let Err(error) = enabled {
++            scope
++                .restore()
++                .map_err(|restore| format!("{error}; {restore}"))?;
++            return Err(error);
++        }
++        Ok(scope)
++    }
++
++    fn restore(&mut self) -> Result<(), String> {
++        if self.restored {
++            return Ok(());
++        }
++        if self.previous.PrivilegeCount != 0 {
++            // SAFETY: restore only the exact previous state returned for our
++            // single change; no other privilege is disabled or added.
++            unsafe { SetLastError(ERROR_SUCCESS) };
++            let adjusted = unsafe {
++                AdjustTokenPrivileges(self.token.0, false, Some(&self.previous), 0, None, None)
++            };
++            let status = unsafe { GetLastError() };
++            adjusted.map_err(|e| failure("restore original-token privilege", e))?;
++            if status != ERROR_SUCCESS {
++                return Err(format!(
++                    "original-token privilege restoration failed (Windows error {})",
++                    status.0
++                ));
++            }
++        }
++        self.restored = true;
++        Ok(())
++    }
++}
++impl Drop for PrivilegeScope<'_> {
++    fn drop(&mut self) {
++        // Explicit checked restoration controls the production result. Drop
++        // additionally covers unwinding/early returns and retries a failed
++        // restore, without ordinary file logging in this elevated path.
++        let _ = self.restore();
++    }
++}
++
++fn with_privilege<T>(
++    token: &Handle,
++    name: PCWSTR,
++    operation: impl FnOnce() -> Result<T, String>,
++) -> Result<T, String> {
++    let mut scope = PrivilegeScope::enable(token, name)?;
++    let result = operation();
++    // An acquired token is not returned to the policy caller unless restoration
++    // succeeded; on failure its RAII owner closes it before returning an error.
++    match scope.restore() {
++        Ok(()) => result,
++        Err(restore) => Err(match result {
++            Ok(_) => restore,
++            Err(error) => format!("{error}; {restore}"),
++        }),
++    }
++}
++
++fn original_token(process: HANDLE, child: bool) -> Result<Handle, String> {
++    match token(process) {
++        Ok(token) => Ok(token),
++        Err(error) if !child => Err(error),
++        Err(first_error) => {
++            // Identity/creation checks already succeeded in origin. Preserve
++            // accessible same-account paths; a failed child open gets exactly
++            // one retry under its already-assigned SeDebug privilege, as the
++            // different-account OpenProcessToken contract requires.
++            let mut current = HANDLE::default();
++            unsafe {
++                OpenProcessToken(
++                    GetCurrentProcess(),
++                    TOKEN_QUERY | TOKEN_ADJUST_PRIVILEGES,
++                    &mut current,
++                )
++            }
++            .map_err(|e| failure("child privilege token", e))?;
++            let current = Handle(current);
++            with_privilege(&current, SE_DEBUG_NAME, || token(process)).map_err(|error| {
++                format!("{first_error}; scoped child SeDebugPrivilege retry: {error}")
++            })
++        }
++    }
++}
++
+ fn token_sid(token: HANDLE) -> Result<String, String> {
+     let mut required = 0;
+     let _ = unsafe { GetTokenInformation(token, TokenUser, None, 0, &mut required) };
+@@ -311,7 +451,7 @@ fn origin(request: &ChildRequest, child: bool) -> Result<Origin, String> {
+     if !ordinal_equal(&canonical_file(Path::new(&name))?, &request.program) {
+         return Err("original parent executable mismatch".into());
+     }
+-    let token = token(handle)?;
++    let token = original_token(handle, child)?;
+     let sid = token_sid(token.0)?;
+     Ok(Origin {
+         _image: image,
+@@ -1473,9 +1613,125 @@ mod tests {
+     #[test]
+     fn rule_backup_roundtrips_through_windows_com() {
+         // Standalone COM objects only. No INetFwPolicy2, INetFwRules::Add/Remove,
+-        // administrator token, UAC prompt, or machine policy mutation occurs.
++        // elevation, UAC prompt, or machine policy mutation occurs. Privilege
++        // checks below modify only private duplicate tokens, never a live
++        // process/thread token or an account's assigned privileges.
+         std::thread::spawn(|| {
+             let _com = Com::init().unwrap();
++            fn duplicate_fixture_token(access: TOKEN_ACCESS_MASK) -> Handle {
++                let source = token(unsafe { GetCurrentProcess() }).unwrap();
++                let mut duplicate = HANDLE::default();
++                unsafe {
++                    DuplicateTokenEx(
++                        source.0,
++                        access,
++                        None,
++                        SecurityImpersonation,
++                        TokenImpersonation,
++                        &mut duplicate,
++                    )
++                }
++                .unwrap();
++                Handle(duplicate)
++            }
++            // Use the already-assigned change-notification privilege on an
++            // isolated duplicate: CI needs no administrator/SeDebug assignment.
++            // These calls exercise the production guard and checked restore,
++            // while the original cross-account UAC remains an owner exercise.
++            let duplicate = duplicate_fixture_token(TOKEN_QUERY | TOKEN_ADJUST_PRIVILEGES);
++            let mut luid = LUID::default();
++            unsafe { LookupPrivilegeValueW(PCWSTR::null(), SE_CHANGE_NOTIFY_NAME, &mut luid) }
++                .unwrap();
++            let disabled = TOKEN_PRIVILEGES {
++                PrivilegeCount: 1,
++                Privileges: [LUID_AND_ATTRIBUTES {
++                    Luid: luid,
++                    Attributes: TOKEN_PRIVILEGES_ATTRIBUTES(0),
++                }],
++            };
++            unsafe {
++                SetLastError(ERROR_SUCCESS);
++                AdjustTokenPrivileges(duplicate.0, false, Some(&disabled), 0, None, None).unwrap();
++            }
++            assert_eq!(unsafe { GetLastError() }, ERROR_SUCCESS);
++            {
++                let mut scope = PrivilegeScope::enable(&duplicate, SE_CHANGE_NOTIFY_NAME).unwrap();
++                assert_eq!(scope.previous.PrivilegeCount, 1);
++                assert!(
++                    !scope.previous.Privileges[0]
++                        .Attributes
++                        .contains(SE_PRIVILEGE_ENABLED)
++                );
++                // An already-enabled privilege has no changed previous state;
++                // its restoration must leave the outer scope enabled.
++                let mut enabled =
++                    PrivilegeScope::enable(&duplicate, SE_CHANGE_NOTIFY_NAME).unwrap();
++                assert_eq!(enabled.previous.PrivilegeCount, 0);
++                enabled.restore().unwrap();
++                scope.restore().unwrap();
++            }
++            for outcome in [Ok(()), Err("injected token-open failure".into())] {
++                assert_eq!(
++                    with_privilege(&duplicate, SE_CHANGE_NOTIFY_NAME, || outcome.clone()),
++                    outcome
++                );
++                let mut restored =
++                    PrivilegeScope::enable(&duplicate, SE_CHANGE_NOTIFY_NAME).unwrap();
++                assert_eq!(restored.previous.PrivilegeCount, 1);
++                assert!(
++                    !restored.previous.Privileges[0]
++                        .Attributes
++                        .contains(SE_PRIVILEGE_ENABLED)
++                );
++                restored.restore().unwrap();
++            }
++            assert!(
++                std::panic::catch_unwind(|| {
++                    let _: Result<(), String> =
++                        with_privilege(&duplicate, SE_CHANGE_NOTIFY_NAME, || {
++                            panic!("injected acquisition unwind")
++                        });
++                })
++                .is_err()
++            );
++            {
++                let mut restored =
++                    PrivilegeScope::enable(&duplicate, SE_CHANGE_NOTIFY_NAME).unwrap();
++                assert_eq!(restored.previous.PrivilegeCount, 1);
++                assert!(
++                    !restored.previous.Privileges[0]
++                        .Attributes
++                        .contains(SE_PRIVILEGE_ENABLED)
++                );
++                restored.restore().unwrap();
++            }
++            let read_only = duplicate_fixture_token(TOKEN_QUERY);
++            assert!(PrivilegeScope::enable(&read_only, SE_CHANGE_NOTIFY_NAME).is_err());
++            // Removing a privilege from this disposable duplicate makes the
++            // real success-with-NOT_ALL_ASSIGNED case deterministic. Nothing
++            // can grant it back, and the guarded operation must not be called.
++            let removed = TOKEN_PRIVILEGES {
++                PrivilegeCount: 1,
++                Privileges: [LUID_AND_ATTRIBUTES {
++                    Luid: luid,
++                    Attributes: SE_PRIVILEGE_REMOVED,
++                }],
++            };
++            unsafe {
++                SetLastError(ERROR_SUCCESS);
++                AdjustTokenPrivileges(duplicate.0, false, Some(&removed), 0, None, None).unwrap();
++            }
++            assert_eq!(unsafe { GetLastError() }, ERROR_SUCCESS);
++            let called = std::cell::Cell::new(false);
++            assert!(
++                with_privilege(&duplicate, SE_CHANGE_NOTIFY_NAME, || {
++                    called.set(true);
++                    Ok(())
++                })
++                .is_err()
++            );
++            assert!(!called.get());
++
+             // A read-only folder query exercises the production task-allocation
+             // lifetime without opening helper files or obtaining machine policy.
+             assert!(program_data_path().unwrap().is_absolute());
