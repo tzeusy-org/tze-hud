@@ -1228,7 +1228,7 @@ async fn send_resource_error_response(
             "Compute expected_hash as the 32-byte BLAKE3 hash of the exact upload bytes, then retry ResourceUploadStart"
         }
         StoreResourceError::TooManyUploads => {
-            "Complete an in-flight upload before retrying ResourceUploadStart"
+            "Complete an in-flight upload before retrying ResourceUploadStart; if none can complete, report stale upload capacity to the operator"
         }
         StoreResourceError::InvalidChunk(detail)
             if detail.contains("unknown upload_id")

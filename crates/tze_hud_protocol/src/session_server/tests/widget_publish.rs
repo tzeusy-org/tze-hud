@@ -238,7 +238,7 @@ async fn test_widget_publish_unknown_parameter() {
         payload: Some(ClientPayload::Publish(Publish {
             surface: "widget:gauge".to_string(),
             params: vec![crate::proto::WidgetParameterValueProto {
-                param_name: "value".to_string(),
+                param_name: "level".to_string(),
                 value: Some(crate::proto::widget_parameter_value_proto::Value::F32Value(
                     0.5,
                 )),
