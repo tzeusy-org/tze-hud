@@ -24,6 +24,48 @@ use super::stream_session::StreamSession;
 use super::upload::UploadByteRateLimiter;
 use super::{DEFAULT_HEARTBEAT_INTERVAL_MS, now_ms, now_wall_us};
 
+/// Dispatch the initial inbound read, including failures before identification.
+pub(super) async fn handle_handshake_read(
+    ctx: HandshakeCtx<'_>,
+    tx: &tokio::sync::mpsc::Sender<Result<ServerMessage, Status>>,
+    read: Result<Option<ClientMessage>, Status>,
+) -> Option<StreamSession> {
+    let error = match read {
+        Ok(Some(message)) => match message.payload {
+            Some(client_message::Payload::SessionInit(init)) => {
+                return handle_session_init(ctx, tx, &init).await;
+            }
+            Some(client_message::Payload::SessionResume(resume)) => {
+                return handle_session_resume(ctx, tx, &resume).await;
+            }
+            _ => SessionError {
+                code: "INVALID_HANDSHAKE".to_string(),
+                message: "First message must be SessionInit or SessionResume".to_string(),
+                hint: "Send SessionInit or SessionResume as the first message on a new stream"
+                    .to_string(),
+            },
+        },
+        Ok(None) => SessionError {
+            code: "HANDSHAKE_TIMEOUT".to_string(),
+            message: "Stream closed before handshake".to_string(),
+            hint: "Open a new stream and send SessionInit as the first message".to_string(),
+        },
+        Err(error) => SessionError {
+            code: "HANDSHAKE_ERROR".to_string(),
+            message: format!("Error receiving handshake: {error}"),
+            hint: "Open a new stream and send SessionInit as the first message".to_string(),
+        },
+    };
+    let _ = tx
+        .send(Ok(ServerMessage {
+            sequence: 1,
+            timestamp_wall_us: now_wall_us(),
+            payload: Some(ServerPayload::SessionError(error)),
+        }))
+        .await;
+    None
+}
+
 async fn send_auth_failed(
     tx: &tokio::sync::mpsc::Sender<Result<ServerMessage, Status>>,
     rejection: AuthRejection,
@@ -138,7 +180,8 @@ pub(super) async fn handle_session_init(
                     payload: Some(ServerPayload::SessionError(SessionError {
                         code: error_code.to_string(),
                         message,
-                        hint: String::new(),
+                        hint: "Wait for session capacity to become available, then open a new stream with SessionInit"
+                            .to_string(),
                     })),
                 }))
                 .await;
@@ -335,7 +378,8 @@ pub(super) async fn handle_session_resume(
                     payload: Some(ServerPayload::SessionError(SessionError {
                         code: error_code.to_string(),
                         message,
-                        hint: String::new(),
+                        hint: "Wait for resource capacity to become available, then open a new stream with SessionInit; this resume token has been consumed"
+                            .to_string(),
                     })),
                 }))
                 .await;

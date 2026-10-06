@@ -1,6 +1,178 @@
 use super::*;
 
 #[tokio::test]
+async fn test_initial_handshake_failures_carry_recovery_hints() {
+    let service = HudSessionImpl::new(SceneGraph::new(800.0, 600.0), "test-key");
+    let agents = tze_hud_scene::config::AgentDirectory::unrestricted("test-key");
+    let budget = ResourceBudget::default();
+    let ctx = HandshakeCtx {
+        state: &service.state,
+        agents: &agents,
+        resource_budget: &budget,
+        budget_enforcer: None,
+        peer_ip: None,
+    };
+    for (read, code, message_fragment) in [
+        (
+            Ok(None),
+            "HANDSHAKE_TIMEOUT",
+            "Stream closed before handshake",
+        ),
+        (
+            Err(Status::data_loss("inbound decode failed")),
+            "HANDSHAKE_ERROR",
+            "Error receiving handshake:",
+        ),
+        (
+            Ok(Some(ClientMessage {
+                payload: Some(ClientPayload::Heartbeat(Heartbeat::default())),
+                ..Default::default()
+            })),
+            "INVALID_HANDSHAKE",
+            "First message must be SessionInit or SessionResume",
+        ),
+        (
+            Ok(Some(ClientMessage::default())),
+            "INVALID_HANDSHAKE",
+            "First message must be SessionInit or SessionResume",
+        ),
+    ] {
+        let (tx, mut rx) = tokio::sync::mpsc::channel(16);
+        assert!(handle_handshake_read(ctx, &tx, read).await.is_none());
+        let message = rx.recv().await.unwrap().unwrap();
+        assert_eq!(message.sequence, 1);
+        let Some(ServerPayload::SessionError(error)) = message.payload else {
+            panic!("expected a terminal SessionError for {code}");
+        };
+        assert_eq!(error.code, code);
+        assert!(error.message.contains(message_fragment));
+        assert!(error.hint.contains("new stream"));
+        assert!(error.hint.contains("SessionInit"));
+        if code == "INVALID_HANDSHAKE" {
+            assert!(error.hint.contains("SessionResume"));
+        }
+        assert!(rx.try_recv().is_err(), "rejection sends only one error");
+        assert_eq!(service.state.lock().await.sessions.session_count(), 0);
+    }
+}
+
+#[tokio::test]
+async fn test_session_registration_rejections_carry_recovery_hints() {
+    struct RejectRegistration;
+    impl MutationBudgetEnforcer for RejectRegistration {
+        fn register_session(
+            &self,
+            _session_id: SceneId,
+            _namespace: String,
+            _budget: ResourceBudget,
+            _resident: bool,
+            _initial_usage: MutationBudgetUsage,
+        ) -> MutationBudgetDecision {
+            MutationBudgetDecision::Reject {
+                error_code: "RESOURCE_EXHAUSTED",
+                message: "session capacity exhausted".to_string(),
+            }
+        }
+
+        fn remove_session(&self, _session_id: SceneId) {
+            panic!("a rejected session was never registered");
+        }
+
+        fn reserve_mutation(
+            &self,
+            _session_id: SceneId,
+            _delta_tiles: i32,
+            _delta_texture_bytes: i64,
+            _max_nodes_in_batch: u32,
+        ) -> MutationBudgetDecision {
+            panic!("a rejected session cannot mutate");
+        }
+
+        fn rollback_mutation(
+            &self,
+            _session_id: SceneId,
+            _delta_tiles: i32,
+            _delta_texture_bytes: i64,
+        ) {
+            panic!("a rejected session cannot mutate");
+        }
+    }
+
+    let enforcer: SharedMutationBudgetEnforcer = Arc::new(RejectRegistration);
+    let agents = tze_hud_scene::config::AgentDirectory::unrestricted("test-key");
+    let budget = ResourceBudget::default();
+    for resume in [false, true] {
+        let clock = tze_hud_scene::TestClock::new(0);
+        let scene = SceneGraph::new_with_clock(800.0, 600.0, Arc::new(clock));
+        let service = HudSessionImpl::new(scene, "test-key");
+        let token = vec![1; 16];
+        let payload = if resume {
+            service.state.lock().await.token_store.insert(
+                token.clone(),
+                "rejected-agent".to_string(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                DEFAULT_GRACE_PERIOD_MS,
+                0,
+            );
+            ClientPayload::SessionResume(SessionResume {
+                agent_id: "rejected-agent".to_string(),
+                resume_token: token.clone(),
+                auth_credential: Some(crate::auth::psk_credential("test-key")),
+                ..Default::default()
+            })
+        } else {
+            ClientPayload::SessionInit(SessionInit {
+                agent_id: "rejected-agent".to_string(),
+                auth_credential: Some(crate::auth::psk_credential("test-key")),
+                ..Default::default()
+            })
+        };
+        let ctx = HandshakeCtx {
+            state: &service.state,
+            agents: &agents,
+            resource_budget: &budget,
+            budget_enforcer: Some(&enforcer),
+            peer_ip: None,
+        };
+        let (tx, mut rx) = tokio::sync::mpsc::channel(16);
+        assert!(
+            handle_handshake_read(
+                ctx,
+                &tx,
+                Ok(Some(ClientMessage {
+                    sequence: 1,
+                    payload: Some(payload),
+                    ..Default::default()
+                })),
+            )
+            .await
+            .is_none()
+        );
+        let message = rx.recv().await.unwrap().unwrap();
+        assert_eq!(message.sequence, 1);
+        let Some(ServerPayload::SessionError(error)) = message.payload else {
+            panic!("expected registration refusal");
+        };
+        assert_eq!(error.code, "RESOURCE_EXHAUSTED");
+        assert_eq!(error.message, "session capacity exhausted");
+        assert!(error.hint.contains("capacity"));
+        assert!(error.hint.contains("new stream with SessionInit"));
+        assert!(rx.try_recv().is_err(), "rejection sends only one error");
+        let mut state = service.state.lock().await;
+        assert_eq!(state.sessions.session_count(), 0);
+        if resume {
+            assert!(error.hint.contains("token has been consumed"));
+            assert!(matches!(
+                state.token_store.consume(&token, "rejected-agent", 0),
+                Err(crate::token::ResumeError::TokenNotFound)
+            ));
+        }
+    }
+}
+
+#[tokio::test]
 async fn test_handshake_init_established_and_snapshot() {
     let (mut client, _server) = setup_test().await;
     let (_tx, messages, _stream) = handshake(&mut client, "test-agent", "test-key").await;
@@ -175,9 +347,16 @@ async fn test_sequence_gap_exceeded() {
                 "Expected SEQUENCE_GAP_EXCEEDED, got: {}",
                 err.code
             );
+            assert!(err.hint.contains("new stream"));
+            assert!(err.hint.contains("increasing sequence numbers"));
+            assert!(err.hint.contains(&DEFAULT_MAX_SEQUENCE_GAP.to_string()));
         }
         other => panic!("Expected SessionError(SEQUENCE_GAP_EXCEEDED), got: {other:?}"),
     }
+    assert!(
+        stream.next().await.is_none(),
+        "sequence error closes the stream"
+    );
 }
 
 /// Scenario: Sequence regression rejected
@@ -220,9 +399,16 @@ async fn test_sequence_regression() {
                 "Expected SEQUENCE_REGRESSION, got: {}",
                 err.code
             );
+            assert!(err.hint.contains("new stream"));
+            assert!(err.hint.contains("increasing sequence numbers"));
+            assert!(err.hint.contains("starting at 2"));
         }
         other => panic!("Expected SessionError(SEQUENCE_REGRESSION), got: {other:?}"),
     }
+    assert!(
+        stream.next().await.is_none(),
+        "sequence error closes the stream"
+    );
 }
 
 /// Scenario: Monotonically increasing sequence numbers accepted.
@@ -511,6 +697,8 @@ async fn test_handle_session_init_local_socket_non_loopback_auth_failed() {
                 "error message must mention loopback, got: {}",
                 err.message
             );
+            assert!(err.hint.contains("PreSharedKeyCredential"));
+            assert!(err.hint.contains("paired PSK"));
         }
         other => panic!(
             "Expected SessionError(AUTH_FAILED) for non-loopback LocalSocket init, \
@@ -588,6 +776,8 @@ async fn test_handle_session_resume_local_socket_non_loopback_auth_failed() {
                 "non-loopback LocalSocket resume must produce AUTH_FAILED, got: {}",
                 err.code
             );
+            assert!(err.hint.contains("PreSharedKeyCredential"));
+            assert!(err.hint.contains("paired PSK"));
         }
         other => panic!(
             "Expected SessionError(AUTH_FAILED) for non-loopback LocalSocket resume, \
