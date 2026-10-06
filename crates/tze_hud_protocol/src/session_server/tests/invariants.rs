@@ -44,40 +44,57 @@ fn wall_aligned_clock() -> tze_hud_scene::TestClock {
     tze_hud_scene::TestClock::new(now_ms())
 }
 
-/// Wait for the session task's async cleanup to orphan `lease_id`.
-async fn wait_for_lease_state(
-    state: &Arc<tokio::sync::Mutex<crate::session::SharedState>>,
+/// A watchdog bounds a stuck harness; only the actual cleanup signal establishes
+/// completion. Semantic TTL/grace time is advanced exclusively by TestClock.
+async fn await_session_cleanup(cleanup: tokio::sync::oneshot::Receiver<()>) {
+    tokio::time::timeout(Duration::from_secs(5), cleanup)
+        .await
+        .expect("real session cleanup did not complete")
+        .expect("cleanup witness dropped before normal cleanup completed");
+}
+
+struct HeldTileSession {
+    tx: tokio::sync::mpsc::Sender<ClientMessage>,
+    stream: tonic::Streaming<ServerMessage>,
+    resume_token: Vec<u8>,
+    session_id: SceneId,
     lease_id: SceneId,
-    want: LeaseState,
-) {
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    loop {
-        {
-            let st = state.lock().await;
-            let scene = st.scene.lock().await;
-            if scene.leases.get(&lease_id).map(|l| l.state) == Some(want) {
-                return;
-            }
-        }
-        assert!(
-            std::time::Instant::now() < deadline,
-            "lease never reached {want:?}"
-        );
-        tokio::task::yield_now().await;
-        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    tile_id: SceneId,
+}
+
+impl HeldTileSession {
+    async fn disconnect(
+        self,
+        state: &Arc<tokio::sync::Mutex<crate::session::SharedState>>,
+    ) -> (Vec<u8>, SceneId, SceneId) {
+        let cleanup = state
+            .lock()
+            .await
+            .sessions
+            .observe_cleanup(&self.session_id);
+        drop(self.tx);
+        drop(self.stream);
+        // Neither the state nor scene lock is held while the real handler runs.
+        await_session_cleanup(cleanup).await;
+        let st = state.lock().await;
+        let scene = st.scene.lock().await;
+        assert_eq!(scene.leases[&self.lease_id].state, LeaseState::Orphaned);
+        (self.resume_token, self.lease_id, self.tile_id)
     }
 }
 
-/// Connect, take a lease that owns one tile, then drop the stream.
-/// Returns the resume token, lease id, and tile id.
-async fn connect_hold_tile_and_disconnect(
+/// Connect and take a lease that owns one tile through the real session stream.
+async fn connect_hold_tile(
     client: &mut HudSessionClient<tonic::transport::Channel>,
-    state: &Arc<tokio::sync::Mutex<crate::session::SharedState>>,
     agent: &str,
-) -> (Vec<u8>, SceneId, SceneId) {
+) -> HeldTileSession {
     let (tx, init, mut stream) = handshake(client, agent, "test-key").await;
-    let resume_token = match &init[0].payload {
-        Some(ServerPayload::SessionEstablished(e)) => e.resume_token.clone(),
+    let (resume_token, session_id) = match &init[0].payload {
+        Some(ServerPayload::SessionEstablished(e)) => (
+            e.resume_token.clone(),
+            bytes_to_scene_id(&e.session_id)
+                .expect("SessionEstablished carries a valid session ID"),
+        ),
         other => panic!("expected SessionEstablished, got {other:?}"),
     };
     tx.send(ClientMessage {
@@ -102,10 +119,26 @@ async fn connect_hold_tile_and_disconnect(
         ),
         other => panic!("expected a granted ClaimTile, got {other:?}"),
     };
-    drop(tx);
-    drop(stream);
-    wait_for_lease_state(state, lease_id, LeaseState::Orphaned).await;
-    (resume_token, lease_id, tile_id)
+    HeldTileSession {
+        tx,
+        stream,
+        resume_token,
+        session_id,
+        lease_id,
+        tile_id,
+    }
+}
+
+/// Register completion before transport drop, then await all real session cleanup.
+async fn connect_hold_tile_and_disconnect(
+    client: &mut HudSessionClient<tonic::transport::Channel>,
+    state: &Arc<tokio::sync::Mutex<crate::session::SharedState>>,
+    agent: &str,
+) -> (Vec<u8>, SceneId, SceneId) {
+    connect_hold_tile(client, agent)
+        .await
+        .disconnect(state)
+        .await
 }
 
 async fn send_resume(
@@ -144,18 +177,47 @@ async fn send_resume(
 async fn grpc_disconnect_orphans_leases_and_badges_tiles() {
     let (mut client, server, state, _exp) =
         setup_test_with_lease_expiry_clock(wall_aligned_clock()).await;
-    let (_token, _lease_id, tile_id) =
-        connect_hold_tile_and_disconnect(&mut client, &state, "orphan-agent").await;
+    let session = connect_hold_tile(&mut client, "orphan-agent").await;
+    let peer = connect_hold_tile(&mut client, "orphan-agent").await;
+    assert_ne!(session.session_id, peer.session_id);
+    let (duplicate_cleanup, mut peer_cleanup) = {
+        let mut st = state.lock().await;
+        (
+            st.sessions.observe_cleanup(&session.session_id),
+            st.sessions.observe_cleanup(&peer.session_id),
+        )
+    };
+    let (_token, lease_id, tile_id) = session.disconnect(&state).await;
+    // A second observer starts awaiting after cleanup already completed.
+    await_session_cleanup(duplicate_cleanup).await;
 
     let st = state.lock().await;
     let scene = st.scene.lock().await;
+    assert_eq!(scene.leases[&lease_id].state, LeaseState::Orphaned);
     let tile = scene.tiles.get(&tile_id).expect("orphaned content is kept");
     assert_eq!(
         tile.visual_hint,
         tze_hud_scene::lease::TileVisualHint::DisconnectionBadge
     );
+    assert_eq!(
+        st.sessions.session_count(),
+        1,
+        "only the peer remains connected"
+    );
+    assert_eq!(scene.leases[&peer.lease_id].state, LeaseState::Active);
+    assert_eq!(
+        scene.tiles[&peer.tile_id].visual_hint,
+        tze_hud_scene::lease::TileVisualHint::None
+    );
+    assert_eq!(
+        peer_cleanup.try_recv(),
+        Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+    );
     drop(scene);
     drop(st);
+    peer.disconnect(&state).await;
+    await_session_cleanup(peer_cleanup).await;
+    assert_eq!(state.lock().await.sessions.session_count(), 0);
     server.abort();
 }
 
@@ -163,11 +225,12 @@ async fn grpc_disconnect_orphans_leases_and_badges_tiles() {
 /// tile, clears the badge, and creates nothing new.
 #[tokio::test]
 async fn grpc_resume_within_grace_restores_same_lease_and_tile() {
-    let (mut client, server, state, _exp) =
-        setup_test_with_lease_expiry_clock(wall_aligned_clock()).await;
+    let clock = wall_aligned_clock();
+    let (mut client, server, state, _exp) = setup_test_with_lease_expiry_clock(clock.clone()).await;
     let (token, lease_id, tile_id) =
         connect_hold_tile_and_disconnect(&mut client, &state, "resume-agent").await;
 
+    clock.advance(crate::token::DEFAULT_GRACE_PERIOD_MS - 1);
     let (_tx, mut stream) = send_resume(&mut client, "resume-agent", token).await;
     match stream.next().await.unwrap().unwrap().payload {
         Some(ServerPayload::SessionResumeResult(r)) => assert!(r.accepted),
@@ -199,6 +262,8 @@ async fn grpc_grace_expiry_reclaims_orphaned_lease_and_rejects_resume() {
     {
         let st = state.lock().await;
         let mut scene = st.scene.lock().await;
+        assert_eq!(st.sessions.session_count(), 0);
+        assert_eq!(scene.leases[&lease_id].state, LeaseState::Orphaned);
         clock.advance(crate::token::DEFAULT_GRACE_PERIOD_MS + 1);
         // The compositor's per-frame sweep, as in production.
         let expiries = scene.expire_leases();

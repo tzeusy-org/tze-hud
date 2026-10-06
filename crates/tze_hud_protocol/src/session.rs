@@ -183,6 +183,9 @@ impl Clone for AgentSession {
 #[derive(Default)]
 pub struct SessionRegistry {
     sessions: HashMap<String, AgentSession>,
+    /// Observers of the full normal cleanup boundary, never a cleanup trigger.
+    #[cfg(test)]
+    cleanup_observers: HashMap<SceneId, Vec<tokio::sync::oneshot::Sender<()>>>,
 }
 
 impl SessionRegistry {
@@ -208,6 +211,34 @@ impl SessionRegistry {
 
     pub fn remove_session(&mut self, session_id: &str) -> Option<AgentSession> {
         self.sessions.remove(session_id)
+    }
+
+    /// Register before dropping the transport, keyed by the scene session ID
+    /// carried by SessionEstablished (distinct from the internal registry ID).
+    /// Simultaneous connections in one namespace stay distinct; oneshots retain
+    /// completion even when cleanup finishes before the observer awaits.
+    #[cfg(test)]
+    pub(crate) fn observe_cleanup(
+        &mut self,
+        session_id: &SceneId,
+    ) -> tokio::sync::oneshot::Receiver<()> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        self.cleanup_observers
+            .entry(*session_id)
+            .or_default()
+            .push(tx);
+        rx
+    }
+
+    /// Called only after normal lease/token/upload/enforcer cleanup completes.
+    /// RegistryGuard's removal-only fallback must not signal this boundary.
+    #[cfg(test)]
+    pub(crate) fn finish_cleanup(&mut self, session_id: &SceneId) {
+        if let Some(observers) = self.cleanup_observers.remove(session_id) {
+            for observer in observers {
+                let _ = observer.send(());
+            }
+        }
     }
 
     /// Inspect the connected-session count in lifecycle fixtures.

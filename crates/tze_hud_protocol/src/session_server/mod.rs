@@ -520,6 +520,12 @@ impl HudSession for HudSessionImpl {
             if let Some(enforcer) = &session.budget_enforcer {
                 enforcer.remove_session(session.scene_session_id);
             }
+            #[cfg(test)]
+            state
+                .lock()
+                .await
+                .sessions
+                .finish_cleanup(&session.scene_session_id);
         });
 
         // Return the receiver stream as the response
