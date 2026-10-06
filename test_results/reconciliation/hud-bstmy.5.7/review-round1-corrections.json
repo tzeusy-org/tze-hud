@@ -1,0 +1,212 @@
+{
+  "at": "2026-10-06T11:37:34.287583+00:00",
+  "native_metadata_pid": 3119235,
+  "reviewed_author_head": "39bd18adbbc8579905a7b898be25fc4339d86ff3",
+  "audited_source": "5825a05421a9e588edd5c3c05ebf7f5bac36c0e1",
+  "bootstrap_receipt": "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.5.7-review-fix/.handoff/hud-bstmy.5.7-review-fix/bootstrap-native-receipt.json",
+  "bootstrap_receipt_sha256": "572b2da06dc84386379fd61152ca44209c6d45eaeaffc0af92b862230987a43f",
+  "bounded_return_packet_sha256": "eb7ea6eda96f983cb7b4db17bd003d16db2019417f96952e8550e36826b6d09e",
+  "findings": [
+    {
+      "key": "mute-match-classification",
+      "corrected_fact": "One protected doc-comment match at portal_resize.rs105 and two LIVE assertion-message matches at2153/2157 in shell_reserved_ctrl_shift_m_mute; both assertions call ShellReservedShortcut::is_reserved(\"m\"/\"M\",true,true,false), whose119-120 branch retains the v1 reserved no-op chord. The removed named MuteToggle implementation is absent. Literal zero-match AC still deviates; preserve T7 source/test and no new repair child."
+    },
+    {
+      "key": "budget-zero-plumbing-qualification",
+      "corrected_fact": "Source-derived zero/plumbing limitation: FrameTelemetry::new initializes mutations_applied=0 (record.rs228), the qualified compositor frame constructors have no writer for that field, and HeadlessRuntime gates both returned input_to_scene_commit_us/input_to_next_present_us on compositor_telemetry.mutations_applied>0 (headless.rs525-543). scene-commit fixture243-305 explicitly has no live mutation; next-present324-386 warms then renders20 unchanged frames. Their successful assertions do not establish measured input/agent-to-commit or input-to-present conformance. This is source inference, not a numeric value emitted by the executed log.",
+      "routed_full_packet": "W4",
+      "related_non_equivalent_owners": [
+        "hud-w2t3x",
+        "hud-ddm2g"
+      ]
+    }
+  ],
+  "current_source_inventory": [
+    {
+      "path": "crates/tze_hud_input/src/portal_resize.rs",
+      "git_blob": "812f8850c769784be3734ab034c0df936347d07c",
+      "file_sha256": "238146de2a7562937de06175a34bb604fdd263c162b5d0d85ffe11dcbdde6f03",
+      "bytes": 92261,
+      "source_blob_equals_audited_582": true
+    },
+    {
+      "path": "examples/vertical_slice/tests/budget_assertions.rs",
+      "git_blob": "2ced8abf270a716119cf1b039e8c8b426f6717db",
+      "file_sha256": "b32a13d3ccd004df86799d071ddf2b3ad076315e38e61756407d4270a3aac466",
+      "bytes": 54808,
+      "source_blob_equals_audited_582": true
+    },
+    {
+      "path": "crates/tze_hud_telemetry/src/record.rs",
+      "git_blob": "44e2f9350db1a4247b6cb363633e5a5195fed4ce",
+      "file_sha256": "3c7e9243e0e9c52e6530acbd929887aed90aacf0dbaddd00ac59c30429c8f93e",
+      "bytes": 48323,
+      "source_blob_equals_audited_582": true
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/headless.rs",
+      "git_blob": "9811068804cd058446b5aa094ba26c83a34173bb",
+      "file_sha256": "073c31640005549e5683c3d684ce6e300d9f17d3f5dc87ecacf2e56da8242751",
+      "bytes": 75635,
+      "source_blob_equals_audited_582": true
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/renderer/frame.rs",
+      "git_blob": "9663fa1ca5d6a4aaa165ff0bdea4a38ca3ce1e48",
+      "file_sha256": "260bbc9fd3ba092e3ce2da5fbbada5225b07eb7a9c7679103fc27958503c205f",
+      "bytes": 64548,
+      "source_blob_equals_audited_582": true
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/windowed/lifecycle.rs",
+      "git_blob": "dfe5883078bcb64bb2d2a3585ed02223b3438251",
+      "file_sha256": "ef232f643b01b9d24656a8d030bca65f11a0c9597516b4fb1a77e078f5330375",
+      "bytes": 122872,
+      "source_blob_equals_audited_582": true
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/windowed/mod.rs",
+      "git_blob": "aaada422f0d0411739730957c4ab36dae3d9a901",
+      "file_sha256": "2c7817ba8dabc7fa7f31f7e8ba1f0f8b40e0364ad89020b6fa8d5deaa9af9747",
+      "bytes": 184382,
+      "source_blob_equals_audited_582": true
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/windowed/event_loop_harness.rs",
+      "git_blob": "4253ad272be230a7e76af29ed38b8c2d09fb8463",
+      "file_sha256": "79106b76f77692a3eec145406535a951703683b1cb393f8db5edb4ffa90a873d",
+      "bytes": 92409,
+      "source_blob_equals_audited_582": true
+    }
+  ],
+  "actual_native_source_queries": [
+    {
+      "command": [
+        "rg",
+        "-n",
+        "--glob",
+        "*.rs",
+        "\\bmutations_applied\\b",
+        "app",
+        "crates",
+        "examples",
+        "tests"
+      ],
+      "exit_code": 0,
+      "stdout": "examples/vertical_slice/tests/budget_assertions.rs:249:/// `headless.rs` — the field is gated on `mutations_applied > 0`). This test\ncrates/tze_hud_telemetry/src/record.rs:134:    pub mutations_applied: u32,\ncrates/tze_hud_telemetry/src/record.rs:228:            mutations_applied: 0,\ncrates/tze_hud_telemetry/src/record.rs:956:            \"active_leases\":0,\"mutations_applied\":0,\"hit_region_updates\":0,\ncrates/tze_hud_telemetry/src/record.rs:1019:            \"active_leases\":0,\"mutations_applied\":0,\"hit_region_updates\":0,\ncrates/tze_hud_runtime/src/headless.rs:526:        // mutations_applied > 0, keeping the documented semantics (\"0 when no\ncrates/tze_hud_runtime/src/headless.rs:528:        let had_scene_commit = compositor_telemetry.mutations_applied > 0;\ncrates/tze_hud_runtime/src/headless.rs:543:        telemetry.mutations_applied = compositor_telemetry.mutations_applied;\n",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "rg",
+        "-n",
+        "--glob",
+        "*.rs",
+        "\\b(input_to_scene_commit_us|input_to_next_present_us)\\b",
+        "app",
+        "crates",
+        "examples",
+        "tests"
+      ],
+      "exit_code": 0,
+      "stdout": "examples/vertical_slice/tests/budget_assertions.rs:245:/// Runs 30 headless frames and records the `input_to_scene_commit_us` field\nexamples/vertical_slice/tests/budget_assertions.rs:247:/// live agent applying mutations between frames, so `input_to_scene_commit_us`\nexamples/vertical_slice/tests/budget_assertions.rs:255:/// `render_frame()` sets `input_to_scene_commit_us` as wall time from\nexamples/vertical_slice/tests/budget_assertions.rs:289:        // input_to_scene_commit_us = stages 1–4 combined (local commit path)\nexamples/vertical_slice/tests/budget_assertions.rs:291:        bucket.record(telemetry.input_to_scene_commit_us);\nexamples/vertical_slice/tests/budget_assertions.rs:315:/// `render_frame()` sets `input_to_next_present_us = frame_time_us`, which is\nexamples/vertical_slice/tests/budget_assertions.rs:366:        bucket.record(telemetry.input_to_next_present_us);\ncrates/tze_hud_telemetry/src/record.rs:118:    pub input_to_scene_commit_us: u64,\ncrates/tze_hud_telemetry/src/record.rs:124:    pub input_to_next_present_us: u64,\ncrates/tze_hud_telemetry/src/record.rs:223:            input_to_scene_commit_us: 0,\ncrates/tze_hud_telemetry/src/record.rs:224:            input_to_next_present_us: 0,\ncrates/tze_hud_telemetry/src/record.rs:673:        frame.input_to_scene_commit_us = 5_000; // 5ms\ncrates/tze_hud_telemetry/src/record.rs:674:        frame.input_to_next_present_us = 15_000; // 15ms\ncrates/tze_hud_telemetry/src/record.rs:678:        assert_eq!(frame.input_to_scene_commit_us, 5_000);\ncrates/tze_hud_telemetry/src/record.rs:679:        assert_eq!(frame.input_to_next_present_us, 15_000);\ncrates/tze_hud_telemetry/src/record.rs:688:            json.contains(\"input_to_scene_commit_us\"),\ncrates/tze_hud_telemetry/src/record.rs:689:            \"JSON must contain input_to_scene_commit_us\"\ncrates/tze_hud_telemetry/src/record.rs:692:            json.contains(\"input_to_next_present_us\"),\ncrates/tze_hud_telemetry/src/record.rs:693:            \"JSON must contain input_to_next_present_us\"\ncrates/tze_hud_telemetry/src/record.rs:954:            \"input_to_local_ack_us\":0,\"input_to_scene_commit_us\":0,\ncrates/tze_hud_telemetry/src/record.rs:955:            \"input_to_next_present_us\":0,\"tile_count\":0,\"node_count\":0,\ncrates/tze_hud_telemetry/src/record.rs:1017:            \"input_to_local_ack_us\":0,\"input_to_scene_commit_us\":0,\ncrates/tze_hud_telemetry/src/record.rs:1018:            \"input_to_next_present_us\":0,\"tile_count\":0,\"node_count\":0,\ncrates/tze_hud_runtime/src/headless.rs:450:        let input_to_scene_commit_us = frame_start.elapsed().as_micros() as u64;\ncrates/tze_hud_runtime/src/headless.rs:475:        let input_to_next_present_us = frame_time_us;\ncrates/tze_hud_runtime/src/headless.rs:525:        // input_to_scene_commit_us and input_to_next_present_us are gated on\ncrates/tze_hud_runtime/src/headless.rs:530:        telemetry.input_to_scene_commit_us = if had_scene_commit {\ncrates/tze_hud_runtime/src/headless.rs:531:            input_to_scene_commit_us\ncrates/tze_hud_runtime/src/headless.rs:535:        telemetry.input_to_next_present_us = if had_scene_commit {\ncrates/tze_hud_runtime/src/headless.rs:536:            input_to_next_present_us\ncrates/tze_hud_runtime/src/windowed/lifecycle.rs:632:    let mut input_to_scene_commit_us = 0;\ncrates/tze_hud_runtime/src/windowed/lifecycle.rs:633:    let mut input_to_next_present_us = 0;\ncrates/tze_hud_runtime/src/windowed/lifecycle.rs:636:        input_to_scene_commit_us = input_to_scene_commit_us.max(\ncrates/tze_hud_runtime/src/windowed/lifecycle.rs:641:        input_to_next_present_us = input_to_next_present_us.max(\ncrates/tze_hud_runtime/src/windowed/lifecycle.rs:650:        input_to_scene_commit_us,\ncrates/tze_hud_runtime/src/windowed/lifecycle.rs:651:        input_to_next_present_us,\ncrates/tze_hud_runtime/src/windowed/lifecycle.rs:843:        if telemetry.input_to_scene_commit_us > 0 {\ncrates/tze_hud_runtime/src/windowed/lifecycle.rs:846:                .record(telemetry.input_to_scene_commit_us);\ncrates/tze_hud_runtime/src/windowed/lifecycle.rs:848:        if telemetry.input_to_next_present_us > 0 {\ncrates/tze_hud_runtime/src/windowed/lifecycle.rs:851:                .record(telemetry.input_to_next_present_us);\ncrates/tze_hud_runtime/src/windowed/lifecycle.rs:2785:        telemetry.input_to_scene_commit_us = 10_500;\ncrates/tze_hud_runtime/src/windowed/lifecycle.rs:2786:        telemetry.input_to_next_present_us = 18_000;\ncrates/tze_hud_runtime/src/windowed/mod.rs:2096:                                telem.input_to_scene_commit_us = scene_commit_us;\ncrates/tze_hud_runtime/src/windowed/mod.rs:2097:                                telem.input_to_next_present_us = next_present_us;\n",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "git",
+        "grep",
+        "-nE",
+        "render_frame_with_chrome|strip_chrome_from_topology|MuteToggle|classify_safe_mode_input|shell::badges",
+        "--",
+        "crates",
+        "tests"
+      ],
+      "exit_code": 0,
+      "stdout": "crates/tze_hud_input/src/portal_resize.rs:105:    /// | `Ctrl+Shift+M` | MuteToggle (v1-reserved) |\ncrates/tze_hud_input/src/portal_resize.rs:2153:            \"Ctrl+Shift+m must be reserved (MuteToggle)\"\ncrates/tze_hud_input/src/portal_resize.rs:2157:            \"Ctrl+Shift+M must be reserved (MuteToggle)\"\n",
+      "stderr": ""
+    }
+  ],
+  "source_inference_not_emitted_counterexample": true,
+  "historical_snapshots_preserved": [
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.7/first-shaping-packet.json",
+      "sha256": "ce06ca6c32a322869b89b0f442b36482f30a5d0900fe450301dc7425bfd1197b",
+      "disposition": "Immutable actual FIRST/canonical/command snapshot contains old comment wording; superseded factual classification is explicit in this current correction, report and current rows. No past authority/execution is rewritten."
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.7/root-dispatch-packet.json",
+      "sha256": "ce06ca6c32a322869b89b0f442b36482f30a5d0900fe450301dc7425bfd1197b",
+      "disposition": "Immutable actual FIRST/canonical/command snapshot contains old comment wording; superseded factual classification is explicit in this current correction, report and current rows. No past authority/execution is rewritten."
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.7/execution-canonical-inputs.json",
+      "sha256": "4f2b78cb4759888386be00b1a457a8d84dfdd2e4ac3c143078b3e91abeaafd9b",
+      "disposition": "Immutable actual FIRST/canonical/command snapshot contains old comment wording; superseded factual classification is explicit in this current correction, report and current rows. No past authority/execution is rewritten."
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.7/execution-bootstrap-native-receipt.json",
+      "sha256": "0bdc981b43bfec791da0c6233c70fbd75c0b8ae08a0c29e50369d2f4d60b7ab0",
+      "disposition": "Immutable actual FIRST/canonical/command snapshot contains old comment wording; superseded factual classification is explicit in this current correction, report and current rows. No past authority/execution is rewritten."
+    }
+  ],
+  "old_metadata_before_sha256": {
+    "test_results/hud-bstmy.5.7-reconciliation.md": "47763b403290be3264ce892b3c2ea35b44ed29038116569f16ffbae8c37de8b9",
+    "test_results/hud-bstmy.5.7-followups.json": "edb5463e0b4f6e121a06938a49421a163d2b7293592fd1a10b47c6f1a72640a1",
+    "test_results/reconciliation/hud-bstmy.5.7/root-budget-cargo-lease.json": "e7c9d87b4251a2457e9a5e514a2c8ea0efc3b9159bda611408b982e02f218542",
+    "test_results/reconciliation/hud-bstmy.5.7/existing-owners.json": "fd48d0fa375fa8f9feddc3ef94aa0347d8e9d312fe0f0c96532c5476b31375a5",
+    "test_results/reconciliation/hud-bstmy.5.7/qualified-owner-matrix.json": "2ff60c1dacbf11d11b171d3d6b7348aba5363c8c0cc49c3683b9563cf88b0f2a",
+    "test_results/reconciliation/hud-bstmy.5.7/first-packet-validation.json": "9f7b76fc3979a7fcf7a3416c08c71d143ae333d39698dd0f4d4bffb334678ab5",
+    "test_results/reconciliation/hud-bstmy.5.7/execution-canonical-inputs.json": "4f2b78cb4759888386be00b1a457a8d84dfdd2e4ac3c143078b3e91abeaafd9b",
+    "test_results/reconciliation/hud-bstmy.5.7/source-inventory.json": "8ed1a6ef1c74fc4e72c4be3978f0b1b65ffcf10dbb85e98e25c30f6bbb80724b",
+    "test_results/reconciliation/hud-bstmy.5.7/coverage.json": "5e5a210d7152a2dc203d01287868c5d829f3fe8e94ecde3210d1e1b33f6c28f0",
+    "test_results/reconciliation/hud-bstmy.5.7/counter-primitive-owner-navigation.json": "b2ebc05ecee897a188d2f2c33af56cf34109f372facfe55707c032e4709658d1",
+    "test_results/reconciliation/hud-bstmy.5.7/merged-inputs.json": "3e659cb92d6ccabfe320d2107cbe7bd7404c711c5e9688fcaf31aa5681ad1232",
+    "test_results/reconciliation/hud-bstmy.5.7/first-shaping-packet.json": "ce06ca6c32a322869b89b0f442b36482f30a5d0900fe450301dc7425bfd1197b",
+    "test_results/reconciliation/hud-bstmy.5.7/evidence-index.json": "a05acc038cec5a8b952056f47c59ba7a5d6e98e23c10bcacfaa5e64f0f70d849",
+    "test_results/reconciliation/hud-bstmy.5.7/applicable-full-ci-terminal-release.json": "053f7bcd679d7fe3b18128d0897d87d343e9f1b16dad9f4f0e348bdea7482f44",
+    "test_results/reconciliation/hud-bstmy.5.7/artifact-validation.json": "8572e73631f34265592d553c449366ce09c78d9c0bb1aa2ca4b172ddc5cdf433",
+    "test_results/reconciliation/hud-bstmy.5.7/blockers.json": "790480bbb4541af33b3e6b6994d76409cf99f2fbfdc4aa7d48335cc5dde0f62e",
+    "test_results/reconciliation/hud-bstmy.5.7/dedupe-owner-actual-pr-outcomes.json": "b8a5d2659c2b358c9b845278f90d6d9324444102a6a7b9e016f808ccd802ae21",
+    "test_results/reconciliation/hud-bstmy.5.7/canonical-inputs.json": "9364c21e2f8d7625538c5fecbb620136a4f3d1c6573fe6f4c1e90833ef04f14c",
+    "test_results/reconciliation/hud-bstmy.5.7/invariant-test-inventory.json": "e76b1aecd0e620e3978988f79449a3368f8bf161bea639993f6da4a862a9004f",
+    "test_results/reconciliation/hud-bstmy.5.7/original-assertion-dispositions.json": "a4dec39a539fd25e07dbeecbae520d495408656297db816f29e68f8e6df949d8",
+    "test_results/reconciliation/hud-bstmy.5.7/bootstrap-native-receipt.json": "f3e008d759bd31b5e4587e42eb7083e93b81e28b4404d39333dfb460efb5f73a",
+    "test_results/reconciliation/hud-bstmy.5.7/current-observation-owners.json": "0f2d463061129bb6c72797b079381554e7437660c155639be231b016bdab8c9e",
+    "test_results/reconciliation/hud-bstmy.5.7/dedupe-current-owners.json": "58c4a8f7037de650096afc554a49b9b20f4e4b867811dc4435a22b0f5ab0184a",
+    "test_results/reconciliation/hud-bstmy.5.7/execution-bootstrap-native-receipt.json": "0bdc981b43bfec791da0c6233c70fbd75c0b8ae08a0c29e50369d2f4d60b7ab0",
+    "test_results/reconciliation/hud-bstmy.5.7/final-fetched-main-applicability.json": "def72ba9ebbf4040d54aadddadaaa82134a02e9fb150f5042119717d859f8595",
+    "test_results/reconciliation/hud-bstmy.5.7/token-footprint-applicability.json": "26ae8b94ad136475b4a03628e852df98a3424a34996e2d8e9b970fcc212964ed",
+    "test_results/reconciliation/hud-bstmy.5.7/root-first-field-verification.json": "d9e349b79853b5f3be687730d34fafb93e27a5926b16fb2c1c2f7c563cc7f995",
+    "test_results/reconciliation/hud-bstmy.5.7/applicable-missing-gates-receipt.json": "2f3deb153783941d3db5195b990091863bb0a2a9b78aa8c980d3601c04deda67",
+    "test_results/reconciliation/hud-bstmy.5.7/verification.json": "fe9eafd9df39bf407acb2d65ab1bd2061c0c3f6abe0a111229e3590afb397832",
+    "test_results/reconciliation/hud-bstmy.5.7/source-shaping-receipt.json": "0e4e1a29b6649168d6dfc995a4b7eecfe1cb1573a3e9d9138199117c7a872ede",
+    "test_results/reconciliation/hud-bstmy.5.7/applicable-full-ci-receipt.json": "178c945e960d631fb867a2e3ed2dd36b4d1d48dcda8771198cc968b0aa52b20a",
+    "test_results/reconciliation/hud-bstmy.5.7/original-pr-outcomes.json": "ef746938ba77d387bb2c6981c2baeea075d6c675089b4f29a32da98c4f72cc96",
+    "test_results/reconciliation/hud-bstmy.5.7/dedupe-qualified-owners.json": "a449754047786f1c0957b636180995051c88771f1bdc5397cc4017edbfe3407e",
+    "test_results/reconciliation/hud-bstmy.5.7/current-qualified-token-navigation.json": "7b678d0ac58f4d07f5285beba22054c18d439c18b838fe5b0439687efb275c98",
+    "test_results/reconciliation/hud-bstmy.5.7/budget-cargo-terminal-release.json": "4d6b96eb70cdf888ca634b886a431ab802d188f5936f10e4416450bbf642eab9",
+    "test_results/reconciliation/hud-bstmy.5.7/deletion-and-owner-navigation.json": "90100e9b4b3e7dbbecd6c89b3c9b6526bd7ba13e6cd65b38fe250b0a6051b494",
+    "test_results/reconciliation/hud-bstmy.5.7/final-canonical-field-match.json": "bbbb0cfdf31793ba20594029fe7a473fdd1a419ecea11e5ce4ce33ce7bcf0e76",
+    "test_results/reconciliation/hud-bstmy.5.7/source-applicability.json": "059361a77d4b63208d6ce4bd8227a8689db8d084ad992e1a1dd2902fba435191",
+    "test_results/reconciliation/hud-bstmy.5.7/root-dispatch-packet.json": "ce06ca6c32a322869b89b0f442b36482f30a5d0900fe450301dc7425bfd1197b",
+    "test_results/reconciliation/hud-bstmy.5.7/vertical-slice-budget-assertions-receipt.json": "7d245f569705137ff2e00b7b4269a154c994c664f531d4733be53202d9110677",
+    "test_results/reconciliation/hud-bstmy.5.7/shell-original-assertion-fates.json": "91e598dabfbc65cd61675ea30be94af9c7e89c7887398b1e209ecd7b61c854f8",
+    "test_results/reconciliation/hud-bstmy.5.7/root-budget-independent-validation.json": "4c33bad8d3835b58a0563726deff36fa53ed1781e586e8c61088c1f14208aae6",
+    "test_results/reconciliation/hud-bstmy.5.7/operational-provenance.json": "87de64b738124e22cac719639726645bc66c8f8a72e450c78854f53f2c6f71b6"
+  },
+  "raw_budget_log_sha256": "a34fb6f818a69968979310aaf3b06cfa3e45d7f08524a633f1d374e5bac2014a",
+  "raw_budget_pins_counts_unchanged": true,
+  "W1_W2_W3_full_packets_unchanged": true,
+  "one_GEN2_preserved_and_corrected": true,
+  "current_dedupe_all_records": 3044,
+  "owner_snapshot_sha256": "0039421d676f3fc0c661589f107b7aac51858ea7acdc0217ee01624fd26162fc",
+  "metadata_source_navigation_miss": {
+    "guessed_path": "crates/tze_hud_scene/src/graph/transactions.rs",
+    "component_result": "rg reported missing path; outer compound command returned0 after independent reads. No source/Rust/GPU failure.",
+    "recovery": "Current all-root app/crates/examples/tests query and actual qualified existing owners used; no missing-path negative claim."
+  },
+  "new_probe_or_Cargo": false,
+  "test_delta": "+0 ~0 -0",
+  "lifecycle_mutations": []
+}

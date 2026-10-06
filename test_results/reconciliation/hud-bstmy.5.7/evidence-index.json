@@ -6,13 +6,13 @@
   "entries": [
     {
       "path": "test_results/hud-bstmy.5.7-followups.json",
-      "bytes": 38998,
-      "sha256": "edb5463e0b4f6e121a06938a49421a163d2b7293592fd1a10b47c6f1a72640a1"
+      "bytes": 57843,
+      "sha256": "9868edcf51818f7b5c2d2e213de59d4955ca8939410468f134b42602adad49a0"
     },
     {
       "path": "test_results/hud-bstmy.5.7-reconciliation.md",
-      "bytes": 18728,
-      "sha256": "47763b403290be3264ce892b3c2ea35b44ed29038116569f16ffbae8c37de8b9"
+      "bytes": 21209,
+      "sha256": "1689501f8275bd57ecbfe8361a407b05e1ce2f0b8290392d1b32edd3087ccfac"
     },
     {
       "path": "test_results/reconciliation/hud-bstmy.5.7/applicable-full-ci-receipt.json",
@@ -61,13 +61,13 @@
     },
     {
       "path": "test_results/reconciliation/hud-bstmy.5.7/artifact-validation.json",
-      "bytes": 3368,
-      "sha256": "8572e73631f34265592d553c449366ce09c78d9c0bb1aa2ca4b172ddc5cdf433"
+      "bytes": 3885,
+      "sha256": "f31b2263689a97db9772eeabf5884d1c86b19326f18e638b9b430a95a04f7e4b"
     },
     {
       "path": "test_results/reconciliation/hud-bstmy.5.7/blockers.json",
-      "bytes": 1278,
-      "sha256": "790480bbb4541af33b3e6b6994d76409cf99f2fbfdc4aa7d48335cc5dde0f62e"
+      "bytes": 2028,
+      "sha256": "3bcdecf71ef0ced3a5fe0c88579b814d908e20e8afa4573e373cc31d47921d84"
     },
     {
       "path": "test_results/reconciliation/hud-bstmy.5.7/bootstrap-native-receipt.json",
@@ -91,8 +91,8 @@
     },
     {
       "path": "test_results/reconciliation/hud-bstmy.5.7/coverage.json",
-      "bytes": 67562,
-      "sha256": "5e5a210d7152a2dc203d01287868c5d829f3fe8e94ecde3210d1e1b33f6c28f0"
+      "bytes": 70530,
+      "sha256": "ddd77ec80030f8004ab9e0e492fbd3ac9783c13bf9e06901945de6a8122d29e5"
     },
     {
       "path": "test_results/reconciliation/hud-bstmy.5.7/current-observation-owners.json",
@@ -141,8 +141,8 @@
     },
     {
       "path": "test_results/reconciliation/hud-bstmy.5.7/deletion-and-owner-navigation.json",
-      "bytes": 10303,
-      "sha256": "90100e9b4b3e7dbbecd6c89b3c9b6526bd7ba13e6cd65b38fe250b0a6051b494"
+      "bytes": 11574,
+      "sha256": "496fb478651d0f4be72d728598df79960c23655623a8157f3cee4600cc9c1454"
     },
     {
       "path": "test_results/reconciliation/hud-bstmy.5.7/execution-bootstrap-native-receipt.json",
@@ -221,8 +221,18 @@
     },
     {
       "path": "test_results/reconciliation/hud-bstmy.5.7/qualified-owner-matrix.json",
-      "bytes": 12043,
-      "sha256": "2ff60c1dacbf11d11b171d3d6b7348aba5363c8c0cc49c3683b9563cf88b0f2a"
+      "bytes": 13876,
+      "sha256": "094d0264d298702a88c32b035cc5adafd222e707f1f7586353717ea1e94a326e"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.7/review-round1-corrections.json",
+      "bytes": 20266,
+      "sha256": "92d27b293e20ecebefb774a7af73116743f82b7874deb4d3e42e091c38fd02e2"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.7/review-round1-owner-dedupe.json",
+      "bytes": 91930,
+      "sha256": "4c5b407456a5049e469a4dad2b18555e6502671627b3cac85b97a1bd72ab340c"
     },
     {
       "path": "test_results/reconciliation/hud-bstmy.5.7/root-budget-cargo-lease.json",
@@ -271,13 +281,13 @@
     },
     {
       "path": "test_results/reconciliation/hud-bstmy.5.7/verification.json",
-      "bytes": 32816,
-      "sha256": "fe9eafd9df39bf407acb2d65ab1bd2061c0c3f6abe0a111229e3590afb397832"
+      "bytes": 36213,
+      "sha256": "3106916aa83232af2435070fb085de2cdc0cfb66dbca18d5c42dfea812e8f8ef"
     },
     {
       "path": "test_results/reconciliation/hud-bstmy.5.7/vertical-slice-budget-assertions-receipt.json",
-      "bytes": 12366,
-      "sha256": "7d245f569705137ff2e00b7b4269a154c994c664f531d4733be53202d9110677"
+      "bytes": 14971,
+      "sha256": "5c2483c78ca0cf5c20341d927b544a375955789eabe65105c1ef93f299ae0c04"
     },
     {
       "path": "test_results/reconciliation/hud-bstmy.5.7/vertical-slice-budget-assertions.log",
@@ -285,7 +295,7 @@
       "sha256": "a34fb6f818a69968979310aaf3b06cfa3e45d7f08524a633f1d374e5bac2014a"
     }
   ],
-  "indexed_files": 56,
+  "indexed_files": 58,
   "index_self_hash": "Not embedded recursively; final native whole-artifact receipt includes this index SHA.",
   "complete_primary_arrays": {
     "followups": "test_results/hud-bstmy.5.7-followups.json",
@@ -298,5 +308,6 @@
     "fixtures": "qualified-owner-matrix.json/invariant-test-inventory.json explicit NoAdapter and behavior/test/host limits"
   },
   "execution_pins_not_relabelled": true,
-  "test_delta": "+0 ~0 -0"
+  "test_delta": "+0 ~0 -0",
+  "review_round1": "Two evidence corrections/full W4 routing; original raw/log/execution snapshots preserved, current index hashes updated derived artifacts."
 }

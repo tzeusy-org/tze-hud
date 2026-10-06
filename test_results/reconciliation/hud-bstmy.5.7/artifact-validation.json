@@ -2,6 +2,7 @@
   "validation": "native Python metadata integrity checks; not production tests or a new repository guard",
   "source": "5825a05421a9e588edd5c3c05ebf7f5bac36c0e1",
   "parseable_json_files": [
+    "test_results/hud-bstmy.5.7-followups.json",
     "test_results/reconciliation/hud-bstmy.5.7/applicable-full-ci-receipt.json",
     "test_results/reconciliation/hud-bstmy.5.7/applicable-full-ci-terminal-release.json",
     "test_results/reconciliation/hud-bstmy.5.7/applicable-missing-gates-receipt.json",
@@ -28,6 +29,8 @@
     "test_results/reconciliation/hud-bstmy.5.7/original-assertion-dispositions.json",
     "test_results/reconciliation/hud-bstmy.5.7/original-pr-outcomes.json",
     "test_results/reconciliation/hud-bstmy.5.7/qualified-owner-matrix.json",
+    "test_results/reconciliation/hud-bstmy.5.7/review-round1-corrections.json",
+    "test_results/reconciliation/hud-bstmy.5.7/review-round1-owner-dedupe.json",
     "test_results/reconciliation/hud-bstmy.5.7/shell-original-assertion-fates.json",
     "test_results/reconciliation/hud-bstmy.5.7/source-applicability.json",
     "test_results/reconciliation/hud-bstmy.5.7/source-inventory.json",
@@ -36,10 +39,10 @@
     "test_results/reconciliation/hud-bstmy.5.7/vertical-slice-budget-assertions-receipt.json"
   ],
   "primary_arrays_actual_counts": {
-    "followups": 4,
+    "followups": 5,
     "blockers": 1
   },
-  "full_cold_three_field_packets": 4,
+  "full_cold_three_field_packets": 5,
   "all72_current_invariant_definitions": 72,
   "own_real_gate30_positive8_enabled3_numeric": true,
   "actual_raw_log_SHA_verified": true,
@@ -57,5 +60,14 @@
     ],
     "exit_code": 0,
     "exception": "Preserve original raw-log EOF bytes; full hashes stay equal."
+  },
+  "review_round1": {
+    "evidence_only": true,
+    "source_test_spec_changes": 0,
+    "measurement_row_partial": true,
+    "historical_raw_logs_pins_counts_preserved": true,
+    "source_zero_inference_not_emitted": true,
+    "W4_full_cold_related_not_equivalent": true,
+    "W1_W2_W3_unchanged": true
   }
 }

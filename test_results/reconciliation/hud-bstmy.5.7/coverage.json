@@ -256,14 +256,15 @@
       "requirement": "Original deletion expression prints no matching text",
       "status": "deviates",
       "qualified_owner_surface": [
-        "protected input::portal_resize historical comments"
+        "protected input::portal_resize::ShellReservedShortcut::is_reserved",
+        "input::portal_resize::tests::shell_reserved_ctrl_shift_m_mute"
       ],
       "current_source_evidence": [
-        "fresh exact original expression has3 MuteToggle comment hits only, no live qualified owner",
-        "deletion-and-owner-navigation.json"
+        "One protected doc-comment match at portal_resize.rs105 and two LIVE assertion-message matches at2153/2157 in shell_reserved_ctrl_shift_m_mute; both assertions call ShellReservedShortcut::is_reserved(\"m\"/\"M\",true,true,false), whose119-120 branch retains the v1 reserved no-op chord. The removed named MuteToggle implementation is absent. Literal zero-match AC still deviates; preserve T7 source/test and no new repair child.",
+        "deletion-and-owner-navigation.json; review-round1-corrections.json"
       ],
       "execution": "Actual8f fullCI positively matched through547 exact non-evidence source/recipe blobs unless explicitly582e budget suite; no fabricated72e/582e broad run",
-      "limits": "Literal AC cannot be reported zero. ProtectedT7 comments must remain now; disclose exception and link existingT7, do not create duplicate runtime repair or make T7 a new5.7 prerequisite.",
+      "limits": "Literal original deletion expression has3 matches and remains deviates. One is a doc comment; two are live assertion-message strings exercising retained current reservation behavior. T7 code/tests remain; no repair child or new prerequisite.",
       "followup_or_existing_owner": "hud-lirh2 existing owner/status quo"
     },
     {
@@ -462,17 +463,24 @@
     },
     {
       "key": "5.5-default-budget",
-      "requirement": "All current30 budget structural/pixel cases and8 conditional hard assertions retained and executed",
-      "status": "implemented",
+      "requirement": "Retain and execute current30 budget cases/eight conditional branches; establish meaningful measurement provenance for applicable input-response p99 samples",
+      "status": "partial",
       "qualified_owner_surface": [
         "vertical_slice::budget_assertions current source",
         "LatencyBucket::assert_p99_under",
-        "test_budget"
+        "test_budget",
+        "FrameTelemetry::new",
+        "HeadlessRuntime::render_frame",
+        "Compositor::render_frame_headless",
+        "windowed::record_pending_input_latency/drain_pending_input_latency"
       ],
-      "current_source_evidence": "vertical-slice-budget-assertions-receipt.json actual582e30pass/0fail/ignored/filtered;8 enabled assertions;3numeric only",
+      "current_source_evidence": [
+        "actual582e30pass/eight enabled assertions/only3numeric emitted",
+        "Source-derived zero/plumbing limitation: FrameTelemetry::new initializes mutations_applied=0 (record.rs228), the qualified compositor frame constructors have no writer for that field, and HeadlessRuntime gates both returned input_to_scene_commit_us/input_to_next_present_us on compositor_telemetry.mutations_applied>0 (headless.rs525-543). scene-commit fixture243-305 explicitly has no live mutation; next-present324-386 warms then renders20 unchanged frames. Their successful assertions do not establish measured input/agent-to-commit or input-to-present conformance. This is source inference, not a numeric value emitted by the executed log."
+      ],
       "execution": "Actual8f fullCI positively matched through547 exact non-evidence source/recipe blobs unless explicitly582e budget suite; no fabricated72e/582e broad run",
-      "limits": "scene_commit50000us direct; nextpresent330000us10x; other6 use20x. llvmpipe/local headless samples are not owner Windows/real network budgets. Five successful values not emitted; do not fabricate.",
-      "followup_or_existing_owner": null
+      "limits": "Source-derived zero/plumbing limitation: FrameTelemetry::new initializes mutations_applied=0 (record.rs228), the qualified compositor frame constructors have no writer for that field, and HeadlessRuntime gates both returned input_to_scene_commit_us/input_to_next_present_us on compositor_telemetry.mutations_applied>0 (headless.rs525-543). scene-commit fixture243-305 explicitly has no live mutation; next-present324-386 warms then renders20 unchanged frames. Their successful assertions do not establish measured input/agent-to-commit or input-to-present conformance. This is source inference, not a numeric value emitted by the executed log. Thresholds unchanged: scene_commit50000us direct; next_present330000us10x; other6 default20x. Five silent values remain unknown. Distinct current windowed input writers exist; do not generalize this qualified headless inference to all runtimes.",
+      "followup_or_existing_owner": "W4; hud-w2t3x and hud-ddm2g RELATED, not equivalent"
     },
     {
       "key": "5.5-original-delete",
@@ -759,7 +767,7 @@
         "old/new evidence-only branch proof"
       ],
       "execution": "Actual8f fullCI positively matched through547 exact non-evidence source/recipe blobs unless explicitly582e budget suite; no fabricated72e/582e broad run",
-      "limits": "Protected historical MuteToggle comments deliberately retained despite literal original regex. Existing T7 owner, no new prerequisite.",
+      "limits": "One protected doc-comment match at portal_resize.rs105 and two LIVE assertion-message matches at2153/2157 in shell_reserved_ctrl_shift_m_mute; both assertions call ShellReservedShortcut::is_reserved(\"m\"/\"M\",true,true,false), whose119-120 branch retains the v1 reserved no-op chord. The removed named MuteToggle implementation is absent. Literal zero-match AC still deviates; preserve T7 source/test and no new repair child.",
       "followup_or_existing_owner": null
     },
     {
@@ -777,7 +785,7 @@
         "no source/test delta"
       ],
       "execution": "Actual8f fullCI positively matched through547 exact non-evidence source/recipe blobs unless explicitly582e budget suite; no fabricated72e/582e broad run",
-      "limits": "No claim of157byte retiredNode cap or180/155 Tile history; real current160/200 only. General I7 protocol aggregate proof is separately partial.",
+      "limits": "No claim of157byte retiredNode cap or180/155 Tile history; real current160/200 only. General I7 protocol aggregate proof is separately partial. Preserving fields/counts and executing branches does not establish these two headless input-response measurements; see partial5.5-default-budget/W4.",
       "followup_or_existing_owner": null
     },
     {
@@ -793,7 +801,7 @@
         "actual582e budget30/8assertions"
       ],
       "execution": "Actual8f fullCI positively matched through547 exact non-evidence source/recipe blobs unless explicitly582e budget suite; no fabricated72e/582e broad run",
-      "limits": "Only pwsh tool-gated contract skip in reused fullCI; GPU fixtures with silent NoAdapter have separate source instrument limit. No normal582e fullCI/release claim or duplicate sweep.",
+      "limits": "Only pwsh tool-gated contract skip in reused fullCI; GPU fixtures with silent NoAdapter have separate source instrument limit. No normal582e fullCI/release claim or duplicate sweep. Successful command execution does not certify two zero/plumbing input-response p99 fixtures; W4 routes their unmet measurement obligation.",
       "followup_or_existing_owner": null
     }
   ],
@@ -840,7 +848,8 @@
     "5.3-four-dimensions",
     "5.3-dev-mode",
     "5.3-raster-reuse",
-    "5.4-docs"
+    "5.4-docs",
+    "5.5-default-budget"
   ],
   "linked_existing_partial_rows": [
     "5.2-leases",
@@ -855,8 +864,10 @@
     "5.2-old-critical",
     "5.2-literal-delete",
     "all72",
-    "gates"
+    "gates",
+    "5.5-default-budget"
   ],
   "owner_defaults": "5.6C and8.6C unanswered statusquo; never prerequisites.",
-  "next_generation": "ONE GEN2 after necessary actual merged/main repair outcomes, MAXGEN3; noGEN4/original closure cycle."
+  "next_generation": "ONE GEN2 after necessary actual merged/main repair outcomes, MAXGEN3; noGEN4/original closure cycle.",
+  "review_correction_notice": "Current derived rows supersede the two factual claims in historical FIRST/canonical/bootstrap snapshots; those immutable actual-authority/command snapshots are preserved byte-for-byte."
 }

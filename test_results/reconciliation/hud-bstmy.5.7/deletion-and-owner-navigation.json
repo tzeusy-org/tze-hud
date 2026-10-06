@@ -15,7 +15,29 @@
       "exit_code": 0,
       "raw_output": "crates/tze_hud_input/src/portal_resize.rs:105:    /// | `Ctrl+Shift+M` | MuteToggle (v1-reserved) |\ncrates/tze_hud_input/src/portal_resize.rs:2153:            \"Ctrl+Shift+m must be reserved (MuteToggle)\"\ncrates/tze_hud_input/src/portal_resize.rs:2157:            \"Ctrl+Shift+M must be reserved (MuteToggle)\"\n",
       "stderr": "",
-      "limitations": "Text navigation includes comments/literals and colliding names; live definitions/qualified owner/cfg/reexports are adjudicated separately. Exact original mandated roots preserved."
+      "limitations": "Text navigation includes comments/literals and colliding names; live definitions/qualified owner/cfg/reexports are adjudicated separately. Exact original mandated roots preserved.",
+      "qualified_match_classification": [
+        {
+          "path": "crates/tze_hud_input/src/portal_resize.rs",
+          "line": 105,
+          "kind": "protected documentation comment"
+        },
+        {
+          "path": "crates/tze_hud_input/src/portal_resize.rs",
+          "line": 2153,
+          "kind": "LIVE assertion-message string",
+          "test": "shell_reserved_ctrl_shift_m_mute",
+          "production_call": "ShellReservedShortcut::is_reserved(\"m\",true,true,false)"
+        },
+        {
+          "path": "crates/tze_hud_input/src/portal_resize.rs",
+          "line": 2157,
+          "kind": "LIVE assertion-message string",
+          "test": "shell_reserved_ctrl_shift_m_mute",
+          "production_call": "ShellReservedShortcut::is_reserved(\"M\",true,true,false)"
+        }
+      ],
+      "qualified_verdict": "One protected doc-comment match at portal_resize.rs105 and two LIVE assertion-message matches at2153/2157 in shell_reserved_ctrl_shift_m_mute; both assertions call ShellReservedShortcut::is_reserved(\"m\"/\"M\",true,true,false), whose119-120 branch retains the v1 reserved no-op chord. The removed named MuteToggle implementation is absent. Literal zero-match AC still deviates; preserve T7 source/test and no new repair child."
     },
     {
       "id": "artifact-original",

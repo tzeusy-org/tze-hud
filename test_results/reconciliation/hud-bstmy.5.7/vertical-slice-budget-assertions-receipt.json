@@ -256,7 +256,10 @@
       ],
       "branch_enabled_by_actual_environment": true,
       "numeric_success_value_emitted": false,
-      "numeric_success_lines": []
+      "numeric_success_lines": [],
+      "measurement_qualification": "Source-derived zero/plumbing limitation: FrameTelemetry::new initializes mutations_applied=0 (record.rs228), the qualified compositor frame constructors have no writer for that field, and HeadlessRuntime gates both returned input_to_scene_commit_us/input_to_next_present_us on compositor_telemetry.mutations_applied>0 (headless.rs525-543). scene-commit fixture243-305 explicitly has no live mutation; next-present324-386 warms then renders20 unchanged frames. Their successful assertions do not establish measured input/agent-to-commit or input-to-present conformance. This is source inference, not a numeric value emitted by the executed log.",
+      "measured_conformance_established": false,
+      "numeric_value_emitted": false
     },
     {
       "test": "test_input_to_next_present_p99_within_budget",
@@ -274,7 +277,10 @@
       ],
       "branch_enabled_by_actual_environment": true,
       "numeric_success_value_emitted": false,
-      "numeric_success_lines": []
+      "numeric_success_lines": [],
+      "measurement_qualification": "Source-derived zero/plumbing limitation: FrameTelemetry::new initializes mutations_applied=0 (record.rs228), the qualified compositor frame constructors have no writer for that field, and HeadlessRuntime gates both returned input_to_scene_commit_us/input_to_next_present_us on compositor_telemetry.mutations_applied>0 (headless.rs525-543). scene-commit fixture243-305 explicitly has no live mutation; next-present324-386 warms then renders20 unchanged frames. Their successful assertions do not establish measured input/agent-to-commit or input-to-present conformance. This is source inference, not a numeric value emitted by the executed log.",
+      "measured_conformance_established": false,
+      "numeric_value_emitted": false
     },
     {
       "test": "test_hit_test_p99_within_budget",
@@ -362,7 +368,9 @@
   "instrument_limits": [
     "All8 actual enabled assert_p99_under branches executed successfully at582e. Only3 branches emit numeric success values; the other5 values cannot be recovered from the log and are not fabricated.",
     "This fixture samples headless pipeline/local input/resource submission, not Windows live wire-roundtrip latency. Input-to-scene-commit uses50000us directly; input-to-next-present uses330000us(10x), other6 use default20x test_budget.",
-    "No proof of W1 zero-duration-on-active or W2 original multidimensional work or W3 runtime widget observation propagation is provided by these unrelated p99 passes."
+    "No proof of W1 zero-duration-on-active or W2 original multidimensional work or W3 runtime widget observation propagation is provided by these unrelated p99 passes.",
+    "Source-derived zero/plumbing limitation: FrameTelemetry::new initializes mutations_applied=0 (record.rs228), the qualified compositor frame constructors have no writer for that field, and HeadlessRuntime gates both returned input_to_scene_commit_us/input_to_next_present_us on compositor_telemetry.mutations_applied>0 (headless.rs525-543). scene-commit fixture243-305 explicitly has no live mutation; next-present324-386 warms then renders20 unchanged frames. Their successful assertions do not establish measured input/agent-to-commit or input-to-present conformance. This is source inference, not a numeric value emitted by the executed log.",
+    "Current correction is metadata annotation only: raw command/environment/pins/counts/positive lines/numeric output/log SHA remain unchanged. Two silent p99 values are not claimed observed0."
   ],
   "driver_diagnostics": [
     {
@@ -390,5 +398,10 @@
       "text": "libEGL warning: egl: failed to create dri2 screen",
       "classification": "non-fatal software adapter discovery diagnostic; not Rust failure or skip"
     }
-  ]
+  ],
+  "source_qualification_added_by_review_round1": {
+    "reviewed_author_head": "39bd18adbbc8579905a7b898be25fc4339d86ff3",
+    "source": "5825a05421a9e588edd5c3c05ebf7f5bac36c0e1",
+    "execution_relabelled": false
+  }
 }

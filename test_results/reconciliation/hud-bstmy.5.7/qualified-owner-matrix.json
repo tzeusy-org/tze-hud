@@ -167,16 +167,18 @@
     ],
     "reexports": "runtime/lib.rs73/74 and shell/mod.rs chrome pub(crate); freeze imports protected tests remain.",
     "cfg": "Windows global RegisterHotKey/GetMessageW thread under Windows cfg; Linux source/bridge test does not execute OSregistration. Headless and realwindowed frame owners manually distinct.",
-    "removed": "Exact deleted alternative rendering/audit/mute/controller/classifier/badges owners and helperonly imports gone;3protectedMuteTogglecomments remain.",
+    "removed": "Exact named dead alternative render/audit/mute/controller/classifier/badges implementation removed; One protected doc-comment match at portal_resize.rs105 and two LIVE assertion-message matches at2153/2157 in shell_reserved_ctrl_shift_m_mute; both assertions call ShellReservedShortcut::is_reserved(\"m\"/\"M\",true,true,false), whose119-120 branch retains the v1 reserved no-op chord. The removed named MuteToggle implementation is absent. Literal zero-match AC still deviates; preserve T7 source/test and no new repair child.",
     "owner_clock": "Current safe_mode lease suspend/resume SystemTime -> existing1.16; no duplicate packet.",
-    "freeze": "No answer5.6; unwired statusquo explicitlyretained."
+    "freeze": "No answer5.6; unwired statusquo explicitlyretained.",
+    "retained_reserved_shortcut": "One protected doc-comment match at portal_resize.rs105 and two LIVE assertion-message matches at2153/2157 in shell_reserved_ctrl_shift_m_mute; both assertions call ShellReservedShortcut::is_reserved(\"m\"/\"M\",true,true,false), whose119-120 branch retains the v1 reserved no-op chord. The removed named MuteToggle implementation is absent. Literal zero-match AC still deviates; preserve T7 source/test and no new repair child."
   },
   "vertical_slice": {
     "normal_default": "runtime normal production config/auth; real current<=400 line resident lifecycle helper",
     "test_dev": "devdependencies runtime/dev-mode configNone only; default app guard/tree/release sourceapplicable8f receipts",
     "targets": "binarytests paired/unpaired; production_boot target retained; budget_assertions30; current CI/weekly selectors unchanged",
     "owners": "app canonicalboot builtinwidgets/auth and vertical originalproductionboot each kept real selector, not blindlyremovedduplicates",
-    "performance": "Actual leased582e PERFASSERT1 30pass/all8hardbranches; only3successvalues; direct50000/10x330000/other6default20x; distinct dashboard1test/100observations."
+    "performance": "Actual leased582e PERFASSERT1 30pass/all8hardbranches; only3successvalues; direct50000/10x330000/other6default20x; distinct dashboard1test/100observations. Source-derived zero/plumbing limitation: FrameTelemetry::new initializes mutations_applied=0 (record.rs228), the qualified compositor frame constructors have no writer for that field, and HeadlessRuntime gates both returned input_to_scene_commit_us/input_to_next_present_us on compositor_telemetry.mutations_applied>0 (headless.rs525-543). scene-commit fixture243-305 explicitly has no live mutation; next-present324-386 warms then renders20 unchanged frames. Their successful assertions do not establish measured input/agent-to-commit or input-to-present conformance. This is source inference, not a numeric value emitted by the executed log.",
+    "measurement_owner_relation": "W4 existing input fields/fixtures; OPEN w2t3x/ddm2g publish-admission-to-present metric/benchmark are related, not equivalent."
   },
   "T7_protected": [
     "crates/tze_hud_projection/**",
@@ -192,6 +194,7 @@
     "Native literal names do not themselves resolve receiver types; exact private/current owner paths and module/manifests/call expressions above are manually adjudicated.",
     "Applicable priorAST traversed327files/7708owneddefs in its original primary scope; it is not a new327file parser execution or a Rust typechecker.",
     "Target/feature closure source proof and actual defaulttree/release receipts are scoped; no unsupported allfeatures,GStreamer,Windows desktop proof.",
-    "Negative source roots/regex do not certify new symbols or outside-tree generated code. All72 attributed definitions and macro handling are separately indexed."
+    "Negative source roots/regex do not certify new symbols or outside-tree generated code. All72 attributed definitions and macro handling are separately indexed.",
+    "Source-derived headless guard0 is not a printed runtime counterexample and not a universal windowed-zero claim; live windowed pending-input writers are separately retained."
   ]
 }

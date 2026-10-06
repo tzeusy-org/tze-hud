@@ -1,17 +1,19 @@
 [
   {
-    "title": "GEN1 decided runtime coverage remains incomplete at the qualified widget/counter/telemetry seams",
+    "title": "GEN1 decided runtime coverage remains incomplete at widget/counter/telemetry and input-budget measurement seams",
     "type": "task",
     "priority": 1,
     "depends_on": null,
-    "rationale": "Evidence-only audit completed; W1 instant retarget, W2 original counter dimensions/dev boundary and W3 runtime widget observation propagation remain unresolved. Source repair is explicitly outside this worker authorization. Passing current commands and evidence PR merge do not satisfy these rows. Existing shell/invariant clock gaps retain their separate owners, and protected comment/test instrument limits are explicit.",
-    "unblock_condition": "ROOT materializes/dedupes the complete W1-W3 packets and necessary existing relevant owner outcomes; their actual repair PRs merge and squashes reach fetched current main. Then dispatch the ONE full GEN2 packet after FIRST verification. No dependency on original5.7 closure or unanswered5.6/8.6. MAXGEN3; noGEN4.",
+    "rationale": "Evidence-only audit completed; W1 instant retarget, W2 original counter dimensions/dev boundary and W3 runtime widget observation propagation and W4 existing input-budget measurement provenance remain unresolved. Source repair is explicitly outside this worker authorization. Passing current commands and evidence PR merge do not satisfy these rows. Existing shell/invariant clock gaps retain their separate owners, and protected comment/test instrument limits are explicit.",
+    "unblock_condition": "ROOT materializes/dedupes the complete W1-W4 packets and necessary existing relevant owner outcomes; their actual repair PRs merge and squashes reach fetched current main. Then dispatch the ONE full GEN2 packet after FIRST verification. No dependency on original5.7 closure or unanswered5.6/8.6. MAXGEN3; noGEN4.",
     "coverage_keys": [
       "W1",
       "W2",
-      "W3"
+      "W3",
+      "W4"
     ],
     "source": "5825a05421a9e588edd5c3c05ebf7f5bac36c0e1",
-    "command_outcome_note": "The successful native source-query commands falsify coverage; there is no invented red Rust command. The optional AST139 is a separate navigation limit."
+    "command_outcome_note": "The successful native source-query commands falsify coverage; there is no invented red Rust command. The optional AST139 is a separate navigation limit.",
+    "instrument_limit": "Source-derived zero/plumbing limitation: FrameTelemetry::new initializes mutations_applied=0 (record.rs228), the qualified compositor frame constructors have no writer for that field, and HeadlessRuntime gates both returned input_to_scene_commit_us/input_to_next_present_us on compositor_telemetry.mutations_applied>0 (headless.rs525-543). scene-commit fixture243-305 explicitly has no live mutation; next-present324-386 warms then renders20 unchanged frames. Their successful assertions do not establish measured input/agent-to-commit or input-to-present conformance. This is source inference, not a numeric value emitted by the executed log."
   }
 ]
