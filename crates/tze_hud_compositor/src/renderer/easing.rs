@@ -17,8 +17,9 @@
 /// non-decreasing on `[0, 1]`, so it is safe to drive any
 /// `lerp(from, to, ease(t))` interpolation without overshoot.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
-pub enum Easing {
+pub(crate) enum Easing {
     /// Identity — `f(t) = t`. No acceleration; matches the legacy linear fades.
+    #[cfg(test)]
     Linear,
     /// Smoothstep `f(t) = 3t² − 2t³`: gentle acceleration then deceleration.
     /// The default for collapse/expand and tile fades — symmetric about `t=0.5`.
@@ -34,9 +35,10 @@ impl Easing {
     ///
     /// The input is clamped to `[0, 1]`; the output is in `[0, 1]`.
     #[inline]
-    pub fn apply(self, t: f32) -> f32 {
+    pub(crate) fn apply(self, t: f32) -> f32 {
         let t = t.clamp(0.0, 1.0);
         match self {
+            #[cfg(test)]
             Easing::Linear => t,
             Easing::EaseInOut => t * t * (3.0 - 2.0 * t),
             Easing::EaseOutQuad => {
@@ -52,7 +54,7 @@ impl Easing {
 /// Callers that need clamping should pass an already-clamped/eased `t`
 /// (e.g. [`Easing::apply`], which clamps).
 #[inline]
-pub fn lerp(a: f32, b: f32, t: f32) -> f32 {
+pub(crate) fn lerp(a: f32, b: f32, t: f32) -> f32 {
     a + (b - a) * t
 }
 
@@ -71,7 +73,7 @@ pub fn lerp(a: f32, b: f32, t: f32) -> f32 {
 /// `tau_ms <= 0` degenerates to an instant snap (`1.0`) rather than dividing by
 /// zero — a non-positive time constant means "no smoothing".
 #[inline]
-pub fn exp_smooth_factor(dt_ms: f32, tau_ms: f32) -> f32 {
+pub(crate) fn exp_smooth_factor(dt_ms: f32, tau_ms: f32) -> f32 {
     if tau_ms <= 0.0 || !dt_ms.is_finite() {
         return 1.0;
     }
@@ -90,7 +92,7 @@ pub fn exp_smooth_factor(dt_ms: f32, tau_ms: f32) -> f32 {
 /// `advance` is pure given `dt_ms`, so convergence and frame-rate independence
 /// are unit-tested without a real clock.
 #[derive(Clone, Copy, Debug)]
-pub struct ScrollSmoother {
+pub(crate) struct ScrollSmoother {
     displayed_x: f32,
     displayed_y: f32,
     tau_ms: f32,
@@ -111,7 +113,7 @@ impl ScrollSmoother {
     ///
     /// A freshly-observed tile starts *on* its current offset (no initial
     /// jump); only subsequent target changes animate.
-    pub fn new(x: f32, y: f32) -> Self {
+    pub(crate) fn new(x: f32, y: f32) -> Self {
         Self {
             displayed_x: x,
             displayed_y: y,
@@ -122,7 +124,7 @@ impl ScrollSmoother {
 
     /// The currently displayed (smoothed) offset.
     #[inline]
-    pub fn displayed(&self) -> (f32, f32) {
+    pub(crate) fn displayed(&self) -> (f32, f32) {
         (self.displayed_x, self.displayed_y)
     }
 
@@ -134,7 +136,7 @@ impl ScrollSmoother {
     /// this to tell a still-catching-up smoother (must keep rendering) apart
     /// from a settled one (safe to idle).
     #[inline]
-    pub fn is_settled(&self, target_x: f32, target_y: f32) -> bool {
+    pub(crate) fn is_settled(&self, target_x: f32, target_y: f32) -> bool {
         (target_x - self.displayed_x).abs() <= self.snap_epsilon
             && (target_y - self.displayed_y).abs() <= self.snap_epsilon
     }
@@ -146,7 +148,7 @@ impl ScrollSmoother {
     /// same trajectory. Within [`Self::snap_epsilon`] of the target on an axis,
     /// that axis snaps exactly onto the target.
     #[inline]
-    pub fn advance(&mut self, target_x: f32, target_y: f32, dt_ms: f32) -> (f32, f32) {
+    pub(crate) fn advance(&mut self, target_x: f32, target_y: f32, dt_ms: f32) -> (f32, f32) {
         let a = exp_smooth_factor(dt_ms, self.tau_ms);
         self.displayed_x = Self::step_axis(self.displayed_x, target_x, a, self.snap_epsilon);
         self.displayed_y = Self::step_axis(self.displayed_y, target_y, a, self.snap_epsilon);
@@ -176,7 +178,7 @@ impl ScrollSmoother {
 /// portal-path streaming-fade primitive (deliverable #3); the dwell-frame
 /// counter is supplied by the reveal state, keeping this pure and testable.
 #[derive(Clone, Copy, Debug)]
-pub struct StreamFadeRamp {
+pub(crate) struct StreamFadeRamp {
     easing: Easing,
 }
 
@@ -190,7 +192,8 @@ impl Default for StreamFadeRamp {
 
 impl StreamFadeRamp {
     /// Create a ramp with the given easing.
-    pub fn new(easing: Easing) -> Self {
+    #[cfg(test)]
+    pub(crate) fn new(easing: Easing) -> Self {
         Self { easing }
     }
 
@@ -201,7 +204,7 @@ impl StreamFadeRamp {
     /// (fully revealed) once the dwell completes or when `frames_per_segment`
     /// is `0`.
     #[inline]
-    pub fn alpha(&self, frames_in_segment: u32, frames_per_segment: u32) -> f32 {
+    pub(crate) fn alpha(&self, frames_in_segment: u32, frames_per_segment: u32) -> f32 {
         if frames_per_segment == 0 {
             return 1.0;
         }

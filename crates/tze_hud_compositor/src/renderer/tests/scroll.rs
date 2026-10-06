@@ -601,10 +601,10 @@ async fn scrolled_portal_output_tile_clips_geometry_outside_viewport() {
         compositor.render_frame_headless(&mut scene, &surface);
 
         let pixels = surface.read_pixels(&compositor.device);
-        let frame_control = HeadlessSurface::pixel_at(&pixels, 220, 55, 45);
-        let above_output = HeadlessSurface::pixel_at(&pixels, 220, 110, 45);
-        let below_output = HeadlessSurface::pixel_at(&pixels, 220, 110, 135);
-        let inside_output = HeadlessSurface::pixel_at(&pixels, 220, 110, 70);
+        let frame_control = crate::test_pixels::pixel_at(&pixels, 220, 55, 45);
+        let above_output = crate::test_pixels::pixel_at(&pixels, 220, 110, 45);
+        let below_output = crate::test_pixels::pixel_at(&pixels, 220, 110, 135);
+        let inside_output = crate::test_pixels::pixel_at(&pixels, 220, 110, 70);
 
         assert_eq!(
             above_output, frame_control,

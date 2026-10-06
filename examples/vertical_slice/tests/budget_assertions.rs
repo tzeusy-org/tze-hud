@@ -42,7 +42,8 @@
 mod gpu_init;
 use gpu_init::serialized_headless_init;
 
-use tze_hud_compositor::HeadlessSurface;
+#[path = "../../../crates/tze_hud_compositor/tests/common/pixels.rs"]
+mod pixels;
 use tze_hud_input::{PointerEvent, PointerEventKind};
 use tze_hud_runtime::HeadlessRuntime;
 use tze_hud_runtime::headless::HeadlessConfig;
@@ -922,7 +923,7 @@ async fn test_layer1_pixel_readback_background() {
 
     // Sample corners and center
     for (x, y) in [(5u32, 5u32), (795, 5), (5, 595), (795, 595), (400, 300)] {
-        HeadlessSurface::assert_pixel_color(
+        pixels::assert_pixel_color(
             &pixels,
             800,
             x,
@@ -1003,7 +1004,7 @@ async fn test_layer1_pixel_readback_tile_color() {
     let sample_x = tile_x + tile_w / 2;
     let sample_y = tile_y + tile_h / 2;
 
-    HeadlessSurface::assert_pixel_color(
+    pixels::assert_pixel_color(
         &pixels,
         800,
         sample_x,
@@ -1100,7 +1101,7 @@ async fn test_layer1_pixel_readback_z_order() {
     let pixels = runtime.read_pixels();
 
     // Point inside Tile B (z=2) — must be red
-    HeadlessSurface::assert_pixel_color(
+    pixels::assert_pixel_color(
         &pixels,
         800,
         200,
@@ -1115,7 +1116,7 @@ async fn test_layer1_pixel_readback_z_order() {
 // Unit tests for LatencyBucket::assert_p99_under live in
 // crates/tze_hud_telemetry/src/record.rs.
 //
-// Unit tests for HeadlessSurface::assert_pixel_color live in
+// Unit tests for the shared pure pixel helpers live in
 // crates/tze_hud_compositor/src/surface.rs.
 
 // ─── Layer 1: 25-scene pixel readback assertions ──────────────────────────────
@@ -1194,7 +1195,7 @@ async fn test_scene_empty_scene_pixels() {
     for i in (0..SCENE_W * SCENE_H).step_by(50) {
         let x = i % SCENE_W;
         let y = i / SCENE_W;
-        HeadlessSurface::assert_pixel_color(
+        pixels::assert_pixel_color(
             &pixels,
             SCENE_W,
             x,
@@ -1232,7 +1233,7 @@ async fn test_scene_single_tile_solid_pixels() {
     // Tile background (0.08, 0.08, 0.15) linear → sRGB ≈ (75, 75, 106)
     // We use a wide tolerance because the tile color is close to the background.
     // The center of the tile (400, 300) should definitely not be pure-BG.
-    let tile_center = HeadlessSurface::pixel_at(&pixels, SCENE_W, 400, 300);
+    let tile_center = pixels::pixel_at(&pixels, SCENE_W, 400, 300);
     assert_ne!(
         tile_center,
         [0u8, 0, 0, 0],
@@ -1326,7 +1327,7 @@ async fn test_scene_overlapping_tiles_zorder_pixels() {
     // At the overlap region (400, 250), the z=3 tile (blue 0.2, 0.2, 0.8) should dominate.
     // sRGB ≈ (124, 124, 226).  Tolerance ±10 for software GPU variance.
     // The important assertion is: blue channel is significantly larger than red/green.
-    let overlap_px = HeadlessSurface::pixel_at(&pixels, SCENE_W, 400, 250);
+    let overlap_px = pixels::pixel_at(&pixels, SCENE_W, 400, 250);
     assert!(
         overlap_px[2] > overlap_px[0] + 50 && overlap_px[2] > overlap_px[1] + 50,
         "z=3 (blue) tile must dominate at overlap: pixel={overlap_px:?}"

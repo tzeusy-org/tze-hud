@@ -44,7 +44,9 @@ use tze_hud_scene::types::{
 };
 use wgpu::{Device, MultisampleState, Queue};
 
-use crate::fonts::{FontConfig, ResolvedFonts, build_font_system};
+#[cfg(test)]
+use crate::fonts::ResolvedFonts;
+use crate::fonts::{FontConfig, build_font_system};
 use crate::overflow::{self, TruncationResult, TruncationViewport};
 
 /// Default line-height multiplier: `line_height_px = font_size_px × this`.
@@ -54,7 +56,7 @@ use crate::overflow::{self, TruncationResult, TruncationViewport};
 /// lacks a parsed `MarkdownTokens` (e.g. zone items, the legacy `TextItem`
 /// constructor). A design-token map may override it per-tile via
 /// `typography.line_height.multiplier`.
-pub const LINE_HEIGHT_MULTIPLIER: f32 = 1.4;
+pub(crate) const LINE_HEIGHT_MULTIPLIER: f32 = 1.4;
 
 // ─── TruncationCache ─────────────────────────────────────────────────────────
 
@@ -368,10 +370,10 @@ impl TruncationCache {
 
 /// Compositor-owned glyphon state.
 ///
-/// Created once per `Compositor` via [`TextRasterizer::new`]. Holds the
+/// Created once per `Compositor` via [`TextRasterizer::with_font_config`]. Holds the
 /// font system, glyph atlas, and renderer. Not `Send` — must stay on the
 /// compositor thread.
-pub struct TextRasterizer {
+pub(crate) struct TextRasterizer {
     font_system: FontSystem,
     swash_cache: SwashCache,
     viewport: Viewport,
@@ -392,9 +394,8 @@ pub struct TextRasterizer {
     /// rebuilt for a new [`FontConfig`] can carry them over
     /// ([`TextRasterizer::take_uploaded_fonts`]).  Shared with fontdb (no copy).
     uploaded_fonts: Vec<([u8; 32], Arc<Vec<u8>>)>,
-    /// Normalized font configuration this rasterizer was built for.
-    font_config: FontConfig,
     /// Family each font role resolved to.
+    #[cfg(test)]
     resolved_fonts: ResolvedFonts,
     /// Truncation result cache for `TextOverflow::Ellipsis` items.
     ///
@@ -700,14 +701,6 @@ pub(crate) fn measure_raw_content_height(
 }
 
 impl TextRasterizer {
-    /// Create a text rasterizer targeting the given surface format.
-    ///
-    /// This must be called after the wgpu `Device` and `Queue` are available
-    /// (i.e. after `Compositor::new_headless` or `new_windowed`).
-    pub fn new(device: &Device, queue: &Queue, format: wgpu::TextureFormat) -> Self {
-        Self::with_font_config(device, queue, format, &FontConfig::default())
-    }
-
     /// Create a text rasterizer whose font roles follow `font_config`.
     ///
     /// The font system never scans OS font directories (see [`crate::fonts`]):
@@ -715,7 +708,7 @@ impl TextRasterizer {
     /// Windows system families the config names.  With the default config it
     /// is fully deterministic.  Agent-uploaded fonts are accepted afterwards
     /// via `load_font_bytes`.
-    pub fn with_font_config(
+    pub(crate) fn with_font_config(
         device: &Device,
         queue: &Queue,
         format: wgpu::TextureFormat,
@@ -749,7 +742,7 @@ impl TextRasterizer {
             overlay_renderer,
             loaded_font_ids: HashSet::new(),
             uploaded_fonts: Vec::new(),
-            font_config,
+            #[cfg(test)]
             resolved_fonts,
             truncation_cache: TruncationCache::new(),
             shape_call_count: 0,
@@ -786,7 +779,7 @@ impl TextRasterizer {
     /// `TextRasterizer` is `!Send` — this must be called from the compositor
     /// thread only (same thread that calls `prepare_text_items` and
     /// `render_text_pass`).
-    pub fn load_font_bytes(&mut self, resource_id: [u8; 32], data: &[u8]) {
+    pub(crate) fn load_font_bytes(&mut self, resource_id: [u8; 32], data: &[u8]) {
         if self.loaded_font_ids.contains(&resource_id) {
             tracing::debug!(
                 resource_id = %format_resource_id(&resource_id),
@@ -817,41 +810,38 @@ impl TextRasterizer {
         );
     }
 
-    /// The (normalized) font configuration this rasterizer was built for.
-    #[inline]
-    pub fn font_config(&self) -> &FontConfig {
-        &self.font_config
-    }
-
     /// The concrete family each font role resolved to.
     #[inline]
-    pub fn resolved_fonts(&self) -> &ResolvedFonts {
+    #[cfg(test)]
+    pub(crate) fn resolved_fonts(&self) -> &ResolvedFonts {
         &self.resolved_fonts
     }
 
     /// Agent-uploaded fonts loaded so far, as `(resource_id, bytes)` in load
     /// order — for replaying into a rebuilt rasterizer.
-    pub fn take_uploaded_fonts(&mut self) -> Vec<([u8; 32], Arc<Vec<u8>>)> {
+    pub(crate) fn take_uploaded_fonts(&mut self) -> Vec<([u8; 32], Arc<Vec<u8>>)> {
         std::mem::take(&mut self.uploaded_fonts)
     }
 
     /// Returns `true` if the font identified by `resource_id` has already been
     /// loaded into the `FontSystem`.
     #[inline]
-    pub fn has_font(&self, resource_id: &[u8; 32]) -> bool {
+    #[cfg(test)]
+    pub(crate) fn has_font(&self, resource_id: &[u8; 32]) -> bool {
         self.loaded_font_ids.contains(resource_id)
     }
 
     /// Total number of font faces visible to glyphon's `FontSystem`.
     #[inline]
-    pub fn font_face_count(&self) -> usize {
+    #[cfg(test)]
+    pub(crate) fn font_face_count(&self) -> usize {
         self.font_system.db().faces().count()
     }
 
     /// Update the viewport resolution before each frame.
     ///
     /// Must be called once per frame before `render_text_pass`.
-    pub fn update_viewport(&mut self, queue: &Queue, width: u32, height: u32) {
+    pub(crate) fn update_viewport(&mut self, queue: &Queue, width: u32, height: u32) {
         self.viewport.update(queue, Resolution { width, height });
     }
 
@@ -1252,7 +1242,7 @@ impl TextRasterizer {
     /// Returns `Ok(quads)` on success where `quads` is the list of inline
     /// backdrop quads to render, or `Err(string)` on glyphon error (non-fatal —
     /// the frame continues with missing text rather than a crash).
-    pub fn prepare_text_items(
+    pub(crate) fn prepare_text_items(
         &mut self,
         device: &Device,
         queue: &Queue,
@@ -1264,7 +1254,7 @@ impl TextRasterizer {
     /// Prepare runtime chrome text for the final overlay pass (hud-w5zon); replay
     /// it with [`TextRasterizer::render_overlay_text_pass`]. Independent of the
     /// content layer's prepared state.
-    pub fn prepare_overlay_text_items(
+    pub(crate) fn prepare_overlay_text_items(
         &mut self,
         device: &Device,
         queue: &Queue,
@@ -1644,7 +1634,7 @@ impl TextRasterizer {
     ///
     /// The render pass must have been begun with `LoadOp::Load` so that prior
     /// geometry (rects, backgrounds) is preserved under the text.
-    pub fn render_text_pass<'rp>(
+    pub(crate) fn render_text_pass<'rp>(
         &'rp self,
         render_pass: &mut wgpu::RenderPass<'rp>,
     ) -> Result<(), String> {
@@ -1655,7 +1645,7 @@ impl TextRasterizer {
 
     /// Record the overlay-layer text pass (see [`TextRasterizer::prepare_overlay_text_items`]).
     /// Same `LoadOp::Load` contract as [`TextRasterizer::render_text_pass`].
-    pub fn render_overlay_text_pass<'rp>(
+    pub(crate) fn render_overlay_text_pass<'rp>(
         &'rp self,
         render_pass: &mut wgpu::RenderPass<'rp>,
     ) -> Result<(), String> {
@@ -1667,7 +1657,7 @@ impl TextRasterizer {
     /// Trim the atlas after the frame is presented.
     ///
     /// Reclaims memory for glyphs that were not used in the last frame.
-    pub fn trim_atlas(&mut self) {
+    pub(crate) fn trim_atlas(&mut self) {
         self.atlas.trim();
     }
 }
@@ -1683,17 +1673,17 @@ impl TextRasterizer {
 ///
 /// Coordinates are in physical pixels, absolute (not tile-relative).
 #[derive(Debug, Clone, PartialEq)]
-pub struct InlineBackdropQuad {
+pub(crate) struct InlineBackdropQuad {
     /// Left edge in physical pixels.
-    pub x: f32,
+    pub(crate) x: f32,
     /// Top edge in physical pixels.
-    pub y: f32,
+    pub(crate) y: f32,
     /// Width in physical pixels.
-    pub w: f32,
+    pub(crate) w: f32,
     /// Height in physical pixels.
-    pub h: f32,
+    pub(crate) h: f32,
     /// sRGB backdrop color [r, g, b, a] from the design token.
-    pub color: [u8; 4],
+    pub(crate) color: [u8; 4],
 }
 
 /// Compute the shaped-buffer cache key for `item` (hud-991cj).
@@ -1895,7 +1885,7 @@ fn extend_selection_quad_to_box(
     q
 }
 
-pub fn compute_inline_backdrop_quads(
+pub(crate) fn compute_inline_backdrop_quads(
     items: &[TextItem],
     buffers: &[Buffer],
     effective_styled_runs: &[Vec<StyledRunItem>],
@@ -2228,7 +2218,7 @@ pub struct ColorRunItem {
 /// to one with empty `color_runs`, so it can still take the cached/styled
 /// markdown path. Use this predicate — never `color_runs.is_empty()` — to decide
 /// whether the lossy raw-content path is required. (hud-9v3t6)
-pub fn markdown_node_has_pixel_runs(node: &TextMarkdownNode) -> bool {
+pub(crate) fn markdown_node_has_pixel_runs(node: &TextMarkdownNode) -> bool {
     node.color_runs.iter().any(|r| r.start_byte < r.end_byte)
 }
 
@@ -2252,7 +2242,7 @@ pub fn markdown_node_has_pixel_runs(node: &TextMarkdownNode) -> bool {
 ///
 /// Returns `None` when the content is empty or no tail marker is present (the
 /// cue has quiesced — kbm80 behavior preserved).
-pub fn markdown_node_tail_cursor_color(node: &TextMarkdownNode) -> Option<[u8; 4]> {
+pub(crate) fn markdown_node_tail_cursor_color(node: &TextMarkdownNode) -> Option<[u8; 4]> {
     let end = node.content.len() as u32;
     if end == 0 {
         return None;
@@ -2268,7 +2258,7 @@ pub fn markdown_node_tail_cursor_color(node: &TextMarkdownNode) -> Option<[u8; 4
 ///
 /// Used by [`portal_part_clip_rect`] purely as a lightweight geometry tuple so
 /// the per-part clip math is a free function testable without a GPU.
-pub type ClipBox = (f32, f32, f32, f32);
+pub(crate) type ClipBox = (f32, f32, f32, f32);
 
 /// Intersect two [`ClipBox`]es in the same coordinate space.
 ///
@@ -2305,7 +2295,11 @@ fn intersect_clip_box(a: ClipBox, b: ClipBox) -> ClipBox {
 /// Each returned dimension is floored at `1.0` so a fully-collapsed
 /// intersection still yields a valid (degenerate) scissor rect rather than a
 /// zero or negative extent.
-pub fn portal_part_clip_rect(content: ClipBox, tile: ClipBox, part: Option<ClipBox>) -> ClipBox {
+pub(crate) fn portal_part_clip_rect(
+    content: ClipBox,
+    tile: ClipBox,
+    part: Option<ClipBox>,
+) -> ClipBox {
     let mut clip = intersect_clip_box(content, tile);
     if let Some(part) = part {
         clip = intersect_clip_box(clip, part);
@@ -2458,7 +2452,7 @@ impl TextItem {
     ///
     /// [`ParsedMarkdown`]: crate::markdown::ParsedMarkdown
     /// [`MarkdownCache`]: crate::markdown::MarkdownCache
-    pub fn from_text_markdown_cached(
+    pub(crate) fn from_text_markdown_cached(
         node: &TextMarkdownNode,
         tile_x: f32,
         tile_y: f32,
@@ -2545,7 +2539,7 @@ impl TextItem {
     /// `opacity` is the current zone animation opacity (1.0 = fully opaque).
     ///
     /// [`RenderingPolicy`]: tze_hud_scene::types::RenderingPolicy
-    pub fn from_zone_policy(
+    pub(crate) fn from_zone_policy(
         text: &str,
         x: f32,
         y: f32,
@@ -2619,7 +2613,7 @@ impl TextItem {
 ///
 /// The alpha channel is passed through directly (0..1 → 0..255) rather than
 /// being gamma-encoded, which matches glyphon's expected color space.
-pub fn rgba_to_srgb_u8(c: Rgba) -> [u8; 4] {
+pub(crate) fn rgba_to_srgb_u8(c: Rgba) -> [u8; 4] {
     [
         linear_to_srgb_u8(c.r),
         linear_to_srgb_u8(c.g),
@@ -2629,7 +2623,7 @@ pub fn rgba_to_srgb_u8(c: Rgba) -> [u8; 4] {
 }
 
 /// Multiply the alpha channel of an sRGB u8 color by `opacity`.
-pub fn apply_opacity_to_color(color: [u8; 4], opacity: f32) -> [u8; 4] {
+pub(crate) fn apply_opacity_to_color(color: [u8; 4], opacity: f32) -> [u8; 4] {
     let a = (color[3] as f32 * opacity.clamp(0.0, 1.0)).clamp(0.0, 255.0) as u8;
     [color[0], color[1], color[2], a]
 }
@@ -3300,7 +3294,7 @@ pub(crate) fn format_resource_id(id: &[u8; 32]) -> String {
 
 /// Minimal Markdown strip for v1: removes `#` heading prefixes and `*` emphasis
 /// markers. Does not parse nested Markdown, code blocks, or links.
-pub fn strip_markdown_v1(s: &str) -> String {
+pub(crate) fn strip_markdown_v1(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for line in s.lines() {
         let stripped = line.trim_start_matches('#').trim_start();

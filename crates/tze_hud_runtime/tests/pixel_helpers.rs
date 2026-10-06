@@ -36,6 +36,10 @@
 //! linear 1.00  → sRGB = 255
 //! ```
 
+#[path = "../../tze_hud_compositor/tests/common/pixels.rs"]
+pub mod pixels;
+pub use pixels::{assert_pixel_color, pixel_at};
+
 // ─── Tolerance constants ─────────────────────────────────────────────────────
 
 /// CI tolerance for solid-fill pixels on llvmpipe / SwiftShader (±6/channel).

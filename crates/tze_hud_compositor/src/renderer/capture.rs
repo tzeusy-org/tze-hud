@@ -9,12 +9,12 @@ use super::frame::WindowedFrameBuild;
 use super::*;
 
 /// Largest width or height a capture will allocate for.
-pub const MAX_CAPTURE_DIM: u32 = 8192;
+pub(crate) const MAX_CAPTURE_DIM: u32 = 8192;
 
 /// Largest frame (width x height) a capture will allocate for: 16 Mpx covers
 /// 4K and 5K displays. It bounds peak memory (readback buffer, RGBA copy and
 /// PNG encode, roughly 4x the frame's 64 MiB) to a few hundred MiB.
-pub const MAX_CAPTURE_PIXELS: u64 = 16 * 1024 * 1024;
+pub(crate) const MAX_CAPTURE_PIXELS: u64 = 16 * 1024 * 1024;
 
 /// A captured frame: tightly packed straight-from-the-GPU RGBA8 (row-major,
 /// no padding). In sRGB formats the bytes are sRGB-encoded, as on screen; in
@@ -42,7 +42,7 @@ pub enum CaptureError {
 
 /// Whether `format` stores bytes as B,G,R,A (`Ok(true)`) or R,G,B,A
 /// (`Ok(false)`); anything else is not capturable.
-pub fn format_is_bgra(format: wgpu::TextureFormat) -> Result<bool, CaptureError> {
+pub(crate) fn format_is_bgra(format: wgpu::TextureFormat) -> Result<bool, CaptureError> {
     use wgpu::TextureFormat::*;
     match format {
         Bgra8Unorm | Bgra8UnormSrgb => Ok(true),
@@ -52,14 +52,14 @@ pub fn format_is_bgra(format: wgpu::TextureFormat) -> Result<bool, CaptureError>
 }
 
 /// Whether a `width` x `height` frame is within the capture limits.
-pub fn capture_size_ok(width: u32, height: u32) -> bool {
+pub(crate) fn capture_size_ok(width: u32, height: u32) -> bool {
     width <= MAX_CAPTURE_DIM
         && height <= MAX_CAPTURE_DIM
         && u64::from(width) * u64::from(height) <= MAX_CAPTURE_PIXELS
 }
 
 /// Drop the per-row padding wgpu requires and, for BGRA, swap to RGBA.
-pub fn unpad_to_rgba(
+pub(crate) fn unpad_to_rgba(
     padded: &[u8],
     width: u32,
     height: u32,

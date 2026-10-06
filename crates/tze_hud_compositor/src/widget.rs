@@ -1662,7 +1662,7 @@ fn rgba_to_svg_color(rgba: &Rgba) -> String {
 /// per-frame re-rasterizations during periods of degradation.
 ///
 /// Under `Nominal`, the normal time-based interpolation value is returned.
-pub fn compute_transition_t(
+pub(crate) fn compute_transition_t(
     elapsed_ms: f32,
     duration_ms: f32,
     degradation_level: DegradationLevel,
@@ -1679,7 +1679,7 @@ pub fn compute_transition_t(
 /// - f32: linear interpolation
 /// - color: component-wise linear interpolation in sRGB space
 /// - string / enum: snap to `new` at t=0 (applied immediately)
-pub fn interpolate_param(
+pub(crate) fn interpolate_param(
     old: &WidgetParameterValue,
     new: &WidgetParameterValue,
     t: f32,
@@ -1709,33 +1709,33 @@ pub fn interpolate_param(
 /// new texture. When false, the cached texture is reused.
 pub struct WidgetTextureEntry {
     resident_allocation_id: Option<tze_hud_resource::AllocationId>,
-    /// The cached wgpu texture (RGBA8Unorm, premultiplied alpha).
-    pub texture: wgpu::Texture,
+    /// Owns the cached wgpu texture (RGBA8Unorm, premultiplied alpha).
+    _texture: wgpu::Texture,
     /// Bind group for sampling the texture in the widget render pass.
-    pub bind_group: wgpu::BindGroup,
+    pub(crate) bind_group: wgpu::BindGroup,
     /// Width of the texture in pixels.
     pub width: u32,
     /// Height of the texture in pixels.
     pub height: u32,
     /// When true, the texture must be re-rasterized before compositing.
-    pub dirty: bool,
+    pub(crate) dirty: bool,
     /// Parameters used for the last successful rasterization.
     /// Compared against current scene params to detect changes from MCP publishes.
     pub last_rendered_params: HashMap<String, WidgetParameterValue>,
     /// Animation state: start time, duration, starting params, target params.
-    pub animation: Option<WidgetAnimationState>,
+    pub(crate) animation: Option<WidgetAnimationState>,
 }
 
 /// Spacing of wake-ups while a widget transition is animating (~60 Hz).
-pub const WIDGET_TRANSITION_TICK: std::time::Duration = std::time::Duration::from_millis(16);
+pub(crate) const WIDGET_TRANSITION_TICK: std::time::Duration = std::time::Duration::from_millis(16);
 
 /// Active animation state for a widget instance.
-pub struct WidgetAnimationState {
+pub(crate) struct WidgetAnimationState {
     /// Start time on the scene's injected clock (microseconds).
-    pub start_us: u64,
-    pub duration_ms: u32,
-    pub from_params: HashMap<String, WidgetParameterValue>,
-    pub to_params: HashMap<String, WidgetParameterValue>,
+    pub(crate) start_us: u64,
+    pub(crate) duration_ms: u32,
+    pub(crate) from_params: HashMap<String, WidgetParameterValue>,
+    pub(crate) to_params: HashMap<String, WidgetParameterValue>,
 }
 
 // ─── Standalone SVG rasterization (CPU-only, no GPU) ─────────────────────────
@@ -2252,7 +2252,7 @@ fn rasterize_static_svg_layer(
 ///
 /// This is primarily used by benchmarks to distinguish first-render cost from
 /// hot-path cost after static widget chrome has been cached.
-pub fn clear_static_svg_layer_cache() {
+pub(crate) fn clear_static_svg_layer_cache() {
     static_svg_layer_cache()
         .lock()
         .expect("static SVG layer cache poisoned")
@@ -2485,13 +2485,13 @@ pub fn rasterize_widget_render_plan(
 /// and consumed by [`WidgetRenderer::composite_prepared`] after the lock drops.
 /// Carries only the resolved pixel origin plus the instance name used to look up
 /// the (compositor-owned) cached texture at draw time.
-pub struct WidgetDrawQuad {
+pub(crate) struct WidgetDrawQuad {
     /// Widget instance name — the key into `WidgetRenderer::textures`.
-    pub instance_name: String,
+    pub(crate) instance_name: String,
     /// Resolved (pre-snap) pixel x origin.
-    pub raw_x: f32,
+    pub(crate) raw_x: f32,
     /// Resolved (pre-snap) pixel y origin.
-    pub raw_y: f32,
+    pub(crate) raw_y: f32,
 }
 
 /// The compositor-owned widget rendering state.
@@ -2545,7 +2545,7 @@ fn reserve_widget_source(
 
 impl WidgetRenderer {
     /// Create a new `WidgetRenderer` for the given device and output format.
-    pub fn new(device: &wgpu::Device, output_format: wgpu::TextureFormat) -> Self {
+    pub(crate) fn new(device: &wgpu::Device, output_format: wgpu::TextureFormat) -> Self {
         let texture_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("widget_texture_bgl"),
@@ -2587,7 +2587,7 @@ impl WidgetRenderer {
         }
     }
 
-    pub fn set_resident_ledger(&mut self, ledger: tze_hud_resource::ResidentLedger) {
+    pub(crate) fn set_resident_ledger(&mut self, ledger: tze_hud_resource::ResidentLedger) {
         self.resident_ledger = Some(ledger);
     }
 
@@ -2680,7 +2680,7 @@ impl WidgetRenderer {
 
     /// Mark a widget instance as dirty and start a transition animation.
     /// `now_us` is the scene's injected clock, never the wall clock.
-    pub fn start_transition(
+    pub(crate) fn start_transition(
         &mut self,
         instance_name: &str,
         from_params: HashMap<String, WidgetParameterValue>,
@@ -2708,7 +2708,7 @@ impl WidgetRenderer {
     /// per parameter change during transitions, saving CPU time under load.
     ///
     /// Returns `(effective_params, still_animating)`.
-    pub fn resolve_animated_params(
+    pub(crate) fn resolve_animated_params(
         &mut self,
         instance_name: &str,
         current_params: &HashMap<String, WidgetParameterValue>,
@@ -2764,7 +2764,7 @@ impl WidgetRenderer {
     /// Per-instance raster counts (`raster_count`) are the observable cost;
     /// timing lives in `tests/widget_rasterize_budget.rs`, not on this path.
     #[allow(clippy::too_many_arguments)]
-    pub fn rasterize_and_upload(
+    pub(crate) fn rasterize_and_upload(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -2966,7 +2966,7 @@ impl WidgetRenderer {
                     .resident_ledger
                     .as_ref()
                     .map(|_| allocation_id.clone()),
-                texture,
+                _texture: texture,
                 bind_group,
                 width,
                 height,
@@ -2994,7 +2994,7 @@ impl WidgetRenderer {
     /// - `render_pass` — the active render pass to draw into
     /// - `registry` — the widget registry (instances + definitions)
     /// - `surf_w` / `surf_h` — surface dimensions for NDC conversion
-    pub fn composite_widgets<'rp>(
+    pub(crate) fn composite_widgets<'rp>(
         &'rp self,
         render_pass: &mut wgpu::RenderPass<'rp>,
         registry: &WidgetRegistry,
@@ -3079,7 +3079,7 @@ impl WidgetRenderer {
     /// The matching draw half is [`Self::composite_prepared`], which needs only
     /// these owned quads (no `&WidgetRegistry`) and so runs after the scene lock
     /// is dropped.
-    pub fn collect_widget_draw_quads(
+    pub(crate) fn collect_widget_draw_quads(
         &self,
         registry: &WidgetRegistry,
         surf_w: f32,
@@ -3135,7 +3135,7 @@ impl WidgetRenderer {
     /// quad's cached texture entry (compositor-owned, not scene state), pixel-snaps
     /// against the texture dimensions, and draws. Geometry was resolved earlier by
     /// [`Self::collect_widget_draw_quads`].
-    pub fn composite_prepared<'rp>(
+    pub(crate) fn composite_prepared<'rp>(
         &'rp self,
         render_pass: &mut wgpu::RenderPass<'rp>,
         quads: &[WidgetDrawQuad],
@@ -3185,12 +3185,12 @@ impl WidgetRenderer {
     }
 
     /// Instances re-rasterized since the last [`Self::begin_sync`].
-    pub fn rasterized_last_sync(&self) -> &[String] {
+    pub(crate) fn rasterized_last_sync(&self) -> &[String] {
         &self.rasterized_last_sync
     }
 
     /// Start a new sync pass: forget the previous pass's rasterized set.
-    pub fn begin_sync(&mut self) {
+    pub(crate) fn begin_sync(&mut self) {
         self.rasterized_last_sync.clear();
     }
 
@@ -3198,11 +3198,14 @@ impl WidgetRenderer {
         self.textures.get(instance_name)
     }
 
-    pub fn texture_entry_mut(&mut self, instance_name: &str) -> Option<&mut WidgetTextureEntry> {
+    pub(crate) fn texture_entry_mut(
+        &mut self,
+        instance_name: &str,
+    ) -> Option<&mut WidgetTextureEntry> {
         self.textures.get_mut(instance_name)
     }
 
-    pub fn remove_texture(&mut self, instance_name: &str) {
+    pub(crate) fn remove_texture(&mut self, instance_name: &str) {
         if let Some(entry) = self.textures.remove(instance_name)
             && let (Some(ledger), Some(id)) = (&self.resident_ledger, entry.resident_allocation_id)
         {
@@ -3292,13 +3295,13 @@ fn snap_composite_rect(
 /// Vertex for the widget texture quad (position + UV).
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct WidgetVertex {
-    pub position: [f32; 2],
-    pub uv: [f32; 2],
+pub(crate) struct WidgetVertex {
+    pub(crate) position: [f32; 2],
+    pub(crate) uv: [f32; 2],
 }
 
 impl WidgetVertex {
-    pub fn desc() -> wgpu::VertexBufferLayout<'static> {
+    pub(crate) fn desc() -> wgpu::VertexBufferLayout<'static> {
         wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<WidgetVertex>() as wgpu::BufferAddress,
             step_mode: wgpu::VertexStepMode::Vertex,

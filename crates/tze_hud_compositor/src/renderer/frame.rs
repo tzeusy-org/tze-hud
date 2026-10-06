@@ -712,7 +712,7 @@ impl Compositor {
     /// Skips the frame gracefully (returning early with total-time telemetry) if
     /// the surface is unavailable, and contains the hud-pi5wx submit/present
     /// panic so the compositor thread survives a mid-frame swapchain reconfigure.
-    pub fn present_windowed_frame(
+    pub(crate) fn present_windowed_frame(
         &mut self,
         build: WindowedFrameBuild,
         surface: &dyn CompositorSurface,
@@ -723,7 +723,7 @@ impl Compositor {
 
     /// Present a frame and report each completed GPU-facing operation
     /// independently for runtime efficiency accounting.
-    pub fn present_windowed_frame_with_outcome(
+    pub(crate) fn present_windowed_frame_with_outcome(
         &mut self,
         build: WindowedFrameBuild,
         surface: &dyn CompositorSurface,

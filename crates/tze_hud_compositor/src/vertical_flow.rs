@@ -36,10 +36,11 @@ use glyphon::FontSystem;
 use tze_hud_scene::types::{FontFamily, Node, NodeData, NodeLayout, SceneId};
 
 use crate::markdown::{MarkdownTokens, ParsedMarkdown};
+#[cfg(test)]
+use crate::text::{LINE_HEIGHT_MULTIPLIER, composer_wrap_line_widths};
 use crate::text::{
-    LINE_HEIGHT_MULTIPLIER, composer_wrap_line_widths, markdown_node_has_pixel_runs,
-    measure_markdown_content_height, measure_markdown_content_height_cached,
-    measure_raw_content_height, text_content_box_margins,
+    markdown_node_has_pixel_runs, measure_markdown_content_height,
+    measure_markdown_content_height_cached, measure_raw_content_height, text_content_box_margins,
 };
 
 /// Which render-path shaping a flowed child's content should be measured
@@ -49,13 +50,14 @@ use crate::text::{
 /// [`crate::text::TextItem::from_text_markdown_node`]), so a caller building a
 /// [`FlowChild`] from a `TextMarkdownNode` should apply the SAME fork.
 #[derive(Clone, Copy, Debug)]
-pub enum FlowContentMode<'a> {
+pub(crate) enum FlowContentMode<'a> {
     /// Plain text (e.g. the composer draft). Measured via
     /// [`composer_wrap_line_widths`], the SAME CPU wrapped-line shaper the
     /// composer's own measurement/render paths already share (`WRAPPED_TEXT_WRAP`,
     /// uniform `font_size_px` × [`LINE_HEIGHT_MULTIPLIER`]) — correct for plain
     /// text, but this path does NOT strip markdown syntax or apply per-span
     /// styling, so it must never be used to measure `TextMarkdownNode` content.
+    #[cfg(test)]
     PlainText,
     /// Markdown SOURCE with no pixel-bearing `color_runs` — the common case.
     /// Measured via [`crate::text::measure_markdown_content_height`], which
@@ -96,26 +98,26 @@ pub enum FlowContentMode<'a> {
 
 /// One child's inputs for vertical-flow height measurement.
 #[derive(Clone, Copy, Debug)]
-pub struct FlowChild<'a> {
+pub(crate) struct FlowChild<'a> {
     /// The child's text content (markdown source, as the render path receives it).
-    pub content: &'a str,
+    pub(crate) content: &'a str,
     /// The width the child wraps to — its own content box width in px.
-    pub wrap_width: f32,
+    pub(crate) wrap_width: f32,
     /// Font size in px used to shape and measure the child.
-    pub font_size_px: f32,
+    pub(crate) font_size_px: f32,
     /// Font family used to shape and measure the child. Consulted on the
     /// [`FlowContentMode::Markdown`] and [`FlowContentMode::RawWithColorRuns`]
     /// paths — the [`FlowContentMode::PlainText`] path shapes at a fixed
     /// sans-serif family, matching [`composer_wrap_line_widths`]'s existing
     /// behavior.
-    pub font_family: FontFamily,
+    pub(crate) font_family: FontFamily,
     /// Total vertical padding (top + bottom) added around the text inside the
     /// child node, matching the render path's `text_margin * 2` so the measured
     /// row height equals the painted row height.
-    pub vertical_padding: f32,
+    pub(crate) vertical_padding: f32,
     /// Which render-path shaping to measure `content` against — see
     /// [`FlowContentMode`].
-    pub content_mode: FlowContentMode<'a>,
+    pub(crate) content_mode: FlowContentMode<'a>,
 }
 
 /// Pure geometry: stack `heights` top-to-bottom from `start_y`, inserting `gap`
@@ -126,7 +128,7 @@ pub struct FlowChild<'a> {
 /// negative `gap` is treated as `0.0`, and a negative height contributes `0.0` to
 /// the running cursor (its own offset is still emitted). The result length always
 /// equals `heights.len()`.
-pub fn stack_offsets(heights: &[f32], gap: f32, start_y: f32) -> Vec<f32> {
+pub(crate) fn stack_offsets(heights: &[f32], gap: f32, start_y: f32) -> Vec<f32> {
     let gap = gap.max(0.0);
     let mut offsets = Vec::with_capacity(heights.len());
     let mut cursor = start_y;
@@ -144,7 +146,8 @@ pub fn stack_offsets(heights: &[f32], gap: f32, start_y: f32) -> Vec<f32> {
 /// between adjacent items. Returns `0.0` for an empty stack; a single item has no
 /// gap. Negative heights and `gap` are clamped to `0.0`, matching
 /// [`stack_offsets`].
-pub fn flow_total_height(heights: &[f32], gap: f32) -> f32 {
+#[cfg(test)]
+pub(crate) fn flow_total_height(heights: &[f32], gap: f32) -> f32 {
     if heights.is_empty() {
         return 0.0;
     }
@@ -179,7 +182,7 @@ pub fn flow_total_height(heights: &[f32], gap: f32) -> f32 {
 ///
 /// `wrap_width` and `vertical_padding` are clamped to non-negative on every
 /// branch.
-pub fn measure_child_height(font_system: &mut FontSystem, child: &FlowChild<'_>) -> f32 {
+pub(crate) fn measure_child_height(font_system: &mut FontSystem, child: &FlowChild<'_>) -> f32 {
     let wrap_width = child.wrap_width.max(1.0);
     let content_height = match child.content_mode {
         FlowContentMode::Markdown { tokens, cached } => match cached {
@@ -209,6 +212,7 @@ pub fn measure_child_height(font_system: &mut FontSystem, child: &FlowChild<'_>)
             child.font_size_px,
             child.font_family,
         ),
+        #[cfg(test)]
         FlowContentMode::PlainText => {
             let line_count = composer_wrap_line_widths(
                 font_system,
@@ -1105,7 +1109,7 @@ mod tests {
     // against the render rasterizer's OWN persistent `FontSystem` (reachable via
     // the new `TextRasterizer::font_system_mut()`), so agent-uploaded fonts
     // (loaded into that same `FontSystem` via `load_font_bytes`) are reflected in
-    // flow heights. The claimed no-regression basis is that `TextRasterizer::new`
+    // flow heights. The claimed no-regression basis is that `TextRasterizer::with_font_config`
     // seeds `font_system` from the SAME `bundled_font_system()` call the old code
     // used directly — so un-uploaded measurement is unchanged — and the actual
     // upload path (`self.font_system.db_mut().load_font_data(..)`) is pure
@@ -1143,7 +1147,7 @@ mod tests {
         let sans_child = text_node(sans_content, 0.0, 220.0);
         let tokens = MarkdownTokens::default();
 
-        // Baseline: exactly what `TextRasterizer::new` (and the OLD
+        // Baseline: exactly what `TextRasterizer::with_font_config` (and the OLD
         // per-frame call site) constructs.
         let mut fs_baseline = crate::fonts::bundled_font_system();
         let h_mono_baseline = flow_child_height(&mut fs_baseline, &mono_child, &tokens, None);

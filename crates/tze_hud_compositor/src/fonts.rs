@@ -108,7 +108,7 @@ static DEJAVU_SERIF_BOLD: &[u8] = include_bytes!("../fonts/dejavu/DejaVuSerif-Bo
 ///
 /// Used in startup telemetry and tests to confirm the bundled font set is
 /// intact.
-pub const BUNDLED_FONT_FACE_COUNT: usize = 11;
+pub(crate) const BUNDLED_FONT_FACE_COUNT: usize = 11;
 
 static BUNDLED_FACES: [&[u8]; BUNDLED_FONT_FACE_COUNT] = [
     PLEX_SANS_REGULAR,
@@ -125,18 +125,18 @@ static BUNDLED_FACES: [&[u8]; BUNDLED_FONT_FACE_COUNT] = [
 ];
 
 /// Default family for the sans role ([`tze_hud_scene::types::FontFamily::SystemSansSerif`]).
-pub const DEFAULT_SANS_FAMILY: &str = "IBM Plex Sans";
+pub(crate) const DEFAULT_SANS_FAMILY: &str = "IBM Plex Sans";
 /// Default family for the mono role ([`tze_hud_scene::types::FontFamily::SystemMonospace`]).
-pub const DEFAULT_MONO_FAMILY: &str = "IBM Plex Mono";
+pub(crate) const DEFAULT_MONO_FAMILY: &str = "IBM Plex Mono";
 /// Default family for the serif role ([`tze_hud_scene::types::FontFamily::SystemSerif`]).
-pub const DEFAULT_SERIF_FAMILY: &str = "DejaVu Serif";
+pub(crate) const DEFAULT_SERIF_FAMILY: &str = "DejaVu Serif";
 
 /// Design-token key naming the sans role's family.
-pub const TOKEN_FONT_SANS: &str = "font.sans";
+pub(crate) const TOKEN_FONT_SANS: &str = "font.sans";
 /// Design-token key naming the mono role's family.
-pub const TOKEN_FONT_MONO: &str = "font.mono";
+pub(crate) const TOKEN_FONT_MONO: &str = "font.mono";
 /// Design-token key naming the serif role's family.
-pub const TOKEN_FONT_SERIF: &str = "font.serif";
+pub(crate) const TOKEN_FONT_SERIF: &str = "font.serif";
 /// Runtime-internal token-map key carrying the absolute fonts directory.
 ///
 /// Not user config: the runtime sets it to `<config dir>/fonts` when that
@@ -153,21 +153,21 @@ pub const RUNTIME_FONTS_DIR_KEY: &str = "runtime.fonts_dir";
 /// Build a font system from it with [`build_font_system`], or hand it to
 /// [`crate::Compositor::set_font_config`] to apply it to a running compositor.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct FontConfig {
+pub(crate) struct FontConfig {
     /// Family for the sans role (default [`DEFAULT_SANS_FAMILY`]).
-    pub sans: Option<String>,
+    pub(crate) sans: Option<String>,
     /// Family for the mono role (default [`DEFAULT_MONO_FAMILY`]).
-    pub mono: Option<String>,
+    pub(crate) mono: Option<String>,
     /// Family for the serif role (default [`DEFAULT_SERIF_FAMILY`]).
-    pub serif: Option<String>,
+    pub(crate) serif: Option<String>,
     /// Directory whose font files are loaded before names are resolved.
-    pub fonts_dir: Option<PathBuf>,
+    pub(crate) fonts_dir: Option<PathBuf>,
 }
 
 impl FontConfig {
     /// Read the `font.sans`, `font.mono` and `font.serif` tokens and the
     /// runtime-set [`RUNTIME_FONTS_DIR_KEY`] from a resolved token map.  Absent keys leave the role at its default.
-    pub fn from_token_map(tokens: &HashMap<String, String>) -> Self {
+    pub(crate) fn from_token_map(tokens: &HashMap<String, String>) -> Self {
         let get = |key: &str| tokens.get(key).cloned();
         Self {
             sans: get(TOKEN_FONT_SANS),
@@ -181,7 +181,7 @@ impl FontConfig {
     /// Canonical form: names trimmed, and empty names, generic keywords and
     /// names equal to the role default all become `None`, so two configs that
     /// select the same fonts compare equal (no pointless rebuilds).
-    pub fn normalized(self) -> Self {
+    pub(crate) fn normalized(self) -> Self {
         let norm = |name: Option<String>, default: &str, generics: &[&str]| {
             let name = name?.trim().to_owned();
             let is_default = name.is_empty()
@@ -200,10 +200,10 @@ impl FontConfig {
 
 /// The concrete family each role resolved to.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ResolvedFonts {
-    pub sans: String,
-    pub mono: String,
-    pub serif: String,
+pub(crate) struct ResolvedFonts {
+    pub(crate) sans: String,
+    pub(crate) mono: String,
+    pub(crate) serif: String,
 }
 
 impl Default for ResolvedFonts {
@@ -230,7 +230,7 @@ pub fn bundled_font_system() -> FontSystem {
 ///
 /// All faces are loaded before the [`FontSystem`] is constructed because
 /// cosmic-text computes its monospace fallback table once, at construction.
-pub fn build_font_system(config: &FontConfig) -> (FontSystem, ResolvedFonts) {
+pub(crate) fn build_font_system(config: &FontConfig) -> (FontSystem, ResolvedFonts) {
     let mut db = fontdb::Database::new();
     for bytes in BUNDLED_FACES.iter().copied() {
         db.load_font_source(fontdb::Source::Binary(Arc::new(bytes)));
@@ -256,24 +256,14 @@ pub fn build_font_system(config: &FontConfig) -> (FontSystem, ResolvedFonts) {
     (FontSystem::new_with_locale_and_db(locale(), db), resolved)
 }
 
-/// Return all bundled font faces as [`fontdb::Source::Binary`] sources.
-///
-/// Useful when adding the bundled faces to an existing [`fontdb::Database`].
-pub fn bundled_font_sources() -> impl Iterator<Item = fontdb::Source> {
-    BUNDLED_FACES
-        .iter()
-        .copied()
-        .map(|bytes| fontdb::Source::Binary(Arc::new(bytes)))
-}
-
 /// Raw bytes of every bundled face, for font databases of a different fontdb
 /// version (resvg's widget text).
-pub fn bundled_face_bytes() -> impl Iterator<Item = &'static [u8]> {
+pub(crate) fn bundled_face_bytes() -> impl Iterator<Item = &'static [u8]> {
     BUNDLED_FACES.iter().copied()
 }
 
 /// The family name `db` knows that equals `name` case-insensitively, if any.
-pub fn find_family(db: &fontdb::Database, name: &str) -> Option<String> {
+pub(crate) fn find_family(db: &fontdb::Database, name: &str) -> Option<String> {
     db.faces()
         .flat_map(|face| face.families.iter())
         .find(|(family, _)| family.eq_ignore_ascii_case(name))
@@ -391,12 +381,12 @@ fn warn_once(key: &str, emit: impl FnOnce()) {
 /// files whose value name matches the requested family are loaded.
 ///
 /// Other platforms: a no-op (Linux builds are headless CI only).
-pub mod system {
+pub(crate) mod system {
     use glyphon::fontdb;
 
     /// Load the system font files for `family` into `db`; returns how many
     /// files were loaded.  Never scans a directory.
-    pub fn load_family(db: &mut fontdb::Database, family: &str) -> usize {
+    pub(crate) fn load_family(db: &mut fontdb::Database, family: &str) -> usize {
         imp::load_family(db, family)
     }
 
