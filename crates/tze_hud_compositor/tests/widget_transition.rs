@@ -60,12 +60,25 @@ impl Rig {
     /// A gauge already on screen with `level = 0.0`, `fill_color = black`,
     /// `severity = info`, published with no transition.
     async fn new() -> Option<Rig> {
+        let require_gpu = std::env::var("TZE_HUD_REQUIRE_GPU").is_ok_and(|v| v.trim() == "1");
         if std::env::var("TZE_HUD_SKIP_GPU_TESTS").is_ok_and(|v| v.trim() == "1") {
+            assert!(
+                !require_gpu,
+                "TZE_HUD_REQUIRE_GPU=1 forbids skipping widget transition assertions"
+            );
+            eprintln!("SKIPPED: widget_transition TZE_HUD_SKIP_GPU_TESTS=1");
             return None;
         }
         let mut compositor = match common::new_headless_serialized(256, 256).await {
             Ok(c) => c,
-            Err(CompositorError::NoAdapter) => return None,
+            Err(CompositorError::NoAdapter) => {
+                assert!(
+                    !require_gpu,
+                    "TZE_HUD_REQUIRE_GPU=1 but no adapter for widget transition assertions"
+                );
+                eprintln!("SKIPPED: widget_transition no GPU adapter");
+                return None;
+            }
             Err(e) => panic!("unexpected compositor error: {e}"),
         };
         let surface = HeadlessSurface::new(&compositor.device, 256, 256);
@@ -310,6 +323,49 @@ async fn retarget_mid_flight_is_continuous_and_uses_the_new_duration() {
         0.0,
         "lands exactly on the new target"
     );
+
+    // Duration zero must interrupt a running transition both when choosing a
+    // different target and when choosing the same target as that old animation.
+    for instant_target in [0.0, 1.0] {
+        rig.publish([("level", WidgetParameterValue::F32(0.0))], 0);
+        rig.step(0);
+        rig.publish([("level", WidgetParameterValue::F32(1.0))], 200);
+        rig.step(0);
+        let halfway = level(&rig.step(100));
+        assert!((halfway - 0.5).abs() < 0.01, "active halfway: {halfway}");
+        assert!(
+            rig.compositor
+                .widget_renderer()
+                .unwrap()
+                .has_active_transition()
+        );
+        assert!(rig.compositor.has_inflight_animation(&rig.scene));
+        assert!(rig.compositor.next_animation_deadline().is_some());
+
+        rig.publish([("level", WidgetParameterValue::F32(instant_target))], 0);
+        assert_eq!(
+            level(&rig.step(0)),
+            instant_target,
+            "zero duration snaps without advancing the clock"
+        );
+        assert!(
+            !rig.compositor
+                .widget_renderer()
+                .unwrap()
+                .has_active_transition(),
+            "the old instance animation is cancelled"
+        );
+        assert!(!rig.compositor.has_inflight_animation(&rig.scene));
+        assert!(rig.compositor.next_animation_deadline().is_none());
+        let snapped_rasters = rig.rasters();
+        assert_eq!(level(&rig.step(1_000)), instant_target);
+        assert_eq!(
+            rig.rasters(),
+            snapped_rasters,
+            "a later injected tick must not resume the old transition"
+        );
+        println!("instant retarget {instant_target}: cancelled, no deadline or later raster");
+    }
 }
 
 #[tokio::test]
