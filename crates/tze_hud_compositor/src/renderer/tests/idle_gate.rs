@@ -57,6 +57,10 @@ async fn idle_render_gate_skips_static_scene_renders_on_change_or_animation() {
         !dirty_idle,
         "idle frame (no scene change, no animation) MUST skip render/present"
     );
+    assert!(
+        compositor.take_work_counts().is_none(),
+        "no render invocation must not manufacture a sampled zero-work frame"
+    );
 
     // -- Case 2: scene-version bump -> RENDER. --
     // A scene diff / mutation bumps scene.version; the gate must not skip it.

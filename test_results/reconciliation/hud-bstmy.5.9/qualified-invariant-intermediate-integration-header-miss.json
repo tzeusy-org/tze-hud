@@ -1,0 +1,1227 @@
+{
+  "at": "2026-10-06T18:29:40.232949+00:00",
+  "native_metadata_pid": 3725880,
+  "source_head": "8d7727351c0942e372e999960ea0c49ebb1a7a32",
+  "raw_sha256": "752bff9b116bf4a9dd26d87518f7be8f8258cd0f909b143bd6bd724b67503ca5",
+  "scope": "current72 documentation assertion names, same Cargo package/actual binary positive test lines; preserve actual qualified Rust test names. This is scoped fixture execution, not universal invariant proof.",
+  "source_assertion_names": 72,
+  "same_owner_raw_positive": 61,
+  "missing_same_owner": [
+    {
+      "name": "poc_override_exit_safe_mode_with_agent_hung_during_it",
+      "docs_owner": [
+        "integration"
+      ],
+      "positive_same_owner_receipts": [],
+      "same_owner_positive": false
+    },
+    {
+      "name": "poc_override_notifies_the_agent",
+      "docs_owner": [
+        "integration"
+      ],
+      "positive_same_owner_receipts": [],
+      "same_owner_positive": false
+    },
+    {
+      "name": "poc_override_safe_mode_wins_with_hung_grpc_agent",
+      "docs_owner": [
+        "integration"
+      ],
+      "positive_same_owner_receipts": [],
+      "same_owner_positive": false
+    },
+    {
+      "name": "poc_portal_abandoned_is_reclaimed",
+      "docs_owner": [
+        "integration"
+      ],
+      "positive_same_owner_receipts": [],
+      "same_owner_positive": false
+    },
+    {
+      "name": "poc_portal_viewer_dismiss_then_mcp_verbs",
+      "docs_owner": [
+        "integration"
+      ],
+      "positive_same_owner_receipts": [],
+      "same_owner_positive": false
+    },
+    {
+      "name": "poc_tile_claim_with_placement_two_round_trips",
+      "docs_owner": [
+        "integration"
+      ],
+      "positive_same_owner_receipts": [],
+      "same_owner_positive": false
+    },
+    {
+      "name": "poc_tile_update_then_orphan_then_reclaim_after_grace",
+      "docs_owner": [
+        "integration"
+      ],
+      "positive_same_owner_receipts": [],
+      "same_owner_positive": false
+    },
+    {
+      "name": "poc_zone_delay_ms_appears_on_schedule",
+      "docs_owner": [
+        "integration"
+      ],
+      "positive_same_owner_receipts": [],
+      "same_owner_positive": false
+    },
+    {
+      "name": "poc_zone_notification_ttl_disappears_unattended",
+      "docs_owner": [
+        "integration"
+      ],
+      "positive_same_owner_receipts": [],
+      "same_owner_positive": false
+    },
+    {
+      "name": "shell_dismiss_override_removes_portal_tile",
+      "docs_owner": [
+        "integration"
+      ],
+      "positive_same_owner_receipts": [],
+      "same_owner_positive": false
+    },
+    {
+      "name": "shell_status_snapshot_exposes_no_portal_identity_or_transcript",
+      "docs_owner": [
+        "integration"
+      ],
+      "positive_same_owner_receipts": [],
+      "same_owner_positive": false
+    }
+  ],
+  "rows": [
+    {
+      "name": "agent_texture_budget_rejects_whole_upload_and_stores_nothing",
+      "docs_owner": [
+        "tze_hud_resource"
+      ],
+      "positive_same_owner_receipts": [
+        {
+          "line": 5139,
+          "qualified_test": "agent_texture_budget_rejects_whole_upload_and_stores_nothing",
+          "target": "store_behavior",
+          "target_owner_candidates": [
+            "tze_hud_resource"
+          ]
+        }
+      ],
+      "same_owner_positive": true
+    },
+    {
+      "name": "aggregate_limits_are_atomic_across_agents",
+      "docs_owner": [
+        "tze_hud_runtime"
+      ],
+      "positive_same_owner_receipts": [
+        {
+          "line": 5212,
+          "qualified_test": "mutation_budget_bridge::tests::aggregate_limits_are_atomic_across_agents",
+          "target": "tze_hud_runtime",
+          "target_owner_candidates": [
+            "tze_hud_runtime"
+          ]
+        }
+      ],
+      "same_owner_positive": true
+    },
+    {
+      "name": "chunk_protocol_errors_have_stable_codes",
+      "docs_owner": [
+        "tze_hud_resource"
+      ],
+      "positive_same_owner_receipts": [
+        {
+          "line": 5138,
+          "qualified_test": "chunk_protocol_errors_have_stable_codes",
+          "target": "store_behavior",
+          "target_owner_candidates": [
+            "tze_hud_resource"
+          ]
+        }
+      ],
+      "same_owner_positive": true
+    },
+    {
+      "name": "chunked_upload_rejected_at_complete_frees_its_slot_and_stores_nothing",
+      "docs_owner": [
+        "tze_hud_resource"
+      ],
+      "positive_same_owner_receipts": [
+        {
+          "line": 5136,
+          "qualified_test": "chunked_upload_rejected_at_complete_frees_its_slot_and_stores_nothing",
+          "target": "store_behavior",
+          "target_owner_candidates": [
+            "tze_hud_resource"
+          ]
+        }
+      ],
+      "same_owner_positive": true
+    },
+    {
+      "name": "degradation::tests::sustained_overload_does_not_escalate_past_simplified",
+      "docs_owner": [
+        "tze_hud_runtime"
+      ],
+      "positive_same_owner_receipts": [
+        {
+          "line": 5164,
+          "qualified_test": "degradation::tests::sustained_overload_does_not_escalate_past_simplified",
+          "target": "tze_hud_runtime",
+          "target_owner_candidates": [
+            "tze_hud_runtime"
+          ]
+        }
+      ],
+      "same_owner_positive": true
+    },
+    {
+      "name": "delay_ms_holds_content_until_due",
+      "docs_owner": [
+        "tze_hud_mcp"
+      ],
+      "positive_same_owner_receipts": [
+        {
+          "line": 4475,
+          "qualified_test": "server::tests::delay_ms_holds_content_until_due",
+          "target": "tze_hud_mcp",
+          "target_owner_candidates": [
+            "tze_hud_mcp"
+          ]
+        }
+      ],
+      "same_owner_positive": true
+    },
+    {
+      "name": "disconnect_then_reconnect_within_grace_resumes_same_surface_without_duplication",
+      "docs_owner": [
+        "tze_hud_runtime"
+      ],
+      "positive_same_owner_receipts": [
+        {
+          "line": 5311,
+          "qualified_test": "portal_projection_driver::tests::disconnect_then_reconnect_within_grace_resumes_same_surface_without_duplication",
+          "target": "tze_hud_runtime",
+          "target_owner_candidates": [
+            "tze_hud_runtime"
+          ]
+        }
+      ],
+      "same_owner_positive": true
+    },
+    {
+      "name": "disconnect_transitions_to_orphaned_and_sets_disconnection_badge",
+      "docs_owner": [
+        "tze_hud_protocol"
+      ],
+      "positive_same_owner_receipts": [
+        {
+          "line": 5007,
+          "qualified_test": "disconnect_transitions_to_orphaned_and_sets_disconnection_badge",
+          "target": "lease_governance",
+          "target_owner_candidates": [
+            "tze_hud_protocol"
+          ]
+        }
+      ],
+      "same_owner_positive": true
+    },
+    {
+      "name": "error_codes_are_unique_and_documented",
+      "docs_owner": [
+        "tze_hud_mcp"
+      ],
+      "positive_same_owner_receipts": [
+        {
+          "line": 4468,
+          "qualified_test": "error::tests::error_codes_are_unique_and_documented",
+          "target": "tze_hud_mcp",
+          "target_owner_candidates": [
+            "tze_hud_mcp"
+          ]
+        }
+      ],
+      "same_owner_positive": true
+    },
+    {
+      "name": "every_returned_code_is_in_the_closed_set",
+      "docs_owner": [
+        "tze_hud_mcp"
+      ],
+      "positive_same_owner_receipts": [
+        {
+          "line": 4480,
+          "qualified_test": "server::tests::every_returned_code_is_in_the_closed_set",
+          "target": "tze_hud_mcp",
+          "target_owner_candidates": [
+            "tze_hud_mcp"
+          ]
+        }
+      ],
+      "same_owner_positive": true
+    },
+    {
+      "name": "grace_period_expiry_removes_tile_and_nodes",
+      "docs_owner": [
+        "tze_hud_protocol"
+      ],
+      "positive_same_owner_receipts": [
+        {
+          "line": 5010,
+          "qualified_test": "grace_period_expiry_removes_tile_and_nodes",
+          "target": "lease_governance",
+          "target_owner_candidates": [
+            "tze_hud_protocol"
+          ]
+        }
+      ],
+      "same_owner_positive": true
+    },
+    {
+      "name": "graph::widget_tests::widget_publish_with_suspended_lease_is_safe_mode_active",
+      "docs_owner": [
+        "tze_hud_scene"
+      ],
+      "positive_same_owner_receipts": [
+        {
+          "line": 6052,
+          "qualified_test": "graph::widget_tests::widget_publish_with_suspended_lease_is_safe_mode_active",
+          "target": "tze_hud_scene",
+          "target_owner_candidates": [
+            "tze_hud_scene"
+          ]
+        }
+      ],
+      "same_owner_positive": true
+    },
+    {
+      "name": "graph::widget_tests::widget_ttl_only_expired_publication_removed_when_mixed",
+      "docs_owner": [
+        "tze_hud_scene"
+      ],
+      "positive_same_owner_receipts": [
+        {
+          "line": 6075,
+          "qualified_test": "graph::widget_tests::widget_ttl_only_expired_publication_removed_when_mixed",
+          "target": "tze_hud_scene",
+          "target_owner_candidates": [
+            "tze_hud_scene"
+          ]
+        }
+      ],
+      "same_owner_positive": true
+    },
+    {
+      "name": "grpc_batch_expires_at_sweeps_tile",
+      "docs_owner": [
+        "tze_hud_protocol"
+      ],
+      "positive_same_owner_receipts": [
+        {
+          "line": 4795,
+          "qualified_test": "session_server::tests::invariants::grpc_batch_expires_at_sweeps_tile",
+          "target": "tze_hud_protocol",
+          "target_owner_candidates": [
+            "tze_hud_protocol"
+          ]
+        }
+      ],
+      "same_owner_positive": true
+    },
+    {
+      "name": "grpc_batch_present_at_holds_content_until_due",
+      "docs_owner": [
+        "tze_hud_protocol"
+      ],
+      "positive_same_owner_receipts": [
+        {
+          "line": 4794,
+          "qualified_test": "session_server::tests::invariants::grpc_batch_present_at_holds_content_until_due",
+          "target": "tze_hud_protocol",
+          "target_owner_candidates": [
+            "tze_hud_protocol"
+          ]
+        }
+      ],
+      "same_owner_positive": true
+    },
+    {
+      "name": "grpc_disconnect_orphans_leases_and_badges_tiles",
+      "docs_owner": [
+        "tze_hud_protocol"
+      ],
+      "positive_same_owner_receipts": [
+        {
+          "line": 4808,
+          "qualified_test": "session_server::tests::invariants::grpc_disconnect_orphans_leases_and_badges_tiles",
+          "target": "tze_hud_protocol",
+          "target_owner_candidates": [
+            "tze_hud_protocol"
+          ]
+        }
+      ],
+      "same_owner_positive": true
+    },
+    {
+      "name": "grpc_grace_expiry_reclaims_orphaned_lease_and_rejects_resume",
+      "docs_owner": [
+        "tze_hud_protocol"
+      ],
+      "positive_same_owner_receipts": [
+        {
+          "line": 4806,
+          "qualified_test": "session_server::tests::invariants::grpc_grace_expiry_reclaims_orphaned_lease_and_rejects_resume",
+          "target": "tze_hud_protocol",
+          "target_owner_candidates": [
+            "tze_hud_protocol"
+          ]
+        }
+      ],
+      "same_owner_positive": true
+    },
+    {
+      "name": "grpc_resume_within_grace_restores_same_lease_and_tile",
+      "docs_owner": [
+        "tze_hud_protocol"
+      ],
+      "positive_same_owner_receipts": [
+        {
+          "line": 4805,
+          "qualified_test": "session_server::tests::invariants::grpc_resume_within_grace_restores_same_lease_and_tile",
+          "target": "tze_hud_protocol",
+          "target_owner_candidates": [
+            "tze_hud_protocol"
+          ]
+        }
+      ],
+      "same_owner_positive": true
+    },
+    {
+      "name": "grpc_zone_publish_expires_at_is_swept",
+      "docs_owner": [
+        "tze_hud_protocol"
+      ],
+      "positive_same_owner_receipts": [
+        {
+          "line": 4796,
+          "qualified_test": "session_server::tests::invariants::grpc_zone_publish_expires_at_is_swept",
+          "target": "tze_hud_protocol",
+          "target_owner_candidates": [
+            "tze_hud_protocol"
+          ]
+        }
+      ],
+      "same_owner_positive": true
+    },
+    {
+      "name": "grpc_zone_publish_present_at_is_held_until_due",
+      "docs_owner": [
+        "tze_hud_protocol"
+      ],
+      "positive_same_owner_receipts": [
+        {
+          "line": 4793,
+          "qualified_test": "session_server::tests::invariants::grpc_zone_publish_present_at_is_held_until_due",
+          "target": "tze_hud_protocol",
+          "target_owner_candidates": [
+            "tze_hud_protocol"
+          ]
+        }
+      ],
+      "same_owner_positive": true
+    },
+    {
+      "name": "grpc_zone_publish_ttl_sets_expiry_and_is_swept",
+      "docs_owner": [
+        "tze_hud_protocol"
+      ],
+      "positive_same_owner_receipts": [
+        {
+          "line": 4797,
+          "qualified_test": "session_server::tests::invariants::grpc_zone_publish_ttl_sets_expiry_and_is_swept",
+          "target": "tze_hud_protocol",
+          "target_owner_candidates": [
+            "tze_hud_protocol"
+          ]
+        }
+      ],
+      "same_owner_positive": true
+    },
+    {
+      "name": "hold_moves_the_fade_deadline_and_ttl_zero_never_fades",
+      "docs_owner": [
+        "tze_hud_compositor"
+      ],
+      "positive_same_owner_receipts": [
+        {
+          "line": 3373,
+          "qualified_test": "renderer::tests::idle_gate::hold_moves_the_fade_deadline_and_ttl_zero_never_fades",
+          "target": "tze_hud_compositor",
+          "target_owner_candidates": [
+            "tze_hud_compositor"
+          ]
+        }
+      ],
+      "same_owner_positive": true
+    },
+    {
+      "name": "hotkey_event_enters_safe_mode_and_suspends_leases",
+      "docs_owner": [
+        "tze_hud_runtime"
+      ],
+      "positive_same_owner_receipts": [
+        {
+          "line": 5684,
+          "qualified_test": "windowed::safe_mode_toggle::tests::hotkey_event_enters_safe_mode_and_suspends_leases",
+          "target": "tze_hud_runtime",
+          "target_owner_candidates": [
+            "tze_hud_runtime"
+          ]
+        }
+      ],
+      "same_owner_positive": true
+    },
+    {
+      "name": "hud_publish_in_safe_mode_returns_safe_mode_active",
+      "docs_owner": [
+        "tze_hud_mcp"
+      ],
+      "positive_same_owner_receipts": [
+        {
+          "line": 4490,
+          "qualified_test": "server::tests::hud_publish_in_safe_mode_returns_safe_mode_active",
+          "target": "tze_hud_mcp",
+          "target_owner_candidates": [
+            "tze_hud_mcp"
+          ]
+        }
+      ],
+      "same_owner_positive": true
+    },
+    {
+      "name": "mutation_batch_oversized_rejected_with_structured_error",
+      "docs_owner": [
+        "tze_hud_protocol"
+      ],
+      "positive_same_owner_receipts": [
+        {
+          "line": 4962,
+          "qualified_test": "mutation_batch_oversized_rejected_with_structured_error",
+          "target": "fuzz_protocol_boundary",
+          "target_owner_candidates": [
+            "tze_hud_protocol"
+          ]
+        }
+      ],
+      "same_owner_positive": true
+    },
+    {
+      "name": "mutation_budget_bridge::tests::registered_budget_rejects_mutation_above_tile_limit",
+      "docs_owner": [
+        "tze_hud_runtime"
+      ],
+      "positive_same_owner_receipts": [
+        {
+          "line": 5214,
+          "qualified_test": "mutation_budget_bridge::tests::registered_budget_rejects_mutation_above_tile_limit",
+          "target": "tze_hud_runtime",
+          "target_owner_candidates": [
+            "tze_hud_runtime"
+          ]
+        }
+      ],
+      "same_owner_positive": true
+    },
+    {
+      "name": "notification_ttl_zero_is_held_and_hold_retimes_it",
+      "docs_owner": [
+        "tze_hud_mcp"
+      ],
+      "positive_same_owner_receipts": [
+        {
+          "line": 4484,
+          "qualified_test": "server::tests::notification_ttl_zero_is_held_and_hold_retimes_it",
+          "target": "tze_hud_mcp",
+          "target_owner_candidates": [
+            "tze_hud_mcp"
+          ]
+        }
+      ],
+      "same_owner_positive": true
+    },
+    {
+      "name": "orphaned_tile_emits_disconnection_badge_draw_cmd",
+      "docs_owner": [
+        "tze_hud_compositor"
+      ],
+      "positive_same_owner_receipts": [
+        {
+          "line": 3343,
+          "qualified_test": "renderer::tests::focus_chrome::orphaned_tile_emits_disconnection_badge_draw_cmd",
+          "target": "tze_hud_compositor",
+          "target_owner_candidates": [
+            "tze_hud_compositor"
+          ]
+        }
+      ],
+      "same_owner_positive": true
+    },
+    {
+      "name": "per_resource_size_cap_rejects_chunked_upload_at_start",
+      "docs_owner": [
+        "tze_hud_resource"
+      ],
+      "positive_same_owner_receipts": [
+        {
+          "line": 5140,
+          "qualified_test": "per_resource_size_cap_rejects_chunked_upload_at_start",
+          "target": "store_behavior",
+          "target_owner_candidates": [
+            "tze_hud_resource"
+          ]
+        }
+      ],
+      "same_owner_positive": true
+    },
+    {
+      "name": "poc_override_exit_safe_mode_with_agent_hung_during_it",
+      "docs_owner": [
+        "integration"
+      ],
+      "positive_same_owner_receipts": [],
+      "same_owner_positive": false
+    },
+    {
+      "name": "poc_override_notifies_the_agent",
+      "docs_owner": [
+        "integration"
+      ],
+      "positive_same_owner_receipts": [],
+      "same_owner_positive": false
+    },
+    {
+      "name": "poc_override_safe_mode_wins_with_hung_grpc_agent",
+      "docs_owner": [
+        "integration"
+      ],
+      "positive_same_owner_receipts": [],
+      "same_owner_positive": false
+    },
+    {
+      "name": "poc_portal_abandoned_is_reclaimed",
+      "docs_owner": [
+        "integration"
+      ],
+      "positive_same_owner_receipts": [],
+      "same_owner_positive": false
+    },
+    {
+      "name": "poc_portal_viewer_dismiss_then_mcp_verbs",
+      "docs_owner": [
+        "integration"
+      ],
+      "positive_same_owner_receipts": [],
+      "same_owner_positive": false
+    },
+    {
+      "name": "poc_tile_claim_with_placement_two_round_trips",
+      "docs_owner": [
+        "integration"
+      ],
+      "positive_same_owner_receipts": [],
+      "same_owner_positive": false
+    },
+    {
+      "name": "poc_tile_update_then_orphan_then_reclaim_after_grace",
+      "docs_owner": [
+        "integration"
+      ],
+      "positive_same_owner_receipts": [],
+      "same_owner_positive": false
+    },
+    {
+      "name": "poc_zone_delay_ms_appears_on_schedule",
+      "docs_owner": [
+        "integration"
+      ],
+      "positive_same_owner_receipts": [],
+      "same_owner_positive": false
+    },
+    {
+      "name": "poc_zone_notification_ttl_disappears_unattended",
+      "docs_owner": [
+        "integration"
+      ],
+      "positive_same_owner_receipts": [],
+      "same_owner_positive": false
+    },
+    {
+      "name": "rejections_carry_stable_wire_code_and_actionable_detail",
+      "docs_owner": [
+        "tze_hud_resource"
+      ],
+      "positive_same_owner_receipts": [
+        {
+          "line": 5137,
+          "qualified_test": "rejections_carry_stable_wire_code_and_actionable_detail",
+          "target": "store_behavior",
+          "target_owner_candidates": [
+            "tze_hud_resource"
+          ]
+        }
+      ],
+      "same_owner_positive": true
+    },
+    {
+      "name": "render_frame_reclaims_orphaned_lease_after_grace",
+      "docs_owner": [
+        "tze_hud_runtime"
+      ],
+      "positive_same_owner_receipts": [
+        {
+          "line": 5687,
+          "qualified_test": "headless::tests::render_frame_reclaims_orphaned_lease_after_grace",
+          "target": "tze_hud_runtime",
+          "target_owner_candidates": [
+            "tze_hud_runtime"
+          ]
+        }
+      ],
+      "same_owner_positive": true
+    },
+    {
+      "name": "resource_count_cap_rejects_the_extra_resource",
+      "docs_owner": [
+        "tze_hud_resource"
+      ],
+      "positive_same_owner_receipts": [
+        {
+          "line": 5141,
+          "qualified_test": "resource_count_cap_rejects_the_extra_resource",
+          "target": "store_behavior",
+          "target_owner_candidates": [
+            "tze_hud_resource"
+          ]
+        }
+      ],
+      "same_owner_positive": true
+    },
+    {
+      "name": "resume_restores_mcp_publishing",
+      "docs_owner": [
+        "tze_hud_mcp"
+      ],
+      "positive_same_owner_receipts": [
+        {
+          "line": 4491,
+          "qualified_test": "server::tests::resume_restores_mcp_publishing",
+          "target": "tze_hud_mcp",
+          "target_owner_candidates": [
+            "tze_hud_mcp"
+          ]
+        }
+      ],
+      "same_owner_positive": true
+    },
+    {
+      "name": "resumed_session_restores_usage_before_accepting_new_mutations",
+      "docs_owner": [
+        "tze_hud_runtime"
+      ],
+      "positive_same_owner_receipts": [
+        {
+          "line": 5217,
+          "qualified_test": "mutation_budget_bridge::tests::resumed_session_restores_usage_before_accepting_new_mutations",
+          "target": "tze_hud_runtime",
+          "target_owner_candidates": [
+            "tze_hud_runtime"
+          ]
+        }
+      ],
+      "same_owner_positive": true
+    },
+    {
+      "name": "revoked_lease_clears_only_its_publications",
+      "docs_owner": [
+        "tze_hud_scene"
+      ],
+      "positive_same_owner_receipts": [
+        {
+          "line": 5931,
+          "qualified_test": "graph::spec_scenarios::revoked_lease_clears_only_its_publications",
+          "target": "tze_hud_scene",
+          "target_owner_candidates": [
+            "tze_hud_scene"
+          ]
+        }
+      ],
+      "same_owner_positive": true
+    },
+    {
+      "name": "runtime_wide_texture_cap_is_shared_across_agents",
+      "docs_owner": [
+        "tze_hud_resource"
+      ],
+      "positive_same_owner_receipts": [
+        {
+          "line": 5143,
+          "qualified_test": "runtime_wide_texture_cap_is_shared_across_agents",
+          "target": "store_behavior",
+          "target_owner_candidates": [
+            "tze_hud_resource"
+          ]
+        }
+      ],
+      "same_owner_positive": true
+    },
+    {
+      "name": "safe_mode_does_not_regrant_suspended_mcp_lease",
+      "docs_owner": [
+        "tze_hud_mcp"
+      ],
+      "positive_same_owner_receipts": [
+        {
+          "line": 4488,
+          "qualified_test": "server::tests::safe_mode_does_not_regrant_suspended_mcp_lease",
+          "target": "tze_hud_mcp",
+          "target_owner_candidates": [
+            "tze_hud_mcp"
+          ]
+        }
+      ],
+      "same_owner_positive": true
+    },
+    {
+      "name": "safe_mode_hotkey_defaults_overrides_and_rejects_garbage",
+      "docs_owner": [
+        "tze_hud_config"
+      ],
+      "positive_same_owner_receipts": [
+        {
+          "line": 3952,
+          "qualified_test": "tests::safe_mode_hotkey_defaults_overrides_and_rejects_garbage",
+          "target": "tze_hud_config",
+          "target_owner_candidates": [
+            "tze_hud_config"
+          ]
+        }
+      ],
+      "same_owner_positive": true
+    },
+    {
+      "name": "shell_dismiss_override_removes_portal_tile",
+      "docs_owner": [
+        "integration"
+      ],
+      "positive_same_owner_receipts": [],
+      "same_owner_positive": false
+    },
+    {
+      "name": "shell_status_snapshot_exposes_no_portal_identity_or_transcript",
+      "docs_owner": [
+        "integration"
+      ],
+      "positive_same_owner_receipts": [],
+      "same_owner_positive": false
+    },
+    {
+      "name": "significant_degradation_preserves_hidden_tiles_and_opaques_visible_tiles",
+      "docs_owner": [
+        "tze_hud_compositor"
+      ],
+      "positive_same_owner_receipts": [
+        {
+          "line": 3533,
+          "qualified_test": "renderer::tile_render::degradation_opacity_tests::significant_degradation_preserves_hidden_tiles_and_opaques_visible_tiles",
+          "target": "tze_hud_compositor",
+          "target_owner_candidates": [
+            "tze_hud_compositor"
+          ]
+        }
+      ],
+      "same_owner_positive": true
+    },
+    {
+      "name": "test_chrome_always_above_max_zorder_tile",
+      "docs_owner": [
+        "tze_hud_compositor"
+      ],
+      "positive_same_owner_receipts": [
+        {
+          "line": 3437,
+          "qualified_test": "renderer::tests::surface::test_chrome_always_above_max_zorder_tile",
+          "target": "tze_hud_compositor",
+          "target_owner_candidates": [
+            "tze_hud_compositor"
+          ]
+        }
+      ],
+      "same_owner_positive": true
+    },
+    {
+      "name": "test_coalesce_scroll_latest_wins",
+      "docs_owner": [
+        "tze_hud_input"
+      ],
+      "positive_same_owner_receipts": [
+        {
+          "line": 4072,
+          "qualified_test": "coalescing::tests::test_coalesce_scroll_latest_wins",
+          "target": "tze_hud_input",
+          "target_owner_candidates": [
+            "tze_hud_input"
+          ]
+        }
+      ],
+      "same_owner_positive": true
+    },
+    {
+      "name": "test_enter_safe_mode_suspends_active_leases",
+      "docs_owner": [
+        "tze_hud_runtime"
+      ],
+      "positive_same_owner_receipts": [
+        {
+          "line": 5398,
+          "qualified_test": "shell::safe_mode::tests::test_enter_safe_mode_suspends_active_leases",
+          "target": "tze_hud_runtime",
+          "target_owner_candidates": [
+            "tze_hud_runtime"
+          ]
+        }
+      ],
+      "same_owner_positive": true
+    },
+    {
+      "name": "test_hud_publish_zone_contention_policy_latest_wins",
+      "docs_owner": [
+        "tze_hud_mcp"
+      ],
+      "positive_same_owner_receipts": [
+        {
+          "line": 4501,
+          "qualified_test": "server::tests::test_hud_publish_zone_contention_policy_latest_wins",
+          "target": "tze_hud_mcp",
+          "target_owner_candidates": [
+            "tze_hud_mcp"
+          ]
+        }
+      ],
+      "same_owner_positive": true
+    },
+    {
+      "name": "test_hud_publish_zone_ttl_sets_content_expiry_and_is_swept",
+      "docs_owner": [
+        "tze_hud_mcp"
+      ],
+      "positive_same_owner_receipts": [
+        {
+          "line": 4497,
+          "qualified_test": "server::tests::test_hud_publish_zone_ttl_sets_content_expiry_and_is_swept",
+          "target": "tze_hud_mcp",
+          "target_owner_candidates": [
+            "tze_hud_mcp"
+          ]
+        }
+      ],
+      "same_owner_positive": true
+    },
+    {
+      "name": "test_latest_wins_zone_renders_only_latest_publication",
+      "docs_owner": [
+        "tze_hud_compositor"
+      ],
+      "positive_same_owner_receipts": [
+        {
+          "line": 3699,
+          "qualified_test": "renderer::tests::zone_stack::test_latest_wins_zone_renders_only_latest_publication",
+          "target": "tze_hud_compositor",
+          "target_owner_candidates": [
+            "tze_hud_compositor"
+          ]
+        }
+      ],
+      "same_owner_positive": true
+    },
+    {
+      "name": "test_lease_identity_preserved_across_suspend_resume",
+      "docs_owner": [
+        "tze_hud_runtime"
+      ],
+      "positive_same_owner_receipts": [
+        {
+          "line": 5400,
+          "qualified_test": "shell::safe_mode::tests::test_lease_identity_preserved_across_suspend_resume",
+          "target": "tze_hud_runtime",
+          "target_owner_candidates": [
+            "tze_hud_runtime"
+          ]
+        }
+      ],
+      "same_owner_positive": true
+    },
+    {
+      "name": "test_lease_resume_from_suspended",
+      "docs_owner": [
+        "tze_hud_scene"
+      ],
+      "positive_same_owner_receipts": [
+        {
+          "line": 5971,
+          "qualified_test": "graph::tests::test_lease_resume_from_suspended",
+          "target": "tze_hud_scene",
+          "target_owner_candidates": [
+            "tze_hud_scene"
+          ]
+        }
+      ],
+      "same_owner_positive": true
+    },
+    {
+      "name": "test_lease_suspend_from_active",
+      "docs_owner": [
+        "tze_hud_scene"
+      ],
+      "positive_same_owner_receipts": [
+        {
+          "line": 5982,
+          "qualified_test": "graph::tests::test_lease_suspend_from_active",
+          "target": "tze_hud_scene",
+          "target_owner_candidates": [
+            "tze_hud_scene"
+          ]
+        }
+      ],
+      "same_owner_positive": true
+    },
+    {
+      "name": "test_mutations_rejected_via_shared_state_flag",
+      "docs_owner": [
+        "tze_hud_runtime"
+      ],
+      "positive_same_owner_receipts": [
+        {
+          "line": 5401,
+          "qualified_test": "shell::safe_mode::tests::test_mutations_rejected_via_shared_state_flag",
+          "target": "tze_hud_runtime",
+          "target_owner_candidates": [
+            "tze_hud_runtime"
+          ]
+        }
+      ],
+      "same_owner_positive": true
+    },
+    {
+      "name": "test_pointer_move_coalesced_in_batch",
+      "docs_owner": [
+        "tze_hud_input"
+      ],
+      "positive_same_owner_receipts": [
+        {
+          "line": 4056,
+          "qualified_test": "batching::tests::test_pointer_move_coalesced_in_batch",
+          "target": "tze_hud_input",
+          "target_owner_candidates": [
+            "tze_hud_input"
+          ]
+        }
+      ],
+      "same_owner_positive": true
+    },
+    {
+      "name": "test_publication_ttl_ms_uses_expires_at_wall_us",
+      "docs_owner": [
+        "tze_hud_compositor"
+      ],
+      "positive_same_owner_receipts": [
+        {
+          "line": 3473,
+          "qualified_test": "renderer::tests::zone_layers::test_publication_ttl_ms_uses_expires_at_wall_us",
+          "target": "tze_hud_compositor",
+          "target_owner_candidates": [
+            "tze_hud_compositor"
+          ]
+        }
+      ],
+      "same_owner_positive": true
+    },
+    {
+      "name": "test_structured_error_has_hint_field",
+      "docs_owner": [
+        "tze_hud_mcp"
+      ],
+      "positive_same_owner_receipts": [
+        {
+          "line": 4498,
+          "qualified_test": "server::tests::test_structured_error_has_hint_field",
+          "target": "tze_hud_mcp",
+          "target_owner_candidates": [
+            "tze_hud_mcp"
+          ]
+        }
+      ],
+      "same_owner_positive": true
+    },
+    {
+      "name": "test_ttl_excluded_during_suspension",
+      "docs_owner": [
+        "tze_hud_runtime"
+      ],
+      "positive_same_owner_receipts": [
+        {
+          "line": 5404,
+          "qualified_test": "shell::safe_mode::tests::test_ttl_excluded_during_suspension",
+          "target": "tze_hud_runtime",
+          "target_owner_candidates": [
+            "tze_hud_runtime"
+          ]
+        }
+      ],
+      "same_owner_positive": true
+    },
+    {
+      "name": "tile_close_button_draw_and_hit_region_share_token_geometry",
+      "docs_owner": [
+        "tze_hud_compositor"
+      ],
+      "positive_same_owner_receipts": [
+        {
+          "line": 3363,
+          "qualified_test": "renderer::tests::hit_drag::tile_close_button_draw_and_hit_region_share_token_geometry",
+          "target": "tze_hud_compositor",
+          "target_owner_candidates": [
+            "tze_hud_compositor"
+          ]
+        }
+      ],
+      "same_owner_positive": true
+    },
+    {
+      "name": "tile_lease_reap_keeps_same_namespace_mcp_publications",
+      "docs_owner": [
+        "tze_hud_scene"
+      ],
+      "positive_same_owner_receipts": [
+        {
+          "line": 5933,
+          "qualified_test": "graph::spec_scenarios::tile_lease_reap_keeps_same_namespace_mcp_publications",
+          "target": "tze_hud_scene",
+          "target_owner_candidates": [
+            "tze_hud_scene"
+          ]
+        }
+      ],
+      "same_owner_positive": true
+    },
+    {
+      "name": "upload_slot_cap_is_per_agent_and_freed_by_abort",
+      "docs_owner": [
+        "tze_hud_resource"
+      ],
+      "positive_same_owner_receipts": [
+        {
+          "line": 5142,
+          "qualified_test": "upload_slot_cap_is_per_agent_and_freed_by_abort",
+          "target": "store_behavior",
+          "target_owner_candidates": [
+            "tze_hud_resource"
+          ]
+        }
+      ],
+      "same_owner_positive": true
+    },
+    {
+      "name": "viewer_close_button_dismisses_hovered_tile_and_notifies_owner",
+      "docs_owner": [
+        "tze_hud_runtime"
+      ],
+      "positive_same_owner_receipts": [
+        {
+          "line": 5476,
+          "qualified_test": "windowed::event_loop_harness::tests::viewer_close_button_dismisses_hovered_tile_and_notifies_owner",
+          "target": "tze_hud_runtime",
+          "target_owner_candidates": [
+            "tze_hud_runtime"
+          ]
+        }
+      ],
+      "same_owner_positive": true
+    },
+    {
+      "name": "viewer_dismiss_portal_detaches_and_next_publish_reattaches",
+      "docs_owner": [
+        "tze_hud_runtime"
+      ],
+      "positive_same_owner_receipts": [
+        {
+          "line": 5331,
+          "qualified_test": "portal_projection_driver::tests::viewer_dismiss_portal_detaches_and_next_publish_reattaches",
+          "target": "tze_hud_runtime",
+          "target_owner_candidates": [
+            "tze_hud_runtime"
+          ]
+        }
+      ],
+      "same_owner_positive": true
+    },
+    {
+      "name": "viewer_dismiss_tile_pushes_reclaimed_override",
+      "docs_owner": [
+        "tze_hud_protocol"
+      ],
+      "positive_same_owner_receipts": [
+        {
+          "line": 4807,
+          "qualified_test": "session_server::tests::events::viewer_dismiss_tile_pushes_reclaimed_override",
+          "target": "tze_hud_protocol",
+          "target_owner_candidates": [
+            "tze_hud_protocol"
+          ]
+        }
+      ],
+      "same_owner_positive": true
+    },
+    {
+      "name": "viewer_dismiss_tile_revokes_lease_in_any_live_state",
+      "docs_owner": [
+        "tze_hud_scene"
+      ],
+      "positive_same_owner_receipts": [
+        {
+          "line": 6020,
+          "qualified_test": "graph::tests::viewer_dismiss_tile_revokes_lease_in_any_live_state",
+          "target": "tze_hud_scene",
+          "target_owner_candidates": [
+            "tze_hud_scene"
+          ]
+        }
+      ],
+      "same_owner_positive": true
+    },
+    {
+      "name": "windowed_frame_draws_chrome_overlay_in_safe_mode",
+      "docs_owner": [
+        "tze_hud_compositor"
+      ],
+      "positive_same_owner_receipts": [
+        {
+          "line": 3258,
+          "qualified_test": "renderer::safe_mode_overlay::tests::windowed_frame_draws_chrome_overlay_in_safe_mode",
+          "target": "tze_hud_compositor",
+          "target_owner_candidates": [
+            "tze_hud_compositor"
+          ]
+        }
+      ],
+      "same_owner_positive": true
+    }
+  ],
+  "PERF_ASSERT": "normal off"
+}

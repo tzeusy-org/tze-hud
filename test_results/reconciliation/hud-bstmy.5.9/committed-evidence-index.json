@@ -1,0 +1,838 @@
+{
+  "scope": "Committed owned evidence snapshot copied from issue stage before publication; this is NOT whole-current .handoff/test_results proof.",
+  "source_head": "8d7727351c0942e372e999960ea0c49ebb1a7a32",
+  "count_excluding_self": 166,
+  "files": [
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/DDA-full.json",
+      "bytes": 2317,
+      "sha256": "67991dea3e65027ed14b1662ea8fcfdf5c5ddf2e189badf6616383511bda02a8"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/README.md",
+      "bytes": 3643,
+      "sha256": "e183100adf3ec93df9bb7d2742376e70ae4114b896749f60b14807ba861ea918"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/ROOT-Cargo-GPU-terminal-release.json",
+      "bytes": 17137,
+      "sha256": "d7e41c4f406bc296a6b3ef26fbdafaf56750e8f04addbb940c2796d1b846e1be"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/acceptance_criteria.txt",
+      "bytes": 1873,
+      "sha256": "a849c3b2905cf892f0098d197695cff0ffdd71ed026e0258eaa503be5d24c1ea"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/authority-read-receipt.json",
+      "bytes": 969,
+      "sha256": "faf558e0130eb7b04d59eecda58e32b8a8fe2fca77a54f584a743499eff3fe45"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/blockers.json",
+      "bytes": 3,
+      "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/bootstrap-native-receipt.json",
+      "bytes": 54035,
+      "sha256": "fba75574de8e3aaffe60377e422e7a956032cd5b349de2be93f625bd4e5a4996"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/branch.json",
+      "bytes": 408,
+      "sha256": "b4451cc153be6451b9d97964e1ba8c8eb420dc258e8e0f417647d39a57a555a8"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/canonical-hud-bstmy.5.3.json",
+      "bytes": 21452,
+      "sha256": "0319c78b2c30dddfa6e883aaf3a2ea16bdc8b1b7f688a010ad944a8a1d7584cb"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/canonical-hud-bstmy.5.9.json",
+      "bytes": 17752,
+      "sha256": "943ade15134c78e11815b9dc11a79fae10fb7b1c51a91d5ff0fbe3b3f2cdfa66"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/canonical-hud-bstmy.5.json",
+      "bytes": 4865,
+      "sha256": "6a6fb40dcc54c1e7e37de976c3a4a0192324ac15e2878864365352adf449c740"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/common-git.json",
+      "bytes": 465,
+      "sha256": "9fd22c57f9d8ca645936b168f84cd2f4e16f8e205fabe73153195b4e6aa5d551"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/completed-default-dev-release-proof.json",
+      "bytes": 3042,
+      "sha256": "9e6d7a01f0868f806a22ae81f07c356c71b15a9e5d99c08c337933c3de73a9f9"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/context-after.json",
+      "bytes": 1188,
+      "sha256": "f377158ebbdd44b5d45a8cf867e808f05b76fafb31532d71dfb34795a5342bb2"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/context-before.json",
+      "bytes": 1189,
+      "sha256": "5a4813aecd36825c23633aafe6f842d6647805d741e8a9ddb87e49e01448b06d"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/current-invariant-definition-and-T7-preservation.json",
+      "bytes": 19718,
+      "sha256": "7ba769b85aa853a23d799010fa99b6f9e0537001ed684f72829580ab5cb224a4"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/cwd.json",
+      "bytes": 433,
+      "sha256": "704d13fa09ba83a48880dc2807eb574ae39803c2abc4ff06a1237629858af20a"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/default-dev-feature-closure-proof.json",
+      "bytes": 2681,
+      "sha256": "173e377a33ce717f1efbb7a297de3bdb4d844722b0521f003aa525f524e0e4d7"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/description.txt",
+      "bytes": 1308,
+      "sha256": "2256253fc9679f5828d020bb6302d354c9563d900bfbba34516829cc8239c885"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/design.txt",
+      "bytes": 9534,
+      "sha256": "efb5f9dc870cf8d157056537ee3e7d512fe98c45e150c1e4bea059b216244656"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/discovered-follow-ups.json",
+      "bytes": 3,
+      "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/dispatch-state.json",
+      "bytes": 56194,
+      "sha256": "f27c25f512b90899590541329ca06b7eadaad9c0205c3d77a62687aa3a2c181f"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/final-CI-qualified-invariant-receipts.json",
+      "bytes": 35352,
+      "sha256": "0104f6b4042aeb338b3d88238b2cc4bf9e98a9bace8494bd369e4a1b417046ea"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/final-implementation-source-and-behavior-summary.json",
+      "bytes": 5545,
+      "sha256": "4f16fd40c0f0f96aaf6418c16909b12bff581c58d871c1dd2f609e4a166a806f"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/final-normal-ci-proof.json",
+      "bytes": 25141,
+      "sha256": "26c957fff294753922afa13f94c75fb0efa338d4f7285a8a70d618a864720241"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/fixture-assertion-ledger.json",
+      "bytes": 3613,
+      "sha256": "3b606d279432933a1cd41bcb976ddf55e92e4b32b600e8a1a2aaaf838eba5656"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/focused-existing-gates-summary.json",
+      "bytes": 3325,
+      "sha256": "b6d16b2b2fb9b7bcdc36d83e08b7efa00b667bddee0dc0d14ae2d2b461d7ebc0"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/formatted-fixture-assertion-ledger.json",
+      "bytes": 3826,
+      "sha256": "a5b095ebe84159001027b8c82ec8711d3408799a72ef3ada9ecbb2aea7f4c9e0"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/formatted-frozen-source-manifest.json",
+      "bytes": 92308,
+      "sha256": "bfd35059d60122ac7e076136efe116dc42b3df89728c82df0a8b1084374f952d"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/formatted-source-freeze-native-receipt.json",
+      "bytes": 61104,
+      "sha256": "9cec1f896edb1dc9eb298f8feb32e27347971d0d801c9d8747aa1a209c461d87"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gate-environment-native-receipt.json",
+      "bytes": 1564,
+      "sha256": "f4de61c7177a7ec1fe78b0134172009cb962a1a1ee48ec190a21055a2ca306f1"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/01-fmt-check/raw.log",
+      "bytes": 3893,
+      "sha256": "787e0420ecf8c4080f1287e1b5c8cf86ca72b306c6f8e34656c86c7d2415a2da"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/01-fmt-check/running.json",
+      "bytes": 591,
+      "sha256": "8194c62c8ea55229b3ca32d27d93424204c29703a52a889e0f200791e6f03319"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/01-fmt-check/source-after.json",
+      "bytes": 92308,
+      "sha256": "1bc3d4292dc62c48170acf9a74d38255f37398400cbcee5d04211e5a9a2abc3f"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/01-fmt-check/source-before.json",
+      "bytes": 92308,
+      "sha256": "1bc3d4292dc62c48170acf9a74d38255f37398400cbcee5d04211e5a9a2abc3f"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/01-fmt-check/terminal.json",
+      "bytes": 1790,
+      "sha256": "a26bf3201a727f16f624ad63fb27afd3bb476df83c4e705241f4572cd1accfd1"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/02-fmt-fix/raw.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/02-fmt-fix/running.json",
+      "bytes": 576,
+      "sha256": "07cb62c750b9ff73ccc2efa009c8b67a4c4c174c5560529d3c5fdcb44aa80c84"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/02-fmt-fix/source-after.json",
+      "bytes": 92308,
+      "sha256": "bfd35059d60122ac7e076136efe116dc42b3df89728c82df0a8b1084374f952d"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/02-fmt-fix/source-before.json",
+      "bytes": 92308,
+      "sha256": "1bc3d4292dc62c48170acf9a74d38255f37398400cbcee5d04211e5a9a2abc3f"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/02-fmt-fix/terminal.json",
+      "bytes": 1773,
+      "sha256": "65a813cde547b7f0299ada6c423769cdd2ec0d76d64f33f77b11dc5ced92f0b3"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/03-fmt-check-final/raw.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/03-fmt-check-final/running.json",
+      "bytes": 591,
+      "sha256": "6050d6eb7cd7d4af2844215ca40f4ac1c6c9833ed997e2ebd8d66a86b2f22067"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/03-fmt-check-final/source-after.json",
+      "bytes": 92308,
+      "sha256": "bfd35059d60122ac7e076136efe116dc42b3df89728c82df0a8b1084374f952d"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/03-fmt-check-final/source-before.json",
+      "bytes": 92308,
+      "sha256": "bfd35059d60122ac7e076136efe116dc42b3df89728c82df0a8b1084374f952d"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/03-fmt-check-final/terminal.json",
+      "bytes": 1786,
+      "sha256": "4eacce8dba8098c857312822b8796bf6e52dfac8dcce70264f07a9e81a9457a3"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/04-runtime-focused-build/raw.log",
+      "bytes": 1679,
+      "sha256": "183d65e789945faa17c6a4905ab55c4652c21a9a6044b7a916ca70335a14b147"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/04-runtime-focused-build/running.json",
+      "bytes": 626,
+      "sha256": "c5cfc6d05e01151582abd1e8b00504a29a9c7000d086d0c5d918f7a5cc70077b"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/04-runtime-focused-build/source-after.json",
+      "bytes": 92308,
+      "sha256": "bfd35059d60122ac7e076136efe116dc42b3df89728c82df0a8b1084374f952d"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/04-runtime-focused-build/source-before.json",
+      "bytes": 92308,
+      "sha256": "bfd35059d60122ac7e076136efe116dc42b3df89728c82df0a8b1084374f952d"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/04-runtime-focused-build/terminal.json",
+      "bytes": 3912,
+      "sha256": "319ff6bd50d7b6cb9a9b6911c118dbeb539b05d71228883768dfa7ce1ae661d2"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/05-runtime-canonical/raw.log",
+      "bytes": 658,
+      "sha256": "3285eb25869c1a1c94ea95b43094286535f869715e8a15b1c683d597eebacd05"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/05-runtime-canonical/running.json",
+      "bytes": 703,
+      "sha256": "af86d7b6c9c5d0131cab0b8699ae0cfee82a4a0394a11ada7f2d1a3ef654e7f8"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/05-runtime-canonical/source-after.json",
+      "bytes": 92308,
+      "sha256": "bfd35059d60122ac7e076136efe116dc42b3df89728c82df0a8b1084374f952d"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/05-runtime-canonical/source-before.json",
+      "bytes": 92308,
+      "sha256": "bfd35059d60122ac7e076136efe116dc42b3df89728c82df0a8b1084374f952d"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/05-runtime-canonical/terminal.json",
+      "bytes": 1901,
+      "sha256": "f4abbe961f574cc632005f3cabd4c87eb91d0f6b55887f3f189e66f79a6814ad"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/06-runtime-overlap/raw.log",
+      "bytes": 1039,
+      "sha256": "12a44097735f30ab483a2f5d966a72e320bdfd6965ba2413010b9e60c00e6375"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/06-runtime-overlap/running.json",
+      "bytes": 667,
+      "sha256": "bebf7034a46a4eac6e34adc97a32fdbef0a452c53556f25d00229834100fcb32"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/06-runtime-overlap/source-after.json",
+      "bytes": 92308,
+      "sha256": "bfd35059d60122ac7e076136efe116dc42b3df89728c82df0a8b1084374f952d"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/06-runtime-overlap/source-before.json",
+      "bytes": 92308,
+      "sha256": "bfd35059d60122ac7e076136efe116dc42b3df89728c82df0a8b1084374f952d"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/06-runtime-overlap/terminal.json",
+      "bytes": 1866,
+      "sha256": "eebff5bb9932f7055bc7da416ce6e9bb60ef4aa3f48e5fb375377d5ea27f6726"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/07-compositor-focused-build/raw.log",
+      "bytes": 1009,
+      "sha256": "502b1295ec8f7c738e191706ca112510009fc8cdcb207c0334f4584cc07c2f56"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/07-compositor-focused-build/running.json",
+      "bytes": 629,
+      "sha256": "b7114c2200bec8560d56f5f3be69321b022f1c35ea89d6a380cc3f07bb3d9240"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/07-compositor-focused-build/source-after.json",
+      "bytes": 92308,
+      "sha256": "bfd35059d60122ac7e076136efe116dc42b3df89728c82df0a8b1084374f952d"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/07-compositor-focused-build/source-before.json",
+      "bytes": 92308,
+      "sha256": "bfd35059d60122ac7e076136efe116dc42b3df89728c82df0a8b1084374f952d"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/07-compositor-focused-build/terminal.json",
+      "bytes": 2755,
+      "sha256": "0b61ac7708bd938238c5fe28c357d61080fc5aa4494bd480a608a1e16a807823"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/08-compositor-reset/raw.log",
+      "bytes": 396,
+      "sha256": "7f3f646ded607763525c8666651c3be6810f8fdd889633f7e13d9060246d631f"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/08-compositor-reset/running.json",
+      "bytes": 696,
+      "sha256": "30b1fa157367f24ff13bff2c3d2b251273f150dbd6e8ca84ad326554eb902344"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/08-compositor-reset/source-after.json",
+      "bytes": 92308,
+      "sha256": "bfd35059d60122ac7e076136efe116dc42b3df89728c82df0a8b1084374f952d"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/08-compositor-reset/source-before.json",
+      "bytes": 92308,
+      "sha256": "bfd35059d60122ac7e076136efe116dc42b3df89728c82df0a8b1084374f952d"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/08-compositor-reset/terminal.json",
+      "bytes": 1778,
+      "sha256": "5b14dce257776248189f00508c673de1e433fffecc9c2cd541866805ad82da0d"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/09-compositor-recovery/raw.log",
+      "bytes": 672,
+      "sha256": "50e14407d7b0e0f3bfced4f6e834c5201187aacaec149edda731ca9e4503d5b7"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/09-compositor-recovery/running.json",
+      "bytes": 701,
+      "sha256": "b8f3fe379024bbc28e370837f595b24b09b7fe1c7cd17f34791f7b63db492c99"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/09-compositor-recovery/source-after.json",
+      "bytes": 92308,
+      "sha256": "bfd35059d60122ac7e076136efe116dc42b3df89728c82df0a8b1084374f952d"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/09-compositor-recovery/source-before.json",
+      "bytes": 92308,
+      "sha256": "bfd35059d60122ac7e076136efe116dc42b3df89728c82df0a8b1084374f952d"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/09-compositor-recovery/terminal.json",
+      "bytes": 1900,
+      "sha256": "aa6e10cc3d0eb724195e4ff244ee3b7997e1a046294d6874f20c938c06330fe3"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/10-compositor-idle/raw.log",
+      "bytes": 682,
+      "sha256": "fca59663ef72cc22c197fd951ce1dcd03d84b4d52ecf34696be7e1c3cc3efb02"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/10-compositor-idle/running.json",
+      "bytes": 716,
+      "sha256": "8179cea323de7c42615c9e861c520fdd2103ef3d6a6d2126ea026e62cb24fe61"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/10-compositor-idle/source-after.json",
+      "bytes": 92308,
+      "sha256": "bfd35059d60122ac7e076136efe116dc42b3df89728c82df0a8b1084374f952d"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/10-compositor-idle/source-before.json",
+      "bytes": 92308,
+      "sha256": "bfd35059d60122ac7e076136efe116dc42b3df89728c82df0a8b1084374f952d"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/10-compositor-idle/terminal.json",
+      "bytes": 1682,
+      "sha256": "4d601424bc33f6a988c11c0a27b6c806c6eecd1f40fbb5706f6d258c7b4c3e44"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/11-widget-dev-build/raw.log",
+      "bytes": 347,
+      "sha256": "67d2a6e81c8a593f9646081e0a29d53a68ecb2f53c8242f4d20b623a3e67b5e9"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/11-widget-dev-build/running.json",
+      "bytes": 691,
+      "sha256": "c0ca3963a1f1ccc01cb624cfce8bbf6efb12aad4bd578cb519f989b773c8b541"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/11-widget-dev-build/source-after.json",
+      "bytes": 92308,
+      "sha256": "bfd35059d60122ac7e076136efe116dc42b3df89728c82df0a8b1084374f952d"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/11-widget-dev-build/source-before.json",
+      "bytes": 92308,
+      "sha256": "bfd35059d60122ac7e076136efe116dc42b3df89728c82df0a8b1084374f952d"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/11-widget-dev-build/terminal.json",
+      "bytes": 2353,
+      "sha256": "8642eeaf5a9e5b610fd9198abad04afa402dc94349f594c5b13d666deae4cf26"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/12-widget-dev/raw.log",
+      "bytes": 742,
+      "sha256": "6ab42bbdad1add596dbb957dfedf70403569c0697cd128d13adf4382b03449da"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/12-widget-dev/running.json",
+      "bytes": 704,
+      "sha256": "bb2e6826b1fca74a59a0cda3dbb2f507ad1d79561b5559893086901cfe0a7e60"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/12-widget-dev/source-after.json",
+      "bytes": 92308,
+      "sha256": "bfd35059d60122ac7e076136efe116dc42b3df89728c82df0a8b1084374f952d"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/12-widget-dev/source-before.json",
+      "bytes": 92308,
+      "sha256": "bfd35059d60122ac7e076136efe116dc42b3df89728c82df0a8b1084374f952d"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/12-widget-dev/terminal.json",
+      "bytes": 1902,
+      "sha256": "66e6597d1279110ce5cd0aff0b630e5f7ed618a9c02fee97d0b3999d6d66e99a"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/13-widget-default-build/raw.log",
+      "bytes": 347,
+      "sha256": "8493e9e0578c60bbf6ebc3f3440f653592d7a5a23853551cca123b15c0695009"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/13-widget-default-build/running.json",
+      "bytes": 657,
+      "sha256": "2c366aaf4e796c242e43d458a1946fb81c3431fca1b2d1e8708b505d389485a4"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/13-widget-default-build/source-after.json",
+      "bytes": 92308,
+      "sha256": "bfd35059d60122ac7e076136efe116dc42b3df89728c82df0a8b1084374f952d"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/13-widget-default-build/source-before.json",
+      "bytes": 92308,
+      "sha256": "bfd35059d60122ac7e076136efe116dc42b3df89728c82df0a8b1084374f952d"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/13-widget-default-build/terminal.json",
+      "bytes": 2319,
+      "sha256": "2ed7c695a8bfac97f75aa8b23b19f98bb9c1d080e900e3f515ee9550a80d2cef"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/14-widget-default/raw.log",
+      "bytes": 644,
+      "sha256": "8e74da478fff867ece02bde7159bdb8b101b2a6b27c2458509d90a6d1a488ada"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/14-widget-default/running.json",
+      "bytes": 670,
+      "sha256": "cc6cec42e8de14b354bad93929740040165d48271e27c8d197f933d7c69126aa"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/14-widget-default/source-after.json",
+      "bytes": 92308,
+      "sha256": "bfd35059d60122ac7e076136efe116dc42b3df89728c82df0a8b1084374f952d"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/14-widget-default/source-before.json",
+      "bytes": 92308,
+      "sha256": "bfd35059d60122ac7e076136efe116dc42b3df89728c82df0a8b1084374f952d"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/14-widget-default/terminal.json",
+      "bytes": 1868,
+      "sha256": "e4356ce9a702dc810b2061a5fa5ee19ad463f18cf9964499ca6068b7f031e1a6"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/15-dev-mode-guard/raw.log",
+      "bytes": 1194,
+      "sha256": "7b0a99a2d90aa61aa77895e9bac8a81ed5389825243edd1b5e0cf09fde358b56"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/15-dev-mode-guard/running.json",
+      "bytes": 573,
+      "sha256": "b1daa9bc2c604156a414b83cbfd229c628fbb50c0333a224be2c3c794631395a"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/15-dev-mode-guard/source-after.json",
+      "bytes": 92308,
+      "sha256": "bfd35059d60122ac7e076136efe116dc42b3df89728c82df0a8b1084374f952d"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/15-dev-mode-guard/source-before.json",
+      "bytes": 92308,
+      "sha256": "bfd35059d60122ac7e076136efe116dc42b3df89728c82df0a8b1084374f952d"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/15-dev-mode-guard/terminal.json",
+      "bytes": 1541,
+      "sha256": "643de4b2b556ae2e74c282aa3259f9cf79b8c6aec7efa7d765d1fdf36174e751"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/16-app-default-tree/raw.log",
+      "bytes": 61487,
+      "sha256": "c88c0585c92275b08360536a4d99969d0cb1d6291725f732dda661eaa994c3d0"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/16-app-default-tree/running.json",
+      "bytes": 659,
+      "sha256": "cc0d17d5751eff439dee68bc74964fad7387625c4272dd5c63392fa3bab652ed"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/16-app-default-tree/source-after.json",
+      "bytes": 92308,
+      "sha256": "bfd35059d60122ac7e076136efe116dc42b3df89728c82df0a8b1084374f952d"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/16-app-default-tree/source-before.json",
+      "bytes": 92308,
+      "sha256": "bfd35059d60122ac7e076136efe116dc42b3df89728c82df0a8b1084374f952d"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/16-app-default-tree/terminal.json",
+      "bytes": 1744,
+      "sha256": "90ffb7b8eb6f3bf37186b41f88a8ed494c5d3ce2ea257c9b1600aea691e7eede"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/17-runtime-dev-tree/raw.log",
+      "bytes": 54733,
+      "sha256": "ab003d3515c8343110e2560e214182d402d94f484f7fda192e43d1637464f237"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/17-runtime-dev-tree/running.json",
+      "bytes": 697,
+      "sha256": "a185c7da51f8454c7a9e9270b48cf46aea06dd8720d042585fa56f4e7b207d55"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/17-runtime-dev-tree/source-after.json",
+      "bytes": 92308,
+      "sha256": "bfd35059d60122ac7e076136efe116dc42b3df89728c82df0a8b1084374f952d"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/17-runtime-dev-tree/source-before.json",
+      "bytes": 92308,
+      "sha256": "bfd35059d60122ac7e076136efe116dc42b3df89728c82df0a8b1084374f952d"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/17-runtime-dev-tree/terminal.json",
+      "bytes": 1666,
+      "sha256": "2b65b474ec98c384d7017c5361f7b0e73d0228e7066bcb94fc4284c09fe5c084"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/18-workspace-check/raw.log",
+      "bytes": 2365,
+      "sha256": "de1e8ebcb7232e61d1b383dbdadfb039d202fb7ecf5fcbcb65ea6675a16034f4"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/18-workspace-check/running.json",
+      "bytes": 584,
+      "sha256": "74918f6af75fde64417bfc026ae521ac7be7b3a76127442c46cf06b6f01399fb"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/18-workspace-check/source-after.json",
+      "bytes": 92308,
+      "sha256": "bfd35059d60122ac7e076136efe116dc42b3df89728c82df0a8b1084374f952d"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/18-workspace-check/source-before.json",
+      "bytes": 92308,
+      "sha256": "bfd35059d60122ac7e076136efe116dc42b3df89728c82df0a8b1084374f952d"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/18-workspace-check/terminal.json",
+      "bytes": 4682,
+      "sha256": "cd8d28759d3bd60973493d924208776f76e82be1fdd2d10db7b71e21058c18db"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/19-workspace-all-target-clippy/raw.log",
+      "bytes": 2491,
+      "sha256": "ac7b8ae92f96f9663d0132c91b1f75731900499efe91aedc334cfe37a8c84112"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/19-workspace-all-target-clippy/running.json",
+      "bytes": 642,
+      "sha256": "32f96834ea571057305726ab2064c6c4e205fca33d9292429cce28fac889c2b5"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/19-workspace-all-target-clippy/source-after.json",
+      "bytes": 92308,
+      "sha256": "bfd35059d60122ac7e076136efe116dc42b3df89728c82df0a8b1084374f952d"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/19-workspace-all-target-clippy/source-before.json",
+      "bytes": 92308,
+      "sha256": "bfd35059d60122ac7e076136efe116dc42b3df89728c82df0a8b1084374f952d"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/19-workspace-all-target-clippy/terminal.json",
+      "bytes": 11236,
+      "sha256": "c036925d6bec24f4e9615599c8207b5d5fe9bd9138d44a6a10ba9052c777096e"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/20-app-default-release/raw.log",
+      "bytes": 1672,
+      "sha256": "57c09e71f5dd6928cf5cffe1a6c744c8060b51d5f067ad892a6d1e241cd6cfab"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/20-app-default-release/running.json",
+      "bytes": 611,
+      "sha256": "9f42694fa5539a4617cb76074497e8af4814843be4de9d7c8b180417b31f8986"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/20-app-default-release/source-after.json",
+      "bytes": 92308,
+      "sha256": "bfd35059d60122ac7e076136efe116dc42b3df89728c82df0a8b1084374f952d"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/20-app-default-release/source-before.json",
+      "bytes": 92308,
+      "sha256": "bfd35059d60122ac7e076136efe116dc42b3df89728c82df0a8b1084374f952d"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/20-app-default-release/terminal.json",
+      "bytes": 3898,
+      "sha256": "f47f2a70d5bfd36b3f91fa06177ae1d72c908f6003ff8f49b735778b019e23aa"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/21-final-normal-ci/raw.log",
+      "bytes": 449946,
+      "sha256": "752bff9b116bf4a9dd26d87518f7be8f8258cd0f909b143bd6bd724b67503ca5"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/21-final-normal-ci/running.json",
+      "bytes": 562,
+      "sha256": "3d21585c711f23fa5806423d8ded58f6eca03eb79287871c531d8a7997a5495f"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/21-final-normal-ci/source-after.json",
+      "bytes": 92308,
+      "sha256": "bfd35059d60122ac7e076136efe116dc42b3df89728c82df0a8b1084374f952d"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/21-final-normal-ci/source-before.json",
+      "bytes": 92308,
+      "sha256": "bfd35059d60122ac7e076136efe116dc42b3df89728c82df0a8b1084374f952d"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/gates/21-final-normal-ci/terminal.json",
+      "bytes": 55586,
+      "sha256": "439df4e0d96c294ffaea12e5ad512a5c1799d5a7fb81a78670be72bb3a3ef9fb"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/head.json",
+      "bytes": 420,
+      "sha256": "3cb49121d9a9de936b12146d2cb6f6eb6df93716240ba0ca6d226ae954ea2bd2"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/identity-email.json",
+      "bytes": 405,
+      "sha256": "772cd4c8a33188598922ab9d5214ccc0ece22aa48966eb97c6c7d906b2924a06"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/identity-name.json",
+      "bytes": 402,
+      "sha256": "ed67d0dd82af58de4365f7ed1c757cbbbb12183a1bdfa21f326e8159e269702f"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/implementation-source-and-behavior-summary.json",
+      "bytes": 3933,
+      "sha256": "ae3bcfb95370eeba4c06e5338ef508b952c4cd23f6854c3fc0579cafe4cb648e"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/initial-frozen-source-manifest.json",
+      "bytes": 92308,
+      "sha256": "1bc3d4292dc62c48170acf9a74d38255f37398400cbcee5d04211e5a9a2abc3f"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/initial-source-freeze-native-receipt.json",
+      "bytes": 63053,
+      "sha256": "8d9b11fff9c1683ce799c8284fcc1bd47f3c3f009a62e0eed2b5d1c97686f519"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/invariant-enumeration-intermediate-field-collision.json",
+      "bytes": 19791,
+      "sha256": "f407069fcdc6ef30998e4aa183b7ef43c393526d28c03d32619d4e72342f329e"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/invariant-enumeration-intermediate-invalid.json",
+      "bytes": 20203,
+      "sha256": "8b67d35dd036b936882e024ffb2c0ddb71dda650786cff9542b39e1594860abf"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/issue-full.json",
+      "bytes": 15996,
+      "sha256": "0e3c6758b6944115ff1a312ae3708c3d74591c9ba8509dba6a813d0c0ece2294"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/linked-git.json",
+      "bytes": 482,
+      "sha256": "278426ab2b771cbc2d994b541786351f0752f61243e23b9450eea36124e20a8b"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/original_counter_owner-full.json",
+      "bytes": 19437,
+      "sha256": "d69a513c5e4bc0cc6025d0b004d4590ff6999f86bc16ab742a44c606cec7b5d0"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/parent-full.json",
+      "bytes": 3701,
+      "sha256": "0aa786d91782536c778160486b4938a1e9a953d03a7615c998a4830a3c67c011"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/qualified-invariant-intermediate-integration-header-miss.json",
+      "bytes": 34688,
+      "sha256": "5bc5be150b95a2fde9c4ea4334d7d5582a316372703e8f2db0ec15b39b6e8e62"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/requested-gates-plan.json",
+      "bytes": 3030,
+      "sha256": "d71e69c8628c8ae3cf6f0f2f87b552d8276e8bc108129c5c22b9e3056c02ef5a"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/root-common-git.json",
+      "bytes": 520,
+      "sha256": "bfbc24f788fc088bebe01f0eeb35de2861bf8daa73e211e4da4f40954fca0f42"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/run-gate.py",
+      "bytes": 4930,
+      "sha256": "dfca8573b987b1a5be5de53c13cc02a1778299381b10f69fe06e2cf273135ca3"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/runtime-W2-ROOT-Cargo-GPU-release-root-ack.json",
+      "bytes": 4315,
+      "sha256": "4e8ad6637b0f699a87f0f4b422b9e8e72b087d5c5801e4532bb688d264bb7f9e"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/runtime-W2-ROOT-six-context-clean-only-lease.json",
+      "bytes": 1425,
+      "sha256": "ee3c13149ebbce8686d38436bd3027a62164f46b435d2a12766b71fce546ed31"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/runtime-W2-ROOT-six-context-clean-release-root-ack.json",
+      "bytes": 663,
+      "sha256": "a4b98213ba80f4441aa8c23045ec0569448267337707ab3f2aa65cf56ff82b57"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/runtime-W2-exclusive-ROOT-Cargo-GPU-lease.json",
+      "bytes": 2275,
+      "sha256": "5ba820f57f2a350f37d4b0de71ef4c20f3b33624aa9c1d2efe20662397b8e7d3"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/runtime-W2-formatted-source-refreeze-root-ack.json",
+      "bytes": 675,
+      "sha256": "ed8ee4360338506a44c3701501f2fb95808e7344fb8f06eb3fa1ce0d940b6566"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/runtime-W2-frozen-source-root-ack.json",
+      "bytes": 939,
+      "sha256": "091483739e1974dd13466ae684b1d1709be6ea2672f5f296e95192569ff695cd"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/runtime-W2-native-FIRST-root-ack.json",
+      "bytes": 1031,
+      "sha256": "ee3af49fa2166f13d3473f1d3157d2f06bef9d3b0154259101472e20f45fc63f"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/six-context-clean-release-verification.json",
+      "bytes": 405,
+      "sha256": "d4f23fdb989e65c607b6249c014d43e4ee3ff1df35e4587ccb9c2a3b9416b547"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/six-context-clean-source-after.json",
+      "bytes": 92308,
+      "sha256": "99cda33db398bf61c4ebd1066c168a79dabb92ab9f52e6162e7c252d65d19478"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/six-context-clean-source-before.json",
+      "bytes": 92308,
+      "sha256": "99cda33db398bf61c4ebd1066c168a79dabb92ab9f52e6162e7c252d65d19478"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/six-context-clean-terminal-release.json",
+      "bytes": 2147,
+      "sha256": "1feb652c1f512bb662e9a8246c2f2a1daab6fa7a34e2fb520ed01cb1fead26d8"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/six-context-clean.log",
+      "bytes": 39,
+      "sha256": "19c75aaaf8f3f89caee9851ac6df054593cb427c5553cbcc3b480dec0df023ea"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/source-owner-inventory.json",
+      "bytes": 7401,
+      "sha256": "4e73a39e9af517db7ee3d614f317fd4fc0427095c70642d5004dbb6b65131b81"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.9/tracked-status.json",
+      "bytes": 420,
+      "sha256": "346b6649f7bbac922d8d7c11d6e156ea235bdb5d023eeb61de9e7effe92039a1"
+    }
+  ],
+  "rows_sha256": "0d9b250c4e8b33d0a2ac28f891e41ac90d2f0fd248534b21a056167b2ca2f487"
+}

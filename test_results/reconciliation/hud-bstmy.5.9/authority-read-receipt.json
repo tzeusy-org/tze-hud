@@ -1,0 +1,33 @@
+{
+  "at": "2026-10-06T17:43:00.570107+00:00",
+  "native_pid": 3658057,
+  "cwd": "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.5.9",
+  "DDA_command": [
+    "bd",
+    "show",
+    "hud-bstmy",
+    "--json"
+  ],
+  "DDA_exit": 0,
+  "DDA_raw_sha256": "67991dea3e65027ed14b1662ea8fcfdf5c5ddf2e189badf6616383511bda02a8",
+  "DDA_stderr_sha256": "d4a1e4f444cb284131fd6b984b27964af9b1067dc7370ccaf4ed01d953f97bda",
+  "authority_blobs": [
+    {
+      "path": "docs/vision.md",
+      "bytes": 6172,
+      "sha256": "0a7514253c166430f63ce68dd57848b8ca21103489d6462efee98a53b1518ea6"
+    },
+    {
+      "path": "docs/scope.md",
+      "bytes": 8199,
+      "sha256": "6bdfb226e0981a38ccdbbbc3606c93e7cb4ebce94b4808caaacb2b14abb220eb"
+    },
+    {
+      "path": "docs/invariants.md",
+      "bytes": 9042,
+      "sha256": "c8e8554ed6de04b3917b46b5fcea3dade85e7c83ba10bd63221f01161a98ba04"
+    }
+  ],
+  "source_work_performed": false,
+  "Cargo_performed": false
+}

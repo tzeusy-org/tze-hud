@@ -1,0 +1,19 @@
+cargo metadata --format-version 1 --no-deps | python3 scripts/ci/check_dev_mode_defaults.py
+PASS: dev-mode is not enabled by default for tze_hud_app (shipped binary)
+PASS: dev-mode is not enabled by default for benchmark
+SKIP: integration has no lib/bin target (tests only)
+PASS: dev-mode is not enabled by default for poc_demo
+PASS: dev-mode is not enabled by default for render_artifacts
+PASS: dev-mode is not enabled by default for tze_hud_compositor
+PASS: dev-mode is not enabled by default for tze_hud_config
+PASS: dev-mode is not enabled by default for tze_hud_input
+PASS: dev-mode is not enabled by default for tze_hud_mcp
+PASS: dev-mode is not enabled by default for tze_hud_projection
+PASS: dev-mode is not enabled by default for tze_hud_protocol
+PASS: dev-mode is not enabled by default for tze_hud_resource
+PASS: dev-mode is not enabled by default for tze_hud_runtime
+PASS: dev-mode is not enabled by default for tze_hud_scene
+PASS: dev-mode is not enabled by default for tze_hud_telemetry
+PASS: dev-mode is not enabled by default for tze_hud_widget
+PASS: dev-mode is not enabled by default for vertical_slice
+PASS: dev-mode is not enabled by default for widget_publish_load_harness

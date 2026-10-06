@@ -1,0 +1,62 @@
+{
+  "at": "2026-10-06T18:01:13.943387+00:00",
+  "native_pid": 3668166,
+  "child_pid": 3668169,
+  "process_group": 3668169,
+  "source_head": "75ad0f051dca59d6b39166bdb1d9c627bae9dca3",
+  "command": [
+    "cargo",
+    "fmt",
+    "--all"
+  ],
+  "deadline_seconds": 120,
+  "environment": {
+    "CARGO_TARGET_DIR": "/home/orca/orca/projects/tze-hud/target",
+    "CARGO_BUILD_JOBS": "1",
+    "PROTOC": "/usr/bin/protoc",
+    "VK_ICD_FILENAMES": "/usr/share/vulkan/icd.d/lvp_icd.json",
+    "HEADLESS_FORCE_SOFTWARE": "1",
+    "TZE_HUD_REQUIRE_GPU": "1",
+    "LLVMPIPE_CI": "1"
+  },
+  "ended_at": "2026-10-06T18:01:15.189132+00:00",
+  "exit": 0,
+  "seconds": 1.2459920900000725,
+  "source_head_after": "75ad0f051dca59d6b39166bdb1d9c627bae9dca3",
+  "source_files": 541,
+  "source_manifest_equal": false,
+  "before_manifest_SHA256": "1bc3d4292dc62c48170acf9a74d38255f37398400cbcee5d04211e5a9a2abc3f",
+  "after_manifest_SHA256": "bfd35059d60122ac7e076136efe116dc42b3df89728c82df0a8b1084374f952d",
+  "raw_bytes": 0,
+  "raw_SHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "observed_processes": {
+    "3668169": {
+      "ppid": 3668166,
+      "group": 3668169,
+      "start_ticks": "15082002"
+    },
+    "3668170": {
+      "ppid": 3668169,
+      "group": 3668169,
+      "start_ticks": "15082002"
+    },
+    "3668188": {
+      "ppid": 3668170,
+      "group": 3668169,
+      "start_ticks": "15082006"
+    }
+  },
+  "observed_pids_absent": [
+    3668169,
+    3668170,
+    3668188
+  ],
+  "process_group_members_after": {
+    "3668169": []
+  },
+  "child_absent": true,
+  "normal_parallelism": "RUST_TEST_THREADS unset; no --test-threads override",
+  "PERF_ASSERT": "unset, normal off",
+  "SKIP_GPU": "both skip variables unset",
+  "metadata_only_runner": true
+}

@@ -1,0 +1,1021 @@
+{
+  "at": "2026-10-06T18:27:49.391700+00:00",
+  "source_head": "8d7727351c0942e372e999960ea0c49ebb1a7a32",
+  "source_head_after": "8d7727351c0942e372e999960ea0c49ebb1a7a32",
+  "actual_exit": 0,
+  "seconds": 617.8315546649974,
+  "raw_sha256": "752bff9b116bf4a9dd26d87518f7be8f8258cd0f909b143bd6bd724b67503ca5",
+  "raw_bytes": 449946,
+  "rust_summary_count": 70,
+  "rust_passes": 3241,
+  "rust_failures": 0,
+  "rust_ignored": 0,
+  "Rust_summaries": [
+    {
+      "result": "ok",
+      "passed": 7,
+      "failed": 0,
+      "ignored": 0,
+      "line": 2974
+    },
+    {
+      "result": "ok",
+      "passed": 0,
+      "failed": 0,
+      "ignored": 0,
+      "line": 2980
+    },
+    {
+      "result": "ok",
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0,
+      "line": 2987
+    },
+    {
+      "result": "ok",
+      "passed": 0,
+      "failed": 0,
+      "ignored": 0,
+      "line": 2993
+    },
+    {
+      "result": "ok",
+      "passed": 3,
+      "failed": 0,
+      "ignored": 0,
+      "line": 3002
+    },
+    {
+      "result": "ok",
+      "passed": 18,
+      "failed": 0,
+      "ignored": 0,
+      "line": 3026
+    },
+    {
+      "result": "ok",
+      "passed": 0,
+      "failed": 0,
+      "ignored": 0,
+      "line": 3032
+    },
+    {
+      "result": "ok",
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0,
+      "line": 3039
+    },
+    {
+      "result": "ok",
+      "passed": 13,
+      "failed": 0,
+      "ignored": 0,
+      "line": 3058
+    },
+    {
+      "result": "ok",
+      "passed": 2,
+      "failed": 0,
+      "ignored": 0,
+      "line": 3074
+    },
+    {
+      "result": "ok",
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0,
+      "line": 3081
+    },
+    {
+      "result": "ok",
+      "passed": 3,
+      "failed": 0,
+      "ignored": 0,
+      "line": 3098
+    },
+    {
+      "result": "ok",
+      "passed": 591,
+      "failed": 0,
+      "ignored": 0,
+      "line": 3711
+    },
+    {
+      "result": "ok",
+      "passed": 23,
+      "failed": 0,
+      "ignored": 0,
+      "line": 3740
+    },
+    {
+      "result": "ok",
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0,
+      "line": 3755
+    },
+    {
+      "result": "ok",
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0,
+      "line": 3770
+    },
+    {
+      "result": "ok",
+      "passed": 4,
+      "failed": 0,
+      "ignored": 0,
+      "line": 3780
+    },
+    {
+      "result": "ok",
+      "passed": 8,
+      "failed": 0,
+      "ignored": 0,
+      "line": 3802
+    },
+    {
+      "result": "ok",
+      "passed": 13,
+      "failed": 0,
+      "ignored": 0,
+      "line": 3829
+    },
+    {
+      "result": "ok",
+      "passed": 171,
+      "failed": 0,
+      "ignored": 0,
+      "line": 4048
+    },
+    {
+      "result": "ok",
+      "passed": 404,
+      "failed": 0,
+      "ignored": 0,
+      "line": 4458
+    },
+    {
+      "result": "ok",
+      "passed": 42,
+      "failed": 0,
+      "ignored": 0,
+      "line": 4506
+    },
+    {
+      "result": "ok",
+      "passed": 209,
+      "failed": 0,
+      "ignored": 0,
+      "line": 4721
+    },
+    {
+      "result": "ok",
+      "passed": 204,
+      "failed": 0,
+      "ignored": 0,
+      "line": 4931
+    },
+    {
+      "result": "ok",
+      "passed": 9,
+      "failed": 0,
+      "ignored": 0,
+      "line": 4946
+    },
+    {
+      "result": "ok",
+      "passed": 3,
+      "failed": 0,
+      "ignored": 0,
+      "line": 4955
+    },
+    {
+      "result": "ok",
+      "passed": 33,
+      "failed": 0,
+      "ignored": 0,
+      "line": 4994
+    },
+    {
+      "result": "ok",
+      "passed": 21,
+      "failed": 0,
+      "ignored": 0,
+      "line": 5021
+    },
+    {
+      "result": "ok",
+      "passed": 12,
+      "failed": 0,
+      "ignored": 0,
+      "line": 5039
+    },
+    {
+      "result": "ok",
+      "passed": 86,
+      "failed": 0,
+      "ignored": 0,
+      "line": 5131
+    },
+    {
+      "result": "ok",
+      "passed": 8,
+      "failed": 0,
+      "ignored": 0,
+      "line": 5145
+    },
+    {
+      "result": "ok",
+      "passed": 529,
+      "failed": 0,
+      "ignored": 0,
+      "line": 5760
+    },
+    {
+      "result": "ok",
+      "passed": 2,
+      "failed": 0,
+      "ignored": 0,
+      "line": 5768
+    },
+    {
+      "result": "ok",
+      "passed": 0,
+      "failed": 0,
+      "ignored": 0,
+      "line": 5774
+    },
+    {
+      "result": "ok",
+      "passed": 39,
+      "failed": 0,
+      "ignored": 0,
+      "line": 5827
+    },
+    {
+      "result": "ok",
+      "passed": 3,
+      "failed": 0,
+      "ignored": 0,
+      "line": 5844
+    },
+    {
+      "result": "ok",
+      "passed": 315,
+      "failed": 0,
+      "ignored": 0,
+      "line": 6165
+    },
+    {
+      "result": "ok",
+      "passed": 22,
+      "failed": 0,
+      "ignored": 0,
+      "line": 6193
+    },
+    {
+      "result": "ok",
+      "passed": 9,
+      "failed": 0,
+      "ignored": 0,
+      "line": 6208
+    },
+    {
+      "result": "ok",
+      "passed": 20,
+      "failed": 0,
+      "ignored": 0,
+      "line": 6234
+    },
+    {
+      "result": "ok",
+      "passed": 7,
+      "failed": 0,
+      "ignored": 0,
+      "line": 6247
+    },
+    {
+      "result": "ok",
+      "passed": 16,
+      "failed": 0,
+      "ignored": 0,
+      "line": 6269
+    },
+    {
+      "result": "ok",
+      "passed": 19,
+      "failed": 0,
+      "ignored": 0,
+      "line": 6294
+    },
+    {
+      "result": "ok",
+      "passed": 15,
+      "failed": 0,
+      "ignored": 0,
+      "line": 6315
+    },
+    {
+      "result": "ok",
+      "passed": 46,
+      "failed": 0,
+      "ignored": 0,
+      "line": 6367
+    },
+    {
+      "result": "ok",
+      "passed": 49,
+      "failed": 0,
+      "ignored": 0,
+      "line": 6448
+    },
+    {
+      "result": "ok",
+      "passed": 5,
+      "failed": 0,
+      "ignored": 0,
+      "line": 6459
+    },
+    {
+      "result": "ok",
+      "passed": 7,
+      "failed": 0,
+      "ignored": 0,
+      "line": 6472
+    },
+    {
+      "result": "ok",
+      "passed": 8,
+      "failed": 0,
+      "ignored": 0,
+      "line": 6486
+    },
+    {
+      "result": "ok",
+      "passed": 17,
+      "failed": 0,
+      "ignored": 0,
+      "line": 6509
+    },
+    {
+      "result": "ok",
+      "passed": 2,
+      "failed": 0,
+      "ignored": 0,
+      "line": 6525
+    },
+    {
+      "result": "ok",
+      "passed": 30,
+      "failed": 0,
+      "ignored": 0,
+      "line": 6569
+    },
+    {
+      "result": "ok",
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0,
+      "line": 6584
+    },
+    {
+      "result": "ok",
+      "passed": 14,
+      "failed": 0,
+      "ignored": 0,
+      "line": 6604
+    },
+    {
+      "result": "ok",
+      "passed": 18,
+      "failed": 0,
+      "ignored": 0,
+      "line": 6639
+    },
+    {
+      "result": "ok",
+      "passed": 19,
+      "failed": 0,
+      "ignored": 0,
+      "line": 6664
+    },
+    {
+      "result": "ok",
+      "passed": 7,
+      "failed": 0,
+      "ignored": 0,
+      "line": 6677
+    },
+    {
+      "result": "ok",
+      "passed": 4,
+      "failed": 0,
+      "ignored": 0,
+      "line": 6695
+    },
+    {
+      "result": "ok",
+      "passed": 11,
+      "failed": 0,
+      "ignored": 0,
+      "line": 6712
+    },
+    {
+      "result": "ok",
+      "passed": 5,
+      "failed": 0,
+      "ignored": 0,
+      "line": 6731
+    },
+    {
+      "result": "ok",
+      "passed": 6,
+      "failed": 0,
+      "ignored": 0,
+      "line": 6751
+    },
+    {
+      "result": "ok",
+      "passed": 14,
+      "failed": 0,
+      "ignored": 0,
+      "line": 6779
+    },
+    {
+      "result": "ok",
+      "passed": 3,
+      "failed": 0,
+      "ignored": 0,
+      "line": 6788
+    },
+    {
+      "result": "ok",
+      "passed": 20,
+      "failed": 0,
+      "ignored": 0,
+      "line": 6814
+    },
+    {
+      "result": "ok",
+      "passed": 15,
+      "failed": 0,
+      "ignored": 0,
+      "line": 6835
+    },
+    {
+      "result": "ok",
+      "passed": 21,
+      "failed": 0,
+      "ignored": 0,
+      "line": 6862
+    },
+    {
+      "result": "ok",
+      "passed": 12,
+      "failed": 0,
+      "ignored": 0,
+      "line": 6880
+    },
+    {
+      "result": "ok",
+      "passed": 15,
+      "failed": 0,
+      "ignored": 0,
+      "line": 6901
+    },
+    {
+      "result": "ok",
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0,
+      "line": 6987
+    },
+    {
+      "result": "ok",
+      "passed": 3,
+      "failed": 0,
+      "ignored": 0,
+      "line": 7011
+    }
+  ],
+  "current_named_assertions_source": 72,
+  "current_named_assertions_positive_raw": 72,
+  "named_assertion_receipts": [
+    {
+      "name": "test_hud_publish_zone_ttl_sets_content_expiry_and_is_swept",
+      "positive_lines": [
+        "server::tests::test_hud_publish_zone_ttl_sets_content_expiry_and_is_swept"
+      ],
+      "raw_positive_present": true
+    },
+    {
+      "name": "delay_ms_holds_content_until_due",
+      "positive_lines": [
+        "server::tests::delay_ms_holds_content_until_due"
+      ],
+      "raw_positive_present": true
+    },
+    {
+      "name": "notification_ttl_zero_is_held_and_hold_retimes_it",
+      "positive_lines": [
+        "server::tests::notification_ttl_zero_is_held_and_hold_retimes_it"
+      ],
+      "raw_positive_present": true
+    },
+    {
+      "name": "graph::widget_tests::widget_ttl_only_expired_publication_removed_when_mixed",
+      "positive_lines": [
+        "graph::widget_tests::widget_ttl_only_expired_publication_removed_when_mixed"
+      ],
+      "raw_positive_present": true
+    },
+    {
+      "name": "test_publication_ttl_ms_uses_expires_at_wall_us",
+      "positive_lines": [
+        "renderer::tests::zone_layers::test_publication_ttl_ms_uses_expires_at_wall_us"
+      ],
+      "raw_positive_present": true
+    },
+    {
+      "name": "hold_moves_the_fade_deadline_and_ttl_zero_never_fades",
+      "positive_lines": [
+        "renderer::tests::idle_gate::hold_moves_the_fade_deadline_and_ttl_zero_never_fades"
+      ],
+      "raw_positive_present": true
+    },
+    {
+      "name": "grpc_zone_publish_ttl_sets_expiry_and_is_swept",
+      "positive_lines": [
+        "session_server::tests::invariants::grpc_zone_publish_ttl_sets_expiry_and_is_swept"
+      ],
+      "raw_positive_present": true
+    },
+    {
+      "name": "grpc_zone_publish_expires_at_is_swept",
+      "positive_lines": [
+        "session_server::tests::invariants::grpc_zone_publish_expires_at_is_swept"
+      ],
+      "raw_positive_present": true
+    },
+    {
+      "name": "grpc_zone_publish_present_at_is_held_until_due",
+      "positive_lines": [
+        "session_server::tests::invariants::grpc_zone_publish_present_at_is_held_until_due"
+      ],
+      "raw_positive_present": true
+    },
+    {
+      "name": "grpc_batch_present_at_holds_content_until_due",
+      "positive_lines": [
+        "session_server::tests::invariants::grpc_batch_present_at_holds_content_until_due"
+      ],
+      "raw_positive_present": true
+    },
+    {
+      "name": "grpc_batch_expires_at_sweeps_tile",
+      "positive_lines": [
+        "session_server::tests::invariants::grpc_batch_expires_at_sweeps_tile"
+      ],
+      "raw_positive_present": true
+    },
+    {
+      "name": "poc_zone_notification_ttl_disappears_unattended",
+      "positive_lines": [
+        "poc_zone_notification_ttl_disappears_unattended"
+      ],
+      "raw_positive_present": true
+    },
+    {
+      "name": "poc_zone_delay_ms_appears_on_schedule",
+      "positive_lines": [
+        "poc_zone_delay_ms_appears_on_schedule"
+      ],
+      "raw_positive_present": true
+    },
+    {
+      "name": "test_hud_publish_zone_contention_policy_latest_wins",
+      "positive_lines": [
+        "server::tests::test_hud_publish_zone_contention_policy_latest_wins"
+      ],
+      "raw_positive_present": true
+    },
+    {
+      "name": "test_latest_wins_zone_renders_only_latest_publication",
+      "positive_lines": [
+        "renderer::tests::zone_stack::test_latest_wins_zone_renders_only_latest_publication"
+      ],
+      "raw_positive_present": true
+    },
+    {
+      "name": "test_pointer_move_coalesced_in_batch",
+      "positive_lines": [
+        "batching::tests::test_pointer_move_coalesced_in_batch"
+      ],
+      "raw_positive_present": true
+    },
+    {
+      "name": "test_coalesce_scroll_latest_wins",
+      "positive_lines": [
+        "coalescing::tests::test_coalesce_scroll_latest_wins"
+      ],
+      "raw_positive_present": true
+    },
+    {
+      "name": "test_enter_safe_mode_suspends_active_leases",
+      "positive_lines": [
+        "shell::safe_mode::tests::test_enter_safe_mode_suspends_active_leases"
+      ],
+      "raw_positive_present": true
+    },
+    {
+      "name": "test_mutations_rejected_via_shared_state_flag",
+      "positive_lines": [
+        "shell::safe_mode::tests::test_mutations_rejected_via_shared_state_flag"
+      ],
+      "raw_positive_present": true
+    },
+    {
+      "name": "hotkey_event_enters_safe_mode_and_suspends_leases",
+      "positive_lines": [
+        "windowed::safe_mode_toggle::tests::hotkey_event_enters_safe_mode_and_suspends_leases"
+      ],
+      "raw_positive_present": true
+    },
+    {
+      "name": "safe_mode_hotkey_defaults_overrides_and_rejects_garbage",
+      "positive_lines": [
+        "tests::safe_mode_hotkey_defaults_overrides_and_rejects_garbage"
+      ],
+      "raw_positive_present": true
+    },
+    {
+      "name": "shell_dismiss_override_removes_portal_tile",
+      "positive_lines": [
+        "shell_dismiss_override_removes_portal_tile"
+      ],
+      "raw_positive_present": true
+    },
+    {
+      "name": "shell_status_snapshot_exposes_no_portal_identity_or_transcript",
+      "positive_lines": [
+        "shell_status_snapshot_exposes_no_portal_identity_or_transcript"
+      ],
+      "raw_positive_present": true
+    },
+    {
+      "name": "viewer_dismiss_tile_revokes_lease_in_any_live_state",
+      "positive_lines": [
+        "graph::tests::viewer_dismiss_tile_revokes_lease_in_any_live_state"
+      ],
+      "raw_positive_present": true
+    },
+    {
+      "name": "viewer_dismiss_tile_pushes_reclaimed_override",
+      "positive_lines": [
+        "session_server::tests::events::viewer_dismiss_tile_pushes_reclaimed_override"
+      ],
+      "raw_positive_present": true
+    },
+    {
+      "name": "viewer_dismiss_portal_detaches_and_next_publish_reattaches",
+      "positive_lines": [
+        "portal_projection_driver::tests::viewer_dismiss_portal_detaches_and_next_publish_reattaches"
+      ],
+      "raw_positive_present": true
+    },
+    {
+      "name": "viewer_close_button_dismisses_hovered_tile_and_notifies_owner",
+      "positive_lines": [
+        "windowed::event_loop_harness::tests::viewer_close_button_dismisses_hovered_tile_and_notifies_owner"
+      ],
+      "raw_positive_present": true
+    },
+    {
+      "name": "poc_portal_viewer_dismiss_then_mcp_verbs",
+      "positive_lines": [
+        "poc_portal_viewer_dismiss_then_mcp_verbs"
+      ],
+      "raw_positive_present": true
+    },
+    {
+      "name": "tile_close_button_draw_and_hit_region_share_token_geometry",
+      "positive_lines": [
+        "renderer::tests::hit_drag::tile_close_button_draw_and_hit_region_share_token_geometry"
+      ],
+      "raw_positive_present": true
+    },
+    {
+      "name": "poc_override_safe_mode_wins_with_hung_grpc_agent",
+      "positive_lines": [
+        "poc_override_safe_mode_wins_with_hung_grpc_agent"
+      ],
+      "raw_positive_present": true
+    },
+    {
+      "name": "poc_override_exit_safe_mode_with_agent_hung_during_it",
+      "positive_lines": [
+        "poc_override_exit_safe_mode_with_agent_hung_during_it"
+      ],
+      "raw_positive_present": true
+    },
+    {
+      "name": "poc_override_notifies_the_agent",
+      "positive_lines": [
+        "poc_override_notifies_the_agent"
+      ],
+      "raw_positive_present": true
+    },
+    {
+      "name": "hud_publish_in_safe_mode_returns_safe_mode_active",
+      "positive_lines": [
+        "server::tests::hud_publish_in_safe_mode_returns_safe_mode_active"
+      ],
+      "raw_positive_present": true
+    },
+    {
+      "name": "safe_mode_does_not_regrant_suspended_mcp_lease",
+      "positive_lines": [
+        "server::tests::safe_mode_does_not_regrant_suspended_mcp_lease"
+      ],
+      "raw_positive_present": true
+    },
+    {
+      "name": "resume_restores_mcp_publishing",
+      "positive_lines": [
+        "server::tests::resume_restores_mcp_publishing"
+      ],
+      "raw_positive_present": true
+    },
+    {
+      "name": "graph::widget_tests::widget_publish_with_suspended_lease_is_safe_mode_active",
+      "positive_lines": [
+        "graph::widget_tests::widget_publish_with_suspended_lease_is_safe_mode_active"
+      ],
+      "raw_positive_present": true
+    },
+    {
+      "name": "test_chrome_always_above_max_zorder_tile",
+      "positive_lines": [
+        "renderer::tests::surface::test_chrome_always_above_max_zorder_tile"
+      ],
+      "raw_positive_present": true
+    },
+    {
+      "name": "windowed_frame_draws_chrome_overlay_in_safe_mode",
+      "positive_lines": [
+        "renderer::safe_mode_overlay::tests::windowed_frame_draws_chrome_overlay_in_safe_mode"
+      ],
+      "raw_positive_present": true
+    },
+    {
+      "name": "disconnect_transitions_to_orphaned_and_sets_disconnection_badge",
+      "positive_lines": [
+        "disconnect_transitions_to_orphaned_and_sets_disconnection_badge"
+      ],
+      "raw_positive_present": true
+    },
+    {
+      "name": "grace_period_expiry_removes_tile_and_nodes",
+      "positive_lines": [
+        "grace_period_expiry_removes_tile_and_nodes"
+      ],
+      "raw_positive_present": true
+    },
+    {
+      "name": "disconnect_then_reconnect_within_grace_resumes_same_surface_without_duplication",
+      "positive_lines": [
+        "portal_projection_driver::tests::disconnect_then_reconnect_within_grace_resumes_same_surface_without_duplication"
+      ],
+      "raw_positive_present": true
+    },
+    {
+      "name": "resumed_session_restores_usage_before_accepting_new_mutations",
+      "positive_lines": [
+        "mutation_budget_bridge::tests::resumed_session_restores_usage_before_accepting_new_mutations"
+      ],
+      "raw_positive_present": true
+    },
+    {
+      "name": "grpc_disconnect_orphans_leases_and_badges_tiles",
+      "positive_lines": [
+        "session_server::tests::invariants::grpc_disconnect_orphans_leases_and_badges_tiles"
+      ],
+      "raw_positive_present": true
+    },
+    {
+      "name": "grpc_resume_within_grace_restores_same_lease_and_tile",
+      "positive_lines": [
+        "session_server::tests::invariants::grpc_resume_within_grace_restores_same_lease_and_tile"
+      ],
+      "raw_positive_present": true
+    },
+    {
+      "name": "grpc_grace_expiry_reclaims_orphaned_lease_and_rejects_resume",
+      "positive_lines": [
+        "session_server::tests::invariants::grpc_grace_expiry_reclaims_orphaned_lease_and_rejects_resume"
+      ],
+      "raw_positive_present": true
+    },
+    {
+      "name": "render_frame_reclaims_orphaned_lease_after_grace",
+      "positive_lines": [
+        "headless::tests::render_frame_reclaims_orphaned_lease_after_grace"
+      ],
+      "raw_positive_present": true
+    },
+    {
+      "name": "orphaned_tile_emits_disconnection_badge_draw_cmd",
+      "positive_lines": [
+        "renderer::tests::focus_chrome::orphaned_tile_emits_disconnection_badge_draw_cmd"
+      ],
+      "raw_positive_present": true
+    },
+    {
+      "name": "poc_portal_abandoned_is_reclaimed",
+      "positive_lines": [
+        "poc_portal_abandoned_is_reclaimed"
+      ],
+      "raw_positive_present": true
+    },
+    {
+      "name": "poc_tile_claim_with_placement_two_round_trips",
+      "positive_lines": [
+        "poc_tile_claim_with_placement_two_round_trips"
+      ],
+      "raw_positive_present": true
+    },
+    {
+      "name": "poc_tile_update_then_orphan_then_reclaim_after_grace",
+      "positive_lines": [
+        "poc_tile_update_then_orphan_then_reclaim_after_grace"
+      ],
+      "raw_positive_present": true
+    },
+    {
+      "name": "tile_lease_reap_keeps_same_namespace_mcp_publications",
+      "positive_lines": [
+        "graph::spec_scenarios::tile_lease_reap_keeps_same_namespace_mcp_publications"
+      ],
+      "raw_positive_present": true
+    },
+    {
+      "name": "revoked_lease_clears_only_its_publications",
+      "positive_lines": [
+        "graph::spec_scenarios::revoked_lease_clears_only_its_publications"
+      ],
+      "raw_positive_present": true
+    },
+    {
+      "name": "test_ttl_excluded_during_suspension",
+      "positive_lines": [
+        "shell::safe_mode::tests::test_ttl_excluded_during_suspension"
+      ],
+      "raw_positive_present": true
+    },
+    {
+      "name": "test_lease_identity_preserved_across_suspend_resume",
+      "positive_lines": [
+        "shell::safe_mode::tests::test_lease_identity_preserved_across_suspend_resume"
+      ],
+      "raw_positive_present": true
+    },
+    {
+      "name": "test_lease_suspend_from_active",
+      "positive_lines": [
+        "graph::tests::test_lease_suspend_from_active"
+      ],
+      "raw_positive_present": true
+    },
+    {
+      "name": "test_lease_resume_from_suspended",
+      "positive_lines": [
+        "graph::tests::test_lease_resume_from_suspended"
+      ],
+      "raw_positive_present": true
+    },
+    {
+      "name": "significant_degradation_preserves_hidden_tiles_and_opaques_visible_tiles",
+      "positive_lines": [
+        "renderer::tile_render::degradation_opacity_tests::significant_degradation_preserves_hidden_tiles_and_opaques_visible_tiles"
+      ],
+      "raw_positive_present": true
+    },
+    {
+      "name": "degradation::tests::sustained_overload_does_not_escalate_past_simplified",
+      "positive_lines": [
+        "degradation::tests::sustained_overload_does_not_escalate_past_simplified"
+      ],
+      "raw_positive_present": true
+    },
+    {
+      "name": "mutation_budget_bridge::tests::registered_budget_rejects_mutation_above_tile_limit",
+      "positive_lines": [
+        "mutation_budget_bridge::tests::registered_budget_rejects_mutation_above_tile_limit"
+      ],
+      "raw_positive_present": true
+    },
+    {
+      "name": "aggregate_limits_are_atomic_across_agents",
+      "positive_lines": [
+        "mutation_budget_bridge::tests::aggregate_limits_are_atomic_across_agents"
+      ],
+      "raw_positive_present": true
+    },
+    {
+      "name": "agent_texture_budget_rejects_whole_upload_and_stores_nothing",
+      "positive_lines": [
+        "agent_texture_budget_rejects_whole_upload_and_stores_nothing"
+      ],
+      "raw_positive_present": true
+    },
+    {
+      "name": "runtime_wide_texture_cap_is_shared_across_agents",
+      "positive_lines": [
+        "runtime_wide_texture_cap_is_shared_across_agents"
+      ],
+      "raw_positive_present": true
+    },
+    {
+      "name": "resource_count_cap_rejects_the_extra_resource",
+      "positive_lines": [
+        "resource_count_cap_rejects_the_extra_resource"
+      ],
+      "raw_positive_present": true
+    },
+    {
+      "name": "per_resource_size_cap_rejects_chunked_upload_at_start",
+      "positive_lines": [
+        "per_resource_size_cap_rejects_chunked_upload_at_start"
+      ],
+      "raw_positive_present": true
+    },
+    {
+      "name": "upload_slot_cap_is_per_agent_and_freed_by_abort",
+      "positive_lines": [
+        "upload_slot_cap_is_per_agent_and_freed_by_abort"
+      ],
+      "raw_positive_present": true
+    },
+    {
+      "name": "chunked_upload_rejected_at_complete_frees_its_slot_and_stores_nothing",
+      "positive_lines": [
+        "chunked_upload_rejected_at_complete_frees_its_slot_and_stores_nothing"
+      ],
+      "raw_positive_present": true
+    },
+    {
+      "name": "mutation_batch_oversized_rejected_with_structured_error",
+      "positive_lines": [
+        "mutation_batch_oversized_rejected_with_structured_error"
+      ],
+      "raw_positive_present": true
+    },
+    {
+      "name": "test_structured_error_has_hint_field",
+      "positive_lines": [
+        "server::tests::test_structured_error_has_hint_field"
+      ],
+      "raw_positive_present": true
+    },
+    {
+      "name": "error_codes_are_unique_and_documented",
+      "positive_lines": [
+        "error::tests::error_codes_are_unique_and_documented"
+      ],
+      "raw_positive_present": true
+    },
+    {
+      "name": "every_returned_code_is_in_the_closed_set",
+      "positive_lines": [
+        "server::tests::every_returned_code_is_in_the_closed_set"
+      ],
+      "raw_positive_present": true
+    },
+    {
+      "name": "rejections_carry_stable_wire_code_and_actionable_detail",
+      "positive_lines": [
+        "rejections_carry_stable_wire_code_and_actionable_detail"
+      ],
+      "raw_positive_present": true
+    },
+    {
+      "name": "chunk_protocol_errors_have_stable_codes",
+      "positive_lines": [
+        "chunk_protocol_errors_have_stable_codes"
+      ],
+      "raw_positive_present": true
+    }
+  ],
+  "failed_or_skip_lines": [
+    {
+      "line": 1,
+      "text": "SKIPPED: overlay-harness-contract needs PowerShell (pwsh)"
+    }
+  ],
+  "PERF_ASSERT": "normal off",
+  "limits": "raw test passes/positive named receipts are scoped scenario evidence; no universal upload/input/idle/perf coverage. Default widget silent NoAdapter limitation remains; dev focused operation marker actual."
+}

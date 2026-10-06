@@ -1,0 +1,8 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.31s
+     Running unittests src/lib.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/tze_hud_compositor-b7d04063d523f30e)
+
+running 1 test
+test renderer::retained::tests::new_observation_clears_prior_frame_work_counts ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 590 filtered out; finished in 0.00s
+

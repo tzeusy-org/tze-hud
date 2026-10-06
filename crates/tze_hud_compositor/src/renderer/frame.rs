@@ -1141,6 +1141,8 @@ impl Compositor {
         scene: &mut SceneGraph,
         surface: &HeadlessSurface,
     ) -> FrameTelemetry {
+        #[cfg(any(test, feature = "dev-mode"))]
+        self.begin_headless_work_observation();
         let frame_start = std::time::Instant::now();
         self.frame_number += 1;
 

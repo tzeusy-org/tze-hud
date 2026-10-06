@@ -1,0 +1,51 @@
+{
+  "at": "2026-10-06T18:12:04.139301+00:00",
+  "native_pid": 3680601,
+  "source_head": "8d7727351c0942e372e999960ea0c49ebb1a7a32",
+  "normal_build_app_tree_dev_mode_absent": true,
+  "guard_actual_positive_shippable_closures": 17,
+  "guard_positive_lines": [
+    "PASS: dev-mode is not enabled by default for tze_hud_app (shipped binary)",
+    "PASS: dev-mode is not enabled by default for benchmark",
+    "PASS: dev-mode is not enabled by default for poc_demo",
+    "PASS: dev-mode is not enabled by default for render_artifacts",
+    "PASS: dev-mode is not enabled by default for tze_hud_compositor",
+    "PASS: dev-mode is not enabled by default for tze_hud_config",
+    "PASS: dev-mode is not enabled by default for tze_hud_input",
+    "PASS: dev-mode is not enabled by default for tze_hud_mcp",
+    "PASS: dev-mode is not enabled by default for tze_hud_projection",
+    "PASS: dev-mode is not enabled by default for tze_hud_protocol",
+    "PASS: dev-mode is not enabled by default for tze_hud_resource",
+    "PASS: dev-mode is not enabled by default for tze_hud_runtime",
+    "PASS: dev-mode is not enabled by default for tze_hud_scene",
+    "PASS: dev-mode is not enabled by default for tze_hud_telemetry",
+    "PASS: dev-mode is not enabled by default for tze_hud_widget",
+    "PASS: dev-mode is not enabled by default for vertical_slice",
+    "PASS: dev-mode is not enabled by default for widget_publish_load_harness"
+  ],
+  "explicit_runtime_dev_feature_owner_lines": {
+    "tze_hud_runtime": [
+      "tze_hud_runtime v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.5.9/crates/tze_hud_runtime):dev-mode"
+    ],
+    "tze_hud_compositor": [
+      "\u251c\u2500\u2500 tze_hud_compositor v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.5.9/crates/tze_hud_compositor):dev-mode"
+    ],
+    "tze_hud_telemetry": [
+      "\u2502   \u251c\u2500\u2500 tze_hud_telemetry v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.5.9/crates/tze_hud_telemetry):dev-mode",
+      "\u251c\u2500\u2500 tze_hud_telemetry v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.5.9/crates/tze_hud_telemetry):dev-mode (*)"
+    ]
+  },
+  "gate_raw_SHA256": {
+    "15-dev-mode-guard": "7b0a99a2d90aa61aa77895e9bac8a81ed5389825243edd1b5e0cf09fde358b56",
+    "16-app-default-tree": "c88c0585c92275b08360536a4d99969d0cb1d6291725f732dda661eaa994c3d0",
+    "17-runtime-dev-tree": "ab003d3515c8343110e2560e214182d402d94f484f7fda192e43d1637464f237"
+  },
+  "limit": "actual Cargo normal/build default/dev feature graphs, existing guard17 and actual default Linux app release; source cfg removes observations in this default closure. No Windows native, all-upload or windowed-idle proof.",
+  "default_app_release": {
+    "actual_exit": 0,
+    "source_head": "8d7727351c0942e372e999960ea0c49ebb1a7a32",
+    "source_manifest_equal": true,
+    "seconds": 168.46412030200008,
+    "raw_sha256": "57c09e71f5dd6928cf5cffe1a6c744c8060b51d5f067ad892a6d1e241cd6cfab"
+  }
+}

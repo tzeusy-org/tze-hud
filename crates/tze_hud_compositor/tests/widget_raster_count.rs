@@ -119,6 +119,13 @@ async fn widget_param_update_rasterizes_only_that_instance() {
         (1, 1)
     );
     assert_eq!(first.widget_rasterized.len(), 2);
+    #[cfg(feature = "dev-mode")]
+    {
+        let work = compositor.take_work_counts().expect("first widget frame");
+        assert_eq!((work.layout, work.raster, work.upload), (0, 2, 2));
+        assert_eq!(work.damage_px, 512 * 256);
+        assert!(work.full_frame);
+    }
 
     // Publish to the gauge only: gauge +1, progress +0.
     publish(&mut scene, "main-gauge", "level", 0.75);
@@ -126,10 +133,63 @@ async fn widget_param_update_rasterizes_only_that_instance() {
     assert_eq!(count(&compositor, "main-gauge"), 2);
     assert_eq!(count(&compositor, "main-progress"), 1);
     assert_eq!(update.widget_rasterized, ["main-gauge"]);
+    #[cfg(feature = "dev-mode")]
+    {
+        let work = compositor.take_work_counts().expect("changed widget frame");
+        assert_eq!((work.layout, work.raster, work.upload), (0, 1, 1));
+        assert_eq!(work.damage_px, work.pixels_damaged);
+        assert!(
+            compositor.take_work_counts().is_none(),
+            "single-frame drain"
+        );
+        // Nothing called the renderer after that drain: there is no synthetic
+        // observation of an idle frame, even though the last image persists.
+        assert!(compositor.take_work_counts().is_none(), "no new frame");
+    }
 
     // Idle frame: nothing is re-rasterized.
     let idle = render(&mut compositor, &mut scene, &mut surface);
     assert_eq!(count(&compositor, "main-gauge"), 2);
     assert_eq!(count(&compositor, "main-progress"), 1);
     assert!(idle.widget_rasterized.is_empty());
+    #[cfg(feature = "dev-mode")]
+    {
+        // This explicitly invoked frame still presents the full image, despite
+        // no new shaping/raster/upload work. It is distinct from no render.
+        let work = compositor
+            .take_work_counts()
+            .expect("actual unchanged frame");
+        assert_eq!((work.layout, work.raster, work.upload), (0, 0, 0));
+        assert_eq!(work.damage_px, 512 * 256);
+
+        // A real raster admission failure must count the entered invocation,
+        // while recording no RGBA submission. Keep the live per-instance and
+        // FrameTelemetry attempt observations independent of upload success.
+        let ledger =
+            tze_hud_resource::ResidentLedger::new(tze_hud_resource::ResidentLedgerLimits {
+                aggregate_bytes: 0,
+                resource_bytes: 0,
+                widget_source_bytes: 0,
+                widget_raster_bytes: 0,
+                font_bytes: 0,
+            });
+        compositor.set_resident_ledger(ledger.clone());
+        publish(&mut scene, "main-gauge", "level", 0.5);
+        let denied = render(&mut compositor, &mut scene, &mut surface);
+        let denied_work = compositor
+            .take_work_counts()
+            .expect("completed denied-raster frame");
+        assert_eq!(
+            (denied_work.layout, denied_work.raster, denied_work.upload),
+            (0, 1, 0)
+        );
+        assert_eq!(count(&compositor, "main-gauge"), 3);
+        assert_eq!(count(&compositor, "main-progress"), 1);
+        assert_eq!(denied.widget_rasterized, ["main-gauge"]);
+        assert_eq!(ledger.snapshot().class_denial_count, 1);
+        assert!(compositor.take_work_counts().is_none());
+        println!(
+            "observed widget frames: first raster/upload=2/2; changed=1/1; unchanged=0/0; admission-denied=1/0"
+        );
+    }
 }

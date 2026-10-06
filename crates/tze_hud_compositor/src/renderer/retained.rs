@@ -3,8 +3,8 @@
 //! It owns a private compositor snapshot and accepts only the bounded
 //! fifty-tile headless scene: one tile's text changes and only that tile (plus
 //! a z-higher translucent overlap, if any) is repainted inside a scissor. Every
-//! other scene stays on the established full-frame renderer. Each frame records
-//! [`WorkCounts`] so tests can see how much was repainted.
+//! other scene stays on the established full-frame renderer. Opt-in dev/test
+//! observations record shaping, widget raster/upload work and repaint area.
 
 use std::collections::BTreeSet;
 use std::time::Instant;
@@ -13,6 +13,7 @@ use wgpu::util::DeviceExt;
 
 use tze_hud_scene::graph::SceneGraph;
 use tze_hud_scene::types::{DragHandleElementKind, NodeData, Rect, SceneId, TextMarkdownNode};
+#[cfg(any(test, feature = "dev-mode"))]
 use tze_hud_telemetry::WorkCounts;
 
 use crate::pipeline::rect_vertices;
@@ -33,6 +34,7 @@ struct PixelRect {
 }
 
 impl PixelRect {
+    #[cfg(any(test, feature = "dev-mode"))]
     fn area(self) -> u64 {
         u64::from(self.width) * u64::from(self.height)
     }
@@ -42,7 +44,19 @@ impl PixelRect {
 #[derive(Default)]
 pub(super) struct RetainedRenderState {
     snapshot: Option<CanonicalSceneSnapshot>,
+    #[cfg(any(test, feature = "dev-mode"))]
     latest_work: Option<WorkCounts>,
+    #[cfg(any(test, feature = "dev-mode"))]
+    frame_start_work: WorkTotals,
+}
+
+/// Cumulative owner counts sampled only at actual headless render boundaries.
+#[cfg(any(test, feature = "dev-mode"))]
+#[derive(Clone, Copy, Default)]
+struct WorkTotals {
+    layout: u64,
+    raster: u64,
+    upload: u64,
 }
 
 #[derive(Clone, PartialEq)]
@@ -114,6 +128,7 @@ impl RetainedRenderState {
 
     /// Work counts are a single-frame drain, not a history: a new frame must
     /// never leave the previous frame's counts available to be misattributed.
+    #[cfg(any(test, feature = "dev-mode"))]
     fn begin_observation_frame(&mut self) {
         self.latest_work = None;
     }
@@ -126,6 +141,42 @@ impl RetainedRenderState {
 }
 
 impl Compositor {
+    #[cfg(any(test, feature = "dev-mode"))]
+    fn current_work_totals(&self) -> WorkTotals {
+        let (raster, upload) = self
+            .widget_renderer
+            .as_ref()
+            .map_or((0, 0), |renderer| renderer.work_totals());
+        WorkTotals {
+            layout: self.text_shape_call_count(),
+            raster,
+            upload,
+        }
+    }
+
+    /// Start once at actual render entry, before retained preparation can fail
+    /// and fall back. No frame invocation means no newly sampled observation.
+    #[cfg(any(test, feature = "dev-mode"))]
+    pub(super) fn begin_headless_work_observation(&mut self) {
+        self.retained_render_state.begin_observation_frame();
+        self.retained_render_state.frame_start_work = self.current_work_totals();
+    }
+
+    #[cfg(any(test, feature = "dev-mode"))]
+    fn record_headless_work(&mut self, tiles: u32, damage_px: u64, full_frame: bool) {
+        let before = self.retained_render_state.frame_start_work;
+        let after = self.current_work_totals();
+        self.retained_render_state.latest_work = Some(WorkCounts {
+            layout: after.layout - before.layout,
+            raster: after.raster - before.raster,
+            upload: after.upload - before.upload,
+            damage_px,
+            tiles_redrawn: tiles,
+            pixels_damaged: damage_px,
+            full_frame,
+        });
+    }
+
     /// Try the retained canonical headless path before falling back to the
     /// ordinary full-frame renderer. `None` always means the caller must run
     /// the existing path.
@@ -134,7 +185,6 @@ impl Compositor {
         scene: &SceneGraph,
         surface: &HeadlessSurface,
     ) -> Option<tze_hud_telemetry::FrameTelemetry> {
-        self.retained_render_state.begin_observation_frame();
         if !self.retained_headless_policy_is_supported() {
             // A full-frame degradation policy can alter visibility or raster
             // semantics. Its submitted pixels are not a retained baseline, so
@@ -151,10 +201,12 @@ impl Compositor {
             return None;
         };
 
-        self.retained_render_state.latest_work = Some(WorkCounts::scoped(
+        #[cfg(any(test, feature = "dev-mode"))]
+        self.record_headless_work(
             change.redraw_tiles.len() as u32,
             change.damage.area(),
-        ));
+            false,
+        );
         self.retained_render_state.snapshot = Some(change.next_snapshot);
         Some(telemetry)
     }
@@ -174,18 +226,21 @@ impl Compositor {
         } else {
             self.retained_render_state.forget_snapshot();
         }
-        self.retained_render_state.latest_work = Some(WorkCounts::full_frame(
+        #[cfg(any(test, feature = "dev-mode"))]
+        self.record_headless_work(
             scene.visible_tiles().len() as u32,
-            width,
-            height,
-        ));
+            u64::from(width) * u64::from(height),
+            true,
+        );
     }
 
-    /// Drain the work counts of the most recent headless frame: a scoped
-    /// repaint of the changed tile(s), or a full-frame repaint.
+    /// Drain actual shaping, widget raster/upload and repaint work from the
+    /// most recent completed headless frame, including failed preparation
+    /// before full fallback. A second drain returns `None`.
     ///
     /// Rust-only dev/test hook; it does not touch scene, gRPC, or protobuf
     /// contracts.
+    #[cfg(any(test, feature = "dev-mode"))]
     pub fn take_work_counts(&mut self) -> Option<WorkCounts> {
         self.retained_render_state.latest_work.take()
     }
@@ -843,7 +898,15 @@ mod tests {
     #[test]
     fn new_observation_clears_prior_frame_work_counts() {
         let mut state = RetainedRenderState {
-            latest_work: Some(WorkCounts::scoped(1, 100)),
+            latest_work: Some(WorkCounts {
+                layout: 1,
+                raster: 2,
+                upload: 1,
+                damage_px: 100,
+                tiles_redrawn: 1,
+                pixels_damaged: 100,
+                full_frame: false,
+            }),
             ..RetainedRenderState::default()
         };
 

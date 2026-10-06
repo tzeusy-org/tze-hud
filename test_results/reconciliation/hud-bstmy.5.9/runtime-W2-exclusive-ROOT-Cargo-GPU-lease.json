@@ -1,0 +1,31 @@
+{
+  "at": "2026-10-06T17:59:25.309873+00:00",
+  "issue": "hud-bstmy.5.9",
+  "worker": "/root/lane_runtime_audit",
+  "head": "75ad0f051dca59d6b39166bdb1d9c627bae9dca3",
+  "exclusive_artifact_target": "/home/orca/orca/projects/tze-hud/target",
+  "High_target_access_allowed": false,
+  "global_GPU_exclusive_owner": "hud-bstmy.5.9",
+  "CARGO_BUILD_JOBS": 1,
+  "PROTOC": "/usr/bin/protoc",
+  "VK_ICD_FILENAMES": "/usr/share/vulkan/icd.d/lvp_icd.json",
+  "HEADLESS_FORCE_SOFTWARE": "1",
+  "TZE_HUD_REQUIRE_GPU": "1",
+  "SKIP_GPU_TESTS": "UNSET",
+  "TZE_HUD_SKIP_GPU_TESTS": "UNSET",
+  "TZE_HUD_PERF_ASSERT": "UNSET normaloff",
+  "RUST_TEST_THREADS": "UNSET defaultparallel",
+  "MemAvailable_KiB": 6120940,
+  "current_ROOT_locks_unheld": [
+    {
+      "path": "/home/orca/orca/projects/tze-hud/target/debug/.cargo-lock",
+      "unlocked": true
+    },
+    {
+      "path": "/home/orca/orca/projects/tze-hud/target/x86_64-pc-windows-gnu/debug/.cargo-lock",
+      "unlocked": true
+    }
+  ],
+  "plan_sha256": "d71e69c8628c8ae3cf6f0f2f87b552d8276e8bc108129c5c22b9e3056c02ef5a",
+  "authorization": "Serial fmtcheck first (fmtfix onlyactualfailure then refreeze before nextgate); requested7focusedselectors eachonce incl runtimecanonical1/overlap2 and compositorreset1/recovery1/idle1/widget explicitdev1 with actualpositive output+defaultstandalone1 ensures no targetskip. Existingdevguard/default17 and appnormalbuilddependencytree/defaultapprelease/runtimeexplicitdevtree, workspacecheck/workspaceALLTARGETClippy-Dwarnings required. ONE finalnormal justci after actualscopedfixes; raw positive observations/all72/default/GPU no skippedadapter/prePERFoff qualified. Use build900/suite300/CI1800 actualnative/groups/fullrawSHA/source541beforeafter; source immutable whilechild active. No fullwipe/assets/newtests/scanner/allfeatures/newbudgets/spec/T7/ownerkind/sourcefreshness rebase. Actual ownedcompile/runtime failure can be fixed afteractualterminal withinaccepted13paths/fixture7 scope, preservefirstfail/raw/source andrefreeze ROOTACK before continuedgates. No duplicatebroadCPU/GPU repeats solely evidence. Actualrelease/allownedPIDs/groups/raw/currentlocks\u2192ROOTACK before normalpush/newPR/finalstrictTWO/currentALLWHOLE; independentexactheadreview/normalqueue required."
+}
