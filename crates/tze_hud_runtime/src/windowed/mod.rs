@@ -2275,6 +2275,12 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
         self.state.cursor_entry.tick = false;
         let wake_source = main_work_source_for_window_event(&event);
         let secondary = displays::secondary_index(&self.state.secondaries, window_id);
+        #[cfg(target_os = "windows")]
+        if let WindowEvent::Resized(size) = &event
+            && self.restore_minimized_overlay(window_id, secondary, *size)
+        {
+            return;
+        }
         match event {
             // ── Close ──────────────────────────────────────────────────────
             WindowEvent::CloseRequested => {

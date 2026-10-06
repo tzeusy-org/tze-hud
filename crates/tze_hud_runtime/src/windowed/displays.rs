@@ -384,8 +384,8 @@ pub(super) fn overlay_window_attributes(title: String, spec: &MonitorSpec) -> Wi
     #[cfg(target_os = "windows")]
     {
         use winit::platform::windows::WindowAttributesExtWindows;
-        // Hidden from the taskbar so the overlay cannot be minimized or
-        // alt-tabbed to; WS_EX_NOREDIRECTIONBITMAP so DWM presents the
+        // Hidden from the taskbar and alt-tab. Shell/display changes can
+        // still minimize it; WS_EX_NOREDIRECTIONBITMAP lets DWM present the
         // swapchain directly with per-pixel alpha.
         attrs
             .with_skip_taskbar(true)
@@ -496,6 +496,90 @@ pub(super) fn overlay_refit(
     (!fitted).then_some((position, size))
 }
 
+/// A minimized overlay needs a no-activate restore, not another budgeted
+/// resize. A matching window needs no work at all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OverlayRecovery {
+    Matched,
+    Restore,
+    Refit((i32, i32), (u32, u32)),
+}
+
+fn overlay_recovery(
+    minimized: bool,
+    outer_position: Option<(i32, i32)>,
+    inner_size: (u32, u32),
+    spec: &MonitorSpec,
+) -> OverlayRecovery {
+    if minimized {
+        OverlayRecovery::Restore
+    } else if let Some((position, size)) = overlay_refit(outer_position, inner_size, spec) {
+        OverlayRecovery::Refit(position, size)
+    } else {
+        OverlayRecovery::Matched
+    }
+}
+
+/// Windows parks minimized windows at this sentinel. Do not mistake a real
+/// monitor at that origin for a minimized window when IsIconic is false.
+#[cfg(any(target_os = "windows", test))]
+fn windows_overlay_minimized(
+    iconic: bool,
+    outer_position: Option<(i32, i32)>,
+    spec: &MonitorSpec,
+) -> bool {
+    iconic || (outer_position == Some((-32000, -32000)) && (spec.x, spec.y) != (-32000, -32000))
+}
+
+/// The caller owns this winit window and runs on its event-loop thread.
+#[cfg(target_os = "windows")]
+fn restore_overlay_window(window: &Window, spec: &MonitorSpec) {
+    use std::ffi::c_void;
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SWP_NOZORDER, SetWindowPos, ShowWindow,
+    };
+    use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+
+    let Ok(handle) = window.window_handle() else {
+        tracing::warn!(overlay = %spec.name, "minimized overlay window handle unavailable");
+        return;
+    };
+    let RawWindowHandle::Win32(handle) = handle.as_raw() else {
+        return;
+    };
+    let (Ok(width), Ok(height)) = (i32::try_from(spec.width), i32::try_from(spec.height)) else {
+        tracing::warn!(overlay = %spec.name, "minimized overlay monitor size is not representable");
+        return;
+    };
+    let hwnd = HWND(handle.hwnd.get() as *mut c_void);
+    // SAFETY: a live HWND owned by this event-loop thread. ShowWindow's BOOL
+    // reports prior visibility, not success. SW_RESTORE (including winit's
+    // set_minimized(false)) activates the window, so it must not be used here.
+    // These undecorated, non-resizable overlays have no frame to add to the
+    // monitor-native rectangle. Keep their existing topmost order and focus.
+    let result = unsafe {
+        let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+        SetWindowPos(
+            hwnd,
+            None,
+            spec.x,
+            spec.y,
+            width,
+            height,
+            SWP_NOACTIVATE | SWP_NOZORDER,
+        )
+    };
+    match result {
+        Ok(()) => {
+            tracing::info!(overlay = %spec.name, "requested minimized overlay restore without activation")
+        }
+        Err(error) => {
+            tracing::warn!(overlay = %spec.name, %error, "minimized overlay restore positioning failed")
+        }
+    }
+}
+
 /// Re-fits allowed per window per [`REFIT_WINDOW`].
 const MAX_REFITS: u32 = 5;
 const REFIT_WINDOW: Duration = Duration::from_secs(10);
@@ -509,6 +593,16 @@ pub(super) struct RefitBudget {
 }
 
 impl RefitBudget {
+    /// Only genuine geometry drift spends the refit budget. Restoring a
+    /// minimized window remains possible even after the budget is exhausted.
+    fn plan(&mut self, recovery: OverlayRecovery, now: Instant) -> Option<OverlayRecovery> {
+        match recovery {
+            OverlayRecovery::Matched => None,
+            OverlayRecovery::Restore => Some(recovery),
+            OverlayRecovery::Refit(..) => self.take(now).then_some(recovery),
+        }
+    }
+
     /// Spend one re-fit at `now` if the budget allows it.
     pub fn take(&mut self, now: Instant) -> bool {
         if self
@@ -694,6 +788,54 @@ impl super::WinitApp {
         }
     }
 
+    /// Consume a minimized resize before it can shrink the scene or surface.
+    /// Ordinary restored resize events still use the existing resize handler.
+    #[cfg(target_os = "windows")]
+    pub(super) fn restore_minimized_overlay(
+        &self,
+        window_id: WindowId,
+        secondary: Option<usize>,
+        reported_size: winit::dpi::PhysicalSize<u32>,
+    ) -> bool {
+        if self.state.effective_mode != crate::window::WindowMode::Overlay
+            || !self.state.config.overlay_auto_size
+        {
+            return false;
+        }
+        let (window, spec) = match secondary {
+            Some(i) => {
+                let display = &self.state.secondaries[i];
+                (&display.window, &display.spec)
+            }
+            None => {
+                let (Some(window), Some(spec)) = (&self.state.window, &self.state.primary_monitor)
+                else {
+                    return false;
+                };
+                if window.id() != window_id {
+                    return false;
+                }
+                (window, spec)
+            }
+        };
+        let size = window.inner_size();
+        let position = window.outer_position().ok().map(|p| (p.x, p.y));
+        let minimized =
+            windows_overlay_minimized(window.is_minimized().unwrap_or(false), position, spec);
+        match overlay_recovery(minimized, position, (size.width, size.height), spec) {
+            OverlayRecovery::Restore => {
+                restore_overlay_window(window, spec);
+                self.state.displays_dirty.store(true, Ordering::Release);
+                true
+            }
+            // Restoring can leave older WM_SIZE events queued. The actual
+            // native rect already matches; do not apply a stale minimized
+            // size to SceneGraph/config or request a surface resize for it.
+            OverlayRecovery::Matched => reported_size != size,
+            OverlayRecovery::Refit(..) => false,
+        }
+    }
+
     /// Pin every overlay window to its monitor's bounds. A topology or DPI
     /// change lets Windows move and resize them (seen: 237x39, and 3862x2182
     /// on a 3840x2160 monitor); nothing else would put them back.
@@ -704,17 +846,21 @@ impl super::WinitApp {
         for (window, spec) in windows {
             let size = window.inner_size();
             let position = window.outer_position().ok().map(|p| (p.x, p.y));
-            let Some(((x, y), (width, height))) =
-                overlay_refit(position, (size.width, size.height), spec)
-            else {
+            #[cfg(target_os = "windows")]
+            let minimized =
+                windows_overlay_minimized(window.is_minimized().unwrap_or(false), position, spec);
+            #[cfg(not(target_os = "windows"))]
+            let minimized = false;
+            let recovery = overlay_recovery(minimized, position, (size.width, size.height), spec);
+            if recovery == OverlayRecovery::Matched {
                 continue;
-            };
+            }
             let budget = self
                 .state
                 .overlay_refits
                 .entry(spec.name.clone())
                 .or_default();
-            if !budget.take(now) {
+            let Some(recovery) = budget.plan(recovery, now) else {
                 tracing::warn!(
                     overlay = %spec.name,
                     width = size.width,
@@ -722,7 +868,12 @@ impl super::WinitApp {
                     "overlay window keeps being resized off its monitor; not re-fitting for now"
                 );
                 continue;
-            }
+            };
+            let OverlayRecovery::Refit((x, y), (width, height)) = recovery else {
+                #[cfg(target_os = "windows")]
+                restore_overlay_window(window, spec);
+                continue;
+            };
             tracing::info!(
                 overlay = %spec.name,
                 from_x = position.map(|p| p.0),
@@ -1329,6 +1480,52 @@ mod tests {
             None,
             "no position reported: the size alone decides"
         );
+        for (iconic, position, size) in [
+            (true, Some((17, -2160)), (3840, 2160)),
+            (true, None, (0, 0)),
+            (false, Some((-32000, -32000)), (237, 39)),
+        ] {
+            assert_eq!(
+                overlay_recovery(
+                    windows_overlay_minimized(iconic, position, &d8),
+                    position,
+                    size,
+                    &d8
+                ),
+                OverlayRecovery::Restore,
+                "minimized windows are restored before geometry refitting"
+            );
+        }
+        assert_eq!(
+            overlay_recovery(false, Some((17, -2160)), (237, 39), &d8),
+            OverlayRecovery::Refit((17, -2160), (3840, 2160)),
+            "a genuine non-minimized small resize still needs a refit"
+        );
+        assert_eq!(
+            overlay_recovery(false, None, (3840, 2160), &d8),
+            OverlayRecovery::Matched
+        );
+        assert_eq!(
+            overlay_recovery(false, Some((17, -2160)), (3840, 2160), &d8),
+            OverlayRecovery::Matched,
+            "the restored native rectangle needs no more work"
+        );
+        let sentinel_monitor = spec("DISPLAY9", -32000, -32000);
+        assert!(!windows_overlay_minimized(
+            false,
+            Some((-32000, -32000)),
+            &sentinel_monitor
+        ));
+        assert_eq!(
+            overlay_recovery(
+                false,
+                Some((-32000, -32000)),
+                (3840, 2160),
+                &sentinel_monitor
+            ),
+            OverlayRecovery::Matched,
+            "a real monitor at the sentinel origin is not minimized"
+        );
     }
 
     #[test]
@@ -1340,6 +1537,37 @@ mod tests {
         }
         assert!(!budget.take(t0 + Duration::from_secs(1)), "budget spent");
         assert!(budget.take(t0 + REFIT_WINDOW), "a new window restores it");
+
+        let d8 = spec("DISPLAY8", 17, -2160);
+        let restore = overlay_recovery(true, Some((-32000, -32000)), (237, 39), &d8);
+        let refit = overlay_recovery(false, Some((17, -2160)), (237, 39), &d8);
+        let matched = overlay_recovery(false, Some((17, -2160)), (3840, 2160), &d8);
+        let mut budget = RefitBudget::default();
+        for i in 0..MAX_REFITS {
+            let now = t0 + Duration::from_millis(u64::from(i));
+            assert_eq!(budget.plan(restore, now), Some(OverlayRecovery::Restore));
+            assert_eq!(budget.plan(matched, now), None);
+            assert_eq!(
+                budget.plan(refit, now),
+                Some(refit),
+                "restores did not spend a refit"
+            );
+        }
+        let exhausted = t0 + Duration::from_secs(1);
+        assert_eq!(budget.plan(refit, exhausted), None);
+        for _ in 0..MAX_REFITS {
+            assert_eq!(
+                budget.plan(restore, exhausted),
+                Some(OverlayRecovery::Restore)
+            );
+        }
+        assert_eq!(budget.plan(matched, exhausted), None);
+        assert_eq!(
+            budget.plan(refit, exhausted),
+            None,
+            "restores did not reset an exhausted budget"
+        );
+        assert_eq!(budget.plan(refit, t0 + REFIT_WINDOW), Some(refit));
     }
 
     #[test]
