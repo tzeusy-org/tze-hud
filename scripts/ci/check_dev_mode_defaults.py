@@ -26,8 +26,10 @@ release binary. Per-package closures are exactly what a `-p P` build unifies.
 `tze_hud_app` (the `tze_hud` release binary) is the shipped artifact and is
 labelled as such. Every other workspace package is checked too, so one that is
 outside the app closure today cannot silently grow a default dev-mode.
-Packages with no lib/bin/example target (the `integration` crate: tests only,
-and it enables dev-mode on purpose) produce nothing shippable and are skipped.
+Packages are checked when they have a production binary or library target
+(bin, lib, rlib, cdylib, dylib, staticlib or proc-macro). Tests-only packages
+(such as `integration`, which enables dev-mode on purpose) and example-only
+packages are skipped.
 Third-party crates are not followed: none defines `dev-mode`.
 """
 import json

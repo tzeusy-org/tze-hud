@@ -28,7 +28,8 @@
 #   dev-mode-guard — cargo-metadata check (no build) that dev-mode is not enabled in the
 #     default-build dependency closure of any workspace package, incl. the shipped
 #     binary (the actual release build runs in windows.yml)
-#   cargo-deny     — advisories + licenses (informational)
+#   cargo-deny     — advisories + licenses + bans + sources (workflow-blocking;
+#     outside the current eight required checks)
 #   test-gpu-pixel-readback — pixel readback on llvmpipe (informational duplicate: the
 #     same pixel_readback tests already run, blocking, inside test-unit via workspace
 #     feature unification of tze_hud_runtime/dev-mode)
@@ -455,7 +456,7 @@ jobs:
   # deny.toml at the repository root.  See hud-1aswu.5 for context.
   #
   # Uses EmbarkStudios/cargo-deny-action for a stable, versioned install.
-  # Pinned to a specific SHA to prevent supply-chain attacks on CI.
+  # The current @v2 reference is a version tag, not a commit SHA.
 
   cargo-deny:
     name: cargo deny (advisories + licenses)
@@ -466,10 +467,7 @@ jobs:
       - name: cargo deny check advisories + licenses
         uses: EmbarkStudios/cargo-deny-action@v2
         with:
-          # Check only the two gates relevant to security and license compliance.
-          # bans and sources are checked implicitly; explicitly scoping prevents
-          # new deny.toml sections from accidentally blocking CI before they are
-          # tuned.
+          # Explicitly check all four gates: advisories, licenses, bans and sources.
           command: check advisories licenses bans sources
           # Log level: warn surfaces yanked-crate and duplicate-version notices
           # without failing the job.
@@ -487,7 +485,7 @@ jobs:
   # in CI (configured via the LLVMPIPE_CI env var in the test harness).
   #
   # To run locally:
-  #   cargo test -p tze_hud_runtime --test pixel_readback --features dev-mode
+  #   just test-gpu
   #
   # This job is INFORMATIONAL only on PRs and does not block merge. It is a
   # pure duplicate: the workspace-wide `cargo test` in test-unit (a required
