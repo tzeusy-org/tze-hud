@@ -11,10 +11,6 @@
 //! - Uses `DashMap` for the same shard-concurrent properties as `DedupIndex`.
 //! - `Clone`-able via the inner `Arc` — cloning the store shares ownership of
 //!   the map (and therefore the byte arcs).  This matches `ResourceStore`.
-//! - GC: when font resources are evicted from the resource store, callers
-//!   should call `remove` to free the bytes.  The compositor's `FontSystem`
-//!   does not release fontdb entries, so eviction at the glyphon layer is out
-//!   of scope for v1.
 
 use std::sync::Arc;
 
@@ -26,8 +22,7 @@ use crate::types::ResourceId;
 
 /// Thread-safe store for raw font bytes, keyed by `ResourceId`.
 ///
-/// Shared between the upload path (writer) and any consumer that needs
-/// the raw bytes (e.g., the compositor when loading fonts into glyphon).
+/// Retains source bytes admitted by the upload path. Inspection is test-only.
 #[derive(Clone, Debug)]
 pub struct FontBytesStore {
     inner: Arc<DashMap<ResourceId, Arc<[u8]>>>,
@@ -77,40 +72,29 @@ impl FontBytesStore {
     /// If an entry already exists for this `ResourceId` (dedup race), the
     /// existing entry is kept and the new bytes are ignored — content-addressed
     /// identity guarantees the bytes are identical.
+    #[cfg(any(test, feature = "test-support"))]
     pub fn insert(&self, resource_id: ResourceId, data: Arc<[u8]>) {
         let _ = self.try_insert(resource_id, data);
     }
 
     /// Retrieve the raw bytes for `resource_id`.
     ///
-    /// Returns `None` if not present (font not yet uploaded, or after eviction).
+    /// Returns `None` if not present (font not yet uploaded).
+    #[cfg(any(test, feature = "test-support"))]
     #[inline]
     pub fn get(&self, resource_id: &ResourceId) -> Option<Arc<[u8]>> {
         self.inner.get(resource_id).map(|e| Arc::clone(e.value()))
     }
 
-    /// Remove bytes for `resource_id` (e.g., on GC eviction).
-    ///
-    /// Returns the removed `Arc<[u8]>` if present.
-    #[inline]
-    pub fn remove(&self, resource_id: &ResourceId) -> Option<Arc<[u8]>> {
-        let value = self.inner.remove(resource_id).map(|(_, v)| v)?;
-        if let Some(ledger) = &self.resident_ledger {
-            ledger.release_evicted(
-                crate::ResidentClass::Font,
-                &crate::AllocationId(format!("font:raw:{resource_id}")),
-            );
-        }
-        Some(value)
-    }
-
     /// Number of font entries currently held.
+    #[cfg(any(test, feature = "test-support"))]
     #[inline]
     pub fn len(&self) -> usize {
         self.inner.len()
     }
 
     /// `true` when no fonts are stored.
+    #[cfg(any(test, feature = "test-support"))]
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.inner.is_empty()
@@ -170,19 +154,6 @@ mod tests {
     fn get_returns_none_for_missing_id() {
         let store = FontBytesStore::new();
         assert!(store.get(&rid(0xFF)).is_none());
-    }
-
-    #[test]
-    fn remove_evicts_entry() {
-        let store = FontBytesStore::new();
-        let id = rid(3);
-        store.insert(id, Arc::from(b"bytes".as_ref()));
-        assert!(!store.is_empty());
-
-        let removed = store.remove(&id);
-        assert!(removed.is_some());
-        assert!(store.is_empty());
-        assert!(store.get(&id).is_none());
     }
 
     #[test]

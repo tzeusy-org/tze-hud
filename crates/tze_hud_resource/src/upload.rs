@@ -27,12 +27,11 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Instant;
 
 use tokio::sync::Mutex;
 
+use crate::FontBytesStore;
 use crate::dedup::{DedupIndex, ResourceRecord};
-use crate::font_bytes_store::FontBytesStore;
 use crate::types::{
     CHUNK_SIZE_LIMIT, INLINE_SIZE_LIMIT, MAX_CONCURRENT_UPLOADS_PER_AGENT, ResourceError,
     ResourceId, ResourceStoreConfig, ResourceStored, ResourceType,
@@ -62,8 +61,6 @@ impl UploadId {
 
 /// State of a single in-flight chunked upload.
 struct InflightUpload {
-    #[allow(dead_code)] // retained for diagnostics/tracing
-    upload_id: UploadId,
     resource_type: ResourceType,
     /// BLAKE3 hash the agent declared in `ResourceUploadStart.expected_hash`.
     expected_hash: [u8; 32],
@@ -76,9 +73,6 @@ struct InflightUpload {
     accumulated_bytes: usize,
     /// Index of the next expected chunk (0-based).
     next_chunk_index: u32,
-    /// Wall-clock time of upload start (for rate limiting accounting).
-    #[allow(dead_code)]
-    started_at: Instant,
     /// Width in pixels (for IMAGE_RGBA8 dimension validation).
     width: u32,
     /// Height in pixels (for IMAGE_RGBA8 dimension validation).
@@ -134,9 +128,8 @@ pub struct ResourceStore {
     agent_uploads: Arc<Mutex<HashMap<String, AgentUploads>>>,
     /// Raw bytes for font resources (FONT_TTF / FONT_OTF).
     ///
-    /// Image resources are excluded — their raw bytes are not needed after
-    /// decode validation.  Font bytes are retained so the compositor can load
-    /// them into glyphon's `FontSystem` at any time after upload.
+    /// Image resources are excluded. Font source bytes remain retained and
+    /// admitted atomically against the resident font ledger.
     font_bytes: FontBytesStore,
     resident_ledger: Option<crate::ResidentLedger>,
 }
@@ -157,15 +150,11 @@ impl ResourceStore {
         config: ResourceStoreConfig,
         resident_ledger: crate::ResidentLedger,
     ) -> Self {
-        let font_bytes = FontBytesStore::new_with_resident_ledger(resident_ledger.clone());
         Self {
-            dedup: DedupIndex::new_with_resident_ledger(
-                resident_ledger.clone(),
-                font_bytes.clone(),
-            ),
+            dedup: DedupIndex::new(),
             config: Arc::new(config),
             agent_uploads: Arc::new(Mutex::new(HashMap::new())),
-            font_bytes,
+            font_bytes: FontBytesStore::new_with_resident_ledger(resident_ledger.clone()),
             resident_ledger: Some(resident_ledger),
         }
     }
@@ -174,14 +163,6 @@ impl ResourceStore {
     #[cfg(any(test, feature = "test-support"))]
     pub fn dedup_index(&self) -> &DedupIndex {
         &self.dedup
-    }
-
-    /// Reference to the font bytes store.
-    ///
-    /// The compositor uses this to retrieve raw font bytes and load them into
-    /// glyphon's `FontSystem` after a `FONT_TTF` / `FONT_OTF` upload completes.
-    pub fn font_bytes(&self) -> &FontBytesStore {
-        &self.font_bytes
     }
 
     /// Configured per-session upload rate limit in bytes/second.
@@ -306,14 +287,12 @@ impl ResourceStore {
         entry.inflight.insert(
             upload_id,
             InflightUpload {
-                upload_id,
                 resource_type: req.resource_type,
                 expected_hash: req.expected_hash,
                 total_size: req.total_size,
                 chunks: Vec::new(),
                 accumulated_bytes: 0,
                 next_chunk_index: 0,
-                started_at: Instant::now(),
                 width: req.width,
                 height: req.height,
             },
