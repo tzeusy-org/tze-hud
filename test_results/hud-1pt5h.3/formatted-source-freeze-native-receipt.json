@@ -1,0 +1,2036 @@
+{
+  "schema": "source-freeze-minimized-overlay-v1",
+  "native_pid": 3813471,
+  "source_head": "740b68b70b3bcbd64c7f330f91ac627de6f42e5b",
+  "baseline": "abd252ebc70c990fa645a9c3ffad4c75ea8aeae7",
+  "owned_changed_paths": [
+    "crates/tze_hud_runtime/src/windowed/displays.rs",
+    "crates/tze_hud_runtime/src/windowed/mod.rs"
+  ],
+  "source_hashes": {
+    ".github/workflows/ci.yml": {
+      "before": "8d1c717c280c66b05a4562b0d5280f826793353574dfa1a1c866148486412fb6",
+      "after": "8d1c717c280c66b05a4562b0d5280f826793353574dfa1a1c866148486412fb6"
+    },
+    ".github/workflows/delete-merged-branches.yml": {
+      "before": "055f3d3f4b22d4a91d00b7c67dc6a3d7e96a8d0a1ad7687ff8cee53352f42ae4",
+      "after": "055f3d3f4b22d4a91d00b7c67dc6a3d7e96a8d0a1ad7687ff8cee53352f42ae4"
+    },
+    ".github/workflows/perf-assert.yml": {
+      "before": "84abb63fbcb245c29d232207b87ffa6bc7f2a758f418b266e36bbf01a261338d",
+      "after": "84abb63fbcb245c29d232207b87ffa6bc7f2a758f418b266e36bbf01a261338d"
+    },
+    ".github/workflows/perf-budget.yml": {
+      "before": "19cc2292c09f66cfcfa106acea61b1e62e03916c42871584e1c0c62024090c19",
+      "after": "19cc2292c09f66cfcfa106acea61b1e62e03916c42871584e1c0c62024090c19"
+    },
+    ".github/workflows/windowed-overlay-perf.yml": {
+      "before": "cef86424e3e14616bc8a42fef319af23090665f0beadb659aa3693c542705c3b",
+      "after": "cef86424e3e14616bc8a42fef319af23090665f0beadb659aa3693c542705c3b"
+    },
+    ".github/workflows/windows.yml": {
+      "before": "39c9712676c5238179ffdcbff2851bb37aba9bb5b121a74e0c47cbc0ea36f27b",
+      "after": "39c9712676c5238179ffdcbff2851bb37aba9bb5b121a74e0c47cbc0ea36f27b"
+    },
+    "Cargo.lock": {
+      "before": "8c4fa6f3af422082e0748c7fd1834c1bc1c22331f9a88cdc6a0067a641e12b85",
+      "after": "8c4fa6f3af422082e0748c7fd1834c1bc1c22331f9a88cdc6a0067a641e12b85"
+    },
+    "Cargo.toml": {
+      "before": "ee0704c7b84c50f04a44be0b6edd82b1eb87cdce513712eb19e5e323283e53e8",
+      "after": "ee0704c7b84c50f04a44be0b6edd82b1eb87cdce513712eb19e5e323283e53e8"
+    },
+    "app/tze_hud_app/Cargo.toml": {
+      "before": "86d5e4be5d24e2f933a3cd94d9631540effe5f7c15daa37b5320ba88cdb34101",
+      "after": "86d5e4be5d24e2f933a3cd94d9631540effe5f7c15daa37b5320ba88cdb34101"
+    },
+    "app/tze_hud_app/build.rs": {
+      "before": "0d172beb82fc783af441a7bce4d74393adf9cc81db430c7561a68c87f7e1b661",
+      "after": "0d172beb82fc783af441a7bce4d74393adf9cc81db430c7561a68c87f7e1b661"
+    },
+    "app/tze_hud_app/src/main.rs": {
+      "before": "01337fb7b6e4785c1c8ed65e6b76dc0d8145ea0f8533c205bd08443c823fe82d",
+      "after": "01337fb7b6e4785c1c8ed65e6b76dc0d8145ea0f8533c205bd08443c823fe82d"
+    },
+    "app/tze_hud_app/tests/benchmark_config_schema.rs": {
+      "before": "3237159602a315fd1e80fa52edee01ba5dd21d9783996e54ff73485e1b99acf3",
+      "after": "3237159602a315fd1e80fa52edee01ba5dd21d9783996e54ff73485e1b99acf3"
+    },
+    "app/tze_hud_app/tests/canonical_config_schema.rs": {
+      "before": "e59ad462c585684e2e5054b6090d995f61a5ae8bc9a0f0bf883b90b61521f918",
+      "after": "e59ad462c585684e2e5054b6090d995f61a5ae8bc9a0f0bf883b90b61521f918"
+    },
+    "app/tze_hud_app/tests/production_boot.rs": {
+      "before": "e1df617c6b3286bfbd7479a0e9a97ba9b5f0f49627871b8442f9fcaef277df88",
+      "after": "e1df617c6b3286bfbd7479a0e9a97ba9b5f0f49627871b8442f9fcaef277df88"
+    },
+    "crates/tze_hud_compositor/Cargo.toml": {
+      "before": "a1acaa6dc297b80b9d2b648f4c57c7e5ef8411343d60ef5d859fc39b7feae2e1",
+      "after": "a1acaa6dc297b80b9d2b648f4c57c7e5ef8411343d60ef5d859fc39b7feae2e1"
+    },
+    "crates/tze_hud_compositor/benches/markdown_cache.rs": {
+      "before": "95491867b57e4c4749d66099bae60a086f1ef1c586f35033f6787201a0c884d8",
+      "after": "95491867b57e4c4749d66099bae60a086f1ef1c586f35033f6787201a0c884d8"
+    },
+    "crates/tze_hud_compositor/benches/overflow_truncate.rs": {
+      "before": "60f97469c8b33f2b389ccb868de14ca7e06c8c2bc74e4e81364f6c880585d228",
+      "after": "60f97469c8b33f2b389ccb868de14ca7e06c8c2bc74e4e81364f6c880585d228"
+    },
+    "crates/tze_hud_compositor/benches/widget_rasterize.rs": {
+      "before": "c7233b742e80830c0a89bd0a5e624a3fb8265c198d9bddebef5aeddd9304b210",
+      "after": "c7233b742e80830c0a89bd0a5e624a3fb8265c198d9bddebef5aeddd9304b210"
+    },
+    "crates/tze_hud_compositor/src/display.rs": {
+      "before": "f991c3866f66a0273b7148686bdddf7ed13391114be4e6d70665b10c281191a9",
+      "after": "f991c3866f66a0273b7148686bdddf7ed13391114be4e6d70665b10c281191a9"
+    },
+    "crates/tze_hud_compositor/src/fonts.rs": {
+      "before": "50dcfa0355316d255400608f421c00200c3e049ac22815ee4017d300df0bd6b2",
+      "after": "50dcfa0355316d255400608f421c00200c3e049ac22815ee4017d300df0bd6b2"
+    },
+    "crates/tze_hud_compositor/src/lib.rs": {
+      "before": "aed7db243fe41c28dd7416ece7447c8064e68727ae71bcdc33c61f0797a69610",
+      "after": "aed7db243fe41c28dd7416ece7447c8064e68727ae71bcdc33c61f0797a69610"
+    },
+    "crates/tze_hud_compositor/src/markdown.rs": {
+      "before": "c7bc53a4f2383763186add8849ce1523fce5e474273b0ca7321b14cfbb8a1ce7",
+      "after": "c7bc53a4f2383763186add8849ce1523fce5e474273b0ca7321b14cfbb8a1ce7"
+    },
+    "crates/tze_hud_compositor/src/overflow.rs": {
+      "before": "ddda80e6166b8084d365e4217a786421556dd6434a264267f88ff4890af20d6f",
+      "after": "ddda80e6166b8084d365e4217a786421556dd6434a264267f88ff4890af20d6f"
+    },
+    "crates/tze_hud_compositor/src/pipeline.rs": {
+      "before": "2b231c0ee5bd98028bcedd9158c56c4985114975755f1b512cb4804611247cf9",
+      "after": "2b231c0ee5bd98028bcedd9158c56c4985114975755f1b512cb4804611247cf9"
+    },
+    "crates/tze_hud_compositor/src/renderer/animation.rs": {
+      "before": "95cf3632aaabad06af8a6506dc940098c6447c92d52417d03506d51d26e77a98",
+      "after": "95cf3632aaabad06af8a6506dc940098c6447c92d52417d03506d51d26e77a98"
+    },
+    "crates/tze_hud_compositor/src/renderer/capture.rs": {
+      "before": "dce940c7cc4a4d0434560da14f3156c0b7a72311f1666b318a15bfc9b7993379",
+      "after": "dce940c7cc4a4d0434560da14f3156c0b7a72311f1666b318a15bfc9b7993379"
+    },
+    "crates/tze_hud_compositor/src/renderer/draw_cmds.rs": {
+      "before": "a262cc51dffb9d4afbc6669800e23ddbf276f11afef0517affea403075f4c11e",
+      "after": "a262cc51dffb9d4afbc6669800e23ddbf276f11afef0517affea403075f4c11e"
+    },
+    "crates/tze_hud_compositor/src/renderer/easing.rs": {
+      "before": "872e6a3c4eeee429118bc1e78ff2bddf9e63fb47cd72a15f36c9d76aca65791c",
+      "after": "872e6a3c4eeee429118bc1e78ff2bddf9e63fb47cd72a15f36c9d76aca65791c"
+    },
+    "crates/tze_hud_compositor/src/renderer/encode_pass.rs": {
+      "before": "89fa376330db2c038ceb0e7d02d91beae2523fdc25ed916e3ba1cee92e1d4763",
+      "after": "89fa376330db2c038ceb0e7d02d91beae2523fdc25ed916e3ba1cee92e1d4763"
+    },
+    "crates/tze_hud_compositor/src/renderer/focus_ring.rs": {
+      "before": "b03a8731a4e42c8fe569b441c1441ccb029cc0b170addd58c6758172806acba1",
+      "after": "b03a8731a4e42c8fe569b441c1441ccb029cc0b170addd58c6758172806acba1"
+    },
+    "crates/tze_hud_compositor/src/renderer/frame.rs": {
+      "before": "260bbc9fd3ba092e3ce2da5fbbada5225b07eb7a9c7679103fc27958503c205f",
+      "after": "260bbc9fd3ba092e3ce2da5fbbada5225b07eb7a9c7679103fc27958503c205f"
+    },
+    "crates/tze_hud_compositor/src/renderer/hit_regions.rs": {
+      "before": "465d72908d732fd024813fe6a046899ae3292c0782bd19898f67e443ee86e10c",
+      "after": "465d72908d732fd024813fe6a046899ae3292c0782bd19898f67e443ee86e10c"
+    },
+    "crates/tze_hud_compositor/src/renderer/icon.rs": {
+      "before": "1a4188fde7a9d2ed433aa875bd8b44ae61f07b8b2df280da3afda261f11a111e",
+      "after": "1a4188fde7a9d2ed433aa875bd8b44ae61f07b8b2df280da3afda261f11a111e"
+    },
+    "crates/tze_hud_compositor/src/renderer/image_cache.rs": {
+      "before": "e3ee77eaab6d2b5ded9e6c87a0af058cd12f3f7a5da99aa0e48110be042fbb37",
+      "after": "e3ee77eaab6d2b5ded9e6c87a0af058cd12f3f7a5da99aa0e48110be042fbb37"
+    },
+    "crates/tze_hud_compositor/src/renderer/mod.rs": {
+      "before": "3c50dbab4614e0b609af6cc6da3975342008259c141141641461597c343b05db",
+      "after": "3c50dbab4614e0b609af6cc6da3975342008259c141141641461597c343b05db"
+    },
+    "crates/tze_hud_compositor/src/renderer/retained.rs": {
+      "before": "86b0146780974aa39d9b5445d5677acc96611baefeaa893b8c26fae464452778",
+      "after": "86b0146780974aa39d9b5445d5677acc96611baefeaa893b8c26fae464452778"
+    },
+    "crates/tze_hud_compositor/src/renderer/safe_mode_overlay.rs": {
+      "before": "f6b1db5a03a19d4d90f9c0bff4370b916a152c2123800ee4d08a3f7fe1d6aea4",
+      "after": "f6b1db5a03a19d4d90f9c0bff4370b916a152c2123800ee4d08a3f7fe1d6aea4"
+    },
+    "crates/tze_hud_compositor/src/renderer/system_card.rs": {
+      "before": "0a2ec36ce096d742216630c7341d1b8f5eb8176cca8834bfad45c14e842b1a20",
+      "after": "0a2ec36ce096d742216630c7341d1b8f5eb8176cca8834bfad45c14e842b1a20"
+    },
+    "crates/tze_hud_compositor/src/renderer/tests/alert_banner.rs": {
+      "before": "e49c9d0298f2171d719708fb9130c3499da89dd73b3909fafc27c7ce731ffc6c",
+      "after": "e49c9d0298f2171d719708fb9130c3499da89dd73b3909fafc27c7ce731ffc6c"
+    },
+    "crates/tze_hud_compositor/src/renderer/tests/composer.rs": {
+      "before": "f559b88ffce9c8b8a147dfd9f4d95e37af4df228b6e0cf966eac5a24c14a4760",
+      "after": "f559b88ffce9c8b8a147dfd9f4d95e37af4df228b6e0cf966eac5a24c14a4760"
+    },
+    "crates/tze_hud_compositor/src/renderer/tests/focus_chrome.rs": {
+      "before": "b26af0cbd4bd94a970fe553098b81aaf09c5b74a0a2c829cd8b61d41831d77fb",
+      "after": "b26af0cbd4bd94a970fe553098b81aaf09c5b74a0a2c829cd8b61d41831d77fb"
+    },
+    "crates/tze_hud_compositor/src/renderer/tests/hit_drag.rs": {
+      "before": "3aae3e78b74f3cfa5c981fc88ea782df9351bf95667b81a25914e0b9d07c9862",
+      "after": "3aae3e78b74f3cfa5c981fc88ea782df9351bf95667b81a25914e0b9d07c9862"
+    },
+    "crates/tze_hud_compositor/src/renderer/tests/idle_gate.rs": {
+      "before": "a66fa23ac1539d5f5cdd4ebf6fa880b2586ce3d9fd070d7fc71140329ec2ea4a",
+      "after": "a66fa23ac1539d5f5cdd4ebf6fa880b2586ce3d9fd070d7fc71140329ec2ea4a"
+    },
+    "crates/tze_hud_compositor/src/renderer/tests/markdown_cache.rs": {
+      "before": "2b20b71ae72def06b410650454013c6a98b51176d83a19c55f187798fb36755c",
+      "after": "2b20b71ae72def06b410650454013c6a98b51176d83a19c55f187798fb36755c"
+    },
+    "crates/tze_hud_compositor/src/renderer/tests/markdown_primer.rs": {
+      "before": "1031821ae76b265a60b17db5e3f1150447924d188d64daaf975815c7f6258c99",
+      "after": "1031821ae76b265a60b17db5e3f1150447924d188d64daaf975815c7f6258c99"
+    },
+    "crates/tze_hud_compositor/src/renderer/tests/mod.rs": {
+      "before": "9447924e8aaf8257f8d019306410cca9723db347b43282e895c92d0ccf3f77bb",
+      "after": "9447924e8aaf8257f8d019306410cca9723db347b43282e895c92d0ccf3f77bb"
+    },
+    "crates/tze_hud_compositor/src/renderer/tests/notification_layout.rs": {
+      "before": "2b63c1ed73956c6ae836331d4f68fe95d1bb8028f734384acbd85e1385f893fe",
+      "after": "2b63c1ed73956c6ae836331d4f68fe95d1bb8028f734384acbd85e1385f893fe"
+    },
+    "crates/tze_hud_compositor/src/renderer/tests/portal_animation.rs": {
+      "before": "6d8979bd353458de9bb2fae74afe7be0872da16e22d86eef5d9a18c9416166cf",
+      "after": "6d8979bd353458de9bb2fae74afe7be0872da16e22d86eef5d9a18c9416166cf"
+    },
+    "crates/tze_hud_compositor/src/renderer/tests/portal_reveal.rs": {
+      "before": "ddd19ab7e79dae38b194fcebb944152d35cfe441664f877b91e1ef0c99dd97d1",
+      "after": "ddd19ab7e79dae38b194fcebb944152d35cfe441664f877b91e1ef0c99dd97d1"
+    },
+    "crates/tze_hud_compositor/src/renderer/tests/retained_image.rs": {
+      "before": "eb33acd59670bcc8ad54b6156dd172dbfd8670697857ef3488d22932018bc2c5",
+      "after": "eb33acd59670bcc8ad54b6156dd172dbfd8670697857ef3488d22932018bc2c5"
+    },
+    "crates/tze_hud_compositor/src/renderer/tests/scroll.rs": {
+      "before": "736b6f96a51008b20ebe577198a7e74296916f46eb92a6e1edade54c7fced55f",
+      "after": "736b6f96a51008b20ebe577198a7e74296916f46eb92a6e1edade54c7fced55f"
+    },
+    "crates/tze_hud_compositor/src/renderer/tests/surface.rs": {
+      "before": "b5b7039a866856a088b9900fb29b53fb020b232dfad6e83862faf168aca52573",
+      "after": "b5b7039a866856a088b9900fb29b53fb020b232dfad6e83862faf168aca52573"
+    },
+    "crates/tze_hud_compositor/src/renderer/tests/text_render.rs": {
+      "before": "4fd24a460a6d57fa371d77d0f6a5edab59fc2ca465dee4cbd97c27f6985fe45c",
+      "after": "4fd24a460a6d57fa371d77d0f6a5edab59fc2ca465dee4cbd97c27f6985fe45c"
+    },
+    "crates/tze_hud_compositor/src/renderer/tests/tile_opacity.rs": {
+      "before": "c183d5235ec0fdb034149ca0229044d99d4b520a9c5355d6a0e56c04c008609a",
+      "after": "c183d5235ec0fdb034149ca0229044d99d4b520a9c5355d6a0e56c04c008609a"
+    },
+    "crates/tze_hud_compositor/src/renderer/tests/tokens.rs": {
+      "before": "289f8a5ee7565da378cb59da36e6ea9023b647876f088e25fa29e64355aa5b5c",
+      "after": "289f8a5ee7565da378cb59da36e6ea9023b647876f088e25fa29e64355aa5b5c"
+    },
+    "crates/tze_hud_compositor/src/renderer/tests/viewer_echo.rs": {
+      "before": "f3afb3a3568e83850a5a5f23931e75360a37201496f9238cf3d1196388c2a944",
+      "after": "f3afb3a3568e83850a5a5f23931e75360a37201496f9238cf3d1196388c2a944"
+    },
+    "crates/tze_hud_compositor/src/renderer/tests/zone_layers.rs": {
+      "before": "506c54ddc718509dcb68a93d06b3ffc32096fc0e560f9bb40b06e36c5133d82a",
+      "after": "506c54ddc718509dcb68a93d06b3ffc32096fc0e560f9bb40b06e36c5133d82a"
+    },
+    "crates/tze_hud_compositor/src/renderer/tests/zone_notification.rs": {
+      "before": "906d9918d6fa0c6a60f1482df3e23687d7728a411725446499d40b3ec14a137c",
+      "after": "906d9918d6fa0c6a60f1482df3e23687d7728a411725446499d40b3ec14a137c"
+    },
+    "crates/tze_hud_compositor/src/renderer/tests/zone_stack.rs": {
+      "before": "bac89e5854315de773e8022af0b467b2431b3e5056f87a059e95acc651f6a112",
+      "after": "bac89e5854315de773e8022af0b467b2431b3e5056f87a059e95acc651f6a112"
+    },
+    "crates/tze_hud_compositor/src/renderer/text.rs": {
+      "before": "8259ba8dc2e0cb1c3fc7a958411103a3cc95fa5f2f8859742e4e6a3925621f56",
+      "after": "8259ba8dc2e0cb1c3fc7a958411103a3cc95fa5f2f8859742e4e6a3925621f56"
+    },
+    "crates/tze_hud_compositor/src/renderer/tile_render.rs": {
+      "before": "053058cea840797d8b2c1dba458e6478f56466f42f699f23f5d744a99a04519f",
+      "after": "053058cea840797d8b2c1dba458e6478f56466f42f699f23f5d744a99a04519f"
+    },
+    "crates/tze_hud_compositor/src/renderer/token_colors.rs": {
+      "before": "5a0c7d53f8c8498dd5a821260fe81139c113ef1e608720fd350fbc4e7e688fcf",
+      "after": "5a0c7d53f8c8498dd5a821260fe81139c113ef1e608720fd350fbc4e7e688fcf"
+    },
+    "crates/tze_hud_compositor/src/renderer/viewer_echo.rs": {
+      "before": "af2acea0a065d0049935e67fe53e205c98e2a61386b1662e945cb6dec2b08dda",
+      "after": "af2acea0a065d0049935e67fe53e205c98e2a61386b1662e945cb6dec2b08dda"
+    },
+    "crates/tze_hud_compositor/src/renderer/widget_geometry.rs": {
+      "before": "22197d47205c04d03a04729e703e6c7781aa295d9c0776ef3677e67df3712881",
+      "after": "22197d47205c04d03a04729e703e6c7781aa295d9c0776ef3677e67df3712881"
+    },
+    "crates/tze_hud_compositor/src/renderer/widgets.rs": {
+      "before": "75e10c7cbbbfe327469c2c3980180616288d08b900d025bdb09f0ba8acc496d8",
+      "after": "75e10c7cbbbfe327469c2c3980180616288d08b900d025bdb09f0ba8acc496d8"
+    },
+    "crates/tze_hud_compositor/src/renderer/zone_render.rs": {
+      "before": "dda4f42a04e474238e5e0727be45bb9e7eaf1d6c76d40cb239c3ad1bb08a51f1",
+      "after": "dda4f42a04e474238e5e0727be45bb9e7eaf1d6c76d40cb239c3ad1bb08a51f1"
+    },
+    "crates/tze_hud_compositor/src/surface.rs": {
+      "before": "1d0dbe84b913a670f95b74e193154ee7c9e7bfbb260035bb123bd2d06ed87021",
+      "after": "1d0dbe84b913a670f95b74e193154ee7c9e7bfbb260035bb123bd2d06ed87021"
+    },
+    "crates/tze_hud_compositor/src/text.rs": {
+      "before": "e850f3c6ed68070c21b4123047b484cc99057eeda7b88fc379f766bb28618000",
+      "after": "e850f3c6ed68070c21b4123047b484cc99057eeda7b88fc379f766bb28618000"
+    },
+    "crates/tze_hud_compositor/src/vertical_flow.rs": {
+      "before": "7e20220a7e485a2ae77e10bf03859e218442f7260f44d590fa6acdc22df7cff3",
+      "after": "7e20220a7e485a2ae77e10bf03859e218442f7260f44d590fa6acdc22df7cff3"
+    },
+    "crates/tze_hud_compositor/src/widget.rs": {
+      "before": "476ace89ef44f1887a2dfc68f8e4e8260d3574c487c2664ad71797cfcd21b34e",
+      "after": "476ace89ef44f1887a2dfc68f8e4e8260d3574c487c2664ad71797cfcd21b34e"
+    },
+    "crates/tze_hud_compositor/tests/common/mod.rs": {
+      "before": "f5a9776a71affb32cdef82a95bc04b81f885bed450372ccf546bd00a3ef01cb7",
+      "after": "f5a9776a71affb32cdef82a95bc04b81f885bed450372ccf546bd00a3ef01cb7"
+    },
+    "crates/tze_hud_compositor/tests/common/pixels.rs": {
+      "before": "8e76062c78a9c6731b4d8bcdf46097ae094bb85d59fd03c4c2076ac0b2f4cea7",
+      "after": "8e76062c78a9c6731b4d8bcdf46097ae094bb85d59fd03c4c2076ac0b2f4cea7"
+    },
+    "crates/tze_hud_compositor/tests/gauge_binding_rendering.rs": {
+      "before": "1c4f1e4467bfd0794cc509e9772e4a785409ce438370acd71a5cd6dc9267501d",
+      "after": "1c4f1e4467bfd0794cc509e9772e4a785409ce438370acd71a5cd6dc9267501d"
+    },
+    "crates/tze_hud_compositor/tests/gpu_canary.rs": {
+      "before": "b74b1d70a2eee1f12b4c031ee38500bbfcf119ff6c7cb56472c1b7c133f45e08",
+      "after": "b74b1d70a2eee1f12b4c031ee38500bbfcf119ff6c7cb56472c1b7c133f45e08"
+    },
+    "crates/tze_hud_compositor/tests/widget_raster_count.rs": {
+      "before": "80fc5e26cf672b15b674774d836bc7d28b0b8b6f6ab73a666ab00538aa8be432",
+      "after": "80fc5e26cf672b15b674774d836bc7d28b0b8b6f6ab73a666ab00538aa8be432"
+    },
+    "crates/tze_hud_compositor/tests/widget_rasterize_budget.rs": {
+      "before": "4509c3ef4c245bee0b3ca87974164381595e1efe293e5cb4a29524bd1f1f8df1",
+      "after": "4509c3ef4c245bee0b3ca87974164381595e1efe293e5cb4a29524bd1f1f8df1"
+    },
+    "crates/tze_hud_compositor/tests/widget_transition.rs": {
+      "before": "8a1f5f82956309fb1ad8fee91465d349519a697d31c77ef2f02d973976427ecc",
+      "after": "8a1f5f82956309fb1ad8fee91465d349519a697d31c77ef2f02d973976427ecc"
+    },
+    "crates/tze_hud_compositor/tests/zone_rendering.rs": {
+      "before": "befda072ad0af9650e2f400e2356ea8b06822b4b9254473c46b08b9d57b60edb",
+      "after": "befda072ad0af9650e2f400e2356ea8b06822b4b9254473c46b08b9d57b60edb"
+    },
+    "crates/tze_hud_config/Cargo.toml": {
+      "before": "2b38686625cb578e9e2dc675dcce755b38569cd32f941556dd461e7f90a7d49d",
+      "after": "2b38686625cb578e9e2dc675dcce755b38569cd32f941556dd461e7f90a7d49d"
+    },
+    "crates/tze_hud_config/src/agents_file.rs": {
+      "before": "046a7fc3a526cf8c6351ac6a1184d7830ff5ccce655d51229c9df7989bbb55ce",
+      "after": "046a7fc3a526cf8c6351ac6a1184d7830ff5ccce655d51229c9df7989bbb55ce"
+    },
+    "crates/tze_hud_config/src/allow.rs": {
+      "before": "d11afaa24ed02ed6464e6ae4fb659c2bda507074c41e64dbebc8df0fd0407a2b",
+      "after": "d11afaa24ed02ed6464e6ae4fb659c2bda507074c41e64dbebc8df0fd0407a2b"
+    },
+    "crates/tze_hud_config/src/config_write.rs": {
+      "before": "49f62e6639daece2262237726da02c81aaeb38a6c0a3dcab1f49a0f9211352fa",
+      "after": "49f62e6639daece2262237726da02c81aaeb38a6c0a3dcab1f49a0f9211352fa"
+    },
+    "crates/tze_hud_config/src/displays.rs": {
+      "before": "690991d5c41ba211cb41d0e16af62be2c742093b4244eafc35f1353f1048ae87",
+      "after": "690991d5c41ba211cb41d0e16af62be2c742093b4244eafc35f1353f1048ae87"
+    },
+    "crates/tze_hud_config/src/lib.rs": {
+      "before": "889e6940a8191cb0abec7804344df8459e12256ee40b9eb891d81cc1e3b59cd1",
+      "after": "889e6940a8191cb0abec7804344df8459e12256ee40b9eb891d81cc1e3b59cd1"
+    },
+    "crates/tze_hud_config/src/loader.rs": {
+      "before": "28a7ed66e9c9e9dee1dd5be20b9de3598fe64b3add976a40102a36f54e805330",
+      "after": "28a7ed66e9c9e9dee1dd5be20b9de3598fe64b3add976a40102a36f54e805330"
+    },
+    "crates/tze_hud_config/src/policy_builder.rs": {
+      "before": "ad951fbe0f930043aa60993b3f9a4e6dd73bccf1663b5feb3c9badfe273093ca",
+      "after": "ad951fbe0f930043aa60993b3f9a4e6dd73bccf1663b5feb3c9badfe273093ca"
+    },
+    "crates/tze_hud_config/src/portal_tokens.rs": {
+      "before": "2c64c3abfd32c7ab55e92b54c07cbc28509935217bd3e0c1f1497329050ee51c",
+      "after": "2c64c3abfd32c7ab55e92b54c07cbc28509935217bd3e0c1f1497329050ee51c"
+    },
+    "crates/tze_hud_config/src/raw.rs": {
+      "before": "657a3c3646632a35843f2b2131264f273679b120560afd2df53eabad6f47dee3",
+      "after": "657a3c3646632a35843f2b2131264f273679b120560afd2df53eabad6f47dee3"
+    },
+    "crates/tze_hud_config/src/resolver.rs": {
+      "before": "afc98f5c15f5938fdb58398e2f623a78ffe33ca74649e290155d476efcf943dd",
+      "after": "afc98f5c15f5938fdb58398e2f623a78ffe33ca74649e290155d476efcf943dd"
+    },
+    "crates/tze_hud_config/src/runtime_widget_assets.rs": {
+      "before": "6aaa2ca92d723486aeb2dcd3ff432dcbe25a9467b0e54add398f6ae97b83b76a",
+      "after": "6aaa2ca92d723486aeb2dcd3ff432dcbe25a9467b0e54add398f6ae97b83b76a"
+    },
+    "crates/tze_hud_config/src/tests.rs": {
+      "before": "ee3d84762899085af34886514c706d2be0662185eb7a32b930da439271fcf496",
+      "after": "ee3d84762899085af34886514c706d2be0662185eb7a32b930da439271fcf496"
+    },
+    "crates/tze_hud_config/src/themes.rs": {
+      "before": "701ebd34be9ca09852b6365b9dcaab120b91e796aadfa69314e00d96cb8bf880",
+      "after": "701ebd34be9ca09852b6365b9dcaab120b91e796aadfa69314e00d96cb8bf880"
+    },
+    "crates/tze_hud_config/src/tokens.rs": {
+      "before": "2f39bf45b196fdb0cee1ac30abba404843351702e976ea986afd7d6f3d7495bd",
+      "after": "2f39bf45b196fdb0cee1ac30abba404843351702e976ea986afd7d6f3d7495bd"
+    },
+    "crates/tze_hud_config/src/validate.rs": {
+      "before": "6b3e670b06af9aeff3ea48fde378342e922bbac180296da9e58e95b38ab58c3a",
+      "after": "6b3e670b06af9aeff3ea48fde378342e922bbac180296da9e58e95b38ab58c3a"
+    },
+    "crates/tze_hud_config/src/widgets.rs": {
+      "before": "27bc22a36db8f38607ae839d20de9aff42ba843f989cfefe35b686eaa8698085",
+      "after": "27bc22a36db8f38607ae839d20de9aff42ba843f989cfefe35b686eaa8698085"
+    },
+    "crates/tze_hud_config/src/zones.rs": {
+      "before": "bb8d442c2919d1ea5c8f4234e1f43bd6e0e8f6b0e15864baf86cb3289ebc0087",
+      "after": "bb8d442c2919d1ea5c8f4234e1f43bd6e0e8f6b0e15864baf86cb3289ebc0087"
+    },
+    "crates/tze_hud_input/Cargo.toml": {
+      "before": "89952520036b0856c2a366b148866b93c345a00abcc9ff1c4b11df97efcbe4ac",
+      "after": "89952520036b0856c2a366b148866b93c345a00abcc9ff1c4b11df97efcbe4ac"
+    },
+    "crates/tze_hud_input/src/batching.rs": {
+      "before": "2104548791b9bc10da87daeeb0a0fd512078cc2a508ac6a232cdf88c015d26f4",
+      "after": "2104548791b9bc10da87daeeb0a0fd512078cc2a508ac6a232cdf88c015d26f4"
+    },
+    "crates/tze_hud_input/src/capture.rs": {
+      "before": "ffb1e3ee3d434357f447c5f49d5a27a864e103dbf5de50256b08795193a60247",
+      "after": "ffb1e3ee3d434357f447c5f49d5a27a864e103dbf5de50256b08795193a60247"
+    },
+    "crates/tze_hud_input/src/coalescing.rs": {
+      "before": "6ad0cb6bdbc78062fedbeeca0dd8912c5a4efe1b5a6d0e5c51b450f7c22fb39c",
+      "after": "6ad0cb6bdbc78062fedbeeca0dd8912c5a4efe1b5a6d0e5c51b450f7c22fb39c"
+    },
+    "crates/tze_hud_input/src/command.rs": {
+      "before": "2c3272f48981386c3f07a5952c5c7b79bae3e45cb42e886a25594fde5a334ef0",
+      "after": "2c3272f48981386c3f07a5952c5c7b79bae3e45cb42e886a25594fde5a334ef0"
+    },
+    "crates/tze_hud_input/src/composer_draft.rs": {
+      "before": "298b3cdde90f8aa198101fd504b2b88a21cfce0f67b2aeec0f8adc30c3623edc",
+      "after": "298b3cdde90f8aa198101fd504b2b88a21cfce0f67b2aeec0f8adc30c3623edc"
+    },
+    "crates/tze_hud_input/src/drag.rs": {
+      "before": "a66a9d8fdb7c3279c42ca71666cbfb4aac28a35a780d8aa7e98f72be2764029a",
+      "after": "a66a9d8fdb7c3279c42ca71666cbfb4aac28a35a780d8aa7e98f72be2764029a"
+    },
+    "crates/tze_hud_input/src/envelope.rs": {
+      "before": "4993474afd03d2b6a79b05b69b91022556e950ef6efaccc4f390cf525e3fb23c",
+      "after": "4993474afd03d2b6a79b05b69b91022556e950ef6efaccc4f390cf525e3fb23c"
+    },
+    "crates/tze_hud_input/src/event_queue.rs": {
+      "before": "26016e02bbf8c48357d610847a95c5b242e5008da904000f6f41d7f6da79be8f",
+      "after": "26016e02bbf8c48357d610847a95c5b242e5008da904000f6f41d7f6da79be8f"
+    },
+    "crates/tze_hud_input/src/events.rs": {
+      "before": "d719e21556da463e1d3fc1d56975428d8b326fb2e5b66992ffc5e9b12f8966f1",
+      "after": "d719e21556da463e1d3fc1d56975428d8b326fb2e5b66992ffc5e9b12f8966f1"
+    },
+    "crates/tze_hud_input/src/focus.rs": {
+      "before": "a59eb197f5243c4d060c526dcae646c0bd1fe8987d2ccf6078b83c7cf569b820",
+      "after": "a59eb197f5243c4d060c526dcae646c0bd1fe8987d2ccf6078b83c7cf569b820"
+    },
+    "crates/tze_hud_input/src/focus_tree.rs": {
+      "before": "3b8da74af7037be1b5135ffeb8b9e6b767e2beb8912f7f6b18c6106d7a7843b1",
+      "after": "3b8da74af7037be1b5135ffeb8b9e6b767e2beb8912f7f6b18c6106d7a7843b1"
+    },
+    "crates/tze_hud_input/src/hit_test.rs": {
+      "before": "9b83c8a0a7f83604696a4a513c55b7a9cdfaa8a56ddfad47ac36d5c0e2183fdb",
+      "after": "9b83c8a0a7f83604696a4a513c55b7a9cdfaa8a56ddfad47ac36d5c0e2183fdb"
+    },
+    "crates/tze_hud_input/src/jump_to_latest.rs": {
+      "before": "fb20e2c473667c9ba11476f03f16e850d9b6a80fe118ea6774da8f18a473ec20",
+      "after": "fb20e2c473667c9ba11476f03f16e850d9b6a80fe118ea6774da8f18a473ec20"
+    },
+    "crates/tze_hud_input/src/keyboard.rs": {
+      "before": "03b33042a629a45535e9dd92f17964ff60f3cbcc7c32f21a38a0ecbb8680c1c8",
+      "after": "03b33042a629a45535e9dd92f17964ff60f3cbcc7c32f21a38a0ecbb8680c1c8"
+    },
+    "crates/tze_hud_input/src/lib.rs": {
+      "before": "c9a7efc695dc68e71bbcba77afe64432129b0ef156a50906438e3112dcebba13",
+      "after": "c9a7efc695dc68e71bbcba77afe64432129b0ef156a50906438e3112dcebba13"
+    },
+    "crates/tze_hud_input/src/local_feedback.rs": {
+      "before": "35098395db711060bd5981a77ec403fbe84f124defa6367bfb4dfa7259259b39",
+      "after": "35098395db711060bd5981a77ec403fbe84f124defa6367bfb4dfa7259259b39"
+    },
+    "crates/tze_hud_input/src/pointer.rs": {
+      "before": "ffc69cbab766829617023d384cc7afd36f90b26423a30b38cd254892edec219a",
+      "after": "ffc69cbab766829617023d384cc7afd36f90b26423a30b38cd254892edec219a"
+    },
+    "crates/tze_hud_input/src/portal_resize.rs": {
+      "before": "238146de2a7562937de06175a34bb604fdd263c162b5d0d85ffe11dcbdde6f03",
+      "after": "238146de2a7562937de06175a34bb604fdd263c162b5d0d85ffe11dcbdde6f03"
+    },
+    "crates/tze_hud_input/src/scroll.rs": {
+      "before": "c5f1a3983c019e8ed3fd2b0dc7d72706a32ce8e3efbac6d0c7c1eb1f04fbaf18",
+      "after": "c5f1a3983c019e8ed3fd2b0dc7d72706a32ce8e3efbac6d0c7c1eb1f04fbaf18"
+    },
+    "crates/tze_hud_input/src/scroll_indicator.rs": {
+      "before": "69392e3e339d457f8fa6d1a62ee3e412db3786c3716fb520fa953b001a47f009",
+      "after": "69392e3e339d457f8fa6d1a62ee3e412db3786c3716fb520fa953b001a47f009"
+    },
+    "crates/tze_hud_mcp/Cargo.toml": {
+      "before": "859774239d17b61fd694c12426d3d838f36368ca5a5dc523fbfb9c8ad90099a1",
+      "after": "859774239d17b61fd694c12426d3d838f36368ca5a5dc523fbfb9c8ad90099a1"
+    },
+    "crates/tze_hud_mcp/src/error.rs": {
+      "before": "a5c75ff2bbf80bd1e43c45c11e102673c3f39747146d0fd9d314e740753e2c87",
+      "after": "a5c75ff2bbf80bd1e43c45c11e102673c3f39747146d0fd9d314e740753e2c87"
+    },
+    "crates/tze_hud_mcp/src/lib.rs": {
+      "before": "f8691ab2905a66f1fe6d4208152e4db9b7d29e2b8f7221a00a36149a9fbc3e76",
+      "after": "f8691ab2905a66f1fe6d4208152e4db9b7d29e2b8f7221a00a36149a9fbc3e76"
+    },
+    "crates/tze_hud_mcp/src/portal_op.rs": {
+      "before": "a7b83236ee5b8a1851d30c21922367815a05f4b92876738a7220a139b6728746",
+      "after": "a7b83236ee5b8a1851d30c21922367815a05f4b92876738a7220a139b6728746"
+    },
+    "crates/tze_hud_mcp/src/schema.rs": {
+      "before": "fcb54ba33dc7c785f860d90a109433674051d64ce0bcf2ea14f76a80c3582455",
+      "after": "fcb54ba33dc7c785f860d90a109433674051d64ce0bcf2ea14f76a80c3582455"
+    },
+    "crates/tze_hud_mcp/src/server.rs": {
+      "before": "00c1a858b02e306c166719dcb7e017bb893930deaf84729d7a6886c78eb70505",
+      "after": "00c1a858b02e306c166719dcb7e017bb893930deaf84729d7a6886c78eb70505"
+    },
+    "crates/tze_hud_mcp/src/server/tests.rs": {
+      "before": "1283e9c6eea83948bc8f4ed7ff38d2636f133bf238ba3d03dc41ee597456793a",
+      "after": "1283e9c6eea83948bc8f4ed7ff38d2636f133bf238ba3d03dc41ee597456793a"
+    },
+    "crates/tze_hud_mcp/src/tools.rs": {
+      "before": "546dc1ca4c9b95291928b69f1ea585770604bc629ee190009f7b81cbe7f69ccd",
+      "after": "546dc1ca4c9b95291928b69f1ea585770604bc629ee190009f7b81cbe7f69ccd"
+    },
+    "crates/tze_hud_mcp/src/types.rs": {
+      "before": "d72bd6cf5a0e6c1a98996caee7757e2aa85aa729897d49afb08b53cf26dfaaca",
+      "after": "d72bd6cf5a0e6c1a98996caee7757e2aa85aa729897d49afb08b53cf26dfaaca"
+    },
+    "crates/tze_hud_projection/Cargo.toml": {
+      "before": "1a969d6029e79a2e87750a0121aa4c7e95c0f1903f6eee0b45e665cef932b8d2",
+      "after": "1a969d6029e79a2e87750a0121aa4c7e95c0f1903f6eee0b45e665cef932b8d2"
+    },
+    "crates/tze_hud_projection/src/authority.rs": {
+      "before": "45b77e8402c7a220174defa74fbeafb61bd84bcf3c96e32106d482724dd0ed0a",
+      "after": "45b77e8402c7a220174defa74fbeafb61bd84bcf3c96e32106d482724dd0ed0a"
+    },
+    "crates/tze_hud_projection/src/contract.rs": {
+      "before": "a5c04921724e958ea27bddbe37b836d83d93837cc876a7734a6aac7d75dba5e3",
+      "after": "a5c04921724e958ea27bddbe37b836d83d93837cc876a7734a6aac7d75dba5e3"
+    },
+    "crates/tze_hud_projection/src/hub.rs": {
+      "before": "7b1edd787cf2696825e12f4b104dc430d09426ceb56fb1190b8fea21eead37bf",
+      "after": "7b1edd787cf2696825e12f4b104dc430d09426ceb56fb1190b8fea21eead37bf"
+    },
+    "crates/tze_hud_projection/src/lib.rs": {
+      "before": "3c423fd0ff22879db29e131361f5a543b5c74968b341592520a45280da191cf7",
+      "after": "3c423fd0ff22879db29e131361f5a543b5c74968b341592520a45280da191cf7"
+    },
+    "crates/tze_hud_projection/src/portal_cadence.rs": {
+      "before": "7e816d04e24240c7ab825223e4d0b75879476dcb964b6f3311bbc3f0e742eb84",
+      "after": "7e816d04e24240c7ab825223e4d0b75879476dcb964b6f3311bbc3f0e742eb84"
+    },
+    "crates/tze_hud_projection/src/resident_grpc.rs": {
+      "before": "a5ea1b02268a3a9a7c0964f13c314627a5b7d4b4839934996cc9e3788c5f9f16",
+      "after": "a5ea1b02268a3a9a7c0964f13c314627a5b7d4b4839934996cc9e3788c5f9f16"
+    },
+    "crates/tze_hud_projection/src/tests/mod.rs": {
+      "before": "b7e433cefd599ae4b37e72db7393b95b8d1d802dad42d6ad12a888da54eaef38",
+      "after": "b7e433cefd599ae4b37e72db7393b95b8d1d802dad42d6ad12a888da54eaef38"
+    },
+    "crates/tze_hud_protocol/Cargo.toml": {
+      "before": "04f9f7a26451cfa20cac511bbcbf8c5160da092c62d04412a7701e9ac1cd7321",
+      "after": "04f9f7a26451cfa20cac511bbcbf8c5160da092c62d04412a7701e9ac1cd7321"
+    },
+    "crates/tze_hud_protocol/build.rs": {
+      "before": "c128cf3632da43d58e66ffb7cee7e574303a286613922ac11eb434e7a126d37c",
+      "after": "c128cf3632da43d58e66ffb7cee7e574303a286613922ac11eb434e7a126d37c"
+    },
+    "crates/tze_hud_protocol/src/auth.rs": {
+      "before": "41b8d5f72907be4a388412c4bce0e23d34259f39bb59bf3775bd98b397cc8b99",
+      "after": "41b8d5f72907be4a388412c4bce0e23d34259f39bb59bf3775bd98b397cc8b99"
+    },
+    "crates/tze_hud_protocol/src/convert.rs": {
+      "before": "371a33aed85b29873650f421ce8c6893ccef658410bf9a2fde1698a268ef2328",
+      "after": "371a33aed85b29873650f421ce8c6893ccef658410bf9a2fde1698a268ef2328"
+    },
+    "crates/tze_hud_protocol/src/dedup.rs": {
+      "before": "ddb9ff1119119a865a2ad7382f076271e6bba6f4598c1fa4f31e608bc78c8357",
+      "after": "ddb9ff1119119a865a2ad7382f076271e6bba6f4598c1fa4f31e608bc78c8357"
+    },
+    "crates/tze_hud_protocol/src/lease.rs": {
+      "before": "cc6c9a4d645a5e9127d7e0cdce0fedf5ef2a729703ee6d15c07b2fd9ddac0c85",
+      "after": "cc6c9a4d645a5e9127d7e0cdce0fedf5ef2a729703ee6d15c07b2fd9ddac0c85"
+    },
+    "crates/tze_hud_protocol/src/lib.rs": {
+      "before": "5d745e80482cc57af9a00a14c847e575bf2d8b7f215c55cfda114940538fef56",
+      "after": "5d745e80482cc57af9a00a14c847e575bf2d8b7f215c55cfda114940538fef56"
+    },
+    "crates/tze_hud_protocol/src/session.rs": {
+      "before": "b92f08e5815a7dc6bca331a6cc4026ce4223bb8a9cf95cdd83d2f1ad803c9dff",
+      "after": "b92f08e5815a7dc6bca331a6cc4026ce4223bb8a9cf95cdd83d2f1ad803c9dff"
+    },
+    "crates/tze_hud_protocol/src/session_server/budget_gate.rs": {
+      "before": "ebb518e2040eccaf9f97bd67829491a170caae3a91cd88a07171a10cb6b30fea",
+      "after": "ebb518e2040eccaf9f97bd67829491a170caae3a91cd88a07171a10cb6b30fea"
+    },
+    "crates/tze_hud_protocol/src/session_server/degradation_notice_bus.rs": {
+      "before": "5e15cb96b8f5cbcaa36aa69be7f6bf97b789ce2bd1071edbd49879a3057992df",
+      "after": "5e15cb96b8f5cbcaa36aa69be7f6bf97b789ce2bd1071edbd49879a3057992df"
+    },
+    "crates/tze_hud_protocol/src/session_server/element_persist.rs": {
+      "before": "003afbfd7cce7c792db9c446268c77b7631a5551bc6e5b1c6180576705fb07d3",
+      "after": "003afbfd7cce7c792db9c446268c77b7631a5551bc6e5b1c6180576705fb07d3"
+    },
+    "crates/tze_hud_protocol/src/session_server/freeze_queue.rs": {
+      "before": "8f024ee820fa97fba803e15c4a48adf81b2a524b087a8f086eb29d6effe7fea7",
+      "after": "8f024ee820fa97fba803e15c4a48adf81b2a524b087a8f086eb29d6effe7fea7"
+    },
+    "crates/tze_hud_protocol/src/session_server/handshake.rs": {
+      "before": "984ce30d327293a0480daabedf2ed7538f975d650fcc185c0037b97009b9f634",
+      "after": "984ce30d327293a0480daabedf2ed7538f975d650fcc185c0037b97009b9f634"
+    },
+    "crates/tze_hud_protocol/src/session_server/input_event_bus.rs": {
+      "before": "9d991f31b92611ac5ee06568b136c48157d30ab5dd974a407ed3768636d897a4",
+      "after": "9d991f31b92611ac5ee06568b136c48157d30ab5dd974a407ed3768636d897a4"
+    },
+    "crates/tze_hud_protocol/src/session_server/lease_expiry_bus.rs": {
+      "before": "abc70d38a59c9221265a326f9b09b80b69ebf3b42f6c900b1fddf6875eedfc35",
+      "after": "abc70d38a59c9221265a326f9b09b80b69ebf3b42f6c900b1fddf6875eedfc35"
+    },
+    "crates/tze_hud_protocol/src/session_server/lifecycle.rs": {
+      "before": "ab0d9cc5d631e5863f44dd688f7f4bc2fbaf779a8dbab6d2616b774855bce59a",
+      "after": "ab0d9cc5d631e5863f44dd688f7f4bc2fbaf779a8dbab6d2616b774855bce59a"
+    },
+    "crates/tze_hud_protocol/src/session_server/mod.rs": {
+      "before": "488258d25df3bb20ccf5bcd3ee461bdd80890929d350a646998348f73655f017",
+      "after": "488258d25df3bb20ccf5bcd3ee461bdd80890929d350a646998348f73655f017"
+    },
+    "crates/tze_hud_protocol/src/session_server/mutations.rs": {
+      "before": "d82bebe50fc6fd917de9382ffe34a6529d2b457a064ef6fbf80ba3200d23eac9",
+      "after": "d82bebe50fc6fd917de9382ffe34a6529d2b457a064ef6fbf80ba3200d23eac9"
+    },
+    "crates/tze_hud_protocol/src/session_server/service.rs": {
+      "before": "eef0fa5eeaafc7d21e96733ffd70540b7fb4b3ebe5b6c039f13194de86511294",
+      "after": "eef0fa5eeaafc7d21e96733ffd70540b7fb4b3ebe5b6c039f13194de86511294"
+    },
+    "crates/tze_hud_protocol/src/session_server/stream_session.rs": {
+      "before": "4ce3768997b01065a1f2842ed76d2b6ee1f3fed40b4543df10dc54b5151e1e2b",
+      "after": "4ce3768997b01065a1f2842ed76d2b6ee1f3fed40b4543df10dc54b5151e1e2b"
+    },
+    "crates/tze_hud_protocol/src/session_server/tests/allow.rs": {
+      "before": "90b1eb2e17813d21eb0c93a10a8a009f25d79bfa645eefd88f173d2715f818cb",
+      "after": "90b1eb2e17813d21eb0c93a10a8a009f25d79bfa645eefd88f173d2715f818cb"
+    },
+    "crates/tze_hud_protocol/src/session_server/tests/events.rs": {
+      "before": "a25f8ad53676577c02a3e76cd9abfde48c90c8b294a13b3a5f56c7ebf1056e9d",
+      "after": "a25f8ad53676577c02a3e76cd9abfde48c90c8b294a13b3a5f56c7ebf1056e9d"
+    },
+    "crates/tze_hud_protocol/src/session_server/tests/invariants.rs": {
+      "before": "031e804e0e371f38d0ad9f10542ddf6a7910f5ef7c307b5a3ff5f2bc32314f3e",
+      "after": "031e804e0e371f38d0ad9f10542ddf6a7910f5ef7c307b5a3ff5f2bc32314f3e"
+    },
+    "crates/tze_hud_protocol/src/session_server/tests/lease.rs": {
+      "before": "ded0d696d58bfbb56db6f2b01736fe09eeb8d59d36a1105861fe1a94586c35ab",
+      "after": "ded0d696d58bfbb56db6f2b01736fe09eeb8d59d36a1105861fe1a94586c35ab"
+    },
+    "crates/tze_hud_protocol/src/session_server/tests/lifecycle_verbs.rs": {
+      "before": "b5d015da11e6b56bb5c4932487c25311b97ee5f44464d873770785813db32a82",
+      "after": "b5d015da11e6b56bb5c4932487c25311b97ee5f44464d873770785813db32a82"
+    },
+    "crates/tze_hud_protocol/src/session_server/tests/mod.rs": {
+      "before": "3bba3b0fb6a7da3e06d744b8e309c31d3d32dd2cfe0fda1c70344076a348a8ee",
+      "after": "3bba3b0fb6a7da3e06d744b8e309c31d3d32dd2cfe0fda1c70344076a348a8ee"
+    },
+    "crates/tze_hud_protocol/src/session_server/tests/portal.rs": {
+      "before": "201c2d71fef13fb07e7b29b2865da28e0235a5717114c0e6d41b61eb4a0802ef",
+      "after": "201c2d71fef13fb07e7b29b2865da28e0235a5717114c0e6d41b61eb4a0802ef"
+    },
+    "crates/tze_hud_protocol/src/session_server/tests/render_wake.rs": {
+      "before": "e92f38c6b4951b6fb24c518e7d0b9faee192058a3b24180852baf3cd41ff87b3",
+      "after": "e92f38c6b4951b6fb24c518e7d0b9faee192058a3b24180852baf3cd41ff87b3"
+    },
+    "crates/tze_hud_protocol/src/session_server/tests/resource_upload.rs": {
+      "before": "92a7f7d8a64475701ac41e9d1a1dfd4889df7ba4bc81173101bf4af4887d7aad",
+      "after": "92a7f7d8a64475701ac41e9d1a1dfd4889df7ba4bc81173101bf4af4887d7aad"
+    },
+    "crates/tze_hud_protocol/src/session_server/tests/resume.rs": {
+      "before": "f8fcff4928d734a03ac65f7d59e51d16ee32b69c8c891955f83f24220f29a821",
+      "after": "f8fcff4928d734a03ac65f7d59e51d16ee32b69c8c891955f83f24220f29a821"
+    },
+    "crates/tze_hud_protocol/src/session_server/tests/safe_mode.rs": {
+      "before": "db2f66f0891d1d6bea231e93b87e1294ef69b36eed7779021483adafbd1f7101",
+      "after": "db2f66f0891d1d6bea231e93b87e1294ef69b36eed7779021483adafbd1f7101"
+    },
+    "crates/tze_hud_protocol/src/session_server/tests/scene_mutations.rs": {
+      "before": "31d1eba15170478baa999dd3c2fadf347b9d9f4a55928b74e5bb843c123e1da7",
+      "after": "31d1eba15170478baa999dd3c2fadf347b9d9f4a55928b74e5bb843c123e1da7"
+    },
+    "crates/tze_hud_protocol/src/session_server/tests/session_handshake.rs": {
+      "before": "1c806646e8d1d627ce60ca2932ff3469f3d0d98fe16ec8c145fecbcefd9c6b2c",
+      "after": "1c806646e8d1d627ce60ca2932ff3469f3d0d98fe16ec8c145fecbcefd9c6b2c"
+    },
+    "crates/tze_hud_protocol/src/session_server/tests/timing.rs": {
+      "before": "e647be45dc103077794c1a2e94d3cf1b7d6e7cc65e9c42b367304ba4d9ef4c35",
+      "after": "e647be45dc103077794c1a2e94d3cf1b7d6e7cc65e9c42b367304ba4d9ef4c35"
+    },
+    "crates/tze_hud_protocol/src/session_server/tests/widget_publish.rs": {
+      "before": "4f7284559ab4096423151b8f6d6c0118ec21d07acf65223357e25cbd961f5dd5",
+      "after": "4f7284559ab4096423151b8f6d6c0118ec21d07acf65223357e25cbd961f5dd5"
+    },
+    "crates/tze_hud_protocol/src/session_server/tests/zones.rs": {
+      "before": "4c088a5b4fe4623b0f25687ff673735e6eafda9e3ff52b8133e8c49da1191570",
+      "after": "4c088a5b4fe4623b0f25687ff673735e6eafda9e3ff52b8133e8c49da1191570"
+    },
+    "crates/tze_hud_protocol/src/session_server/traffic.rs": {
+      "before": "53c20d6eaf35f2c5ca980a161b6e677c64541943b7e0ed937d086a1f85a7653f",
+      "after": "53c20d6eaf35f2c5ca980a161b6e677c64541943b7e0ed937d086a1f85a7653f"
+    },
+    "crates/tze_hud_protocol/src/session_server/upload.rs": {
+      "before": "552a640b764f237a649303882b569d50f2e6f99fe050ad7d9fdc5b891043ad5d",
+      "after": "552a640b764f237a649303882b569d50f2e6f99fe050ad7d9fdc5b891043ad5d"
+    },
+    "crates/tze_hud_protocol/src/session_server/verbs.rs": {
+      "before": "9524e2ac1b648e96971622e921d6135cd8d150d4b27e2db9ca8c7f5f2b3cea64",
+      "after": "9524e2ac1b648e96971622e921d6135cd8d150d4b27e2db9ca8c7f5f2b3cea64"
+    },
+    "crates/tze_hud_protocol/src/subscriptions.rs": {
+      "before": "0f958fa95f97e2e0a25335f022390b494194d41d5f2ed2a497f53dac61042167",
+      "after": "0f958fa95f97e2e0a25335f022390b494194d41d5f2ed2a497f53dac61042167"
+    },
+    "crates/tze_hud_protocol/src/token.rs": {
+      "before": "01bd8d2fd64a731bc982924e850675e04a512fef30be81510b38a66142e2fef8",
+      "after": "01bd8d2fd64a731bc982924e850675e04a512fef30be81510b38a66142e2fef8"
+    },
+    "crates/tze_hud_protocol/tests/capability_gating.rs": {
+      "before": "f1d17405099fa8f09bddf3d9c037b890dbf6ea47a45e9c502d4f2fcd5f629729",
+      "after": "f1d17405099fa8f09bddf3d9c037b890dbf6ea47a45e9c502d4f2fcd5f629729"
+    },
+    "crates/tze_hud_protocol/tests/event_delivery.rs": {
+      "before": "4ca59b8a1d0fff52925db20554a251e77d4dc34f3d08841db331feb5ac102165",
+      "after": "4ca59b8a1d0fff52925db20554a251e77d4dc34f3d08841db331feb5ac102165"
+    },
+    "crates/tze_hud_protocol/tests/fuzz_protocol_boundary.rs": {
+      "before": "61d8319ab97d6ab1a6720bcb45026730178791728f20933ed5c73ca49c8039af",
+      "after": "61d8319ab97d6ab1a6720bcb45026730178791728f20933ed5c73ca49c8039af"
+    },
+    "crates/tze_hud_protocol/tests/lease_governance.rs": {
+      "before": "b638f3e131f432c8fdc95c75d788f62843adb96add2cee6bba48de115d06d9fc",
+      "after": "b638f3e131f432c8fdc95c75d788f62843adb96add2cee6bba48de115d06d9fc"
+    },
+    "crates/tze_hud_protocol/tests/subscriptions.rs": {
+      "before": "42622e90d41a1b887e78c7b32c71c159219126829984758d461da2d999c31c6b",
+      "after": "42622e90d41a1b887e78c7b32c71c159219126829984758d461da2d999c31c6b"
+    },
+    "crates/tze_hud_resource/Cargo.toml": {
+      "before": "1af4df320932317c3aa6b5e098a1e3032c895020743c2d6f507e43f57e334bde",
+      "after": "1af4df320932317c3aa6b5e098a1e3032c895020743c2d6f507e43f57e334bde"
+    },
+    "crates/tze_hud_resource/src/debug.rs": {
+      "before": "696b69515dc46052c83899bf54ad9e263652b745525f134cf71c235d0b0855fa",
+      "after": "696b69515dc46052c83899bf54ad9e263652b745525f134cf71c235d0b0855fa"
+    },
+    "crates/tze_hud_resource/src/dedup.rs": {
+      "before": "68a97d0aedbca0e19ca321934d4d23825db7742690754d25b3cae22d953b80fb",
+      "after": "68a97d0aedbca0e19ca321934d4d23825db7742690754d25b3cae22d953b80fb"
+    },
+    "crates/tze_hud_resource/src/font_bytes_store.rs": {
+      "before": "bb655a255f0068521d149c8df6750d668e9f4e4414ebaf69544406f3e4b3d71e",
+      "after": "bb655a255f0068521d149c8df6750d668e9f4e4414ebaf69544406f3e4b3d71e"
+    },
+    "crates/tze_hud_resource/src/lib.rs": {
+      "before": "9e624cac8c946b667163aacdd4ca978feaabaea0820580268dde41029109e9d5",
+      "after": "9e624cac8c946b667163aacdd4ca978feaabaea0820580268dde41029109e9d5"
+    },
+    "crates/tze_hud_resource/src/resident_ledger.rs": {
+      "before": "896e1c98fa094c93f9d77c861bb2daa45bbd58678e2099cfe739fd3ee17ec286",
+      "after": "896e1c98fa094c93f9d77c861bb2daa45bbd58678e2099cfe739fd3ee17ec286"
+    },
+    "crates/tze_hud_resource/src/runtime_widget_store.rs": {
+      "before": "fe190bd895c21f0d27eb887428bf3f748fab1575d5b5103fd08ff19353bf6695",
+      "after": "fe190bd895c21f0d27eb887428bf3f748fab1575d5b5103fd08ff19353bf6695"
+    },
+    "crates/tze_hud_resource/src/types.rs": {
+      "before": "d9bda31b846f6a1aa53cdff3a130ccaf1d9eeba8940a26c178d0f0a3a5920c8c",
+      "after": "d9bda31b846f6a1aa53cdff3a130ccaf1d9eeba8940a26c178d0f0a3a5920c8c"
+    },
+    "crates/tze_hud_resource/src/upload.rs": {
+      "before": "767e19381994555f46eb849368320f4d1279f6b2451c1216a6b1446c242744d6",
+      "after": "767e19381994555f46eb849368320f4d1279f6b2451c1216a6b1446c242744d6"
+    },
+    "crates/tze_hud_resource/src/validation.rs": {
+      "before": "5c2e25ae8123dfff2d5ee432211bc12dfad3993eb704d457856729e4767b6466",
+      "after": "5c2e25ae8123dfff2d5ee432211bc12dfad3993eb704d457856729e4767b6466"
+    },
+    "crates/tze_hud_resource/tests/store_behavior.rs": {
+      "before": "d43670c592ba189432f6f0ead65cb1304f64b25fcc88898677b7c6805a938295",
+      "after": "d43670c592ba189432f6f0ead65cb1304f64b25fcc88898677b7c6805a938295"
+    },
+    "crates/tze_hud_runtime/Cargo.toml": {
+      "before": "126c9065982dcff2ab67394809e78a3b5a1d41a98a6d8464a263c193114618a6",
+      "after": "126c9065982dcff2ab67394809e78a3b5a1d41a98a6d8464a263c193114618a6"
+    },
+    "crates/tze_hud_runtime/src/channels.rs": {
+      "before": "be05c14c028450967f3c519fa7153654f0d021a848da667457f9f7cc138e2d7e",
+      "after": "be05c14c028450967f3c519fa7153654f0d021a848da667457f9f7cc138e2d7e"
+    },
+    "crates/tze_hud_runtime/src/degradation.rs": {
+      "before": "3f052adeaa39f4d4121bf59942a07f9e28a8d386f8fb7989464fd22d9c5652bc",
+      "after": "3f052adeaa39f4d4121bf59942a07f9e28a8d386f8fb7989464fd22d9c5652bc"
+    },
+    "crates/tze_hud_runtime/src/diag.rs": {
+      "before": "d8ff0247a18476c036ff8648f294db38a8156162a887f54354ab7581852ab0ac",
+      "after": "d8ff0247a18476c036ff8648f294db38a8156162a887f54354ab7581852ab0ac"
+    },
+    "crates/tze_hud_runtime/src/element_store.rs": {
+      "before": "188c1c688a07271bd4773b858fc512c1ef3a74dce78b5ba3222a2603b5cb075d",
+      "after": "188c1c688a07271bd4773b858fc512c1ef3a74dce78b5ba3222a2603b5cb075d"
+    },
+    "crates/tze_hud_runtime/src/firewall.rs": {
+      "before": "0d923d227d2e7381d31fde931d2a2bd4efa009b6a6e5fa7a1b64f69428d235c3",
+      "after": "0d923d227d2e7381d31fde931d2a2bd4efa009b6a6e5fa7a1b64f69428d235c3"
+    },
+    "crates/tze_hud_runtime/src/firewall/remote.rs": {
+      "before": "fefe9bb8356d84f7e917e2abf128c7780708ce80976efc1a26f3373c80508589",
+      "after": "fefe9bb8356d84f7e917e2abf128c7780708ce80976efc1a26f3373c80508589"
+    },
+    "crates/tze_hud_runtime/src/firewall/remote/windows.rs": {
+      "before": "c538d8ada659ab92640b6d039cf1598e1ee0dd360cd06a068f94d0a03384f03a",
+      "after": "c538d8ada659ab92640b6d039cf1598e1ee0dd360cd06a068f94d0a03384f03a"
+    },
+    "crates/tze_hud_runtime/src/headless.rs": {
+      "before": "073c31640005549e5683c3d684ce6e300d9f17d3f5dc87ecacf2e56da8242751",
+      "after": "073c31640005549e5683c3d684ce6e300d9f17d3f5dc87ecacf2e56da8242751"
+    },
+    "crates/tze_hud_runtime/src/http.rs": {
+      "before": "c04b211f8e8f56ff4a072c8b03d733978967f1a3a069493de61e0198860b9cd2",
+      "after": "c04b211f8e8f56ff4a072c8b03d733978967f1a3a069493de61e0198860b9cd2"
+    },
+    "crates/tze_hud_runtime/src/idle_efficiency.rs": {
+      "before": "df4219a1f1f5ea68783b0077a8c7b06bacf2393bfd00bc3ce116e09bc1889ad0",
+      "after": "df4219a1f1f5ea68783b0077a8c7b06bacf2393bfd00bc3ce116e09bc1889ad0"
+    },
+    "crates/tze_hud_runtime/src/lib.rs": {
+      "before": "49dcb439153d20a574c50cb53188e5a7b91db52986a859461d306963f0e4cd79",
+      "after": "49dcb439153d20a574c50cb53188e5a7b91db52986a859461d306963f0e4cd79"
+    },
+    "crates/tze_hud_runtime/src/mcp.rs": {
+      "before": "5453e89bd0303932f23f243c12fa5b8e73002dc0c526f3b39a8e16652fdbbe09",
+      "after": "5453e89bd0303932f23f243c12fa5b8e73002dc0c526f3b39a8e16652fdbbe09"
+    },
+    "crates/tze_hud_runtime/src/mutation_budget_bridge.rs": {
+      "before": "dac9c39d0801598101fe164bef7b1fcc7e11c430a1b5813694de3cceda8ca786",
+      "after": "dac9c39d0801598101fe164bef7b1fcc7e11c430a1b5813694de3cceda8ca786"
+    },
+    "crates/tze_hud_runtime/src/net_addrs.rs": {
+      "before": "75e75eb3266f50254c391686e6324b5c5d2c0d6ccab2dfee0ab61d8e42069f64",
+      "after": "75e75eb3266f50254c391686e6324b5c5d2c0d6ccab2dfee0ab61d8e42069f64"
+    },
+    "crates/tze_hud_runtime/src/operator/handoff.rs": {
+      "before": "df55c192983dacbb90eccb5f4acd4e3c814ac1df7bcef618b03db7b42517396d",
+      "after": "df55c192983dacbb90eccb5f4acd4e3c814ac1df7bcef618b03db7b42517396d"
+    },
+    "crates/tze_hud_runtime/src/operator/install.rs": {
+      "before": "a8b785218051e12e1ba149cffac791f6a99c8d3c7ac5f1b4d5044956db274f13",
+      "after": "a8b785218051e12e1ba149cffac791f6a99c8d3c7ac5f1b4d5044956db274f13"
+    },
+    "crates/tze_hud_runtime/src/operator/logs.rs": {
+      "before": "3b1ce23096ef532d48103e943af1f9080375e246bfd12c2c22347132358e06fc",
+      "after": "3b1ce23096ef532d48103e943af1f9080375e246bfd12c2c22347132358e06fc"
+    },
+    "crates/tze_hud_runtime/src/operator/mod.rs": {
+      "before": "3ec4bee5e1eca16c584f23c3c5a6ec680c21c5aa09019558fc92850223686939",
+      "after": "3ec4bee5e1eca16c584f23c3c5a6ec680c21c5aa09019558fc92850223686939"
+    },
+    "crates/tze_hud_runtime/src/operator/screenshot.rs": {
+      "before": "4968d4129679a7df11dcd86f9ffacd8a17da418cc118bf7654a182ace09730fa",
+      "after": "4968d4129679a7df11dcd86f9ffacd8a17da418cc118bf7654a182ace09730fa"
+    },
+    "crates/tze_hud_runtime/src/operator/status.rs": {
+      "before": "9c9456ecb9e063d7f93e707dbb967e0b211d6afc7f500d8a9d90d604196409d8",
+      "after": "9c9456ecb9e063d7f93e707dbb967e0b211d6afc7f500d8a9d90d604196409d8"
+    },
+    "crates/tze_hud_runtime/src/operator/update.rs": {
+      "before": "e4f813bb72651512537375a99aba1c1f4ccbd641b4aa7079f02093908501f1ca",
+      "after": "e4f813bb72651512537375a99aba1c1f4ccbd641b4aa7079f02093908501f1ca"
+    },
+    "crates/tze_hud_runtime/src/pairing.rs": {
+      "before": "18e7e6e6f0441ccfa146819256518376509372a4b1513e731948e2b5142bdad1",
+      "after": "18e7e6e6f0441ccfa146819256518376509372a4b1513e731948e2b5142bdad1"
+    },
+    "crates/tze_hud_runtime/src/pipeline.rs": {
+      "before": "27b404b7875d0ae7f1a4d22d9e3db4f49d0f9381ffcaedf8fd1a6351981f88ea",
+      "after": "27b404b7875d0ae7f1a4d22d9e3db4f49d0f9381ffcaedf8fd1a6351981f88ea"
+    },
+    "crates/tze_hud_runtime/src/portal_projection_driver.rs": {
+      "before": "9f4a657a565a725da38860487f50941628ea7c6a07a530962f85feecfbc35a21",
+      "after": "9f4a657a565a725da38860487f50941628ea7c6a07a530962f85feecfbc35a21"
+    },
+    "crates/tze_hud_runtime/src/portal_tokens.rs": {
+      "before": "a0903ed0650b19628fc3ee540c11697f312b305ea89084e705558d3c3b333b27",
+      "after": "a0903ed0650b19628fc3ee540c11697f312b305ea89084e705558d3c3b333b27"
+    },
+    "crates/tze_hud_runtime/src/runtime_context.rs": {
+      "before": "826fc470c4e65ca6eaa4a03caf7e0b5814c82ab811b8c40836df2da67f7563a4",
+      "after": "826fc470c4e65ca6eaa4a03caf7e0b5814c82ab811b8c40836df2da67f7563a4"
+    },
+    "crates/tze_hud_runtime/src/scene_startup.rs": {
+      "before": "bd5e349de1079d0a83ee1f23dc4583705f6cecc050a8bb4cba8ec05da5976ee6",
+      "after": "bd5e349de1079d0a83ee1f23dc4583705f6cecc050a8bb4cba8ec05da5976ee6"
+    },
+    "crates/tze_hud_runtime/src/shell/chrome.rs": {
+      "before": "e0d8811d906fc1a368e344ac388880f179ce85c46fbf74417e8debb14c5c116b",
+      "after": "e0d8811d906fc1a368e344ac388880f179ce85c46fbf74417e8debb14c5c116b"
+    },
+    "crates/tze_hud_runtime/src/shell/freeze.rs": {
+      "before": "f3138312c0d8453aecadf6e1de82dd0b58f5e873e376d6a7d005bda8d34bdcf6",
+      "after": "f3138312c0d8453aecadf6e1de82dd0b58f5e873e376d6a7d005bda8d34bdcf6"
+    },
+    "crates/tze_hud_runtime/src/shell/mod.rs": {
+      "before": "1dec5f7f8a47d936a2073d2b71873792fea4c5048514dc91669061bba2da35e1",
+      "after": "1dec5f7f8a47d936a2073d2b71873792fea4c5048514dc91669061bba2da35e1"
+    },
+    "crates/tze_hud_runtime/src/shell/safe_mode.rs": {
+      "before": "b8eefd7c10313e848f0346f9c7bb8047082a5eac0b391806dce382fdb08434c4",
+      "after": "b8eefd7c10313e848f0346f9c7bb8047082a5eac0b391806dce382fdb08434c4"
+    },
+    "crates/tze_hud_runtime/src/shell/system_card.rs": {
+      "before": "f0684f96f85968c1ca6e14c14732b96cdb0eae4fc23888ae44fadcda3f018a03",
+      "after": "f0684f96f85968c1ca6e14c14732b96cdb0eae4fc23888ae44fadcda3f018a03"
+    },
+    "crates/tze_hud_runtime/src/test_support.rs": {
+      "before": "0b761b52a716cea069ef06c6df6803db38c7ab8083abb3cb8675f072284d14f4",
+      "after": "0b761b52a716cea069ef06c6df6803db38c7ab8083abb3cb8675f072284d14f4"
+    },
+    "crates/tze_hud_runtime/src/threads.rs": {
+      "before": "c3fdc0ccf6b841efd63a294925a59044a2aa30af482c95c62a0c2f03f58d9e78",
+      "after": "c3fdc0ccf6b841efd63a294925a59044a2aa30af482c95c62a0c2f03f58d9e78"
+    },
+    "crates/tze_hud_runtime/src/widget_hover.rs": {
+      "before": "63a0d36da5170fab30a701a50389327e1f7f90eaf8db53a1e00a28d76f4cea5d",
+      "after": "63a0d36da5170fab30a701a50389327e1f7f90eaf8db53a1e00a28d76f4cea5d"
+    },
+    "crates/tze_hud_runtime/src/widget_runtime_registration.rs": {
+      "before": "d6fbac30a6641c3877f21a57611b80e8ff6e2c6a06ad90115b5e83dd7e712c00",
+      "after": "d6fbac30a6641c3877f21a57611b80e8ff6e2c6a06ad90115b5e83dd7e712c00"
+    },
+    "crates/tze_hud_runtime/src/widget_startup.rs": {
+      "before": "7cd76ee43732deb241f7c8c4cca2e0fe53c90708b699ff13f4f13afc58fb2b99",
+      "after": "7cd76ee43732deb241f7c8c4cca2e0fe53c90708b699ff13f4f13afc58fb2b99"
+    },
+    "crates/tze_hud_runtime/src/window.rs": {
+      "before": "2130935ab9bfe6d47e1e3962b1ae8f123b52cf32c9684962e7b76425d40c2bf7",
+      "after": "2130935ab9bfe6d47e1e3962b1ae8f123b52cf32c9684962e7b76425d40c2bf7"
+    },
+    "crates/tze_hud_runtime/src/windowed/config.rs": {
+      "before": "7dae53a83b6ed1a3a61589658dc172a0c4eb40367ac30544f964cd1d2c6093c3",
+      "after": "7dae53a83b6ed1a3a61589658dc172a0c4eb40367ac30544f964cd1d2c6093c3"
+    },
+    "crates/tze_hud_runtime/src/windowed/displays.rs": {
+      "before": "694f91bf699145c7e716c68d04912c6cb26e54b09fac2b51fdeb81aa2c27648e",
+      "after": "1fe81e31f559a464089e43570f3d80a5db1c19a4d30cdac56cfa718d6c48d0f7"
+    },
+    "crates/tze_hud_runtime/src/windowed/event_loop_harness.rs": {
+      "before": "79106b76f77692a3eec145406535a951703683b1cb393f8db5edb4ffa90a873d",
+      "after": "79106b76f77692a3eec145406535a951703683b1cb393f8db5edb4ffa90a873d"
+    },
+    "crates/tze_hud_runtime/src/windowed/global_hotkey.rs": {
+      "before": "11311acb6c8a98488a2955101c99d0f5d867dc4f9a8f64b26e03d2cfd2756838",
+      "after": "11311acb6c8a98488a2955101c99d0f5d867dc4f9a8f64b26e03d2cfd2756838"
+    },
+    "crates/tze_hud_runtime/src/windowed/hittest.rs": {
+      "before": "59733eea2562708f8d2e263384d3dea0b9accf8f8555f12f213ab97820623101",
+      "after": "59733eea2562708f8d2e263384d3dea0b9accf8f8555f12f213ab97820623101"
+    },
+    "crates/tze_hud_runtime/src/windowed/input_dispatch.rs": {
+      "before": "9f6e9dd7729a01c9fd83d1642988518e04c47d0c39a4996f8007f4e09333b9ec",
+      "after": "9f6e9dd7729a01c9fd83d1642988518e04c47d0c39a4996f8007f4e09333b9ec"
+    },
+    "crates/tze_hud_runtime/src/windowed/keyboard.rs": {
+      "before": "dfbe4199c4d15ae073b4905b042ab0ba4e1b474c4d6a39feec3df988d37de727",
+      "after": "dfbe4199c4d15ae073b4905b042ab0ba4e1b474c4d6a39feec3df988d37de727"
+    },
+    "crates/tze_hud_runtime/src/windowed/lifecycle.rs": {
+      "before": "ef232f643b01b9d24656a8d030bca65f11a0c9597516b4fb1a77e078f5330375",
+      "after": "ef232f643b01b9d24656a8d030bca65f11a0c9597516b4fb1a77e078f5330375"
+    },
+    "crates/tze_hud_runtime/src/windowed/mod.rs": {
+      "before": "2c7817ba8dabc7fa7f31f7e8ba1f0f8b40e0364ad89020b6fa8d5deaa9af9747",
+      "after": "d6565b1c9612ffdaa73d7e7e336b1a877946c89b13a509b67875dcc8416f4e2a"
+    },
+    "crates/tze_hud_runtime/src/windowed/monitor_identity.rs": {
+      "before": "7941b9677f74d8e3df11ac114f3ee9d10365fd78095e02b27e518c8b24c10a2b",
+      "after": "7941b9677f74d8e3df11ac114f3ee9d10365fd78095e02b27e518c8b24c10a2b"
+    },
+    "crates/tze_hud_runtime/src/windowed/network.rs": {
+      "before": "6a7666ff409a959b855fe25c60067da9a297d1b01d945397e9759c3174a38a43",
+      "after": "6a7666ff409a959b855fe25c60067da9a297d1b01d945397e9759c3174a38a43"
+    },
+    "crates/tze_hud_runtime/src/windowed/portal.rs": {
+      "before": "69dbf0fff57aa3792fe3b283faab96411cfb176140982830477cb99f8ae7ecb7",
+      "after": "69dbf0fff57aa3792fe3b283faab96411cfb176140982830477cb99f8ae7ecb7"
+    },
+    "crates/tze_hud_runtime/src/windowed/safe_mode_toggle.rs": {
+      "before": "397090905c91d3d7cbd6a26f08ad338f3f63b3830cf342c55dbbb7ca292a5c59",
+      "after": "397090905c91d3d7cbd6a26f08ad338f3f63b3830cf342c55dbbb7ca292a5c59"
+    },
+    "crates/tze_hud_runtime/src/windowed/test_support.rs": {
+      "before": "77e707f5d0fa36cfa55aa4b9c14da74083ed8c6b521555dd3d083a1f3b612b7d",
+      "after": "77e707f5d0fa36cfa55aa4b9c14da74083ed8c6b521555dd3d083a1f3b612b7d"
+    },
+    "crates/tze_hud_runtime/src/windowed/wake.rs": {
+      "before": "a914f2a34d935082e2ce7f4063d7e7703ae134b3c3139298f9bf3d9cddd2cb26",
+      "after": "a914f2a34d935082e2ce7f4063d7e7703ae134b3c3139298f9bf3d9cddd2cb26"
+    },
+    "crates/tze_hud_runtime/src/windowed/widgets.rs": {
+      "before": "f7a1cc62a89d6b010b5b088226e761b3771c4e9fef634348cef62613a9301257",
+      "after": "f7a1cc62a89d6b010b5b088226e761b3771c4e9fef634348cef62613a9301257"
+    },
+    "crates/tze_hud_runtime/tests/idle_efficiency_counters.rs": {
+      "before": "4806a3cc5103d0b45291f6e70117df2b3ace2a335a5ea3e9e2cbe342515e3b3f",
+      "after": "4806a3cc5103d0b45291f6e70117df2b3ace2a335a5ea3e9e2cbe342515e3b3f"
+    },
+    "crates/tze_hud_runtime/tests/pixel_helpers.rs": {
+      "before": "9df6f0c5e0e66a8bd4306437e64c35524cad9161da315ed3f3748fc963fbd788",
+      "after": "9df6f0c5e0e66a8bd4306437e64c35524cad9161da315ed3f3748fc963fbd788"
+    },
+    "crates/tze_hud_runtime/tests/pixel_readback.rs": {
+      "before": "df60ecb26d0b838458d2323d7530125f78a471ff6129494c283fa4fb007be759",
+      "after": "df60ecb26d0b838458d2323d7530125f78a471ff6129494c283fa4fb007be759"
+    },
+    "crates/tze_hud_runtime/tests/present_ack.rs": {
+      "before": "5ccd73868e904376fbb1fae091482a7c3f535277d1aa377d5210973742a8fc42",
+      "after": "5ccd73868e904376fbb1fae091482a7c3f535277d1aa377d5210973742a8fc42"
+    },
+    "crates/tze_hud_scene/Cargo.toml": {
+      "before": "70b969c040da5ff8b47eda80cc9eb5b722df6c7233beb2b2b3dd6e3e7c5c6afb",
+      "after": "70b969c040da5ff8b47eda80cc9eb5b722df6c7233beb2b2b3dd6e3e7c5c6afb"
+    },
+    "crates/tze_hud_scene/benches/hit_test.rs": {
+      "before": "fcb64bed8ed585230b05d8c9abf907febbed0db62f435ed557f17f40a26c7439",
+      "after": "fcb64bed8ed585230b05d8c9abf907febbed0db62f435ed557f17f40a26c7439"
+    },
+    "crates/tze_hud_scene/benches/snapshot.rs": {
+      "before": "4160eb13af6624defb19a6e40b4ec23081aa5557eff3774916447de6750f5368",
+      "after": "4160eb13af6624defb19a6e40b4ec23081aa5557eff3774916447de6750f5368"
+    },
+    "crates/tze_hud_scene/src/clock.rs": {
+      "before": "57c057760e0145175352d193bcd577e15b080022142dfdd1535040a5a95d1d7c",
+      "after": "57c057760e0145175352d193bcd577e15b080022142dfdd1535040a5a95d1d7c"
+    },
+    "crates/tze_hud_scene/src/config/agents.rs": {
+      "before": "2c50c7755c4ca5c46afc86ed0127c3c426597954597dfdb836745235d26618f2",
+      "after": "2c50c7755c4ca5c46afc86ed0127c3c426597954597dfdb836745235d26618f2"
+    },
+    "crates/tze_hud_scene/src/config/hotkey.rs": {
+      "before": "b076b7e0f081f9fe93d1ae92dfdd35309f52fb6bc201e2aa8a6b2cf23a3bc012",
+      "after": "b076b7e0f081f9fe93d1ae92dfdd35309f52fb6bc201e2aa8a6b2cf23a3bc012"
+    },
+    "crates/tze_hud_scene/src/config/mod.rs": {
+      "before": "669e697d56789bc61306518ba689140564539cd3ea328777692339f38629ae84",
+      "after": "669e697d56789bc61306518ba689140564539cd3ea328777692339f38629ae84"
+    },
+    "crates/tze_hud_scene/src/element_store.rs": {
+      "before": "1f46c5b09d36721231d683eb39aa6c694176be81d97f2a8c8741b269da44239e",
+      "after": "1f46c5b09d36721231d683eb39aa6c694176be81d97f2a8c8741b269da44239e"
+    },
+    "crates/tze_hud_scene/src/error_codes.rs": {
+      "before": "c424cd89c7a0023c5ff5389ac5aa676a969b1918fbebd5c8f89d9f9eda68907b",
+      "after": "c424cd89c7a0023c5ff5389ac5aa676a969b1918fbebd5c8f89d9f9eda68907b"
+    },
+    "crates/tze_hud_scene/src/graph/budget.rs": {
+      "before": "3d29a7086f758f8fbab453761e65e9fe7fb1f6c6a5d32f3d232d3a90175981dc",
+      "after": "3d29a7086f758f8fbab453761e65e9fe7fb1f6c6a5d32f3d232d3a90175981dc"
+    },
+    "crates/tze_hud_scene/src/graph/contention.rs": {
+      "before": "5d93a979e2b86940ee4caafb7856042abf0e322d1aefada0ac8648865186d1c3",
+      "after": "5d93a979e2b86940ee4caafb7856042abf0e322d1aefada0ac8648865186d1c3"
+    },
+    "crates/tze_hud_scene/src/graph/leases.rs": {
+      "before": "3e820e5b585bc7e715572e021c06164f27c466a512646e0003873fa71a6f6205",
+      "after": "3e820e5b585bc7e715572e021c06164f27c466a512646e0003873fa71a6f6205"
+    },
+    "crates/tze_hud_scene/src/graph/limits_tests.rs": {
+      "before": "3f223f61e4c18c4ec39f7b96287c5c59952b79020b03e752f75fed72b66440bf",
+      "after": "3f223f61e4c18c4ec39f7b96287c5c59952b79020b03e752f75fed72b66440bf"
+    },
+    "crates/tze_hud_scene/src/graph/mod.rs": {
+      "before": "6cf77aba96959baa37d46e16af99673c846a07f9b488789ef2446e97d0cf63b0",
+      "after": "6cf77aba96959baa37d46e16af99673c846a07f9b488789ef2446e97d0cf63b0"
+    },
+    "crates/tze_hud_scene/src/graph/node_tree.rs": {
+      "before": "d374ad6dfdc3c1b5dacc0cebebab6b8290212d4177842fde48915aee3ab6697c",
+      "after": "d374ad6dfdc3c1b5dacc0cebebab6b8290212d4177842fde48915aee3ab6697c"
+    },
+    "crates/tze_hud_scene/src/graph/overlay.rs": {
+      "before": "7a345267622ddef991efcc0b28a4d943e0bc5178d52fdb6cffb457816d7b86bf",
+      "after": "7a345267622ddef991efcc0b28a4d943e0bc5178d52fdb6cffb457816d7b86bf"
+    },
+    "crates/tze_hud_scene/src/graph/queries.rs": {
+      "before": "a77544ef5b5c85c57882a2e3b23eb7b91a95a04cca63f3a22965b7a1e52a210f",
+      "after": "a77544ef5b5c85c57882a2e3b23eb7b91a95a04cca63f3a22965b7a1e52a210f"
+    },
+    "crates/tze_hud_scene/src/graph/resources.rs": {
+      "before": "341db0d363ddef5317eba6ff663cc299e3c790395ecc64f50ce4bc75b454a0be",
+      "after": "341db0d363ddef5317eba6ff663cc299e3c790395ecc64f50ce4bc75b454a0be"
+    },
+    "crates/tze_hud_scene/src/graph/snapshot.rs": {
+      "before": "b63052ec800a10610ad5b5e79c8897e0fb1a4ede150a6672f2b52cd53858ad4b",
+      "after": "b63052ec800a10610ad5b5e79c8897e0fb1a4ede150a6672f2b52cd53858ad4b"
+    },
+    "crates/tze_hud_scene/src/graph/spec_scenarios.rs": {
+      "before": "f5c83276628b73bfeae4dbc390d591485f19dec7d64362083c943901607c2e16",
+      "after": "f5c83276628b73bfeae4dbc390d591485f19dec7d64362083c943901607c2e16"
+    },
+    "crates/tze_hud_scene/src/graph/tabs.rs": {
+      "before": "87eba25fb85cf776a1d51bab3be8f347a74ea4f017671fb1f79dc9dd4944951d",
+      "after": "87eba25fb85cf776a1d51bab3be8f347a74ea4f017671fb1f79dc9dd4944951d"
+    },
+    "crates/tze_hud_scene/src/graph/test_helpers.rs": {
+      "before": "4c8ad7bda69fb1484ee67dad5e0233d0ebd9f041e1a8638ae49743419229340b",
+      "after": "4c8ad7bda69fb1484ee67dad5e0233d0ebd9f041e1a8638ae49743419229340b"
+    },
+    "crates/tze_hud_scene/src/graph/tests.rs": {
+      "before": "ff54b2d35705ab3adf561cb54e9de4f61953a8bf0118a75d6fb573e40cc69612",
+      "after": "ff54b2d35705ab3adf561cb54e9de4f61953a8bf0118a75d6fb573e40cc69612"
+    },
+    "crates/tze_hud_scene/src/graph/tiles.rs": {
+      "before": "210034f22054b575583aea711d5131fb83a6efa610b1021ff2574e1a32763a3c",
+      "after": "210034f22054b575583aea711d5131fb83a6efa610b1021ff2574e1a32763a3c"
+    },
+    "crates/tze_hud_scene/src/graph/timed.rs": {
+      "before": "3c1bb5f3de8b44441cee70e992c2810a09f725113e866d73cae4d26dfac75edc",
+      "after": "3c1bb5f3de8b44441cee70e992c2810a09f725113e866d73cae4d26dfac75edc"
+    },
+    "crates/tze_hud_scene/src/graph/widget_tests.rs": {
+      "before": "b94d15eb3289e81946ff31f7c9e59044ca5a57723e8745ae8042717c298f8cf9",
+      "after": "b94d15eb3289e81946ff31f7c9e59044ca5a57723e8745ae8042717c298f8cf9"
+    },
+    "crates/tze_hud_scene/src/graph/zone_ops.rs": {
+      "before": "27f3722ffe7e34f76fcbd6b366f20258459ec4d36e1b2d3835f9c3e6cf2f146f",
+      "after": "27f3722ffe7e34f76fcbd6b366f20258459ec4d36e1b2d3835f9c3e6cf2f146f"
+    },
+    "crates/tze_hud_scene/src/lease/budget.rs": {
+      "before": "3020677c6387d65ca6c594b6f961e408cbc96b0ea1ab98ad0304f3eb76000084",
+      "after": "3020677c6387d65ca6c594b6f961e408cbc96b0ea1ab98ad0304f3eb76000084"
+    },
+    "crates/tze_hud_scene/src/lease/degradation.rs": {
+      "before": "7be60f6e4e832a7d1b6d1bca64788ae9036bef356c0f3c73213caa63323d0fbe",
+      "after": "7be60f6e4e832a7d1b6d1bca64788ae9036bef356c0f3c73213caa63323d0fbe"
+    },
+    "crates/tze_hud_scene/src/lease/mod.rs": {
+      "before": "d3399b1693c8d399f4aebc82f55251decee148d6413cc8e5cd296720a3e43572",
+      "after": "d3399b1693c8d399f4aebc82f55251decee148d6413cc8e5cd296720a3e43572"
+    },
+    "crates/tze_hud_scene/src/lease/orphan.rs": {
+      "before": "28b13b0c367af60fed8dbb70f0511f6b302772513a92e33315f0338258d1eea2",
+      "after": "28b13b0c367af60fed8dbb70f0511f6b302772513a92e33315f0338258d1eea2"
+    },
+    "crates/tze_hud_scene/src/lease/types.rs": {
+      "before": "edf6414e51814d6b4b8369c923c0fe5d5ab08f0fff0fee72e0161e5c85784384",
+      "after": "edf6414e51814d6b4b8369c923c0fe5d5ab08f0fff0fee72e0161e5c85784384"
+    },
+    "crates/tze_hud_scene/src/lib.rs": {
+      "before": "9c42dd342b154e14b96d84ca96fce4b74aaac1a67f1f7c305ab643d65e94def7",
+      "after": "9c42dd342b154e14b96d84ca96fce4b74aaac1a67f1f7c305ab643d65e94def7"
+    },
+    "crates/tze_hud_scene/src/mutation.rs": {
+      "before": "156c4e4d40ad91ad108b3171cbddc138ea96859016ee4b793fcba0ea36a6dd77",
+      "after": "156c4e4d40ad91ad108b3171cbddc138ea96859016ee4b793fcba0ea36a6dd77"
+    },
+    "crates/tze_hud_scene/src/perf_budget.rs": {
+      "before": "11a8c645481bc8bd28400e0d669660d83bb4218fb173d7ef3f4391c1d50ac132",
+      "after": "11a8c645481bc8bd28400e0d669660d83bb4218fb173d7ef3f4391c1d50ac132"
+    },
+    "crates/tze_hud_scene/src/placement.rs": {
+      "before": "5f810323813d92e05cd609d66b7e2c2018a5f6785ea1a8365850d8a7a2cb810e",
+      "after": "5f810323813d92e05cd609d66b7e2c2018a5f6785ea1a8365850d8a7a2cb810e"
+    },
+    "crates/tze_hud_scene/src/render_wake.rs": {
+      "before": "eb157030993106faaad101d047b96f0afb9837c41c2f1baa66392405ca6e4b32",
+      "after": "eb157030993106faaad101d047b96f0afb9837c41c2f1baa66392405ca6e4b32"
+    },
+    "crates/tze_hud_scene/src/svg_tokens.rs": {
+      "before": "7968def7c89bc59059f61890966ed715c04c5716dde0e12b99085ee3912eeffe",
+      "after": "7968def7c89bc59059f61890966ed715c04c5716dde0e12b99085ee3912eeffe"
+    },
+    "crates/tze_hud_scene/src/test_scenes.rs": {
+      "before": "7949e53e927cab8a6c7d90e73fd5021a074dd9b68f9e81e82f4355c80fea30ce",
+      "after": "7949e53e927cab8a6c7d90e73fd5021a074dd9b68f9e81e82f4355c80fea30ce"
+    },
+    "crates/tze_hud_scene/src/timing/domains.rs": {
+      "before": "a55abd8e299d1352870aee9e46fc7742eb54aa7855883a8c6c6c85beaad50249",
+      "after": "a55abd8e299d1352870aee9e46fc7742eb54aa7855883a8c6c6c85beaad50249"
+    },
+    "crates/tze_hud_scene/src/timing/mod.rs": {
+      "before": "11865c41152b1e16799a7f56391134931f6a1e4e83a533c731f3b5fff30a744a",
+      "after": "11865c41152b1e16799a7f56391134931f6a1e4e83a533c731f3b5fff30a744a"
+    },
+    "crates/tze_hud_scene/src/types.rs": {
+      "before": "4a72792a6f750c9a570ecacc61e6ca008de97fdc50d08b53231d9a621d449dfd",
+      "after": "4a72792a6f750c9a570ecacc61e6ca008de97fdc50d08b53231d9a621d449dfd"
+    },
+    "crates/tze_hud_scene/src/validation.rs": {
+      "before": "8102f78c16a1345a5ed91869d7bfdb1687dcc2dc1188a3e92e6f481b6c520326",
+      "after": "8102f78c16a1345a5ed91869d7bfdb1687dcc2dc1188a3e92e6f481b6c520326"
+    },
+    "crates/tze_hud_scene/tests/batch_atomicity.rs": {
+      "before": "adc37de83cbd729daed4ca8d04abfb5e7d163da14f74ba7b26689eacdb440330",
+      "after": "adc37de83cbd729daed4ca8d04abfb5e7d163da14f74ba7b26689eacdb440330"
+    },
+    "crates/tze_hud_scene/tests/fuzz_scene_graph.rs": {
+      "before": "fac11c53452744b8dd9ed7ef0baf4cddf10d0f1d5e28c3c98f5fe74962ed2024",
+      "after": "fac11c53452744b8dd9ed7ef0baf4cddf10d0f1d5e28c3c98f5fe74962ed2024"
+    },
+    "crates/tze_hud_scene/tests/hit_test.rs": {
+      "before": "6b9139eb17de2e679d108a5bb003ac1c083dbfdbc9abfe4815171349320f33d1",
+      "after": "6b9139eb17de2e679d108a5bb003ac1c083dbfdbc9abfe4815171349320f33d1"
+    },
+    "crates/tze_hud_scene/tests/proptest_invariants.rs": {
+      "before": "581e69b3b4442d61814598860cb698f441c0ccf6e5701e546f49986ec5d35225",
+      "after": "581e69b3b4442d61814598860cb698f441c0ccf6e5701e546f49986ec5d35225"
+    },
+    "crates/tze_hud_scene/tests/session_lifecycle.rs": {
+      "before": "87864f80ccd3a904110aaa52c4636023d49fcddb84622911c9afcb257c1be8c2",
+      "after": "87864f80ccd3a904110aaa52c4636023d49fcddb84622911c9afcb257c1be8c2"
+    },
+    "crates/tze_hud_scene/tests/snapshot.rs": {
+      "before": "d2ab9850e3805efbb62dcfccf8778311d19482fe1f9d5c1520572511f1c9786a",
+      "after": "d2ab9850e3805efbb62dcfccf8778311d19482fe1f9d5c1520572511f1c9786a"
+    },
+    "crates/tze_hud_scene/tests/zone_interaction.rs": {
+      "before": "f91300eda43d3edc16ce4ce4e28ff3f936e623627bbdb6b2325083b28315e20f",
+      "after": "f91300eda43d3edc16ce4ce4e28ff3f936e623627bbdb6b2325083b28315e20f"
+    },
+    "crates/tze_hud_scene/tests/zone_ontology.rs": {
+      "before": "847ffedfaa95a49c28cd0b31d4095d79cc8e44bbb3afa169e8885dc3647654c5",
+      "after": "847ffedfaa95a49c28cd0b31d4095d79cc8e44bbb3afa169e8885dc3647654c5"
+    },
+    "crates/tze_hud_telemetry/Cargo.toml": {
+      "before": "bc8c8c5a57fa43d95b053a4e4a5c70e4cb03b04e101f7badbfbf143668a02892",
+      "after": "bc8c8c5a57fa43d95b053a4e4a5c70e4cb03b04e101f7badbfbf143668a02892"
+    },
+    "crates/tze_hud_telemetry/src/collector.rs": {
+      "before": "d877903906495fd6d922618eedd4b643bd676451ea265b3107ebf99ef740b267",
+      "after": "d877903906495fd6d922618eedd4b643bd676451ea265b3107ebf99ef740b267"
+    },
+    "crates/tze_hud_telemetry/src/idle_efficiency.rs": {
+      "before": "c6f36bedfef1aebee3a0009c65cd16a62b69d9b438cd850ecc90137a56ea37c2",
+      "after": "c6f36bedfef1aebee3a0009c65cd16a62b69d9b438cd850ecc90137a56ea37c2"
+    },
+    "crates/tze_hud_telemetry/src/lib.rs": {
+      "before": "812dc52f2e2f6faee65bd1a7ed28349ededf0a803f19101bcfdf44a67b0f9b1c",
+      "after": "812dc52f2e2f6faee65bd1a7ed28349ededf0a803f19101bcfdf44a67b0f9b1c"
+    },
+    "crates/tze_hud_telemetry/src/publish_load.rs": {
+      "before": "1ecc914ed8208b1b3848de7c58e7302248f733d1f438e91e4f0c1f6e7b5a8a38",
+      "after": "1ecc914ed8208b1b3848de7c58e7302248f733d1f438e91e4f0c1f6e7b5a8a38"
+    },
+    "crates/tze_hud_telemetry/src/record.rs": {
+      "before": "275fb6c1e6ece508b953bc6db40b653c3fb15ccf8dfcef4033ecca249f4cde93",
+      "after": "275fb6c1e6ece508b953bc6db40b653c3fb15ccf8dfcef4033ecca249f4cde93"
+    },
+    "crates/tze_hud_telemetry/src/validation.rs": {
+      "before": "b3f825d38e8ab7f7eb693ab88d875a67eede5e7936a051d53082dfc6903db825",
+      "after": "b3f825d38e8ab7f7eb693ab88d875a67eede5e7936a051d53082dfc6903db825"
+    },
+    "crates/tze_hud_telemetry/src/work_counts.rs": {
+      "before": "48ba2fd72e2df47436f79fcf7eb462c9a9352a35fa75beb0594ea2eee2ab8f89",
+      "after": "48ba2fd72e2df47436f79fcf7eb462c9a9352a35fa75beb0594ea2eee2ab8f89"
+    },
+    "crates/tze_hud_telemetry/tests/idle_efficiency.rs": {
+      "before": "4eb9fa2fb98fd6542487a2c17d9f1fbb944a876aa09fb24b771f757be5e70560",
+      "after": "4eb9fa2fb98fd6542487a2c17d9f1fbb944a876aa09fb24b771f757be5e70560"
+    },
+    "crates/tze_hud_telemetry/tests/publish_load_artifact.rs": {
+      "before": "08146142e0b600143366feaa04fa60de718894a2d113b1a69c696842023a08f0",
+      "after": "08146142e0b600143366feaa04fa60de718894a2d113b1a69c696842023a08f0"
+    },
+    "crates/tze_hud_widget/Cargo.toml": {
+      "before": "dd9eaeb4d46a91a52ab34f05e444c6770593b20f72ca5a7833bf13165c3fb7d5",
+      "after": "dd9eaeb4d46a91a52ab34f05e444c6770593b20f72ca5a7833bf13165c3fb7d5"
+    },
+    "crates/tze_hud_widget/src/error.rs": {
+      "before": "ffd158eb315fce4c410abf1b016b08583f4c4f7f3e6401ca105c627ec23cb38f",
+      "after": "ffd158eb315fce4c410abf1b016b08583f4c4f7f3e6401ca105c627ec23cb38f"
+    },
+    "crates/tze_hud_widget/src/lib.rs": {
+      "before": "037120cd8290ca4927f516ed268d4dfa2e350abf59726e97f74c13579dc5e44b",
+      "after": "037120cd8290ca4927f516ed268d4dfa2e350abf59726e97f74c13579dc5e44b"
+    },
+    "crates/tze_hud_widget/src/loader.rs": {
+      "before": "ccfa16d50a7aaeadbc2b8fcf5a20d1bd9d3aaf248d794fe696758959a3251013",
+      "after": "ccfa16d50a7aaeadbc2b8fcf5a20d1bd9d3aaf248d794fe696758959a3251013"
+    },
+    "crates/tze_hud_widget/src/manifest.rs": {
+      "before": "7b8d471a4b6010373eecb31d6c249edbc483599adf15af91cfc9ed479c37452d",
+      "after": "7b8d471a4b6010373eecb31d6c249edbc483599adf15af91cfc9ed479c37452d"
+    },
+    "crates/tze_hud_widget/src/runtime_registration.rs": {
+      "before": "b2264578fb41b6ce85c28b87a0343270fec3ca0ea25a769d458c368da1a71ce3",
+      "after": "b2264578fb41b6ce85c28b87a0343270fec3ca0ea25a769d458c368da1a71ce3"
+    },
+    "crates/tze_hud_widget/src/svg_ids.rs": {
+      "before": "e253e3b8321d8720e12da4d6e533af277696f6bd61d8d4e4b6ba2b4404875c49",
+      "after": "e253e3b8321d8720e12da4d6e533af277696f6bd61d8d4e4b6ba2b4404875c49"
+    },
+    "crates/tze_hud_widget/tests/shipped_bundles.rs": {
+      "before": "e220ac2c1aa1ef3ae13289c222ed51c1764d8a081548698661200f8fc1488904",
+      "after": "e220ac2c1aa1ef3ae13289c222ed51c1764d8a081548698661200f8fc1488904"
+    },
+    "examples/benchmark/Cargo.toml": {
+      "before": "98eba0d5194673c42a5f172d38d4c6f8491f2d138dbd380984c6a50857dfe2ea",
+      "after": "98eba0d5194673c42a5f172d38d4c6f8491f2d138dbd380984c6a50857dfe2ea"
+    },
+    "examples/benchmark/src/cpu_calibration.rs": {
+      "before": "b9158a7ec51a889bf63ebe37a45b68263682a32ac414a0a5ec5f0f91235c99c7",
+      "after": "b9158a7ec51a889bf63ebe37a45b68263682a32ac414a0a5ec5f0f91235c99c7"
+    },
+    "examples/benchmark/src/main.rs": {
+      "before": "6bf82fb9632ecb621434f8ac95bac707ba1048e02a8cc058eae24da16c38a9b6",
+      "after": "6bf82fb9632ecb621434f8ac95bac707ba1048e02a8cc058eae24da16c38a9b6"
+    },
+    "examples/benchmark/src/token_footprint_calibration.rs": {
+      "before": "83d65a321e3e5f97d4907074013745e982220458b748b3609f1a68366154ecc1",
+      "after": "83d65a321e3e5f97d4907074013745e982220458b748b3609f1a68366154ecc1"
+    },
+    "examples/poc_demo/Cargo.toml": {
+      "before": "03663ac975e5c06fbb677716e199bc82fd2748fc3b9db656c61f96f8f4ad23da",
+      "after": "03663ac975e5c06fbb677716e199bc82fd2748fc3b9db656c61f96f8f4ad23da"
+    },
+    "examples/poc_demo/src/lib.rs": {
+      "before": "56e65ef1aef90bf0a7a87ef172b05cef66175de1b6b80300097dfffcbfe92266",
+      "after": "56e65ef1aef90bf0a7a87ef172b05cef66175de1b6b80300097dfffcbfe92266"
+    },
+    "examples/poc_demo/src/main.rs": {
+      "before": "a48ce7e4b4bf0b37cac48fd6cc04c595b49c30717a76964bd61dee80508610b7",
+      "after": "a48ce7e4b4bf0b37cac48fd6cc04c595b49c30717a76964bd61dee80508610b7"
+    },
+    "examples/poc_demo/tests/smoke.rs": {
+      "before": "e47e9d82ac87b974ab3bcc952117b745fe1e9c9d6f60cb318e9a9837d7d998d5",
+      "after": "e47e9d82ac87b974ab3bcc952117b745fe1e9c9d6f60cb318e9a9837d7d998d5"
+    },
+    "examples/render_artifacts/Cargo.toml": {
+      "before": "d161ff2f66c16c7eaa25758f721c2a4ac10a59ec40abb447c99c01a43905fb51",
+      "after": "d161ff2f66c16c7eaa25758f721c2a4ac10a59ec40abb447c99c01a43905fb51"
+    },
+    "examples/render_artifacts/src/bin/cooperative_projection_readback.rs": {
+      "before": "3134d4f2e918d99e913455673cd68b6a71368fd479673cd4a3c17cab06e9da97",
+      "after": "3134d4f2e918d99e913455673cd68b6a71368fd479673cd4a3c17cab06e9da97"
+    },
+    "examples/render_artifacts/src/bin/vertical_flow_readback.rs": {
+      "before": "bc025aaff8e5553941315b7eef85cb819407931415c03c0ba3030628bf499ad7",
+      "after": "bc025aaff8e5553941315b7eef85cb819407931415c03c0ba3030628bf499ad7"
+    },
+    "examples/render_artifacts/src/lib.rs": {
+      "before": "561068e3a34de0fc444554ce69193f112fac693dde7be28680e492b9b3a88095",
+      "after": "561068e3a34de0fc444554ce69193f112fac693dde7be28680e492b9b3a88095"
+    },
+    "examples/render_artifacts/src/vertical_flow_proof.rs": {
+      "before": "270b0e1f7fa8123a9c6a5a7ad58034b6f717044d96e8973f77c418a93d81beb6",
+      "after": "270b0e1f7fa8123a9c6a5a7ad58034b6f717044d96e8973f77c418a93d81beb6"
+    },
+    "examples/vertical_slice/Cargo.toml": {
+      "before": "1eb05f2503fb7f0db6bb878798ed063f396a2ee2d14a27ef20753cb98747aa27",
+      "after": "1eb05f2503fb7f0db6bb878798ed063f396a2ee2d14a27ef20753cb98747aa27"
+    },
+    "examples/vertical_slice/src/main.rs": {
+      "before": "b61d4a0ccaa3c5975416aaf486e474aa341ffe456d6907e47632efa5efe10e64",
+      "after": "b61d4a0ccaa3c5975416aaf486e474aa341ffe456d6907e47632efa5efe10e64"
+    },
+    "examples/vertical_slice/tests/budget_assertions.rs": {
+      "before": "b32a13d3ccd004df86799d071ddf2b3ad076315e38e61756407d4270a3aac466",
+      "after": "b32a13d3ccd004df86799d071ddf2b3ad076315e38e61756407d4270a3aac466"
+    },
+    "examples/vertical_slice/tests/production_boot.rs": {
+      "before": "14e27bc9a58cd8ee6231416163d0d120d8c47164468c1783749dc79509e25305",
+      "after": "14e27bc9a58cd8ee6231416163d0d120d8c47164468c1783749dc79509e25305"
+    },
+    "examples/widget_publish_load_harness/Cargo.toml": {
+      "before": "b4f54054e97bacff30f8ea481b36f41848572b4794d983efacc8a2d57f705b2f",
+      "after": "b4f54054e97bacff30f8ea481b36f41848572b4794d983efacc8a2d57f705b2f"
+    },
+    "examples/widget_publish_load_harness/src/main.rs": {
+      "before": "50663321eba4e49a8eb74538a0dd9cd1ec28f4088daff58bfa0d52636e1d302f",
+      "after": "50663321eba4e49a8eb74538a0dd9cd1ec28f4088daff58bfa0d52636e1d302f"
+    },
+    "justfile": {
+      "before": "d39dec71c122ff1f21e7391e7245c1e5faaa99faa593ad762efe25a6d2e09ad3",
+      "after": "d39dec71c122ff1f21e7391e7245c1e5faaa99faa593ad762efe25a6d2e09ad3"
+    },
+    "rust-toolchain.toml": {
+      "before": "c2cc07c28097b9283273686da9eaf1e2106b2eef5083cd40f7d54eb858153255",
+      "after": "c2cc07c28097b9283273686da9eaf1e2106b2eef5083cd40f7d54eb858153255"
+    },
+    "tests/integration/Cargo.toml": {
+      "before": "b82a639b31eaba8bbff049aaff6c29e0f1d175bc58d5eb390c5fdd22dc01de59",
+      "after": "b82a639b31eaba8bbff049aaff6c29e0f1d175bc58d5eb390c5fdd22dc01de59"
+    },
+    "tests/integration/common/mod.rs": {
+      "before": "1bdfe680b9f7fc7f1cefa4a4dfc25f8cad6b9eb41516e97ac36a7ce887ee55b8",
+      "after": "1bdfe680b9f7fc7f1cefa4a4dfc25f8cad6b9eb41516e97ac36a7ce887ee55b8"
+    },
+    "tests/integration/dashboard_tile_input.rs": {
+      "before": "398e7bb939d610f3c9622baefbc2f0c1ca43fd3aaef45fe2f544a688bfde72fe",
+      "after": "398e7bb939d610f3c9622baefbc2f0c1ca43fd3aaef45fe2f544a688bfde72fe"
+    },
+    "tests/integration/drag_reposition.rs": {
+      "before": "6307456f0cb48c84ac45c157c08cf5eb467bc7abe67b979b2198fa5a712cb201",
+      "after": "6307456f0cb48c84ac45c157c08cf5eb467bc7abe67b979b2198fa5a712cb201"
+    },
+    "tests/integration/movable_elements_e2e.rs": {
+      "before": "fb1b423f57609dc27e516b17294f61a6a8fed735b0349ffacd3a2acde3cacfa4",
+      "after": "fb1b423f57609dc27e516b17294f61a6a8fed735b0349ffacd3a2acde3cacfa4"
+    },
+    "tests/integration/multi_agent.rs": {
+      "before": "6f26144570138e403c5ed9670564080af84a1d6bced84c90956147a890ddd6e9",
+      "after": "6f26144570138e403c5ed9670564080af84a1d6bced84c90956147a890ddd6e9"
+    },
+    "tests/integration/poc_acceptance.rs": {
+      "before": "96587d3bf413969ebd69247dd08376f293a84c5cc877ea316bb4fc849ec684e9",
+      "after": "96587d3bf413969ebd69247dd08376f293a84c5cc877ea316bb4fc849ec684e9"
+    },
+    "tests/integration/subtitle_streaming.rs": {
+      "before": "263b0d5b06bad0be7cb8613d01b92a35fb51a8416ee8b174c9906dd3509e99f0",
+      "after": "263b0d5b06bad0be7cb8613d01b92a35fb51a8416ee8b174c9906dd3509e99f0"
+    },
+    "tests/integration/text_stream_portal_adapter.rs": {
+      "before": "61a7d3d45adde0ebf4375963e45d42decfba5caa77deaa33110908d5918c4e81",
+      "after": "61a7d3d45adde0ebf4375963e45d42decfba5caa77deaa33110908d5918c4e81"
+    },
+    "tests/integration/text_stream_portal_cadence.rs": {
+      "before": "7b392768912ffd3c3783379ee316dc83a54c770f0366818ccf524d8e8fecd284",
+      "after": "7b392768912ffd3c3783379ee316dc83a54c770f0366818ccf524d8e8fecd284"
+    },
+    "tests/integration/text_stream_portal_coalescing.rs": {
+      "before": "4786850facd3259fea77aed0ae5e122420e89b3cf69d508f0162e807d7dbddd1",
+      "after": "4786850facd3259fea77aed0ae5e122420e89b3cf69d508f0162e807d7dbddd1"
+    },
+    "tests/integration/text_stream_portal_composer.rs": {
+      "before": "77a490ebcb346d8db3bf2df98ba3f35f902c2968302dd2f85be2bb5676251425",
+      "after": "77a490ebcb346d8db3bf2df98ba3f35f902c2968302dd2f85be2bb5676251425"
+    },
+    "tests/integration/text_stream_portal_governance.rs": {
+      "before": "7211c104f0add05d0754125f1e41472ee5338beb4e3b52477d80f52589515092",
+      "after": "7211c104f0add05d0754125f1e41472ee5338beb4e3b52477d80f52589515092"
+    },
+    "tests/integration/text_stream_portal_markdown.rs": {
+      "before": "a68b2f38d5120599b1cb0a32af0aabac244cfe14ed5201d4930e0e9ec28cdcf5",
+      "after": "a68b2f38d5120599b1cb0a32af0aabac244cfe14ed5201d4930e0e9ec28cdcf5"
+    },
+    "tests/integration/text_stream_portal_styling.rs": {
+      "before": "c77611b4060cf22a40f12a25258f55e61a9795df98f69721fadbf829f0bbcd4b",
+      "after": "c77611b4060cf22a40f12a25258f55e61a9795df98f69721fadbf829f0bbcd4b"
+    },
+    "tests/integration/text_stream_portal_surface.rs": {
+      "before": "58941335fb7687df6393f5a27350b8a2c6b9949cd75ce00887f3fd0d812032d4",
+      "after": "58941335fb7687df6393f5a27350b8a2c6b9949cd75ce00887f3fd0d812032d4"
+    }
+  },
+  "source_entry_count": 356,
+  "72_invariants": [
+    {
+      "path": "crates/tze_hud_compositor/src/renderer/safe_mode_overlay.rs",
+      "name": "windowed_frame_draws_chrome_overlay_in_safe_mode",
+      "baseline_to_current_preserved": true,
+      "proof": "whole defining source file unchanged"
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/renderer/tests/focus_chrome.rs",
+      "name": "orphaned_tile_emits_disconnection_badge_draw_cmd",
+      "baseline_to_current_preserved": true,
+      "proof": "whole defining source file unchanged"
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/renderer/tests/hit_drag.rs",
+      "name": "tile_close_button_draw_and_hit_region_share_token_geometry",
+      "baseline_to_current_preserved": true,
+      "proof": "whole defining source file unchanged"
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/renderer/tests/idle_gate.rs",
+      "name": "hold_moves_the_fade_deadline_and_ttl_zero_never_fades",
+      "baseline_to_current_preserved": true,
+      "proof": "whole defining source file unchanged"
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/renderer/tests/surface.rs",
+      "name": "test_chrome_always_above_max_zorder_tile",
+      "baseline_to_current_preserved": true,
+      "proof": "whole defining source file unchanged"
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/renderer/tests/zone_layers.rs",
+      "name": "test_publication_ttl_ms_uses_expires_at_wall_us",
+      "baseline_to_current_preserved": true,
+      "proof": "whole defining source file unchanged"
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/renderer/tests/zone_stack.rs",
+      "name": "test_latest_wins_zone_renders_only_latest_publication",
+      "baseline_to_current_preserved": true,
+      "proof": "whole defining source file unchanged"
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/renderer/tile_render.rs",
+      "name": "significant_degradation_preserves_hidden_tiles_and_opaques_visible_tiles",
+      "baseline_to_current_preserved": true,
+      "proof": "whole defining source file unchanged"
+    },
+    {
+      "path": "crates/tze_hud_config/src/tests.rs",
+      "name": "safe_mode_hotkey_defaults_overrides_and_rejects_garbage",
+      "baseline_to_current_preserved": true,
+      "proof": "whole defining source file unchanged"
+    },
+    {
+      "path": "crates/tze_hud_input/src/batching.rs",
+      "name": "test_pointer_move_coalesced_in_batch",
+      "baseline_to_current_preserved": true,
+      "proof": "whole defining source file unchanged"
+    },
+    {
+      "path": "crates/tze_hud_input/src/coalescing.rs",
+      "name": "test_coalesce_scroll_latest_wins",
+      "baseline_to_current_preserved": true,
+      "proof": "whole defining source file unchanged"
+    },
+    {
+      "path": "crates/tze_hud_mcp/src/error.rs",
+      "name": "error_codes_are_unique_and_documented",
+      "baseline_to_current_preserved": true,
+      "proof": "whole defining source file unchanged"
+    },
+    {
+      "path": "crates/tze_hud_mcp/src/server/tests.rs",
+      "name": "delay_ms_holds_content_until_due",
+      "baseline_to_current_preserved": true,
+      "proof": "whole defining source file unchanged"
+    },
+    {
+      "path": "crates/tze_hud_mcp/src/server/tests.rs",
+      "name": "every_returned_code_is_in_the_closed_set",
+      "baseline_to_current_preserved": true,
+      "proof": "whole defining source file unchanged"
+    },
+    {
+      "path": "crates/tze_hud_mcp/src/server/tests.rs",
+      "name": "hud_publish_in_safe_mode_returns_safe_mode_active",
+      "baseline_to_current_preserved": true,
+      "proof": "whole defining source file unchanged"
+    },
+    {
+      "path": "crates/tze_hud_mcp/src/server/tests.rs",
+      "name": "notification_ttl_zero_is_held_and_hold_retimes_it",
+      "baseline_to_current_preserved": true,
+      "proof": "whole defining source file unchanged"
+    },
+    {
+      "path": "crates/tze_hud_mcp/src/server/tests.rs",
+      "name": "resume_restores_mcp_publishing",
+      "baseline_to_current_preserved": true,
+      "proof": "whole defining source file unchanged"
+    },
+    {
+      "path": "crates/tze_hud_mcp/src/server/tests.rs",
+      "name": "safe_mode_does_not_regrant_suspended_mcp_lease",
+      "baseline_to_current_preserved": true,
+      "proof": "whole defining source file unchanged"
+    },
+    {
+      "path": "crates/tze_hud_mcp/src/server/tests.rs",
+      "name": "test_hud_publish_zone_contention_policy_latest_wins",
+      "baseline_to_current_preserved": true,
+      "proof": "whole defining source file unchanged"
+    },
+    {
+      "path": "crates/tze_hud_mcp/src/server/tests.rs",
+      "name": "test_hud_publish_zone_ttl_sets_content_expiry_and_is_swept",
+      "baseline_to_current_preserved": true,
+      "proof": "whole defining source file unchanged"
+    },
+    {
+      "path": "crates/tze_hud_mcp/src/server/tests.rs",
+      "name": "test_structured_error_has_hint_field",
+      "baseline_to_current_preserved": true,
+      "proof": "whole defining source file unchanged"
+    },
+    {
+      "path": "crates/tze_hud_protocol/src/session_server/tests/events.rs",
+      "name": "viewer_dismiss_tile_pushes_reclaimed_override",
+      "baseline_to_current_preserved": true,
+      "proof": "whole defining source file unchanged"
+    },
+    {
+      "path": "crates/tze_hud_protocol/src/session_server/tests/invariants.rs",
+      "name": "grpc_batch_expires_at_sweeps_tile",
+      "baseline_to_current_preserved": true,
+      "proof": "whole defining source file unchanged"
+    },
+    {
+      "path": "crates/tze_hud_protocol/src/session_server/tests/invariants.rs",
+      "name": "grpc_batch_present_at_holds_content_until_due",
+      "baseline_to_current_preserved": true,
+      "proof": "whole defining source file unchanged"
+    },
+    {
+      "path": "crates/tze_hud_protocol/src/session_server/tests/invariants.rs",
+      "name": "grpc_disconnect_orphans_leases_and_badges_tiles",
+      "baseline_to_current_preserved": true,
+      "proof": "whole defining source file unchanged"
+    },
+    {
+      "path": "crates/tze_hud_protocol/src/session_server/tests/invariants.rs",
+      "name": "grpc_grace_expiry_reclaims_orphaned_lease_and_rejects_resume",
+      "baseline_to_current_preserved": true,
+      "proof": "whole defining source file unchanged"
+    },
+    {
+      "path": "crates/tze_hud_protocol/src/session_server/tests/invariants.rs",
+      "name": "grpc_resume_within_grace_restores_same_lease_and_tile",
+      "baseline_to_current_preserved": true,
+      "proof": "whole defining source file unchanged"
+    },
+    {
+      "path": "crates/tze_hud_protocol/src/session_server/tests/invariants.rs",
+      "name": "grpc_zone_publish_expires_at_is_swept",
+      "baseline_to_current_preserved": true,
+      "proof": "whole defining source file unchanged"
+    },
+    {
+      "path": "crates/tze_hud_protocol/src/session_server/tests/invariants.rs",
+      "name": "grpc_zone_publish_present_at_is_held_until_due",
+      "baseline_to_current_preserved": true,
+      "proof": "whole defining source file unchanged"
+    },
+    {
+      "path": "crates/tze_hud_protocol/src/session_server/tests/invariants.rs",
+      "name": "grpc_zone_publish_ttl_sets_expiry_and_is_swept",
+      "baseline_to_current_preserved": true,
+      "proof": "whole defining source file unchanged"
+    },
+    {
+      "path": "crates/tze_hud_protocol/tests/fuzz_protocol_boundary.rs",
+      "name": "mutation_batch_oversized_rejected_with_structured_error",
+      "baseline_to_current_preserved": true,
+      "proof": "whole defining source file unchanged"
+    },
+    {
+      "path": "crates/tze_hud_protocol/tests/lease_governance.rs",
+      "name": "disconnect_transitions_to_orphaned_and_sets_disconnection_badge",
+      "baseline_to_current_preserved": true,
+      "proof": "whole defining source file unchanged"
+    },
+    {
+      "path": "crates/tze_hud_protocol/tests/lease_governance.rs",
+      "name": "grace_period_expiry_removes_tile_and_nodes",
+      "baseline_to_current_preserved": true,
+      "proof": "whole defining source file unchanged"
+    },
+    {
+      "path": "crates/tze_hud_resource/tests/store_behavior.rs",
+      "name": "agent_texture_budget_rejects_whole_upload_and_stores_nothing",
+      "baseline_to_current_preserved": true,
+      "proof": "whole defining source file unchanged"
+    },
+    {
+      "path": "crates/tze_hud_resource/tests/store_behavior.rs",
+      "name": "chunk_protocol_errors_have_stable_codes",
+      "baseline_to_current_preserved": true,
+      "proof": "whole defining source file unchanged"
+    },
+    {
+      "path": "crates/tze_hud_resource/tests/store_behavior.rs",
+      "name": "chunked_upload_rejected_at_complete_frees_its_slot_and_stores_nothing",
+      "baseline_to_current_preserved": true,
+      "proof": "whole defining source file unchanged"
+    },
+    {
+      "path": "crates/tze_hud_resource/tests/store_behavior.rs",
+      "name": "per_resource_size_cap_rejects_chunked_upload_at_start",
+      "baseline_to_current_preserved": true,
+      "proof": "whole defining source file unchanged"
+    },
+    {
+      "path": "crates/tze_hud_resource/tests/store_behavior.rs",
+      "name": "rejections_carry_stable_wire_code_and_actionable_detail",
+      "baseline_to_current_preserved": true,
+      "proof": "whole defining source file unchanged"
+    },
+    {
+      "path": "crates/tze_hud_resource/tests/store_behavior.rs",
+      "name": "resource_count_cap_rejects_the_extra_resource",
+      "baseline_to_current_preserved": true,
+      "proof": "whole defining source file unchanged"
+    },
+    {
+      "path": "crates/tze_hud_resource/tests/store_behavior.rs",
+      "name": "runtime_wide_texture_cap_is_shared_across_agents",
+      "baseline_to_current_preserved": true,
+      "proof": "whole defining source file unchanged"
+    },
+    {
+      "path": "crates/tze_hud_resource/tests/store_behavior.rs",
+      "name": "upload_slot_cap_is_per_agent_and_freed_by_abort",
+      "baseline_to_current_preserved": true,
+      "proof": "whole defining source file unchanged"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/degradation.rs",
+      "name": "sustained_overload_does_not_escalate_past_simplified",
+      "baseline_to_current_preserved": true,
+      "proof": "whole defining source file unchanged"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/headless.rs",
+      "name": "render_frame_reclaims_orphaned_lease_after_grace",
+      "baseline_to_current_preserved": true,
+      "proof": "whole defining source file unchanged"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/mutation_budget_bridge.rs",
+      "name": "aggregate_limits_are_atomic_across_agents",
+      "baseline_to_current_preserved": true,
+      "proof": "whole defining source file unchanged"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/mutation_budget_bridge.rs",
+      "name": "registered_budget_rejects_mutation_above_tile_limit",
+      "baseline_to_current_preserved": true,
+      "proof": "whole defining source file unchanged"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/mutation_budget_bridge.rs",
+      "name": "resumed_session_restores_usage_before_accepting_new_mutations",
+      "baseline_to_current_preserved": true,
+      "proof": "whole defining source file unchanged"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/portal_projection_driver.rs",
+      "name": "disconnect_then_reconnect_within_grace_resumes_same_surface_without_duplication",
+      "baseline_to_current_preserved": true,
+      "proof": "whole defining source file unchanged"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/portal_projection_driver.rs",
+      "name": "viewer_dismiss_portal_detaches_and_next_publish_reattaches",
+      "baseline_to_current_preserved": true,
+      "proof": "whole defining source file unchanged"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/shell/safe_mode.rs",
+      "name": "test_enter_safe_mode_suspends_active_leases",
+      "baseline_to_current_preserved": true,
+      "proof": "whole defining source file unchanged"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/shell/safe_mode.rs",
+      "name": "test_lease_identity_preserved_across_suspend_resume",
+      "baseline_to_current_preserved": true,
+      "proof": "whole defining source file unchanged"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/shell/safe_mode.rs",
+      "name": "test_mutations_rejected_via_shared_state_flag",
+      "baseline_to_current_preserved": true,
+      "proof": "whole defining source file unchanged"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/shell/safe_mode.rs",
+      "name": "test_ttl_excluded_during_suspension",
+      "baseline_to_current_preserved": true,
+      "proof": "whole defining source file unchanged"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/windowed/event_loop_harness.rs",
+      "name": "viewer_close_button_dismisses_hovered_tile_and_notifies_owner",
+      "baseline_to_current_preserved": true,
+      "proof": "whole defining source file unchanged"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/windowed/safe_mode_toggle.rs",
+      "name": "hotkey_event_enters_safe_mode_and_suspends_leases",
+      "baseline_to_current_preserved": true,
+      "proof": "whole defining source file unchanged"
+    },
+    {
+      "path": "crates/tze_hud_scene/src/graph/spec_scenarios.rs",
+      "name": "revoked_lease_clears_only_its_publications",
+      "baseline_to_current_preserved": true,
+      "proof": "whole defining source file unchanged"
+    },
+    {
+      "path": "crates/tze_hud_scene/src/graph/spec_scenarios.rs",
+      "name": "tile_lease_reap_keeps_same_namespace_mcp_publications",
+      "baseline_to_current_preserved": true,
+      "proof": "whole defining source file unchanged"
+    },
+    {
+      "path": "crates/tze_hud_scene/src/graph/tests.rs",
+      "name": "test_lease_resume_from_suspended",
+      "baseline_to_current_preserved": true,
+      "proof": "whole defining source file unchanged"
+    },
+    {
+      "path": "crates/tze_hud_scene/src/graph/tests.rs",
+      "name": "test_lease_suspend_from_active",
+      "baseline_to_current_preserved": true,
+      "proof": "whole defining source file unchanged"
+    },
+    {
+      "path": "crates/tze_hud_scene/src/graph/tests.rs",
+      "name": "viewer_dismiss_tile_revokes_lease_in_any_live_state",
+      "baseline_to_current_preserved": true,
+      "proof": "whole defining source file unchanged"
+    },
+    {
+      "path": "crates/tze_hud_scene/src/graph/widget_tests.rs",
+      "name": "widget_publish_with_suspended_lease_is_safe_mode_active",
+      "baseline_to_current_preserved": true,
+      "proof": "whole defining source file unchanged"
+    },
+    {
+      "path": "crates/tze_hud_scene/src/graph/widget_tests.rs",
+      "name": "widget_ttl_only_expired_publication_removed_when_mixed",
+      "baseline_to_current_preserved": true,
+      "proof": "whole defining source file unchanged"
+    },
+    {
+      "path": "tests/integration/poc_acceptance.rs",
+      "name": "poc_override_exit_safe_mode_with_agent_hung_during_it",
+      "baseline_to_current_preserved": true,
+      "proof": "whole defining source file unchanged"
+    },
+    {
+      "path": "tests/integration/poc_acceptance.rs",
+      "name": "poc_override_notifies_the_agent",
+      "baseline_to_current_preserved": true,
+      "proof": "whole defining source file unchanged"
+    },
+    {
+      "path": "tests/integration/poc_acceptance.rs",
+      "name": "poc_override_safe_mode_wins_with_hung_grpc_agent",
+      "baseline_to_current_preserved": true,
+      "proof": "whole defining source file unchanged"
+    },
+    {
+      "path": "tests/integration/poc_acceptance.rs",
+      "name": "poc_portal_abandoned_is_reclaimed",
+      "baseline_to_current_preserved": true,
+      "proof": "whole defining source file unchanged"
+    },
+    {
+      "path": "tests/integration/poc_acceptance.rs",
+      "name": "poc_portal_viewer_dismiss_then_mcp_verbs",
+      "baseline_to_current_preserved": true,
+      "proof": "whole defining source file unchanged"
+    },
+    {
+      "path": "tests/integration/poc_acceptance.rs",
+      "name": "poc_tile_claim_with_placement_two_round_trips",
+      "baseline_to_current_preserved": true,
+      "proof": "whole defining source file unchanged"
+    },
+    {
+      "path": "tests/integration/poc_acceptance.rs",
+      "name": "poc_tile_update_then_orphan_then_reclaim_after_grace",
+      "baseline_to_current_preserved": true,
+      "proof": "whole defining source file unchanged"
+    },
+    {
+      "path": "tests/integration/poc_acceptance.rs",
+      "name": "poc_zone_delay_ms_appears_on_schedule",
+      "baseline_to_current_preserved": true,
+      "proof": "whole defining source file unchanged"
+    },
+    {
+      "path": "tests/integration/poc_acceptance.rs",
+      "name": "poc_zone_notification_ttl_disappears_unattended",
+      "baseline_to_current_preserved": true,
+      "proof": "whole defining source file unchanged"
+    },
+    {
+      "path": "tests/integration/text_stream_portal_governance.rs",
+      "name": "shell_dismiss_override_removes_portal_tile",
+      "baseline_to_current_preserved": true,
+      "proof": "whole defining source file unchanged"
+    },
+    {
+      "path": "tests/integration/text_stream_portal_governance.rs",
+      "name": "shell_status_snapshot_exposes_no_portal_identity_or_transcript",
+      "baseline_to_current_preserved": true,
+      "proof": "whole defining source file unchanged"
+    }
+  ],
+  "T7protected27": [
+    {
+      "path": "crates/tze_hud_config/src/portal_tokens.rs",
+      "current_sha256": "2c64c3abfd32c7ab55e92b54c07cbc28509935217bd3e0c1f1497329050ee51c",
+      "current_baseline_equal": true
+    },
+    {
+      "path": "crates/tze_hud_input/src/composer_draft.rs",
+      "current_sha256": "298b3cdde90f8aa198101fd504b2b88a21cfce0f67b2aeec0f8adc30c3623edc",
+      "current_baseline_equal": true
+    },
+    {
+      "path": "crates/tze_hud_input/src/portal_resize.rs",
+      "current_sha256": "238146de2a7562937de06175a34bb604fdd263c162b5d0d85ffe11dcbdde6f03",
+      "current_baseline_equal": true
+    },
+    {
+      "path": "crates/tze_hud_mcp/src/portal_op.rs",
+      "current_sha256": "a7b83236ee5b8a1851d30c21922367815a05f4b92876738a7220a139b6728746",
+      "current_baseline_equal": true
+    },
+    {
+      "path": "crates/tze_hud_projection/Cargo.toml",
+      "current_sha256": "1a969d6029e79a2e87750a0121aa4c7e95c0f1903f6eee0b45e665cef932b8d2",
+      "current_baseline_equal": true
+    },
+    {
+      "path": "crates/tze_hud_projection/src/authority.rs",
+      "current_sha256": "45b77e8402c7a220174defa74fbeafb61bd84bcf3c96e32106d482724dd0ed0a",
+      "current_baseline_equal": true
+    },
+    {
+      "path": "crates/tze_hud_projection/src/contract.rs",
+      "current_sha256": "a5c04921724e958ea27bddbe37b836d83d93837cc876a7734a6aac7d75dba5e3",
+      "current_baseline_equal": true
+    },
+    {
+      "path": "crates/tze_hud_projection/src/hub.rs",
+      "current_sha256": "7b1edd787cf2696825e12f4b104dc430d09426ceb56fb1190b8fea21eead37bf",
+      "current_baseline_equal": true
+    },
+    {
+      "path": "crates/tze_hud_projection/src/lib.rs",
+      "current_sha256": "3c423fd0ff22879db29e131361f5a543b5c74968b341592520a45280da191cf7",
+      "current_baseline_equal": true
+    },
+    {
+      "path": "crates/tze_hud_projection/src/portal_cadence.rs",
+      "current_sha256": "7e816d04e24240c7ab825223e4d0b75879476dcb964b6f3311bbc3f0e742eb84",
+      "current_baseline_equal": true
+    },
+    {
+      "path": "crates/tze_hud_projection/src/resident_grpc.rs",
+      "current_sha256": "a5ea1b02268a3a9a7c0964f13c314627a5b7d4b4839934996cc9e3788c5f9f16",
+      "current_baseline_equal": true
+    },
+    {
+      "path": "crates/tze_hud_projection/src/tests/mod.rs",
+      "current_sha256": "b7e433cefd599ae4b37e72db7393b95b8d1d802dad42d6ad12a888da54eaef38",
+      "current_baseline_equal": true
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/portal_projection_driver.rs",
+      "current_sha256": "9f4a657a565a725da38860487f50941628ea7c6a07a530962f85feecfbc35a21",
+      "current_baseline_equal": true
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/windowed/portal.rs",
+      "current_sha256": "69dbf0fff57aa3792fe3b283faab96411cfb176140982830477cb99f8ae7ecb7",
+      "current_baseline_equal": true
+    },
+    {
+      "path": "tests/integration/text_stream_portal_adapter.rs",
+      "current_sha256": "61a7d3d45adde0ebf4375963e45d42decfba5caa77deaa33110908d5918c4e81",
+      "current_baseline_equal": true
+    },
+    {
+      "path": "tests/integration/text_stream_portal_cadence.rs",
+      "current_sha256": "7b392768912ffd3c3783379ee316dc83a54c770f0366818ccf524d8e8fecd284",
+      "current_baseline_equal": true
+    },
+    {
+      "path": "tests/integration/text_stream_portal_coalescing.rs",
+      "current_sha256": "4786850facd3259fea77aed0ae5e122420e89b3cf69d508f0162e807d7dbddd1",
+      "current_baseline_equal": true
+    },
+    {
+      "path": "tests/integration/text_stream_portal_composer.rs",
+      "current_sha256": "77a490ebcb346d8db3bf2df98ba3f35f902c2968302dd2f85be2bb5676251425",
+      "current_baseline_equal": true
+    },
+    {
+      "path": "tests/integration/text_stream_portal_governance.rs",
+      "current_sha256": "7211c104f0add05d0754125f1e41472ee5338beb4e3b52477d80f52589515092",
+      "current_baseline_equal": true
+    },
+    {
+      "path": "tests/integration/text_stream_portal_markdown.rs",
+      "current_sha256": "a68b2f38d5120599b1cb0a32af0aabac244cfe14ed5201d4930e0e9ec28cdcf5",
+      "current_baseline_equal": true
+    },
+    {
+      "path": "tests/integration/text_stream_portal_styling.rs",
+      "current_sha256": "c77611b4060cf22a40f12a25258f55e61a9795df98f69721fadbf829f0bbcd4b",
+      "current_baseline_equal": true
+    },
+    {
+      "path": "tests/integration/text_stream_portal_surface.rs",
+      "current_sha256": "58941335fb7687df6393f5a27350b8a2c6b9949cd75ce00887f3fd0d812032d4",
+      "current_baseline_equal": true
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/shell/freeze.rs",
+      "current_sha256": "f3138312c0d8453aecadf6e1de82dd0b58f5e873e376d6a7d005bda8d34bdcf6",
+      "current_baseline_equal": true
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/lib.rs",
+      "current_sha256": "49dcb439153d20a574c50cb53188e5a7b91db52986a859461d306963f0e4cd79",
+      "current_baseline_equal": true
+    },
+    {
+      "path": "crates/tze_hud_protocol/src/session_server/freeze_queue.rs",
+      "current_sha256": "8f024ee820fa97fba803e15c4a48adf81b2a524b087a8f086eb29d6effe7fea7",
+      "current_baseline_equal": true
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/shell/safe_mode.rs",
+      "current_sha256": "b8eefd7c10313e848f0346f9c7bb8047082a5eac0b391806dce382fdb08434c4",
+      "current_baseline_equal": true
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/windowed/safe_mode_toggle.rs",
+      "current_sha256": "397090905c91d3d7cbd6a26f08ad338f3f63b3830cf342c55dbbb7ca292a5c59",
+      "current_baseline_equal": true
+    }
+  ],
+  "T7_path_authority": {
+    "root_archive": "/home/orca/orca/projects/tze-hud/.handoff/review-evidence/hud-bstmy.2.17/final-author-tree-artifacts/.handoff/hud-bstmy.2.17/previous-qualified-named72-and-T7-boundaries.json",
+    "sha256": "8d49ed810dbe9443abd50d88888146b994a32060d026f7b8e8a67a8ff84bf497",
+    "qualification": "Path list reused; all27 hashes freshly computed against actual abd baseline. 27 source seams, NOT27 test declarations. poc_acceptance has11 existing declarations."
+  },
+  "fixtures": [
+    {
+      "name": "overlays_resized_off_their_monitor_are_refitted",
+      "all_original_body_before_final_closing_brace_retained_exactly": true,
+      "original_sha256": "de58d6790a87eb4046c1d188ff1439bb2d0ff613b3b0c9ae7627ed185bd49920"
+    },
+    {
+      "name": "refits_are_bounded_when_the_os_keeps_resizing",
+      "all_original_body_before_final_closing_brace_retained_exactly": true,
+      "original_sha256": "268f3c860f746b60b0012bb4ac95c4ee12f7d39c9c1c2bedadc0e1af9fcb7b91"
+    }
+  ],
+  "test_delta": "+0~2-0",
+  "new_declarations": 0,
+  "default_manifests_lock_workflows_unchanged": true,
+  "all_other_consumed_sources_unchanged": true,
+  "tracked_clean": true,
+  "cargo_executed": false,
+  "physical_focus_latency_sleep_execution": "NOT EXECUTED; owner Win+D/sleep/wake AC remains pending",
+  "initial_static_diagnostics": [
+    "Nonexistent human_override.rs lookup exited2; source navigation corrected.",
+    "Initial inventory assertion incorrectly expected27 tests in poc_acceptance.rs; actual11, corrected to established27 protected T7 source seams. No production/compiler/test failure."
+  ]
+}

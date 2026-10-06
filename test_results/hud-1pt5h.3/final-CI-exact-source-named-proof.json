@@ -1,0 +1,1320 @@
+{
+  "schema": "minimized-overlay-exact-CI-proof-v1",
+  "native_pid": 3867960,
+  "source_head": "740b68b70b3bcbd64c7f330f91ac627de6f42e5b",
+  "raw_sha256": "52f95524647b70c28ccc5c801cbe1cc7eb2fd8f080979920291d827ec317b9d4",
+  "rust_summaries": [
+    {
+      "line": 2996,
+      "passed": 7,
+      "failed": 0,
+      "ignored": 0,
+      "section": "workspace"
+    },
+    {
+      "line": 3002,
+      "passed": 0,
+      "failed": 0,
+      "ignored": 0,
+      "section": "workspace"
+    },
+    {
+      "line": 3009,
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0,
+      "section": "workspace"
+    },
+    {
+      "line": 3015,
+      "passed": 0,
+      "failed": 0,
+      "ignored": 0,
+      "section": "workspace"
+    },
+    {
+      "line": 3024,
+      "passed": 3,
+      "failed": 0,
+      "ignored": 0,
+      "section": "workspace"
+    },
+    {
+      "line": 3048,
+      "passed": 18,
+      "failed": 0,
+      "ignored": 0,
+      "section": "workspace"
+    },
+    {
+      "line": 3054,
+      "passed": 0,
+      "failed": 0,
+      "ignored": 0,
+      "section": "workspace"
+    },
+    {
+      "line": 3061,
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0,
+      "section": "workspace"
+    },
+    {
+      "line": 3080,
+      "passed": 13,
+      "failed": 0,
+      "ignored": 0,
+      "section": "workspace"
+    },
+    {
+      "line": 3096,
+      "passed": 2,
+      "failed": 0,
+      "ignored": 0,
+      "section": "workspace"
+    },
+    {
+      "line": 3103,
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0,
+      "section": "workspace"
+    },
+    {
+      "line": 3128,
+      "passed": 3,
+      "failed": 0,
+      "ignored": 0,
+      "section": "workspace"
+    },
+    {
+      "line": 3733,
+      "passed": 591,
+      "failed": 0,
+      "ignored": 0,
+      "section": "workspace"
+    },
+    {
+      "line": 3762,
+      "passed": 23,
+      "failed": 0,
+      "ignored": 0,
+      "section": "workspace"
+    },
+    {
+      "line": 3777,
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0,
+      "section": "workspace"
+    },
+    {
+      "line": 3792,
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0,
+      "section": "workspace"
+    },
+    {
+      "line": 3802,
+      "passed": 4,
+      "failed": 0,
+      "ignored": 0,
+      "section": "workspace"
+    },
+    {
+      "line": 3824,
+      "passed": 8,
+      "failed": 0,
+      "ignored": 0,
+      "section": "workspace"
+    },
+    {
+      "line": 3851,
+      "passed": 13,
+      "failed": 0,
+      "ignored": 0,
+      "section": "workspace"
+    },
+    {
+      "line": 4070,
+      "passed": 171,
+      "failed": 0,
+      "ignored": 0,
+      "section": "workspace"
+    },
+    {
+      "line": 4480,
+      "passed": 404,
+      "failed": 0,
+      "ignored": 0,
+      "section": "workspace"
+    },
+    {
+      "line": 4528,
+      "passed": 42,
+      "failed": 0,
+      "ignored": 0,
+      "section": "workspace"
+    },
+    {
+      "line": 4743,
+      "passed": 209,
+      "failed": 0,
+      "ignored": 0,
+      "section": "workspace"
+    },
+    {
+      "line": 4953,
+      "passed": 204,
+      "failed": 0,
+      "ignored": 0,
+      "section": "workspace"
+    },
+    {
+      "line": 4968,
+      "passed": 9,
+      "failed": 0,
+      "ignored": 0,
+      "section": "workspace"
+    },
+    {
+      "line": 4977,
+      "passed": 3,
+      "failed": 0,
+      "ignored": 0,
+      "section": "workspace"
+    },
+    {
+      "line": 5016,
+      "passed": 33,
+      "failed": 0,
+      "ignored": 0,
+      "section": "workspace"
+    },
+    {
+      "line": 5043,
+      "passed": 21,
+      "failed": 0,
+      "ignored": 0,
+      "section": "workspace"
+    },
+    {
+      "line": 5061,
+      "passed": 12,
+      "failed": 0,
+      "ignored": 0,
+      "section": "workspace"
+    },
+    {
+      "line": 5153,
+      "passed": 86,
+      "failed": 0,
+      "ignored": 0,
+      "section": "workspace"
+    },
+    {
+      "line": 5167,
+      "passed": 8,
+      "failed": 0,
+      "ignored": 0,
+      "section": "workspace"
+    },
+    {
+      "line": 5786,
+      "passed": 533,
+      "failed": 0,
+      "ignored": 0,
+      "section": "workspace"
+    },
+    {
+      "line": 5794,
+      "passed": 2,
+      "failed": 0,
+      "ignored": 0,
+      "section": "workspace"
+    },
+    {
+      "line": 5800,
+      "passed": 0,
+      "failed": 0,
+      "ignored": 0,
+      "section": "workspace"
+    },
+    {
+      "line": 5853,
+      "passed": 39,
+      "failed": 0,
+      "ignored": 0,
+      "section": "workspace"
+    },
+    {
+      "line": 5870,
+      "passed": 3,
+      "failed": 0,
+      "ignored": 0,
+      "section": "workspace"
+    },
+    {
+      "line": 6191,
+      "passed": 315,
+      "failed": 0,
+      "ignored": 0,
+      "section": "workspace"
+    },
+    {
+      "line": 6219,
+      "passed": 22,
+      "failed": 0,
+      "ignored": 0,
+      "section": "workspace"
+    },
+    {
+      "line": 6234,
+      "passed": 9,
+      "failed": 0,
+      "ignored": 0,
+      "section": "workspace"
+    },
+    {
+      "line": 6260,
+      "passed": 20,
+      "failed": 0,
+      "ignored": 0,
+      "section": "workspace"
+    },
+    {
+      "line": 6273,
+      "passed": 7,
+      "failed": 0,
+      "ignored": 0,
+      "section": "workspace"
+    },
+    {
+      "line": 6295,
+      "passed": 16,
+      "failed": 0,
+      "ignored": 0,
+      "section": "workspace"
+    },
+    {
+      "line": 6320,
+      "passed": 19,
+      "failed": 0,
+      "ignored": 0,
+      "section": "workspace"
+    },
+    {
+      "line": 6341,
+      "passed": 15,
+      "failed": 0,
+      "ignored": 0,
+      "section": "workspace"
+    },
+    {
+      "line": 6393,
+      "passed": 46,
+      "failed": 0,
+      "ignored": 0,
+      "section": "workspace"
+    },
+    {
+      "line": 6474,
+      "passed": 49,
+      "failed": 0,
+      "ignored": 0,
+      "section": "workspace"
+    },
+    {
+      "line": 6485,
+      "passed": 5,
+      "failed": 0,
+      "ignored": 0,
+      "section": "workspace"
+    },
+    {
+      "line": 6498,
+      "passed": 7,
+      "failed": 0,
+      "ignored": 0,
+      "section": "workspace"
+    },
+    {
+      "line": 6512,
+      "passed": 8,
+      "failed": 0,
+      "ignored": 0,
+      "section": "workspace"
+    },
+    {
+      "line": 6535,
+      "passed": 17,
+      "failed": 0,
+      "ignored": 0,
+      "section": "workspace"
+    },
+    {
+      "line": 6551,
+      "passed": 2,
+      "failed": 0,
+      "ignored": 0,
+      "section": "workspace"
+    },
+    {
+      "line": 6595,
+      "passed": 30,
+      "failed": 0,
+      "ignored": 0,
+      "section": "workspace"
+    },
+    {
+      "line": 6610,
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0,
+      "section": "workspace"
+    },
+    {
+      "line": 6630,
+      "passed": 14,
+      "failed": 0,
+      "ignored": 0,
+      "section": "workspace"
+    },
+    {
+      "line": 6665,
+      "passed": 18,
+      "failed": 0,
+      "ignored": 0,
+      "section": "integration"
+    },
+    {
+      "line": 6690,
+      "passed": 19,
+      "failed": 0,
+      "ignored": 0,
+      "section": "integration"
+    },
+    {
+      "line": 6703,
+      "passed": 7,
+      "failed": 0,
+      "ignored": 0,
+      "section": "integration"
+    },
+    {
+      "line": 6721,
+      "passed": 4,
+      "failed": 0,
+      "ignored": 0,
+      "section": "integration"
+    },
+    {
+      "line": 6738,
+      "passed": 11,
+      "failed": 0,
+      "ignored": 0,
+      "section": "integration"
+    },
+    {
+      "line": 6757,
+      "passed": 5,
+      "failed": 0,
+      "ignored": 0,
+      "section": "integration"
+    },
+    {
+      "line": 6777,
+      "passed": 6,
+      "failed": 0,
+      "ignored": 0,
+      "section": "integration"
+    },
+    {
+      "line": 6805,
+      "passed": 14,
+      "failed": 0,
+      "ignored": 0,
+      "section": "integration"
+    },
+    {
+      "line": 6814,
+      "passed": 3,
+      "failed": 0,
+      "ignored": 0,
+      "section": "integration"
+    },
+    {
+      "line": 6840,
+      "passed": 20,
+      "failed": 0,
+      "ignored": 0,
+      "section": "integration"
+    },
+    {
+      "line": 6861,
+      "passed": 15,
+      "failed": 0,
+      "ignored": 0,
+      "section": "integration"
+    },
+    {
+      "line": 6888,
+      "passed": 21,
+      "failed": 0,
+      "ignored": 0,
+      "section": "integration"
+    },
+    {
+      "line": 6906,
+      "passed": 12,
+      "failed": 0,
+      "ignored": 0,
+      "section": "integration"
+    },
+    {
+      "line": 6927,
+      "passed": 15,
+      "failed": 0,
+      "ignored": 0,
+      "section": "integration"
+    },
+    {
+      "line": 7012,
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0,
+      "section": "later"
+    },
+    {
+      "line": 7036,
+      "passed": 3,
+      "failed": 0,
+      "ignored": 0,
+      "section": "later"
+    }
+  ],
+  "summary_count": 70,
+  "rust_positive_rows": 3245,
+  "rust_passed": 3245,
+  "all72_named_binary_positive": [
+    {
+      "source_file": "crates/tze_hud_compositor/src/renderer/safe_mode_overlay.rs",
+      "name": "windowed_frame_draws_chrome_overlay_in_safe_mode",
+      "actual_positive_hits": [
+        {
+          "name": "renderer::safe_mode_overlay::tests::windowed_frame_draws_chrome_overlay_in_safe_mode",
+          "binary": "Running unittests src/lib.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/tze_hud_compositor-be860508c924fdc3)",
+          "line": 3290
+        }
+      ]
+    },
+    {
+      "source_file": "crates/tze_hud_compositor/src/renderer/tests/focus_chrome.rs",
+      "name": "orphaned_tile_emits_disconnection_badge_draw_cmd",
+      "actual_positive_hits": [
+        {
+          "name": "renderer::tests::focus_chrome::orphaned_tile_emits_disconnection_badge_draw_cmd",
+          "binary": "Running unittests src/lib.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/tze_hud_compositor-be860508c924fdc3)",
+          "line": 3365
+        }
+      ]
+    },
+    {
+      "source_file": "crates/tze_hud_compositor/src/renderer/tests/hit_drag.rs",
+      "name": "tile_close_button_draw_and_hit_region_share_token_geometry",
+      "actual_positive_hits": [
+        {
+          "name": "renderer::tests::hit_drag::tile_close_button_draw_and_hit_region_share_token_geometry",
+          "binary": "Running unittests src/lib.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/tze_hud_compositor-be860508c924fdc3)",
+          "line": 3385
+        }
+      ]
+    },
+    {
+      "source_file": "crates/tze_hud_compositor/src/renderer/tests/idle_gate.rs",
+      "name": "hold_moves_the_fade_deadline_and_ttl_zero_never_fades",
+      "actual_positive_hits": [
+        {
+          "name": "renderer::tests::idle_gate::hold_moves_the_fade_deadline_and_ttl_zero_never_fades",
+          "binary": "Running unittests src/lib.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/tze_hud_compositor-be860508c924fdc3)",
+          "line": 3395
+        }
+      ]
+    },
+    {
+      "source_file": "crates/tze_hud_compositor/src/renderer/tests/surface.rs",
+      "name": "test_chrome_always_above_max_zorder_tile",
+      "actual_positive_hits": [
+        {
+          "name": "renderer::tests::surface::test_chrome_always_above_max_zorder_tile",
+          "binary": "Running unittests src/lib.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/tze_hud_compositor-be860508c924fdc3)",
+          "line": 3459
+        }
+      ]
+    },
+    {
+      "source_file": "crates/tze_hud_compositor/src/renderer/tests/zone_layers.rs",
+      "name": "test_publication_ttl_ms_uses_expires_at_wall_us",
+      "actual_positive_hits": [
+        {
+          "name": "renderer::tests::zone_layers::test_publication_ttl_ms_uses_expires_at_wall_us",
+          "binary": "Running unittests src/lib.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/tze_hud_compositor-be860508c924fdc3)",
+          "line": 3495
+        }
+      ]
+    },
+    {
+      "source_file": "crates/tze_hud_compositor/src/renderer/tests/zone_stack.rs",
+      "name": "test_latest_wins_zone_renders_only_latest_publication",
+      "actual_positive_hits": [
+        {
+          "name": "renderer::tests::zone_stack::test_latest_wins_zone_renders_only_latest_publication",
+          "binary": "Running unittests src/lib.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/tze_hud_compositor-be860508c924fdc3)",
+          "line": 3721
+        }
+      ]
+    },
+    {
+      "source_file": "crates/tze_hud_compositor/src/renderer/tile_render.rs",
+      "name": "significant_degradation_preserves_hidden_tiles_and_opaques_visible_tiles",
+      "actual_positive_hits": [
+        {
+          "name": "renderer::tile_render::degradation_opacity_tests::significant_degradation_preserves_hidden_tiles_and_opaques_visible_tiles",
+          "binary": "Running unittests src/lib.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/tze_hud_compositor-be860508c924fdc3)",
+          "line": 3555
+        }
+      ]
+    },
+    {
+      "source_file": "crates/tze_hud_config/src/tests.rs",
+      "name": "safe_mode_hotkey_defaults_overrides_and_rejects_garbage",
+      "actual_positive_hits": [
+        {
+          "name": "tests::safe_mode_hotkey_defaults_overrides_and_rejects_garbage",
+          "binary": "Running unittests src/lib.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/tze_hud_config-464e3578a67e3b13)",
+          "line": 3982
+        }
+      ]
+    },
+    {
+      "source_file": "crates/tze_hud_input/src/batching.rs",
+      "name": "test_pointer_move_coalesced_in_batch",
+      "actual_positive_hits": [
+        {
+          "name": "batching::tests::test_pointer_move_coalesced_in_batch",
+          "binary": "Running unittests src/lib.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/tze_hud_input-76bcc105af0e52a5)",
+          "line": 4076
+        }
+      ]
+    },
+    {
+      "source_file": "crates/tze_hud_input/src/coalescing.rs",
+      "name": "test_coalesce_scroll_latest_wins",
+      "actual_positive_hits": [
+        {
+          "name": "coalescing::tests::test_coalesce_scroll_latest_wins",
+          "binary": "Running unittests src/lib.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/tze_hud_input-76bcc105af0e52a5)",
+          "line": 4094
+        }
+      ]
+    },
+    {
+      "source_file": "crates/tze_hud_mcp/src/error.rs",
+      "name": "error_codes_are_unique_and_documented",
+      "actual_positive_hits": [
+        {
+          "name": "error::tests::error_codes_are_unique_and_documented",
+          "binary": "Running unittests src/lib.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/tze_hud_mcp-c33dc76ccd6b0d9b)",
+          "line": 4495
+        }
+      ]
+    },
+    {
+      "source_file": "crates/tze_hud_mcp/src/server/tests.rs",
+      "name": "delay_ms_holds_content_until_due",
+      "actual_positive_hits": [
+        {
+          "name": "server::tests::delay_ms_holds_content_until_due",
+          "binary": "Running unittests src/lib.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/tze_hud_mcp-c33dc76ccd6b0d9b)",
+          "line": 4496
+        }
+      ]
+    },
+    {
+      "source_file": "crates/tze_hud_mcp/src/server/tests.rs",
+      "name": "every_returned_code_is_in_the_closed_set",
+      "actual_positive_hits": [
+        {
+          "name": "server::tests::every_returned_code_is_in_the_closed_set",
+          "binary": "Running unittests src/lib.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/tze_hud_mcp-c33dc76ccd6b0d9b)",
+          "line": 4502
+        }
+      ]
+    },
+    {
+      "source_file": "crates/tze_hud_mcp/src/server/tests.rs",
+      "name": "hud_publish_in_safe_mode_returns_safe_mode_active",
+      "actual_positive_hits": [
+        {
+          "name": "server::tests::hud_publish_in_safe_mode_returns_safe_mode_active",
+          "binary": "Running unittests src/lib.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/tze_hud_mcp-c33dc76ccd6b0d9b)",
+          "line": 4525
+        }
+      ]
+    },
+    {
+      "source_file": "crates/tze_hud_mcp/src/server/tests.rs",
+      "name": "notification_ttl_zero_is_held_and_hold_retimes_it",
+      "actual_positive_hits": [
+        {
+          "name": "server::tests::notification_ttl_zero_is_held_and_hold_retimes_it",
+          "binary": "Running unittests src/lib.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/tze_hud_mcp-c33dc76ccd6b0d9b)",
+          "line": 4508
+        }
+      ]
+    },
+    {
+      "source_file": "crates/tze_hud_mcp/src/server/tests.rs",
+      "name": "resume_restores_mcp_publishing",
+      "actual_positive_hits": [
+        {
+          "name": "server::tests::resume_restores_mcp_publishing",
+          "binary": "Running unittests src/lib.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/tze_hud_mcp-c33dc76ccd6b0d9b)",
+          "line": 4524
+        }
+      ]
+    },
+    {
+      "source_file": "crates/tze_hud_mcp/src/server/tests.rs",
+      "name": "safe_mode_does_not_regrant_suspended_mcp_lease",
+      "actual_positive_hits": [
+        {
+          "name": "server::tests::safe_mode_does_not_regrant_suspended_mcp_lease",
+          "binary": "Running unittests src/lib.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/tze_hud_mcp-c33dc76ccd6b0d9b)",
+          "line": 4522
+        }
+      ]
+    },
+    {
+      "source_file": "crates/tze_hud_mcp/src/server/tests.rs",
+      "name": "test_hud_publish_zone_contention_policy_latest_wins",
+      "actual_positive_hits": [
+        {
+          "name": "server::tests::test_hud_publish_zone_contention_policy_latest_wins",
+          "binary": "Running unittests src/lib.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/tze_hud_mcp-c33dc76ccd6b0d9b)",
+          "line": 4519
+        }
+      ]
+    },
+    {
+      "source_file": "crates/tze_hud_mcp/src/server/tests.rs",
+      "name": "test_hud_publish_zone_ttl_sets_content_expiry_and_is_swept",
+      "actual_positive_hits": [
+        {
+          "name": "server::tests::test_hud_publish_zone_ttl_sets_content_expiry_and_is_swept",
+          "binary": "Running unittests src/lib.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/tze_hud_mcp-c33dc76ccd6b0d9b)",
+          "line": 4513
+        }
+      ]
+    },
+    {
+      "source_file": "crates/tze_hud_mcp/src/server/tests.rs",
+      "name": "test_structured_error_has_hint_field",
+      "actual_positive_hits": [
+        {
+          "name": "server::tests::test_structured_error_has_hint_field",
+          "binary": "Running unittests src/lib.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/tze_hud_mcp-c33dc76ccd6b0d9b)",
+          "line": 4516
+        }
+      ]
+    },
+    {
+      "source_file": "crates/tze_hud_protocol/src/session_server/tests/events.rs",
+      "name": "viewer_dismiss_tile_pushes_reclaimed_override",
+      "actual_positive_hits": [
+        {
+          "name": "session_server::tests::events::viewer_dismiss_tile_pushes_reclaimed_override",
+          "binary": "Running unittests src/lib.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/tze_hud_protocol-3005da36ff1d77b9)",
+          "line": 4830
+        }
+      ]
+    },
+    {
+      "source_file": "crates/tze_hud_protocol/src/session_server/tests/invariants.rs",
+      "name": "grpc_batch_expires_at_sweeps_tile",
+      "actual_positive_hits": [
+        {
+          "name": "session_server::tests::invariants::grpc_batch_expires_at_sweeps_tile",
+          "binary": "Running unittests src/lib.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/tze_hud_protocol-3005da36ff1d77b9)",
+          "line": 4817
+        }
+      ]
+    },
+    {
+      "source_file": "crates/tze_hud_protocol/src/session_server/tests/invariants.rs",
+      "name": "grpc_batch_present_at_holds_content_until_due",
+      "actual_positive_hits": [
+        {
+          "name": "session_server::tests::invariants::grpc_batch_present_at_holds_content_until_due",
+          "binary": "Running unittests src/lib.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/tze_hud_protocol-3005da36ff1d77b9)",
+          "line": 4818
+        }
+      ]
+    },
+    {
+      "source_file": "crates/tze_hud_protocol/src/session_server/tests/invariants.rs",
+      "name": "grpc_disconnect_orphans_leases_and_badges_tiles",
+      "actual_positive_hits": [
+        {
+          "name": "session_server::tests::invariants::grpc_disconnect_orphans_leases_and_badges_tiles",
+          "binary": "Running unittests src/lib.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/tze_hud_protocol-3005da36ff1d77b9)",
+          "line": 4833
+        }
+      ]
+    },
+    {
+      "source_file": "crates/tze_hud_protocol/src/session_server/tests/invariants.rs",
+      "name": "grpc_grace_expiry_reclaims_orphaned_lease_and_rejects_resume",
+      "actual_positive_hits": [
+        {
+          "name": "session_server::tests::invariants::grpc_grace_expiry_reclaims_orphaned_lease_and_rejects_resume",
+          "binary": "Running unittests src/lib.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/tze_hud_protocol-3005da36ff1d77b9)",
+          "line": 4832
+        }
+      ]
+    },
+    {
+      "source_file": "crates/tze_hud_protocol/src/session_server/tests/invariants.rs",
+      "name": "grpc_resume_within_grace_restores_same_lease_and_tile",
+      "actual_positive_hits": [
+        {
+          "name": "session_server::tests::invariants::grpc_resume_within_grace_restores_same_lease_and_tile",
+          "binary": "Running unittests src/lib.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/tze_hud_protocol-3005da36ff1d77b9)",
+          "line": 4831
+        }
+      ]
+    },
+    {
+      "source_file": "crates/tze_hud_protocol/src/session_server/tests/invariants.rs",
+      "name": "grpc_zone_publish_expires_at_is_swept",
+      "actual_positive_hits": [
+        {
+          "name": "session_server::tests::invariants::grpc_zone_publish_expires_at_is_swept",
+          "binary": "Running unittests src/lib.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/tze_hud_protocol-3005da36ff1d77b9)",
+          "line": 4816
+        }
+      ]
+    },
+    {
+      "source_file": "crates/tze_hud_protocol/src/session_server/tests/invariants.rs",
+      "name": "grpc_zone_publish_present_at_is_held_until_due",
+      "actual_positive_hits": [
+        {
+          "name": "session_server::tests::invariants::grpc_zone_publish_present_at_is_held_until_due",
+          "binary": "Running unittests src/lib.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/tze_hud_protocol-3005da36ff1d77b9)",
+          "line": 4815
+        }
+      ]
+    },
+    {
+      "source_file": "crates/tze_hud_protocol/src/session_server/tests/invariants.rs",
+      "name": "grpc_zone_publish_ttl_sets_expiry_and_is_swept",
+      "actual_positive_hits": [
+        {
+          "name": "session_server::tests::invariants::grpc_zone_publish_ttl_sets_expiry_and_is_swept",
+          "binary": "Running unittests src/lib.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/tze_hud_protocol-3005da36ff1d77b9)",
+          "line": 4819
+        }
+      ]
+    },
+    {
+      "source_file": "crates/tze_hud_protocol/tests/fuzz_protocol_boundary.rs",
+      "name": "mutation_batch_oversized_rejected_with_structured_error",
+      "actual_positive_hits": [
+        {
+          "name": "mutation_batch_oversized_rejected_with_structured_error",
+          "binary": "Running tests/fuzz_protocol_boundary.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/fuzz_protocol_boundary-4877562798ee3fc4)",
+          "line": 5010
+        }
+      ]
+    },
+    {
+      "source_file": "crates/tze_hud_protocol/tests/lease_governance.rs",
+      "name": "disconnect_transitions_to_orphaned_and_sets_disconnection_badge",
+      "actual_positive_hits": [
+        {
+          "name": "disconnect_transitions_to_orphaned_and_sets_disconnection_badge",
+          "binary": "Running tests/lease_governance.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/lease_governance-80e75292d9147ede)",
+          "line": 5027
+        }
+      ]
+    },
+    {
+      "source_file": "crates/tze_hud_protocol/tests/lease_governance.rs",
+      "name": "grace_period_expiry_removes_tile_and_nodes",
+      "actual_positive_hits": [
+        {
+          "name": "grace_period_expiry_removes_tile_and_nodes",
+          "binary": "Running tests/lease_governance.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/lease_governance-80e75292d9147ede)",
+          "line": 5039
+        }
+      ]
+    },
+    {
+      "source_file": "crates/tze_hud_resource/tests/store_behavior.rs",
+      "name": "agent_texture_budget_rejects_whole_upload_and_stores_nothing",
+      "actual_positive_hits": [
+        {
+          "name": "agent_texture_budget_rejects_whole_upload_and_stores_nothing",
+          "binary": "Running tests/store_behavior.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/store_behavior-530e0c6e98fd8a57)",
+          "line": 5165
+        }
+      ]
+    },
+    {
+      "source_file": "crates/tze_hud_resource/tests/store_behavior.rs",
+      "name": "chunk_protocol_errors_have_stable_codes",
+      "actual_positive_hits": [
+        {
+          "name": "chunk_protocol_errors_have_stable_codes",
+          "binary": "Running tests/store_behavior.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/store_behavior-530e0c6e98fd8a57)",
+          "line": 5162
+        }
+      ]
+    },
+    {
+      "source_file": "crates/tze_hud_resource/tests/store_behavior.rs",
+      "name": "chunked_upload_rejected_at_complete_frees_its_slot_and_stores_nothing",
+      "actual_positive_hits": [
+        {
+          "name": "chunked_upload_rejected_at_complete_frees_its_slot_and_stores_nothing",
+          "binary": "Running tests/store_behavior.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/store_behavior-530e0c6e98fd8a57)",
+          "line": 5160
+        }
+      ]
+    },
+    {
+      "source_file": "crates/tze_hud_resource/tests/store_behavior.rs",
+      "name": "per_resource_size_cap_rejects_chunked_upload_at_start",
+      "actual_positive_hits": [
+        {
+          "name": "per_resource_size_cap_rejects_chunked_upload_at_start",
+          "binary": "Running tests/store_behavior.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/store_behavior-530e0c6e98fd8a57)",
+          "line": 5161
+        }
+      ]
+    },
+    {
+      "source_file": "crates/tze_hud_resource/tests/store_behavior.rs",
+      "name": "rejections_carry_stable_wire_code_and_actionable_detail",
+      "actual_positive_hits": [
+        {
+          "name": "rejections_carry_stable_wire_code_and_actionable_detail",
+          "binary": "Running tests/store_behavior.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/store_behavior-530e0c6e98fd8a57)",
+          "line": 5159
+        }
+      ]
+    },
+    {
+      "source_file": "crates/tze_hud_resource/tests/store_behavior.rs",
+      "name": "resource_count_cap_rejects_the_extra_resource",
+      "actual_positive_hits": [
+        {
+          "name": "resource_count_cap_rejects_the_extra_resource",
+          "binary": "Running tests/store_behavior.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/store_behavior-530e0c6e98fd8a57)",
+          "line": 5164
+        }
+      ]
+    },
+    {
+      "source_file": "crates/tze_hud_resource/tests/store_behavior.rs",
+      "name": "runtime_wide_texture_cap_is_shared_across_agents",
+      "actual_positive_hits": [
+        {
+          "name": "runtime_wide_texture_cap_is_shared_across_agents",
+          "binary": "Running tests/store_behavior.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/store_behavior-530e0c6e98fd8a57)",
+          "line": 5163
+        }
+      ]
+    },
+    {
+      "source_file": "crates/tze_hud_resource/tests/store_behavior.rs",
+      "name": "upload_slot_cap_is_per_agent_and_freed_by_abort",
+      "actual_positive_hits": [
+        {
+          "name": "upload_slot_cap_is_per_agent_and_freed_by_abort",
+          "binary": "Running tests/store_behavior.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/store_behavior-530e0c6e98fd8a57)",
+          "line": 5158
+        }
+      ]
+    },
+    {
+      "source_file": "crates/tze_hud_runtime/src/degradation.rs",
+      "name": "sustained_overload_does_not_escalate_past_simplified",
+      "actual_positive_hits": [
+        {
+          "name": "degradation::tests::sustained_overload_does_not_escalate_past_simplified",
+          "binary": "Running unittests src/lib.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/tze_hud_runtime-781d15130b9937e6)",
+          "line": 5187
+        }
+      ]
+    },
+    {
+      "source_file": "crates/tze_hud_runtime/src/headless.rs",
+      "name": "render_frame_reclaims_orphaned_lease_after_grace",
+      "actual_positive_hits": [
+        {
+          "name": "headless::tests::render_frame_reclaims_orphaned_lease_after_grace",
+          "binary": "Running unittests src/lib.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/tze_hud_runtime-781d15130b9937e6)",
+          "line": 5745
+        }
+      ]
+    },
+    {
+      "source_file": "crates/tze_hud_runtime/src/mutation_budget_bridge.rs",
+      "name": "aggregate_limits_are_atomic_across_agents",
+      "actual_positive_hits": [
+        {
+          "name": "mutation_budget_bridge::tests::aggregate_limits_are_atomic_across_agents",
+          "binary": "Running unittests src/lib.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/tze_hud_runtime-781d15130b9937e6)",
+          "line": 5239
+        }
+      ]
+    },
+    {
+      "source_file": "crates/tze_hud_runtime/src/mutation_budget_bridge.rs",
+      "name": "registered_budget_rejects_mutation_above_tile_limit",
+      "actual_positive_hits": [
+        {
+          "name": "mutation_budget_bridge::tests::registered_budget_rejects_mutation_above_tile_limit",
+          "binary": "Running unittests src/lib.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/tze_hud_runtime-781d15130b9937e6)",
+          "line": 5242
+        }
+      ]
+    },
+    {
+      "source_file": "crates/tze_hud_runtime/src/mutation_budget_bridge.rs",
+      "name": "resumed_session_restores_usage_before_accepting_new_mutations",
+      "actual_positive_hits": [
+        {
+          "name": "mutation_budget_bridge::tests::resumed_session_restores_usage_before_accepting_new_mutations",
+          "binary": "Running unittests src/lib.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/tze_hud_runtime-781d15130b9937e6)",
+          "line": 5249
+        }
+      ]
+    },
+    {
+      "source_file": "crates/tze_hud_runtime/src/portal_projection_driver.rs",
+      "name": "disconnect_then_reconnect_within_grace_resumes_same_surface_without_duplication",
+      "actual_positive_hits": [
+        {
+          "name": "portal_projection_driver::tests::disconnect_then_reconnect_within_grace_resumes_same_surface_without_duplication",
+          "binary": "Running unittests src/lib.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/tze_hud_runtime-781d15130b9937e6)",
+          "line": 5329
+        }
+      ]
+    },
+    {
+      "source_file": "crates/tze_hud_runtime/src/portal_projection_driver.rs",
+      "name": "viewer_dismiss_portal_detaches_and_next_publish_reattaches",
+      "actual_positive_hits": [
+        {
+          "name": "portal_projection_driver::tests::viewer_dismiss_portal_detaches_and_next_publish_reattaches",
+          "binary": "Running unittests src/lib.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/tze_hud_runtime-781d15130b9937e6)",
+          "line": 5346
+        }
+      ]
+    },
+    {
+      "source_file": "crates/tze_hud_runtime/src/shell/safe_mode.rs",
+      "name": "test_enter_safe_mode_suspends_active_leases",
+      "actual_positive_hits": [
+        {
+          "name": "shell::safe_mode::tests::test_enter_safe_mode_suspends_active_leases",
+          "binary": "Running unittests src/lib.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/tze_hud_runtime-781d15130b9937e6)",
+          "line": 5423
+        }
+      ]
+    },
+    {
+      "source_file": "crates/tze_hud_runtime/src/shell/safe_mode.rs",
+      "name": "test_lease_identity_preserved_across_suspend_resume",
+      "actual_positive_hits": [
+        {
+          "name": "shell::safe_mode::tests::test_lease_identity_preserved_across_suspend_resume",
+          "binary": "Running unittests src/lib.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/tze_hud_runtime-781d15130b9937e6)",
+          "line": 5426
+        }
+      ]
+    },
+    {
+      "source_file": "crates/tze_hud_runtime/src/shell/safe_mode.rs",
+      "name": "test_mutations_rejected_via_shared_state_flag",
+      "actual_positive_hits": [
+        {
+          "name": "shell::safe_mode::tests::test_mutations_rejected_via_shared_state_flag",
+          "binary": "Running unittests src/lib.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/tze_hud_runtime-781d15130b9937e6)",
+          "line": 5427
+        }
+      ]
+    },
+    {
+      "source_file": "crates/tze_hud_runtime/src/shell/safe_mode.rs",
+      "name": "test_ttl_excluded_during_suspension",
+      "actual_positive_hits": [
+        {
+          "name": "shell::safe_mode::tests::test_ttl_excluded_during_suspension",
+          "binary": "Running unittests src/lib.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/tze_hud_runtime-781d15130b9937e6)",
+          "line": 5429
+        }
+      ]
+    },
+    {
+      "source_file": "crates/tze_hud_runtime/src/windowed/event_loop_harness.rs",
+      "name": "viewer_close_button_dismisses_hovered_tile_and_notifies_owner",
+      "actual_positive_hits": [
+        {
+          "name": "windowed::event_loop_harness::tests::viewer_close_button_dismisses_hovered_tile_and_notifies_owner",
+          "binary": "Running unittests src/lib.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/tze_hud_runtime-781d15130b9937e6)",
+          "line": 5500
+        }
+      ]
+    },
+    {
+      "source_file": "crates/tze_hud_runtime/src/windowed/safe_mode_toggle.rs",
+      "name": "hotkey_event_enters_safe_mode_and_suspends_leases",
+      "actual_positive_hits": [
+        {
+          "name": "windowed::safe_mode_toggle::tests::hotkey_event_enters_safe_mode_and_suspends_leases",
+          "binary": "Running unittests src/lib.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/tze_hud_runtime-781d15130b9937e6)",
+          "line": 5709
+        }
+      ]
+    },
+    {
+      "source_file": "crates/tze_hud_scene/src/graph/spec_scenarios.rs",
+      "name": "revoked_lease_clears_only_its_publications",
+      "actual_positive_hits": [
+        {
+          "name": "graph::spec_scenarios::revoked_lease_clears_only_its_publications",
+          "binary": "Running unittests src/lib.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/tze_hud_scene-f6d99de7cad85b2e)",
+          "line": 5942
+        }
+      ]
+    },
+    {
+      "source_file": "crates/tze_hud_scene/src/graph/spec_scenarios.rs",
+      "name": "tile_lease_reap_keeps_same_namespace_mcp_publications",
+      "actual_positive_hits": [
+        {
+          "name": "graph::spec_scenarios::tile_lease_reap_keeps_same_namespace_mcp_publications",
+          "binary": "Running unittests src/lib.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/tze_hud_scene-f6d99de7cad85b2e)",
+          "line": 5941
+        }
+      ]
+    },
+    {
+      "source_file": "crates/tze_hud_scene/src/graph/tests.rs",
+      "name": "test_lease_resume_from_suspended",
+      "actual_positive_hits": [
+        {
+          "name": "graph::tests::test_lease_resume_from_suspended",
+          "binary": "Running unittests src/lib.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/tze_hud_scene-f6d99de7cad85b2e)",
+          "line": 6005
+        }
+      ]
+    },
+    {
+      "source_file": "crates/tze_hud_scene/src/graph/tests.rs",
+      "name": "test_lease_suspend_from_active",
+      "actual_positive_hits": [
+        {
+          "name": "graph::tests::test_lease_suspend_from_active",
+          "binary": "Running unittests src/lib.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/tze_hud_scene-f6d99de7cad85b2e)",
+          "line": 6006
+        }
+      ]
+    },
+    {
+      "source_file": "crates/tze_hud_scene/src/graph/tests.rs",
+      "name": "viewer_dismiss_tile_revokes_lease_in_any_live_state",
+      "actual_positive_hits": [
+        {
+          "name": "graph::tests::viewer_dismiss_tile_revokes_lease_in_any_live_state",
+          "binary": "Running unittests src/lib.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/tze_hud_scene-f6d99de7cad85b2e)",
+          "line": 6046
+        }
+      ]
+    },
+    {
+      "source_file": "crates/tze_hud_scene/src/graph/widget_tests.rs",
+      "name": "widget_publish_with_suspended_lease_is_safe_mode_active",
+      "actual_positive_hits": [
+        {
+          "name": "graph::widget_tests::widget_publish_with_suspended_lease_is_safe_mode_active",
+          "binary": "Running unittests src/lib.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/tze_hud_scene-f6d99de7cad85b2e)",
+          "line": 6098
+        }
+      ]
+    },
+    {
+      "source_file": "crates/tze_hud_scene/src/graph/widget_tests.rs",
+      "name": "widget_ttl_only_expired_publication_removed_when_mixed",
+      "actual_positive_hits": [
+        {
+          "name": "graph::widget_tests::widget_ttl_only_expired_publication_removed_when_mixed",
+          "binary": "Running unittests src/lib.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/tze_hud_scene-f6d99de7cad85b2e)",
+          "line": 6099
+        }
+      ]
+    },
+    {
+      "source_file": "tests/integration/poc_acceptance.rs",
+      "name": "poc_override_exit_safe_mode_with_agent_hung_during_it",
+      "actual_positive_hits": [
+        {
+          "name": "poc_override_exit_safe_mode_with_agent_hung_during_it",
+          "binary": "Running poc_acceptance.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/poc_acceptance-df41b950103a3003)",
+          "line": 6727
+        }
+      ]
+    },
+    {
+      "source_file": "tests/integration/poc_acceptance.rs",
+      "name": "poc_override_notifies_the_agent",
+      "actual_positive_hits": [
+        {
+          "name": "poc_override_notifies_the_agent",
+          "binary": "Running poc_acceptance.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/poc_acceptance-df41b950103a3003)",
+          "line": 6729
+        }
+      ]
+    },
+    {
+      "source_file": "tests/integration/poc_acceptance.rs",
+      "name": "poc_override_safe_mode_wins_with_hung_grpc_agent",
+      "actual_positive_hits": [
+        {
+          "name": "poc_override_safe_mode_wins_with_hung_grpc_agent",
+          "binary": "Running poc_acceptance.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/poc_acceptance-df41b950103a3003)",
+          "line": 6726
+        }
+      ]
+    },
+    {
+      "source_file": "tests/integration/poc_acceptance.rs",
+      "name": "poc_portal_abandoned_is_reclaimed",
+      "actual_positive_hits": [
+        {
+          "name": "poc_portal_abandoned_is_reclaimed",
+          "binary": "Running poc_acceptance.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/poc_acceptance-df41b950103a3003)",
+          "line": 6735
+        }
+      ]
+    },
+    {
+      "source_file": "tests/integration/poc_acceptance.rs",
+      "name": "poc_portal_viewer_dismiss_then_mcp_verbs",
+      "actual_positive_hits": [
+        {
+          "name": "poc_portal_viewer_dismiss_then_mcp_verbs",
+          "binary": "Running poc_acceptance.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/poc_acceptance-df41b950103a3003)",
+          "line": 6733
+        }
+      ]
+    },
+    {
+      "source_file": "tests/integration/poc_acceptance.rs",
+      "name": "poc_tile_claim_with_placement_two_round_trips",
+      "actual_positive_hits": [
+        {
+          "name": "poc_tile_claim_with_placement_two_round_trips",
+          "binary": "Running poc_acceptance.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/poc_acceptance-df41b950103a3003)",
+          "line": 6728
+        }
+      ]
+    },
+    {
+      "source_file": "tests/integration/poc_acceptance.rs",
+      "name": "poc_tile_update_then_orphan_then_reclaim_after_grace",
+      "actual_positive_hits": [
+        {
+          "name": "poc_tile_update_then_orphan_then_reclaim_after_grace",
+          "binary": "Running poc_acceptance.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/poc_acceptance-df41b950103a3003)",
+          "line": 6736
+        }
+      ]
+    },
+    {
+      "source_file": "tests/integration/poc_acceptance.rs",
+      "name": "poc_zone_delay_ms_appears_on_schedule",
+      "actual_positive_hits": [
+        {
+          "name": "poc_zone_delay_ms_appears_on_schedule",
+          "binary": "Running poc_acceptance.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/poc_acceptance-df41b950103a3003)",
+          "line": 6730
+        }
+      ]
+    },
+    {
+      "source_file": "tests/integration/poc_acceptance.rs",
+      "name": "poc_zone_notification_ttl_disappears_unattended",
+      "actual_positive_hits": [
+        {
+          "name": "poc_zone_notification_ttl_disappears_unattended",
+          "binary": "Running poc_acceptance.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/poc_acceptance-df41b950103a3003)",
+          "line": 6732
+        }
+      ]
+    },
+    {
+      "source_file": "tests/integration/text_stream_portal_governance.rs",
+      "name": "shell_dismiss_override_removes_portal_tile",
+      "actual_positive_hits": [
+        {
+          "name": "shell_dismiss_override_removes_portal_tile",
+          "binary": "Running text_stream_portal_governance.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/text_stream_portal_governance-47f6e14902a21847)",
+          "line": 6848
+        }
+      ]
+    },
+    {
+      "source_file": "tests/integration/text_stream_portal_governance.rs",
+      "name": "shell_status_snapshot_exposes_no_portal_identity_or_transcript",
+      "actual_positive_hits": [
+        {
+          "name": "shell_status_snapshot_exposes_no_portal_identity_or_transcript",
+          "binary": "Running text_stream_portal_governance.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/text_stream_portal_governance-47f6e14902a21847)",
+          "line": 6855
+        }
+      ]
+    }
+  ],
+  "default17_actual_PASS": [
+    "PASS: dev-mode is not enabled by default for tze_hud_app (shipped binary)",
+    "PASS: dev-mode is not enabled by default for benchmark",
+    "PASS: dev-mode is not enabled by default for poc_demo",
+    "PASS: dev-mode is not enabled by default for render_artifacts",
+    "PASS: dev-mode is not enabled by default for tze_hud_compositor",
+    "PASS: dev-mode is not enabled by default for tze_hud_config",
+    "PASS: dev-mode is not enabled by default for tze_hud_input",
+    "PASS: dev-mode is not enabled by default for tze_hud_mcp",
+    "PASS: dev-mode is not enabled by default for tze_hud_projection",
+    "PASS: dev-mode is not enabled by default for tze_hud_protocol",
+    "PASS: dev-mode is not enabled by default for tze_hud_resource",
+    "PASS: dev-mode is not enabled by default for tze_hud_runtime",
+    "PASS: dev-mode is not enabled by default for tze_hud_scene",
+    "PASS: dev-mode is not enabled by default for tze_hud_telemetry",
+    "PASS: dev-mode is not enabled by default for tze_hud_widget",
+    "PASS: dev-mode is not enabled by default for vertical_slice",
+    "PASS: dev-mode is not enabled by default for widget_publish_load_harness"
+  ],
+  "skip_lines": [
+    "SKIPPED: overlay-harness-contract needs PowerShell (pwsh)",
+    "SKIP: integration has no lib/bin target (tests only)"
+  ],
+  "gpu_skip_lines": [],
+  "physical_owner_AC": "UNEXECUTED Win+D, <=1s/focus and sleep/wake; code PR cannot close full .3"
+}
