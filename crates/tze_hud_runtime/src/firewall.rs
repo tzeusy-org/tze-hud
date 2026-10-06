@@ -358,21 +358,29 @@ impl FirewallProbe {
 
     /// A fresh cached answer, if any. Never blocks.
     pub fn cached(&self) -> Option<TailnetInbound> {
+        self.cached_with_clock(Instant::now)
+    }
+
+    fn cached_with_clock(&self, now: impl Fn() -> Instant) -> Option<TailnetInbound> {
         let cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
         cache
             .as_ref()
-            .filter(|(at, _)| at.elapsed() < CACHE_TTL)
+            .filter(|(at, _)| now().saturating_duration_since(*at) < CACHE_TTL)
             .map(|(_, v)| v.clone())
     }
 
     /// The cached answer or a fresh evaluation. Blocks on a cache miss (COM
     /// enumeration can take a while): call from a blocking context.
     pub fn current(&self) -> TailnetInbound {
-        if let Some(v) = self.cached() {
+        self.current_with_clock(Instant::now)
+    }
+
+    fn current_with_clock(&self, now: impl Fn() -> Instant) -> TailnetInbound {
+        if let Some(v) = self.cached_with_clock(&now) {
             return v;
         }
         let v = (self.eval)();
-        *self.cache.lock().unwrap_or_else(|e| e.into_inner()) = Some((Instant::now(), v.clone()));
+        *self.cache.lock().unwrap_or_else(|e| e.into_inner()) = Some((now(), v.clone()));
         v
     }
 }
@@ -694,14 +702,47 @@ mod tests {
 
         let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let c = Arc::clone(&calls);
+        let clock = Arc::new(Mutex::new(Instant::now()));
+        let eval_clock = Arc::clone(&clock);
         let probe = FirewallProbe::new(move || {
-            c.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if c.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 1 {
+                // A slow evaluation must get a full TTL after it completes.
+                *eval_clock.lock().unwrap() += Duration::from_millis(2_000);
+            }
             TailnetInbound::Allowed
         });
-        assert_eq!(probe.cached(), None);
-        probe.current();
-        probe.current();
+        let now = || *clock.lock().unwrap();
+        let started = now();
+        assert_eq!(probe.cached_with_clock(now), None);
+        probe.current_with_clock(now);
+        probe.current_with_clock(now);
         assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+
+        *clock.lock().unwrap() = started + Duration::from_millis(4_999);
+        assert_eq!(probe.cached_with_clock(now), Some(TailnetInbound::Allowed));
+        assert_eq!(probe.current_with_clock(now), TailnetInbound::Allowed);
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+        for elapsed_ms in [5_000, 5_001] {
+            *clock.lock().unwrap() = started + Duration::from_millis(elapsed_ms);
+            assert_eq!(probe.cached_with_clock(now), None);
+        }
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+
+        assert_eq!(probe.current_with_clock(now), TailnetInbound::Allowed);
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 2);
+        let completed = now();
+        assert_eq!(probe.cached_with_clock(now), Some(TailnetInbound::Allowed));
+        *clock.lock().unwrap() = completed + Duration::from_millis(4_999);
+        assert_eq!(probe.cached_with_clock(now), Some(TailnetInbound::Allowed));
+        assert_eq!(
+            probe.current_with_clock(now).to_json(),
+            json!({"state": "allowed"})
+        );
+        for elapsed_ms in [5_000, 5_001] {
+            *clock.lock().unwrap() = completed + Duration::from_millis(elapsed_ms);
+            assert_eq!(probe.cached_with_clock(now), None);
+        }
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 2);
     }
 
     #[cfg(not(target_os = "windows"))]
