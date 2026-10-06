@@ -4,7 +4,9 @@
 Method: copy the workspace to a temp dir, narrow every `pub` item in the target
 crate's src/ to `pub(crate)` unless another crate's non-test code mentions its
 name, then `cargo check -p <crate> --lib` with lints capped to warnings and
-print the dead_code diagnostics. Never touches the working tree.
+print the dead_code diagnostics. Never touches the working tree: the copy skips
+build output and tracker state (.beads), and the default build dir
+(target/dead-code) is removed afterwards unless CARGO_TARGET_DIR is set.
 
 Usage: scripts/dead_code.py <crate-name>     (e.g. tze_hud_telemetry)
 """
@@ -21,7 +23,7 @@ import tempfile
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-COPY_IGNORE = shutil.ignore_patterns("target", ".git", ".worktrees", "node_modules", "test_results")
+COPY_IGNORE = shutil.ignore_patterns("target", ".git", ".worktrees", ".beads", "node_modules", "test_results")
 
 # `pub` (not `pub(...)`, not `pub use`) followed by an optional item keyword and the name.
 PUB_ITEM = re.compile(
@@ -112,11 +114,18 @@ def main() -> int:
 
         env = dict(os.environ)
         env["RUSTFLAGS"] = (env.get("RUSTFLAGS", "") + " --cap-lints warn").strip()
-        env.setdefault("CARGO_TARGET_DIR", str(REPO_ROOT / "target" / "dead-code"))
-        proc = subprocess.run(
-            ["cargo", "check", "-p", args.crate, "--lib", "--message-format=short"],
-            cwd=root, env=env, text=True, capture_output=True,
-        )
+        # Our own build dir is a multi-GB one-off; a caller-chosen one is kept.
+        own_target = None if env.get("CARGO_TARGET_DIR") else REPO_ROOT / "target" / "dead-code"
+        if own_target:
+            env["CARGO_TARGET_DIR"] = str(own_target)
+        try:
+            proc = subprocess.run(
+                ["cargo", "check", "-p", args.crate, "--lib", "--message-format=short"],
+                cwd=root, env=env, text=True, capture_output=True,
+            )
+        finally:
+            if own_target:
+                shutil.rmtree(own_target, ignore_errors=True)
         if proc.returncode != 0:
             sys.stderr.write(proc.stderr)
             return proc.returncode
