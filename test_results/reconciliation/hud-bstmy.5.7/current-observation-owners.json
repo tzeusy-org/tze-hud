@@ -1,0 +1,212 @@
+{
+  "hud-jm8nq.13": {
+    "id": "hud-jm8nq.13",
+    "title": "Prove a widget update re-rasterizes only that widget",
+    "description": "Goal: a per-instance rasterization counter proves that publishing a parameter to one widget re-rasterizes only that widget's SVG, and docs/scope.md's Widgets bullet is reworded accordingly.\n\nWhy: the per-instance raster cache exists (crates/tze_hud_compositor/src/renderer/widgets.rs:56-150, last_rendered_params/dirty) but no test counts rasterizations and none covers two widgets; existing cache tests (crates/tze_hud_widget/tests/gauge_perf_and_cache.rs:303,437) check scene params only. The full frame is still re-presented (no damage tracking), which is accepted.\n\nNon-goals: damage-rect presentation.\nGoverning spec: docs/scope.md 'POC acceptance' Widgets. Line refs are at windows-release-pipeline@44d355ef (content identical to main@1eb8f7cb, the merge of PR #1245); re-grep symbols before editing. The planning survey that produced this bead is not persisted; everything needed is in this bead.",
+    "design": "[decision] \"re-renders only that widget\" means re-rasterizes only that widget's SVG; the compositor still presents a frame. Update scope.md POC wording accordingly.\nFiles: crates/tze_hud_compositor/src/renderer/widgets.rs:56-150 (per-instance raster counter, exposed through telemetry); crates/tze_hud_telemetry; docs/scope.md 'POC acceptance' Widgets bullet.\nTests added: `widget_param_update_rasterizes_only_that_instance` (two widgets: main-gauge and main-progress; publish to gauge; gauge count +1, progress +0). Uses the built-in bundles from the embed bead.",
+    "acceptance_criteria": "1. `just test` passes including widget_param_update_rasterizes_only_that_instance (filter: `HEADLESS_FORCE_SOFTWARE=1 cargo test -p tze_hud_compositor widget_param_update_rasterizes_only_that_instance`).\n2. The counter is readable through tze_hud_telemetry; `cargo test -p tze_hud_telemetry` passes.\n3. docs/scope.md Widgets bullet says 're-rasterizes only that widget'.\n4. Gates, run once before handoff (quiet): `cargo fmt --check`; `cargo clippy --workspace --all-targets -- -D warnings`; `cargo test -p <crate>` for every touched crate (for tze_hud_compositor use `just test`, which sets HEADLESS_FORCE_SOFTWARE=1; never run `cargo test -p tze_hud_compositor` bare, it deadlocks headless); `just ci` green.",
+    "notes": "[beads-heartbeat]\nowner=coordinator:coord-20261003b\nlast_heartbeat_at=2026-10-03T07:43:03Z\nPR #1266 opened",
+    "status": "closed",
+    "external_ref": "gh-pr:1266",
+    "dependencies": [
+      {
+        "id": "hud-rbhqi",
+        "title": "Conduct a thorough code review of https://github.com/tzeusy-org/tze-hud/pull/1266",
+        "description": "Review PR 1266 thoroughly. Original implementation bead: hud-jm8nq.13. Leave resolvable PR comments, report corrections, attest merge readiness for exact head.",
+        "design": "Independent exact-head review; classify risk first.",
+        "acceptance_criteria": "1. Record reviewer identity and risk tier. 2. Bind verdict to exact head SHA. 3. Resolve/classify every thread. 4. Run risk-scaled gates; merge only when safe.",
+        "notes": "Review target bead: hud-jm8nq.13. PR: https://github.com/tzeusy-org/tze-hud/pull/1266\n[beads-heartbeat]\nowner=coordinator:coord-20261003b\nlast_heartbeat_at=2026-10-03T08:12:48Z\nmerge-queued 375b2daa",
+        "status": "closed",
+        "priority": 1,
+        "issue_type": "task",
+        "owner": "orca@tze.how",
+        "created_at": "2026-10-03T07:43:49Z",
+        "created_by": "tzeusy-orca",
+        "updated_at": "2026-10-03T19:09:57Z",
+        "closed_at": "2026-10-03T08:27:08Z",
+        "close_reason": "PR #1266 merged via merge queue",
+        "labels": [
+          "merge-queued",
+          "pr-review",
+          "pr-review-task"
+        ],
+        "dependency_type": "blocks"
+      },
+      {
+        "id": "hud-jm8nq.4",
+        "title": "Embed widget bundles so the shipped exe has its widgets",
+        "description": "Goal: `tze_hud.exe` + production.toml exposes widget:main-gauge, widget:main-progress and widget:main-status on Windows with no asset files beside the exe.\n\nWhy: the shipped app has no widgets. production.toml `[widget_bundles] paths=[\"widget_bundles\"]` resolves to app/tze_hud_app/config/widget_bundles which does not exist; bundles are split across assets/widget_bundles/{progress-bar,status-indicator} and assets/widgets/gauge; the release ships only tze_hud.exe (.github/workflows/windows.yml); missing bundles are skipped with a warning (crates/tze_hud_runtime/src/widget_startup.rs:222-229); app/tze_hud_app/tests/production_boot.rs:22-48 hides this by rewriting paths. Blocks T6 self-install (which then need not stage asset files).\n\nNon-goals: new widgets; damage-rect presentation.\nGoverning spec: docs/scope.md 'POC acceptance' Widgets; docs/scope.md T6 (2). Line refs are at windows-release-pipeline@44d355ef (content identical to main@1eb8f7cb, the merge of PR #1245); re-grep symbols before editing. The planning survey that produced this bead is not persisted; everything needed is in this bead.",
+        "design": "Files: move assets/widgets/gauge -> assets/widget_bundles/gauge; crates/tze_hud_runtime/src/widget_startup.rs (built-in table); app/tze_hud_app (embed: `include_bytes!` table or a build.rs walking assets/widget_bundles); app/tze_hud_app/config/production.toml comments (:5-32, :72-100); app/tze_hud_app/tests/production_boot.rs:22-48 (stop rewriting paths); scripts/ci/windows_smoke.py (publish to a widget, assert hud_surfaces lists three widgets).\nApproach: the three bundles are built-in defaults; on-disk `[widget_bundles].paths` overrides by bundle type name. Keep bundle loading through the existing loader (`tze_hud_widget::loader`).\nTests added: `production_config_boots_with_builtin_widget_bundles` (no path rewrite); Windows smoke widget step. Kept: `widget_publish_hold_clear` (crates/tze_hud_mcp/src/server/tests.rs:630), crates/tze_hud_widget tests.",
+        "acceptance_criteria": "1. `cargo test -p tze_hud_app production_config_boots_with_builtin_widget_bundles` passes with production.toml unmodified (no path rewriting anywhere in production_boot.rs).\n2. An on-disk bundle with the same type name overrides the built-in one (unit test in tze_hud_runtime widget_startup).\n3. scripts/ci/windows_smoke.py publishes to widget:main-gauge and asserts hud_surfaces lists three widgets; the Windows CI job passes.\n4. `cargo test -p tze_hud_widget` and `just production-boot` pass.\n5. Gates, run once before handoff (quiet): `cargo fmt --check`; `cargo clippy --workspace --all-targets -- -D warnings`; `cargo test -p <crate>` for every touched crate (for tze_hud_compositor use `just test`, which sets HEADLESS_FORCE_SOFTWARE=1; never run `cargo test -p tze_hud_compositor` bare, it deadlocks headless); `just ci` green.",
+        "notes": "[beads-heartbeat]\nowner=coordinator:coord-20261003b\nlast_heartbeat_at=2026-10-03T04:53:21Z\nPR #1249 opened",
+        "status": "closed",
+        "priority": 1,
+        "issue_type": "task",
+        "assignee": "tzeusy-orca",
+        "owner": "orca@tze.how",
+        "created_at": "2026-10-02T19:25:28Z",
+        "created_by": "tzeusy-orca",
+        "updated_at": "2026-10-03T19:09:57Z",
+        "started_at": "2026-10-03T04:39:24Z",
+        "closed_at": "2026-10-03T05:39:19Z",
+        "close_reason": "PRs #1246/#1249 merged via merge queue",
+        "external_ref": "gh-pr:1249",
+        "labels": [
+          "complexity:medium",
+          "poc",
+          "post-reset",
+          "pr-review"
+        ],
+        "dependency_type": "blocks"
+      },
+      {
+        "id": "hud-jm8nq",
+        "title": "POC: acceptance gaps and demo",
+        "description": "Close the gaps between the shipped app (tze_hud_app + production.toml) and docs/scope.md 'POC acceptance', prove each bullet with a headless end-to-end test in Linux CI, build a single demo agent, and run the checklist on the owner's Windows overlay.\n\nGoverning spec: docs/scope.md 'POC acceptance' (Portal, Zones, Widgets, Tiles, Override, Idle); docs/api.md; docs/invariants.md \u00a71, \u00a73, \u00a74, \u00a75, \u00a79; docs/vision.md 'The real-estate lifecycle'.\n\nSurvey verdict (2026-10-03): Portal partial (never run end to end); Zones TTL/delay yes, action buttons never drawn; Widgets missing from the shipped artifact; Tiles partial (orphan badge never drawn, reap wipes same-namespace MCP content); Override no (no safe-mode entry, MCP bypasses safe mode, tiles/portals not dismissable); Idle partial (notification countdown and composer caret redraw at 60 fps).\n\n## Success Criteria\n1. tests/integration/poc_acceptance.rs proves every acceptance bullet except pixel/idle claims, headless in CI.\n2. Safe mode and dismiss win over a hung agent on every surface (MCP, gRPC, portal).\n3. The shipped exe has its widgets; a widget update re-rasterizes only that widget.\n4. Static content on screen costs no frames between events.\n5. examples/poc_demo drives zones, widgets, tiles and override against the live app.\n6. The owner runs the full checklist on the Windows overlay and it passes.",
+        "design": "Order: Wave A (independent fixes) and B1 (headless harness, T7's guard) first; then overlay behavior (B2-B8); then C1 (remaining acceptance tests), C2 demo, C3 Windows smoke; then human sign-off and the owner-host run.\nCohesion override: more than 9 children because the coordinator required one epic per area and the POC spans six independent acceptance bullets with distinct risk and sign-off gates.\nDecisions (coordinator 2026-10-03): fix docs/api.md to say zone:notification-area (don't rename the zone); safe-mode global hotkey configurable, default Ctrl+Shift+F12, RegisterHotKey; tile/portal dismiss = token-styled close button on hover in chrome (visual sign-off is needs-human); 're-renders only that widget' = re-rasterizes only that widget's SVG, scope.md wording updated; resident tile agent gets its own agent entry (allow [\"tiles\"]) via pairing once T6 lands, tests use agents.toml injection; stale PRs #658 #659 #1193 #1216 #1218 #1219 already closed.\nGating rule: anything requiring a real Windows desktop/visual check, real install on the owner's host, or an owner taste call is a separate needs-human bead.",
+        "status": "open",
+        "priority": 1,
+        "issue_type": "epic",
+        "owner": "orca@tze.how",
+        "created_at": "2026-10-02T19:25:26Z",
+        "created_by": "tzeusy-orca",
+        "updated_at": "2026-10-03T19:09:57Z",
+        "labels": [
+          "complexity:epic",
+          "poc",
+          "post-reset"
+        ],
+        "dependency_type": "parent-child"
+      }
+    ]
+  },
+  "hud-jm8nq.8": {
+    "id": "hud-jm8nq.8",
+    "title": "Idle with content on screen: no frames between events",
+    "description": "Goal: a notification counting down to its fade and a focused composer cost no frames between events, AND overlay click capture (notification actions, the x, widget hover, portal clicks) keeps working when the HUD is idle.\n\nWhy: `has_inflight_animation` treats a notification counting down as in flight (crates/tze_hud_compositor/src/renderer/animation.rs:738-747), so a visible notification redraws at 60 fps for its whole TTL; the composer caret renders at 60 fps (renderer/mod.rs:1583-1601) instead of waking every 530 ms (image_cache.rs:137), pinned by `idle_render_gate_renders_for_composer_echo_and_caret_blink` (renderer/tests.rs:9755). Overlay passthrough flips only in about_to_wait (crates/tze_hud_runtime/src/windowed/mod.rs:817-821 -> windowed/hittest.rs:184-244, GetCursorPos): it works today only because the 60 fps redraw polls it, so fixing idle alone breaks clicks. The two changes must land together.\n\nNon-goals: damage-rect presentation; the Windows CPU/click verification itself (needs-human sign-off bead).\nGoverning spec: docs/scope.md 'POC acceptance' Idle and Zones (action reaches hud_input); CLAUDE.md rule 'Idle costs ~nothing'; docs/invariants.md \u00a71. Line refs are at windows-release-pipeline@44d355ef (content identical to main@1eb8f7cb, the merge of PR #1245); re-grep symbols before editing. The planning survey that produced this bead is not persisted; everything needed is in this bead.",
+    "design": "Files: crates/tze_hud_runtime/src/windowed/hittest.rs:184-244; windowed/mod.rs:817-821, :1683-1731 (TtlDeadline min); windowed/wake.rs; crates/tze_hud_compositor/src/renderer/animation.rs:738-747; renderer/mod.rs:1583-1601; renderer/tests.rs:9755 (rewrite).\nApproach: (1) input capture: arm a low-rate cursor poll (e.g. 30 Hz via WaitUntil) only while interactive hit regions exist and the window is in passthrough; on a hit, flip passthrough off. (WH_MOUSE_LL hook is the heavier alternative; prefer the poll.) (2) idle: a countdown is not in flight; expose `next_animation_deadline()` (fade start, next caret toggle) and fold it into the TtlDeadline min.\nTests added: `cursor_poll_armed_only_with_hit_regions` (wake-source unit), `notification_countdown_is_not_inflight_animation`, `caret_blink_wakes_at_toggle_not_every_frame`, `idle_with_notification_renders_only_at_fade` (frame counter over a TestClock window). Rewritten: `idle_render_gate_renders_for_composer_echo_and_caret_blink`. Kept: `sixty_seconds_of_static_idle_has_zero_runtime_wakeups` (wake.rs:524), `idle_render_gate_skips_static_scene_renders_on_change_or_animation`, crates/tze_hud_runtime/tests/idle_efficiency_counters.rs (idle counters stay zero with no hit regions).\nWindows click/CPU verification lives in the POC needs-human sign-off bead.",
+    "acceptance_criteria": "1. `cargo test -p tze_hud_runtime cursor_poll_armed_only_with_hit_regions` passes; with no hit regions the idle counters (crates/tze_hud_runtime/tests/idle_efficiency_counters.rs) stay zero.\n2. `just test` passes including notification_countdown_is_not_inflight_animation, caret_blink_wakes_at_toggle_not_every_frame and idle_with_notification_renders_only_at_fade (filter: `HEADLESS_FORCE_SOFTWARE=1 cargo test -p tze_hud_compositor <name>`).\n3. `cargo test -p tze_hud_runtime sixty_seconds_of_static_idle_has_zero_runtime_wakeups` passes.\n4. POC headless zone tests (`cargo test -p integration --test poc_acceptance poc_notification_action_reaches_hud_input`) still pass.\n5. Gates, run once before handoff (quiet): `cargo fmt --check`; `cargo clippy --workspace --all-targets -- -D warnings`; `cargo test -p <crate>` for every touched crate (for tze_hud_compositor use `just test`, which sets HEADLESS_FORCE_SOFTWARE=1; never run `cargo test -p tze_hud_compositor` bare, it deadlocks headless); `just ci` green.",
+    "notes": "[beads-heartbeat]\nowner=coordinator:coord-20261003b\nlast_heartbeat_at=2026-10-03T08:47:41Z\nPR #1271 opened",
+    "status": "closed",
+    "external_ref": "gh-pr:1271",
+    "dependencies": [
+      {
+        "id": "hud-48l2o",
+        "title": "Conduct a thorough code review of https://github.com/tzeusy-org/tze-hud/pull/1271",
+        "description": "Review PR 1271 thoroughly. Original implementation bead: hud-jm8nq.8. Leave resolvable PR comments, report corrections, attest merge readiness for exact head.",
+        "design": "Independent exact-head review; classify risk first (windowed event loop wake/idle logic: high).",
+        "acceptance_criteria": "1. Record reviewer identity and risk tier. 2. Bind verdict to exact head SHA. 3. Resolve/classify every thread. 4. Run risk-scaled gates; merge only when safe.",
+        "notes": "Review target bead: hud-jm8nq.8. PR: https://github.com/tzeusy-org/tze-hud/pull/1271\n[beads-heartbeat]\nowner=coordinator:coord-20261003b\nlast_heartbeat_at=2026-10-03T08:59:22Z\nmerge-queued 5f974999",
+        "status": "closed",
+        "priority": 1,
+        "issue_type": "task",
+        "owner": "orca@tze.how",
+        "created_at": "2026-10-03T08:48:03Z",
+        "created_by": "tzeusy-orca",
+        "updated_at": "2026-10-03T19:09:57Z",
+        "closed_at": "2026-10-03T09:16:07Z",
+        "close_reason": "PRs #1271/#1272 merged via merge queue",
+        "labels": [
+          "merge-queued",
+          "pr-review",
+          "pr-review-task"
+        ],
+        "dependency_type": "blocks"
+      },
+      {
+        "id": "hud-jm8nq",
+        "title": "POC: acceptance gaps and demo",
+        "description": "Close the gaps between the shipped app (tze_hud_app + production.toml) and docs/scope.md 'POC acceptance', prove each bullet with a headless end-to-end test in Linux CI, build a single demo agent, and run the checklist on the owner's Windows overlay.\n\nGoverning spec: docs/scope.md 'POC acceptance' (Portal, Zones, Widgets, Tiles, Override, Idle); docs/api.md; docs/invariants.md \u00a71, \u00a73, \u00a74, \u00a75, \u00a79; docs/vision.md 'The real-estate lifecycle'.\n\nSurvey verdict (2026-10-03): Portal partial (never run end to end); Zones TTL/delay yes, action buttons never drawn; Widgets missing from the shipped artifact; Tiles partial (orphan badge never drawn, reap wipes same-namespace MCP content); Override no (no safe-mode entry, MCP bypasses safe mode, tiles/portals not dismissable); Idle partial (notification countdown and composer caret redraw at 60 fps).\n\n## Success Criteria\n1. tests/integration/poc_acceptance.rs proves every acceptance bullet except pixel/idle claims, headless in CI.\n2. Safe mode and dismiss win over a hung agent on every surface (MCP, gRPC, portal).\n3. The shipped exe has its widgets; a widget update re-rasterizes only that widget.\n4. Static content on screen costs no frames between events.\n5. examples/poc_demo drives zones, widgets, tiles and override against the live app.\n6. The owner runs the full checklist on the Windows overlay and it passes.",
+        "design": "Order: Wave A (independent fixes) and B1 (headless harness, T7's guard) first; then overlay behavior (B2-B8); then C1 (remaining acceptance tests), C2 demo, C3 Windows smoke; then human sign-off and the owner-host run.\nCohesion override: more than 9 children because the coordinator required one epic per area and the POC spans six independent acceptance bullets with distinct risk and sign-off gates.\nDecisions (coordinator 2026-10-03): fix docs/api.md to say zone:notification-area (don't rename the zone); safe-mode global hotkey configurable, default Ctrl+Shift+F12, RegisterHotKey; tile/portal dismiss = token-styled close button on hover in chrome (visual sign-off is needs-human); 're-renders only that widget' = re-rasterizes only that widget's SVG, scope.md wording updated; resident tile agent gets its own agent entry (allow [\"tiles\"]) via pairing once T6 lands, tests use agents.toml injection; stale PRs #658 #659 #1193 #1216 #1218 #1219 already closed.\nGating rule: anything requiring a real Windows desktop/visual check, real install on the owner's host, or an owner taste call is a separate needs-human bead.",
+        "status": "open",
+        "priority": 1,
+        "issue_type": "epic",
+        "owner": "orca@tze.how",
+        "created_at": "2026-10-02T19:25:26Z",
+        "created_by": "tzeusy-orca",
+        "updated_at": "2026-10-03T19:09:57Z",
+        "labels": [
+          "complexity:epic",
+          "poc",
+          "post-reset"
+        ],
+        "dependency_type": "parent-child"
+      }
+    ]
+  },
+  "hud-b9qeg": {
+    "id": "hud-b9qeg",
+    "title": "Conduct a thorough code review of https://github.com/tzeusy-org/tze-hud/pull/1285",
+    "description": "Review PR 1285 thoroughly. Original implementation bead: hud-bstmy.5.3. Leave resolvable PR comments, report corrections, attest merge readiness for exact head.",
+    "design": "Independent exact-head review; deletion of ~2.1k lines of artifact code + test rewrite.",
+    "acceptance_criteria": "1. Record reviewer identity and risk tier. 2. Bind verdict to exact head SHA. 3. Resolve/classify every thread. 4. Run risk-scaled gates; merge only when safe.",
+    "notes": "Review target bead: hud-bstmy.5.3. PR: https://github.com/tzeusy-org/tze-hud/pull/1285\n[beads-heartbeat]\nowner=coordinator:coord-20261003b\nlast_heartbeat_at=2026-10-03T10:53:12Z\nmerge-queued 27602163",
+    "status": "closed",
+    "external_ref": null,
+    "dependencies": null
+  },
+  "hud-bstmy.5.6": {
+    "id": "hud-bstmy.5.6",
+    "title": "Decide: delete the never-activated freeze, or keep and wire it (invariant 3)",
+    "description": "Escalation (hard gate: amends invariant 3 wording, docs/invariants.md). One decision.\n\nFacts: SharedState.freeze_active (protocol session.rs:191) is never set true outside tests (session_server tests.rs:2251). runtime shell/freeze.rs (1,137 lines) is referenced only by re-exports and 3 portal integration tests (text_stream_portal_{coalescing,cadence,governance} import FreezeQueue). The protocol freeze queue (session_server/freeze_queue.rs 217; mutations.rs:345-~420; mod.rs:413-426) can never fill. Invariant 3 currently covers safe mode and dismiss; freeze is described alongside.\n\nOptions:\nA. Delete freeze (runtime shell/freeze.rs, protocol freeze queue, freeze_active) and reword invariant 3 to 'Safe mode and dismiss'. About -3,000 lines. Lands after T7 (hud-lirh2) retargets the portal tests.\nB. Keep and wire it: a viewer chord/hotkey freezes agent mutations (queued, applied on unfreeze), drawn in chrome; add a behavior test. About +300 lines.\nC. Status quo: leave dead code as is.\n\nRecommendation: A. No current user, the POC Override criterion is satisfied by safe mode (hud-jm8nq.10), and 'prefer deleting over generalizing'. Consequences: A shrinks invariant 3 scope (no freeze promise); B adds a feature the vision does not require; C keeps 3k dead lines and a misleading invariant claim.\n\nDefault if unanswered: C (status quo, no code or invariant change).\n\nLine refs are at windows-release-pipeline@44d355ef (same content as main@1eb8f7cb); re-grep symbols before editing. The planning survey is not persisted; this bead is self-contained.",
+    "design": "[escalate] Freeze: deleting it amends invariant 3 -> needs-human (decisions.md T8 #3). Answer with one word: A, B or C. On A: the coordinator files an implementation bead under T8.2b depending on hud-lirh2.11 (T7 complete), with acceptance: fmt/clippy/test for runtime+protocol+integration, `git grep -nE 'FreezeQueue|freeze_active' -- crates tests` empty, invariants.md \u00a73 reworded.",
+    "acceptance_criteria": "1. The owner's answer (A/B/C) is recorded in this bead's notes.\n2. On A or B, a follow-up implementation bead exists under T8.2b with full acceptance and the right deps; this bead closes with the decision as close reason.\n3. Unanswered: nothing changes (status quo).",
+    "notes": null,
+    "status": "open",
+    "external_ref": null,
+    "dependencies": [
+      {
+        "id": "hud-bstmy.5",
+        "title": "T8.2b: Decided changes in runtime shell, widgets, telemetry and examples",
+        "description": "Owner-approved changes: wire widget transitions with an injected clock, trim the runtime shell (dead chrome render path, badges module, audit/mute stubs), reduce the change-efficiency artifact to counters, delete the soak suite, rewrite vertical_slice onto T5 verbs. Includes the freeze escalation.\n\nLine refs are at windows-release-pipeline@44d355ef (same content as main@1eb8f7cb); re-grep symbols before editing. The planning survey is not persisted; this bead is self-contained.",
+        "design": "[decision] Widget transitions: wire them with an injected clock; keep transition_ms.\n[decision] Change-efficiency artifact -> counters; keep one idle-no-redraw behavior test.\n[decision] Delete the soak suite.\n[decision] Keep vertical_slice (required check) and the weekly perf lane.\n[escalate] Freeze deletion amends invariant 3 -> needs-human bead.",
+        "status": "open",
+        "priority": 2,
+        "issue_type": "epic",
+        "owner": "orca@tze.how",
+        "created_at": "2026-10-02T19:36:27Z",
+        "created_by": "tzeusy-orca",
+        "updated_at": "2026-10-03T19:09:57Z",
+        "labels": [
+          "complexity:epic",
+          "post-reset",
+          "t8",
+          "t8-decided"
+        ],
+        "dependency_type": "parent-child"
+      }
+    ]
+  },
+  "hud-bstmy.8.6": {
+    "id": "hud-bstmy.8.6",
+    "title": "Decide: required-check ruleset changes (boot jobs, Windows clippy, pixel_readback gating)",
+    "description": "Escalation (hard gate: owner account/ruleset change on GitHub 'main merge queue', ci.yml:8-11). One decision covering a single ruleset edit window.\n\nProposed changes:\n1. Delete required jobs production-boot-vertical-slice (ci.yml:322) and canonical-app-production-boot (ci.yml:365): test-unit (ci.yml:207-211, --workspace --all-targets) already runs both tests; each recompiles the workspace and reinstalls Mesa.\n2. Replace clippy-windows-gnu (ci.yml:143-180, mingw cross) with `cargo clippy --target x86_64-pc-windows-msvc` inside windows.yml windows-build (native MSVC runner from T6 step 1).\n3. pixel_readback: test-gpu-pixel-readback (ci.yml:580-622) is continue-on-error and gates nothing: make it blocking inside test-unit, or move it to the weekly perf lane.\nvertical_slice stays (it is a required check) and the weekly perf lane stays.\n\nOptions:\nA. Apply 1+2+3(blocking in test-unit); owner edits the ruleset in the same window as the PR. About -135 YAML lines, 2-3 fewer full compiles and Mesa installs per PR.\nB. Apply 1+2 only; move pixel_readback to the weekly lane.\nC. Status quo.\n\nRecommendation: A (after the T8 llvmpipe recipe shows pixel_readback is stable on Mesa). Consequences: A/B require a ruleset edit or merges block on missing checks; C keeps the duplicate compile cost per PR.\n\nDefault if unanswered: C (no change to CI or the ruleset).\n\nLine refs are at windows-release-pipeline@44d355ef (same content as main@1eb8f7cb); re-grep symbols before editing. The planning survey is not persisted; this bead is self-contained.",
+    "design": "[escalate] Ruleset/required-check edits are owner account changes (decisions.md T8 #11). Answer A, B or C. On A/B the coordinator files one implementation bead (ci.yml/windows.yml edits; acceptance: workflow YAML parses, removed job names absent, new step present, PR merged only after the owner confirms the ruleset edit).",
+    "acceptance_criteria": "1. The owner's answer is recorded in notes.\n2. On A/B a follow-up CI bead exists with the ruleset-edit coordination step in its acceptance.\n3. Unanswered: no CI or ruleset change.",
+    "notes": "2026-10-03T12:26:56Z: From reconciliation hud-bstmy.1.6 / PR #1297: pixel_readback already runs in the blocking 'cargo test (unit)' job (workspace feature unification enables tze_hud_runtime/dev-mode; CI run 37120579351 shows it executed, 0 SKIPPED). The informational 'pixel readback (GPU / llvmpipe, informational)' job is therefore a pure duplicate: option 3 should be 'delete that job', not 'make it blocking'. Also (hud-bstmy.1.10) clippy windows-gnu and cargo-deny are required but not mirrored by just ci.",
+    "status": "open",
+    "external_ref": null,
+    "dependencies": [
+      {
+        "id": "hud-bstmy.8",
+        "title": "T8.4: Tooling, build cost and pre-reset lock-in",
+        "description": "cargo-machete gate and dead-code script, one test binary per crate, strip pre-reset references with a CI grep guard, dedupe skills, turn on unreachable_pub. Includes the required-checks escalation.\n\nLine refs are at windows-release-pipeline@44d355ef (same content as main@1eb8f7cb); re-grep symbols before editing. The planning survey is not persisted; this bead is self-contained.",
+        "design": "Runs last except the machete/dead-code tooling and the escalation, which can run any time.",
+        "status": "open",
+        "priority": 3,
+        "issue_type": "epic",
+        "owner": "orca@tze.how",
+        "created_at": "2026-10-02T19:36:29Z",
+        "created_by": "tzeusy-orca",
+        "updated_at": "2026-10-03T19:09:57Z",
+        "labels": [
+          "complexity:epic",
+          "post-reset",
+          "t8",
+          "t8-tooling"
+        ],
+        "dependency_type": "parent-child"
+      }
+    ]
+  }
+}

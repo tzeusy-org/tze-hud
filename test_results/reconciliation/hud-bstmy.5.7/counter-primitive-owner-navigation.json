@@ -1,0 +1,76 @@
+{
+  "source": "5825a05421a9e588edd5c3c05ebf7f5bac36c0e1",
+  "operations": {
+    "shape_call_count": {
+      "command": [
+        "git",
+        "grep",
+        "-n",
+        "-w",
+        "shape_call_count",
+        "--",
+        "crates",
+        "app",
+        "examples",
+        "tests"
+      ],
+      "exit_code": 0,
+      "actual_matches": [
+        "crates/tze_hud_compositor/src/renderer/mod.rs:1765:            .map(|r| r.shape_call_count())",
+        "crates/tze_hud_compositor/src/renderer/tests/text_render.rs:667:    let marker = |c: &Compositor| c.text_rasterizer.as_ref().unwrap().shape_call_count;",
+        "crates/tze_hud_compositor/src/renderer/tests/text_render.rs:672:        .shape_call_count = 12_345;",
+        "crates/tze_hud_compositor/src/text.rs:418:    /// `shape_until_scroll`; read via [`TextRasterizer::shape_call_count`].",
+        "crates/tze_hud_compositor/src/text.rs:420:    pub(crate) shape_call_count: u64,",
+        "crates/tze_hud_compositor/src/text.rs:748:            shape_call_count: 0,",
+        "crates/tze_hud_compositor/src/text.rs:759:    pub(crate) fn shape_call_count(&self) -> u64 {",
+        "crates/tze_hud_compositor/src/text.rs:760:        self.shape_call_count",
+        "crates/tze_hud_compositor/src/text.rs:1378:                // re-shape. `shape_call_count` deliberately does NOT advance.",
+        "crates/tze_hud_compositor/src/text.rs:1486:    /// pure scroll must avoid. It increments [`Self::shape_call_count`] exactly",
+        "crates/tze_hud_compositor/src/text.rs:1628:        self.shape_call_count += 1;"
+      ],
+      "scope": "qualified definitions at text.rs759/1628; widget.rs2778/2869/2912, and exact existing helper/benchmark users adjudicated; lexical matches alone not receiver resolution"
+    },
+    "raster_counts": {
+      "command": [
+        "git",
+        "grep",
+        "-n",
+        "-w",
+        "raster_counts",
+        "--",
+        "crates",
+        "app",
+        "examples",
+        "tests"
+      ],
+      "exit_code": 0,
+      "actual_matches": [
+        "crates/tze_hud_compositor/src/widget.rs:2511:    raster_counts: HashMap<String, u64>,",
+        "crates/tze_hud_compositor/src/widget.rs:2582:            raster_counts: HashMap::new(),",
+        "crates/tze_hud_compositor/src/widget.rs:2778:            .raster_counts",
+        "crates/tze_hud_compositor/src/widget.rs:3184:        self.raster_counts.get(instance_name).copied().unwrap_or(0)"
+      ],
+      "scope": "qualified definitions at text.rs759/1628; widget.rs2778/2869/2912, and exact existing helper/benchmark users adjudicated; lexical matches alone not receiver resolution"
+    },
+    "upload_texture": {
+      "command": [
+        "git",
+        "grep",
+        "-n",
+        "-w",
+        "upload_texture",
+        "--",
+        "crates",
+        "app",
+        "examples",
+        "tests"
+      ],
+      "exit_code": 0,
+      "actual_matches": [
+        "crates/tze_hud_compositor/src/widget.rs:2851:        self.upload_texture(",
+        "crates/tze_hud_compositor/src/widget.rs:2869:    fn upload_texture("
+      ],
+      "scope": "qualified definitions at text.rs759/1628; widget.rs2778/2869/2912, and exact existing helper/benchmark users adjudicated; lexical matches alone not receiver resolution"
+    }
+  }
+}

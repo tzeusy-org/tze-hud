@@ -1,0 +1,20 @@
+{
+  "source": "5825a05421a9e588edd5c3c05ebf7f5bac36c0e1",
+  "native_runner_pid": 2955957,
+  "cargo_pid": 2955964,
+  "native_exec_session_id": 27902,
+  "native_terminal_exit_code": 0,
+  "cargo_exit_code": 0,
+  "cargo_process_group_still_exists": false,
+  "actual_native_receipt_processes_finished": true,
+  "tracked_source_after": "5825a05421a9e588edd5c3c05ebf7f5bac36c0e1",
+  "tracked_clean": true,
+  "lease_release_requested_to_root": true,
+  "no_more_cargo_authorized_here": true,
+  "high_target_accessed": false,
+  "whole_log_sha256": "a34fb6f818a69968979310aaf3b06cfa3e45d7f08524a633f1d374e5bac2014a",
+  "receipt_sha256": "7d245f569705137ff2e00b7b4269a154c994c664f531d4733be53202d9110677",
+  "released_unix": 1791280379.5879424,
+  "root_release_ack_received": true,
+  "root_validation_durable_path": "/home/orca/orca/projects/tze-hud/.handoff/review-evidence/hud-bstmy.5.7/existing-budget-gate"
+}

@@ -1,0 +1,169 @@
+{
+  "source": "5825a05421a9e588edd5c3c05ebf7f5bac36c0e1",
+  "scans": [
+    {
+      "id": "shell-original",
+      "command": [
+        "git",
+        "grep",
+        "-nE",
+        "render_frame_with_chrome|strip_chrome_from_topology|MuteToggle|classify_safe_mode_input|shell::badges",
+        "--",
+        "crates",
+        "tests"
+      ],
+      "exit_code": 0,
+      "raw_output": "crates/tze_hud_input/src/portal_resize.rs:105:    /// | `Ctrl+Shift+M` | MuteToggle (v1-reserved) |\ncrates/tze_hud_input/src/portal_resize.rs:2153:            \"Ctrl+Shift+m must be reserved (MuteToggle)\"\ncrates/tze_hud_input/src/portal_resize.rs:2157:            \"Ctrl+Shift+M must be reserved (MuteToggle)\"\n",
+      "stderr": "",
+      "limitations": "Text navigation includes comments/literals and colliding names; live definitions/qualified owner/cfg/reexports are adjudicated separately. Exact original mandated roots preserved.",
+      "qualified_match_classification": [
+        {
+          "path": "crates/tze_hud_input/src/portal_resize.rs",
+          "line": 105,
+          "kind": "protected documentation comment"
+        },
+        {
+          "path": "crates/tze_hud_input/src/portal_resize.rs",
+          "line": 2153,
+          "kind": "LIVE assertion-message string",
+          "test": "shell_reserved_ctrl_shift_m_mute",
+          "production_call": "ShellReservedShortcut::is_reserved(\"m\",true,true,false)"
+        },
+        {
+          "path": "crates/tze_hud_input/src/portal_resize.rs",
+          "line": 2157,
+          "kind": "LIVE assertion-message string",
+          "test": "shell_reserved_ctrl_shift_m_mute",
+          "production_call": "ShellReservedShortcut::is_reserved(\"M\",true,true,false)"
+        }
+      ],
+      "qualified_verdict": "One protected doc-comment match at portal_resize.rs105 and two LIVE assertion-message matches at2153/2157 in shell_reserved_ctrl_shift_m_mute; both assertions call ShellReservedShortcut::is_reserved(\"m\"/\"M\",true,true,false), whose119-120 branch retains the v1 reserved no-op chord. The removed named MuteToggle implementation is absent. Literal zero-match AC still deviates; preserve T7 source/test and no new repair child."
+    },
+    {
+      "id": "artifact-original",
+      "command": [
+        "git",
+        "grep",
+        "-nE",
+        "invalidation_closure|InvalidationClosure",
+        "--",
+        "crates",
+        "scripts",
+        "justfile"
+      ],
+      "exit_code": 1,
+      "raw_output": "",
+      "stderr": "",
+      "limitations": "Text navigation includes comments/literals and colliding names; live definitions/qualified owner/cfg/reexports are adjudicated separately. Exact original mandated roots preserved."
+    },
+    {
+      "id": "soak-original",
+      "command": [
+        "git",
+        "grep",
+        "-nE",
+        "soak\\.rs|resource_monitor|name = \"soak\"",
+        "--",
+        "crates",
+        "tests",
+        ".github",
+        "justfile"
+      ],
+      "exit_code": 1,
+      "raw_output": "",
+      "stderr": "",
+      "limitations": "Text navigation includes comments/literals and colliding names; live definitions/qualified owner/cfg/reexports are adjudicated separately. Exact original mandated roots preserved."
+    },
+    {
+      "id": "example-original",
+      "command": [
+        "git",
+        "grep",
+        "-nE",
+        "publish_to_zone|resident-principal",
+        "--",
+        "examples/vertical_slice"
+      ],
+      "exit_code": 1,
+      "raw_output": "",
+      "stderr": "",
+      "limitations": "Text navigation includes comments/literals and colliding names; live definitions/qualified owner/cfg/reexports are adjudicated separately. Exact original mandated roots preserved."
+    },
+    {
+      "id": "widget-wall-clock",
+      "command": [
+        "git",
+        "grep",
+        "-nE",
+        "Instant::now",
+        "--",
+        "crates/tze_hud_compositor/src/widget.rs"
+      ],
+      "exit_code": 1,
+      "raw_output": "",
+      "stderr": "",
+      "limitations": "Text navigation includes comments/literals and colliding names; live definitions/qualified owner/cfg/reexports are adjudicated separately. Exact original mandated roots preserved."
+    },
+    {
+      "id": "instrument-allroots",
+      "command": [
+        "git",
+        "grep",
+        "-nE",
+        "WorkCounts|take_work_counts|widget_rasterized|rasterized_last_sync|latest_work",
+        "--",
+        "app",
+        "crates",
+        "examples",
+        "tests",
+        "scripts",
+        "justfile",
+        ".github"
+      ],
+      "exit_code": 0,
+      "raw_output": "crates/tze_hud_compositor/src/renderer/frame.rs:654:        telemetry.widget_rasterized = self\ncrates/tze_hud_compositor/src/renderer/frame.rs:657:            .map(|wr| wr.rasterized_last_sync().to_vec())\ncrates/tze_hud_compositor/src/renderer/frame.rs:1219:        telemetry.widget_rasterized = self\ncrates/tze_hud_compositor/src/renderer/frame.rs:1222:            .map(|wr| wr.rasterized_last_sync().to_vec())\ncrates/tze_hud_compositor/src/renderer/retained.rs:7://! [`WorkCounts`] so tests can see how much was repainted.\ncrates/tze_hud_compositor/src/renderer/retained.rs:16:use tze_hud_telemetry::WorkCounts;\ncrates/tze_hud_compositor/src/renderer/retained.rs:45:    latest_work: Option<WorkCounts>,\ncrates/tze_hud_compositor/src/renderer/retained.rs:118:        self.latest_work = None;\ncrates/tze_hud_compositor/src/renderer/retained.rs:154:        self.retained_render_state.latest_work = Some(WorkCounts::scoped(\ncrates/tze_hud_compositor/src/renderer/retained.rs:177:        self.retained_render_state.latest_work = Some(WorkCounts::full_frame(\ncrates/tze_hud_compositor/src/renderer/retained.rs:189:    pub fn take_work_counts(&mut self) -> Option<WorkCounts> {\ncrates/tze_hud_compositor/src/renderer/retained.rs:190:        self.retained_render_state.latest_work.take()\ncrates/tze_hud_compositor/src/renderer/retained.rs:846:            latest_work: Some(WorkCounts::scoped(1, 100)),\ncrates/tze_hud_compositor/src/renderer/retained.rs:852:        assert!(state.latest_work.is_none());\ncrates/tze_hud_compositor/src/renderer/tests/retained_image.rs:75:            .take_work_counts()\ncrates/tze_hud_compositor/src/renderer/tests/retained_image.rs:102:        .take_work_counts()\ncrates/tze_hud_compositor/src/widget.rs:2514:    rasterized_last_sync: Vec<String>,\ncrates/tze_hud_compositor/src/widget.rs:2583:            rasterized_last_sync: Vec::new(),\ncrates/tze_hud_compositor/src/widget.rs:2781:        self.rasterized_last_sync.push(instance_name.to_string());\ncrates/tze_hud_compositor/src/widget.rs:3188:    pub(crate) fn rasterized_last_sync(&self) -> &[String] {\ncrates/tze_hud_compositor/src/widget.rs:3189:        &self.rasterized_last_sync\ncrates/tze_hud_compositor/src/widget.rs:3194:        self.rasterized_last_sync.clear();\ncrates/tze_hud_compositor/tests/widget_raster_count.rs:5://! per-frame list on `FrameTelemetry::widget_rasterized`) rather than comparing\ncrates/tze_hud_compositor/tests/widget_raster_count.rs:121:    assert_eq!(first.widget_rasterized.len(), 2);\ncrates/tze_hud_compositor/tests/widget_raster_count.rs:128:    assert_eq!(update.widget_rasterized, [\"main-gauge\"]);\ncrates/tze_hud_compositor/tests/widget_raster_count.rs:134:    assert!(idle.widget_rasterized.is_empty());\ncrates/tze_hud_runtime/src/headless.rs:983:                .take_work_counts()\ncrates/tze_hud_runtime/src/headless.rs:1010:            .take_work_counts()\ncrates/tze_hud_runtime/src/headless.rs:1119:                .take_work_counts()\ncrates/tze_hud_runtime/src/headless.rs:1251:            .take_work_counts()\ncrates/tze_hud_runtime/src/headless.rs:1330:                .take_work_counts()\ncrates/tze_hud_runtime/src/headless.rs:1340:                .take_work_counts()\ncrates/tze_hud_runtime/src/headless.rs:1381:                .take_work_counts()\ncrates/tze_hud_telemetry/src/lib.rs:37:pub use work_counts::WorkCounts;\ncrates/tze_hud_telemetry/src/record.rs:201:    pub widget_rasterized: Vec<String>,\ncrates/tze_hud_telemetry/src/record.rs:235:            widget_rasterized: Vec::new(),\ncrates/tze_hud_telemetry/src/work_counts.rs:11:pub struct WorkCounts {\ncrates/tze_hud_telemetry/src/work_counts.rs:20:impl WorkCounts {\n",
+      "stderr": "",
+      "limitations": "Text navigation includes comments/literals and colliding names; live definitions/qualified owner/cfg/reexports are adjudicated separately. Exact original mandated roots preserved."
+    },
+    {
+      "id": "transition-allroots",
+      "command": [
+        "git",
+        "grep",
+        "-nE",
+        "start_transition|resolve_animated_params|sync_widget_textures|WidgetAnimationState|has_active_transition",
+        "--",
+        "app",
+        "crates",
+        "examples",
+        "tests"
+      ],
+      "exit_code": 0,
+      "raw_output": "crates/tze_hud_compositor/src/renderer/animation.rs:700:            .filter(|wr| wr.has_active_transition())\ncrates/tze_hud_compositor/src/renderer/animation.rs:757:            .is_some_and(|wr| wr.has_active_transition())\ncrates/tze_hud_compositor/src/renderer/draw_cmds.rs:158:/// Modeled after `WidgetAnimationState` in `crate::widget`.\ncrates/tze_hud_compositor/src/renderer/frame.rs:653:        self.sync_widget_textures(scene, self.degradation_level);\ncrates/tze_hud_compositor/src/renderer/frame.rs:1218:        self.sync_widget_textures(scene, self.degradation_level);\ncrates/tze_hud_compositor/src/renderer/widgets.rs:56:    pub(crate) fn sync_widget_textures(\ncrates/tze_hud_compositor/src/renderer/widgets.rs:138:                    wr.start_transition(\ncrates/tze_hud_compositor/src/renderer/widgets.rs:147:            let (effective_params, still_animating) = wr.resolve_animated_params(\ncrates/tze_hud_compositor/src/widget.rs:1726:    pub(crate) animation: Option<WidgetAnimationState>,\ncrates/tze_hud_compositor/src/widget.rs:1733:pub(crate) struct WidgetAnimationState {\ncrates/tze_hud_compositor/src/widget.rs:2513:    /// Instances rasterized by the most recent `sync_widget_textures` pass.\ncrates/tze_hud_compositor/src/widget.rs:2683:    pub(crate) fn start_transition(\ncrates/tze_hud_compositor/src/widget.rs:2693:            entry.animation = Some(WidgetAnimationState {\ncrates/tze_hud_compositor/src/widget.rs:2711:    pub(crate) fn resolve_animated_params(\ncrates/tze_hud_compositor/src/widget.rs:2758:    pub fn has_active_transition(&self) -> bool {\ncrates/tze_hud_compositor/tests/widget_transition.rs:277:            .has_active_transition()\ncrates/tze_hud_compositor/tests/widget_transition.rs:284:            .has_active_transition()\n",
+      "stderr": "",
+      "limitations": "Text navigation includes comments/literals and colliding names; live definitions/qualified owner/cfg/reexports are adjudicated separately. Exact original mandated roots preserved."
+    },
+    {
+      "id": "retired-helper-allroots",
+      "command": [
+        "git",
+        "grep",
+        "-nE",
+        "ChromeRenderer|ChromeLayout|ChromeDrawCmd|SafeModeController|ResourceMonitor|InvalidationClosure",
+        "--",
+        "app",
+        "crates",
+        "examples",
+        "tests",
+        "scripts",
+        ".github",
+        "justfile"
+      ],
+      "exit_code": 1,
+      "raw_output": "",
+      "stderr": "",
+      "limitations": "Text navigation includes comments/literals and colliding names; live definitions/qualified owner/cfg/reexports are adjudicated separately. Exact original mandated roots preserved."
+    }
+  ],
+  "created_new_source_scan_gate": false
+}

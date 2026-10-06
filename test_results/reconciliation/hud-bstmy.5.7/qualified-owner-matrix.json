@@ -1,0 +1,200 @@
+{
+  "source": "5825a05421a9e588edd5c3c05ebf7f5bac36c0e1",
+  "all_root_inventory": "source-inventory.json327Rust + source-applicability.json547non-evidence paths",
+  "navigation": "current-qualified-token-navigation.json actual git roots + prior actual8f AST applicable by327exactSHA; no fresh parse success",
+  "work_counts": {
+    "type": "tze_hud_telemetry::work_counts::WorkCounts",
+    "definition": {
+      "path": "crates/tze_hud_telemetry/src/work_counts.rs",
+      "line": 11,
+      "qualified_owner": "WorkCounts",
+      "git_blob": "f031a704566d519bacb6c4026747b1ec6656542c",
+      "file_sha256": "48ba2fd72e2df47436f79fcf7eb462c9a9352a35fa75beb0594ea2eee2ab8f89"
+    },
+    "module_and_reexport": [
+      "telemetry/lib.rs13 pubmod work_counts",
+      "telemetry/lib.rs37 pubuse WorkCounts"
+    ],
+    "production_producers": [
+      "Compositor::try_render_retained_headless154",
+      "Compositor::observe_full_headless_frame177"
+    ],
+    "storage": "RetainedRenderState.latest_work private45",
+    "drain": "Compositor::take_work_counts189",
+    "qualified_current_readers": [
+      {
+        "path": "crates/tze_hud_compositor/src/renderer/tests/retained_image.rs",
+        "line": 75,
+        "source_line": ".take_work_counts()",
+        "git_blob": "dfbfc6d9a380d448f84819c18c4bf897b139e475",
+        "role": "existing-test-or-fixture"
+      },
+      {
+        "path": "crates/tze_hud_compositor/src/renderer/tests/retained_image.rs",
+        "line": 102,
+        "source_line": ".take_work_counts()",
+        "git_blob": "dfbfc6d9a380d448f84819c18c4bf897b139e475",
+        "role": "existing-test-or-fixture"
+      },
+      {
+        "path": "crates/tze_hud_runtime/src/headless.rs",
+        "line": 983,
+        "source_line": ".take_work_counts()",
+        "git_blob": "9811068804cd058446b5aa094ba26c83a34173bb",
+        "role": "production-or-inline-test (manually qualified below)"
+      },
+      {
+        "path": "crates/tze_hud_runtime/src/headless.rs",
+        "line": 1010,
+        "source_line": ".take_work_counts()",
+        "git_blob": "9811068804cd058446b5aa094ba26c83a34173bb",
+        "role": "production-or-inline-test (manually qualified below)"
+      },
+      {
+        "path": "crates/tze_hud_runtime/src/headless.rs",
+        "line": 1119,
+        "source_line": ".take_work_counts()",
+        "git_blob": "9811068804cd058446b5aa094ba26c83a34173bb",
+        "role": "production-or-inline-test (manually qualified below)"
+      },
+      {
+        "path": "crates/tze_hud_runtime/src/headless.rs",
+        "line": 1251,
+        "source_line": ".take_work_counts()",
+        "git_blob": "9811068804cd058446b5aa094ba26c83a34173bb",
+        "role": "production-or-inline-test (manually qualified below)"
+      },
+      {
+        "path": "crates/tze_hud_runtime/src/headless.rs",
+        "line": 1330,
+        "source_line": ".take_work_counts()",
+        "git_blob": "9811068804cd058446b5aa094ba26c83a34173bb",
+        "role": "production-or-inline-test (manually qualified below)"
+      },
+      {
+        "path": "crates/tze_hud_runtime/src/headless.rs",
+        "line": 1340,
+        "source_line": ".take_work_counts()",
+        "git_blob": "9811068804cd058446b5aa094ba26c83a34173bb",
+        "role": "production-or-inline-test (manually qualified below)"
+      },
+      {
+        "path": "crates/tze_hud_runtime/src/headless.rs",
+        "line": 1381,
+        "source_line": ".take_work_counts()",
+        "git_blob": "9811068804cd058446b5aa094ba26c83a34173bb",
+        "role": "production-or-inline-test (manually qualified below)"
+      }
+    ],
+    "reader_count": 9,
+    "cfg_boundary": "Inline runtime callers are cfg(test); compositor retained_image is cfg(test). Storage/writes/type/reexport/drain are unconditional. runtime dev-mode=[]; compositor/telemetry nofeaturetables. Default production producer live; no prod/bench/T7 drain found.",
+    "default_dependency_paths": [
+      "app -> runtime -> compositor -> telemetry normal",
+      "vertical_slice devdeps runtime/dev-mode currentlyempty; scene/test-support explicit",
+      "benchmark -> runtime and telemetry normal"
+    ],
+    "no_unused_owner_claim": "Inspection-only drain consumers never authorize deleting the retained producer or original measurement promise.",
+    "cold_required_units": {
+      "layout": "existing TextRasterizer.shape_call_count per-frame delta; cache-miss shaping calls",
+      "raster": "existing per-instance raster_count summed deltas; entered SVG raster-and-upload attempts",
+      "upload": "actual widget RGBA queue.write_texture call submissions, not opaque glyphon/other-resource uploads",
+      "damage_px": "clipped repaint-region pixel area"
+    },
+    "supplemental_retained_repaint_fields": "Existing3fields retain their9 actual test users; remain supplementary to required4 dev dimensions, no deletion to hide tracking."
+  },
+  "widget_transition": {
+    "public_roots": [
+      "gRPC Publish.transition_ms proto440 -> verbs625 -> SceneGraph publication559",
+      "MCP tools566 fixed0 -> same SceneGraph owner"
+    ],
+    "private_shared_renderer": [
+      "Compositor::sync_widget_textures only normal start_transition/resolve call expressions",
+      "WidgetRenderer existing entry.animation last_rendered_params and upload_texture preserved"
+    ],
+    "frame_consumers": [
+      "build_windowed_frame sync then encode/present",
+      "render_frame_headless sync then telemetry/submit",
+      "windowed real has_inflight_animation and next_animation_deadline frame planning"
+    ],
+    "clock_domains": "Newest record selection uses publication wall timestamp; elapsed interpolation uses scene monotonic u64 microseconds. duration_ms f32conversion. Both domains supplied by existing SceneGraph clock; not a new clock scheme.",
+    "aliases_cfg": "No alternate qualified start_transition or resolve_animated_params receiver/import alias in current allroots. Renderer methods pub(crate), no public/T7 reexport. Has_active_transition/animation deadlines public queries retain their real runtime/fixture users.",
+    "gaps": [
+      "W1 zero instant interruption",
+      "Rig optional NoAdapter/skip instrumentation"
+    ],
+    "failures": {
+      "forward": "Use the authoritative existing scene monotonic domain; never substitute sleep or a new wall clock.",
+      "backward": "Existing widget rewound-clock restart/completion remains; test with TestClock.set/advance.",
+      "ttl": "Clear/expiry removes only the matching publication/lease and cached widget animation; indefiniteTTL0 remains held.",
+      "concurrency": "Existing scene lock serializes publishes; GPU init admission guards and normal parallel harness remain.",
+      "replay": "No new transport sequence/replay contract. Repeated unchanged publication does not revive a landed animation or attribute prior-frame work.",
+      "compatibility": "MCP stays five verbs with no transition option; gRPC uint32 transition_ms0 remains instant. Default app/dev/test closure and all T7 imported public contracts remain."
+    }
+  },
+  "widget_observation": {
+    "producer": "WidgetRenderer::rasterize_and_upload -> raster_counts and rasterized_last_sync; begin_sync clears current list",
+    "field": "FrameTelemetry.widget_rasterized serde(default)201/new235 empty, exported through FrameTelemetry; all actual sources in current token artifact",
+    "compositor_frame_assignments": [
+      "frame.rs654 windowed",
+      "frame.rs1219 headless"
+    ],
+    "broken_consumer": "HeadlessRuntime461 compositor result -> new508 -> selectedcopies548 -> TelemetryCollector.record579 and return582 missingfield",
+    "live_readers": [
+      "direct compositor widget_raster_count fixture three actual first/update/idle assertions",
+      "HeadlessRuntime.public return and pubtelemetry collector records",
+      "examples/benchmark runtime.render_frame830/1006 real stage/frame/summary consumers; do not pretend benchmark currently inspects widget list",
+      "vertical_slice real runtime budget consumers"
+    ],
+    "same_name_and_owner": "jm8nq.13 actualPR1266 reachable produces list, no runtimehandoff change. FrameRecorder begin_frame unused wrapper owned3.10 distinct, neverdelete thislivefield.",
+    "cfg": "Normal FrameTelemetry field/producer/headless runtime and collector all ungated; current direct widget count binary optionalNoAdapter, appboot failclosed expectinit.",
+    "nearest_gate": "Existing app production_config_boots_with_builtin_widget_bundles real canonical runtime; W3 extends existing fixture, no test support framework/newprocess.",
+    "producer_semantic_limit": "Existing raster_count and rasterized_last_sync record entry into rasterize_and_upload before SVG composition/admission (widget.rs2778); they observe attempted sync work, not universal successful upload/pixel presentation. W3 copies this exact existing producer semantics and does not repair/change counters."
+  },
+  "shell": {
+    "kept": [
+      "ChromeState",
+      "collect_diagnostic",
+      "DiagnosticSnapshot",
+      "DismissTileResult/dismiss_tile",
+      "FreezeQueue/EnqueueResult/MutationTrafficClass/QueuedMutation/classify_mutation_batch",
+      "actual shell safe_mode enter/exit and systemcard"
+    ],
+    "production_paths": [
+      "windowed keyboard/hotkeybridge -> shared authoritative safe mode/scene lease/chrome flag",
+      "Compositor build_windowed_frame->safe_mode vertices realmaxz capturedgate",
+      "SceneGraph tile.visual_hint -> orphaned badge vertices",
+      "viewer hover/hit/dismiss -> revoke and protocol Reclaimed override"
+    ],
+    "reexports": "runtime/lib.rs73/74 and shell/mod.rs chrome pub(crate); freeze imports protected tests remain.",
+    "cfg": "Windows global RegisterHotKey/GetMessageW thread under Windows cfg; Linux source/bridge test does not execute OSregistration. Headless and realwindowed frame owners manually distinct.",
+    "removed": "Exact named dead alternative render/audit/mute/controller/classifier/badges implementation removed; One protected doc-comment match at portal_resize.rs105 and two LIVE assertion-message matches at2153/2157 in shell_reserved_ctrl_shift_m_mute; both assertions call ShellReservedShortcut::is_reserved(\"m\"/\"M\",true,true,false), whose119-120 branch retains the v1 reserved no-op chord. The removed named MuteToggle implementation is absent. Literal zero-match AC still deviates; preserve T7 source/test and no new repair child.",
+    "owner_clock": "Current safe_mode lease suspend/resume SystemTime -> existing1.16; no duplicate packet.",
+    "freeze": "No answer5.6; unwired statusquo explicitlyretained.",
+    "retained_reserved_shortcut": "One protected doc-comment match at portal_resize.rs105 and two LIVE assertion-message matches at2153/2157 in shell_reserved_ctrl_shift_m_mute; both assertions call ShellReservedShortcut::is_reserved(\"m\"/\"M\",true,true,false), whose119-120 branch retains the v1 reserved no-op chord. The removed named MuteToggle implementation is absent. Literal zero-match AC still deviates; preserve T7 source/test and no new repair child."
+  },
+  "vertical_slice": {
+    "normal_default": "runtime normal production config/auth; real current<=400 line resident lifecycle helper",
+    "test_dev": "devdependencies runtime/dev-mode configNone only; default app guard/tree/release sourceapplicable8f receipts",
+    "targets": "binarytests paired/unpaired; production_boot target retained; budget_assertions30; current CI/weekly selectors unchanged",
+    "owners": "app canonicalboot builtinwidgets/auth and vertical originalproductionboot each kept real selector, not blindlyremovedduplicates",
+    "performance": "Actual leased582e PERFASSERT1 30pass/all8hardbranches; only3successvalues; direct50000/10x330000/other6default20x; distinct dashboard1test/100observations. Source-derived zero/plumbing limitation: FrameTelemetry::new initializes mutations_applied=0 (record.rs228), the qualified compositor frame constructors have no writer for that field, and HeadlessRuntime gates both returned input_to_scene_commit_us/input_to_next_present_us on compositor_telemetry.mutations_applied>0 (headless.rs525-543). scene-commit fixture243-305 explicitly has no live mutation; next-present324-386 warms then renders20 unchanged frames. Their successful assertions do not establish measured input/agent-to-commit or input-to-present conformance. This is source inference, not a numeric value emitted by the executed log.",
+    "measurement_owner_relation": "W4 existing input fields/fixtures; OPEN w2t3x/ddm2g publish-admission-to-present metric/benchmark are related, not equivalent."
+  },
+  "T7_protected": [
+    "crates/tze_hud_projection/**",
+    "crates/tze_hud_runtime/src/portal_projection_driver.rs",
+    "crates/tze_hud_runtime/src/windowed/portal.rs",
+    "crates/tze_hud_input/src/composer_draft.rs",
+    "crates/tze_hud_input/src/portal_resize.rs",
+    "crates/tze_hud_config/src/portal_tokens.rs",
+    "crates/tze_hud_mcp/src/portal_op.rs",
+    "tests/integration/text_stream_portal_*.rs"
+  ],
+  "limits": [
+    "Native literal names do not themselves resolve receiver types; exact private/current owner paths and module/manifests/call expressions above are manually adjudicated.",
+    "Applicable priorAST traversed327files/7708owneddefs in its original primary scope; it is not a new327file parser execution or a Rust typechecker.",
+    "Target/feature closure source proof and actual defaulttree/release receipts are scoped; no unsupported allfeatures,GStreamer,Windows desktop proof.",
+    "Negative source roots/regex do not certify new symbols or outside-tree generated code. All72 attributed definitions and macro handling are separately indexed.",
+    "Source-derived headless guard0 is not a printed runtime counterexample and not a universal windowed-zero claim; live windowed pending-input writers are separately retained."
+  ]
+}
