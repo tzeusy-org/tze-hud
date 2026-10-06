@@ -285,6 +285,15 @@ again. An unknown theme name fails config validation with
 overrides for values specific to one deployment. The visual design
 belongs in a theme.
 
+Theme files accept canonical keys and the 41 existing portal color keys
+documented in `crates/tze_hud_config/src/portal_tokens.rs`, including
+`portal.frame.background`, `portal.transcript.background`, and
+`portal.composer.background`. These colors use `#RRGGBB` or `#RRGGBBAA`
+string values. Unknown keys, noncanonical portal number/font/timestamp keys,
+malformed colors, and nonstring values remain errors. Accepting these existing
+color overrides adds no canonical defaults and leaves built-in palettes and
+explicit config precedence unchanged.
+
 **Semantic families** (Tonal Glass values; sizes are logical px):
 
 | Family | Keys |

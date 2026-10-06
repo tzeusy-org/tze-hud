@@ -1,8 +1,9 @@
 //! Named themes: swappable, token-only layers over the canonical defaults.
 //!
-//! A theme is a flat TOML map of canonical design-token keys to values (no
-//! layout logic). Built-in themes live in `assets/themes/<name>.toml` and are
-//! embedded in the binary. Config selects one with the reserved key
+//! A theme is a flat TOML map of canonical design-token keys and the existing
+//! portal color keys to values (no layout logic). Built-in themes live in
+//! `assets/themes/<name>.toml` and are embedded in the binary. Config selects
+//! one with the reserved key
 //! `[design_tokens] theme = "<name>"`; unset selects [`DEFAULT_THEME`].
 //!
 //! Resolution (lowest to highest): canonical defaults → selected theme →
@@ -17,7 +18,8 @@
 use tze_hud_scene::config::{ConfigError, ConfigErrorCode};
 
 use crate::raw::RawConfig;
-use crate::tokens::{DesignTokenMap, resolve_tokens, validate_canonical_value};
+use crate::portal_tokens;
+use crate::tokens::{DesignTokenMap, parse_color_hex, resolve_tokens, validate_canonical_value};
 
 /// Reserved `[design_tokens]` key that selects a theme. Never a token itself:
 /// it is stripped before resolution.
@@ -42,15 +44,73 @@ const BUILTIN_THEMES: &[(&str, &str)] = &[
     ),
 ];
 
+// Existing documented portal colors are valid theme overrides without adding
+// canonical defaults. Numeric/family portal keys and unknown names stay outside
+// this exception. Use exact constants rather than a portal.* prefix rule.
+const PORTAL_COLOR_KEYS: &[&str] = &[
+    portal_tokens::PORTAL_TOKEN_FRAME_BACKGROUND,
+    portal_tokens::PORTAL_TOKEN_FRAME_BORDER_COLOR,
+    portal_tokens::PORTAL_TOKEN_HEADER_TEXT_COLOR,
+    portal_tokens::PORTAL_TOKEN_COMPOSER_BACKGROUND,
+    portal_tokens::PORTAL_TOKEN_COMPOSER_TEXT_COLOR,
+    portal_tokens::PORTAL_TOKEN_COMPOSER_AT_CAPACITY_COLOR,
+    portal_tokens::PORTAL_TOKEN_TRANSCRIPT_BACKGROUND,
+    portal_tokens::PORTAL_TOKEN_TRANSCRIPT_TEXT_COLOR,
+    portal_tokens::PORTAL_TOKEN_TRANSCRIPT_SYSTEM_COLOR,
+    portal_tokens::PORTAL_TOKEN_TRANSCRIPT_CODE_BACKGROUND,
+    portal_tokens::PORTAL_TOKEN_TRANSCRIPT_CODE_TEXT,
+    portal_tokens::PORTAL_TOKEN_TRANSCRIPT_LINK_COLOR,
+    portal_tokens::PORTAL_TOKEN_TRANSCRIPT_DIM_TEXT_COLOR,
+    portal_tokens::PORTAL_TOKEN_TRANSCRIPT_DIM_BACKGROUND,
+    portal_tokens::PORTAL_TOKEN_STALE_MARKER_COLOR,
+    portal_tokens::PORTAL_TOKEN_DISCONNECT_BADGE_COLOR,
+    portal_tokens::PORTAL_TOKEN_UNREAD_INDICATOR_COLOR,
+    portal_tokens::PORTAL_TOKEN_AWAITING_REPLY_COLOR,
+    portal_tokens::PORTAL_TOKEN_EMPTY_STATE_COLOR,
+    portal_tokens::PORTAL_TOKEN_CONNECTING_MARKER_COLOR,
+    portal_tokens::PORTAL_TOKEN_ACTIVITY_CUE_COLOR,
+    portal_tokens::PORTAL_TOKEN_STREAMING_CURSOR_COLOR,
+    portal_tokens::PORTAL_TOKEN_DELIVERY_INFLIGHT_COLOR,
+    portal_tokens::PORTAL_TOKEN_DELIVERY_DELIVERED_COLOR,
+    portal_tokens::PORTAL_TOKEN_DELIVERY_FAILED_COLOR,
+    portal_tokens::PORTAL_TOKEN_TIMESTAMP_COLOR,
+    portal_tokens::PORTAL_TOKEN_LIFECYCLE_ACTIVE_COLOR,
+    portal_tokens::PORTAL_TOKEN_LIFECYCLE_ATTACHED_COLOR,
+    portal_tokens::PORTAL_TOKEN_LIFECYCLE_ATTENTION_COLOR,
+    portal_tokens::PORTAL_TOKEN_LIFECYCLE_INACTIVE_COLOR,
+    portal_tokens::PORTAL_TOKEN_DIVIDER_COLOR,
+    portal_tokens::PORTAL_TOKEN_UNREAD_DIVIDER_COLOR,
+    portal_tokens::PORTAL_TOKEN_COLLAPSED_BACKGROUND,
+    portal_tokens::PORTAL_TOKEN_COLLAPSED_TEXT_COLOR,
+    portal_tokens::PORTAL_TOKEN_SCROLL_INDICATOR_COLOR,
+    portal_tokens::PORTAL_TOKEN_COMPOSER_CARET_COLOR,
+    portal_tokens::PORTAL_TOKEN_COMPOSER_SELECTION_COLOR,
+    portal_tokens::PORTAL_TOKEN_COMPOSER_PLACEHOLDER_COLOR,
+    portal_tokens::PORTAL_TOKEN_FOCUS_RING_COLOR,
+    portal_tokens::PORTAL_TOKEN_WINDOW_RESIZE_GRIP_COLOR,
+    portal_tokens::PORTAL_TOKEN_WINDOW_RESIZE_GRIP_HOVER_COLOR,
+];
+
+fn validate_theme_value(key: &str, value: &str) -> Result<(), String> {
+    if PORTAL_COLOR_KEYS.contains(&key) {
+        parse_color_hex(value)
+            .map(|_| ())
+            .ok_or_else(|| "a color #RRGGBB or #RRGGBBAA".into())
+    } else {
+        validate_canonical_value(key, value)
+    }
+}
+
 /// Names of the built-in themes, in declaration order.
 pub fn builtin_theme_names() -> impl Iterator<Item = &'static str> {
     BUILTIN_THEMES.iter().map(|(name, _)| *name)
 }
 
-/// Parse and validate a theme source: a flat map of canonical token keys to
-/// string values, each valid for its token kind. Errors list every bad entry.
+/// Parse and validate a theme source: canonical tokens and existing documented
+/// portal color keys, with string values valid for their kind. Errors list every
+/// bad entry. Portal colors do not add defaults or allow arbitrary portal keys.
 ///
-/// Keys are checked against [`crate::tokens::CANONICAL_TOKENS`] rather than
+/// Other keys are checked against [`crate::tokens::CANONICAL_TOKENS`] rather than
 /// the `[design_tokens]` key pattern, so a theme can also set the runtime-only
 /// `system_card.*` / `safe_mode.*` tokens that config cannot spell.
 pub fn parse_theme(src: &str) -> Result<DesignTokenMap, Vec<String>> {
@@ -58,7 +118,7 @@ pub fn parse_theme(src: &str) -> Result<DesignTokenMap, Vec<String>> {
     let mut errors: Vec<String> = map
         .iter()
         .filter_map(|(key, value)| {
-            validate_canonical_value(key, value)
+            validate_theme_value(key, value)
                 .err()
                 .map(|expected| format!("{key:?} = {value:?}: expected {expected}"))
         })
@@ -155,6 +215,72 @@ mod tests {
             assert!(!map.contains_key(THEME_KEY), "{name:?} sets the selector");
         }
         assert!(builtin_theme_names().any(|n| n == DEFAULT_THEME));
+
+        // Enumerate the documented keys independently of the validator list:
+        // every existing color must accept both formats and preserve the input.
+        let documented_colors = [
+            "portal.frame.background",
+            "portal.frame.border_color",
+            "portal.header.text_color",
+            "portal.composer.background",
+            "portal.composer.text_color",
+            "portal.composer.at_capacity_color",
+            "portal.transcript.background",
+            "portal.transcript.text_color",
+            "portal.transcript.system_color",
+            "portal.transcript.code_background",
+            "portal.transcript.code_text",
+            "portal.transcript.link_color",
+            "portal.transcript.dim_text_color",
+            "portal.transcript.dim_background",
+            "portal.stale_marker.color",
+            "portal.disconnect_badge.color",
+            "portal.unread_indicator.color",
+            "portal.awaiting_reply.color",
+            "portal.empty_state.color",
+            "portal.connecting_marker.color",
+            "portal.activity_cue.color",
+            "portal.streaming_cursor.color",
+            "portal.delivery.inflight_color",
+            "portal.delivery.delivered_color",
+            "portal.delivery.failed_color",
+            "portal.timestamp.color",
+            "portal.lifecycle.active_color",
+            "portal.lifecycle.attached_color",
+            "portal.lifecycle.attention_color",
+            "portal.lifecycle.inactive_color",
+            "portal.divider.color",
+            "portal.unread_divider.color",
+            "portal.collapsed_card.background",
+            "portal.collapsed_card.text_color",
+            "portal.scroll_indicator.color",
+            "portal.composer.caret_color",
+            "portal.composer.selection_color",
+            "portal.composer.placeholder_color",
+            "portal.focus_ring.color",
+            "portal.window.resize_grip.color",
+            "portal.window.resize_grip.hover_color",
+        ];
+        for value in ["#123456", "#abcdef80", "  #AaBbCcDd  "] {
+            let src = documented_colors
+                .iter()
+                .map(|key| format!("{key:?} = {value:?}\n"))
+                .collect::<String>();
+            let theme = parse_theme(&src).unwrap();
+            assert_eq!(theme.len(), documented_colors.len());
+            for key in documented_colors {
+                assert_eq!(theme[key], value, "{key} must retain {value:?}");
+            }
+        }
+        // The exception must not seed portal defaults into every resolved map.
+        let canonical: DesignTokenMap = CANONICAL_TOKENS
+            .iter()
+            .map(|token| (token.key.to_string(), token.default_value.to_string()))
+            .collect();
+        assert_eq!(
+            resolve_tokens(&DesignTokenMap::new(), &DesignTokenMap::new()),
+            canonical
+        );
     }
 
     /// Tonal Glass is the design-system baseline: it sets every semantic
@@ -207,6 +333,65 @@ mod tests {
             parse_theme("\"shape.m\" = 12").is_err(),
             "values are strings"
         );
+
+        for value in ["", "teal", "#12345", "#1234567", "#GGGGGG", "#你好"] {
+            let src = PORTAL_COLOR_KEYS
+                .iter()
+                .map(|key| format!("{key:?} = {value:?}\n"))
+                .collect::<String>();
+            let errors = parse_theme(&src).unwrap_err();
+            let mut expected = PORTAL_COLOR_KEYS
+                .iter()
+                .map(|key| format!("{key:?} = {value:?}: expected a color #RRGGBB or #RRGGBBAA"))
+                .collect::<Vec<_>>();
+            expected.sort();
+            assert_eq!(errors, expected, "invalid color {value:?}");
+        }
+        for key in PORTAL_COLOR_KEYS {
+            assert!(
+                parse_theme(&format!("{key:?} = 12")).is_err(),
+                "{key} requires a string"
+            );
+        }
+        for key in [
+            "",
+            "portal.fake.color",
+            portal_tokens::PORTAL_TOKEN_FRAME_OPACITY,
+            portal_tokens::PORTAL_TOKEN_TRANSCRIPT_CODE_FONT_FAMILY,
+            portal_tokens::PORTAL_TOKEN_TIMESTAMP_GRANULARITY,
+        ] {
+            assert_eq!(
+                parse_theme(&format!("{key:?} = \"#123456\"")).unwrap_err(),
+                [format!("{key:?} = \"#123456\": expected a canonical token key")]
+            );
+        }
+
+        // Accepted theme entries traverse the real resolver. Explicit config
+        // still wins, and an invalid direct config color keeps its fallback.
+        let theme = parse_theme(
+            r##""portal.frame.background" = "#12345680"
+"portal.transcript.background" = "#234567"
+"portal.composer.background" = "#345678"
+"##,
+        )
+        .unwrap();
+        let config = tokens(&[(portal_tokens::PORTAL_TOKEN_COMPOSER_BACKGROUND, "#abcdef40")]);
+        let resolved = resolve_tokens(&theme, &config);
+        let part = portal_tokens::resolve_portal_tokens(&resolved);
+        assert_eq!(part.frame_background, parse_color_hex("#12345680").unwrap());
+        assert_eq!(
+            part.transcript_background,
+            parse_color_hex("#234567").unwrap()
+        );
+        assert_eq!(
+            part.composer_background,
+            parse_color_hex("#abcdef40").unwrap()
+        );
+        let defaults = portal_tokens::PortalPartTokens::default();
+        assert_eq!(part.header_text_color, defaults.header_text_color);
+        let invalid_override = tokens(&[(portal_tokens::PORTAL_TOKEN_COMPOSER_BACKGROUND, "teal")]);
+        let part = portal_tokens::resolve_portal_tokens(&resolve_tokens(&theme, &invalid_override));
+        assert_eq!(part.composer_background, defaults.composer_background);
     }
 
     #[test]
