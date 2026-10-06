@@ -373,8 +373,8 @@ name = "T"
 
 // ── [display_profile] is gone ─────────────────────────────────────────────────
 
-/// WHEN a config still has `[display_profile]` THEN it is rejected with a hint
-/// naming the two built-in profiles.
+/// Unsupported config keys fail public startup validation with correction
+/// guidance; `[display_profile]` retains its dedicated built-in-profile hint.
 #[test]
 fn display_profile_table_is_rejected_with_hint() {
     let toml = r#"
@@ -387,13 +387,75 @@ max_tiles = 512
 [[tabs]]
 name = "Main"
 "#;
-    let errors = TzeHudConfig::parse(toml).unwrap().validate();
+    let errors = crate::validate_config(toml).unwrap_err();
     let err = errors
         .iter()
         .find(|e| matches!(e.code, ConfigErrorCode::DisplayProfileNotSupported))
         .expect("[display_profile] should be rejected");
     assert_eq!(err.field_path, "display_profile");
     assert!(err.hint.contains("headless"), "{}", err.hint);
+
+    let cases = [
+        ("", "emit_schema", "emit_schema = true"),
+        ("runtime", "emit_schema", "emit_schema = true"),
+        ("runtime", "headless_width", "headless_width = 800"),
+        ("runtime", "headless_height", "headless_height = 600"),
+        ("runtime", "max_media_streams", "max_media_streams = 4"),
+        ("tabs", "default_layout", "default_layout = \"grid\""),
+        (
+            "tabs",
+            "tab_switch_on_event",
+            "tab_switch_on_event = \"input\"",
+        ),
+        ("tabs", "layout", "[tabs.layout]\nwidth_fraction = 1.0"),
+        ("", "unknown_setting", "unknown_setting = true"),
+        ("runtime", "unknown_setting", "unknown_setting = true"),
+        ("tabs", "unknown_setting", "unknown_setting = true"),
+        ("", "unknown_table", "[unknown_table]\nvalue = true"),
+        (
+            "runtime",
+            "unknown_table",
+            "[runtime.unknown_table]\nvalue = true",
+        ),
+        (
+            "tabs",
+            "unknown_table",
+            "[tabs.unknown_table]\nvalue = true",
+        ),
+    ];
+    for (section, key, fragment) in cases {
+        let (document, runtime, tab) = match section {
+            "" => (fragment, "", ""),
+            "runtime" => ("", fragment, ""),
+            "tabs" => ("", "", fragment),
+            _ => unreachable!(),
+        };
+        let toml = format!(
+            "{document}\n[runtime]\nprofile = \"full-display\"\n{runtime}\n\
+             [[tabs]]\nname = \"Main\"\n{tab}\n"
+        );
+        let errors = crate::validate_config(&toml).unwrap_err();
+        assert_eq!(errors.len(), 1, "{section}.{key}: {errors:?}");
+        let err = &errors[0];
+        assert_eq!(err.code, ConfigErrorCode::ParseError, "{section}.{key}");
+        assert_eq!(err.field_path, key, "{section}.{key}: {err:?}");
+        assert!(err.got.contains(key), "{section}.{key}: {err:?}");
+        assert!(err.hint.contains(key), "{section}.{key}: {err:?}");
+        assert!(
+            err.hint.contains("remove") && err.hint.contains("correct"),
+            "{section}.{key}: {err:?}"
+        );
+        assert_eq!(crate::validate_config(&toml).unwrap_err(), errors);
+    }
+
+    for malformed in [
+        "[runtime\nprofile = \"headless\"\n",
+        "unknown field `pretend`\n",
+    ] {
+        let errors = crate::validate_config(malformed).unwrap_err();
+        assert_eq!(errors[0].code, ConfigErrorCode::ParseError);
+        assert!(errors[0].hint.contains("syntax"), "{:?}", errors[0]);
+    }
 }
 
 // ── Agents live in agents.toml ────────────────────────────────────────────────
