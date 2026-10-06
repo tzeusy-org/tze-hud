@@ -71,6 +71,44 @@ impl Drop for LocalAllocation {
         }
     }
 }
+struct ComAllocation(*mut c_void);
+impl Drop for ComAllocation {
+    fn drop(&mut self) {
+        // SAFETY: SHGetKnownFolderPath returns task-allocator storage, including
+        // on a failing HRESULT. CoTaskMemFree accepts a null pointer.
+        unsafe { CoTaskMemFree(Some(self.0.cast_const())) };
+    }
+}
+
+#[link(name = "shell32")]
+unsafe extern "system" {
+    #[link_name = "SHGetKnownFolderPath"]
+    fn known_folder_path_raw(
+        folder: *const ::windows::core::GUID,
+        flags: u32,
+        token: HANDLE,
+        path: *mut PWSTR,
+    ) -> ::windows::core::HRESULT;
+}
+
+fn program_data_path() -> Result<PathBuf, String> {
+    let mut name = PWSTR::null();
+    // Use the SDK's out-parameter interface so even a failing HRESULT releases
+    // any returned allocation; the generated Result<PWSTR> hides that pointer.
+    let result = unsafe {
+        known_folder_path_raw(
+            &FOLDERID_ProgramData,
+            KF_FLAG_DEFAULT.0 as u32,
+            HANDLE::default(),
+            &mut name,
+        )
+    };
+    let _memory = ComAllocation(name.0.cast());
+    result.ok().map_err(|e| failure("ProgramData", e))?;
+    Ok(PathBuf::from(
+        unsafe { name.to_string() }.map_err(|e| failure("ProgramData path", e))?,
+    ))
+}
 struct Com;
 impl Com {
     fn init() -> Result<Self, String> {
@@ -567,11 +605,7 @@ struct Root {
     _directories: Vec<File>,
 }
 fn protected_root(create: bool) -> Result<Root, String> {
-    let name = unsafe { SHGetKnownFolderPath(&FOLDERID_ProgramData, KF_FLAG_DEFAULT, None) }
-        .map_err(|e| failure("ProgramData", e))?;
-    let _memory = LocalAllocation(name.0.cast());
-    let mut path =
-        PathBuf::from(unsafe { name.to_string() }.map_err(|e| failure("ProgramData path", e))?);
+    let mut path = program_data_path()?;
     // The system-owned ProgramData ancestor is opened without following a reparse
     // point. Do not impose our ACL on this shared Windows directory.
     let raw = path_wide(&path)?;
@@ -1440,6 +1474,9 @@ mod tests {
         // administrator token, UAC prompt, or machine policy mutation occurs.
         std::thread::spawn(|| {
             let _com = Com::init().unwrap();
+            // A read-only folder query exercises the production task-allocation
+            // lifetime without opening helper files or obtaining machine policy.
+            assert!(program_data_path().unwrap().is_absolute());
             let program = canonical_file(&std::env::current_exe().unwrap()).unwrap();
             let base = prepare_owned_allow(
                 &RuleSpec::new(program, [9090, 50051])
