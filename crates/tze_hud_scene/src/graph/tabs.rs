@@ -19,7 +19,8 @@ impl SceneGraph {
     ///
     /// Pass `Some(lease_id)` to require an active lease. Pass `None` to skip
     /// the lease check (used by internal scene construction and tests).
-    pub fn create_tab_with_lease(
+    #[cfg(test)]
+    pub(crate) fn create_tab_with_lease(
         &mut self,
         name: &str,
         display_order: u32,
@@ -90,7 +91,8 @@ impl SceneGraph {
     }
 
     /// Switch active tab with lease enforcement.
-    pub fn switch_active_tab_with_lease(
+    #[cfg(test)]
+    pub(crate) fn switch_active_tab_with_lease(
         &mut self,
         tab_id: SceneId,
         lease_id: SceneId,

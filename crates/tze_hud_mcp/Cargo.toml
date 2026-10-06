@@ -19,6 +19,7 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
+tze_hud_scene = { path = "../tze_hud_scene", version = "0.1.0", features = ["test-support"] }
 tokio = { workspace = true }
 
 [lints]

@@ -62,9 +62,8 @@ pub struct MutationBatch {
 
 /// Optional timing hints attached to a [`MutationBatch`] (RFC 0005).
 ///
-/// Named `BatchTimingHints` to distinguish it from [`crate::timing::TimingHints`],
-/// which is the per-node/per-payload scheduling struct used by the compositor.
-/// Fields use the [`WallUs`] newtype for clock-domain safety.
+/// Fields use the [`WallUs`] newtype for clock-domain safety. The protocol
+/// boundary converts wire timing hints into this batch-level representation.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BatchTimingHints {
     /// Wall-clock time at which the batch should be presented.
@@ -81,9 +80,8 @@ pub enum SceneMutation {
     // §2.2, §3.3. However, `SceneMutation` variants do not carry a `lease_id`
     // field, so capability enforcement at the batch-apply layer must be done
     // by the transport/session layer (gRPC handler) before calling
-    // `apply_batch`. The scene graph's `create_tab_with_lease` /
-    // etc. checked variants are available for
-    // direct callers that have a lease in scope.
+    // `apply_batch`. Checked graph wrappers are available only to fixtures;
+    // production admission happens at the session boundary.
     //
     // Tab mutations in `apply_single_mutation` call the unchecked graph
     // methods; the gRPC layer is responsible for verifying `manage_tabs`
@@ -308,7 +306,8 @@ pub struct MutationResult {
     /// Structured rejection response (RFC 0001 §3.4). Present when `applied == false`.
     pub rejection: Option<BatchRejected>,
     /// True if the lease is at the soft budget warning threshold (80%).
-    /// The batch was still applied, but the caller should notify the agent.
+    /// The batch was still applied. This remains part of the mutation-return
+    /// contract used by policy fixtures; production callers do not read it.
     pub budget_warning: bool,
     /// Monotonically increasing sequence number assigned when this batch was committed.
     /// `None` if `applied == false`.

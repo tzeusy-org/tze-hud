@@ -7,7 +7,6 @@
 //! |---------------|----------------|--------------|------------------------------|
 //! | [`WallUs`]    | Network (UTC)  | `_wall_us`   | UTC microseconds since epoch |
 //! | [`MonoUs`]    | Monotonic OS   | `_mono_us`   | Monotonic microseconds       |
-//! | [`DurationUs`]| —              | *(delta)*    | Microsecond delta            |
 //!
 //! `WallUs` and `MonoUs` are **not interchangeable**: passing one where the
 //! other is expected is a compile-time error.
@@ -23,8 +22,6 @@
 //! the suffix:
 //! - `_wall_us` — use [`WallUs`]
 //! - `_mono_us` — use [`MonoUs`]
-//! - no domain suffix — use [`DurationUs`] (delta / frame-relative, not a
-//!   timestamp)
 //!
 //! A plain `_us` suffix without domain indicator MUST NOT be used for
 //! absolute timestamps.
@@ -156,61 +153,6 @@ impl std::fmt::Display for MonoUs {
     }
 }
 
-// ─── DurationUs ──────────────────────────────────────────────────────────────
-
-/// A duration (delta) in microseconds — NOT a timestamp.
-///
-/// Use this type for fields that express an interval or offset rather than an
-/// absolute point in time.  Such fields MUST NOT carry a `_wall_us` or
-/// `_mono_us` suffix; they use a plain unit description (e.g. `after_us`,
-/// `duration_us`, `ttl_us`).
-#[derive(
-    Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
-)]
-#[repr(transparent)]
-pub struct DurationUs(pub u64);
-
-impl DurationUs {
-    /// Zero duration.
-    pub const ZERO: Self = Self(0);
-
-    /// Raw microsecond value.
-    #[inline]
-    pub fn as_u64(self) -> u64 {
-        self.0
-    }
-
-    /// Add this duration to a [`WallUs`] timestamp.
-    #[inline]
-    pub fn after_wall(self, base: WallUs) -> WallUs {
-        WallUs(base.0.saturating_add(self.0))
-    }
-
-    /// Add this duration to a [`MonoUs`] timestamp.
-    #[inline]
-    pub fn after_mono(self, base: MonoUs) -> MonoUs {
-        MonoUs(base.0.saturating_add(self.0))
-    }
-}
-
-impl From<u64> for DurationUs {
-    fn from(v: u64) -> Self {
-        Self(v)
-    }
-}
-
-impl From<DurationUs> for u64 {
-    fn from(v: DurationUs) -> Self {
-        v.0
-    }
-}
-
-impl std::fmt::Display for DurationUs {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}µs", self.0)
-    }
-}
-
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -264,34 +206,6 @@ mod tests {
     #[test]
     fn mono_us_display() {
         assert_eq!(format!("{}", MonoUs(2_000_000)), "2000000µs(mono)");
-    }
-
-    // ── DurationUs ──
-
-    #[test]
-    fn duration_us_zero() {
-        assert_eq!(DurationUs::ZERO.as_u64(), 0);
-    }
-
-    #[test]
-    fn duration_after_wall() {
-        let base = WallUs(1_000_000);
-        let delta = DurationUs(500_000);
-        assert_eq!(delta.after_wall(base), WallUs(1_500_000));
-    }
-
-    #[test]
-    fn duration_after_mono() {
-        let base = MonoUs(2_000_000);
-        let delta = DurationUs(100_000);
-        assert_eq!(delta.after_mono(base), MonoUs(2_100_000));
-    }
-
-    #[test]
-    fn duration_after_wall_saturates_on_overflow() {
-        let base = WallUs(u64::MAX);
-        let delta = DurationUs(1);
-        assert_eq!(delta.after_wall(base), WallUs(u64::MAX));
     }
 
     // ── Spec: cross-domain assignment is a compile error ──

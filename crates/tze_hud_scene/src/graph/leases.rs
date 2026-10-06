@@ -17,9 +17,6 @@ impl SceneGraph {
     /// Maximum leases across all agents in the entire runtime (spec §Lease Caps).
     pub const MAX_RUNTIME_LEASES: usize = 64;
 
-    /// Maximum tiles per lease (spec §Lease Caps).
-    pub const MAX_TILES_PER_LEASE: u32 = 64;
-
     /// Maximum nodes per tile (spec §Lease Caps).
     pub const MAX_NODES_PER_TILE: u32 = 64;
 
@@ -205,6 +202,7 @@ impl SceneGraph {
     }
 
     /// Suspend a lease (safe mode entry). Blocks mutations, preserves state.
+    #[cfg(any(test, feature = "test-support"))]
     pub fn suspend_lease(&mut self, lease_id: &SceneId, now_ms: u64) -> Result<(), LeaseError> {
         let lease = self
             .leases
@@ -216,6 +214,7 @@ impl SceneGraph {
     }
 
     /// Resume a suspended lease (safe mode exit). Re-enables mutations.
+    #[cfg(any(test, feature = "test-support"))]
     pub fn resume_lease(&mut self, lease_id: &SceneId, now_ms: u64) -> Result<(), LeaseError> {
         let lease = self
             .leases
@@ -369,13 +368,10 @@ impl SceneGraph {
     /// This is the scoped counterpart to [`Self::expire_leases`]: it applies the
     /// identical orphan/grace/TTL predicate and the identical tile-removal and
     /// zone/widget-publication cleanup, but touches exactly the named lease. The
-    /// portal driver uses it to bound the degraded window of an ungracefully
-    /// dropped cooperative portal (grace expiry removes its surface) WITHOUT
-    /// turning on a global lease sweep for every other subsystem's leases — the
-    /// gRPC control plane relies on `renew_lease`, not on nothing ever calling
-    /// `expire_leases`, so a global sweep here would change behaviour well beyond
-    /// portals. Bumps the scene version when it reaps so the removal repaints.
-    pub fn expire_lease(&mut self, lease_id: &SceneId) -> Option<LeaseExpiry> {
+    /// single-lease expiry fixture uses it to exercise scoped cleanup without
+    /// sweeping unrelated leases. Bumps the scene version when it reaps.
+    #[cfg(test)]
+    pub(crate) fn expire_lease(&mut self, lease_id: &SceneId) -> Option<LeaseExpiry> {
         let now = self.clock.now_millis();
         let terminal_state = self
             .leases
@@ -387,9 +383,8 @@ impl SceneGraph {
     }
 
     /// The terminal state a lease is due for at `now`, or `None` if it is not yet
-    /// expired. Shared by [`Self::expire_leases_with_max_suspend`] (whole-scene
-    /// sweep) and [`Self::expire_lease`] (single lease) so both apply the exact
-    /// same TTL / grace / suspension predicate.
+    /// expired. Used by the whole-scene sweep and the scoped expiry fixture
+    /// so both apply the same TTL / grace / suspension predicate.
     fn lease_terminal_state(lease: &Lease, now: u64, max_suspend_ms: u64) -> Option<LeaseState> {
         // TTL-expired active/orphaned leases
         if (lease.state == LeaseState::Active || lease.state == LeaseState::Orphaned)
@@ -413,8 +408,7 @@ impl SceneGraph {
     /// Drive a single lease to `terminal_state`: remove its tiles, clear its zone
     /// and widget publications, and record the terminal state in place. Does NOT
     /// bump `self.version` — the caller batches that so a multi-lease sweep bumps
-    /// once. Shared reap body for [`Self::expire_leases_with_max_suspend`] and
-    /// [`Self::expire_lease`].
+    /// once. Shared by the whole-scene sweep and scoped expiry fixture.
     fn reap_lease(&mut self, id: SceneId, terminal_state: LeaseState) -> LeaseExpiry {
         // Collect the old state before mutating so terminal delivery can
         // report the actual transition.

@@ -291,7 +291,7 @@ impl SceneGraph {
     ///
     /// Public so callers that stamp lease lifecycle transitions
     /// (`disconnect_lease`/`reconnect_lease`) use the SAME clock domain the
-    /// grace/TTL checks in `expire_lease`/`expire_leases` compare against — a
+    /// lease expiry/grace checks compare against — a
     /// wall-clock value from a different source would make grace bounds
     /// inconsistent.
     pub fn now_millis(&self) -> u64 {

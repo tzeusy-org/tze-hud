@@ -370,10 +370,10 @@ impl SceneGraph {
         }
     }
 
-    /// Clear any viewer-local font scaling for `tile_id`, restoring the
-    /// adapter-published font size. Called by the reset-geometry affordance and
-    /// on tile removal, alongside [`Self::unlock_viewer_geometry`].
-    pub fn clear_tile_font_scale(&mut self, tile_id: SceneId) {
+    /// Clear viewer-local font scaling in font-scale fixtures, restoring the
+    /// adapter-published font size.
+    #[cfg(test)]
+    pub(crate) fn clear_tile_font_scale(&mut self, tile_id: SceneId) {
         self.overlay.tile_font_scale.remove(&tile_id);
     }
 

@@ -56,7 +56,7 @@ pub use svg_tokens::{is_valid_token_key, resolve_token_placeholders};
 pub use test_scenes::{
     ClockMs, InvariantViolation, SceneSpec, TestSceneRegistry, assert_layer0_invariants,
 };
-pub use timing::{DeliveryPolicy, DurationUs, MessageClass, MonoUs, Schedule, TimingHints, WallUs};
+pub use timing::{MonoUs, WallUs};
 pub use types::*;
 pub use validation::{BatchRejected, BatchValidationError, ValidationError, ValidationErrorCode};
 
