@@ -1065,29 +1065,6 @@ impl InputProcessor {
         ))
     }
 
-    /// Suspend or resume the composer draft manager for safe-mode governance (§4.5).
-    ///
-    /// Called by the safe-mode controller on safe-mode enter (`suspended = true`)
-    /// and safe-mode exit (`suspended = false`).  While suspended the manager
-    /// rejects all mutating operations (`insert`, `paste`, `backspace`, submit)
-    /// but preserves the current draft buffer — on resume the draft is available
-    /// for editing again exactly as it was before safe mode engaged.
-    ///
-    /// This is the manager-state side of safe-mode governance.  The dispatch-level
-    /// side (dropping all key/character events before they reach the manager) is
-    /// handled separately in `dispatch_key_down_event` / `dispatch_character_event`
-    /// (PR #692).  The two mechanisms are complementary:
-    /// - Dispatch-level: keystrokes never reach the manager while safe mode is active.
-    /// - Manager-state: if a keystroke somehow reaches the manager, it is rejected.
-    ///
-    /// Mid-edit behaviour: a draft that is mid-edit when safe mode engages retains
-    /// its buffer (`text`, `cursor`, `selection_anchor`) while suspended.  Edits are
-    /// blocked until `set_composer_suspended(false)` is called.  This is the
-    /// least-surprising behaviour — the viewer resumes from where they left off.
-    pub fn set_composer_suspended(&mut self, suspended: bool) {
-        self.composer_draft_manager.set_suspended(suspended);
-    }
-
     /// Process a pointer event against the scene graph.
     ///
     /// Updates hit-region local state for immediate visual feedback.

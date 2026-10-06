@@ -35,8 +35,7 @@ use crate::focus_tree::FocusOwner;
 
 /// Keyboard modifier state carried by key events (spec line 290).
 ///
-/// Represented as a struct of boolean flags. Use [`KeyboardModifiers::has_modifier`]
-/// to test whether any momentary modifier (Shift/Ctrl/Alt/Meta) is active.
+/// Represented as a struct of boolean flags.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct KeyboardModifiers {
     pub shift: bool,
@@ -59,11 +58,6 @@ impl KeyboardModifiers {
         caps_lock: false,
         num_lock: false,
     };
-
-    /// Returns true if any momentary modifier key (Shift/Ctrl/Alt/Meta) is held.
-    pub fn has_modifier(&self) -> bool {
-        self.shift || self.ctrl || self.alt || self.meta
-    }
 }
 
 // ─── Raw OS keyboard event ─────────────────────────────────────────────────────

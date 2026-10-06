@@ -123,9 +123,6 @@ impl LocalStateUpdate {
 /// Carries the **absolute** post-update scroll offset for the tile, per
 /// spec §Local Feedback Rendering via SceneLocalPatch:
 /// `ScrollOffsetUpdate(tile_id, offset_x, offset_y)`.
-///
-/// The `user_initiated` flag is used by `SceneLocalPatch::merge_from` to
-/// enforce user-priority semantics when coalescing patches.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ScrollOffsetUpdate {
     /// The tile whose scroll offset changed.
@@ -148,11 +145,6 @@ pub struct ScrollOffsetUpdate {
 /// ## Latency invariant
 /// Must be produced within 1ms of the input event (combined Stage 1+2 budget).
 /// The compositor must apply it before the next frame (< 33ms guarantee).
-///
-/// ## Channel semantics
-/// The channel is bounded; if the compositor is behind, patches may be coalesced
-/// via `merge_from`. Since local state is idempotent (last-write-wins),
-/// coalescing is lossless.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct SceneLocalPatch {
     /// Per-node state updates (pressed, hovered, focused).
@@ -174,44 +166,6 @@ impl SceneLocalPatch {
     /// Add a node state update.
     pub fn push_state(&mut self, update: LocalStateUpdate) {
         self.node_updates.push(update);
-    }
-
-    /// Merge another patch into this one (in-place coalescing).
-    ///
-    /// For state updates: the incoming update for a `node_id` replaces any
-    /// existing entry for the same `node_id` (last-write-wins per node).
-    ///
-    /// For scroll updates: per-tile coalescing with user-priority semantics.
-    /// Since offsets are absolute, same-origin updates follow last-write-wins:
-    /// - Existing **agent** + incoming **user**: agent discarded, user wins.
-    /// - Existing **user** + incoming **agent**: agent dropped.
-    /// - Same origin: last-write-wins on absolute offsets.
-    pub fn merge_from(&mut self, other: SceneLocalPatch) {
-        // State updates: last-write-wins per node_id.
-        for incoming in other.node_updates {
-            self.node_updates.retain(|u| u.node_id != incoming.node_id);
-            self.node_updates.push(incoming);
-        }
-        // Scroll updates: coalesce per tile_id with user-priority.
-        for incoming in other.scroll_updates {
-            if let Some(existing) = self
-                .scroll_updates
-                .iter_mut()
-                .find(|u| u.tile_id == incoming.tile_id)
-            {
-                match (existing.user_initiated, incoming.user_initiated) {
-                    (false, true) => {
-                        *existing = incoming;
-                    }
-                    (true, false) => {}
-                    _ => {
-                        *existing = incoming;
-                    }
-                }
-            } else {
-                self.scroll_updates.push(incoming);
-            }
-        }
     }
 }
 
