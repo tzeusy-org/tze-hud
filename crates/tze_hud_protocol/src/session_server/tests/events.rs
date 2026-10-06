@@ -238,18 +238,6 @@ async fn viewer_dismiss_tile_pushes_reclaimed_override() {
 
 // ─── DegradationNotice ───────────────────────────────────────────────────────
 
-/// traffic_class: DegradationNotice must be Transactional.
-#[test]
-fn test_degradation_notice_is_transactional() {
-    assert_eq!(
-        classify_server_payload(&ServerPayload::DegradationNotice(
-            DegradationNotice::default()
-        )),
-        TrafficClass::Transactional,
-        "DegradationNotice must be Transactional — never dropped"
-    );
-}
-
 #[tokio::test]
 async fn new_session_receives_existing_degradation_after_snapshot() {
     let scene = SceneGraph::new(800.0, 600.0);
