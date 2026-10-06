@@ -962,7 +962,9 @@ fn create_rule(rule: &RuleImage) -> Result<INetFwRule, String> {
             if let Some(names) = &rule.interfaces {
                 let value =
                     interface_variant(names).map_err(|s| ::windows::core::Error::new(E_FAIL, s))?;
-                object.SetInterfaces(&value)?;
+                object.SetInterfaces(&value).map_err(|error| {
+                    ::windows::core::Error::new(error.code(), format!("SetInterfaces: {error}"))
+                })?;
             }
             object.SetInterfaceTypes(&BSTR::from(rule.interface_types.as_str()))?;
             object.SetProfiles(rule.profiles)?;
@@ -1496,7 +1498,6 @@ mod tests {
                 rule.local_ports = matches!(protocol, 6 | 17).then(|| "9090,50051".into());
                 rule.remote_ports = matches!(protocol, 6 | 17).then(|| "*".into());
                 rule.icmp = matches!(protocol, 1 | 58).then(|| "*".into());
-                rule.interfaces = Some(vec!["fixture interface".into()]);
                 let saved = image(&create_rule(&rule).unwrap()).unwrap();
                 assert_eq!(saved.name, rule.name);
                 assert_eq!(saved.description, rule.description);
@@ -1532,6 +1533,18 @@ mod tests {
             let mut unsupported = base.clone();
             unsupported.package_id = "unsupported package".into();
             assert!(standalone(&unsupported).is_err());
+            // Native Interfaces setters resolve real adapter friendly names.
+            // A fabricated name is a refusal case, not a valid host fixture.
+            // Keep typed multi-name/Unicode codec coverage independent of host
+            // adapters; restoration still requires native preflight of all saved
+            // properties before any policy mutation.
+            let mut missing_interface = base.clone();
+            missing_interface.interfaces = Some(vec!["fixture interface".into()]);
+            let error = match create_rule(&missing_interface) {
+                Ok(_) => panic!("a nonexistent native interface was accepted"),
+                Err(error) => error,
+            };
+            assert!(error.contains("SetInterfaces:"), "{error}");
             let names = vec!["Ethernet".into(), "Unicode Δ".into()];
             assert_eq!(
                 interfaces(&interface_variant(&names).unwrap()).unwrap(),
