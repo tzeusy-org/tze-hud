@@ -1,0 +1,641 @@
+{
+  "schema": "Classic11-published-criterion-and-fixture-ledger-v1",
+  "executed_source_commit": "d7a9fb9a280869dc5ee44e1b5a14039a2848758a",
+  "execution_baseline": "de71d179d27c84a034ed61c1917bb963cdb9dff0",
+  "source_paths": [
+    "assets/themes/classic.toml",
+    "crates/tze_hud_config/src/themes.rs",
+    "docs/api.md"
+  ],
+  "semantic_roles": [
+    {
+      "key": "color.surface",
+      "kind": "color",
+      "declared_value": "#000000",
+      "exact_installed_packet_value": true,
+      "intent": "Classic black/navy structure and legacy semantic/status palette"
+    },
+    {
+      "key": "color.surface.container.low",
+      "kind": "color",
+      "declared_value": "#05080D",
+      "exact_installed_packet_value": true,
+      "intent": "Classic black/navy structure and legacy semantic/status palette"
+    },
+    {
+      "key": "color.surface.container",
+      "kind": "color",
+      "declared_value": "#0C1426",
+      "exact_installed_packet_value": true,
+      "intent": "Classic black/navy structure and legacy semantic/status palette"
+    },
+    {
+      "key": "color.surface.container.high",
+      "kind": "color",
+      "declared_value": "#141D30",
+      "exact_installed_packet_value": true,
+      "intent": "Classic black/navy structure and legacy semantic/status palette"
+    },
+    {
+      "key": "color.surface.container.highest",
+      "kind": "color",
+      "declared_value": "#1E293F",
+      "exact_installed_packet_value": true,
+      "intent": "Classic black/navy structure and legacy semantic/status palette"
+    },
+    {
+      "key": "opacity.surface",
+      "kind": "number",
+      "declared_value": "0.96",
+      "exact_installed_packet_value": true,
+      "intent": "Explicit Classic state/opacity, 4px scale or system-font role; shared literal is intentional, never fallback inheritance"
+    },
+    {
+      "key": "opacity.scrim",
+      "kind": "number",
+      "declared_value": "0.75",
+      "exact_installed_packet_value": true,
+      "intent": "Explicit Classic state/opacity, 4px scale or system-font role; shared literal is intentional, never fallback inheritance"
+    },
+    {
+      "key": "color.on_surface",
+      "kind": "color",
+      "declared_value": "#F5F7FA",
+      "exact_installed_packet_value": true,
+      "intent": "Classic black/navy structure and legacy semantic/status palette"
+    },
+    {
+      "key": "color.on_surface.variant",
+      "kind": "color",
+      "declared_value": "#BFC7D5",
+      "exact_installed_packet_value": true,
+      "intent": "Classic black/navy structure and legacy semantic/status palette"
+    },
+    {
+      "key": "color.outline",
+      "kind": "color",
+      "declared_value": "#6E7A91",
+      "exact_installed_packet_value": true,
+      "intent": "Classic black/navy structure and legacy semantic/status palette"
+    },
+    {
+      "key": "color.outline.variant",
+      "kind": "color",
+      "declared_value": "#3E4A62",
+      "exact_installed_packet_value": true,
+      "intent": "Classic black/navy structure and legacy semantic/status palette"
+    },
+    {
+      "key": "color.primary",
+      "kind": "color",
+      "declared_value": "#4A9EFF",
+      "exact_installed_packet_value": true,
+      "intent": "Classic black/navy structure and legacy semantic/status palette"
+    },
+    {
+      "key": "color.on_primary",
+      "kind": "color",
+      "declared_value": "#071321",
+      "exact_installed_packet_value": true,
+      "intent": "Classic black/navy structure and legacy semantic/status palette"
+    },
+    {
+      "key": "color.primary.container",
+      "kind": "color",
+      "declared_value": "#17375C",
+      "exact_installed_packet_value": true,
+      "intent": "Classic black/navy structure and legacy semantic/status palette"
+    },
+    {
+      "key": "color.on_primary.container",
+      "kind": "color",
+      "declared_value": "#E1EDFF",
+      "exact_installed_packet_value": true,
+      "intent": "Classic black/navy structure and legacy semantic/status palette"
+    },
+    {
+      "key": "color.success",
+      "kind": "color",
+      "declared_value": "#66D9A3",
+      "exact_installed_packet_value": true,
+      "intent": "Classic black/navy structure and legacy semantic/status palette"
+    },
+    {
+      "key": "color.caution",
+      "kind": "color",
+      "declared_value": "#FFCA66",
+      "exact_installed_packet_value": true,
+      "intent": "Classic black/navy structure and legacy semantic/status palette"
+    },
+    {
+      "key": "color.caution.container",
+      "kind": "color",
+      "declared_value": "#2A1E08",
+      "exact_installed_packet_value": true,
+      "intent": "Classic black/navy structure and legacy semantic/status palette"
+    },
+    {
+      "key": "color.on_caution.container",
+      "kind": "color",
+      "declared_value": "#FFF0CA",
+      "exact_installed_packet_value": true,
+      "intent": "Classic black/navy structure and legacy semantic/status palette"
+    },
+    {
+      "key": "color.error",
+      "kind": "color",
+      "declared_value": "#FF8392",
+      "exact_installed_packet_value": true,
+      "intent": "Classic black/navy structure and legacy semantic/status palette"
+    },
+    {
+      "key": "color.error.container",
+      "kind": "color",
+      "declared_value": "#450612",
+      "exact_installed_packet_value": true,
+      "intent": "Classic black/navy structure and legacy semantic/status palette"
+    },
+    {
+      "key": "color.on_error.container",
+      "kind": "color",
+      "declared_value": "#FFE3E8",
+      "exact_installed_packet_value": true,
+      "intent": "Classic black/navy structure and legacy semantic/status palette"
+    },
+    {
+      "key": "state.hover.opacity",
+      "kind": "number",
+      "declared_value": "0.01",
+      "exact_installed_packet_value": true,
+      "intent": "Explicit Classic state/opacity, 4px scale or system-font role; shared literal is intentional, never fallback inheritance"
+    },
+    {
+      "key": "state.pressed.opacity",
+      "kind": "number",
+      "declared_value": "0.10",
+      "exact_installed_packet_value": true,
+      "intent": "Explicit Classic state/opacity, 4px scale or system-font role; shared literal is intentional, never fallback inheritance"
+    },
+    {
+      "key": "focus.ring.width",
+      "kind": "number",
+      "declared_value": "2",
+      "exact_installed_packet_value": true,
+      "intent": "Explicit Classic state/opacity, 4px scale or system-font role; shared literal is intentional, never fallback inheritance"
+    },
+    {
+      "key": "focus.ring.offset",
+      "kind": "number",
+      "declared_value": "2",
+      "exact_installed_packet_value": true,
+      "intent": "Explicit Classic state/opacity, 4px scale or system-font role; shared literal is intentional, never fallback inheritance"
+    },
+    {
+      "key": "motion.enter.ms",
+      "kind": "number",
+      "declared_value": "150",
+      "exact_installed_packet_value": true,
+      "intent": "Explicit Classic state/opacity, 4px scale or system-font role; shared literal is intentional, never fallback inheritance"
+    },
+    {
+      "key": "motion.exit.ms",
+      "kind": "number",
+      "declared_value": "100",
+      "exact_installed_packet_value": true,
+      "intent": "Explicit Classic state/opacity, 4px scale or system-font role; shared literal is intentional, never fallback inheritance"
+    },
+    {
+      "key": "motion.state.ms",
+      "kind": "number",
+      "declared_value": "100",
+      "exact_installed_packet_value": true,
+      "intent": "Explicit Classic state/opacity, 4px scale or system-font role; shared literal is intentional, never fallback inheritance"
+    },
+    {
+      "key": "motion.enter.easing",
+      "kind": "easing",
+      "declared_value": "decelerate",
+      "exact_installed_packet_value": true,
+      "intent": "Explicit Classic state/opacity, 4px scale or system-font role; shared literal is intentional, never fallback inheritance"
+    },
+    {
+      "key": "motion.exit.easing",
+      "kind": "easing",
+      "declared_value": "accelerate",
+      "exact_installed_packet_value": true,
+      "intent": "Explicit Classic state/opacity, 4px scale or system-font role; shared literal is intentional, never fallback inheritance"
+    },
+    {
+      "key": "shape.xs",
+      "kind": "number",
+      "declared_value": "2",
+      "exact_installed_packet_value": true,
+      "intent": "Explicit Classic state/opacity, 4px scale or system-font role; shared literal is intentional, never fallback inheritance"
+    },
+    {
+      "key": "shape.s",
+      "kind": "number",
+      "declared_value": "6",
+      "exact_installed_packet_value": true,
+      "intent": "Explicit Classic state/opacity, 4px scale or system-font role; shared literal is intentional, never fallback inheritance"
+    },
+    {
+      "key": "shape.m",
+      "kind": "number",
+      "declared_value": "14",
+      "exact_installed_packet_value": true,
+      "intent": "Explicit Classic state/opacity, 4px scale or system-font role; shared literal is intentional, never fallback inheritance"
+    },
+    {
+      "key": "shape.l",
+      "kind": "number",
+      "declared_value": "18",
+      "exact_installed_packet_value": true,
+      "intent": "Explicit Classic state/opacity, 4px scale or system-font role; shared literal is intentional, never fallback inheritance"
+    },
+    {
+      "key": "shape.xl",
+      "kind": "number",
+      "declared_value": "24",
+      "exact_installed_packet_value": true,
+      "intent": "Explicit Classic state/opacity, 4px scale or system-font role; shared literal is intentional, never fallback inheritance"
+    },
+    {
+      "key": "shape.full",
+      "kind": "number",
+      "declared_value": "999",
+      "exact_installed_packet_value": true,
+      "intent": "Explicit Classic state/opacity, 4px scale or system-font role; shared literal is intentional, never fallback inheritance"
+    },
+    {
+      "key": "space.xs",
+      "kind": "number",
+      "declared_value": "4",
+      "exact_installed_packet_value": true,
+      "intent": "Explicit Classic state/opacity, 4px scale or system-font role; shared literal is intentional, never fallback inheritance"
+    },
+    {
+      "key": "space.s",
+      "kind": "number",
+      "declared_value": "8",
+      "exact_installed_packet_value": true,
+      "intent": "Explicit Classic state/opacity, 4px scale or system-font role; shared literal is intentional, never fallback inheritance"
+    },
+    {
+      "key": "space.m",
+      "kind": "number",
+      "declared_value": "12",
+      "exact_installed_packet_value": true,
+      "intent": "Explicit Classic state/opacity, 4px scale or system-font role; shared literal is intentional, never fallback inheritance"
+    },
+    {
+      "key": "space.l",
+      "kind": "number",
+      "declared_value": "16",
+      "exact_installed_packet_value": true,
+      "intent": "Explicit Classic state/opacity, 4px scale or system-font role; shared literal is intentional, never fallback inheritance"
+    },
+    {
+      "key": "space.xl",
+      "kind": "number",
+      "declared_value": "20",
+      "exact_installed_packet_value": true,
+      "intent": "Explicit Classic state/opacity, 4px scale or system-font role; shared literal is intentional, never fallback inheritance"
+    },
+    {
+      "key": "space.xxl",
+      "kind": "number",
+      "declared_value": "28",
+      "exact_installed_packet_value": true,
+      "intent": "Explicit Classic state/opacity, 4px scale or system-font role; shared literal is intentional, never fallback inheritance"
+    },
+    {
+      "key": "font.sans",
+      "kind": "family",
+      "declared_value": "Segoe UI",
+      "exact_installed_packet_value": true,
+      "intent": "Explicit Classic state/opacity, 4px scale or system-font role; shared literal is intentional, never fallback inheritance"
+    },
+    {
+      "key": "font.mono",
+      "kind": "family",
+      "declared_value": "Consolas",
+      "exact_installed_packet_value": true,
+      "intent": "Explicit Classic state/opacity, 4px scale or system-font role; shared literal is intentional, never fallback inheritance"
+    },
+    {
+      "key": "type.code.display.family",
+      "kind": "family",
+      "declared_value": "Consolas",
+      "exact_installed_packet_value": true,
+      "intent": "Explicit Classic state/opacity, 4px scale or system-font role; shared literal is intentional, never fallback inheritance"
+    },
+    {
+      "key": "type.code.display.size",
+      "kind": "number",
+      "declared_value": "40",
+      "exact_installed_packet_value": true,
+      "intent": "Explicit Classic state/opacity, 4px scale or system-font role; shared literal is intentional, never fallback inheritance"
+    },
+    {
+      "key": "type.code.display.line_height",
+      "kind": "number",
+      "declared_value": "48",
+      "exact_installed_packet_value": true,
+      "intent": "Explicit Classic state/opacity, 4px scale or system-font role; shared literal is intentional, never fallback inheritance"
+    },
+    {
+      "key": "type.code.display.weight",
+      "kind": "number",
+      "declared_value": "500",
+      "exact_installed_packet_value": true,
+      "intent": "Explicit Classic state/opacity, 4px scale or system-font role; shared literal is intentional, never fallback inheritance"
+    },
+    {
+      "key": "type.caption.display.family",
+      "kind": "family",
+      "declared_value": "Segoe UI",
+      "exact_installed_packet_value": true,
+      "intent": "Explicit Classic state/opacity, 4px scale or system-font role; shared literal is intentional, never fallback inheritance"
+    },
+    {
+      "key": "type.caption.display.size",
+      "kind": "number",
+      "declared_value": "26",
+      "exact_installed_packet_value": true,
+      "intent": "Explicit Classic state/opacity, 4px scale or system-font role; shared literal is intentional, never fallback inheritance"
+    },
+    {
+      "key": "type.caption.display.line_height",
+      "kind": "number",
+      "declared_value": "34",
+      "exact_installed_packet_value": true,
+      "intent": "Explicit Classic state/opacity, 4px scale or system-font role; shared literal is intentional, never fallback inheritance"
+    },
+    {
+      "key": "type.caption.display.weight",
+      "kind": "number",
+      "declared_value": "600",
+      "exact_installed_packet_value": true,
+      "intent": "Explicit Classic state/opacity, 4px scale or system-font role; shared literal is intentional, never fallback inheritance"
+    },
+    {
+      "key": "type.headline.s.family",
+      "kind": "family",
+      "declared_value": "Segoe UI",
+      "exact_installed_packet_value": true,
+      "intent": "Explicit Classic state/opacity, 4px scale or system-font role; shared literal is intentional, never fallback inheritance"
+    },
+    {
+      "key": "type.headline.s.size",
+      "kind": "number",
+      "declared_value": "20",
+      "exact_installed_packet_value": true,
+      "intent": "Explicit Classic state/opacity, 4px scale or system-font role; shared literal is intentional, never fallback inheritance"
+    },
+    {
+      "key": "type.headline.s.line_height",
+      "kind": "number",
+      "declared_value": "28",
+      "exact_installed_packet_value": true,
+      "intent": "Explicit Classic state/opacity, 4px scale or system-font role; shared literal is intentional, never fallback inheritance"
+    },
+    {
+      "key": "type.headline.s.weight",
+      "kind": "number",
+      "declared_value": "600",
+      "exact_installed_packet_value": true,
+      "intent": "Explicit Classic state/opacity, 4px scale or system-font role; shared literal is intentional, never fallback inheritance"
+    },
+    {
+      "key": "type.title.m.family",
+      "kind": "family",
+      "declared_value": "Segoe UI",
+      "exact_installed_packet_value": true,
+      "intent": "Explicit Classic state/opacity, 4px scale or system-font role; shared literal is intentional, never fallback inheritance"
+    },
+    {
+      "key": "type.title.m.size",
+      "kind": "number",
+      "declared_value": "16",
+      "exact_installed_packet_value": true,
+      "intent": "Explicit Classic state/opacity, 4px scale or system-font role; shared literal is intentional, never fallback inheritance"
+    },
+    {
+      "key": "type.title.m.line_height",
+      "kind": "number",
+      "declared_value": "24",
+      "exact_installed_packet_value": true,
+      "intent": "Explicit Classic state/opacity, 4px scale or system-font role; shared literal is intentional, never fallback inheritance"
+    },
+    {
+      "key": "type.title.m.weight",
+      "kind": "number",
+      "declared_value": "600",
+      "exact_installed_packet_value": true,
+      "intent": "Explicit Classic state/opacity, 4px scale or system-font role; shared literal is intentional, never fallback inheritance"
+    },
+    {
+      "key": "type.body.m.family",
+      "kind": "family",
+      "declared_value": "Segoe UI",
+      "exact_installed_packet_value": true,
+      "intent": "Explicit Classic state/opacity, 4px scale or system-font role; shared literal is intentional, never fallback inheritance"
+    },
+    {
+      "key": "type.body.m.size",
+      "kind": "number",
+      "declared_value": "15",
+      "exact_installed_packet_value": true,
+      "intent": "Explicit Classic state/opacity, 4px scale or system-font role; shared literal is intentional, never fallback inheritance"
+    },
+    {
+      "key": "type.body.m.line_height",
+      "kind": "number",
+      "declared_value": "20",
+      "exact_installed_packet_value": true,
+      "intent": "Explicit Classic state/opacity, 4px scale or system-font role; shared literal is intentional, never fallback inheritance"
+    },
+    {
+      "key": "type.body.m.weight",
+      "kind": "number",
+      "declared_value": "500",
+      "exact_installed_packet_value": true,
+      "intent": "Explicit Classic state/opacity, 4px scale or system-font role; shared literal is intentional, never fallback inheritance"
+    },
+    {
+      "key": "type.label.m.family",
+      "kind": "family",
+      "declared_value": "Segoe UI",
+      "exact_installed_packet_value": true,
+      "intent": "Explicit Classic state/opacity, 4px scale or system-font role; shared literal is intentional, never fallback inheritance"
+    },
+    {
+      "key": "type.label.m.size",
+      "kind": "number",
+      "declared_value": "12",
+      "exact_installed_packet_value": true,
+      "intent": "Explicit Classic state/opacity, 4px scale or system-font role; shared literal is intentional, never fallback inheritance"
+    },
+    {
+      "key": "type.label.m.line_height",
+      "kind": "number",
+      "declared_value": "16",
+      "exact_installed_packet_value": true,
+      "intent": "Explicit Classic state/opacity, 4px scale or system-font role; shared literal is intentional, never fallback inheritance"
+    },
+    {
+      "key": "type.label.m.weight",
+      "kind": "number",
+      "declared_value": "500",
+      "exact_installed_packet_value": true,
+      "intent": "Explicit Classic state/opacity, 4px scale or system-font role; shared literal is intentional, never fallback inheritance"
+    },
+    {
+      "key": "type.label.s.family",
+      "kind": "family",
+      "declared_value": "Segoe UI",
+      "exact_installed_packet_value": true,
+      "intent": "Explicit Classic state/opacity, 4px scale or system-font role; shared literal is intentional, never fallback inheritance"
+    },
+    {
+      "key": "type.label.s.size",
+      "kind": "number",
+      "declared_value": "11",
+      "exact_installed_packet_value": true,
+      "intent": "Explicit Classic state/opacity, 4px scale or system-font role; shared literal is intentional, never fallback inheritance"
+    },
+    {
+      "key": "type.label.s.line_height",
+      "kind": "number",
+      "declared_value": "16",
+      "exact_installed_packet_value": true,
+      "intent": "Explicit Classic state/opacity, 4px scale or system-font role; shared literal is intentional, never fallback inheritance"
+    },
+    {
+      "key": "type.label.s.weight",
+      "kind": "number",
+      "declared_value": "500",
+      "exact_installed_packet_value": true,
+      "intent": "Explicit Classic state/opacity, 4px scale or system-font role; shared literal is intentional, never fallback inheritance"
+    },
+    {
+      "key": "type.readout.family",
+      "kind": "family",
+      "declared_value": "Consolas",
+      "exact_installed_packet_value": true,
+      "intent": "Explicit Classic state/opacity, 4px scale or system-font role; shared literal is intentional, never fallback inheritance"
+    },
+    {
+      "key": "type.readout.size",
+      "kind": "number",
+      "declared_value": "14",
+      "exact_installed_packet_value": true,
+      "intent": "Explicit Classic state/opacity, 4px scale or system-font role; shared literal is intentional, never fallback inheritance"
+    },
+    {
+      "key": "type.readout.line_height",
+      "kind": "number",
+      "declared_value": "20",
+      "exact_installed_packet_value": true,
+      "intent": "Explicit Classic state/opacity, 4px scale or system-font role; shared literal is intentional, never fallback inheritance"
+    },
+    {
+      "key": "type.readout.weight",
+      "kind": "number",
+      "declared_value": "500",
+      "exact_installed_packet_value": true,
+      "intent": "Explicit Classic state/opacity, 4px scale or system-font role; shared literal is intentional, never fallback inheritance"
+    }
+  ],
+  "legacy13": {
+    "color.text.primary": "#F5F7FA",
+    "color.border.default": "#6E7A91",
+    "opacity.backdrop.opaque": "0.80",
+    "typography.body.size": "15",
+    "typography.body.weight": "500",
+    "spacing.padding.medium": "10",
+    "border.radius.medium": "14",
+    "color.notification.urgency.low": "#000000",
+    "color.notification.urgency.normal": "#0C1426",
+    "color.notification.urgency.urgent": "#2A1E08",
+    "color.notification.urgency.critical": "#450612",
+    "typography.notification.body.scale": "0.90",
+    "typography.notification.title.weight": "700"
+  },
+  "fixture_bodies": {
+    "builtin_themes_are_valid": {
+      "bytes": 458,
+      "SHA256": "5ba66c0bbf1d76fbcf251aa71f3d600c269a2187b51ea8004b3454dea5e973a0",
+      "extended": false
+    },
+    "full_themes_set_every_semantic_token": {
+      "bytes": 3842,
+      "SHA256": "89c458c3efc9268bf416735a1c8bb2e14ec7af7221e1506e4ad71b425b3aa1fd",
+      "extended": true
+    },
+    "parse_theme_rejects_unknown_keys_and_bad_values": {
+      "bytes": 428,
+      "SHA256": "6e5c388cf033ed717acce3e86cb4a5d6d3d2551f9bc2b6b2c7c36db948508265",
+      "extended": false
+    },
+    "unset_theme_selects_default": {
+      "bytes": 362,
+      "SHA256": "b5e63ae68251e19310aed744ddf03a96254e8c4ab8cddeb9264d211115cb7e20",
+      "extended": false
+    },
+    "selected_theme_layers_between_canonical_and_config": {
+      "bytes": 1257,
+      "SHA256": "7f6e098d03e23caef3639beea4dfce16d5254f6980f59c1f6d58dfdfd2a99455",
+      "extended": true
+    },
+    "unknown_theme_is_a_validation_error_listing_themes": {
+      "bytes": 888,
+      "SHA256": "81e65d3c7f70beccd29c4d56f07d6438f7b9eba71e8417eba087d631afddaa82",
+      "extended": false
+    },
+    "known_or_absent_theme_validates": {
+      "bytes": 479,
+      "SHA256": "4174dff5ec1120cfeb8dd18e693d6397d0c846f23246975ac9b578b458a0511d",
+      "extended": false
+    }
+  },
+  "test_delta": "+0~2-0",
+  "all_original_role_presence_and_layering_assertions_retained": true,
+  "production_theme_parser_default_registry_signatures_unchanged": true,
+  "criteria": {
+    "1": "Classic retained;77 semantic keys explicitly declared;13 legacy values preserved.",
+    "2": "Actual full_themes_set_every_semantic_token verifies selected Classic resolved values equal declared values; equal shared constants allowed, no missing-role inheritance.",
+    "3": "Tests +0~2-0; all7 existing config theme fixture names retained.",
+    "4": "All77 exact installed packet values and all3 built-in names/default preserved.",
+    "5": "Full-set/layering extended; other5 bodies byteexact; actual focused7 and normalCI positives.",
+    "6": "Full543 source snapshot differs from de71 only3 ownerpaths; production theme parser prefix and all other source bodies unchanged. Current72 owners+actual binary pass proof/default17/T7 retained at executed baseline.",
+    "7": "Theme/docs describe explicit shared values; raw/source/count/native proof included. No screenshot or owner signoff claimed.",
+    "8": "Repeated/default/unknown/error/override fixtures retained. Rollback is revert this bounded Classic/theme-test/docs change; no persistence migration. Downstream theme6 remains separate serialized palette owner;Blueprint12 and parent restyle/physical obligations untouched."
+  },
+  "contrast_scope": "14 opaque text/fill role pairs evaluated with actual parsed colors and unrounded f64 >=4.5; transparency, wallpaper, state layers, arbitrary overrides, renderer/screenshots not certified.",
+  "CI_actual": {
+    "exit": 0,
+    "seconds": 579.1338756089972,
+    "Rust_passed": 3245,
+    "Rust_summaries": 70,
+    "named72": 72,
+    "default17": 17,
+    "integration": {
+      "passed": 170,
+      "summaries": 14
+    },
+    "raw_SHA256": "37d56d50b95ffbd952f16c91efcfe0ff01795c6631b8386262dc78ad3fad8066",
+    "tool_skips": [
+      {
+        "line": 1,
+        "text": "SKIPPED: overlay-harness-contract needs PowerShell (pwsh)"
+      },
+      {
+        "line": 2943,
+        "text": "SKIP: integration has no lib/bin target (tests only)"
+      }
+    ]
+  },
+  "qualification": "Exactd7 source executed on de71 baseline. Latermain/parser and merge-tree success are qualified separately, never treated as executed combined source. Evidence-only publication commit must preserve all543 source bytes."
+}
