@@ -141,7 +141,12 @@ pub(super) async fn run_upload_worker(
     let mut upload_rate_limiter =
         UploadByteRateLimiter::with_limit(upload_rate_limit_bytes_per_sec);
 
-    while let Some(command) = command_rx.recv().await {
+    'worker: while let Some(command) = command_rx.recv().await {
+        // The session loop drops its event receiver before joining this worker.
+        // Discard queued work instead of admitting uploads after disconnect.
+        if event_tx.is_closed() {
+            break;
+        }
         match command {
             UploadWorkerCommand::Start {
                 request_sequence,
@@ -164,7 +169,7 @@ pub(super) async fn run_upload_worker(
                             .await
                             .is_err()
                         {
-                            return;
+                            break 'worker;
                         }
                         continue;
                     }
@@ -186,7 +191,7 @@ pub(super) async fn run_upload_worker(
                             .await
                             .is_err()
                         {
-                            return;
+                            break 'worker;
                         }
                         continue;
                     }
@@ -206,7 +211,7 @@ pub(super) async fn run_upload_worker(
                         .await
                         .is_err()
                     {
-                        return;
+                        break 'worker;
                     }
                     continue;
                 }
@@ -230,7 +235,7 @@ pub(super) async fn run_upload_worker(
                             .await
                             .is_err()
                         {
-                            return;
+                            break 'worker;
                         }
                         continue;
                     }
@@ -255,8 +260,11 @@ pub(super) async fn run_upload_worker(
                 };
 
                 if inline_bytes > 0 {
-                    apply_upload_transport_backpressure(&mut upload_rate_limiter, inline_bytes)
-                        .await;
+                    tokio::select! {
+                        biased;
+                        _ = event_tx.closed() => break 'worker,
+                        _ = apply_upload_transport_backpressure(&mut upload_rate_limiter, inline_bytes) => {}
+                    }
                 }
 
                 match store.handle_upload_start(request).await {
@@ -274,7 +282,7 @@ pub(super) async fn run_upload_worker(
                             .await
                             .is_err()
                         {
-                            return;
+                            break 'worker;
                         }
                     }
                     Ok(None) => {
@@ -294,7 +302,7 @@ pub(super) async fn run_upload_worker(
                             .await
                             .is_err()
                         {
-                            return;
+                            break 'worker;
                         }
                     }
                     Err(err) => {
@@ -307,7 +315,7 @@ pub(super) async fn run_upload_worker(
                             .await
                             .is_err()
                         {
-                            return;
+                            break 'worker;
                         }
                     }
                 }
@@ -332,7 +340,7 @@ pub(super) async fn run_upload_worker(
                             .await
                             .is_err()
                         {
-                            return;
+                            break 'worker;
                         }
                         continue;
                     }
@@ -351,14 +359,17 @@ pub(super) async fn run_upload_worker(
                         .await
                         .is_err()
                     {
-                        return;
+                        break 'worker;
                     }
                     continue;
                 };
 
                 if !chunk.data.is_empty() {
-                    apply_upload_transport_backpressure(&mut upload_rate_limiter, chunk.data.len())
-                        .await;
+                    tokio::select! {
+                        biased;
+                        _ = event_tx.closed() => break 'worker,
+                        _ = apply_upload_transport_backpressure(&mut upload_rate_limiter, chunk.data.len()) => {}
+                    }
                 }
 
                 if let Err(err) = store
@@ -371,6 +382,9 @@ pub(super) async fn run_upload_worker(
                     .await
                 {
                     in_flight_uploads.remove(&upload_id_bytes);
+                    store
+                        .abort_upload(&namespace, UploadId::from_bytes(upload_id_bytes))
+                        .await;
                     if event_tx
                         .send(UploadWorkerEvent::Error {
                             request_sequence: tracked.request_sequence,
@@ -380,7 +394,7 @@ pub(super) async fn run_upload_worker(
                         .await
                         .is_err()
                     {
-                        return;
+                        break 'worker;
                     }
                 }
             }
@@ -405,7 +419,7 @@ pub(super) async fn run_upload_worker(
                             .await
                             .is_err()
                         {
-                            return;
+                            break 'worker;
                         }
                         continue;
                     }
@@ -424,7 +438,7 @@ pub(super) async fn run_upload_worker(
                         .await
                         .is_err()
                     {
-                        return;
+                        break 'worker;
                     }
                     continue;
                 };
@@ -456,7 +470,7 @@ pub(super) async fn run_upload_worker(
                             .await
                             .is_err()
                         {
-                            return;
+                            break 'worker;
                         }
                     }
                     Err(err) => {
@@ -470,12 +484,17 @@ pub(super) async fn run_upload_worker(
                             .await
                             .is_err()
                         {
-                            return;
+                            break 'worker;
                         }
                     }
                 }
             }
         }
+    }
+    for upload_id in in_flight_uploads.into_keys() {
+        store
+            .abort_upload(&namespace, UploadId::from_bytes(upload_id))
+            .await;
     }
 }
 

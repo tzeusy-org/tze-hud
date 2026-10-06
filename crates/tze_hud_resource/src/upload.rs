@@ -420,8 +420,7 @@ impl ResourceStore {
 
     // ─── Abort an upload ─────────────────────────────────────────────────────
 
-    /// Discard one in-flight upload in upload-slot invariant fixtures.
-    #[cfg(any(test, feature = "test-support"))]
+    /// Discard one pending upload owned by the calling session.
     pub async fn abort_upload(&self, agent_namespace: &str, upload_id: UploadId) {
         let mut guard = self.agent_uploads.lock().await;
         if let Some(uploads) = guard.get_mut(agent_namespace) {
@@ -429,7 +428,7 @@ impl ResourceStore {
         }
     }
 
-    /// Abort all in-flight uploads for an agent (on session disconnect).
+    /// Abort all in-flight uploads for an agent namespace.
     pub async fn abort_all_uploads(&self, agent_namespace: &str) {
         let mut guard = self.agent_uploads.lock().await;
         guard.remove(agent_namespace);
