@@ -87,7 +87,8 @@ impl HardwareFactors {
     }
 
     /// Create a CPU-only calibrated set (GPU/upload uncalibrated).
-    pub fn cpu_only(cpu: f64) -> Self {
+    #[cfg(test)]
+    fn cpu_only(cpu: f64) -> Self {
         Self {
             cpu: Some(cpu),
             gpu: None,
@@ -399,7 +400,8 @@ impl ValidationReport {
     }
 
     /// Serialize to pretty-printed JSON.
-    pub fn to_json(&self) -> Result<String, serde_json::Error> {
+    #[cfg(test)]
+    fn to_json(&self) -> Result<String, serde_json::Error> {
         serde_json::to_string_pretty(self)
     }
 }
