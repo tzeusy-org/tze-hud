@@ -17,8 +17,8 @@
 
 use tze_hud_scene::config::{ConfigError, ConfigErrorCode};
 
-use crate::raw::RawConfig;
 use crate::portal_tokens;
+use crate::raw::RawConfig;
 use crate::tokens::{DesignTokenMap, parse_color_hex, resolve_tokens, validate_canonical_value};
 
 /// Reserved `[design_tokens]` key that selects a theme. Never a token itself:
@@ -362,7 +362,9 @@ mod tests {
         ] {
             assert_eq!(
                 parse_theme(&format!("{key:?} = \"#123456\"")).unwrap_err(),
-                [format!("{key:?} = \"#123456\": expected a canonical token key")]
+                [format!(
+                    "{key:?} = \"#123456\": expected a canonical token key"
+                )]
             );
         }
 
