@@ -1,0 +1,94 @@
+{
+  "schema": "hook-Python-real-native-gate-v1",
+  "native_pid": 3913748,
+  "cwd": "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-x38zn.1",
+  "name": "focused",
+  "argv": [
+    "/home/orca/orca/projects/tze-hud/.venv/bin/python3",
+    "-m",
+    "pytest",
+    ".claude/skills/user-test/tests/test_portal_client.py",
+    "-vv",
+    "-q"
+  ],
+  "deadline_seconds": 300,
+  "git_override_names_stripped": [
+    "GIT_ASKPASS",
+    "GIT_CONFIG_COUNT",
+    "GIT_CONFIG_KEY_0",
+    "GIT_CONFIG_KEY_1",
+    "GIT_CONFIG_VALUE_0",
+    "GIT_CONFIG_VALUE_1",
+    "GIT_PAGER",
+    "GIT_TERMINAL_PROMPT"
+  ],
+  "python": "/home/orca/orca/projects/tze-hud/.venv/bin/python3",
+  "Cargo_GPU_cache_or_live_host_settings_model": false,
+  "input_source_before": {
+    ".claude/skills/hud-projection/scripts/portal_hook.py": {
+      "bytes": 16185,
+      "SHA256": "73f2c951663bd745fd131bc7f0e50a1272a18912e8f994d77b0025cb62ef7e95"
+    },
+    ".claude/skills/hud-projection/scripts/portal_client.py": {
+      "bytes": 7165,
+      "SHA256": "9c6423e54244c76484630f4da687c8ff8056a00cd4fb8858ba86c6c156f6790c"
+    },
+    ".claude/skills/hud-projection/references/claude-code-hooks.md": {
+      "bytes": 12178,
+      "SHA256": "35b7c5e28d6b0ca07e4a0fb9968f3887bf5c9136c1e42fd01dbb9bbc9f43b411"
+    },
+    ".claude/skills/hud-projection/SKILL.md": {
+      "bytes": 6110,
+      "SHA256": "d4063f4f5531ff5ca2b58ae0d48cd8f38e71646c6de7b7ce58fd0181623850e3"
+    },
+    ".claude/skills/user-test/tests/test_portal_client.py": {
+      "bytes": 17570,
+      "SHA256": "edff5d47cb2d8d8de1e7638542b1b261e25057ed6b2ed1613f85241c1f6202a0"
+    }
+  },
+  "synthetic_payloads_not_recorded_owner_hooks": true,
+  "test_delta": "+3~1-0",
+  "fixture_tests": [
+    "test_publish_attaches_through_hud_publish",
+    "test_poll_prints_ndjson_and_acks_on_next_call",
+    "test_poll_without_input_exits_3",
+    "test_tool_error_prints_code_and_hint",
+    "test_hold_calls_hud_hold_with_portal_surface",
+    "test_hook_lifecycle_over_real_mcp_surface",
+    "test_hook_subprocess_replay_prompt_races_and_reaping",
+    "test_hook_unavailable_malformed_privacy_and_state_failures"
+  ],
+  "child_pid": 3913749,
+  "pgid": 3913749,
+  "actual_seconds": 8.13461751898285,
+  "exit_code": 0,
+  "raw_path": ".handoff/hud-x38zn.1/code-FIRST/focused-gate.raw.log",
+  "raw_bytes": 1316,
+  "raw_SHA256": "6e65565fbf80ff993fad7c164614a04166e54c85269d1fdc16e65ecfbb209369",
+  "input_source_after": {
+    ".claude/skills/hud-projection/scripts/portal_hook.py": {
+      "bytes": 16185,
+      "SHA256": "73f2c951663bd745fd131bc7f0e50a1272a18912e8f994d77b0025cb62ef7e95"
+    },
+    ".claude/skills/hud-projection/scripts/portal_client.py": {
+      "bytes": 7165,
+      "SHA256": "9c6423e54244c76484630f4da687c8ff8056a00cd4fb8858ba86c6c156f6790c"
+    },
+    ".claude/skills/hud-projection/references/claude-code-hooks.md": {
+      "bytes": 12178,
+      "SHA256": "35b7c5e28d6b0ca07e4a0fb9968f3887bf5c9136c1e42fd01dbb9bbc9f43b411"
+    },
+    ".claude/skills/hud-projection/SKILL.md": {
+      "bytes": 6110,
+      "SHA256": "d4063f4f5531ff5ca2b58ae0d48cd8f38e71646c6de7b7ce58fd0181623850e3"
+    },
+    ".claude/skills/user-test/tests/test_portal_client.py": {
+      "bytes": 17570,
+      "SHA256": "edff5d47cb2d8d8de1e7638542b1b261e25057ed6b2ed1613f85241c1f6202a0"
+    }
+  },
+  "source_equal": true,
+  "child_absent": true,
+  "status": "terminal",
+  "UTC": "2026-10-06T21:36:15.027209+00:00"
+}

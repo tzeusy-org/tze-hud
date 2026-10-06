@@ -1,0 +1,16 @@
+============================= test session starts ==============================
+platform linux -- Python 3.14.4, pytest-9.1.1, pluggy-1.6.0 -- /home/orca/orca/projects/tze-hud/.venv/bin/python3
+cachedir: .pytest_cache
+rootdir: /home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-x38zn.1
+collecting ... collected 8 items
+
+.claude/skills/user-test/tests/test_portal_client.py::test_publish_attaches_through_hud_publish PASSED [ 12%]
+.claude/skills/user-test/tests/test_portal_client.py::test_poll_prints_ndjson_and_acks_on_next_call PASSED [ 25%]
+.claude/skills/user-test/tests/test_portal_client.py::test_poll_without_input_exits_3 PASSED [ 37%]
+.claude/skills/user-test/tests/test_portal_client.py::test_tool_error_prints_code_and_hint PASSED [ 50%]
+.claude/skills/user-test/tests/test_portal_client.py::test_hold_calls_hud_hold_with_portal_surface PASSED [ 62%]
+.claude/skills/user-test/tests/test_portal_client.py::test_hook_lifecycle_over_real_mcp_surface PASSED [ 75%]
+.claude/skills/user-test/tests/test_portal_client.py::test_hook_subprocess_replay_prompt_races_and_reaping PASSED [ 87%]
+.claude/skills/user-test/tests/test_portal_client.py::test_hook_unavailable_malformed_privacy_and_state_failures PASSED [100%]
+
+============================== 8 passed in 7.93s ===============================
