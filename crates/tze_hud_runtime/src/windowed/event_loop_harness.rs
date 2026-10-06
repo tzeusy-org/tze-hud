@@ -1035,7 +1035,9 @@ mod tests {
         SceneId,
         tze_hud_protocol::session_server::InputEventReceiver,
     ) {
-        let mut scene = SceneGraph::new(1920.0, 1080.0);
+        // Populate the authoritative scene rather than replacing its injected clock.
+        let scene_handle = Arc::clone(&harness.app.state.shared_state.blocking_lock().scene);
+        let mut scene = scene_handle.blocking_lock();
         let tab_id = scene.create_tab("Main", 0).unwrap();
         let lease_id = scene.grant_lease("command-agent", 60_000);
         let tile_id = scene
@@ -1077,16 +1079,197 @@ mod tests {
                 .focus_node_via_command(tab_id, tile_id, node_id, &scene);
         }
 
-        {
-            let shared = harness.app.state.shared_state.blocking_lock();
-            *shared.scene.blocking_lock() = scene;
-        }
+        drop(scene);
         *harness.app.state.active_tab_mirror.lock().unwrap() = Some(tab_id);
 
         let tx = tze_hud_protocol::session_server::InputEventSender::new(16);
         let rx = tx.subscribe_all();
         harness.app.state.input_event_tx = Some(tx);
         (tile_id, node_id, rx)
+    }
+
+    #[test]
+    fn focus_cleared_when_lease_revoked() {
+        use tze_hud_input::FocusOwner;
+        use tze_hud_scene::{TestClock, types::LeaseState};
+
+        #[derive(Clone, Copy, Debug)]
+        enum Removal {
+            Revoke,
+            GraceExpiry,
+            MissingFallback,
+        }
+
+        for removal in [
+            Removal::Revoke,
+            Removal::GraceExpiry,
+            Removal::MissingFallback,
+        ] {
+            // Exercise both real try_lock boundaries with a fresh scene per case.
+            for busy_scene in [false, true] {
+                let clock = Arc::new(TestClock::new(1_000));
+                let mut harness = HeadlessEventLoopHarness::new();
+                let shared_handle = harness.shared_state();
+                let scene_handle = Arc::clone(&shared_handle.blocking_lock().scene);
+                *scene_handle.blocking_lock() =
+                    SceneGraph::new_with_clock(1920.0, 1080.0, clock.clone());
+                let (tile_id, node_id, _rx) = install_button(&mut harness, true);
+                let (tab_id, lease_id, other_tab, other_tile, other_lease, grace_ms) = {
+                    let mut scene = scene_handle.blocking_lock();
+                    assert_eq!(scene.now_millis(), clock.now_millis());
+                    let tab_id = scene.tiles[&tile_id].tab_id;
+                    let lease_id = scene.tiles[&tile_id].lease_id;
+                    let lease = &scene.leases[&lease_id];
+                    let grace_ms = lease.grace_period_ms;
+                    assert!(lease.ttl_ms > grace_ms + 1);
+                    assert_eq!(lease.granted_at_ms, clock.now_millis());
+                    if matches!(removal, Removal::MissingFallback) {
+                        let fallback_lease = scene.grant_lease("fallback-agent", 60_000);
+                        let fallback_tile = scene
+                            .create_tile(
+                                tab_id,
+                                "fallback-agent",
+                                fallback_lease,
+                                Rect::new(500.0, 0.0, 100.0, 100.0),
+                                2,
+                            )
+                            .unwrap();
+                        harness.app.state.focus_manager.on_click(
+                            tab_id,
+                            fallback_tile,
+                            None,
+                            &scene,
+                        );
+                        harness.app.state.focus_manager.on_click(
+                            tab_id,
+                            tile_id,
+                            Some(node_id),
+                            &scene,
+                        );
+                        scene.revoke_lease(fallback_lease).unwrap();
+                        assert!(!scene.tiles.contains_key(&fallback_tile));
+                    }
+                    let other_tab = scene.create_tab("Unrelated", 1).unwrap();
+                    let other_lease = scene.grant_lease("other-agent", 60_000);
+                    let other_tile = scene
+                        .create_tile(
+                            other_tab,
+                            "other-agent",
+                            other_lease,
+                            Rect::new(0.0, 300.0, 100.0, 100.0),
+                            1,
+                        )
+                        .unwrap();
+                    harness.app.state.focus_manager.add_tab(other_tab);
+                    harness
+                        .app
+                        .state
+                        .focus_manager
+                        .on_click(other_tab, other_tile, None, &scene);
+                    (
+                        tab_id,
+                        lease_id,
+                        other_tab,
+                        other_tile,
+                        other_lease,
+                        grace_ms,
+                    )
+                };
+                let owner = FocusOwner::Node { tile_id, node_id };
+                let ring = Some(tze_hud_compositor::FocusRingOwner {
+                    tab_id,
+                    tile_id,
+                    node_id: Some(node_id),
+                });
+                assert!(
+                    harness
+                        .app
+                        .state
+                        .focus_manager
+                        .current_owner(tab_id)
+                        .tile_id()
+                        .is_some()
+                );
+                assert!(harness.tick());
+                let assert_retained_focus = |harness: &HeadlessEventLoopHarness| {
+                    assert_eq!(
+                        *harness.app.state.focus_manager.current_owner(tab_id),
+                        owner
+                    );
+                    assert_eq!(
+                        *harness.app.state.focus_ring_owner_state.lock().unwrap(),
+                        ring
+                    );
+                };
+                assert_retained_focus(&harness);
+
+                if matches!(removal, Removal::GraceExpiry) {
+                    scene_handle
+                        .blocking_lock()
+                        .disconnect_lease(&lease_id, clock.now_millis())
+                        .unwrap();
+                    clock.advance(grace_ms - 1);
+                    for _ in 0..2 {
+                        assert!(harness.tick());
+                        let scene = scene_handle.blocking_lock();
+                        assert_eq!(scene.now_millis(), clock.now_millis());
+                        assert_eq!(scene.tiles[&tile_id].lease_id, lease_id);
+                        assert!(scene.nodes.contains_key(&node_id));
+                        assert_eq!(scene.leases[&lease_id].state, LeaseState::Orphaned);
+                        assert_retained_focus(&harness);
+                    }
+                    clock.advance(2);
+                    // Settle sees the retained tile; the following Stage 4 sweep reaps it.
+                    assert!(harness.tick());
+                    assert_eq!(
+                        scene_handle.blocking_lock().leases[&lease_id].state,
+                        LeaseState::Expired
+                    );
+                    assert_retained_focus(&harness);
+                } else {
+                    scene_handle.blocking_lock().revoke_lease(lease_id).unwrap();
+                    assert_eq!(
+                        scene_handle.blocking_lock().leases[&lease_id].state,
+                        LeaseState::Revoked
+                    );
+                    assert!(scene_handle.blocking_lock().revoke_lease(lease_id).is_err());
+                }
+                {
+                    let scene = scene_handle.blocking_lock();
+                    assert!(!scene.tiles.contains_key(&tile_id), "{removal:?}");
+                    assert!(!scene.nodes.contains_key(&node_id), "{removal:?}");
+                }
+
+                // Neither contention point may block the event loop or force cleanup.
+                let shared_guard = (!busy_scene).then(|| shared_handle.blocking_lock());
+                let scene_guard = busy_scene.then(|| scene_handle.blocking_lock());
+                assert!(!harness.tick());
+                assert_retained_focus(&harness);
+                drop(scene_guard);
+                drop(shared_guard);
+                for _ in 0..3 {
+                    assert!(harness.tick());
+                    assert_eq!(
+                        *harness.app.state.focus_manager.current_owner(tab_id),
+                        FocusOwner::None
+                    );
+                    assert_eq!(
+                        *harness.app.state.focus_ring_owner_state.lock().unwrap(),
+                        None
+                    );
+                    let scene = scene_handle.blocking_lock();
+                    assert!(!scene.tiles.contains_key(&tile_id));
+                    assert!(!scene.nodes.contains_key(&node_id));
+                    assert_eq!(scene.tiles[&other_tile].lease_id, other_lease);
+                    assert_eq!(scene.leases[&other_lease].state, LeaseState::Active);
+                    assert_eq!(scene.active_tab, Some(tab_id));
+                    assert_eq!(
+                        *harness.app.state.focus_manager.current_owner(other_tab),
+                        FocusOwner::Tile(other_tile)
+                    );
+                }
+            }
+        }
     }
 
     fn received_events(
