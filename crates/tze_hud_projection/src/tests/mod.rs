@@ -20,7 +20,7 @@ fn attach_request(projection_id: &str, request_id: &str) -> AttachRequest {
         envelope: envelope(ProjectionOperation::Attach, projection_id, request_id),
         provider_kind: ProviderKind::Codex,
         display_name: "Codex Session".to_string(),
-        workspace_hint: Some("mayor/rig".to_string()),
+        workspace_hint: Some("tze-hud".to_string()),
         repository_hint: None,
         icon_profile_hint: None,
         content_classification: ContentClassification::Private,
@@ -298,7 +298,7 @@ fn attach_materializes_content_layer_projected_portal_and_reuses_idempotently() 
     assert_eq!(state.layer, ProjectedPortalLayer::Content);
     assert_eq!(state.presentation, ProjectedPortalPresentation::Expanded);
     assert_eq!(state.display_name.as_deref(), Some("Codex Session"));
-    assert_eq!(state.workspace_hint.as_deref(), Some("mayor/rig"));
+    assert_eq!(state.workspace_hint.as_deref(), Some("tze-hud"));
     assert!(state.interaction_enabled);
 
     authority.collapse_projected_portal("projection-a").unwrap();
