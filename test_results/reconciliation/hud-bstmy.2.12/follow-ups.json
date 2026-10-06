@@ -1,0 +1,317 @@
+[
+  {
+    "key": "R2",
+    "title": "Finish resource dedup/inspection narrowing and delete construction-only fields",
+    "type": "task",
+    "priority": 2,
+    "parent": "hud-bstmy.2",
+    "dedupe_key": "T8.1a-gen2:R2",
+    "source_head": "398c6f91de6e0d4883b10a41b6c63044e6192730",
+    "authority": "docs/scope.md:37,62-65; docs/vision.md:85-99,107; docs/invariants.md:132-149",
+    "observed_behavior": "Fresh narrowed resource scan reports three remaining groups. InflightUpload.upload_id/started_at are assigned only and suppressed. DedupIndex.is_empty has no caller; contains is an actual store_behavior fixture; remove plus duplicated ledger/font handles are used only by the font-GC self-test. ResourceRecord.resource_type is LIVE at upload.rs:241 in inline dedup type-admission, so retain the field and its constructor parameter. Only ResourceRecord width/height fields have no reader. ResourceStore.font_bytes has no current caller. FontBytesStore try_insert remains a live upload writer; its inspection/legacy convenience methods have fixture-only callers.",
+    "owned_files": [
+      "crates/tze_hud_resource/src/upload.rs",
+      "crates/tze_hud_resource/src/dedup.rs",
+      "crates/tze_hud_resource/src/font_bytes_store.rs",
+      "crates/tze_hud_resource/src/lib.rs"
+    ],
+    "nearest_existing_gates": [
+      "agent_texture_budget_rejects_whole_upload_and_stores_nothing",
+      "runtime_wide_texture_cap_is_shared_across_agents",
+      "resource_count_cap_rejects_the_extra_resource",
+      "per_resource_size_cap_rejects_chunked_upload_at_start",
+      "upload_slot_cap_is_per_agent_and_freed_by_abort",
+      "chunked_upload_rejected_at_complete_frees_its_slot_and_stores_nothing",
+      "rejections_carry_stable_wire_code_and_actionable_detail",
+      "chunk_protocol_errors_have_stable_codes",
+      "mandatory_decoded_resource_debits_shared_resident_ledger_atomically",
+      "font_source_admission_uses_font_class_and_is_atomic"
+    ],
+    "proposed_test_delta": "+0 ~0 -2",
+    "description": "Outcome: Finish resource dedup/inspection narrowing and delete construction-only fields. Fresh narrowed resource scan reports three remaining groups. InflightUpload.upload_id/started_at are assigned only and suppressed. DedupIndex.is_empty has no caller; contains is an actual store_behavior fixture; remove plus duplicated ledger/font handles are used only by the font-GC self-test. ResourceRecord.resource_type is LIVE at upload.rs:241 in inline dedup type-admission, so retain the field and its constructor parameter. Only ResourceRecord width/height fields have no reader. ResourceStore.font_bytes has no current caller. FontBytesStore try_insert remains a live upload writer; its inspection/legacy convenience methods have fixture-only callers. Maintenance authority: docs/scope.md:37,62-65; docs/vision.md:85-99,107; docs/invariants.md:132-149. Non-goals: Preserve all 72 named invariant definitions and the full protected T7 file/import list in audit-context.json. No auth/allow/trust/schema/persistence/policy expansion; no new mirror/source-scan/test species.",
+    "design": "Delete the two construction-only upload fields and their initializers, unused DedupIndex.is_empty, uncalled ResourceStore.font_bytes getter and unread Record dimensions. Retain ResourceRecord.resource_type, ResourceRecord::new resource_type parameter and upload.rs:241 fast-path type comparison unchanged. Delete the unreachable dedup/font GC removal island and its exact two helper-only definitions font_gc_releases_the_retained_source_copy_and_ledger_charge/remove_evicts_entry; simplify only now-dead duplicate handles/constructors. Narrow contains and remaining FontBytesStore inspection/convenience fixtures under the established nondefault test-support/cfg(test) convention, retaining actual atomic font admission and raw stored bytes. Preserve ResourceId/DecodedMeta type-name distinctions, complete_upload admission/hash/dedup, resident ledger, RuntimeWidgetStore persisted behavior and the real transport byte limiter. No GC replacement, font policy change or resource-count concurrency fix. Documentation impact: update only affected source comments, keep authoritative specs unchanged. Validate current app/crates/examples/tests/Windows/default consumers; workspace check and all-target clippy exactly as CI for any public/signature changes; jobs1 and repo llvmpipe recipes. No broad abstractions or policy redesign.",
+    "acceptance_criteria": [
+      "Prove each actual owner/caller/cfg/reexport before the scoped change; preserve production upload/auth/error/token/lease semantics and T7 exclusions.",
+      "Exercise the listed existing behavior gates with their complete original assertions; proposed Tests: +0 ~0 -2. No new parallel test species.",
+      "Run current named72 inventory, cargo fmt, workspace check, workspace all-target clippy and required repository gates; commit/push/review via coordinator lifecycle."
+    ],
+    "dedupe": {
+      "same_parent_repairs_closed": [
+        "hud-bstmy.2.7",
+        "hud-bstmy.2.8",
+        "hud-bstmy.2.9",
+        "hud-bstmy.2.10",
+        "hud-bstmy.2.11"
+      ],
+      "status": "Full active/closed tracker snapshot cross-checked; this concrete residual is outside the repaired subjects. Existing external owners are listed separately below."
+    },
+    "classification": "source-confirmed residual; passing existing gates do not cover its universal obligation",
+    "surface_trust_map": {
+      "owners": [
+        "crates/tze_hud_resource/src/upload.rs",
+        "crates/tze_hud_resource/src/dedup.rs",
+        "crates/tze_hud_resource/src/font_bytes_store.rs",
+        "crates/tze_hud_resource/src/lib.rs"
+      ],
+      "callers": "All tracked app/crates/examples/tests/benches and Windows cfg paths; distinguish declaration, producer and reader; inventory and surface-matrix are evidence.",
+      "protected": "Preserve all 72 named invariant definitions and the full protected T7 file/import list in audit-context.json. No auth/allow/trust/schema/persistence/policy expansion; no new mirror/source-scan/test species."
+    },
+    "behavior_matrix": [
+      "Normal/corrupt/hash/size/type/budget upload: all eight retained store_behavior results unchanged.",
+      "Atomic font admission and rejected charge rollback retained; remove only two GC-helper definitions.",
+      "Repeated/dedup upload and resident ledger charges unchanged; no count-concurrency redesign.",
+      "Default app, test-support fixtures and similarly named scene/proto metadata remain build-clean."
+    ],
+    "behavior_verification": "Use the nearest named existing scenarios at real handler/store/time seams; keep all original assertions, and run current named72/default/workspace/all-target/full repository gates. Source audit is evidence, not a new test species.",
+    "governing_spec": "docs/scope.md:37,62-65; docs/vision.md:85-99,107"
+  },
+  {
+    "key": "P2",
+    "title": "Remove write-only protocol heartbeat timestamp and unused outbound classifier",
+    "type": "task",
+    "priority": 2,
+    "parent": "hud-bstmy.2",
+    "dedupe_key": "T8.1a-gen2:P2",
+    "source_head": "398c6f91de6e0d4883b10a41b6c63044e6192730",
+    "authority": "docs/scope.md:37,62-65; docs/vision.md:85-99,107; docs/invariants.md:132-149",
+    "observed_behavior": "StreamSession.last_heartbeat_ms has initializers and writes but no reader; the real heartbeat timeout is a separate Tokio receive timeout. classify_server_payload has no production caller; only four literal backpressure fixtures and test_degradation_notice_is_transactional call it. Grouped pub reexport keeps it invisible to the name-only advisory scan.",
+    "owned_files": [
+      "crates/tze_hud_protocol/src/session_server/stream_session.rs",
+      "crates/tze_hud_protocol/src/session_server/mod.rs",
+      "crates/tze_hud_protocol/src/session_server/handshake.rs",
+      "crates/tze_hud_protocol/src/session_server/traffic.rs",
+      "crates/tze_hud_protocol/tests/backpressure.rs",
+      "crates/tze_hud_protocol/src/session_server/tests/events.rs",
+      "crates/tze_hud_protocol/src/session_server/tests/safe_mode.rs",
+      "crates/tze_hud_protocol/src/session_server/tests/render_wake.rs"
+    ],
+    "nearest_existing_gates": [
+      "test_heartbeat_echo",
+      "transactional_command_input_does_not_lag_under_receiver_backpressure",
+      "test_degradation_notice_broadcast_to_active_session"
+    ],
+    "proposed_test_delta": "+0 ~2 -5 (core helper-only removal +0 ~0 -5; two mechanical fixture literal edits)",
+    "description": "Outcome: Remove write-only protocol heartbeat timestamp and unused outbound classifier. StreamSession.last_heartbeat_ms has initializers and writes but no reader; the real heartbeat timeout is a separate Tokio receive timeout. classify_server_payload has no production caller; only four literal backpressure fixtures and test_degradation_notice_is_transactional call it. Grouped pub reexport keeps it invisible to the name-only advisory scan. Maintenance authority: docs/scope.md:37,62-65; docs/vision.md:85-99,107; docs/invariants.md:132-149. Non-goals: Preserve all 72 named invariant definitions and the full protected T7 file/import list in audit-context.json. No auth/allow/trust/schema/persistence/policy expansion; no new mirror/source-scan/test species.",
+    "design": "Delete the unused field/writes/fixture initializers and the outbound classifier/reexport with its exact five helper-only classification tests. Preserve TrafficClass and classify_inbound_batch where the existing freeze queue actually references them; do not decide freeze activation/removal owned by hud-bstmy.5.6. Preserve heartbeat echoes, actual timeout/order/sends, degradation delivery and all real backpressure/event gates. Update fixture struct literals in safe_mode.rs/render_wake.rs without creating tests; preserve real T7 MutationTrafficClass as a distinct runtime owner. Documentation impact: update only affected source comments, keep authoritative specs unchanged. Validate current app/crates/examples/tests/Windows/default consumers; workspace check and all-target clippy exactly as CI for any public/signature changes; jobs1 and repo llvmpipe recipes. No broad abstractions or policy redesign.",
+    "acceptance_criteria": [
+      "Prove each actual owner/caller/cfg/reexport before the scoped change; preserve production upload/auth/error/token/lease semantics and T7 exclusions.",
+      "Exercise the listed existing behavior gates with their complete original assertions; proposed Tests: +0 ~2 -5 (core helper-only removal +0 ~0 -5; two mechanical fixture literal edits). No new parallel test species.",
+      "Run current named72 inventory, cargo fmt, workspace check, workspace all-target clippy and required repository gates; commit/push/review via coordinator lifecycle."
+    ],
+    "dedupe": {
+      "same_parent_repairs_closed": [
+        "hud-bstmy.2.7",
+        "hud-bstmy.2.8",
+        "hud-bstmy.2.9",
+        "hud-bstmy.2.10",
+        "hud-bstmy.2.11"
+      ],
+      "status": "Full active/closed tracker snapshot cross-checked; this concrete residual is outside the repaired subjects. Existing external owners are listed separately below."
+    },
+    "classification": "source-confirmed residual; passing existing gates do not cover its universal obligation",
+    "surface_trust_map": {
+      "owners": [
+        "crates/tze_hud_protocol/src/session_server/stream_session.rs",
+        "crates/tze_hud_protocol/src/session_server/mod.rs",
+        "crates/tze_hud_protocol/src/session_server/handshake.rs",
+        "crates/tze_hud_protocol/src/session_server/traffic.rs",
+        "crates/tze_hud_protocol/tests/backpressure.rs",
+        "crates/tze_hud_protocol/src/session_server/tests/events.rs",
+        "crates/tze_hud_protocol/src/session_server/tests/safe_mode.rs",
+        "crates/tze_hud_protocol/src/session_server/tests/render_wake.rs"
+      ],
+      "callers": "All tracked app/crates/examples/tests/benches and Windows cfg paths; distinguish declaration, producer and reader; inventory and surface-matrix are evidence.",
+      "protected": "Preserve all 72 named invariant definitions and the full protected T7 file/import list in audit-context.json. No auth/allow/trust/schema/persistence/policy expansion; no new mirror/source-scan/test species."
+    },
+    "behavior_matrix": [
+      "Heartbeat echo/real receive timeout and close order unchanged after unused timestamp deletion.",
+      "Real transactional command channel under receiver backpressure and degradation broadcast unchanged.",
+      "Inbound freeze classification retained as current caller; human freeze decision remains hud-bstmy.5.6.",
+      "Replay/cache/token/default/wire/T7 converters unchanged; all affected struct literals and grouped exports resolved."
+    ],
+    "behavior_verification": "Use the nearest named existing scenarios at real handler/store/time seams; keep all original assertions, and run current named72/default/workspace/all-target/full repository gates. Source audit is evidence, not a new test species.",
+    "governing_spec": "docs/scope.md:37,62-65; docs/vision.md:85-99,107",
+    "mechanical_fixture_delta": {
+      "modified_definitions": [
+        "test_fifo_preserved_when_mutation_arrives_during_drain_window",
+        "test_freeze_retransmit_deduped_applied_exactly_once"
+      ],
+      "reason": "Remove last_heartbeat_ms from their StreamSession literals; keep every behavioral assertion. direct_handler_test_session is a shared helper, not a test definition."
+    }
+  },
+  {
+    "key": "E2",
+    "title": "Give live request/resource rejections category-specific next actions",
+    "type": "task",
+    "priority": 2,
+    "parent": "hud-bstmy.2",
+    "dedupe_key": "T8.1a-gen2:E2",
+    "source_head": "398c6f91de6e0d4883b10a41b6c63044e6192730",
+    "authority": "docs/scope.md:37,62-65; docs/vision.md:85-99,107; docs/invariants.md:132-149",
+    "observed_behavior": "All SessionError/AuthRejection hints are now nonempty. Live RequestResult producers still use descriptions without a next action: malformed lease bytes at mutations.rs:657, generic conversion/admission/cache error messages, root-node missing data and dynamic ValidationError display text at verbs.rs:282,602,630,715,783. Widget-not-found and unknown-param fixtures assert only codes. mod.rs:1208 emits the same upload-flow hint even for capability/budget/decode/hash failures; expected_flow alone does not describe those recovery actions. Complete producer classifications are in rejection-path-catalog.json.",
+    "owned_files": [
+      "crates/tze_hud_protocol/src/session_server/mutations.rs",
+      "crates/tze_hud_protocol/src/session_server/verbs.rs",
+      "crates/tze_hud_protocol/src/session_server/mod.rs",
+      "crates/tze_hud_protocol/src/session_server/tests"
+    ],
+    "nearest_existing_gates": [
+      "test_mutation_result_echoes_client_batch_id",
+      "publish_to_unknown_zone_names_the_zone",
+      "test_widget_publish_not_found",
+      "test_widget_publish_unknown_parameter",
+      "test_resource_upload_start_requires_upload_resource_capability",
+      "test_resource_upload_chunk_error_aborts_inflight_tracking"
+    ],
+    "proposed_test_delta": "+0 ~6 -0",
+    "description": "Outcome: Give live request/resource rejections category-specific next actions. All SessionError/AuthRejection hints are now nonempty. Live RequestResult producers still use descriptions without a next action: malformed lease bytes at mutations.rs:657, generic conversion/admission/cache error messages, root-node missing data and dynamic ValidationError display text at verbs.rs:282,602,630,715,783. Widget-not-found and unknown-param fixtures assert only codes. mod.rs:1208 emits the same upload-flow hint even for capability/budget/decode/hash failures; expected_flow alone does not describe those recovery actions. Complete producer classifications are in rejection-path-catalog.json. Maintenance authority: docs/scope.md:37,62-65; docs/vision.md:85-99,107; docs/invariants.md:132-149. Non-goals: Preserve all 72 named invariant definitions and the full protected T7 file/import list in audit-context.json. No auth/allow/trust/schema/persistence/policy expansion; no new mirror/source-scan/test species.",
+    "design": "Complete the actual handwritten rejection catalog, following dynamic validation/cached-result/resource-error producers. Add deterministic next-call/retry/repair guidance only inside existing protobuf hint fields (including the existing opaque ResourceErrorResponse.hint JSON); no proto/wire/schema expansion. Preserve exact current code fields, message fields and all acceptance/cache/replay/token/budget/trust/close/send order; description-only text currently occupying RequestResult.hint may be augmented, not silently relabeled as a message-field change. Expose no credential values. Extend the six nearest existing tests through actual outbound channels, including malformed lease correlation and replay guidance. The five T7 converters remain excluded; inactive freeze-policy decisions stay with hud-bstmy.5.6. This is affordance completion beyond E's seven AuthRejection/SessionError fixes, not their reopening. Documentation impact: update only affected source comments, keep authoritative specs unchanged. Validate current app/crates/examples/tests/Windows/default consumers; workspace check and all-target clippy exactly as CI for any public/signature changes; jobs1 and repo llvmpipe recipes. No broad abstractions or policy redesign.",
+    "acceptance_criteria": [
+      "Prove each actual owner/caller/cfg/reexport before the scoped change; preserve production upload/auth/error/token/lease semantics and T7 exclusions.",
+      "Exercise the listed existing behavior gates with their complete original assertions; proposed Tests: +0 ~6 -0. No new parallel test species.",
+      "Run current named72 inventory, cargo fmt, workspace check, workspace all-target clippy and required repository gates; commit/push/review via coordinator lifecycle."
+    ],
+    "dedupe": {
+      "same_parent_repairs_closed": [
+        "hud-bstmy.2.7",
+        "hud-bstmy.2.8",
+        "hud-bstmy.2.9",
+        "hud-bstmy.2.10",
+        "hud-bstmy.2.11"
+      ],
+      "status": "Full active/closed tracker snapshot cross-checked; this concrete residual is outside the repaired subjects. Existing external owners are listed separately below."
+    },
+    "classification": "source-confirmed residual; passing existing gates do not cover its universal obligation",
+    "surface_trust_map": {
+      "owners": [
+        "crates/tze_hud_protocol/src/session_server/mutations.rs",
+        "crates/tze_hud_protocol/src/session_server/verbs.rs",
+        "crates/tze_hud_protocol/src/session_server/mod.rs",
+        "crates/tze_hud_protocol/src/session_server/tests"
+      ],
+      "callers": "All tracked app/crates/examples/tests/benches and Windows cfg paths; distinguish declaration, producer and reader; inventory and surface-matrix are evidence.",
+      "protected": "Preserve all 72 named invariant definitions and the full protected T7 file/import list in audit-context.json. No auth/allow/trust/schema/persistence/policy expansion; no new mirror/source-scan/test species."
+    },
+    "behavior_matrix": [
+      "Malformed lease and dynamic widget/zone validation: same code/message/correlation plus deterministic next action.",
+      "Capability/hash/decode/resource-budget failures: category-specific repair/retry affordance, same acceptance and sends.",
+      "Cached rejection replay retains identical guidance and no second mutation/upload.",
+      "No paired identity, credential, token, host path or permission material in guidance."
+    ],
+    "behavior_verification": "Use the nearest named existing scenarios at real handler/store/time seams; keep all original assertions, and run current named72/default/workspace/all-target/full repository gates. Source audit is evidence, not a new test species.",
+    "governing_spec": "docs/invariants.md:132-136"
+  },
+  {
+    "key": "T2",
+    "title": "Finish protocol deadline injection and observe remaining cleanup tests",
+    "type": "task",
+    "priority": 2,
+    "parent": "hud-bstmy.2",
+    "dedupe_key": "T8.1a-gen2:T2",
+    "source_head": "398c6f91de6e0d4883b10a41b6c63044e6192730",
+    "authority": "docs/scope.md:37,62-65; docs/vision.md:85-99,107; docs/invariants.md:132-149",
+    "observed_behavior": "validate_timing_hints reads host SystemTime internally and too-future test uses a1-second jitter margin. DedupWindow samples Instant internally for its60-second expiry; its two expiry tests instead set TTL0. Five resume fixtures rely on100/150ms cleanup sleeps. test_graceful_disconnect_session_close marks timeout Err(_) as successful stream termination, although no None was observed.",
+    "owned_files": [
+      "crates/tze_hud_protocol/src/dedup.rs",
+      "crates/tze_hud_protocol/src/session_server/mod.rs",
+      "crates/tze_hud_protocol/src/session_server/mutations.rs",
+      "crates/tze_hud_protocol/src/session_server/handshake.rs",
+      "crates/tze_hud_protocol/src/session_server/tests/timing.rs",
+      "crates/tze_hud_protocol/src/session_server/tests/resume.rs",
+      "crates/tze_hud_protocol/src/session_server/tests/session_handshake.rs"
+    ],
+    "nearest_existing_gates": [
+      "test_timing_hints_too_old",
+      "test_timing_hints_too_future",
+      "test_timing_hints_expiry_before_present",
+      "test_timing_hints_valid_future",
+      "test_timing_hints_zero_bypasses_validation",
+      "test_ttl_expiry",
+      "test_re_insert_after_expiry_treated_as_new",
+      "test_resume_with_token",
+      "test_reconnect_within_grace_accepted",
+      "test_resume_token_single_use",
+      "test_resume_auth_required",
+      "test_resume_result_carries_subscription_state",
+      "test_graceful_disconnect_session_close"
+    ],
+    "proposed_test_delta": "+0 ~13 -0",
+    "description": "Outcome: Finish protocol deadline injection and observe remaining cleanup tests. validate_timing_hints reads host SystemTime internally and too-future test uses a1-second jitter margin. DedupWindow samples Instant internally for its60-second expiry; its two expiry tests instead set TTL0. Five resume fixtures rely on100/150ms cleanup sleeps. test_graceful_disconnect_session_close marks timeout Err(_) as successful stream termination, although no None was observed. Maintenance authority: docs/scope.md:37,62-65; docs/vision.md:85-99,107; docs/invariants.md:132-149. Non-goals: Preserve all 72 named invariant definitions and the full protected T7 file/import list in audit-context.json. No auth/allow/trust/schema/persistence/policy expansion; no new mirror/source-scan/test species.",
+    "design": "Use the existing injectable scene wall/monotonic time or narrowly explicit-now operations for scheduling validation and replay expiry, retaining SystemClock default behavior, horizon/TTL/FIFO/capacity/code/cache semantics. Drive positive boundary cases with TestClock/explicit now instead of TTL0 or jitter margins, and update all actual lookup/insert/handshake callers. Reuse the existing test-only SessionRegistry completion witness registered before real transport drop for the five retained resume fixtures. Graceful close must distinguish actual stream end from watchdog failure; never count timeout as completion, and test the existing seam counterfactually without a parallel source guard. Keep bounded watchdogs, hold no locks across await, preserve T's three already repaired named invariants and concurrent observer isolation. No new production clock/event architecture, auth posture, lease/grace state machine, or operational transport-timeout policy. Documentation impact: update only affected source comments, keep authoritative specs unchanged. Validate current app/crates/examples/tests/Windows/default consumers; workspace check and all-target clippy exactly as CI for any public/signature changes; jobs1 and repo llvmpipe recipes. No broad abstractions or policy redesign.",
+    "acceptance_criteria": [
+      "Prove each actual owner/caller/cfg/reexport before the scoped change; preserve production upload/auth/error/token/lease semantics and T7 exclusions.",
+      "Exercise the listed existing behavior gates with their complete original assertions; proposed Tests: +0 ~13 -0. No new parallel test species.",
+      "Run current named72 inventory, cargo fmt, workspace check, workspace all-target clippy and required repository gates; commit/push/review via coordinator lifecycle."
+    ],
+    "dedupe": {
+      "same_parent_repairs_closed": [
+        "hud-bstmy.2.7",
+        "hud-bstmy.2.8",
+        "hud-bstmy.2.9",
+        "hud-bstmy.2.10",
+        "hud-bstmy.2.11"
+      ],
+      "status": "Full active/closed tracker snapshot cross-checked; this concrete residual is outside the repaired subjects. Existing external owners are listed separately below."
+    },
+    "classification": "source-confirmed residual; passing existing gates do not cover its universal obligation",
+    "surface_trust_map": {
+      "owners": [
+        "crates/tze_hud_protocol/src/dedup.rs",
+        "crates/tze_hud_protocol/src/session_server/mod.rs",
+        "crates/tze_hud_protocol/src/session_server/mutations.rs",
+        "crates/tze_hud_protocol/src/session_server/handshake.rs",
+        "crates/tze_hud_protocol/src/session_server/tests/timing.rs",
+        "crates/tze_hud_protocol/src/session_server/tests/resume.rs",
+        "crates/tze_hud_protocol/src/session_server/tests/session_handshake.rs"
+      ],
+      "callers": "All tracked app/crates/examples/tests/benches and Windows cfg paths; distinguish declaration, producer and reader; inventory and surface-matrix are evidence.",
+      "protected": "Preserve all 72 named invariant definitions and the full protected T7 file/import list in audit-context.json. No auth/allow/trust/schema/persistence/policy expansion; no new mirror/source-scan/test species."
+    },
+    "behavior_matrix": [
+      "Positive before/at/after wall horizon and monotonic replay TTL boundaries; same default clock and expiry rules.",
+      "Matching/expired/wrong-agent/single-use resume and subscription restoration after observed actual cleanup.",
+      "Fast cleanup/concurrent observer registration/repeated close: session-ID witness isolation, no lock held across await.",
+      "Actual stream None passes; watchdog timeout fails; original three T invariants and operational receive timeouts unchanged."
+    ],
+    "behavior_verification": "Use the nearest named existing scenarios at real handler/store/time seams; keep all original assertions, and run current named72/default/workspace/all-target/full repository gates. Source audit is evidence, not a new test species.",
+    "governing_spec": "docs/invariants.md:142-149"
+  },
+  {
+    "title": "Terminal generation3 reconciliation of T8.1a residual repairs",
+    "type": "task",
+    "priority": 2,
+    "parent": "hud-bstmy.2",
+    "generation": 3,
+    "materialization_required": true,
+    "blocking_gap_keys": [
+      "R2",
+      "P2",
+      "E2",
+      "T2"
+    ],
+    "depends_on": "Coordinator must replace gap keys with actual new candidate IDs and require this GEN2 evidence PR merged; never depend on .2.6 or .2.12 closure.",
+    "scope": "One terminal same-parent reconciliation, complete23 outcomes/current72/T7/current scanners and real behavior after all concrete residual repairs merge. Explicitly resolve the separately unexecuted R3 upload-isolation candidate through the existing scenario before a universal clean result; do not silently promote source traces to executed defects. Generation4 is forbidden; no second shaping or parallel subsystem recon.",
+    "proposed_test_delta": "+0 ~0 -0",
+    "dedupe_key": "T8.1a-terminal-gen3",
+    "description": "Outcome: one terminal current-main T8.1a reconciliation after concrete R2/P2/E2/T2 repairs and this GEN2 evidence PR reach main. Reconcile all23 current requirements/instruments, every current named invariant and protected T7 consumer. Resolve the explicitly unexecuted upload cleanup/count/same-agent-cap proof limits before a universal clean claim. Non-goals: no generation4, no parallel subsystem reconciliation/second shaping, code/test/spec/trust/policy redesign, new test species or automatic original.2.6 closure.",
+    "design": "Maintenance authority is current docs/scope.md T8/Working rules, docs/vision.md and docs/invariants.md. Surface/trust map remains the live AgentDirectory/Init/Resume/capability/proto-to-scene/lease/budget/resource/runtime chain across actual app/crates/examples/tests/Windows/default callers, plus protectedT7 paths. Confirm all concrete candidate IDs and their actual merged commits, plus this evidence PR MERGED/reachable; never depend on .2.6/.2.12 closure or a self edge. Re-enumerate owners/readers/cfg/reexports and every rejection emitter; re-run the exact inventories/narrowed scans and existing behavior/default/workspace/all-target/full repository gates at a new recorded main source SHA. Preserve code/message/close/cache/idempotence, grace/time authority, serialization/default and physical versus logical budget contracts. Classify source-only risks honestly and reconcile already-owned8.3/4.5/5.6/369u8 outcomes rather than duplicate them. Docs impact: durable evidence-only report under a generation3 directory, no production/spec amendment. Rollback is removal of report-only evidence.",
+    "acceptance_criteria": [
+      "Coordinator replaces R2/P2/E2/T2 keys with real materialized IDs and requires their reviewed outcomes plus GEN2 evidence PR actually MERGED/reachable on audited main; no invented/self/cyclic dependency.",
+      "Produce complete23-group file:line checklist, current full named-invariant definitions/executions and T7/current default/caller matrix; retain scanner/clock/timeout/wire-category limitations and every skip/failure/raw command source SHA.",
+      "Resolve R3 through the existing two-session upload scenarios before claiming cleanup isolation; same-agent admission/count interleavings need actual authority/behavior evidence, not pass counts. Reconcile separately owned input/freeze/history/layer-0 decisions without reopening or inventing production callers.",
+      "Run meaningful current existing seam gates and one required normal full sweep under allocated warmed target/jobs1/protoc/actual required llvmpipe. No code/test changes or new mirror scenario species in the reconciliation; Tests:+0~0-0.",
+      "Commit/push an evidence PR, return real follow-up/blocker arrays, and let coordinator confirm main merge and actual clean outcomes. Remaining gaps keep outcome partial/blocked with concrete ownership; generation4 is forbidden."
+    ],
+    "existing_owner_reconciliation": [
+      "hud-bstmy.8.3",
+      "hud-bstmy.4.5",
+      "hud-bstmy.5.6",
+      "hud-369u8"
+    ],
+    "verification_prerequisites": [
+      "R3 unexecuted owning-session upload cleanup candidate",
+      "resource-count interleaving proof limit",
+      "same-agent aggregate-cap contract/coverage limit"
+    ]
+  }
+]

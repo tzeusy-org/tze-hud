@@ -1,0 +1,24 @@
+{
+  "label": "dead-code-instrument-unit",
+  "command": [
+    "python3",
+    "-m",
+    "unittest",
+    "scripts/tests/test_dead_code.py",
+    "-v"
+  ],
+  "source_head": "398c6f91de6e0d4883b10a41b6c63044e6192730",
+  "head_after": "398c6f91de6e0d4883b10a41b6c63044e6192730",
+  "exit_code": 0,
+  "elapsed_seconds": 0.06945105099293869,
+  "log_sha256": "fe1e0d8aa4c870ef22308fc2e270ee20cf518dd5a22222548b0dd1c0c1a11de4",
+  "environment": {
+    "CARGO_BUILD_JOBS": null,
+    "CARGO_TARGET_DIR": null,
+    "PROTOC": null,
+    "VK_ICD_FILENAMES": null,
+    "HEADLESS_FORCE_SOFTWARE": null,
+    "TZE_HUD_REQUIRE_GPU": null,
+    "TMPDIR": null
+  }
+}

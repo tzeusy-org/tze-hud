@@ -1,0 +1,1001 @@
+   Compiling proptest v1.11.0
+   Compiling tze_hud_scene v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.2.12/crates/tze_hud_scene)
+   Compiling prost-derive v0.13.5
+   Compiling prost v0.13.5
+   Compiling prost-types v0.13.5
+   Compiling criterion v0.5.1
+   Compiling prost-build v0.13.5
+   Compiling tze_hud_resource v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.2.12/crates/tze_hud_resource)
+   Compiling tonic-build v0.13.1
+   Compiling axum v0.8.8
+   Compiling toml_edit v0.22.27
+   Compiling tze_hud_protocol v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.2.12/crates/tze_hud_protocol)
+   Compiling tonic v0.13.1
+   Compiling toml v0.8.23
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 30s
+     Running unittests src/lib.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/tze_hud_protocol-35c3cbd967cb77e4)
+
+running 205 tests
+test auth::tests::test_empty_credential_fails ... ok
+test auth::tests::test_local_socket_credential_accepted_loopback_127_0_0_2 ... ok
+test auth::tests::test_local_socket_credential_accepted_loopback_v4 ... ok
+test auth::tests::test_local_socket_credential_accepted_loopback_v6 ... ok
+test auth::tests::test_local_socket_credential_rejected_ipv4_mapped_loopback ... ok
+test auth::tests::test_local_socket_credential_rejected_unknown_peer ... ok
+test auth::tests::test_psk_credential_failure ... ok
+test auth::tests::test_local_socket_credential_rejected_tailnet_peer ... ok
+test auth::tests::test_psk_credential_success ... ok
+test auth::tests::test_version_negotiation_exact_match ... ok
+test auth::tests::test_version_negotiation_unset_treated_as_v1 ... ok
+test auth::tests::test_version_negotiation_success ... ok
+test auth::tests::test_version_negotiation_no_overlap ... ok
+test auth::tests::test_local_socket_credential_rejected_lan_peer ... ok
+test auth::tests::test_version_negotiation_agent_below_runtime ... ok
+test convert::tests::hit_region_accepts_composer_input_round_trips_scene_to_proto ... ok
+test convert::tests::hit_region_proto_accepts_composer_input_defaults_false ... ok
+test convert::tests::hit_region_proto_to_scene_carries_accepts_composer_input ... ok
+test convert::tests::hit_region_update_node_content_path_carries_accepts_composer_input ... ok
+test convert::tests::input_mode_capture_round_trip ... ok
+test convert::tests::input_mode_local_only_round_trip ... ok
+test convert::tests::input_mode_passthrough_round_trip ... ok
+test convert::tests::input_mode_unspecified_maps_to_capture ... ok
+test convert::tests::empty_children_flat_conversion_matches_proto_node_to_scene ... ok
+test convert::tests::nested_children_flatten_root_first_with_linked_ids ... ok
+test convert::tests::color_runs_round_trip_proto_scene_proto ... ok
+test convert::tests::node_layout_round_trips_proto_scene_proto ... ok
+test convert::tests::portal_state_patch_unspecified_means_unchanged ... ok
+test convert::tests::portal_surface_conversion_rejects_unspecified_part_kind ... ok
+test convert::tests::portal_surface_conversion_rejects_bad_node_length ... ok
+test convert::tests::resource_id_proto_bytes_are_raw_not_hex ... ok
+test convert::tests::resource_id_proto_rejects_wrong_length ... ok
+test convert::tests::portal_surface_scene_proto_round_trip_preserves_all_fields ... ok
+test convert::tests::resource_id_proto_round_trip ... ok
+test convert::tests::scene_id_null_proto_round_trip ... ok
+test convert::tests::scene_id_proto_rejects_wrong_length ... ok
+test convert::tests::proto_scene_proto_round_trip_preserves_nested_children ... ok
+test convert::tests::scene_id_proto_round_trip ... ok
+test convert::tests::test_static_image_proto_preserves_resource_id ... ok
+test convert::tests::test_static_image_proto_roundtrip_all_fit_modes ... ok
+test convert::tests::text_overflow_wire_mapping ... ok
+test convert::tests::test_static_image_proto_roundtrip_contain ... ok
+test convert::tests::widget_param_value_wire_mapping ... ok
+test dedup::tests::test_different_ids_do_not_collide ... ok
+test dedup::tests::test_re_insert_after_expiry_treated_as_new ... ok
+test dedup::tests::test_basic_insert_lookup ... ok
+test dedup::tests::test_fifo_eviction_on_capacity ... ok
+test dedup::tests::test_ttl_expiry ... ok
+test lease::tests::test_correlation_cache_overwrite_keeps_order ... ok
+test lease::tests::test_correlation_cache_hit_after_insert ... ok
+test lease::tests::test_correlation_cache_miss_on_new_sequence ... ok
+test lease::tests::test_correlation_cache_evicts_oldest_when_full ... ok
+test dedup::tests::test_created_ids_preserved ... ok
+test lease::tests::test_correlation_cache_zero_capacity_is_noop ... ok
+test session_server::degradation_notice_bus::tests::degradation_coalesces_only_the_state_stream_gate ... ok
+test session_server::lease_expiry_bus::tests::dropped_receiver_unregisters_without_waiting_for_an_expiry ... ok
+test session_server::lease_expiry_bus::tests::terminal_notice_is_durable_for_a_slow_connected_handler ... ok
+test session_server::degradation_notice_bus::tests::dropped_receiver_unregisters_only_its_own_lane_without_a_transition ... ok
+test session_server::tests::events::test_degradation_notice_is_transactional ... ok
+test session_server::degradation_notice_bus::tests::full_queue_backpressures_instead_of_dropping_notice ... ok
+test session_server::tests::events::test_reset_geometry_override_carries_correct_previous_and_new ... ok
+test session_server::tests::events::test_reset_geometry_override_clears_override_and_returns_previous ... ok
+test session_server::tests::events::test_reset_geometry_override_noop_for_unknown_element ... ok
+test session_server::tests::events::test_reset_geometry_override_noop_when_no_override ... ok
+test session_server::degradation_notice_bus::tests::subscribe_captures_current_before_future_transitions ... ok
+test session_server::tests::events::transactional_input_is_not_enqueued_for_an_unrelated_namespace ... ok
+test session_server::tests::events::transactional_command_input_does_not_lag_under_receiver_backpressure ... ok
+test session_server::tests::events::new_session_receives_existing_degradation_after_snapshot ... ok
+test session_server::tests::invariants::grpc_zone_publish_expires_at_is_swept ... ok
+test session_server::tests::invariants::grpc_zone_publish_present_at_is_held_until_due ... ok
+test session_server::tests::invariants::grpc_batch_present_at_holds_content_until_due ... ok
+test session_server::tests::invariants::grpc_batch_expires_at_sweeps_tile ... ok
+test session_server::tests::invariants::grpc_zone_publish_ttl_sets_expiry_and_is_swept ... ok
+test session_server::tests::lease::test_lease_acquire_sends_lease_response ... ok
+test session_server::tests::lease::test_lease_expiry_scenario_initial_grant ... ok
+test session_server::tests::lease::test_lease_id_is_16_byte_uuidv7 ... ok
+test session_server::tests::lease::test_lease_over_stream ... ok
+test session_server::tests::lease::test_lease_retransmit_correlation_returns_cached_response ... ok
+test session_server::tests::events::viewer_dismiss_tile_pushes_reclaimed_override ... ok
+test session_server::tests::invariants::grpc_resume_within_grace_restores_same_lease_and_tile ... ok
+test session_server::tests::invariants::grpc_grace_expiry_reclaims_orphaned_lease_and_rejects_resume ... ok
+test session_server::tests::invariants::grpc_disconnect_orphans_leases_and_badges_tiles ... ok
+test session_server::tests::allow::claim_tile_without_tiles_allow_rejected ... ok
+test session_server::tests::allow::clear_outside_allow_list_rejected ... ok
+test session_server::tests::allow::zone_publish_outside_allow_list_rejected ... ok
+test session_server::tests::allow::claim_tile_with_tiles_allow_accepted ... ok
+test session_server::tests::allow::internal_mutations_rejected_from_agents ... ok
+test session_server::tests::lease::test_mutation_rejected_with_expired_lease_id ... ok
+test session_server::tests::lifecycle_verbs::claim_tile_is_one_round_trip_with_root_and_ids ... ok
+test session_server::tests::lifecycle_verbs::claim_tile_retransmit_replays_cached_result ... ok
+test session_server::tests::events::test_degradation_notice_broadcast_to_active_session ... ok
+test session_server::tests::render_wake::successful_mutation_apply_wakes_before_capacity_one_response_send ... ok
+test session_server::tests::events::test_element_repositioned_delivered_to_scene_topology_subscriber ... ok
+test session_server::tests::events::test_frame_presented_delivered_to_telemetry_subscriber ... ok
+test session_server::tests::lifecycle_verbs::claim_tile_stacks_at_shared_anchor ... ok
+test session_server::tests::events::short_ttl_expiry_reaches_owning_connected_agent_once_after_cleanup ... ok
+test session_server::tests::lifecycle_verbs::clear_zone_publication ... ok
+test session_server::tests::lifecycle_verbs::hold_and_clear_reach_a_pending_delayed_publish ... ok
+test session_server::tests::resource_upload::uploaded_resource_notifies_after_the_parked_checkpoint ... ok
+test session_server::tests::lifecycle_verbs::hold_and_clear_tile ... ok
+test session_server::tests::resume::test_bogus_token_rejected_with_grace_expired ... ok
+test session_server::tests::lifecycle_verbs::publish_to_unknown_zone_names_the_zone ... ok
+test session_server::tests::lease::test_disconnect_with_active_leases_no_panic ... ok
+test session_server::tests::lifecycle_verbs::hold_zone_publication ... ok
+test session_server::tests::safe_mode::test_fifo_preserved_when_mutation_arrives_during_drain_window ... ok
+test session_server::tests::render_wake::rejected_zone_publish_does_not_wake_the_compositor ... ok
+test session_server::tests::safe_mode::test_freeze_retransmit_deduped_applied_exactly_once ... ok
+test session_server::tests::portal::test_recreated_portal_tile_adopts_orphaned_durable_override ... ok
+test session_server::tests::resource_upload::test_resource_upload_chunk_error_aborts_inflight_tracking ... ok
+test session_server::tests::resource_upload::test_resident_upload_then_static_image_references_uploaded_resource_id ... ok
+test session_server::tests::resource_upload::test_resource_upload_chunked_ack_then_complete ... ok
+test session_server::tests::scene_mutations::test_mutation_dedup_returns_cached_result ... ok
+test session_server::tests::scene_mutations::test_mutation_over_stream ... ok
+test session_server::tests::scene_mutations::test_mutation_result_echoes_client_batch_id ... ok
+test session_server::tests::resource_upload::test_resource_upload_chunked_concurrent_limit_rejected ... ok
+test session_server::tests::session_handshake::removed_client_request_numbers_decode_to_empty_payload ... ok
+test session_server::tests::session_handshake::test_auth_local_socket_credential_accepted ... ok
+test session_server::tests::resource_upload::test_resource_upload_chunked_zero_size_rejected ... ok
+test session_server::tests::resource_upload::test_resource_upload_chunked_success_correlates_by_request_sequence ... ok
+test session_server::tests::session_handshake::test_capability_set_covers_wildcard_grants ... ok
+test session_server::tests::session_handshake::test_auth_structured_psk_credential_accepted ... ok
+test session_server::tests::session_handshake::test_auth_structured_psk_credential_wrong_key ... ok
+test session_server::tests::session_handshake::test_handle_session_init_local_socket_non_loopback_auth_failed ... ok
+test session_server::tests::session_handshake::test_handle_session_resume_local_socket_non_loopback_auth_failed ... ok
+test session_server::tests::session_handshake::test_handshake_auth_failure ... ok
+test session_server::tests::session_handshake::test_handshake_init_established_and_snapshot ... ok
+test session_server::tests::session_handshake::test_initial_handshake_failures_carry_recovery_hints ... ok
+test session_server::tests::session_handshake::test_heartbeat_echo ... ok
+test session_server::tests::session_handshake::test_psk_with_capability_allows_input_events_subscription ... ok
+test session_server::tests::session_handshake::test_sequence_gap_exceeded ... ok
+test session_server::tests::session_handshake::test_sequence_monotonic_accepted ... ok
+test session_server::tests::session_handshake::test_session_registration_rejections_carry_recovery_hints ... ok
+test session_server::tests::session_handshake::test_sequence_regression ... ok
+test session_server::tests::session_handshake::test_version_negotiation_success ... ok
+test session_server::tests::session_handshake::test_version_negotiation_unsupported ... ok
+test session_server::tests::resource_upload::test_resource_upload_inline_and_dedup_short_circuit ... ok
+test session_server::tests::timing::test_mutation_timing_expiry_before_present_rejected ... ok
+test session_server::tests::timing::test_timing_hints_expiry_before_present ... ok
+test session_server::tests::timing::test_timing_hints_too_future ... ok
+test session_server::tests::timing::test_timing_hints_too_old ... ok
+test session_server::tests::timing::test_timing_hints_valid_future ... ok
+test session_server::tests::timing::test_timing_hints_zero_bypasses_validation ... ok
+test session_server::tests::resource_upload::test_resource_upload_start_requires_upload_resource_capability ... ok
+test session_server::tests::timing::test_mutation_timing_too_old_rejected ... ok
+test session_server::tests::safe_mode::test_freeze_queues_mutations_not_applied ... ok
+test session_server::tests::safe_mode::test_safe_mode_rejects_mutations ... ok
+test session_server::tests::safe_mode::test_safe_mode_takes_precedence_over_freeze ... ok
+test session_server::tests::scene_mutations::test_create_tile_persists_element_store_entry ... ok
+test session_server::tests::scene_mutations::test_existing_tile_last_published_update_triggers_persist ... ok
+test session_server::tests::lease::test_three_agents_lease_contention ... ok
+test session_server::tests::zones::test_zone_publish_result ... ok
+test session_server::traffic::inbound_tests::add_node_still_dominates_as_transactional ... ok
+test session_server::traffic::inbound_tests::composer_interaction_alone_is_state_stream ... ok
+test session_server::traffic::inbound_tests::interaction_enabled_streaming_republish_stays_state_stream ... ok
+test session_server::traffic::inbound_tests::lifecycle_accent_alone_is_state_stream ... ok
+test session_server::traffic::inbound_tests::lifecycle_accent_update_stays_state_stream ... ok
+test session_server::traffic::inbound_tests::set_tile_root_with_inline_children_stays_state_stream ... ok
+test session_server::traffic::inbound_tests::unread_count_alone_is_state_stream ... ok
+test session_server::traffic::inbound_tests::unread_count_update_stays_state_stream ... ok
+test session_server::verbs::tests::grpc_codes_are_in_the_shared_set ... ok
+test session_server::verbs::tests::surfaces_parse_like_mcp ... ok
+test subscriptions::tests::test_both_subscriptions_delivers_all_variants ... ok
+test subscriptions::tests::test_capture_released_is_focus_variant ... ok
+test subscriptions::tests::test_empty_batch_after_filtering_returns_none ... ok
+test subscriptions::tests::test_focus_events_filtered_when_no_focus_subscription ... ok
+test subscriptions::tests::test_focus_events_granted_with_access_input_events_capability ... ok
+test subscriptions::tests::test_input_events_denied_without_capability ... ok
+test subscriptions::tests::test_input_events_filtered_when_no_input_subscription ... ok
+test subscriptions::tests::test_input_events_granted_with_capability ... ok
+test subscriptions::tests::test_mandatory_always_active_even_if_not_requested ... ok
+test subscriptions::tests::test_no_subscription_batch_dropped ... ok
+test subscriptions::tests::test_pointer_move_is_input_variant ... ok
+test subscriptions::tests::test_scene_topology_denied_without_capability ... ok
+test subscriptions::tests::test_scene_topology_granted_with_capability ... ok
+test subscriptions::tests::test_telemetry_frames_denied_without_capability ... ok
+test subscriptions::tests::test_telemetry_frames_granted_with_read_telemetry ... ok
+test token::tests::test_consume_valid_token ... ok
+test token::tests::test_evict_expired ... ok
+test token::tests::test_orphaned_leases_preserved ... ok
+test token::tests::test_token_at_exact_expiry_is_expired ... ok
+test token::tests::test_token_expired_grace_period ... ok
+test token::tests::test_token_just_before_expiry_succeeds ... ok
+test token::tests::test_token_not_found_returns_grace_expired_code ... ok
+test token::tests::test_token_single_use ... ok
+test token::tests::test_token_wrong_agent_rejected ... ok
+test token::tests::test_wrong_agent_does_not_consume_token ... ok
+test session_server::tests::widget_publish::test_durable_widget_publish_receives_result ... ok
+test session_server::tests::widget_publish::test_durable_widget_publish_repeated_requests_are_correlated ... ok
+test session_server::tests::widget_publish::test_ephemeral_widget_no_publish_result ... ok
+test session_server::tests::widget_publish::test_widget_publish_missing_capability_rejected ... ok
+test session_server::tests::widget_publish::test_widget_publish_not_found ... ok
+test session_server::tests::widget_publish::test_widget_publish_unknown_parameter ... ok
+test session_server::tests::widget_publish::test_widget_publish_wildcard_capability_allows_publish ... ok
+test session_server::tests::zones::test_durable_zone_publish_result ... ok
+test session_server::tests::zones::test_ephemeral_zone_no_publish_result ... ok
+test session_server::tests::session_handshake::test_graceful_disconnect_session_close ... ok
+test session_server::tests::resume::test_resume_with_token ... ok
+test session_server::tests::events::test_frame_presented_not_delivered_without_telemetry_subscription ... ok
+test session_server::tests::events::test_element_repositioned_not_delivered_without_scene_topology_subscription ... ok
+test session_server::tests::resume::test_reconnect_within_grace_accepted ... ok
+test session_server::tests::resume::test_resume_auth_required ... ok
+test session_server::tests::resume::test_resume_result_carries_subscription_state ... ok
+test session_server::tests::resume::test_resume_token_single_use ... ok
+test session_server::tests::session_handshake::degradation_notice_send_failure_unregisters_session ... ok
+test session_server::tests::resource_upload::test_resource_upload_backpressure_keeps_heartbeat_responsive ... ok
+
+test result: ok. 205 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.14s
+
+     Running tests/backpressure.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/backpressure-74eb1c1ff2c19975)
+
+running 4 tests
+test state_stream_messages_are_coalesced_class ... ok
+test heartbeat_is_ephemeral_and_droppable ... ok
+test transactional_messages_never_dropped ... ok
+test transactional_not_droppable_different_from_ephemeral ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/capability_gating.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/capability_gating-7f437a449c55b96c)
+
+running 9 tests
+test local_socket_from_loopback_resolves_only_under_dev_psk ... ok
+test own_psk_cannot_claim_other_agent ... ok
+test unpaired_psk_is_rejected ... ok
+test version_negotiation_fails_when_no_intersection ... ok
+test version_negotiation_fails_when_agent_requires_newer ... ok
+test own_psk_identifies_agent_with_allow_permissions ... ok
+test version_negotiation_picks_highest_mutual_version ... ok
+test version_negotiation_succeeds_at_v1_0 ... ok
+test version_negotiation_treats_zero_as_v1_0 ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/event_delivery.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/event_delivery-db050ad080c07c34)
+
+running 3 tests
+test subscribed_agent_receives_event_intact ... ok
+test unsubscribed_agent_receives_nothing ... ok
+test event_reaches_owning_namespace_only ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.70s
+
+     Running tests/fuzz_protocol_boundary.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/fuzz_protocol_boundary-676058bf22e4cd0c)
+
+running 33 tests
+test proto_node_no_data_returns_none ... ok
+test mutation_batch_expired_lease_rejected_before_other_checks ... ok
+test mutation_batch_oversized_rejected_with_structured_error ... ok
+test mutation_batch_empty_namespace_invariant ... ok
+test mutation_batch_create_update_delete_no_leak ... ok
+test proto_node_static_image_malformed_resource_id_returns_none ... ok
+test mutation_batch_inf_bounds_rejected ... ok
+test prop_proto_resource_id_any_bytes_no_panic ... ok
+test proto_resource_id_31_bytes_returns_none ... ok
+test proto_resource_id_32_bytes_ok ... ok
+test proto_node_text_zero_font_size_defaults_to_16 ... ok
+test proto_scene_id_empty_bytes_returns_none ... ok
+test proto_rect_negative_dims_does_not_panic ... ok
+test proto_rect_nan_does_not_panic ... ok
+test proto_zone_content_none_payload_returns_none ... ok
+test proto_resource_id_33_bytes_returns_none ... ok
+test proto_rect_inf_does_not_panic ... ok
+test proto_scene_id_null_16_bytes_returns_some ... ok
+test proto_scene_id_17_bytes_returns_none ... ok
+test proto_scene_id_oversized_bytes_returns_none ... ok
+test proto_node_static_image_empty_resource_id_returns_none ... ok
+test proto_node_solid_color_no_bounds_returns_some ... ok
+test mutation_batch_nan_bounds_rejected ... ok
+test mutation_batch_nonexistent_tab_id_rejected ... ok
+test prop_proto_static_image_arbitrary_resource_id_no_panic ... ok
+test mutation_batch_nonexistent_tile_rejected ... ok
+test mutation_batch_zone_reserved_z_order_rejected ... ok
+test proto_node_static_image_valid_returns_some ... ok
+test prop_adversarial_tile_ids_no_crash ... ok
+test proto_scene_id_15_bytes_returns_none ... ok
+test prop_proto_rect_arbitrary_floats_no_panic ... ok
+test prop_proto_scene_id_any_bytes_no_panic ... ok
+test prop_opacity_arbitrary_float_no_crash ... ok
+
+test result: ok. 33 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/lease_governance.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/lease_governance-2afecab1bdb7e057)
+
+running 21 tests
+test dashboard_agent_cannot_mutate_other_namespace_tiles ... ok
+test dashboard_agent_cannot_update_input_mode_of_other_tile ... ok
+test disconnect_from_non_active_state_is_rejected ... ok
+test dashboard_agent_cannot_update_opacity_of_other_tile ... ok
+test disconnect_badges_all_owned_tiles ... ok
+test agent_cannot_create_tile_in_foreign_namespace ... ok
+test explicit_lease_release_removes_all_nodes ... ok
+test disconnect_transitions_to_orphaned_and_sets_disconnection_badge ... ok
+test explicit_lease_release_removes_tile_cleanly ... ok
+test grace_period_expiry_removes_tile_and_nodes ... ok
+test mutation_after_release_is_rejected ... ok
+test grace_period_expiry_removes_all_tile_nodes ... ok
+test reconnect_at_grace_period_boundary_is_accepted ... ok
+test orphaned_agent_is_frozen_while_other_agents_keep_working ... ok
+test reconnect_after_grace_period_fails ... ok
+test reconnect_within_grace_period_restores_active_and_clears_badge ... ok
+test resource_ref_count_drops_after_lease_expiry ... ok
+test second_agent_cannot_delete_dashboard_tile ... ok
+test second_agent_cannot_mutate_dashboard_tile ... ok
+test ttl_expires_while_orphaned_removes_tile ... ok
+test ttl_expiry_without_renewal_removes_tile ... ok
+
+test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/subscriptions.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/subscriptions-78900684005c1b6f)
+
+running 12 tests
+test both_input_and_focus_subscriptions_deliver_all_variants ... ok
+test degradation_notices_mandatory_cannot_be_removed ... ok
+test focus_subscription_only_filters_input_variants ... ok
+test all_focus_events_filtered_returns_none_for_input_only_subscriber ... ok
+test event_batch_filtering_preserves_order ... ok
+test input_and_focus_events_require_access_input_events ... ok
+test input_subscription_only_filters_focus_variants ... ok
+test no_input_subscription_batch_not_delivered ... ok
+test scene_topology_requires_read_scene_topology_capability ... ok
+test scroll_is_input_variant ... ok
+test telemetry_frames_requires_read_telemetry ... ok
+test unknown_subscription_category_is_denied ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/tze_hud_resource-f1f395c177ac5dd4)
+
+running 88 tests
+test debug::tests::resource_id_debug_contains_lowercase_hex ... ok
+test debug::tests::resource_id_hex_all_ff ... ok
+test debug::tests::resource_id_display_is_64_char_lowercase_hex ... ok
+test debug::tests::resource_id_hex_all_zeros ... ok
+test debug::tests::resource_id_hex_no_0x_prefix ... ok
+test debug::tests::resource_id_hex_is_not_base64 ... ok
+test debug::tests::to_lowercase_hex_empty_slice ... ok
+test debug::tests::resource_id_hex_no_uppercase ... ok
+test debug::tests::to_lowercase_hex_matches_resource_id_to_hex ... ok
+test debug::tests::to_lowercase_hex_single_byte ... ok
+test dedup::tests::get_returns_record ... ok
+test dedup::tests::dedup_index_len ... ok
+test dedup::tests::insert_and_contains ... ok
+test dedup::tests::font_gc_releases_the_retained_source_copy_and_ledger_charge ... ok
+test dedup::tests::insert_duplicate_returns_existing ... ok
+test font_bytes_store::tests::clone_shares_state ... ok
+test font_bytes_store::tests::empty_on_construction ... ok
+test font_bytes_store::tests::dedup_race_keeps_existing_bytes ... ok
+test dedup::tests::total_decoded_bytes_sums_all_records ... ok
+test font_bytes_store::tests::font_source_admission_uses_font_class_and_is_atomic ... ok
+test font_bytes_store::tests::get_returns_none_for_missing_id ... ok
+test font_bytes_store::tests::insert_and_get_roundtrip ... ok
+test font_bytes_store::tests::remove_evicts_entry ... ok
+test resident_ledger::tests::allocation_identity_cannot_debit_two_classes ... ok
+test resident_ledger::tests::classes_are_disjoint_and_cannot_borrow ... ok
+test resident_ledger::tests::physical_identity_is_single_charged_but_copies_are_separate ... ok
+test resident_ledger::tests::release_returns_capacity_atomically ... ok
+test resident_ledger::tests::replacement_reserves_before_old_frame_allocation_is_released ... ok
+test resident_ledger::tests::snapshot_counts_denials_and_only_safe_eviction_releases ... ok
+test runtime_widget_store::tests::enforces_per_agent_budget ... ok
+test runtime_widget_store::tests::corrupt_blob_not_admitted_on_reindex ... ok
+test runtime_widget_store::tests::partial_temp_files_ignored ... ok
+test types::tests::different_bytes_produce_different_resource_id ... ok
+test types::tests::identical_bytes_produce_identical_resource_id ... ok
+test types::tests::all_v1_types_are_supported ... ok
+test types::tests::image_svg_display_name ... ok
+test types::tests::resource_id_from_content_is_32_bytes ... ok
+test types::tests::resource_id_from_slice_roundtrip ... ok
+test runtime_widget_store::tests::enforces_total_budget ... ok
+test types::tests::resource_id_from_slice_wrong_length_returns_none ... ok
+test types::tests::resource_id_hex_is_64_chars ... ok
+test types::tests::wire_codes_are_stable ... ok
+test runtime_widget_store::tests::survives_restart_and_rehydrates_hash_index ... ok
+test upload::tests::upload_rate_limit_bytes_per_sec_uses_configured_value ... ok
+test validation::tests::agent_budget_unlimited_fits_any_size ... ok
+test validation::tests::agent_budget_limited_fits ... ok
+test validation::tests::budget_check_unlimited_always_passes ... ok
+test validation::tests::capability_check_denied_for_empty_caps ... ok
+test validation::tests::capability_check_pass ... ok
+test validation::tests::budget_check_agent_exceeded ... ok
+test validation::tests::decode_font_corrupt_rejected ... ok
+test validation::tests::decode_rgba8_size_exceeded ... ok
+test validation::tests::decode_rgba8_dimension_exceeds_max_rejected ... ok
+test validation::tests::decode_png_1x1_succeeds ... ok
+test validation::tests::decode_rgba8_dimension_mismatch_rejected ... ok
+test validation::tests::budget_check_runtime_exceeded ... ok
+test validation::tests::decode_rgba8_valid ... ok
+test validation::tests::decode_rgba8_zero_dimension_rejected ... ok
+test validation::tests::hash_check_mismatch ... ok
+test validation::tests::hash_check_pass ... ok
+test validation::tests::raw_size_exceeded ... ok
+test validation::tests::raw_size_pass ... ok
+test validation::tests::svg_invalid_xml_rejected ... ok
+test validation::tests::svg_large_dimensions_clamped_to_2048 ... ok
+test upload::tests::abort_all_uploads_clears_agent ... ok
+test upload::tests::out_of_order_chunk_rejected ... ok
+test upload::tests::inline_png_upload_succeeds ... ok
+test upload::tests::oversized_chunk_rejected ... ok
+test validation::tests::decode_png_corrupt_rejected ... ok
+test validation::tests::svg_non_svg_root_rejected ... ok
+test validation::tests::svg_valid_minimal_accepted ... ok
+test validation::tests::svg_with_xml_declaration_accepted ... ok
+test validation::tests::svg_viewbox_takes_priority_over_width_height ... ok
+test upload::tests::chunked_upload_hash_mismatch ... ok
+test validation::tests::svg_with_viewbox_budget_estimated_correctly ... ok
+test validation::tests::type_check_png_accepted ... ok
+test upload::tests::too_many_concurrent_uploads ... ok
+test validation::tests::svg_image_svg_is_v1_supported ... ok
+test validation::tests::svg_with_width_and_height_attrs ... ok
+test validation::tests::decode_jpeg_corrupt_rejected ... ok
+test upload::tests::mandatory_decoded_resource_debits_shared_resident_ledger_atomically ... ok
+test upload::tests::upload_denied_without_capability ... ok
+test upload::tests::dedup_hit_returns_immediately ... ok
+test upload::tests::inline_upload_requires_no_chunks_or_complete ... ok
+test validation::tests::svg_div_root_rejected ... ok
+test upload::tests::identical_bytes_same_resource_id ... ok
+test upload::tests::abort_upload_removes_inflight ... ok
+test upload::tests::chunked_upload_success ... ok
+
+test result: ok. 88 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/store_behavior.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/store_behavior-ae1261ce4a23d8ea)
+
+running 8 tests
+test chunked_upload_rejected_at_complete_frees_its_slot_and_stores_nothing ... ok
+test rejections_carry_stable_wire_code_and_actionable_detail ... ok
+test chunk_protocol_errors_have_stable_codes ... ok
+test agent_texture_budget_rejects_whole_upload_and_stores_nothing ... ok
+test upload_slot_cap_is_per_agent_and_freed_by_abort ... ok
+test per_resource_size_cap_rejects_chunked_upload_at_start ... ok
+test resource_count_cap_rejects_the_extra_resource ... ok
+test runtime_wide_texture_cap_is_shared_across_agents ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/tze_hud_scene-61351cb076b42ea5)
+
+running 315 tests
+test clock::tests::system_clock_monotonic_does_not_decrease ... ok
+test clock::tests::test_clock_advance ... ok
+test clock::tests::clock_trait_is_observation_only ... ok
+test clock::tests::test_clock_no_overflow_on_saturating_add ... ok
+test clock::tests::test_clock_now_us_is_millis_times_1000 ... ok
+test clock::tests::test_clock_set ... ok
+test clock::tests::test_clock_starts_at_given_value ... ok
+test clock::tests::test_clock_us_monotonic_equals_wall ... ok
+test clock::tests::test_clock_us_advance_us ... ok
+test clock::tests::test_clock_us_no_overflow_on_saturating_add ... ok
+test clock::tests::test_clock_us_now_millis_delegates_correctly ... ok
+test clock::tests::test_clock_us_set_us ... ok
+test clock::tests::test_clock_us_starts_at_given_value ... ok
+test clock::tests::test_system_clock_returns_nonzero ... ok
+test config::hotkey::tests::parses_chords_and_encodes_for_win32 ... ok
+test config::hotkey::tests::rejects_malformed_chords ... ok
+test config::tests::built_in_resident_classes_exactly_partition_the_aggregate ... ok
+test config::agents::tests::dev_psk_claims_any_id_with_entry_permissions_or_unrestricted ... ok
+test config::tests::only_full_display_and_headless_are_built_in ... ok
+test config::tests::test_full_display_profile_budget_values ... ok
+test config::agents::tests::resolve_accepts_the_psk_whose_hash_is_stored_and_rejects_others ... ok
+test config::tests::test_headless_profile_budget_values ... ok
+test element_store::tests::adopt_is_a_noop_without_orphans ... ok
+test element_store::tests::adopt_falls_back_to_stable_order_for_legacy_zero_z_order ... ok
+test element_store::tests::adopt_matches_members_by_z_order_not_position ... ok
+test element_store::tests::adopt_never_steals_a_live_siblings_override ... ok
+test element_store::tests::find_id_by_type_and_namespace ... ok
+test element_store::tests::gc_ignores_zones_and_widgets_but_tracks_override_free_tiles ... ok
+test element_store::tests::adopt_rehomes_single_member_override_to_recreated_tile ... ok
+test element_store::tests::gc_preserves_orphan_within_window_and_it_is_still_adopted ... ok
+test element_store::tests::gc_preserves_override_free_orphan_reclaimed_within_window ... ok
+test element_store::tests::gc_prunes_override_orphan_past_retention_bound ... ok
+test element_store::tests::reset_geometry_override_clears_override ... ok
+test element_store::tests::set_geometry_override_updates_only_the_keyed_entry ... ok
+test error_codes::tests::codes_are_unique ... ok
+test error_codes::tests::validation_codes_are_in_the_closed_set ... ok
+test graph::limits_tests::create_and_switch_tab_with_capability ... ok
+test graph::limits_tests::create_tile_checked_with_active_lease ... ok
+test graph::limits_tests::cross_namespace_tile_access_denied ... ok
+test graph::limits_tests::bounds_outside_display_rejected ... ok
+test element_store::tests::gc_prunes_override_free_orphan_past_retention_bound ... ok
+test graph::limits_tests::node_struct_size_under_160_bytes ... ok
+test graph::limits_tests::duplicate_node_id_rejected ... ok
+test graph::limits_tests::delete_tile_removes_tile_and_nodes ... ok
+test graph::limits_tests::opacity_out_of_range_rejected ... ok
+test graph::limits_tests::tab_name_too_long_rejected ... ok
+test graph::limits_tests::tile_opacity_accepts_boundary_values ... ok
+test graph::limits_tests::tile_struct_size_under_200_bytes ... ok
+test graph::limits_tests::z_order_reserved_zone_band_rejected ... ok
+test graph::limits_tests::zero_size_bounds_rejected ... ok
+test graph::spec_scenarios::count_node_subtree_cycle_terminates ... ok
+test graph::spec_scenarios::count_node_subtree_self_loop_terminates ... ok
+test graph::spec_scenarios::hit_test_node_cycle_no_hit_outside_bounds ... ok
+test graph::spec_scenarios::hit_test_node_cycle_terminates ... ok
+test graph::limits_tests::tile_mutation_with_expired_lease_rejected ... ok
+test graph::spec_scenarios::is_node_in_subtree_cycle_terminates ... ok
+test graph::spec_scenarios::is_node_in_subtree_cycle_unreachable_node ... ok
+test graph::limits_tests::tile_unread_count_set_get_and_prune ... ok
+test graph::spec_scenarios::is_node_in_subtree_direct_child ... ok
+test graph::spec_scenarios::is_node_in_subtree_root_equals_target ... ok
+test graph::spec_scenarios::portal_resize_drain_queue_accumulates_multiple_removals ... ok
+test graph::spec_scenarios::portal_resize_drain_queue_populated_by_remove_tile ... ok
+test graph::spec_scenarios::revoked_lease_clears_only_its_publications ... ok
+test graph::spec_scenarios::tile_lease_reap_keeps_same_namespace_mcp_publications ... ok
+test graph::limits_tests::tab_limit_256_enforced ... ok
+test graph::tests::batch_clear_zone_does_not_cancel_later_pending_publish ... ok
+test graph::spec_scenarios::sum_texture_bytes_cycle_terminates ... ok
+test graph::tests::degraded_portal_surface_removed_on_lease_grace_expiry_via_orphan_path ... ok
+test graph::tests::inline_subtree_materialization::duplicate_descendant_id_rejected_atomically ... ok
+test graph::tests::inline_subtree_materialization::empty_descendants_equals_flat_set_tile_root ... ok
+test graph::tests::inline_subtree_materialization::materializes_full_subtree_atomically ... ok
+test graph::tests::inline_subtree_materialization::republish_replaces_whole_subtree ... ok
+test graph::tests::lease_is_active_false_for_unknown_and_grace_expired_lease ... ok
+test graph::tests::portal_header_band_clamps_negative_part_origin_to_tile ... ok
+test graph::tests::legacy_grip_keeps_chrome_priority_over_nodes ... ok
+test graph::tests::portal_header_band_anchors_falls_back_without_header_part ... ok
+test graph::tests::expire_lease_scoped_reaps_only_the_named_grace_expired_lease ... ok
+test graph::tests::portal_header_band_anchors_includes_single_scrollable_tile ... ok
+test graph::limits_tests::node_limit_64_per_tile_enforced ... ok
+test graph::tests::portal_header_band_anchors_keys_off_declared_header_part ... ok
+test graph::tests::header_band_anchor_is_deterministically_the_visible_frame_not_backstop ... ok
+test graph::tests::portal_header_band_anchors_targets_frame_only ... ok
+test graph::tests::removing_tile_clears_viewer_geometry_lock ... ok
+test graph::tests::header_band_drags_empty_header_but_yields_to_minimize_control ... ok
+test graph::tests::resource_freed_on_lease_expiry ... ok
+test graph::tests::header_band_survives_full_tile_click_to_focus_region ... ok
+test graph::tests::locked_tile_ignores_adapter_update_tile_bounds ... ok
+test graph::tests::portal_anchor_tile_picks_largest_area_member ... ok
+test graph::tests::portal_header_band_anchors_excludes_non_scrollable_tiles ... ok
+test graph::tests::inline_subtree_materialization::oversized_subtree_rejected_atomically ... ok
+test graph::tests::resource_kept_alive_while_second_tile_references_it_then_freed ... ok
+test graph::tests::resource_freed_when_only_referencing_tile_is_removed ... ok
+test graph::tests::header_band_drag_engages_across_full_empty_header_width ... ok
+test graph::tests::resource_refs_updated_on_set_tile_root_replacement ... ok
+test graph::tests::resource_refs_unchanged_on_update_node_content_same_resource ... ok
+test graph::tests::snapshot_carries_previously_declared_portal_surface ... ok
+test graph::tests::test_batch_notification_expiry_follows_held_flag ... ok
+test graph::tests::test_budget_tile_count_exceeds_limit ... ok
+test graph::tests::test_budget_tile_count_within_limit ... ok
+test graph::tests::snapshot_without_portal_surfaces_omits_field_and_verifies_like_old_format ... ok
+test graph::tests::test_clear_zone_per_publisher_only_affects_own_publishes ... ok
+test graph::tests::resource_refs_updated_on_update_node_content_resource_swap ... ok
+test graph::tests::test_contention_merge_by_key ... ok
+test graph::tests::take_snapshot_includes_display_area ... ok
+test graph::tests::snapshot_portal_surface_with_nulled_part_node_round_trips ... ok
+test graph::tests::test_clear_zone ... ok
+test graph::tests::test_budget_soft_limit_warning ... ok
+test graph::tests::snapshot_portal_surfaces_are_tile_keyed_for_namespace_visibility ... ok
+test graph::tests::test_clear_zone_via_mutation_batch ... ok
+test graph::tests::test_clear_zone_not_found ... ok
+test graph::tests::test_contention_replace ... ok
+test graph::tests::aggregate_budget_delta_tracks_sequential_updates_within_one_batch ... ok
+test graph::tests::test_contention_stack ... ok
+test graph::tests::test_contention_zone_max_publishers_rejected ... ok
+test graph::tests::test_contention_widget_max_publishers_rejected ... ok
+test graph::tests::test_contention_zone_stack_max_depth_zero_discards_all ... ok
+test graph::tests::test_contention_zone_vs_breakpoints_entry_point_consistency ... ok
+test graph::tests::test_create_scene_with_tab_and_tiles ... ok
+test graph::tests::test_grace_period_check ... ok
+test graph::tests::test_grace_period_disconnect_and_reconnect ... ok
+test graph::tests::test_grace_period_expiry_cleans_up ... ok
+test graph::tests::test_hit_test ... ok
+test graph::tests::test_hit_test_applies_tile_scroll_offset ... ok
+test graph::tests::test_hit_test_keeps_geometry_only_portal_composer_fixed_after_resize_and_displayed_scroll ... ok
+test graph::tests::test_hit_test_uses_displayed_scroll_offset_during_animation ... ok
+test graph::tests::test_hit_test_zone_regions_without_active_tab ... ok
+test graph::tests::test_lease_disconnect_from_active ... ok
+test graph::tests::test_lease_disconnect_invalid_from_suspended ... ok
+test graph::tests::test_lease_expiry ... ok
+test graph::tests::test_lease_expiry_returns_lease_expiry_struct ... ok
+test graph::tests::test_lease_is_expired_not_when_suspended ... ok
+test graph::tests::test_lease_reconnect_after_grace_fails ... ok
+test graph::tests::test_lease_reconnect_within_grace ... ok
+test graph::tests::test_lease_resource_usage ... ok
+test graph::tests::test_lease_resume_from_suspended ... ok
+test graph::tests::test_lease_hard_cap_rejects_65th_live_lease ... ok
+test graph::tests::test_lease_resume_invalid_from_active ... ok
+test graph::tests::test_lease_revocation_cleans_tiles ... ok
+test graph::tests::test_lease_revoke_from_any_non_terminal ... ok
+test graph::tests::test_lease_revoke_from_terminal_fails ... ok
+test graph::tests::test_lease_state_defaults_to_active ... ok
+test graph::tests::test_lease_suspend_from_active ... ok
+test graph::tests::test_lease_suspend_invalid_from_non_active ... ok
+test graph::tests::test_lifecycle_accent_checked_applies_under_active_lease ... ok
+test graph::tests::test_lifecycle_accent_checked_rejected_under_suspended_lease ... ok
+test graph::tests::test_lifecycle_accent_checked_rejected_while_orphaned_then_applies_after_grace_reconnect ... ok
+test graph::tests::test_lifecycle_accent_clear_checked_rejected_under_suspended_lease ... ok
+test graph::tests::test_non_notification_content_no_auto_dismiss ... ok
+test graph::tests::test_notification_auto_dismiss_drain_removes_after_expiry ... ok
+test graph::tests::test_notification_auto_dismiss_publisher_override ... ok
+test graph::tests::test_notification_auto_dismiss_urgency_critical ... ok
+test graph::tests::test_notification_auto_dismiss_urgency_info_low ... ok
+test graph::tests::test_notification_auto_dismiss_urgency_info_normal ... ok
+test graph::tests::test_notification_auto_dismiss_urgency_warning ... ok
+test graph::tests::test_renew_lease_fails_when_not_active ... ok
+test graph::tests::test_renew_lease_uses_clock ... ok
+test graph::tests::test_resume_all_leases ... ok
+test graph::tests::test_resume_all_only_resumes_suspended ... ok
+test graph::tests::test_resume_allows_mutations_again ... ok
+test graph::tests::test_static_image_node_all_fit_modes ... ok
+test graph::tests::test_snapshot_roundtrip ... ok
+test graph::tests::test_static_image_node_replace_with_set_tile_root ... ok
+test graph::tests::test_suspend_all_leases ... ok
+test graph::tests::test_static_image_node_creation ... ok
+test graph::tests::test_suspend_all_skips_non_active ... ok
+test graph::tests::test_static_image_node_snapshot_roundtrip ... ok
+test graph::tests::test_zone_publish_media_type_mismatch ... ok
+test graph::tests::test_zone_query_by_media_type ... ok
+test graph::tests::tile_font_scale_defaults_to_one_and_round_trips ... ok
+test graph::tests::tile_font_scale_cleared_on_tile_removal ... ok
+test graph::tests::viewer_dismiss_tile_revokes_lease_in_any_live_state ... ok
+test graph::tests::test_suspend_blocks_mutations ... ok
+test graph::tests::test_suspension_timeout_revokes ... ok
+test graph::tests::test_zone_publish_via_mutation_batch ... ok
+test graph::tests::test_tab_created_at_uses_clock ... ok
+test graph::widget_tests::clear_widget_for_publisher_removes_own_publications ... ok
+test graph::widget_tests::clear_widget_for_publisher_refreshes_current_params_from_remaining_publish ... ok
+test graph::widget_tests::clear_widget_for_publisher_widget_not_found ... ok
+test graph::widget_tests::clear_widget_via_mutation_batch ... ok
+test graph::widget_tests::clear_publications_for_lease_removes_only_that_leases_widget_pubs ... ok
+test graph::widget_tests::pending_widget_svg_queue_drains_in_fifo_order ... ok
+test graph::widget_tests::widget_contention_latest_wins_replaces_previous ... ok
+test graph::widget_tests::widget_contention_replace_retains_only_latest ... ok
+test graph::widget_tests::widget_contention_merge_by_key_replaces_same_key ... ok
+test graph::widget_tests::widget_occupancy_latest_wins_uses_most_recent ... ok
+test graph::widget_tests::widget_occupancy_replace_no_default_fallback_for_missing_keys ... ok
+test graph::tests::test_visible_tiles_sorted_by_z_order ... ok
+test graph::widget_tests::widget_contention_stack_evicts_oldest_at_max_depth ... ok
+test graph::tests::test_zone_query_by_name ... ok
+test graph::widget_tests::widget_contention_stack_max_depth_zero_discards_all ... ok
+test graph::widget_tests::widget_occupancy_latest_wins_merges_over_defaults ... ok
+test graph::widget_tests::widget_occupancy_merge_by_key_merges_all_keys_over_defaults ... ok
+test graph::widget_tests::widget_occupancy_merge_by_key_updated_key_reflects_latest_value ... ok
+test graph::widget_tests::widget_occupancy_replace_uses_most_recent_params_only ... ok
+test graph::tests::test_update_static_image_same_resource_preserves_decoded_bytes ... ok
+test graph::widget_tests::clear_widget_for_publisher_noop_when_no_publications ... ok
+test graph::widget_tests::widget_occupancy_stack_top_after_depth_cap ... ok
+test graph::widget_tests::widget_occupancy_stack_uses_top_of_stack ... ok
+test graph::widget_tests::widget_publish_enum_out_of_allowed_values_rejected ... ok
+test graph::widget_tests::widget_publish_f32_in_range_accepted_unchanged ... ok
+test graph::widget_tests::widget_publish_f32_nan_rejected ... ok
+test graph::widget_tests::widget_publish_f32_type_mismatch_rejected ... ok
+test graph::widget_tests::widget_publish_nonexistent_widget_rejected ... ok
+test graph::tests::test_update_static_image_decoded_bytes_zero_after_resource_change_is_zero ... ok
+test graph::widget_tests::widget_publish_unknown_parameter_rejected ... ok
+test graph::widget_tests::widget_publish_with_suspended_lease_is_safe_mode_active ... ok
+test graph::widget_tests::widget_registry_definition_overwrites_on_duplicate_id ... ok
+test graph::widget_tests::widget_publish_enum_in_allowed_values_accepted ... ok
+test graph::widget_tests::widget_registry_occupancy_defaults_when_no_publications ... ok
+test graph::widget_tests::widget_registry_occupancy_unknown_instance_returns_none ... ok
+test graph::widget_tests::widget_registry_publish_recorded_in_active_for_widget ... ok
+test graph::tests::test_zone_registry_snapshot ... ok
+test graph::widget_tests::widget_publish_f32_above_max_clamped ... ok
+test graph::widget_tests::clear_widget_for_publisher_only_affects_own_publications ... ok
+test graph::tests::test_ttl_paused_during_suspension ... ok
+test graph::widget_tests::widget_registry_register_and_retrieve_instance ... ok
+test graph::widget_tests::widget_registry_register_and_retrieve_definition ... ok
+test graph::tests::test_zone_register_unregister ... ok
+test graph::widget_tests::widget_registry_runtime_svg_handle_round_trip ... ok
+test graph::widget_tests::widget_ttl_drain_with_no_publications_is_noop ... ok
+test graph::widget_tests::widget_ttl_empty_entry_cleaned_up_after_expiry ... ok
+test graph::widget_tests::widget_ttl_only_expired_publication_removed_when_mixed ... ok
+test graph::widget_tests::widget_ttl_expiry_bumps_scene_version ... ok
+test graph::widget_tests::widget_ttl_publication_expires_after_deadline ... ok
+test mutation::tests::accepted_batch_records_present_ack_and_drains_once ... ok
+test graph::widget_tests::widget_registry_snapshot_includes_all_types_and_instances ... ok
+test graph::widget_tests::widget_ttl_publication_not_expired_before_deadline ... ok
+test mutation::tests::set_portal_surface_expresses_all_eight_parts ... ok
+test mutation::tests::set_portal_surface_rejects_cross_namespace ... ok
+test mutation::tests::composer_interaction_hit_region_survives_consecutive_transcript_republishes ... ok
+test mutation::tests::test_lease_check_before_budget_check ... ok
+test mutation::tests::set_tile_unread_count_mutation_updates_overlay_and_enforces_namespace ... ok
+test mutation::tests::rejected_batch_records_no_present_ack ... ok
+test mutation::tests::test_structured_error_has_required_fields ... ok
+test mutation::tests::test_mutation_batch_apply ... ok
+test mutation::tests::test_mutation_batch_rollback_on_failure ... ok
+test mutation::tests::test_sequence_numbers_monotonically_increasing ... ok
+test graph::tests::test_update_static_image_new_resource_uses_caller_decoded_bytes ... ok
+test mutation::tests::test_update_node_content_node_in_wrong_tile_rejected ... ok
+test mutation::tests::set_portal_surface_rejects_foreign_part_node ... ok
+test mutation::tests::portal_part_node_refs_pruned_on_root_republish ... ok
+test mutation::tests::set_portal_surface_rejects_negative_part_bounds ... ok
+test mutation::tests::set_tile_lifecycle_accent_sets_clears_and_cleans_up ... ok
+test mutation::tests::set_tile_composer_interaction_rejects_cross_namespace ... ok
+test mutation::tests::test_update_node_content_nonexistent_node_rejected ... ok
+test mutation::tests::test_update_node_content_text_happy_path ... ok
+test mutation::tests::test_z_order_conflict_detected ... ok
+test perf_budget::tests::test_budget_is_at_least_the_reference_budget_by_default ... ok
+test mutation::tests::set_tile_lifecycle_accent_rejects_cross_namespace ... ok
+test placement::tests::anchors_place_inside_margins ... ok
+test mutation::tests::test_update_node_content_wrong_type_rejected ... ok
+test mutation::tests::update_portal_surface_state_patches_and_coalesces ... ok
+test mutation::tests::update_portal_surface_state_requires_prior_surface ... ok
+test mutation::tests::test_batch_size_exceeded ... ok
+test placement::tests::same_anchor_claims_stack_deterministically ... ok
+test placement::tests::oversized_and_overflowing_tiles_are_clamped ... ok
+test render_wake::tests::cloned_notifiers_share_the_project_owned_callback ... ok
+test render_wake::tests::default_notifier_is_a_safe_no_op ... ok
+test mutation::tests::present_ack_preserves_application_order_across_batches ... ok
+test svg_tokens::tests::unresolved_token_returns_err ... ok
+test timing::domains::tests::mono_us_display ... ok
+test timing::domains::tests::mono_us_nonzero_is_set ... ok
+test svg_tokens::tests::bare_form_substituted ... ok
+test mutation::tests::test_update_node_content_content_size_enforced ... ok
+test timing::domains::tests::mono_us_not_set_is_zero ... ok
+test svg_tokens::tests::is_valid_token_key_basic ... ok
+test svg_tokens::tests::no_placeholders_passthrough ... ok
+test timing::domains::tests::mono_us_ordering ... ok
+test svg_tokens::tests::single_placeholder_substituted ... ok
+test timing::domains::tests::wall_us_not_set_is_zero ... ok
+test timing::domains::tests::wall_us_ordering ... ok
+test timing::domains::tests::wall_us_roundtrip_u64 ... ok
+test timing::domains::tests::zero_means_not_set_mono ... ok
+test timing::domains::tests::wall_us_display ... ok
+test timing::domains::tests::wall_us_nonzero_is_set ... ok
+test timing::domains::tests::zero_means_not_set_wall ... ok
+test timing::domains::tests::wall_us_from_u64 ... ok
+test types::tests::layer0_identity_invariants_pass ... ok
+test types::tests::portal_part_kind_text_bearing_classification ... ok
+test types::tests::portal_surface_validate_accepts_all_eight_parts ... ok
+test types::tests::portal_surface_validate_rejects_duplicate_kind ... ok
+test types::tests::portal_surface_validate_rejects_negative_extent_bounds ... ok
+test types::tests::resource_id_same_content_same_id ... ok
+test types::tests::resource_id_size_is_32_bytes ... ok
+test types::tests::geometry_override_resolution_order_is_user_then_agent_then_config_then_default ... ok
+test types::tests::resource_id_to_hex_is_64_chars ... ok
+test types::tests::scene_id_from_bytes_le_rejects_wrong_length ... ok
+test types::tests::scene_id_monotonic_small_batch ... ok
+test types::tests::scene_id_new_is_never_null ... ok
+test types::tests::scene_id_nil_aliases_null ... ok
+test types::proptests::scene_id_monotonic_10k ... ok
+test types::proptests::scene_id_bytes_le_roundtrip_arb ... ok
+test types::proptests::resource_id_bytes_roundtrip_arb ... ok
+test types::tests::portal_surface_validate_rejects_non_finite_bounds ... ok
+test types::tests::resource_id_from_hex_round_trip ... ok
+test types::tests::portal_surface_validate_rejects_oversized_identity ... ok
+test types::tests::resource_id_from_slice_round_trip ... ok
+test types::tests::rect_to_relative_geometry_policy_converts_expected_percentages ... ok
+test types::tests::scene_id_bytes_le_round_trip ... ok
+test types::tests::resource_id_different_content_different_id ... ok
+test types::tests::resource_id_from_bytes_round_trip ... ok
+test types::tests::resource_id_empty_content ... ok
+test types::tests::resource_id_from_slice_rejects_wrong_length ... ok
+test types::tests::resource_id_from_hex_rejects_human_readable_name ... ok
+test types::tests::resource_id_from_hex_rejects_short_string ... ok
+test types::tests::resource_id_from_hex_rejects_non_hex_string ... ok
+test types::tests::scene_id_null_is_all_zeros ... ok
+test types::tests::scene_id_size_is_16_bytes ... ok
+test types::tests::widget_instance_missing_id_defaults_to_null ... ok
+test types::tests::scene_id_null_round_trips_via_bytes ... ok
+test types::tests::widget_registry_resolves_user_override_before_instance_and_default ... ok
+test types::tests::zone_registry_resolves_user_override_before_config_and_default ... ok
+test graph::limits_tests::tile_limit_1024_per_tab_enforced ... ok
+test types::proptests::resource_id_distinct_inputs_distinct_ids ... ok
+test types::proptests::resource_id_deterministic ... ok
+
+test result: ok. 315 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running tests/batch_atomicity.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/batch_atomicity-4a033af48068f8ef)
+
+running 22 tests
+test layer0_partial_failure_rollback ... ok
+test spec_agent_namespace_from_session_context ... ok
+test spec_all_or_nothing_batch_rejection ... ok
+test spec_exclusive_z_order_conflict ... ok
+test spec_lease_check_before_budget_check ... ok
+test spec_passthrough_tiles_exempt_from_z_order_conflict ... ok
+test spec_batch_rejected_carries_batch_id ... ok
+test spec_batch_size_exceeded ... ok
+test spec_rejected_batch_does_not_increment_sequence ... ok
+test spec_post_mutation_cycle_detected ... ok
+test spec_structured_validation_error_on_bounds_failure ... ok
+test stage1_add_node_with_expired_lease_rejected ... ok
+test spec_sequential_batch_ordering ... ok
+test stage1_batch_lease_id_nonexistent_is_rejected ... ok
+test stage1_batch_lease_id_expired_is_rejected_before_budget ... ok
+test stage1_empty_batch_with_nonexistent_batch_lease_id_rejected ... ok
+test stage1_delete_tile_with_expired_lease_rejected ... ok
+test stage1_set_tile_root_with_expired_lease_rejected ... ok
+test stage1_update_tile_bounds_with_expired_lease_rejected ... ok
+test static_image_with_unregistered_resource_is_rejected_on_every_agent_path ... ok
+test proptest_batch_atomicity::prop_batch_atomicity_with_invalid_mutation ... ok
+test proptest_batch_atomicity::prop_all_valid_batch_succeeds ... ok
+
+test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/fuzz_scene_graph.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/fuzz_scene_graph-5b7f3ab6e77dedc5)
+
+running 9 tests
+test test_empty_tab_name_rejected ... ok
+test test_oversized_markdown_content_rejected ... ok
+test prop_zero_bounds_always_rejected ... ok
+test prop_mixed_valid_invalid_batch_all_or_nothing ... ok
+test prop_stale_ids_rejected_gracefully ... ok
+test prop_lease_grant_revoke_no_leak ... ok
+test prop_oversized_batch_rejected_cleanly ... ok
+test test_100k_deterministic_tile_mutations ... ok
+test prop_scene_graph_random_mutation_sequence ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.14s
+
+     Running tests/hit_test.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/hit_test-86eff7b2cf0507aa)
+
+running 20 tests
+test highest_z_tile_wins_in_overlap ... ok
+test hit_region_node_new_fields_accessible ... ok
+test interaction_id_forwarded_in_node_hit ... ok
+test all_tiles_passthrough_returns_passthrough ... ok
+test last_sibling_wins_in_reverse_tree_order ... ok
+test passthrough_tile_skipped_reveals_tile_below ... ok
+test passthrough_when_no_active_tab ... ok
+test node_hit_when_pointer_on_hit_region ... ok
+test overlay_passthrough_skips_passthrough_tile ... ok
+test passthrough_when_pointer_misses_all_tiles ... ok
+test hit_result_is_some_none_helpers ... ok
+test input_highlight_hit_test_on_button ... ok
+test tile_hit_when_pointer_on_tile_but_outside_node ... ok
+test update_focused_state_sets_and_clears ... ok
+test update_hover_state_clears_previous_hover ... ok
+test update_hover_state_sets_hovered_on_node_hit ... ok
+test update_pressed_state_sets_and_clears ... ok
+test widget_passthrough_skips_to_agent_tile_below ... ok
+test proptest_passthrough_skipped ... ok
+test proptest_highest_z_wins ... ok
+
+test result: ok. 20 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/proptest_invariants.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/proptest_invariants-5bbcf8fbbce27292)
+
+running 7 tests
+test checker_reports_a_dangling_active_tab ... ok
+test prop_zone_registry_invariants_hold ... ok
+test prop_namespace_isolation_preserved ... ok
+test prop_valid_scene_passes_assert_layer0_invariants ... ok
+test prop_invalid_mutation_rejected_and_scene_unchanged ... ok
+test prop_valid_scene_after_valid_mutations_passes_assert_layer0_invariants ... ok
+test prop_batch_not_rejected_as_batch_too_large ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.15s
+
+     Running tests/session_lifecycle.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/session_lifecycle-40832416d0c961a8)
+
+running 16 tests
+test test_grace_period_precision_reconnect_at_29950ms ... ok
+test test_disconnection_badge_set_on_orphan ... ok
+test test_disconnect_reclaim_multiagent_scene ... ok
+test test_full_session_lifecycle_state_transitions ... ok
+test test_reconnect_after_grace_period_expiry_clears_state ... ok
+test test_freeze_plus_safe_mode_interaction ... ok
+test test_resource_footprint_measurements ... ok
+test test_reconnect_within_grace_period_delivers_snapshot ... ok
+test test_lease_lifecycle_timeline_artifact ... ok
+test test_safe_mode_suspends_all_leases ... ok
+test test_ttl_continues_during_orphan_state ... ok
+test test_zero_resource_footprint_after_disconnect_and_expiry ... ok
+test test_safe_mode_exit_resumes_leases_and_accepts_mutations ... ok
+test test_zone_publications_cleared_on_lease_expiry ... ok
+test test_zone_publish_rejected_when_lease_orphaned ... ok
+test test_zone_publications_cleared_on_revoke_lease ... ok
+
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/snapshot.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/snapshot-5468fc688af49940)
+
+running 19 tests
+test snapshot_active_tab_none_for_empty_scene ... ok
+test snapshot_checksum_is_not_over_itself ... ok
+test snapshot_checksum_changes_when_content_mutated ... ok
+test snapshot_active_tab_propagated ... ok
+test snapshot_checksum_is_verifiable ... ok
+test snapshot_includes_zone_publications_not_effective_geometry ... ok
+test snapshot_references_resource_ids_not_blob_data ... ok
+test snapshot_determinism_simple_scene ... ok
+test snapshot_sequence_number_propagated ... ok
+test snapshot_roundtrip_empty_scene ... ok
+test snapshot_tiles_and_nodes_use_btreemap ... ok
+test snapshot_zone_instances_is_empty_in_v1 ... ok
+test snapshot_tabs_ordered_by_display_order ... ok
+test snapshot_roundtrip_simple_scene ... ok
+test snapshot_zone_conflict_deterministic ... ok
+test all_test_scenes_produce_valid_snapshots ... ok
+test proptest_suite::prop_snapshot_checksum_valid ... ok
+test proptest_suite::prop_snapshot_roundtrip ... ok
+test proptest_suite::prop_snapshot_determinism ... ok
+
+test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.26s
+
+     Running tests/zone_interaction.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/zone_interaction-237fe828042ffe78)
+
+running 15 tests
+test dismiss_notification_increments_version ... ok
+test dismiss_notification_leaves_other_publications_untouched ... ok
+test dismiss_notification_returns_false_for_unknown_zone ... ok
+test dismiss_notification_returns_false_for_wrong_pub_key ... ok
+test hit_test_returns_zone_interaction_for_action_button ... ok
+test hit_test_returns_zone_interaction_for_dismiss_button ... ok
+test dismiss_notification_removes_matching_publication ... ok
+test notification_payload_with_actions_serializes ... ok
+test hit_test_returns_passthrough_when_outside_zone_regions ... ok
+test zone_interaction_kind_clones_correctly ... ok
+test zone_hit_region_fields_round_trip ... ok
+test zone_interaction_result_has_correct_interaction_id_scheme ... ok
+test notification_action_fields_accessible ... ok
+test zone_hit_regions_are_skipped_in_serialization ... ok
+test notification_payload_serde_default_actions ... ok
+
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/zone_ontology.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/zone_ontology-602171d891814ae9)
+
+running 46 tests
+test all_five_v1_media_types_accepted_by_appropriate_zones ... ok
+test ambient_background_auto_clear_ms_is_none ... ok
+test clear_zone_for_publisher_nonexistent_zone_fails ... ok
+test clear_zone_for_publisher_only_removes_own_publications ... ok
+test content_layer_zone_z_order_must_be_ge_zone_tile_z_min ... ok
+test contention_merge_by_key_same_key_replaces ... ok
+test contention_replace_evicts_current ... ok
+test default_zone_registry_contains_all_six_v1_zones ... ok
+test contention_stack_evicts_oldest_at_max_depth ... ok
+test drain_expired_increments_version_only_when_changed ... ok
+test default_zones_have_correct_layer_attachments ... ok
+test drain_expired_leaves_no_expiry_publications ... ok
+test drain_expired_mixed_keeps_live_removes_dead ... ok
+test drain_expired_zone_publications_removes_past_due ... ok
+test exemplar_status_bar_clear_per_publisher ... ok
+test exemplar_status_bar_key_removal_empty_value ... ok
+test exemplar_status_bar_key_removal_ttl_expiry ... ok
+test exemplar_status_bar_key_update_replaces ... ok
+test exemplar_status_bar_lease_expiry_isolation ... ok
+test exemplar_status_bar_max_keys_eviction ... ok
+test exemplar_status_bar_rapid_updates_coalesce_to_latest ... ok
+test exemplar_status_bar_three_agents_coexist ... ok
+test publish_without_expiry_stores_none ... ok
+test publish_with_content_classification_stored ... ok
+test publish_with_expiry_stores_expiry_timestamp ... ok
+test zone_reject_wrong_type_rejects_mismatched_media_type ... ok
+test zone_tile_z_min_constant_is_correct ... ok
+test static_image_content_publishes_successfully ... ok
+test test_ambient_background_omitted_ttl_persists ... ok
+test test_ambient_background_ttl_expiry_then_republish ... ok
+test test_ambient_background_zero_ttl_persists ... ok
+test zone_instance_binds_type_to_tab ... ok
+test zone_media_type_mismatch_rejected ... ok
+test zone_orchestrate_then_publish_has_three_zones ... ok
+test zone_publish_subtitle_has_subtitle_zone ... ok
+test zone_publish_subtitle_layer_attachment_is_content ... ok
+test zone_reject_wrong_type_accepts_correct_media_type ... ok
+test test_ambient_background_nonzero_ttl_expires ... ok
+test zone_conflict_latest_wins_policy ... ok
+test zone_not_found_rejected ... ok
+test zone_occupancy_query_returns_correct_state ... ok
+test zone_occupancy_returns_none_for_unknown_zone ... ok
+test proptests::prop_merge_by_key_unique_keys_and_bounded ... ok
+test proptests::prop_replace_at_most_one_publication ... ok
+test proptests::prop_latest_wins_at_most_one_publication ... ok
+test proptests::prop_stack_never_exceeds_max_depth ... ok
+
+test result: ok. 46 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+
+     Running benches/hit_test.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/hit_test-718d9f2d6b163b9f)
+Gnuplot not found, using plotters backend
+Testing hit_test/50_tiles_worst_case/
+Success
+Testing hit_test/50_tiles_miss/
+Success
+Testing hit_test/50_tiles_passthrough/
+Success
+
+     Running benches/snapshot.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/snapshot-f84bf0f7df160cc9)
+Gnuplot not found, using plotters backend
+Testing snapshot/100_tiles_1000_nodes/take_snapshot
+Success
+
+Testing snapshot/empty_scene/take_snapshot
+Success
+
+Testing snapshot/max_tiles_stress/take_snapshot
+Success
+
+Testing snapshot/zone_publish_subtitle/take_snapshot
+Success
+
+Testing snapshot/50_tiles_10_widgets/take_snapshot
+Success
+

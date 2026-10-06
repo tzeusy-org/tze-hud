@@ -1,0 +1,277 @@
+{
+  "base": "6c2ce2af2f14c9bafa9694ebe850cec6fab093c3",
+  "baseline_group_count": 6,
+  "diagnostic_groups": [
+    {
+      "baseline": "dedup.rs: inc_refcount / dec_refcount",
+      "classification": "removed",
+      "evidence": "Caller scan of app/crates/examples/tests found only four refcount-only self-test definitions. Atomic field, increment/decrement/read methods and all four definitions deleted; live decoded metadata retained.",
+      "retained_symbol_references": []
+    },
+    {
+      "baseline": "runtime_widget_store.rs: put_svg / asset_count / total_bytes_used",
+      "classification": "required-test-fixture / removed",
+      "evidence": "put_svg and asset_count are private cfg(test) fixtures for survives_restart_and_rehydrates_hash_index, corrupt_blob_not_admitted_on_reindex, partial_temp_files_ignored, enforces_total_budget and enforces_per_agent_budget. total_bytes_used had no caller, including fixtures, and is deleted. contains is also cfg(test); PutOutcome is private cfg(test); internal AssetRecord stays private. open/reindex/enforce_budgets production path retained without persisted AssetSidecar changes.",
+      "existing_fixture_names": [
+        "survives_restart_and_rehydrates_hash_index",
+        "corrupt_blob_not_admitted_on_reindex",
+        "partial_temp_files_ignored",
+        "enforces_total_budget",
+        "enforces_per_agent_budget"
+      ],
+      "retained_symbol_references": [
+        {
+          "path": "crates/tze_hud_resource/src/runtime_widget_store.rs",
+          "line": 121,
+          "call": "fn put_svg("
+        },
+        {
+          "path": "crates/tze_hud_resource/src/runtime_widget_store.rs",
+          "line": 196,
+          "call": "fn asset_count(&self) -> usize {"
+        },
+        {
+          "path": "crates/tze_hud_resource/src/runtime_widget_store.rs",
+          "line": 404,
+          "call": "let id = match first.put_svg(\"agent-a\", svg).unwrap() {"
+        },
+        {
+          "path": "crates/tze_hud_resource/src/runtime_widget_store.rs",
+          "line": 409,
+          "call": "assert_eq!(first.asset_count(), 1);"
+        },
+        {
+          "path": "crates/tze_hud_resource/src/runtime_widget_store.rs",
+          "line": 414,
+          "call": "assert_eq!(second.asset_count(), 1);"
+        },
+        {
+          "path": "crates/tze_hud_resource/src/runtime_widget_store.rs",
+          "line": 415,
+          "call": "match second.put_svg(\"agent-b\", svg).unwrap() {"
+        },
+        {
+          "path": "crates/tze_hud_resource/src/runtime_widget_store.rs",
+          "line": 436,
+          "call": "let _ = first.put_svg(\"agent-a\", svg).unwrap();"
+        },
+        {
+          "path": "crates/tze_hud_resource/src/runtime_widget_store.rs",
+          "line": 447,
+          "call": "assert_eq!(second.asset_count(), 0);"
+        },
+        {
+          "path": "crates/tze_hud_resource/src/runtime_widget_store.rs",
+          "line": 463,
+          "call": "assert_eq!(store.asset_count(), 0);"
+        },
+        {
+          "path": "crates/tze_hud_resource/src/runtime_widget_store.rs",
+          "line": 474,
+          "call": "let _ = store.put_svg(\"agent-a\", a).unwrap();"
+        },
+        {
+          "path": "crates/tze_hud_resource/src/runtime_widget_store.rs",
+          "line": 475,
+          "call": "let err = store.put_svg(\"agent-a\", b).unwrap_err();"
+        },
+        {
+          "path": "crates/tze_hud_resource/src/runtime_widget_store.rs",
+          "line": 490,
+          "call": "let _ = store.put_svg(\"agent-a\", a).unwrap();"
+        },
+        {
+          "path": "crates/tze_hud_resource/src/runtime_widget_store.rs",
+          "line": 491,
+          "call": "let err = store.put_svg(\"agent-a\", b).unwrap_err();"
+        }
+      ]
+    },
+    {
+      "baseline": "runtime_widget_store.rs: write_atomic",
+      "classification": "required-test-fixture",
+      "evidence": "Private cfg(test), called only by existing put_svg fixture for persisted blob/sidecar setup. Function body unchanged.",
+      "retained_symbol_references": [
+        {
+          "path": "crates/tze_hud_resource/src/runtime_widget_store.rs",
+          "line": 158,
+          "call": "write_atomic(&blob_path, svg_bytes)?;"
+        },
+        {
+          "path": "crates/tze_hud_resource/src/runtime_widget_store.rs",
+          "line": 165,
+          "call": "if let Err(err) = write_atomic(&meta_path, &sidecar_json) {"
+        },
+        {
+          "path": "crates/tze_hud_resource/src/runtime_widget_store.rs",
+          "line": 349,
+          "call": "fn write_atomic(final_path: &Path, bytes: &[u8]) -> Result<(), RuntimeWidgetStoreError> {"
+        }
+      ]
+    },
+    {
+      "baseline": "runtime_widget_store.rs: sync_parent_dir",
+      "classification": "required-test-fixture",
+      "evidence": "Private cfg(test), called only by existing put_svg fixture. Function body unchanged.",
+      "retained_symbol_references": [
+        {
+          "path": "crates/tze_hud_resource/src/runtime_widget_store.rs",
+          "line": 168,
+          "call": "sync_parent_dir(&blob_path);"
+        },
+        {
+          "path": "crates/tze_hud_resource/src/runtime_widget_store.rs",
+          "line": 172,
+          "call": "sync_parent_dir(&blob_path);"
+        },
+        {
+          "path": "crates/tze_hud_resource/src/runtime_widget_store.rs",
+          "line": 173,
+          "call": "sync_parent_dir(&meta_path);"
+        },
+        {
+          "path": "crates/tze_hud_resource/src/runtime_widget_store.rs",
+          "line": 372,
+          "call": "fn sync_parent_dir(path: &Path) {"
+        }
+      ]
+    },
+    {
+      "baseline": "upload.rs: dedup_index / abort_upload / in_flight_count",
+      "classification": "required-test-fixture",
+      "evidence": "External tests/store_behavior.rs calls all three; src/upload.rs inline fixtures also call them. Methods gated cfg(any(test, feature=\"test-support\")); feature is enabled only by self dev-dependency, matching existing scene convention. Eight external invariant gates retained unchanged. Production disconnect still calls abort_all_uploads, unchanged.",
+      "retained_symbol_references": [
+        {
+          "path": "crates/tze_hud_resource/src/upload.rs",
+          "line": 175,
+          "call": "pub fn dedup_index(&self) -> &DedupIndex {"
+        },
+        {
+          "path": "crates/tze_hud_resource/src/upload.rs",
+          "line": 446,
+          "call": "pub async fn abort_upload(&self, agent_namespace: &str, upload_id: UploadId) {"
+        },
+        {
+          "path": "crates/tze_hud_resource/src/upload.rs",
+          "line": 461,
+          "call": "pub async fn in_flight_count(&self, agent_namespace: &str) -> usize {"
+        },
+        {
+          "path": "crates/tze_hud_resource/src/upload.rs",
+          "line": 702,
+          "call": "assert!(!store.dedup_index().contains(&ResourceId::from_bytes(hash)));"
+        },
+        {
+          "path": "crates/tze_hud_resource/src/upload.rs",
+          "line": 1022,
+          "call": "assert_eq!(store.in_flight_count(agent).await, 1);"
+        },
+        {
+          "path": "crates/tze_hud_resource/src/upload.rs",
+          "line": 1023,
+          "call": "store.abort_upload(agent, uid).await;"
+        },
+        {
+          "path": "crates/tze_hud_resource/src/upload.rs",
+          "line": 1024,
+          "call": "assert_eq!(store.in_flight_count(agent).await, 0);"
+        },
+        {
+          "path": "crates/tze_hud_resource/src/upload.rs",
+          "line": 1051,
+          "call": "assert_eq!(store.in_flight_count(agent).await, 3);"
+        },
+        {
+          "path": "crates/tze_hud_resource/src/upload.rs",
+          "line": 1053,
+          "call": "assert_eq!(store.in_flight_count(agent).await, 0);"
+        },
+        {
+          "path": "crates/tze_hud_resource/tests/store_behavior.rs",
+          "line": 77,
+          "call": ".dedup_index()"
+        },
+        {
+          "path": "crates/tze_hud_resource/tests/store_behavior.rs",
+          "line": 101,
+          "call": "assert_eq!(store.dedup_index().total_decoded_bytes(), 0);"
+        },
+        {
+          "path": "crates/tze_hud_resource/tests/store_behavior.rs",
+          "line": 125,
+          "call": "assert_eq!(store.dedup_index().total_decoded_bytes(), 256);"
+        },
+        {
+          "path": "crates/tze_hud_resource/tests/store_behavior.rs",
+          "line": 140,
+          "call": "assert_eq!(store.dedup_index().len(), 2);"
+        },
+        {
+          "path": "crates/tze_hud_resource/tests/store_behavior.rs",
+          "line": 165,
+          "call": "store.in_flight_count(\"a\").await,"
+        },
+        {
+          "path": "crates/tze_hud_resource/tests/store_behavior.rs",
+          "line": 196,
+          "call": "store.abort_upload(\"a\", UploadId::from_bytes([0; 16])).await;"
+        },
+        {
+          "path": "crates/tze_hud_resource/tests/store_behavior.rs",
+          "line": 227,
+          "call": "assert_eq!(store.in_flight_count(\"a\").await, 0);"
+        },
+        {
+          "path": "crates/tze_hud_resource/tests/store_behavior.rs",
+          "line": 276,
+          "call": "assert_eq!(store.dedup_index().len(), 0, \"no rejection stored anything\");"
+        }
+      ]
+    },
+    {
+      "baseline": "validation.rs: validate_upload",
+      "classification": "removed",
+      "evidence": "Only definition found across app/crates/examples/tests. Live ResourceStore::complete_upload admission and storage body unchanged.",
+      "retained_symbol_references": []
+    }
+  ],
+  "real_production_callers": [
+    {
+      "path": "crates/tze_hud_runtime/src/headless.rs",
+      "line": 244,
+      "call": "RuntimeWidgetStore::open(RuntimeWidgetStoreConfig {"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/windowed/mod.rs",
+      "line": 2754,
+      "call": "Some(RuntimeWidgetStore::open(RuntimeWidgetStoreConfig {"
+    },
+    {
+      "path": "crates/tze_hud_protocol/src/session_server/upload.rs",
+      "line": 262,
+      "call": "match store.handle_upload_start(request).await {"
+    },
+    {
+      "path": "crates/tze_hud_protocol/src/session_server/upload.rs",
+      "line": 365,
+      "call": ".handle_upload_chunk("
+    },
+    {
+      "path": "crates/tze_hud_protocol/src/session_server/upload.rs",
+      "line": 433,
+      "call": ".handle_upload_complete("
+    }
+  ],
+  "live_complete_upload_body_unchanged": true,
+  "persisted_sidecar_format_unchanged": true,
+  "test_delta": {
+    "added": 0,
+    "extended": 0,
+    "removed_definitions": 4,
+    "debug_harness_count_removed": 3,
+    "release_harness_count_removed": 3
+  },
+  "head": "6ff752b044ef785e66a9674408cffedab30b7173",
+  "pre_rebase_head": "94034a5cddc02dd7fc66765ba09e901eddf4dfe0",
+  "resource_patch_unchanged_after_rebase": true
+}

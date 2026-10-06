@@ -1,0 +1,5575 @@
+{
+  "source_head": "398c6f91de6e0d4883b10a41b6c63044e6192730",
+  "limits": [
+    "Raw identifier hits require defining-owner/call/reader/cfg qualification; out-of-line cfg and same-name collisions are resolved in the report. No comment or string is a caller."
+  ],
+  "symbols": {
+    "InflightUpload": [
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 64,
+        "node": "type_identifier",
+        "owner": "InflightUpload",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 88,
+        "node": "type_identifier",
+        "owner": "InflightUpload",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 102,
+        "node": "type_identifier",
+        "owner": "AgentUploads",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 308,
+        "node": "type_identifier",
+        "owner": "ResourceStore::handle_upload_start",
+        "attributes": [],
+        "source_class": "default-eligible"
+      }
+    ],
+    "upload_id": [
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/mod.rs",
+        "line": 793,
+        "node": "field_identifier",
+        "owner": "StreamSession::on_upload_event",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/mod.rs",
+        "line": 793,
+        "node": "identifier",
+        "owner": "StreamSession::on_upload_event",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/mod.rs",
+        "line": 814,
+        "node": "identifier",
+        "owner": "StreamSession::on_upload_event",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/mod.rs",
+        "line": 828,
+        "node": "identifier",
+        "owner": "StreamSession::on_upload_event",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/mod.rs",
+        "line": 1173,
+        "node": "identifier",
+        "owner": "send_resource_stored",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/mod.rs",
+        "line": 1189,
+        "node": "field_identifier",
+        "owner": "send_resource_stored",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/mod.rs",
+        "line": 1189,
+        "node": "identifier",
+        "owner": "send_resource_stored",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/mod.rs",
+        "line": 1199,
+        "node": "identifier",
+        "owner": "send_resource_error_response",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/mod.rs",
+        "line": 1223,
+        "node": "field_identifier",
+        "owner": "send_resource_error_response",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/mod.rs",
+        "line": 1223,
+        "node": "identifier",
+        "owner": "send_resource_error_response",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/tests/resource_upload.rs",
+        "line": 58,
+        "node": "identifier",
+        "owner": "test_resource_upload_backpressure_keeps_heartbeat_responsive",
+        "attributes": [
+          "#[tokio::test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/tests/resource_upload.rs",
+        "line": 59,
+        "node": "field_identifier",
+        "owner": "test_resource_upload_backpressure_keeps_heartbeat_responsive",
+        "attributes": [
+          "#[tokio::test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/tests/resource_upload.rs",
+        "line": 67,
+        "node": "field_identifier",
+        "owner": "test_resource_upload_backpressure_keeps_heartbeat_responsive",
+        "attributes": [
+          "#[tokio::test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/tests/resource_upload.rs",
+        "line": 67,
+        "node": "identifier",
+        "owner": "test_resource_upload_backpressure_keeps_heartbeat_responsive",
+        "attributes": [
+          "#[tokio::test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/tests/resource_upload.rs",
+        "line": 79,
+        "node": "field_identifier",
+        "owner": "test_resource_upload_backpressure_keeps_heartbeat_responsive",
+        "attributes": [
+          "#[tokio::test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/tests/resource_upload.rs",
+        "line": 79,
+        "node": "identifier",
+        "owner": "test_resource_upload_backpressure_keeps_heartbeat_responsive",
+        "attributes": [
+          "#[tokio::test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/tests/resource_upload.rs",
+        "line": 92,
+        "node": "field_identifier",
+        "owner": "test_resource_upload_backpressure_keeps_heartbeat_responsive",
+        "attributes": [
+          "#[tokio::test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/tests/resource_upload.rs",
+        "line": 92,
+        "node": "identifier",
+        "owner": "test_resource_upload_backpressure_keeps_heartbeat_responsive",
+        "attributes": [
+          "#[tokio::test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/tests/resource_upload.rs",
+        "line": 134,
+        "node": "identifier",
+        "owner": "test_resource_upload_backpressure_keeps_heartbeat_responsive",
+        "attributes": [
+          "#[tokio::test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/tests/resource_upload.rs",
+        "line": 134,
+        "node": "identifier",
+        "owner": "test_resource_upload_backpressure_keeps_heartbeat_responsive",
+        "attributes": [
+          "#[tokio::test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/tests/resource_upload.rs",
+        "line": 170,
+        "node": "identifier",
+        "owner": "test_resource_upload_start_requires_upload_resource_capability",
+        "attributes": [
+          "#[tokio::test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/tests/resource_upload.rs",
+        "line": 211,
+        "node": "identifier",
+        "owner": "test_resource_upload_inline_and_dedup_short_circuit",
+        "attributes": [
+          "#[tokio::test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/tests/resource_upload.rs",
+        "line": 235,
+        "node": "identifier",
+        "owner": "test_resource_upload_inline_and_dedup_short_circuit",
+        "attributes": [
+          "#[tokio::test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/tests/resource_upload.rs",
+        "line": 272,
+        "node": "identifier",
+        "owner": "test_resource_upload_chunked_ack_then_complete",
+        "attributes": [
+          "#[tokio::test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/tests/resource_upload.rs",
+        "line": 275,
+        "node": "identifier",
+        "owner": "test_resource_upload_chunked_ack_then_complete",
+        "attributes": [
+          "#[tokio::test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/tests/resource_upload.rs",
+        "line": 276,
+        "node": "field_identifier",
+        "owner": "test_resource_upload_chunked_ack_then_complete",
+        "attributes": [
+          "#[tokio::test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/tests/resource_upload.rs",
+        "line": 285,
+        "node": "field_identifier",
+        "owner": "test_resource_upload_chunked_ack_then_complete",
+        "attributes": [
+          "#[tokio::test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/tests/resource_upload.rs",
+        "line": 285,
+        "node": "identifier",
+        "owner": "test_resource_upload_chunked_ack_then_complete",
+        "attributes": [
+          "#[tokio::test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/tests/resource_upload.rs",
+        "line": 298,
+        "node": "field_identifier",
+        "owner": "test_resource_upload_chunked_ack_then_complete",
+        "attributes": [
+          "#[tokio::test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/tests/resource_upload.rs",
+        "line": 298,
+        "node": "identifier",
+        "owner": "test_resource_upload_chunked_ack_then_complete",
+        "attributes": [
+          "#[tokio::test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/tests/resource_upload.rs",
+        "line": 309,
+        "node": "identifier",
+        "owner": "test_resource_upload_chunked_ack_then_complete",
+        "attributes": [
+          "#[tokio::test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/tests/resource_upload.rs",
+        "line": 309,
+        "node": "identifier",
+        "owner": "test_resource_upload_chunked_ack_then_complete",
+        "attributes": [
+          "#[tokio::test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/tests/resource_upload.rs",
+        "line": 356,
+        "node": "identifier",
+        "owner": "test_resource_upload_chunked_concurrent_limit_rejected",
+        "attributes": [
+          "#[tokio::test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/tests/resource_upload.rs",
+        "line": 365,
+        "node": "identifier",
+        "owner": "test_resource_upload_chunked_concurrent_limit_rejected",
+        "attributes": [
+          "#[tokio::test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/tests/resource_upload.rs",
+        "line": 416,
+        "node": "field_identifier",
+        "owner": "test_resource_upload_chunked_success_correlates_by_request_sequence",
+        "attributes": [
+          "#[tokio::test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/tests/resource_upload.rs",
+        "line": 436,
+        "node": "field_identifier",
+        "owner": "test_resource_upload_chunked_success_correlates_by_request_sequence",
+        "attributes": [
+          "#[tokio::test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/tests/resource_upload.rs",
+        "line": 448,
+        "node": "field_identifier",
+        "owner": "test_resource_upload_chunked_success_correlates_by_request_sequence",
+        "attributes": [
+          "#[tokio::test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/tests/resource_upload.rs",
+        "line": 459,
+        "node": "field_identifier",
+        "owner": "test_resource_upload_chunked_success_correlates_by_request_sequence",
+        "attributes": [
+          "#[tokio::test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/tests/resource_upload.rs",
+        "line": 471,
+        "node": "field_identifier",
+        "owner": "test_resource_upload_chunked_success_correlates_by_request_sequence",
+        "attributes": [
+          "#[tokio::test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/tests/resource_upload.rs",
+        "line": 490,
+        "node": "field_identifier",
+        "owner": "test_resource_upload_chunked_success_correlates_by_request_sequence",
+        "attributes": [
+          "#[tokio::test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/tests/resource_upload.rs",
+        "line": 559,
+        "node": "identifier",
+        "owner": "test_resource_upload_chunked_zero_size_rejected",
+        "attributes": [
+          "#[tokio::test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/tests/resource_upload.rs",
+        "line": 601,
+        "node": "identifier",
+        "owner": "test_resource_upload_chunk_error_aborts_inflight_tracking",
+        "attributes": [
+          "#[tokio::test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/tests/resource_upload.rs",
+        "line": 602,
+        "node": "field_identifier",
+        "owner": "test_resource_upload_chunk_error_aborts_inflight_tracking",
+        "attributes": [
+          "#[tokio::test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/tests/resource_upload.rs",
+        "line": 610,
+        "node": "field_identifier",
+        "owner": "test_resource_upload_chunk_error_aborts_inflight_tracking",
+        "attributes": [
+          "#[tokio::test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/tests/resource_upload.rs",
+        "line": 610,
+        "node": "identifier",
+        "owner": "test_resource_upload_chunk_error_aborts_inflight_tracking",
+        "attributes": [
+          "#[tokio::test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/tests/resource_upload.rs",
+        "line": 623,
+        "node": "identifier",
+        "owner": "test_resource_upload_chunk_error_aborts_inflight_tracking",
+        "attributes": [
+          "#[tokio::test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/tests/resource_upload.rs",
+        "line": 623,
+        "node": "identifier",
+        "owner": "test_resource_upload_chunk_error_aborts_inflight_tracking",
+        "attributes": [
+          "#[tokio::test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/tests/resource_upload.rs",
+        "line": 632,
+        "node": "identifier",
+        "owner": "test_resource_upload_chunk_error_aborts_inflight_tracking",
+        "attributes": [
+          "#[tokio::test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/upload.rs",
+        "line": 112,
+        "node": "field_identifier",
+        "owner": "UploadWorkerEvent",
+        "attributes": [
+          "#[derive(Debug)]"
+        ],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/upload.rs",
+        "line": 119,
+        "node": "field_identifier",
+        "owner": "UploadWorkerEvent",
+        "attributes": [
+          "#[derive(Debug)]"
+        ],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/upload.rs",
+        "line": 123,
+        "node": "field_identifier",
+        "owner": "UploadWorkerEvent",
+        "attributes": [
+          "#[derive(Debug)]"
+        ],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/upload.rs",
+        "line": 161,
+        "node": "field_identifier",
+        "owner": "run_upload_worker",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/upload.rs",
+        "line": 183,
+        "node": "field_identifier",
+        "owner": "run_upload_worker",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/upload.rs",
+        "line": 203,
+        "node": "field_identifier",
+        "owner": "run_upload_worker",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/upload.rs",
+        "line": 227,
+        "node": "field_identifier",
+        "owner": "run_upload_worker",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/upload.rs",
+        "line": 248,
+        "node": "field_identifier",
+        "owner": "run_upload_worker",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/upload.rs",
+        "line": 272,
+        "node": "field_identifier",
+        "owner": "run_upload_worker",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/upload.rs",
+        "line": 292,
+        "node": "field_identifier",
+        "owner": "run_upload_worker",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/upload.rs",
+        "line": 304,
+        "node": "field_identifier",
+        "owner": "run_upload_worker",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/upload.rs",
+        "line": 319,
+        "node": "field_identifier",
+        "owner": "run_upload_worker",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/upload.rs",
+        "line": 324,
+        "node": "identifier",
+        "owner": "run_upload_worker",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/upload.rs",
+        "line": 329,
+        "node": "field_identifier",
+        "owner": "run_upload_worker",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/upload.rs",
+        "line": 329,
+        "node": "field_identifier",
+        "owner": "run_upload_worker",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/upload.rs",
+        "line": 348,
+        "node": "field_identifier",
+        "owner": "run_upload_worker",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/upload.rs",
+        "line": 348,
+        "node": "field_identifier",
+        "owner": "run_upload_worker",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/upload.rs",
+        "line": 377,
+        "node": "field_identifier",
+        "owner": "run_upload_worker",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/upload.rs",
+        "line": 392,
+        "node": "field_identifier",
+        "owner": "run_upload_worker",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/upload.rs",
+        "line": 397,
+        "node": "identifier",
+        "owner": "run_upload_worker",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/upload.rs",
+        "line": 402,
+        "node": "field_identifier",
+        "owner": "run_upload_worker",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/upload.rs",
+        "line": 402,
+        "node": "field_identifier",
+        "owner": "run_upload_worker",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/upload.rs",
+        "line": 421,
+        "node": "field_identifier",
+        "owner": "run_upload_worker",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/upload.rs",
+        "line": 421,
+        "node": "field_identifier",
+        "owner": "run_upload_worker",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/upload.rs",
+        "line": 454,
+        "node": "field_identifier",
+        "owner": "run_upload_worker",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/upload.rs",
+        "line": 467,
+        "node": "field_identifier",
+        "owner": "run_upload_worker",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/upload.rs",
+        "line": 496,
+        "node": "identifier",
+        "owner": "upload_id_bytes_from_slice",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/upload.rs",
+        "line": 497,
+        "node": "identifier",
+        "owner": "upload_id_bytes_from_slice",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 66,
+        "node": "field_identifier",
+        "owner": "InflightUpload",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 289,
+        "node": "identifier",
+        "owner": "ResourceStore::handle_upload_start",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 289,
+        "node": "field_identifier",
+        "owner": "ResourceStore::handle_upload_start",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 299,
+        "node": "identifier",
+        "owner": "ResourceStore::handle_upload_start",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 302,
+        "node": "identifier",
+        "owner": "ResourceStore::handle_upload_start",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 307,
+        "node": "identifier",
+        "owner": "ResourceStore::handle_upload_start",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 309,
+        "node": "identifier",
+        "owner": "ResourceStore::handle_upload_start",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 324,
+        "node": "identifier",
+        "owner": "ResourceStore::handle_upload_start",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 324,
+        "node": "identifier",
+        "owner": "ResourceStore::handle_upload_start",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 343,
+        "node": "identifier",
+        "owner": "ResourceStore::handle_upload_chunk",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 359,
+        "node": "identifier",
+        "owner": "ResourceStore::handle_upload_chunk",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 404,
+        "node": "identifier",
+        "owner": "ResourceStore::handle_upload_complete",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 415,
+        "node": "identifier",
+        "owner": "ResourceStore::handle_upload_complete",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 446,
+        "node": "identifier",
+        "owner": "ResourceStore::abort_upload",
+        "attributes": [
+          "#[cfg(any(test, feature = \"test-support\"))]"
+        ],
+        "source_class": "fixture-feature"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 449,
+        "node": "identifier",
+        "owner": "ResourceStore::abort_upload",
+        "attributes": [
+          "#[cfg(any(test, feature = \"test-support\"))]"
+        ],
+        "source_class": "fixture-feature"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 586,
+        "node": "field_identifier",
+        "owner": "UploadStartRequest",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 622,
+        "node": "identifier",
+        "owner": "tests::upload_id",
+        "attributes": [
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 652,
+        "node": "field_identifier",
+        "owner": "tests::inline_png_upload_succeeds",
+        "attributes": [
+          "#[tokio::test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 652,
+        "node": "identifier",
+        "owner": "tests::inline_png_upload_succeeds",
+        "attributes": [
+          "#[tokio::test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 688,
+        "node": "field_identifier",
+        "owner": "tests::mandatory_decoded_resource_debits_shared_resident_ledger_atomically",
+        "attributes": [
+          "#[tokio::test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 688,
+        "node": "identifier",
+        "owner": "tests::mandatory_decoded_resource_debits_shared_resident_ledger_atomically",
+        "attributes": [
+          "#[tokio::test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 717,
+        "node": "field_identifier",
+        "owner": "tests::inline_upload_requires_no_chunks_or_complete",
+        "attributes": [
+          "#[tokio::test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 717,
+        "node": "identifier",
+        "owner": "tests::inline_upload_requires_no_chunks_or_complete",
+        "attributes": [
+          "#[tokio::test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 747,
+        "node": "field_identifier",
+        "owner": "tests::dedup_hit_returns_immediately",
+        "attributes": [
+          "#[tokio::test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 747,
+        "node": "identifier",
+        "owner": "tests::dedup_hit_returns_immediately",
+        "attributes": [
+          "#[tokio::test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 767,
+        "node": "field_identifier",
+        "owner": "tests::dedup_hit_returns_immediately",
+        "attributes": [
+          "#[tokio::test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 767,
+        "node": "identifier",
+        "owner": "tests::dedup_hit_returns_immediately",
+        "attributes": [
+          "#[tokio::test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 794,
+        "node": "field_identifier",
+        "owner": "tests::identical_bytes_same_resource_id",
+        "attributes": [
+          "#[tokio::test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 794,
+        "node": "identifier",
+        "owner": "tests::identical_bytes_same_resource_id",
+        "attributes": [
+          "#[tokio::test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 816,
+        "node": "identifier",
+        "owner": "tests::chunked_upload_success",
+        "attributes": [
+          "#[tokio::test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 834,
+        "node": "field_identifier",
+        "owner": "tests::chunked_upload_success",
+        "attributes": [
+          "#[tokio::test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 873,
+        "node": "identifier",
+        "owner": "tests::chunked_upload_hash_mismatch",
+        "attributes": [
+          "#[tokio::test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 886,
+        "node": "field_identifier",
+        "owner": "tests::chunked_upload_hash_mismatch",
+        "attributes": [
+          "#[tokio::test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 929,
+        "node": "field_identifier",
+        "owner": "tests::upload_denied_without_capability",
+        "attributes": [
+          "#[tokio::test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 929,
+        "node": "identifier",
+        "owner": "tests::upload_denied_without_capability",
+        "attributes": [
+          "#[tokio::test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 961,
+        "node": "field_identifier",
+        "owner": "tests::too_many_concurrent_uploads",
+        "attributes": [
+          "#[tokio::test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 961,
+        "node": "identifier",
+        "owner": "tests::too_many_concurrent_uploads",
+        "attributes": [
+          "#[tokio::test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 982,
+        "node": "field_identifier",
+        "owner": "tests::too_many_concurrent_uploads",
+        "attributes": [
+          "#[tokio::test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 982,
+        "node": "identifier",
+        "owner": "tests::too_many_concurrent_uploads",
+        "attributes": [
+          "#[tokio::test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 1003,
+        "node": "identifier",
+        "owner": "tests::abort_upload_removes_inflight",
+        "attributes": [
+          "#[tokio::test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 1011,
+        "node": "field_identifier",
+        "owner": "tests::abort_upload_removes_inflight",
+        "attributes": [
+          "#[tokio::test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 1039,
+        "node": "field_identifier",
+        "owner": "tests::abort_all_uploads_clears_agent",
+        "attributes": [
+          "#[tokio::test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 1039,
+        "node": "identifier",
+        "owner": "tests::abort_all_uploads_clears_agent",
+        "attributes": [
+          "#[tokio::test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 1062,
+        "node": "identifier",
+        "owner": "tests::out_of_order_chunk_rejected",
+        "attributes": [
+          "#[tokio::test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 1070,
+        "node": "field_identifier",
+        "owner": "tests::out_of_order_chunk_rejected",
+        "attributes": [
+          "#[tokio::test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 1102,
+        "node": "identifier",
+        "owner": "tests::oversized_chunk_rejected",
+        "attributes": [
+          "#[tokio::test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 1110,
+        "node": "field_identifier",
+        "owner": "tests::oversized_chunk_rejected",
+        "attributes": [
+          "#[tokio::test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/tests/store_behavior.rs",
+        "line": 44,
+        "node": "field_identifier",
+        "owner": "inline_req",
+        "attributes": [],
+        "source_class": "test"
+      },
+      {
+        "path": "tests/integration/text_stream_portal_surface.rs",
+        "line": 113,
+        "node": "identifier",
+        "owner": "upload_png_icon",
+        "attributes": [],
+        "source_class": "test"
+      },
+      {
+        "path": "tests/integration/text_stream_portal_surface.rs",
+        "line": 122,
+        "node": "identifier",
+        "owner": "upload_png_icon",
+        "attributes": [],
+        "source_class": "test"
+      }
+    ],
+    "started_at": [
+      {
+        "path": "crates/tze_hud_input/src/local_feedback.rs",
+        "line": 162,
+        "node": "field_identifier",
+        "owner": "RollbackAnimation",
+        "attributes": [
+          "#[derive(Clone, Debug)]"
+        ],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_input/src/local_feedback.rs",
+        "line": 172,
+        "node": "field_identifier",
+        "owner": "RollbackAnimation::start",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_input/src/local_feedback.rs",
+        "line": 179,
+        "node": "field_identifier",
+        "owner": "RollbackAnimation::is_active",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_input/src/local_feedback.rs",
+        "line": 184,
+        "node": "field_identifier",
+        "owner": "RollbackAnimation::progress",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 81,
+        "node": "field_identifier",
+        "owner": "InflightUpload",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 316,
+        "node": "field_identifier",
+        "owner": "ResourceStore::handle_upload_start",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_runtime/src/windowed/lifecycle.rs",
+        "line": 1013,
+        "node": "identifier",
+        "owner": "WindowedQuiescentEfficiencyRunState::new",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_runtime/src/windowed/lifecycle.rs",
+        "line": 1022,
+        "node": "identifier",
+        "owner": "WindowedQuiescentEfficiencyRunState::new",
+        "attributes": [],
+        "source_class": "default-eligible"
+      }
+    ],
+    "width_px": [
+      {
+        "path": "crates/tze_hud_compositor/src/overflow.rs",
+        "line": 1755,
+        "node": "identifier",
+        "owner": "tests",
+        "attributes": [
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_compositor/src/overflow.rs",
+        "line": 1759,
+        "node": "identifier",
+        "owner": "tests",
+        "attributes": [
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_compositor/src/overflow.rs",
+        "line": 1784,
+        "node": "identifier",
+        "owner": "tests",
+        "attributes": [
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_compositor/src/overflow.rs",
+        "line": 1790,
+        "node": "identifier",
+        "owner": "tests",
+        "attributes": [
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_compositor/src/overflow.rs",
+        "line": 1796,
+        "node": "identifier",
+        "owner": "tests",
+        "attributes": [
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_compositor/src/overflow.rs",
+        "line": 1802,
+        "node": "identifier",
+        "owner": "tests",
+        "attributes": [
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_compositor/src/overflow.rs",
+        "line": 1859,
+        "node": "identifier",
+        "owner": "tests",
+        "attributes": [
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_compositor/src/overflow.rs",
+        "line": 1868,
+        "node": "identifier",
+        "owner": "tests",
+        "attributes": [
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_compositor/src/overflow.rs",
+        "line": 1869,
+        "node": "identifier",
+        "owner": "tests",
+        "attributes": [
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_compositor/src/overflow.rs",
+        "line": 1875,
+        "node": "identifier",
+        "owner": "tests",
+        "attributes": [
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_compositor/src/overflow.rs",
+        "line": 1892,
+        "node": "identifier",
+        "owner": "tests",
+        "attributes": [
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_compositor/src/overflow.rs",
+        "line": 2596,
+        "node": "identifier",
+        "owner": "tests",
+        "attributes": [
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_compositor/src/overflow.rs",
+        "line": 2612,
+        "node": "identifier",
+        "owner": "tests",
+        "attributes": [
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_compositor/src/overflow.rs",
+        "line": 2636,
+        "node": "identifier",
+        "owner": "tests",
+        "attributes": [
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_compositor/src/overflow.rs",
+        "line": 2650,
+        "node": "identifier",
+        "owner": "tests",
+        "attributes": [
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_compositor/src/overflow.rs",
+        "line": 2674,
+        "node": "identifier",
+        "owner": "tests",
+        "attributes": [
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_compositor/src/overflow.rs",
+        "line": 2688,
+        "node": "identifier",
+        "owner": "tests",
+        "attributes": [
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_compositor/src/overflow.rs",
+        "line": 2715,
+        "node": "identifier",
+        "owner": "tests",
+        "attributes": [
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_compositor/src/overflow.rs",
+        "line": 2730,
+        "node": "identifier",
+        "owner": "tests",
+        "attributes": [
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_compositor/src/overflow.rs",
+        "line": 2759,
+        "node": "identifier",
+        "owner": "tests",
+        "attributes": [
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_compositor/src/overflow.rs",
+        "line": 2776,
+        "node": "identifier",
+        "owner": "tests",
+        "attributes": [
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_compositor/src/renderer/frame.rs",
+        "line": 360,
+        "node": "field_identifier",
+        "owner": "Compositor::build_frame_vertices",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_compositor/src/renderer/frame.rs",
+        "line": 404,
+        "node": "field_identifier",
+        "owner": "Compositor::build_frame_vertices",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_compositor/src/renderer/hit_regions.rs",
+        "line": 218,
+        "node": "field_identifier",
+        "owner": "Compositor::populate_zone_hit_regions",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_compositor/src/renderer/tile_render.rs",
+        "line": 582,
+        "node": "field_identifier",
+        "owner": "Compositor::append_focus_ring_vertices",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_compositor/src/renderer/tile_render.rs",
+        "line": 1049,
+        "node": "field_identifier",
+        "owner": "Compositor::lifecycle_accent_bar_geom",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_compositor/src/renderer/tile_render.rs",
+        "line": 1698,
+        "node": "field_identifier",
+        "owner": "Compositor::collect_jump_to_latest_badge_item",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_compositor/src/renderer/tile_render.rs",
+        "line": 2895,
+        "node": "field_identifier",
+        "owner": "lifecycle_accent_tests::accent_bar_clamps_width_and_folds_opacity",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_compositor/src/renderer/tile_render.rs",
+        "line": 2913,
+        "node": "field_identifier",
+        "owner": "lifecycle_accent_tests::accent_bar_clamps_width_and_folds_opacity",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_compositor/src/renderer/tile_render.rs",
+        "line": 2924,
+        "node": "field_identifier",
+        "owner": "lifecycle_accent_tests::accent_bar_none_when_invisible",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_compositor/src/renderer/tile_render.rs",
+        "line": 2929,
+        "node": "field_identifier",
+        "owner": "lifecycle_accent_tests::accent_bar_none_when_invisible",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_compositor/src/renderer/token_colors.rs",
+        "line": 507,
+        "node": "identifier",
+        "owner": "resolve_scroll_indicator_tokens",
+        "attributes": [
+          "#[inline]"
+        ],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_compositor/src/renderer/token_colors.rs",
+        "line": 511,
+        "node": "field_identifier",
+        "owner": "resolve_scroll_indicator_tokens",
+        "attributes": [
+          "#[inline]"
+        ],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_compositor/src/renderer/token_colors.rs",
+        "line": 524,
+        "node": "identifier",
+        "owner": "resolve_scroll_indicator_tokens",
+        "attributes": [
+          "#[inline]"
+        ],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_compositor/src/renderer/token_colors.rs",
+        "line": 554,
+        "node": "identifier",
+        "owner": "resolve_jump_to_latest_tokens",
+        "attributes": [
+          "#[inline]"
+        ],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_compositor/src/renderer/token_colors.rs",
+        "line": 558,
+        "node": "field_identifier",
+        "owner": "resolve_jump_to_latest_tokens",
+        "attributes": [
+          "#[inline]"
+        ],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_compositor/src/renderer/token_colors.rs",
+        "line": 611,
+        "node": "identifier",
+        "owner": "resolve_jump_to_latest_tokens",
+        "attributes": [
+          "#[inline]"
+        ],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_compositor/src/renderer/token_colors.rs",
+        "line": 653,
+        "node": "field_identifier",
+        "owner": "FocusRingTokens",
+        "attributes": [
+          "#[derive(Clone, Copy, Debug)]"
+        ],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_compositor/src/renderer/token_colors.rs",
+        "line": 668,
+        "node": "identifier",
+        "owner": "resolve_focus_ring_tokens",
+        "attributes": [
+          "#[inline]"
+        ],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_compositor/src/renderer/token_colors.rs",
+        "line": 674,
+        "node": "identifier",
+        "owner": "resolve_focus_ring_tokens",
+        "attributes": [
+          "#[inline]"
+        ],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_input/src/jump_to_latest.rs",
+        "line": 91,
+        "node": "field_identifier",
+        "owner": "JumpToLatestTokens",
+        "attributes": [
+          "#[derive(Clone, Copy, Debug, PartialEq)]"
+        ],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_input/src/jump_to_latest.rs",
+        "line": 120,
+        "node": "field_identifier",
+        "owner": "JumpToLatestTokens::default",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_input/src/jump_to_latest.rs",
+        "line": 164,
+        "node": "field_identifier",
+        "owner": "JumpToLatestGeometry",
+        "attributes": [
+          "#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]"
+        ],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_input/src/jump_to_latest.rs",
+        "line": 206,
+        "node": "field_identifier",
+        "owner": "compute_jump_to_latest_pill",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_input/src/jump_to_latest.rs",
+        "line": 216,
+        "node": "field_identifier",
+        "owner": "compute_jump_to_latest_pill",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_input/src/jump_to_latest.rs",
+        "line": 285,
+        "node": "field_identifier",
+        "owner": "tests::pill_anchored_bottom_center",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_input/src/jump_to_latest.rs",
+        "line": 300,
+        "node": "field_identifier",
+        "owner": "tests::pill_size_matches_tokens",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_input/src/jump_to_latest.rs",
+        "line": 303,
+        "node": "identifier",
+        "owner": "tests::pill_size_matches_tokens",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_input/src/jump_to_latest.rs",
+        "line": 311,
+        "node": "identifier",
+        "owner": "tests::pill_clamped_to_tiny_viewport",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_input/src/scroll_indicator.rs",
+        "line": 63,
+        "node": "field_identifier",
+        "owner": "ScrollIndicatorTokens",
+        "attributes": [
+          "#[derive(Clone, Copy, Debug, PartialEq)]"
+        ],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_input/src/scroll_indicator.rs",
+        "line": 79,
+        "node": "field_identifier",
+        "owner": "ScrollIndicatorTokens::default",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_input/src/scroll_indicator.rs",
+        "line": 106,
+        "node": "field_identifier",
+        "owner": "ScrollIndicatorGeometry",
+        "attributes": [
+          "#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]"
+        ],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_input/src/scroll_indicator.rs",
+        "line": 185,
+        "node": "field_identifier",
+        "owner": "compute_scroll_indicator",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_input/src/scroll_indicator.rs",
+        "line": 185,
+        "node": "field_identifier",
+        "owner": "compute_scroll_indicator",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_input/src/scroll_indicator.rs",
+        "line": 333,
+        "node": "field_identifier",
+        "owner": "tests::geometry_width_matches_token_width",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_input/src/scroll_indicator.rs",
+        "line": 336,
+        "node": "identifier",
+        "owner": "tests::geometry_width_matches_token_width",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_input/src/scroll_indicator.rs",
+        "line": 382,
+        "node": "field_identifier",
+        "owner": "tests::scroll_indicator_geometry_is_content_free",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_projection/src/contract.rs",
+        "line": 1213,
+        "node": "field_identifier",
+        "owner": "AdapterPortalRect",
+        "attributes": [
+          "#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]"
+        ],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_projection/src/contract.rs",
+        "line": 1227,
+        "node": "field_identifier",
+        "owner": "AdapterPortalRect::from_f32",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_projection/src/resident_grpc.rs",
+        "line": 1180,
+        "node": "field_identifier",
+        "owner": "ResidentGrpcPortalAdapter::render_batch",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_projection/src/resident_grpc.rs",
+        "line": 1937,
+        "node": "field_identifier",
+        "owner": "ResidentGrpcPortalAdapter::bounds_for_state",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_projection/src/resident_grpc.rs",
+        "line": 1950,
+        "node": "field_identifier",
+        "owner": "ResidentGrpcPortalAdapter::bounds_for_state",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_projection/src/resident_grpc.rs",
+        "line": 4340,
+        "node": "identifier",
+        "owner": "tests::lifecycle_accent_rides_state_stream_tile_update_not_add_node",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_projection/src/resident_grpc.rs",
+        "line": 4380,
+        "node": "identifier",
+        "owner": "tests::lifecycle_accent_rides_state_stream_tile_update_not_add_node",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_projection/src/resident_grpc.rs",
+        "line": 4427,
+        "node": "identifier",
+        "owner": "tests::degraded_state_shows_disconnect_badge_even_when_redacted",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_projection/src/tests/mod.rs",
+        "line": 3646,
+        "node": "field_identifier",
+        "owner": "make_snapshot",
+        "attributes": [],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_projection/src/tests/mod.rs",
+        "line": 3713,
+        "node": "field_identifier",
+        "owner": "coalesce_equal_sequence_does_not_replace",
+        "attributes": [
+          "#[test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/convert.rs",
+        "line": 831,
+        "node": "field_identifier",
+        "owner": "apply_portal_render_batch_to_scene",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/convert.rs",
+        "line": 833,
+        "node": "field_identifier",
+        "owner": "apply_portal_render_batch_to_scene",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/convert.rs",
+        "line": 833,
+        "node": "field_identifier",
+        "owner": "apply_portal_render_batch_to_scene",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/traffic.rs",
+        "line": 166,
+        "node": "identifier",
+        "owner": "inbound_tests::lifecycle_accent_update_stays_state_stream",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/traffic.rs",
+        "line": 221,
+        "node": "identifier",
+        "owner": "inbound_tests::lifecycle_accent_alone_is_state_stream",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/traffic.rs",
+        "line": 264,
+        "node": "identifier",
+        "owner": "inbound_tests::interaction_enabled_streaming_republish_stays_state_stream",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/traffic.rs",
+        "line": 324,
+        "node": "identifier",
+        "owner": "inbound_tests::add_node_still_dominates_as_transactional",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/dedup.rs",
+        "line": 39,
+        "node": "field_identifier",
+        "owner": "ResourceRecord",
+        "attributes": [
+          "#[derive(Debug)]"
+        ],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/dedup.rs",
+        "line": 50,
+        "node": "field_identifier",
+        "owner": "ResourceRecord::new",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/dedup.rs",
+        "line": 50,
+        "node": "field_identifier",
+        "owner": "ResourceRecord::new",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/dedup.rs",
+        "line": 208,
+        "node": "field_identifier",
+        "owner": "tests::make_record",
+        "attributes": [
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/dedup.rs",
+        "line": 288,
+        "node": "field_identifier",
+        "owner": "tests::font_gc_releases_the_retained_source_copy_and_ledger_charge",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/types.rs",
+        "line": 202,
+        "node": "field_identifier",
+        "owner": "DecodedMeta",
+        "attributes": [
+          "#[derive(Clone, Debug)]"
+        ],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/validation.rs",
+        "line": 239,
+        "node": "field_identifier",
+        "owner": "validate_raw_rgba8",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/validation.rs",
+        "line": 261,
+        "node": "identifier",
+        "owner": "decode_image",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/validation.rs",
+        "line": 265,
+        "node": "identifier",
+        "owner": "decode_image",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/validation.rs",
+        "line": 275,
+        "node": "identifier",
+        "owner": "decode_image",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/validation.rs",
+        "line": 295,
+        "node": "identifier",
+        "owner": "decode_image",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/validation.rs",
+        "line": 321,
+        "node": "identifier",
+        "owner": "validate_svg",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/validation.rs",
+        "line": 323,
+        "node": "identifier",
+        "owner": "validate_svg",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/validation.rs",
+        "line": 330,
+        "node": "identifier",
+        "owner": "validate_svg",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/validation.rs",
+        "line": 459,
+        "node": "field_identifier",
+        "owner": "validate_font",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/validation.rs",
+        "line": 620,
+        "node": "identifier",
+        "owner": "tests::decode_rgba8_valid",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/validation.rs",
+        "line": 701,
+        "node": "identifier",
+        "owner": "tests::decode_png_1x1_succeeds",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/validation.rs",
+        "line": 735,
+        "node": "identifier",
+        "owner": "tests::svg_valid_minimal_accepted",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/validation.rs",
+        "line": 747,
+        "node": "identifier",
+        "owner": "tests::svg_with_viewbox_budget_estimated_correctly",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/validation.rs",
+        "line": 759,
+        "node": "identifier",
+        "owner": "tests::svg_large_dimensions_clamped_to_2048",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/validation.rs",
+        "line": 770,
+        "node": "identifier",
+        "owner": "tests::svg_with_width_and_height_attrs",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/validation.rs",
+        "line": 820,
+        "node": "identifier",
+        "owner": "tests::svg_viewbox_takes_priority_over_width_height",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_scene/src/graph/tests.rs",
+        "line": 4452,
+        "node": "field_identifier",
+        "owner": "sample_accent",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_scene/src/mutation.rs",
+        "line": 1208,
+        "node": "field_identifier",
+        "owner": "tests::set_tile_lifecycle_accent_sets_clears_and_cleans_up",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_scene/src/mutation.rs",
+        "line": 1530,
+        "node": "identifier",
+        "owner": "tests::set_tile_lifecycle_accent_rejects_cross_namespace",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_scene/src/types.rs",
+        "line": 273,
+        "node": "field_identifier",
+        "owner": "LifecycleAccent",
+        "attributes": [
+          "#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]"
+        ],
+        "source_class": "default-eligible"
+      }
+    ],
+    "height_px": [
+      {
+        "path": "crates/tze_hud_compositor/src/renderer/frame.rs",
+        "line": 405,
+        "node": "field_identifier",
+        "owner": "Compositor::build_frame_vertices",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_compositor/src/renderer/hit_regions.rs",
+        "line": 219,
+        "node": "field_identifier",
+        "owner": "Compositor::populate_zone_hit_regions",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_compositor/src/renderer/tile_render.rs",
+        "line": 1697,
+        "node": "field_identifier",
+        "owner": "Compositor::collect_jump_to_latest_badge_item",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_compositor/src/renderer/tile_render.rs",
+        "line": 1699,
+        "node": "field_identifier",
+        "owner": "Compositor::collect_jump_to_latest_badge_item",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_compositor/src/renderer/token_colors.rs",
+        "line": 560,
+        "node": "identifier",
+        "owner": "resolve_jump_to_latest_tokens",
+        "attributes": [
+          "#[inline]"
+        ],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_compositor/src/renderer/token_colors.rs",
+        "line": 564,
+        "node": "field_identifier",
+        "owner": "resolve_jump_to_latest_tokens",
+        "attributes": [
+          "#[inline]"
+        ],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_compositor/src/renderer/token_colors.rs",
+        "line": 612,
+        "node": "identifier",
+        "owner": "resolve_jump_to_latest_tokens",
+        "attributes": [
+          "#[inline]"
+        ],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_input/src/jump_to_latest.rs",
+        "line": 93,
+        "node": "field_identifier",
+        "owner": "JumpToLatestTokens",
+        "attributes": [
+          "#[derive(Clone, Copy, Debug, PartialEq)]"
+        ],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_input/src/jump_to_latest.rs",
+        "line": 121,
+        "node": "field_identifier",
+        "owner": "JumpToLatestTokens::default",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_input/src/jump_to_latest.rs",
+        "line": 166,
+        "node": "field_identifier",
+        "owner": "JumpToLatestGeometry",
+        "attributes": [
+          "#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]"
+        ],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_input/src/jump_to_latest.rs",
+        "line": 207,
+        "node": "field_identifier",
+        "owner": "compute_jump_to_latest_pill",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_input/src/jump_to_latest.rs",
+        "line": 217,
+        "node": "field_identifier",
+        "owner": "compute_jump_to_latest_pill",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_input/src/jump_to_latest.rs",
+        "line": 286,
+        "node": "field_identifier",
+        "owner": "tests::pill_anchored_bottom_center",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_input/src/jump_to_latest.rs",
+        "line": 301,
+        "node": "field_identifier",
+        "owner": "tests::pill_size_matches_tokens",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_input/src/jump_to_latest.rs",
+        "line": 304,
+        "node": "identifier",
+        "owner": "tests::pill_size_matches_tokens",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_input/src/jump_to_latest.rs",
+        "line": 313,
+        "node": "identifier",
+        "owner": "tests::pill_clamped_to_tiny_viewport",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_projection/src/contract.rs",
+        "line": 1215,
+        "node": "field_identifier",
+        "owner": "AdapterPortalRect",
+        "attributes": [
+          "#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]"
+        ],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_projection/src/contract.rs",
+        "line": 1228,
+        "node": "field_identifier",
+        "owner": "AdapterPortalRect::from_f32",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_projection/src/resident_grpc.rs",
+        "line": 1937,
+        "node": "field_identifier",
+        "owner": "ResidentGrpcPortalAdapter::bounds_for_state",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_projection/src/resident_grpc.rs",
+        "line": 1951,
+        "node": "field_identifier",
+        "owner": "ResidentGrpcPortalAdapter::bounds_for_state",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_projection/src/tests/mod.rs",
+        "line": 3647,
+        "node": "field_identifier",
+        "owner": "make_snapshot",
+        "attributes": [],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_projection/src/tests/mod.rs",
+        "line": 3714,
+        "node": "field_identifier",
+        "owner": "coalesce_equal_sequence_does_not_replace",
+        "attributes": [
+          "#[test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/dedup.rs",
+        "line": 41,
+        "node": "field_identifier",
+        "owner": "ResourceRecord",
+        "attributes": [
+          "#[derive(Debug)]"
+        ],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/dedup.rs",
+        "line": 51,
+        "node": "field_identifier",
+        "owner": "ResourceRecord::new",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/dedup.rs",
+        "line": 51,
+        "node": "field_identifier",
+        "owner": "ResourceRecord::new",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/dedup.rs",
+        "line": 209,
+        "node": "field_identifier",
+        "owner": "tests::make_record",
+        "attributes": [
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/dedup.rs",
+        "line": 289,
+        "node": "field_identifier",
+        "owner": "tests::font_gc_releases_the_retained_source_copy_and_ledger_charge",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/types.rs",
+        "line": 204,
+        "node": "field_identifier",
+        "owner": "DecodedMeta",
+        "attributes": [
+          "#[derive(Clone, Debug)]"
+        ],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/validation.rs",
+        "line": 240,
+        "node": "field_identifier",
+        "owner": "validate_raw_rgba8",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/validation.rs",
+        "line": 262,
+        "node": "identifier",
+        "owner": "decode_image",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/validation.rs",
+        "line": 265,
+        "node": "identifier",
+        "owner": "decode_image",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/validation.rs",
+        "line": 276,
+        "node": "identifier",
+        "owner": "decode_image",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/validation.rs",
+        "line": 296,
+        "node": "identifier",
+        "owner": "decode_image",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/validation.rs",
+        "line": 321,
+        "node": "identifier",
+        "owner": "validate_svg",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/validation.rs",
+        "line": 324,
+        "node": "identifier",
+        "owner": "validate_svg",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/validation.rs",
+        "line": 331,
+        "node": "identifier",
+        "owner": "validate_svg",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/validation.rs",
+        "line": 460,
+        "node": "field_identifier",
+        "owner": "validate_font",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/validation.rs",
+        "line": 621,
+        "node": "identifier",
+        "owner": "tests::decode_rgba8_valid",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/validation.rs",
+        "line": 702,
+        "node": "identifier",
+        "owner": "tests::decode_png_1x1_succeeds",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/validation.rs",
+        "line": 736,
+        "node": "identifier",
+        "owner": "tests::svg_valid_minimal_accepted",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/validation.rs",
+        "line": 748,
+        "node": "identifier",
+        "owner": "tests::svg_with_viewbox_budget_estimated_correctly",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/validation.rs",
+        "line": 760,
+        "node": "identifier",
+        "owner": "tests::svg_large_dimensions_clamped_to_2048",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/validation.rs",
+        "line": 771,
+        "node": "identifier",
+        "owner": "tests::svg_with_width_and_height_attrs",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/validation.rs",
+        "line": 821,
+        "node": "identifier",
+        "owner": "tests::svg_viewbox_takes_priority_over_width_height",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_runtime/src/portal_projection_driver.rs",
+        "line": 747,
+        "node": "field_identifier",
+        "owner": "InProcessPortalDriver::render",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_runtime/src/portal_projection_driver.rs",
+        "line": 748,
+        "node": "field_identifier",
+        "owner": "InProcessPortalDriver::render",
+        "attributes": [],
+        "source_class": "default-eligible"
+      }
+    ],
+    "font_bytes": [
+      {
+        "path": "crates/tze_hud_compositor/src/widget.rs",
+        "line": 3419,
+        "node": "field_identifier",
+        "owner": "tests::renderer_retained_svg_uses_widget_source_class_atomically",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/dedup.rs",
+        "line": 71,
+        "node": "field_identifier",
+        "owner": "DedupIndex",
+        "attributes": [
+          "#[derive(Clone, Debug)]"
+        ],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/dedup.rs",
+        "line": 80,
+        "node": "field_identifier",
+        "owner": "DedupIndex::new",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/dedup.rs",
+        "line": 86,
+        "node": "identifier",
+        "owner": "DedupIndex::new_with_resident_ledger",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/dedup.rs",
+        "line": 91,
+        "node": "field_identifier",
+        "owner": "DedupIndex::new_with_resident_ledger",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/dedup.rs",
+        "line": 91,
+        "node": "identifier",
+        "owner": "DedupIndex::new_with_resident_ledger",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/dedup.rs",
+        "line": 178,
+        "node": "identifier",
+        "owner": "DedupIndex::remove",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/dedup.rs",
+        "line": 178,
+        "node": "field_identifier",
+        "owner": "DedupIndex::remove",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/dedup.rs",
+        "line": 179,
+        "node": "identifier",
+        "owner": "DedupIndex::remove",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/dedup.rs",
+        "line": 272,
+        "node": "field_identifier",
+        "owner": "tests::font_gc_releases_the_retained_source_copy_and_ledger_charge",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/dedup.rs",
+        "line": 274,
+        "node": "identifier",
+        "owner": "tests::font_gc_releases_the_retained_source_copy_and_ledger_charge",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/dedup.rs",
+        "line": 275,
+        "node": "identifier",
+        "owner": "tests::font_gc_releases_the_retained_source_copy_and_ledger_charge",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/dedup.rs",
+        "line": 277,
+        "node": "identifier",
+        "owner": "tests::font_gc_releases_the_retained_source_copy_and_ledger_charge",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/dedup.rs",
+        "line": 297,
+        "node": "identifier",
+        "owner": "tests::font_gc_releases_the_retained_source_copy_and_ledger_charge",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/dedup.rs",
+        "line": 298,
+        "node": "identifier",
+        "owner": "tests::font_gc_releases_the_retained_source_copy_and_ledger_charge",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/font_bytes_store.rs",
+        "line": 217,
+        "node": "field_identifier",
+        "owner": "tests::font_source_admission_uses_font_class_and_is_atomic",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/font_bytes_store.rs",
+        "line": 225,
+        "node": "identifier",
+        "owner": "tests::font_source_admission_uses_font_class_and_is_atomic",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/resident_ledger.rs",
+        "line": 37,
+        "node": "field_identifier",
+        "owner": "ResidentLedgerLimits",
+        "attributes": [
+          "#[derive(Clone, Copy, Debug, PartialEq, Eq)]"
+        ],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/resident_ledger.rs",
+        "line": 46,
+        "node": "field_identifier",
+        "owner": "ResidentLedgerLimits::class_limit",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/resident_ledger.rs",
+        "line": 57,
+        "node": "field_identifier",
+        "owner": "ResidentLedgerSnapshot",
+        "attributes": [
+          "#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]"
+        ],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/resident_ledger.rs",
+        "line": 70,
+        "node": "field_identifier",
+        "owner": "ResidentLedgerSnapshot::class_bytes",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/resident_ledger.rs",
+        "line": 80,
+        "node": "field_identifier",
+        "owner": "ResidentLedgerSnapshot::add",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/resident_ledger.rs",
+        "line": 96,
+        "node": "field_identifier",
+        "owner": "ResidentLedgerSnapshot::subtract",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/resident_ledger.rs",
+        "line": 96,
+        "node": "field_identifier",
+        "owner": "ResidentLedgerSnapshot::subtract",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/resident_ledger.rs",
+        "line": 253,
+        "node": "field_identifier",
+        "owner": "tests::ledger",
+        "attributes": [
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 140,
+        "node": "field_identifier",
+        "owner": "ResourceStore",
+        "attributes": [
+          "#[derive(Clone)]"
+        ],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 151,
+        "node": "field_identifier",
+        "owner": "ResourceStore::new",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 160,
+        "node": "identifier",
+        "owner": "ResourceStore::new_with_resident_ledger",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 164,
+        "node": "identifier",
+        "owner": "ResourceStore::new_with_resident_ledger",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 168,
+        "node": "identifier",
+        "owner": "ResourceStore::new_with_resident_ledger",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 183,
+        "node": "identifier",
+        "owner": "ResourceStore::font_bytes",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 184,
+        "node": "field_identifier",
+        "owner": "ResourceStore::font_bytes",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 525,
+        "node": "field_identifier",
+        "owner": "ResourceStore::complete_upload",
+        "attributes": [
+          "#[allow(clippy::too_many_arguments)]"
+        ],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 676,
+        "node": "field_identifier",
+        "owner": "tests::mandatory_decoded_resource_debits_shared_resident_ledger_atomically",
+        "attributes": [
+          "#[tokio::test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_runtime/src/runtime_context.rs",
+        "line": 66,
+        "node": "field_identifier",
+        "owner": "RuntimeResidentStoreLimits",
+        "attributes": [
+          "#[derive(Debug, Clone, Copy, PartialEq, Eq)]"
+        ],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_runtime/src/runtime_context.rs",
+        "line": 106,
+        "node": "field_identifier",
+        "owner": "resident_ledger_for",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_runtime/src/runtime_context.rs",
+        "line": 239,
+        "node": "field_identifier",
+        "owner": "RuntimeContext::resident_store_limits",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_runtime/src/runtime_context.rs",
+        "line": 273,
+        "node": "identifier",
+        "owner": "RuntimeContext::resident_accounting_snapshot",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_runtime/src/runtime_context.rs",
+        "line": 280,
+        "node": "identifier",
+        "owner": "RuntimeContext::resident_accounting_snapshot",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_runtime/src/runtime_context.rs",
+        "line": 429,
+        "node": "identifier",
+        "owner": "tests::headless_production_consumers_share_exact_store_limits",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      }
+    ],
+    "resident_ledger": [
+      {
+        "path": "crates/tze_hud_compositor/src/renderer/image_cache.rs",
+        "line": 494,
+        "node": "field_identifier",
+        "owner": "super::Compositor::load_font_bytes",
+        "attributes": [
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_compositor/src/renderer/image_cache.rs",
+        "line": 576,
+        "node": "field_identifier",
+        "owner": "super::Compositor::register_image_bytes",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_compositor/src/renderer/image_cache.rs",
+        "line": 657,
+        "node": "field_identifier",
+        "owner": "super::Compositor::ensure_image_texture",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_compositor/src/renderer/image_cache.rs",
+        "line": 915,
+        "node": "field_identifier",
+        "owner": "super::Compositor::evict_unused_image_textures",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_compositor/src/renderer/mod.rs",
+        "line": 168,
+        "node": "field_identifier",
+        "owner": "Compositor",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_compositor/src/renderer/mod.rs",
+        "line": 852,
+        "node": "field_identifier",
+        "owner": "Compositor::new_headless",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_compositor/src/renderer/mod.rs",
+        "line": 1188,
+        "node": "field_identifier",
+        "owner": "Compositor::new_windowed_inner",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_compositor/src/renderer/widgets.rs",
+        "line": 19,
+        "node": "field_identifier",
+        "owner": "super::Compositor::init_widget_renderer",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_compositor/src/renderer/widgets.rs",
+        "line": 30,
+        "node": "field_identifier",
+        "owner": "super::Compositor::set_resident_ledger",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_compositor/src/widget.rs",
+        "line": 2501,
+        "node": "field_identifier",
+        "owner": "WidgetRenderer",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_compositor/src/widget.rs",
+        "line": 2578,
+        "node": "field_identifier",
+        "owner": "WidgetRenderer::new",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_compositor/src/widget.rs",
+        "line": 2591,
+        "node": "field_identifier",
+        "owner": "WidgetRenderer::set_resident_ledger",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_compositor/src/widget.rs",
+        "line": 2648,
+        "node": "field_identifier",
+        "owner": "WidgetRenderer::register_svg",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_compositor/src/widget.rs",
+        "line": 2664,
+        "node": "field_identifier",
+        "owner": "WidgetRenderer::register_svg",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_compositor/src/widget.rs",
+        "line": 2668,
+        "node": "field_identifier",
+        "owner": "WidgetRenderer::register_svg",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_compositor/src/widget.rs",
+        "line": 2880,
+        "node": "field_identifier",
+        "owner": "WidgetRenderer::upload_texture",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_compositor/src/widget.rs",
+        "line": 2966,
+        "node": "field_identifier",
+        "owner": "WidgetRenderer::upload_texture",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_compositor/src/widget.rs",
+        "line": 2979,
+        "node": "field_identifier",
+        "owner": "WidgetRenderer::upload_texture",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_compositor/src/widget.rs",
+        "line": 3210,
+        "node": "field_identifier",
+        "owner": "WidgetRenderer::remove_texture",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/dedup.rs",
+        "line": 70,
+        "node": "field_identifier",
+        "owner": "DedupIndex",
+        "attributes": [
+          "#[derive(Clone, Debug)]"
+        ],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/dedup.rs",
+        "line": 79,
+        "node": "field_identifier",
+        "owner": "DedupIndex::new",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/dedup.rs",
+        "line": 85,
+        "node": "identifier",
+        "owner": "DedupIndex::new_with_resident_ledger",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/dedup.rs",
+        "line": 90,
+        "node": "field_identifier",
+        "owner": "DedupIndex::new_with_resident_ledger",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/dedup.rs",
+        "line": 90,
+        "node": "identifier",
+        "owner": "DedupIndex::new_with_resident_ledger",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/dedup.rs",
+        "line": 181,
+        "node": "field_identifier",
+        "owner": "DedupIndex::remove",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/font_bytes_store.rs",
+        "line": 34,
+        "node": "field_identifier",
+        "owner": "FontBytesStore",
+        "attributes": [
+          "#[derive(Clone, Debug)]"
+        ],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/font_bytes_store.rs",
+        "line": 42,
+        "node": "field_identifier",
+        "owner": "FontBytesStore::new",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/font_bytes_store.rs",
+        "line": 46,
+        "node": "identifier",
+        "owner": "FontBytesStore::new_with_resident_ledger",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/font_bytes_store.rs",
+        "line": 49,
+        "node": "field_identifier",
+        "owner": "FontBytesStore::new_with_resident_ledger",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/font_bytes_store.rs",
+        "line": 49,
+        "node": "identifier",
+        "owner": "FontBytesStore::new_with_resident_ledger",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/font_bytes_store.rs",
+        "line": 61,
+        "node": "field_identifier",
+        "owner": "FontBytesStore::try_insert",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/font_bytes_store.rs",
+        "line": 98,
+        "node": "field_identifier",
+        "owner": "FontBytesStore::remove",
+        "attributes": [
+          "#[inline]"
+        ],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/lib.rs",
+        "line": 34,
+        "node": "identifier",
+        "owner": "resident_ledger",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/lib.rs",
+        "line": 42,
+        "node": "identifier",
+        "owner": "",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 141,
+        "node": "field_identifier",
+        "owner": "ResourceStore",
+        "attributes": [
+          "#[derive(Clone)]"
+        ],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 152,
+        "node": "field_identifier",
+        "owner": "ResourceStore::new",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 158,
+        "node": "identifier",
+        "owner": "ResourceStore::new_with_resident_ledger",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 160,
+        "node": "identifier",
+        "owner": "ResourceStore::new_with_resident_ledger",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 163,
+        "node": "identifier",
+        "owner": "ResourceStore::new_with_resident_ledger",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 169,
+        "node": "field_identifier",
+        "owner": "ResourceStore::new_with_resident_ledger",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 169,
+        "node": "identifier",
+        "owner": "ResourceStore::new_with_resident_ledger",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 512,
+        "node": "field_identifier",
+        "owner": "ResourceStore::complete_upload",
+        "attributes": [
+          "#[allow(clippy::too_many_arguments)]"
+        ],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_runtime/src/headless.rs",
+        "line": 214,
+        "node": "field_identifier",
+        "owner": "HeadlessRuntime::new",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_runtime/src/headless.rs",
+        "line": 299,
+        "node": "field_identifier",
+        "owner": "HeadlessRuntime::new",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_runtime/src/runtime_context.rs",
+        "line": 129,
+        "node": "field_identifier",
+        "owner": "RuntimeContext",
+        "attributes": [
+          "#[derive(Debug)]"
+        ],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_runtime/src/runtime_context.rs",
+        "line": 138,
+        "node": "identifier",
+        "owner": "RuntimeContext::from_config",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_runtime/src/runtime_context.rs",
+        "line": 143,
+        "node": "identifier",
+        "owner": "RuntimeContext::from_config",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_runtime/src/runtime_context.rs",
+        "line": 201,
+        "node": "identifier",
+        "owner": "RuntimeContext::headless_default",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_runtime/src/runtime_context.rs",
+        "line": 206,
+        "node": "identifier",
+        "owner": "RuntimeContext::headless_default",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_runtime/src/runtime_context.rs",
+        "line": 245,
+        "node": "field_identifier",
+        "owner": "RuntimeContext::resident_accounting_snapshot",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_runtime/src/runtime_context.rs",
+        "line": 246,
+        "node": "field_identifier",
+        "owner": "RuntimeContext::resident_accounting_snapshot",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_runtime/src/windowed/mod.rs",
+        "line": 1319,
+        "node": "field_identifier",
+        "owner": "WinitApp::resumed",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_runtime/src/windowed/mod.rs",
+        "line": 2835,
+        "node": "field_identifier",
+        "owner": "WindowedRuntime::run",
+        "attributes": [],
+        "source_class": "default-eligible"
+      }
+    ],
+    "resource_type": [
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/tests/resource_upload.rs",
+        "line": 44,
+        "node": "field_identifier",
+        "owner": "test_resource_upload_backpressure_keeps_heartbeat_responsive",
+        "attributes": [
+          "#[tokio::test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/tests/resource_upload.rs",
+        "line": 156,
+        "node": "field_identifier",
+        "owner": "test_resource_upload_start_requires_upload_resource_capability",
+        "attributes": [
+          "#[tokio::test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/tests/resource_upload.rs",
+        "line": 197,
+        "node": "field_identifier",
+        "owner": "test_resource_upload_inline_and_dedup_short_circuit",
+        "attributes": [
+          "#[tokio::test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/tests/resource_upload.rs",
+        "line": 221,
+        "node": "field_identifier",
+        "owner": "test_resource_upload_inline_and_dedup_short_circuit",
+        "attributes": [
+          "#[tokio::test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/tests/resource_upload.rs",
+        "line": 262,
+        "node": "field_identifier",
+        "owner": "test_resource_upload_chunked_ack_then_complete",
+        "attributes": [
+          "#[tokio::test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/tests/resource_upload.rs",
+        "line": 338,
+        "node": "field_identifier",
+        "owner": "test_resource_upload_chunked_concurrent_limit_rejected",
+        "attributes": [
+          "#[tokio::test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/tests/resource_upload.rs",
+        "line": 397,
+        "node": "field_identifier",
+        "owner": "test_resource_upload_chunked_success_correlates_by_request_sequence",
+        "attributes": [
+          "#[tokio::test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/tests/resource_upload.rs",
+        "line": 545,
+        "node": "field_identifier",
+        "owner": "test_resource_upload_chunked_zero_size_rejected",
+        "attributes": [
+          "#[tokio::test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/tests/resource_upload.rs",
+        "line": 591,
+        "node": "field_identifier",
+        "owner": "test_resource_upload_chunk_error_aborts_inflight_tracking",
+        "attributes": [
+          "#[tokio::test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/tests/resource_upload.rs",
+        "line": 670,
+        "node": "field_identifier",
+        "owner": "test_resident_upload_then_static_image_references_uploaded_resource_id",
+        "attributes": [
+          "#[tokio::test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/upload.rs",
+        "line": 151,
+        "node": "identifier",
+        "owner": "run_upload_worker",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/upload.rs",
+        "line": 151,
+        "node": "field_identifier",
+        "owner": "run_upload_worker",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/upload.rs",
+        "line": 156,
+        "node": "identifier",
+        "owner": "run_upload_worker",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/upload.rs",
+        "line": 249,
+        "node": "identifier",
+        "owner": "run_upload_worker",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/upload.rs",
+        "line": 484,
+        "node": "identifier",
+        "owner": "proto_resource_type_to_store",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/upload.rs",
+        "line": 485,
+        "node": "identifier",
+        "owner": "proto_resource_type_to_store",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/dedup.rs",
+        "line": 35,
+        "node": "field_identifier",
+        "owner": "ResourceRecord",
+        "attributes": [
+          "#[derive(Debug)]"
+        ],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/dedup.rs",
+        "line": 45,
+        "node": "identifier",
+        "owner": "ResourceRecord::new",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/dedup.rs",
+        "line": 48,
+        "node": "identifier",
+        "owner": "ResourceRecord::new",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/dedup.rs",
+        "line": 175,
+        "node": "identifier",
+        "owner": "DedupIndex::remove",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 67,
+        "node": "field_identifier",
+        "owner": "InflightUpload",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 232,
+        "node": "field_identifier",
+        "owner": "ResourceStore::handle_upload_start",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 241,
+        "node": "field_identifier",
+        "owner": "ResourceStore::handle_upload_start",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 241,
+        "node": "field_identifier",
+        "owner": "ResourceStore::handle_upload_start",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 272,
+        "node": "field_identifier",
+        "owner": "ResourceStore::handle_upload_start",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 310,
+        "node": "field_identifier",
+        "owner": "ResourceStore::handle_upload_start",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 310,
+        "node": "field_identifier",
+        "owner": "ResourceStore::handle_upload_start",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 409,
+        "node": "identifier",
+        "owner": "ResourceStore::handle_upload_complete",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 421,
+        "node": "field_identifier",
+        "owner": "ResourceStore::handle_upload_complete",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 432,
+        "node": "identifier",
+        "owner": "ResourceStore::handle_upload_complete",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 473,
+        "node": "identifier",
+        "owner": "ResourceStore::complete_upload",
+        "attributes": [
+          "#[allow(clippy::too_many_arguments)]"
+        ],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 487,
+        "node": "identifier",
+        "owner": "ResourceStore::complete_upload",
+        "attributes": [
+          "#[allow(clippy::too_many_arguments)]"
+        ],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 493,
+        "node": "identifier",
+        "owner": "ResourceStore::complete_upload",
+        "attributes": [
+          "#[allow(clippy::too_many_arguments)]"
+        ],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 511,
+        "node": "identifier",
+        "owner": "ResourceStore::complete_upload",
+        "attributes": [
+          "#[allow(clippy::too_many_arguments)]"
+        ],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 524,
+        "node": "identifier",
+        "owner": "ResourceStore::complete_upload",
+        "attributes": [
+          "#[allow(clippy::too_many_arguments)]"
+        ],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 531,
+        "node": "identifier",
+        "owner": "ResourceStore::complete_upload",
+        "attributes": [
+          "#[allow(clippy::too_many_arguments)]"
+        ],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 557,
+        "node": "identifier",
+        "owner": "ResourceStore::complete_upload",
+        "attributes": [
+          "#[allow(clippy::too_many_arguments)]"
+        ],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 588,
+        "node": "field_identifier",
+        "owner": "UploadStartRequest",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 653,
+        "node": "field_identifier",
+        "owner": "tests::inline_png_upload_succeeds",
+        "attributes": [
+          "#[tokio::test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 689,
+        "node": "field_identifier",
+        "owner": "tests::mandatory_decoded_resource_debits_shared_resident_ledger_atomically",
+        "attributes": [
+          "#[tokio::test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 718,
+        "node": "field_identifier",
+        "owner": "tests::inline_upload_requires_no_chunks_or_complete",
+        "attributes": [
+          "#[tokio::test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 748,
+        "node": "field_identifier",
+        "owner": "tests::dedup_hit_returns_immediately",
+        "attributes": [
+          "#[tokio::test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 768,
+        "node": "field_identifier",
+        "owner": "tests::dedup_hit_returns_immediately",
+        "attributes": [
+          "#[tokio::test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 795,
+        "node": "field_identifier",
+        "owner": "tests::identical_bytes_same_resource_id",
+        "attributes": [
+          "#[tokio::test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 835,
+        "node": "field_identifier",
+        "owner": "tests::chunked_upload_success",
+        "attributes": [
+          "#[tokio::test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 887,
+        "node": "field_identifier",
+        "owner": "tests::chunked_upload_hash_mismatch",
+        "attributes": [
+          "#[tokio::test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 930,
+        "node": "field_identifier",
+        "owner": "tests::upload_denied_without_capability",
+        "attributes": [
+          "#[tokio::test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 962,
+        "node": "field_identifier",
+        "owner": "tests::too_many_concurrent_uploads",
+        "attributes": [
+          "#[tokio::test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 983,
+        "node": "field_identifier",
+        "owner": "tests::too_many_concurrent_uploads",
+        "attributes": [
+          "#[tokio::test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 1012,
+        "node": "field_identifier",
+        "owner": "tests::abort_upload_removes_inflight",
+        "attributes": [
+          "#[tokio::test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 1040,
+        "node": "field_identifier",
+        "owner": "tests::abort_all_uploads_clears_agent",
+        "attributes": [
+          "#[tokio::test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 1071,
+        "node": "field_identifier",
+        "owner": "tests::out_of_order_chunk_rejected",
+        "attributes": [
+          "#[tokio::test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 1111,
+        "node": "field_identifier",
+        "owner": "tests::oversized_chunk_rejected",
+        "attributes": [
+          "#[tokio::test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/validation.rs",
+        "line": 148,
+        "node": "identifier",
+        "owner": "check_resource_type",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/validation.rs",
+        "line": 149,
+        "node": "identifier",
+        "owner": "check_resource_type",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/validation.rs",
+        "line": 152,
+        "node": "identifier",
+        "owner": "check_resource_type",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/validation.rs",
+        "line": 177,
+        "node": "identifier",
+        "owner": "decode_and_validate",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/validation.rs",
+        "line": 182,
+        "node": "identifier",
+        "owner": "decode_and_validate",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/validation.rs",
+        "line": 184,
+        "node": "identifier",
+        "owner": "decode_and_validate",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/validation.rs",
+        "line": 185,
+        "node": "identifier",
+        "owner": "decode_and_validate",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/validation.rs",
+        "line": 246,
+        "node": "identifier",
+        "owner": "decode_image",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/validation.rs",
+        "line": 251,
+        "node": "identifier",
+        "owner": "decode_image",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/tests/store_behavior.rs",
+        "line": 45,
+        "node": "field_identifier",
+        "owner": "inline_req",
+        "attributes": [],
+        "source_class": "test"
+      },
+      {
+        "path": "tests/integration/text_stream_portal_surface.rs",
+        "line": 123,
+        "node": "field_identifier",
+        "owner": "upload_png_icon",
+        "attributes": [],
+        "source_class": "test"
+      }
+    ],
+    "FontBytesStore": [
+      {
+        "path": "crates/tze_hud_resource/src/dedup.rs",
+        "line": 71,
+        "node": "type_identifier",
+        "owner": "DedupIndex",
+        "attributes": [
+          "#[derive(Clone, Debug)]"
+        ],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/dedup.rs",
+        "line": 86,
+        "node": "type_identifier",
+        "owner": "DedupIndex::new_with_resident_ledger",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/dedup.rs",
+        "line": 274,
+        "node": "identifier",
+        "owner": "tests::font_gc_releases_the_retained_source_copy_and_ledger_charge",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/font_bytes_store.rs",
+        "line": 32,
+        "node": "type_identifier",
+        "owner": "FontBytesStore",
+        "attributes": [
+          "#[derive(Clone, Debug)]"
+        ],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/font_bytes_store.rs",
+        "line": 37,
+        "node": "type_identifier",
+        "owner": "FontBytesStore",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/font_bytes_store.rs",
+        "line": 120,
+        "node": "type_identifier",
+        "owner": "FontBytesStore",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/font_bytes_store.rs",
+        "line": 138,
+        "node": "identifier",
+        "owner": "tests::empty_on_construction",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/font_bytes_store.rs",
+        "line": 145,
+        "node": "identifier",
+        "owner": "tests::insert_and_get_roundtrip",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/font_bytes_store.rs",
+        "line": 157,
+        "node": "identifier",
+        "owner": "tests::dedup_race_keeps_existing_bytes",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/font_bytes_store.rs",
+        "line": 171,
+        "node": "identifier",
+        "owner": "tests::get_returns_none_for_missing_id",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/font_bytes_store.rs",
+        "line": 177,
+        "node": "identifier",
+        "owner": "tests::remove_evicts_entry",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/font_bytes_store.rs",
+        "line": 190,
+        "node": "identifier",
+        "owner": "tests::clone_shares_state",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/font_bytes_store.rs",
+        "line": 219,
+        "node": "identifier",
+        "owner": "tests::font_source_admission_uses_font_class_and_is_atomic",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/lib.rs",
+        "line": 41,
+        "node": "identifier",
+        "owner": "",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 35,
+        "node": "identifier",
+        "owner": "",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 140,
+        "node": "type_identifier",
+        "owner": "ResourceStore",
+        "attributes": [
+          "#[derive(Clone)]"
+        ],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 151,
+        "node": "identifier",
+        "owner": "ResourceStore::new",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 160,
+        "node": "identifier",
+        "owner": "ResourceStore::new_with_resident_ledger",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 183,
+        "node": "type_identifier",
+        "owner": "ResourceStore::font_bytes",
+        "attributes": [],
+        "source_class": "default-eligible"
+      }
+    ],
+    "DedupIndex": [
+      {
+        "path": "crates/tze_hud_resource/src/dedup.rs",
+        "line": 63,
+        "node": "type_identifier",
+        "owner": "DedupIndex",
+        "attributes": [
+          "#[derive(Clone, Debug)]"
+        ],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/dedup.rs",
+        "line": 74,
+        "node": "type_identifier",
+        "owner": "DedupIndex",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/dedup.rs",
+        "line": 191,
+        "node": "type_identifier",
+        "owner": "DedupIndex",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/dedup.rs",
+        "line": 216,
+        "node": "identifier",
+        "owner": "tests::insert_and_contains",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/dedup.rs",
+        "line": 226,
+        "node": "identifier",
+        "owner": "tests::get_returns_record",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/dedup.rs",
+        "line": 237,
+        "node": "identifier",
+        "owner": "tests::insert_duplicate_returns_existing",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/dedup.rs",
+        "line": 248,
+        "node": "identifier",
+        "owner": "tests::total_decoded_bytes_sums_all_records",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/dedup.rs",
+        "line": 258,
+        "node": "identifier",
+        "owner": "tests::dedup_index_len",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/dedup.rs",
+        "line": 275,
+        "node": "identifier",
+        "owner": "tests::font_gc_releases_the_retained_source_copy_and_ledger_charge",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 34,
+        "node": "identifier",
+        "owner": "",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 131,
+        "node": "type_identifier",
+        "owner": "ResourceStore",
+        "attributes": [
+          "#[derive(Clone)]"
+        ],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 148,
+        "node": "identifier",
+        "owner": "ResourceStore::new",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 162,
+        "node": "identifier",
+        "owner": "ResourceStore::new_with_resident_ledger",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 175,
+        "node": "type_identifier",
+        "owner": "ResourceStore::dedup_index",
+        "attributes": [
+          "#[cfg(any(test, feature = \"test-support\"))]"
+        ],
+        "source_class": "fixture-feature"
+      }
+    ],
+    "last_heartbeat_ms": [
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/handshake.rs",
+        "line": 214,
+        "node": "field_identifier",
+        "owner": "handle_session_init",
+        "attributes": [
+          "#[allow(clippy::too_many_arguments)]"
+        ],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/handshake.rs",
+        "line": 418,
+        "node": "field_identifier",
+        "owner": "handle_session_resume",
+        "attributes": [
+          "#[allow(clippy::too_many_arguments)]"
+        ],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/mod.rs",
+        "line": 682,
+        "node": "field_identifier",
+        "owner": "StreamSession::on_client_message",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/mod.rs",
+        "line": 1235,
+        "node": "field_identifier",
+        "owner": "handle_heartbeat",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/stream_session.rs",
+        "line": 32,
+        "node": "field_identifier",
+        "owner": "StreamSession",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/tests/render_wake.rs",
+        "line": 16,
+        "node": "field_identifier",
+        "owner": "direct_handler_test_session",
+        "attributes": [],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/tests/safe_mode.rs",
+        "line": 404,
+        "node": "field_identifier",
+        "owner": "test_fifo_preserved_when_mutation_arrives_during_drain_window",
+        "attributes": [
+          "#[tokio::test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/tests/safe_mode.rs",
+        "line": 524,
+        "node": "field_identifier",
+        "owner": "test_freeze_retransmit_deduped_applied_exactly_once",
+        "attributes": [
+          "#[tokio::test]"
+        ],
+        "source_class": "test"
+      }
+    ],
+    "classify_server_payload": [
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/mod.rs",
+        "line": 88,
+        "node": "identifier",
+        "owner": "",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/tests/events.rs",
+        "line": 245,
+        "node": "identifier",
+        "owner": "test_degradation_notice_is_transactional",
+        "attributes": [
+          "#[test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/traffic.rs",
+        "line": 28,
+        "node": "identifier",
+        "owner": "classify_server_payload",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_protocol/tests/backpressure.rs",
+        "line": 12,
+        "node": "identifier",
+        "owner": "",
+        "attributes": [],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/tests/backpressure.rs",
+        "line": 24,
+        "node": "identifier",
+        "owner": "transactional_messages_never_dropped",
+        "attributes": [
+          "#[test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/tests/backpressure.rs",
+        "line": 38,
+        "node": "identifier",
+        "owner": "heartbeat_is_ephemeral_and_droppable",
+        "attributes": [
+          "#[test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/tests/backpressure.rs",
+        "line": 53,
+        "node": "identifier",
+        "owner": "state_stream_messages_are_coalesced_class",
+        "attributes": [
+          "#[test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/tests/backpressure.rs",
+        "line": 63,
+        "node": "identifier",
+        "owner": "transactional_not_droppable_different_from_ephemeral",
+        "attributes": [
+          "#[test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/tests/backpressure.rs",
+        "line": 64,
+        "node": "identifier",
+        "owner": "transactional_not_droppable_different_from_ephemeral",
+        "attributes": [
+          "#[test]"
+        ],
+        "source_class": "test"
+      }
+    ],
+    "classify_inbound_batch": [
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/freeze_queue.rs",
+        "line": 13,
+        "node": "identifier",
+        "owner": "",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/freeze_queue.rs",
+        "line": 86,
+        "node": "identifier",
+        "owner": "SessionFreezeQueue::enqueue",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/traffic.rs",
+        "line": 74,
+        "node": "identifier",
+        "owner": "classify_inbound_batch",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/traffic.rs",
+        "line": 170,
+        "node": "identifier",
+        "owner": "inbound_tests::lifecycle_accent_update_stays_state_stream",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/traffic.rs",
+        "line": 207,
+        "node": "identifier",
+        "owner": "inbound_tests::set_tile_root_with_inline_children_stays_state_stream",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/traffic.rs",
+        "line": 224,
+        "node": "identifier",
+        "owner": "inbound_tests::lifecycle_accent_alone_is_state_stream",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/traffic.rs",
+        "line": 242,
+        "node": "identifier",
+        "owner": "inbound_tests::unread_count_update_stays_state_stream",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/traffic.rs",
+        "line": 281,
+        "node": "identifier",
+        "owner": "inbound_tests::interaction_enabled_streaming_republish_stays_state_stream",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/traffic.rs",
+        "line": 300,
+        "node": "identifier",
+        "owner": "inbound_tests::composer_interaction_alone_is_state_stream",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/traffic.rs",
+        "line": 312,
+        "node": "identifier",
+        "owner": "inbound_tests::unread_count_alone_is_state_stream",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/traffic.rs",
+        "line": 328,
+        "node": "identifier",
+        "owner": "inbound_tests::add_node_still_dominates_as_transactional",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      }
+    ],
+    "abort_all_uploads": [
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/mod.rs",
+        "line": 518,
+        "node": "field_identifier",
+        "owner": "HudSessionImpl::session",
+        "attributes": [
+          "#[tonic::async_trait]"
+        ],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 454,
+        "node": "identifier",
+        "owner": "ResourceStore::abort_all_uploads",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 1052,
+        "node": "field_identifier",
+        "owner": "tests::abort_all_uploads_clears_agent",
+        "attributes": [
+          "#[tokio::test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      }
+    ],
+    "abort_upload": [
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 446,
+        "node": "identifier",
+        "owner": "ResourceStore::abort_upload",
+        "attributes": [
+          "#[cfg(any(test, feature = \"test-support\"))]"
+        ],
+        "source_class": "fixture-feature"
+      },
+      {
+        "path": "crates/tze_hud_resource/src/upload.rs",
+        "line": 1023,
+        "node": "field_identifier",
+        "owner": "tests::abort_upload_removes_inflight",
+        "attributes": [
+          "#[tokio::test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_resource/tests/store_behavior.rs",
+        "line": 196,
+        "node": "field_identifier",
+        "owner": "upload_slot_cap_is_per_agent_and_freed_by_abort",
+        "attributes": [
+          "#[tokio::test]"
+        ],
+        "source_class": "test"
+      }
+    ],
+    "run_upload_worker": [
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/mod.rs",
+        "line": 89,
+        "node": "identifier",
+        "owner": "",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/mod.rs",
+        "line": 328,
+        "node": "identifier",
+        "owner": "HudSessionImpl::session",
+        "attributes": [
+          "#[tonic::async_trait]"
+        ],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/upload.rs",
+        "line": 128,
+        "node": "identifier",
+        "owner": "run_upload_worker",
+        "attributes": [],
+        "source_class": "default-eligible"
+      }
+    ],
+    "validate_timing_hints": [
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/mod.rs",
+        "line": 1079,
+        "node": "identifier",
+        "owner": "validate_timing_hints",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/mutations.rs",
+        "line": 28,
+        "node": "identifier",
+        "owner": "",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/mutations.rs",
+        "line": 627,
+        "node": "identifier",
+        "owner": "handle_mutation_batch",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/tests/timing.rs",
+        "line": 15,
+        "node": "identifier",
+        "owner": "test_timing_hints_too_old",
+        "attributes": [
+          "#[test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/tests/timing.rs",
+        "line": 36,
+        "node": "identifier",
+        "owner": "test_timing_hints_too_future",
+        "attributes": [
+          "#[test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/tests/timing.rs",
+        "line": 53,
+        "node": "identifier",
+        "owner": "test_timing_hints_expiry_before_present",
+        "attributes": [
+          "#[test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/tests/timing.rs",
+        "line": 71,
+        "node": "identifier",
+        "owner": "test_timing_hints_valid_future",
+        "attributes": [
+          "#[test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/tests/timing.rs",
+        "line": 85,
+        "node": "identifier",
+        "owner": "test_timing_hints_zero_bypasses_validation",
+        "attributes": [
+          "#[test]"
+        ],
+        "source_class": "test"
+      }
+    ],
+    "DedupWindow": [
+      {
+        "path": "crates/tze_hud_protocol/src/dedup.rs",
+        "line": 50,
+        "node": "type_identifier",
+        "owner": "DedupWindow",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/dedup.rs",
+        "line": 61,
+        "node": "type_identifier",
+        "owner": "DedupWindow",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/dedup.rs",
+        "line": 176,
+        "node": "identifier",
+        "owner": "tests::test_basic_insert_lookup",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/dedup.rs",
+        "line": 187,
+        "node": "identifier",
+        "owner": "tests::test_different_ids_do_not_collide",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/dedup.rs",
+        "line": 198,
+        "node": "identifier",
+        "owner": "tests::test_fifo_eviction_on_capacity",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/dedup.rs",
+        "line": 229,
+        "node": "identifier",
+        "owner": "tests::test_ttl_expiry",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/dedup.rs",
+        "line": 241,
+        "node": "identifier",
+        "owner": "tests::test_re_insert_after_expiry_treated_as_new",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/dedup.rs",
+        "line": 263,
+        "node": "identifier",
+        "owner": "tests::test_created_ids_preserved",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/handshake.rs",
+        "line": 9,
+        "node": "identifier",
+        "owner": "",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/handshake.rs",
+        "line": 220,
+        "node": "identifier",
+        "owner": "handle_session_init",
+        "attributes": [
+          "#[allow(clippy::too_many_arguments)]"
+        ],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/handshake.rs",
+        "line": 424,
+        "node": "identifier",
+        "owner": "handle_session_resume",
+        "attributes": [
+          "#[allow(clippy::too_many_arguments)]"
+        ],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/mod.rs",
+        "line": 27,
+        "node": "identifier",
+        "owner": "",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/stream_session.rs",
+        "line": 10,
+        "node": "identifier",
+        "owner": "",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/stream_session.rs",
+        "line": 61,
+        "node": "type_identifier",
+        "owner": "StreamSession",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/tests/render_wake.rs",
+        "line": 22,
+        "node": "identifier",
+        "owner": "direct_handler_test_session",
+        "attributes": [],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/tests/safe_mode.rs",
+        "line": 410,
+        "node": "identifier",
+        "owner": "test_fifo_preserved_when_mutation_arrives_during_drain_window",
+        "attributes": [
+          "#[tokio::test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/tests/safe_mode.rs",
+        "line": 530,
+        "node": "identifier",
+        "owner": "test_freeze_retransmit_deduped_applied_exactly_once",
+        "attributes": [
+          "#[tokio::test]"
+        ],
+        "source_class": "test"
+      }
+    ],
+    "budget_warning": [
+      {
+        "path": "crates/tze_hud_scene/src/graph/tests.rs",
+        "line": 3026,
+        "node": "identifier",
+        "owner": "test_budget_tile_count_within_limit",
+        "attributes": [
+          "#[test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_scene/src/graph/tests.rs",
+        "line": 3132,
+        "node": "identifier",
+        "owner": "test_budget_soft_limit_warning",
+        "attributes": [
+          "#[test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_scene/src/mutation.rs",
+        "line": 311,
+        "node": "field_identifier",
+        "owner": "MutationResult",
+        "attributes": [
+          "#[derive(Clone, Debug)]"
+        ],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_scene/src/mutation.rs",
+        "line": 329,
+        "node": "field_identifier",
+        "owner": "MutationResult::rejected_with_error",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_scene/src/mutation.rs",
+        "line": 457,
+        "node": "identifier",
+        "owner": "SceneGraph::apply_batch",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_scene/src/mutation.rs",
+        "line": 467,
+        "node": "identifier",
+        "owner": "SceneGraph::apply_batch",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_scene/src/mutation.rs",
+        "line": 545,
+        "node": "identifier",
+        "owner": "SceneGraph::apply_batch",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_scene/src/mutation.rs",
+        "line": 562,
+        "node": "identifier",
+        "owner": "SceneGraph::apply_batch",
+        "attributes": [],
+        "source_class": "default-eligible"
+      }
+    ],
+    "is_lease_budget_warning": [
+      {
+        "path": "crates/tze_hud_scene/src/graph/budget.rs",
+        "line": 268,
+        "node": "identifier",
+        "owner": "SceneGraph::is_lease_budget_warning",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_scene/src/graph/tests.rs",
+        "line": 3114,
+        "node": "identifier",
+        "owner": "test_budget_soft_limit_warning",
+        "attributes": [
+          "#[test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_scene/src/mutation.rs",
+        "line": 466,
+        "node": "field_identifier",
+        "owner": "SceneGraph::apply_batch",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_scene/src/mutation.rs",
+        "line": 544,
+        "node": "field_identifier",
+        "owner": "SceneGraph::apply_batch",
+        "attributes": [],
+        "source_class": "default-eligible"
+      }
+    ],
+    "to_json": [
+      {
+        "path": "crates/tze_hud_mcp/src/error.rs",
+        "line": 91,
+        "node": "identifier",
+        "owner": "McpError::to_json",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_mcp/src/error.rs",
+        "line": 150,
+        "node": "field_identifier",
+        "owner": "tests::tool_error_json_is_code_and_hint",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_mcp/src/server.rs",
+        "line": 102,
+        "node": "identifier",
+        "owner": "tool_error_result",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_protocol/src/session_server/mod.rs",
+        "line": 280,
+        "node": "field_identifier",
+        "owner": "HudSessionImpl::session",
+        "attributes": [
+          "#[tonic::async_trait]"
+        ],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_runtime/src/firewall.rs",
+        "line": 89,
+        "node": "identifier",
+        "owner": "TailnetInbound::to_json",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_runtime/src/firewall.rs",
+        "line": 686,
+        "node": "identifier",
+        "owner": "tests::json_shape_and_probe_caching",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_runtime/src/firewall.rs",
+        "line": 689,
+        "node": "field_identifier",
+        "owner": "tests::json_shape_and_probe_caching",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_runtime/src/operator/status.rs",
+        "line": 62,
+        "node": "identifier",
+        "owner": "HotkeyStatus::to_json",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_runtime/src/operator/status.rs",
+        "line": 346,
+        "node": "identifier",
+        "owner": "StatusSource::render",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_runtime/src/operator/status.rs",
+        "line": 349,
+        "node": "identifier",
+        "owner": "StatusSource::render",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_runtime/src/operator/status.rs",
+        "line": 387,
+        "node": "identifier",
+        "owner": "tests::hotkey_status_json_and_banner",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_runtime/src/operator/status.rs",
+        "line": 391,
+        "node": "identifier",
+        "owner": "tests::hotkey_status_json_and_banner",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_runtime/src/operator/status.rs",
+        "line": 394,
+        "node": "identifier",
+        "owner": "tests::hotkey_status_json_and_banner",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_runtime/src/operator/status.rs",
+        "line": 399,
+        "node": "identifier",
+        "owner": "tests::hotkey_status_json_and_banner",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_runtime/src/shell/system_card.rs",
+        "line": 163,
+        "node": "field_identifier",
+        "owner": "tests::system_card_absent_from_snapshot_surfaces_and_publish",
+        "attributes": [
+          "#[tokio::test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_scene/src/graph/tests.rs",
+        "line": 596,
+        "node": "field_identifier",
+        "owner": "snapshot_portal_surface_with_nulled_part_node_round_trips",
+        "attributes": [
+          "#[test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_scene/src/graph/tests.rs",
+        "line": 676,
+        "node": "field_identifier",
+        "owner": "snapshot_without_portal_surfaces_omits_field_and_verifies_like_old_format",
+        "attributes": [
+          "#[test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_scene/src/types.rs",
+        "line": 2838,
+        "node": "identifier",
+        "owner": "SceneGraphSnapshot::to_json",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_scene/tests/session_lifecycle.rs",
+        "line": 90,
+        "node": "identifier",
+        "owner": "TransitionLog::to_json",
+        "attributes": [],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_scene/tests/session_lifecycle.rs",
+        "line": 352,
+        "node": "field_identifier",
+        "owner": "test_full_session_lifecycle_state_transitions",
+        "attributes": [
+          "#[test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_scene/tests/snapshot.rs",
+        "line": 58,
+        "node": "field_identifier",
+        "owner": "snapshot_determinism_simple_scene",
+        "attributes": [
+          "#[test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_scene/tests/snapshot.rs",
+        "line": 59,
+        "node": "field_identifier",
+        "owner": "snapshot_determinism_simple_scene",
+        "attributes": [
+          "#[test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_scene/tests/snapshot.rs",
+        "line": 122,
+        "node": "field_identifier",
+        "owner": "snapshot_roundtrip_empty_scene",
+        "attributes": [
+          "#[test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_scene/tests/snapshot.rs",
+        "line": 125,
+        "node": "field_identifier",
+        "owner": "snapshot_roundtrip_empty_scene",
+        "attributes": [
+          "#[test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_scene/tests/snapshot.rs",
+        "line": 141,
+        "node": "field_identifier",
+        "owner": "snapshot_roundtrip_simple_scene",
+        "attributes": [
+          "#[test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_scene/tests/snapshot.rs",
+        "line": 144,
+        "node": "field_identifier",
+        "owner": "snapshot_roundtrip_simple_scene",
+        "attributes": [
+          "#[test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_scene/tests/snapshot.rs",
+        "line": 224,
+        "node": "field_identifier",
+        "owner": "all_test_scenes_produce_valid_snapshots",
+        "attributes": [
+          "#[test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_scene/tests/snapshot.rs",
+        "line": 226,
+        "node": "field_identifier",
+        "owner": "all_test_scenes_produce_valid_snapshots",
+        "attributes": [
+          "#[test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_scene/tests/snapshot.rs",
+        "line": 234,
+        "node": "field_identifier",
+        "owner": "all_test_scenes_produce_valid_snapshots",
+        "attributes": [
+          "#[test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_scene/tests/snapshot.rs",
+        "line": 262,
+        "node": "field_identifier",
+        "owner": "snapshot_includes_zone_publications_not_effective_geometry",
+        "attributes": [
+          "#[test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_scene/tests/snapshot.rs",
+        "line": 317,
+        "node": "field_identifier",
+        "owner": "snapshot_references_resource_ids_not_blob_data",
+        "attributes": [
+          "#[test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_scene/tests/snapshot.rs",
+        "line": 495,
+        "node": "identifier",
+        "owner": "snapshot_zone_conflict_deterministic",
+        "attributes": [
+          "#[test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_scene/tests/snapshot.rs",
+        "line": 496,
+        "node": "identifier",
+        "owner": "snapshot_zone_conflict_deterministic",
+        "attributes": [
+          "#[test]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_scene/tests/snapshot.rs",
+        "line": 535,
+        "node": "identifier",
+        "owner": "proptest_suite",
+        "attributes": [],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_scene/tests/snapshot.rs",
+        "line": 535,
+        "node": "identifier",
+        "owner": "proptest_suite",
+        "attributes": [],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_scene/tests/snapshot.rs",
+        "line": 545,
+        "node": "identifier",
+        "owner": "proptest_suite",
+        "attributes": [],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_scene/tests/snapshot.rs",
+        "line": 547,
+        "node": "identifier",
+        "owner": "proptest_suite",
+        "attributes": [],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_telemetry/src/record.rs",
+        "line": 583,
+        "node": "identifier",
+        "owner": "SessionSummary::to_json",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_telemetry/src/record.rs",
+        "line": 616,
+        "node": "field_identifier",
+        "owner": "tests::test_session_summary_serialization",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_telemetry/src/record.rs",
+        "line": 653,
+        "node": "field_identifier",
+        "owner": "tests::test_session_summary_has_three_split_latency_buckets",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_telemetry/src/record.rs",
+        "line": 732,
+        "node": "field_identifier",
+        "owner": "tests::test_session_summary_has_input_to_next_present",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_telemetry/src/record.rs",
+        "line": 858,
+        "node": "field_identifier",
+        "owner": "tests::test_session_summary_invariant_violations_zero_initialized",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_telemetry/src/record.rs",
+        "line": 1072,
+        "node": "field_identifier",
+        "owner": "tests::session_summary_scene_lock_misses_serializes",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      },
+      {
+        "path": "crates/tze_hud_telemetry/src/validation.rs",
+        "line": 402,
+        "node": "identifier",
+        "owner": "ValidationReport::to_json",
+        "attributes": [],
+        "source_class": "default-eligible"
+      },
+      {
+        "path": "crates/tze_hud_telemetry/src/validation.rs",
+        "line": 611,
+        "node": "field_identifier",
+        "owner": "tests::report_serializes_to_json",
+        "attributes": [
+          "#[test]",
+          "#[cfg(test)]"
+        ],
+        "source_class": "test"
+      }
+    ]
+  },
+  "owner_qualification": {
+    "ResourceRecord.resource_type": "LIVE reader crates/tze_hud_resource/src/upload.rs:241 in inline dedup type admission; retain field and constructor parameter. DedupIndex.remove:175 is an additional fixture-only reader, not its sole owner.",
+    "ResourceRecord.width_px/height_px": "Construction-only fields in dedup.rs:39-41,48-49; no workspace reader. DecodedMeta and live proto/image dimensions are distinct retained types.",
+    "ResourceRecord::new": "Production upload.rs:531; fixture helper make_record at dedup.rs:202-213 is not a test definition and retains the live resource_type parameter. Other fixture constructor call belongs to the proposed deleted font-GC definition.",
+    "DedupIndex::new_with_resident_ledger": "Production ResourceStore constructor upload.rs:162 and only font-GC fixture:275. Removing duplicated GC-only handles changes production/shared constructors, no retained test definition.",
+    "protocol safe_mode fixtures": "Two mechanical StreamSession literals; preserve their assertions. Runtime MutationTrafficClass is a distinct protected T7 owner, never this outbound classifier."
+  }
+}
