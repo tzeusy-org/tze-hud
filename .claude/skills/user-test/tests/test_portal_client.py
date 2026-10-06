@@ -411,6 +411,12 @@ def test_hook_unavailable_malformed_privacy_and_state_failures(tmp_path):
             assert final not in json.dumps(h.records)
         h.prompt = str(uuid.uuid4())
         h.event("UserPromptSubmit")
+        h.event("Stop", last_assistant_message=None)
+        assert "content" not in h.publications()[-1]
+        h.event("Stop", last_assistant_message="status-only")
+        assert h.publications()[-1].get("content") == "status-only"
+        h.prompt = str(uuid.uuid4())
+        h.event("UserPromptSubmit")
         h.event("Stop", last_assistant_message="界" * 4000)
         truncated = h.publications()[-1]["content"]
         assert len(truncated.encode()) <= 8192 and truncated.endswith("[truncated]")

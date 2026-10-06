@@ -320,7 +320,8 @@ def delivery(event, deadline):
         prior = state["tools"].get(event["key"], 0)
         if prior >= event["stage"] or (event["key"] not in state["tools"] and len(state["tools"]) >= 256):
             return
-    final_hash = digest(event.get("content") or "status-only")
+    # Preserve the distinction between absent text and any literal reply.
+    final_hash = digest(json.dumps(event.get("content"), ensure_ascii=False))
     if kind == "Stop" and state["finals"].get(event["prompt"]) == final_hash:
         return
 
