@@ -1,0 +1,66 @@
+{
+  "cwd": "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.3.10",
+  "context": {
+    "command": [
+      "python3",
+      "/home/orca/.dotfiles/ai-bootstrap/skills/personal/beads-orchestration/subskills/beads-worker/scripts/assert_worker_context.py",
+      "--worktree-path",
+      "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.3.10",
+      "--repo-root",
+      "/home/orca/orca/projects/tze-hud",
+      "--issue-id",
+      "hud-bstmy.3.10",
+      "--current-path",
+      "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.3.10"
+    ],
+    "exit": 0,
+    "stdout": "{\"status\":\"ok\",\"issue_id\":\"hud-bstmy.3.10\",\"expected_branch\":\"agent/hud-bstmy.3.10\",\"branch\":\"agent/hud-bstmy.3.10\",\"current_path\":\"/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.3.10\",\"worktree_path\":\"/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.3.10\",\"repo_root\":\"/home/orca/orca/projects/tze-hud\",\"reasons\":[]}",
+    "stderr": ""
+  },
+  "head": {
+    "command": [
+      "git",
+      "rev-parse",
+      "HEAD"
+    ],
+    "exit": 0,
+    "stdout": "398c6f91de6e0d4883b10a41b6c63044e6192730",
+    "stderr": ""
+  },
+  "branch": {
+    "command": [
+      "git",
+      "branch",
+      "--show-current"
+    ],
+    "exit": 0,
+    "stdout": "agent/hud-bstmy.3.10",
+    "stderr": ""
+  },
+  "git_common": {
+    "command": [
+      "git",
+      "rev-parse",
+      "--git-common-dir"
+    ],
+    "exit": 0,
+    "stdout": "/home/orca/orca/projects/tze-hud/.git",
+    "stderr": ""
+  },
+  "tracked_status": {
+    "command": [
+      "git",
+      "status",
+      "--porcelain=v1",
+      "--untracked-files=no"
+    ],
+    "exit": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  "first_packet_fields_equal": {
+    "description": true,
+    "design": true,
+    "acceptance_criteria": true
+  }
+}

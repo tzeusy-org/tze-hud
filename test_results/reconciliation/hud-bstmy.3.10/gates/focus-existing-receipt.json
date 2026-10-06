@@ -1,0 +1,45 @@
+{
+  "name": "focus-existing",
+  "cwd": "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.3.10",
+  "head_before": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261",
+  "command": [
+    "cargo",
+    "test",
+    "-p",
+    "tze_hud_runtime",
+    "--lib",
+    "focus_cleared_when_lease_revoked"
+  ],
+  "deadline_seconds": 600,
+  "environment": {
+    "CARGO_TARGET_DIR": "/home/orca/orca/projects/tze-hud/target",
+    "CARGO_BUILD_JOBS": "1",
+    "PROTOC": "/usr/bin/protoc",
+    "VK_ICD_FILENAMES": "/usr/share/vulkan/icd.d/lvp_icd.json",
+    "HEADLESS_FORCE_SOFTWARE": "1",
+    "TZE_HUD_REQUIRE_GPU": "1"
+  },
+  "started_unix": 1791274924.5614185,
+  "tracked_before": "",
+  "head_after": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261",
+  "exit_code": 0,
+  "elapsed_seconds": 51.001,
+  "log": "test_results/reconciliation/hud-bstmy.3.10/gates/focus-existing.log",
+  "log_sha256": "a30c8f8d2c5d3bcafd38f896549fa515df5ef87a969d717c200f394a0c95e300",
+  "tracked_after": "",
+  "rust_summaries": [
+    {
+      "line": 18,
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0
+    }
+  ],
+  "rust_totals": {
+    "passed": 1,
+    "failed": 0,
+    "ignored": 0
+  },
+  "failed_lines": [],
+  "skip_lines": []
+}

@@ -1,0 +1,16 @@
+{
+  "command": [
+    "just",
+    "ci"
+  ],
+  "head_before": "a5312842111daa6bbdd7c27db9a27f450a32a082",
+  "head_after": "a5312842111daa6bbdd7c27db9a27f450a32a082",
+  "tracked_clean": true,
+  "started_utc": "2026-10-06T05:21:21.112940+00:00",
+  "exit": 0,
+  "seconds": 669.948,
+  "log": "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-oh692/.handoff/hud-oh692/full-ci-review.log",
+  "log_sha256": "b7e08e38dc2bc084038aa2ea5ff93388b5ef1c64b3874394e95a15ca3bc967a0",
+  "normal_flags_no_wrapper": true,
+  "exclusive_target_coordinator_attested": true
+}

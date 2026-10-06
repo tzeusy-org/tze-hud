@@ -1,0 +1,9 @@
+{
+  "source": "git show origin/agent/hud-bstmy.1.15:test_results/reconciliation/hud-bstmy.1.15/discovered-follow-ups.json",
+  "head": "95e28ac353edcad8c66a207cf24a2ca6b5efa441",
+  "pr": 1371,
+  "state_at_read": "OPEN",
+  "packet_sha256": "f276ff5e91f65c3234f92eca29c6708d897aa113b93f13f17b0493001eaea3c9",
+  "execution_source": "398c6f91de6e0d4883b10a41b6c63044e6192730",
+  "claim": "Final delivered proposal snapshot only; not a materialized or implemented repair."
+}

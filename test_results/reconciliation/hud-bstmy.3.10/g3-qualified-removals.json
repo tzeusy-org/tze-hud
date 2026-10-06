@@ -1,0 +1,70 @@
+{
+  "audited_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261",
+  "count": 13,
+  "owned_definitions": [
+    {
+      "qualified": "tze_hud_config::tokens::parse_token_value",
+      "compiled_definition_present": false
+    },
+    {
+      "qualified": "tze_hud_config::zones::custom_zone_type_names",
+      "compiled_definition_present": false
+    },
+    {
+      "qualified": "tze_hud_input::events::HitTestResult::requires_agent_dispatch",
+      "compiled_definition_present": false
+    },
+    {
+      "qualified": "tze_hud_input::events::LocalStateUpdate::has_changes",
+      "compiled_definition_present": false
+    },
+    {
+      "qualified": "tze_hud_input::events::LocalStateUpdate::with_focused",
+      "compiled_definition_present": false
+    },
+    {
+      "qualified": "tze_hud_input::events::SceneLocalPatch::push_scroll",
+      "compiled_definition_present": false
+    },
+    {
+      "qualified": "tze_hud_input::events::SceneLocalPatch::update_node",
+      "compiled_definition_present": false
+    },
+    {
+      "qualified": "tze_hud_input::events::ScrollOffsetUpdate::from_agent",
+      "compiled_definition_present": false
+    },
+    {
+      "qualified": "tze_hud_input::events::ScrollOffsetUpdate::from_user",
+      "compiled_definition_present": false
+    },
+    {
+      "qualified": "tze_hud_runtime::degradation::DegradationLevel::is_normal",
+      "compiled_definition_present": false
+    },
+    {
+      "qualified": "tze_hud_runtime::windowed::input_dispatch::winit_logical_to_str",
+      "compiled_definition_present": false
+    },
+    {
+      "qualified": "tze_hud_telemetry::collector::TelemetryCollector::emit_json",
+      "compiled_definition_present": false
+    },
+    {
+      "qualified": "tze_hud_telemetry::collector::TelemetryCollector::summary_mut",
+      "compiled_definition_present": false
+    }
+  ],
+  "same_name_retained_owners": [],
+  "eight_removed_test_names": [
+    "winit_logical_to_str_character",
+    "winit_logical_to_str_dead",
+    "test_parse_token_value_color",
+    "test_parse_token_value_numeric",
+    "test_parse_token_value_font",
+    "test_parse_token_value_literal",
+    "hit_test_result_requires_dispatch",
+    "scene_local_patch_update_node"
+  ],
+  "preserved_scenario": "scene_local_patch_empty_by_default remains events.rs:223; independent latency vectors/guards preserved, not eight behavior replacements"
+}

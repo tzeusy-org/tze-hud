@@ -1,0 +1,25 @@
+{
+  "name": "full-ci",
+  "command": [
+    "just",
+    "ci"
+  ],
+  "cwd": "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.3.8",
+  "head": "2e6f7f4c1247401145ce51d3a6f4f279759022fa",
+  "source_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "started_unix": 1791266574.780975,
+  "environment": {
+    "CARGO_TARGET_DIR": "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target",
+    "CARGO_BUILD_JOBS": "1",
+    "PROTOC": "/usr/bin/protoc",
+    "VK_ICD_FILENAMES": "/usr/share/vulkan/icd.d/lvp_icd.json",
+    "HEADLESS_FORCE_SOFTWARE": "1",
+    "TZE_HUD_REQUIRE_GPU": "1"
+  },
+  "exit_code": 0,
+  "elapsed_seconds": 496.038,
+  "log": "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.3.8/.handoff/hud-bstmy.3.8/full-ci.log",
+  "log_sha256": "090669c0323c7d1c5b4c2b76962ff6f38ae9a2deeda7eae674dda3fef879c46f",
+  "finished_head": "2e6f7f4c1247401145ce51d3a6f4f279759022fa",
+  "finished_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+}

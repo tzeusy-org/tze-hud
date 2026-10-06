@@ -1,0 +1,504 @@
+{
+  "hud-bstmy.3": {
+    "id": "hud-bstmy.3",
+    "title": "T8.1b: Dead code in runtime, compositor, config, input, telemetry and files",
+    "description": "Delete production code with no production caller in tze_hud_runtime, tze_hud_compositor, tze_hud_config, tze_hud_input, tze_hud_telemetry, plus dead files, scripts and CHANGELOG.md.\n\nLine refs are at windows-release-pipeline@44d355ef (same content as main@1eb8f7cb); re-grep symbols before editing. The planning survey is not persisted; this bead is self-contained.",
+    "design": "Same narrow-then-delete method as T8.1a. Windows cfg code (runtime threads.rs, compositor adapter.rs) cannot be checked from Linux; check it by hand.",
+    "acceptance_criteria": null,
+    "notes": null,
+    "status": "open",
+    "external_ref": null,
+    "labels": [
+      "complexity:epic",
+      "post-reset",
+      "t8",
+      "t8-dead-code"
+    ],
+    "dependencies": [
+      {
+        "id": "hud-bstmy",
+        "dependency_type": "parent-child",
+        "status": "open"
+      }
+    ]
+  },
+  "hud-bstmy.3.1": {
+    "id": "hud-bstmy.3.1",
+    "title": "Delete runtime dead plumbing (font_loader, channel zoo, pipeline stages, thread helpers)",
+    "description": "Goal: Delete runtime modules and helpers with no production caller and cut lib.rs re-exports to what app, examples, tests and T7 use.\n\nNon-goals: Portal-only names (keep public until T7); gpu_lock.rs (T6 hud-i2e10.6).\n\nGoverning spec: docs/scope.md T8 row (delete code without a current user; behavior tests tied to docs/invariants.md; resource tests; llvmpipe recipe; strip pre-reset refs) and 'Working rules' (prefer deleting over generalizing; tests guard behavior a user would notice, not internal structure); docs/vision.md; docs/invariants.md; CLAUDE.md Rules; AGENTS.md (just recipes).\n\nT7 boundary: do not edit crates/tze_hud_projection/**, crates/tze_hud_runtime/src/portal_projection_driver.rs, crates/tze_hud_runtime/src/windowed/portal.rs, crates/tze_hud_input/src/{composer_draft,portal_resize}.rs, crates/tze_hud_config/src/portal_tokens.rs, crates/tze_hud_mcp/src/portal_op.rs or tests/integration/text_stream_portal_*.rs; keep every pub item those files import until T7 (epic hud-lirh2) lands.\n\nLine refs are at windows-release-pipeline@44d355ef (same content as main@1eb8f7cb); re-grep symbols before editing. The planning survey is not persisted; this bead is self-contained.",
+    "design": "Files:\n- crates/tze_hud_runtime/src/font_loader.rs (256, delete)\n- channels.rs: keep ~80 lines (frame_ready + InputEvent) of 830\n- pipeline.rs: delete stage1..8_*, run_frame, run_scene_frame (:221-560), TileBoundsEntry, 9 of 13 budget consts; keep HitTestSnapshot, slim FramePipeline, STAGE3/4/5 and INPUT_TO_NEXT_PRESENT (text_stream_portal tests use them)\n- threads.rs: delete spawn_telemetry_thread :314, graceful_shutdown :340, ShutdownConfig :49, ThreadRole :241, CompositorThreadHandle :254, elevate_macos :195\n- window.rs:167-205 check_overlay_support, OverlaySupport, FallbackReason; widget_startup.rs collect_tab_name_to_id\n- tests/media_ingress_proptest.proptest-regressions (delete); Cargo.toml dev-deps blake3, proptest\n- lib.rs:27-195 (~150 re-exports, ~25 used outside the crate)\n\nEvidence:\nrustc narrowing flags 89 items (~1,242 lines). ResourceStore::font_bytes caller is font_loader.rs:143 \u2014 check the resource dead-code bead's keep-list stays consistent.\n\nApproach:\nCut re-exports, flip modules to pub(crate), compile, delete what rustc flags, check cfg(windows) code in threads.rs by hand.\n\nTests:\nDelete channels (565-830), pipeline stage (587-964), threads and font_loader tests. Keep HitTestSnapshot tests and all invariants.md runtime tests.\n\nExpected delta: about -2,350\n\nEvery test named in docs/invariants.md is kept, or moved/renamed with docs/invariants.md updated in the same PR. Local builds on this host need `PROTOC=$HOME/.local/protoc/bin/protoc` (/usr/bin/protoc 3.12 fails on types.proto).",
+    "acceptance_criteria": "1. `cargo fmt --all --check` is clean.\n2. `cargo clippy --workspace --all-targets -- -D warnings` is clean.\n3. `cargo test -p tze_hud_runtime -p tze_hud_app` passes (quiet).\n4. `cargo test -p integration --tests` passes.\n5. `cargo check -p tze_hud_runtime --target x86_64-pc-windows-msvc` is not runnable here; instead list every cfg(windows) item touched in the PR and confirm windows.yml CI is green.\n6. Deletion check: `git grep -nE 'font_loader|spawn_telemetry_thread|graceful_shutdown|check_overlay_support|run_scene_frame' -- crates app examples tests` prints nothing (no remaining references).\n7. Every test named in docs/invariants.md still exists (grep each name) or docs/invariants.md was updated in the same PR.\n8. `just ci` is green once before handoff.",
+    "notes": "[beads-heartbeat]\nowner=coordinator:coord-20261003b\nlast_heartbeat_at=2026-10-03T08:56:30Z\nPR #1272 opened",
+    "status": "closed",
+    "external_ref": "gh-pr:1272",
+    "labels": [
+      "complexity:medium",
+      "post-reset",
+      "pr-review",
+      "t8",
+      "t8-dead-code"
+    ],
+    "dependencies": [
+      {
+        "id": "hud-bstmy.3",
+        "dependency_type": "parent-child",
+        "status": "open"
+      },
+      {
+        "id": "hud-d7hng",
+        "dependency_type": "blocks",
+        "status": "closed"
+      }
+    ]
+  },
+  "hud-bstmy.3.2": {
+    "id": "hud-bstmy.3.2",
+    "title": "Remove write-only config hot reload; one config->RuntimeContext builder",
+    "description": "Goal: Delete SIGHUP / RuntimeService.ReloadConfig hot reload (no reader, no client, no SIGHUP on Windows) and collapse the two duplicate config->RuntimeContext builders into one.\n\nNon-goals: Changing startup config validation (app main.rs:270 keeps a validate_config).\n\nGoverning spec: docs/scope.md T8 row (delete code without a current user; behavior tests tied to docs/invariants.md; resource tests; llvmpipe recipe; strip pre-reset refs) and 'Working rules' (prefer deleting over generalizing; tests guard behavior a user would notice, not internal structure); docs/vision.md; docs/invariants.md; CLAUDE.md Rules; AGENTS.md (just recipes).\n\nT7 boundary: do not edit crates/tze_hud_projection/**, crates/tze_hud_runtime/src/portal_projection_driver.rs, crates/tze_hud_runtime/src/windowed/portal.rs, crates/tze_hud_input/src/{composer_draft,portal_resize}.rs, crates/tze_hud_config/src/portal_tokens.rs, crates/tze_hud_mcp/src/portal_op.rs or tests/integration/text_stream_portal_*.rs; keep every pub item those files import until T7 (epic hud-lirh2) lands.\n\nLine refs are at windows-release-pipeline@44d355ef (same content as main@1eb8f7cb); re-grep symbols before editing. The planning survey is not persisted; this bead is self-contained.",
+    "design": "Files:\n- crates/tze_hud_config/src/reload.rs (keep `validate_config(toml)`; delete the rest), config lib.rs:92-93, config tests.rs:1020-1072\n- crates/tze_hud_runtime/src/reload_triggers.rs (443, delete); runtime_context.rs:170-325 (hot, from_config_with_hot, reload_hot_config, hot_config); headless.rs:47, 803-840, 137-228 + tests :1876-1990; windowed/network.rs:8,15,33-120,88,239-272 + tests :770-900\n- crates/tze_hud_protocol/proto/session.proto:821-840 (RuntimeService)\n- app/tze_hud_app/src/main.rs:76, 270\n\nEvidence:\nHotReloadableConfig {} is empty (reload.rs:142,181); FieldClassification has only Frozen (:52-60); hot_config() has 0 callers; nothing calls RuntimeServiceClient; network.rs:88 calls reload_config only to discard the result. Both runtimes parse/validate/freeze/fallback identically (network.rs:60-95 vs headless.rs:154-228).\n\nApproach:\n1. Delete the reload path and RuntimeService (reserve nothing: it is a service, not a field; remove from api.md if mentioned).\n2. Add RuntimeContext::from_toml(Option<&str>) and call it from both runtimes; keep one test set.\n3. Rebase on hud-i2e10.1/.2, which rewrite network.rs and runtime_context.rs.\n\nTests:\nDelete reload.rs (10), config (2), reload_triggers (6) tests and the duplicate builder tests; keep app startup validation tests.\n\nExpected delta: about -1,250\n\nEvery test named in docs/invariants.md is kept, or moved/renamed with docs/invariants.md updated in the same PR. Local builds on this host need `PROTOC=$HOME/.local/protoc/bin/protoc` (/usr/bin/protoc 3.12 fails on types.proto).\n\n[decision] RuntimeService has no client and is not in api.md: delete (light-confirm in PR).",
+    "acceptance_criteria": "1. `cargo fmt --all --check` is clean.\n2. `cargo clippy --workspace --all-targets -- -D warnings` is clean.\n3. `cargo test -p tze_hud_config -p tze_hud_runtime -p tze_hud_protocol -p tze_hud_app` passes (quiet).\n4. `cargo test -p integration --tests` passes.\n5. Deletion check: `git grep -nE 'reload_hot_config|HotReloadableConfig|RuntimeService|reload_triggers|SIGHUP' -- crates app examples tests` prints nothing (no remaining references).\n6. Every test named in docs/invariants.md still exists (grep each name) or docs/invariants.md was updated in the same PR.\n7. `just ci` is green once before handoff.",
+    "notes": "[beads-heartbeat]\nowner=coordinator:coord-20261003b\nlast_heartbeat_at=2026-10-03T10:02:08Z\nPR #1280 opened",
+    "status": "closed",
+    "external_ref": "gh-pr:1280",
+    "labels": [
+      "complexity:medium",
+      "post-reset",
+      "pr-review",
+      "t8",
+      "t8-dead-code"
+    ],
+    "dependencies": [
+      {
+        "id": "hud-bstmy.3",
+        "dependency_type": "parent-child",
+        "status": "open"
+      },
+      {
+        "id": "hud-d7g6c",
+        "dependency_type": "blocks",
+        "status": "closed"
+      },
+      {
+        "id": "hud-i2e10.1",
+        "dependency_type": "blocks",
+        "status": "closed"
+      },
+      {
+        "id": "hud-i2e10.2",
+        "dependency_type": "blocks",
+        "status": "closed"
+      }
+    ]
+  },
+  "hud-bstmy.3.3": {
+    "id": "hud-bstmy.3.3",
+    "title": "Delete dead test dirs, orphan files, tracked bytecode and CHANGELOG.md",
+    "description": "Goal: Remove files nothing reads, an orphan source file that never compiles, and the stale CHANGELOG.\n\nNon-goals: Docs under docs/ other than references to removed files.\n\nGoverning spec: docs/scope.md T8 row (delete code without a current user; behavior tests tied to docs/invariants.md; resource tests; llvmpipe recipe; strip pre-reset refs) and 'Working rules' (prefer deleting over generalizing; tests guard behavior a user would notice, not internal structure); docs/vision.md; docs/invariants.md; CLAUDE.md Rules; AGENTS.md (just recipes).\n\nT7 boundary: do not edit crates/tze_hud_projection/**, crates/tze_hud_runtime/src/portal_projection_driver.rs, crates/tze_hud_runtime/src/windowed/portal.rs, crates/tze_hud_input/src/{composer_draft,portal_resize}.rs, crates/tze_hud_config/src/portal_tokens.rs, crates/tze_hud_mcp/src/portal_op.rs or tests/integration/text_stream_portal_*.rs; keep every pub item those files import until T7 (epic hud-lirh2) lands.\n\nLine refs are at windows-release-pipeline@44d355ef (same content as main@1eb8f7cb); re-grep symbols before editing. The planning survey is not persisted; this bead is self-contained.",
+    "design": "Files:\n- tests/golden/, tests/v1_proof/ (.gitkeep only); tests/vertical_slice/mod.rs (placeholder, not a member); tests/scenes/*.json (no reader; scenes are built at test_scenes.rs:146-182); tests/user-test/gauge-5step-scenario.json\n- .claude/skills/user-test/scripts/__pycache__/*.pyc (+ `__pycache__/` in .gitignore)\n- crates/tze_hud_input/src/scene_local_patch.rs (370; no `mod` in lib.rs:42-109, duplicates events.rs:92-290; its 5 tests never ran)\n- scripts/mcp_reachability_check.py (0 refs)\n- CHANGELOG.md (998 lines, generated once at 32415fec, 135 pre-reset lines)\n\nEvidence:\nEach path has zero readers (grep). CHANGELOG is never regenerated; signed T6 releases carry provenance.\n\nApproach:\nDelete; fix any README/AGENTS.md/CI mention; add .gitignore entry.\n\nTests:\nNone run today.\n\nExpected delta: about -1,800\n\nEvery test named in docs/invariants.md is kept, or moved/renamed with docs/invariants.md updated in the same PR. Local builds on this host need `PROTOC=$HOME/.local/protoc/bin/protoc` (/usr/bin/protoc 3.12 fails on types.proto).\n\n[decision] Delete CHANGELOG.md (owner, 2026-10-03).",
+    "acceptance_criteria": "1. `cargo fmt --all --check` is clean.\n2. `cargo clippy --workspace --all-targets -- -D warnings` is clean.\n3. `cargo test -p tze_hud_input` passes (quiet).\n4. `git ls-files '*.pyc'` prints nothing.\n5. Deletion check: `git grep -nE 'CHANGELOG|scene_local_patch|mcp_reachability_check|v1_proof|tests/golden|gauge-5step' -- ':!docs/archive'` prints nothing (no remaining references).\n6. Every test named in docs/invariants.md still exists (grep each name) or docs/invariants.md was updated in the same PR.\n7. `just ci` is green once before handoff.",
+    "notes": "[beads-heartbeat]\nowner=coordinator:coord-20261003b\nlast_heartbeat_at=2026-10-03T06:19:06Z\nPR #1254 opened",
+    "status": "closed",
+    "external_ref": "gh-pr:1254",
+    "labels": [
+      "complexity:low",
+      "post-reset",
+      "pr-review",
+      "t8",
+      "t8-dead-code"
+    ],
+    "dependencies": [
+      {
+        "id": "hud-bstmy.3",
+        "dependency_type": "parent-child",
+        "status": "open"
+      },
+      {
+        "id": "hud-qhgo7",
+        "dependency_type": "blocks",
+        "status": "closed"
+      }
+    ]
+  },
+  "hud-bstmy.3.4": {
+    "id": "hud-bstmy.3.4",
+    "title": "Delete compositor dead API and the no-op `headless` feature",
+    "description": "Goal: Delete compositor items with no caller or only test callers and remove the `headless` feature that no cfg uses.\n\nNon-goals: Widget transitions (start_transition, transition_ms; separate decided bead); portal exports lib.rs:43-47.\n\nGoverning spec: docs/scope.md T8 row (delete code without a current user; behavior tests tied to docs/invariants.md; resource tests; llvmpipe recipe; strip pre-reset refs) and 'Working rules' (prefer deleting over generalizing; tests guard behavior a user would notice, not internal structure); docs/vision.md; docs/invariants.md; CLAUDE.md Rules; AGENTS.md (just recipes).\n\nT7 boundary: do not edit crates/tze_hud_projection/**, crates/tze_hud_runtime/src/portal_projection_driver.rs, crates/tze_hud_runtime/src/windowed/portal.rs, crates/tze_hud_input/src/{composer_draft,portal_resize}.rs, crates/tze_hud_config/src/portal_tokens.rs, crates/tze_hud_mcp/src/portal_op.rs or tests/integration/text_stream_portal_*.rs; keep every pub item those files import until T7 (epic hud-lirh2) lands.\n\nLine refs are at windows-release-pipeline@44d355ef (same content as main@1eb8f7cb); re-grep symbols before editing. The planning survey is not persisted; this bead is self-contained.",
+    "design": "Files:\n- crates/tze_hud_compositor/src/adapter.rs (245; select_gpu_adapter has no caller), lib.rs:5-21, 34\n- widget.rs:2656 mark_dirty, :3155 update_format, :3178 has_active_animations; markdown.rs:460 is_plain; text.rs:783 loaded_font_count; easing.rs:222 with_tau_ms; text.rs:2536-2618 from_zone_stream_text/from_zone_notification (test-only); hit_regions.rs:36-41 populate_drag_handle_hit_regions; vertical_flow.rs:120-260 VerticalFlowLayout/resolve_vertical_flow; surface.rs:930-970 pixel_at/assert_pixel_color (move to a test helper)\n- `headless` feature: compositor Cargo.toml:8-14, forwards in runtime Cargo.toml:9, tests/integration Cargo.toml:164, render_artifacts Cargo.toml:25\n\nEvidence:\n145 of 262 pub items have no non-test reference outside the crate; rustc narrowing flags 41 items (~637 lines). adapter.rs is macOS/Metal policy (non-goal); check its cfg(windows) bits by hand.\n\nApproach:\nDelete; rewrite affected tests to call the production path; narrow the 145 items to pub(crate) and delete what rustc flags.\n\nTests:\nDelete adapter's 7 tests and 2 resolve_vertical_flow_* tests.\n\nExpected delta: -700 to -1,000\n\nEvery test named in docs/invariants.md is kept, or moved/renamed with docs/invariants.md updated in the same PR. Local builds on this host need `PROTOC=$HOME/.local/protoc/bin/protoc` (/usr/bin/protoc 3.12 fails on types.proto).",
+    "acceptance_criteria": "1. `cargo fmt --all --check` is clean.\n2. `cargo clippy --workspace --all-targets -- -D warnings` is clean.\n3. `cargo test -p tze_hud_runtime` passes (quiet).\n4. Compositor tests pass via `just test-gpu` (or `just test` with HEADLESS_FORCE_SOFTWARE=1 if the llvmpipe-recipe bead has not landed); never bare `cargo test -p tze_hud_compositor`.\n5. `cargo test -p integration --tests` passes.\n6. Deletion check: `git grep -nE 'select_gpu_adapter|resolve_vertical_flow|populate_drag_handle_hit_regions\\b|features = \\[.*\"headless\"' -- crates tests examples` prints nothing (no remaining references).\n7. Every test named in docs/invariants.md still exists (grep each name) or docs/invariants.md was updated in the same PR.\n8. `just ci` is green once before handoff.",
+    "notes": "[beads-heartbeat]\nowner=coordinator:coord-20261003b\nlast_heartbeat_at=2026-10-03T10:13:05Z\nPR #1282 opened (partial: headless feature + verified dead items deleted; bulk pub narrowing not done)",
+    "status": "closed",
+    "external_ref": "gh-pr:1282",
+    "labels": [
+      "complexity:medium",
+      "post-reset",
+      "pr-review",
+      "t8",
+      "t8-dead-code"
+    ],
+    "dependencies": [
+      {
+        "id": "hud-bstmy.1.1",
+        "dependency_type": "blocks",
+        "status": "closed"
+      },
+      {
+        "id": "hud-bstmy.3",
+        "dependency_type": "parent-child",
+        "status": "open"
+      },
+      {
+        "id": "hud-km80p",
+        "dependency_type": "blocks",
+        "status": "closed"
+      }
+    ]
+  },
+  "hud-bstmy.3.5": {
+    "id": "hud-bstmy.3.5",
+    "title": "Delete orphan input envelope/accessor items and dead telemetry records",
+    "description": "Goal: Remove unused input items and leftover telemetry budget-ladder types; check and fix focus clearing on lease revoke/disconnect.\n\nNon-goals: Input batching/coalescing pipeline (decided bead in T8.2a); drag accessors that windowed/portal.rs uses.\n\nGoverning spec: docs/scope.md T8 row (delete code without a current user; behavior tests tied to docs/invariants.md; resource tests; llvmpipe recipe; strip pre-reset refs) and 'Working rules' (prefer deleting over generalizing; tests guard behavior a user would notice, not internal structure); docs/vision.md; docs/invariants.md; CLAUDE.md Rules; AGENTS.md (just recipes).\n\nT7 boundary: do not edit crates/tze_hud_projection/**, crates/tze_hud_runtime/src/portal_projection_driver.rs, crates/tze_hud_runtime/src/windowed/portal.rs, crates/tze_hud_input/src/{composer_draft,portal_resize}.rs, crates/tze_hud_config/src/portal_tokens.rs, crates/tze_hud_mcp/src/portal_op.rs or tests/integration/text_stream_portal_*.rs; keep every pub item those files import until T7 (epic hud-lirh2) lands.\n\nLine refs are at windows-release-pipeline@44d355ef (same content as main@1eb8f7cb); re-grep symbols before editing. The planning survey is not persisted; this bead is self-contained.",
+    "design": "Files:\n- crates/tze_hud_input/src/events.rs:290-~400 (InputEnvelope, EventBatch; re-export lib.rs:82), scroll.rs:643 unregister_tile, batching.rs:124 pending_agent_count, lib.rs:1910-1945 drag accessors (skip any windowed/portal.rs uses)\n- focus.rs:510 on_lease_revoked, :561 on_agent_disconnected (never called)\n- crates/tze_hud_telemetry/src/record.rs:363-415 (BudgetTier, BudgetViolationKind, BudgetViolationEvent, FrameTimeShedEvent), collector.rs:18-70 (TelemetrySender, telemetry_channel, drain_channel), validation.rs is_fully_calibrated\n\nEvidence:\n0 references (narrowing run: input 69 items ~987 lines excl. portal; telemetry 9 items).\n\nApproach:\nDelete. For focus: check whether on_tile_destroyed covers revoke/disconnect; if not, wire on_lease_revoked/on_agent_disconnected from the runtime's revoke/disconnect paths and add a test (do not delete them).\n\nTests:\nAdd `focus_cleared_when_lease_revoked` if wiring was needed.\n\nExpected delta: about -600\n\nEvery test named in docs/invariants.md is kept, or moved/renamed with docs/invariants.md updated in the same PR. Local builds on this host need `PROTOC=$HOME/.local/protoc/bin/protoc` (/usr/bin/protoc 3.12 fails on types.proto).",
+    "acceptance_criteria": "1. `cargo fmt --all --check` is clean.\n2. `cargo clippy --workspace --all-targets -- -D warnings` is clean.\n3. `cargo test -p tze_hud_input -p tze_hud_telemetry -p tze_hud_runtime` passes (quiet).\n4. PR states whether focus is cleared on lease revoke/disconnect, with the test that proves it.\n5. Deletion check: `git grep -nE 'InputEnvelope|BudgetViolationEvent|FrameTimeShedEvent|TelemetrySender|is_fully_calibrated|pending_agent_count' -- crates` prints nothing (no remaining references).\n6. Every test named in docs/invariants.md still exists (grep each name) or docs/invariants.md was updated in the same PR.\n7. `just ci` is green once before handoff.",
+    "notes": "[beads-heartbeat]\nowner=coordinator:coord-20261003b\nlast_heartbeat_at=2026-10-03T06:36:04Z\nPR #1258 opened",
+    "status": "closed",
+    "external_ref": "gh-pr:1258",
+    "labels": [
+      "complexity:low",
+      "post-reset",
+      "pr-review",
+      "t8",
+      "t8-dead-code"
+    ],
+    "dependencies": [
+      {
+        "id": "hud-bstmy.3",
+        "dependency_type": "parent-child",
+        "status": "open"
+      },
+      {
+        "id": "hud-ipdbo",
+        "dependency_type": "blocks",
+        "status": "closed"
+      }
+    ]
+  },
+  "hud-bstmy.3.6": {
+    "id": "hud-bstmy.3.6",
+    "title": "Config diet: delete validate-only fields and [display_profile] overrides",
+    "description": "Goal: Delete config fields that are validated but never applied, the schema emitter, and profile auto-detect / custom display_profile overrides.\n\nNon-goals: Built-in profile names used by shipped TOML (production.toml:35 `full-display`).\n\nGoverning spec: docs/scope.md T8 row (delete code without a current user; behavior tests tied to docs/invariants.md; resource tests; llvmpipe recipe; strip pre-reset refs) and 'Working rules' (prefer deleting over generalizing; tests guard behavior a user would notice, not internal structure); docs/vision.md; docs/invariants.md; CLAUDE.md Rules; AGENTS.md (just recipes).\n\nT7 boundary: do not edit crates/tze_hud_projection/**, crates/tze_hud_runtime/src/portal_projection_driver.rs, crates/tze_hud_runtime/src/windowed/portal.rs, crates/tze_hud_input/src/{composer_draft,portal_resize}.rs, crates/tze_hud_config/src/portal_tokens.rs, crates/tze_hud_mcp/src/portal_op.rs or tests/integration/text_stream_portal_*.rs; keep every pub item those files import until T7 (epic hud-lirh2) lands.\n\nLine refs are at windows-release-pipeline@44d355ef (same content as main@1eb8f7cb); re-grep symbols before editing. The planning survey is not persisted; this bead is self-contained.",
+    "design": "Files:\n- crates/tze_hud_config/src/raw.rs:46 emit_schema + schema.rs (84; print_schema 0 callers) + `schemars` dep and 21 derives; :81 max_media_streams; :113 default_layout; :117 tab_switch_on_event + loader.rs:64-95 is_valid_event_name, :230; :120 layout fractions (loader.rs:218, 494)\n- crates/tze_hud_scene/src/types.rs:583, graph/tabs.rs:285-344 (set_tab_switch_on_event, find_tab_for_event)\n- profile.rs:28-103, 468-495 (env/docker/VRAM heuristics; freeze() passes fake 8192 MB / 60 Hz at loader.rs:298-312), :212-408, 497-555 (extends + escalation checks)\n\nEvidence:\nEach field is validated by loader.rs and read nowhere; no shipped TOML uses them, `auto`, or [display_profile].\n\nApproach:\nDelete; built-in profiles become a fixed lookup. Unknown keys keep failing with a hinted ConfigError.\n\nTests:\nDelete ~10 spec_* tests and the profile auto-detect/extends tests; add one test that `[display_profile]` in TOML is rejected with a hint.\n\nExpected delta: about -1,550\n\nEvery test named in docs/invariants.md is kept, or moved/renamed with docs/invariants.md updated in the same PR. Local builds on this host need `PROTOC=$HOME/.local/protoc/bin/protoc` (/usr/bin/protoc 3.12 fails on types.proto).\n\n[decision] Delete the [display_profile] override (no current user).",
+    "acceptance_criteria": "1. `cargo fmt --all --check` is clean.\n2. `cargo clippy --workspace --all-targets -- -D warnings` is clean.\n3. `cargo test -p tze_hud_config -p tze_hud_scene -p tze_hud_runtime -p tze_hud_app` passes (quiet).\n4. Deletion check: `git grep -nE 'schemars|emit_schema|max_media_streams|tab_switch_on_event|default_layout|extends' -- crates/tze_hud_config crates/tze_hud_scene app` prints nothing (no remaining references).\n5. Every test named in docs/invariants.md still exists (grep each name) or docs/invariants.md was updated in the same PR.\n6. `just ci` is green once before handoff.",
+    "notes": "[beads-heartbeat]\nowner=coordinator:coord-20261003b\nlast_heartbeat_at=2026-10-03T08:16:52Z\nPR #1269 opened",
+    "status": "closed",
+    "external_ref": "gh-pr:1269",
+    "labels": [
+      "complexity:medium",
+      "post-reset",
+      "pr-review",
+      "t8",
+      "t8-dead-code"
+    ],
+    "dependencies": [
+      {
+        "id": "hud-bstmy.3",
+        "dependency_type": "parent-child",
+        "status": "open"
+      },
+      {
+        "id": "hud-jglht",
+        "dependency_type": "blocks",
+        "status": "closed"
+      }
+    ]
+  },
+  "hud-bstmy.3.7": {
+    "id": "hud-bstmy.3.7",
+    "title": "Reconcile spec-to-code (gen-1) for T8.1b: Dead code in runtime, compositor, config, input, telemetry and files",
+    "description": "Deep-dive review: compare the original spec/requirements (see epic description and docs/scope.md T8 row, docs/invariants.md) against the implementation delivered by sibling beads under this epic.\n\nMindset: audit the CODEBASE against the spec, not the sibling diffs against their bead descriptions. Your job is to FALSIFY the coverage claim, not to collect confirming evidence. A requirement counts as implemented only after you have read the implementing code; a test existing or the suite being green is never sufficient evidence by itself.\n\nWorkflow:\n1. Re-read the epic description and all sibling bead descriptions/acceptance criteria.\n2. Audit the code. Start from the sibling diffs, but treat the whole codebase as in scope; spec invariants bind pre-existing code too.\n3. For every universal or negative requirement (\"no X anywhere\", \"every Y must\", \"the only path is Z\"): enumerate ALL code paths performing that operation (search the repo) and verify each one.\n4. Audit the instruments: for every guardrail/scan test, read its regex, glob and scan roots and check they cover the mandated surface. For every spec scenario confirm ONE gate pins it (a behavior-executing test, or the designated scan guard for structural invariants).\n5. Where several surfaces implement the same contract, diff them against each other (filters, defaults, ordering, authz).\n6. Produce a checklist mapping every requirement to its implementing bead and code evidence (file:line), classified implemented/partial/missing/deviates.\n7. For every partial or missing requirement, report a cold-start-ready gap candidate in Discovered-Follow-Ups-JSON (priority, parent, deps, exact spec link, acceptance evidence, gate species, expected net test delta).\n8. When gaps remain, report the need for a gen-2 reconciliation and return blocked-awaiting-coordinator with \"coverage gaps remain\" as the unblock condition.\n9. The coordinator dedupes/materializes gaps and closes lifecycle state; this worker never mutates Beads lifecycle.",
+    "design": "Spec sources: docs/scope.md T8 row and Working rules, docs/invariants.md (every named test exists), docs/vision.md, plus every sibling bead under hud-bstmy.3 (their Files/Evidence lists define the deletion surface; verify each deletion grep is empty and each kept test exists). Runs last among implementation siblings. Escalation (needs-human) siblings are deliberately NOT dependencies: their default is status quo, so reconciliation must not wait on an owner answer; if one was answered, include its follow-up bead.",
+    "acceptance_criteria": "1. Every requirement in the epic spec has a corresponding implementation bead.\n2. Universal/negative invariants are verified by enumerating every code path that performs the operation, not by citing a single compliant example.\n3. Guardrail/scan tests were audited for blind spots, and every spec scenario is pinned by exactly one gate species; no gap candidate proposes tests for a scenario that already has one.\n4. Any gaps found are reported as dedupe-ready child-bead candidates under the same epic.\n5. If gaps were found, the handoff reports a next-generation reconciliation candidate.\n6. The close reason records the reconciliation summary.",
+    "notes": "Evidence-only PR #1353 verified at 650ee37888c905b46691745af469f73f55be8ecf. Coverage remains partial; gap dependencies and next-generation reconciliation must resolve before closure. No separate generic coverage blocker created: concrete linked gaps express unblock conditions.\n[beads-heartbeat]\nowner=coordinator:codex-20261006-0058\nlast_heartbeat_at=2026-10-06T08:07:07Z\n[/beads-heartbeat]",
+    "status": "blocked",
+    "external_ref": "gh-pr:1353",
+    "labels": [
+      "complexity:high",
+      "post-reset",
+      "pr-review",
+      "reconciliation",
+      "t8",
+      "t8-dead-code"
+    ],
+    "dependencies": [
+      {
+        "id": "hud-bstmy.3",
+        "dependency_type": "parent-child",
+        "status": "open"
+      },
+      {
+        "id": "hud-bstmy.3.1",
+        "dependency_type": "blocks",
+        "status": "closed"
+      },
+      {
+        "id": "hud-bstmy.3.10",
+        "dependency_type": "blocks",
+        "status": "in_progress"
+      },
+      {
+        "id": "hud-bstmy.3.2",
+        "dependency_type": "blocks",
+        "status": "closed"
+      },
+      {
+        "id": "hud-bstmy.3.3",
+        "dependency_type": "blocks",
+        "status": "closed"
+      },
+      {
+        "id": "hud-bstmy.3.4",
+        "dependency_type": "blocks",
+        "status": "closed"
+      },
+      {
+        "id": "hud-bstmy.3.5",
+        "dependency_type": "blocks",
+        "status": "closed"
+      },
+      {
+        "id": "hud-bstmy.3.6",
+        "dependency_type": "blocks",
+        "status": "closed"
+      },
+      {
+        "id": "hud-bstmy.3.8",
+        "dependency_type": "blocks",
+        "status": "closed"
+      },
+      {
+        "id": "hud-bstmy.3.9",
+        "dependency_type": "blocks",
+        "status": "closed"
+      },
+      {
+        "id": "hud-fv50z",
+        "dependency_type": "blocks",
+        "status": "closed"
+      },
+      {
+        "id": "hud-qudoh",
+        "dependency_type": "blocks",
+        "status": "closed"
+      },
+      {
+        "id": "hud-rk7q5",
+        "dependency_type": "blocks",
+        "status": "closed"
+      }
+    ]
+  },
+  "hud-rk7q5": {
+    "id": "hud-rk7q5",
+    "title": "Narrow compositor APIs and move test-only pixel helpers",
+    "description": "Outcome: Finish the public-API narrowing left incomplete by hud-bstmy.3.4 / PR #1282. Every unprotected compositor item has a justified current production consumer or is narrowed/deleted; HeadlessSurface::pixel_at and ::assert_pixel_color leave compiled production and all current tests use test-only helpers with the same results and assertions. The historical ~145 items is a survey estimate, not a quota or permission to remove live code.\n\nThis is G1 in the merged hud-bstmy.3.7 reconciliation, not a new rendering feature. Complete the remainder manually per owner-qualified item and propagate every visibility/helper change to real callers. Preserve current glyph/text, capture/surface, font and widget paths, all invariant gates, Windows cfg consumers and protected T7 imports. The same vertical-slice fixture is touched by active hud-bstmy.1.12 / PR #1355; consume that repair first and retain its test-only async GPU guards.",
+    "design": "Governing maintenance authority: hud-bstmy.3 authorizes deleting production code with no current production caller in runtime/compositor/config/input/telemetry. docs/scope.md T8 and Working rules (lines 37,62-65) require deleting rather than generalizing, preserving every invariant contract, and testing user-visible behavior. docs/vision.md lessons at lines 85-99 require current users and useful local test signal. docs/invariants.md is current authority; pre-reset doctrine/tags are history. The merged generation-1 evidence is test_results/hud-bstmy.3.7-reconciliation.md and test_results/hud-bstmy.3.7-followups.json (PR #1353), pinned originally at 17de3331b11a1ee55fa22197fd13b99b26dac267 and present at shaping baseline e6c70074eeb7154ee193af8164e38515469b8879. Re-grep at the implementation SHA; old survey counts/line numbers are navigation, not deletion permission.\n\nProtected T7 boundary (hud-lirh2): do not edit crates/tze_hud_projection/**, crates/tze_hud_runtime/src/portal_projection_driver.rs, crates/tze_hud_runtime/src/windowed/portal.rs, crates/tze_hud_input/src/{composer_draft,portal_resize}.rs, crates/tze_hud_config/src/portal_tokens.rs, crates/tze_hud_mcp/src/portal_op.rs, or tests/integration/text_stream_portal_*.rs. Preserve every public item imported by those files until T7 lands. Other live callers also remain authoritative; a text name collision is not a qualified caller.\n\nOutcome and non-goals: Narrow the current compositor production API and relocate the two pure pixel test helpers. No rendering/layout/font/glyph-atlas behavior, GPU adapter policy, public feature/dependency/helper crate, production synchronization, widget transition policy, invariant contract, T7 boundary, or unrelated code diet change. Do not resurrect removed adapter/headless/vertical-flow wrappers. Keep externally consumed items public; use pub(crate)/private only as their real ownership requires. Retain internal live glyph shaping/prepare/render paths even if an external-name probe finds no reference.\n\nOwned surface and trust map: crates/tze_hud_compositor/src/lib.rs:8-42 exposes the current modules/reexports (display, fonts, markdown, overflow, pipeline, renderer, surface, text, vertical_flow, widget). Inventory their public types, fields, functions/methods and grouped reexports by defining owner, using all tracked production, test, example, bench, app and target-cfg consumers. Include trait/generic/type and construction users, not only method-call spellings. Renderer/HeadlessSurface are live through runtime src/headless.rs:52,206 and windowed/mod.rs:87,1291-1303; TextRasterizer's glyphon shaping, shared atlas/renderer, styled runs and existing CPU layout gates remain live production paths. Capture and Windows surface recovery are current code, not the removed adapter survey. Current recovery accessors have live internal wiring at renderer/mod.rs:1292-1350; inspect before deleting. widget cache-clearing test conveniences are candidates only after re-grep and caller classification.\n\nPixel-helper map at this baseline: surface.rs:1098 pixel_at and :1113 assert_pixel_color are pure RGBA indexing/tolerance helpers; read_pixels(:1071), surface creation/frame acquisition and capture remain production-capable. Consumers are compositor tests/common/mod.rs:76,82; inline renderer/tests/{tile_opacity,scroll}.rs; runtime tests/pixel_readback.rs (via pixel_helpers setup); and examples/vertical_slice/tests/budget_assertions.rs. Move the pure functions to one compositor-owned test source, e.g. tests/common/pixels.rs, with no runtime-crate imports or device creation. Include that source by path from existing common/pixel_helpers/vertical-slice and inline test support rather than exposing a test feature from the production library. Keep the existing Frame::at/expect interface and any current helper unit tests; do not create a helper-only test species.\n\nMethod: Inventory/classify first; inspect scripts/dead_code.py's advisory regex, roots and reexport keep-set as a lead, then make a small visibility change, compile all consumers, and delete only proven unused descendants. The advisory tool omits app/test/bench users, includes comments/inline test names and conflates identifiers, so automatic transitive deletion and a zero-probe result are not authority. Record retained items/current callers in PR evidence. Remove stale exports/imports and all uses of the two production helper methods; qualified deletion checks allow same-named test-only free functions.\n\nBehavior/failure/concurrency/replay matrix: Existing pixel and text/markdown/widget/scroll/opacity outputs and tolerances are preserved. Pixel helper success returns the identical sampled RGBA; failure retains channel/label/coordinate diagnostics and tolerance semantics; out-of-bounds indexing retains the old failure behavior. Production GPU acquisition/recovery/error behavior is unchanged. Existing per-binary GPU init guards remain, with no rendering/lifetime lock or cross-process coordination added. Repeated reads/renders follow existing gates; this visibility-only repair introduces no persistence, retry protocol or replay state. Rebase on the .1.12 outcome before touching vertical-slice fixtures, preserving admission wrappers and scenario assertions. Rollback is the isolated repair commit, not a compatibility wrapper restoring dead production helpers.\n\nDocs impact: Update existing crate/helper API comments and stale test run/location references affected by relocation. docs/invariants.md changes only if an existing named gate is actually moved/renamed, with the same contract/name retained where possible. No new standalone docs/spec or investigation note; put caller decisions/evidence in the PR. Tests: +0 ~0 -0; relocate helpers/tests without changing declaration/scenario counts.\n\nCohesion override: Preserve this existing independent compositor repair rather than merge it into cross-crate G3. Serialize it after hud-bstmy.1.12 due shared vertical-slice GPU fixture ownership; serialize G3 after this repair because both update that fixture.\n\nVerification environment: use the pinned Rust toolchain and PROTOC=/usr/bin/protoc (installed 3.21.12; the historical ~/.local/protoc path is absent). Use CARGO_BUILD_JOBS=1 on this host and a coordinator-approved target under /home/orca; let Cargo arbitrate a shared build lock, never wipe a foreign target/process. GPU gates use the actual justfile ICD selection (just --evaluate lvp; current result /usr/share/vulkan/icd.d/lvp_icd.json, alternate lvp_icd.x86_64.json supported), HEADLESS_FORCE_SOFTWARE=1 and TZE_HUD_REQUIRE_GPU=1. Missing adapter/GPU skip is not passing GPU evidence. Required gates: just fmt, cargo check --workspace, cargo clippy --workspace --all-targets -- -D warnings, and just ci once at final code head; preserve/record tool-gated skips and existing Windows-GNU coverage. Never substitute crate-only compilation for external workspace callers.",
+    "acceptance_criteria": "1. A per-owner current compositor API inventory classifies all public declarations/reexports against whole-tree callers (app, crates, examples, tests, benches, Windows cfg and protected T7). Every remaining exposed item has a current consumer or explicit protected retention; unprotected no-consumer items are narrowed/deleted. Newly exposed dead warnings are inspected, not blindly cascaded.\n2. HeadlessSurface::pixel_at and ::assert_pixel_color are absent from compiled production and all qualified old calls are replaced across the full consumer map. The live read_pixels/surface/capture and glyph/text/render paths remain. A single test-only pure helper source serves existing tests with identical byte/tolerance/error behavior; no test feature/dependency/public shim is added.\n3. All existing pixel, glyph/text/markdown, widget, scroll/opacity, invariant and helper assertions survive. Preserve the .1.12 admission wrappers and existing compositor/runtime GPU guards; no new synchronization policy. Tests: +0 ~0 -0, with exact final count/location evidence.\n4. Structural API absence is verified by the owner-qualified source/caller inventory, not a new mirrored scan test. Unchanged rendering is verified by existing behavior gates: just test-gpu (compositor and runtime pixel_readback), current vertical_slice --all-targets with recipe-selected llvmpipe, and just test-integration as applicable to changed exports. No bare hardware-ICD compositor cargo run and no GPU skip accepted.\n5. just fmt, workspace check, workspace all-targets clippy -D warnings and just ci pass once at final implementation head. Existing Windows-GNU gate or explicitly recorded tool-gated skip covers cfg consumers; inspect their imports regardless. Docs/comments/location references are current and no standalone docs/spec is introduced.\n6. Implementation starts after hud-bstmy.3.4 and hud-bstmy.1.12 outcomes are on fetched main; base sync and caller count are rechecked before final proof. T7 and live glyph paths remain protected.",
+    "notes": "dispatch-readiness 2026-10-06 codex-20261006-0058: self-contained non-goals, surface/failure matrix, documentation impact and verification design required. Reconciliation candidate g1_compositor, original hud-bstmy.3.7; evidence PR #1353.\n\ndispatch-readiness 2026-10-06: complete parent3 packet applied and equality verified; no new owner decision. Concrete dependencies and active writer cohesion determine runnable state. Artifact .handoff/shaping-hud-bstmy.3-batch.json [G1].\n\nG1 exact pushed/local/remote/PR1ef83a7a720f347d056278482ec61a51d0334a4c; fullCI3302 exit0 and logdigest rootverified. Complete654-record inventory311retained/292narrowed/39removed/12test-only, +0~0-0 definitions, shared purepixels source, protectedT7/fixtures/bodies/guards/Cargo unchanged. Proof .handoff/review-evidence/hud-rk7q5. Independent reviewer excludes /root/lane_review author.\n[beads-heartbeat]\nowner=coordinator:codex-20261006-0058\nlast_heartbeat_at=2026-10-06T05:16:03Z\n[/beads-heartbeat]",
+    "status": "closed",
+    "external_ref": "gh-pr:1361",
+    "labels": [
+      "complexity:medium",
+      "post-reset",
+      "pr-review",
+      "t8",
+      "t8-dead-code"
+    ],
+    "dependencies": [
+      {
+        "id": "hud-bstmy.1.12",
+        "dependency_type": "blocks",
+        "status": "closed"
+      },
+      {
+        "id": "hud-bstmy.3",
+        "dependency_type": "parent-child",
+        "status": "open"
+      },
+      {
+        "id": "hud-bstmy.3.4",
+        "dependency_type": "blocks",
+        "status": "closed"
+      },
+      {
+        "id": "hud-tzlns",
+        "dependency_type": "blocks",
+        "status": "closed"
+      }
+    ]
+  },
+  "hud-qudoh": {
+    "id": "hud-qudoh",
+    "title": "Reject removed and unknown raw config keys with useful hints",
+    "description": "Outcome: Make unsupported top-level, [runtime] and [[tabs]] keys fail parsing/public startup validation with an actionable ConfigError instead of being silently discarded. Preserve every valid shipped/default configuration, built-in profile, dynamic token/zone/widget/display map and production pairing/auth boundary. This is the explicit hud-bstmy.3.6 promised rejection outcome and existing hud-qudoh repair, reported as G2 by generation 1; unknown-key acceptance was pre-existing, so do not describe it as a new regression.\n\nExtend the existing display_profile_table_is_rejected_with_hint behavior gate into one public validate_config case table. Include each removed/unknown placement and preserve that table's existing [display_profile] code/field/hint assertions; do not add another test species or silently weaken the valid-config/default gates.",
+    "design": "Governing maintenance authority: hud-bstmy.3 authorizes deleting production code with no current production caller in runtime/compositor/config/input/telemetry. docs/scope.md T8 and Working rules (lines 37,62-65) require deleting rather than generalizing, preserving every invariant contract, and testing user-visible behavior. docs/vision.md lessons at lines 85-99 require current users and useful local test signal. docs/invariants.md is current authority; pre-reset doctrine/tags are history. The merged generation-1 evidence is test_results/hud-bstmy.3.7-reconciliation.md and test_results/hud-bstmy.3.7-followups.json (PR #1353), pinned originally at 17de3331b11a1ee55fa22197fd13b99b26dac267 and present at shaping baseline e6c70074eeb7154ee193af8164e38515469b8879. Re-grep at the implementation SHA; old survey counts/line numbers are navigation, not deletion permission.\n\nSpecific authority: hud-bstmy.3.6 design Approach promises unknown keys fail with hinted ConfigError, and current hud-qudoh explicitly authorizes RawTab/RawRuntime unknown-key rejection. docs/invariants.md:132-141 requires stable error codes and useful hints. This maintenance packet authorizes unsupported-key refusal, not a new default/auth/profile policy or an owner posture change.\n\nNon-goals: No default/profile/headless dimensions behavior, configuration precedence, RuntimeContext fallback policy, includes/agents/display_profile semantic error contract, production auth/admission, hot reload, theme/display policy, wire code set, or protected T7 portal-token change. Do not deny arbitrary keys inside intentionally dynamic RawDesignTokens/RawZones/widget initial_params/displays maps, or broadly mark every unrelated nested raw struct strict. No new schema emitter or removed config capability.\n\nProtected T7 boundary (hud-lirh2): do not edit crates/tze_hud_projection/**, crates/tze_hud_runtime/src/portal_projection_driver.rs, crates/tze_hud_runtime/src/windowed/portal.rs, crates/tze_hud_input/src/{composer_draft,portal_resize}.rs, crates/tze_hud_config/src/portal_tokens.rs, crates/tze_hud_mcp/src/portal_op.rs, or tests/integration/text_stream_portal_*.rs. Preserve every public item imported by those files until T7 lands. Other live callers also remain authoritative; a text name collision is not a qualified caller.\n\nSurface/trust map: raw.rs:26 RawRuntime accepts profile and safe_mode_hotkey; :37 RawTab accepts name/default_tab/zones/widgets; :179 RawConfig holds schema_version/includes/runtime/display_profile/tabs/zones/agents/widget_bundles/widget_runtime_assets/design_tokens/displays. loader.rs:48 directly deserializes RawConfig; validate.rs:12 maps parse errors to existing ConfigErrorCode::ParseError and currently labels all parse errors syntax problems. app/src/main.rs:332 uses validate_config for strict startup. runtime_context.rs uses the shared loader and retains its intentionally documented bad-input fallback; do not conflate a parser rejection with a new fallback policy. Direct RawConfig deserializers share the schema and must be inventoried so bypasses cannot silently accept these three structs. The raw config is operator-provided TOML; invalid input never gets frozen or partially applied by validation. Paired identities remain in agents.toml; the rejected [agents] marker keeps its pairing hint. Unknown dynamic tokens remain valid by raw.rs:169 design.\n\nEngineering choice: Add serde deny_unknown_fields to RawRuntime, RawTab and RawConfig only, keeping accepted fields/options/defaults and presence-only AnyValue rejection markers. Make the existing ParseError -> ConfigError mapping distinguish unsupported keys from malformed TOML so the existing stable ParseError code has an actionable remove/correct-key hint and useful key/location when available; retain syntax diagnostics for malformed TOML. Use the parser's schema/expected fields instead of inventing a second supported-key schema. Keep validation/parse APIs and strict startup wiring; no new public error variant merely for this repair.\n\nSingle existing-gate matrix (display_profile_table_is_rejected_with_hint at tests.rs:379): Invoke public validate_config on a valid base plus removed emit_schema (top-level/runtime), headless_width/headless_height/max_media_streams under runtime, default_layout/tab_switch_on_event under tabs, nested tabs.layout, and unknown top-level/runtime/tab scalar/table keys. Each unsupported key fails with stable existing code, a nonempty actionable hint naming removal/correction, and identifiable bad field or parser context. Preserve the original [display_profile] DisplayProfileNotSupported/field_path/built-in-profile hint checks. Include malformed TOML classification as existing syntax coverage, not a new scenario test. Keep agents/includes refusal gates separate because they already own distinct declared-field semantic rejection. Valid minimal/default/shipped TOMLs, safe_mode_hotkey_defaults_overrides_and_rejects_garbage(:675), schema-version compatibility, widget/dynamic tokens, display maps and app startup fixtures continue parsing/validating/freezing with equal resolved defaults.\n\nConcurrency/retry/replay/failure: Parsing is local and has no runtime writes/global mutation; parallel validation has no shared schema state to serialize. Revalidating identical input deterministically returns the same rejection category/actionable field/hint, not a partial accepted config. No new persistence/retry channel/hot config application; existing malformed/missing/invalid-value collection and known semantic rejections remain. A rejected file can be corrected and parsed normally; no migration that auto-deletes unsupported fields. Rollback is reverting the isolated stricter-parser repair, not silently accepting invalid keys at one deserialization surface.\n\nDocs impact: Correct raw.rs permissiveness comments and public validation/parse help to distinguish absent/invalid values from unsupported fields. Update existing QUICKSTART/operations config guidance only if it claims these unsupported keys are ignored; keep supported/default/auth instructions intact. No standalone config spec/investigation document and no owner-doctrine amendment. Expected Tests: +0 ~1 -0; extend one existing case table, preserving all other assertions.\n\nVerification environment: use the pinned Rust toolchain and PROTOC=/usr/bin/protoc (installed 3.21.12; the historical ~/.local/protoc path is absent). Use CARGO_BUILD_JOBS=1 on this host and a coordinator-approved target under /home/orca; let Cargo arbitrate a shared build lock, never wipe a foreign target/process. GPU gates use the actual justfile ICD selection (just --evaluate lvp; current result /usr/share/vulkan/icd.d/lvp_icd.json, alternate lvp_icd.x86_64.json supported), HEADLESS_FORCE_SOFTWARE=1 and TZE_HUD_REQUIRE_GPU=1. Missing adapter/GPU skip is not passing GPU evidence. Required gates: just fmt, cargo check --workspace, cargo clippy --workspace --all-targets -- -D warnings, and just ci once at final code head; preserve/record tool-gated skips and existing Windows-GNU coverage. Never substitute crate-only compilation for external workspace callers.",
+    "acceptance_criteria": "1. RawConfig, RawRuntime and RawTab reject unsupported keys on every direct/public parsing path. The complete removed/unknown placement matrix is executed through public validate_config by extending display_profile_table_is_rejected_with_hint; no duplicate new test. Every failure has stable existing ConfigError code and a useful remove/correct-key hint with identifiable field/parser context.\n2. The original display_profile code/field/hint assertions, rejected agents/includes pairing semantics, syntax-error behavior and existing valid/default/schema-version/hotkey gates remain. Valid shipped TOMLs still parse, validate and freeze with equal defaults and production auth; dynamic design-token/zone/widget-param/display names are not treated as unknown schema fields. Shared RuntimeContext fallback policy is unchanged.\n3. No schema emitter/removed capability, new error-code/public API, global parse state, hot reload, production auth/default/profile change or T7 edit is introduced. Repeated rejection is deterministic and validation applies no state. Existing source/caller inventory covers all RawConfig/RawRuntime/RawTab readers; parser behavior is pinned by the one public config table, not a source-regex unit test.\n4. Run cargo test -p tze_hud_config --lib and existing scene/runtime/app valid-config/startup gates (including safe_mode_hotkey_defaults_overrides_and_rejects_garbage and from_toml_loads_valid_config_and_falls_back_on_bad_input). Run shipped production/benchmark config parse/freeze and existing boot recipes using actual llvmpipe where needed. Do not delete valid settings or a failing matrix case to make tests pass.\n5. just fmt, workspace check, workspace all-targets clippy -D warnings and just ci pass at final implementation head; current comments/help/docs explain unsupported-key refusal. Tests: +0 ~1 -0; no standalone docs/spec or new gate species.",
+    "notes": "dispatch-readiness 2026-10-06 codex-20261006-0058: self-contained non-goals, surface/failure matrix, documentation impact and verification design required. Reconciliation candidate g2_unknown_config, original hud-bstmy.3.7; evidence PR #1353.\n\ndispatch-readiness 2026-10-06: complete parent3 packet applied and equality verified; no new owner decision. Concrete dependencies and active writer cohesion determine runnable state. Artifact .handoff/shaping-hud-bstmy.3-batch.json [G2].\n\nStrict completed-pr-opened report verified at exact local/remote/PR head1b1bfd3c57d18129f42ac795cc2b874ac220a63f. Full CI3303 pass, no failures/ignored/GPU skips, only absent-pwsh skip; valid empty discovery/blocker arrays. Tracked-clean, generated untracked lock preserved. Complete proof .handoff/review-evidence/hud-qudoh. Stopped warm target moved atomically within filesystem to ignored .worktrees/parallel-agents/.lane-cache/lane_review/target for continuing independent review; no cold build. Close only on authoritative merge after independent review.\n\n[decision] Current-PR correctness classification: fix only the contradictory AGENTS legacy component-profile sentence, preserve parser/design-token behavior and all tests. Author /root/lane_review resumes in transferred review worktree hud-u100l on original branch. Fresh claim verified; preserve existing PR1358 and independent reviewer identity. No new bead/scope/production behavior.\n\nOriginal-author bounded correction verified at exact29d542ac; only AGENTS one sentence+1/-1, all parser/test blobs unchanged. Existing PR updated and thread answered4191110044, unresolved for independent reviewer. Strict arrays empty, pushed-clean, proof preserved .handoff/review-evidence/hud-qudoh/correction. Await same independent exact-head recheck; no new follow-up.\n[beads-heartbeat]\nowner=coordinator:codex-20261006-0058\nlast_heartbeat_at=2026-10-06T03:17:44Z\n[/beads-heartbeat]",
+    "status": "closed",
+    "external_ref": "gh-pr:1358",
+    "labels": [
+      "complexity:medium",
+      "post-reset",
+      "pr-review",
+      "t8",
+      "t8-dead-code"
+    ],
+    "dependencies": [
+      {
+        "id": "hud-bstmy.3",
+        "dependency_type": "parent-child",
+        "status": "open"
+      },
+      {
+        "id": "hud-bstmy.3.6",
+        "dependency_type": "blocks",
+        "status": "closed"
+      },
+      {
+        "id": "hud-u100l",
+        "dependency_type": "blocks",
+        "status": "closed"
+      }
+    ]
+  },
+  "hud-bstmy.3.8": {
+    "id": "hud-bstmy.3.8",
+    "title": "Delete caller-free runtime, config, input and telemetry helpers",
+    "description": "Outcome: Remove the exact remaining G3 no-caller/test-only convenience APIs from compiled production, then inspect/narrow remaining unprotected surface in the same owned files using real caller evidence. Preserve live input/scroll/feedback, config parsing, frame/latency telemetry and all invariant contracts. Remove the eight implementation-only tests belonging to the dead helpers; existing user-visible/invariant/fixture assertions continue to execute the real paths.\n\nThis is the cross-crate G3 repair from merged hud-bstmy.3.7 evidence. The telemetry fixture edits overlap integration/multi_agent.rs and vertical_slice/budget_assertions.rs with hud-bstmy.1.12 / PR #1355. Preserve that dependency and consume its merged test-only init guards before editing. The compositor repair also changes vertical-slice pixel calls, so serialize the shared fixture after hud-rk7q5. No additional independent implementation child is needed.",
+    "design": "Governing maintenance authority: hud-bstmy.3 authorizes deleting production code with no current production caller in runtime/compositor/config/input/telemetry. docs/scope.md T8 and Working rules (lines 37,62-65) require deleting rather than generalizing, preserving every invariant contract, and testing user-visible behavior. docs/vision.md lessons at lines 85-99 require current users and useful local test signal. docs/invariants.md is current authority; pre-reset doctrine/tags are history. The merged generation-1 evidence is test_results/hud-bstmy.3.7-reconciliation.md and test_results/hud-bstmy.3.7-followups.json (PR #1353), pinned originally at 17de3331b11a1ee55fa22197fd13b99b26dac267 and present at shaping baseline e6c70074eeb7154ee193af8164e38515469b8879. Re-grep at the implementation SHA; old survey counts/line numbers are navigation, not deletion permission.\n\nProtected T7 boundary (hud-lirh2): do not edit crates/tze_hud_projection/**, crates/tze_hud_runtime/src/portal_projection_driver.rs, crates/tze_hud_runtime/src/windowed/portal.rs, crates/tze_hud_input/src/{composer_draft,portal_resize}.rs, crates/tze_hud_config/src/portal_tokens.rs, crates/tze_hud_mcp/src/portal_op.rs, or tests/integration/text_stream_portal_*.rs. Preserve every public item imported by those files until T7 lands. Other live callers also remain authoritative; a text name collision is not a qualified caller.\n\nNon-goals: No T7 files/imported APIs, input batching/coalescing (hud-bstmy.4.5), shell/http leftovers (hud-6vuue), HeadlessRuntime scroll wrapper (hud-jx1fk), compositor APIs (hud-rk7q5), raw schema refusal (hud-qudoh), focus cleanup policy/gate (hud-bstmy.3.9), telemetry sampling/budgets/schema semantics, production GPU synchronization, new Cargo feature/helper crate, or invariant deletion. Delete only owner-qualified current dead conveniences; unrelated symbols with the same name are not this scope.\n\nExact owned definition and trust map at baseline: runtime src/degradation.rs:104 DegradationLevel::is_normal (zero callers), and windowed/input_dispatch.rs:784 winit_logical_to_str (only two test users at :897,:904); config src/tokens.rs:197 parse_token_value (four test-only dispatch users), zones.rs:145 custom_zone_type_names (zero callers); input src/events.rs:40 HitTestResult::requires_agent_dispatch, :125/:137 LocalStateUpdate::{with_focused,has_changes}, :165/:175 ScrollOffsetUpdate::{from_user,from_agent}, :223/:228 SceneLocalPatch::{push_scroll,update_node}; telemetry src/collector.rs:36 summary_mut and :46 emit_json. Keep their live types and input patch push_state/merge_from, actual scroll paths/processor feedback, typed token parsing/validation, and TelemetryCollector::{record,summary,records}/FrameRecorder. Caller classification must include app, crates, examples, tests, benches and Windows cfg code; repeat owner-qualified references after base sync and inspect new dead warnings without blind cascades.\n\nFixture map and concrete migration: summary_mut has one informational frame-time call in tests/integration/multi_agent.rs:474, inside test_three_agents_contention, and five sites in examples/vertical_slice/tests/budget_assertions.rs:214,219,306,394,471. Those record input/local-ack, hit-test, scene-commit and next-present operation measurements. Replace direct collector mutation with existing record(FrameTelemetry)/summary() where the real production frame is being measured, or fixture-owned SessionSummary/LatencyBucket accumulators (record.rs:287,297,428,507) for independent sampled input latencies. Do not add another production mutable accessor or test feature. Preserve every actual measured vector/sample, empty-sample failure, percentile assertion, test_budget slack and TZE_HUD_PERF_ASSERT hard-assert policy; do not substitute synthetic zero samples, weaken budgets or discard an assertion. Exact fixture construction is test-owned; production summary aggregation continues via collector.rs:23.\n\nRemove exactly eight nearest implementation-only declarations with their dead helpers: winit_logical_to_str_character and winit_logical_to_str_dead; test_parse_token_value_color/numeric/font/literal; hit_test_result_requires_dispatch; scene_local_patch_update_node. Keep scene_local_patch_empty_by_default, typed token behavior tests and all named invariants (current inventory 78 mentions/72 unique, including qualified degradation/budget names). If a newly found real or protected consumer invalidates a candidate, retain that contract and report the precise caller/conflict rather than replacing it with an abstraction or silently reducing scope.\n\nFailure/concurrency/replay/compatibility matrix: Actual input hit/patch/scroll and config typed-value behavior and error cases are unchanged and remain pinned by existing crate/POC behavior gates. Telemetry correctness/serialization and real latency percentile/empty-sample failures remain; dead wrappers are not observable behavior. Multi-agent concurrency, namespace isolation, render counts and lifecycle assertions remain. Preserve .1.12 per-binary init admission wrappers and all existing lib/pixel/compositor locks; fixtures neither retain those guards into rendering nor add production locks. Collector production ownership/concurrency is unchanged. Existing retry/coalescing/frame replay paths are live and excluded from deletion; the deleted pure convenience APIs own no persistent state, migration or retry protocol. Rollback is the scoped repair commit, never a replacement dead wrapper.\n\nDocs impact: Remove/update existing API/reexport/helper comments and obsolete fixture instructions; no new standalone docs/spec. Preserve invariant names; change docs/invariants.md only if moving an actual listed test requires its reference to follow it. Document caller keep/delete decisions and exact final test delta in the PR. Expected Tests: +0 ~0 -8; fixture plumbing changes preserve scenario/assertion counts and are not eight behavior tests to recreate under new names.\n\nCohesion override: Keep one cross-crate repair because the shortlist shares one current-user classification and telemetry fixture migration outcome. Preserve existing dependencies .3.1/.3.5/.3.6 and .1.12; add serialization after compositor hud-rk7q5 for the shared vertical-slice fixture. Raw-schema and focus-gate repairs own distinct fields/modules and contracts.\n\nVerification environment: use the pinned Rust toolchain and PROTOC=/usr/bin/protoc (installed 3.21.12; the historical ~/.local/protoc path is absent). Use CARGO_BUILD_JOBS=1 on this host and a coordinator-approved target under /home/orca; let Cargo arbitrate a shared build lock, never wipe a foreign target/process. GPU gates use the actual justfile ICD selection (just --evaluate lvp; current result /usr/share/vulkan/icd.d/lvp_icd.json, alternate lvp_icd.x86_64.json supported), HEADLESS_FORCE_SOFTWARE=1 and TZE_HUD_REQUIRE_GPU=1. Missing adapter/GPU skip is not passing GPU evidence. Required gates: just fmt, cargo check --workspace, cargo clippy --workspace --all-targets -- -D warnings, and just ci once at final code head; preserve/record tool-gated skips and existing Windows-GNU coverage. Never substitute crate-only compilation for external workspace callers.",
+    "acceptance_criteria": "1. Each exact G3 owner-qualified candidate is absent from compiled production, after a whole-tree caller/T7/Windows review. Additional warnings/unprotected public surface in the same files are classified; live types/paths/current users remain. No false-positive deletion of unrelated from_user/update_node names or protected APIs; report any genuine new consumer conflict with exact evidence.\n2. summary_mut and emit_json leave the production collector API. The one multi-agent and five vertical-slice fixture call sites use existing read/record behavior or fixture-owned accumulators, with identical operation samples, namespace/lifecycle/render assertions and percentile/empty-sample/budget semantics. No replacement production accessor/feature/new test species.\n3. Only the eight enumerated dead-helper implementation tests are removed (Tests: +0 ~0 -8). scene_local_patch_empty_by_default, typed token/public behavior, telemetry serialization/correctness, real multi-agent scenarios and every current named invariant declaration survive. Caller-qualified deletion checks are empty for compiled definitions/old qualified calls; negative fixtures/comments are classified separately.\n4. Base includes hud-bstmy.1.12/PR1355 and hud-rk7q5 outcomes before fixture edits. Preserve all test-only init guards and existing scenario bodies; no production synchronization or protected T7/batching/shell/headless-scroll/config-refusal/focus-policy/compositor scope expansion.\n5. Run existing input/config/telemetry suites (including test_latency_bucket_percentiles, test_session_summary_serialization, test_session_summary_record_frame_correctness_accumulates_violations), runtime-lib/headless behavior, just test-integration and vertical_slice --all-targets with selected llvmpipe/default test parallelism. Structural removal uses qualified source/caller evidence, not new mirror tests.\n6. just fmt, cargo check --workspace, workspace all-targets clippy -D warnings and just ci pass once at final code head, including separate integration callers and existing Windows-GNU gate/explicit tool skip. Docs/comments/PR evidence are current with exact test delta; no standalone docs/spec added.",
+    "notes": "dispatch-readiness 2026-10-06 codex-20261006-0058: self-contained non-goals, surface/failure matrix, documentation impact and verification design required. Reconciliation candidate g3_remaining_helpers, original hud-bstmy.3.7; evidence PR #1353.\n\nCohesion deferral: hud-bstmy.1.12 owns multi_agent.rs and vertical_slice budget_assertions.rs setup. Serialize G3 summary_mut fixture edits behind that active PR/merge rather than sharing those files.\n\ndispatch-readiness 2026-10-06: complete parent3 packet applied and equality verified; no new owner decision. Concrete dependencies and active writer cohesion determine runnable state. Artifact .handoff/shaping-hud-bstmy.3-batch.json [G3].\n\nG1 PR1361 authoritativeMERGED05:14:44/mainf1b97ca9; all blockdepsclosed and external1355 exact40char e6628b377d18e281169792a24eebb6d74f5711df MERGED verified. CompleteG3 packet fields match. Readyserialruntime afterreviewboundary; no workerdispatched. Earlierassertion used mistyped41charliteral, no lifecyclewrite occurred before correctedactualreceipt.\n\nAccepted canonical terminal PRIMARY worker report (two real arrays: followups/blockers; reviewer schema has third review-actions field). Exact local/remote/non-draft OPEN PR1367 head2e6f7f4c1247401145ce51d3a6f4f279759022fa; root independently verified actual full CI exit0/wholelog090669.../3263Rust71summaries/72observations/GPUskips0. Complete author evidence copied/digested. Native protocol author excluded from future review. Wait createdAt+5min before unique canonical review creation/dispatch under freshwhole normalizer; close full original only after review-first exacthead MERGED.\n[beads-heartbeat]\nowner=coordinator:codex-20261006-0058\nlast_heartbeat_at=2026-10-06T06:52:08Z\n[/beads-heartbeat]",
+    "status": "closed",
+    "external_ref": "gh-pr:1367",
+    "labels": [
+      "complexity:medium",
+      "post-reset",
+      "pr-review",
+      "t8",
+      "t8-dead-code"
+    ],
+    "dependencies": [
+      {
+        "id": "hud-bstmy.1.12",
+        "dependency_type": "blocks",
+        "status": "closed"
+      },
+      {
+        "id": "hud-bstmy.3",
+        "dependency_type": "parent-child",
+        "status": "open"
+      },
+      {
+        "id": "hud-bstmy.3.1",
+        "dependency_type": "blocks",
+        "status": "closed"
+      },
+      {
+        "id": "hud-bstmy.3.5",
+        "dependency_type": "blocks",
+        "status": "closed"
+      },
+      {
+        "id": "hud-bstmy.3.6",
+        "dependency_type": "blocks",
+        "status": "closed"
+      },
+      {
+        "id": "hud-rk7q5",
+        "dependency_type": "blocks",
+        "status": "closed"
+      },
+      {
+        "id": "hud-xdxhd",
+        "dependency_type": "blocks",
+        "status": "closed"
+      }
+    ]
+  },
+  "hud-bstmy.3.9": {
+    "id": "hud-bstmy.3.9",
+    "title": "Move the focus cleanup gate to the real runtime lease lifecycle",
+    "description": "Outcome: The single existing focus_cleared_when_lease_revoked gate exercises actual lease revoke and clock-driven orphan grace expiry through the GPU-free HeadlessEventLoopHarness and the real runtime settle sequence. It fails if runtime focus cleanup is disconnected. Focus and published ring survive disconnect within grace, then clear after terminal removal; missing fallback tiles cannot regain focus.\n\nGeneration 1 found production cleanup wired but its existing input test only removed scene.tiles directly and invoked the helper. Replace that weak seam by relocating/extending the same named test, not by adding a reconstructed closure, duplicate test species, GPU runtime, or a new production focus policy. Preserve original focused-before/none-after assertions and all other focus gates.",
+    "design": "Governing maintenance authority: hud-bstmy.3 authorizes deleting production code with no current production caller in runtime/compositor/config/input/telemetry. docs/scope.md T8 and Working rules (lines 37,62-65) require deleting rather than generalizing, preserving every invariant contract, and testing user-visible behavior. docs/vision.md lessons at lines 85-99 require current users and useful local test signal. docs/invariants.md is current authority; pre-reset doctrine/tags are history. The merged generation-1 evidence is test_results/hud-bstmy.3.7-reconciliation.md and test_results/hud-bstmy.3.7-followups.json (PR #1353), pinned originally at 17de3331b11a1ee55fa22197fd13b99b26dac267 and present at shaping baseline e6c70074eeb7154ee193af8164e38515469b8879. Re-grep at the implementation SHA; old survey counts/line numbers are navigation, not deletion permission.\n\nSpecific authority: hud-bstmy.3.5 acceptance/Approach requires cleanup after tile loss while preserving grace semantics; current .3.9 acceptance explicitly requires the real event_loop_harness. docs/invariants.md:71-103 covers orphan grace and lease lifecycle, and :144-152 requires injected time/no sleeps. This is a behavior-gate repair; no owner/spec decision is required to change the test seam.\n\nProtected T7 boundary (hud-lirh2): do not edit crates/tze_hud_projection/**, crates/tze_hud_runtime/src/portal_projection_driver.rs, crates/tze_hud_runtime/src/windowed/portal.rs, crates/tze_hud_input/src/{composer_draft,portal_resize}.rs, crates/tze_hud_config/src/portal_tokens.rs, crates/tze_hud_mcp/src/portal_op.rs, or tests/integration/text_stream_portal_*.rs. Preserve every public item imported by those files until T7 lands. Other live callers also remain authoritative; a text name collision is not a qualified caller.\n\nNon-goals: No focus policy/routing/history semantics, production lease lifetime/auth/namespace semantics, protocol transport/resume tests, GPU compositor/headless constructor, new parallel behavior gate/species, sleeps, direct map removal masquerading as lease revoke, generic reconstructed settle closure, or unrelated input-helper deletion. Do not alter the existing non-blocking lock policy or ring ordering to simplify a test.\n\nOwned surface/trust map: Move input src/focus.rs:1307 focus_cleared_when_lease_revoked into runtime src/windowed/event_loop_harness.rs's existing test module. Harness state constructor(:88) omits window/GPU/network owners; new(:643) and install_button(:1030) create the real WinitApp/input/focus fields and channel. Existing install_button currently builds SceneGraph::new with SystemClock, so adapt the existing fixture narrowly to install the same Arc<TestClock> into the authoritative SceneGraph for the grace case; constructing a with_network clock then overwriting that scene with the old fixture would invalidate injected-time proof. Read actual tab/tile/lease ownership from the scene rather than duplicate guessed ids/state.\n\nReal chain: SceneGraph::revoke_lease at scene src/graph/leases.rs:113 removes lease-owned tiles/nodes; disconnect_lease(:236) keeps tiles and badges them; reconnect_lease(:257) restores within-grace identity; timed sweep expires terminal grace/TTL. Harness tick(:484) calls the genuine WinitApp::settle_scene_work, then pipeline::sweep_timed_scene_state. Production settle at windowed/mod.rs:803-833 invokes clear_focus_on_removed_tile before push_focus_ring_owner and later keyboard drain; lifecycle.rs:1341 uses try_lock and FocusManager::clear_focus_on_missing_tile. The sweep follows settle, so grace removal is observed by the following settle turn: do not assert cleanup must run before the tile is removed or manually reorder production. Runtime focus manager and focus_ring_owner_state are authoritative; scene existence, same tile/lease identity and injected clock establish lifecycle state. Test-only access may use existing module privacy; no new public harness API merely for assertions.\n\nOne relocated-gate behavior matrix: (a) focus a real owned button, verify its owner/ring, invoke actual revoke_lease, run genuine tick/settle and assert tile/nodes absent plus focus/ring None; (b) focus a clock-backed leased button, call disconnect_lease with TestClock time, advance within grace and tick, verify same tile/lease/current owner/ring remains; advance beyond its grace deadline (TTL chosen longer), tick to run the real expiry sweep then tick to settle, assert terminal removal and focus/ring None; (c) seed focus history with another real tile, remove the fallback via its actual lease revoke, then remove current owner and assert the missing history target is skipped. Keep unrelated live owner/tab unaffected as applicable to the existing fixture contract.\n\nFailure/concurrency/replay: The cleanup's shared-state/scene try_lock may defer one turn; hold the real lock in the same scenario table, verify no blocking/forced cleanup, then release and tick to convergence. Repeated ticks after cleanup remain None and cannot resurrect a removed tile; within-grace repeated ticks preserve identity/focus. Reconnecting while grace is live uses the existing lifecycle/resume gate for that contract, not a second transport species here. No persisted/replayed test state; use fresh real scene per table case and deterministic TestClock values, never sleeps/Instant polling. Repeat terminal API calls according to existing error behavior without inventing idempotent revoke semantics.\n\nVerification: Execute only the existing relocated named gate through runtime-lib CPU harness. Temporarily remove only the production settle call to clear_focus_on_removed_tile and re-run that same gate; it must fail focus/ring cleanup assertions. Restore source before final verification/commit and prove the production diff is empty. This mutation proof is an experiment, not a new test/species or a source-grep substitute. Keep exactly one attributed declaration of the existing test name, preserving its basic assertions and extending lifecycle vectors.\n\nDocs impact: Update existing helper comments/test references if the location/crate changes; docs/invariants.md only if it already references the moved gate/location. No new standalone docs/spec or contract amendment. Expected Tests: +0 ~1 -0 (one gate moved/extended; globally no new or removed declaration).\n\nVerification environment: use the pinned Rust toolchain and PROTOC=/usr/bin/protoc (installed 3.21.12; the historical ~/.local/protoc path is absent). Use CARGO_BUILD_JOBS=1 on this host and a coordinator-approved target under /home/orca; let Cargo arbitrate a shared build lock, never wipe a foreign target/process. GPU gates use the actual justfile ICD selection (just --evaluate lvp; current result /usr/share/vulkan/icd.d/lvp_icd.json, alternate lvp_icd.x86_64.json supported), HEADLESS_FORCE_SOFTWARE=1 and TZE_HUD_REQUIRE_GPU=1. Missing adapter/GPU skip is not passing GPU evidence. Required gates: just fmt, cargo check --workspace, cargo clippy --workspace --all-targets -- -D warnings, and just ci once at final code head; preserve/record tool-gated skips and existing Windows-GNU coverage. Never substitute crate-only compilation for external workspace callers.",
+    "acceptance_criteria": "1. Exactly one focus_cleared_when_lease_revoked declaration exists, relocated from the input helper-only test to the GPU-free runtime event_loop_harness. Its original focused-before/none-after assertions remain; it executes genuine WinitApp settle, not a reconstructed closure/helper-only call or direct scene.tiles.remove.\n2. The same gate executes actual revoke_lease, TestClock-based disconnect/grace terminal reaping and actual missing-fallback lease removal. It checks scene/lease identity and current focus/ring: preserved within grace, cleared only after terminal removal and following real settle. Fixture setup installs the injected clock into the authoritative scene and chooses TTL beyond the grace vector; no GPU/device/network/sleep is required.\n3. The same gate pins lock-busy deferral/convergence and repeated-tick non-resurrection without changing the production try_lock/ordering/revoke-error semantics. Live unrelated/fallback behavior is preserved. Existing reconnect/TTL/focus gates remain; no duplicate transport/focus test species.\n4. Removing the real settle cleanup call makes this relocated gate fail; restoration passes, and no production behavior/policy diff is committed. Tests: +0 ~1 -0 with one global declaration and no mirrored implementation test.\n5. Run the bounded runtime-lib filter focus_cleared_when_lease_revoked and existing input focus tests; then just fmt, workspace check, workspace all-targets clippy -D warnings and just ci once at final test-only head. Existing GPU suites use actual llvmpipe as required by ci, but the target gate itself proves the real GPU-free seam.\n6. Existing location/helper comments/docs references are accurate, all current named invariants and T7 paths remain, and no standalone docs/spec or focus/auth/lifecycle policy is introduced.",
+    "notes": "dispatch-readiness 2026-10-06 codex-20261006-0058: self-contained non-goals, surface/failure matrix, documentation impact and verification design required. Reconciliation candidate g4_focus_gate, original hud-bstmy.3.7; evidence PR #1353.\n\ndispatch-readiness 2026-10-06: complete parent3 packet applied and equality verified; no new owner decision. Concrete dependencies and active writer cohesion determine runnable state. Artifact .handoff/shaping-hud-bstmy.3-batch.json [G4].\n\nVerified complete author report and exact local/remote/PRa5312842. Root fullCI SHA2561ff14c61c85eadcff36c12ffb6b586aea02db0bf36e93b90ee31a4d835e677c7 and3291 passes/0fail/ignored confirmed. Full local artifact/lock preservation .handoff/review-evidence/hud-bstmy.3.9. Same existing focus gate +0~1-0, meaningful actual settle mutation failed and production bytes restored; initial compile-only and interrupted preliminary CI preserved separately. Dedicated independent review required; authorHigh lane excluded from own G4 review.\n[beads-heartbeat]\nowner=coordinator:codex-20261006-0058\nlast_heartbeat_at=2026-10-06T05:44:24Z\n[/beads-heartbeat]",
+    "status": "closed",
+    "external_ref": "gh-pr:1364",
+    "labels": [
+      "complexity:medium",
+      "post-reset",
+      "pr-review",
+      "t8",
+      "t8-dead-code"
+    ],
+    "dependencies": [
+      {
+        "id": "hud-bstmy.3",
+        "dependency_type": "parent-child",
+        "status": "open"
+      },
+      {
+        "id": "hud-bstmy.3.5",
+        "dependency_type": "blocks",
+        "status": "closed"
+      },
+      {
+        "id": "hud-oh692",
+        "dependency_type": "blocks",
+        "status": "closed"
+      }
+    ]
+  },
+  "hud-bstmy.3.10": {
+    "id": "hud-bstmy.3.10",
+    "title": "Reconcile T8.1b gen-2 after all four repair outcomes reach main",
+    "description": "Outcome: Perform one terminal generation-2 spec-to-code reconciliation for the whole hud-bstmy.3 parent after hud-rk7q5, hud-qudoh, hud-bstmy.3.8 and hud-bstmy.3.9 repairs and the generation-1 evidence are on fetched main. Falsify coverage against current authoritative specs and production code, including pre-existing paths; do not just approve sibling diffs or green tests.\n\nThe merged generation-1 report classifies parent coverage partial. Map original .3.1-.3.6 removals/retentions plus all four G1-G4 repair outcomes to every requirement, implementation, caller and designated gate. Validate the complete current named invariant inventory (baseline 78 mentions/72 unique, including both module-qualified runtime names), not the obsolete 70 count. This terminal audit depends on repair outcomes/evidence reaching main, never closure of original hud-bstmy.3.7; adding that edge would create a closure cycle.",
+    "design": "Governing maintenance authority: hud-bstmy.3 authorizes deleting production code with no current production caller in runtime/compositor/config/input/telemetry. docs/scope.md T8 and Working rules (lines 37,62-65) require deleting rather than generalizing, preserving every invariant contract, and testing user-visible behavior. docs/vision.md lessons at lines 85-99 require current users and useful local test signal. docs/invariants.md is current authority; pre-reset doctrine/tags are history. The merged generation-1 evidence is test_results/hud-bstmy.3.7-reconciliation.md and test_results/hud-bstmy.3.7-followups.json (PR #1353), pinned originally at 17de3331b11a1ee55fa22197fd13b99b26dac267 and present at shaping baseline e6c70074eeb7154ee193af8164e38515469b8879. Re-grep at the implementation SHA; old survey counts/line numbers are navigation, not deletion permission.\n\nProtected T7 boundary (hud-lirh2): do not edit crates/tze_hud_projection/**, crates/tze_hud_runtime/src/portal_projection_driver.rs, crates/tze_hud_runtime/src/windowed/portal.rs, crates/tze_hud_input/src/{composer_draft,portal_resize}.rs, crates/tze_hud_config/src/portal_tokens.rs, crates/tze_hud_mcp/src/portal_op.rs, or tests/integration/text_stream_portal_*.rs. Preserve every public item imported by those files until T7 lands. Other live callers also remain authoritative; a text name collision is not a qualified caller.\n\nNon-goals: Read-only production/spec/test reconciliation, with committed evidence only; no implementation repair, new test/scan species, owner posture/spec amendment, retired doctrine revival, T7 narrowing, duplicate cross-epic gaps, or closing lifecycle state. No dependency on .3.7 closure or new gen-1 audit. Do not rerun the exhaustive original audit during shaping; the eventual worker executes this contract once after inputs are final.\n\nInputs and sequencing: Re-fetch current main and compact fields for parent hud-bstmy.3, original six implementation siblings (.3.1-.3.6), original report .3.7 for evidence only, and four repair beads. Confirm each repair's merged head/outcome is reachable from main and check expected source rather than treating closed status as delivery. Preserve .3.8's .1.12 sequencing/guards in the final fixture. PR #1353 evidence already exists in main at e6c70074; require its two tracked artifacts, not an unresolved .3.7 lifecycle dependency. Re-pin a single audited SHA; all code/test/instrument citations and gate execution evidence identify their SHA.\n\nAudit surface/trust map: Runtime windowed/headless/shared RuntimeContext, channels/pipeline/threads and config construction; compositor public API/module/reexport and pixel/text/glyph/surface/capture consumers; config raw parse/public validator/strict app entry point/built-in profiles/dynamic maps; live input envelope/patch/scroll/focus and runtime settle ordering; telemetry frame/summary/latency producers and external fixtures; exact deleted files/scripts/bytecode/features/dependencies. Sweep all tracked app, crates, examples, tests, benches and Windows target-cfg users plus protected T7 imports. Classify each declaration/reference as production, designated existing test, fixture, comment/string, target-cfg consumer or protected retained contract; owner-qualified symbol resolution must distinguish unrelated update_node/from_user/TimingHints-like collisions and grouped reexports.\n\nOriginal requirement checklist to recheck: .3.1 font-loader/fake frame stages/channel zoo/unused budgets/thread/config/role/handle/macOS elevation/overlay probe/tab collector/media regression/deps/export deletions, retaining real frame-ready/OS queue, slim pipeline/hit-test and justified live TileBoundsEntry; .3.2 SIGHUP/ReloadConfig/hot state/RuntimeService deletion with one config builder and strict startup; .3.3 listed dead directories/scene JSON/gauge/orphan source/script/CHANGELOG/bytecode removal; .3.4 enumerated compositor APIs/no-op headless forwarding deletion plus completed public/test-helper diet; .3.5 duplicate events envelopes/batch/scroll/drag/focus hooks and telemetry record/channel/calibration deletion while retaining live envelopes/patch/coalescing and corrected real focus gate; .3.6 schema/validate-only fields/event-switch/custom profile overrides/auto detection deletion, fixed built-in profiles and repaired unsupported-key refusal. All original exact file/type/feature scans and keeps remain in the checklist, with current source-root enumeration from the bead fields and merged report.\n\nG1-G4 closure checks: Every current compositor exposure has a real consumer/protected rationale, and pure pixel helpers are test-only with every caller updated; every RawConfig/RawRuntime/RawTab reader rejects the complete removed/unknown matrix while valid defaults/dynamic maps/auth/fallback contracts survive; exact G3 conveniences and eight dead-helper tests leave compiled production without losing actual telemetry vectors or .1.12 guards; the single moved focus gate exercises real revoke/grace/lock deferral/next-settle ring cleanup and demonstrably depends on the production call. Validate original contracts separately from preservation of test declarations.\n\nUniversal/negative/instrument audit: For every 'no caller', 'every key rejection', 'only builder', 'all invariant tests survive' and deleted file/feature assertion enumerate the full mandated operation/caller/schema surface, not one compliant example. Read scripts/dead_code.py's public-declaration regex, external_names roots, test/comment treatment and grouped-reexport behavior; advisory success and cargo machete do not prove no live caller. Audit deletion scan regex/globs/roots for all mandated trees and describe legitimate hits from negative config fixtures/comment/history separately from removed compiled definitions/imports/production consumers. Do not make the original overbroad text scan require deleting new unsupported-key behavior cases. Inspect the one public config table, existing pixel/glyph/telemetry gates and moved runtime focus gate for real seam execution, state/clock/assertions/guard reach; compare headless/windowed config and repeated/concurrent fixture paths for defaults, ordering and auth consistency. Exactly one designated gate species per scenario; no new species just to re-prove existing behavior.\n\nFailure/concurrency/replay/compatibility matrix: Partial/missing/deviating implementation is a gap even when CI is green. Config invalid/removed/unknown and valid/default repeat parsing, pixel assertion failure/tolerance, actual telemetry sample/percentile/empty-sample handling, parallel GPU fixture admission, focus revoke/within-grace/terminal reap/lock-busy retry/repeated settle, schema/API/Windows/T7 compatibility and no hot/persisted config mutation are explicitly covered or honestly marked retained external behavior. Read repair gate logs with exact head attribution; obtain minimal existing-gate execution evidence if absent/stale, rather than invent tests or claim all 72 were executed by one subset. No new replay/persistence model; inspect live deferred/retry owners before assuming absence.\n\nDeliverables/verification: Commit an evidence-only generation-2 requirement matrix and complete caller/test/instrument inventory with audited SHA, search roots/patterns, code:line and test/assertion:line; classify implemented/partial/missing/deviates and list each requirement's implementing bead and single gate species. Prefer test_results/hud-bstmy.3.10-reconciliation.md and -followups.json, matching the existing evidence convention. Validate JSON, cited paths/functions/test attributes, declaration count and evidence-only diff; no new standalone docs under docs/. Recompute current reference counts (starting 78/72), normalize final :: components and verify attributed declarations, not substrings/comments. Changed/moved named gates retain their authoritative references in their repair PR; this audit makes no spec change.\n\nIf any gaps remain, return dedupe-ready cold-start candidates with exact authority/source/caller matrix, parent/priority/dependencies/non-goals/behavior verification/gate species/test delta, plus one gen-3 candidate depending on those fixes/main evidence (never gen-4). Report blocked-awaiting-coordinator with the concrete coverage gaps and completion conditions; coordinator dedupes/materializes and owns closure. If no gaps remain, report full coverage with the evidence/checklist, not blanket green-CI confirmation. Original .3.7 closure is a coordinator consequence, never a prerequisite. Tests: +0 ~0 -0.\n\nCohesion: This is the single terminal cross-child audit for the repaired parent, depending on all four outcomes (and considering closed original children), not separate audits per repair. No extra active reconciliation child or original-closure cycle.\n\nDocs impact: Only the generation-2 test_results reconciliation report, machine-readable follow-up/blocker inventory and PR evidence are written. No standalone docs/spec or owner posture amendment; implementation/test code remains read-only.",
+    "acceptance_criteria": "1. Audit begins only after all four repair outcomes and generation-1 evidence are on fetched main; pin exact audit SHA and read current specs/parent/all original and repair children. No dependency on original hud-bstmy.3.7 closure; one terminal gen-2 audit, no cycle.\n2. Complete requirement matrix covers every original .3.1-.3.6 requirement and retention plus G1-G4. Every universal/negative claim enumerates all current/pre-existing operation/caller/schema/config/feature surfaces across app, crates, examples, tests, benches and Windows cfg, retaining protected T7/live glyph/input/auth contracts. Each row names implementing bead, current source evidence, classification and designated gate species.\n3. Audit the scan/guard instruments themselves: roots, regex/globs, grouped reexports, comments/inline tests, name collisions, generated/cfg paths and advisory semantics. A blind guard or absent current-user proof is reported as a gap. Qualified compiled-deletion scans distinguish legitimate negative-test strings; green CI/existence of a declaration alone is not implementation evidence.\n4. Recompute complete docs/invariants.md named-test references with final :: normalization and test attributes; baseline 78 mentions/72 unique includes sustained_overload_does_not_escalate_past_simplified and registered_budget_rejects_mutation_above_tile_limit. Every current named gate remains or its reference was validly updated without contract reduction. Inspect real config/pixel/glyph/telemetry/focus behavior gate code and exact-head run evidence, preserving one species per scenario and honest executed-vs-retained coverage.\n5. Failure/concurrency/retry/replay/compatibility comparisons cover the explicit G1-G4 matrix and shared headless/windowed/default/auth/Windows/T7 paths. Confirm .1.12 guards and telemetry vectors remain and the relocated focus gate hits real revoke/grace/sweep/next-settle wiring rather than a closure. Any missing evidence or behavior is partial/missing, not presumed green.\n6. Durable evidence report and machine-readable gap/blocker arrays validate (JSON, paths/citations, count/all attributed definitions and whitespace), contain no production/spec/test changes, and record Tests: +0 ~0 -0. Docs impact is only those test_results evidence artifacts and PR description; no standalone docs/spec or owner posture change.\n7. Every residual gap has a dedupe-ready same-parent candidate with authority, full surface/behavior/docs/verification packet, priority/dependencies and expected delta; only unpinned scenarios propose tests. If gaps remain propose gen-3 and report concrete blockers to coordinator. Full closure requires complete evidence; coordinator alone applies lifecycle/graph changes.",
+    "notes": "dispatch-readiness 2026-10-06 codex-20261006-0058: self-contained non-goals, surface/failure matrix, documentation impact and verification design required. Reconciliation candidate gen2_reconciliation, original hud-bstmy.3.7; evidence PR #1353.\n\ndispatch-readiness 2026-10-06: complete parent3 packet applied and equality verified; no new owner decision. Concrete dependencies and active writer cohesion determine runnable state. Artifact .handoff/shaping-hud-bstmy.3-batch.json [GEN2].\n\nAll exact G1/CFG/G3/G4 outcomes and PR1353 generation1 evidence MERGED and squash reachable from fetched origin/main b5c8852b; both generation1 artifacts tracked. Canonical FIRSTGEN2 packet byte-identical/all blockersclosed. Ready XHigh deep terminal reconciliation/MAXgen3/no gen4. Original3.7 partial coverage remains blocked until complete terminal reconciliation, never prerequisite closure. Initial no-external-gates assumption failed BEFORE mutation; corrected by checking BOTH explicit main-evidence and merged-outcome gates, no packet reshaping.\n[beads-heartbeat]\nowner=coordinator:codex-20261006-0058\nlast_heartbeat_at=2026-10-06T08:09:04Z\n[/beads-heartbeat]",
+    "status": "in_progress",
+    "external_ref": null,
+    "labels": [
+      "complexity:high",
+      "post-reset",
+      "reconciliation",
+      "t8",
+      "t8-dead-code"
+    ],
+    "dependencies": [
+      {
+        "id": "hud-bstmy.3",
+        "dependency_type": "parent-child",
+        "status": "open"
+      },
+      {
+        "id": "hud-bstmy.3.8",
+        "dependency_type": "blocks",
+        "status": "closed"
+      },
+      {
+        "id": "hud-bstmy.3.9",
+        "dependency_type": "blocks",
+        "status": "closed"
+      },
+      {
+        "id": "hud-qudoh",
+        "dependency_type": "blocks",
+        "status": "closed"
+      },
+      {
+        "id": "hud-rk7q5",
+        "dependency_type": "blocks",
+        "status": "closed"
+      }
+    ]
+  }
+}

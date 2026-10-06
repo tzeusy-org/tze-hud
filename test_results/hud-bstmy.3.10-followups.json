@@ -1,0 +1,131 @@
+[
+  {
+    "candidate_key": "R1-telemetry-conveniences",
+    "title": "Remove the unconsumed frame-recorder wrapper and narrow three self-test telemetry conveniences",
+    "type": "task",
+    "priority": 2,
+    "parent": "hud-bstmy.3",
+    "depends_on": [
+      "hud-bstmy.3.8"
+    ],
+    "description": "Outcome: FrameRecorder and its SystemClock/injected-clock convenience surface leave compiled production because no current runtime, benchmark, external fixture or protected caller uses this owner. The three test-only telemetry convenience methods remain available only to their existing unit-test module. Actual FrameTelemetry/SessionSummary schema, runtime/benchmark measurements, LatencyBucket assertions and collector behavior remain intact. No sampling, timestamp, replay, calibration policy or new test API is added.",
+    "design": "hud-bstmy.3 authorizes deleting production code without a current production caller. docs/scope.md T8 and Working rules require deleting rather than generalizing and preserving every invariant contract; docs/vision.md current-user/useful-test lessons and docs/invariants.md are current authority. Generation2 hud-bstmy.3.10 evidence at 8f61ab81dc6aab44229f5eff9ed2eb5be45d8261 supersedes bare live labels from generation1/G3. Re-read current definitions and all callers; line numbers are navigation, not permission to delete a new consumer.\n\nProtected T7 boundary: never edit crates/tze_hud_projection/**, runtime/src/portal_projection_driver.rs, runtime/src/windowed/portal.rs, input/src/{composer_draft,portal_resize}.rs, config/src/portal_tokens.rs, mcp/src/portal_op.rs or tests/integration/text_stream_portal_*.rs; retain all public items they actually import. Retain live types, fields and required members. A protected type import does not justify deleting the type to remove an uncalled member; review member-specific receivers/static aliases independently, and retain/report any newly found protected member call.\n\nExact surface at audited8f61: telemetry/src/collector.rs:66 FrameRecorder, ::new:72, ::new_with_clock:79, ::begin_frame:89 and Default:97, its dead clock imports, doc example:54-64, and telemetry/src/lib.rs:15 reexport. Current calls are only collector.rs:111/113/119/126/127 inside its own two helper tests; no production/benchmark/external/protected call or method alias exists. SceneGraph::new_with_clock is an unrelated owner. Remove this wrapper and its two nearest helper-only attributed tests (test_frame_recorder_stamps_timestamp and test_frame_recorder_default_uses_system_clock), plus its own doctest. Do not recreate these implementation tests under new names.\n\nTest-owned compiled methods: telemetry/src/record.rs:583 SessionSummary::to_json (only own existing serialization/schema tests at616/653/732/858/1072); validation.rs:402 ValidationReport::to_json (own report_serializes_to_json:611); validation.rs:90 HardwareFactors::cpu_only (own partial-calibration tests at433/449/487/599). Narrow using existing cfg(test)/module privacy; no new Cargo feature/helper crate. Preserve all those scenario/test bodies and serialization assertions. SceneSnapshot/McpError/operator-status to_json and benchmark Args.cpu_only are unrelated live owners and stay. Benchmark serializes its real report with serde_json, not these wrapper calls.\n\nKeep telemetry/src/collector.rs:15/23/31/36 TelemetryCollector::{new,record,summary,records}; FrameTelemetry::new:record.rs202 and every serialized field including timestamp_us. Production frames construct FrameTelemetry::new directly; current timestamp_us defaults to0, so removing a dead producer is not authority to delete the field or claim timestamp population. Update record.rs:28 stale producer comment to describe the actual constructor behavior without a new sampling promise. Keep actual stage/sample vectors, record_frame_correctness, frame/render ordering, LatencyBucket window/percentiles/empty-sample error, HardwareFactors::new/uncalibrated/Default, ValidationReport::run, and benchmark/runtime consumers.\n\nFailure/concurrency/replay/compatibility: preserve JSON field names/defaults and partial/uncalibrated/NoSamples/fail verdict cases; actual measured vector counts and p99/assert_p99_under semantics remain. Keep TZE_HUD_PERF_ASSERT policy/test_budget slack. The wrapper owns no live retry/replay/persisted state. Preserve .1.12 per-binary GPU init guards and all external multi-agent/vertical-slice sample, namespace, lifecycle, render and budget assertions. Do not change resource fields, clocks/enabler packets, WorkCounts/.5.3/.5.7, protocol gaps, T7, owner5.6 or8.6 posture.\n\nDocs impact: update only affected existing API/reexport/record comments and PR explanation; no docs/spec/posture amendment or standalone page. Tests expected +0 ~0 -2 attributed helper tests, with one dead wrapper doctest removed separately; existing serialization/calibration/latency behavior tests preserved. Cohesion: one telemetry production API diet outcome, not separate feature work. Rollback is this scoped commit.\n\nVerification: repeat owner-qualified searches across all tracked app/crates/examples/tests/nested benches, target-cfg and T7 paths after syncing main. All named invariants (current78 mentions/72 unique) must resolve by final::name plus test attribute. Use existing telemetry unit suite including test_latency_bucket_percentiles, test_session_summary_serialization, test_session_summary_record_frame_correctness_accumulates_violations, report_serializes_to_json and partial/no-samples cases; existing integration/multi_agent and vertical_slice budget tests. Run just fmt, cargo check --workspace, workspace all-targets clippy -D warnings and one normal just ci at final source; existing Windows-GNU/WindowsCI compatibility or explicit tool limitation. No new structural or serializer scan gate.\n\nUse a coordinator-leased existing warm Cargo target, jobs1, PROTOC=/usr/bin/protoc3.21.12, the actual just lvp ICD (currently /usr/share/vulkan/icd.d/lvp_icd.json), HEADLESS_FORCE_SOFTWARE=1 and TZE_HUD_REQUIRE_GPU=1. Run default test parallelism. No wiped/shared foreign target, broad duplicated gates or skipped GPU proof. Record exact execution source, command, environment, whole log SHA, failed/skip line indexes and source after.",
+    "acceptance_criteria": "1. Whole-root owner/receiver/reexport/T7 inventory verifies the exact unused FrameRecorder owner and no new current user; wrapper/imports/reexport/two helper tests/doctest removed. New consumers are retained with exact conflict evidence.\n2. The three exact self-test convenience methods are absent from compiled default production but continue to serve their existing unit tests; no new feature/accessor/helper crate and no unrelated same-name narrowing.\n3. All actual frame/summary fields and runtime/benchmark telemetry, JSON schema/defaults, real latency vectors/percentiles/empty handling/calibration verdicts, .1.12 admission guards and external fixture assertions remain. timestamp_us remains unchanged, not silently dropped or invented as sampled.\n4. Existing API/comment references match delivered behavior; no standalone docs/spec/posture change. Tests +0 ~0 -2 with only the two named helper tests removed (one wrapper doctest separately).\n5. Exact-head existing telemetry/fixture behavior, fmt/workspace check/all-targets clippy/full normal just ci and Windows compatibility receipts pass; whole SHA and failures/skips indexed. No mirrored/new test species.",
+    "non_goals": [
+      "No production sampling/timestamp/schema/budget/calibration/clock change",
+      "No protected T7 file/type deletion",
+      "No enabler/protocol/WorkCounts sibling repair or owner posture",
+      "No new tests/scan species/features"
+    ],
+    "source_evidence": [
+      "qualified-residual-caller-matrix.json",
+      "source-inventory.json.gz",
+      "reference-index.json.gz",
+      "gates/full-ci-receipt.json"
+    ],
+    "verification_gate_species": "Existing telemetry/serialization/latency and current integration/vertical-slice behavior gates; structural qualified source proof.",
+    "expected_test_delta": {
+      "added": 0,
+      "modified": 0,
+      "removed": 2
+    },
+    "docs_impact": "Existing affected API/reexport/record comments and PR evidence only.",
+    "baseline_commit": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261",
+    "packet_complete": true,
+    "labels": [
+      "post-reset",
+      "t8",
+      "t8-dead-code",
+      "complexity:medium"
+    ],
+    "complexity": "medium"
+  },
+  {
+    "candidate_key": "R2-input-conveniences",
+    "title": "Delete three caller-free input convenience members while preserving live input and T7 contracts",
+    "type": "task",
+    "priority": 2,
+    "parent": "hud-bstmy.3",
+    "depends_on": [
+      "hud-bstmy.3.8"
+    ],
+    "description": "Outcome: SceneLocalPatch::merge_from, KeyboardModifiers::has_modifier and InputProcessor::set_composer_suspended leave compiled production after current qualified all-root caller confirmation. These three members currently have no production, fixture, bench or protected call; only definition/comment references remain. Their live owner types, actual patch/scroll/keyboard/composer/safe-mode paths and all existing behavior tests remain.",
+    "design": "hud-bstmy.3 authorizes deleting production code without a current production caller. docs/scope.md T8 and Working rules require deleting rather than generalizing and preserving every invariant contract; docs/vision.md current-user/useful-test lessons and docs/invariants.md are current authority. Generation2 hud-bstmy.3.10 evidence at 8f61ab81dc6aab44229f5eff9ed2eb5be45d8261 supersedes bare live labels from generation1/G3. Re-read current definitions and all callers; line numbers are navigation, not permission to delete a new consumer.\n\nProtected T7 boundary: never edit crates/tze_hud_projection/**, runtime/src/portal_projection_driver.rs, runtime/src/windowed/portal.rs, input/src/{composer_draft,portal_resize}.rs, config/src/portal_tokens.rs, mcp/src/portal_op.rs or tests/integration/text_stream_portal_*.rs; retain all public items they actually import. Retain live types, fields and required members. A protected type import does not justify deleting the type to remove an uncalled member; review member-specific receivers/static aliases independently, and retain/report any newly found protected member call.\n\nExact owner surface at8f61: input/src/events.rs:189 SceneLocalPatch::merge_from, keyboard.rs:64 KeyboardModifiers::has_modifier, input/src/lib.rs:1087 InputProcessor::set_composer_suspended. Whole tracked Rust navigation and direct qualified body/import/receiver review found no call, UFCS/static alias or test consumer. events.rs:127/154 only describe merge_from; keyboard.rs:38 only documents has_modifier; lib.rs:1068-1086 claims a controller call that does not exist. G3 design explicitly kept merge_from as live; that label is contradicted by current caller evidence, not authority for deleting the owner. InputProcessor wrapper delegates to protected ComposerDraftManager::set_suspended; calls on ComposerDraft/DraftManager are a separate live/test owner, not this wrapper.\n\nDelete only these three exact callable definitions and their adjacent obsolete existing documentation references. Keep events::SceneLocalPatch::{new,is_empty,push_state}, node_updates/scroll_updates, LocalStateUpdate/ScrollOffsetUpdate/live InputResult and returned patches; keep KeyboardModifiers fields/NONE/serde and raw keyboard event types; keep InputProcessor and its actual process/dispatch fields/functions. Protected T7 imports of these live types remain; source qualification must retain a newly discovered protected member call instead of touching the protected file.\n\nFailure/concurrency/retry/replay: no caller executes these methods, so deleting them changes no active coalescing or suspension state. Preserve actual scroll user-priority/latest-wins processing, local feedback/rollback, pending-keyboard ordering, physical key suppression, portal/composer routing, direct DraftManager suspension tests and safe-mode dispatch guards. These dead methods own no persisted/replayed contract. Do not implement missing manager wiring, another patch channel or new policy. Input batching/coalescing pipeline modules/envelope are existing .4.5 scope and remain untouched; exact events.rs patch member is outside that Files list. Preserve .3.9 real focus lifecycle/try_lock/next-settle gate.\n\nNon-goals: no input transport/routing/focus/scroll/composer/clock semantics; no protected T7/source or type/field deletion; no .4.5 batching pipeline, shell5.6 freeze decision, enabler clock/comment packets or originalG3 rematerialization. No replacement wrapper, feature or test gate. Docs impact is existing adjacent comments and PR caller ledger only; no spec amendment. Tests +0 ~0 -0 (none of these members has its own current test).\n\nVerification: re-fetch main/re-enumerate all app/crates/examples/tests/nested benches/Windows/T7 consumers; exact compiled definitions and qualified calls must disappear without matching unrelated names. Keep scene_local_patch_empty_by_default and all current named72 invariant declarations. Run existing input unit/scroll/local-feedback/keyboard/focus and runtime focus/POC/portal behavior through normal workspace gates; just fmt, cargo check --workspace, workspace all-targets clippy -D warnings, one normal just ci and existing Windows compatibility. No test for absence of a symbol.\n\nUse a coordinator-leased existing warm Cargo target, jobs1, PROTOC=/usr/bin/protoc3.21.12, the actual just lvp ICD (currently /usr/share/vulkan/icd.d/lvp_icd.json), HEADLESS_FORCE_SOFTWARE=1 and TZE_HUD_REQUIRE_GPU=1. Run default test parallelism. No wiped/shared foreign target, broad duplicated gates or skipped GPU proof. Record exact execution source, command, environment, whole log SHA, failed/skip line indexes and source after.",
+    "acceptance_criteria": "1. Exact three member definitions and obsolete adjacent comments removed after full qualified caller/T7/cfg/alias review; no live owner type/field or protected imported member removed.\n2. Existing actual patch/scroll/keyboard/local-feedback/composer/portal/safe-mode behavior and .3.9 focus gate unchanged, including retry/deferral/repeated settle and direct protected DraftManager behavior. No pipeline/policy/wiring repair introduced.\n3. Current named78/72 invariant inventory and scene_local_patch_empty_by_default survive; Tests +0 ~0 -0, no new fixture/feature/accessor/test species.\n4. Existing comment/API references accurately describe remaining behavior; no standalone docs/spec/posture amendment.\n5. Qualified removal source proof and exact-head existing input/runtime/external behavior gates, fmt/workspace check/all-targets clippy/one normal fullCI/Windows compatibility receipts pass with actual SHA/failure/skip indexes.",
+    "non_goals": [
+      "No owner type/field/T7 edit",
+      "No .4.5 pipeline deletion or composer policy/wiring",
+      "No new behavior/structural tests",
+      "No .3.7 closure dependency"
+    ],
+    "source_evidence": [
+      "qualified-residual-caller-matrix.json",
+      "g3-qualified-removals.json",
+      "reference-index.json.gz"
+    ],
+    "verification_gate_species": "Qualified source proof plus existing input/runtime/POC/portal/focus behavior gates.",
+    "expected_test_delta": {
+      "added": 0,
+      "modified": 0,
+      "removed": 0
+    },
+    "docs_impact": "Existing adjacent API/helper comments and PR evidence only.",
+    "baseline_commit": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261",
+    "packet_complete": true,
+    "labels": [
+      "post-reset",
+      "t8",
+      "t8-dead-code",
+      "complexity:medium"
+    ],
+    "complexity": "medium"
+  },
+  {
+    "candidate_key": "GEN3-terminal",
+    "title": "Reconcile T8.1b generation3 after the exact residual repairs and generation2 evidence reach main",
+    "type": "task",
+    "priority": 2,
+    "parent": "hud-bstmy.3",
+    "depends_on_candidate_keys": [
+      "R1-telemetry-conveniences",
+      "R2-input-conveniences"
+    ],
+    "depends_on": [
+      "hud-rk7q5",
+      "hud-qudoh",
+      "hud-bstmy.3.8",
+      "hud-bstmy.3.9"
+    ],
+    "description": "Outcome: one terminal generation3 evidence-only cross-child audit of hud-bstmy.3 after the two qualified residual repairs and generation2 evidence are merged and reachable on fetched main. Reconcile the original six children, four G1-G4 outcomes, and exact R1/R2 changes against the current complete parent/spec/caller/gate contract. Original .3.7 closure is never a prerequisite. No generation4 candidate or new active generation2 is created.",
+    "design": "hud-bstmy.3 authorizes deleting production code without a current production caller. docs/scope.md T8 and Working rules require deleting rather than generalizing and preserving every invariant contract; docs/vision.md current-user/useful-test lessons and docs/invariants.md are current authority. Generation2 hud-bstmy.3.10 evidence at 8f61ab81dc6aab44229f5eff9ed2eb5be45d8261 supersedes bare live labels from generation1/G3. Re-read current definitions and all callers; line numbers are navigation, not permission to delete a new consumer.\n\nProtected T7 boundary: never edit crates/tze_hud_projection/**, runtime/src/portal_projection_driver.rs, runtime/src/windowed/portal.rs, input/src/{composer_draft,portal_resize}.rs, config/src/portal_tokens.rs, mcp/src/portal_op.rs or tests/integration/text_stream_portal_*.rs; retain all public items they actually import. Retain live types, fields and required members. A protected type import does not justify deleting the type to remove an uncalled member; review member-specific receivers/static aliases independently, and retain/report any newly found protected member call.\n\nInputs: current docs/scope/vision/invariants/API; full canonical parent/original .3.1-.3.6/.3.7 evidence-only/G1-G4 plus R1/R2 fields; merged generation1 report/JSON (PR1353) and this generation2 report, two arrays and complete inventories at audited8f61. Require each actual repair outcome and evidence artifact reachable from fresh main; closed status alone is insufficient. Pin one current source and preserve historical-vs-current blob/execution attribution.\n\nSweep every original deletion/retention and G1-G4 requirement, not just R1/R2 diffs. Enumerate all tracked app/crates/examples/tests/nested benches and Windows cfg/T7 roots; owner-qualified declarations/reexports/receivers/construction/serialized fields distinguish unrelated collisions. Check dead files/scripts/bytecode/manifests/features/default dev-mode boundaries. Audit scripts/dead_code.py roots/regex/comments/inline tests/grouped reexports/advisory success plus exact acceptance scans. Existing qualified fixture/benchmark/observation rationale is not a blanket claim that every same-name production hit is a reader.\n\nRecompute docs invariant final::name mentions/unique attributed declarations at then-current specs (baseline78/72); inspect assertions and actual existing gate executions. Recheck config RawConfig/RawRuntime/RawTab readers and strict app/sharedbuilder defaults/auth/fallback, pure pixel tolerance/error semantics and real glyph geometry, actual frame/summary/latency vectors/p99/empty handling/guards, and one actual focus revoke/grace/lockbusy/repeat/missingfallback/next-settle gate including unchanged applicable mutation proof. Keep .1.12 guards and normal parallel GPU execution. Honest Windowsnative/weeklyhard-performance limitations remain limitations; no replacement/new species.\n\nR1/R2 specifically: verify unused FrameRecorder/reexport/helper tests/doctest gone, three telemetry wrappers test-only with existing schema/calibration tests, all live fields/samples/instruments retained, and three exact input unused members gone without protected owner/type/field change. Compare defaults, repeated/concurrent/deferred/retry/replay/compatibility matrix; no live behavior can be assumed solely from greenCI. Dedupe protocol2.12 R2/P2/E2/T2 and enabler1.15 five clock/comment packets, WorkCounts5.3/5.7, batching4.5 and existing owner posture; do not absorb them as .3 repairs.\n\nDeliver only committed test_results generation3 requirement/caller/test/instrument/failure matrix and validated followup/blocker JSON arrays/PR evidence, Tests +0 ~0 -0. Falsify full coverage or clearly report remaining concrete hard gaps; never propose generation4 or originalclosure edges. Coordinator owns tracker mutations and closure. Validate citations/all attributed declarations/counts/JSON/evidence-only diff and actual pushed head/PR status. Execute only minimally missing existing gates and one designated current normal fullCI if needed; source applicability must justify reused costly proofs.\n\nUse a coordinator-leased existing warm Cargo target, jobs1, PROTOC=/usr/bin/protoc3.21.12, the actual just lvp ICD (currently /usr/share/vulkan/icd.d/lvp_icd.json), HEADLESS_FORCE_SOFTWARE=1 and TZE_HUD_REQUIRE_GPU=1. Run default test parallelism. No wiped/shared foreign target, broad duplicated gates or skipped GPU proof. Record exact execution source, command, environment, whole log SHA, failed/skip line indexes and source after.",
+    "acceptance_criteria": "1. Exactly one generation3 audit begins after R1/R2 actual repairs and generation2 evidence are merged/reachable on fresh main; one pinned current SHA, no .3.7 closure dependency/cycle/generation4.\n2. Complete original/G1-G4/R1-R2 requirement matrix plus qualified whole-root caller/fixture/bench/cfg/T7/serialization/reexport inventory, deletion/default-feature scans and instrument self-audit. Each row has implementation, classification and single existing gate species.\n3. Current complete invariant attributed source/assertions and exact execution applicability, config/pixel/glyph/telemetry/focus/default/auth/failure/concurrency/retry/replay/Windows compatibility are implemented or honestly partial; counters and retained fields/contracts unchanged.\n4. Only test_results evidence and PR text change; JSON/citations/counts/evidence-only diff validated, Tests +0 ~0 -0, branch committed/pushed and two real JSON arrays returned.\n5. Dedupe exact other owners; no code/test/spec/policy repairs, new tests/scanners/features, owner decision or lifecycle mutation. Report full coverage only with complete evidence; otherwise concrete terminal blockers, never generation4.",
+    "external_gates": [
+      {
+        "type": "main-evidence",
+        "condition": "Generation2 report/arrays/inventories and both R1/R2 outcomes are merged/reachable; actual PR and bead IDs supplied by coordinator when materialized."
+      }
+    ],
+    "non_goals": [
+      "No generation4",
+      "No original .3.7 closure prerequisite",
+      "No implementation/new test/scan species",
+      "No cross-owner absorption or lifecycle mutation"
+    ],
+    "verification_gate_species": "Read-only current source/requirement/caller/instrument matrix and existing exact-source behavior gates.",
+    "expected_test_delta": {
+      "added": 0,
+      "modified": 0,
+      "removed": 0
+    },
+    "docs_impact": "Generation3 test_results evidence and PR text only.",
+    "baseline_commit": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261",
+    "packet_complete": true,
+    "labels": [
+      "post-reset",
+      "t8",
+      "t8-dead-code",
+      "complexity:high"
+    ],
+    "complexity": "high"
+  }
+]

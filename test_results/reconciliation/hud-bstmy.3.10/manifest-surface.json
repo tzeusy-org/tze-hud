@@ -1,0 +1,218 @@
+{
+  "sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261",
+  "manifests": [
+    {
+      "path": "Cargo.toml",
+      "features": {},
+      "headless_forwards": [],
+      "dev_dependencies": [],
+      "has_schemars": false
+    },
+    {
+      "path": "app/tze_hud_app/Cargo.toml",
+      "features": {},
+      "headless_forwards": [],
+      "dev_dependencies": [
+        "toml",
+        "tokio-stream",
+        "tze_hud_protocol"
+      ],
+      "has_schemars": false
+    },
+    {
+      "path": "crates/tze_hud_compositor/Cargo.toml",
+      "features": {},
+      "headless_forwards": [],
+      "dev_dependencies": [
+        "tze_hud_scene",
+        "tokio",
+        "criterion",
+        "proptest",
+        "tze_hud_widget"
+      ],
+      "has_schemars": false
+    },
+    {
+      "path": "crates/tze_hud_config/Cargo.toml",
+      "features": {},
+      "headless_forwards": [],
+      "dev_dependencies": [
+        "proptest",
+        "tempfile"
+      ],
+      "has_schemars": false
+    },
+    {
+      "path": "crates/tze_hud_input/Cargo.toml",
+      "features": {},
+      "headless_forwards": [],
+      "dev_dependencies": [
+        "proptest"
+      ],
+      "has_schemars": false
+    },
+    {
+      "path": "crates/tze_hud_mcp/Cargo.toml",
+      "features": {},
+      "headless_forwards": [],
+      "dev_dependencies": [
+        "tze_hud_scene",
+        "tokio"
+      ],
+      "has_schemars": false
+    },
+    {
+      "path": "crates/tze_hud_projection/Cargo.toml",
+      "features": {
+        "default": [],
+        "resident-grpc": [
+          "dep:tze_hud_config",
+          "dep:tze_hud_protocol",
+          "dep:uuid"
+        ]
+      },
+      "headless_forwards": [],
+      "dev_dependencies": [
+        "proptest",
+        "tze_hud_input",
+        "tze_hud_scene"
+      ],
+      "has_schemars": false
+    },
+    {
+      "path": "crates/tze_hud_protocol/Cargo.toml",
+      "features": {
+        "dev-mode": []
+      },
+      "headless_forwards": [],
+      "dev_dependencies": [
+        "tze_hud_protocol",
+        "tze_hud_scene",
+        "proptest",
+        "tempfile"
+      ],
+      "has_schemars": false
+    },
+    {
+      "path": "crates/tze_hud_resource/Cargo.toml",
+      "features": {
+        "test-support": []
+      },
+      "headless_forwards": [],
+      "dev_dependencies": [
+        "tze_hud_resource",
+        "proptest",
+        "tempfile"
+      ],
+      "has_schemars": false
+    },
+    {
+      "path": "crates/tze_hud_runtime/Cargo.toml",
+      "features": {
+        "dev-mode": [],
+        "test-harness": [
+          "tze_hud_protocol/dev-mode"
+        ]
+      },
+      "headless_forwards": [],
+      "dev_dependencies": [
+        "prost",
+        "tze_hud_scene",
+        "tze_hud_compositor",
+        "tze_hud_protocol",
+        "tokio",
+        "tempfile",
+        "tracing-subscriber"
+      ],
+      "has_schemars": false
+    },
+    {
+      "path": "crates/tze_hud_scene/Cargo.toml",
+      "features": {
+        "test-support": []
+      },
+      "headless_forwards": [],
+      "dev_dependencies": [
+        "tze_hud_scene",
+        "proptest",
+        "criterion"
+      ],
+      "has_schemars": false
+    },
+    {
+      "path": "crates/tze_hud_telemetry/Cargo.toml",
+      "features": {},
+      "headless_forwards": [],
+      "dev_dependencies": [],
+      "has_schemars": false
+    },
+    {
+      "path": "crates/tze_hud_widget/Cargo.toml",
+      "features": {},
+      "headless_forwards": [],
+      "dev_dependencies": [
+        "tempfile",
+        "tze_hud_scene"
+      ],
+      "has_schemars": false
+    },
+    {
+      "path": "examples/benchmark/Cargo.toml",
+      "features": {
+        "headless": []
+      },
+      "headless_forwards": [],
+      "dev_dependencies": [],
+      "has_schemars": false
+    },
+    {
+      "path": "examples/poc_demo/Cargo.toml",
+      "features": {},
+      "headless_forwards": [],
+      "dev_dependencies": [
+        "tze_hud_runtime",
+        "tze_hud_scene",
+        "tze_hud_config"
+      ],
+      "has_schemars": false
+    },
+    {
+      "path": "examples/render_artifacts/Cargo.toml",
+      "features": {},
+      "headless_forwards": [],
+      "dev_dependencies": [],
+      "has_schemars": false
+    },
+    {
+      "path": "examples/vertical_slice/Cargo.toml",
+      "features": {},
+      "headless_forwards": [],
+      "dev_dependencies": [
+        "tze_hud_runtime",
+        "tze_hud_scene",
+        "tze_hud_compositor",
+        "tze_hud_input",
+        "tze_hud_telemetry"
+      ],
+      "has_schemars": false
+    },
+    {
+      "path": "examples/widget_publish_load_harness/Cargo.toml",
+      "features": {},
+      "headless_forwards": [],
+      "dev_dependencies": [],
+      "has_schemars": false
+    },
+    {
+      "path": "tests/integration/Cargo.toml",
+      "features": {},
+      "headless_forwards": [],
+      "dev_dependencies": [
+        "tze_hud_scene",
+        "tze_hud_runtime",
+        "tze_hud_protocol"
+      ],
+      "has_schemars": false
+    }
+  ]
+}
