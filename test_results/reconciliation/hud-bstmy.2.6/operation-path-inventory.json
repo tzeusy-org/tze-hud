@@ -1,0 +1,140 @@
+{
+  "lease_terminal_cleanup": {
+    "pattern": "clear_publications_for_lease|reap_lease\\(|revoke_lease\\(|disconnect_lease\\(|reconnect_lease\\(",
+    "scan_roots": [
+      "crates/tze_hud_scene/src",
+      "crates/tze_hud_protocol/src",
+      "crates/tze_hud_resource/src"
+    ],
+    "matches": [
+      "crates/tze_hud_scene/src/graph/leases.rs:113:    pub fn revoke_lease(&mut self, lease_id: SceneId) -> Result<(), ValidationError> {",
+      "crates/tze_hud_scene/src/graph/leases.rs:136:        self.clear_publications_for_lease(lease_id);",
+      "crates/tze_hud_scene/src/graph/leases.rs:154:        let expiry = self.reap_lease(lease_id, LeaseState::Revoked);",
+      "crates/tze_hud_scene/src/graph/leases.rs:236:    pub fn disconnect_lease(&mut self, lease_id: &SceneId, now_ms: u64) -> Result<(), LeaseError> {",
+      "crates/tze_hud_scene/src/graph/leases.rs:257:    pub fn reconnect_lease(&mut self, lease_id: &SceneId, now_ms: u64) -> Result<(), LeaseError> {",
+      "crates/tze_hud_scene/src/graph/leases.rs:327:            expiries.push(self.reap_lease(id, terminal_state));",
+      "crates/tze_hud_scene/src/graph/leases.rs:384:        let expiry = self.reap_lease(*lease_id, terminal_state);",
+      "crates/tze_hud_scene/src/graph/leases.rs:418:    fn reap_lease(&mut self, id: SceneId, terminal_state: LeaseState) -> LeaseExpiry {",
+      "crates/tze_hud_scene/src/graph/leases.rs:445:            self.clear_publications_for_lease(id);",
+      "crates/tze_hud_protocol/src/session_server/handshake.rs:292:                    scene.reconnect_lease(lease_id, now).is_ok()",
+      "crates/tze_hud_protocol/src/session_server/mod.rs:548:                                let _ = scene.disconnect_lease(lease_id, now);",
+      "crates/tze_hud_scene/src/graph/zone_ops.rs:154:    /// publications recorded under its id ([`Self::clear_publications_for_lease`]);",
+      "crates/tze_hud_scene/src/graph/zone_ops.rs:810:    pub fn clear_publications_for_lease(&mut self, lease_id: SceneId) {",
+      "crates/tze_hud_protocol/src/session_server/verbs.rs:357:        let _ = scene.revoke_lease(lease_id);",
+      "crates/tze_hud_protocol/src/session_server/verbs.rs:704:                    scene.revoke_lease(lease)"
+    ],
+    "limitations": "Inline #[cfg(test)] modules can remain in the raw match list; classification is in report.md."
+  },
+  "content_deadlines": {
+    "pattern": "fn (drain_expired|apply_due_batches|schedule_batch|next_.*deadline|.*expiry)|expires_at_wall_us\\(",
+    "scan_roots": [
+      "crates/tze_hud_scene/src",
+      "crates/tze_hud_protocol/src",
+      "crates/tze_hud_resource/src"
+    ],
+    "matches": [
+      "crates/tze_hud_protocol/src/dedup.rs:225:    fn test_ttl_expiry() {",
+      "crates/tze_hud_protocol/src/dedup.rs:240:    fn test_re_insert_after_expiry_treated_as_new() {",
+      "crates/tze_hud_protocol/src/token.rs:362:    fn test_token_at_exact_expiry_is_expired() {",
+      "crates/tze_hud_protocol/src/token.rs:375:    fn test_token_just_before_expiry_succeeds() {",
+      "crates/tze_hud_scene/src/timing/hints.rs:291:    fn default_hints_are_immediate_no_expiry() {",
+      "crates/tze_hud_protocol/src/session_server/mod.rs:915:    async fn on_lease_expiry(",
+      "crates/tze_hud_protocol/src/session_server/lease_expiry_bus.rs:27:    fn from(expiry: LeaseExpiry) -> Self {",
+      "crates/tze_hud_protocol/src/session_server/lease_expiry_bus.rs:157:    fn dropped_receiver_unregisters_without_waiting_for_an_expiry() {",
+      "crates/tze_hud_protocol/src/session_server/verbs.rs:586:            expires_at_wall_us: expires_at_wall_us(publish, now),",
+      "crates/tze_hud_protocol/src/session_server/verbs.rs:626:        expires_at_wall_us(publish, now),",
+      "crates/tze_hud_protocol/src/session_server/verbs.rs:636:fn expires_at_wall_us(publish: &Publish, now_wall_us: u64) -> Option<u64> {",
+      "crates/tze_hud_protocol/src/session_server/verbs.rs:662:    if let Some(expires) = expires_at_wall_us(publish, now_wall_us)",
+      "crates/tze_hud_scene/src/graph/zone_ops.rs:902:    pub fn drain_expired_zone_publications(&mut self) -> usize {",
+      "crates/tze_hud_scene/src/graph/zone_ops.rs:929:    pub fn next_publication_expiry_wall_us(&self) -> Option<u64> {",
+      "crates/tze_hud_scene/src/graph/zone_ops.rs:960:    pub fn drain_expired_widget_publications(&mut self) -> usize {",
+      "crates/tze_hud_scene/src/graph/timed.rs:26:    pub fn schedule_batch(&mut self, present_at_wall_us: u64, batch: MutationBatch) {",
+      "crates/tze_hud_scene/src/graph/timed.rs:88:    pub fn apply_due_batches(&mut self) -> Vec<MutationResult> {",
+      "crates/tze_hud_scene/src/graph/timed.rs:109:    pub(crate) fn stamp_batch_expiry(&mut self, batch: &MutationBatch, created_ids: &[SceneId]) {",
+      "crates/tze_hud_scene/src/graph/timed.rs:127:    pub fn drain_expired_tiles(&mut self) -> Vec<SceneId> {",
+      "crates/tze_hud_scene/src/graph/leases.rs:339:    pub fn next_lease_deadline_ms(&self, max_suspend_ms: u64) -> Option<u64> {"
+    ],
+    "limitations": "Inline #[cfg(test)] modules can remain in the raw match list; classification is in report.md."
+  },
+  "session_error_construction": {
+    "pattern": "SessionError\\s*\\{|AuthRejection\\s*\\{|hint: String::new\\(\\)",
+    "scan_roots": [
+      "crates/tze_hud_scene/src",
+      "crates/tze_hud_protocol/src",
+      "crates/tze_hud_resource/src"
+    ],
+    "matches": [
+      "crates/tze_hud_protocol/src/auth.rs:159:                AuthResult::Failed(message) => Err(AuthRejection {",
+      "crates/tze_hud_protocol/src/auth.rs:162:                    hint: String::new(),",
+      "crates/tze_hud_scene/src/config/agents.rs:66:pub struct AuthRejection {",
+      "crates/tze_hud_scene/src/config/agents.rs:192:            return Err(AuthRejection {",
+      "crates/tze_hud_scene/src/config/agents.rs:230:fn reject(message: &str) -> AuthRejection {",
+      "crates/tze_hud_scene/src/config/agents.rs:231:    AuthRejection {",
+      "crates/tze_hud_protocol/src/session_server/handshake.rs:35:            payload: Some(ServerPayload::SessionError(SessionError {",
+      "crates/tze_hud_protocol/src/session_server/handshake.rs:80:                        payload: Some(ServerPayload::SessionError(SessionError {",
+      "crates/tze_hud_protocol/src/session_server/handshake.rs:138:                    payload: Some(ServerPayload::SessionError(SessionError {",
+      "crates/tze_hud_protocol/src/session_server/handshake.rs:141:                        hint: String::new(),",
+      "crates/tze_hud_protocol/src/session_server/handshake.rs:272:                    payload: Some(ServerPayload::SessionError(SessionError {",
+      "crates/tze_hud_protocol/src/session_server/handshake.rs:335:                    payload: Some(ServerPayload::SessionError(SessionError {",
+      "crates/tze_hud_protocol/src/session_server/handshake.rs:338:                        hint: String::new(),",
+      "crates/tze_hud_protocol/src/lease.rs:110:            hint: String::new(),",
+      "crates/tze_hud_protocol/src/lease.rs:131:                    hint: String::new(),",
+      "crates/tze_hud_protocol/src/lease.rs:149:                hint: String::new(),",
+      "crates/tze_hud_protocol/src/lease.rs:170:                hint: String::new(),",
+      "crates/tze_hud_protocol/src/lease.rs:192:                hint: String::new(),",
+      "crates/tze_hud_protocol/src/lease.rs:203:                hint: String::new(),",
+      "crates/tze_hud_protocol/src/session_server/mod.rs:218:                            payload: Some(ServerPayload::SessionError(SessionError {",
+      "crates/tze_hud_protocol/src/session_server/mod.rs:221:                                hint: String::new(),",
+      "crates/tze_hud_protocol/src/session_server/mod.rs:232:                            payload: Some(ServerPayload::SessionError(SessionError {",
+      "crates/tze_hud_protocol/src/session_server/mod.rs:235:                                hint: String::new(),",
+      "crates/tze_hud_protocol/src/session_server/mod.rs:246:                            payload: Some(ServerPayload::SessionError(SessionError {",
+      "crates/tze_hud_protocol/src/session_server/mod.rs:278:                            payload: Some(ServerPayload::SessionError(SessionError {",
+      "crates/tze_hud_protocol/src/session_server/mod.rs:282:                                hint: String::new(),",
+      "crates/tze_hud_protocol/src/session_server/mod.rs:767:                                    payload: Some(ServerPayload::SessionError(SessionError {",
+      "crates/tze_hud_protocol/src/session_server/mod.rs:770:                                        hint: String::new(),"
+    ],
+    "limitations": "Inline #[cfg(test)] modules can remain in the raw match list; classification is in report.md."
+  },
+  "budget_admission": {
+    "pattern": "fn (check_budget|complete_upload|handle_upload_start|handle_upload_complete|reserve_mutation|register_session)",
+    "scan_roots": [
+      "crates/tze_hud_scene/src",
+      "crates/tze_hud_protocol/src",
+      "crates/tze_hud_resource/src"
+    ],
+    "matches": [
+      "crates/tze_hud_resource/src/upload.rs:223:    pub async fn handle_upload_start(",
+      "crates/tze_hud_resource/src/upload.rs:400:    pub async fn handle_upload_complete(",
+      "crates/tze_hud_resource/src/upload.rs:469:    async fn complete_upload(",
+      "crates/tze_hud_resource/src/validation.rs:112:pub fn check_budget(",
+      "crates/tze_hud_protocol/src/session_server/budget_gate.rs:26:    fn register_session(",
+      "crates/tze_hud_protocol/src/session_server/budget_gate.rs:36:    fn reserve_mutation(",
+      "crates/tze_hud_scene/src/graph/budget.rs:170:    pub fn check_budget("
+    ],
+    "limitations": "Inline #[cfg(test)] modules can remain in the raw match list; classification is in report.md."
+  },
+  "production_deadline_clocks": {
+    "pattern": "Instant::now\\(|SystemTime::now\\(|tokio::time::sleep\\(",
+    "scan_roots": [
+      "crates/tze_hud_scene/src",
+      "crates/tze_hud_protocol/src",
+      "crates/tze_hud_resource/src"
+    ],
+    "matches": [
+      "crates/tze_hud_resource/src/runtime_widget_store.rs:350:        std::time::SystemTime::now()",
+      "crates/tze_hud_resource/src/upload.rs:315:                started_at: Instant::now(),",
+      "crates/tze_hud_scene/src/clock.rs:68:/// - `now_us()` \u2014 `SystemTime::now()` converted to UTC microseconds.",
+      "crates/tze_hud_scene/src/clock.rs:81:            mono_origin: Instant::now(),",
+      "crates/tze_hud_scene/src/clock.rs:99:        SystemTime::now()",
+      "crates/tze_hud_protocol/src/dedup.rs:80:        let now = Instant::now();",
+      "crates/tze_hud_protocol/src/dedup.rs:100:        let now = Instant::now();",
+      "crates/tze_hud_protocol/src/dedup.rs:142:                inserted_at: Instant::now(),",
+      "crates/tze_hud_protocol/src/session_server/element_persist.rs:172:    let now_ns = SystemTime::now()",
+      "crates/tze_hud_protocol/src/session_server/mod.rs:128:    std::time::SystemTime::now()",
+      "crates/tze_hud_protocol/src/session_server/mod.rs:135:    std::time::SystemTime::now()",
+      "crates/tze_hud_protocol/src/session_server/upload.rs:506:        let now = Instant::now();",
+      "crates/tze_hud_protocol/src/session_server/upload.rs:519:            tokio::time::sleep(delay).await;"
+    ],
+    "limitations": "Inline #[cfg(test)] modules can remain in the raw match list; classification is in report.md."
+  }
+}

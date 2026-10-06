@@ -1,0 +1,21 @@
+{
+  "audited_base": "17de3331b11a1ee55fa22197fd13b99b26dac267",
+  "json_valid": true,
+  "invariant_tests": 72,
+  "missing": 0,
+  "duplicate": 0,
+  "deletion_greps_empty": 4,
+  "deleted_files_absent": 13,
+  "focused_tests_passed": 901,
+  "focused_tests_ignored": 1,
+  "follow_up_candidates": 6,
+  "blockers": 1,
+  "code_changes": 0,
+  "test_definition_delta": "+0 ~0 -0",
+  "invariant_mentions": 78,
+  "attributed_test_declarations_verified": 72,
+  "qualified_references_included": [
+    "degradation::tests::sustained_overload_does_not_escalate_past_simplified",
+    "mutation_budget_bridge::tests::registered_budget_rejects_mutation_above_tile_limit"
+  ]
+}

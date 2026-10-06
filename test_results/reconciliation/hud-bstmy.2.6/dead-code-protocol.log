@@ -1,0 +1,22 @@
+# narrowed 75 pub items in tze_hud_protocol
+# 20 dead item(s) in tze_hud_protocol
+crates/tze_hud_protocol/src/auth.rs:116:15: warning: function `authenticate_session_init` is never used
+crates/tze_hud_protocol/src/convert.rs:1029:15: warning: function `scene_portal_peer_class_to_proto` is never used
+crates/tze_hud_protocol/src/convert.rs:1073:15: warning: function `scene_portal_lifecycle_to_proto` is never used
+crates/tze_hud_protocol/src/convert.rs:1121:15: warning: function `scene_portal_display_state_to_proto` is never used
+crates/tze_hud_protocol/src/convert.rs:1160:15: warning: function `scene_portal_part_kind_to_proto` is never used
+crates/tze_hud_protocol/src/convert.rs:1232:15: warning: function `scene_portal_surface_to_proto` is never used
+crates/tze_hud_protocol/src/convert.rs:220:15: warning: function `scene_node_layout_to_proto` is never used
+crates/tze_hud_protocol/src/convert.rs:23:15: warning: function `resource_id_to_proto` is never used
+crates/tze_hud_protocol/src/convert.rs:32:15: warning: function `proto_to_resource_id` is never used
+crates/tze_hud_protocol/src/convert.rs:449:15: warning: function `scene_text_overflow_to_proto` is never used
+crates/tze_hud_protocol/src/convert.rs:457:15: warning: function `scene_color_runs_to_proto` is never used
+crates/tze_hud_protocol/src/convert.rs:485:15: warning: function `scene_input_mode_to_proto` is never used
+crates/tze_hud_protocol/src/convert.rs:581:15: warning: function `scene_node_to_proto` is never used
+crates/tze_hud_protocol/src/convert.rs:688:15: warning: function `scene_node_tree_to_proto` is never used
+crates/tze_hud_protocol/src/convert.rs:9:15: warning: function `scene_id_to_proto` is never used
+crates/tze_hud_protocol/src/session.rs:210:19: warning: methods `get_session`, `get_session_mut`, and `session_count` are never used
+crates/tze_hud_protocol/src/session_server/lifecycle.rs:25:19: warning: method `allows_mutations` is never used
+crates/tze_hud_protocol/src/session_server/service.rs:227:19: warning: methods `inject_input_event`, `broadcast_frame_presented`, and `emit_drag_repositioned_event` are never used
+crates/tze_hud_protocol/src/subscriptions.rs:240:15: warning: function `build_event_batch_message` is never used
+crates/tze_hud_protocol/src/token.rs:154:19: warning: method `evict_expired` is never used
