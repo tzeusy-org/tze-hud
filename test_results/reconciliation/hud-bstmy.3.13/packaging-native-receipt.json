@@ -1,0 +1,10 @@
+{
+  "native_pid": 3612428,
+  "cwd": "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.3.13",
+  "source": "121c1e7afe928c55cef3adcc5fb91f4e59fa2d52",
+  "time": "2026-10-06T16:31:57.423920+00:00",
+  "source_edits": false,
+  "Cargo_current": "none; six bounded context clean already terminal/released/root ACK",
+  "new_scanner": false,
+  "terminal_errors": []
+}

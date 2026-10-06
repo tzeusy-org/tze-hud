@@ -1,0 +1,781 @@
+{
+  "source": "121c1e7afe928c55cef3adcc5fb91f4e59fa2d52",
+  "job_counts": {
+    "CI": 12,
+    "Windows": 2
+  },
+  "jobs": [
+    {
+      "run": 37487716397,
+      "job_log": "0_pixel readback (GPU _ llvmpipe, informational).txt",
+      "raw_sha256": "2d1a028b731086261170842dac596a945aff0656dce3fee9db807f8d39b74a1f",
+      "bytes": 65997,
+      "summaries": [
+        {
+          "line": 735,
+          "passed": 39,
+          "failed": 0,
+          "ignored": 0
+        }
+      ],
+      "passed": 39,
+      "failure_or_ignored": 0,
+      "actual_checkout_lines": [
+        {
+          "line": 98,
+          "text": "2026-10-06T15:32:26.8503715Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +121c1e7afe928c55cef3adcc5fb91f4e59fa2d52:refs/remotes/origin/main"
+        },
+        {
+          "line": 100,
+          "text": "2026-10-06T15:32:28.6360174Z  * [new ref]         121c1e7afe928c55cef3adcc5fb91f4e59fa2d52 -> origin/main"
+        },
+        {
+          "line": 112,
+          "text": "2026-10-06T15:32:28.7522321Z 121c1e7afe928c55cef3adcc5fb91f4e59fa2d52"
+        }
+      ],
+      "GPU_skip_lines": []
+    },
+    {
+      "run": 37487716397,
+      "job_log": "1_cargo test (integration).txt",
+      "raw_sha256": "c855dcf7dbfa7756372a505fd6afb3da40e1ea4de09b9958be6452e51731c679",
+      "bytes": 127888,
+      "summaries": [
+        {
+          "line": 1202,
+          "passed": 18,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 1227,
+          "passed": 19,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 1240,
+          "passed": 7,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 1250,
+          "passed": 4,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 1267,
+          "passed": 11,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 1278,
+          "passed": 5,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 1290,
+          "passed": 6,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 1310,
+          "passed": 14,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 1319,
+          "passed": 3,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 1345,
+          "passed": 20,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 1366,
+          "passed": 15,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 1393,
+          "passed": 21,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 1412,
+          "passed": 12,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 1432,
+          "passed": 15,
+          "failed": 0,
+          "ignored": 0
+        }
+      ],
+      "passed": 170,
+      "failure_or_ignored": 0,
+      "actual_checkout_lines": [
+        {
+          "line": 100,
+          "text": "2026-10-06T15:28:49.9567845Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +121c1e7afe928c55cef3adcc5fb91f4e59fa2d52:refs/remotes/origin/main"
+        },
+        {
+          "line": 102,
+          "text": "2026-10-06T15:28:51.5400442Z  * [new ref]         121c1e7afe928c55cef3adcc5fb91f4e59fa2d52 -> origin/main"
+        },
+        {
+          "line": 114,
+          "text": "2026-10-06T15:28:51.6629010Z 121c1e7afe928c55cef3adcc5fb91f4e59fa2d52"
+        }
+      ],
+      "GPU_skip_lines": []
+    },
+    {
+      "run": 37487716397,
+      "job_log": "2_canonical app production config boot gate.txt",
+      "raw_sha256": "7d50bc457f7c3c85129a4c161cb504a860dc7f1052ab981a66bd16ba0f7ba351",
+      "bytes": 55041,
+      "summaries": [
+        {
+          "line": 650,
+          "passed": 3,
+          "failed": 0,
+          "ignored": 0
+        }
+      ],
+      "passed": 3,
+      "failure_or_ignored": 0,
+      "actual_checkout_lines": [
+        {
+          "line": 98,
+          "text": "2026-10-06T15:28:49.4972721Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +121c1e7afe928c55cef3adcc5fb91f4e59fa2d52:refs/remotes/origin/main"
+        },
+        {
+          "line": 100,
+          "text": "2026-10-06T15:28:51.0940630Z  * [new ref]         121c1e7afe928c55cef3adcc5fb91f4e59fa2d52 -> origin/main"
+        },
+        {
+          "line": 112,
+          "text": "2026-10-06T15:28:51.2496464Z 121c1e7afe928c55cef3adcc5fb91f4e59fa2d52"
+        }
+      ],
+      "GPU_skip_lines": []
+    },
+    {
+      "run": 37487716397,
+      "job_log": "3_dev-mode guard (release build).txt",
+      "raw_sha256": "e7bac1db08bff8014cbfaf64ce1ded047c1dbf6372a6b897916df13720d8694d",
+      "bytes": 12663,
+      "summaries": [],
+      "passed": 0,
+      "failure_or_ignored": 0,
+      "actual_checkout_lines": [
+        {
+          "line": 96,
+          "text": "2026-10-06T15:28:50.1436710Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +121c1e7afe928c55cef3adcc5fb91f4e59fa2d52:refs/remotes/origin/main"
+        },
+        {
+          "line": 98,
+          "text": "2026-10-06T15:28:51.0418370Z  * [new ref]         121c1e7afe928c55cef3adcc5fb91f4e59fa2d52 -> origin/main"
+        },
+        {
+          "line": 110,
+          "text": "2026-10-06T15:28:51.2082982Z 121c1e7afe928c55cef3adcc5fb91f4e59fa2d52"
+        }
+      ],
+      "GPU_skip_lines": []
+    },
+    {
+      "run": 37487716397,
+      "job_log": "4_vertical_slice production config boot.txt",
+      "raw_sha256": "b425bccd8471a04ade3316b176daa5a1add3bbdd3c3ee62613378fcd2046de3a",
+      "bytes": 54823,
+      "summaries": [
+        {
+          "line": 647,
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0
+        }
+      ],
+      "passed": 1,
+      "failure_or_ignored": 0,
+      "actual_checkout_lines": [
+        {
+          "line": 98,
+          "text": "2026-10-06T15:28:48.5420567Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +121c1e7afe928c55cef3adcc5fb91f4e59fa2d52:refs/remotes/origin/main"
+        },
+        {
+          "line": 100,
+          "text": "2026-10-06T15:28:49.7632259Z  * [new ref]         121c1e7afe928c55cef3adcc5fb91f4e59fa2d52 -> origin/main"
+        },
+        {
+          "line": 112,
+          "text": "2026-10-06T15:28:49.9182684Z 121c1e7afe928c55cef3adcc5fb91f4e59fa2d52"
+        }
+      ],
+      "GPU_skip_lines": []
+    },
+    {
+      "run": 37487716397,
+      "job_log": "5_cargo test (unit).txt",
+      "raw_sha256": "fda5e3d5c91596c5288fab7010708cb5a40899c045fae6a6ee102b6c15afe0c2",
+      "bytes": 400346,
+      "summaries": [
+        {
+          "line": 660,
+          "passed": 7,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 666,
+          "passed": 0,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 673,
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 679,
+          "passed": 0,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 688,
+          "passed": 3,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 712,
+          "passed": 18,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 718,
+          "passed": 0,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 725,
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 744,
+          "passed": 13,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 752,
+          "passed": 2,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 759,
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 768,
+          "passed": 3,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 1365,
+          "passed": 591,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 1394,
+          "passed": 23,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 1401,
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 1408,
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 1418,
+          "passed": 4,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 1432,
+          "passed": 8,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 1451,
+          "passed": 13,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 1671,
+          "passed": 171,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 2080,
+          "passed": 404,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 2128,
+          "passed": 42,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 2343,
+          "passed": 209,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 2553,
+          "passed": 204,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 2568,
+          "passed": 9,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 2577,
+          "passed": 3,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 2616,
+          "passed": 33,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 2643,
+          "passed": 21,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 2661,
+          "passed": 12,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 2753,
+          "passed": 86,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 2767,
+          "passed": 8,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 3302,
+          "passed": 529,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 3310,
+          "passed": 2,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 3316,
+          "passed": 0,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 3361,
+          "passed": 39,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 3370,
+          "passed": 3,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 3691,
+          "passed": 315,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 3719,
+          "passed": 22,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 3734,
+          "passed": 9,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 3760,
+          "passed": 20,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 3773,
+          "passed": 7,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 3795,
+          "passed": 16,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 3820,
+          "passed": 19,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 3841,
+          "passed": 15,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 3893,
+          "passed": 46,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 3974,
+          "passed": 49,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 3985,
+          "passed": 5,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 3998,
+          "passed": 7,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 4012,
+          "passed": 8,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 4035,
+          "passed": 17,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 4043,
+          "passed": 2,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 4079,
+          "passed": 30,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 4086,
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 4106,
+          "passed": 14,
+          "failed": 0,
+          "ignored": 0
+        }
+      ],
+      "passed": 3067,
+      "failure_or_ignored": 0,
+      "actual_checkout_lines": [
+        {
+          "line": 98,
+          "text": "2026-10-06T15:28:50.4811523Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +121c1e7afe928c55cef3adcc5fb91f4e59fa2d52:refs/remotes/origin/main"
+        },
+        {
+          "line": 100,
+          "text": "2026-10-06T15:29:03.8032368Z  * [new ref]         121c1e7afe928c55cef3adcc5fb91f4e59fa2d52 -> origin/main"
+        },
+        {
+          "line": 112,
+          "text": "2026-10-06T15:29:03.9326277Z 121c1e7afe928c55cef3adcc5fb91f4e59fa2d52"
+        }
+      ],
+      "GPU_skip_lines": []
+    },
+    {
+      "run": 37487716397,
+      "job_log": "6_user-test python suite.txt",
+      "raw_sha256": "06d7754c92a1c6849617a9b81a0d2c7ec2e8fb01eb1dfc59a6303fa0b36ea121",
+      "bytes": 16686,
+      "summaries": [],
+      "passed": 0,
+      "failure_or_ignored": 0,
+      "actual_checkout_lines": [
+        {
+          "line": 97,
+          "text": "2026-10-06T15:27:58.2514409Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +121c1e7afe928c55cef3adcc5fb91f4e59fa2d52:refs/remotes/origin/main"
+        },
+        {
+          "line": 99,
+          "text": "2026-10-06T15:27:59.7550175Z  * [new ref]         121c1e7afe928c55cef3adcc5fb91f4e59fa2d52 -> origin/main"
+        },
+        {
+          "line": 111,
+          "text": "2026-10-06T15:27:59.9226819Z 121c1e7afe928c55cef3adcc5fb91f4e59fa2d52"
+        }
+      ],
+      "GPU_skip_lines": []
+    },
+    {
+      "run": 37487716397,
+      "job_log": "7_cargo clippy.txt",
+      "raw_sha256": "80b5dc4c3588c5e1d9066a293d33eebcda72f832ad691728e805eecc95fd4c09",
+      "bytes": 99371,
+      "summaries": [],
+      "passed": 0,
+      "failure_or_ignored": 0,
+      "actual_checkout_lines": [
+        {
+          "line": 99,
+          "text": "2026-10-06T15:27:57.7163106Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +121c1e7afe928c55cef3adcc5fb91f4e59fa2d52:refs/remotes/origin/main"
+        },
+        {
+          "line": 101,
+          "text": "2026-10-06T15:27:58.9656308Z  * [new ref]         121c1e7afe928c55cef3adcc5fb91f4e59fa2d52 -> origin/main"
+        },
+        {
+          "line": 113,
+          "text": "2026-10-06T15:27:59.1254187Z 121c1e7afe928c55cef3adcc5fb91f4e59fa2d52"
+        }
+      ],
+      "GPU_skip_lines": []
+    },
+    {
+      "run": 37487716397,
+      "job_log": "8_cargo check.txt",
+      "raw_sha256": "f59cbb769c7539b40e22a1149738f01038cca1f6e25bf6fdcb13e0db253ffa82",
+      "bytes": 56074,
+      "summaries": [],
+      "passed": 0,
+      "failure_or_ignored": 0,
+      "actual_checkout_lines": [
+        {
+          "line": 99,
+          "text": "2026-10-06T15:27:59.1764599Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +121c1e7afe928c55cef3adcc5fb91f4e59fa2d52:refs/remotes/origin/main"
+        },
+        {
+          "line": 101,
+          "text": "2026-10-06T15:28:00.7499919Z  * [new ref]         121c1e7afe928c55cef3adcc5fb91f4e59fa2d52 -> origin/main"
+        },
+        {
+          "line": 113,
+          "text": "2026-10-06T15:28:00.9066613Z 121c1e7afe928c55cef3adcc5fb91f4e59fa2d52"
+        }
+      ],
+      "GPU_skip_lines": []
+    },
+    {
+      "run": 37487716397,
+      "job_log": "9_cargo deny (advisories + licenses).txt",
+      "raw_sha256": "fe38001416cf16bb46c50773ca9548447af15d23bba6f5dedebe079edeb7ed95",
+      "bytes": 281442,
+      "summaries": [],
+      "passed": 0,
+      "failure_or_ignored": 0,
+      "actual_checkout_lines": [
+        {
+          "line": 203,
+          "text": "2026-10-06T15:28:17.2739501Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +121c1e7afe928c55cef3adcc5fb91f4e59fa2d52:refs/remotes/origin/main"
+        },
+        {
+          "line": 205,
+          "text": "2026-10-06T15:28:19.3712930Z  * [new ref]         121c1e7afe928c55cef3adcc5fb91f4e59fa2d52 -> origin/main"
+        },
+        {
+          "line": 217,
+          "text": "2026-10-06T15:28:19.5061459Z 121c1e7afe928c55cef3adcc5fb91f4e59fa2d52"
+        }
+      ],
+      "GPU_skip_lines": []
+    },
+    {
+      "run": 37487716397,
+      "job_log": "10_cargo clippy (windows-gnu cross-target).txt",
+      "raw_sha256": "b4e13412175f5ea520f6dac68aec7518507bd05f75c3a72ae6a0fc5c5049f775",
+      "bytes": 63407,
+      "summaries": [],
+      "passed": 0,
+      "failure_or_ignored": 0,
+      "actual_checkout_lines": [
+        {
+          "line": 98,
+          "text": "2026-10-06T15:27:59.1916489Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +121c1e7afe928c55cef3adcc5fb91f4e59fa2d52:refs/remotes/origin/main"
+        },
+        {
+          "line": 100,
+          "text": "2026-10-06T15:28:00.7977004Z  * [new ref]         121c1e7afe928c55cef3adcc5fb91f4e59fa2d52 -> origin/main"
+        },
+        {
+          "line": 112,
+          "text": "2026-10-06T15:28:00.9186404Z 121c1e7afe928c55cef3adcc5fb91f4e59fa2d52"
+        }
+      ],
+      "GPU_skip_lines": []
+    },
+    {
+      "run": 37487716397,
+      "job_log": "11_cargo fmt.txt",
+      "raw_sha256": "d2fd0d075b0432f7bd1f8232904b6551e4f4bc05eb7036c46ae12b4b415ec659",
+      "bytes": 29592,
+      "summaries": [],
+      "passed": 0,
+      "failure_or_ignored": 0,
+      "actual_checkout_lines": [
+        {
+          "line": 97,
+          "text": "2026-10-06T15:27:57.8658285Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +121c1e7afe928c55cef3adcc5fb91f4e59fa2d52:refs/remotes/origin/main"
+        },
+        {
+          "line": 99,
+          "text": "2026-10-06T15:27:59.7353261Z  * [new ref]         121c1e7afe928c55cef3adcc5fb91f4e59fa2d52 -> origin/main"
+        },
+        {
+          "line": 111,
+          "text": "2026-10-06T15:27:59.8907472Z 121c1e7afe928c55cef3adcc5fb91f4e59fa2d52"
+        }
+      ],
+      "GPU_skip_lines": []
+    },
+    {
+      "run": 37487716349,
+      "job_log": "0_sign + publish release.txt",
+      "raw_sha256": "dd82ab6800afa18a3346b911f7754bd13f897cccd9bc890d713d9edfdcb83846",
+      "bytes": 21233,
+      "summaries": [],
+      "passed": 0,
+      "failure_or_ignored": 0,
+      "actual_checkout_lines": [
+        {
+          "line": 93,
+          "text": "2026-10-06T15:37:49.2746552Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +121c1e7afe928c55cef3adcc5fb91f4e59fa2d52:refs/remotes/origin/main"
+        },
+        {
+          "line": 95,
+          "text": "2026-10-06T15:37:50.3929615Z  * [new ref]         121c1e7afe928c55cef3adcc5fb91f4e59fa2d52 -> origin/main"
+        },
+        {
+          "line": 107,
+          "text": "2026-10-06T15:37:50.5546197Z 121c1e7afe928c55cef3adcc5fb91f4e59fa2d52"
+        },
+        {
+          "line": 236,
+          "text": "2026-10-06T15:38:05.6599816Z Trusted comment: tze_hud dev 121c1e7afe928c55cef3adcc5fb91f4e59fa2d52"
+        }
+      ],
+      "GPU_skip_lines": []
+    },
+    {
+      "run": 37487716349,
+      "job_log": "1_windows build + boot smoke.txt",
+      "raw_sha256": "65cee711c4a77634912fc6e9cf159e8da99e5ff2ee025a701a9a3b5f8c0da967",
+      "bytes": 58684,
+      "summaries": [],
+      "passed": 0,
+      "failure_or_ignored": 0,
+      "actual_checkout_lines": [
+        {
+          "line": 80,
+          "text": "2026-10-06T15:28:12.5760013Z [command]\"C:\\Program Files\\Git\\bin\\git.exe\" -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +121c1e7afe928c55cef3adcc5fb91f4e59fa2d52:refs/remotes/origin/main"
+        },
+        {
+          "line": 82,
+          "text": "2026-10-06T15:28:15.7203618Z  * [new ref]         121c1e7afe928c55cef3adcc5fb91f4e59fa2d52 -> origin/main"
+        },
+        {
+          "line": 94,
+          "text": "2026-10-06T15:28:16.3619826Z 121c1e7afe928c55cef3adcc5fb91f4e59fa2d52"
+        }
+      ],
+      "GPU_skip_lines": []
+    }
+  ],
+  "scope": "Actual complete exact-head remote CI/Windows job archives. NOT a local just ci invocation; informational pixel suite is separately indexed and duplicates main unit coverage."
+}

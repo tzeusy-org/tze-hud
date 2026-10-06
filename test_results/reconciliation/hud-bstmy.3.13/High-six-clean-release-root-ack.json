@@ -1,0 +1,24 @@
+{
+  "at": "2026-10-06T16:13:07.698413+00:00",
+  "issue": "hud-bstmy.3.13",
+  "six_clean_receipt_sha256": "c70deff8467ac67e6dc9953bc329d818ae88f65c0090114a4462e5116cd962fc",
+  "actual_exit": 0,
+  "source_equal_121c": true,
+  "native_and_child_absent": true,
+  "exact_six_packages_only_raw_verified": true,
+  "raw_sha256": "e2a0820a7f57cb21b14b45ab127aa0e414d4248383cb35d41dd6c80d902a7604",
+  "High_locks_unlocked": [
+    {
+      "path": "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/.cargo-lock",
+      "unlocked": true
+    },
+    {
+      "path": "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/x86_64-pc-windows-gnu/debug/.cargo-lock",
+      "unlocked": true
+    }
+  ],
+  "High_lease": "released/unassigned",
+  "globalGPU_remains": "hud-lgb6c.2",
+  "authorization": "No further GEN3 Cargo; continue complete current source/remote exact121c gate audit. ROOT may normalretire oldR3WT151 only after CURRENTarchive reverify/newindependent actual nativebinding/oldnativeabsence/ownemptylock/clean0:0; source branch retained.",
+  "errors": []
+}

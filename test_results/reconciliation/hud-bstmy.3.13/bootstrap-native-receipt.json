@@ -1,0 +1,209 @@
+{
+  "native_pid": 3545873,
+  "time_utc": "2026-10-06T15:59:41.042286+00:00",
+  "cwd": "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.3.13",
+  "helper": {
+    "status": "ok",
+    "issue_id": "hud-bstmy.3.13",
+    "expected_branch": "agent/hud-bstmy.3.13",
+    "branch": "agent/hud-bstmy.3.13",
+    "current_path": "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.3.13",
+    "worktree_path": "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.3.13",
+    "repo_root": "/home/orca/orca/projects/tze-hud",
+    "reasons": []
+  },
+  "head": "121c1e7afe928c55cef3adcc5fb91f4e59fa2d52",
+  "branch": "agent/hud-bstmy.3.13",
+  "common_git_dir": "/home/orca/orca/projects/tze-hud/.git",
+  "linked_git_dir": "/home/orca/orca/projects/tze-hud/.git/worktrees/hud-bstmy.3.13",
+  "tracked_clean": true,
+  "beads_mode": "0o2770",
+  "Git_override_names_stripped": [
+    "GIT_ASKPASS",
+    "GIT_CONFIG_COUNT",
+    "GIT_CONFIG_KEY_0",
+    "GIT_CONFIG_KEY_1",
+    "GIT_CONFIG_VALUE_0",
+    "GIT_CONFIG_VALUE_1",
+    "GIT_PAGER",
+    "GIT_TERMINAL_PROMPT"
+  ],
+  "canonical_three_field_RAW_UTF8_SHA256": {
+    "description": "4aaff8b6a68d8a2da51cdfc7465838af0fa3c7e1856d7e144c24e4342cba09d7",
+    "design": "aa8b466f63d8ce1f2a6e2f0598c7127451633a921551ec0a9e2b9dcc8a79a1d6",
+    "acceptance_criteria": "10a64213642d67bc69aa530709084b511d039195a0f32b4dad20f764bdd3427f"
+  },
+  "full_three_fields_byte_equal_to_dispatch": true,
+  "github_identity": "tzeusy-orca",
+  "PRs": [],
+  "model": "gpt-6.1-sol",
+  "reasoning_effort": "high",
+  "commands": [
+    {
+      "name": "bootstrap-helper",
+      "pid": 3545874,
+      "exit_code": 0,
+      "command": [
+        "python3",
+        "/home/orca/.dotfiles/ai-bootstrap/skills/personal/beads-orchestration/subskills/beads-worker/scripts/assert_worker_context.py",
+        "--worktree-path",
+        "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.3.13",
+        "--repo-root",
+        "/home/orca/orca/projects/tze-hud",
+        "--issue-id",
+        "hud-bstmy.3.13",
+        "--current-path",
+        "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.3.13"
+      ]
+    },
+    {
+      "name": "canonical-full",
+      "pid": 3545877,
+      "exit_code": 0,
+      "command": [
+        "bd",
+        "show",
+        "hud-bstmy.3.13",
+        "--json"
+      ]
+    },
+    {
+      "name": "head",
+      "pid": 3545891,
+      "exit_code": 0,
+      "command": [
+        "git",
+        "rev-parse",
+        "HEAD"
+      ]
+    },
+    {
+      "name": "branch",
+      "pid": 3545892,
+      "exit_code": 0,
+      "command": [
+        "git",
+        "branch",
+        "--show-current"
+      ]
+    },
+    {
+      "name": "common-git",
+      "pid": 3545893,
+      "exit_code": 0,
+      "command": [
+        "git",
+        "rev-parse",
+        "--path-format=absolute",
+        "--git-common-dir"
+      ]
+    },
+    {
+      "name": "linked-git",
+      "pid": 3545894,
+      "exit_code": 0,
+      "command": [
+        "git",
+        "rev-parse",
+        "--absolute-git-dir"
+      ]
+    },
+    {
+      "name": "tracked-status",
+      "pid": 3545895,
+      "exit_code": 0,
+      "command": [
+        "git",
+        "status",
+        "--porcelain",
+        "--untracked-files=no"
+      ]
+    },
+    {
+      "name": "github-identity",
+      "pid": 3545896,
+      "exit_code": 0,
+      "command": [
+        "gh",
+        "api",
+        "user",
+        "--jq",
+        ".login"
+      ]
+    },
+    {
+      "name": "branch-PRs",
+      "pid": 3545916,
+      "exit_code": 0,
+      "command": [
+        "gh",
+        "pr",
+        "list",
+        "--head",
+        "agent/hud-bstmy.3.13",
+        "--state",
+        "all",
+        "--json",
+        "number,state,headRefOid"
+      ]
+    },
+    {
+      "name": "context-hud-bstmy.3",
+      "pid": 3545930,
+      "exit_code": 0,
+      "command": [
+        "bd",
+        "show",
+        "hud-bstmy.3",
+        "--json"
+      ]
+    },
+    {
+      "name": "context-hud-bstmy.3.7",
+      "pid": 3545945,
+      "exit_code": 0,
+      "command": [
+        "bd",
+        "show",
+        "hud-bstmy.3.7",
+        "--json"
+      ]
+    },
+    {
+      "name": "context-hud-bstmy.3.10",
+      "pid": 3545962,
+      "exit_code": 0,
+      "command": [
+        "bd",
+        "show",
+        "hud-bstmy.3.10",
+        "--json"
+      ]
+    },
+    {
+      "name": "context-hud-bstmy.3.11",
+      "pid": 3545977,
+      "exit_code": 0,
+      "command": [
+        "bd",
+        "show",
+        "hud-bstmy.3.11",
+        "--json"
+      ]
+    },
+    {
+      "name": "context-hud-bstmy.3.12",
+      "pid": 3545991,
+      "exit_code": 0,
+      "command": [
+        "bd",
+        "show",
+        "hud-bstmy.3.12",
+        "--json"
+      ]
+    }
+  ],
+  "Cargo_executed": false,
+  "old_worktrees_touched": false,
+  "errors": []
+}

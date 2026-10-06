@@ -1,0 +1,211 @@
+[
+  {
+    "issue_id": "hud-bstmy.1.15",
+    "current_status_at_read": "blocked",
+    "title": "Reconcile T8.0 enablers gen-3 after weak-forwarding guard repair",
+    "reason": "Existing enabler audit and five qualified clock/comment leaves; no absorption.",
+    "description_sha256": "a8c1ae9667faec0cf1c0884952919b1a49c84ce74fe109b254afc660bdd5c1ed",
+    "design_sha256": "368a89b574886b7543f554e81d87eab0a1474e206ed8733f17829660035658dd",
+    "acceptance_sha256": "5e9c0038ddb2066153f7bc53ceedd24f4bc21b3e6a09ece69b83605c4debad65",
+    "packet": "other-owner-packets.json.gz",
+    "new_duplicate_created": false
+  },
+  {
+    "issue_id": "hud-bstmy.1.16",
+    "current_status_at_read": "closed",
+    "title": "Use the scene clock for safe-mode lease suspension and resumption",
+    "reason": "Existing exact enabler/protocol leaf; current delivered or pending owning outcome stays separate from .3.13 evidence. Unexecuted candidates are not observed bugs.",
+    "description_sha256": "69109aca7e4ba16e3306dd68c4942cce31b462d04652fb2e356532ead9bb1d70",
+    "design_sha256": "62539b395ac7ea7f465e0e46a9e07dbddf9adbabcda5764014ceb1c36915d6d5",
+    "acceptance_sha256": "3e77b0338cb49a898cc7de10834d7ed9b7341a44fbafc2186033f4920c63db6e",
+    "packet": "other-owner-packets.json.gz",
+    "new_duplicate_created": false
+  },
+  {
+    "issue_id": "hud-bstmy.1.17",
+    "current_status_at_read": "closed",
+    "title": "Inject the live grip long-press deadline and remove its sleep-based fixture",
+    "reason": "Existing exact enabler/protocol leaf; current delivered or pending owning outcome stays separate from .3.13 evidence. Unexecuted candidates are not observed bugs.",
+    "description_sha256": "110f9394cd83b1b0b56ea35b586aadb412cdb9171c0895977ae1c187bc7dd428",
+    "design_sha256": "b51ea6a205f18762c05c25a393431dc6552c9d403c861dc4bdc5c333afefc5ff",
+    "acceptance_sha256": "1c5f639fa7f6d44b89ace84b4eeffa7e6ec4c46bd2e78775a4cb7ce6bca5f8a0",
+    "packet": "other-owner-packets.json.gz",
+    "new_duplicate_created": false
+  },
+  {
+    "issue_id": "hud-bstmy.1.18",
+    "current_status_at_read": "closed",
+    "title": "Inject the firewall diagnostic cache expiry and exercise its existing boundary fixture",
+    "reason": "Existing exact enabler/protocol leaf; current delivered or pending owning outcome stays separate from .3.13 evidence. Unexecuted candidates are not observed bugs.",
+    "description_sha256": "e7d6c2aeab4265a5c68a274204ce6fa71a0ae7195d093ef95281a46d86b3b8ec",
+    "design_sha256": "5be84d86c9479827b3fbd3ef5ff26daa59c59e3baf3db20caf4cb187c6bd645a",
+    "acceptance_sha256": "1367e71834b3c7e4261a465f3eedfe7f65d381a5b46682805bd1013b5182e6c6",
+    "packet": "other-owner-packets.json.gz",
+    "new_duplicate_created": false
+  },
+  {
+    "issue_id": "hud-bstmy.1.19",
+    "current_status_at_read": "open",
+    "title": "Make renderer fade deadlines accept explicit injected time",
+    "reason": "Existing exact enabler/protocol leaf; current delivered or pending owning outcome stays separate from .3.13 evidence. Unexecuted candidates are not observed bugs.",
+    "description_sha256": "edc37151397d5acf7f869b74915ded02b3ec7817da70cad206f076515864b7e4",
+    "design_sha256": "893f17a22988dc47dac196b8c4ab88fbd4d3dad1bb6d4a9b89f13adb045bf18a",
+    "acceptance_sha256": "b819ddb7e509d0508a079dc66d226558973315854b690827c89ee02314b32a84",
+    "packet": "other-owner-packets.json.gz",
+    "new_duplicate_created": false
+  },
+  {
+    "issue_id": "hud-bstmy.1.20",
+    "current_status_at_read": "closed",
+    "title": "Correct current CI and guard comments to describe their actual commands",
+    "reason": "Existing exact enabler/protocol leaf; current delivered or pending owning outcome stays separate from .3.13 evidence. Unexecuted candidates are not observed bugs.",
+    "description_sha256": "3733fd532b722f3d55f48c5f71414779961f7415f760b7ad70bdf7efad760071",
+    "design_sha256": "507ef6941f87d02784f96185b90127439391067be32c545e0d2aee21836ecea3",
+    "acceptance_sha256": "cd9ff1832498dc6e93f97861f6243e7087c84062f9d2b30862292855dbbdcd4f",
+    "packet": "other-owner-packets.json.gz",
+    "new_duplicate_created": false
+  },
+  {
+    "issue_id": "hud-bstmy.2.12",
+    "current_status_at_read": "blocked",
+    "title": "Reconcile T8.1a against main after all coverage repairs",
+    "reason": "Existing protocol audit with R2/P2/E2/T2+GEN3; no absorption.",
+    "description_sha256": "ca67005468fc8d1b733bfc8cec0e7e3e0e9f885f8cd869de5a93e9da8d7e48ba",
+    "design_sha256": "73bba521be086f698d723d78566af85ca05fa14bc077fef8e9c52d720704afed",
+    "acceptance_sha256": "4efb21a75e521b3364326e51eb2e1752ce14a482f63cc1870144e590556f4600",
+    "packet": "other-owner-packets.json.gz",
+    "new_duplicate_created": false
+  },
+  {
+    "issue_id": "hud-bstmy.2.13",
+    "current_status_at_read": "closed",
+    "title": "Finish resource dedup/inspection narrowing and delete construction-only fields",
+    "reason": "Existing exact enabler/protocol leaf; current delivered or pending owning outcome stays separate from .3.13 evidence. Unexecuted candidates are not observed bugs.",
+    "description_sha256": "2f3493bf397f3b8068eeac3c11b242a5af2db504d36fad5776777b17d00d25d4",
+    "design_sha256": "579357a882e8d694d3f4ab17da8f8c49ca7fab883bfeec2b525a1007158890a7",
+    "acceptance_sha256": "fdcbeb0d7841fc6aefefd83e5001933863191e18921fba98a53a02a71604b667",
+    "packet": "other-owner-packets.json.gz",
+    "new_duplicate_created": false
+  },
+  {
+    "issue_id": "hud-bstmy.2.14",
+    "current_status_at_read": "closed",
+    "title": "Remove write-only protocol heartbeat timestamp and unused outbound classifier",
+    "reason": "Existing exact enabler/protocol leaf; current delivered or pending owning outcome stays separate from .3.13 evidence. Unexecuted candidates are not observed bugs.",
+    "description_sha256": "fe4e6cba80ac9e39d691add539ae2e09e55e425d7ed271def3f24478b4941c55",
+    "design_sha256": "d0d39a8b27916069a59c6e4b85494c527181625905cfac68fb8f918c14f09075",
+    "acceptance_sha256": "10a4bf3ef85432c218c71535407e46714a06bece0845e00e6c32b541b9eaad50",
+    "packet": "other-owner-packets.json.gz",
+    "new_duplicate_created": false
+  },
+  {
+    "issue_id": "hud-bstmy.2.15",
+    "current_status_at_read": "blocked",
+    "title": "Give live request/resource rejections category-specific next actions",
+    "reason": "Existing exact enabler/protocol leaf; current delivered or pending owning outcome stays separate from .3.13 evidence. Unexecuted candidates are not observed bugs.",
+    "description_sha256": "e669af10c90e5962d2908c388288b8a59bddaf26b86da7cc0e3a8ff2f0396f00",
+    "design_sha256": "64c98f9f4073eba9bc804480ff5d2e991a17b0bab785739690f41236e2ee50f6",
+    "acceptance_sha256": "ee0f8672549d7a80e8d8efc591f306eac72e40df70f97572fca8e0038762b845",
+    "packet": "other-owner-packets.json.gz",
+    "new_duplicate_created": false
+  },
+  {
+    "issue_id": "hud-bstmy.2.16",
+    "current_status_at_read": "open",
+    "title": "Finish protocol deadline injection and observe remaining cleanup tests",
+    "reason": "Existing exact enabler/protocol leaf; current delivered or pending owning outcome stays separate from .3.13 evidence. Unexecuted candidates are not observed bugs.",
+    "description_sha256": "e9cb4fb37364d93236b47634ab4d26b52c3e21cfe0473d379dfafc22df90f00b",
+    "design_sha256": "ae95baac4f3234502c3e970078d04d43abfa2e61cce68e2767cb57e2ddb3d3b1",
+    "acceptance_sha256": "5c6fab8fad89f3a48f54a7b0500d4a7dc2876d927cdb9c0d03e15ed9e017fb48",
+    "packet": "other-owner-packets.json.gz",
+    "new_duplicate_created": false
+  },
+  {
+    "issue_id": "hud-bstmy.2.17",
+    "current_status_at_read": "blocked",
+    "title": "Verify owning-session upload cleanup and worker termination isolation",
+    "reason": "Existing exact enabler/protocol leaf; current delivered or pending owning outcome stays separate from .3.13 evidence. Unexecuted candidates are not observed bugs.",
+    "description_sha256": "633a91ee39869109a5687ffdee51b90ccbb21c7156221803e8e985e8c788628f",
+    "design_sha256": "04723794776b9d4277c18696e29efa52443467541042c0de6b0c652c6c1d5bef",
+    "acceptance_sha256": "34d4c3ac47178532012f57cf579807f3bf3d758296ebd2904318a882fd3da358",
+    "packet": "other-owner-packets.json.gz",
+    "new_duplicate_created": false
+  },
+  {
+    "issue_id": "hud-bstmy.2.18",
+    "current_status_at_read": "blocked",
+    "title": "Terminal generation3 reconciliation of T8.1a residual repairs",
+    "reason": "Existing exact enabler/protocol leaf; current delivered or pending owning outcome stays separate from .3.13 evidence. Unexecuted candidates are not observed bugs.",
+    "description_sha256": "bc9a3e8a30d00475f442c9e17952dc9226d0ab07b8218a16a5d2c1f2b19ee985",
+    "design_sha256": "5908a1df9a988f18938fa678c874d94080c05f33729ab575547ee408499799e2",
+    "acceptance_sha256": "08c55407f2861fbce75933be113feef78ba8f2a66fd1cae38930ccb06d6108fe",
+    "packet": "other-owner-packets.json.gz",
+    "new_duplicate_created": false
+  },
+  {
+    "issue_id": "hud-bstmy.2.19",
+    "current_status_at_read": "open",
+    "title": "Resolve the source-only I7 admission proof limits",
+    "reason": "Existing exact enabler/protocol leaf; current delivered or pending owning outcome stays separate from .3.13 evidence. Unexecuted candidates are not observed bugs.",
+    "description_sha256": "87e95b2052ba8171538cefd76b6c31cd072f40aa3f3fcf83451babb7b3aed66a",
+    "design_sha256": "1613eac9d9d301cbdb33cd9b22eefdced63fa6e02fdc4bf4416287d33ea98f95",
+    "acceptance_sha256": "e18863317f37068a5686e4ce68f59ebbede41967b0ea5ee79c3052f654eeeb75",
+    "packet": "other-owner-packets.json.gz",
+    "new_duplicate_created": false
+  },
+  {
+    "issue_id": "hud-bstmy.4.5",
+    "current_status_at_read": "open",
+    "title": "Delete unwired input batching/coalescing pipeline; invariant 2 tests on input_event_bus",
+    "reason": "Unwired batching/coalescing/envelope/input_event_bus and invariant2 owner; protected T7 retained, not a runtimeGEN3 repair.",
+    "description_sha256": "0a2ded6fda5a7e396f862f54bdcf7398baace31a66a7c6b54555df95b1ba560b",
+    "design_sha256": "227d69bd920a6dde37645165239dd8d487a58e69461ff109f984def959abdbde",
+    "acceptance_sha256": "b438f9e9184fcb9e22a74110307131c3566a4b1572a98dc912815529510540df",
+    "packet": "other-owner-packets.json.gz",
+    "new_duplicate_created": false
+  },
+  {
+    "issue_id": "hud-bstmy.5.3",
+    "current_status_at_read": "closed",
+    "title": "Reduce the change-efficiency artifact to work counters",
+    "reason": "Current real WorkCounts instrument owner; retained nine fixture consumers, not a deleted recorder convenience.",
+    "description_sha256": "af19a35faeb5237590320bdff4dbaa48a76abe117fc8ac247c33041c35cbb35d",
+    "design_sha256": "cb269ea264bcf4a48900fa4126449338ba38730574a169bdcaaf200b195f8ee0",
+    "acceptance_sha256": "d70270bd1a32d60ee3521083837fd132736dfb28a7fca09a7a1170974315cc14",
+    "packet": "other-owner-packets.json.gz",
+    "new_duplicate_created": false
+  },
+  {
+    "issue_id": "hud-bstmy.5.6",
+    "current_status_at_read": "open",
+    "title": "Decide: delete the never-activated freeze, or keep and wire it (invariant 3)",
+    "reason": "Freeze posture decision stays status quo; no authority to change suspension policy.",
+    "description_sha256": "d1b52a84a22001d9cbc9c2ccbd00a33c13ab2c2104daf3ad9f885d2670c1ca60",
+    "design_sha256": "275af9b7f8e7feba1a9d7f92f0353d4ac905610647e867dea9461d0b7d8a3ecf",
+    "acceptance_sha256": "f3c6629e7efa6377789cc527bd493f8b4870f5e93214d5e6204cb4b56a13b0ae",
+    "packet": "other-owner-packets.json.gz",
+    "new_duplicate_created": false
+  },
+  {
+    "issue_id": "hud-bstmy.5.7",
+    "current_status_at_read": "blocked",
+    "title": "Reconcile decided runtime and example outcomes (gen-1)",
+    "reason": "WorkCounts default/dev-mode/current work proof and counters remain external outcome.",
+    "description_sha256": "d827dfe94dd1d361a9cd17cd53bde1a24f915fd888f07709bc00b13dbe2a7a8f",
+    "design_sha256": "08c8ab7fc78972c6f1a1ba0d07cfe95b5681dfc220a84ab6d8fe9af2477be660",
+    "acceptance_sha256": "264ee0f0bd25ee1c27387650c84e6a6a6124f9f6befc943b4414528905c9bf7b",
+    "packet": "other-owner-packets.json.gz",
+    "new_duplicate_created": false
+  },
+  {
+    "issue_id": "hud-bstmy.8.6",
+    "current_status_at_read": "open",
+    "title": "Decide: required-check ruleset changes (boot jobs, Windows clippy, pixel_readback gating)",
+    "reason": "Required rules/owner posture decision stays separate.",
+    "description_sha256": "3cf8feb196f31bb87f15199385b556b507afde4fb6ff3a085df82c3cd20d8ed7",
+    "design_sha256": "4c9b50b00a9d7b94ec3ef61c2127adf7acef5365e1e26212ffd9eafcaecf252c",
+    "acceptance_sha256": "6ed3af2decc6369895d2b7ad4d0b425ea4d6f817597a6f92587f33baf2e0050e",
+    "packet": "other-owner-packets.json.gz",
+    "new_duplicate_created": false
+  }
+]

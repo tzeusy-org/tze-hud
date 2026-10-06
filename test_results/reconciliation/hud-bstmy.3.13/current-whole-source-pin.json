@@ -1,0 +1,3237 @@
+{
+  "native_pid": 3551371,
+  "time_utc": "2026-10-06T16:04:12.057076+00:00",
+  "audit_source": "121c1e7afe928c55cef3adcc5fb91f4e59fa2d52",
+  "full_tracked_paths": [
+    ".beads/.gitignore",
+    ".beads/README.md",
+    ".beads/config.yaml",
+    ".beads/metadata.json",
+    ".cargo/config.toml",
+    ".claude/settings.json",
+    ".claude/skills/hud-projection/SKILL.md",
+    ".claude/skills/hud-projection/agents/openai.yaml",
+    ".claude/skills/hud-projection/mcp.template.json",
+    ".claude/skills/hud-projection/references/mcp-facade.md",
+    ".claude/skills/hud-projection/scripts/portal_client.py",
+    ".claude/skills/th-hud-publish/SKILL.md",
+    ".claude/skills/th-hud-publish/mcp.template.json",
+    ".claude/skills/th-hud-publish/scripts/publish.py",
+    ".claude/skills/user-test-performance/SKILL.md",
+    ".claude/skills/user-test-performance/agents/openai.yaml",
+    ".claude/skills/user-test-performance/reference/results.csv",
+    ".claude/skills/user-test-performance/reference/targets.json",
+    ".claude/skills/user-test-performance/scripts/.gitignore",
+    ".claude/skills/user-test-performance/scripts/compare_results.py",
+    ".claude/skills/user-test-performance/scripts/grpc_widget_publish_perf.py",
+    ".claude/skills/user-test-performance/scripts/mcp_publish_perf.py",
+    ".claude/skills/user-test-performance/scripts/perf_common.py",
+    ".claude/skills/user-test-performance/scripts/proto_gen/.gitignore",
+    ".claude/skills/user-test-performance/scripts/proto_gen/__init__.py",
+    ".claude/skills/user-test-performance/scripts/proto_gen/events_pb2.py",
+    ".claude/skills/user-test-performance/scripts/proto_gen/events_pb2_grpc.py",
+    ".claude/skills/user-test-performance/scripts/proto_gen/session_pb2.py",
+    ".claude/skills/user-test-performance/scripts/proto_gen/session_pb2_grpc.py",
+    ".claude/skills/user-test-performance/scripts/proto_gen/types_pb2.py",
+    ".claude/skills/user-test-performance/scripts/proto_gen/types_pb2_grpc.py",
+    ".claude/skills/user-test-performance/scripts/scenarios/widget-main-progress-100-5s.json",
+    ".claude/skills/user-test-performance/scripts/scenarios/widget-main-progress-100-fast.json",
+    ".claude/skills/user-test-performance/scripts/scenarios/zone-subtitle-100-fast.json",
+    ".claude/skills/user-test-performance/scripts/test_widget_soak_runner.py",
+    ".claude/skills/user-test-performance/scripts/widget_soak_runner.py",
+    ".claude/skills/user-test/SKILL.md",
+    ".claude/skills/user-test/agents/openai.yaml",
+    ".claude/skills/user-test/references/exemplar-manual-review-checklist.md",
+    ".claude/skills/user-test/references/message-payloads.md",
+    ".claude/skills/user-test/references/resident-exemplars.md",
+    ".claude/skills/user-test/references/widget-reactivity-tests.md",
+    ".claude/skills/user-test/references/zone-exemplars.md",
+    ".claude/skills/user-test/scripts/alert_banner_exemplar.py",
+    ".claude/skills/user-test/scripts/all-zones-test.json",
+    ".claude/skills/user-test/scripts/ambient_background_exemplar.py",
+    ".claude/skills/user-test/scripts/gauge_cycle_test.json",
+    ".claude/skills/user-test/scripts/hud_admin.py",
+    ".claude/skills/user-test/scripts/hud_env.py",
+    ".claude/skills/user-test/scripts/hud_grpc_client.py",
+    ".claude/skills/user-test/scripts/hud_pair.py",
+    ".claude/skills/user-test/scripts/notification-full-gamut.json",
+    ".claude/skills/user-test/scripts/notification_exemplar.py",
+    ".claude/skills/user-test/scripts/presence_card_exemplar.py",
+    ".claude/skills/user-test/scripts/progress-bar-color-sweep.json",
+    ".claude/skills/user-test/scripts/progress-bar-rapidfire-100-5s.json",
+    ".claude/skills/user-test/scripts/progress-bar-step.json",
+    ".claude/skills/user-test/scripts/proto_gen/.gitignore",
+    ".claude/skills/user-test/scripts/proto_gen/__init__.py",
+    ".claude/skills/user-test/scripts/proto_gen/events_pb2.py",
+    ".claude/skills/user-test/scripts/proto_gen/events_pb2_grpc.py",
+    ".claude/skills/user-test/scripts/proto_gen/session_pb2.py",
+    ".claude/skills/user-test/scripts/proto_gen/session_pb2_grpc.py",
+    ".claude/skills/user-test/scripts/proto_gen/types_pb2.py",
+    ".claude/skills/user-test/scripts/proto_gen/types_pb2_grpc.py",
+    ".claude/skills/user-test/scripts/publish_widget_batch.py",
+    ".claude/skills/user-test/scripts/publish_zone_batch.py",
+    ".claude/skills/user-test/scripts/status-indicator-contention-test.json",
+    ".claude/skills/user-test/scripts/status-indicator-enum-cycle-test.json",
+    ".claude/skills/user-test/scripts/status-indicator-label-update-test.json",
+    ".claude/skills/user-test/scripts/status-indicator-theme-cycle-test.json",
+    ".claude/skills/user-test/scripts/status-indicator-theme-status-matrix-test.json",
+    ".claude/skills/user-test/scripts/status-indicator-validation-test.json",
+    ".claude/skills/user-test/scripts/status_bar_exemplar.py",
+    ".claude/skills/user-test/scripts/stress_test_zones.py",
+    ".claude/skills/user-test/scripts/subtitle-full-sequence.json",
+    ".claude/skills/user-test/scripts/subtitle-multiline.json",
+    ".claude/skills/user-test/scripts/subtitle-rapid-replace.json",
+    ".claude/skills/user-test/scripts/subtitle-single-line.json",
+    ".claude/skills/user-test/scripts/subtitle-streaming.json",
+    ".claude/skills/user-test/scripts/subtitle-ttl-expiry.json",
+    ".claude/skills/user-test/scripts/subtitle_exemplar.py",
+    ".claude/skills/user-test/scripts/test_hud_grpc_client.py",
+    ".claude/skills/user-test/scripts/widget-cleanup.json",
+    ".claude/skills/user-test/tests/test_ambient_background_exemplar.py",
+    ".claude/skills/user-test/tests/test_hud_pair.py",
+    ".claude/skills/user-test/tests/test_hud_projection_adoption_docs.py",
+    ".claude/skills/user-test/tests/test_portal_client.py",
+    ".claude/skills/user-test/tests/test_presence_card_exemplar.py",
+    ".claude/skills/user-test/tests/test_skills_docs.py",
+    ".codex/skills",
+    ".gemini/skills/hud-projection/SKILL.md",
+    ".gemini/skills/hud-projection/agents/openai.yaml",
+    ".gemini/skills/hud-projection/mcp.template.json",
+    ".gemini/skills/hud-projection/references/mcp-facade.md",
+    ".github/workflows/ci.yml",
+    ".github/workflows/delete-merged-branches.yml",
+    ".github/workflows/perf-assert.yml",
+    ".github/workflows/perf-budget.yml",
+    ".github/workflows/windowed-overlay-perf.yml",
+    ".github/workflows/windows.yml",
+    ".gitignore",
+    ".mcp.json",
+    ".opencode/skills/hud-projection/SKILL.md",
+    ".opencode/skills/hud-projection/agents/openai.yaml",
+    ".opencode/skills/hud-projection/mcp.template.json",
+    ".opencode/skills/hud-projection/references/mcp-facade.md",
+    "AGENTS.md",
+    "CLAUDE.md",
+    "Cargo.lock",
+    "Cargo.toml",
+    "LICENSE",
+    "README.md",
+    "app/tze_hud_app/Cargo.toml",
+    "app/tze_hud_app/build.rs",
+    "app/tze_hud_app/config/benchmark.toml",
+    "app/tze_hud_app/config/production.toml",
+    "app/tze_hud_app/minisign.pub",
+    "app/tze_hud_app/src/main.rs",
+    "app/tze_hud_app/tests/benchmark_config_schema.rs",
+    "app/tze_hud_app/tests/canonical_config_schema.rs",
+    "app/tze_hud_app/tests/production_boot.rs",
+    "app/tze_hud_app/tze_hud.manifest",
+    "app/tze_hud_app/tze_hud.rc",
+    "assets/themes/blueprint.toml",
+    "assets/themes/classic.toml",
+    "assets/themes/tonal-glass.toml",
+    "assets/widget_bundles/gauge/background.svg",
+    "assets/widget_bundles/gauge/fill.svg",
+    "assets/widget_bundles/gauge/widget.toml",
+    "assets/widget_bundles/progress-bar/fill.svg",
+    "assets/widget_bundles/progress-bar/track.svg",
+    "assets/widget_bundles/progress-bar/widget.toml",
+    "assets/widget_bundles/status-indicator/indicator.svg",
+    "assets/widget_bundles/status-indicator/widget.toml",
+    "crates/tze_hud_compositor/Cargo.toml",
+    "crates/tze_hud_compositor/benches/markdown_cache.rs",
+    "crates/tze_hud_compositor/benches/overflow_truncate.rs",
+    "crates/tze_hud_compositor/benches/widget_rasterize.rs",
+    "crates/tze_hud_compositor/fonts/dejavu/DejaVuSans.ttf",
+    "crates/tze_hud_compositor/fonts/dejavu/DejaVuSansMono.ttf",
+    "crates/tze_hud_compositor/fonts/dejavu/DejaVuSerif-Bold.ttf",
+    "crates/tze_hud_compositor/fonts/dejavu/DejaVuSerif.ttf",
+    "crates/tze_hud_compositor/fonts/dejavu/LICENSE",
+    "crates/tze_hud_compositor/fonts/ibm-plex/IBMPlexMono-Medium.ttf",
+    "crates/tze_hud_compositor/fonts/ibm-plex/IBMPlexMono-Regular.ttf",
+    "crates/tze_hud_compositor/fonts/ibm-plex/IBMPlexSans-Bold.ttf",
+    "crates/tze_hud_compositor/fonts/ibm-plex/IBMPlexSans-Italic.ttf",
+    "crates/tze_hud_compositor/fonts/ibm-plex/IBMPlexSans-Medium.ttf",
+    "crates/tze_hud_compositor/fonts/ibm-plex/IBMPlexSans-Regular.ttf",
+    "crates/tze_hud_compositor/fonts/ibm-plex/IBMPlexSans-SemiBold.ttf",
+    "crates/tze_hud_compositor/fonts/ibm-plex/LICENSE.txt",
+    "crates/tze_hud_compositor/proptest-regressions/overflow.txt",
+    "crates/tze_hud_compositor/src/display.rs",
+    "crates/tze_hud_compositor/src/fonts.rs",
+    "crates/tze_hud_compositor/src/lib.rs",
+    "crates/tze_hud_compositor/src/markdown.rs",
+    "crates/tze_hud_compositor/src/overflow.rs",
+    "crates/tze_hud_compositor/src/pipeline.rs",
+    "crates/tze_hud_compositor/src/renderer/animation.rs",
+    "crates/tze_hud_compositor/src/renderer/capture.rs",
+    "crates/tze_hud_compositor/src/renderer/draw_cmds.rs",
+    "crates/tze_hud_compositor/src/renderer/easing.rs",
+    "crates/tze_hud_compositor/src/renderer/encode_pass.rs",
+    "crates/tze_hud_compositor/src/renderer/focus_ring.rs",
+    "crates/tze_hud_compositor/src/renderer/frame.rs",
+    "crates/tze_hud_compositor/src/renderer/hit_regions.rs",
+    "crates/tze_hud_compositor/src/renderer/icon.rs",
+    "crates/tze_hud_compositor/src/renderer/image_cache.rs",
+    "crates/tze_hud_compositor/src/renderer/mod.rs",
+    "crates/tze_hud_compositor/src/renderer/retained.rs",
+    "crates/tze_hud_compositor/src/renderer/safe_mode_overlay.rs",
+    "crates/tze_hud_compositor/src/renderer/system_card.rs",
+    "crates/tze_hud_compositor/src/renderer/tests/alert_banner.rs",
+    "crates/tze_hud_compositor/src/renderer/tests/composer.rs",
+    "crates/tze_hud_compositor/src/renderer/tests/focus_chrome.rs",
+    "crates/tze_hud_compositor/src/renderer/tests/hit_drag.rs",
+    "crates/tze_hud_compositor/src/renderer/tests/idle_gate.rs",
+    "crates/tze_hud_compositor/src/renderer/tests/markdown_cache.rs",
+    "crates/tze_hud_compositor/src/renderer/tests/markdown_primer.rs",
+    "crates/tze_hud_compositor/src/renderer/tests/mod.rs",
+    "crates/tze_hud_compositor/src/renderer/tests/notification_layout.rs",
+    "crates/tze_hud_compositor/src/renderer/tests/portal_animation.rs",
+    "crates/tze_hud_compositor/src/renderer/tests/portal_reveal.rs",
+    "crates/tze_hud_compositor/src/renderer/tests/retained_image.rs",
+    "crates/tze_hud_compositor/src/renderer/tests/scroll.rs",
+    "crates/tze_hud_compositor/src/renderer/tests/surface.rs",
+    "crates/tze_hud_compositor/src/renderer/tests/text_render.rs",
+    "crates/tze_hud_compositor/src/renderer/tests/tile_opacity.rs",
+    "crates/tze_hud_compositor/src/renderer/tests/tokens.rs",
+    "crates/tze_hud_compositor/src/renderer/tests/viewer_echo.rs",
+    "crates/tze_hud_compositor/src/renderer/tests/zone_layers.rs",
+    "crates/tze_hud_compositor/src/renderer/tests/zone_notification.rs",
+    "crates/tze_hud_compositor/src/renderer/tests/zone_stack.rs",
+    "crates/tze_hud_compositor/src/renderer/text.rs",
+    "crates/tze_hud_compositor/src/renderer/tile_render.rs",
+    "crates/tze_hud_compositor/src/renderer/token_colors.rs",
+    "crates/tze_hud_compositor/src/renderer/viewer_echo.rs",
+    "crates/tze_hud_compositor/src/renderer/widget_geometry.rs",
+    "crates/tze_hud_compositor/src/renderer/widgets.rs",
+    "crates/tze_hud_compositor/src/renderer/zone_render.rs",
+    "crates/tze_hud_compositor/src/surface.rs",
+    "crates/tze_hud_compositor/src/text.rs",
+    "crates/tze_hud_compositor/src/vertical_flow.rs",
+    "crates/tze_hud_compositor/src/widget.rs",
+    "crates/tze_hud_compositor/tests/common/mod.rs",
+    "crates/tze_hud_compositor/tests/common/pixels.rs",
+    "crates/tze_hud_compositor/tests/gauge_binding_rendering.rs",
+    "crates/tze_hud_compositor/tests/gpu_canary.rs",
+    "crates/tze_hud_compositor/tests/widget_raster_count.rs",
+    "crates/tze_hud_compositor/tests/widget_rasterize_budget.rs",
+    "crates/tze_hud_compositor/tests/widget_transition.rs",
+    "crates/tze_hud_compositor/tests/zone_rendering.rs",
+    "crates/tze_hud_config/Cargo.toml",
+    "crates/tze_hud_config/src/agents_file.rs",
+    "crates/tze_hud_config/src/allow.rs",
+    "crates/tze_hud_config/src/config_write.rs",
+    "crates/tze_hud_config/src/displays.rs",
+    "crates/tze_hud_config/src/lib.rs",
+    "crates/tze_hud_config/src/loader.rs",
+    "crates/tze_hud_config/src/policy_builder.rs",
+    "crates/tze_hud_config/src/portal_tokens.rs",
+    "crates/tze_hud_config/src/raw.rs",
+    "crates/tze_hud_config/src/resolver.rs",
+    "crates/tze_hud_config/src/runtime_widget_assets.rs",
+    "crates/tze_hud_config/src/tests.rs",
+    "crates/tze_hud_config/src/themes.rs",
+    "crates/tze_hud_config/src/tokens.rs",
+    "crates/tze_hud_config/src/validate.rs",
+    "crates/tze_hud_config/src/widgets.rs",
+    "crates/tze_hud_config/src/zones.rs",
+    "crates/tze_hud_input/Cargo.toml",
+    "crates/tze_hud_input/src/batching.rs",
+    "crates/tze_hud_input/src/capture.rs",
+    "crates/tze_hud_input/src/coalescing.rs",
+    "crates/tze_hud_input/src/command.rs",
+    "crates/tze_hud_input/src/composer_draft.rs",
+    "crates/tze_hud_input/src/drag.rs",
+    "crates/tze_hud_input/src/envelope.rs",
+    "crates/tze_hud_input/src/event_queue.rs",
+    "crates/tze_hud_input/src/events.rs",
+    "crates/tze_hud_input/src/focus.rs",
+    "crates/tze_hud_input/src/focus_tree.rs",
+    "crates/tze_hud_input/src/hit_test.rs",
+    "crates/tze_hud_input/src/jump_to_latest.rs",
+    "crates/tze_hud_input/src/keyboard.rs",
+    "crates/tze_hud_input/src/lib.rs",
+    "crates/tze_hud_input/src/local_feedback.rs",
+    "crates/tze_hud_input/src/pointer.rs",
+    "crates/tze_hud_input/src/portal_resize.rs",
+    "crates/tze_hud_input/src/scroll.rs",
+    "crates/tze_hud_input/src/scroll_indicator.rs",
+    "crates/tze_hud_mcp/Cargo.toml",
+    "crates/tze_hud_mcp/src/error.rs",
+    "crates/tze_hud_mcp/src/lib.rs",
+    "crates/tze_hud_mcp/src/portal_op.rs",
+    "crates/tze_hud_mcp/src/schema.rs",
+    "crates/tze_hud_mcp/src/server.rs",
+    "crates/tze_hud_mcp/src/server/tests.rs",
+    "crates/tze_hud_mcp/src/tools.rs",
+    "crates/tze_hud_mcp/src/types.rs",
+    "crates/tze_hud_projection/Cargo.toml",
+    "crates/tze_hud_projection/src/authority.rs",
+    "crates/tze_hud_projection/src/contract.rs",
+    "crates/tze_hud_projection/src/hub.rs",
+    "crates/tze_hud_projection/src/lib.rs",
+    "crates/tze_hud_projection/src/portal_cadence.rs",
+    "crates/tze_hud_projection/src/resident_grpc.rs",
+    "crates/tze_hud_projection/src/tests/mod.rs",
+    "crates/tze_hud_protocol/Cargo.toml",
+    "crates/tze_hud_protocol/build.rs",
+    "crates/tze_hud_protocol/proto/events.proto",
+    "crates/tze_hud_protocol/proto/session.proto",
+    "crates/tze_hud_protocol/proto/types.proto",
+    "crates/tze_hud_protocol/src/auth.rs",
+    "crates/tze_hud_protocol/src/convert.rs",
+    "crates/tze_hud_protocol/src/dedup.rs",
+    "crates/tze_hud_protocol/src/lease.rs",
+    "crates/tze_hud_protocol/src/lib.rs",
+    "crates/tze_hud_protocol/src/session.rs",
+    "crates/tze_hud_protocol/src/session_server/budget_gate.rs",
+    "crates/tze_hud_protocol/src/session_server/degradation_notice_bus.rs",
+    "crates/tze_hud_protocol/src/session_server/element_persist.rs",
+    "crates/tze_hud_protocol/src/session_server/freeze_queue.rs",
+    "crates/tze_hud_protocol/src/session_server/handshake.rs",
+    "crates/tze_hud_protocol/src/session_server/input_event_bus.rs",
+    "crates/tze_hud_protocol/src/session_server/lease_expiry_bus.rs",
+    "crates/tze_hud_protocol/src/session_server/lifecycle.rs",
+    "crates/tze_hud_protocol/src/session_server/mod.rs",
+    "crates/tze_hud_protocol/src/session_server/mutations.rs",
+    "crates/tze_hud_protocol/src/session_server/service.rs",
+    "crates/tze_hud_protocol/src/session_server/stream_session.rs",
+    "crates/tze_hud_protocol/src/session_server/tests/allow.rs",
+    "crates/tze_hud_protocol/src/session_server/tests/events.rs",
+    "crates/tze_hud_protocol/src/session_server/tests/invariants.rs",
+    "crates/tze_hud_protocol/src/session_server/tests/lease.rs",
+    "crates/tze_hud_protocol/src/session_server/tests/lifecycle_verbs.rs",
+    "crates/tze_hud_protocol/src/session_server/tests/mod.rs",
+    "crates/tze_hud_protocol/src/session_server/tests/portal.rs",
+    "crates/tze_hud_protocol/src/session_server/tests/render_wake.rs",
+    "crates/tze_hud_protocol/src/session_server/tests/resource_upload.rs",
+    "crates/tze_hud_protocol/src/session_server/tests/resume.rs",
+    "crates/tze_hud_protocol/src/session_server/tests/safe_mode.rs",
+    "crates/tze_hud_protocol/src/session_server/tests/scene_mutations.rs",
+    "crates/tze_hud_protocol/src/session_server/tests/session_handshake.rs",
+    "crates/tze_hud_protocol/src/session_server/tests/timing.rs",
+    "crates/tze_hud_protocol/src/session_server/tests/widget_publish.rs",
+    "crates/tze_hud_protocol/src/session_server/tests/zones.rs",
+    "crates/tze_hud_protocol/src/session_server/traffic.rs",
+    "crates/tze_hud_protocol/src/session_server/upload.rs",
+    "crates/tze_hud_protocol/src/session_server/verbs.rs",
+    "crates/tze_hud_protocol/src/subscriptions.rs",
+    "crates/tze_hud_protocol/src/token.rs",
+    "crates/tze_hud_protocol/tests/capability_gating.rs",
+    "crates/tze_hud_protocol/tests/event_delivery.rs",
+    "crates/tze_hud_protocol/tests/fuzz_protocol_boundary.rs",
+    "crates/tze_hud_protocol/tests/lease_governance.rs",
+    "crates/tze_hud_protocol/tests/subscriptions.rs",
+    "crates/tze_hud_resource/Cargo.toml",
+    "crates/tze_hud_resource/src/debug.rs",
+    "crates/tze_hud_resource/src/dedup.rs",
+    "crates/tze_hud_resource/src/font_bytes_store.rs",
+    "crates/tze_hud_resource/src/lib.rs",
+    "crates/tze_hud_resource/src/resident_ledger.rs",
+    "crates/tze_hud_resource/src/runtime_widget_store.rs",
+    "crates/tze_hud_resource/src/types.rs",
+    "crates/tze_hud_resource/src/upload.rs",
+    "crates/tze_hud_resource/src/validation.rs",
+    "crates/tze_hud_resource/tests/store_behavior.rs",
+    "crates/tze_hud_runtime/Cargo.toml",
+    "crates/tze_hud_runtime/src/channels.rs",
+    "crates/tze_hud_runtime/src/degradation.rs",
+    "crates/tze_hud_runtime/src/diag.rs",
+    "crates/tze_hud_runtime/src/element_store.rs",
+    "crates/tze_hud_runtime/src/firewall.rs",
+    "crates/tze_hud_runtime/src/headless.rs",
+    "crates/tze_hud_runtime/src/http.rs",
+    "crates/tze_hud_runtime/src/idle_efficiency.rs",
+    "crates/tze_hud_runtime/src/lib.rs",
+    "crates/tze_hud_runtime/src/mcp.rs",
+    "crates/tze_hud_runtime/src/mutation_budget_bridge.rs",
+    "crates/tze_hud_runtime/src/net_addrs.rs",
+    "crates/tze_hud_runtime/src/operator/handoff.rs",
+    "crates/tze_hud_runtime/src/operator/install.rs",
+    "crates/tze_hud_runtime/src/operator/logs.rs",
+    "crates/tze_hud_runtime/src/operator/mod.rs",
+    "crates/tze_hud_runtime/src/operator/screenshot.rs",
+    "crates/tze_hud_runtime/src/operator/status.rs",
+    "crates/tze_hud_runtime/src/operator/update.rs",
+    "crates/tze_hud_runtime/src/pairing.rs",
+    "crates/tze_hud_runtime/src/pipeline.rs",
+    "crates/tze_hud_runtime/src/portal_projection_driver.rs",
+    "crates/tze_hud_runtime/src/portal_tokens.rs",
+    "crates/tze_hud_runtime/src/runtime_context.rs",
+    "crates/tze_hud_runtime/src/scene_startup.rs",
+    "crates/tze_hud_runtime/src/shell/chrome.rs",
+    "crates/tze_hud_runtime/src/shell/freeze.rs",
+    "crates/tze_hud_runtime/src/shell/mod.rs",
+    "crates/tze_hud_runtime/src/shell/safe_mode.rs",
+    "crates/tze_hud_runtime/src/shell/system_card.rs",
+    "crates/tze_hud_runtime/src/test_support.rs",
+    "crates/tze_hud_runtime/src/threads.rs",
+    "crates/tze_hud_runtime/src/widget_hover.rs",
+    "crates/tze_hud_runtime/src/widget_runtime_registration.rs",
+    "crates/tze_hud_runtime/src/widget_startup.rs",
+    "crates/tze_hud_runtime/src/window.rs",
+    "crates/tze_hud_runtime/src/windowed/config.rs",
+    "crates/tze_hud_runtime/src/windowed/displays.rs",
+    "crates/tze_hud_runtime/src/windowed/event_loop_harness.rs",
+    "crates/tze_hud_runtime/src/windowed/global_hotkey.rs",
+    "crates/tze_hud_runtime/src/windowed/hittest.rs",
+    "crates/tze_hud_runtime/src/windowed/input_dispatch.rs",
+    "crates/tze_hud_runtime/src/windowed/keyboard.rs",
+    "crates/tze_hud_runtime/src/windowed/lifecycle.rs",
+    "crates/tze_hud_runtime/src/windowed/mod.rs",
+    "crates/tze_hud_runtime/src/windowed/monitor_identity.rs",
+    "crates/tze_hud_runtime/src/windowed/network.rs",
+    "crates/tze_hud_runtime/src/windowed/portal.rs",
+    "crates/tze_hud_runtime/src/windowed/safe_mode_toggle.rs",
+    "crates/tze_hud_runtime/src/windowed/test_support.rs",
+    "crates/tze_hud_runtime/src/windowed/wake.rs",
+    "crates/tze_hud_runtime/src/windowed/widgets.rs",
+    "crates/tze_hud_runtime/tests/idle_efficiency_counters.rs",
+    "crates/tze_hud_runtime/tests/pixel_helpers.rs",
+    "crates/tze_hud_runtime/tests/pixel_readback.rs",
+    "crates/tze_hud_runtime/tests/present_ack.rs",
+    "crates/tze_hud_scene/Cargo.toml",
+    "crates/tze_hud_scene/benches/hit_test.rs",
+    "crates/tze_hud_scene/benches/snapshot.rs",
+    "crates/tze_hud_scene/src/clock.rs",
+    "crates/tze_hud_scene/src/config/agents.rs",
+    "crates/tze_hud_scene/src/config/hotkey.rs",
+    "crates/tze_hud_scene/src/config/mod.rs",
+    "crates/tze_hud_scene/src/element_store.rs",
+    "crates/tze_hud_scene/src/error_codes.rs",
+    "crates/tze_hud_scene/src/graph/budget.rs",
+    "crates/tze_hud_scene/src/graph/contention.rs",
+    "crates/tze_hud_scene/src/graph/leases.rs",
+    "crates/tze_hud_scene/src/graph/limits_tests.rs",
+    "crates/tze_hud_scene/src/graph/mod.rs",
+    "crates/tze_hud_scene/src/graph/node_tree.rs",
+    "crates/tze_hud_scene/src/graph/overlay.rs",
+    "crates/tze_hud_scene/src/graph/queries.rs",
+    "crates/tze_hud_scene/src/graph/resources.rs",
+    "crates/tze_hud_scene/src/graph/snapshot.rs",
+    "crates/tze_hud_scene/src/graph/spec_scenarios.rs",
+    "crates/tze_hud_scene/src/graph/tabs.rs",
+    "crates/tze_hud_scene/src/graph/test_helpers.rs",
+    "crates/tze_hud_scene/src/graph/tests.rs",
+    "crates/tze_hud_scene/src/graph/tiles.rs",
+    "crates/tze_hud_scene/src/graph/timed.rs",
+    "crates/tze_hud_scene/src/graph/widget_tests.rs",
+    "crates/tze_hud_scene/src/graph/zone_ops.rs",
+    "crates/tze_hud_scene/src/lease/budget.rs",
+    "crates/tze_hud_scene/src/lease/degradation.rs",
+    "crates/tze_hud_scene/src/lease/mod.rs",
+    "crates/tze_hud_scene/src/lease/orphan.rs",
+    "crates/tze_hud_scene/src/lease/types.rs",
+    "crates/tze_hud_scene/src/lib.rs",
+    "crates/tze_hud_scene/src/mutation.rs",
+    "crates/tze_hud_scene/src/perf_budget.rs",
+    "crates/tze_hud_scene/src/placement.rs",
+    "crates/tze_hud_scene/src/render_wake.rs",
+    "crates/tze_hud_scene/src/svg_tokens.rs",
+    "crates/tze_hud_scene/src/test_scenes.rs",
+    "crates/tze_hud_scene/src/timing/domains.rs",
+    "crates/tze_hud_scene/src/timing/mod.rs",
+    "crates/tze_hud_scene/src/types.rs",
+    "crates/tze_hud_scene/src/validation.rs",
+    "crates/tze_hud_scene/tests/batch_atomicity.rs",
+    "crates/tze_hud_scene/tests/fuzz_scene_graph.proptest-regressions",
+    "crates/tze_hud_scene/tests/fuzz_scene_graph.rs",
+    "crates/tze_hud_scene/tests/hit_test.rs",
+    "crates/tze_hud_scene/tests/proptest_invariants.rs",
+    "crates/tze_hud_scene/tests/session_lifecycle.rs",
+    "crates/tze_hud_scene/tests/snapshot.rs",
+    "crates/tze_hud_scene/tests/zone_interaction.rs",
+    "crates/tze_hud_scene/tests/zone_ontology.rs",
+    "crates/tze_hud_telemetry/Cargo.toml",
+    "crates/tze_hud_telemetry/src/collector.rs",
+    "crates/tze_hud_telemetry/src/idle_efficiency.rs",
+    "crates/tze_hud_telemetry/src/lib.rs",
+    "crates/tze_hud_telemetry/src/publish_load.rs",
+    "crates/tze_hud_telemetry/src/record.rs",
+    "crates/tze_hud_telemetry/src/validation.rs",
+    "crates/tze_hud_telemetry/src/work_counts.rs",
+    "crates/tze_hud_telemetry/tests/idle_efficiency.rs",
+    "crates/tze_hud_telemetry/tests/publish_load_artifact.rs",
+    "crates/tze_hud_widget/Cargo.toml",
+    "crates/tze_hud_widget/src/error.rs",
+    "crates/tze_hud_widget/src/lib.rs",
+    "crates/tze_hud_widget/src/loader.rs",
+    "crates/tze_hud_widget/src/manifest.rs",
+    "crates/tze_hud_widget/src/runtime_registration.rs",
+    "crates/tze_hud_widget/src/svg_ids.rs",
+    "crates/tze_hud_widget/tests/shipped_bundles.rs",
+    "deny.toml",
+    "docs/QUICKSTART.md",
+    "docs/api.md",
+    "docs/development/windows.md",
+    "docs/invariants.md",
+    "docs/operations/beads-coordination-backup.md",
+    "docs/operations/constrained-envelope-benchmark.md",
+    "docs/operations/idle-efficiency-measurement.md",
+    "docs/operations/runtime-resident-memory.md",
+    "docs/operations/windows-install.md",
+    "docs/scope.md",
+    "docs/vision.md",
+    "examples/benchmark/Cargo.toml",
+    "examples/benchmark/TOKEN_FOOTPRINT.md",
+    "examples/benchmark/src/cpu_calibration.rs",
+    "examples/benchmark/src/main.rs",
+    "examples/benchmark/src/token_footprint_calibration.rs",
+    "examples/benchmark/token_footprint_flow.py",
+    "examples/poc_demo/Cargo.toml",
+    "examples/poc_demo/src/lib.rs",
+    "examples/poc_demo/src/main.rs",
+    "examples/poc_demo/tests/smoke.rs",
+    "examples/render_artifacts/Cargo.toml",
+    "examples/render_artifacts/src/bin/cooperative_projection_readback.rs",
+    "examples/render_artifacts/src/bin/vertical_flow_readback.rs",
+    "examples/render_artifacts/src/lib.rs",
+    "examples/render_artifacts/src/vertical_flow_proof.rs",
+    "examples/vertical_slice/Cargo.toml",
+    "examples/vertical_slice/config/agents.toml",
+    "examples/vertical_slice/config/production.toml",
+    "examples/vertical_slice/src/main.rs",
+    "examples/vertical_slice/tests/budget_assertions.rs",
+    "examples/vertical_slice/tests/production_boot.rs",
+    "examples/widget_publish_load_harness/Cargo.toml",
+    "examples/widget_publish_load_harness/src/main.rs",
+    "justfile",
+    "rust-toolchain.toml",
+    "scripts/ci/check_constrained_envelope.py",
+    "scripts/ci/check_dev_mode_defaults.py",
+    "scripts/ci/check_idle_efficiency.py",
+    "scripts/ci/check_token_footprint.py",
+    "scripts/ci/check_windows_perf_budgets.py",
+    "scripts/ci/fixtures/idle-efficiency/invalid-missing-presents-v1.json",
+    "scripts/ci/fixtures/idle-efficiency/valid-linux-v1.json",
+    "scripts/ci/report_telemetry_trend.py",
+    "scripts/ci/run_constrained_envelope.sh",
+    "scripts/ci/select_constrained_cpu_pair.py",
+    "scripts/ci/test_check_constrained_envelope.py",
+    "scripts/ci/test_check_dev_mode_defaults.py",
+    "scripts/ci/test_check_idle_efficiency.py",
+    "scripts/ci/test_check_token_footprint.py",
+    "scripts/ci/test_check_windows_perf_budgets.py",
+    "scripts/ci/test_constrained_envelope_runner.py",
+    "scripts/ci/test_report_telemetry_trend.py",
+    "scripts/ci/test_run_quiescent_efficiency_script.py",
+    "scripts/ci/test_select_constrained_cpu_pair.py",
+    "scripts/ci/test_token_footprint_flow.py",
+    "scripts/ci/test_windowed_overlay_perf_script.py",
+    "scripts/ci/token_footprint_baseline.json",
+    "scripts/ci/windows/run-quiescent-efficiency.ps1",
+    "scripts/ci/windows/test-windowed-fullscreen-overlay-perf.ps1",
+    "scripts/ci/windows/windowed-fullscreen-overlay-perf.ps1",
+    "scripts/ci/windows_install_smoke.py",
+    "scripts/ci/windows_smoke.py",
+    "scripts/dead_code.py",
+    "scripts/dev-bootstrap.sh",
+    "scripts/prune-merged-branches.sh",
+    "scripts/quickstart.sh",
+    "scripts/requirements-dev.txt",
+    "scripts/tests/test_dead_code.py",
+    "scripts/tests/test_quickstart.py",
+    "scripts/tests/test_windows_smoke.py",
+    "scripts/worktree-add.sh",
+    "targets/publish_load_targets.toml",
+    "test_results/hud-bstmy.3.10-followups.json",
+    "test_results/hud-bstmy.3.10-reconciliation.md",
+    "test_results/hud-bstmy.3.7-followups.json",
+    "test_results/hud-bstmy.3.7-reconciliation.md",
+    "test_results/hud-bstmy.5.7-followups.json",
+    "test_results/hud-bstmy.5.7-reconciliation.md",
+    "test_results/reconciliation/hud-bstmy.1.11/artifact-validation.json",
+    "test_results/reconciliation/hud-bstmy.1.11/blockers.json",
+    "test_results/reconciliation/hud-bstmy.1.11/ci-action-inventory.json",
+    "test_results/reconciliation/hud-bstmy.1.11/ci-parity-matrix.json",
+    "test_results/reconciliation/hud-bstmy.1.11/ci-run-step-inventory.json",
+    "test_results/reconciliation/hud-bstmy.1.11/ci-yaml-parse.log",
+    "test_results/reconciliation/hud-bstmy.1.11/ci.log",
+    "test_results/reconciliation/hud-bstmy.1.11/concurrent-main-applicability.json",
+    "test_results/reconciliation/hud-bstmy.1.11/criteria-snapshot.json",
+    "test_results/reconciliation/hud-bstmy.1.11/current-metadata-mutation-proof.json",
+    "test_results/reconciliation/hud-bstmy.1.11/default-feature-closure-inventory.json",
+    "test_results/reconciliation/hud-bstmy.1.11/dev-mode-guard.log",
+    "test_results/reconciliation/hud-bstmy.1.11/discovered-follow-ups.json",
+    "test_results/reconciliation/hud-bstmy.1.11/documentation-assessment.json",
+    "test_results/reconciliation/hud-bstmy.1.11/dry-run-canonical-app-boot.log",
+    "test_results/reconciliation/hud-bstmy.1.11/dry-run-cargo-deny.log",
+    "test_results/reconciliation/hud-bstmy.1.11/dry-run-ci.log",
+    "test_results/reconciliation/hud-bstmy.1.11/dry-run-clippy-windows-gnu.log",
+    "test_results/reconciliation/hud-bstmy.1.11/dry-run-overlay-harness-contract.log",
+    "test_results/reconciliation/hud-bstmy.1.11/dry-run-production-boot.log",
+    "test_results/reconciliation/hud-bstmy.1.11/dry-run-test-gpu.log",
+    "test_results/reconciliation/hud-bstmy.1.11/dry-run-test-integration.log",
+    "test_results/reconciliation/hud-bstmy.1.11/dry-run-test.log",
+    "test_results/reconciliation/hud-bstmy.1.11/dry-run-token-footprint.log",
+    "test_results/reconciliation/hud-bstmy.1.11/environment-receipt.json",
+    "test_results/reconciliation/hud-bstmy.1.11/exact-main-ci-job-evidence.json",
+    "test_results/reconciliation/hud-bstmy.1.11/exact-main-ci-runs.json",
+    "test_results/reconciliation/hud-bstmy.1.11/existing-init-regression.log",
+    "test_results/reconciliation/hud-bstmy.1.11/final-guard-dedupe.json",
+    "test_results/reconciliation/hud-bstmy.1.11/followup-materialization.json",
+    "test_results/reconciliation/hud-bstmy.1.11/gpu-path-classification.json",
+    "test_results/reconciliation/hud-bstmy.1.11/gpu-source-instrument-inventory.json",
+    "test_results/reconciliation/hud-bstmy.1.11/guard-fixtures.log",
+    "test_results/reconciliation/hud-bstmy.1.11/guard-gap-dedupe.json",
+    "test_results/reconciliation/hud-bstmy.1.11/guard-instrument-matrix.json",
+    "test_results/reconciliation/hud-bstmy.1.11/historical-split-validation.json",
+    "test_results/reconciliation/hud-bstmy.1.11/initial-gates.json",
+    "test_results/reconciliation/hud-bstmy.1.11/invariant-contract-matrix.json",
+    "test_results/reconciliation/hud-bstmy.1.11/invariant-execution-receipt.json",
+    "test_results/reconciliation/hud-bstmy.1.11/invariant-test-inventory.json",
+    "test_results/reconciliation/hud-bstmy.1.11/original-compositor-275-history.json",
+    "test_results/reconciliation/hud-bstmy.1.11/preserved-evidence-applicability.json",
+    "test_results/reconciliation/hud-bstmy.1.11/protocol-author-final-commands.json",
+    "test_results/reconciliation/hud-bstmy.1.11/protocol-author-full-ci-result.json",
+    "test_results/reconciliation/hud-bstmy.1.11/protocol-author-report.md",
+    "test_results/reconciliation/hud-bstmy.1.11/protocol-merge-tree-applicability.json",
+    "test_results/reconciliation/hud-bstmy.1.11/python-discovery-inventory.json",
+    "test_results/reconciliation/hud-bstmy.1.11/recipe-dry-run-inventory.json",
+    "test_results/reconciliation/hud-bstmy.1.11/refresh-check.log",
+    "test_results/reconciliation/hud-bstmy.1.11/refresh-guard.log",
+    "test_results/reconciliation/hud-bstmy.1.11/refresh-protocol.log",
+    "test_results/reconciliation/hud-bstmy.1.11/refresh-verification-results.json",
+    "test_results/reconciliation/hud-bstmy.1.11/report.md",
+    "test_results/reconciliation/hud-bstmy.1.11/required-main-rules.json",
+    "test_results/reconciliation/hud-bstmy.1.11/requirements-matrix.json",
+    "test_results/reconciliation/hud-bstmy.1.11/source-verifier-attempts.json",
+    "test_results/reconciliation/hud-bstmy.1.11/test-gpu-1.log",
+    "test_results/reconciliation/hud-bstmy.1.11/test-gpu-2.log",
+    "test_results/reconciliation/hud-bstmy.1.11/test-integration.log",
+    "test_results/reconciliation/hud-bstmy.1.11/test-python-result.json",
+    "test_results/reconciliation/hud-bstmy.1.11/test-python.log",
+    "test_results/reconciliation/hud-bstmy.1.11/third-party-feature-assumption.json",
+    "test_results/reconciliation/hud-bstmy.1.11/token-footprint.log",
+    "test_results/reconciliation/hud-bstmy.1.11/token-gate-report.json",
+    "test_results/reconciliation/hud-bstmy.1.11/token-measurement.json",
+    "test_results/reconciliation/hud-bstmy.1.11/token-repeat.json",
+    "test_results/reconciliation/hud-bstmy.1.11/token-replay-proof.json",
+    "test_results/reconciliation/hud-bstmy.1.11/verification-events.jsonl",
+    "test_results/reconciliation/hud-bstmy.1.11/verification-results.json",
+    "test_results/reconciliation/hud-bstmy.1.11/weak-feature-counterexample.json",
+    "test_results/reconciliation/hud-bstmy.1.11/weak-feature-metadata-activate.json",
+    "test_results/reconciliation/hud-bstmy.1.11/weak-feature-metadata-forward.json",
+    "test_results/reconciliation/hud-bstmy.1.11/weak-feature-resolved-activate.json",
+    "test_results/reconciliation/hud-bstmy.1.11/weak-feature-resolved-forward.json",
+    "test_results/reconciliation/hud-bstmy.1.15/active-clock-dedupe-all.json",
+    "test_results/reconciliation/hud-bstmy.1.15/artifact-index.json",
+    "test_results/reconciliation/hud-bstmy.1.15/artifact-validation.json",
+    "test_results/reconciliation/hud-bstmy.1.15/blockers.json",
+    "test_results/reconciliation/hud-bstmy.1.15/cargo-lock-applicability.json",
+    "test_results/reconciliation/hud-bstmy.1.15/cargo-oracle-activate-forward-metadata.json",
+    "test_results/reconciliation/hud-bstmy.1.15/cargo-oracle-activate-forward-resolve.json",
+    "test_results/reconciliation/hud-bstmy.1.15/cargo-oracle-active-build-0-metadata.json",
+    "test_results/reconciliation/hud-bstmy.1.15/cargo-oracle-active-build-0-resolve.json",
+    "test_results/reconciliation/hud-bstmy.1.15/cargo-oracle-active-build-0-tree.log",
+    "test_results/reconciliation/hud-bstmy.1.15/cargo-oracle-active-build-1-metadata.json",
+    "test_results/reconciliation/hud-bstmy.1.15/cargo-oracle-active-build-1-resolve.json",
+    "test_results/reconciliation/hud-bstmy.1.15/cargo-oracle-active-build-1-tree.log",
+    "test_results/reconciliation/hud-bstmy.1.15/cargo-oracle-active-normal-0-metadata.json",
+    "test_results/reconciliation/hud-bstmy.1.15/cargo-oracle-active-normal-0-resolve.json",
+    "test_results/reconciliation/hud-bstmy.1.15/cargo-oracle-active-normal-0-tree.log",
+    "test_results/reconciliation/hud-bstmy.1.15/cargo-oracle-active-normal-1-metadata.json",
+    "test_results/reconciliation/hud-bstmy.1.15/cargo-oracle-active-normal-1-resolve.json",
+    "test_results/reconciliation/hud-bstmy.1.15/cargo-oracle-active-normal-1-tree.log",
+    "test_results/reconciliation/hud-bstmy.1.15/cargo-oracle-dev-only-metadata.json",
+    "test_results/reconciliation/hud-bstmy.1.15/cargo-oracle-dev-only-resolve.json",
+    "test_results/reconciliation/hud-bstmy.1.15/cargo-oracle-dev-only-tree.log",
+    "test_results/reconciliation/hud-bstmy.1.15/cargo-oracle-forward-activate-metadata.json",
+    "test_results/reconciliation/hud-bstmy.1.15/cargo-oracle-forward-activate-resolve.json",
+    "test_results/reconciliation/hud-bstmy.1.15/cargo-oracle-inactive-build-metadata.json",
+    "test_results/reconciliation/hud-bstmy.1.15/cargo-oracle-inactive-build-resolve.json",
+    "test_results/reconciliation/hud-bstmy.1.15/cargo-oracle-inactive-build-tree.log",
+    "test_results/reconciliation/hud-bstmy.1.15/cargo-oracle-inactive-normal-metadata.json",
+    "test_results/reconciliation/hud-bstmy.1.15/cargo-oracle-inactive-normal-resolve.json",
+    "test_results/reconciliation/hud-bstmy.1.15/cargo-oracle-inactive-normal-tree.log",
+    "test_results/reconciliation/hud-bstmy.1.15/cargo-oracle-indirect-cycle-metadata.json",
+    "test_results/reconciliation/hud-bstmy.1.15/cargo-oracle-indirect-cycle-resolve.json",
+    "test_results/reconciliation/hud-bstmy.1.15/cargo-oracle-indirect-cycle-tree.log",
+    "test_results/reconciliation/hud-bstmy.1.15/cargo-oracles.json",
+    "test_results/reconciliation/hud-bstmy.1.15/ci-action-classification.json",
+    "test_results/reconciliation/hud-bstmy.1.15/ci-action-inventory.json",
+    "test_results/reconciliation/hud-bstmy.1.15/ci-parity-matrix.json",
+    "test_results/reconciliation/hud-bstmy.1.15/ci-run-inventory.json",
+    "test_results/reconciliation/hud-bstmy.1.15/ci-yaml-validation.json",
+    "test_results/reconciliation/hud-bstmy.1.15/clock-contract-matrix.json",
+    "test_results/reconciliation/hud-bstmy.1.15/clock-doc-dedupe-all.json",
+    "test_results/reconciliation/hud-bstmy.1.15/clock-doc-dedupe.json",
+    "test_results/reconciliation/hud-bstmy.1.15/clock-source-operation-inventory.json",
+    "test_results/reconciliation/hud-bstmy.1.15/concurrent-main-applicability.json",
+    "test_results/reconciliation/hud-bstmy.1.15/coverage-gate-result.json",
+    "test_results/reconciliation/hud-bstmy.1.15/coverage-gate.log",
+    "test_results/reconciliation/hud-bstmy.1.15/criteria-snapshot.json",
+    "test_results/reconciliation/hud-bstmy.1.15/deadline-doc-dedupe-all.json",
+    "test_results/reconciliation/hud-bstmy.1.15/default-feature-closure-inventory.json",
+    "test_results/reconciliation/hud-bstmy.1.15/dev-mode-guard.log",
+    "test_results/reconciliation/hud-bstmy.1.15/discovered-follow-ups.json",
+    "test_results/reconciliation/hud-bstmy.1.15/documentation-assessment.json",
+    "test_results/reconciliation/hud-bstmy.1.15/dry-run-canonical-app-boot.log",
+    "test_results/reconciliation/hud-bstmy.1.15/dry-run-cargo-deny.log",
+    "test_results/reconciliation/hud-bstmy.1.15/dry-run-ci.log",
+    "test_results/reconciliation/hud-bstmy.1.15/dry-run-clippy-windows-gnu.log",
+    "test_results/reconciliation/hud-bstmy.1.15/dry-run-overlay-harness-contract.log",
+    "test_results/reconciliation/hud-bstmy.1.15/dry-run-production-boot.log",
+    "test_results/reconciliation/hud-bstmy.1.15/dry-run-test-gpu.log",
+    "test_results/reconciliation/hud-bstmy.1.15/dry-run-test-integration.log",
+    "test_results/reconciliation/hud-bstmy.1.15/dry-run-test.log",
+    "test_results/reconciliation/hud-bstmy.1.15/dry-run-token-footprint.log",
+    "test_results/reconciliation/hud-bstmy.1.15/evidence-whitespace-check.json",
+    "test_results/reconciliation/hud-bstmy.1.15/exact-main-ci-jobs.json",
+    "test_results/reconciliation/hud-bstmy.1.15/exact-main-ci-runs.json",
+    "test_results/reconciliation/hud-bstmy.1.15/finding-source-evidence.json",
+    "test_results/reconciliation/hud-bstmy.1.15/gpu-path-classification.json",
+    "test_results/reconciliation/hud-bstmy.1.15/gpu-root-attestation.json",
+    "test_results/reconciliation/hud-bstmy.1.15/gpu-source-inventory.json",
+    "test_results/reconciliation/hud-bstmy.1.15/gpu-verification-results.json",
+    "test_results/reconciliation/hud-bstmy.1.15/guard-fixtures.log",
+    "test_results/reconciliation/hud-bstmy.1.15/guard-instrument-matrix.json",
+    "test_results/reconciliation/hud-bstmy.1.15/historical-all-function-body-proof.json",
+    "test_results/reconciliation/hud-bstmy.1.15/historical-helper-module-proof.json",
+    "test_results/reconciliation/hud-bstmy.1.15/historical-split-validation.json",
+    "test_results/reconciliation/hud-bstmy.1.15/instrument-assessment.json",
+    "test_results/reconciliation/hud-bstmy.1.15/instrument-diagnostics.json",
+    "test_results/reconciliation/hud-bstmy.1.15/integrated-ci-applicability.json",
+    "test_results/reconciliation/hud-bstmy.1.15/integrated-ci-author-receipt.json",
+    "test_results/reconciliation/hud-bstmy.1.15/integrated-ci-binary-results.json",
+    "test_results/reconciliation/hud-bstmy.1.15/integrated-ci-root-attestation.json",
+    "test_results/reconciliation/hud-bstmy.1.15/integrated-ci.log",
+    "test_results/reconciliation/hud-bstmy.1.15/invariant-contract-matrix.json",
+    "test_results/reconciliation/hud-bstmy.1.15/invariant-execution-receipt.json",
+    "test_results/reconciliation/hud-bstmy.1.15/invariant-test-inventory.json",
+    "test_results/reconciliation/hud-bstmy.1.15/live-main-applicability.json",
+    "test_results/reconciliation/hud-bstmy.1.15/metadata.json",
+    "test_results/reconciliation/hud-bstmy.1.15/original-compositor-275-history.json",
+    "test_results/reconciliation/hud-bstmy.1.15/prebuild-compositor.log",
+    "test_results/reconciliation/hud-bstmy.1.15/prebuild-pixel.log",
+    "test_results/reconciliation/hud-bstmy.1.15/protocol-existing-gap-packets.json",
+    "test_results/reconciliation/hud-bstmy.1.15/python-discovery-inventory.json",
+    "test_results/reconciliation/hud-bstmy.1.15/read-only-checks.json",
+    "test_results/reconciliation/hud-bstmy.1.15/recipe-dry-run-inventory.json",
+    "test_results/reconciliation/hud-bstmy.1.15/renderer-clock-surface-map.json",
+    "test_results/reconciliation/hud-bstmy.1.15/report.md",
+    "test_results/reconciliation/hud-bstmy.1.15/required-main-rules.json",
+    "test_results/reconciliation/hud-bstmy.1.15/requirements-matrix.json",
+    "test_results/reconciliation/hud-bstmy.1.15/test-gpu-1.log",
+    "test_results/reconciliation/hud-bstmy.1.15/test-gpu-2.log",
+    "test_results/reconciliation/hud-bstmy.1.15/test-python-provisioned-result.json",
+    "test_results/reconciliation/hud-bstmy.1.15/test-python-provisioned.log",
+    "test_results/reconciliation/hud-bstmy.1.15/test-python-result.json",
+    "test_results/reconciliation/hud-bstmy.1.15/test-python.log",
+    "test_results/reconciliation/hud-bstmy.1.15/third-party-feature-assumption.json",
+    "test_results/reconciliation/hud-bstmy.1.15/time-source-inventory.log",
+    "test_results/reconciliation/hud-bstmy.1.15/token-footprint/gate-report.json",
+    "test_results/reconciliation/hud-bstmy.1.15/token-footprint/measurement.json",
+    "test_results/reconciliation/hud-bstmy.1.15/token-footprint/repeat.json",
+    "test_results/reconciliation/hud-bstmy.1.15/token-replay-proof.json",
+    "test_results/reconciliation/hud-bstmy.2.12/artifact-index.json",
+    "test_results/reconciliation/hud-bstmy.2.12/audit-context.json",
+    "test_results/reconciliation/hud-bstmy.2.12/blockers.json",
+    "test_results/reconciliation/hud-bstmy.2.12/caller-correction.json",
+    "test_results/reconciliation/hud-bstmy.2.12/candidate-gate-definition-inventory.json",
+    "test_results/reconciliation/hud-bstmy.2.12/canonical-requirements.json",
+    "test_results/reconciliation/hud-bstmy.2.12/coverage-checklist.json",
+    "test_results/reconciliation/hud-bstmy.2.12/current-diagnostic-reference-inventory.json",
+    "test_results/reconciliation/hud-bstmy.2.12/dead-code-instrument-unit-receipt.json",
+    "test_results/reconciliation/hud-bstmy.2.12/dead-code-instrument-unit.log",
+    "test_results/reconciliation/hud-bstmy.2.12/dead-code-protocol-receipt.json",
+    "test_results/reconciliation/hud-bstmy.2.12/dead-code-protocol.log",
+    "test_results/reconciliation/hud-bstmy.2.12/dead-code-resource-receipt.json",
+    "test_results/reconciliation/hud-bstmy.2.12/dead-code-resource.log",
+    "test_results/reconciliation/hud-bstmy.2.12/dead-code-scene-receipt.json",
+    "test_results/reconciliation/hud-bstmy.2.12/dead-code-scene.log",
+    "test_results/reconciliation/hud-bstmy.2.12/dedupe-evidence.json",
+    "test_results/reconciliation/hud-bstmy.2.12/default-app-check-receipt.json",
+    "test_results/reconciliation/hud-bstmy.2.12/default-app-check.log",
+    "test_results/reconciliation/hud-bstmy.2.12/default-feature-closure-receipt.json",
+    "test_results/reconciliation/hud-bstmy.2.12/default-feature-closure.log",
+    "test_results/reconciliation/hud-bstmy.2.12/deletion-checks.json",
+    "test_results/reconciliation/hud-bstmy.2.12/dispatch-packet.json",
+    "test_results/reconciliation/hud-bstmy.2.12/evidence-validation-attempts.json",
+    "test_results/reconciliation/hud-bstmy.2.12/evidence-validation.json",
+    "test_results/reconciliation/hud-bstmy.2.12/first-only-packet.json",
+    "test_results/reconciliation/hud-bstmy.2.12/focused-resource-protocol-scene-receipt.json",
+    "test_results/reconciliation/hud-bstmy.2.12/focused-resource-protocol-scene.log",
+    "test_results/reconciliation/hud-bstmy.2.12/follow-ups.json",
+    "test_results/reconciliation/hud-bstmy.2.12/full-ci-receipt.json",
+    "test_results/reconciliation/hud-bstmy.2.12/full-ci.log",
+    "test_results/reconciliation/hud-bstmy.2.12/gap-packets.json",
+    "test_results/reconciliation/hud-bstmy.2.12/invariant-test-inventory.json",
+    "test_results/reconciliation/hud-bstmy.2.12/merge-reachability.json",
+    "test_results/reconciliation/hud-bstmy.2.12/named-invariant-execution-inventory.json",
+    "test_results/reconciliation/hud-bstmy.2.12/prepin-b5c8852b/audit-context.json",
+    "test_results/reconciliation/hud-bstmy.2.12/prepin-b5c8852b/current-diagnostic-reference-inventory.json",
+    "test_results/reconciliation/hud-bstmy.2.12/prepin-b5c8852b/deletion-checks.json",
+    "test_results/reconciliation/hud-bstmy.2.12/prepin-b5c8852b/invariant-test-inventory.json",
+    "test_results/reconciliation/hud-bstmy.2.12/prepin-b5c8852b/merge-reachability.json",
+    "test_results/reconciliation/hud-bstmy.2.12/prepin-b5c8852b/rejection-envelope-inventory.json",
+    "test_results/reconciliation/hud-bstmy.2.12/prepin-b5c8852b/source-blob-inventory.json",
+    "test_results/reconciliation/hud-bstmy.2.12/prior-P-diagnostic-classification.json",
+    "test_results/reconciliation/hud-bstmy.2.12/prior-R-diagnostic-classification.json",
+    "test_results/reconciliation/hud-bstmy.2.12/prior-S-diagnostic-classification.json",
+    "test_results/reconciliation/hud-bstmy.2.12/python-audit-provision.log",
+    "test_results/reconciliation/hud-bstmy.2.12/python-ci-provision.log",
+    "test_results/reconciliation/hud-bstmy.2.12/rejection-envelope-inventory.json",
+    "test_results/reconciliation/hud-bstmy.2.12/rejection-path-catalog.json",
+    "test_results/reconciliation/hud-bstmy.2.12/report.md",
+    "test_results/reconciliation/hud-bstmy.2.12/residual-owner-reference-inventory.json",
+    "test_results/reconciliation/hud-bstmy.2.12/source-applicability.json",
+    "test_results/reconciliation/hud-bstmy.2.12/source-blob-inventory.json",
+    "test_results/reconciliation/hud-bstmy.2.12/surface-matrix.md",
+    "test_results/reconciliation/hud-bstmy.2.12/tools/build_report.py",
+    "test_results/reconciliation/hud-bstmy.2.12/tools/finalize_evidence.py",
+    "test_results/reconciliation/hud-bstmy.2.12/tools/run_gate.py",
+    "test_results/reconciliation/hud-bstmy.2.12/tools/source_audit.py",
+    "test_results/reconciliation/hud-bstmy.2.12/upload-isolation-verification-packet.json",
+    "test_results/reconciliation/hud-bstmy.2.12/verification-summary.json",
+    "test_results/reconciliation/hud-bstmy.2.6/artifact-validation.json",
+    "test_results/reconciliation/hud-bstmy.2.6/blockers.json",
+    "test_results/reconciliation/hud-bstmy.2.6/dead-code-protocol.log",
+    "test_results/reconciliation/hud-bstmy.2.6/dead-code-resource.log",
+    "test_results/reconciliation/hud-bstmy.2.6/dead-code-scene.log",
+    "test_results/reconciliation/hud-bstmy.2.6/dead-code-tool-tests.log",
+    "test_results/reconciliation/hud-bstmy.2.6/deletion-checks.json",
+    "test_results/reconciliation/hud-bstmy.2.6/focused-tests.log",
+    "test_results/reconciliation/hud-bstmy.2.6/follow-ups.json",
+    "test_results/reconciliation/hud-bstmy.2.6/invariant-test-inventory.json",
+    "test_results/reconciliation/hud-bstmy.2.6/operation-path-inventory.json",
+    "test_results/reconciliation/hud-bstmy.2.6/remaining-symbol-references.json",
+    "test_results/reconciliation/hud-bstmy.2.6/report.md",
+    "test_results/reconciliation/hud-bstmy.2.6/scan-instrument-probe.json",
+    "test_results/reconciliation/hud-bstmy.3.10/blockers.json",
+    "test_results/reconciliation/hud-bstmy.3.10/bootstrap-issues.json",
+    "test_results/reconciliation/hud-bstmy.3.10/bootstrap-receipt.json",
+    "test_results/reconciliation/hud-bstmy.3.10/candidate-navigation.json.gz",
+    "test_results/reconciliation/hud-bstmy.3.10/cargo-terminal-release.json",
+    "test_results/reconciliation/hud-bstmy.3.10/compressed-log-index.json",
+    "test_results/reconciliation/hud-bstmy.3.10/current-pin.json",
+    "test_results/reconciliation/hud-bstmy.3.10/deleted-paths.json",
+    "test_results/reconciliation/hud-bstmy.3.10/deletion-scans.json",
+    "test_results/reconciliation/hud-bstmy.3.10/enabler-final-receipt.json",
+    "test_results/reconciliation/hud-bstmy.3.10/evidence-index.json",
+    "test_results/reconciliation/hud-bstmy.3.10/existing-owner-packets/batching-owner.json",
+    "test_results/reconciliation/hud-bstmy.3.10/existing-owner-packets/enabler-final.json",
+    "test_results/reconciliation/hud-bstmy.3.10/existing-owner-packets/protocol-final.json",
+    "test_results/reconciliation/hud-bstmy.3.10/existing-owner-packets/workcounts-owner.json",
+    "test_results/reconciliation/hud-bstmy.3.10/final-main-applicability.json",
+    "test_results/reconciliation/hud-bstmy.3.10/g1-public-dispositions.json.gz",
+    "test_results/reconciliation/hud-bstmy.3.10/g3-qualified-removals.json",
+    "test_results/reconciliation/hud-bstmy.3.10/gates/config-existing-receipt.json",
+    "test_results/reconciliation/hud-bstmy.3.10/gates/config-existing.log.gz",
+    "test_results/reconciliation/hud-bstmy.3.10/gates/focus-existing-receipt.json",
+    "test_results/reconciliation/hud-bstmy.3.10/gates/focus-existing.log.gz",
+    "test_results/reconciliation/hud-bstmy.3.10/gates/full-ci-receipt.json",
+    "test_results/reconciliation/hud-bstmy.3.10/gates/full-ci.log.gz",
+    "test_results/reconciliation/hud-bstmy.3.10/historical-gate-index.json",
+    "test_results/reconciliation/hud-bstmy.3.10/historical-gates/g1-author-ci.log.gz",
+    "test_results/reconciliation/hud-bstmy.3.10/historical-gates/g1-initial-receipt.json",
+    "test_results/reconciliation/hud-bstmy.3.10/historical-gates/g1-retry-receipt.json",
+    "test_results/reconciliation/hud-bstmy.3.10/historical-gates/g1-review-exclusive-retry.log.gz",
+    "test_results/reconciliation/hud-bstmy.3.10/historical-gates/g1-review-initial-failed.log.gz",
+    "test_results/reconciliation/hud-bstmy.3.10/historical-gates/g2-author-ci.log.gz",
+    "test_results/reconciliation/hud-bstmy.3.10/historical-gates/g2-correction.json",
+    "test_results/reconciliation/hud-bstmy.3.10/historical-gates/g2-verification.json",
+    "test_results/reconciliation/hud-bstmy.3.10/historical-gates/g3-author-ci.log.gz",
+    "test_results/reconciliation/hud-bstmy.3.10/historical-gates/g3-ci-receipt.json",
+    "test_results/reconciliation/hud-bstmy.3.10/historical-gates/g4-ci-receipt.json",
+    "test_results/reconciliation/hud-bstmy.3.10/historical-gates/g4-mutation-receipt.json",
+    "test_results/reconciliation/hud-bstmy.3.10/historical-gates/g4-real-settle-mutation.log.gz",
+    "test_results/reconciliation/hud-bstmy.3.10/historical-gates/g4-restoration.json",
+    "test_results/reconciliation/hud-bstmy.3.10/historical-gates/g4-review-ci.log.gz",
+    "test_results/reconciliation/hud-bstmy.3.10/invariant-index.json",
+    "test_results/reconciliation/hud-bstmy.3.10/manifest-surface.json",
+    "test_results/reconciliation/hud-bstmy.3.10/merged-outcomes.json",
+    "test_results/reconciliation/hud-bstmy.3.10/protocol-final-receipt.json",
+    "test_results/reconciliation/hud-bstmy.3.10/qualified-residual-caller-matrix.json",
+    "test_results/reconciliation/hud-bstmy.3.10/reference-index.json.gz",
+    "test_results/reconciliation/hud-bstmy.3.10/source-inventory.json.gz",
+    "test_results/reconciliation/hud-bstmy.3.10/source-tree-398c6f91.json",
+    "test_results/reconciliation/hud-bstmy.3.10/source-tree-8f61ab81.json",
+    "test_results/reconciliation/hud-bstmy.3.10/test-declaration-inventory.json.gz",
+    "test_results/reconciliation/hud-bstmy.3.10/token-footprint-receipt.json",
+    "test_results/reconciliation/hud-bstmy.3.10/token-footprint/gate-report.json",
+    "test_results/reconciliation/hud-bstmy.3.10/token-footprint/measurement.json",
+    "test_results/reconciliation/hud-bstmy.3.10/token-footprint/repeat.json",
+    "test_results/reconciliation/hud-bstmy.3.10/validation.json",
+    "test_results/reconciliation/hud-bstmy.5.7/applicable-full-ci-receipt.json",
+    "test_results/reconciliation/hud-bstmy.5.7/applicable-full-ci-terminal-release.json",
+    "test_results/reconciliation/hud-bstmy.5.7/applicable-full-ci.log.gz",
+    "test_results/reconciliation/hud-bstmy.5.7/applicable-missing-gates-receipt.json",
+    "test_results/reconciliation/hud-bstmy.5.7/applicable-qualified-AST-navigation.json.gz",
+    "test_results/reconciliation/hud-bstmy.5.7/applicable-token-footprint/gate-report.json",
+    "test_results/reconciliation/hud-bstmy.5.7/applicable-token-footprint/measurement.json",
+    "test_results/reconciliation/hud-bstmy.5.7/applicable-token-footprint/repeat.json",
+    "test_results/reconciliation/hud-bstmy.5.7/applicable-token-footprint/token-footprint-receipt.json",
+    "test_results/reconciliation/hud-bstmy.5.7/artifact-validation.json",
+    "test_results/reconciliation/hud-bstmy.5.7/blockers.json",
+    "test_results/reconciliation/hud-bstmy.5.7/bootstrap-native-receipt.json",
+    "test_results/reconciliation/hud-bstmy.5.7/budget-cargo-terminal-release.json",
+    "test_results/reconciliation/hud-bstmy.5.7/canonical-inputs.json",
+    "test_results/reconciliation/hud-bstmy.5.7/counter-primitive-owner-navigation.json",
+    "test_results/reconciliation/hud-bstmy.5.7/coverage.json",
+    "test_results/reconciliation/hud-bstmy.5.7/current-observation-owners.json",
+    "test_results/reconciliation/hud-bstmy.5.7/current-qualified-token-navigation.json",
+    "test_results/reconciliation/hud-bstmy.5.7/dashboard-p99.log",
+    "test_results/reconciliation/hud-bstmy.5.7/dedupe-current-owners.json",
+    "test_results/reconciliation/hud-bstmy.5.7/dedupe-issues-snapshot.json.gz",
+    "test_results/reconciliation/hud-bstmy.5.7/dedupe-owner-actual-pr-outcomes.json",
+    "test_results/reconciliation/hud-bstmy.5.7/dedupe-qualified-owners.json",
+    "test_results/reconciliation/hud-bstmy.5.7/default-app-release.log",
+    "test_results/reconciliation/hud-bstmy.5.7/default-app-tree.log",
+    "test_results/reconciliation/hud-bstmy.5.7/deletion-and-owner-navigation.json",
+    "test_results/reconciliation/hud-bstmy.5.7/evidence-index.json",
+    "test_results/reconciliation/hud-bstmy.5.7/execution-bootstrap-native-receipt.json",
+    "test_results/reconciliation/hud-bstmy.5.7/execution-canonical-inputs.json",
+    "test_results/reconciliation/hud-bstmy.5.7/existing-owners.json",
+    "test_results/reconciliation/hud-bstmy.5.7/final-canonical-field-match.json",
+    "test_results/reconciliation/hud-bstmy.5.7/final-fetched-main-applicability.json",
+    "test_results/reconciliation/hud-bstmy.5.7/first-packet-validation.json",
+    "test_results/reconciliation/hud-bstmy.5.7/first-shaping-packet.json",
+    "test_results/reconciliation/hud-bstmy.5.7/invariant-test-inventory.json",
+    "test_results/reconciliation/hud-bstmy.5.7/leased-budget-runner.py",
+    "test_results/reconciliation/hud-bstmy.5.7/merged-inputs.json",
+    "test_results/reconciliation/hud-bstmy.5.7/operational-provenance.json",
+    "test_results/reconciliation/hud-bstmy.5.7/optional-metadata-collect_source_ast-failed.py",
+    "test_results/reconciliation/hud-bstmy.5.7/optional-metadata-collect_source_ast.py",
+    "test_results/reconciliation/hud-bstmy.5.7/original-assertion-dispositions.json",
+    "test_results/reconciliation/hud-bstmy.5.7/original-pr-outcomes.json",
+    "test_results/reconciliation/hud-bstmy.5.7/qualified-owner-matrix.json",
+    "test_results/reconciliation/hud-bstmy.5.7/review-round1-corrections.json",
+    "test_results/reconciliation/hud-bstmy.5.7/review-round1-owner-dedupe.json",
+    "test_results/reconciliation/hud-bstmy.5.7/root-budget-cargo-lease.json",
+    "test_results/reconciliation/hud-bstmy.5.7/root-budget-independent-validation.json",
+    "test_results/reconciliation/hud-bstmy.5.7/root-dispatch-packet.json",
+    "test_results/reconciliation/hud-bstmy.5.7/root-first-field-verification.json",
+    "test_results/reconciliation/hud-bstmy.5.7/shell-original-assertion-fates.json",
+    "test_results/reconciliation/hud-bstmy.5.7/source-applicability.json",
+    "test_results/reconciliation/hud-bstmy.5.7/source-inventory.json",
+    "test_results/reconciliation/hud-bstmy.5.7/source-shaping-receipt.json",
+    "test_results/reconciliation/hud-bstmy.5.7/token-footprint-applicability.json",
+    "test_results/reconciliation/hud-bstmy.5.7/verification.json",
+    "test_results/reconciliation/hud-bstmy.5.7/vertical-slice-budget-assertions-receipt.json",
+    "test_results/reconciliation/hud-bstmy.5.7/vertical-slice-budget-assertions.log",
+    "test_results/reconciliation/hud-bstmy.7.7/coverage.json",
+    "test_results/reconciliation/hud-bstmy.7.7/gap-candidates.json",
+    "test_results/reconciliation/hud-bstmy.7.7/invariant-test-inventory.json",
+    "test_results/reconciliation/hud-bstmy.7.7/report.md",
+    "test_results/reconciliation/hud-bstmy.7.7/verification.json",
+    "tests/integration/Cargo.toml",
+    "tests/integration/common/mod.rs",
+    "tests/integration/dashboard_tile_input.rs",
+    "tests/integration/drag_reposition.rs",
+    "tests/integration/movable_elements_e2e.rs",
+    "tests/integration/multi_agent.rs",
+    "tests/integration/poc_acceptance.rs",
+    "tests/integration/subtitle_streaming.rs",
+    "tests/integration/text_stream_portal_adapter.rs",
+    "tests/integration/text_stream_portal_cadence.rs",
+    "tests/integration/text_stream_portal_coalescing.rs",
+    "tests/integration/text_stream_portal_composer.rs",
+    "tests/integration/text_stream_portal_governance.rs",
+    "tests/integration/text_stream_portal_markdown.rs",
+    "tests/integration/text_stream_portal_styling.rs",
+    "tests/integration/text_stream_portal_surface.rs"
+  ],
+  "tracked_rust_paths": [
+    "app/tze_hud_app/build.rs",
+    "app/tze_hud_app/src/main.rs",
+    "app/tze_hud_app/tests/benchmark_config_schema.rs",
+    "app/tze_hud_app/tests/canonical_config_schema.rs",
+    "app/tze_hud_app/tests/production_boot.rs",
+    "crates/tze_hud_compositor/benches/markdown_cache.rs",
+    "crates/tze_hud_compositor/benches/overflow_truncate.rs",
+    "crates/tze_hud_compositor/benches/widget_rasterize.rs",
+    "crates/tze_hud_compositor/src/display.rs",
+    "crates/tze_hud_compositor/src/fonts.rs",
+    "crates/tze_hud_compositor/src/lib.rs",
+    "crates/tze_hud_compositor/src/markdown.rs",
+    "crates/tze_hud_compositor/src/overflow.rs",
+    "crates/tze_hud_compositor/src/pipeline.rs",
+    "crates/tze_hud_compositor/src/renderer/animation.rs",
+    "crates/tze_hud_compositor/src/renderer/capture.rs",
+    "crates/tze_hud_compositor/src/renderer/draw_cmds.rs",
+    "crates/tze_hud_compositor/src/renderer/easing.rs",
+    "crates/tze_hud_compositor/src/renderer/encode_pass.rs",
+    "crates/tze_hud_compositor/src/renderer/focus_ring.rs",
+    "crates/tze_hud_compositor/src/renderer/frame.rs",
+    "crates/tze_hud_compositor/src/renderer/hit_regions.rs",
+    "crates/tze_hud_compositor/src/renderer/icon.rs",
+    "crates/tze_hud_compositor/src/renderer/image_cache.rs",
+    "crates/tze_hud_compositor/src/renderer/mod.rs",
+    "crates/tze_hud_compositor/src/renderer/retained.rs",
+    "crates/tze_hud_compositor/src/renderer/safe_mode_overlay.rs",
+    "crates/tze_hud_compositor/src/renderer/system_card.rs",
+    "crates/tze_hud_compositor/src/renderer/tests/alert_banner.rs",
+    "crates/tze_hud_compositor/src/renderer/tests/composer.rs",
+    "crates/tze_hud_compositor/src/renderer/tests/focus_chrome.rs",
+    "crates/tze_hud_compositor/src/renderer/tests/hit_drag.rs",
+    "crates/tze_hud_compositor/src/renderer/tests/idle_gate.rs",
+    "crates/tze_hud_compositor/src/renderer/tests/markdown_cache.rs",
+    "crates/tze_hud_compositor/src/renderer/tests/markdown_primer.rs",
+    "crates/tze_hud_compositor/src/renderer/tests/mod.rs",
+    "crates/tze_hud_compositor/src/renderer/tests/notification_layout.rs",
+    "crates/tze_hud_compositor/src/renderer/tests/portal_animation.rs",
+    "crates/tze_hud_compositor/src/renderer/tests/portal_reveal.rs",
+    "crates/tze_hud_compositor/src/renderer/tests/retained_image.rs",
+    "crates/tze_hud_compositor/src/renderer/tests/scroll.rs",
+    "crates/tze_hud_compositor/src/renderer/tests/surface.rs",
+    "crates/tze_hud_compositor/src/renderer/tests/text_render.rs",
+    "crates/tze_hud_compositor/src/renderer/tests/tile_opacity.rs",
+    "crates/tze_hud_compositor/src/renderer/tests/tokens.rs",
+    "crates/tze_hud_compositor/src/renderer/tests/viewer_echo.rs",
+    "crates/tze_hud_compositor/src/renderer/tests/zone_layers.rs",
+    "crates/tze_hud_compositor/src/renderer/tests/zone_notification.rs",
+    "crates/tze_hud_compositor/src/renderer/tests/zone_stack.rs",
+    "crates/tze_hud_compositor/src/renderer/text.rs",
+    "crates/tze_hud_compositor/src/renderer/tile_render.rs",
+    "crates/tze_hud_compositor/src/renderer/token_colors.rs",
+    "crates/tze_hud_compositor/src/renderer/viewer_echo.rs",
+    "crates/tze_hud_compositor/src/renderer/widget_geometry.rs",
+    "crates/tze_hud_compositor/src/renderer/widgets.rs",
+    "crates/tze_hud_compositor/src/renderer/zone_render.rs",
+    "crates/tze_hud_compositor/src/surface.rs",
+    "crates/tze_hud_compositor/src/text.rs",
+    "crates/tze_hud_compositor/src/vertical_flow.rs",
+    "crates/tze_hud_compositor/src/widget.rs",
+    "crates/tze_hud_compositor/tests/common/mod.rs",
+    "crates/tze_hud_compositor/tests/common/pixels.rs",
+    "crates/tze_hud_compositor/tests/gauge_binding_rendering.rs",
+    "crates/tze_hud_compositor/tests/gpu_canary.rs",
+    "crates/tze_hud_compositor/tests/widget_raster_count.rs",
+    "crates/tze_hud_compositor/tests/widget_rasterize_budget.rs",
+    "crates/tze_hud_compositor/tests/widget_transition.rs",
+    "crates/tze_hud_compositor/tests/zone_rendering.rs",
+    "crates/tze_hud_config/src/agents_file.rs",
+    "crates/tze_hud_config/src/allow.rs",
+    "crates/tze_hud_config/src/config_write.rs",
+    "crates/tze_hud_config/src/displays.rs",
+    "crates/tze_hud_config/src/lib.rs",
+    "crates/tze_hud_config/src/loader.rs",
+    "crates/tze_hud_config/src/policy_builder.rs",
+    "crates/tze_hud_config/src/portal_tokens.rs",
+    "crates/tze_hud_config/src/raw.rs",
+    "crates/tze_hud_config/src/resolver.rs",
+    "crates/tze_hud_config/src/runtime_widget_assets.rs",
+    "crates/tze_hud_config/src/tests.rs",
+    "crates/tze_hud_config/src/themes.rs",
+    "crates/tze_hud_config/src/tokens.rs",
+    "crates/tze_hud_config/src/validate.rs",
+    "crates/tze_hud_config/src/widgets.rs",
+    "crates/tze_hud_config/src/zones.rs",
+    "crates/tze_hud_input/src/batching.rs",
+    "crates/tze_hud_input/src/capture.rs",
+    "crates/tze_hud_input/src/coalescing.rs",
+    "crates/tze_hud_input/src/command.rs",
+    "crates/tze_hud_input/src/composer_draft.rs",
+    "crates/tze_hud_input/src/drag.rs",
+    "crates/tze_hud_input/src/envelope.rs",
+    "crates/tze_hud_input/src/event_queue.rs",
+    "crates/tze_hud_input/src/events.rs",
+    "crates/tze_hud_input/src/focus.rs",
+    "crates/tze_hud_input/src/focus_tree.rs",
+    "crates/tze_hud_input/src/hit_test.rs",
+    "crates/tze_hud_input/src/jump_to_latest.rs",
+    "crates/tze_hud_input/src/keyboard.rs",
+    "crates/tze_hud_input/src/lib.rs",
+    "crates/tze_hud_input/src/local_feedback.rs",
+    "crates/tze_hud_input/src/pointer.rs",
+    "crates/tze_hud_input/src/portal_resize.rs",
+    "crates/tze_hud_input/src/scroll.rs",
+    "crates/tze_hud_input/src/scroll_indicator.rs",
+    "crates/tze_hud_mcp/src/error.rs",
+    "crates/tze_hud_mcp/src/lib.rs",
+    "crates/tze_hud_mcp/src/portal_op.rs",
+    "crates/tze_hud_mcp/src/schema.rs",
+    "crates/tze_hud_mcp/src/server.rs",
+    "crates/tze_hud_mcp/src/server/tests.rs",
+    "crates/tze_hud_mcp/src/tools.rs",
+    "crates/tze_hud_mcp/src/types.rs",
+    "crates/tze_hud_projection/src/authority.rs",
+    "crates/tze_hud_projection/src/contract.rs",
+    "crates/tze_hud_projection/src/hub.rs",
+    "crates/tze_hud_projection/src/lib.rs",
+    "crates/tze_hud_projection/src/portal_cadence.rs",
+    "crates/tze_hud_projection/src/resident_grpc.rs",
+    "crates/tze_hud_projection/src/tests/mod.rs",
+    "crates/tze_hud_protocol/build.rs",
+    "crates/tze_hud_protocol/src/auth.rs",
+    "crates/tze_hud_protocol/src/convert.rs",
+    "crates/tze_hud_protocol/src/dedup.rs",
+    "crates/tze_hud_protocol/src/lease.rs",
+    "crates/tze_hud_protocol/src/lib.rs",
+    "crates/tze_hud_protocol/src/session.rs",
+    "crates/tze_hud_protocol/src/session_server/budget_gate.rs",
+    "crates/tze_hud_protocol/src/session_server/degradation_notice_bus.rs",
+    "crates/tze_hud_protocol/src/session_server/element_persist.rs",
+    "crates/tze_hud_protocol/src/session_server/freeze_queue.rs",
+    "crates/tze_hud_protocol/src/session_server/handshake.rs",
+    "crates/tze_hud_protocol/src/session_server/input_event_bus.rs",
+    "crates/tze_hud_protocol/src/session_server/lease_expiry_bus.rs",
+    "crates/tze_hud_protocol/src/session_server/lifecycle.rs",
+    "crates/tze_hud_protocol/src/session_server/mod.rs",
+    "crates/tze_hud_protocol/src/session_server/mutations.rs",
+    "crates/tze_hud_protocol/src/session_server/service.rs",
+    "crates/tze_hud_protocol/src/session_server/stream_session.rs",
+    "crates/tze_hud_protocol/src/session_server/tests/allow.rs",
+    "crates/tze_hud_protocol/src/session_server/tests/events.rs",
+    "crates/tze_hud_protocol/src/session_server/tests/invariants.rs",
+    "crates/tze_hud_protocol/src/session_server/tests/lease.rs",
+    "crates/tze_hud_protocol/src/session_server/tests/lifecycle_verbs.rs",
+    "crates/tze_hud_protocol/src/session_server/tests/mod.rs",
+    "crates/tze_hud_protocol/src/session_server/tests/portal.rs",
+    "crates/tze_hud_protocol/src/session_server/tests/render_wake.rs",
+    "crates/tze_hud_protocol/src/session_server/tests/resource_upload.rs",
+    "crates/tze_hud_protocol/src/session_server/tests/resume.rs",
+    "crates/tze_hud_protocol/src/session_server/tests/safe_mode.rs",
+    "crates/tze_hud_protocol/src/session_server/tests/scene_mutations.rs",
+    "crates/tze_hud_protocol/src/session_server/tests/session_handshake.rs",
+    "crates/tze_hud_protocol/src/session_server/tests/timing.rs",
+    "crates/tze_hud_protocol/src/session_server/tests/widget_publish.rs",
+    "crates/tze_hud_protocol/src/session_server/tests/zones.rs",
+    "crates/tze_hud_protocol/src/session_server/traffic.rs",
+    "crates/tze_hud_protocol/src/session_server/upload.rs",
+    "crates/tze_hud_protocol/src/session_server/verbs.rs",
+    "crates/tze_hud_protocol/src/subscriptions.rs",
+    "crates/tze_hud_protocol/src/token.rs",
+    "crates/tze_hud_protocol/tests/capability_gating.rs",
+    "crates/tze_hud_protocol/tests/event_delivery.rs",
+    "crates/tze_hud_protocol/tests/fuzz_protocol_boundary.rs",
+    "crates/tze_hud_protocol/tests/lease_governance.rs",
+    "crates/tze_hud_protocol/tests/subscriptions.rs",
+    "crates/tze_hud_resource/src/debug.rs",
+    "crates/tze_hud_resource/src/dedup.rs",
+    "crates/tze_hud_resource/src/font_bytes_store.rs",
+    "crates/tze_hud_resource/src/lib.rs",
+    "crates/tze_hud_resource/src/resident_ledger.rs",
+    "crates/tze_hud_resource/src/runtime_widget_store.rs",
+    "crates/tze_hud_resource/src/types.rs",
+    "crates/tze_hud_resource/src/upload.rs",
+    "crates/tze_hud_resource/src/validation.rs",
+    "crates/tze_hud_resource/tests/store_behavior.rs",
+    "crates/tze_hud_runtime/src/channels.rs",
+    "crates/tze_hud_runtime/src/degradation.rs",
+    "crates/tze_hud_runtime/src/diag.rs",
+    "crates/tze_hud_runtime/src/element_store.rs",
+    "crates/tze_hud_runtime/src/firewall.rs",
+    "crates/tze_hud_runtime/src/headless.rs",
+    "crates/tze_hud_runtime/src/http.rs",
+    "crates/tze_hud_runtime/src/idle_efficiency.rs",
+    "crates/tze_hud_runtime/src/lib.rs",
+    "crates/tze_hud_runtime/src/mcp.rs",
+    "crates/tze_hud_runtime/src/mutation_budget_bridge.rs",
+    "crates/tze_hud_runtime/src/net_addrs.rs",
+    "crates/tze_hud_runtime/src/operator/handoff.rs",
+    "crates/tze_hud_runtime/src/operator/install.rs",
+    "crates/tze_hud_runtime/src/operator/logs.rs",
+    "crates/tze_hud_runtime/src/operator/mod.rs",
+    "crates/tze_hud_runtime/src/operator/screenshot.rs",
+    "crates/tze_hud_runtime/src/operator/status.rs",
+    "crates/tze_hud_runtime/src/operator/update.rs",
+    "crates/tze_hud_runtime/src/pairing.rs",
+    "crates/tze_hud_runtime/src/pipeline.rs",
+    "crates/tze_hud_runtime/src/portal_projection_driver.rs",
+    "crates/tze_hud_runtime/src/portal_tokens.rs",
+    "crates/tze_hud_runtime/src/runtime_context.rs",
+    "crates/tze_hud_runtime/src/scene_startup.rs",
+    "crates/tze_hud_runtime/src/shell/chrome.rs",
+    "crates/tze_hud_runtime/src/shell/freeze.rs",
+    "crates/tze_hud_runtime/src/shell/mod.rs",
+    "crates/tze_hud_runtime/src/shell/safe_mode.rs",
+    "crates/tze_hud_runtime/src/shell/system_card.rs",
+    "crates/tze_hud_runtime/src/test_support.rs",
+    "crates/tze_hud_runtime/src/threads.rs",
+    "crates/tze_hud_runtime/src/widget_hover.rs",
+    "crates/tze_hud_runtime/src/widget_runtime_registration.rs",
+    "crates/tze_hud_runtime/src/widget_startup.rs",
+    "crates/tze_hud_runtime/src/window.rs",
+    "crates/tze_hud_runtime/src/windowed/config.rs",
+    "crates/tze_hud_runtime/src/windowed/displays.rs",
+    "crates/tze_hud_runtime/src/windowed/event_loop_harness.rs",
+    "crates/tze_hud_runtime/src/windowed/global_hotkey.rs",
+    "crates/tze_hud_runtime/src/windowed/hittest.rs",
+    "crates/tze_hud_runtime/src/windowed/input_dispatch.rs",
+    "crates/tze_hud_runtime/src/windowed/keyboard.rs",
+    "crates/tze_hud_runtime/src/windowed/lifecycle.rs",
+    "crates/tze_hud_runtime/src/windowed/mod.rs",
+    "crates/tze_hud_runtime/src/windowed/monitor_identity.rs",
+    "crates/tze_hud_runtime/src/windowed/network.rs",
+    "crates/tze_hud_runtime/src/windowed/portal.rs",
+    "crates/tze_hud_runtime/src/windowed/safe_mode_toggle.rs",
+    "crates/tze_hud_runtime/src/windowed/test_support.rs",
+    "crates/tze_hud_runtime/src/windowed/wake.rs",
+    "crates/tze_hud_runtime/src/windowed/widgets.rs",
+    "crates/tze_hud_runtime/tests/idle_efficiency_counters.rs",
+    "crates/tze_hud_runtime/tests/pixel_helpers.rs",
+    "crates/tze_hud_runtime/tests/pixel_readback.rs",
+    "crates/tze_hud_runtime/tests/present_ack.rs",
+    "crates/tze_hud_scene/benches/hit_test.rs",
+    "crates/tze_hud_scene/benches/snapshot.rs",
+    "crates/tze_hud_scene/src/clock.rs",
+    "crates/tze_hud_scene/src/config/agents.rs",
+    "crates/tze_hud_scene/src/config/hotkey.rs",
+    "crates/tze_hud_scene/src/config/mod.rs",
+    "crates/tze_hud_scene/src/element_store.rs",
+    "crates/tze_hud_scene/src/error_codes.rs",
+    "crates/tze_hud_scene/src/graph/budget.rs",
+    "crates/tze_hud_scene/src/graph/contention.rs",
+    "crates/tze_hud_scene/src/graph/leases.rs",
+    "crates/tze_hud_scene/src/graph/limits_tests.rs",
+    "crates/tze_hud_scene/src/graph/mod.rs",
+    "crates/tze_hud_scene/src/graph/node_tree.rs",
+    "crates/tze_hud_scene/src/graph/overlay.rs",
+    "crates/tze_hud_scene/src/graph/queries.rs",
+    "crates/tze_hud_scene/src/graph/resources.rs",
+    "crates/tze_hud_scene/src/graph/snapshot.rs",
+    "crates/tze_hud_scene/src/graph/spec_scenarios.rs",
+    "crates/tze_hud_scene/src/graph/tabs.rs",
+    "crates/tze_hud_scene/src/graph/test_helpers.rs",
+    "crates/tze_hud_scene/src/graph/tests.rs",
+    "crates/tze_hud_scene/src/graph/tiles.rs",
+    "crates/tze_hud_scene/src/graph/timed.rs",
+    "crates/tze_hud_scene/src/graph/widget_tests.rs",
+    "crates/tze_hud_scene/src/graph/zone_ops.rs",
+    "crates/tze_hud_scene/src/lease/budget.rs",
+    "crates/tze_hud_scene/src/lease/degradation.rs",
+    "crates/tze_hud_scene/src/lease/mod.rs",
+    "crates/tze_hud_scene/src/lease/orphan.rs",
+    "crates/tze_hud_scene/src/lease/types.rs",
+    "crates/tze_hud_scene/src/lib.rs",
+    "crates/tze_hud_scene/src/mutation.rs",
+    "crates/tze_hud_scene/src/perf_budget.rs",
+    "crates/tze_hud_scene/src/placement.rs",
+    "crates/tze_hud_scene/src/render_wake.rs",
+    "crates/tze_hud_scene/src/svg_tokens.rs",
+    "crates/tze_hud_scene/src/test_scenes.rs",
+    "crates/tze_hud_scene/src/timing/domains.rs",
+    "crates/tze_hud_scene/src/timing/mod.rs",
+    "crates/tze_hud_scene/src/types.rs",
+    "crates/tze_hud_scene/src/validation.rs",
+    "crates/tze_hud_scene/tests/batch_atomicity.rs",
+    "crates/tze_hud_scene/tests/fuzz_scene_graph.rs",
+    "crates/tze_hud_scene/tests/hit_test.rs",
+    "crates/tze_hud_scene/tests/proptest_invariants.rs",
+    "crates/tze_hud_scene/tests/session_lifecycle.rs",
+    "crates/tze_hud_scene/tests/snapshot.rs",
+    "crates/tze_hud_scene/tests/zone_interaction.rs",
+    "crates/tze_hud_scene/tests/zone_ontology.rs",
+    "crates/tze_hud_telemetry/src/collector.rs",
+    "crates/tze_hud_telemetry/src/idle_efficiency.rs",
+    "crates/tze_hud_telemetry/src/lib.rs",
+    "crates/tze_hud_telemetry/src/publish_load.rs",
+    "crates/tze_hud_telemetry/src/record.rs",
+    "crates/tze_hud_telemetry/src/validation.rs",
+    "crates/tze_hud_telemetry/src/work_counts.rs",
+    "crates/tze_hud_telemetry/tests/idle_efficiency.rs",
+    "crates/tze_hud_telemetry/tests/publish_load_artifact.rs",
+    "crates/tze_hud_widget/src/error.rs",
+    "crates/tze_hud_widget/src/lib.rs",
+    "crates/tze_hud_widget/src/loader.rs",
+    "crates/tze_hud_widget/src/manifest.rs",
+    "crates/tze_hud_widget/src/runtime_registration.rs",
+    "crates/tze_hud_widget/src/svg_ids.rs",
+    "crates/tze_hud_widget/tests/shipped_bundles.rs",
+    "examples/benchmark/src/cpu_calibration.rs",
+    "examples/benchmark/src/main.rs",
+    "examples/benchmark/src/token_footprint_calibration.rs",
+    "examples/poc_demo/src/lib.rs",
+    "examples/poc_demo/src/main.rs",
+    "examples/poc_demo/tests/smoke.rs",
+    "examples/render_artifacts/src/bin/cooperative_projection_readback.rs",
+    "examples/render_artifacts/src/bin/vertical_flow_readback.rs",
+    "examples/render_artifacts/src/lib.rs",
+    "examples/render_artifacts/src/vertical_flow_proof.rs",
+    "examples/vertical_slice/src/main.rs",
+    "examples/vertical_slice/tests/budget_assertions.rs",
+    "examples/vertical_slice/tests/production_boot.rs",
+    "examples/widget_publish_load_harness/src/main.rs",
+    "tests/integration/common/mod.rs",
+    "tests/integration/dashboard_tile_input.rs",
+    "tests/integration/drag_reposition.rs",
+    "tests/integration/movable_elements_e2e.rs",
+    "tests/integration/multi_agent.rs",
+    "tests/integration/poc_acceptance.rs",
+    "tests/integration/subtitle_streaming.rs",
+    "tests/integration/text_stream_portal_adapter.rs",
+    "tests/integration/text_stream_portal_cadence.rs",
+    "tests/integration/text_stream_portal_coalescing.rs",
+    "tests/integration/text_stream_portal_composer.rs",
+    "tests/integration/text_stream_portal_governance.rs",
+    "tests/integration/text_stream_portal_markdown.rs",
+    "tests/integration/text_stream_portal_styling.rs",
+    "tests/integration/text_stream_portal_surface.rs"
+  ],
+  "source_manifest_instrument_blobs": [
+    {
+      "path": ".github/workflows/ci.yml",
+      "blob": "3a1cf32521acb075c27a094d6ebbd7859b5f76f0",
+      "sha256": "8d1c717c280c66b05a4562b0d5280f826793353574dfa1a1c866148486412fb6"
+    },
+    {
+      "path": ".github/workflows/delete-merged-branches.yml",
+      "blob": "795e491504d1b586c444a2b7b4ed390c44b7114d",
+      "sha256": "055f3d3f4b22d4a91d00b7c67dc6a3d7e96a8d0a1ad7687ff8cee53352f42ae4"
+    },
+    {
+      "path": ".github/workflows/perf-assert.yml",
+      "blob": "3ae3090a14b815b96074b70dc1a8524c7564c9ff",
+      "sha256": "84abb63fbcb245c29d232207b87ffa6bc7f2a758f418b266e36bbf01a261338d"
+    },
+    {
+      "path": ".github/workflows/perf-budget.yml",
+      "blob": "1fb069cf7b7727be11452422af8caf8857c1d2bf",
+      "sha256": "19cc2292c09f66cfcfa106acea61b1e62e03916c42871584e1c0c62024090c19"
+    },
+    {
+      "path": ".github/workflows/windowed-overlay-perf.yml",
+      "blob": "9bf5f1ad4a112b4f3968ab36830a0af5ceb0dd01",
+      "sha256": "cef86424e3e14616bc8a42fef319af23090665f0beadb659aa3693c542705c3b"
+    },
+    {
+      "path": ".github/workflows/windows.yml",
+      "blob": "0e477c2d691ac7afe9aafdb28d1811a27b133f51",
+      "sha256": "0c9a291fa9372828194713491cfce1b8863d86fc5f918f3dda29c508c06ef8ce"
+    },
+    {
+      "path": "Cargo.lock",
+      "blob": "922a3d8fa15fccc5eeb1d321c8f2133fdab415b9",
+      "sha256": "12dc444cea02cc6d1b4b3d38afc73d350c3f6a39019ae11469aff30aae52cbe5"
+    },
+    {
+      "path": "Cargo.toml",
+      "blob": "d375af84d5ce66f4cefaf15fe3aad8592ea83870",
+      "sha256": "9f402d4f8f64897bc23ac768b7c26fa1f36bb93f1f54852d3d44dc8a9aa43554"
+    },
+    {
+      "path": "app/tze_hud_app/Cargo.toml",
+      "blob": "3c9d4e02ae7888c6af765f10c8c94f0a9509d4e2",
+      "sha256": "86d5e4be5d24e2f933a3cd94d9631540effe5f7c15daa37b5320ba88cdb34101"
+    },
+    {
+      "path": "app/tze_hud_app/build.rs",
+      "blob": "a4359ba9c007e62f74933f38be1c01fd05d17bc3",
+      "sha256": "0d172beb82fc783af441a7bce4d74393adf9cc81db430c7561a68c87f7e1b661"
+    },
+    {
+      "path": "app/tze_hud_app/config/benchmark.toml",
+      "blob": "4dbcba0c1066c82b53e345a5c8ad23b0cbafbc4e",
+      "sha256": "6f0883e33e843808c041f336ceb6e1a03a15f8f55f64ce6f16e7a6f1a84ff2ec"
+    },
+    {
+      "path": "app/tze_hud_app/config/production.toml",
+      "blob": "32fa7f0544781a2418a80c40153849335e58f553",
+      "sha256": "c60908827fd738157c27b268a1fe466045e8aa59b35556d41d929117cd62585c"
+    },
+    {
+      "path": "app/tze_hud_app/src/main.rs",
+      "blob": "87451589bc33793a0fb0108c10d78f35c55f6307",
+      "sha256": "97a096c43ab1aaa6d1356e6550c973f1b285a22636296602ca5ec135ebdeff98"
+    },
+    {
+      "path": "app/tze_hud_app/tests/benchmark_config_schema.rs",
+      "blob": "d3d8e7367b583442b40c3bdd7259ae61cb39e115",
+      "sha256": "3237159602a315fd1e80fa52edee01ba5dd21d9783996e54ff73485e1b99acf3"
+    },
+    {
+      "path": "app/tze_hud_app/tests/canonical_config_schema.rs",
+      "blob": "3223c91bb36e7cdb2cdc84911ec38ad10f3ec236",
+      "sha256": "e59ad462c585684e2e5054b6090d995f61a5ae8bc9a0f0bf883b90b61521f918"
+    },
+    {
+      "path": "app/tze_hud_app/tests/production_boot.rs",
+      "blob": "031ce16c1e4bca939fdf34f163f208a86691367a",
+      "sha256": "e1df617c6b3286bfbd7479a0e9a97ba9b5f0f49627871b8442f9fcaef277df88"
+    },
+    {
+      "path": "crates/tze_hud_compositor/Cargo.toml",
+      "blob": "057ed0ef94dc9615ac9d6ef3ca633ff13648638d",
+      "sha256": "a1acaa6dc297b80b9d2b648f4c57c7e5ef8411343d60ef5d859fc39b7feae2e1"
+    },
+    {
+      "path": "crates/tze_hud_compositor/benches/markdown_cache.rs",
+      "blob": "70961b27987485b97fdbf10a64d5d5a11f091fc1",
+      "sha256": "95491867b57e4c4749d66099bae60a086f1ef1c586f35033f6787201a0c884d8"
+    },
+    {
+      "path": "crates/tze_hud_compositor/benches/overflow_truncate.rs",
+      "blob": "c7fcdb5e8dd54c63dce9fad6fb6e0915da7159e3",
+      "sha256": "60f97469c8b33f2b389ccb868de14ca7e06c8c2bc74e4e81364f6c880585d228"
+    },
+    {
+      "path": "crates/tze_hud_compositor/benches/widget_rasterize.rs",
+      "blob": "4900947af5b415bb9f2e13d9af7d9a7feec363c9",
+      "sha256": "c7233b742e80830c0a89bd0a5e624a3fb8265c198d9bddebef5aeddd9304b210"
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/display.rs",
+      "blob": "ff1588d0daacec777394092a216a8e679cf796ed",
+      "sha256": "f991c3866f66a0273b7148686bdddf7ed13391114be4e6d70665b10c281191a9"
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/fonts.rs",
+      "blob": "4e5c4eb8756e296bc48ba50892bd570d0975b120",
+      "sha256": "50dcfa0355316d255400608f421c00200c3e049ac22815ee4017d300df0bd6b2"
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/lib.rs",
+      "blob": "6f59ceddd16604a4a2021c99df25b4a01ba6d61f",
+      "sha256": "aed7db243fe41c28dd7416ece7447c8064e68727ae71bcdc33c61f0797a69610"
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/markdown.rs",
+      "blob": "d7cb7bec00e8b9f7c441be7ee5898061b46d80d6",
+      "sha256": "c7bc53a4f2383763186add8849ce1523fce5e474273b0ca7321b14cfbb8a1ce7"
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/overflow.rs",
+      "blob": "d349ce0ee5fc3533ea1ddeb4cca80f4769ee5c64",
+      "sha256": "ddda80e6166b8084d365e4217a786421556dd6434a264267f88ff4890af20d6f"
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/pipeline.rs",
+      "blob": "bd210de92c234691f969363cdaaf318cec455383",
+      "sha256": "2b231c0ee5bd98028bcedd9158c56c4985114975755f1b512cb4804611247cf9"
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/renderer/animation.rs",
+      "blob": "1dfd7184991e59a1bbd6212167d6ca5f3ed2fcc1",
+      "sha256": "95cf3632aaabad06af8a6506dc940098c6447c92d52417d03506d51d26e77a98"
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/renderer/capture.rs",
+      "blob": "c6c7b5a27ae42b5d0d231cb2043ffd14e04d0233",
+      "sha256": "dce940c7cc4a4d0434560da14f3156c0b7a72311f1666b318a15bfc9b7993379"
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/renderer/draw_cmds.rs",
+      "blob": "c08018c71cd1422311950c6b8b00cc7558043d01",
+      "sha256": "a262cc51dffb9d4afbc6669800e23ddbf276f11afef0517affea403075f4c11e"
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/renderer/easing.rs",
+      "blob": "7d680c26fd057682a14198b64e6d5d21a82eb9b5",
+      "sha256": "872e6a3c4eeee429118bc1e78ff2bddf9e63fb47cd72a15f36c9d76aca65791c"
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/renderer/encode_pass.rs",
+      "blob": "3e7727335383c77dae4a1be301dc462416a739cd",
+      "sha256": "89fa376330db2c038ceb0e7d02d91beae2523fdc25ed916e3ba1cee92e1d4763"
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/renderer/focus_ring.rs",
+      "blob": "c251f33c8c3b404c87adaeb1ea58b78b75b972f9",
+      "sha256": "b03a8731a4e42c8fe569b441c1441ccb029cc0b170addd58c6758172806acba1"
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/renderer/frame.rs",
+      "blob": "9663fa1ca5d6a4aaa165ff0bdea4a38ca3ce1e48",
+      "sha256": "260bbc9fd3ba092e3ce2da5fbbada5225b07eb7a9c7679103fc27958503c205f"
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/renderer/hit_regions.rs",
+      "blob": "358725146b6a6338a57c7c3535832cda5582ae79",
+      "sha256": "465d72908d732fd024813fe6a046899ae3292c0782bd19898f67e443ee86e10c"
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/renderer/icon.rs",
+      "blob": "0b5e6aab573293f1063c4ed4c3da37ca3dd8e74e",
+      "sha256": "1a4188fde7a9d2ed433aa875bd8b44ae61f07b8b2df280da3afda261f11a111e"
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/renderer/image_cache.rs",
+      "blob": "6dec7cafb30824a6bce3dd559abba1846acd4b7e",
+      "sha256": "e3ee77eaab6d2b5ded9e6c87a0af058cd12f3f7a5da99aa0e48110be042fbb37"
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/renderer/mod.rs",
+      "blob": "94404ae5d088fa8e826881e667548efb6f1440f9",
+      "sha256": "3c50dbab4614e0b609af6cc6da3975342008259c141141641461597c343b05db"
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/renderer/retained.rs",
+      "blob": "263f9201bcedb8557a760dc9a2f81252f5a8b42d",
+      "sha256": "86b0146780974aa39d9b5445d5677acc96611baefeaa893b8c26fae464452778"
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/renderer/safe_mode_overlay.rs",
+      "blob": "aa01695af905ae2bf1a745486d9170925f5cf93f",
+      "sha256": "f6b1db5a03a19d4d90f9c0bff4370b916a152c2123800ee4d08a3f7fe1d6aea4"
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/renderer/system_card.rs",
+      "blob": "de8b9f37887af886ff2e0807ca7150b81c5ac024",
+      "sha256": "0a2ec36ce096d742216630c7341d1b8f5eb8176cca8834bfad45c14e842b1a20"
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/renderer/tests/alert_banner.rs",
+      "blob": "16d80d459de0af557f08034401fe69eccb769ce6",
+      "sha256": "e49c9d0298f2171d719708fb9130c3499da89dd73b3909fafc27c7ce731ffc6c"
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/renderer/tests/composer.rs",
+      "blob": "89a72f582431f27b8c007941ec6c463f99059eb2",
+      "sha256": "f559b88ffce9c8b8a147dfd9f4d95e37af4df228b6e0cf966eac5a24c14a4760"
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/renderer/tests/focus_chrome.rs",
+      "blob": "0f43e29f829a0e54f7a0bf9bad696a4c64a8050d",
+      "sha256": "b26af0cbd4bd94a970fe553098b81aaf09c5b74a0a2c829cd8b61d41831d77fb"
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/renderer/tests/hit_drag.rs",
+      "blob": "ed635869bc8ed722e2fc09256420bceb43a23799",
+      "sha256": "3aae3e78b74f3cfa5c981fc88ea782df9351bf95667b81a25914e0b9d07c9862"
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/renderer/tests/idle_gate.rs",
+      "blob": "2eec3500eb080705b4cc9c115704bcd121cf54f0",
+      "sha256": "a66fa23ac1539d5f5cdd4ebf6fa880b2586ce3d9fd070d7fc71140329ec2ea4a"
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/renderer/tests/markdown_cache.rs",
+      "blob": "20fe4f96176499a87ad11269d4165c16893e0a39",
+      "sha256": "2b20b71ae72def06b410650454013c6a98b51176d83a19c55f187798fb36755c"
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/renderer/tests/markdown_primer.rs",
+      "blob": "b721052698ea5df371605379f6f4edd9492c6d1a",
+      "sha256": "1031821ae76b265a60b17db5e3f1150447924d188d64daaf975815c7f6258c99"
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/renderer/tests/mod.rs",
+      "blob": "a7ca1c328e6561f3f4c6284fad2074906c9f3616",
+      "sha256": "9447924e8aaf8257f8d019306410cca9723db347b43282e895c92d0ccf3f77bb"
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/renderer/tests/notification_layout.rs",
+      "blob": "569f7fa9ec24a002f91787e7dba2640d3659f712",
+      "sha256": "2b63c1ed73956c6ae836331d4f68fe95d1bb8028f734384acbd85e1385f893fe"
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/renderer/tests/portal_animation.rs",
+      "blob": "dcb541b3a94c1e405969d0ecd55b574413aa3db4",
+      "sha256": "6d8979bd353458de9bb2fae74afe7be0872da16e22d86eef5d9a18c9416166cf"
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/renderer/tests/portal_reveal.rs",
+      "blob": "36df56fd0f142c7aeb6641b6cb5f8971bf1d1b67",
+      "sha256": "ddd19ab7e79dae38b194fcebb944152d35cfe441664f877b91e1ef0c99dd97d1"
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/renderer/tests/retained_image.rs",
+      "blob": "dfbfc6d9a380d448f84819c18c4bf897b139e475",
+      "sha256": "eb33acd59670bcc8ad54b6156dd172dbfd8670697857ef3488d22932018bc2c5"
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/renderer/tests/scroll.rs",
+      "blob": "dd29e89321bc83878238b0c1b7c848782676da3c",
+      "sha256": "736b6f96a51008b20ebe577198a7e74296916f46eb92a6e1edade54c7fced55f"
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/renderer/tests/surface.rs",
+      "blob": "40382cccad217231f0196b2ab79950ac5f0e0f52",
+      "sha256": "b5b7039a866856a088b9900fb29b53fb020b232dfad6e83862faf168aca52573"
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/renderer/tests/text_render.rs",
+      "blob": "cb1202990bb2865bfccccb4fc9b11552f6150237",
+      "sha256": "4fd24a460a6d57fa371d77d0f6a5edab59fc2ca465dee4cbd97c27f6985fe45c"
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/renderer/tests/tile_opacity.rs",
+      "blob": "fad7ba4277fa6afda114b921fffca53f653b3ae4",
+      "sha256": "c183d5235ec0fdb034149ca0229044d99d4b520a9c5355d6a0e56c04c008609a"
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/renderer/tests/tokens.rs",
+      "blob": "fd44e1fc87aa2c2a233147e2cdd10f22cc7a0906",
+      "sha256": "289f8a5ee7565da378cb59da36e6ea9023b647876f088e25fa29e64355aa5b5c"
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/renderer/tests/viewer_echo.rs",
+      "blob": "642ee9c4e71da7e8b83a5de343068a8d5da4370b",
+      "sha256": "f3afb3a3568e83850a5a5f23931e75360a37201496f9238cf3d1196388c2a944"
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/renderer/tests/zone_layers.rs",
+      "blob": "9d108b0c91e57121c718679c9d2a3e565007c2c9",
+      "sha256": "506c54ddc718509dcb68a93d06b3ffc32096fc0e560f9bb40b06e36c5133d82a"
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/renderer/tests/zone_notification.rs",
+      "blob": "7c164f5943b78bf0e8457fe88aa6b509b84b4e43",
+      "sha256": "906d9918d6fa0c6a60f1482df3e23687d7728a411725446499d40b3ec14a137c"
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/renderer/tests/zone_stack.rs",
+      "blob": "5ee8ddfd1bea4bfbe5a0590e0bbb92749df7dc29",
+      "sha256": "bac89e5854315de773e8022af0b467b2431b3e5056f87a059e95acc651f6a112"
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/renderer/text.rs",
+      "blob": "03a073ae269be732c121de0344c71d45beaf5168",
+      "sha256": "8259ba8dc2e0cb1c3fc7a958411103a3cc95fa5f2f8859742e4e6a3925621f56"
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/renderer/tile_render.rs",
+      "blob": "1e61d64ad9c8bcad35a0d7fe8fc5e482f51d7049",
+      "sha256": "053058cea840797d8b2c1dba458e6478f56466f42f699f23f5d744a99a04519f"
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/renderer/token_colors.rs",
+      "blob": "20b2eb83d4d8775af3003eb9536a827cc39ceda4",
+      "sha256": "5a0c7d53f8c8498dd5a821260fe81139c113ef1e608720fd350fbc4e7e688fcf"
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/renderer/viewer_echo.rs",
+      "blob": "80b8a7f2f4fb58ba94c089adb011ca2488dd97b1",
+      "sha256": "af2acea0a065d0049935e67fe53e205c98e2a61386b1662e945cb6dec2b08dda"
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/renderer/widget_geometry.rs",
+      "blob": "a8898a45afdd77d73ed7eb5f3d284a5e6033b660",
+      "sha256": "22197d47205c04d03a04729e703e6c7781aa295d9c0776ef3677e67df3712881"
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/renderer/widgets.rs",
+      "blob": "582328d49098180f8c369a4dfae1edc4dc4930ee",
+      "sha256": "75e10c7cbbbfe327469c2c3980180616288d08b900d025bdb09f0ba8acc496d8"
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/renderer/zone_render.rs",
+      "blob": "d60bde0672048c12c72e5b7e5641d181c69996ea",
+      "sha256": "dda4f42a04e474238e5e0727be45bb9e7eaf1d6c76d40cb239c3ad1bb08a51f1"
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/surface.rs",
+      "blob": "508257a8c742df8ad0aac7e4348cf40b6690aec0",
+      "sha256": "1d0dbe84b913a670f95b74e193154ee7c9e7bfbb260035bb123bd2d06ed87021"
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/text.rs",
+      "blob": "77e210d9ad6aecd284883b0a96d0d2241f34b9be",
+      "sha256": "e850f3c6ed68070c21b4123047b484cc99057eeda7b88fc379f766bb28618000"
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/vertical_flow.rs",
+      "blob": "4c6c0f9c24fe66712e2d9eb4d5e6df5fcb820b3e",
+      "sha256": "7e20220a7e485a2ae77e10bf03859e218442f7260f44d590fa6acdc22df7cff3"
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/widget.rs",
+      "blob": "eea43150ad514fa79afbfcd7b4eed2cbf3cc08bd",
+      "sha256": "476ace89ef44f1887a2dfc68f8e4e8260d3574c487c2664ad71797cfcd21b34e"
+    },
+    {
+      "path": "crates/tze_hud_compositor/tests/common/mod.rs",
+      "blob": "2ed83bc9934eb14cd038c354edebba1185f41920",
+      "sha256": "f5a9776a71affb32cdef82a95bc04b81f885bed450372ccf546bd00a3ef01cb7"
+    },
+    {
+      "path": "crates/tze_hud_compositor/tests/common/pixels.rs",
+      "blob": "599da72491a09069d2312c01c714f5da8dfb8743",
+      "sha256": "8e76062c78a9c6731b4d8bcdf46097ae094bb85d59fd03c4c2076ac0b2f4cea7"
+    },
+    {
+      "path": "crates/tze_hud_compositor/tests/gauge_binding_rendering.rs",
+      "blob": "4204cfd5e8e05f423b840972b23c0ffdb544d731",
+      "sha256": "1c4f1e4467bfd0794cc509e9772e4a785409ce438370acd71a5cd6dc9267501d"
+    },
+    {
+      "path": "crates/tze_hud_compositor/tests/gpu_canary.rs",
+      "blob": "b93ac4a8cd76c29bead74bc938faeb52ca1cdbca",
+      "sha256": "b74b1d70a2eee1f12b4c031ee38500bbfcf119ff6c7cb56472c1b7c133f45e08"
+    },
+    {
+      "path": "crates/tze_hud_compositor/tests/widget_raster_count.rs",
+      "blob": "428e7f10b0b4a1c56f1c4ff1d62f57425b260f7a",
+      "sha256": "80fc5e26cf672b15b674774d836bc7d28b0b8b6f6ab73a666ab00538aa8be432"
+    },
+    {
+      "path": "crates/tze_hud_compositor/tests/widget_rasterize_budget.rs",
+      "blob": "b2c99cb72c6743df5ec8a55472d681cfa1df0365",
+      "sha256": "4509c3ef4c245bee0b3ca87974164381595e1efe293e5cb4a29524bd1f1f8df1"
+    },
+    {
+      "path": "crates/tze_hud_compositor/tests/widget_transition.rs",
+      "blob": "e091877704ecf75e4b7ce7f1e9ee02fb6667f403",
+      "sha256": "8a1f5f82956309fb1ad8fee91465d349519a697d31c77ef2f02d973976427ecc"
+    },
+    {
+      "path": "crates/tze_hud_compositor/tests/zone_rendering.rs",
+      "blob": "34ebd19802cdd78f87bc216765f66013bf8d2808",
+      "sha256": "befda072ad0af9650e2f400e2356ea8b06822b4b9254473c46b08b9d57b60edb"
+    },
+    {
+      "path": "crates/tze_hud_config/Cargo.toml",
+      "blob": "bd5c5713849b86a9800613976614670bdf501056",
+      "sha256": "2b38686625cb578e9e2dc675dcce755b38569cd32f941556dd461e7f90a7d49d"
+    },
+    {
+      "path": "crates/tze_hud_config/src/agents_file.rs",
+      "blob": "b3279d3b42a8d7b8a53e5f3fdb0be8d50cce437b",
+      "sha256": "046a7fc3a526cf8c6351ac6a1184d7830ff5ccce655d51229c9df7989bbb55ce"
+    },
+    {
+      "path": "crates/tze_hud_config/src/allow.rs",
+      "blob": "0a7fff7012d624ae3e44a9094b55867aad3ac359",
+      "sha256": "d11afaa24ed02ed6464e6ae4fb659c2bda507074c41e64dbebc8df0fd0407a2b"
+    },
+    {
+      "path": "crates/tze_hud_config/src/config_write.rs",
+      "blob": "62b2cf69707544ede9cbbb1e1a768d0b94d50284",
+      "sha256": "49f62e6639daece2262237726da02c81aaeb38a6c0a3dcab1f49a0f9211352fa"
+    },
+    {
+      "path": "crates/tze_hud_config/src/displays.rs",
+      "blob": "7885a5c824685243880ba45c37be7291d3416472",
+      "sha256": "690991d5c41ba211cb41d0e16af62be2c742093b4244eafc35f1353f1048ae87"
+    },
+    {
+      "path": "crates/tze_hud_config/src/lib.rs",
+      "blob": "d1cf492dd238b9b7d2639ae041ae16270348411b",
+      "sha256": "889e6940a8191cb0abec7804344df8459e12256ee40b9eb891d81cc1e3b59cd1"
+    },
+    {
+      "path": "crates/tze_hud_config/src/loader.rs",
+      "blob": "ed4022942a0fcde97c83412105d4aa8a171abc69",
+      "sha256": "28a7ed66e9c9e9dee1dd5be20b9de3598fe64b3add976a40102a36f54e805330"
+    },
+    {
+      "path": "crates/tze_hud_config/src/policy_builder.rs",
+      "blob": "827bfb3eaa5f59458c2ac71a75c58c3fc0972b79",
+      "sha256": "ad951fbe0f930043aa60993b3f9a4e6dd73bccf1663b5feb3c9badfe273093ca"
+    },
+    {
+      "path": "crates/tze_hud_config/src/portal_tokens.rs",
+      "blob": "6425da92535fa140b60ade6928bba2e2c910ee71",
+      "sha256": "2c64c3abfd32c7ab55e92b54c07cbc28509935217bd3e0c1f1497329050ee51c"
+    },
+    {
+      "path": "crates/tze_hud_config/src/raw.rs",
+      "blob": "7c6e3a77082dea1952ea30357cf9ce8b103ebcfe",
+      "sha256": "657a3c3646632a35843f2b2131264f273679b120560afd2df53eabad6f47dee3"
+    },
+    {
+      "path": "crates/tze_hud_config/src/resolver.rs",
+      "blob": "0d9028a17071c1bfe840af3e89b8110c285b9038",
+      "sha256": "afc98f5c15f5938fdb58398e2f623a78ffe33ca74649e290155d476efcf943dd"
+    },
+    {
+      "path": "crates/tze_hud_config/src/runtime_widget_assets.rs",
+      "blob": "7aa02ea7d96d623f1cde5f5b26113d27ab09e085",
+      "sha256": "6aaa2ca92d723486aeb2dcd3ff432dcbe25a9467b0e54add398f6ae97b83b76a"
+    },
+    {
+      "path": "crates/tze_hud_config/src/tests.rs",
+      "blob": "3cc629b8a0db5f28f8ed95b36b967f512225ab39",
+      "sha256": "ee3d84762899085af34886514c706d2be0662185eb7a32b930da439271fcf496"
+    },
+    {
+      "path": "crates/tze_hud_config/src/themes.rs",
+      "blob": "712bd5aacb43f3af9995cbcee80ee54bcca775db",
+      "sha256": "701ebd34be9ca09852b6365b9dcaab120b91e796aadfa69314e00d96cb8bf880"
+    },
+    {
+      "path": "crates/tze_hud_config/src/tokens.rs",
+      "blob": "6a245078ed90e6a892a842e0e7363528ccb1dda3",
+      "sha256": "2f39bf45b196fdb0cee1ac30abba404843351702e976ea986afd7d6f3d7495bd"
+    },
+    {
+      "path": "crates/tze_hud_config/src/validate.rs",
+      "blob": "8cb5da5b2d11760be32ed975fc67cf6e0b848edc",
+      "sha256": "6b3e670b06af9aeff3ea48fde378342e922bbac180296da9e58e95b38ab58c3a"
+    },
+    {
+      "path": "crates/tze_hud_config/src/widgets.rs",
+      "blob": "aff7ac94f240f1c5581a9ee2202ceb8b597a702a",
+      "sha256": "27bc22a36db8f38607ae839d20de9aff42ba843f989cfefe35b686eaa8698085"
+    },
+    {
+      "path": "crates/tze_hud_config/src/zones.rs",
+      "blob": "1b0eab6ca369814df7c5bb7c96ee3e55cfa5d5f3",
+      "sha256": "bb8d442c2919d1ea5c8f4234e1f43bd6e0e8f6b0e15864baf86cb3289ebc0087"
+    },
+    {
+      "path": "crates/tze_hud_input/Cargo.toml",
+      "blob": "3c6f6f7d6c8c5ec553abebb68530667f8541c144",
+      "sha256": "89952520036b0856c2a366b148866b93c345a00abcc9ff1c4b11df97efcbe4ac"
+    },
+    {
+      "path": "crates/tze_hud_input/src/batching.rs",
+      "blob": "d165c28bb82e0e92c00e0ab26f2155393410f4d1",
+      "sha256": "2104548791b9bc10da87daeeb0a0fd512078cc2a508ac6a232cdf88c015d26f4"
+    },
+    {
+      "path": "crates/tze_hud_input/src/capture.rs",
+      "blob": "0f9fd1d4e1af7902e72282d9a68832310677fcb1",
+      "sha256": "ffb1e3ee3d434357f447c5f49d5a27a864e103dbf5de50256b08795193a60247"
+    },
+    {
+      "path": "crates/tze_hud_input/src/coalescing.rs",
+      "blob": "1c4576a0614cddc7ff20806575dc4ae7e3dd119c",
+      "sha256": "6ad0cb6bdbc78062fedbeeca0dd8912c5a4efe1b5a6d0e5c51b450f7c22fb39c"
+    },
+    {
+      "path": "crates/tze_hud_input/src/command.rs",
+      "blob": "0547828afa08a5b0f3a9f69ac2ea42de1cafbd15",
+      "sha256": "2c3272f48981386c3f07a5952c5c7b79bae3e45cb42e886a25594fde5a334ef0"
+    },
+    {
+      "path": "crates/tze_hud_input/src/composer_draft.rs",
+      "blob": "807ba1d2d544e7b563f0ff3388936b1436516568",
+      "sha256": "298b3cdde90f8aa198101fd504b2b88a21cfce0f67b2aeec0f8adc30c3623edc"
+    },
+    {
+      "path": "crates/tze_hud_input/src/drag.rs",
+      "blob": "395a07327c7ff062d68ca9ac71ef91a1ca7fa973",
+      "sha256": "a66a9d8fdb7c3279c42ca71666cbfb4aac28a35a780d8aa7e98f72be2764029a"
+    },
+    {
+      "path": "crates/tze_hud_input/src/envelope.rs",
+      "blob": "a0c706e262fd1993a518c58e99123774c0b99387",
+      "sha256": "4993474afd03d2b6a79b05b69b91022556e950ef6efaccc4f390cf525e3fb23c"
+    },
+    {
+      "path": "crates/tze_hud_input/src/event_queue.rs",
+      "blob": "b6c038229b7be131f553facb838d29324c39e4f5",
+      "sha256": "26016e02bbf8c48357d610847a95c5b242e5008da904000f6f41d7f6da79be8f"
+    },
+    {
+      "path": "crates/tze_hud_input/src/events.rs",
+      "blob": "474859bf9c2fe6ac79a99a4b392d9f216440ba10",
+      "sha256": "d719e21556da463e1d3fc1d56975428d8b326fb2e5b66992ffc5e9b12f8966f1"
+    },
+    {
+      "path": "crates/tze_hud_input/src/focus.rs",
+      "blob": "ed5b55cae064b01fbe4fd662893e64230a9b1be5",
+      "sha256": "a59eb197f5243c4d060c526dcae646c0bd1fe8987d2ccf6078b83c7cf569b820"
+    },
+    {
+      "path": "crates/tze_hud_input/src/focus_tree.rs",
+      "blob": "87eca8dab8585d97af884a6e5da9d6338ab83c5d",
+      "sha256": "3b8da74af7037be1b5135ffeb8b9e6b767e2beb8912f7f6b18c6106d7a7843b1"
+    },
+    {
+      "path": "crates/tze_hud_input/src/hit_test.rs",
+      "blob": "adb5b54f6f9bfc7e84a49bc512102d3f7e3bb959",
+      "sha256": "9b83c8a0a7f83604696a4a513c55b7a9cdfaa8a56ddfad47ac36d5c0e2183fdb"
+    },
+    {
+      "path": "crates/tze_hud_input/src/jump_to_latest.rs",
+      "blob": "a39b67d4a15d4fd7a275ded3703448c8dfb7c635",
+      "sha256": "fb20e2c473667c9ba11476f03f16e850d9b6a80fe118ea6774da8f18a473ec20"
+    },
+    {
+      "path": "crates/tze_hud_input/src/keyboard.rs",
+      "blob": "8a1a3821368696cec962acc45301b1049b72cd9a",
+      "sha256": "03b33042a629a45535e9dd92f17964ff60f3cbcc7c32f21a38a0ecbb8680c1c8"
+    },
+    {
+      "path": "crates/tze_hud_input/src/lib.rs",
+      "blob": "1fa7a10860067102148c35e387e863603900bfcb",
+      "sha256": "c9a7efc695dc68e71bbcba77afe64432129b0ef156a50906438e3112dcebba13"
+    },
+    {
+      "path": "crates/tze_hud_input/src/local_feedback.rs",
+      "blob": "4559fe3e4e8bbbbf3d4cc9b5fba40280a00f677c",
+      "sha256": "35098395db711060bd5981a77ec403fbe84f124defa6367bfb4dfa7259259b39"
+    },
+    {
+      "path": "crates/tze_hud_input/src/pointer.rs",
+      "blob": "f33730411015ca1457cc08b8e09d2669fcb6be64",
+      "sha256": "ffc69cbab766829617023d384cc7afd36f90b26423a30b38cd254892edec219a"
+    },
+    {
+      "path": "crates/tze_hud_input/src/portal_resize.rs",
+      "blob": "812f8850c769784be3734ab034c0df936347d07c",
+      "sha256": "238146de2a7562937de06175a34bb604fdd263c162b5d0d85ffe11dcbdde6f03"
+    },
+    {
+      "path": "crates/tze_hud_input/src/scroll.rs",
+      "blob": "9f2a8d49b53181784bb453fef02312c33eeb4f4e",
+      "sha256": "c5f1a3983c019e8ed3fd2b0dc7d72706a32ce8e3efbac6d0c7c1eb1f04fbaf18"
+    },
+    {
+      "path": "crates/tze_hud_input/src/scroll_indicator.rs",
+      "blob": "a22bc1b9fb32bec8ed4710c94928ae477983e754",
+      "sha256": "69392e3e339d457f8fa6d1a62ee3e412db3786c3716fb520fa953b001a47f009"
+    },
+    {
+      "path": "crates/tze_hud_mcp/Cargo.toml",
+      "blob": "f31b0aaae92063235051d1ab5cdd9ce2e586aafe",
+      "sha256": "859774239d17b61fd694c12426d3d838f36368ca5a5dc523fbfb9c8ad90099a1"
+    },
+    {
+      "path": "crates/tze_hud_mcp/src/error.rs",
+      "blob": "1ee701c3146b942bd83009ea8cb0e5e2b8ec155d",
+      "sha256": "a5c75ff2bbf80bd1e43c45c11e102673c3f39747146d0fd9d314e740753e2c87"
+    },
+    {
+      "path": "crates/tze_hud_mcp/src/lib.rs",
+      "blob": "a512869a5fd0a1f8875c1acffaca9c20a29aa710",
+      "sha256": "f8691ab2905a66f1fe6d4208152e4db9b7d29e2b8f7221a00a36149a9fbc3e76"
+    },
+    {
+      "path": "crates/tze_hud_mcp/src/portal_op.rs",
+      "blob": "063243f9c39feb23270733de10159dbac72218e9",
+      "sha256": "a7b83236ee5b8a1851d30c21922367815a05f4b92876738a7220a139b6728746"
+    },
+    {
+      "path": "crates/tze_hud_mcp/src/schema.rs",
+      "blob": "5008f0a2f1ed0f41100660f23d2a9a407717c7f5",
+      "sha256": "fcb54ba33dc7c785f860d90a109433674051d64ce0bcf2ea14f76a80c3582455"
+    },
+    {
+      "path": "crates/tze_hud_mcp/src/server.rs",
+      "blob": "301b5a158f4d57644cbe56779b727f63116774b3",
+      "sha256": "00c1a858b02e306c166719dcb7e017bb893930deaf84729d7a6886c78eb70505"
+    },
+    {
+      "path": "crates/tze_hud_mcp/src/server/tests.rs",
+      "blob": "528a536bbac31aa820fe0c719b2ec0c1658518f6",
+      "sha256": "1283e9c6eea83948bc8f4ed7ff38d2636f133bf238ba3d03dc41ee597456793a"
+    },
+    {
+      "path": "crates/tze_hud_mcp/src/tools.rs",
+      "blob": "51a5573df8a2d9e1a5fa99cbd8233d6e53317a0f",
+      "sha256": "546dc1ca4c9b95291928b69f1ea585770604bc629ee190009f7b81cbe7f69ccd"
+    },
+    {
+      "path": "crates/tze_hud_mcp/src/types.rs",
+      "blob": "375fbb708cdc855623165d30a28c881c5e1ce689",
+      "sha256": "d72bd6cf5a0e6c1a98996caee7757e2aa85aa729897d49afb08b53cf26dfaaca"
+    },
+    {
+      "path": "crates/tze_hud_projection/Cargo.toml",
+      "blob": "5e673138057f5b4fc65ac29c8739ed90284a22ef",
+      "sha256": "1a969d6029e79a2e87750a0121aa4c7e95c0f1903f6eee0b45e665cef932b8d2"
+    },
+    {
+      "path": "crates/tze_hud_projection/src/authority.rs",
+      "blob": "468ed1c64ad96562d273be35cdfdd69b1268c1cf",
+      "sha256": "45b77e8402c7a220174defa74fbeafb61bd84bcf3c96e32106d482724dd0ed0a"
+    },
+    {
+      "path": "crates/tze_hud_projection/src/contract.rs",
+      "blob": "2020a367db251a00feef25571476eaf66927d483",
+      "sha256": "a5c04921724e958ea27bddbe37b836d83d93837cc876a7734a6aac7d75dba5e3"
+    },
+    {
+      "path": "crates/tze_hud_projection/src/hub.rs",
+      "blob": "784e96accf85d6a63f2fb65246048fad1abe64c7",
+      "sha256": "7b1edd787cf2696825e12f4b104dc430d09426ceb56fb1190b8fea21eead37bf"
+    },
+    {
+      "path": "crates/tze_hud_projection/src/lib.rs",
+      "blob": "ab69973050c2b0583bad505564b661bde2356548",
+      "sha256": "3c423fd0ff22879db29e131361f5a543b5c74968b341592520a45280da191cf7"
+    },
+    {
+      "path": "crates/tze_hud_projection/src/portal_cadence.rs",
+      "blob": "825e6fdb6e2ea4a7cd75569363765fc83a49846c",
+      "sha256": "7e816d04e24240c7ab825223e4d0b75879476dcb964b6f3311bbc3f0e742eb84"
+    },
+    {
+      "path": "crates/tze_hud_projection/src/resident_grpc.rs",
+      "blob": "a1928115f9dcbdab2eff1588d328354122668f1c",
+      "sha256": "a5ea1b02268a3a9a7c0964f13c314627a5b7d4b4839934996cc9e3788c5f9f16"
+    },
+    {
+      "path": "crates/tze_hud_projection/src/tests/mod.rs",
+      "blob": "b351c45e98f3f4b3af23a1257b117a40f7f8999e",
+      "sha256": "b7e433cefd599ae4b37e72db7393b95b8d1d802dad42d6ad12a888da54eaef38"
+    },
+    {
+      "path": "crates/tze_hud_protocol/Cargo.toml",
+      "blob": "c93ecf84f51d95df297aac9fd1d625e9ea0be673",
+      "sha256": "04f9f7a26451cfa20cac511bbcbf8c5160da092c62d04412a7701e9ac1cd7321"
+    },
+    {
+      "path": "crates/tze_hud_protocol/build.rs",
+      "blob": "8a05772671b1e4e70ce726f6df54e88045399714",
+      "sha256": "c128cf3632da43d58e66ffb7cee7e574303a286613922ac11eb434e7a126d37c"
+    },
+    {
+      "path": "crates/tze_hud_protocol/proto/events.proto",
+      "blob": "13af67a14d9bfdcdcaf918a1b1df33fdfc84feda",
+      "sha256": "5b016a561b49b460806a48af8b354fd66639f66f550326523c2fae6bc3cea392"
+    },
+    {
+      "path": "crates/tze_hud_protocol/proto/session.proto",
+      "blob": "b933afcdc798d88e6acd35939486bb7bac22ed50",
+      "sha256": "04bbf9656eb3fbbf79f87c1bd1798634a1300db32da66b88ed26ee4305273830"
+    },
+    {
+      "path": "crates/tze_hud_protocol/proto/types.proto",
+      "blob": "76a8534b12569475e8924912bbee58f05b141959",
+      "sha256": "776e92b61e7913e1b3d43ad0cd211ad168b7680d73415dbb4c1d472e81cff27c"
+    },
+    {
+      "path": "crates/tze_hud_protocol/src/auth.rs",
+      "blob": "4c33dfacaf18ba278acdbb34cc65bf5945e5f826",
+      "sha256": "41b8d5f72907be4a388412c4bce0e23d34259f39bb59bf3775bd98b397cc8b99"
+    },
+    {
+      "path": "crates/tze_hud_protocol/src/convert.rs",
+      "blob": "ec6815e418b86ee254e8a9f76cfb353791507646",
+      "sha256": "371a33aed85b29873650f421ce8c6893ccef658410bf9a2fde1698a268ef2328"
+    },
+    {
+      "path": "crates/tze_hud_protocol/src/dedup.rs",
+      "blob": "adea09d3cc3a56c1a3b3bcf63c0791fb15e0a941",
+      "sha256": "ddb9ff1119119a865a2ad7382f076271e6bba6f4598c1fa4f31e608bc78c8357"
+    },
+    {
+      "path": "crates/tze_hud_protocol/src/lease.rs",
+      "blob": "6fb9635b0ac1d59f27d292280eb2ccec16228a5a",
+      "sha256": "cc6c9a4d645a5e9127d7e0cdce0fedf5ef2a729703ee6d15c07b2fd9ddac0c85"
+    },
+    {
+      "path": "crates/tze_hud_protocol/src/lib.rs",
+      "blob": "3db5d0db499d3dcfcef82aa69234397112c9dcf5",
+      "sha256": "5d745e80482cc57af9a00a14c847e575bf2d8b7f215c55cfda114940538fef56"
+    },
+    {
+      "path": "crates/tze_hud_protocol/src/session.rs",
+      "blob": "5104b1276d7b0407617bbd705184cc34b393339a",
+      "sha256": "b92f08e5815a7dc6bca331a6cc4026ce4223bb8a9cf95cdd83d2f1ad803c9dff"
+    },
+    {
+      "path": "crates/tze_hud_protocol/src/session_server/budget_gate.rs",
+      "blob": "f9febdc2f1bcd7295108769edd1d89eafd983460",
+      "sha256": "ebb518e2040eccaf9f97bd67829491a170caae3a91cd88a07171a10cb6b30fea"
+    },
+    {
+      "path": "crates/tze_hud_protocol/src/session_server/degradation_notice_bus.rs",
+      "blob": "890e797525817743f0b426f6c391e2557e72ef15",
+      "sha256": "5e15cb96b8f5cbcaa36aa69be7f6bf97b789ce2bd1071edbd49879a3057992df"
+    },
+    {
+      "path": "crates/tze_hud_protocol/src/session_server/element_persist.rs",
+      "blob": "68569900df0e63dc161e66084a0e025e20e48ef0",
+      "sha256": "003afbfd7cce7c792db9c446268c77b7631a5551bc6e5b1c6180576705fb07d3"
+    },
+    {
+      "path": "crates/tze_hud_protocol/src/session_server/freeze_queue.rs",
+      "blob": "5e78ce967f79f9caec997948bc05082f998e562d",
+      "sha256": "8f024ee820fa97fba803e15c4a48adf81b2a524b087a8f086eb29d6effe7fea7"
+    },
+    {
+      "path": "crates/tze_hud_protocol/src/session_server/handshake.rs",
+      "blob": "1d9e2a17314f11c003009375d7c685fbc17e8bb8",
+      "sha256": "984ce30d327293a0480daabedf2ed7538f975d650fcc185c0037b97009b9f634"
+    },
+    {
+      "path": "crates/tze_hud_protocol/src/session_server/input_event_bus.rs",
+      "blob": "80f55bc0d8d8d9752350c9db5070f966a54481d3",
+      "sha256": "9d991f31b92611ac5ee06568b136c48157d30ab5dd974a407ed3768636d897a4"
+    },
+    {
+      "path": "crates/tze_hud_protocol/src/session_server/lease_expiry_bus.rs",
+      "blob": "6efc4298315042dd25f62d8994de85e27e943f20",
+      "sha256": "abc70d38a59c9221265a326f9b09b80b69ebf3b42f6c900b1fddf6875eedfc35"
+    },
+    {
+      "path": "crates/tze_hud_protocol/src/session_server/lifecycle.rs",
+      "blob": "76b99b85026cf6f0b820e9cc12df110644091aba",
+      "sha256": "ab0d9cc5d631e5863f44dd688f7f4bc2fbaf779a8dbab6d2616b774855bce59a"
+    },
+    {
+      "path": "crates/tze_hud_protocol/src/session_server/mod.rs",
+      "blob": "fa3b19b7c4984a021aa0222ca1bd2730075a70f6",
+      "sha256": "c405bc849d15bc95c606d4c4543c2ef2d7981a75cb19f56b85efbd344fe0ba40"
+    },
+    {
+      "path": "crates/tze_hud_protocol/src/session_server/mutations.rs",
+      "blob": "221680491b8b7b61a985642b94e8c672531ed45e",
+      "sha256": "ccdb7ef37d3e0842da24b38986a130463d9925b023e905c07aa84bc8ee039f9d"
+    },
+    {
+      "path": "crates/tze_hud_protocol/src/session_server/service.rs",
+      "blob": "91b1ad297344520a4633017df753cafbdc8f8765",
+      "sha256": "eef0fa5eeaafc7d21e96733ffd70540b7fb4b3ebe5b6c039f13194de86511294"
+    },
+    {
+      "path": "crates/tze_hud_protocol/src/session_server/stream_session.rs",
+      "blob": "40c48bd2bec5a4619e72ebe4a1adb43ade852daa",
+      "sha256": "4ce3768997b01065a1f2842ed76d2b6ee1f3fed40b4543df10dc54b5151e1e2b"
+    },
+    {
+      "path": "crates/tze_hud_protocol/src/session_server/tests/allow.rs",
+      "blob": "83b071e5ebb02ea91e30ba99e902d2102daa9e9f",
+      "sha256": "90b1eb2e17813d21eb0c93a10a8a009f25d79bfa645eefd88f173d2715f818cb"
+    },
+    {
+      "path": "crates/tze_hud_protocol/src/session_server/tests/events.rs",
+      "blob": "f4ac731fe2c1146639f023ef335c0f7adadeeaf1",
+      "sha256": "a25f8ad53676577c02a3e76cd9abfde48c90c8b294a13b3a5f56c7ebf1056e9d"
+    },
+    {
+      "path": "crates/tze_hud_protocol/src/session_server/tests/invariants.rs",
+      "blob": "f00b44610ba2a15002f81fd594405b85c5efb1df",
+      "sha256": "031e804e0e371f38d0ad9f10542ddf6a7910f5ef7c307b5a3ff5f2bc32314f3e"
+    },
+    {
+      "path": "crates/tze_hud_protocol/src/session_server/tests/lease.rs",
+      "blob": "c462943beec85204f4e470158335ad4dc1304939",
+      "sha256": "ded0d696d58bfbb56db6f2b01736fe09eeb8d59d36a1105861fe1a94586c35ab"
+    },
+    {
+      "path": "crates/tze_hud_protocol/src/session_server/tests/lifecycle_verbs.rs",
+      "blob": "c9f6cdf6298a742bfaf34b2c3ae8e68570512319",
+      "sha256": "38b2f4a43c180f49618158423e36fb18e998d72bc665ff3672a6e3b7403828f4"
+    },
+    {
+      "path": "crates/tze_hud_protocol/src/session_server/tests/mod.rs",
+      "blob": "ff0b68b6e763167bdea0a23cd1a16c1dac553352",
+      "sha256": "3bba3b0fb6a7da3e06d744b8e309c31d3d32dd2cfe0fda1c70344076a348a8ee"
+    },
+    {
+      "path": "crates/tze_hud_protocol/src/session_server/tests/portal.rs",
+      "blob": "05c6672ec6c1ecf527e9920168913a8e9db06079",
+      "sha256": "201c2d71fef13fb07e7b29b2865da28e0235a5717114c0e6d41b61eb4a0802ef"
+    },
+    {
+      "path": "crates/tze_hud_protocol/src/session_server/tests/render_wake.rs",
+      "blob": "82e36d419195ce50450ad3ac45ff2bd7637587f5",
+      "sha256": "e92f38c6b4951b6fb24c518e7d0b9faee192058a3b24180852baf3cd41ff87b3"
+    },
+    {
+      "path": "crates/tze_hud_protocol/src/session_server/tests/resource_upload.rs",
+      "blob": "4c3639b1cf1b4decefbddfc76d78bbdab2ea99d8",
+      "sha256": "d3fdebd5a86d547d3a8c1550cf5d41eb98bf3cb72bcb5a2bf7285a302d9b9007"
+    },
+    {
+      "path": "crates/tze_hud_protocol/src/session_server/tests/resume.rs",
+      "blob": "cc502c59955a95eb96f753b9b541119f21a65c6a",
+      "sha256": "f8fcff4928d734a03ac65f7d59e51d16ee32b69c8c891955f83f24220f29a821"
+    },
+    {
+      "path": "crates/tze_hud_protocol/src/session_server/tests/safe_mode.rs",
+      "blob": "188f18c19bbedf0b72546592c4aea740f48dd5b1",
+      "sha256": "db2f66f0891d1d6bea231e93b87e1294ef69b36eed7779021483adafbd1f7101"
+    },
+    {
+      "path": "crates/tze_hud_protocol/src/session_server/tests/scene_mutations.rs",
+      "blob": "081f4dba7516008212bc89b109eb7ae36fe2f113",
+      "sha256": "2ae1c017176e9a328cb00fafde7fdbcefe6080199e636af002b0080375837cdb"
+    },
+    {
+      "path": "crates/tze_hud_protocol/src/session_server/tests/session_handshake.rs",
+      "blob": "178af92a2255b02dc245462085df0370c67915fc",
+      "sha256": "1c806646e8d1d627ce60ca2932ff3469f3d0d98fe16ec8c145fecbcefd9c6b2c"
+    },
+    {
+      "path": "crates/tze_hud_protocol/src/session_server/tests/timing.rs",
+      "blob": "af9b8ac089b2cffbe8ff219667e8cc69dd517bcb",
+      "sha256": "e647be45dc103077794c1a2e94d3cf1b7d6e7cc65e9c42b367304ba4d9ef4c35"
+    },
+    {
+      "path": "crates/tze_hud_protocol/src/session_server/tests/widget_publish.rs",
+      "blob": "0891ea14ca1e5c71d58ce9c944bba389ff3ee44f",
+      "sha256": "90bdbe4490f49ac54a4d33f7df7009f83b4fe815584543efe9ba6d2a40673688"
+    },
+    {
+      "path": "crates/tze_hud_protocol/src/session_server/tests/zones.rs",
+      "blob": "9c4f0371a11fe565161b3d910d2b84e019e4d588",
+      "sha256": "4c088a5b4fe4623b0f25687ff673735e6eafda9e3ff52b8133e8c49da1191570"
+    },
+    {
+      "path": "crates/tze_hud_protocol/src/session_server/traffic.rs",
+      "blob": "e661436da2bcd50daa3fde8f50c0541c05e6263a",
+      "sha256": "53c20d6eaf35f2c5ca980a161b6e677c64541943b7e0ed937d086a1f85a7653f"
+    },
+    {
+      "path": "crates/tze_hud_protocol/src/session_server/upload.rs",
+      "blob": "0f1ddfd690d1d5510759a867b774c254bcd80609",
+      "sha256": "c9c99dc515f89247dbda257521ee612f1603bd549ee6a6ec4dbfa45c022c2694"
+    },
+    {
+      "path": "crates/tze_hud_protocol/src/session_server/verbs.rs",
+      "blob": "085f834c97d1b17ef602e53a4e3b42dfbc1607d2",
+      "sha256": "8c5248eec914f9f778d7d40fe3d4de4ca462a304587abaf96c828addeddb5c37"
+    },
+    {
+      "path": "crates/tze_hud_protocol/src/subscriptions.rs",
+      "blob": "d611fe528a6f7cf39b43acc2a8660864d2d8b3b8",
+      "sha256": "0f958fa95f97e2e0a25335f022390b494194d41d5f2ed2a497f53dac61042167"
+    },
+    {
+      "path": "crates/tze_hud_protocol/src/token.rs",
+      "blob": "f168c6b816cfc7ed1725fc1b631c4e773cdc8675",
+      "sha256": "01bd8d2fd64a731bc982924e850675e04a512fef30be81510b38a66142e2fef8"
+    },
+    {
+      "path": "crates/tze_hud_protocol/tests/capability_gating.rs",
+      "blob": "6a764b4cf6e3f9820648b54e51ca527e8dfb14d9",
+      "sha256": "f1d17405099fa8f09bddf3d9c037b890dbf6ea47a45e9c502d4f2fcd5f629729"
+    },
+    {
+      "path": "crates/tze_hud_protocol/tests/event_delivery.rs",
+      "blob": "0ab9fee73e41b2ef3b3677394249ec9a918ad4b6",
+      "sha256": "4ca59b8a1d0fff52925db20554a251e77d4dc34f3d08841db331feb5ac102165"
+    },
+    {
+      "path": "crates/tze_hud_protocol/tests/fuzz_protocol_boundary.rs",
+      "blob": "0e6a1a9e14a08a688515b8b819fce1f91a08d53d",
+      "sha256": "61d8319ab97d6ab1a6720bcb45026730178791728f20933ed5c73ca49c8039af"
+    },
+    {
+      "path": "crates/tze_hud_protocol/tests/lease_governance.rs",
+      "blob": "4ee87230f0cde33167b1cc231573952ac67ed362",
+      "sha256": "b638f3e131f432c8fdc95c75d788f62843adb96add2cee6bba48de115d06d9fc"
+    },
+    {
+      "path": "crates/tze_hud_protocol/tests/subscriptions.rs",
+      "blob": "a7a49ea4b1415758564803ed71548b33ed135d99",
+      "sha256": "42622e90d41a1b887e78c7b32c71c159219126829984758d461da2d999c31c6b"
+    },
+    {
+      "path": "crates/tze_hud_resource/Cargo.toml",
+      "blob": "7e8597c44bd0768f4561f36cef5012bb062b6c9f",
+      "sha256": "1af4df320932317c3aa6b5e098a1e3032c895020743c2d6f507e43f57e334bde"
+    },
+    {
+      "path": "crates/tze_hud_resource/src/debug.rs",
+      "blob": "3af8cc5f235507f8278ffb1bd3ac37c404a223eb",
+      "sha256": "696b69515dc46052c83899bf54ad9e263652b745525f134cf71c235d0b0855fa"
+    },
+    {
+      "path": "crates/tze_hud_resource/src/dedup.rs",
+      "blob": "c5a0f6bdde2e3f670546747cea7b0d43612ba63b",
+      "sha256": "68a97d0aedbca0e19ca321934d4d23825db7742690754d25b3cae22d953b80fb"
+    },
+    {
+      "path": "crates/tze_hud_resource/src/font_bytes_store.rs",
+      "blob": "1bc9bc867fbf36c364bf84824bd9a3fc3aaad63a",
+      "sha256": "bb655a255f0068521d149c8df6750d668e9f4e4414ebaf69544406f3e4b3d71e"
+    },
+    {
+      "path": "crates/tze_hud_resource/src/lib.rs",
+      "blob": "a769968b4c42720640e03ad07ff30407608232a0",
+      "sha256": "9e624cac8c946b667163aacdd4ca978feaabaea0820580268dde41029109e9d5"
+    },
+    {
+      "path": "crates/tze_hud_resource/src/resident_ledger.rs",
+      "blob": "1cd53598bc9931fc52f5c67fc6b8bb88165939d2",
+      "sha256": "896e1c98fa094c93f9d77c861bb2daa45bbd58678e2099cfe739fd3ee17ec286"
+    },
+    {
+      "path": "crates/tze_hud_resource/src/runtime_widget_store.rs",
+      "blob": "7d114eee7398042840f0341152f01811efadb5a6",
+      "sha256": "fe190bd895c21f0d27eb887428bf3f748fab1575d5b5103fd08ff19353bf6695"
+    },
+    {
+      "path": "crates/tze_hud_resource/src/types.rs",
+      "blob": "a84b606ff71d33ece077e585b975c2ff6b5a9d96",
+      "sha256": "d9bda31b846f6a1aa53cdff3a130ccaf1d9eeba8940a26c178d0f0a3a5920c8c"
+    },
+    {
+      "path": "crates/tze_hud_resource/src/upload.rs",
+      "blob": "d640718c8b77abd87c5d3122080d05c28ff80582",
+      "sha256": "6204e19239c41f89d203225418187e0367801c4e3fa113d69c474a009bcb622c"
+    },
+    {
+      "path": "crates/tze_hud_resource/src/validation.rs",
+      "blob": "98834b4f690ba6b194e63acd2f29e7462f1f993c",
+      "sha256": "5c2e25ae8123dfff2d5ee432211bc12dfad3993eb704d457856729e4767b6466"
+    },
+    {
+      "path": "crates/tze_hud_resource/tests/store_behavior.rs",
+      "blob": "5cd4137e575bd27ab678360a1a7b0f17b0ddaf90",
+      "sha256": "d43670c592ba189432f6f0ead65cb1304f64b25fcc88898677b7c6805a938295"
+    },
+    {
+      "path": "crates/tze_hud_runtime/Cargo.toml",
+      "blob": "58646016d36ddc45eb15422799ed507fab5da980",
+      "sha256": "676a3ea0bb20dff4ecb8dd20b666fd3f88356c32f6541f2718e0aefc8b1d9e48"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/channels.rs",
+      "blob": "288fe0e0fb23f8c1671702a0f555f18077eaf3ef",
+      "sha256": "be05c14c028450967f3c519fa7153654f0d021a848da667457f9f7cc138e2d7e"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/degradation.rs",
+      "blob": "250ea55c36fc67373de812ea1b495756eb8d6056",
+      "sha256": "3f052adeaa39f4d4121bf59942a07f9e28a8d386f8fb7989464fd22d9c5652bc"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/diag.rs",
+      "blob": "df84efd8c96dd3d7337938c81ff778b086c157cf",
+      "sha256": "d8ff0247a18476c036ff8648f294db38a8156162a887f54354ab7581852ab0ac"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/element_store.rs",
+      "blob": "d1d79c4685fb10b2abbd53cf13b5507fb331c3ab",
+      "sha256": "188c1c688a07271bd4773b858fc512c1ef3a74dce78b5ba3222a2603b5cb075d"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/firewall.rs",
+      "blob": "97a5b5c9fdb2f1289660b41a5262df969006f207",
+      "sha256": "c79cb281329d3de961599d1f04687159fbfaa54432fd4ed43094ae173e3d7c6b"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/headless.rs",
+      "blob": "9811068804cd058446b5aa094ba26c83a34173bb",
+      "sha256": "073c31640005549e5683c3d684ce6e300d9f17d3f5dc87ecacf2e56da8242751"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/http.rs",
+      "blob": "18a52ae092cb94ed46e283a3e74f7bdb303dcc13",
+      "sha256": "c04b211f8e8f56ff4a072c8b03d733978967f1a3a069493de61e0198860b9cd2"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/idle_efficiency.rs",
+      "blob": "1e49a089e9e170032233c171923023a74464bd9d",
+      "sha256": "df4219a1f1f5ea68783b0077a8c7b06bacf2393bfd00bc3ce116e09bc1889ad0"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/lib.rs",
+      "blob": "f8cdb51b5cf42bd7ed373d13671db4c763c246e5",
+      "sha256": "5c4ca1e8a78e503a75001135506b9f1c841c5ac5ba5c19a3711a0b178a6ba833"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/mcp.rs",
+      "blob": "00364e79c03afde8a4728b5c3a84ae692bd1e895",
+      "sha256": "5453e89bd0303932f23f243c12fa5b8e73002dc0c526f3b39a8e16652fdbbe09"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/mutation_budget_bridge.rs",
+      "blob": "9d14d160ff4fdb5ffaf98cdfb24a1292af54c3e5",
+      "sha256": "dac9c39d0801598101fe164bef7b1fcc7e11c430a1b5813694de3cceda8ca786"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/net_addrs.rs",
+      "blob": "7aa5178e89f7602bcf7c54fd9199ac689923f621",
+      "sha256": "75e75eb3266f50254c391686e6324b5c5d2c0d6ccab2dfee0ab61d8e42069f64"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/operator/handoff.rs",
+      "blob": "4c9bde8755566c339f7196aa1ccfc55228f04e57",
+      "sha256": "df55c192983dacbb90eccb5f4acd4e3c814ac1df7bcef618b03db7b42517396d"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/operator/install.rs",
+      "blob": "7cdbe55a6839c6f21988551d242741d45a88eb54",
+      "sha256": "a8b785218051e12e1ba149cffac791f6a99c8d3c7ac5f1b4d5044956db274f13"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/operator/logs.rs",
+      "blob": "9522b44b0e8c6a08961a3fe46a7c3b35d1e271ae",
+      "sha256": "3b1ce23096ef532d48103e943af1f9080375e246bfd12c2c22347132358e06fc"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/operator/mod.rs",
+      "blob": "6a44959d42ec0cb8a084fc71429cb44956f8a6fb",
+      "sha256": "3ec4bee5e1eca16c584f23c3c5a6ec680c21c5aa09019558fc92850223686939"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/operator/screenshot.rs",
+      "blob": "5b99582ddbda3882cfb3eb765d03ed91bd8acd66",
+      "sha256": "4968d4129679a7df11dcd86f9ffacd8a17da418cc118bf7654a182ace09730fa"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/operator/status.rs",
+      "blob": "e6e0eb6254e3267aca7de6d427c19978d9757af3",
+      "sha256": "9c9456ecb9e063d7f93e707dbb967e0b211d6afc7f500d8a9d90d604196409d8"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/operator/update.rs",
+      "blob": "68deefe67bee33b099daeaff506773864c1caa67",
+      "sha256": "e4f813bb72651512537375a99aba1c1f4ccbd641b4aa7079f02093908501f1ca"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/pairing.rs",
+      "blob": "fa811e5320b7eea6b828d9d16007b362f8fece42",
+      "sha256": "1628ece0f7a002e2f2ff6d40fb1826f47994227d93c09dfc50cbaa19aa3ca0d1"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/pipeline.rs",
+      "blob": "0881d40ea9a7974880e7c9ddbbb5d14dedc2ea49",
+      "sha256": "27b404b7875d0ae7f1a4d22d9e3db4f49d0f9381ffcaedf8fd1a6351981f88ea"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/portal_projection_driver.rs",
+      "blob": "b330c96c84cad65949519d7b09d7715f35eac37e",
+      "sha256": "9f4a657a565a725da38860487f50941628ea7c6a07a530962f85feecfbc35a21"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/portal_tokens.rs",
+      "blob": "2a089d7129726b64e7a6c68c142e294f77c57f12",
+      "sha256": "a0903ed0650b19628fc3ee540c11697f312b305ea89084e705558d3c3b333b27"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/runtime_context.rs",
+      "blob": "4e64e4832f9cb4b1d8e16ae9d697294e6625bcad",
+      "sha256": "826fc470c4e65ca6eaa4a03caf7e0b5814c82ab811b8c40836df2da67f7563a4"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/scene_startup.rs",
+      "blob": "f53f4bd70e0a1c03c88844b024e32cda7d88e1c0",
+      "sha256": "bd5e349de1079d0a83ee1f23dc4583705f6cecc050a8bb4cba8ec05da5976ee6"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/shell/chrome.rs",
+      "blob": "0202693aad1e4db7878a1cece47c1999d3f06d24",
+      "sha256": "e0d8811d906fc1a368e344ac388880f179ce85c46fbf74417e8debb14c5c116b"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/shell/freeze.rs",
+      "blob": "a76336aeb87f634c251a6589bde9f22d08cb58d0",
+      "sha256": "f3138312c0d8453aecadf6e1de82dd0b58f5e873e376d6a7d005bda8d34bdcf6"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/shell/mod.rs",
+      "blob": "1a6433a46cef55f55ce8c7d766ed824e2d80f187",
+      "sha256": "1dec5f7f8a47d936a2073d2b71873792fea4c5048514dc91669061bba2da35e1"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/shell/safe_mode.rs",
+      "blob": "4750111f5b59946cbe2d9203271e3bd5628be865",
+      "sha256": "b8eefd7c10313e848f0346f9c7bb8047082a5eac0b391806dce382fdb08434c4"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/shell/system_card.rs",
+      "blob": "06b6f48bc96c3198497221dd039ee07c4f272999",
+      "sha256": "f0684f96f85968c1ca6e14c14732b96cdb0eae4fc23888ae44fadcda3f018a03"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/test_support.rs",
+      "blob": "9da33ab8106eb973eb619d95756684f9b24c040e",
+      "sha256": "0b761b52a716cea069ef06c6df6803db38c7ab8083abb3cb8675f072284d14f4"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/threads.rs",
+      "blob": "fbc63f4e9231ef8e5fbfb3bded7ada861a01f5fd",
+      "sha256": "c3fdc0ccf6b841efd63a294925a59044a2aa30af482c95c62a0c2f03f58d9e78"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/widget_hover.rs",
+      "blob": "690d64f6c2d1539e9d64bdad14be53a04abf5136",
+      "sha256": "63a0d36da5170fab30a701a50389327e1f7f90eaf8db53a1e00a28d76f4cea5d"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/widget_runtime_registration.rs",
+      "blob": "944a37813a54801bcb54f607852dd38c82eb9347",
+      "sha256": "d6fbac30a6641c3877f21a57611b80e8ff6e2c6a06ad90115b5e83dd7e712c00"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/widget_startup.rs",
+      "blob": "b323540160979bfba2605966365bf745c7945835",
+      "sha256": "7cd76ee43732deb241f7c8c4cca2e0fe53c90708b699ff13f4f13afc58fb2b99"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/window.rs",
+      "blob": "9dce3fa0e3d0d86bd7153a11491bb50d3092a2e6",
+      "sha256": "2130935ab9bfe6d47e1e3962b1ae8f123b52cf32c9684962e7b76425d40c2bf7"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/windowed/config.rs",
+      "blob": "2f30f15762da944d8cdcab421bfe1ce4ff2550df",
+      "sha256": "7dae53a83b6ed1a3a61589658dc172a0c4eb40367ac30544f964cd1d2c6093c3"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/windowed/displays.rs",
+      "blob": "53e9184b548675f403ebe29e366257381ba2de96",
+      "sha256": "694f91bf699145c7e716c68d04912c6cb26e54b09fac2b51fdeb81aa2c27648e"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/windowed/event_loop_harness.rs",
+      "blob": "4253ad272be230a7e76af29ed38b8c2d09fb8463",
+      "sha256": "79106b76f77692a3eec145406535a951703683b1cb393f8db5edb4ffa90a873d"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/windowed/global_hotkey.rs",
+      "blob": "37d50cdc92ea2e0ad475195912301f91ae21b862",
+      "sha256": "11311acb6c8a98488a2955101c99d0f5d867dc4f9a8f64b26e03d2cfd2756838"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/windowed/hittest.rs",
+      "blob": "c4e5c13bb90bdab4f2f307fbe8eac7d8b120877e",
+      "sha256": "59733eea2562708f8d2e263384d3dea0b9accf8f8555f12f213ab97820623101"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/windowed/input_dispatch.rs",
+      "blob": "488099effa4d9e69119e688df32b247c9a7baf63",
+      "sha256": "9f6e9dd7729a01c9fd83d1642988518e04c47d0c39a4996f8007f4e09333b9ec"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/windowed/keyboard.rs",
+      "blob": "149fd3ff96476af62878e9519725b4323ecc5921",
+      "sha256": "dfbe4199c4d15ae073b4905b042ab0ba4e1b474c4d6a39feec3df988d37de727"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/windowed/lifecycle.rs",
+      "blob": "dfe5883078bcb64bb2d2a3585ed02223b3438251",
+      "sha256": "ef232f643b01b9d24656a8d030bca65f11a0c9597516b4fb1a77e078f5330375"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/windowed/mod.rs",
+      "blob": "aaada422f0d0411739730957c4ab36dae3d9a901",
+      "sha256": "2c7817ba8dabc7fa7f31f7e8ba1f0f8b40e0364ad89020b6fa8d5deaa9af9747"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/windowed/monitor_identity.rs",
+      "blob": "a4cd591a51dd198c685179b83161a59b48254597",
+      "sha256": "7941b9677f74d8e3df11ac114f3ee9d10365fd78095e02b27e518c8b24c10a2b"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/windowed/network.rs",
+      "blob": "3f12c6c9d1e8d6c57b83abf54e2e4c105a6deb79",
+      "sha256": "6a7666ff409a959b855fe25c60067da9a297d1b01d945397e9759c3174a38a43"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/windowed/portal.rs",
+      "blob": "bc3e3a81c5a749bef4a4a3da7fd7877826547060",
+      "sha256": "69dbf0fff57aa3792fe3b283faab96411cfb176140982830477cb99f8ae7ecb7"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/windowed/safe_mode_toggle.rs",
+      "blob": "33582b3da16531622ef88b976de8795878385ab9",
+      "sha256": "397090905c91d3d7cbd6a26f08ad338f3f63b3830cf342c55dbbb7ca292a5c59"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/windowed/test_support.rs",
+      "blob": "c7740f868c6f67c082dc517462aba8bd19e2d9db",
+      "sha256": "77e707f5d0fa36cfa55aa4b9c14da74083ed8c6b521555dd3d083a1f3b612b7d"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/windowed/wake.rs",
+      "blob": "f0407270411a8f97aba910a0be34a0eb79e7380c",
+      "sha256": "a914f2a34d935082e2ce7f4063d7e7703ae134b3c3139298f9bf3d9cddd2cb26"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/windowed/widgets.rs",
+      "blob": "a0a66e5e5e8a90f0c07caea29dfc6f82fe3b03c5",
+      "sha256": "f7a1cc62a89d6b010b5b088226e761b3771c4e9fef634348cef62613a9301257"
+    },
+    {
+      "path": "crates/tze_hud_runtime/tests/idle_efficiency_counters.rs",
+      "blob": "53b69c16f48587e06d71a4ff018c697da0661e6a",
+      "sha256": "4806a3cc5103d0b45291f6e70117df2b3ace2a335a5ea3e9e2cbe342515e3b3f"
+    },
+    {
+      "path": "crates/tze_hud_runtime/tests/pixel_helpers.rs",
+      "blob": "23600a433c83b4ec39f6c861ebe9c94095a2af96",
+      "sha256": "9df6f0c5e0e66a8bd4306437e64c35524cad9161da315ed3f3748fc963fbd788"
+    },
+    {
+      "path": "crates/tze_hud_runtime/tests/pixel_readback.rs",
+      "blob": "1d67fff4cbc9afa75cf905e4879893538f94e6df",
+      "sha256": "df60ecb26d0b838458d2323d7530125f78a471ff6129494c283fa4fb007be759"
+    },
+    {
+      "path": "crates/tze_hud_runtime/tests/present_ack.rs",
+      "blob": "5b30be217fdeddbc15e6236b773d32e672d0e151",
+      "sha256": "5ccd73868e904376fbb1fae091482a7c3f535277d1aa377d5210973742a8fc42"
+    },
+    {
+      "path": "crates/tze_hud_scene/Cargo.toml",
+      "blob": "65a511cd94bf194dbdb852fbd568366808c044e0",
+      "sha256": "70b969c040da5ff8b47eda80cc9eb5b722df6c7233beb2b2b3dd6e3e7c5c6afb"
+    },
+    {
+      "path": "crates/tze_hud_scene/benches/hit_test.rs",
+      "blob": "1749bb6b2a2a611b11f8614214af1b2b8a3955ac",
+      "sha256": "fcb64bed8ed585230b05d8c9abf907febbed0db62f435ed557f17f40a26c7439"
+    },
+    {
+      "path": "crates/tze_hud_scene/benches/snapshot.rs",
+      "blob": "73aeec5543507b1785e9f1e572d15a7397e9c158",
+      "sha256": "4160eb13af6624defb19a6e40b4ec23081aa5557eff3774916447de6750f5368"
+    },
+    {
+      "path": "crates/tze_hud_scene/src/clock.rs",
+      "blob": "053634fe0eecaf99aa1c88f555fb4010c59d8812",
+      "sha256": "57c057760e0145175352d193bcd577e15b080022142dfdd1535040a5a95d1d7c"
+    },
+    {
+      "path": "crates/tze_hud_scene/src/config/agents.rs",
+      "blob": "325ccaedc701cb80bbbeb38f2b0c106ed8ce75fe",
+      "sha256": "2c50c7755c4ca5c46afc86ed0127c3c426597954597dfdb836745235d26618f2"
+    },
+    {
+      "path": "crates/tze_hud_scene/src/config/hotkey.rs",
+      "blob": "164f6faca72546a5c160609bd6de6f4c0a013f5b",
+      "sha256": "b076b7e0f081f9fe93d1ae92dfdd35309f52fb6bc201e2aa8a6b2cf23a3bc012"
+    },
+    {
+      "path": "crates/tze_hud_scene/src/config/mod.rs",
+      "blob": "da7480f5a0ed7a7c59b9dc7a94a98760a6d00966",
+      "sha256": "669e697d56789bc61306518ba689140564539cd3ea328777692339f38629ae84"
+    },
+    {
+      "path": "crates/tze_hud_scene/src/element_store.rs",
+      "blob": "5eac23a1bbccca4662436bf1c8f7a9e1176ce614",
+      "sha256": "1f46c5b09d36721231d683eb39aa6c694176be81d97f2a8c8741b269da44239e"
+    },
+    {
+      "path": "crates/tze_hud_scene/src/error_codes.rs",
+      "blob": "59ec98374491cb2c2df36561eec7a05f660dc702",
+      "sha256": "c424cd89c7a0023c5ff5389ac5aa676a969b1918fbebd5c8f89d9f9eda68907b"
+    },
+    {
+      "path": "crates/tze_hud_scene/src/graph/budget.rs",
+      "blob": "7beada233a82f469707bb4bd2d1dd61a2e9f0687",
+      "sha256": "3d29a7086f758f8fbab453761e65e9fe7fb1f6c6a5d32f3d232d3a90175981dc"
+    },
+    {
+      "path": "crates/tze_hud_scene/src/graph/contention.rs",
+      "blob": "b3f1ab1ddd5dd97504f792b632e531f16b296214",
+      "sha256": "5d93a979e2b86940ee4caafb7856042abf0e322d1aefada0ac8648865186d1c3"
+    },
+    {
+      "path": "crates/tze_hud_scene/src/graph/leases.rs",
+      "blob": "8a0206bbd17da8490469c13233117dd08ce2a38a",
+      "sha256": "3e820e5b585bc7e715572e021c06164f27c466a512646e0003873fa71a6f6205"
+    },
+    {
+      "path": "crates/tze_hud_scene/src/graph/limits_tests.rs",
+      "blob": "c1a2af5b6540bd97b43c8c13843633997187af63",
+      "sha256": "3f223f61e4c18c4ec39f7b96287c5c59952b79020b03e752f75fed72b66440bf"
+    },
+    {
+      "path": "crates/tze_hud_scene/src/graph/mod.rs",
+      "blob": "1829024a695031df306e064cfbbfa296a62e41d0",
+      "sha256": "6cf77aba96959baa37d46e16af99673c846a07f9b488789ef2446e97d0cf63b0"
+    },
+    {
+      "path": "crates/tze_hud_scene/src/graph/node_tree.rs",
+      "blob": "dad0a229ba49545bec5f8f5429eef8ca12dc8fb7",
+      "sha256": "d374ad6dfdc3c1b5dacc0cebebab6b8290212d4177842fde48915aee3ab6697c"
+    },
+    {
+      "path": "crates/tze_hud_scene/src/graph/overlay.rs",
+      "blob": "984c974d65e315bcc5e97f10cc56400ed6e1461d",
+      "sha256": "7a345267622ddef991efcc0b28a4d943e0bc5178d52fdb6cffb457816d7b86bf"
+    },
+    {
+      "path": "crates/tze_hud_scene/src/graph/queries.rs",
+      "blob": "9c9a36c6d86ed837dbbc3a903f3744fb07bf624f",
+      "sha256": "a77544ef5b5c85c57882a2e3b23eb7b91a95a04cca63f3a22965b7a1e52a210f"
+    },
+    {
+      "path": "crates/tze_hud_scene/src/graph/resources.rs",
+      "blob": "41b787ae6e9335c13d5d4d35483892a9a074ccc4",
+      "sha256": "341db0d363ddef5317eba6ff663cc299e3c790395ecc64f50ce4bc75b454a0be"
+    },
+    {
+      "path": "crates/tze_hud_scene/src/graph/snapshot.rs",
+      "blob": "87c0f60025880b4b44e35b79d2fcc6475b2172b9",
+      "sha256": "b63052ec800a10610ad5b5e79c8897e0fb1a4ede150a6672f2b52cd53858ad4b"
+    },
+    {
+      "path": "crates/tze_hud_scene/src/graph/spec_scenarios.rs",
+      "blob": "5e6e5b87184ab8463838eba18749513f86d2ad21",
+      "sha256": "f5c83276628b73bfeae4dbc390d591485f19dec7d64362083c943901607c2e16"
+    },
+    {
+      "path": "crates/tze_hud_scene/src/graph/tabs.rs",
+      "blob": "0b27bca5741e89ac4569c5e59a6eecdb61602b80",
+      "sha256": "87eba25fb85cf776a1d51bab3be8f347a74ea4f017671fb1f79dc9dd4944951d"
+    },
+    {
+      "path": "crates/tze_hud_scene/src/graph/test_helpers.rs",
+      "blob": "51b74d8ef7eec36b6113cb6f8898f6cc29cd768a",
+      "sha256": "4c8ad7bda69fb1484ee67dad5e0233d0ebd9f041e1a8638ae49743419229340b"
+    },
+    {
+      "path": "crates/tze_hud_scene/src/graph/tests.rs",
+      "blob": "dd9d17262fd8a0e62a663fdca82c6cf5f85a40e0",
+      "sha256": "ff54b2d35705ab3adf561cb54e9de4f61953a8bf0118a75d6fb573e40cc69612"
+    },
+    {
+      "path": "crates/tze_hud_scene/src/graph/tiles.rs",
+      "blob": "fe40202c548087534bdc8e68dc54a2490abadc12",
+      "sha256": "210034f22054b575583aea711d5131fb83a6efa610b1021ff2574e1a32763a3c"
+    },
+    {
+      "path": "crates/tze_hud_scene/src/graph/timed.rs",
+      "blob": "52455b19468e896bf77076c5006c05a9f414b732",
+      "sha256": "3c1bb5f3de8b44441cee70e992c2810a09f725113e866d73cae4d26dfac75edc"
+    },
+    {
+      "path": "crates/tze_hud_scene/src/graph/widget_tests.rs",
+      "blob": "3f96d45cbab99e91cce207bdcf48e01810928d14",
+      "sha256": "b94d15eb3289e81946ff31f7c9e59044ca5a57723e8745ae8042717c298f8cf9"
+    },
+    {
+      "path": "crates/tze_hud_scene/src/graph/zone_ops.rs",
+      "blob": "2516157fc7d710a1af3c38b8ad23bba11f40af3c",
+      "sha256": "27f3722ffe7e34f76fcbd6b366f20258459ec4d36e1b2d3835f9c3e6cf2f146f"
+    },
+    {
+      "path": "crates/tze_hud_scene/src/lease/budget.rs",
+      "blob": "34f99df133369e8e7cd9d15c0972ad98e4257aea",
+      "sha256": "3020677c6387d65ca6c594b6f961e408cbc96b0ea1ab98ad0304f3eb76000084"
+    },
+    {
+      "path": "crates/tze_hud_scene/src/lease/degradation.rs",
+      "blob": "02a0c4c38fc58a5a8263671d7eae32cb35df4974",
+      "sha256": "7be60f6e4e832a7d1b6d1bca64788ae9036bef356c0f3c73213caa63323d0fbe"
+    },
+    {
+      "path": "crates/tze_hud_scene/src/lease/mod.rs",
+      "blob": "25181a9c20177fc8b51e2540fdde963823890f20",
+      "sha256": "d3399b1693c8d399f4aebc82f55251decee148d6413cc8e5cd296720a3e43572"
+    },
+    {
+      "path": "crates/tze_hud_scene/src/lease/orphan.rs",
+      "blob": "5f09d59e0ba296e1ef1e067eae2159b83dd0b0be",
+      "sha256": "28b13b0c367af60fed8dbb70f0511f6b302772513a92e33315f0338258d1eea2"
+    },
+    {
+      "path": "crates/tze_hud_scene/src/lease/types.rs",
+      "blob": "9aa81ee9acf34a1d03d0c571187cf46e9b097cff",
+      "sha256": "edf6414e51814d6b4b8369c923c0fe5d5ab08f0fff0fee72e0161e5c85784384"
+    },
+    {
+      "path": "crates/tze_hud_scene/src/lib.rs",
+      "blob": "c32a625df52bda8750dfbb1438c409fbd200129c",
+      "sha256": "9c42dd342b154e14b96d84ca96fce4b74aaac1a67f1f7c305ab643d65e94def7"
+    },
+    {
+      "path": "crates/tze_hud_scene/src/mutation.rs",
+      "blob": "28b4e1cf7defe5470561134e98aec9e11c2582fd",
+      "sha256": "156c4e4d40ad91ad108b3171cbddc138ea96859016ee4b793fcba0ea36a6dd77"
+    },
+    {
+      "path": "crates/tze_hud_scene/src/perf_budget.rs",
+      "blob": "35b85fa265d7cdb732db04ebe290df563c4fba14",
+      "sha256": "11a8c645481bc8bd28400e0d669660d83bb4218fb173d7ef3f4391c1d50ac132"
+    },
+    {
+      "path": "crates/tze_hud_scene/src/placement.rs",
+      "blob": "e008ed7a664338c264bbede9b7a70487833c04ba",
+      "sha256": "5f810323813d92e05cd609d66b7e2c2018a5f6785ea1a8365850d8a7a2cb810e"
+    },
+    {
+      "path": "crates/tze_hud_scene/src/render_wake.rs",
+      "blob": "f90277978859f2168f8065685f237cf79a710f41",
+      "sha256": "eb157030993106faaad101d047b96f0afb9837c41c2f1baa66392405ca6e4b32"
+    },
+    {
+      "path": "crates/tze_hud_scene/src/svg_tokens.rs",
+      "blob": "a8bbbf07f59355f6c0ed78c140847fcc6a6a0efd",
+      "sha256": "7968def7c89bc59059f61890966ed715c04c5716dde0e12b99085ee3912eeffe"
+    },
+    {
+      "path": "crates/tze_hud_scene/src/test_scenes.rs",
+      "blob": "ade04e4446d5811abdeae645ac9268f966da003f",
+      "sha256": "7949e53e927cab8a6c7d90e73fd5021a074dd9b68f9e81e82f4355c80fea30ce"
+    },
+    {
+      "path": "crates/tze_hud_scene/src/timing/domains.rs",
+      "blob": "8b37391ac5dd4070151ea553184cdc33b0274e98",
+      "sha256": "a55abd8e299d1352870aee9e46fc7742eb54aa7855883a8c6c6c85beaad50249"
+    },
+    {
+      "path": "crates/tze_hud_scene/src/timing/mod.rs",
+      "blob": "008301e7b85ff7df282d2b39892e79dcfdac78da",
+      "sha256": "11865c41152b1e16799a7f56391134931f6a1e4e83a533c731f3b5fff30a744a"
+    },
+    {
+      "path": "crates/tze_hud_scene/src/types.rs",
+      "blob": "3584bdbae3b97f088e79d2b5f44adff0b73aa012",
+      "sha256": "4a72792a6f750c9a570ecacc61e6ca008de97fdc50d08b53231d9a621d449dfd"
+    },
+    {
+      "path": "crates/tze_hud_scene/src/validation.rs",
+      "blob": "7f153790cda2ad4524982f631744588f5d59da9e",
+      "sha256": "8102f78c16a1345a5ed91869d7bfdb1687dcc2dc1188a3e92e6f481b6c520326"
+    },
+    {
+      "path": "crates/tze_hud_scene/tests/batch_atomicity.rs",
+      "blob": "05da53795a53409fb8c613aa675a7f5c5d41d199",
+      "sha256": "adc37de83cbd729daed4ca8d04abfb5e7d163da14f74ba7b26689eacdb440330"
+    },
+    {
+      "path": "crates/tze_hud_scene/tests/fuzz_scene_graph.rs",
+      "blob": "53820d42fa817413115bd1570ccbe5a431347e40",
+      "sha256": "fac11c53452744b8dd9ed7ef0baf4cddf10d0f1d5e28c3c98f5fe74962ed2024"
+    },
+    {
+      "path": "crates/tze_hud_scene/tests/hit_test.rs",
+      "blob": "412aba89c00fe042b966c53c25aeee5dc0d0e9fe",
+      "sha256": "6b9139eb17de2e679d108a5bb003ac1c083dbfdbc9abfe4815171349320f33d1"
+    },
+    {
+      "path": "crates/tze_hud_scene/tests/proptest_invariants.rs",
+      "blob": "40c7810c61402e1155bfa2f69b97d172af9ee60b",
+      "sha256": "581e69b3b4442d61814598860cb698f441c0ccf6e5701e546f49986ec5d35225"
+    },
+    {
+      "path": "crates/tze_hud_scene/tests/session_lifecycle.rs",
+      "blob": "b3ea4bf0b0c4940e4a3deeca3577b4e75b453793",
+      "sha256": "87864f80ccd3a904110aaa52c4636023d49fcddb84622911c9afcb257c1be8c2"
+    },
+    {
+      "path": "crates/tze_hud_scene/tests/snapshot.rs",
+      "blob": "7cd850510cb6444655fa7cbabfa9bc8ae957e8e2",
+      "sha256": "d2ab9850e3805efbb62dcfccf8778311d19482fe1f9d5c1520572511f1c9786a"
+    },
+    {
+      "path": "crates/tze_hud_scene/tests/zone_interaction.rs",
+      "blob": "d8b443f6b0837c1a4449baef473e7922cc7ce299",
+      "sha256": "f91300eda43d3edc16ce4ce4e28ff3f936e623627bbdb6b2325083b28315e20f"
+    },
+    {
+      "path": "crates/tze_hud_scene/tests/zone_ontology.rs",
+      "blob": "c5ba14d4923712e5026f35b6feac9d616034af82",
+      "sha256": "847ffedfaa95a49c28cd0b31d4095d79cc8e44bbb3afa169e8885dc3647654c5"
+    },
+    {
+      "path": "crates/tze_hud_telemetry/Cargo.toml",
+      "blob": "0eacc4f74830b9e4ed803b4ea18a73016f6827aa",
+      "sha256": "bc8c8c5a57fa43d95b053a4e4a5c70e4cb03b04e101f7badbfbf143668a02892"
+    },
+    {
+      "path": "crates/tze_hud_telemetry/src/collector.rs",
+      "blob": "c2f3944a08fe830756be10688a4fbbd3390319bd",
+      "sha256": "d877903906495fd6d922618eedd4b643bd676451ea265b3107ebf99ef740b267"
+    },
+    {
+      "path": "crates/tze_hud_telemetry/src/idle_efficiency.rs",
+      "blob": "19f96419373e606bd84f8bc120e2b56451e9d95d",
+      "sha256": "c6f36bedfef1aebee3a0009c65cd16a62b69d9b438cd850ecc90137a56ea37c2"
+    },
+    {
+      "path": "crates/tze_hud_telemetry/src/lib.rs",
+      "blob": "50476b750548634b6fae6f8f2baa7dae9d946e19",
+      "sha256": "812dc52f2e2f6faee65bd1a7ed28349ededf0a803f19101bcfdf44a67b0f9b1c"
+    },
+    {
+      "path": "crates/tze_hud_telemetry/src/publish_load.rs",
+      "blob": "6b8294cdaf508c336f4974447b97bf1bc5ef0ca6",
+      "sha256": "1ecc914ed8208b1b3848de7c58e7302248f733d1f438e91e4f0c1f6e7b5a8a38"
+    },
+    {
+      "path": "crates/tze_hud_telemetry/src/record.rs",
+      "blob": "61bb668357542a9db72b82b4e7398b536476a515",
+      "sha256": "275fb6c1e6ece508b953bc6db40b653c3fb15ccf8dfcef4033ecca249f4cde93"
+    },
+    {
+      "path": "crates/tze_hud_telemetry/src/validation.rs",
+      "blob": "040ae3e18f0ed75f8cff5c241c53f645e7c22335",
+      "sha256": "b3f825d38e8ab7f7eb693ab88d875a67eede5e7936a051d53082dfc6903db825"
+    },
+    {
+      "path": "crates/tze_hud_telemetry/src/work_counts.rs",
+      "blob": "f031a704566d519bacb6c4026747b1ec6656542c",
+      "sha256": "48ba2fd72e2df47436f79fcf7eb462c9a9352a35fa75beb0594ea2eee2ab8f89"
+    },
+    {
+      "path": "crates/tze_hud_telemetry/tests/idle_efficiency.rs",
+      "blob": "1198cd4a49c02e1da603c0a68fe7bc149dc9eda7",
+      "sha256": "4eb9fa2fb98fd6542487a2c17d9f1fbb944a876aa09fb24b771f757be5e70560"
+    },
+    {
+      "path": "crates/tze_hud_telemetry/tests/publish_load_artifact.rs",
+      "blob": "52c3283d4b582c5315268b8f6496199df3fafdc8",
+      "sha256": "08146142e0b600143366feaa04fa60de718894a2d113b1a69c696842023a08f0"
+    },
+    {
+      "path": "crates/tze_hud_widget/Cargo.toml",
+      "blob": "bed5cd5419160280f1b60688ab9799a34e6e918f",
+      "sha256": "dd9eaeb4d46a91a52ab34f05e444c6770593b20f72ca5a7833bf13165c3fb7d5"
+    },
+    {
+      "path": "crates/tze_hud_widget/src/error.rs",
+      "blob": "e2e253edf8dd3dea8397547c03dcf4816dcaa420",
+      "sha256": "ffd158eb315fce4c410abf1b016b08583f4c4f7f3e6401ca105c627ec23cb38f"
+    },
+    {
+      "path": "crates/tze_hud_widget/src/lib.rs",
+      "blob": "fbce41d7f0439d31384a07637bd94722d2b5adc4",
+      "sha256": "037120cd8290ca4927f516ed268d4dfa2e350abf59726e97f74c13579dc5e44b"
+    },
+    {
+      "path": "crates/tze_hud_widget/src/loader.rs",
+      "blob": "fa49fd4c6671d5278e9aa2e5ca9f0ff787e9299d",
+      "sha256": "ccfa16d50a7aaeadbc2b8fcf5a20d1bd9d3aaf248d794fe696758959a3251013"
+    },
+    {
+      "path": "crates/tze_hud_widget/src/manifest.rs",
+      "blob": "76b39688d558264838332eb6a651fadd9d013145",
+      "sha256": "7b8d471a4b6010373eecb31d6c249edbc483599adf15af91cfc9ed479c37452d"
+    },
+    {
+      "path": "crates/tze_hud_widget/src/runtime_registration.rs",
+      "blob": "762d121b771ba49218f25f98b416c38d62fba4ce",
+      "sha256": "b2264578fb41b6ce85c28b87a0343270fec3ca0ea25a769d458c368da1a71ce3"
+    },
+    {
+      "path": "crates/tze_hud_widget/src/svg_ids.rs",
+      "blob": "37a82e9c97790453bdec0467551cd6ee2c9f7cb5",
+      "sha256": "e253e3b8321d8720e12da4d6e533af277696f6bd61d8d4e4b6ba2b4404875c49"
+    },
+    {
+      "path": "crates/tze_hud_widget/tests/shipped_bundles.rs",
+      "blob": "298f53830ed2e3ec809a5d05d409b5053f04c329",
+      "sha256": "e220ac2c1aa1ef3ae13289c222ed51c1764d8a081548698661200f8fc1488904"
+    },
+    {
+      "path": "examples/benchmark/Cargo.toml",
+      "blob": "240311ec7279bf279709294c17a076f6ce927f5d",
+      "sha256": "98eba0d5194673c42a5f172d38d4c6f8491f2d138dbd380984c6a50857dfe2ea"
+    },
+    {
+      "path": "examples/benchmark/src/cpu_calibration.rs",
+      "blob": "c30047437a6e2db7f4715eb7564ad31e34950430",
+      "sha256": "b9158a7ec51a889bf63ebe37a45b68263682a32ac414a0a5ec5f0f91235c99c7"
+    },
+    {
+      "path": "examples/benchmark/src/main.rs",
+      "blob": "b1319a83928e8fb7254789fe5e5eac93f6098b6d",
+      "sha256": "6bf82fb9632ecb621434f8ac95bac707ba1048e02a8cc058eae24da16c38a9b6"
+    },
+    {
+      "path": "examples/benchmark/src/token_footprint_calibration.rs",
+      "blob": "152c473f597f8537f35e042843df1a4dcd927865",
+      "sha256": "83d65a321e3e5f97d4907074013745e982220458b748b3609f1a68366154ecc1"
+    },
+    {
+      "path": "examples/benchmark/token_footprint_flow.py",
+      "blob": "5fda950db2108e8b6fa7f2246c8eac74d4ea7d5d",
+      "sha256": "9f69bc6b55ea7d653c6bd7a9f646a34243ea12e791fabce901b326c5202d99bf"
+    },
+    {
+      "path": "examples/poc_demo/Cargo.toml",
+      "blob": "6b3cfce407d0ddd72cbc6366497d2cd41c021aa3",
+      "sha256": "03663ac975e5c06fbb677716e199bc82fd2748fc3b9db656c61f96f8f4ad23da"
+    },
+    {
+      "path": "examples/poc_demo/src/lib.rs",
+      "blob": "64f3ef93a35bc2b73b62df24bd8cf103b1fee8bf",
+      "sha256": "56e65ef1aef90bf0a7a87ef172b05cef66175de1b6b80300097dfffcbfe92266"
+    },
+    {
+      "path": "examples/poc_demo/src/main.rs",
+      "blob": "2597498a2c67a87dbf6b3c93a28385b3fe7a2909",
+      "sha256": "a48ce7e4b4bf0b37cac48fd6cc04c595b49c30717a76964bd61dee80508610b7"
+    },
+    {
+      "path": "examples/poc_demo/tests/smoke.rs",
+      "blob": "6446556a73ba4a277bf68730f40bc1451a3a8686",
+      "sha256": "e47e9d82ac87b974ab3bcc952117b745fe1e9c9d6f60cb318e9a9837d7d998d5"
+    },
+    {
+      "path": "examples/render_artifacts/Cargo.toml",
+      "blob": "9207503a4c11278285aec72da3aa9eea4927d397",
+      "sha256": "d161ff2f66c16c7eaa25758f721c2a4ac10a59ec40abb447c99c01a43905fb51"
+    },
+    {
+      "path": "examples/render_artifacts/src/bin/cooperative_projection_readback.rs",
+      "blob": "f1d4783174e9a8bd5c47a4ae7e1a8c53cf42be32",
+      "sha256": "3134d4f2e918d99e913455673cd68b6a71368fd479673cd4a3c17cab06e9da97"
+    },
+    {
+      "path": "examples/render_artifacts/src/bin/vertical_flow_readback.rs",
+      "blob": "bbf92566196d35dac5c444ddfb044560c548fbf1",
+      "sha256": "bc025aaff8e5553941315b7eef85cb819407931415c03c0ba3030628bf499ad7"
+    },
+    {
+      "path": "examples/render_artifacts/src/lib.rs",
+      "blob": "81742c86e87ac05c0d1a9e2381b495d29b5c6ab4",
+      "sha256": "561068e3a34de0fc444554ce69193f112fac693dde7be28680e492b9b3a88095"
+    },
+    {
+      "path": "examples/render_artifacts/src/vertical_flow_proof.rs",
+      "blob": "cecf55e7c49029c94c751d5acc4d0c63106e11ad",
+      "sha256": "270b0e1f7fa8123a9c6a5a7ad58034b6f717044d96e8973f77c418a93d81beb6"
+    },
+    {
+      "path": "examples/vertical_slice/Cargo.toml",
+      "blob": "24beac915f18341a4e23bd9424d0f0cc3875c40c",
+      "sha256": "1eb05f2503fb7f0db6bb878798ed063f396a2ee2d14a27ef20753cb98747aa27"
+    },
+    {
+      "path": "examples/vertical_slice/config/agents.toml",
+      "blob": "0ba24bee8fc82cd24d7d7a5917fc844d1dcf6a3f",
+      "sha256": "21f70e63300508c89d874dd6c57b61f35f25df0358a28b4f84c919da42ecd6e9"
+    },
+    {
+      "path": "examples/vertical_slice/config/production.toml",
+      "blob": "ae5b042a68ebfbafd2658d0cd04a3b3440a7dda5",
+      "sha256": "bf3db5168f895242a0519ec1af02f5e9671e822c78e4a67a5647e986ac8c1658"
+    },
+    {
+      "path": "examples/vertical_slice/src/main.rs",
+      "blob": "c22431459d561f7afa8ba3bbe7546a486c4f7ef3",
+      "sha256": "b61d4a0ccaa3c5975416aaf486e474aa341ffe456d6907e47632efa5efe10e64"
+    },
+    {
+      "path": "examples/vertical_slice/tests/budget_assertions.rs",
+      "blob": "2ced8abf270a716119cf1b039e8c8b426f6717db",
+      "sha256": "b32a13d3ccd004df86799d071ddf2b3ad076315e38e61756407d4270a3aac466"
+    },
+    {
+      "path": "examples/vertical_slice/tests/production_boot.rs",
+      "blob": "59ec9ecbf78c9ec659dd47a308fc2b5512ed915a",
+      "sha256": "14e27bc9a58cd8ee6231416163d0d120d8c47164468c1783749dc79509e25305"
+    },
+    {
+      "path": "examples/widget_publish_load_harness/Cargo.toml",
+      "blob": "6abb74b2e2ae4b3d9ad88d42031111300aed41ef",
+      "sha256": "b4f54054e97bacff30f8ea481b36f41848572b4794d983efacc8a2d57f705b2f"
+    },
+    {
+      "path": "examples/widget_publish_load_harness/src/main.rs",
+      "blob": "20342cfad5401c6c17c24688bedb1535c81c6f83",
+      "sha256": "50663321eba4e49a8eb74538a0dd9cd1ec28f4088daff58bfa0d52636e1d302f"
+    },
+    {
+      "path": "justfile",
+      "blob": "6e5b5f3fc2829056209109444fa9af8ca18cb73d",
+      "sha256": "d39dec71c122ff1f21e7391e7245c1e5faaa99faa593ad762efe25a6d2e09ad3"
+    },
+    {
+      "path": "rust-toolchain.toml",
+      "blob": "77bfbd57ace1f02014fd484766f80ec596563c5d",
+      "sha256": "c2cc07c28097b9283273686da9eaf1e2106b2eef5083cd40f7d54eb858153255"
+    },
+    {
+      "path": "scripts/ci/check_constrained_envelope.py",
+      "blob": "60fe23ef8fbb139a326cf49bc8e512fefd6f6c4a",
+      "sha256": "8f67d0fc0dc7c69080cc4762b7285682b6e884750df31ca488e0b0aa29ddfabf"
+    },
+    {
+      "path": "scripts/ci/check_dev_mode_defaults.py",
+      "blob": "225950436a98f96a149a9d7371072cfca46ab602",
+      "sha256": "be8dfb6fe647853c0d7b35dd3951982ac0a43622e70039edc514e6b4c44fc796"
+    },
+    {
+      "path": "scripts/ci/check_idle_efficiency.py",
+      "blob": "11fcd27a70d4ea9ecadb4a0a8066c3a099b82c85",
+      "sha256": "591b8c1b602e50385b13e798229d19c9510c92cf8853a225c0834682b0f774be"
+    },
+    {
+      "path": "scripts/ci/check_token_footprint.py",
+      "blob": "2650a5e54e247903a80f9ffb06e56e8b1fde5dd9",
+      "sha256": "e60c97f92e676c4216f256d4c0fa17caa1cb6800e5991293ba478d636aa38cd4"
+    },
+    {
+      "path": "scripts/ci/check_windows_perf_budgets.py",
+      "blob": "6e82715b1312ce4947b4da0c02bfdca05a0ef888",
+      "sha256": "d796f923c0b8a8091132d1c9775a7f5bb16393b2323e0802e49b0d4fb29b4a5c"
+    },
+    {
+      "path": "scripts/ci/report_telemetry_trend.py",
+      "blob": "5ec56e397f4cfee29ae0ee1d9dd94f1c742dd9e1",
+      "sha256": "4fb0d30916cce7432e7abd40d8264fba1a2bf63cfaa9f250e787fbfdcc01c8e7"
+    },
+    {
+      "path": "scripts/ci/select_constrained_cpu_pair.py",
+      "blob": "358230f9c0646546132ef15a3e4b6d25cf19d9a7",
+      "sha256": "d8f025599d67edc16f0093b0da0635115af55d6944bfdd01006995c9f409e07a"
+    },
+    {
+      "path": "scripts/ci/test_check_constrained_envelope.py",
+      "blob": "c50ff17e7832c1add138bf716fc988e38ae0eef7",
+      "sha256": "fe292a4ba115c9a022d06a3c5740571b215689c2bb79ddcb629c88f7e3cc7dca"
+    },
+    {
+      "path": "scripts/ci/test_check_dev_mode_defaults.py",
+      "blob": "c53e3a93e6bc3a45d0b684b68385660ae9b53d28",
+      "sha256": "52ad0592a53eab4526ba7667d02a69bd12a06b899c3f2e7257e21a03fd99b975"
+    },
+    {
+      "path": "scripts/ci/test_check_idle_efficiency.py",
+      "blob": "cfc8567b8c6b66ea6bbebc3dafa497b9bbe04065",
+      "sha256": "8a9e5fa4501da051930744b1970673c38498f678a7156a0e6c6fa3895b4995a1"
+    },
+    {
+      "path": "scripts/ci/test_check_token_footprint.py",
+      "blob": "344f528935c233864b9b29865c6548fef3c7d3d9",
+      "sha256": "4d43636628afb76fdda9d4e9eec27114480bbd906fbca3d32a5ded23e152deab"
+    },
+    {
+      "path": "scripts/ci/test_check_windows_perf_budgets.py",
+      "blob": "64ef5505f4ca170dcca47f3ae0e3ce8d15e97e5c",
+      "sha256": "5b2148c084714d3c7ed1ed6b788dae31a2af3b1327fb95abbeae6d32c4d80fa1"
+    },
+    {
+      "path": "scripts/ci/test_constrained_envelope_runner.py",
+      "blob": "b6eeaf807970ac809fc51ddf9f63f9e81f283d35",
+      "sha256": "eda6d2fb2d9d76c74bf227983f0619b6a42e650cbae3b33ffdbb51ce8ace4a2b"
+    },
+    {
+      "path": "scripts/ci/test_report_telemetry_trend.py",
+      "blob": "639e07009779a9faa25c9d44b7d60c90faec1815",
+      "sha256": "b81d365888c75f019203e64d5128a606e6fab83d8e49461eadfd981d14b4c965"
+    },
+    {
+      "path": "scripts/ci/test_run_quiescent_efficiency_script.py",
+      "blob": "72c908c831f86ebf14432d5e9794b1c9241805be",
+      "sha256": "c349b3a023dfed0081f3ac432246af7b65b789828eaa4cbfa119dc571ac547bf"
+    },
+    {
+      "path": "scripts/ci/test_select_constrained_cpu_pair.py",
+      "blob": "abf3490155f9e48f8e47c3aec3ba755f14d174d5",
+      "sha256": "f5acb8876ecd20a34c0ca0c5c40c17a35c9280649e5506897a1c202f88f0c278"
+    },
+    {
+      "path": "scripts/ci/test_token_footprint_flow.py",
+      "blob": "723d9f0eebf1883526f06552ac674140e7f344ca",
+      "sha256": "19fc9678bd15ce9b0665da457d3c2ce8349874af581d79ad3aab78966a95d9f2"
+    },
+    {
+      "path": "scripts/ci/test_windowed_overlay_perf_script.py",
+      "blob": "198f1a94082358f31335fa00f13c4143996fd980",
+      "sha256": "ed9237a384048b2b990d92194c9e64c064e51dc1b6c5a8b77deae4931f4f67a8"
+    },
+    {
+      "path": "scripts/ci/windows_install_smoke.py",
+      "blob": "19585cec587091dbe00285c2108302fa7fdbd9bb",
+      "sha256": "dc7d90e52798a8331c98ae35b2d96963fba2192a4ebec45b796d161538e1f8c0"
+    },
+    {
+      "path": "scripts/ci/windows_smoke.py",
+      "blob": "161b93035a319071465a027efd4630d36e5fe6ea",
+      "sha256": "b743c6a910e4e5899f388846254d236b100dafbf412fc9df59315325d6ed3044"
+    },
+    {
+      "path": "scripts/dead_code.py",
+      "blob": "59886021e7d60a16d3080b065841464f537b5a6f",
+      "sha256": "8c10af8c2b5851b687e34570f499aa7f9d967a4fd6e5d9286bcf0c178fc9c850"
+    },
+    {
+      "path": "scripts/tests/test_dead_code.py",
+      "blob": "a065a302f59ee7d4dcd7c9d356eedd087860b7cb",
+      "sha256": "208ddaeb8f50fa299604e43449a065fe0f2f11439bbca6bff48c9c498936b55d"
+    },
+    {
+      "path": "scripts/tests/test_quickstart.py",
+      "blob": "8d2141e5d94db859eb18fda3c653745bb2d79090",
+      "sha256": "3ffef30adce1a634a693ca842d3c1a8d47e8daad2b77b3df8bda7d33df661a78"
+    },
+    {
+      "path": "scripts/tests/test_windows_smoke.py",
+      "blob": "9fc5030ccd0613eee8706323079f08a962291c4f",
+      "sha256": "06eb38c41474c93e9e2f083f631f4034c241966442de9c5b7fc9e431e9cf4d3f"
+    },
+    {
+      "path": "tests/integration/Cargo.toml",
+      "blob": "46cb474636e049dfb224b78d7307e6ab7f6746c8",
+      "sha256": "b82a639b31eaba8bbff049aaff6c29e0f1d175bc58d5eb390c5fdd22dc01de59"
+    },
+    {
+      "path": "tests/integration/common/mod.rs",
+      "blob": "e0d027638aac07abf373ae16a79aa5f13acd7811",
+      "sha256": "1bdfe680b9f7fc7f1cefa4a4dfc25f8cad6b9eb41516e97ac36a7ce887ee55b8"
+    },
+    {
+      "path": "tests/integration/dashboard_tile_input.rs",
+      "blob": "ff794b18338c1faad24f3d3aae33e8faabb116ab",
+      "sha256": "398e7bb939d610f3c9622baefbc2f0c1ca43fd3aaef45fe2f544a688bfde72fe"
+    },
+    {
+      "path": "tests/integration/drag_reposition.rs",
+      "blob": "3a61ad344afde4e954d57d2576ee185f4ddee15e",
+      "sha256": "6307456f0cb48c84ac45c157c08cf5eb467bc7abe67b979b2198fa5a712cb201"
+    },
+    {
+      "path": "tests/integration/movable_elements_e2e.rs",
+      "blob": "bbd8d9dd0c6f2b7629227055bff415fc5238e0d0",
+      "sha256": "fb1b423f57609dc27e516b17294f61a6a8fed735b0349ffacd3a2acde3cacfa4"
+    },
+    {
+      "path": "tests/integration/multi_agent.rs",
+      "blob": "018c845ddd69568f9f89356686311793f1d598f8",
+      "sha256": "6f26144570138e403c5ed9670564080af84a1d6bced84c90956147a890ddd6e9"
+    },
+    {
+      "path": "tests/integration/poc_acceptance.rs",
+      "blob": "5da14e64eed229dac4d90f6e1ce1aa88ef506e78",
+      "sha256": "96587d3bf413969ebd69247dd08376f293a84c5cc877ea316bb4fc849ec684e9"
+    },
+    {
+      "path": "tests/integration/subtitle_streaming.rs",
+      "blob": "9ea2d874ed7168adaf4d13628d9c9227f0f75f07",
+      "sha256": "263b0d5b06bad0be7cb8613d01b92a35fb51a8416ee8b174c9906dd3509e99f0"
+    },
+    {
+      "path": "tests/integration/text_stream_portal_adapter.rs",
+      "blob": "bc4b1e60efee227ad517d2b0e4cde4e2d37dc157",
+      "sha256": "61a7d3d45adde0ebf4375963e45d42decfba5caa77deaa33110908d5918c4e81"
+    },
+    {
+      "path": "tests/integration/text_stream_portal_cadence.rs",
+      "blob": "834f0a479d8c61f4a5afffc3c5348f76c46a65eb",
+      "sha256": "7b392768912ffd3c3783379ee316dc83a54c770f0366818ccf524d8e8fecd284"
+    },
+    {
+      "path": "tests/integration/text_stream_portal_coalescing.rs",
+      "blob": "923934975f7a7c5f617b535659c643c89162c975",
+      "sha256": "4786850facd3259fea77aed0ae5e122420e89b3cf69d508f0162e807d7dbddd1"
+    },
+    {
+      "path": "tests/integration/text_stream_portal_composer.rs",
+      "blob": "56e89bc8f869ab02d7971b6db389a3f8a7e465e6",
+      "sha256": "77a490ebcb346d8db3bf2df98ba3f35f902c2968302dd2f85be2bb5676251425"
+    },
+    {
+      "path": "tests/integration/text_stream_portal_governance.rs",
+      "blob": "4de50c34d07c2039ae1dc3aca081b7e18ceaa429",
+      "sha256": "7211c104f0add05d0754125f1e41472ee5338beb4e3b52477d80f52589515092"
+    },
+    {
+      "path": "tests/integration/text_stream_portal_markdown.rs",
+      "blob": "b971bb1cf2be489d9021382c64c9784f53deca2c",
+      "sha256": "a68b2f38d5120599b1cb0a32af0aabac244cfe14ed5201d4930e0e9ec28cdcf5"
+    },
+    {
+      "path": "tests/integration/text_stream_portal_styling.rs",
+      "blob": "fd929b454e699afce8465a8320a02907ec2546fa",
+      "sha256": "c77611b4060cf22a40f12a25258f55e61a9795df98f69721fadbf829f0bbcd4b"
+    },
+    {
+      "path": "tests/integration/text_stream_portal_surface.rs",
+      "blob": "c29b9d805c06f3b85b11c270f90755b75e794014",
+      "sha256": "58941335fb7687df6393f5a27350b8a2c6b9949cd75ce00887f3fd0d812032d4"
+    }
+  ],
+  "changes_from_GEN2_8f_source": [
+    "M\t.github/workflows/ci.yml",
+    "M\tCargo.lock",
+    "M\tcrates/tze_hud_input/src/drag.rs",
+    "M\tcrates/tze_hud_input/src/events.rs",
+    "M\tcrates/tze_hud_input/src/keyboard.rs",
+    "M\tcrates/tze_hud_input/src/lib.rs",
+    "M\tcrates/tze_hud_protocol/src/session_server/handshake.rs",
+    "M\tcrates/tze_hud_protocol/src/session_server/mod.rs",
+    "M\tcrates/tze_hud_protocol/src/session_server/stream_session.rs",
+    "M\tcrates/tze_hud_protocol/src/session_server/tests/events.rs",
+    "M\tcrates/tze_hud_protocol/src/session_server/tests/render_wake.rs",
+    "M\tcrates/tze_hud_protocol/src/session_server/tests/safe_mode.rs",
+    "M\tcrates/tze_hud_protocol/src/session_server/traffic.rs",
+    "D\tcrates/tze_hud_protocol/tests/backpressure.rs",
+    "M\tcrates/tze_hud_resource/src/dedup.rs",
+    "M\tcrates/tze_hud_resource/src/font_bytes_store.rs",
+    "M\tcrates/tze_hud_resource/src/lib.rs",
+    "M\tcrates/tze_hud_resource/src/upload.rs",
+    "M\tcrates/tze_hud_runtime/src/firewall.rs",
+    "M\tcrates/tze_hud_runtime/src/shell/safe_mode.rs",
+    "M\tcrates/tze_hud_telemetry/Cargo.toml",
+    "M\tcrates/tze_hud_telemetry/src/collector.rs",
+    "M\tcrates/tze_hud_telemetry/src/lib.rs",
+    "M\tcrates/tze_hud_telemetry/src/record.rs",
+    "M\tcrates/tze_hud_telemetry/src/validation.rs",
+    "M\tscripts/ci/check_dev_mode_defaults.py"
+  ],
+  "merged_required_inputs_reachable": [
+    {
+      "sha": "5cea644f144fc9306d293172d32bf2e43480cd58",
+      "reachable": true
+    },
+    {
+      "sha": "61cd1f0c2c89daacfad2d521b1e64dd2ad50d384",
+      "reachable": true
+    },
+    {
+      "sha": "121c1e7afe928c55cef3adcc5fb91f4e59fa2d52",
+      "reachable": true
+    }
+  ],
+  "no_Cargo": true
+}

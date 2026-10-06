@@ -1,0 +1,33 @@
+{
+  "source": "121c1e7afe928c55cef3adcc5fb91f4e59fa2d52",
+  "rows": [
+    {
+      "instrument": "historical tree-sitter Rust AST",
+      "use": "Reused exact historical records only under whole-blob or declaration-line-range equality",
+      "limit": "Current interpreter absent. No installation/new scanner; changed owner records manually reviewed; references are not receiver inference."
+    },
+    {
+      "instrument": "existing rust-lexical-evidence.py",
+      "sha256": "b8d71b93a55ddf6abf98e2193e986d95bf71b22719ed29a1f02f8802dbeba57b",
+      "use": "Known attributed bodies/tests/comments/string masking, same extractor historical-vs-current compare",
+      "limit": "Name map can collide; semicolon in signature can skip functions. All 72 known current named tests have one attributed declaration; neither generic absence nor syntax counts imply universal coverage."
+    },
+    {
+      "instrument": "rg/git grep",
+      "use": "Every current tracked Rust root, exact accepted scans and current API/member navigation",
+      "limit": "Comments/string/declaration and unrelated same-name hits are retained as navigation, not callers."
+    },
+    {
+      "instrument": "scripts/dead_code.py",
+      "sha256": "8c10af8c2b5851b687e34570f499aa7f9d967a4fd6e5d9286bcf0c178fc9c850",
+      "executed_current": false,
+      "use": "Source self-audit only",
+      "limit": "External_names omits app/test/bench roots, includes comments/inline tests, line regex/grouped reexport/wildcard keep-set; copied crate cargo check --lib success is advisory not zero-dead/default/test/Windows proof."
+    },
+    {
+      "instrument": "current exact-head remote CI",
+      "use": "Actual 12 CI and 2 Windows jobs, 3241 Rust/70 summaries plus informational duplicate39, all72 qualified passes, token artifact/default17/Python/boots/Windows compilation",
+      "limit": "Not local just ci; normal PERF_ASSERT off. Ordinary Windows wrapper requires_constrained=False; no universal constrained/weekly-performance certification."
+    }
+  ]
+}

@@ -1,0 +1,62 @@
+{
+  "source": "121c1e7afe928c55cef3adcc5fb91f4e59fa2d52",
+  "paths": [
+    {
+      "required_absent": "tests/golden",
+      "current_tracked_hits": []
+    },
+    {
+      "required_absent": "tests/v1_proof",
+      "current_tracked_hits": []
+    },
+    {
+      "required_absent": "tests/vertical_slice/mod.rs",
+      "current_tracked_hits": []
+    },
+    {
+      "required_absent": "tests/scenes",
+      "current_tracked_hits": []
+    },
+    {
+      "required_absent": "tests/user-test/gauge-5step-scenario.json",
+      "current_tracked_hits": []
+    },
+    {
+      "required_absent": "crates/tze_hud_input/src/scene_local_patch.rs",
+      "current_tracked_hits": []
+    },
+    {
+      "required_absent": "scripts/mcp_reachability_check.py",
+      "current_tracked_hits": []
+    },
+    {
+      "required_absent": "CHANGELOG.md",
+      "current_tracked_hits": []
+    },
+    {
+      "required_absent": "crates/tze_hud_runtime/src/font_loader.rs",
+      "current_tracked_hits": []
+    },
+    {
+      "required_absent": "crates/tze_hud_runtime/src/reload_triggers.rs",
+      "current_tracked_hits": []
+    },
+    {
+      "required_absent": "crates/tze_hud_compositor/src/adapter.rs",
+      "current_tracked_hits": []
+    },
+    {
+      "required_absent": "crates/tze_hud_config/src/schema.rs",
+      "current_tracked_hits": []
+    },
+    {
+      "required_absent": "crates/tze_hud_config/src/profile.rs",
+      "current_tracked_hits": []
+    },
+    {
+      "required_absent": "*.pyc",
+      "current_tracked_hits": []
+    }
+  ],
+  "ignore_pycache": true
+}

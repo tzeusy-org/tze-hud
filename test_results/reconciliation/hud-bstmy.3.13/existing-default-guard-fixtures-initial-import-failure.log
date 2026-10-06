@@ -1,0 +1,17 @@
+E
+======================================================================
+ERROR: test_check_dev_mode_defaults (unittest.loader._FailedTest.test_check_dev_mode_defaults)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: test_check_dev_mode_defaults
+Traceback (most recent call last):
+  File "/usr/lib/python3.14/unittest/loader.py", line 137, in loadTestsFromName
+    module = __import__(module_name)
+  File "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.3.13/scripts/ci/test_check_dev_mode_defaults.py", line 12, in <module>
+    import check_dev_mode_defaults as guard
+ModuleNotFoundError: No module named 'check_dev_mode_defaults'
+
+
+----------------------------------------------------------------------
+Ran 1 test in 0.001s
+
+FAILED (errors=1)
