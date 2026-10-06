@@ -3,20 +3,20 @@
 //! Content-addressed resource store for tze_hud: BLAKE3 content addressing,
 //! upload validation, the runtime widget asset store, and the resident-memory ledger.
 //!
-//! **Do not add enforcement-ladder logic here.** The enforcement ladder
-//! (Warning, Throttle, Revoke) lives in the runtime's `BudgetEnforcer`.
+//! Uploads are admitted against hard caps before storage.
 //!
 //! ## Contents
 //!
 //! - **BLAKE3 content addressing**: `ResourceId` = 32-byte BLAKE3 digest of raw bytes.
-//! - **Deduplication**: `DedupIndex` checks `expected_hash` on `ResourceUploadStart`; returns
+//! - **Deduplication**: `ResourceStore` checks `expected_hash` on upload start; returns
 //!   existing resource with `was_deduplicated = true` if found.
 //! - **Inline fast path**: resources ≤ 64 KiB upload in a single message.
 //! - **Chunked upload**: three-phase flow for resources > 64 KiB.
-//! - **Validation pipeline**: capability, hash integrity, size limits, budget,
-//!   type check, decode validation.
+//! - **Validation**: `ResourceStore` applies capability, size, type, hash,
+//!   decode and budget checks before insertion.
 //! - **Concurrent upload limits**: max 4 per agent.
-//! - **V1 ephemerality**: all resources stored in memory only; lost on restart.
+//! - **Ephemerality**: uploaded scene resources are kept in memory; the runtime
+//!   widget store reindexes its persisted SVG assets at startup.
 //!
 //! ## Crate structure
 //!
@@ -25,7 +25,7 @@
 //! | [`types`] | `ResourceId`, `ResourceType`, error codes, size constants |
 //! | [`debug`] | Operator/debug hex representation for `ResourceId` |
 //! | [`dedup`] | Content-addressed dedup index (`DedupIndex`, `ResourceRecord`) |
-//! | [`validation`] | Six-step upload validation pipeline |
+//! | [`validation`] | Individual upload and decode checks |
 //! | [`upload`] | Upload state machine and `ResourceStore` |
 
 pub mod debug;
@@ -38,15 +38,13 @@ pub mod upload;
 pub mod validation;
 
 pub use debug::{resource_id_hex, to_lowercase_hex};
-pub use dedup::{DedupIndex, ResourceRecord};
 pub use font_bytes_store::FontBytesStore;
 pub use resident_ledger::{
     AllocationId, ResidentClass, ResidentLedger, ResidentLedgerLimits, ResidentLedgerSnapshot,
     ResidentReserveError,
 };
 pub use runtime_widget_store::{
-    PutOutcome as RuntimeWidgetStorePutOutcome, RuntimeWidgetAssetRecord, RuntimeWidgetStore,
-    RuntimeWidgetStoreConfig, RuntimeWidgetStoreError,
+    RuntimeWidgetStore, RuntimeWidgetStoreConfig, RuntimeWidgetStoreError,
 };
 pub use types::{
     CHUNK_SIZE_LIMIT, DEFAULT_MAX_CONCURRENT_RESOURCES, DEFAULT_MAX_DECODED_TEXTURE_BYTES,

@@ -170,7 +170,8 @@ impl ResourceStore {
         }
     }
 
-    /// Reference to the underlying dedup index (for scene-graph refcount ops).
+    /// Inspect stored resources in invariant fixtures.
+    #[cfg(any(test, feature = "test-support"))]
     pub fn dedup_index(&self) -> &DedupIndex {
         &self.dedup
     }
@@ -440,10 +441,8 @@ impl ResourceStore {
 
     // ─── Abort an upload ─────────────────────────────────────────────────────
 
-    /// Abort and discard an in-flight upload.
-    ///
-    /// Called when the session disconnects mid-upload or the agent sends an
-    /// explicit abort.
+    /// Discard one in-flight upload in upload-slot invariant fixtures.
+    #[cfg(any(test, feature = "test-support"))]
     pub async fn abort_upload(&self, agent_namespace: &str, upload_id: UploadId) {
         let mut guard = self.agent_uploads.lock().await;
         if let Some(uploads) = guard.get_mut(agent_namespace) {
@@ -457,7 +456,8 @@ impl ResourceStore {
         guard.remove(agent_namespace);
     }
 
-    /// Current number of in-flight uploads for an agent.
+    /// Inspect an agent's in-flight slots in invariant fixtures.
+    #[cfg(any(test, feature = "test-support"))]
     pub async fn in_flight_count(&self, agent_namespace: &str) -> usize {
         let guard = self.agent_uploads.lock().await;
         guard.get(agent_namespace).map(|u| u.count()).unwrap_or(0)

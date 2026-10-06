@@ -1,16 +1,22 @@
-//! Durable runtime widget SVG asset store (RFC 0011 §9.1–§9.2).
+//! Startup index for durable runtime widget SVG assets.
 //!
-//! Scene-node resources remain ephemeral in v1; runtime widget SVG assets are
-//! the scoped durability exception. This store provides:
+//! Uploaded scene resources remain ephemeral; runtime widget SVG assets are
+//! the durability exception. Startup preserves the existing blob/sidecar format:
 //! - content-addressed deduplication by BLAKE3 hash
-//! - atomic writes (temp file + rename)
 //! - startup re-index/reconcile (hash verification + sidecar validation)
 //! - durable footprint budgets (global + per-agent)
+//!
+//! Test-only writers create persisted fixtures for the startup checks.
 
 use std::collections::HashMap;
-use std::fs::{self, File, OpenOptions};
+use std::fs;
+#[cfg(test)]
+use std::fs::{File, OpenOptions};
+#[cfg(test)]
 use std::io::Write;
-use std::path::{Path, PathBuf};
+#[cfg(test)]
+use std::path::Path;
+use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -27,14 +33,14 @@ pub struct RuntimeWidgetStoreConfig {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct RuntimeWidgetAssetRecord {
-    pub resource_id: ResourceId,
-    pub size_bytes: u64,
-    pub agent_namespace: String,
+struct RuntimeWidgetAssetRecord {
+    size_bytes: u64,
+    agent_namespace: String,
 }
 
+#[cfg(test)]
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum PutOutcome {
+enum PutOutcome {
     Stored { resource_id: ResourceId },
     Deduplicated { resource_id: ResourceId },
 }
@@ -111,7 +117,8 @@ impl RuntimeWidgetStore {
         Ok(store)
     }
 
-    pub fn put_svg(
+    #[cfg(test)]
+    fn put_svg(
         &mut self,
         agent_namespace: &str,
         svg_bytes: &[u8],
@@ -166,7 +173,6 @@ impl RuntimeWidgetStore {
         sync_parent_dir(&meta_path);
 
         let record = RuntimeWidgetAssetRecord {
-            resource_id,
             size_bytes: incoming,
             agent_namespace: agent_namespace.to_string(),
         };
@@ -181,19 +187,17 @@ impl RuntimeWidgetStore {
         Ok(PutOutcome::Stored { resource_id })
     }
 
-    pub fn contains(&self, resource_id: ResourceId) -> bool {
+    #[cfg(test)]
+    fn contains(&self, resource_id: ResourceId) -> bool {
         self.index.contains_key(&resource_id)
     }
 
-    pub fn asset_count(&self) -> usize {
+    #[cfg(test)]
+    fn asset_count(&self) -> usize {
         self.index.len()
     }
 
-    pub fn total_bytes_used(&self) -> u64 {
-        self.total_bytes_used
-    }
-
-    pub fn agent_bytes_used(&self, agent_namespace: &str) -> u64 {
+    fn agent_bytes_used(&self, agent_namespace: &str) -> u64 {
         self.agent_bytes_used
             .get(agent_namespace)
             .copied()
@@ -254,7 +258,6 @@ impl RuntimeWidgetStore {
             }
 
             let record = RuntimeWidgetAssetRecord {
-                resource_id,
                 size_bytes: sidecar.size_bytes,
                 agent_namespace: sidecar.agent_namespace.clone(),
             };
@@ -342,6 +345,7 @@ fn hex_nibble(ch: u8) -> Option<u8> {
     }
 }
 
+#[cfg(test)]
 fn write_atomic(final_path: &Path, bytes: &[u8]) -> Result<(), RuntimeWidgetStoreError> {
     let tmp_path = final_path.with_file_name(format!(
         ".tmp-{}-{}-{}",
@@ -364,6 +368,7 @@ fn write_atomic(final_path: &Path, bytes: &[u8]) -> Result<(), RuntimeWidgetStor
     Ok(())
 }
 
+#[cfg(test)]
 fn sync_parent_dir(path: &Path) {
     // Best-effort durability barrier for metadata updates. Some platforms
     // (notably Windows) may not support opening/syncing directories via

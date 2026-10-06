@@ -28,7 +28,13 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 tokio = { workspace = true }
 
+[features]
+# Store diagnostics used by the external invariant tests, never shipped.
+test-support = []
+
 [dev-dependencies]
+# Integration tests link the library without cfg(test).
+tze_hud_resource = { path = ".", features = ["test-support"] }
 proptest = { workspace = true }
 tempfile = { workspace = true }
 

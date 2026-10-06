@@ -1,7 +1,4 @@
-//! Upload validation pipeline.
-//!
-//! Implements the six-step validation sequence from RFC 0011 §3.5 and
-//! resource-store/spec.md lines 83-87:
+//! Upload validation checks used by `ResourceStore`.
 //!
 //! 1. `upload_resource` capability check
 //! 2. BLAKE3 hash integrity — computed hash must match `expected_hash`
@@ -10,8 +7,8 @@
 //! 5. V1-supported resource type check
 //! 6. Content decode check (images decode, fonts parse)
 //!
-//! Each step is a stand-alone function so callers can short-circuit or
-//! re-use individual checks.
+//! `ResourceStore` owns admission order, deduplication and storage. These
+//! functions validate individual quantities and decoded content.
 
 use crate::types::{
     DecodedMeta, MAX_TEXTURE_DIMENSION_PX, ResourceError, ResourceStoreConfig, ResourceType,
@@ -462,57 +459,6 @@ fn validate_font(data: &[u8]) -> Result<DecodedMeta, ResourceError> {
         width_px: 0,
         height_px: 0,
     })
-}
-
-// ─── Convenience: run all six validation steps ────────────────────────────────
-
-/// Run all six validation steps for a completed upload and return `DecodedMeta`.
-///
-/// This function hashes `data` against `expected_hash` (step 2).  For the
-/// dedup-hit fast path (step 2 reveals the resource is already known),
-/// callers skip steps 3-6 entirely — no re-validation needed.
-///
-/// `width` and `height` are passed through to `decode_and_validate` for
-/// `IMAGE_RGBA8` dimension validation; pass 0 for other resource types.
-///
-/// For the dedup-hit fast path (step 2 reveals the resource is already known),
-/// callers skip steps 3-6 entirely — no re-validation needed.
-#[allow(clippy::too_many_arguments)]
-pub fn validate_upload(
-    data: &[u8],
-    expected_hash: &[u8; 32],
-    resource_type: ResourceType,
-    agent_capabilities: &[String],
-    agent_budget: &AgentBudget,
-    runtime_total_texture_bytes_used: usize,
-    config: &ResourceStoreConfig,
-    width: u32,
-    height: u32,
-) -> Result<DecodedMeta, ResourceError> {
-    // 1. Capability gate.
-    check_capability(agent_capabilities)?;
-
-    // 2. Hash integrity.
-    check_hash(data, expected_hash)?;
-
-    // 3. Raw size limit.
-    check_raw_size(data.len(), config)?;
-
-    // 5. Type check (before decode to short-circuit unsupported types early).
-    check_resource_type(resource_type)?;
-
-    // 6. Decode validation (also validates decoded size limits).
-    let meta = decode_and_validate(data, resource_type, config, width, height)?;
-
-    // 4. Budget check (after decode so we know the true decoded size).
-    check_budget(
-        meta.decoded_bytes,
-        agent_budget,
-        runtime_total_texture_bytes_used,
-        config,
-    )?;
-
-    Ok(meta)
 }
 
 /// Test helpers shared across crate-internal test modules.
