@@ -35,10 +35,6 @@ pub struct ResourceRecord {
     pub resource_type: ResourceType,
     /// Decoded in-memory size (bytes).  Used for budget accounting.
     pub decoded_bytes: usize,
-    /// Width in pixels (images); 0 for fonts.
-    pub width_px: u32,
-    /// Height in pixels (images); 0 for fonts.
-    pub height_px: u32,
 }
 
 impl ResourceRecord {
@@ -47,8 +43,6 @@ impl ResourceRecord {
             resource_id,
             resource_type,
             decoded_bytes: meta.decoded_bytes,
-            width_px: meta.width_px,
-            height_px: meta.height_px,
         }
     }
 }
@@ -67,8 +61,6 @@ pub struct DedupIndex {
     /// without holding the shard lock.  Insertion is append-only; the record
     /// itself is never replaced (immutability guarantee).
     inner: Arc<DashMap<ResourceId, Arc<ResourceRecord>>>,
-    resident_ledger: Option<crate::ResidentLedger>,
-    font_bytes: Option<crate::FontBytesStore>,
 }
 
 impl DedupIndex {
@@ -76,19 +68,6 @@ impl DedupIndex {
     pub fn new() -> Self {
         Self {
             inner: Arc::new(DashMap::new()),
-            resident_ledger: None,
-            font_bytes: None,
-        }
-    }
-
-    pub fn new_with_resident_ledger(
-        resident_ledger: crate::ResidentLedger,
-        font_bytes: crate::FontBytesStore,
-    ) -> Self {
-        Self {
-            inner: Arc::new(DashMap::new()),
-            resident_ledger: Some(resident_ledger),
-            font_bytes: Some(font_bytes),
         }
     }
 
@@ -96,6 +75,7 @@ impl DedupIndex {
     ///
     /// Latency contract: MUST complete within 100 μs (spec lines 112-113).
     /// DashMap read is O(1) and lock-free for non-contended shards.
+    #[cfg(any(test, feature = "test-support"))]
     #[inline]
     pub fn contains(&self, resource_id: &ResourceId) -> bool {
         self.inner.contains_key(resource_id)
@@ -115,8 +95,8 @@ impl DedupIndex {
     /// Insert a new record.  Returns `Err` if a record with the same id
     /// already exists (immutability: never replace an existing entry).
     ///
-    /// In practice the caller always calls `contains` first under the same
-    /// logical guard, so the collision case signals a race.
+    /// The upload path first looks up the record; a collision can still occur
+    /// when another upload inserts the same content before this call.
     pub fn insert(
         &self,
         resource_id: ResourceId,
@@ -140,15 +120,13 @@ impl DedupIndex {
     }
 
     /// Current number of resources in the store.
+    #[expect(
+        clippy::len_without_is_empty,
+        reason = "Resource admission needs the count; no caller needs an emptiness API."
+    )]
     #[inline]
     pub fn len(&self) -> usize {
         self.inner.len()
-    }
-
-    /// `true` if the store is empty.
-    #[inline]
-    pub fn is_empty(&self) -> bool {
-        self.inner.is_empty()
     }
 
     /// Total decoded bytes across all stored resources.
@@ -160,31 +138,6 @@ impl DedupIndex {
             .iter()
             .map(|entry| entry.value().decoded_bytes)
             .sum()
-    }
-
-    /// Remove a resource from the index.
-    ///
-    /// Called by the GC runner when a resource's grace period has elapsed and
-    /// it is being evicted.  Returns the evicted record if it was present.
-    ///
-    /// This frees the decoded in-memory representation once the last `Arc` to
-    /// the `ResourceRecord` is dropped.
-    pub fn remove(&self, resource_id: &ResourceId) -> Option<Arc<ResourceRecord>> {
-        let record = self.inner.remove(resource_id).map(|(_, record)| record)?;
-        if matches!(
-            record.resource_type,
-            ResourceType::FontTtf | ResourceType::FontOtf
-        ) {
-            if let Some(font_bytes) = &self.font_bytes {
-                font_bytes.remove(resource_id);
-            }
-        } else if let Some(ledger) = &self.resident_ledger {
-            ledger.release_evicted(
-                crate::ResidentClass::Resource,
-                &crate::AllocationId(format!("resource-store:{resource_id}:decoded")),
-            );
-        }
-        Some(record)
     }
 }
 
@@ -260,42 +213,5 @@ mod tests {
         let id = ResourceId::from_content(b"len-test");
         index.insert(id, make_record(id, 64)).unwrap();
         assert_eq!(index.len(), 1);
-    }
-
-    #[test]
-    fn font_gc_releases_the_retained_source_copy_and_ledger_charge() {
-        let ledger = crate::ResidentLedger::new(crate::ResidentLedgerLimits {
-            aggregate_bytes: 16,
-            resource_bytes: 0,
-            widget_source_bytes: 0,
-            widget_raster_bytes: 0,
-            font_bytes: 16,
-        });
-        let font_bytes = crate::FontBytesStore::new_with_resident_ledger(ledger.clone());
-        let index = DedupIndex::new_with_resident_ledger(ledger.clone(), font_bytes.clone());
-        let id = ResourceId::from_content(b"font-gc");
-        font_bytes
-            .try_insert(id, Arc::from(b"font".as_ref()))
-            .unwrap();
-        index
-            .insert(
-                id,
-                ResourceRecord::new(
-                    id,
-                    ResourceType::FontTtf,
-                    &DecodedMeta {
-                        decoded_bytes: 4,
-                        width_px: 0,
-                        height_px: 0,
-                    },
-                ),
-            )
-            .unwrap();
-
-        index.remove(&id).expect("font record exists");
-
-        assert!(font_bytes.get(&id).is_none());
-        assert_eq!(ledger.snapshot().font_bytes, 0);
-        assert_eq!(ledger.snapshot().eviction_count, 1);
     }
 }

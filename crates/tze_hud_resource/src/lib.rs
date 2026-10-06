@@ -30,6 +30,9 @@
 
 pub mod debug;
 pub mod dedup;
+#[cfg(not(any(test, feature = "test-support")))]
+mod font_bytes_store;
+#[cfg(any(test, feature = "test-support"))]
 pub mod font_bytes_store;
 pub mod resident_ledger;
 pub mod runtime_widget_store;
@@ -38,6 +41,9 @@ pub mod upload;
 pub mod validation;
 
 pub use debug::{resource_id_hex, to_lowercase_hex};
+#[cfg(not(any(test, feature = "test-support")))]
+pub(crate) use font_bytes_store::FontBytesStore;
+#[cfg(any(test, feature = "test-support"))]
 pub use font_bytes_store::FontBytesStore;
 pub use resident_ledger::{
     AllocationId, ResidentClass, ResidentLedger, ResidentLedgerLimits, ResidentLedgerSnapshot,
