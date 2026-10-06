@@ -134,7 +134,7 @@ def lock(path, budget):
 
 
 def read_state(path, default=None):
-    if not path.exists():
+    if not os.path.lexists(path):
         return default
     fd = private_file(path)
     with os.fdopen(fd, "rb") as stream:
@@ -228,7 +228,7 @@ class Metadata:
         write_state(self.disabled, {"disabled": True})
 
     def current(self):
-        if self.disabled.exists():
+        if os.path.lexists(self.disabled):
             return None
         try:
             marker = read_state(self.marker)
@@ -248,7 +248,7 @@ class Metadata:
             if kind == "SessionStart":
                 marker = {"generation": uuid.uuid4().hex, "prompt": None, "closed": marker.get("closed", [])[-16:], "ended": False}
             else:
-                if self.disabled.exists() or not marker.get("generation") or marker.get("ended"):
+                if os.path.lexists(self.disabled) or not marker.get("generation") or marker.get("ended"):
                     return None
                 if kind == "UserPromptSubmit":
                     if event["prompt"] in marker["closed"]:

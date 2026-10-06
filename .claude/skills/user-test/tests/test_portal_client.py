@@ -464,3 +464,34 @@ def test_hook_unavailable_malformed_privacy_and_state_failures(tmp_path):
         (h.home / ".config/tze-hud/127.0.0.1.psk").unlink()
         h.event("Stop", last_assistant_message="unpaired")
         assert not h.workers()
+
+    # An existing unsafe entry is not absent metadata. Refuse it before any
+    # MCP request, even when the session's marker is otherwise valid/current.
+    for filename in ("delivery.json", "disabled.json"):
+        with HookHarness(tmp_path / ("dangling-" + filename)) as h:
+            h.boot()
+            marker = json.loads(h.marker().read_text())
+            assert marker["prompt"] == h.prompt and not marker["ended"]
+            path = h.marker().parent / filename
+            path.unlink(missing_ok=True)
+            missing = h.home / "missing-state-target"
+            path.symlink_to(missing)
+            assert path.is_symlink() and not path.exists()
+            before = len(h.records)
+            started = time.monotonic()
+            h.event("PreToolUse", tool_use_id="unsafe-state", tool_name="Read")
+            assert len(h.records) == before
+            assert time.monotonic() - started < 2.5
+            assert not h.workers()
+            assert not missing.exists() and path.is_symlink()
+
+            # Only explicit recovery starts a fresh generation; genuinely
+            # absent delivery metadata still permits ordinary first delivery.
+            path.unlink()
+            h.event("SessionStart", source="resume")
+            assert not (h.marker().parent / "disabled.json").exists()
+            h.prompt = str(uuid.uuid4())
+            h.event("UserPromptSubmit")
+            h.event("PreToolUse", tool_use_id="recovered-state", tool_name="Read")
+            assert h.publications()[-1]["content"] == "Read: running"
+            assert not h.workers()
