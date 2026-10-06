@@ -288,6 +288,33 @@ impl Default for StartupOptions {
     }
 }
 
+#[derive(Debug)]
+enum StartupAction {
+    Normal(StartupOptions),
+    Remote(
+        tze_hud_runtime::remote_firewall::RemoteAction,
+        StartupOptions,
+    ),
+    Child(tze_hud_runtime::remote_firewall::ChildRequest),
+}
+
+/// One-shot helpers must never open ordinary environment-selected log files,
+/// including when rejecting private input. Only normal startup initializes them.
+fn prepare_startup(
+    args: &[String],
+    initialize_normal: impl FnOnce(),
+) -> Result<StartupAction, String> {
+    if let Some(request) = tze_hud_runtime::remote_firewall::parse_private_child(args)? {
+        return Ok(StartupAction::Child(request));
+    }
+    let opts = parse_options(args)?;
+    if let Some(action) = opts.remote_action {
+        return Ok(StartupAction::Remote(action, opts));
+    }
+    initialize_normal();
+    Ok(StartupAction::Normal(opts))
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum StartupSecurityMode {
     Strict,
@@ -964,62 +991,60 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // (the pre-hud-q2glv default) was always immune (Codex P2 on PR #1143).
     ignore_console_ctrl_c();
 
-    init_logging();
-    tze_hud_runtime::operator::status::set_build_info(
-        tze_hud_runtime::operator::status::BuildInfo {
-            sha: env!("TZE_HUD_GIT_SHA_FULL").to_owned(),
-            channel: env!("TZE_HUD_CHANNEL").to_owned(),
-        },
-    );
-
-    // hud-pi5wx: file-based panic hook so a silent compositor/render-thread panic
-    // leaves a durable trail — the overlay deployment captures no stdout/stderr.
-    tze_hud_runtime::diag::install_panic_hook();
-
     // Collect CLI args, skipping argv[0] (the binary name).
     let args: Vec<String> = std::env::args().skip(1).collect();
 
-    match tze_hud_runtime::remote_firewall::parse_private_child(&args) {
-        Ok(Some(request)) => {
-            finish_remote(tze_hud_runtime::remote_firewall::execute_child(request))
-        }
-        Ok(None) => {}
-        Err(error) => finish_remote(Err(error)),
-    }
-
-    let mut opts = parse_options(&args).unwrap_or_else(|e| {
-        eprintln!("error: {e}");
+    let startup = prepare_startup(&args, || {
+        init_logging();
+        tze_hud_runtime::operator::status::set_build_info(
+            tze_hud_runtime::operator::status::BuildInfo {
+                sha: env!("TZE_HUD_GIT_SHA_FULL").to_owned(),
+                channel: env!("TZE_HUD_CHANNEL").to_owned(),
+            },
+        );
+        // Keep normal runtime panic diagnostics; helper results use only the
+        // protected result transport and the attached console.
+        tze_hud_runtime::diag::install_panic_hook();
+    })
+    .unwrap_or_else(|error| {
+        eprintln!("error: {error}");
         std::process::exit(1);
     });
 
-    // This one-shot path precedes install/cleanup, instance lock, agents, GPU
-    // and listeners. Explicit config validation never supplies listen ports.
-    if let Some(action) = opts.remote_action {
-        if let Some(path) = opts.config_path.as_deref() {
-            let validation = resolve_config_path(Some(path))
-                .map_err(|_| "explicit configuration file was not found".to_string())
-                .and_then(|path| {
-                    std::fs::read_to_string(path)
-                        .map_err(|e| format!("cannot read explicit configuration: {e}"))
-                })
-                .and_then(|text| {
-                    tze_hud_config::validate_config(&text).map_err(|errors| {
-                        errors
-                            .iter()
-                            .map(|e| format!("{}: {}", e.field_path, e.hint))
-                            .collect::<Vec<_>>()
-                            .join("; ")
-                    })
-                });
-            if let Err(error) = validation {
-                finish_remote(Err(error));
-            }
+    let mut opts = match startup {
+        StartupAction::Normal(opts) => opts,
+        StartupAction::Child(request) => {
+            finish_remote(tze_hud_runtime::remote_firewall::execute_child(request))
         }
-        finish_remote(tze_hud_runtime::remote_firewall::execute(
-            action,
-            [opts.mcp_port, opts.grpc_port],
-        ));
-    }
+        // This one-shot path precedes ordinary logs/diagnostics, install/cleanup,
+        // instance lock, agents, GPU and listeners. Config never supplies ports.
+        StartupAction::Remote(action, opts) => {
+            if let Some(path) = opts.config_path.as_deref() {
+                let validation = resolve_config_path(Some(path))
+                    .map_err(|_| "explicit configuration file was not found".to_string())
+                    .and_then(|path| {
+                        std::fs::read_to_string(path)
+                            .map_err(|e| format!("cannot read explicit configuration: {e}"))
+                    })
+                    .and_then(|text| {
+                        tze_hud_config::validate_config(&text).map_err(|errors| {
+                            errors
+                                .iter()
+                                .map(|e| format!("{}: {}", e.field_path, e.hint))
+                                .collect::<Vec<_>>()
+                                .join("; ")
+                        })
+                    });
+                if let Err(error) = validation {
+                    finish_remote(Err(error));
+                }
+            }
+            finish_remote(tze_hud_runtime::remote_firewall::execute(
+                action,
+                [opts.mcp_port, opts.grpc_port],
+            ));
+        }
+    };
 
     // ── Attach-info fast path (hud-b7c0m) ─────────────────────────────────────
     // Print the MCP attach-info block and exit *before* acquiring the GPU lock,
@@ -1324,7 +1349,8 @@ mod tests {
 
     type Env<'a> = &'a [(&'a str, &'a str)];
 
-    /// Run `parse_options` with exactly `env` set (all other parse env cleared).
+    /// Exercise the real startup dispatch with exactly `env` set, without
+    /// opening files or executing a remote operation.
     fn parse_with_env(env: Env, args: &[&str]) -> Result<StartupOptions, String> {
         let _guard = ENV_VAR_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         clear_parse_options_env();
@@ -1335,7 +1361,23 @@ mod tests {
             }
         }
         let args: Vec<String> = args.iter().map(|s| s.to_string()).collect();
-        let result = parse_options(&args);
+        let initialized = std::cell::Cell::new(false);
+        let result =
+            prepare_startup(&args, || initialized.set(true)).map(|startup| match startup {
+                StartupAction::Normal(opts) => {
+                    assert!(initialized.get());
+                    opts
+                }
+                StartupAction::Remote(action, opts) => {
+                    assert!(!initialized.get());
+                    assert_eq!(opts.remote_action, Some(action));
+                    opts
+                }
+                StartupAction::Child(_) => panic!("unexpected private child in public parser case"),
+            });
+        if result.is_err() {
+            assert!(!initialized.get());
+        }
         clear_parse_options_env();
         result
     }
@@ -1600,6 +1642,28 @@ mod tests {
                 .unwrap_or_else(|e| panic!("case {name:?} should parse, got: {e}"));
             check(&opts);
         }
+        // Valid private input also bypasses ordinary initialization and the
+        // alternate administrator's startup environment. No child is executed.
+        let _guard = ENV_VAR_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        clear_parse_options_env();
+        unsafe { std::env::set_var("TZE_HUD_MCP_PORT", "invalid") };
+        let payload = serde_json::json!({
+            "version": 1, "action": "allow", "program": "C:\\HUD\\tze_hud.exe",
+            "ports": [9090, 50051], "parent_pid": 123, "parent_created": 456,
+            "nonce": "1234567890abcdef1234567890abcdef"
+        })
+        .to_string();
+        let initialized = std::cell::Cell::new(false);
+        assert!(matches!(
+            prepare_startup(
+                &[tze_hud_runtime::remote_firewall::CHILD_FLAG.into(), payload],
+                || initialized.set(true)
+            )
+            .unwrap(),
+            StartupAction::Child(_)
+        ));
+        assert!(!initialized.get());
+        clear_parse_options_env();
     }
 
     /// Every distinct (env, args) -> error case; the message must carry the hint.
@@ -1658,7 +1722,13 @@ mod tests {
                 "remote invalid private flag",
                 &[],
                 &["--tze-hud-firewall-child"],
-                &["unknown flag"],
+                &["invalid internal firewall arguments"],
+            ),
+            (
+                "remote invalid private payload",
+                &[("TZE_HUD_MCP_PORT", "invalid")],
+                &["--tze-hud-firewall-child", "{}"],
+                &["invalid internal firewall payload"],
             ),
             (
                 "handoff spec off loopback",

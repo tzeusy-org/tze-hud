@@ -202,6 +202,146 @@ fn token(process: HANDLE) -> Result<Handle, String> {
     .map_err(|e| failure("original process token", e))?;
     Ok(Handle(handle))
 }
+
+/// Temporarily enable one privilege already assigned to this token. The saved
+/// state contains only attributes actually changed by AdjustTokenPrivileges.
+/// This never grants account policy or removes a privilege.
+struct PrivilegeScope<'a> {
+    token: &'a Handle,
+    previous: TOKEN_PRIVILEGES,
+    restored: bool,
+}
+impl<'a> PrivilegeScope<'a> {
+    fn enable(token: &'a Handle, name: PCWSTR) -> Result<Self, String> {
+        let mut luid = LUID::default();
+        // SAFETY: the synchronous call writes one LUID for a valid constant.
+        unsafe { LookupPrivilegeValueW(PCWSTR::null(), name, &mut luid) }
+            .map_err(|e| failure("lookup original-token privilege", e))?;
+        let requested = TOKEN_PRIVILEGES {
+            PrivilegeCount: 1,
+            Privileges: [LUID_AND_ATTRIBUTES {
+                Luid: luid,
+                Attributes: SE_PRIVILEGE_ENABLED,
+            }],
+        };
+        let mut scope = Self {
+            token,
+            previous: TOKEN_PRIVILEGES::default(),
+            restored: false,
+        };
+        // SAFETY: only one privilege can change, and previous has room for that
+        // complete state. Capture last-error immediately: BOOL success alone
+        // also represents ERROR_NOT_ALL_ASSIGNED and cannot authorize a retry.
+        unsafe { SetLastError(ERROR_SUCCESS) };
+        let adjusted = unsafe {
+            AdjustTokenPrivileges(
+                token.0,
+                false,
+                Some(&requested),
+                std::mem::size_of::<TOKEN_PRIVILEGES>() as u32,
+                Some(&mut scope.previous),
+                None,
+            )
+        };
+        let status = unsafe { GetLastError() };
+        let enabled = adjusted
+            .map_err(|e| failure("enable original-token privilege", e))
+            .and_then(|()| {
+                if status == ERROR_SUCCESS {
+                    Ok(())
+                } else {
+                    Err(format!(
+                        "original-token privilege not assigned/enabled (Windows error {})",
+                        status.0
+                    ))
+                }
+            });
+        if let Err(error) = enabled {
+            scope
+                .restore()
+                .map_err(|restore| format!("{error}; {restore}"))?;
+            return Err(error);
+        }
+        Ok(scope)
+    }
+
+    fn restore(&mut self) -> Result<(), String> {
+        if self.restored {
+            return Ok(());
+        }
+        if self.previous.PrivilegeCount != 0 {
+            // SAFETY: restore only the exact previous state returned for our
+            // single change; no other privilege is disabled or added.
+            unsafe { SetLastError(ERROR_SUCCESS) };
+            let adjusted = unsafe {
+                AdjustTokenPrivileges(self.token.0, false, Some(&self.previous), 0, None, None)
+            };
+            let status = unsafe { GetLastError() };
+            adjusted.map_err(|e| failure("restore original-token privilege", e))?;
+            if status != ERROR_SUCCESS {
+                return Err(format!(
+                    "original-token privilege restoration failed (Windows error {})",
+                    status.0
+                ));
+            }
+        }
+        self.restored = true;
+        Ok(())
+    }
+}
+impl Drop for PrivilegeScope<'_> {
+    fn drop(&mut self) {
+        // Explicit checked restoration controls the production result. Drop
+        // additionally covers unwinding/early returns and retries a failed
+        // restore, without ordinary file logging in this elevated path.
+        let _ = self.restore();
+    }
+}
+
+fn with_privilege<T>(
+    token: &Handle,
+    name: PCWSTR,
+    operation: impl FnOnce() -> Result<T, String>,
+) -> Result<T, String> {
+    let mut scope = PrivilegeScope::enable(token, name)?;
+    let result = operation();
+    // An acquired token is not returned to the policy caller unless restoration
+    // succeeded; on failure its RAII owner closes it before returning an error.
+    match scope.restore() {
+        Ok(()) => result,
+        Err(restore) => Err(match result {
+            Ok(_) => restore,
+            Err(error) => format!("{error}; {restore}"),
+        }),
+    }
+}
+
+fn original_token(process: HANDLE, child: bool) -> Result<Handle, String> {
+    match token(process) {
+        Ok(token) => Ok(token),
+        Err(error) if !child => Err(error),
+        Err(first_error) => {
+            // Identity/creation checks already succeeded in origin. Preserve
+            // accessible same-account paths; a failed child open gets exactly
+            // one retry under its already-assigned SeDebug privilege, as the
+            // different-account OpenProcessToken contract requires.
+            let mut current = HANDLE::default();
+            unsafe {
+                OpenProcessToken(
+                    GetCurrentProcess(),
+                    TOKEN_QUERY | TOKEN_ADJUST_PRIVILEGES,
+                    &mut current,
+                )
+            }
+            .map_err(|e| failure("child privilege token", e))?;
+            let current = Handle(current);
+            with_privilege(&current, SE_DEBUG_NAME, || token(process)).map_err(|error| {
+                format!("{first_error}; scoped child SeDebugPrivilege retry: {error}")
+            })
+        }
+    }
+}
+
 fn token_sid(token: HANDLE) -> Result<String, String> {
     let mut required = 0;
     let _ = unsafe { GetTokenInformation(token, TokenUser, None, 0, &mut required) };
@@ -311,7 +451,7 @@ fn origin(request: &ChildRequest, child: bool) -> Result<Origin, String> {
     if !ordinal_equal(&canonical_file(Path::new(&name))?, &request.program) {
         return Err("original parent executable mismatch".into());
     }
-    let token = token(handle)?;
+    let token = original_token(handle, child)?;
     let sid = token_sid(token.0)?;
     Ok(Origin {
         _image: image,
@@ -1473,9 +1613,125 @@ mod tests {
     #[test]
     fn rule_backup_roundtrips_through_windows_com() {
         // Standalone COM objects only. No INetFwPolicy2, INetFwRules::Add/Remove,
-        // administrator token, UAC prompt, or machine policy mutation occurs.
+        // elevation, UAC prompt, or machine policy mutation occurs. Privilege
+        // checks below modify only private duplicate tokens, never a live
+        // process/thread token or an account's assigned privileges.
         std::thread::spawn(|| {
             let _com = Com::init().unwrap();
+            fn duplicate_fixture_token(access: TOKEN_ACCESS_MASK) -> Handle {
+                let source = token(unsafe { GetCurrentProcess() }).unwrap();
+                let mut duplicate = HANDLE::default();
+                unsafe {
+                    DuplicateTokenEx(
+                        source.0,
+                        access,
+                        None,
+                        SecurityImpersonation,
+                        TokenImpersonation,
+                        &mut duplicate,
+                    )
+                }
+                .unwrap();
+                Handle(duplicate)
+            }
+            // Use the already-assigned change-notification privilege on an
+            // isolated duplicate: CI needs no administrator/SeDebug assignment.
+            // These calls exercise the production guard and checked restore,
+            // while the original cross-account UAC remains an owner exercise.
+            let duplicate = duplicate_fixture_token(TOKEN_QUERY | TOKEN_ADJUST_PRIVILEGES);
+            let mut luid = LUID::default();
+            unsafe { LookupPrivilegeValueW(PCWSTR::null(), SE_CHANGE_NOTIFY_NAME, &mut luid) }
+                .unwrap();
+            let disabled = TOKEN_PRIVILEGES {
+                PrivilegeCount: 1,
+                Privileges: [LUID_AND_ATTRIBUTES {
+                    Luid: luid,
+                    Attributes: TOKEN_PRIVILEGES_ATTRIBUTES(0),
+                }],
+            };
+            unsafe {
+                SetLastError(ERROR_SUCCESS);
+                AdjustTokenPrivileges(duplicate.0, false, Some(&disabled), 0, None, None).unwrap();
+            }
+            assert_eq!(unsafe { GetLastError() }, ERROR_SUCCESS);
+            {
+                let mut scope = PrivilegeScope::enable(&duplicate, SE_CHANGE_NOTIFY_NAME).unwrap();
+                assert_eq!(scope.previous.PrivilegeCount, 1);
+                assert!(
+                    !scope.previous.Privileges[0]
+                        .Attributes
+                        .contains(SE_PRIVILEGE_ENABLED)
+                );
+                // An already-enabled privilege has no changed previous state;
+                // its restoration must leave the outer scope enabled.
+                let mut enabled =
+                    PrivilegeScope::enable(&duplicate, SE_CHANGE_NOTIFY_NAME).unwrap();
+                assert_eq!(enabled.previous.PrivilegeCount, 0);
+                enabled.restore().unwrap();
+                scope.restore().unwrap();
+            }
+            for outcome in [Ok(()), Err("injected token-open failure".into())] {
+                assert_eq!(
+                    with_privilege(&duplicate, SE_CHANGE_NOTIFY_NAME, || outcome.clone()),
+                    outcome
+                );
+                let mut restored =
+                    PrivilegeScope::enable(&duplicate, SE_CHANGE_NOTIFY_NAME).unwrap();
+                assert_eq!(restored.previous.PrivilegeCount, 1);
+                assert!(
+                    !restored.previous.Privileges[0]
+                        .Attributes
+                        .contains(SE_PRIVILEGE_ENABLED)
+                );
+                restored.restore().unwrap();
+            }
+            assert!(
+                std::panic::catch_unwind(|| {
+                    let _: Result<(), String> =
+                        with_privilege(&duplicate, SE_CHANGE_NOTIFY_NAME, || {
+                            panic!("injected acquisition unwind")
+                        });
+                })
+                .is_err()
+            );
+            {
+                let mut restored =
+                    PrivilegeScope::enable(&duplicate, SE_CHANGE_NOTIFY_NAME).unwrap();
+                assert_eq!(restored.previous.PrivilegeCount, 1);
+                assert!(
+                    !restored.previous.Privileges[0]
+                        .Attributes
+                        .contains(SE_PRIVILEGE_ENABLED)
+                );
+                restored.restore().unwrap();
+            }
+            let read_only = duplicate_fixture_token(TOKEN_QUERY);
+            assert!(PrivilegeScope::enable(&read_only, SE_CHANGE_NOTIFY_NAME).is_err());
+            // Removing a privilege from this disposable duplicate makes the
+            // real success-with-NOT_ALL_ASSIGNED case deterministic. Nothing
+            // can grant it back, and the guarded operation must not be called.
+            let removed = TOKEN_PRIVILEGES {
+                PrivilegeCount: 1,
+                Privileges: [LUID_AND_ATTRIBUTES {
+                    Luid: luid,
+                    Attributes: SE_PRIVILEGE_REMOVED,
+                }],
+            };
+            unsafe {
+                SetLastError(ERROR_SUCCESS);
+                AdjustTokenPrivileges(duplicate.0, false, Some(&removed), 0, None, None).unwrap();
+            }
+            assert_eq!(unsafe { GetLastError() }, ERROR_SUCCESS);
+            let called = std::cell::Cell::new(false);
+            assert!(
+                with_privilege(&duplicate, SE_CHANGE_NOTIFY_NAME, || {
+                    called.set(true);
+                    Ok(())
+                })
+                .is_err()
+            );
+            assert!(!called.get());
+
             // A read-only folder query exercises the production task-allocation
             // lifetime without opening helper files or obtaining machine policy.
             assert!(program_data_path().unwrap().is_absolute());
