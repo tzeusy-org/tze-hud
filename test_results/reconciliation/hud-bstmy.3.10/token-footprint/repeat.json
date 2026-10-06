@@ -1,0 +1,260 @@
+{
+  "schema_version": 1,
+  "runtime_build": "0.1.0",
+  "tokenizer": {
+    "name": "o200k_base",
+    "implementation": "tiktoken-rs",
+    "version": "0.12.0",
+    "vocab_fingerprint": "sha256:446a9538cb6c348e3516120d7c08b09f57c36495e2acfffe59a5bf8b0cfb1a2d",
+    "counting_policy": "each canonical JSON-RPC body independently; UTF-8 bytes; encode_with_special_tokens; operation and flow totals are integer sums; model_visible counts tool name + arguments + result text only"
+  },
+  "fixture_fingerprint": "blake3:c2c6e4830582edfa5267ba2d64fa7ade27f5be117c1adaf0f907a3e5a15aa644",
+  "flows": {
+    "discover": {
+      "flow_version": 2,
+      "flow_fingerprint": "blake3:cc4dff8555f55c50b9b1128d1c5d2b973d3ec9b6432c72da889c5cc7cc936f12",
+      "operations": {
+        "hud_surfaces": {
+          "request": {
+            "bytes": 94,
+            "tokens": 31
+          },
+          "response": {
+            "bytes": 540,
+            "tokens": 150
+          },
+          "total": {
+            "bytes": 634,
+            "tokens": 181
+          },
+          "model_visible": {
+            "bytes": 417,
+            "tokens": 113
+          }
+        }
+      },
+      "total": {
+        "bytes": 634,
+        "tokens": 181
+      },
+      "model_visible": {
+        "bytes": 417,
+        "tokens": 113
+      }
+    },
+    "error": {
+      "flow_version": 2,
+      "flow_fingerprint": "blake3:231d2c1864b13ecf6342cc100ae24bde413c965a89bbbc7c09c6eddf70ebb821",
+      "operations": {
+        "hud_publish": {
+          "request": {
+            "bytes": 137,
+            "tokens": 39
+          },
+          "response": {
+            "bytes": 235,
+            "tokens": 62
+          },
+          "total": {
+            "bytes": 372,
+            "tokens": 101
+          },
+          "model_visible": {
+            "bytes": 196,
+            "tokens": 45
+          }
+        }
+      },
+      "total": {
+        "bytes": 372,
+        "tokens": 101
+      },
+      "model_visible": {
+        "bytes": 196,
+        "tokens": 45
+      }
+    },
+    "portal": {
+      "flow_version": 2,
+      "flow_fingerprint": "blake3:dc6a82ff9c996432e5fd0b6c3ad9a771d4d557b21e31654db9dcd26a0c82131b",
+      "operations": {
+        "1_publish_attach": {
+          "request": {
+            "bytes": 195,
+            "tokens": 54
+          },
+          "response": {
+            "bytes": 86,
+            "tokens": 31
+          },
+          "total": {
+            "bytes": 281,
+            "tokens": 85
+          },
+          "model_visible": {
+            "bytes": 126,
+            "tokens": 34
+          }
+        },
+        "2_input_poll": {
+          "request": {
+            "bytes": 105,
+            "tokens": 34
+          },
+          "response": {
+            "bytes": 210,
+            "tokens": 61
+          },
+          "total": {
+            "bytes": 315,
+            "tokens": 95
+          },
+          "model_visible": {
+            "bytes": 146,
+            "tokens": 43
+          }
+        },
+        "3_input_ack": {
+          "request": {
+            "bytes": 121,
+            "tokens": 37
+          },
+          "response": {
+            "bytes": 103,
+            "tokens": 35
+          },
+          "total": {
+            "bytes": 224,
+            "tokens": 72
+          },
+          "model_visible": {
+            "bytes": 67,
+            "tokens": 20
+          }
+        },
+        "4_clear": {
+          "request": {
+            "bytes": 121,
+            "tokens": 36
+          },
+          "response": {
+            "bytes": 86,
+            "tokens": 31
+          },
+          "total": {
+            "bytes": 207,
+            "tokens": 67
+          },
+          "model_visible": {
+            "bytes": 52,
+            "tokens": 16
+          }
+        }
+      },
+      "total": {
+        "bytes": 1027,
+        "tokens": 319
+      },
+      "model_visible": {
+        "bytes": 391,
+        "tokens": 113
+      }
+    },
+    "tools_list": {
+      "flow_version": 2,
+      "flow_fingerprint": "blake3:de9d93e0555c968037fecb4f88f3933ad7f23a61c46bbc5ddb5183bd5745a4f2",
+      "operations": {
+        "tools/list": {
+          "request": {
+            "bytes": 58,
+            "tokens": 21
+          },
+          "response": {
+            "bytes": 1984,
+            "tokens": 474
+          },
+          "total": {
+            "bytes": 2042,
+            "tokens": 495
+          },
+          "model_visible": {
+            "bytes": 1940,
+            "tokens": 458
+          }
+        }
+      },
+      "total": {
+        "bytes": 2042,
+        "tokens": 495
+      },
+      "model_visible": {
+        "bytes": 1940,
+        "tokens": 458
+      }
+    },
+    "widget_publish": {
+      "flow_version": 2,
+      "flow_fingerprint": "blake3:d21c41f58ce472b20861dcc976f4dc882d43fbf633be0831e4eebaaf187b7fc1",
+      "operations": {
+        "hud_publish": {
+          "request": {
+            "bytes": 142,
+            "tokens": 42
+          },
+          "response": {
+            "bytes": 86,
+            "tokens": 31
+          },
+          "total": {
+            "bytes": 228,
+            "tokens": 73
+          },
+          "model_visible": {
+            "bytes": 73,
+            "tokens": 22
+          }
+        }
+      },
+      "total": {
+        "bytes": 228,
+        "tokens": 73
+      },
+      "model_visible": {
+        "bytes": 73,
+        "tokens": 22
+      }
+    },
+    "zone_publish": {
+      "flow_version": 2,
+      "flow_fingerprint": "blake3:b23b19459a1e296716916f4756166f99a634a962ba612d61cb65a33a48cbbee1",
+      "operations": {
+        "hud_publish": {
+          "request": {
+            "bytes": 194,
+            "tokens": 52
+          },
+          "response": {
+            "bytes": 110,
+            "tokens": 38
+          },
+          "total": {
+            "bytes": 304,
+            "tokens": 90
+          },
+          "model_visible": {
+            "bytes": 147,
+            "tokens": 39
+          }
+        }
+      },
+      "total": {
+        "bytes": 304,
+        "tokens": 90
+      },
+      "model_visible": {
+        "bytes": 147,
+        "tokens": 39
+      }
+    }
+  }
+}

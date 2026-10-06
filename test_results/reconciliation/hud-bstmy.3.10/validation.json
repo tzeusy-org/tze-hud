@@ -1,0 +1,18 @@
+{
+  "audited_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261",
+  "current_base": "72e72e932cf343da100e5c9928991683418e7d29",
+  "json_gzip_valid": true,
+  "citations_valid": true,
+  "named_gate_attributes_assertions_valid": true,
+  "source_digests_valid": true,
+  "declarations": 7708,
+  "roots": 327,
+  "tests": {
+    "mentions": 78,
+    "unique": 72,
+    "observed": 72,
+    "delta": "+0 ~0 -0"
+  },
+  "evidence_only": true,
+  "whitespace_pass": true
+}

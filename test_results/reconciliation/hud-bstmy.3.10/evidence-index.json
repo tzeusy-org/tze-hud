@@ -1,0 +1,286 @@
+{
+  "audited_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261",
+  "method": "SHA256 of exact delivered artifact bytes; self-index excluded to avoid recursion. No source/test/spec edit.",
+  "artifacts": [
+    {
+      "path": "test_results/hud-bstmy.3.10-followups.json",
+      "bytes": 23477,
+      "sha256": "d676c89c0aa2ed6d6c1649fbe11ce5a25dacd8198659254ea0c41b4264ff16bd"
+    },
+    {
+      "path": "test_results/hud-bstmy.3.10-reconciliation.md",
+      "bytes": 45773,
+      "sha256": "1426e8c34f0c8e6bb292fd37cd67990234f8e150b4ec0f5f81c6936d8aa2aaec"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.10/blockers.json",
+      "bytes": 1989,
+      "sha256": "89e7cd7cb0594759da7539cde0ab0970194e5d577036a3f84571b70e70e71d50"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.10/bootstrap-issues.json",
+      "bytes": 95367,
+      "sha256": "745931a8484e39a33b6589eb8a8231237219fbaf4fb08a8d45279da7fee07304"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.10/bootstrap-receipt.json",
+      "bytes": 1880,
+      "sha256": "f796cd632a86192740a57a238bda2a05bfa54887f30e8e4e85780d34f68af5cf"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.10/candidate-navigation.json.gz",
+      "bytes": 27018,
+      "sha256": "07bdd55f9b02dd1a2f3fb26e937be6cf51e8ca25e534d3fb86309a159dbb7ba1"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.10/cargo-terminal-release.json",
+      "bytes": 399,
+      "sha256": "053f7bcd679d7fe3b18128d0897d87d343e9f1b16dad9f4f0e348bdea7482f44"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.10/compressed-log-index.json",
+      "bytes": 4933,
+      "sha256": "85f8b6178e2d328b70f9ef32e508e8bea4e84f352fcc96419ae589e9b883997b"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.10/current-pin.json",
+      "bytes": 2403,
+      "sha256": "4d149b165b492602a10109ddc59022c801b8303b094cca5d0c0ce218ee3c7556"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.10/deleted-paths.json",
+      "bytes": 1409,
+      "sha256": "c0d81a252b929c886a9d376050be0413a809a4582884f2664b71f1b8bfb311d1"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.10/deletion-scans.json",
+      "bytes": 33372,
+      "sha256": "bf7cfdc34b18eac8c39a923020cd25b0dca8a39009bd8687d5853bbb83405012"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.10/enabler-final-receipt.json",
+      "bytes": 469,
+      "sha256": "c1e898ed7498f5a4cece1c455d12eab45fb67e2fe4ac1c971847c80176baf115"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.10/existing-owner-packets/batching-owner.json",
+      "bytes": 3640,
+      "sha256": "a8a2ad58c76ac2c6cdade30e25c1af5d4a437f767d5d20a9df6c8fbf04f841a9"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.10/existing-owner-packets/enabler-final.json",
+      "bytes": 75649,
+      "sha256": "f276ff5e91f65c3234f92eca29c6708d897aa113b93f13f17b0493001eaea3c9"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.10/existing-owner-packets/protocol-final.json",
+      "bytes": 38319,
+      "sha256": "8ad2bd4bdcc35acc7c912bca7c1a93f82e05db57fcae0847d9ea1a848400d03c"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.10/existing-owner-packets/workcounts-owner.json",
+      "bytes": 3240,
+      "sha256": "98d1f80b2ffd4efe6e0f6348ec7c4917ac8dafe1ba19bda260334587d4df2f0b"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.10/final-main-applicability.json",
+      "bytes": 5353,
+      "sha256": "b53deccd259398da98a7703a7ead74d3a42b88afb81e2875d79334cd6d2bc6ff"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.10/g1-public-dispositions.json.gz",
+      "bytes": 738650,
+      "sha256": "211b7c4bf11b00da371af5fe57f76014bf66e85efb3e832f1dc26a80f2e5ecfc"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.10/g3-qualified-removals.json",
+      "bytes": 2364,
+      "sha256": "018df2359cffd69cae9d5837cbfcd0ae62c1fffb1eb6602f50db9c5d42f8228f"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.10/gates/config-existing-receipt.json",
+      "bytes": 1218,
+      "sha256": "410ee70686e15e8b0890606f6ae512c30e5bc10fa1fb50a991896d99f9c97f7a"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.10/gates/config-existing.log.gz",
+      "bytes": 420,
+      "sha256": "fc72529c1f507d88b35708265fb406cbd264c218c0470d1257e6fb853c972bc6"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.10/gates/focus-existing-receipt.json",
+      "bytes": 1207,
+      "sha256": "88c0cc7fb6ace8ae0048889ff4acc4251e7864077472547d0794af8c1feb8b0e"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.10/gates/focus-existing.log.gz",
+      "bytes": 476,
+      "sha256": "5ebef87a6b778c0fa9cddc9b3317e71bf1ecc59558f25189260e1a8bb20b8a10"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.10/gates/full-ci-receipt.json",
+      "bytes": 10008,
+      "sha256": "178c945e960d631fb867a2e3ed2dd36b4d1d48dcda8771198cc968b0aa52b20a"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.10/gates/full-ci.log.gz",
+      "bytes": 69421,
+      "sha256": "b70270485a7c970a235aa9aa4707c11b6a29c43559badbd36d78cdcb1b655a2a"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.10/historical-gate-index.json",
+      "bytes": 89907,
+      "sha256": "c474e6bb4e7b6816487e4b331ba1bf3e0ee608e92c9ac3224f7f8310c53b6b0f"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.10/historical-gates/g1-author-ci.log.gz",
+      "bytes": 69989,
+      "sha256": "0045c61fe883616588808022beff6dcb446a2dc6a27d98b558eb2a786f7e4dee"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.10/historical-gates/g1-initial-receipt.json",
+      "bytes": 308,
+      "sha256": "df2140c63b877bdb844b1dc367c57157af807247d7529e187d9829cf16836bbd"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.10/historical-gates/g1-retry-receipt.json",
+      "bytes": 540,
+      "sha256": "c59bf0e226f2ea2560aa2b7d394b602bd9819d3f765e63e1cba4670119c4d09b"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.10/historical-gates/g1-review-exclusive-retry.log.gz",
+      "bytes": 69993,
+      "sha256": "8f0f2b03ec42d50545c065f5be22fe15ea9dcb7594fea8cf026d3b4ed46b4c47"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.10/historical-gates/g1-review-initial-failed.log.gz",
+      "bytes": 70250,
+      "sha256": "c890f57463a4504c9c970a8a505cf6e794cabbf9f90835dbf45ad1792a68e117"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.10/historical-gates/g2-author-ci.log.gz",
+      "bytes": 76520,
+      "sha256": "86156711ea5d4a7dc51c5ff98cc1eefc5e1e16762c97efb8eb6a490a094de58b"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.10/historical-gates/g2-correction.json",
+      "bytes": 962,
+      "sha256": "026071c62d20221ac305033cdc8816a078e9ceb9d81af7af843c6c7326551d5c"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.10/historical-gates/g2-verification.json",
+      "bytes": 499,
+      "sha256": "85a9032148bc12d059ac1ba739b2ed6bccf43b13730a00c899c95550a67e02b9"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.10/historical-gates/g3-author-ci.log.gz",
+      "bytes": 69749,
+      "sha256": "434694c21ddf471b60cf9a93aa4e94310d30ab07414c717dd4a78eeab00c9279"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.10/historical-gates/g3-ci-receipt.json",
+      "bytes": 1079,
+      "sha256": "9d3a302d70dd05a3ccce216b35278647718205845c3d1e959117361943521482"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.10/historical-gates/g4-ci-receipt.json",
+      "bytes": 566,
+      "sha256": "7b387fc2b612705d19970e9e0fa9e0432c30242175ef58b3503180f4acc1874a"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.10/historical-gates/g4-mutation-receipt.json",
+      "bytes": 1634,
+      "sha256": "51759f3f5b75dd42acede49cc0a64323ea75296271efdee22a0470a26ba62a68"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.10/historical-gates/g4-real-settle-mutation.log.gz",
+      "bytes": 616,
+      "sha256": "79a26c228120da28edd38871824d304a31cfe3319f6dace531159753fb2607f1"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.10/historical-gates/g4-restoration.json",
+      "bytes": 419,
+      "sha256": "57ad677d8fd2a5a7476218ff1a0114fb759c5321217092d466a5f8040d40054f"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.10/historical-gates/g4-review-ci.log.gz",
+      "bytes": 69892,
+      "sha256": "9ad9d05ef198531bc6be7de92484bdef2c52c8359c604e5a550762c4f5b57e67"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.10/invariant-index.json",
+      "bytes": 78981,
+      "sha256": "d82ea2f40b7ffc388966a357ecb1f23494d6ae27f2b48a4df0afe26ac9140a8b"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.10/manifest-surface.json",
+      "bytes": 4929,
+      "sha256": "fd2a9fc791ce8b36d882d46603494cd06c50677138477536f290d6c189a8ed2a"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.10/merged-outcomes.json",
+      "bytes": 1917,
+      "sha256": "607d78ac66e5528d2601db67f3e58ed8d4392dbb49c9e9f8bbcae16c9e4021a8"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.10/protocol-final-receipt.json",
+      "bytes": 461,
+      "sha256": "94ef0a69022ea1658d789942d8b5e1a98776d89da72fde4198d7545850bd2c73"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.10/qualified-residual-caller-matrix.json",
+      "bytes": 72773,
+      "sha256": "e631cd8184b080c36c327533d130bf9d870efb7d381a01700edb35c560418994"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.10/reference-index.json.gz",
+      "bytes": 1942160,
+      "sha256": "c58f9f861a73b106c6f0cd6773c53399d190485ef3005855a4655d35b2c0bf1d"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.10/source-inventory.json.gz",
+      "bytes": 290381,
+      "sha256": "ce68fa182cd23fdadaff3b5083c60a6f5c8325535059f604df40ee31bd22d8a2"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.10/source-tree-398c6f91.json",
+      "bytes": 56657,
+      "sha256": "747a6c0811c285173b7b1543b9a6dfc9390419fdc1c24dc88cf6848f5d5dbcd3"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.10/source-tree-8f61ab81.json",
+      "bytes": 56657,
+      "sha256": "c96499c937958f28ccad27940a7baa966418f8ad2732acc34ca82bf6cb64644d"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.10/test-declaration-inventory.json.gz",
+      "bytes": 245546,
+      "sha256": "56602917518cd7a77f1c48a9d93b839894dd825f89ffe3d095886bf2fe4f7a3d"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.10/token-footprint-receipt.json",
+      "bytes": 772,
+      "sha256": "d57ff2a24615867c16b666fdb91b067b935c3e79dcd5de005a6449a253276fa0"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.10/token-footprint/gate-report.json",
+      "bytes": 221,
+      "sha256": "39c2a7d747ed9ad0df90d7bdcd99fcda6e0c363d07a862c74c390e09eaeb69f7"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.10/token-footprint/measurement.json",
+      "bytes": 6064,
+      "sha256": "3e7e17748454c0e1476e93060db166c9f2d105f01b018bf56c0c12202a9eb78e"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.10/token-footprint/repeat.json",
+      "bytes": 6064,
+      "sha256": "3e7e17748454c0e1476e93060db166c9f2d105f01b018bf56c0c12202a9eb78e"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.10/validation.json",
+      "bytes": 454,
+      "sha256": "7ef63cd7113fab63ac9652d6ee303c12ae077b69ed6100200b8e7c876ca8f041"
+    }
+  ]
+}

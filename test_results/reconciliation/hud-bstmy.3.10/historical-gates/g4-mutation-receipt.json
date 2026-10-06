@@ -1,0 +1,52 @@
+{
+  "head": "a5312842111daa6bbdd7c27db9a27f450a32a082",
+  "behavioral_mutation_failed_as_required": true,
+  "normal_restored_pass": true,
+  "runs": [
+    {
+      "name": "independent-mutation",
+      "head": "a5312842111daa6bbdd7c27db9a27f450a32a082",
+      "command": [
+        "timeout",
+        "180s",
+        "cargo",
+        "test",
+        "-p",
+        "tze_hud_runtime",
+        "--lib",
+        "windowed::event_loop_harness::tests::focus_cleared_when_lease_revoked",
+        "--",
+        "--exact",
+        "--nocapture"
+      ],
+      "exit": 101,
+      "started_utc": "2026-10-06T05:20:02.235651+00:00",
+      "seconds": 25.338,
+      "log": "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-oh692/.handoff/hud-oh692/independent-mutation.log",
+      "log_sha256": "be2a9ff12b826eefe4b2464149458f5165b8977160aa922c262fcd77ad23a77d"
+    },
+    {
+      "name": "independent-restored-focus-gate",
+      "head": "a5312842111daa6bbdd7c27db9a27f450a32a082",
+      "command": [
+        "timeout",
+        "180s",
+        "cargo",
+        "test",
+        "-p",
+        "tze_hud_runtime",
+        "--lib",
+        "windowed::event_loop_harness::tests::focus_cleared_when_lease_revoked",
+        "--",
+        "--exact",
+        "--nocapture"
+      ],
+      "exit": 0,
+      "started_utc": "2026-10-06T05:20:27.576721+00:00",
+      "seconds": 21.135,
+      "log": "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-oh692/.handoff/hud-oh692/independent-restored-focus-gate.log",
+      "log_sha256": "e1d1efdd5c4fd7f9027436cf4085e0b781e28396d54d409d02492ac41372cd15"
+    }
+  ],
+  "tracked_clean": true
+}

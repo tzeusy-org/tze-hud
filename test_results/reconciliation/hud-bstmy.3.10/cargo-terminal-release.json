@@ -1,0 +1,16 @@
+{
+  "timestamp_unix": 1791275783.6483238,
+  "audited_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261",
+  "gate_runner_session_terminal": true,
+  "command": [
+    "ps",
+    "-u",
+    "orca",
+    "-o",
+    "pid,ppid,stat,comm"
+  ],
+  "exit": 0,
+  "active_build_processes": [],
+  "tracked_status": "",
+  "cargo_lease": "exclusive root warm target; all launched processes terminal; release requested"
+}

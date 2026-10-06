@@ -1,0 +1,2584 @@
+{
+  "audited_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261",
+  "mentions": 78,
+  "unique": 72,
+  "tests": [
+    {
+      "name": "agent_texture_budget_rejects_whole_upload_and_stores_nothing",
+      "documented_references": [
+        "agent_texture_budget_rejects_whole_upload_and_stores_nothing"
+      ],
+      "definitions": [
+        {
+          "end_line": 106,
+          "assertion_lines": [
+            96,
+            97,
+            101,
+            105
+          ],
+          "name": "agent_texture_budget_rejects_whole_upload_and_stores_nothing",
+          "path": "crates/tze_hud_resource/tests/store_behavior.rs",
+          "line": 84,
+          "attribute_lines": [
+            "#[tokio::test]"
+          ],
+          "body_sha256": "ccc88886d705a5898f3290973273b729059f8562c6f14885fc92b7006c75d87e"
+        }
+      ],
+      "current_execution": [
+        {
+          "line": 5283,
+          "text": "test agent_texture_budget_rejects_whole_upload_and_stores_nothing ... ok",
+          "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261"
+        }
+      ],
+      "execution_classification": "executed-existing-gate-at-audited-source",
+      "document_lines": [
+        125
+      ]
+    },
+    {
+      "name": "aggregate_limits_are_atomic_across_agents",
+      "documented_references": [
+        "aggregate_limits_are_atomic_across_agents"
+      ],
+      "definitions": [
+        {
+          "end_line": 410,
+          "assertion_lines": [
+            368,
+            383,
+            394,
+            398,
+            402,
+            406
+          ],
+          "name": "aggregate_limits_are_atomic_across_agents",
+          "path": "crates/tze_hud_runtime/src/mutation_budget_bridge.rs",
+          "line": 363,
+          "attribute_lines": [
+            "#[test]"
+          ],
+          "body_sha256": "5fa734d1935b96a9cea8d77b650234eda6f11a07bcd76dda8df5a70c3203d33e"
+        }
+      ],
+      "current_execution": [
+        {
+          "line": 5351,
+          "text": "test mutation_budget_bridge::tests::aggregate_limits_are_atomic_across_agents ... ok",
+          "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261"
+        }
+      ],
+      "execution_classification": "executed-existing-gate-at-audited-source",
+      "document_lines": [
+        124
+      ]
+    },
+    {
+      "name": "chunk_protocol_errors_have_stable_codes",
+      "documented_references": [
+        "chunk_protocol_errors_have_stable_codes"
+      ],
+      "definitions": [
+        {
+          "end_line": 320,
+          "assertion_lines": [
+            315,
+            318,
+            319
+          ],
+          "name": "chunk_protocol_errors_have_stable_codes",
+          "path": "crates/tze_hud_resource/tests/store_behavior.rs",
+          "line": 280,
+          "attribute_lines": [
+            "#[tokio::test]"
+          ],
+          "body_sha256": "c108de0e15ccca0df5d1ee2bd3985f35419a367c6176e3c261a3056c1da02c90"
+        }
+      ],
+      "current_execution": [
+        {
+          "line": 5277,
+          "text": "test chunk_protocol_errors_have_stable_codes ... ok",
+          "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261"
+        }
+      ],
+      "execution_classification": "executed-existing-gate-at-audited-source",
+      "document_lines": [
+        142
+      ]
+    },
+    {
+      "name": "chunked_upload_rejected_at_complete_frees_its_slot_and_stores_nothing",
+      "documented_references": [
+        "chunked_upload_rejected_at_complete_frees_its_slot_and_stores_nothing"
+      ],
+      "definitions": [
+        {
+          "end_line": 229,
+          "assertion_lines": [
+            226,
+            227,
+            228
+          ],
+          "name": "chunked_upload_rejected_at_complete_frees_its_slot_and_stores_nothing",
+          "path": "crates/tze_hud_resource/tests/store_behavior.rs",
+          "line": 204,
+          "attribute_lines": [
+            "#[tokio::test]"
+          ],
+          "body_sha256": "03f7869828d4986aac2fedc3da255253b247a9cae13bd668e722d9914195c223"
+        }
+      ],
+      "current_execution": [
+        {
+          "line": 5279,
+          "text": "test chunked_upload_rejected_at_complete_frees_its_slot_and_stores_nothing ... ok",
+          "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261"
+        }
+      ],
+      "execution_classification": "executed-existing-gate-at-audited-source",
+      "document_lines": [
+        130
+      ]
+    },
+    {
+      "name": "delay_ms_holds_content_until_due",
+      "documented_references": [
+        "delay_ms_holds_content_until_due"
+      ],
+      "definitions": [
+        {
+          "end_line": 556,
+          "assertion_lines": [
+            537,
+            540,
+            551
+          ],
+          "name": "delay_ms_holds_content_until_due",
+          "path": "crates/tze_hud_mcp/src/server/tests.rs",
+          "line": 529,
+          "attribute_lines": [
+            "#[tokio::test]"
+          ],
+          "body_sha256": "8419f6e5dddb92a469449838afd2099149814419a34308c7c4e7da907b55faa5"
+        }
+      ],
+      "current_execution": [
+        {
+          "line": 4601,
+          "text": "test server::tests::delay_ms_holds_content_until_due ... ok",
+          "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261"
+        }
+      ],
+      "execution_classification": "executed-existing-gate-at-audited-source",
+      "document_lines": [
+        16
+      ]
+    },
+    {
+      "name": "disconnect_then_reconnect_within_grace_resumes_same_surface_without_duplication",
+      "documented_references": [
+        "disconnect_then_reconnect_within_grace_resumes_same_surface_without_duplication"
+      ],
+      "definitions": [
+        {
+          "end_line": 1798,
+          "assertion_lines": [
+            1778,
+            1782,
+            1787,
+            1792,
+            1793,
+            1794,
+            1796,
+            1797
+          ],
+          "name": "disconnect_then_reconnect_within_grace_resumes_same_surface_without_duplication",
+          "path": "crates/tze_hud_runtime/src/portal_projection_driver.rs",
+          "line": 1767,
+          "attribute_lines": [
+            "#[test]"
+          ],
+          "body_sha256": "fe9abf7983b746bb5024a4f80876c91a78b6d24439769e1e112a49f60f230551"
+        }
+      ],
+      "current_execution": [
+        {
+          "line": 5443,
+          "text": "test portal_projection_driver::tests::disconnect_then_reconnect_within_grace_resumes_same_surface_without_duplication ... ok",
+          "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261"
+        }
+      ],
+      "execution_classification": "executed-existing-gate-at-audited-source",
+      "document_lines": [
+        82
+      ]
+    },
+    {
+      "name": "disconnect_transitions_to_orphaned_and_sets_disconnection_badge",
+      "documented_references": [
+        "disconnect_transitions_to_orphaned_and_sets_disconnection_badge"
+      ],
+      "definitions": [
+        {
+          "end_line": 130,
+          "assertion_lines": [
+            93,
+            98,
+            112,
+            119,
+            126
+          ],
+          "name": "disconnect_transitions_to_orphaned_and_sets_disconnection_badge",
+          "path": "crates/tze_hud_protocol/tests/lease_governance.rs",
+          "line": 84,
+          "attribute_lines": [
+            "#[test]"
+          ],
+          "body_sha256": "5a3f5abd52b3fa133984a7b9f4e4cc19f1fb465e876d46828fc350cfe7aa98e4"
+        }
+      ],
+      "current_execution": [
+        {
+          "line": 5141,
+          "text": "test disconnect_transitions_to_orphaned_and_sets_disconnection_badge ... ok",
+          "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261"
+        }
+      ],
+      "execution_classification": "executed-existing-gate-at-audited-source",
+      "document_lines": [
+        80
+      ]
+    },
+    {
+      "name": "error_codes_are_unique_and_documented",
+      "documented_references": [
+        "error_codes_are_unique_and_documented"
+      ],
+      "definitions": [
+        {
+          "end_line": 142,
+          "assertion_lines": [
+            133,
+            137
+          ],
+          "name": "error_codes_are_unique_and_documented",
+          "path": "crates/tze_hud_mcp/src/error.rs",
+          "line": 130,
+          "attribute_lines": [
+            "#[test]"
+          ],
+          "body_sha256": "a0232daa2f3b4c633f4ae62ec15bb33f0fd0f5e0ebc1d073d2b5d8ed222fd243"
+        }
+      ],
+      "current_execution": [
+        {
+          "line": 4600,
+          "text": "test error::tests::error_codes_are_unique_and_documented ... ok",
+          "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261"
+        }
+      ],
+      "execution_classification": "executed-existing-gate-at-audited-source",
+      "document_lines": [
+        139
+      ]
+    },
+    {
+      "name": "every_returned_code_is_in_the_closed_set",
+      "documented_references": [
+        "every_returned_code_is_in_the_closed_set"
+      ],
+      "definitions": [
+        {
+          "end_line": 369,
+          "assertion_lines": [
+            364
+          ],
+          "name": "every_returned_code_is_in_the_closed_set",
+          "path": "crates/tze_hud_mcp/src/server/tests.rs",
+          "line": 338,
+          "attribute_lines": [
+            "#[tokio::test]"
+          ],
+          "body_sha256": "c5744966af924610ee3a6e79bdc9a7a77cccbf39dbbb7e990a339ab6ddd3b299"
+        }
+      ],
+      "current_execution": [
+        {
+          "line": 4614,
+          "text": "test server::tests::every_returned_code_is_in_the_closed_set ... ok",
+          "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261"
+        }
+      ],
+      "execution_classification": "executed-existing-gate-at-audited-source",
+      "document_lines": [
+        140
+      ]
+    },
+    {
+      "name": "grace_period_expiry_removes_tile_and_nodes",
+      "documented_references": [
+        "grace_period_expiry_removes_tile_and_nodes"
+      ],
+      "definitions": [
+        {
+          "end_line": 311,
+          "assertion_lines": [
+            273,
+            288,
+            300,
+            307
+          ],
+          "name": "grace_period_expiry_removes_tile_and_nodes",
+          "path": "crates/tze_hud_protocol/tests/lease_governance.rs",
+          "line": 265,
+          "attribute_lines": [
+            "#[test]"
+          ],
+          "body_sha256": "446ab454c25f022bab879692bbeab55a3fc0582b31477a037a445567f9cc6a69"
+        }
+      ],
+      "current_execution": [
+        {
+          "line": 5147,
+          "text": "test grace_period_expiry_removes_tile_and_nodes ... ok",
+          "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261"
+        }
+      ],
+      "execution_classification": "executed-existing-gate-at-audited-source",
+      "document_lines": [
+        81
+      ]
+    },
+    {
+      "name": "grpc_batch_expires_at_sweeps_tile",
+      "documented_references": [
+        "grpc_batch_expires_at_sweeps_tile"
+      ],
+      "definitions": [
+        {
+          "end_line": 584,
+          "assertion_lines": [
+            568,
+            574,
+            575,
+            577,
+            579,
+            580
+          ],
+          "name": "grpc_batch_expires_at_sweeps_tile",
+          "path": "crates/tze_hud_protocol/src/session_server/tests/invariants.rs",
+          "line": 547,
+          "attribute_lines": [
+            "#[tokio::test]"
+          ],
+          "body_sha256": "5e6b6e27845b17e7b30466c61595b269e9d2183c80733008ddb4b4810762b275"
+        }
+      ],
+      "current_execution": [
+        {
+          "line": 4921,
+          "text": "test session_server::tests::invariants::grpc_batch_expires_at_sweeps_tile ... ok",
+          "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261"
+        }
+      ],
+      "execution_classification": "executed-existing-gate-at-audited-source",
+      "document_lines": [
+        22
+      ]
+    },
+    {
+      "name": "grpc_batch_present_at_holds_content_until_due",
+      "documented_references": [
+        "grpc_batch_present_at_holds_content_until_due"
+      ],
+      "definitions": [
+        {
+          "end_line": 542,
+          "assertion_lines": [
+            525,
+            531,
+            533,
+            534,
+            537,
+            538
+          ],
+          "name": "grpc_batch_present_at_holds_content_until_due",
+          "path": "crates/tze_hud_protocol/src/session_server/tests/invariants.rs",
+          "line": 503,
+          "attribute_lines": [
+            "#[tokio::test]"
+          ],
+          "body_sha256": "dabda89fe5045f64c758a1e1447f515b59f3fbf338f79018832f5fb8d89507fd"
+        }
+      ],
+      "current_execution": [
+        {
+          "line": 4922,
+          "text": "test session_server::tests::invariants::grpc_batch_present_at_holds_content_until_due ... ok",
+          "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261"
+        }
+      ],
+      "execution_classification": "executed-existing-gate-at-audited-source",
+      "document_lines": [
+        22
+      ]
+    },
+    {
+      "name": "grpc_disconnect_orphans_leases_and_badges_tiles",
+      "documented_references": [
+        "grpc_disconnect_orphans_leases_and_badges_tiles"
+      ],
+      "definitions": [
+        {
+          "end_line": 222,
+          "assertion_lines": [
+            182,
+            196,
+            198,
+            202,
+            207,
+            208,
+            212,
+            220
+          ],
+          "name": "grpc_disconnect_orphans_leases_and_badges_tiles",
+          "path": "crates/tze_hud_protocol/src/session_server/tests/invariants.rs",
+          "line": 177,
+          "attribute_lines": [
+            "#[tokio::test]"
+          ],
+          "body_sha256": "c4312d2cb4cf7397760a3ce626701a3cbc1d68d2bca76155946ff940f81262a7"
+        }
+      ],
+      "current_execution": [
+        {
+          "line": 4937,
+          "text": "test session_server::tests::invariants::grpc_disconnect_orphans_leases_and_badges_tiles ... ok",
+          "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261"
+        }
+      ],
+      "execution_classification": "executed-existing-gate-at-audited-source",
+      "document_lines": [
+        84
+      ]
+    },
+    {
+      "name": "grpc_grace_expiry_reclaims_orphaned_lease_and_rejects_resume",
+      "documented_references": [
+        "grpc_grace_expiry_reclaims_orphaned_lease_and_rejects_resume"
+      ],
+      "definitions": [
+        {
+          "end_line": 282,
+          "assertion_lines": [
+            265,
+            266,
+            270,
+            271,
+            272,
+            273,
+            278
+          ],
+          "name": "grpc_grace_expiry_reclaims_orphaned_lease_and_rejects_resume",
+          "path": "crates/tze_hud_protocol/src/session_server/tests/invariants.rs",
+          "line": 256,
+          "attribute_lines": [
+            "#[tokio::test]"
+          ],
+          "body_sha256": "a409bcb907577a3ba58f6e40ad308b08467b7e1ae0d9789dc91d51e43f1cb755"
+        }
+      ],
+      "current_execution": [
+        {
+          "line": 4934,
+          "text": "test session_server::tests::invariants::grpc_grace_expiry_reclaims_orphaned_lease_and_rejects_resume ... ok",
+          "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261"
+        }
+      ],
+      "execution_classification": "executed-existing-gate-at-audited-source",
+      "document_lines": [
+        86
+      ]
+    },
+    {
+      "name": "grpc_resume_within_grace_restores_same_lease_and_tile",
+      "documented_references": [
+        "grpc_resume_within_grace_restores_same_lease_and_tile"
+      ],
+      "definitions": [
+        {
+          "end_line": 251,
+          "assertion_lines": [
+            236,
+            242,
+            243,
+            244
+          ],
+          "name": "grpc_resume_within_grace_restores_same_lease_and_tile",
+          "path": "crates/tze_hud_protocol/src/session_server/tests/invariants.rs",
+          "line": 227,
+          "attribute_lines": [
+            "#[tokio::test]"
+          ],
+          "body_sha256": "c39908b0a8cef1db7aea2cf3caa9cb952c9541dbc95f7d55a92e2c05cbf203a0"
+        }
+      ],
+      "current_execution": [
+        {
+          "line": 4936,
+          "text": "test session_server::tests::invariants::grpc_resume_within_grace_restores_same_lease_and_tile ... ok",
+          "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261"
+        }
+      ],
+      "execution_classification": "executed-existing-gate-at-audited-source",
+      "document_lines": [
+        85
+      ]
+    },
+    {
+      "name": "grpc_zone_publish_expires_at_is_swept",
+      "documented_references": [
+        "grpc_zone_publish_expires_at_is_swept"
+      ],
+      "definitions": [
+        {
+          "end_line": 380,
+          "assertion_lines": [
+            366,
+            370,
+            376
+          ],
+          "name": "grpc_zone_publish_expires_at_is_swept",
+          "path": "crates/tze_hud_protocol/src/session_server/tests/invariants.rs",
+          "line": 354,
+          "attribute_lines": [
+            "#[tokio::test]"
+          ],
+          "body_sha256": "1ff9842e766d36eb369486657c8d9e9bee8e8b2f98314818544d52f61ae78bed"
+        }
+      ],
+      "current_execution": [
+        {
+          "line": 4923,
+          "text": "test session_server::tests::invariants::grpc_zone_publish_expires_at_is_swept ... ok",
+          "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261"
+        }
+      ],
+      "execution_classification": "executed-existing-gate-at-audited-source",
+      "document_lines": [
+        21
+      ]
+    },
+    {
+      "name": "grpc_zone_publish_present_at_is_held_until_due",
+      "documented_references": [
+        "grpc_zone_publish_present_at_is_held_until_due"
+      ],
+      "definitions": [
+        {
+          "end_line": 418,
+          "assertion_lines": [
+            397,
+            401,
+            402,
+            404,
+            405,
+            408,
+            409,
+            410,
+            411
+          ],
+          "name": "grpc_zone_publish_present_at_is_held_until_due",
+          "path": "crates/tze_hud_protocol/src/session_server/tests/invariants.rs",
+          "line": 385,
+          "attribute_lines": [
+            "#[tokio::test]"
+          ],
+          "body_sha256": "4e17928a026e8496d18c9587b3b3a7c3b0c63d684f0e64a032f4055fb2630f8b"
+        }
+      ],
+      "current_execution": [
+        {
+          "line": 4925,
+          "text": "test session_server::tests::invariants::grpc_zone_publish_present_at_is_held_until_due ... ok",
+          "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261"
+        }
+      ],
+      "execution_classification": "executed-existing-gate-at-audited-source",
+      "document_lines": [
+        21
+      ]
+    },
+    {
+      "name": "grpc_zone_publish_ttl_sets_expiry_and_is_swept",
+      "documented_references": [
+        "grpc_zone_publish_ttl_sets_expiry_and_is_swept"
+      ],
+      "definitions": [
+        {
+          "end_line": 349,
+          "assertion_lines": [
+            330,
+            336,
+            339,
+            342
+          ],
+          "name": "grpc_zone_publish_ttl_sets_expiry_and_is_swept",
+          "path": "crates/tze_hud_protocol/src/session_server/tests/invariants.rs",
+          "line": 325,
+          "attribute_lines": [
+            "#[tokio::test]"
+          ],
+          "body_sha256": "7d7482141b7f6000ed9c45cab2390cbce999460fef4b159bbf2ff9bb5b8198f9"
+        }
+      ],
+      "current_execution": [
+        {
+          "line": 4924,
+          "text": "test session_server::tests::invariants::grpc_zone_publish_ttl_sets_expiry_and_is_swept ... ok",
+          "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261"
+        }
+      ],
+      "execution_classification": "executed-existing-gate-at-audited-source",
+      "document_lines": [
+        20
+      ]
+    },
+    {
+      "name": "hold_moves_the_fade_deadline_and_ttl_zero_never_fades",
+      "documented_references": [
+        "hold_moves_the_fade_deadline_and_ttl_zero_never_fades"
+      ],
+      "definitions": [
+        {
+          "end_line": 507,
+          "assertion_lines": [
+            444,
+            448,
+            457,
+            459,
+            461,
+            465,
+            471,
+            473,
+            474,
+            480,
+            486,
+            487,
+            500,
+            506
+          ],
+          "name": "hold_moves_the_fade_deadline_and_ttl_zero_never_fades",
+          "path": "crates/tze_hud_compositor/src/renderer/tests/idle_gate.rs",
+          "line": 431,
+          "attribute_lines": [
+            "#[tokio::test]"
+          ],
+          "body_sha256": "00cff2092ce173c4553a7c2d285158423cfd72684fd1843cde66e2bb91b964c3"
+        }
+      ],
+      "current_execution": [
+        {
+          "line": 3492,
+          "text": "test renderer::tests::idle_gate::hold_moves_the_fade_deadline_and_ttl_zero_never_fades ... ok",
+          "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261"
+        }
+      ],
+      "execution_classification": "executed-existing-gate-at-audited-source",
+      "document_lines": [
+        19
+      ]
+    },
+    {
+      "name": "hotkey_event_enters_safe_mode_and_suspends_leases",
+      "documented_references": [
+        "hotkey_event_enters_safe_mode_and_suspends_leases",
+        "hotkey_event_enters_safe_mode_and_suspends_leases"
+      ],
+      "definitions": [
+        {
+          "end_line": 159,
+          "assertion_lines": [
+            152,
+            153,
+            157,
+            158
+          ],
+          "name": "hotkey_event_enters_safe_mode_and_suspends_leases",
+          "path": "crates/tze_hud_runtime/src/windowed/safe_mode_toggle.rs",
+          "line": 113,
+          "attribute_lines": [
+            "#[tokio::test(flavor = \"multi_thread\")]"
+          ],
+          "body_sha256": "2592ede687787a66280b917b177a858d09e12e856d1774e98d676920f1c61f50"
+        }
+      ],
+      "current_execution": [
+        {
+          "line": 5805,
+          "text": "test windowed::safe_mode_toggle::tests::hotkey_event_enters_safe_mode_and_suspends_leases ... ok",
+          "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261"
+        }
+      ],
+      "execution_classification": "executed-existing-gate-at-audited-source",
+      "document_lines": [
+        46,
+        102
+      ]
+    },
+    {
+      "name": "hud_publish_in_safe_mode_returns_safe_mode_active",
+      "documented_references": [
+        "hud_publish_in_safe_mode_returns_safe_mode_active"
+      ],
+      "definitions": [
+        {
+          "end_line": 1179,
+          "assertion_lines": [
+            1160,
+            1167,
+            1170,
+            1178
+          ],
+          "name": "hud_publish_in_safe_mode_returns_safe_mode_active",
+          "path": "crates/tze_hud_mcp/src/server/tests.rs",
+          "line": 1123,
+          "attribute_lines": [
+            "#[tokio::test]"
+          ],
+          "body_sha256": "19701590dc4543d4d1ed77b1a82435bee016dc7d42f2bf41ee21618984c9c11b"
+        }
+      ],
+      "current_execution": [
+        {
+          "line": 4608,
+          "text": "test server::tests::hud_publish_in_safe_mode_returns_safe_mode_active ... ok",
+          "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261"
+        }
+      ],
+      "execution_classification": "executed-existing-gate-at-audited-source",
+      "document_lines": [
+        64
+      ]
+    },
+    {
+      "name": "mutation_batch_oversized_rejected_with_structured_error",
+      "documented_references": [
+        "mutation_batch_oversized_rejected_with_structured_error"
+      ],
+      "definitions": [
+        {
+          "end_line": 404,
+          "assertion_lines": [
+            395,
+            396,
+            397,
+            400
+          ],
+          "name": "mutation_batch_oversized_rejected_with_structured_error",
+          "path": "crates/tze_hud_protocol/tests/fuzz_protocol_boundary.rs",
+          "line": 377,
+          "attribute_lines": [
+            "#[test]"
+          ],
+          "body_sha256": "ca3e1576df417d13ea2ef298afbd0f8d9a83ec801b5608f2ffa59195d9f254e4"
+        }
+      ],
+      "current_execution": [
+        {
+          "line": 5104,
+          "text": "test mutation_batch_oversized_rejected_with_structured_error ... ok",
+          "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261"
+        }
+      ],
+      "execution_classification": "executed-existing-gate-at-audited-source",
+      "document_lines": [
+        138
+      ]
+    },
+    {
+      "name": "notification_ttl_zero_is_held_and_hold_retimes_it",
+      "documented_references": [
+        "notification_ttl_zero_is_held_and_hold_retimes_it"
+      ],
+      "definitions": [
+        {
+          "end_line": 820,
+          "assertion_lines": [
+            758,
+            762,
+            764,
+            773,
+            776,
+            790,
+            804,
+            813
+          ],
+          "name": "notification_ttl_zero_is_held_and_hold_retimes_it",
+          "path": "crates/tze_hud_mcp/src/server/tests.rs",
+          "line": 751,
+          "attribute_lines": [
+            "#[tokio::test]"
+          ],
+          "body_sha256": "ba0b0060775ac5ef100acb4e521a911c5fb3ab22588badcc5ffea0eb3add5d8f"
+        }
+      ],
+      "current_execution": [
+        {
+          "line": 4631,
+          "text": "test server::tests::notification_ttl_zero_is_held_and_hold_retimes_it ... ok",
+          "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261"
+        }
+      ],
+      "execution_classification": "executed-existing-gate-at-audited-source",
+      "document_lines": [
+        16
+      ]
+    },
+    {
+      "name": "orphaned_tile_emits_disconnection_badge_draw_cmd",
+      "documented_references": [
+        "orphaned_tile_emits_disconnection_badge_draw_cmd"
+      ],
+      "definitions": [
+        {
+          "end_line": 298,
+          "assertion_lines": [
+            271,
+            278,
+            282,
+            284,
+            294
+          ],
+          "name": "orphaned_tile_emits_disconnection_badge_draw_cmd",
+          "path": "crates/tze_hud_compositor/src/renderer/tests/focus_chrome.rs",
+          "line": 248,
+          "attribute_lines": [
+            "#[tokio::test]"
+          ],
+          "body_sha256": "2c56dd9e70c3f4d97d84f910c6d993835c181beaa630046d437162f74c87d3e5"
+        }
+      ],
+      "current_execution": [
+        {
+          "line": 3462,
+          "text": "test renderer::tests::focus_chrome::orphaned_tile_emits_disconnection_badge_draw_cmd ... ok",
+          "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261"
+        }
+      ],
+      "execution_classification": "executed-existing-gate-at-audited-source",
+      "document_lines": [
+        88
+      ]
+    },
+    {
+      "name": "per_resource_size_cap_rejects_chunked_upload_at_start",
+      "documented_references": [
+        "per_resource_size_cap_rejects_chunked_upload_at_start"
+      ],
+      "definitions": [
+        {
+          "end_line": 169,
+          "assertion_lines": [
+            163,
+            164
+          ],
+          "name": "per_resource_size_cap_rejects_chunked_upload_at_start",
+          "path": "crates/tze_hud_resource/tests/store_behavior.rs",
+          "line": 151,
+          "attribute_lines": [
+            "#[tokio::test]"
+          ],
+          "body_sha256": "95e56c90d80cb79468df6a3e63e5214d2addc8fd77d3fc87fdf07d03fd4e1567"
+        }
+      ],
+      "current_execution": [
+        {
+          "line": 5276,
+          "text": "test per_resource_size_cap_rejects_chunked_upload_at_start ... ok",
+          "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261"
+        }
+      ],
+      "execution_classification": "executed-existing-gate-at-audited-source",
+      "document_lines": [
+        128
+      ]
+    },
+    {
+      "name": "poc_override_exit_safe_mode_with_agent_hung_during_it",
+      "documented_references": [
+        "poc_override_exit_safe_mode_with_agent_hung_during_it"
+      ],
+      "definitions": [
+        {
+          "end_line": 1065,
+          "assertion_lines": [
+            1063
+          ],
+          "name": "poc_override_exit_safe_mode_with_agent_hung_during_it",
+          "path": "tests/integration/poc_acceptance.rs",
+          "line": 1042,
+          "attribute_lines": [
+            "#[tokio::test(flavor = \"multi_thread\", worker_threads = 2)]"
+          ],
+          "body_sha256": "1e84dd0a31cf01f2f9eb45513813b00e9c7f3586d162171ecaa09e2582257fa2"
+        }
+      ],
+      "current_execution": [
+        {
+          "line": 6844,
+          "text": "test poc_override_exit_safe_mode_with_agent_hung_during_it ... ok",
+          "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261"
+        }
+      ],
+      "execution_classification": "executed-existing-gate-at-audited-source",
+      "document_lines": [
+        61
+      ]
+    },
+    {
+      "name": "poc_override_notifies_the_agent",
+      "documented_references": [
+        "poc_override_notifies_the_agent"
+      ],
+      "definitions": [
+        {
+          "end_line": 1104,
+          "assertion_lines": [
+            1084,
+            1091,
+            1097,
+            1098,
+            1099,
+            1103
+          ],
+          "name": "poc_override_notifies_the_agent",
+          "path": "tests/integration/poc_acceptance.rs",
+          "line": 1071,
+          "attribute_lines": [
+            "#[tokio::test(flavor = \"multi_thread\", worker_threads = 2)]"
+          ],
+          "body_sha256": "dafccd0bfd3c6feb21e9ccb9225dd9817aec184e2ca428bcf4640f5c3fef05b3"
+        }
+      ],
+      "current_execution": [
+        {
+          "line": 6845,
+          "text": "test poc_override_notifies_the_agent ... ok",
+          "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261"
+        }
+      ],
+      "execution_classification": "executed-existing-gate-at-audited-source",
+      "document_lines": [
+        62
+      ]
+    },
+    {
+      "name": "poc_override_safe_mode_wins_with_hung_grpc_agent",
+      "documented_references": [
+        "poc_override_safe_mode_wins_with_hung_grpc_agent"
+      ],
+      "definitions": [
+        {
+          "end_line": 1035,
+          "assertion_lines": [
+            998,
+            1011,
+            1019,
+            1020,
+            1025,
+            1028
+          ],
+          "name": "poc_override_safe_mode_wins_with_hung_grpc_agent",
+          "path": "tests/integration/poc_acceptance.rs",
+          "line": 995,
+          "attribute_lines": [
+            "#[tokio::test(flavor = \"multi_thread\", worker_threads = 2)]"
+          ],
+          "body_sha256": "4a361fbbe4394ef5ffaa4239c2305217dde3bf8ec394d715137bb5f31361b742"
+        }
+      ],
+      "current_execution": [
+        {
+          "line": 6843,
+          "text": "test poc_override_safe_mode_wins_with_hung_grpc_agent ... ok",
+          "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261"
+        }
+      ],
+      "execution_classification": "executed-existing-gate-at-audited-source",
+      "document_lines": [
+        60
+      ]
+    },
+    {
+      "name": "poc_portal_abandoned_is_reclaimed",
+      "documented_references": [
+        "poc_portal_abandoned_is_reclaimed",
+        "poc_portal_abandoned_is_reclaimed"
+      ],
+      "definitions": [
+        {
+          "end_line": 735,
+          "assertion_lines": [
+            719,
+            720,
+            725,
+            729,
+            730,
+            733,
+            734
+          ],
+          "name": "poc_portal_abandoned_is_reclaimed",
+          "path": "tests/integration/poc_acceptance.rs",
+          "line": 711,
+          "attribute_lines": [
+            "#[tokio::test(flavor = \"multi_thread\", worker_threads = 2)]"
+          ],
+          "body_sha256": "8b48b8adc99a2f292f23e8dadbddd293df02ed6b8719b83e6251686ae5f912d5"
+        }
+      ],
+      "current_execution": [
+        {
+          "line": 6849,
+          "text": "test poc_portal_abandoned_is_reclaimed ... ok",
+          "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261"
+        }
+      ],
+      "execution_classification": "executed-existing-gate-at-audited-source",
+      "document_lines": [
+        90,
+        152
+      ]
+    },
+    {
+      "name": "poc_portal_viewer_dismiss_then_mcp_verbs",
+      "documented_references": [
+        "poc_portal_viewer_dismiss_then_mcp_verbs"
+      ],
+      "definitions": [
+        {
+          "end_line": 708,
+          "assertion_lines": [
+            677,
+            681,
+            686,
+            691,
+            699,
+            702,
+            703
+          ],
+          "name": "poc_portal_viewer_dismiss_then_mcp_verbs",
+          "path": "tests/integration/poc_acceptance.rs",
+          "line": 673,
+          "attribute_lines": [
+            "#[tokio::test(flavor = \"multi_thread\", worker_threads = 2)]"
+          ],
+          "body_sha256": "3955286a15e4a505c1b91d5a1ae9d6b0f05fdef9427e139de0e6f6c7a743750b"
+        }
+      ],
+      "current_execution": [
+        {
+          "line": 6850,
+          "text": "test poc_portal_viewer_dismiss_then_mcp_verbs ... ok",
+          "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261"
+        }
+      ],
+      "execution_classification": "executed-existing-gate-at-audited-source",
+      "document_lines": [
+        56
+      ]
+    },
+    {
+      "name": "poc_tile_claim_with_placement_two_round_trips",
+      "documented_references": [
+        "poc_tile_claim_with_placement_two_round_trips"
+      ],
+      "definitions": [
+        {
+          "end_line": 891,
+          "assertion_lines": [
+            843,
+            850,
+            858,
+            862,
+            864,
+            868,
+            869,
+            884,
+            887
+          ],
+          "name": "poc_tile_claim_with_placement_two_round_trips",
+          "path": "tests/integration/poc_acceptance.rs",
+          "line": 838,
+          "attribute_lines": [
+            "#[tokio::test(flavor = \"multi_thread\", worker_threads = 2)]"
+          ],
+          "body_sha256": "375f142d3eb4485c95d196d443be6273ec04b783b38bda2c838c71805df3a5f8"
+        }
+      ],
+      "current_execution": [
+        {
+          "line": 6842,
+          "text": "test poc_tile_claim_with_placement_two_round_trips ... ok",
+          "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261"
+        }
+      ],
+      "execution_classification": "executed-existing-gate-at-audited-source",
+      "document_lines": [
+        90
+      ]
+    },
+    {
+      "name": "poc_tile_update_then_orphan_then_reclaim_after_grace",
+      "documented_references": [
+        "poc_tile_update_then_orphan_then_reclaim_after_grace"
+      ],
+      "definitions": [
+        {
+          "end_line": 949,
+          "assertion_lines": [
+            907,
+            912,
+            923,
+            924,
+            934,
+            941,
+            943,
+            944
+          ],
+          "name": "poc_tile_update_then_orphan_then_reclaim_after_grace",
+          "path": "tests/integration/poc_acceptance.rs",
+          "line": 898,
+          "attribute_lines": [
+            "#[tokio::test(flavor = \"multi_thread\", worker_threads = 2)]"
+          ],
+          "body_sha256": "5c624686720099801d1643743138a755e3ac74284223c9ef40bb23eca9694911"
+        }
+      ],
+      "current_execution": [
+        {
+          "line": 6852,
+          "text": "test poc_tile_update_then_orphan_then_reclaim_after_grace ... ok",
+          "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261"
+        }
+      ],
+      "execution_classification": "executed-existing-gate-at-audited-source",
+      "document_lines": [
+        91
+      ]
+    },
+    {
+      "name": "poc_zone_delay_ms_appears_on_schedule",
+      "documented_references": [
+        "poc_zone_delay_ms_appears_on_schedule",
+        "poc_zone_delay_ms_appears_on_schedule"
+      ],
+      "definitions": [
+        {
+          "end_line": 792,
+          "assertion_lines": [
+            779,
+            780,
+            783,
+            785,
+            787,
+            789,
+            791
+          ],
+          "name": "poc_zone_delay_ms_appears_on_schedule",
+          "path": "tests/integration/poc_acceptance.rs",
+          "line": 770,
+          "attribute_lines": [
+            "#[tokio::test(flavor = \"multi_thread\", worker_threads = 2)]"
+          ],
+          "body_sha256": "d5210a5cfd765f107fcb5e2fd32037c6c7319b8304d449b1b4300d19396af317"
+        }
+      ],
+      "current_execution": [
+        {
+          "line": 6846,
+          "text": "test poc_zone_delay_ms_appears_on_schedule ... ok",
+          "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261"
+        }
+      ],
+      "execution_classification": "executed-existing-gate-at-audited-source",
+      "document_lines": [
+        24,
+        153
+      ]
+    },
+    {
+      "name": "poc_zone_notification_ttl_disappears_unattended",
+      "documented_references": [
+        "poc_zone_notification_ttl_disappears_unattended",
+        "poc_zone_notification_ttl_disappears_unattended"
+      ],
+      "definitions": [
+        {
+          "end_line": 767,
+          "assertion_lines": [
+            750,
+            751,
+            757,
+            758,
+            762,
+            764,
+            766
+          ],
+          "name": "poc_zone_notification_ttl_disappears_unattended",
+          "path": "tests/integration/poc_acceptance.rs",
+          "line": 738,
+          "attribute_lines": [
+            "#[tokio::test(flavor = \"multi_thread\", worker_threads = 2)]"
+          ],
+          "body_sha256": "7c8b528a156b5f87148f390d559a1995bc53a2e2ff7dd4093a8cbc99619766bd"
+        }
+      ],
+      "current_execution": [
+        {
+          "line": 6851,
+          "text": "test poc_zone_notification_ttl_disappears_unattended ... ok",
+          "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261"
+        }
+      ],
+      "execution_classification": "executed-existing-gate-at-audited-source",
+      "document_lines": [
+        23,
+        153
+      ]
+    },
+    {
+      "name": "registered_budget_rejects_mutation_above_tile_limit",
+      "documented_references": [
+        "mutation_budget_bridge::tests::registered_budget_rejects_mutation_above_tile_limit"
+      ],
+      "definitions": [
+        {
+          "end_line": 360,
+          "assertion_lines": [
+            335,
+            348,
+            353
+          ],
+          "name": "registered_budget_rejects_mutation_above_tile_limit",
+          "path": "crates/tze_hud_runtime/src/mutation_budget_bridge.rs",
+          "line": 332,
+          "attribute_lines": [
+            "#[test]"
+          ],
+          "body_sha256": "0e31989853b4b30fb2a322704324df5f6ea8dd99ce0d0e281fe25d6df8afbf9f"
+        }
+      ],
+      "current_execution": [
+        {
+          "line": 5353,
+          "text": "test mutation_budget_bridge::tests::registered_budget_rejects_mutation_above_tile_limit ... ok",
+          "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261"
+        }
+      ],
+      "execution_classification": "executed-existing-gate-at-audited-source",
+      "document_lines": [
+        123
+      ]
+    },
+    {
+      "name": "rejections_carry_stable_wire_code_and_actionable_detail",
+      "documented_references": [
+        "rejections_carry_stable_wire_code_and_actionable_detail"
+      ],
+      "definitions": [
+        {
+          "end_line": 277,
+          "assertion_lines": [
+            271,
+            273,
+            274,
+            276
+          ],
+          "name": "rejections_carry_stable_wire_code_and_actionable_detail",
+          "path": "crates/tze_hud_resource/tests/store_behavior.rs",
+          "line": 236,
+          "attribute_lines": [
+            "#[tokio::test]"
+          ],
+          "body_sha256": "8cdf9f221d88ec35b5defe5cb09a26152ee770c5942c3699befb6904bf983010"
+        }
+      ],
+      "current_execution": [
+        {
+          "line": 5278,
+          "text": "test rejections_carry_stable_wire_code_and_actionable_detail ... ok",
+          "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261"
+        }
+      ],
+      "execution_classification": "executed-existing-gate-at-audited-source",
+      "document_lines": [
+        141
+      ]
+    },
+    {
+      "name": "render_frame_reclaims_orphaned_lease_after_grace",
+      "documented_references": [
+        "render_frame_reclaims_orphaned_lease_after_grace"
+      ],
+      "definitions": [
+        {
+          "end_line": 1462,
+          "assertion_lines": [
+            1447,
+            1454,
+            1455
+          ],
+          "name": "render_frame_reclaims_orphaned_lease_after_grace",
+          "path": "crates/tze_hud_runtime/src/headless.rs",
+          "line": 1409,
+          "attribute_lines": [
+            "#[tokio::test(flavor = \"multi_thread\", worker_threads = 2)]"
+          ],
+          "body_sha256": "6fc72b393b5089aba5bdbc3f9c6e8a8ace6d3fe694a160036f8bf31adf1d6313"
+        }
+      ],
+      "current_execution": [
+        {
+          "line": 5857,
+          "text": "test headless::tests::render_frame_reclaims_orphaned_lease_after_grace ... ok",
+          "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261"
+        }
+      ],
+      "execution_classification": "executed-existing-gate-at-audited-source",
+      "document_lines": [
+        87
+      ]
+    },
+    {
+      "name": "resource_count_cap_rejects_the_extra_resource",
+      "documented_references": [
+        "resource_count_cap_rejects_the_extra_resource"
+      ],
+      "definitions": [
+        {
+          "end_line": 148,
+          "assertion_lines": [
+            139,
+            140,
+            147
+          ],
+          "name": "resource_count_cap_rejects_the_extra_resource",
+          "path": "crates/tze_hud_resource/tests/store_behavior.rs",
+          "line": 129,
+          "attribute_lines": [
+            "#[tokio::test]"
+          ],
+          "body_sha256": "5615457e04db8ff45aa93586b6f7bb7a8f1b08005e92b9a6d8bf8139ceb72214"
+        }
+      ],
+      "current_execution": [
+        {
+          "line": 5282,
+          "text": "test resource_count_cap_rejects_the_extra_resource ... ok",
+          "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261"
+        }
+      ],
+      "execution_classification": "executed-existing-gate-at-audited-source",
+      "document_lines": [
+        127
+      ]
+    },
+    {
+      "name": "resume_restores_mcp_publishing",
+      "documented_references": [
+        "resume_restores_mcp_publishing",
+        "resume_restores_mcp_publishing"
+      ],
+      "definitions": [
+        {
+          "end_line": 1252,
+          "assertion_lines": [
+            1251
+          ],
+          "name": "resume_restores_mcp_publishing",
+          "path": "crates/tze_hud_mcp/src/server/tests.rs",
+          "line": 1214,
+          "attribute_lines": [
+            "#[tokio::test]"
+          ],
+          "body_sha256": "3536e40d7fe9f7ba0fa8e77e4c65fe0a00b720d8c758cbf2809b076aea1f30bf"
+        }
+      ],
+      "current_execution": [
+        {
+          "line": 4617,
+          "text": "test server::tests::resume_restores_mcp_publishing ... ok",
+          "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261"
+        }
+      ],
+      "execution_classification": "executed-existing-gate-at-audited-source",
+      "document_lines": [
+        66,
+        105
+      ]
+    },
+    {
+      "name": "resumed_session_restores_usage_before_accepting_new_mutations",
+      "documented_references": [
+        "resumed_session_restores_usage_before_accepting_new_mutations"
+      ],
+      "definitions": [
+        {
+          "end_line": 489,
+          "assertion_lines": [
+            463,
+            480,
+            485
+          ],
+          "name": "resumed_session_restores_usage_before_accepting_new_mutations",
+          "path": "crates/tze_hud_runtime/src/mutation_budget_bridge.rs",
+          "line": 460,
+          "attribute_lines": [
+            "#[test]"
+          ],
+          "body_sha256": "bc779e48f945db9a9e77364fd6018eb1878fad7e141ada5b5e66865b951542a1"
+        }
+      ],
+      "current_execution": [
+        {
+          "line": 5356,
+          "text": "test mutation_budget_bridge::tests::resumed_session_restores_usage_before_accepting_new_mutations ... ok",
+          "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261"
+        }
+      ],
+      "execution_classification": "executed-existing-gate-at-audited-source",
+      "document_lines": [
+        83
+      ]
+    },
+    {
+      "name": "revoked_lease_clears_only_its_publications",
+      "documented_references": [
+        "revoked_lease_clears_only_its_publications"
+      ],
+      "definitions": [
+        {
+          "end_line": 341,
+          "assertion_lines": [],
+          "name": "revoked_lease_clears_only_its_publications",
+          "path": "crates/tze_hud_scene/src/graph/spec_scenarios.rs",
+          "line": 337,
+          "attribute_lines": [
+            "#[test]"
+          ],
+          "body_sha256": "7bcfcf49b2aad7a48ae3ab0a618178bed217c7278e172da59045ab52a1d76b11"
+        }
+      ],
+      "current_execution": [
+        {
+          "line": 6051,
+          "text": "test graph::spec_scenarios::revoked_lease_clears_only_its_publications ... ok",
+          "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261"
+        }
+      ],
+      "execution_classification": "executed-existing-gate-at-audited-source",
+      "document_lines": [
+        93
+      ],
+      "delegated_assertions": {
+        "path": "crates/tze_hud_scene/src/graph/spec_scenarios.rs",
+        "helper": "assert_only_lease_publications_remain",
+        "call_line": 340,
+        "assertion_lines": [
+          318,
+          319,
+          321,
+          322
+        ]
+      }
+    },
+    {
+      "name": "runtime_wide_texture_cap_is_shared_across_agents",
+      "documented_references": [
+        "runtime_wide_texture_cap_is_shared_across_agents"
+      ],
+      "definitions": [
+        {
+          "end_line": 126,
+          "assertion_lines": [
+            119,
+            120,
+            124,
+            125
+          ],
+          "name": "runtime_wide_texture_cap_is_shared_across_agents",
+          "path": "crates/tze_hud_resource/tests/store_behavior.rs",
+          "line": 109,
+          "attribute_lines": [
+            "#[tokio::test]"
+          ],
+          "body_sha256": "b20caab05ef6fd9f61dd2031df496503b17d48dcd791ffbadde5a64933152e5d"
+        }
+      ],
+      "current_execution": [
+        {
+          "line": 5281,
+          "text": "test runtime_wide_texture_cap_is_shared_across_agents ... ok",
+          "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261"
+        }
+      ],
+      "execution_classification": "executed-existing-gate-at-audited-source",
+      "document_lines": [
+        126
+      ]
+    },
+    {
+      "name": "safe_mode_does_not_regrant_suspended_mcp_lease",
+      "documented_references": [
+        "safe_mode_does_not_regrant_suspended_mcp_lease",
+        "safe_mode_does_not_regrant_suspended_mcp_lease"
+      ],
+      "definitions": [
+        {
+          "end_line": 1211,
+          "assertion_lines": [
+            1202,
+            1205,
+            1210
+          ],
+          "name": "safe_mode_does_not_regrant_suspended_mcp_lease",
+          "path": "crates/tze_hud_mcp/src/server/tests.rs",
+          "line": 1182,
+          "attribute_lines": [
+            "#[tokio::test]"
+          ],
+          "body_sha256": "f727fa9b22a5c5e86bb1ca92f2d8b35642dbe78b2f7aad6aad4e29a96eb01969"
+        }
+      ],
+      "current_execution": [
+        {
+          "line": 4629,
+          "text": "test server::tests::safe_mode_does_not_regrant_suspended_mcp_lease ... ok",
+          "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261"
+        }
+      ],
+      "execution_classification": "executed-existing-gate-at-audited-source",
+      "document_lines": [
+        65,
+        104
+      ]
+    },
+    {
+      "name": "safe_mode_hotkey_defaults_overrides_and_rejects_garbage",
+      "documented_references": [
+        "safe_mode_hotkey_defaults_overrides_and_rejects_garbage"
+      ],
+      "definitions": [
+        {
+          "end_line": 761,
+          "assertion_lines": [
+            746,
+            751,
+            756
+          ],
+          "name": "safe_mode_hotkey_defaults_overrides_and_rejects_garbage",
+          "path": "crates/tze_hud_config/src/tests.rs",
+          "line": 737,
+          "attribute_lines": [
+            "#[test]"
+          ],
+          "body_sha256": "d3705f3cde0a24f251412c592b2213d3a8bcc5060a8bb04533a1350fe3256987"
+        }
+      ],
+      "current_execution": [
+        {
+          "line": 4087,
+          "text": "test tests::safe_mode_hotkey_defaults_overrides_and_rejects_garbage ... ok",
+          "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261"
+        }
+      ],
+      "execution_classification": "executed-existing-gate-at-audited-source",
+      "document_lines": [
+        48
+      ]
+    },
+    {
+      "name": "shell_dismiss_override_removes_portal_tile",
+      "documented_references": [
+        "shell_dismiss_override_removes_portal_tile"
+      ],
+      "definitions": [
+        {
+          "end_line": 348,
+          "assertion_lines": [
+            343,
+            344
+          ],
+          "name": "shell_dismiss_override_removes_portal_tile",
+          "path": "tests/integration/text_stream_portal_governance.rs",
+          "line": 337,
+          "attribute_lines": [
+            "#[test]"
+          ],
+          "body_sha256": "834067c8c119dd3731a6747057c31c007c47b677cbab2270cf84deaad2ba2e0b"
+        }
+      ],
+      "current_execution": [
+        {
+          "line": 6971,
+          "text": "test shell_dismiss_override_removes_portal_tile ... ok",
+          "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261"
+        }
+      ],
+      "execution_classification": "executed-existing-gate-at-audited-source",
+      "document_lines": [
+        49
+      ]
+    },
+    {
+      "name": "shell_status_snapshot_exposes_no_portal_identity_or_transcript",
+      "documented_references": [
+        "shell_status_snapshot_exposes_no_portal_identity_or_transcript"
+      ],
+      "definitions": [
+        {
+          "end_line": 334,
+          "assertion_lines": [
+            310,
+            314,
+            320,
+            326,
+            330
+          ],
+          "name": "shell_status_snapshot_exposes_no_portal_identity_or_transcript",
+          "path": "tests/integration/text_stream_portal_governance.rs",
+          "line": 303,
+          "attribute_lines": [
+            "#[test]"
+          ],
+          "body_sha256": "30adf82f24089534f3dc5b79292ce8f6cb14fe41965dac4cd0a8ea4743753e53"
+        }
+      ],
+      "current_execution": [
+        {
+          "line": 6975,
+          "text": "test shell_status_snapshot_exposes_no_portal_identity_or_transcript ... ok",
+          "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261"
+        }
+      ],
+      "execution_classification": "executed-existing-gate-at-audited-source",
+      "document_lines": [
+        50
+      ]
+    },
+    {
+      "name": "significant_degradation_preserves_hidden_tiles_and_opaques_visible_tiles",
+      "documented_references": [
+        "significant_degradation_preserves_hidden_tiles_and_opaques_visible_tiles"
+      ],
+      "definitions": [
+        {
+          "end_line": 3174,
+          "assertion_lines": [
+            3159,
+            3164,
+            3169
+          ],
+          "name": "significant_degradation_preserves_hidden_tiles_and_opaques_visible_tiles",
+          "path": "crates/tze_hud_compositor/src/renderer/tile_render.rs",
+          "line": 3158,
+          "attribute_lines": [
+            "#[test]"
+          ],
+          "body_sha256": "ba95474ab7fae31264b20cf6688532efb1452d4dbe89fdf79511cd1aff0a6d2d"
+        }
+      ],
+      "current_execution": [
+        {
+          "line": 3660,
+          "text": "test renderer::tile_render::degradation_opacity_tests::significant_degradation_preserves_hidden_tiles_and_opaques_visible_tiles ... ok",
+          "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261"
+        }
+      ],
+      "execution_classification": "executed-existing-gate-at-audited-source",
+      "document_lines": [
+        114
+      ]
+    },
+    {
+      "name": "sustained_overload_does_not_escalate_past_simplified",
+      "documented_references": [
+        "degradation::tests::sustained_overload_does_not_escalate_past_simplified"
+      ],
+      "definitions": [
+        {
+          "end_line": 710,
+          "assertion_lines": [
+            709
+          ],
+          "name": "sustained_overload_does_not_escalate_past_simplified",
+          "path": "crates/tze_hud_runtime/src/degradation.rs",
+          "line": 706,
+          "attribute_lines": [
+            "#[test]"
+          ],
+          "body_sha256": "5637bcc97d9f219cfb8387450fa875bf849e1d00f67c457cc068fcca115e26ea"
+        }
+      ],
+      "current_execution": [
+        {
+          "line": 5297,
+          "text": "test degradation::tests::sustained_overload_does_not_escalate_past_simplified ... ok",
+          "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261"
+        }
+      ],
+      "execution_classification": "executed-existing-gate-at-audited-source",
+      "document_lines": [
+        115
+      ]
+    },
+    {
+      "name": "test_chrome_always_above_max_zorder_tile",
+      "documented_references": [
+        "test_chrome_always_above_max_zorder_tile"
+      ],
+      "definitions": [
+        {
+          "end_line": 98,
+          "assertion_lines": [
+            82,
+            93
+          ],
+          "name": "test_chrome_always_above_max_zorder_tile",
+          "path": "crates/tze_hud_compositor/src/renderer/tests/surface.rs",
+          "line": 38,
+          "attribute_lines": [
+            "#[tokio::test]"
+          ],
+          "body_sha256": "944cdf8320a158e8b5e3ac423514a57e0e60acc717f5ce3b7925ca9296b2cdaa"
+        }
+      ],
+      "current_execution": [
+        {
+          "line": 3556,
+          "text": "test renderer::tests::surface::test_chrome_always_above_max_zorder_tile ... ok",
+          "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261"
+        }
+      ],
+      "execution_classification": "executed-existing-gate-at-audited-source",
+      "document_lines": [
+        68
+      ]
+    },
+    {
+      "name": "test_coalesce_scroll_latest_wins",
+      "documented_references": [
+        "test_coalesce_scroll_latest_wins"
+      ],
+      "definitions": [
+        {
+          "end_line": 365,
+          "assertion_lines": [
+            359,
+            361
+          ],
+          "name": "test_coalesce_scroll_latest_wins",
+          "path": "crates/tze_hud_input/src/coalescing.rs",
+          "line": 348,
+          "attribute_lines": [
+            "#[test]"
+          ],
+          "body_sha256": "0ff66e12c6f506aba3fdd846ef306e0f4d4a66bb7531deecff903ab4a3624b74"
+        }
+      ],
+      "current_execution": [
+        {
+          "line": 4195,
+          "text": "test coalescing::tests::test_coalesce_scroll_latest_wins ... ok",
+          "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261"
+        }
+      ],
+      "execution_classification": "executed-existing-gate-at-audited-source",
+      "document_lines": [
+        35
+      ]
+    },
+    {
+      "name": "test_enter_safe_mode_suspends_active_leases",
+      "documented_references": [
+        "test_enter_safe_mode_suspends_active_leases"
+      ],
+      "definitions": [
+        {
+          "end_line": 286,
+          "assertion_lines": [
+            272,
+            273,
+            277,
+            278,
+            283,
+            284,
+            285
+          ],
+          "name": "test_enter_safe_mode_suspends_active_leases",
+          "path": "crates/tze_hud_runtime/src/shell/safe_mode.rs",
+          "line": 268,
+          "attribute_lines": [
+            "#[tokio::test]"
+          ],
+          "body_sha256": "6516541e227628ec63c11076554b9e13c7afa8fdf263706b2b15eceeb0c3ff02"
+        }
+      ],
+      "current_execution": [
+        {
+          "line": 5529,
+          "text": "test shell::safe_mode::tests::test_enter_safe_mode_suspends_active_leases ... ok",
+          "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261"
+        }
+      ],
+      "execution_classification": "executed-existing-gate-at-audited-source",
+      "document_lines": [
+        43
+      ]
+    },
+    {
+      "name": "test_hud_publish_zone_contention_policy_latest_wins",
+      "documented_references": [
+        "test_hud_publish_zone_contention_policy_latest_wins"
+      ],
+      "definitions": [
+        {
+          "end_line": 508,
+          "assertion_lines": [
+            506,
+            507
+          ],
+          "name": "test_hud_publish_zone_contention_policy_latest_wins",
+          "path": "crates/tze_hud_mcp/src/server/tests.rs",
+          "line": 490,
+          "attribute_lines": [
+            "#[tokio::test]"
+          ],
+          "body_sha256": "207348fe0a06138f86048929bf595d138ee6bf31c83e7d4da52c329630b7eefd"
+        }
+      ],
+      "current_execution": [
+        {
+          "line": 4613,
+          "text": "test server::tests::test_hud_publish_zone_contention_policy_latest_wins ... ok",
+          "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261"
+        }
+      ],
+      "execution_classification": "executed-existing-gate-at-audited-source",
+      "document_lines": [
+        33
+      ]
+    },
+    {
+      "name": "test_hud_publish_zone_ttl_sets_content_expiry_and_is_swept",
+      "documented_references": [
+        "test_hud_publish_zone_ttl_sets_content_expiry_and_is_swept"
+      ],
+      "definitions": [
+        {
+          "end_line": 487,
+          "assertion_lines": [
+            471,
+            477,
+            479,
+            480
+          ],
+          "name": "test_hud_publish_zone_ttl_sets_content_expiry_and_is_swept",
+          "path": "crates/tze_hud_mcp/src/server/tests.rs",
+          "line": 461,
+          "attribute_lines": [
+            "#[tokio::test]"
+          ],
+          "body_sha256": "4638e4bb992d8350a33d48677851bc95c5f79dd86ea4cfa9d365abdf56b26d62"
+        }
+      ],
+      "current_execution": [
+        {
+          "line": 4612,
+          "text": "test server::tests::test_hud_publish_zone_ttl_sets_content_expiry_and_is_swept ... ok",
+          "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261"
+        }
+      ],
+      "execution_classification": "executed-existing-gate-at-audited-source",
+      "document_lines": [
+        15
+      ]
+    },
+    {
+      "name": "test_latest_wins_zone_renders_only_latest_publication",
+      "documented_references": [
+        "test_latest_wins_zone_renders_only_latest_publication"
+      ],
+      "definitions": [
+        {
+          "end_line": 960,
+          "assertion_lines": [
+            948,
+            955
+          ],
+          "name": "test_latest_wins_zone_renders_only_latest_publication",
+          "path": "crates/tze_hud_compositor/src/renderer/tests/zone_stack.rs",
+          "line": 894,
+          "attribute_lines": [
+            "#[tokio::test]"
+          ],
+          "body_sha256": "d8d08e625034315203431670e1509c3beaea29a5c631aade094b36078b098030"
+        }
+      ],
+      "current_execution": [
+        {
+          "line": 3826,
+          "text": "test renderer::tests::zone_stack::test_latest_wins_zone_renders_only_latest_publication ... ok",
+          "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261"
+        }
+      ],
+      "execution_classification": "executed-existing-gate-at-audited-source",
+      "document_lines": [
+        34
+      ]
+    },
+    {
+      "name": "test_lease_identity_preserved_across_suspend_resume",
+      "documented_references": [
+        "test_lease_identity_preserved_across_suspend_resume"
+      ],
+      "definitions": [
+        {
+          "end_line": 325,
+          "assertion_lines": [
+            323,
+            324
+          ],
+          "name": "test_lease_identity_preserved_across_suspend_resume",
+          "path": "crates/tze_hud_runtime/src/shell/safe_mode.rs",
+          "line": 307,
+          "attribute_lines": [
+            "#[tokio::test]"
+          ],
+          "body_sha256": "6bc9c6538459bf9c9944b3ee421f5a35b28aaca84bd066d1614149ad00232bf2"
+        }
+      ],
+      "current_execution": [
+        {
+          "line": 5533,
+          "text": "test shell::safe_mode::tests::test_lease_identity_preserved_across_suspend_resume ... ok",
+          "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261"
+        }
+      ],
+      "execution_classification": "executed-existing-gate-at-audited-source",
+      "document_lines": [
+        101
+      ]
+    },
+    {
+      "name": "test_lease_resume_from_suspended",
+      "documented_references": [
+        "test_lease_resume_from_suspended"
+      ],
+      "definitions": [
+        {
+          "end_line": 2855,
+          "assertion_lines": [
+            2847,
+            2848,
+            2849,
+            2850,
+            2854
+          ],
+          "name": "test_lease_resume_from_suspended",
+          "path": "crates/tze_hud_scene/src/graph/tests.rs",
+          "line": 2836,
+          "attribute_lines": [
+            "#[test]"
+          ],
+          "body_sha256": "9e6e2326978461d8c583e3f94da068cd4fb63b528ea823d5d1db64e006308ac9"
+        }
+      ],
+      "current_execution": [
+        {
+          "line": 6118,
+          "text": "test graph::tests::test_lease_resume_from_suspended ... ok",
+          "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261"
+        }
+      ],
+      "execution_classification": "executed-existing-gate-at-audited-source",
+      "document_lines": [
+        103
+      ]
+    },
+    {
+      "name": "test_lease_suspend_from_active",
+      "documented_references": [
+        "test_lease_suspend_from_active"
+      ],
+      "definitions": [
+        {
+          "end_line": 2814,
+          "assertion_lines": [
+            2808,
+            2809,
+            2810,
+            2811,
+            2813
+          ],
+          "name": "test_lease_suspend_from_active",
+          "path": "crates/tze_hud_scene/src/graph/tests.rs",
+          "line": 2801,
+          "attribute_lines": [
+            "#[test]"
+          ],
+          "body_sha256": "924f1f2eb014bd7bda2e69383af7c8420d3ffdb35cdfb01a8727da4a5bc3a7f5"
+        }
+      ],
+      "current_execution": [
+        {
+          "line": 6128,
+          "text": "test graph::tests::test_lease_suspend_from_active ... ok",
+          "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261"
+        }
+      ],
+      "execution_classification": "executed-existing-gate-at-audited-source",
+      "document_lines": [
+        103
+      ]
+    },
+    {
+      "name": "test_mutations_rejected_via_shared_state_flag",
+      "documented_references": [
+        "test_mutations_rejected_via_shared_state_flag"
+      ],
+      "definitions": [
+        {
+          "end_line": 362,
+          "assertion_lines": [
+            358,
+            361
+          ],
+          "name": "test_mutations_rejected_via_shared_state_flag",
+          "path": "crates/tze_hud_runtime/src/shell/safe_mode.rs",
+          "line": 354,
+          "attribute_lines": [
+            "#[tokio::test]"
+          ],
+          "body_sha256": "b065ca5f28daa44ae80ec3fce653f842d4531321f7111a3925654c34b83a1c54"
+        }
+      ],
+      "current_execution": [
+        {
+          "line": 5532,
+          "text": "test shell::safe_mode::tests::test_mutations_rejected_via_shared_state_flag ... ok",
+          "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261"
+        }
+      ],
+      "execution_classification": "executed-existing-gate-at-audited-source",
+      "document_lines": [
+        44
+      ]
+    },
+    {
+      "name": "test_pointer_move_coalesced_in_batch",
+      "documented_references": [
+        "test_pointer_move_coalesced_in_batch"
+      ],
+      "definitions": [
+        {
+          "end_line": 305,
+          "assertion_lines": [
+            293,
+            300
+          ],
+          "name": "test_pointer_move_coalesced_in_batch",
+          "path": "crates/tze_hud_input/src/batching.rs",
+          "line": 279,
+          "attribute_lines": [
+            "#[test]"
+          ],
+          "body_sha256": "4a4596e23e8314a2208bf3b01dc1187f8e862e6ddec3d97e3e69a1f3f7034254"
+        }
+      ],
+      "current_execution": [
+        {
+          "line": 4180,
+          "text": "test batching::tests::test_pointer_move_coalesced_in_batch ... ok",
+          "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261"
+        }
+      ],
+      "execution_classification": "executed-existing-gate-at-audited-source",
+      "document_lines": [
+        35
+      ]
+    },
+    {
+      "name": "test_publication_ttl_ms_uses_expires_at_wall_us",
+      "documented_references": [
+        "test_publication_ttl_ms_uses_expires_at_wall_us"
+      ],
+      "definitions": [
+        {
+          "end_line": 636,
+          "assertion_lines": [
+            548,
+            578,
+            606,
+            632
+          ],
+          "name": "test_publication_ttl_ms_uses_expires_at_wall_us",
+          "path": "crates/tze_hud_compositor/src/renderer/tests/zone_layers.rs",
+          "line": 525,
+          "attribute_lines": [
+            "#[test]"
+          ],
+          "body_sha256": "0d92956b302a9f3d1e4a883af892ff6ca67958062342b09fd1b5b5664af25747"
+        }
+      ],
+      "current_execution": [
+        {
+          "line": 3592,
+          "text": "test renderer::tests::zone_layers::test_publication_ttl_ms_uses_expires_at_wall_us ... ok",
+          "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261"
+        }
+      ],
+      "execution_classification": "executed-existing-gate-at-audited-source",
+      "document_lines": [
+        18
+      ]
+    },
+    {
+      "name": "test_structured_error_has_hint_field",
+      "documented_references": [
+        "test_structured_error_has_hint_field"
+      ],
+      "definitions": [
+        {
+          "end_line": 268,
+          "assertion_lines": [
+            265,
+            266,
+            267
+          ],
+          "name": "test_structured_error_has_hint_field",
+          "path": "crates/tze_hud_mcp/src/server/tests.rs",
+          "line": 257,
+          "attribute_lines": [
+            "#[tokio::test]"
+          ],
+          "body_sha256": "60c99fd4043523c34fbcbc1b5b9bed8536925f379c56b4de79bf68f452a44ff5"
+        }
+      ],
+      "current_execution": [
+        {
+          "line": 4618,
+          "text": "test server::tests::test_structured_error_has_hint_field ... ok",
+          "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261"
+        }
+      ],
+      "execution_classification": "executed-existing-gate-at-audited-source",
+      "document_lines": [
+        139
+      ]
+    },
+    {
+      "name": "test_ttl_excluded_during_suspension",
+      "documented_references": [
+        "test_ttl_excluded_during_suspension"
+      ],
+      "definitions": [
+        {
+          "end_line": 349,
+          "assertion_lines": [
+            345
+          ],
+          "name": "test_ttl_excluded_during_suspension",
+          "path": "crates/tze_hud_runtime/src/shell/safe_mode.rs",
+          "line": 329,
+          "attribute_lines": [
+            "#[tokio::test]"
+          ],
+          "body_sha256": "8bc2421d23be1ef4b102f940254157770551283e33d2fa6436644c151819eec8"
+        }
+      ],
+      "current_execution": [
+        {
+          "line": 5536,
+          "text": "test shell::safe_mode::tests::test_ttl_excluded_during_suspension ... ok",
+          "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261"
+        }
+      ],
+      "execution_classification": "executed-existing-gate-at-audited-source",
+      "document_lines": [
+        100
+      ]
+    },
+    {
+      "name": "tile_close_button_draw_and_hit_region_share_token_geometry",
+      "documented_references": [
+        "tile_close_button_draw_and_hit_region_share_token_geometry"
+      ],
+      "definitions": [
+        {
+          "end_line": 1078,
+          "assertion_lines": [
+            1032,
+            1033,
+            1047,
+            1048,
+            1055,
+            1064,
+            1074
+          ],
+          "name": "tile_close_button_draw_and_hit_region_share_token_geometry",
+          "path": "crates/tze_hud_compositor/src/renderer/tests/hit_drag.rs",
+          "line": 1006,
+          "attribute_lines": [
+            "#[tokio::test]"
+          ],
+          "body_sha256": "4767079a58a583471ed168d8123eb281142deaca191c560b5ead4c612046894e"
+        }
+      ],
+      "current_execution": [
+        {
+          "line": 3482,
+          "text": "test renderer::tests::hit_drag::tile_close_button_draw_and_hit_region_share_token_geometry ... ok",
+          "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261"
+        }
+      ],
+      "execution_classification": "executed-existing-gate-at-audited-source",
+      "document_lines": [
+        57
+      ]
+    },
+    {
+      "name": "tile_lease_reap_keeps_same_namespace_mcp_publications",
+      "documented_references": [
+        "tile_lease_reap_keeps_same_namespace_mcp_publications"
+      ],
+      "definitions": [
+        {
+          "end_line": 334,
+          "assertion_lines": [
+            331,
+            332
+          ],
+          "name": "tile_lease_reap_keeps_same_namespace_mcp_publications",
+          "path": "crates/tze_hud_scene/src/graph/spec_scenarios.rs",
+          "line": 327,
+          "attribute_lines": [
+            "#[test]"
+          ],
+          "body_sha256": "100aae7403f6c194a21e7ba5e7e5fa8d704a1295f2acd9316db48f75f6acb324"
+        }
+      ],
+      "current_execution": [
+        {
+          "line": 6055,
+          "text": "test graph::spec_scenarios::tile_lease_reap_keeps_same_namespace_mcp_publications ... ok",
+          "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261"
+        }
+      ],
+      "execution_classification": "executed-existing-gate-at-audited-source",
+      "document_lines": [
+        92
+      ]
+    },
+    {
+      "name": "upload_slot_cap_is_per_agent_and_freed_by_abort",
+      "documented_references": [
+        "upload_slot_cap_is_per_agent_and_freed_by_abort"
+      ],
+      "definitions": [
+        {
+          "end_line": 201,
+          "assertion_lines": [
+            176,
+            189
+          ],
+          "name": "upload_slot_cap_is_per_agent_and_freed_by_abort",
+          "path": "crates/tze_hud_resource/tests/store_behavior.rs",
+          "line": 172,
+          "attribute_lines": [
+            "#[tokio::test]"
+          ],
+          "body_sha256": "40f8fdd9038db1f30762f5362f6e5088e9662d2b0bacfe7103272513205a87b9"
+        }
+      ],
+      "current_execution": [
+        {
+          "line": 5280,
+          "text": "test upload_slot_cap_is_per_agent_and_freed_by_abort ... ok",
+          "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261"
+        }
+      ],
+      "execution_classification": "executed-existing-gate-at-audited-source",
+      "document_lines": [
+        129
+      ]
+    },
+    {
+      "name": "viewer_close_button_dismisses_hovered_tile_and_notifies_owner",
+      "documented_references": [
+        "viewer_close_button_dismisses_hovered_tile_and_notifies_owner"
+      ],
+      "definitions": [
+        {
+          "end_line": 1026,
+          "assertion_lines": [
+            983,
+            984,
+            986,
+            1013,
+            1023,
+            1024,
+            1025
+          ],
+          "name": "viewer_close_button_dismisses_hovered_tile_and_notifies_owner",
+          "path": "crates/tze_hud_runtime/src/windowed/event_loop_harness.rs",
+          "line": 949,
+          "attribute_lines": [
+            "#[test]"
+          ],
+          "body_sha256": "07c6f9c88a6efef6f7cc1e3c4a4e2658197a2fa63d88c4bd3a38a04bdbd174a2"
+        }
+      ],
+      "current_execution": [
+        {
+          "line": 5607,
+          "text": "test windowed::event_loop_harness::tests::viewer_close_button_dismisses_hovered_tile_and_notifies_owner ... ok",
+          "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261"
+        }
+      ],
+      "execution_classification": "executed-existing-gate-at-audited-source",
+      "document_lines": [
+        55
+      ]
+    },
+    {
+      "name": "viewer_dismiss_portal_detaches_and_next_publish_reattaches",
+      "documented_references": [
+        "viewer_dismiss_portal_detaches_and_next_publish_reattaches"
+      ],
+      "definitions": [
+        {
+          "end_line": 1563,
+          "assertion_lines": [
+            1546,
+            1550,
+            1551,
+            1552,
+            1559,
+            1560,
+            1562
+          ],
+          "name": "viewer_dismiss_portal_detaches_and_next_publish_reattaches",
+          "path": "crates/tze_hud_runtime/src/portal_projection_driver.rs",
+          "line": 1538,
+          "attribute_lines": [
+            "#[test]"
+          ],
+          "body_sha256": "ddc130fd8b8e8bb18a675bf288d05edb4d705b25afb78a9ebf79bfe4f2697c68"
+        }
+      ],
+      "current_execution": [
+        {
+          "line": 5460,
+          "text": "test portal_projection_driver::tests::viewer_dismiss_portal_detaches_and_next_publish_reattaches ... ok",
+          "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261"
+        }
+      ],
+      "execution_classification": "executed-existing-gate-at-audited-source",
+      "document_lines": [
+        54
+      ]
+    },
+    {
+      "name": "viewer_dismiss_tile_pushes_reclaimed_override",
+      "documented_references": [
+        "viewer_dismiss_tile_pushes_reclaimed_override"
+      ],
+      "definitions": [
+        {
+          "end_line": 237,
+          "assertion_lines": [
+            211,
+            212,
+            215,
+            228,
+            229,
+            230
+          ],
+          "name": "viewer_dismiss_tile_pushes_reclaimed_override",
+          "path": "crates/tze_hud_protocol/src/session_server/tests/events.rs",
+          "line": 174,
+          "attribute_lines": [
+            "#[tokio::test]"
+          ],
+          "body_sha256": "7b3cf241341e0feef53ce1a1a26f2f13ede659c62b7811e45e84f73b9ed75dab"
+        }
+      ],
+      "current_execution": [
+        {
+          "line": 4935,
+          "text": "test session_server::tests::events::viewer_dismiss_tile_pushes_reclaimed_override ... ok",
+          "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261"
+        }
+      ],
+      "execution_classification": "executed-existing-gate-at-audited-source",
+      "document_lines": [
+        53
+      ]
+    },
+    {
+      "name": "viewer_dismiss_tile_revokes_lease_in_any_live_state",
+      "documented_references": [
+        "viewer_dismiss_tile_revokes_lease_in_any_live_state"
+      ],
+      "definitions": [
+        {
+          "end_line": 4851,
+          "assertion_lines": [
+            4820,
+            4821,
+            4822,
+            4827,
+            4828,
+            4829,
+            4837,
+            4841,
+            4842
+          ],
+          "name": "viewer_dismiss_tile_revokes_lease_in_any_live_state",
+          "path": "crates/tze_hud_scene/src/graph/tests.rs",
+          "line": 4766,
+          "attribute_lines": [
+            "#[test]"
+          ],
+          "body_sha256": "c104f982e1a5336ecb1cfee25f32c48fb565733faccdc816023715c1148ff7e4"
+        }
+      ],
+      "current_execution": [
+        {
+          "line": 6160,
+          "text": "test graph::tests::viewer_dismiss_tile_revokes_lease_in_any_live_state ... ok",
+          "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261"
+        }
+      ],
+      "execution_classification": "executed-existing-gate-at-audited-source",
+      "document_lines": [
+        52
+      ]
+    },
+    {
+      "name": "widget_publish_with_suspended_lease_is_safe_mode_active",
+      "documented_references": [
+        "graph::widget_tests::widget_publish_with_suspended_lease_is_safe_mode_active"
+      ],
+      "definitions": [
+        {
+          "end_line": 27,
+          "assertion_lines": [
+            14,
+            22
+          ],
+          "name": "widget_publish_with_suspended_lease_is_safe_mode_active",
+          "path": "crates/tze_hud_scene/src/graph/widget_tests.rs",
+          "line": 7,
+          "attribute_lines": [
+            "#[test]"
+          ],
+          "body_sha256": "ee810a0f7462c77c63c91078bb6fb5695d7835803ed8e100cba2b7497af0b46b"
+        }
+      ],
+      "current_execution": [
+        {
+          "line": 6202,
+          "text": "test graph::widget_tests::widget_publish_with_suspended_lease_is_safe_mode_active ... ok",
+          "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261"
+        }
+      ],
+      "execution_classification": "executed-existing-gate-at-audited-source",
+      "document_lines": [
+        67
+      ]
+    },
+    {
+      "name": "widget_ttl_only_expired_publication_removed_when_mixed",
+      "documented_references": [
+        "graph::widget_tests::widget_ttl_only_expired_publication_removed_when_mixed"
+      ],
+      "definitions": [
+        {
+          "end_line": 1151,
+          "assertion_lines": [
+            1133,
+            1143,
+            1146,
+            1147
+          ],
+          "name": "widget_ttl_only_expired_publication_removed_when_mixed",
+          "path": "crates/tze_hud_scene/src/graph/widget_tests.rs",
+          "line": 1096,
+          "attribute_lines": [
+            "#[test]"
+          ],
+          "body_sha256": "d272f77a033af3da3437c9db366bf54ddb8d12bb47664ce8873230d24f17e158"
+        }
+      ],
+      "current_execution": [
+        {
+          "line": 6213,
+          "text": "test graph::widget_tests::widget_ttl_only_expired_publication_removed_when_mixed ... ok",
+          "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261"
+        }
+      ],
+      "execution_classification": "executed-existing-gate-at-audited-source",
+      "document_lines": [
+        17
+      ]
+    },
+    {
+      "name": "windowed_frame_draws_chrome_overlay_in_safe_mode",
+      "documented_references": [
+        "windowed_frame_draws_chrome_overlay_in_safe_mode"
+      ],
+      "definitions": [
+        {
+          "end_line": 114,
+          "assertion_lines": [
+            91,
+            92,
+            97,
+            101,
+            108,
+            113
+          ],
+          "name": "windowed_frame_draws_chrome_overlay_in_safe_mode",
+          "path": "crates/tze_hud_compositor/src/renderer/safe_mode_overlay.rs",
+          "line": 89,
+          "attribute_lines": [
+            "#[test]"
+          ],
+          "body_sha256": "6a49505ed34bd9d82f8e7f93c5cd7c4f3fb5cc865a53c62972f5bdda26e85949"
+        }
+      ],
+      "current_execution": [
+        {
+          "line": 3366,
+          "text": "test renderer::safe_mode_overlay::tests::windowed_frame_draws_chrome_overlay_in_safe_mode ... ok",
+          "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261"
+        }
+      ],
+      "execution_classification": "executed-existing-gate-at-audited-source",
+      "document_lines": [
+        69
+      ]
+    }
+  ],
+  "attributed_test_declarations": 3172,
+  "executed_unique": 72,
+  "execution_observations": 72,
+  "missing_execution_names": [],
+  "execution_log": "gates/full-ci.log"
+}
