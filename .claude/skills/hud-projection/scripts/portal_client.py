@@ -49,7 +49,7 @@ def endpoint():
         die(str(error))
 
 
-def rpc(method, params, request_id=1):
+def rpc(method, params, request_id=1, *, timeout=60):
     """POST one JSON-RPC request and return the parsed response."""
     body = json.dumps(
         {"jsonrpc": "2.0", "id": request_id, "method": method, "params": params}
@@ -65,15 +65,21 @@ def rpc(method, params, request_id=1):
         },
     )
     try:
-        with urllib.request.urlopen(request, timeout=60) as response:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
             return json.loads(response.read())
     except (urllib.error.HTTPError, urllib.error.URLError) as error:
         die(f"MCP transport failed: {error}")
 
 
-def call_tool(name, arguments):
+def call_tool(name, arguments, *, timeout=None):
     """Call one tool; return its decoded result or raise ToolError."""
-    response = rpc("tools/call", {"name": name, "arguments": arguments})
+    params = {"name": name, "arguments": arguments}
+    # Preserve the original calling shape for existing clients and fake servers.
+    response = (
+        rpc("tools/call", params)
+        if timeout is None
+        else rpc("tools/call", params, timeout=timeout)
+    )
     if response.get("error"):
         die(f"{name}: {response['error'].get('message')}")
     result = response["result"]
