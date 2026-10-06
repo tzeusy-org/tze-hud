@@ -1,0 +1,192 @@
+[
+  {
+    "name": "guard-fixtures",
+    "argv": [
+      "python3",
+      "-m",
+      "unittest",
+      "discover",
+      "-s",
+      "scripts/ci",
+      "-p",
+      "test_check_dev_mode_defaults.py"
+    ],
+    "exit": 0,
+    "seconds": 0.041,
+    "log": "test_results/reconciliation/hud-bstmy.1.15/guard-fixtures.log",
+    "sha256": "4c3b3b2f85f7f81206f2731efca1a5c61f58b2f6c54d820b4003b988757b84ec",
+    "head": "398c6f91de6e0d4883b10a41b6c63044e6192730",
+    "no_compilation": true
+  },
+  {
+    "name": "dev-mode-guard",
+    "argv": [
+      "just",
+      "dev-mode-guard"
+    ],
+    "exit": 0,
+    "seconds": 0.046,
+    "log": "test_results/reconciliation/hud-bstmy.1.15/dev-mode-guard.log",
+    "sha256": "7281fc101ef1ce99c70f412b4d818afabfadd661a3dde9f01ecf3e95bfd354d6",
+    "head": "398c6f91de6e0d4883b10a41b6c63044e6192730",
+    "no_compilation": true
+  },
+  {
+    "name": "metadata",
+    "argv": [
+      "cargo",
+      "metadata",
+      "--format-version",
+      "1",
+      "--no-deps",
+      "--locked",
+      "--offline"
+    ],
+    "exit": 0,
+    "seconds": 0.028,
+    "log": "test_results/reconciliation/hud-bstmy.1.15/metadata.json",
+    "sha256": "33ff373f7871e5a2cdbf41712dde0164e693a73564aefb619e2fb463235aac3a",
+    "head": "398c6f91de6e0d4883b10a41b6c63044e6192730",
+    "no_compilation": true
+  },
+  {
+    "name": "dry-run-ci",
+    "argv": [
+      "just",
+      "--dry-run",
+      "ci"
+    ],
+    "exit": 0,
+    "seconds": 0.002,
+    "log": "test_results/reconciliation/hud-bstmy.1.15/dry-run-ci.log",
+    "sha256": "a1877e2bcebc18abb2e4869277d80d19e032815cec5ebca518de25b94d529b7e",
+    "head": "398c6f91de6e0d4883b10a41b6c63044e6192730",
+    "no_compilation": true
+  },
+  {
+    "name": "dry-run-test",
+    "argv": [
+      "just",
+      "--dry-run",
+      "test"
+    ],
+    "exit": 0,
+    "seconds": 0.002,
+    "log": "test_results/reconciliation/hud-bstmy.1.15/dry-run-test.log",
+    "sha256": "06065fe91ff58d42248b4a5343209d4874b5a21d4b497efb246721afc8289b7b",
+    "head": "398c6f91de6e0d4883b10a41b6c63044e6192730",
+    "no_compilation": true
+  },
+  {
+    "name": "dry-run-test-gpu",
+    "argv": [
+      "just",
+      "--dry-run",
+      "test-gpu"
+    ],
+    "exit": 0,
+    "seconds": 0.002,
+    "log": "test_results/reconciliation/hud-bstmy.1.15/dry-run-test-gpu.log",
+    "sha256": "dd95675ae4437d4f4979158d9834364116ae89025a3592e696c030620af4e367",
+    "head": "398c6f91de6e0d4883b10a41b6c63044e6192730",
+    "no_compilation": true
+  },
+  {
+    "name": "dry-run-test-integration",
+    "argv": [
+      "just",
+      "--dry-run",
+      "test-integration"
+    ],
+    "exit": 0,
+    "seconds": 0.002,
+    "log": "test_results/reconciliation/hud-bstmy.1.15/dry-run-test-integration.log",
+    "sha256": "b14ea1e27b3d92a35247e7f4ee0ff56eb4893b70e394bb581cdd4599f7b4a639",
+    "head": "398c6f91de6e0d4883b10a41b6c63044e6192730",
+    "no_compilation": true
+  },
+  {
+    "name": "dry-run-production-boot",
+    "argv": [
+      "just",
+      "--dry-run",
+      "production-boot"
+    ],
+    "exit": 0,
+    "seconds": 0.002,
+    "log": "test_results/reconciliation/hud-bstmy.1.15/dry-run-production-boot.log",
+    "sha256": "0258a83e9be66538b7f2d8ac45d2d330c904aa49a2ef3b02008fc9a541ea3835",
+    "head": "398c6f91de6e0d4883b10a41b6c63044e6192730",
+    "no_compilation": true
+  },
+  {
+    "name": "dry-run-canonical-app-boot",
+    "argv": [
+      "just",
+      "--dry-run",
+      "canonical-app-boot"
+    ],
+    "exit": 0,
+    "seconds": 0.002,
+    "log": "test_results/reconciliation/hud-bstmy.1.15/dry-run-canonical-app-boot.log",
+    "sha256": "def2647224756451afe0472a144cbd0388ee4c27ef54d0b3fd5063c085a77d48",
+    "head": "398c6f91de6e0d4883b10a41b6c63044e6192730",
+    "no_compilation": true
+  },
+  {
+    "name": "dry-run-token-footprint",
+    "argv": [
+      "just",
+      "--dry-run",
+      "token-footprint"
+    ],
+    "exit": 0,
+    "seconds": 0.002,
+    "log": "test_results/reconciliation/hud-bstmy.1.15/dry-run-token-footprint.log",
+    "sha256": "c0b60953665b12d2fe260dd86aee3dcee2a6b41237218cb99a59a9ef5ecb252c",
+    "head": "398c6f91de6e0d4883b10a41b6c63044e6192730",
+    "no_compilation": true
+  },
+  {
+    "name": "dry-run-clippy-windows-gnu",
+    "argv": [
+      "just",
+      "--dry-run",
+      "clippy-windows-gnu"
+    ],
+    "exit": 0,
+    "seconds": 0.002,
+    "log": "test_results/reconciliation/hud-bstmy.1.15/dry-run-clippy-windows-gnu.log",
+    "sha256": "aab66b6c41156c35dfda232b691821b5741d3a5abea51b79ac6c758eb0b49ea9",
+    "head": "398c6f91de6e0d4883b10a41b6c63044e6192730",
+    "no_compilation": true
+  },
+  {
+    "name": "dry-run-cargo-deny",
+    "argv": [
+      "just",
+      "--dry-run",
+      "cargo-deny"
+    ],
+    "exit": 0,
+    "seconds": 0.002,
+    "log": "test_results/reconciliation/hud-bstmy.1.15/dry-run-cargo-deny.log",
+    "sha256": "cb47a27f36c5018e80763ded0780022053da28a14d9a0af0f34ccec2315523dc",
+    "head": "398c6f91de6e0d4883b10a41b6c63044e6192730",
+    "no_compilation": true
+  },
+  {
+    "name": "dry-run-overlay-harness-contract",
+    "argv": [
+      "just",
+      "--dry-run",
+      "overlay-harness-contract"
+    ],
+    "exit": 0,
+    "seconds": 0.002,
+    "log": "test_results/reconciliation/hud-bstmy.1.15/dry-run-overlay-harness-contract.log",
+    "sha256": "e9cede5c08e63ff9fd14d56567a42489eb27b437e53182e68734bcbafcc9e416",
+    "head": "398c6f91de6e0d4883b10a41b6c63044e6192730",
+    "no_compilation": true
+  }
+]

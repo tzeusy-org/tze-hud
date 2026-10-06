@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+set -euo pipefail
+if ! command -v pwsh >/dev/null; then
+    echo "SKIPPED: overlay-harness-contract needs PowerShell (pwsh)"; exit 0
+fi
+pwsh -File ./scripts/ci/windows/test-windowed-fullscreen-overlay-perf.ps1
+cargo check --workspace
+cargo fmt --check
+cargo clippy --workspace --all-targets -- -D warnings
+#!/usr/bin/env bash
+set -euo pipefail
+if ! rustup target list --installed | grep -qx x86_64-pc-windows-gnu; then
+    echo "SKIPPED: clippy-windows-gnu needs the rustup target (rustup target add x86_64-pc-windows-gnu)"; exit 0
+fi
+if ! command -v x86_64-w64-mingw32-gcc >/dev/null; then
+    echo "SKIPPED: clippy-windows-gnu needs the MinGW cross toolchain (apt install mingw-w64)"; exit 0
+fi
+cargo clippy \
+    -p tze_hud_runtime \
+    -p tze_hud_compositor \
+    -p tze_hud_config \
+    --target x86_64-pc-windows-gnu \
+    -- -D warnings
+#!/usr/bin/env bash
+set -euo pipefail
+if ! cargo deny --version >/dev/null 2>&1; then
+    echo "SKIPPED: cargo-deny not installed (cargo install --locked cargo-deny)"; exit 0
+fi
+cargo deny check advisories licenses bans sources
+cargo machete
+cargo metadata --format-version 1 --no-deps | python3 scripts/ci/check_dev_mode_defaults.py
+python3 scripts/ci/test_check_idle_efficiency.py
+python3 scripts/ci/test_run_quiescent_efficiency_script.py
+if [ -f /usr/share/vulkan/icd.d/lvp_icd.json ]; then export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json; fi; HEADLESS_FORCE_SOFTWARE=1 TZE_HUD_REQUIRE_GPU=1 cargo test --workspace --all-targets --exclude integration
+if [ -f /usr/share/vulkan/icd.d/lvp_icd.json ]; then export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json; fi; HEADLESS_FORCE_SOFTWARE=1 cargo test -p integration --tests
+python3 -m pytest .claude/skills/user-test/tests/ .claude/skills/user-test/scripts/test_hud_grpc_client.py scripts/tests/ -q
+python3 -m unittest discover -s scripts/ci
+mkdir -p test_results/token-footprint
+if [ -f /usr/share/vulkan/icd.d/lvp_icd.json ]; then export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json; fi; HEADLESS_FORCE_SOFTWARE=1 cargo run -p benchmark --features headless --bin token_footprint_calibration -- --output test_results/token-footprint/measurement.json
+if [ -f /usr/share/vulkan/icd.d/lvp_icd.json ]; then export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json; fi; HEADLESS_FORCE_SOFTWARE=1 cargo run -p benchmark --features headless --bin token_footprint_calibration -- --output test_results/token-footprint/repeat.json
+cmp test_results/token-footprint/measurement.json test_results/token-footprint/repeat.json
+python3 scripts/ci/check_token_footprint.py --measurement test_results/token-footprint/measurement.json --baseline scripts/ci/token_footprint_baseline.json --output test_results/token-footprint/gate-report.json
+if [ -f /usr/share/vulkan/icd.d/lvp_icd.json ]; then export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json; fi; HEADLESS_FORCE_SOFTWARE=1 cargo test -p vertical_slice --test production_boot -- --nocapture
+if [ -f /usr/share/vulkan/icd.d/lvp_icd.json ]; then export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json; fi; HEADLESS_FORCE_SOFTWARE=1 cargo test -p tze_hud_app --test production_boot -- --nocapture

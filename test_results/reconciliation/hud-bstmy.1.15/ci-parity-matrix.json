@@ -1,0 +1,539 @@
+{
+  "head": "398c6f91de6e0d4883b10a41b6c63044e6192730",
+  "workflow_env": {
+    "APT_OPTS": "-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30",
+    "CARGO_TERM_COLOR": "always",
+    "RUST_BACKTRACE": 1,
+    "HEADLESS_FORCE_SOFTWARE": "1"
+  },
+  "runs": [
+    {
+      "job": "check",
+      "job_name": "cargo check",
+      "step_index": 1,
+      "step_name": "Test fullscreen vs overlay harness contract",
+      "job_continue_on_error": false,
+      "step_continue_on_error": false,
+      "job_timeout": 15,
+      "step_timeout": null,
+      "step_env": {},
+      "run": ".\\scripts\\ci\\windows\\test-windowed-fullscreen-overlay-perf.ps1",
+      "classification": "reachable tool-gated behavior",
+      "local": "just overlay-harness-contract; local pwsh unavailable, exact398 GitHub check step succeeded",
+      "actual_proof": "integrated-ci.log at398; local pwsh SKIPPED, exact398 remote check step actual success in exact-main-ci-jobs.json"
+    },
+    {
+      "job": "check",
+      "job_name": "cargo check",
+      "step_index": 4,
+      "step_name": "Install protobuf compiler (required by tze_hud_protocol build script)",
+      "job_continue_on_error": false,
+      "step_continue_on_error": false,
+      "job_timeout": 15,
+      "step_timeout": 5,
+      "step_env": {},
+      "run": "sudo apt-get $APT_OPTS update -q\nsudo apt-get $APT_OPTS install -y --no-install-recommends protobuf-compiler\n",
+      "classification": "explicit CI host provisioning",
+      "local": "just bootstrap/environment prerequisites; just ci does not install host packages",
+      "actual_proof": "integrated-ci.log at398 or explicit provisioning/duplicate classification"
+    },
+    {
+      "job": "check",
+      "job_name": "cargo check",
+      "step_index": 5,
+      "step_name": "cargo check (workspace)",
+      "job_continue_on_error": false,
+      "step_continue_on_error": false,
+      "job_timeout": 15,
+      "step_timeout": null,
+      "step_env": {},
+      "run": "cargo check --workspace",
+      "classification": "reachable blocking type gate",
+      "local": "just check: cargo check --workspace",
+      "actual_proof": "integrated-ci.log at398 or explicit provisioning/duplicate classification"
+    },
+    {
+      "job": "check",
+      "job_name": "cargo check",
+      "step_index": 7,
+      "step_name": "cargo machete (unused dependencies)",
+      "job_continue_on_error": false,
+      "step_continue_on_error": false,
+      "job_timeout": 15,
+      "step_timeout": null,
+      "step_env": {},
+      "run": "cargo machete",
+      "classification": "reachable dependency gate",
+      "local": "just deps-unused",
+      "actual_proof": "integrated-ci.log at398 or explicit provisioning/duplicate classification"
+    },
+    {
+      "job": "check",
+      "job_name": "cargo check",
+      "step_index": 8,
+      "step_name": "Test idle-efficiency artifact gate",
+      "job_continue_on_error": false,
+      "step_continue_on_error": false,
+      "job_timeout": 15,
+      "step_timeout": null,
+      "step_env": {},
+      "run": "python3 scripts/ci/test_check_idle_efficiency.py",
+      "classification": "reachable behavior contract",
+      "local": "just idle-efficiency-checker; same two scripts",
+      "actual_proof": "integrated-ci.log at398 or explicit provisioning/duplicate classification"
+    },
+    {
+      "job": "check",
+      "job_name": "cargo check",
+      "step_index": 9,
+      "step_name": "Test quiescent-efficiency startup contract",
+      "job_continue_on_error": false,
+      "step_continue_on_error": false,
+      "job_timeout": 15,
+      "step_timeout": null,
+      "step_env": {},
+      "run": "python3 scripts/ci/test_run_quiescent_efficiency_script.py",
+      "classification": "reachable behavior contract",
+      "local": "just idle-efficiency-checker; same two scripts",
+      "actual_proof": "integrated-ci.log at398 or explicit provisioning/duplicate classification"
+    },
+    {
+      "job": "fmt",
+      "job_name": "cargo fmt",
+      "step_index": 2,
+      "step_name": "cargo fmt --check",
+      "job_continue_on_error": false,
+      "step_continue_on_error": false,
+      "job_timeout": 5,
+      "step_timeout": null,
+      "step_env": {},
+      "run": "cargo fmt --check",
+      "classification": "reachable formatting gate",
+      "local": "just fmt; --all is redundant for workspace root default-members",
+      "actual_proof": "integrated-ci.log at398 or explicit provisioning/duplicate classification"
+    },
+    {
+      "job": "clippy",
+      "job_name": "cargo clippy",
+      "step_index": 3,
+      "step_name": "Install protobuf compiler (required by tze_hud_protocol build script)",
+      "job_continue_on_error": false,
+      "step_continue_on_error": false,
+      "job_timeout": 15,
+      "step_timeout": 5,
+      "step_env": {},
+      "run": "sudo apt-get $APT_OPTS update -q\nsudo apt-get $APT_OPTS install -y --no-install-recommends protobuf-compiler\n",
+      "classification": "explicit CI host provisioning",
+      "local": "just bootstrap/environment prerequisites; just ci does not install host packages",
+      "actual_proof": "integrated-ci.log at398 or explicit provisioning/duplicate classification"
+    },
+    {
+      "job": "clippy",
+      "job_name": "cargo clippy",
+      "step_index": 4,
+      "step_name": "cargo clippy (workspace, all targets, deny warnings)",
+      "job_continue_on_error": false,
+      "step_continue_on_error": false,
+      "job_timeout": 15,
+      "step_timeout": null,
+      "step_env": {},
+      "run": "cargo clippy --workspace --all-targets -- -D warnings",
+      "classification": "reachable lint gate",
+      "local": "just clippy: --workspace --all-targets -- -D warnings",
+      "actual_proof": "integrated-ci.log at398 or explicit provisioning/duplicate classification"
+    },
+    {
+      "job": "clippy-windows-gnu",
+      "job_name": "cargo clippy (windows-gnu cross-target)",
+      "step_index": 3,
+      "step_name": "Install protobuf compiler + MinGW cross toolchain",
+      "job_continue_on_error": false,
+      "step_continue_on_error": false,
+      "job_timeout": 15,
+      "step_timeout": 5,
+      "step_env": {},
+      "run": "sudo apt-get $APT_OPTS update -q\nsudo apt-get $APT_OPTS install -y --no-install-recommends \\\n  protobuf-compiler \\\n  mingw-w64\n",
+      "classification": "explicit CI host provisioning",
+      "local": "just bootstrap/environment prerequisites; just ci does not install host packages",
+      "actual_proof": "integrated-ci.log at398 or explicit provisioning/duplicate classification"
+    },
+    {
+      "job": "clippy-windows-gnu",
+      "job_name": "cargo clippy (windows-gnu cross-target)",
+      "step_index": 4,
+      "step_name": "cargo clippy (windows-gnu, cfg(windows) crates, deny warnings)",
+      "job_continue_on_error": false,
+      "step_continue_on_error": false,
+      "job_timeout": 15,
+      "step_timeout": null,
+      "step_env": {},
+      "run": "cargo clippy \\\n  -p tze_hud_runtime \\\n  -p tze_hud_compositor \\\n  -p tze_hud_config \\\n  --target x86_64-pc-windows-gnu \\\n  -- -D warnings\n",
+      "classification": "reachable tool-gated Windows type/lint gate",
+      "local": "just clippy-windows-gnu; same runtime/compositor/config packages and target/deny warnings",
+      "actual_proof": "integrated-ci.log at398 or explicit provisioning/duplicate classification"
+    },
+    {
+      "job": "test-unit",
+      "job_name": "cargo test (unit)",
+      "step_index": 3,
+      "step_name": "Install Mesa / llvmpipe + protobuf compiler",
+      "job_continue_on_error": false,
+      "step_continue_on_error": false,
+      "job_timeout": 15,
+      "step_timeout": 5,
+      "step_env": {},
+      "run": "sudo apt-get $APT_OPTS update -q\nsudo apt-get $APT_OPTS install -y --no-install-recommends \\\n  libvulkan1 \\\n  mesa-vulkan-drivers \\\n  mesa-utils \\\n  libegl-mesa0 \\\n  libgl1-mesa-dri \\\n  protobuf-compiler\n",
+      "classification": "explicit CI host provisioning",
+      "local": "just bootstrap/environment prerequisites; just ci does not install host packages",
+      "actual_proof": "integrated-ci.log at398 or explicit provisioning/duplicate classification"
+    },
+    {
+      "job": "test-unit",
+      "job_name": "cargo test (unit)",
+      "step_index": 4,
+      "step_name": "cargo test (workspace, exclude integration)",
+      "job_continue_on_error": false,
+      "step_continue_on_error": false,
+      "job_timeout": 15,
+      "step_timeout": null,
+      "step_env": {
+        "TZE_HUD_REQUIRE_GPU": "1"
+      },
+      "run": "cargo test \\\n  --workspace \\\n  --all-targets \\\n  --exclude integration\n",
+      "classification": "reachable blocking behavior",
+      "local": "just test: --workspace --all-targets --exclude integration; same software and require-GPU flags; local also pins installed Mesa ICD",
+      "actual_proof": "integrated-ci.log at398 or explicit provisioning/duplicate classification"
+    },
+    {
+      "job": "test-integration",
+      "job_name": "cargo test (integration)",
+      "step_index": 3,
+      "step_name": "Install Mesa / llvmpipe + protobuf compiler",
+      "job_continue_on_error": false,
+      "step_continue_on_error": false,
+      "job_timeout": 15,
+      "step_timeout": 5,
+      "step_env": {},
+      "run": "sudo apt-get $APT_OPTS update -q\nsudo apt-get $APT_OPTS install -y --no-install-recommends \\\n  libvulkan1 \\\n  mesa-vulkan-drivers \\\n  mesa-utils \\\n  libegl-mesa0 \\\n  libgl1-mesa-dri \\\n  protobuf-compiler\n",
+      "classification": "explicit CI host provisioning",
+      "local": "just bootstrap/environment prerequisites; just ci does not install host packages",
+      "actual_proof": "integrated-ci.log at398 or explicit provisioning/duplicate classification"
+    },
+    {
+      "job": "test-integration",
+      "job_name": "cargo test (integration)",
+      "step_index": 4,
+      "step_name": "cargo test -p integration (headless suites)",
+      "job_continue_on_error": false,
+      "step_continue_on_error": false,
+      "job_timeout": 15,
+      "step_timeout": null,
+      "step_env": {},
+      "run": "cargo test -p integration --tests\n",
+      "classification": "reachable blocking behavior",
+      "local": "just test-integration: cargo test -p integration --tests includes all14 binaries",
+      "actual_proof": "integrated-ci.log at398 or explicit provisioning/duplicate classification"
+    },
+    {
+      "job": "test-integration",
+      "job_name": "cargo test (integration)",
+      "step_index": 5,
+      "step_name": "Test token-footprint gate contract",
+      "job_continue_on_error": false,
+      "step_continue_on_error": false,
+      "job_timeout": 15,
+      "step_timeout": null,
+      "step_env": {},
+      "run": "python3 -m unittest scripts.ci.test_check_token_footprint scripts.ci.test_token_footprint_flow",
+      "classification": "reachable existing behavior fixtures",
+      "local": "just test-python unittest discover covers both modules",
+      "actual_proof": "integrated-ci.log at398 or explicit provisioning/duplicate classification"
+    },
+    {
+      "job": "test-integration",
+      "job_name": "cargo test (integration)",
+      "step_index": 6,
+      "step_name": "Calibrate deterministic LLM-facing token footprint",
+      "job_continue_on_error": false,
+      "step_continue_on_error": false,
+      "job_timeout": 15,
+      "step_timeout": null,
+      "step_env": {
+        "HEADLESS_FORCE_SOFTWARE": "1"
+      },
+      "run": "mkdir -p test_results/token-footprint\ncargo run -p benchmark --features headless \\\n  --bin token_footprint_calibration -- \\\n  --output test_results/token-footprint/measurement.json\ncargo run -p benchmark --features headless \\\n  --bin token_footprint_calibration -- \\\n  --output test_results/token-footprint/repeat.json\ncmp test_results/token-footprint/measurement.json \\\n  test_results/token-footprint/repeat.json\npython3 scripts/ci/check_token_footprint.py \\\n  --measurement test_results/token-footprint/measurement.json \\\n  --baseline scripts/ci/token_footprint_baseline.json \\\n  --output test_results/token-footprint/gate-report.json\n",
+      "classification": "reachable deterministic calibration/gate",
+      "local": "just token-footprint: two actual calibration runs, cmp measurement/repeat, same baseline checker",
+      "actual_proof": "integrated-ci.log at398 or explicit provisioning/duplicate classification"
+    },
+    {
+      "job": "production-boot-vertical-slice",
+      "job_name": "vertical_slice production config boot",
+      "step_index": 3,
+      "step_name": "Install Mesa / llvmpipe + protobuf compiler",
+      "job_continue_on_error": false,
+      "step_continue_on_error": false,
+      "job_timeout": 15,
+      "step_timeout": 5,
+      "step_env": {},
+      "run": "sudo apt-get $APT_OPTS update -q\nsudo apt-get $APT_OPTS install -y --no-install-recommends \\\n  libvulkan1 \\\n  mesa-vulkan-drivers \\\n  mesa-utils \\\n  libegl-mesa0 \\\n  libgl1-mesa-dri \\\n  protobuf-compiler\n",
+      "classification": "explicit CI host provisioning",
+      "local": "just bootstrap/environment prerequisites; just ci does not install host packages",
+      "actual_proof": "integrated-ci.log at398 or explicit provisioning/duplicate classification"
+    },
+    {
+      "job": "production-boot-vertical-slice",
+      "job_name": "vertical_slice production config boot",
+      "step_index": 4,
+      "step_name": "cargo test -p vertical_slice --test production_boot",
+      "job_continue_on_error": false,
+      "step_continue_on_error": false,
+      "job_timeout": 15,
+      "step_timeout": null,
+      "step_env": {},
+      "run": "cargo test \\\n  -p vertical_slice \\\n  --test production_boot \\\n  -- --nocapture\n",
+      "classification": "reachable boot behavior",
+      "local": "just production-boot: same package/test target",
+      "actual_proof": "integrated-ci.log at398 or explicit provisioning/duplicate classification"
+    },
+    {
+      "job": "canonical-app-production-boot",
+      "job_name": "canonical app production config boot gate",
+      "step_index": 3,
+      "step_name": "Install Mesa / llvmpipe + protobuf compiler",
+      "job_continue_on_error": false,
+      "step_continue_on_error": false,
+      "job_timeout": 15,
+      "step_timeout": 5,
+      "step_env": {},
+      "run": "sudo apt-get $APT_OPTS update -q\nsudo apt-get $APT_OPTS install -y --no-install-recommends \\\n  libvulkan1 \\\n  mesa-vulkan-drivers \\\n  mesa-utils \\\n  libegl-mesa0 \\\n  libgl1-mesa-dri \\\n  protobuf-compiler\n",
+      "classification": "explicit CI host provisioning",
+      "local": "just bootstrap/environment prerequisites; just ci does not install host packages",
+      "actual_proof": "integrated-ci.log at398 or explicit provisioning/duplicate classification"
+    },
+    {
+      "job": "canonical-app-production-boot",
+      "job_name": "canonical app production config boot gate",
+      "step_index": 4,
+      "step_name": "cargo test -p tze_hud_app --test production_boot",
+      "job_continue_on_error": false,
+      "step_continue_on_error": false,
+      "job_timeout": 15,
+      "step_timeout": null,
+      "step_env": {},
+      "run": "cargo test \\\n  -p tze_hud_app \\\n  --test production_boot \\\n  -- --nocapture\n",
+      "classification": "reachable boot behavior",
+      "local": "just canonical-app-boot: same package/test target",
+      "actual_proof": "integrated-ci.log at398 or explicit provisioning/duplicate classification"
+    },
+    {
+      "job": "user-test-python-suite",
+      "job_name": "user-test python suite",
+      "step_index": 2,
+      "step_name": "Install Python test dependencies",
+      "job_continue_on_error": false,
+      "step_continue_on_error": false,
+      "job_timeout": 10,
+      "step_timeout": null,
+      "step_env": {},
+      "run": "pip install --quiet -r scripts/requirements-dev.txt\n",
+      "classification": "explicit CI host provisioning",
+      "local": "just bootstrap/environment prerequisites; just ci does not install host packages",
+      "actual_proof": "integrated-ci.log at398 or explicit provisioning/duplicate classification"
+    },
+    {
+      "job": "user-test-python-suite",
+      "job_name": "user-test python suite",
+      "step_index": 3,
+      "step_name": "Run pure-Python user-test suite",
+      "job_continue_on_error": false,
+      "step_continue_on_error": false,
+      "job_timeout": 10,
+      "step_timeout": null,
+      "step_env": {},
+      "run": "python3 -m pytest \\\n  .claude/skills/user-test/tests/ \\\n  .claude/skills/user-test/scripts/test_hud_grpc_client.py \\\n  scripts/tests/ \\\n  -q\n",
+      "classification": "reachable existing Python behavior",
+      "local": "just test-python: same three test roots",
+      "actual_proof": "integrated-ci.log at398 or explicit provisioning/duplicate classification"
+    },
+    {
+      "job": "user-test-python-suite",
+      "job_name": "user-test python suite",
+      "step_index": 4,
+      "step_name": "Run scripts/ci unit tests",
+      "job_continue_on_error": false,
+      "step_continue_on_error": false,
+      "job_timeout": 10,
+      "step_timeout": null,
+      "step_env": {},
+      "run": "python3 -m unittest discover -s scripts/ci",
+      "classification": "reachable existing Python behavior",
+      "local": "just test-python: same scripts/ci discovery root/pattern",
+      "actual_proof": "integrated-ci.log at398 or explicit provisioning/duplicate classification"
+    },
+    {
+      "job": "dev-mode-guard",
+      "job_name": "dev-mode guard (release build)",
+      "step_index": 1,
+      "step_name": "Verify dev-mode is not a default feature",
+      "job_continue_on_error": false,
+      "step_continue_on_error": false,
+      "job_timeout": 5,
+      "step_timeout": null,
+      "step_env": {},
+      "run": "cargo metadata --format-version 1 --no-deps | python3 scripts/ci/check_dev_mode_defaults.py",
+      "classification": "reachable guard with demonstrated blind spot",
+      "local": "just dev-mode-guard: identical cargo metadata --format-version 1 --no-deps pipeline; weak-order counterexample",
+      "actual_proof": "integrated-ci.log at398 or explicit provisioning/duplicate classification"
+    },
+    {
+      "job": "test-gpu-pixel-readback",
+      "job_name": "pixel readback (GPU / llvmpipe, informational)",
+      "step_index": 3,
+      "step_name": "Install Mesa / llvmpipe + Vulkan loader + protobuf compiler",
+      "job_continue_on_error": true,
+      "step_continue_on_error": false,
+      "job_timeout": 15,
+      "step_timeout": 5,
+      "step_env": {},
+      "run": "sudo apt-get $APT_OPTS update -q\nsudo apt-get $APT_OPTS install -y --no-install-recommends \\\n  libvulkan1 \\\n  mesa-vulkan-drivers \\\n  mesa-utils \\\n  libegl-mesa0 \\\n  libgl1-mesa-dri \\\n  vulkan-tools \\\n  protobuf-compiler\n",
+      "classification": "explicit CI host provisioning",
+      "local": "just bootstrap/environment prerequisites; just ci does not install host packages",
+      "actual_proof": "integrated-ci.log at398 or explicit provisioning/duplicate classification"
+    },
+    {
+      "job": "test-gpu-pixel-readback",
+      "job_name": "pixel readback (GPU / llvmpipe, informational)",
+      "step_index": 4,
+      "step_name": "Verify Vulkan adapter available",
+      "job_continue_on_error": true,
+      "step_continue_on_error": false,
+      "job_timeout": 15,
+      "step_timeout": null,
+      "step_env": {},
+      "run": "vulkaninfo --summary 2>&1 | head -30 || true",
+      "classification": "explicit informational duplicate exclusion",
+      "local": "just test runs runtime pixel_readback through workspace dev-mode unification; vulkaninfo is informational only",
+      "actual_proof": "integrated-ci.log at398 or explicit provisioning/duplicate classification"
+    },
+    {
+      "job": "test-gpu-pixel-readback",
+      "job_name": "pixel readback (GPU / llvmpipe, informational)",
+      "step_index": 5,
+      "step_name": "cargo test pixel_readback (software GPU)",
+      "job_continue_on_error": true,
+      "step_continue_on_error": false,
+      "job_timeout": 15,
+      "step_timeout": null,
+      "step_env": {
+        "HEADLESS_FORCE_SOFTWARE": "1",
+        "LLVMPIPE_CI": "1",
+        "TZE_HUD_REQUIRE_GPU": "1"
+      },
+      "run": "cargo test \\\n  -p tze_hud_runtime \\\n  --test pixel_readback \\\n  --features dev-mode \\\n  -- --nocapture\n",
+      "classification": "explicit informational duplicate exclusion",
+      "local": "just test runs runtime pixel_readback through workspace dev-mode unification; vulkaninfo is informational only",
+      "actual_proof": "integrated-ci.log at398 or explicit provisioning/duplicate classification"
+    }
+  ],
+  "required_rules_snapshot": [
+    {
+      "type": "deletion",
+      "ruleset_source_type": "Repository",
+      "ruleset_source": "tzeusy-org/tze-hud",
+      "ruleset_id": 24321785
+    },
+    {
+      "type": "non_fast_forward",
+      "ruleset_source_type": "Repository",
+      "ruleset_source": "tzeusy-org/tze-hud",
+      "ruleset_id": 24321785
+    },
+    {
+      "type": "pull_request",
+      "parameters": {
+        "required_approving_review_count": 0,
+        "dismiss_stale_reviews_on_push": false,
+        "required_reviewers": [],
+        "require_code_owner_review": false,
+        "dismissal_restriction": {
+          "enabled": false,
+          "allowed_actors": []
+        },
+        "require_last_push_approval": false,
+        "required_review_thread_resolution": false,
+        "require_extra_approval_for_unattributed_changes": true,
+        "allowed_merge_methods": [
+          "squash"
+        ]
+      },
+      "ruleset_source_type": "Repository",
+      "ruleset_source": "tzeusy-org/tze-hud",
+      "ruleset_id": 24321785
+    },
+    {
+      "type": "merge_queue",
+      "parameters": {
+        "merge_method": "SQUASH",
+        "max_entries_to_build": 5,
+        "min_entries_to_merge": 1,
+        "max_entries_to_merge": 5,
+        "min_entries_to_merge_wait_minutes": 1,
+        "grouping_strategy": "ALLGREEN",
+        "check_response_timeout_minutes": 60
+      },
+      "ruleset_source_type": "Repository",
+      "ruleset_source": "tzeusy-org/tze-hud",
+      "ruleset_id": 24321785
+    },
+    {
+      "type": "required_status_checks",
+      "parameters": {
+        "strict_required_status_checks_policy": false,
+        "do_not_enforce_on_create": false,
+        "required_status_checks": [
+          {
+            "context": "cargo check",
+            "integration_id": 15368
+          },
+          {
+            "context": "cargo fmt",
+            "integration_id": 15368
+          },
+          {
+            "context": "cargo clippy",
+            "integration_id": 15368
+          },
+          {
+            "context": "cargo test (unit)",
+            "integration_id": 15368
+          },
+          {
+            "context": "vertical_slice production config boot",
+            "integration_id": 15368
+          },
+          {
+            "context": "canonical app production config boot gate",
+            "integration_id": 15368
+          },
+          {
+            "context": "dev-mode guard (release build)",
+            "integration_id": 15368
+          },
+          {
+            "context": "cargo clippy (windows-gnu cross-target)",
+            "integration_id": 15368
+          }
+        ]
+      },
+      "ruleset_source_type": "Repository",
+      "ruleset_source": "tzeusy-org/tze-hud",
+      "ruleset_id": 24321785
+    }
+  ],
+  "audit_head": "398c6f91de6e0d4883b10a41b6c63044e6192730",
+  "action_inventory": "ci-action-classification.json",
+  "workflow_blob": "41e6e11cf33a50e90fb072ebd920eb67d3f45d60",
+  "justfile_blob": "6e5b5f3fc2829056209109444fa9af8ca18cb73d",
+  "owner_8_6": "Unanswered optionC/status quo: eight contexts; no owner wait or inferred approval. Dedicated pixel job informational duplicate; unit pixel assertions already required."
+}

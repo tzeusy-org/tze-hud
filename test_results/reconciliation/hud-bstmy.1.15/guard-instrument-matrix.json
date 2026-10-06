@@ -1,0 +1,71 @@
+{
+  "audit_head": "398c6f91de6e0d4883b10a41b6c63044e6192730",
+  "source": "scripts/ci/check_dev_mode_defaults.py:47",
+  "source_blob": "cd826ea66a37402d43fa7e1d94bdf858a0133e2f",
+  "same_blob_as_counterexample_8dcc": true,
+  "rows": [
+    {
+      "surface": "package roots",
+      "code_assessment": "All18 metadata workspace packages;17 bin/lib-kind eligible default closures including released tze_hud_app; integration tests-only excluded.",
+      "gate_species": "Real metadata/eligibility inventory",
+      "classification": "implemented"
+    },
+    {
+      "surface": "normal/build and dev",
+      "code_assessment": "edges() retains normal/build workspace path entries and excludes dev entries; repeated entries keyed parent/id(d).",
+      "gate_species": "Existing second-target/build-kind/clean-repeats fixtures plus source traversal",
+      "classification": "implemented"
+    },
+    {
+      "surface": "defaults/default-features=false",
+      "code_assessment": "Per-edge uses_default_features determines default request; explicit features retained; default indirection visited once.",
+      "gate_species": "Existing clean/protocol-default/app-to-runtime/indirection fixtures",
+      "classification": "implemented"
+    },
+    {
+      "surface": "aliases and strong forwarding",
+      "code_assessment": "edges keyed rename or name; dep:x, implicit optional and x/f activate; actual Cargo rt alias counterexample confirms alias target mapping.",
+      "gate_species": "Existing forwarded fixture/source plus actual Cargo probe",
+      "classification": "implemented"
+    },
+    {
+      "surface": "inactive optional",
+      "code_assessment": "Weak requests are recorded without activating an optional alias; exact no-activation oracle and extended existing inactive fixture retain no runtime feature in app normal/build tree.",
+      "gate_species": "Existing optional fixture plus actual Cargo selected-package normal/build/features tree oracle",
+      "classification": "implemented"
+    },
+    {
+      "surface": "weak forwarding fixed point",
+      "code_assessment": "weak_forwards stores per parent/key requests; activate replays requests for each newly active dependency entry; already-active weak forwarding handles work order independently.",
+      "gate_species": "Existing forwarded fixture and real Cargo alias/default list orderings, both normal/build; guard exits1 bothorders; source/cyclic oracle",
+      "classification": "implemented"
+    },
+    {
+      "surface": "cycles and repeated activation",
+      "code_assessment": "Finite enabled features, seen packages, active per-entry state and stored weak obligations terminate/replay correctly; current cyclic actual Cargo oracle and fixture both reject default dev-mode.",
+      "gate_species": "Source finite-state analysis; repair extends existing forwarded table rather than adding mirror test",
+      "classification": "implemented"
+    },
+    {
+      "surface": "target union",
+      "code_assessment": "Target-conditioned normal/build entries are conservatively unioned. This does not claim host-target-equivalent Cargo resolution; per-entry id(d) keeps kind/target duplicates independent.",
+      "gate_species": "Existing repeated target/build fixtures",
+      "classification": "implemented"
+    },
+    {
+      "surface": "outside app/missing app",
+      "code_assessment": "All eligible packages checked; missing released package fails closed.",
+      "gate_species": "Existing outside-app and missing-shipped fixtures",
+      "classification": "implemented"
+    },
+    {
+      "surface": "third-party boundary",
+      "code_assessment": "Current offline locked metadata inventories470 packages, no registry dev-mode definitions. Workspace path-only feature resolver boundary remains intentional.",
+      "gate_species": "third-party-feature-assumption.json, actual 398 metadata; no registry expansion",
+      "classification": "implemented current assumption"
+    }
+  ],
+  "existing_fixture_count": 11,
+  "counterexample": "Previous weak counterexample repaired by .1.14, verified independently in cargo-oracles.json; first oracle observation mistake is preserved as audit instrumentation, not code failure.",
+  "production_conclusion": "All17 current shipping closures exclude dev-mode; actual weak alias/default ordering/inactive/cycle semantics now match the designated guard. Eligibility prose correction separately proposed; predicates unchanged."
+}

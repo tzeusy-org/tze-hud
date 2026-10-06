@@ -1,0 +1,7 @@
+{
+  "audit_source_head": "398c6f91de6e0d4883b10a41b6c63044e6192730",
+  "live_remote_main_before_publication": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261",
+  "same_head": false,
+  "source_pin_authorized": "398 per coordinator dispatch and explicit current integrated/gpu proof; final evidence-only commit changes no source/default/recipe blobs.",
+  "source_head_checks": "No stale command relabelling or new broad CI run."
+}
