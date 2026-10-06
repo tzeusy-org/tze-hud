@@ -7,6 +7,10 @@
 //! - non-tmux adapter fixtures can use the same unchanged bridge contract
 //! - pilot updates are sent over the existing primary resident session stream
 
+#[path = "../../crates/tze_hud_runtime/src/test_support.rs"]
+mod gpu_init;
+use gpu_init::serialized_headless_init;
+
 use std::collections::VecDeque;
 
 use tokio_stream::StreamExt;
@@ -827,7 +831,7 @@ async fn tmux_pilot_drives_portal_over_existing_primary_session_stream()
         agents: tze_hud_scene::config::AgentDirectory::unrestricted(TEST_PSK),
         config_toml: None,
     };
-    let runtime = HeadlessRuntime::new(config).await?;
+    let runtime = serialized_headless_init(HeadlessRuntime::new(config)).await?;
 
     {
         let state = runtime.shared_state().lock().await;
@@ -921,7 +925,7 @@ async fn non_tmux_adapter_drives_portal_over_existing_primary_session_stream()
         agents: tze_hud_scene::config::AgentDirectory::unrestricted(TEST_PSK),
         config_toml: None,
     };
-    let runtime = HeadlessRuntime::new(config).await?;
+    let runtime = serialized_headless_init(HeadlessRuntime::new(config)).await?;
 
     {
         let state = runtime.shared_state().lock().await;

@@ -103,7 +103,7 @@ async fn start_runtime_with_subtitle_zone(
         config_toml: None,
     };
 
-    let runtime = HeadlessRuntime::new(config).await?;
+    let runtime = common::serialized_headless_init(HeadlessRuntime::new(config)).await?;
 
     {
         let state = runtime.shared_state().lock().await;

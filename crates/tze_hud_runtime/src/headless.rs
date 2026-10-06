@@ -670,6 +670,103 @@ mod tests {
         FontFamily, Node, NodeData, Rect, ResourceBudget, Rgba, SceneId, TextAlign,
         TextMarkdownNode, TextOverflow,
     };
+
+    #[tokio::test]
+    async fn headless_initialization_is_serial_and_releases_after_failure() {
+        use crate::test_support::serialized_headless_init;
+        use std::future::{Future, pending, poll_fn};
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::task::{Context, Poll, Waker};
+
+        struct ActiveInit(Arc<AtomicUsize>);
+
+        impl ActiveInit {
+            fn enter(active: &Arc<AtomicUsize>, peak: &AtomicUsize) -> Self {
+                let count = active.fetch_add(1, Ordering::SeqCst) + 1;
+                peak.fetch_max(count, Ordering::SeqCst);
+                Self(active.clone())
+            }
+        }
+
+        impl Drop for ActiveInit {
+            fn drop(&mut self) {
+                self.0.fetch_sub(1, Ordering::SeqCst);
+            }
+        }
+
+        let active = Arc::new(AtomicUsize::new(0));
+        let peak = AtomicUsize::new(0);
+        let (finish_tx, finish_rx) = tokio::sync::oneshot::channel();
+        let mut first = Box::pin(serialized_headless_init(async {
+            let _active = ActiveInit::enter(&active, &peak);
+            finish_rx.await.expect("first initialization released");
+        }));
+
+        // Other runtime-lib tests may hold the process gate initially. Wait for
+        // our first initializer to enter, without completing it or using sleep.
+        poll_fn(|cx| {
+            assert!(first.as_mut().poll(cx).is_pending());
+            if active.load(Ordering::SeqCst) == 1 {
+                Poll::Ready(())
+            } else {
+                Poll::Pending
+            }
+        })
+        .await;
+
+        let mut second = Box::pin(serialized_headless_init(async {
+            let _active = ActiveInit::enter(&active, &peak);
+        }));
+        let mut cx = Context::from_waker(Waker::noop());
+        assert!(
+            second.as_mut().poll(&mut cx).is_pending(),
+            "a second initializer must wait for admission"
+        );
+        let mut queued = Box::pin(serialized_headless_init(async {
+            panic!("a cancelled queued initializer must never enter");
+        }));
+        assert!(queued.as_mut().poll(&mut cx).is_pending());
+        drop(queued);
+
+        finish_tx.send(()).expect("first initializer still alive");
+        first.await;
+        second.await;
+        assert_eq!(peak.load(Ordering::SeqCst), 1);
+        assert_eq!(active.load(Ordering::SeqCst), 0);
+
+        assert_eq!(
+            serialized_headless_init(async { Err::<(), _>("initialization failed") }).await,
+            Err("initialization failed"),
+            "initialization errors must propagate unchanged"
+        );
+        let panic = tokio::spawn(serialized_headless_init(async {
+            panic!("initializer unwind probe");
+        }))
+        .await
+        .expect_err("initializer panic must propagate");
+        assert!(panic.is_panic());
+
+        let mut cancelled = Box::pin(serialized_headless_init(async {
+            let _active = ActiveInit::enter(&active, &peak);
+            pending::<()>().await;
+        }));
+        poll_fn(|cx| {
+            assert!(cancelled.as_mut().poll(cx).is_pending());
+            if active.load(Ordering::SeqCst) == 1 {
+                Poll::Ready(())
+            } else {
+                Poll::Pending
+            }
+        })
+        .await;
+        drop(cancelled);
+        assert_eq!(active.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            serialized_headless_init(async { "initialized again" }).await,
+            "initialized again",
+            "error, unwind and cancellation must leave admission available"
+        );
+    }
     use tze_hud_scene::{MutationBatch, SceneMutation};
 
     fn retained_plain_text_node(content: &str, width: f32, height: f32) -> Node {

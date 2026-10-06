@@ -143,7 +143,7 @@ async fn test_three_agents_contention() -> Result<(), Box<dyn std::error::Error>
         config_toml: None,
     };
 
-    let mut runtime = HeadlessRuntime::new(config).await?;
+    let mut runtime = serialized_headless_init(HeadlessRuntime::new(config)).await?;
 
     // Pre-populate the scene with a tab and default zones BEFORE gRPC connections,
     // since all three agents will need an active tab and zones to publish to.
@@ -740,7 +740,9 @@ async fn test_grpc_and_mcp_share_single_scene_graph() {
         agents: tze_hud_scene::config::AgentDirectory::unrestricted("coherence-test"),
         config_toml: None,
     };
-    let runtime = HeadlessRuntime::new(config).await.expect("runtime init");
+    let runtime = serialized_headless_init(HeadlessRuntime::new(config))
+        .await
+        .expect("runtime init");
 
     // Obtain the Arc<Mutex<SharedState>> that both gRPC and MCP share.
     let shared_state_arc = runtime.shared_state().clone();
@@ -1057,7 +1059,7 @@ async fn test_three_agents_same_anchor_stack_without_overlap_and_update_concurre
         agents: tze_hud_scene::config::AgentDirectory::unrestricted(TEST_PSK),
         config_toml: None,
     };
-    let runtime = HeadlessRuntime::new(config).await?;
+    let runtime = serialized_headless_init(HeadlessRuntime::new(config)).await?;
     {
         let state = runtime.shared_state().lock().await;
         let mut scene = state.scene.lock().await;

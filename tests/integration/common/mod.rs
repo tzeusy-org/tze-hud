@@ -12,8 +12,14 @@
 //! Shared gRPC session helpers for the multi-agent integration suites
 //! (`multi_agent.rs`, `subtitle_streaming.rs`).
 //! PSK and port are parameters so the helpers stay test-agnostic.
+//! GPU initialization uses one test-only async gate per binary. Its guard is
+//! released before agent setup or rendering; separate processes are not locked.
 
 #![allow(dead_code)] // Items are selectively used across the test binaries.
+
+#[path = "../../../crates/tze_hud_runtime/src/test_support.rs"]
+mod gpu_init;
+pub(crate) use gpu_init::serialized_headless_init;
 
 use tokio_stream::StreamExt;
 use tze_hud_protocol::auth::{RUNTIME_MAX_VERSION, RUNTIME_MIN_VERSION};
