@@ -1,10 +1,9 @@
 //! Raw TOML-deserialisable structs.
 //!
 //! These are the intermediate representations produced by `toml::from_str`.
-//! They mirror the configuration file structure exactly and are deliberately
-//! permissive — all fields except the structurally-required ones are `Option`
-//! so that we can collect all missing/invalid-value errors in the validation
-//! phase rather than failing at deserialisation.
+//! The document, runtime and tab schemas reject unsupported fields. Optional
+//! fields still let validation collect missing/invalid-value errors, and
+//! intentionally dynamic maps retain their own key validation.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -23,6 +22,7 @@ pub struct AnyValue(pub toml::Value);
 
 /// `[runtime]` table — required.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct RawRuntime {
     /// Display profile name.  Must be present.
     pub profile: Option<String>,
@@ -34,6 +34,7 @@ pub struct RawRuntime {
 
 /// A single entry in the `[[tabs]]` array.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct RawTab {
     /// Human-readable tab name.  Must be unique.
     pub name: Option<String>,
@@ -174,8 +175,9 @@ pub struct RawDesignTokens(pub HashMap<String, String>);
 /// The top-level TOML document.
 ///
 /// All sections are optional to allow maximum error collection; the validator
-/// enforces required fields.
+/// enforces required fields. Unsupported section/field names fail parsing.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct RawConfig {
     /// Optional config schema version. Absent is treated as the current
     /// supported version (back-compatible for existing v1 configs); a value
