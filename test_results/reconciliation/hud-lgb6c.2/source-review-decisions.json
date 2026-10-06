@@ -1,0 +1,42 @@
+{
+  "at": "2026-10-06T12:58:02.916141+00:00",
+  "source_base": "0082c28fcdbc9627852d90ced2d5cf99303f4b7a",
+  "first_packet_sha256": "97893aa91c1c4d4e4018040ec44471e16e4601f05884a806a4bc879f97368c83",
+  "no_second_shaping": true,
+  "decisions": [
+    {
+      "topic": "public namespace",
+      "decision": "Re-export only firewall::remote as remote_firewall; keep existing diagnostic module crate-private."
+    },
+    {
+      "topic": "native new-rule formatting",
+      "decision": "Prepare the new ALLOW through standalone COM and accept only equivalent exact ports/two CIDR intervals; retain that actual native image for fingerprints. Original rule backups still require complete getter/setter roundtrip equality.",
+      "primary_source": "https://learn.microsoft.com/en-us/windows/win32/api/netfw/nf-netfw-inetfwrule-get_remoteaddresses"
+    },
+    {
+      "topic": "Shell apartment",
+      "decision": "Use a dedicated STA with OLE1 DDE disabled and paired cleanup.",
+      "primary_source": "https://learn.microsoft.com/en-us/windows/win32/api/shellapi/nf-shellapi-shellexecuteexw"
+    },
+    {
+      "topic": "program image replacement",
+      "decision": "Hold current executable read-only with no write/delete sharing through parent wait and child transaction. Parent PID/creation/image and original SID remain kernel-derived."
+    },
+    {
+      "topic": "protected journal writes",
+      "decision": "Check the protected journal content hash before every replace/remove and verify the saved content; refuse external changes without overwriting them. This does not assert atomicity against an administrator ignoring the helper lock."
+    },
+    {
+      "topic": "orphan results",
+      "decision": "During explicit actions only, scan at most64 entries and remove at most8 aged results after dead-parent/schema/nonce/exact owner-DACL checks."
+    },
+    {
+      "topic": "port option positions",
+      "finding": "Current pre-CI parser suppresses an inherited port when a --config value equals a port-flag string. Source remains frozen during current CI. Extend the same parser acceptance table to prove the edge, then track actual option positions; no new test species."
+    }
+  ],
+  "new_fixture_species": 5,
+  "modified_fixture_species": 3,
+  "native_live_limit": "No agent UAC/firewall/policy/network mutation. Standalone COM is compiled by GNU but awaits actual Windows CI execution; owner .3 live validation remains separate.",
+  "cache_clock_owner": "hud-bstmy.1.18 remains separate; current source0082 preserves its old private cache implementation, and merged8e is not a fabricated new execution."
+}

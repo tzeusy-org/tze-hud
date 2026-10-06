@@ -1,0 +1,101 @@
+{
+  "at": "2026-10-06T13:15:08.253053+00:00",
+  "base_head": "0082c28fcdbc9627852d90ced2d5cf99303f4b7a",
+  "uncommitted_source": true,
+  "paths": [
+    {
+      "path": ".github/workflows/windows.yml",
+      "bytes": 7252,
+      "sha256": "39c9712676c5238179ffdcbff2851bb37aba9bb5b121a74e0c47cbc0ea36f27b",
+      "base_blob": "0e477c2d691ac7afe9aafdb28d1811a27b133f51",
+      "worktree_blob": "04721e237609c7e4218d54fb155a02d6a7b522f0"
+    },
+    {
+      "path": "Cargo.lock",
+      "bytes": 116087,
+      "sha256": "f6aeb2d1bd38cf20f1099e024d85f5610a887c3e93304bd6fdb5dd42447a22d9",
+      "base_blob": "8b9d26d5c690231da9017091f01d74e76ddc6025",
+      "worktree_blob": "ddcfd27e825daf813a904a5ffa846ce39bb09c7c"
+    },
+    {
+      "path": "Cargo.toml",
+      "bytes": 5574,
+      "sha256": "ee0704c7b84c50f04a44be0b6edd82b1eb87cdce513712eb19e5e323283e53e8",
+      "base_blob": "d375af84d5ce66f4cefaf15fe3aad8592ea83870",
+      "worktree_blob": "7e6c7731b2a01baa1c11a5a8787af4e801ea7ba1"
+    },
+    {
+      "path": "app/tze_hud_app/src/main.rs",
+      "bytes": 81811,
+      "sha256": "5bafef2b15882ae97de225cdefd37115c9922a24c52aee4fd6641d046c671eed",
+      "base_blob": "87451589bc33793a0fb0108c10d78f35c55f6307",
+      "worktree_blob": "81e30aac6e10ef891bc837bfb95a054f7879863c"
+    },
+    {
+      "path": "crates/tze_hud_runtime/Cargo.toml",
+      "bytes": 3814,
+      "sha256": "126c9065982dcff2ab67394809e78a3b5a1d41a98a6d8464a263c193114618a6",
+      "base_blob": "58646016d36ddc45eb15422799ed507fab5da980",
+      "worktree_blob": "7b077026c4f86aaa99ed76b91eadd1cdd26ec2cd"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/firewall.rs",
+      "bytes": 24721,
+      "sha256": "6259e538aafd10e3c35dc33d0705766171728d8c4ebae1f5503ac0a61f0f13d5",
+      "base_blob": "6118c5968361765fc75118111b001559dbeb4a0b",
+      "worktree_blob": "be75447a051ec1da59d9533499ff459801a5b405"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/lib.rs",
+      "bytes": 2995,
+      "sha256": "49dcb439153d20a574c50cb53188e5a7b91db52986a859461d306963f0e4cd79",
+      "base_blob": "f8cdb51b5cf42bd7ed373d13671db4c763c246e5",
+      "worktree_blob": "090650358f61afb00e054030d40a28814526d1cd"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/pairing.rs",
+      "bytes": 39414,
+      "sha256": "18e7e6e6f0441ccfa146819256518376509372a4b1513e731948e2b5142bdad1",
+      "base_blob": "fa811e5320b7eea6b828d9d16007b362f8fece42",
+      "worktree_blob": "2e3de423b91b9b8ef29e7f9cb61ed318209a92ed"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/firewall/remote.rs",
+      "bytes": 44391,
+      "sha256": "fefe9bb8356d84f7e917e2abf128c7780708ce80976efc1a26f3373c80508589",
+      "base_blob": null,
+      "worktree_blob": "3fb5bb248689aae9e8529a7229052d0f3a348d8e"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/firewall/remote/windows.rs",
+      "bytes": 59836,
+      "sha256": "b5caadef787a26be70cabd1c02cbc4553f07e905af772b01a7fc14358be69e7c",
+      "base_blob": null,
+      "worktree_blob": "2d4af53a4b3f05009a1ed8a01ec80fd7e542c0b1"
+    },
+    {
+      "path": "docs/api.md",
+      "bytes": 22940,
+      "sha256": "12b72611860a22dcf86092fdc54e3078770f6072c8bd793e76cfa18a95a21bac",
+      "base_blob": "b22b1659dd44938fb67fb6348216ae82373724b9",
+      "worktree_blob": "bbb83091296fed4ec77524e8ad76d69b11cc098f"
+    },
+    {
+      "path": "docs/development/windows.md",
+      "bytes": 20117,
+      "sha256": "9ed9eb080d3da32e9a9080bcdbc0d7f5d4998146f810fe30df1fbfe920de79fc",
+      "base_blob": "de7e59597aa95fbf07a032ab92832975b54abbd9",
+      "worktree_blob": "36e3f35f98aceb802028845d7b6b6446fcf646c6"
+    },
+    {
+      "path": "docs/operations/windows-install.md",
+      "bytes": 18074,
+      "sha256": "e587857393555bff33aa5d4bd5af6ab6d880d002e1ac6a681f20276ef0d408f6",
+      "base_blob": "0c367d5f66ca17dd5ed5b7622ca746356531d497",
+      "worktree_blob": "51d09dc224cca7effb610689012a3ebaa5a46fb6"
+    }
+  ],
+  "first_packet_sha256": "97893aa91c1c4d4e4018040ec44471e16e4601f05884a806a4bc879f97368c83",
+  "first_canonical_bootstrap": "historical1b5 and current implementation0082 are distinct; no rebase or new execution claim at later main",
+  "source_count": 13
+}

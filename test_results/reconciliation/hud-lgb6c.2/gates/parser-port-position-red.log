@@ -1,0 +1,22 @@
+   Compiling tze_hud_app v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-lgb6c.2/app/tze_hud_app)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 7.50s
+     Running unittests src/main.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/tze_hud-21655c01c77103bb)
+
+running 2 tests
+
+thread 'tests::parse_options_accepts' panicked at app/tze_hud_app/src/main.rs:1362:21:
+assertion `left == right` failed
+  left: 9090
+ right: 9290
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test tests::parse_options_accepts ... FAILED
+test tests::parse_options_rejects ... ok
+
+failures:
+
+failures:
+    tests::parse_options_accepts
+
+test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 11 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p tze_hud_app --bin tze_hud`

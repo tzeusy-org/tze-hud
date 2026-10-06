@@ -1,0 +1,43 @@
+{
+  "at": "2026-10-06T13:02:56.418268+00:00",
+  "native_pid": 3243484,
+  "cwd": "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-lgb6c.2",
+  "argv": [
+    "cargo",
+    "test",
+    "-p",
+    "tze_hud_app",
+    "--bin",
+    "tze_hud",
+    "parse_options_",
+    "--",
+    "--nocapture"
+  ],
+  "timeout_seconds": 900,
+  "source_head": "0082c28fcdbc9627852d90ced2d5cf99303f4b7a",
+  "environment": {
+    "CARGO_TARGET_DIR": "/home/orca/orca/projects/tze-hud/target",
+    "CARGO_BUILD_JOBS": "1",
+    "PROTOC": "/usr/bin/protoc",
+    "VK_ICD_FILENAMES": "/usr/share/vulkan/icd.d/lvp_icd.json",
+    "HEADLESS_FORCE_SOFTWARE": "1",
+    "TZE_HUD_REQUIRE_GPU": "1"
+  },
+  "python_venv_prefix": "/home/orca/orca/projects/tze-hud/.venv/bin",
+  "default_test_parallelism": true,
+  "SKIP_GPU_TESTS_unset": true,
+  "PERF_ASSERT_unset_normal_gate": true,
+  "source_before_path": ".handoff/hud-lgb6c.2-implementation/gates/parser-port-position-green-corrected-source-before.json",
+  "source_before_sha256": "7423401cba00e20da294b5fd99f62f6eef825321b34d9f4cca3f59fda1d97e71",
+  "exit_code": 0,
+  "log_path": ".handoff/hud-lgb6c.2-implementation/gates/parser-port-position-green-corrected.log",
+  "child_pid": 3243497,
+  "process_group": 3243497,
+  "timed_out": false,
+  "elapsed_seconds": 5.5448741810105275,
+  "head_after": "0082c28fcdbc9627852d90ced2d5cf99303f4b7a",
+  "log_sha256": "c9f962f4fe73759becbd86e1ec990607b9ff080067fa32c4581d35a183684627",
+  "source_changes_during_gate": [],
+  "terminal_observed": true,
+  "process_group_absent": true
+}

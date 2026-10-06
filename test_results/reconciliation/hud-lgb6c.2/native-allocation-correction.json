@@ -1,0 +1,9 @@
+{
+  "at": "2026-10-06T13:28:05.395252+00:00",
+  "historical_first_commit": "c18ac0cf31645215977edb4a385d0a9fa1152913",
+  "discovery": "SHGetKnownFolderPath output was incorrectly owned by LocalFree RAII; SDK specifies CoTaskMemFree even on a failing HRESULT.",
+  "official_primary_source": "https://learn.microsoft.com/en-us/windows/win32/api/shlobj_core/nf-shlobj_core-shgetknownfolderpath",
+  "scope": "Replace only this allocation ownership using a small raw out-parameter shim matching the existing SDK/windows0.58 binding, so partial failure output is also freed. LocalAlloc-family outputs keep their existing LocalFree RAII.",
+  "fixture": "Existing fifth native fixture performs the same read-only ProgramData path query; no helper files, mutable firewall collection or UAC are touched. Tests delta remains +5~3-0.",
+  "execution_limit": "GNU all-target compilation underway, actual native execution pending existing Windows job; no false native allocator execution claim."
+}

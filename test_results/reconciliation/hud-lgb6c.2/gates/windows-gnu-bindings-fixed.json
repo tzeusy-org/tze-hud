@@ -1,0 +1,36 @@
+{
+  "at": "2026-10-06T12:37:39.879198+00:00",
+  "native_pid": 3202696,
+  "cwd": "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-lgb6c.2",
+  "argv": [
+    "just",
+    "clippy-windows-gnu"
+  ],
+  "timeout_seconds": 900,
+  "source_head": "0082c28fcdbc9627852d90ced2d5cf99303f4b7a",
+  "environment": {
+    "CARGO_TARGET_DIR": "/home/orca/orca/projects/tze-hud/target",
+    "CARGO_BUILD_JOBS": "1",
+    "PROTOC": "/usr/bin/protoc",
+    "VK_ICD_FILENAMES": "/usr/share/vulkan/icd.d/lvp_icd.json",
+    "HEADLESS_FORCE_SOFTWARE": "1",
+    "TZE_HUD_REQUIRE_GPU": "1"
+  },
+  "python_venv_prefix": "/home/orca/orca/projects/tze-hud/.venv/bin",
+  "default_test_parallelism": true,
+  "SKIP_GPU_TESTS_unset": true,
+  "PERF_ASSERT_unset_normal_gate": true,
+  "source_before_path": ".handoff/hud-lgb6c.2-implementation/gates/windows-gnu-bindings-fixed-source-before.json",
+  "source_before_sha256": "dfd2906b3036b5166a4b6a1166dfa0bc19e30d1fed2f11241f666990728706b0",
+  "exit_code": 101,
+  "log_path": ".handoff/hud-lgb6c.2-implementation/gates/windows-gnu-bindings-fixed.log",
+  "child_pid": 3202709,
+  "process_group": 3202709,
+  "timed_out": false,
+  "elapsed_seconds": 3.6899971079837997,
+  "head_after": "0082c28fcdbc9627852d90ced2d5cf99303f4b7a",
+  "log_sha256": "58a7a18834da6ed3e8401d79975f5a9ed567f41c4c9b0085b6a6b77829ce2aa0",
+  "source_changes_during_gate": [],
+  "terminal_observed": true,
+  "process_group_absent": true
+}

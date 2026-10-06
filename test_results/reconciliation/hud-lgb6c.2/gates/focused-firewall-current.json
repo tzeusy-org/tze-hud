@@ -1,0 +1,42 @@
+{
+  "at": "2026-10-06T12:44:19.444278+00:00",
+  "native_pid": 3206300,
+  "cwd": "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-lgb6c.2",
+  "argv": [
+    "cargo",
+    "test",
+    "-p",
+    "tze_hud_runtime",
+    "--lib",
+    "firewall::",
+    "--",
+    "--nocapture"
+  ],
+  "timeout_seconds": 900,
+  "source_head": "0082c28fcdbc9627852d90ced2d5cf99303f4b7a",
+  "environment": {
+    "CARGO_TARGET_DIR": "/home/orca/orca/projects/tze-hud/target",
+    "CARGO_BUILD_JOBS": "1",
+    "PROTOC": "/usr/bin/protoc",
+    "VK_ICD_FILENAMES": "/usr/share/vulkan/icd.d/lvp_icd.json",
+    "HEADLESS_FORCE_SOFTWARE": "1",
+    "TZE_HUD_REQUIRE_GPU": "1"
+  },
+  "python_venv_prefix": "/home/orca/orca/projects/tze-hud/.venv/bin",
+  "default_test_parallelism": true,
+  "SKIP_GPU_TESTS_unset": true,
+  "PERF_ASSERT_unset_normal_gate": true,
+  "source_before_path": ".handoff/hud-lgb6c.2-implementation/gates/focused-firewall-current-source-before.json",
+  "source_before_sha256": "ac02402a631aa20442f089e85c07789b693f6aec53bf44eb4549c56325c98b63",
+  "exit_code": 0,
+  "log_path": ".handoff/hud-lgb6c.2-implementation/gates/focused-firewall-current.log",
+  "child_pid": 3206313,
+  "process_group": 3206313,
+  "timed_out": false,
+  "elapsed_seconds": 16.22698941300041,
+  "head_after": "0082c28fcdbc9627852d90ced2d5cf99303f4b7a",
+  "log_sha256": "b01ea2490ed6cd987b74448b595a5a19c8e2edc87fc3ce2409b878b248ff67d7",
+  "source_changes_during_gate": [],
+  "terminal_observed": true,
+  "process_group_absent": true
+}
