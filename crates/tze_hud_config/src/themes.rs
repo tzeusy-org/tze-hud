@@ -195,8 +195,14 @@ mod tests {
         for (role, legacy) in [
             ("color.on_surface", "color.text.primary"),
             ("color.outline", "color.border.default"),
-            ("color.caution.container", "color.notification.urgency.urgent"),
-            ("color.error.container", "color.notification.urgency.critical"),
+            (
+                "color.caution.container",
+                "color.notification.urgency.urgent",
+            ),
+            (
+                "color.error.container",
+                "color.notification.urgency.critical",
+            ),
             ("type.body.m.size", "typography.body.size"),
             ("type.body.m.weight", "typography.body.weight"),
         ] {
@@ -231,7 +237,10 @@ mod tests {
             ("color.on_surface.variant", "color.surface.container.low"),
             ("color.on_surface.variant", "color.surface.container"),
             ("color.on_surface.variant", "color.surface.container.high"),
-            ("color.on_surface.variant", "color.surface.container.highest"),
+            (
+                "color.on_surface.variant",
+                "color.surface.container.highest",
+            ),
             ("color.on_primary", "color.primary"),
             ("color.on_primary.container", "color.primary.container"),
             ("color.on_caution.container", "color.caution.container"),
@@ -240,7 +249,10 @@ mod tests {
             let a = luminance(foreground);
             let b = luminance(background);
             let ratio = (a.max(b) + 0.05) / (a.min(b) + 0.05);
-            assert!(ratio >= 4.5, "Classic {foreground} on {background}: {ratio}");
+            assert!(
+                ratio >= 4.5,
+                "Classic {foreground} on {background}: {ratio}"
+            );
         }
     }
 
