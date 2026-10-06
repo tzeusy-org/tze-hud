@@ -34,10 +34,7 @@
 //! NOT focus events. An agent not subscribed to either receives no events
 //! from the batch (the batch is not delivered at all).
 
-use crate::proto::session::ServerMessage;
-use crate::proto::session::server_message::Payload as ServerPayload;
 use crate::proto::{EventBatch, InputEnvelope, input_envelope};
-use tonic::Status;
 
 /// Well-known subscription category names (RFC 0005 §7.1, RFC 0010 §1.2).
 pub mod category {
@@ -233,23 +230,6 @@ pub fn filter_event_batch(
             events: filtered_events,
         })
     }
-}
-
-/// Build a `ServerMessage` wrapping a filtered `EventBatch`, or return `None`
-/// if the batch is empty after filtering.
-pub fn build_event_batch_message(
-    batch: EventBatch,
-    active_subscriptions: &[String],
-    sequence: u64,
-    timestamp_wall_us: u64,
-) -> Option<Result<ServerMessage, Status>> {
-    filter_event_batch(batch, active_subscriptions).map(|filtered| {
-        Ok(ServerMessage {
-            sequence,
-            timestamp_wall_us,
-            payload: Some(ServerPayload::EventBatch(filtered)),
-        })
-    })
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────

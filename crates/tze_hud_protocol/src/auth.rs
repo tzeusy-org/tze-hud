@@ -106,35 +106,6 @@ pub fn psk_credential(key: impl Into<String>) -> AuthCredential {
     }
 }
 
-/// Authenticate a session from its structured `auth_credential`.
-///
-/// `legacy_psk` is the plain-string PSK still carried by `SessionResume`;
-/// `SessionInit` passes an empty string.
-///
-/// `peer_addr` is forwarded to `evaluate_auth_credential` for
-/// `LocalSocketCredential` loopback gating (hud-1aswu.1).
-pub fn authenticate_session_init(
-    auth_credential: Option<&AuthCredential>,
-    legacy_psk: &str,
-    server_psk: &str,
-    peer_addr: Option<IpAddr>,
-) -> AuthResult {
-    // If a structured credential is provided, use it.
-    if let Some(cred) = auth_credential {
-        if cred.credential.is_some() {
-            return evaluate_auth_credential(cred, server_psk, peer_addr);
-        }
-    }
-
-    // Fall back to the deprecated plain-string PSK field.
-    // Use branch-free comparison to resist timing side-channels.
-    if ct_eq_str(legacy_psk, server_psk) {
-        AuthResult::Accepted
-    } else {
-        AuthResult::Failed("invalid pre-shared key".to_string())
-    }
-}
-
 /// Resolve a handshake credential to an agent identity.
 ///
 /// A PSK credential (structured, or the legacy plain string on resume) is
@@ -409,45 +380,6 @@ mod tests {
             AuthResult::Failed(_) => {}
             other => panic!("Expected Failed, got: {other:?}"),
         }
-    }
-
-    // ── authenticate_session_init tests ───────────────────────────────────────
-
-    #[test]
-    fn test_session_init_structured_cred_takes_precedence() {
-        let cred = psk_credential("correct");
-        // Even with wrong legacy PSK, structured cred with correct key should pass
-        assert_eq!(
-            authenticate_session_init(Some(&cred), "wrong-legacy", "correct", loopback_v4()),
-            AuthResult::Accepted
-        );
-    }
-
-    #[test]
-    fn test_session_init_legacy_psk_fallback() {
-        // No structured credential → falls back to the plain PSK (SessionResume.pre_shared_key)
-        assert_eq!(
-            authenticate_session_init(None, "correct", "correct", loopback_v4()),
-            AuthResult::Accepted
-        );
-    }
-
-    #[test]
-    fn test_session_init_legacy_psk_fallback_failure() {
-        match authenticate_session_init(None, "wrong", "correct", loopback_v4()) {
-            AuthResult::Failed(_) => {}
-            other => panic!("Expected Failed, got: {other:?}"),
-        }
-    }
-
-    #[test]
-    fn test_session_init_empty_structured_cred_uses_legacy() {
-        // AuthCredential with no credential variant set → fall back to legacy field
-        let empty_cred = AuthCredential { credential: None };
-        assert_eq!(
-            authenticate_session_init(Some(&empty_cred), "correct", "correct", loopback_v4()),
-            AuthResult::Accepted
-        );
     }
 
     // ── Version negotiation tests ─────────────────────────────────────────────

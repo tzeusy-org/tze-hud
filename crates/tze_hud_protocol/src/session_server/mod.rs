@@ -427,7 +427,7 @@ impl HudSession for HudSessionImpl {
                         //
                         // The compositor input pipeline (Stage 2) assembles ClickEvent /
                         // CommandInputEvent batches for the owning agent and injects them
-                        // here via `HudSessionImpl::inject_input_event`. Only batches
+                        // through `HudSessionImpl::input_event_tx`. Only batches
                         // addressed to this session's namespace are forwarded; others are
                         // silently discarded.
                         //

@@ -17,7 +17,9 @@ use tze_hud_resource::{ResourceStore, ResourceStoreConfig};
 use tze_hud_scene::config::SharedAgents;
 #[cfg(any(test, feature = "dev-mode"))]
 use tze_hud_scene::graph::SceneGraph;
-use tze_hud_scene::types::{GeometryPolicy, ResourceBudget, SceneId};
+#[cfg(any(test, feature = "dev-mode"))]
+use tze_hud_scene::types::GeometryPolicy;
+use tze_hud_scene::types::{ResourceBudget, SceneId};
 
 // ─── Service implementation ─────────────────────────────────────────────────
 
@@ -81,7 +83,7 @@ pub struct HudSessionImpl {
     /// MutationBatch.batch_ids composited into a presented frame with that
     /// frame's number and present wall-clock. The render loop (headless or
     /// windowed) drains the scene's present-ack queue at frame present and
-    /// sends here via [`Self::broadcast_frame_presented`]. Each session handler
+    /// sends through a clone of this sender. Each session handler
     /// subscribes and delivers only when the agent is subscribed to
     /// `TELEMETRY_FRAMES` (which requires the `read_telemetry` capability).
     ///
@@ -206,25 +208,9 @@ impl HudSessionImpl {
         self
     }
 
-    /// Inject an `EventBatch` into the gRPC stream of the session owning `namespace`.
-    ///
-    /// Used by the runtime to push ClickEvent / CommandInputEvent batches produced by
-    /// the compositor input pipeline (Stage 2) to the owning agent (hud-i6yd.6).
-    ///
-    /// The batch is fanned out to all session handler tasks; each task delivers it only
-    /// if its namespace matches AND the event passes subscription filtering
-    /// (`INPUT_EVENTS` / `FOCUS_EVENTS` gates).
-    ///
-    /// Returns the number of session handlers that received the batch (0 if no
-    /// sessions are currently connected, regardless of namespace match).
-    ///
-    /// # Subscription gate
-    ///
-    /// ClickEvent and CommandInputEvent are `INPUT_EVENTS` variants. The session handler
-    /// will silently drop the batch if the agent is not subscribed to `INPUT_EVENTS`.
-    /// Callers that need a guaranteed delivery path should ensure the agent subscribes
-    /// to `INPUT_EVENTS` / `access_input_events` at handshake time.
-    pub fn inject_input_event(
+    /// Inject a namespaced input batch in subscription-routing fixtures.
+    #[cfg(test)]
+    pub(crate) fn inject_input_event(
         &self,
         namespace: impl Into<String>,
         batch: crate::proto::EventBatch,
@@ -250,21 +236,6 @@ impl HudSessionImpl {
         event: crate::proto::ElementRepositionedEvent,
     ) -> usize {
         self.element_repositioned_tx.send(event).unwrap_or_default()
-    }
-
-    /// Broadcast a `FramePresented` acknowledgment to all active sessions
-    /// subscribed to `TELEMETRY_FRAMES` (hud-91uu6).
-    ///
-    /// Called by the render loop once per presented frame that carried one or
-    /// more accepted mutation batches, pairing those `batch_ids` with the
-    /// presented frame number and present wall-clock. Each session handler
-    /// delivers the event only when the agent is subscribed to
-    /// `TELEMETRY_FRAMES` (which requires the `read_telemetry` capability).
-    ///
-    /// Returns the number of active session handlers that received the broadcast
-    /// (0 if no sessions are connected).
-    pub fn broadcast_frame_presented(&self, event: crate::proto::FramePresented) -> usize {
-        self.frame_presented_tx.send(event).unwrap_or_default()
     }
 
     /// Reset an element's user geometry override to the fallback position and
@@ -340,15 +311,12 @@ impl HudSessionImpl {
         true
     }
 
-    /// Build and broadcast an `ElementRepositionedEvent` for a completed drag
-    /// (hud-bs2q.6).
-    ///
-    /// Called by the compositor after `persist_drag_geometry` has already written
-    /// the new `geometry_override` to the element store.
+    /// Build and broadcast a completed-drag event in geometry-event fixtures.
     ///
     /// `new_geometry` is the newly persisted policy.
     /// `previous_geometry` is the geometry that was in effect before the drag
     /// (the prior override or `None` if there was no override).
+    #[cfg(any(test, feature = "dev-mode"))]
     pub fn emit_drag_repositioned_event(
         &self,
         element_id: SceneId,
