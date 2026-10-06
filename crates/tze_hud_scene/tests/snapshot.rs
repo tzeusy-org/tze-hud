@@ -47,41 +47,26 @@ fn simple_scene() -> SceneGraph {
 
 // ── Scenario: Snapshot determinism (spec line 281) ────────────────────────────
 
-/// WHEN two snapshots are taken of identical scene state
+/// WHEN two snapshots are taken of identical empty or populated scene state
 /// THEN both MUST produce identical serialization bytes and identical BLAKE3 checksums
 #[test]
-fn snapshot_determinism_empty_scene() {
-    let scene = empty_scene();
-    let snap1 = scene.take_snapshot(WALL_US, MONO_US);
-    let snap2 = scene.take_snapshot(WALL_US, MONO_US);
-
-    let json1 = snap1.to_json().unwrap();
-    let json2 = snap2.to_json().unwrap();
-
-    assert_eq!(
-        json1, json2,
-        "identical scene snapshots must produce identical JSON bytes"
-    );
-    assert_eq!(
-        snap1.checksum, snap2.checksum,
-        "identical scene snapshots must produce identical BLAKE3 checksums"
-    );
-}
-
-#[test]
 fn snapshot_determinism_simple_scene() {
-    let scene = simple_scene();
-    let snap1 = scene.take_snapshot(WALL_US, MONO_US);
-    let snap2 = scene.take_snapshot(WALL_US, MONO_US);
+    for (label, scene) in [("empty", empty_scene()), ("simple", simple_scene())] {
+        let snap1 = scene.take_snapshot(WALL_US, MONO_US);
+        let snap2 = scene.take_snapshot(WALL_US, MONO_US);
 
-    let json1 = snap1.to_json().unwrap();
-    let json2 = snap2.to_json().unwrap();
+        let json1 = snap1.to_json().unwrap();
+        let json2 = snap2.to_json().unwrap();
 
-    assert_eq!(
-        json1, json2,
-        "identical scene snapshots must produce identical JSON bytes"
-    );
-    assert_eq!(snap1.checksum, snap2.checksum);
+        assert_eq!(
+            json1, json2,
+            "identical {label} scene snapshots must produce identical JSON bytes"
+        );
+        assert_eq!(
+            snap1.checksum, snap2.checksum,
+            "identical {label} scene snapshots must produce identical BLAKE3 checksums"
+        );
+    }
 }
 
 // ── Checksum integrity ────────────────────────────────────────────────────────

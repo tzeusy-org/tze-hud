@@ -412,17 +412,6 @@ fn zone_tile_z_min_constant_is_correct() {
 }
 
 #[test]
-fn layer_attachment_variants_exist() {
-    // Smoke test: all three variants construct and can be compared
-    let bg = LayerAttachment::Background;
-    let content = LayerAttachment::Content;
-    let chrome = LayerAttachment::Chrome;
-    assert_ne!(bg, content);
-    assert_ne!(content, chrome);
-    assert_ne!(bg, chrome);
-}
-
-#[test]
 fn content_layer_zone_z_order_must_be_ge_zone_tile_z_min() {
     // Any tile added for a Content-layer zone should use z_order >= ZONE_TILE_Z_MIN.
     // This is a schema constraint — we verify the constant is below any agent tile value.
@@ -584,7 +573,13 @@ fn zone_not_found_rejected() {
         None,
         None,
     );
-    assert!(result.is_err(), "publishing to nonexistent zone must fail");
+    assert!(
+        matches!(
+            result,
+            Err(tze_hud_scene::ValidationError::ZoneNotFound { .. })
+        ),
+        "publishing to nonexistent zone must produce ZoneNotFound, got {result:?}"
+    );
 }
 
 #[test]

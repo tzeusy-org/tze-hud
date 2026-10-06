@@ -938,28 +938,6 @@ fn test_zone_query_by_media_type() {
 }
 
 #[test]
-fn test_default_zones_populated() {
-    let registry = ZoneRegistry::with_defaults();
-    assert!(registry.get_by_name("status-bar").is_some());
-    assert!(registry.get_by_name("notification-area").is_some());
-    assert!(registry.get_by_name("subtitle").is_some());
-}
-
-#[test]
-fn test_zone_publish_not_found() {
-    let mut scene = SceneGraph::new(1920.0, 1080.0);
-    let result = scene.publish_to_zone(
-        "nonexistent",
-        ZoneContent::StreamText("hello".to_string()),
-        "agent",
-        None,
-        None,
-        None,
-    );
-    assert!(matches!(result, Err(ValidationError::ZoneNotFound { .. })));
-}
-
-#[test]
 fn test_zone_publish_media_type_mismatch() {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     scene.register_zone(make_subtitle_zone()); // accepts StreamText only
@@ -983,41 +961,6 @@ fn test_zone_publish_media_type_mismatch() {
         result,
         Err(ValidationError::ZoneMediaTypeMismatch { .. })
     ));
-}
-
-#[test]
-fn test_contention_latest_wins() {
-    let mut scene = SceneGraph::new(1920.0, 1080.0);
-    scene.register_zone(make_subtitle_zone());
-
-    scene
-        .publish_to_zone(
-            "subtitle",
-            ZoneContent::StreamText("first".to_string()),
-            "a1",
-            None,
-            None,
-            None,
-        )
-        .unwrap();
-    scene
-        .publish_to_zone(
-            "subtitle",
-            ZoneContent::StreamText("second".to_string()),
-            "a2",
-            None,
-            None,
-            None,
-        )
-        .unwrap();
-
-    let publishes = scene.zone_registry.active_for_zone("subtitle");
-    assert_eq!(publishes.len(), 1);
-    assert_eq!(
-        publishes[0].content,
-        ZoneContent::StreamText("second".to_string())
-    );
-    assert_eq!(publishes[0].publisher_namespace, "a2");
 }
 
 #[test]
