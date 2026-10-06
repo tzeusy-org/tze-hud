@@ -1,0 +1,14 @@
+{
+  "native_pid": 3613893,
+  "child_pid": 3613894,
+  "command": [
+    "/home/orca/orca/projects/tze-hud/.venv/bin/python3",
+    "scripts/ci/test_check_dev_mode_defaults.py"
+  ],
+  "exit": 0,
+  "seconds": 0.07024212900432758,
+  "raw_sha256": "770a5a7cfd5ed30408387c611037fc3fb16dc0c5873dba409dd6aae6c67d7bb1",
+  "source": "121c1e7afe928c55cef3adcc5fb91f4e59fa2d52",
+  "Cargo": false,
+  "correction": "Use existing direct-script entrypoint so sibling import resolves. First module invocation imported zero actual behavior fixtures, preserved; no source change."
+}

@@ -1,0 +1,845 @@
+[
+  {
+    "navigation_filter": "config_display_profile",
+    "actual_positive_observations": []
+  },
+  {
+    "navigation_filter": "focus_cleared_when_lease_revoked",
+    "actual_positive_observations": [
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 3082,
+        "qualified_name": "windowed::event_loop_harness::tests::focus_cleared_when_lease_revoked",
+        "binary_context": "2026-10-06T15:32:02.2449553Z      Running unittests src/lib.rs (target/debug/deps/tze_hud_runtime-c92fd5f648cc462b)"
+      }
+    ]
+  },
+  {
+    "navigation_filter": "pixel_helper",
+    "actual_positive_observations": []
+  },
+  {
+    "navigation_filter": "glyph",
+    "actual_positive_observations": [
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 698,
+        "qualified_name": "vertical_flow_proof::tests::glyph_outside_its_background_fails_closed",
+        "binary_context": "2026-10-06T15:31:31.5232625Z      Running unittests src/lib.rs (target/debug/deps/render_artifacts-7d680914e6dc71f7)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 709,
+        "qualified_name": "vertical_flow_proof::tests::pixel_observer_extracts_background_gap_sentinel_and_glyph_evidence",
+        "binary_context": "2026-10-06T15:31:31.5232625Z      Running unittests src/lib.rs (target/debug/deps/render_artifacts-7d680914e6dc71f7)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 710,
+        "qualified_name": "vertical_flow_proof::tests::pixel_observer_reports_glyph_pixels_outside_their_background",
+        "binary_context": "2026-10-06T15:31:31.5232625Z      Running unittests src/lib.rs (target/debug/deps/render_artifacts-7d680914e6dc71f7)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 966,
+        "qualified_name": "renderer::tests::composer::composer_draft_text_never_contains_caret_glyph",
+        "binary_context": "2026-10-06T15:31:34.6985188Z      Running unittests src/lib.rs (target/debug/deps/tze_hud_compositor-91a836f22654d3f4)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 1192,
+        "qualified_name": "renderer::text::portal_reveal_render_tests::tail_cursor_glyph_range_is_multibyte_safe",
+        "binary_context": "2026-10-06T15:31:34.6985188Z      Running unittests src/lib.rs (target/debug/deps/tze_hud_compositor-91a836f22654d3f4)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 1193,
+        "qualified_name": "renderer::text::portal_reveal_render_tests::tail_cursor_recolors_only_the_glyph_and_preserves_styling",
+        "binary_context": "2026-10-06T15:31:34.6985188Z      Running unittests src/lib.rs (target/debug/deps/tze_hud_compositor-91a836f22654d3f4)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 1259,
+        "qualified_name": "text::tests::overlong_unbroken_token_wraps_at_glyph_level_within_box",
+        "binary_context": "2026-10-06T15:31:34.6985188Z      Running unittests src/lib.rs (target/debug/deps/tze_hud_compositor-91a836f22654d3f4)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 1794,
+        "qualified_name": "composer_draft::tests::visual_layout_byte_at_point_selects_row_by_y_then_x_by_glyph",
+        "binary_context": "2026-10-06T15:31:58.2318892Z      Running unittests src/lib.rs (target/debug/deps/tze_hud_input-6fe292860c351e7b)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 3168,
+        "qualified_name": "windowed::portal::tests::approx_wrapped_visual_rows_over_counts_wide_glyphs",
+        "binary_context": "2026-10-06T15:32:02.2449553Z      Running unittests src/lib.rs (target/debug/deps/tze_hud_runtime-c92fd5f648cc462b)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 3174,
+        "qualified_name": "windowed::portal::tests::composer_pointer_down_then_drag_selects_byte_range_via_glyph_hit_test",
+        "binary_context": "2026-10-06T15:32:02.2449553Z      Running unittests src/lib.rs (target/debug/deps/tze_hud_runtime-c92fd5f648cc462b)"
+      }
+    ]
+  },
+  {
+    "navigation_filter": "latency",
+    "actual_positive_observations": [
+      {
+        "run": 37487716397,
+        "job_log": "1_cargo test (integration).txt",
+        "line": 1307,
+        "qualified_name": "input_latency_not_degraded_under_portal_stream",
+        "binary_context": null
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 3140,
+        "qualified_name": "windowed::lifecycle::tests::pending_input_latency_clamps_sub_microsecond_local_ack_to_nonzero_sample",
+        "binary_context": "2026-10-06T15:32:02.2449553Z      Running unittests src/lib.rs (target/debug/deps/tze_hud_runtime-c92fd5f648cc462b)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 3141,
+        "qualified_name": "windowed::lifecycle::tests::pending_input_latency_drains_into_split_latency_fields",
+        "binary_context": "2026-10-06T15:32:02.2449553Z      Running unittests src/lib.rs (target/debug/deps/tze_hud_runtime-c92fd5f648cc462b)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 3150,
+        "qualified_name": "windowed::lifecycle::tests::windowed_benchmark_does_not_treat_zero_input_latency_as_sample",
+        "binary_context": "2026-10-06T15:32:02.2449553Z      Running unittests src/lib.rs (target/debug/deps/tze_hud_runtime-c92fd5f648cc462b)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 3151,
+        "qualified_name": "windowed::lifecycle::tests::windowed_benchmark_records_nonzero_split_input_latency",
+        "binary_context": "2026-10-06T15:32:02.2449553Z      Running unittests src/lib.rs (target/debug/deps/tze_hud_runtime-c92fd5f648cc462b)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 3928,
+        "qualified_name": "record::tests::latency_bucket_json_round_trip",
+        "binary_context": "2026-10-06T15:32:13.4746606Z      Running unittests src/lib.rs (target/debug/deps/tze_hud_telemetry-c6a10428bc435df7)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 3929,
+        "qualified_name": "record::tests::latency_bucket_len_is_empty_helpers",
+        "binary_context": "2026-10-06T15:32:13.4746606Z      Running unittests src/lib.rs (target/debug/deps/tze_hud_telemetry-c6a10428bc435df7)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 3930,
+        "qualified_name": "record::tests::latency_bucket_window_is_bounded",
+        "binary_context": "2026-10-06T15:32:13.4746606Z      Running unittests src/lib.rs (target/debug/deps/tze_hud_telemetry-c6a10428bc435df7)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 3933,
+        "qualified_name": "record::tests::latency_bucket_percentile_reflects_recent_window",
+        "binary_context": "2026-10-06T15:32:13.4746606Z      Running unittests src/lib.rs (target/debug/deps/tze_hud_telemetry-c6a10428bc435df7)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 3943,
+        "qualified_name": "record::tests::test_frame_telemetry_has_split_latency_fields",
+        "binary_context": "2026-10-06T15:32:13.4746606Z      Running unittests src/lib.rs (target/debug/deps/tze_hud_telemetry-c6a10428bc435df7)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 3948,
+        "qualified_name": "record::tests::test_latency_bucket_percentiles",
+        "binary_context": "2026-10-06T15:32:13.4746606Z      Running unittests src/lib.rs (target/debug/deps/tze_hud_telemetry-c6a10428bc435df7)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 3952,
+        "qualified_name": "record::tests::test_session_summary_has_three_split_latency_buckets",
+        "binary_context": "2026-10-06T15:32:13.4746606Z      Running unittests src/lib.rs (target/debug/deps/tze_hud_telemetry-c6a10428bc435df7)"
+      }
+    ]
+  },
+  {
+    "navigation_filter": "budget",
+    "actual_positive_observations": [
+      {
+        "run": 37487716397,
+        "job_log": "1_cargo test (integration).txt",
+        "line": 1306,
+        "qualified_name": "frame_budgets_hold_under_burst",
+        "binary_context": null
+      },
+      {
+        "run": 37487716397,
+        "job_log": "1_cargo test (integration).txt",
+        "line": 1308,
+        "qualified_name": "frame_budgets_hold_under_sustained_portal_stream",
+        "binary_context": null
+      },
+      {
+        "run": 37487716397,
+        "job_log": "1_cargo test (integration).txt",
+        "line": 1332,
+        "qualified_name": "draft_insert_completes_within_local_ack_budget_headroom",
+        "binary_context": null
+      },
+      {
+        "run": 37487716397,
+        "job_log": "1_cargo test (integration).txt",
+        "line": 1390,
+        "qualified_name": "max_payload_node_budget_parses_without_panic",
+        "binary_context": null
+      },
+      {
+        "run": 37487716397,
+        "job_log": "1_cargo test (integration).txt",
+        "line": 1418,
+        "qualified_name": "expanded_transcript_materialization_is_bounded_to_viewport_and_budget",
+        "binary_context": null
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 843,
+        "qualified_name": "markdown::tests::adversarial_floods_stay_within_budget",
+        "binary_context": "2026-10-06T15:31:34.6985188Z      Running unittests src/lib.rs (target/debug/deps/tze_hud_compositor-91a836f22654d3f4)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 1110,
+        "qualified_name": "renderer::tests::text_render::test_stage6_budget_with_text_rendering_active",
+        "binary_context": "2026-10-06T15:31:34.6985188Z      Running unittests src/lib.rs (target/debug/deps/tze_hud_compositor-91a836f22654d3f4)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 1413,
+        "qualified_name": "gauge_label_text_binding_changes_raster_output",
+        "binary_context": "2026-10-06T15:31:49.1556616Z      Running tests/widget_rasterize_budget.rs (target/debug/deps/widget_rasterize_budget-95d5a4d896d3eab4)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 1414,
+        "qualified_name": "gauge_fill_bindings_are_applied",
+        "binary_context": "2026-10-06T15:31:49.1556616Z      Running tests/widget_rasterize_budget.rs (target/debug/deps/widget_rasterize_budget-95d5a4d896d3eab4)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 1415,
+        "qualified_name": "gauge_512x512_rasterize_produces_non_empty_pixels",
+        "binary_context": "2026-10-06T15:31:49.1556616Z      Running tests/widget_rasterize_budget.rs (target/debug/deps/widget_rasterize_budget-95d5a4d896d3eab4)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 1416,
+        "qualified_name": "gauge_512x512_rasterize_within_ci_budget",
+        "binary_context": "2026-10-06T15:31:49.1556616Z      Running tests/widget_rasterize_budget.rs (target/debug/deps/widget_rasterize_budget-95d5a4d896d3eab4)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 1571,
+        "qualified_name": "runtime_widget_assets::tests::budget_relationship_rejected_when_agent_exceeds_total",
+        "binary_context": "2026-10-06T15:31:58.1697532Z      Running unittests src/lib.rs (target/debug/deps/tze_hud_config-529566c871ad12f3)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 1573,
+        "qualified_name": "runtime_widget_assets::tests::budget_validation_pushes_config_error",
+        "binary_context": "2026-10-06T15:31:58.1697532Z      Running unittests src/lib.rs (target/debug/deps/tze_hud_config-529566c871ad12f3)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 1585,
+        "qualified_name": "tests::spec_full_display_profile_budget_values",
+        "binary_context": "2026-10-06T15:31:58.1697532Z      Running unittests src/lib.rs (target/debug/deps/tze_hud_config-529566c871ad12f3)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 1586,
+        "qualified_name": "tests::spec_headless_profile_budget_values",
+        "binary_context": "2026-10-06T15:31:58.1697532Z      Running unittests src/lib.rs (target/debug/deps/tze_hud_config-529566c871ad12f3)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 1605,
+        "qualified_name": "tests::spec_widget_runtime_asset_budget_relationship_rejected",
+        "binary_context": "2026-10-06T15:31:58.1697532Z      Running unittests src/lib.rs (target/debug/deps/tze_hud_config-529566c871ad12f3)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 1985,
+        "qualified_name": "scroll::tests::test_input_to_local_ack_p99_within_budget_scroll",
+        "binary_context": "2026-10-06T15:31:58.2318892Z      Running unittests src/lib.rs (target/debug/deps/tze_hud_input-6fe292860c351e7b)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 2089,
+        "qualified_name": "schema::tests::tools_list_stays_within_token_budget",
+        "binary_context": "2026-10-06T15:31:58.3005715Z      Running unittests src/lib.rs (target/debug/deps/tze_hud_mcp-6352e434bf0fe4df)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 2165,
+        "qualified_name": "resident_grpc::tests::apply_tail_reserved_truncation_degenerate_tail_alone_exceeds_budget_head_wins_nothing",
+        "binary_context": "2026-10-06T15:31:58.3187251Z      Running unittests src/lib.rs (target/debug/deps/tze_hud_projection-962d353d4efe8db4)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 2695,
+        "qualified_name": "runtime_widget_store::tests::enforces_total_budget",
+        "binary_context": "2026-10-06T15:32:02.1895753Z      Running unittests src/lib.rs (target/debug/deps/tze_hud_resource-86e96dade6762cea)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 2696,
+        "qualified_name": "runtime_widget_store::tests::enforces_per_agent_budget",
+        "binary_context": "2026-10-06T15:32:02.1895753Z      Running unittests src/lib.rs (target/debug/deps/tze_hud_resource-86e96dade6762cea)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 2720,
+        "qualified_name": "validation::tests::agent_budget_limited_fits",
+        "binary_context": "2026-10-06T15:32:02.1895753Z      Running unittests src/lib.rs (target/debug/deps/tze_hud_resource-86e96dade6762cea)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 2721,
+        "qualified_name": "validation::tests::agent_budget_unlimited_fits_any_size",
+        "binary_context": "2026-10-06T15:32:02.1895753Z      Running unittests src/lib.rs (target/debug/deps/tze_hud_resource-86e96dade6762cea)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 2722,
+        "qualified_name": "validation::tests::budget_check_agent_exceeded",
+        "binary_context": "2026-10-06T15:32:02.1895753Z      Running unittests src/lib.rs (target/debug/deps/tze_hud_resource-86e96dade6762cea)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 2723,
+        "qualified_name": "validation::tests::budget_check_unlimited_always_passes",
+        "binary_context": "2026-10-06T15:32:02.1895753Z      Running unittests src/lib.rs (target/debug/deps/tze_hud_resource-86e96dade6762cea)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 2725,
+        "qualified_name": "validation::tests::budget_check_runtime_exceeded",
+        "binary_context": "2026-10-06T15:32:02.1895753Z      Running unittests src/lib.rs (target/debug/deps/tze_hud_resource-86e96dade6762cea)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 2747,
+        "qualified_name": "validation::tests::svg_with_viewbox_budget_estimated_correctly",
+        "binary_context": "2026-10-06T15:32:02.1895753Z      Running unittests src/lib.rs (target/debug/deps/tze_hud_resource-86e96dade6762cea)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 2759,
+        "qualified_name": "agent_texture_budget_rejects_whole_upload_and_stores_nothing",
+        "binary_context": "2026-10-06T15:32:02.2422446Z      Running tests/store_behavior.rs (target/debug/deps/store_behavior-57d038f5cf6175a5)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 2849,
+        "qualified_name": "mutation_budget_bridge::tests::aggregate_limits_are_atomic_across_agents",
+        "binary_context": "2026-10-06T15:32:02.2449553Z      Running unittests src/lib.rs (target/debug/deps/tze_hud_runtime-c92fd5f648cc462b)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 2850,
+        "qualified_name": "mutation_budget_bridge::tests::guest_sessions_use_a_separate_enforced_pool",
+        "binary_context": "2026-10-06T15:32:02.2449553Z      Running unittests src/lib.rs (target/debug/deps/tze_hud_runtime-c92fd5f648cc462b)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 2851,
+        "qualified_name": "mutation_budget_bridge::tests::registered_budget_rejects_mutation_above_tile_limit",
+        "binary_context": "2026-10-06T15:32:02.2449553Z      Running unittests src/lib.rs (target/debug/deps/tze_hud_runtime-c92fd5f648cc462b)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 2852,
+        "qualified_name": "mutation_budget_bridge::tests::removing_one_of_two_same_namespace_sessions_preserves_the_other",
+        "binary_context": "2026-10-06T15:32:02.2449553Z      Running unittests src/lib.rs (target/debug/deps/tze_hud_runtime-c92fd5f648cc462b)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 2853,
+        "qualified_name": "mutation_budget_bridge::tests::removing_session_releases_its_aggregate_tile_and_texture_usage",
+        "binary_context": "2026-10-06T15:32:02.2449553Z      Running unittests src/lib.rs (target/debug/deps/tze_hud_runtime-c92fd5f648cc462b)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 2854,
+        "qualified_name": "mutation_budget_bridge::tests::resumed_session_restores_usage_before_accepting_new_mutations",
+        "binary_context": "2026-10-06T15:32:02.2449553Z      Running unittests src/lib.rs (target/debug/deps/tze_hud_runtime-c92fd5f648cc462b)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 2958,
+        "qualified_name": "runtime_context::tests::resource_budget_uses_canonical_defaults_capped_by_profile",
+        "binary_context": "2026-10-06T15:32:02.2449553Z      Running unittests src/lib.rs (target/debug/deps/tze_hud_runtime-c92fd5f648cc462b)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 3176,
+        "qualified_name": "windowed::portal::tests::compute_portal_max_dims_lease_budget_floored_to_token_minimum",
+        "binary_context": "2026-10-06T15:32:02.2449553Z      Running unittests src/lib.rs (target/debug/deps/tze_hud_runtime-c92fd5f648cc462b)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 3177,
+        "qualified_name": "windowed::portal::tests::compute_portal_max_dims_lease_budget_is_more_restrictive",
+        "binary_context": "2026-10-06T15:32:02.2449553Z      Running unittests src/lib.rs (target/debug/deps/tze_hud_runtime-c92fd5f648cc462b)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 3394,
+        "qualified_name": "config::tests::test_headless_profile_budget_values",
+        "binary_context": "2026-10-06T15:32:11.3295299Z      Running unittests src/lib.rs (target/debug/deps/tze_hud_scene-57285a561ea4f1ed)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 3396,
+        "qualified_name": "config::tests::test_full_display_profile_budget_values",
+        "binary_context": "2026-10-06T15:32:11.3295299Z      Running unittests src/lib.rs (target/debug/deps/tze_hud_scene-57285a561ea4f1ed)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 3460,
+        "qualified_name": "graph::tests::aggregate_budget_delta_tracks_sequential_updates_within_one_batch",
+        "binary_context": "2026-10-06T15:32:11.3295299Z      Running unittests src/lib.rs (target/debug/deps/tze_hud_scene-57285a561ea4f1ed)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 3478,
+        "qualified_name": "graph::tests::test_budget_tile_count_within_limit",
+        "binary_context": "2026-10-06T15:32:11.3295299Z      Running unittests src/lib.rs (target/debug/deps/tze_hud_scene-57285a561ea4f1ed)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 3479,
+        "qualified_name": "graph::tests::test_budget_soft_limit_warning",
+        "binary_context": "2026-10-06T15:32:11.3295299Z      Running unittests src/lib.rs (target/debug/deps/tze_hud_scene-57285a561ea4f1ed)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 3482,
+        "qualified_name": "graph::tests::test_budget_tile_count_exceeds_limit",
+        "binary_context": "2026-10-06T15:32:11.3295299Z      Running unittests src/lib.rs (target/debug/deps/tze_hud_scene-57285a561ea4f1ed)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 3615,
+        "qualified_name": "mutation::tests::test_lease_check_before_budget_check",
+        "binary_context": "2026-10-06T15:32:11.3295299Z      Running unittests src/lib.rs (target/debug/deps/tze_hud_scene-57285a561ea4f1ed)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 3628,
+        "qualified_name": "perf_budget::tests::test_budget_is_at_least_the_reference_budget_by_default",
+        "binary_context": "2026-10-06T15:32:11.3295299Z      Running unittests src/lib.rs (target/debug/deps/tze_hud_scene-57285a561ea4f1ed)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 3701,
+        "qualified_name": "spec_lease_check_before_budget_check",
+        "binary_context": "2026-10-06T15:32:11.4302687Z      Running tests/batch_atomicity.rs (target/debug/deps/batch_atomicity-61ec07fbd623a1b3)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 3715,
+        "qualified_name": "stage1_batch_lease_id_expired_is_rejected_before_budget",
+        "binary_context": "2026-10-06T15:32:11.4302687Z      Running tests/batch_atomicity.rs (target/debug/deps/batch_atomicity-61ec07fbd623a1b3)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 3936,
+        "qualified_name": "record::tests::test_assert_p99_under_passes_when_within_budget",
+        "binary_context": "2026-10-06T15:32:13.4746606Z      Running unittests src/lib.rs (target/debug/deps/tze_hud_telemetry-c6a10428bc435df7)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 3938,
+        "qualified_name": "record::tests::test_assert_p99_under_fails_when_exceeds_budget",
+        "binary_context": "2026-10-06T15:32:13.4746606Z      Running unittests src/lib.rs (target/debug/deps/tze_hud_telemetry-c6a10428bc435df7)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 3956,
+        "qualified_name": "validation::tests::assertion_fail_exceeds_budget",
+        "binary_context": "2026-10-06T15:32:13.4746606Z      Running unittests src/lib.rs (target/debug/deps/tze_hud_telemetry-c6a10428bc435df7)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 3958,
+        "qualified_name": "validation::tests::assertion_scales_budget_with_factor",
+        "binary_context": "2026-10-06T15:32:13.4746606Z      Running unittests src/lib.rs (target/debug/deps/tze_hud_telemetry-c6a10428bc435df7)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 3960,
+        "qualified_name": "validation::tests::assertion_pass_within_budget",
+        "binary_context": "2026-10-06T15:32:13.4746606Z      Running unittests src/lib.rs (target/debug/deps/tze_hud_telemetry-c6a10428bc435df7)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 3968,
+        "qualified_name": "validation::tests::report_fail_when_frame_time_over_budget",
+        "binary_context": "2026-10-06T15:32:13.4746606Z      Running unittests src/lib.rs (target/debug/deps/tze_hud_telemetry-c6a10428bc435df7)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 3971,
+        "qualified_name": "validation::tests::report_pass_when_all_within_budget",
+        "binary_context": "2026-10-06T15:32:13.4746606Z      Running unittests src/lib.rs (target/debug/deps/tze_hud_telemetry-c6a10428bc435df7)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 3979,
+        "qualified_name": "any_idle_gpu_work_fails_the_zero_budget",
+        "binary_context": "2026-10-06T15:32:13.4796397Z      Running tests/idle_efficiency.rs (target/debug/deps/idle_efficiency-3bf67973ead1495d)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 3980,
+        "qualified_name": "complete_constrained_quiescent_artifact_passes_exact_budgets",
+        "binary_context": "2026-10-06T15:32:13.4796397Z      Running tests/idle_efficiency.rs (target/debug/deps/idle_efficiency-3bf67973ead1495d)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 4048,
+        "qualified_name": "test_input_to_next_present_p99_within_budget",
+        "binary_context": "2026-10-06T15:32:13.8135158Z      Running tests/budget_assertions.rs (target/debug/deps/budget_assertions-20c718f12b59f697)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 4049,
+        "qualified_name": "test_input_to_local_ack_p99_within_budget",
+        "binary_context": "2026-10-06T15:32:13.8135158Z      Running tests/budget_assertions.rs (target/debug/deps/budget_assertions-20c718f12b59f697)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 4050,
+        "qualified_name": "test_hit_test_p99_within_budget",
+        "binary_context": "2026-10-06T15:32:13.8135158Z      Running tests/budget_assertions.rs (target/debug/deps/budget_assertions-20c718f12b59f697)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 4051,
+        "qualified_name": "test_frame_time_p99_within_budget",
+        "binary_context": "2026-10-06T15:32:13.8135158Z      Running tests/budget_assertions.rs (target/debug/deps/budget_assertions-20c718f12b59f697)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 4052,
+        "qualified_name": "test_input_to_scene_commit_p99_within_budget",
+        "binary_context": "2026-10-06T15:32:13.8135158Z      Running tests/budget_assertions.rs (target/debug/deps/budget_assertions-20c718f12b59f697)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 4053,
+        "qualified_name": "test_layer1_pixel_readback_background",
+        "binary_context": "2026-10-06T15:32:13.8135158Z      Running tests/budget_assertions.rs (target/debug/deps/budget_assertions-20c718f12b59f697)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 4054,
+        "qualified_name": "test_layer1_pixel_readback_tile_color",
+        "binary_context": "2026-10-06T15:32:13.8135158Z      Running tests/budget_assertions.rs (target/debug/deps/budget_assertions-20c718f12b59f697)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 4055,
+        "qualified_name": "test_layer1_pixel_readback_z_order",
+        "binary_context": "2026-10-06T15:32:13.8135158Z      Running tests/budget_assertions.rs (target/debug/deps/budget_assertions-20c718f12b59f697)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 4056,
+        "qualified_name": "test_scene_chatty_dashboard_touch_pixels",
+        "binary_context": "2026-10-06T15:32:13.8135158Z      Running tests/budget_assertions.rs (target/debug/deps/budget_assertions-20c718f12b59f697)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 4057,
+        "qualified_name": "test_scene_coalesced_dashboard_pixels",
+        "binary_context": "2026-10-06T15:32:13.8135158Z      Running tests/budget_assertions.rs (target/debug/deps/budget_assertions-20c718f12b59f697)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 4058,
+        "qualified_name": "test_scene_disconnect_reclaim_multiagent_pixels",
+        "binary_context": "2026-10-06T15:32:13.8135158Z      Running tests/budget_assertions.rs (target/debug/deps/budget_assertions-20c718f12b59f697)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 4059,
+        "qualified_name": "test_scene_empty_scene_pixels",
+        "binary_context": "2026-10-06T15:32:13.8135158Z      Running tests/budget_assertions.rs (target/debug/deps/budget_assertions-20c718f12b59f697)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 4060,
+        "qualified_name": "test_scene_input_highlight_pixels",
+        "binary_context": "2026-10-06T15:32:13.8135158Z      Running tests/budget_assertions.rs (target/debug/deps/budget_assertions-20c718f12b59f697)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 4061,
+        "qualified_name": "test_scene_lease_expiry_pixels",
+        "binary_context": "2026-10-06T15:32:13.8135158Z      Running tests/budget_assertions.rs (target/debug/deps/budget_assertions-20c718f12b59f697)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 4062,
+        "qualified_name": "test_scene_max_tiles_stress_pixels",
+        "binary_context": "2026-10-06T15:32:13.8135158Z      Running tests/budget_assertions.rs (target/debug/deps/budget_assertions-20c718f12b59f697)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 4063,
+        "qualified_name": "test_scene_overlapping_tiles_zorder_pixels",
+        "binary_context": "2026-10-06T15:32:13.8135158Z      Running tests/budget_assertions.rs (target/debug/deps/budget_assertions-20c718f12b59f697)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 4064,
+        "qualified_name": "test_scene_overlay_passthrough_regions_pixels",
+        "binary_context": "2026-10-06T15:32:13.8135158Z      Running tests/budget_assertions.rs (target/debug/deps/budget_assertions-20c718f12b59f697)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 4065,
+        "qualified_name": "test_scene_overlay_transparency_pixels",
+        "binary_context": "2026-10-06T15:32:13.8135158Z      Running tests/budget_assertions.rs (target/debug/deps/budget_assertions-20c718f12b59f697)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 4066,
+        "qualified_name": "test_scene_single_tile_solid_pixels",
+        "binary_context": "2026-10-06T15:32:13.8135158Z      Running tests/budget_assertions.rs (target/debug/deps/budget_assertions-20c718f12b59f697)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 4067,
+        "qualified_name": "test_scene_tab_switch_pixels",
+        "binary_context": "2026-10-06T15:32:13.8135158Z      Running tests/budget_assertions.rs (target/debug/deps/budget_assertions-20c718f12b59f697)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 4068,
+        "qualified_name": "test_scene_three_agents_contention_pixels",
+        "binary_context": "2026-10-06T15:32:13.8135158Z      Running tests/budget_assertions.rs (target/debug/deps/budget_assertions-20c718f12b59f697)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 4069,
+        "qualified_name": "test_scene_three_tiles_no_overlap_pixels",
+        "binary_context": "2026-10-06T15:32:13.8135158Z      Running tests/budget_assertions.rs (target/debug/deps/budget_assertions-20c718f12b59f697)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 4070,
+        "qualified_name": "test_scene_zone_conflict_two_publishers_pixels",
+        "binary_context": "2026-10-06T15:32:13.8135158Z      Running tests/budget_assertions.rs (target/debug/deps/budget_assertions-20c718f12b59f697)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 4071,
+        "qualified_name": "test_scene_zone_disconnect_cleanup_pixels",
+        "binary_context": "2026-10-06T15:32:13.8135158Z      Running tests/budget_assertions.rs (target/debug/deps/budget_assertions-20c718f12b59f697)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 4072,
+        "qualified_name": "test_scene_zone_orchestrate_then_publish_pixels",
+        "binary_context": "2026-10-06T15:32:13.8135158Z      Running tests/budget_assertions.rs (target/debug/deps/budget_assertions-20c718f12b59f697)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 4073,
+        "qualified_name": "test_scene_zone_publish_subtitle_pixels",
+        "binary_context": "2026-10-06T15:32:13.8135158Z      Running tests/budget_assertions.rs (target/debug/deps/budget_assertions-20c718f12b59f697)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 4074,
+        "qualified_name": "test_transaction_validation_p99_within_budget",
+        "binary_context": "2026-10-06T15:32:13.8135158Z      Running tests/budget_assertions.rs (target/debug/deps/budget_assertions-20c718f12b59f697)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 4075,
+        "qualified_name": "test_scene_zone_reject_wrong_type_pixels",
+        "binary_context": "2026-10-06T15:32:13.8135158Z      Running tests/budget_assertions.rs (target/debug/deps/budget_assertions-20c718f12b59f697)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 4076,
+        "qualified_name": "test_texture_upload_p99_within_budget",
+        "binary_context": "2026-10-06T15:32:13.8135158Z      Running tests/budget_assertions.rs (target/debug/deps/budget_assertions-20c718f12b59f697)"
+      },
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 4077,
+        "qualified_name": "test_stage6_render_encode_p99_within_budget",
+        "binary_context": "2026-10-06T15:32:13.8135158Z      Running tests/budget_assertions.rs (target/debug/deps/budget_assertions-20c718f12b59f697)"
+      }
+    ]
+  },
+  {
+    "navigation_filter": "multi_agent",
+    "actual_positive_observations": []
+  },
+  {
+    "navigation_filter": "from_toml",
+    "actual_positive_observations": [
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 2955,
+        "qualified_name": "runtime_context::tests::from_toml_loads_valid_config_and_falls_back_on_bad_input",
+        "binary_context": "2026-10-06T15:32:02.2449553Z      Running unittests src/lib.rs (target/debug/deps/tze_hud_runtime-c92fd5f648cc462b)"
+      }
+    ]
+  },
+  {
+    "navigation_filter": "test_ttl_excluded_during_suspension",
+    "actual_positive_observations": [
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 3023,
+        "qualified_name": "shell::safe_mode::tests::test_ttl_excluded_during_suspension",
+        "binary_context": "2026-10-06T15:32:02.2449553Z      Running unittests src/lib.rs (target/debug/deps/tze_hud_runtime-c92fd5f648cc462b)"
+      }
+    ]
+  },
+  {
+    "navigation_filter": "json_shape_and_probe_caching",
+    "actual_positive_observations": [
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 2800,
+        "qualified_name": "firewall::tests::json_shape_and_probe_caching",
+        "binary_context": "2026-10-06T15:32:02.2449553Z      Running unittests src/lib.rs (target/debug/deps/tze_hud_runtime-c92fd5f648cc462b)"
+      }
+    ]
+  },
+  {
+    "navigation_filter": "device_drag_state_threshold_met_after_duration",
+    "actual_positive_observations": [
+      {
+        "run": 37487716397,
+        "job_log": "5_cargo test (unit).txt",
+        "line": 1808,
+        "qualified_name": "drag::tests::device_drag_state_threshold_met_after_duration",
+        "binary_context": "2026-10-06T15:31:58.2318892Z      Running unittests src/lib.rs (target/debug/deps/tze_hud_input-6fe292860c351e7b)"
+      }
+    ]
+  }
+]

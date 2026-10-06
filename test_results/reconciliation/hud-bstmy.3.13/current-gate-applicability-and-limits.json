@@ -1,0 +1,28 @@
+{
+  "source": "121c1e7afe928c55cef3adcc5fb91f4e59fa2d52",
+  "unit_cmd": "cargo test --workspace --all-targets --exclude integration",
+  "unit_default_parallel": true,
+  "unit_GPU_requirement": 1,
+  "integration_cmd": "cargo test -p integration --tests",
+  "integration_GPU_requirement_explicit_in_step": false,
+  "GPU_skip_observed": 0,
+  "normal_PERF_ASSERT": false,
+  "local_just_ci_executed": false,
+  "remote_existing_species_cover_current_normal_recipes": true,
+  "local_Cargo_only": "terminal/released exact six-package clean; no behavior evidence",
+  "nativeWindows_constrained_profile": false,
+  "nativeWindows_ordinary_content_idle": true,
+  "deny_initial_toolchain_diagnostic_recovered": "actual log241 then installed269, fourchecksok3158",
+  "PowerShell_overlay_actual_pass": "cargo-check job line123",
+  "machete_actual_pass": "cargo-check job line663",
+  "default_guard_actual_roots": 17,
+  "Python_actual": {
+    "pytest": 76,
+    "subtests": 3,
+    "unittest_discover": 103,
+    "token_flow": 22
+  },
+  "token_repeated_equal": true,
+  "token_measurement_sha256": "3e7e17748454c0e1476e93060db166c9f2d105f01b018bf56c0c12202a9eb78e",
+  "missing_local_duplicate_gate_needed": false
+}

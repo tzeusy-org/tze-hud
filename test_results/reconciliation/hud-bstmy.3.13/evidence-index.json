@@ -1,0 +1,281 @@
+{
+  "execution_source": "121c1e7afe928c55cef3adcc5fb91f4e59fa2d52",
+  "method": "Whole raw file SHA256; zip/gzip preserve exact original bytes. Index excludes itself.",
+  "files": [
+    {
+      "path": "test_results/hud-bstmy.3.13-reconciliation.md",
+      "bytes": 20814,
+      "sha256": "e1729671b3f73a0e17b861dfc3ae3335f6ca001cc2045498d18d9a2201d34b96"
+    },
+    {
+      "path": "test_results/hud-bstmy.3.13-followups.json",
+      "bytes": 3,
+      "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.13/G1-current-defining-blobs.json",
+      "bytes": 6197,
+      "sha256": "d897c07200c8cd773e0772fa4f71a608fb2749d73d138961b8167da76f3b2a55"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.13/GEN2-whole-source-applicability.json",
+      "bytes": 103978,
+      "sha256": "5527c7635f338661ddb8bdd385c188e4a01cce655da29918e13c307ee48ab2a7"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.13/High-six-clean-release-root-ack.json",
+      "bytes": 1135,
+      "sha256": "5c63b2b3339ae64e455547c8ae19fd54a8cf3dd422a8965c2cad91473880e9ff"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.13/High-six-context-clean-only-lease.json",
+      "bytes": 1738,
+      "sha256": "3b03dd1406791eca2395fa0ac464a918e8c2f2139d911cbe7c58abc8afd93602"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.13/affected-caller-dispositions.json",
+      "bytes": 203318,
+      "sha256": "e9e0f46e9894b90937cc600b782e7d26289abba84368fc036dd37e08571525e1"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.13/blockers.json",
+      "bytes": 3,
+      "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.13/bootstrap-native-receipt.json",
+      "bytes": 4850,
+      "sha256": "898eb1d6de2476794222f2c4230874b3c74f05e000eeb9a92c8f756c2d143da6"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.13/bootstrap-root-ack-no-cargo.json",
+      "bytes": 1022,
+      "sha256": "86e0fffb22f3ef7249546eb9dcebc051a77c71c19743035bd1978687a17c7905"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.13/bootstrap-self-read-and-packet-match.json",
+      "bytes": 1160,
+      "sha256": "0cdc0b99ac9b59e05498222e9682bdc9329f073da8dde773afeaeb80c4b7e747"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.13/canonical-packets.json.gz",
+      "bytes": 144849,
+      "sha256": "55353ec0f1c05aa12b5e58b5c8a9779ba62d924e1e0120ae77b6f0ef882070b5"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.13/complete-design-surface-matrix.json",
+      "bytes": 9336,
+      "sha256": "3bdfb38fb76d32264f941cd57344b4b9ca907517b4623f0124e085d3f8662636"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.13/complete-original-test-fates.json.gz",
+      "bytes": 283018,
+      "sha256": "b3a535807b6c06b88a07fa6aec05e8d99eba4d2c56cced5a6dc5bf8e436906a3"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.13/complete-requirement-matrix.json",
+      "bytes": 102945,
+      "sha256": "8598ccad145ae069d085419071b7f1abcc563e81cdfc2d31237fb30beedff157"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.13/current-CI-artifact-fetch-proof.json",
+      "bytes": 400,
+      "sha256": "bb75df9122c1ee0335b3ca79eb733d062cb91e1da88246fd1bbacd72cdfee6fe"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.13/current-CI-passed-observations.json.gz",
+      "bytes": 72036,
+      "sha256": "589b1c6ca64667dd711d93f9efcd95b39ddfa583066a17593a1ebbd68a109ef2"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.13/current-all-root-textual-navigation.json.gz",
+      "bytes": 1330656,
+      "sha256": "96ba2f5e616a02039e10a9a88a96991150691654ca92038985684dd145d2f70c"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.13/current-dead-path-proof.json",
+      "bytes": 1550,
+      "sha256": "71594aad866a0e573c28a8292463572240b1b02387abfcc5775abf27172f9def"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.13/current-gate-applicability-and-limits.json",
+      "bytes": 1195,
+      "sha256": "362df41935de5fd2513479bca356cd6f59a7bec530eadc802b01ea6415a7d534"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.13/current-invariant-index.json",
+      "bytes": 178271,
+      "sha256": "f47fc4865d5344f1b7c919eb761d1ef10ba8c518e66b4b7b28a7295473a07d4f"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.13/current-main-CI/37487716349-jobs.json",
+      "bytes": 5885,
+      "sha256": "2d7f8e9d8a7b7a83308bf4e085564707c23406a79629412a6b57eca5e0472e0a"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.13/current-main-CI/37487716349-logs.zip",
+      "bytes": 50964,
+      "sha256": "7ba31db33b328a3244d60dc9eba189887db3448e819a05421cec528d32d294b5"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.13/current-main-CI/37487716349-run.json",
+      "bytes": 12394,
+      "sha256": "2b730f5951fbf5014985e8af3e891262b9da478daf1362df6c4c6152957ebc2f"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.13/current-main-CI/37487716397-jobs.json",
+      "bytes": 28929,
+      "sha256": "ca3940f5d8797e4d5636b1629f97c8c27bf0db5df19f5a5a247636da8eb4cc59"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.13/current-main-CI/37487716397-logs.zip",
+      "bytes": 544012,
+      "sha256": "4a84f6b590780cbb4c0c171f01eb83cabde38779a8d27af4ae45e09ec5bdd5eb"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.13/current-main-CI/37487716397-run.json",
+      "bytes": 12385,
+      "sha256": "696000da20156e8e14e90f0da5457b8c04ea6babe6b960cdd9620c8088ff3252"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.13/current-main-CI/artifact-11423498742.zip",
+      "bytes": 2918,
+      "sha256": "abab349c6f51f126d8ec69d5d35b2991a070b2670172c054fe96441bf0e5940f"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.13/current-main-CI-fetch-receipt.json",
+      "bytes": 1909,
+      "sha256": "080d40b0e03edf2e8dd12fbc1dabbdba72beeccdc91b5e1ccb8c9de5daa2b53e"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.13/current-manifest-feature-surface.json",
+      "bytes": 28641,
+      "sha256": "3bc807a2f7b4c994f6a7368166cc2c97c60eb9c759695944cdbe3f0b8d1ef335"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.13/current-meaningful-existing-gates.json",
+      "bytes": 39649,
+      "sha256": "b25ea6e73007cc927b0312d8f136f51b5732eba1a98f96194e833753772e4367"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.13/current-owner-inventory.json.gz",
+      "bytes": 342707,
+      "sha256": "995eb08adc2a3979c40b8bf0d4eac002a220d1f3bf96005f9ee1f78b202deb37"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.13/current-remote-CI-diagnostic-index.json",
+      "bytes": 3090,
+      "sha256": "ffbb51705f060480d67bf8614f3789b32b8a72c05e6f2f127430c196f9cd4811"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.13/current-remote-CI-job-proof.json",
+      "bytes": 21484,
+      "sha256": "d37951d14f0b8f8d0f6d5128cfc467e33cd8e8182290463af18caaeb7a3cbb87"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.13/current-six-original-deletion-scans.json",
+      "bytes": 195489,
+      "sha256": "4b5c4b291abfc76b70a72ff82d50effe0a2a02f76af888bb4ffd497c8f640823"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.13/current-whole-source-pin.json",
+      "bytes": 161235,
+      "sha256": "44c48c79257da58c5de221039db937a27dfdc822574bff8ef9436062ddad739e"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.13/evidence-packaging-corrections.json",
+      "bytes": 995,
+      "sha256": "41ab1b71fb8ec38a8ee540be27a11c849560033c57f56ff572bdc982ad6b904c"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.13/existing-default-guard-fixtures-initial-import-failure-receipt.json",
+      "bytes": 407,
+      "sha256": "7b2a27eaeaf033828df1a38d086039c24401e0f0f6ce25ddbdd2a37440a9ee79"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.13/existing-default-guard-fixtures-initial-import-failure.log",
+      "bytes": 832,
+      "sha256": "d002d8e2ab5f15ac23675ec91b0cb5561143eebf4e70296f20fda8a2513925f0"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.13/existing-default-guard-fixtures-receipt.json",
+      "bytes": 562,
+      "sha256": "58396b067e9eb221174eb390e48aec8f4ccc004d32c6ad12249e1523a402ecc1"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.13/existing-default-guard-fixtures.log",
+      "bytes": 110,
+      "sha256": "770a5a7cfd5ed30408387c611037fc3fb16dc0c5873dba409dd6aae6c67d7bb1"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.13/existing-owner-dedupe.json",
+      "bytes": 12840,
+      "sha256": "d6090b5cb9b0f26e812ee3fca7c6ffe45b643fd687789f80d7cdd175aeccc69d"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.13/failure-concurrency-compatibility.json",
+      "bytes": 4497,
+      "sha256": "ab140c16bdb82d710079fe0b5946a9200df7a3c063b55a75fb94f4024a5a0f93"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.13/historical-applicable-remaining-telemetry-doc.json",
+      "bytes": 4328,
+      "sha256": "069ac4d8ec76d9b023fde5add435d3e26efff89c22da2f72625d43e1680a87f9"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.13/historical-applicable-remaining-telemetry-doc.log.gz",
+      "bytes": 341,
+      "sha256": "86f8b1a8770056173035ac6724786bc49f73c81ddae6fb9827d4c8ea2d2ee94a"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.13/historical-gate-applicability.json",
+      "bytes": 7222,
+      "sha256": "0e22f1041cba64cd3469c6e83658b56266427e9620545e7a57a2a79419c30bdb"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.13/instrument-matrix.json",
+      "bytes": 2023,
+      "sha256": "689d8812c9b45bf75848ac662e5b9fae2ded2095124af8fb633d55f6068611a9"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.13/invariant-hash-extent-correction.json",
+      "bytes": 384,
+      "sha256": "281c9dca465b40f71c491f9822291e2c0cca402b04dfe3003009a0ad6c333e14"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.13/manual-current-owner-dispositions.json",
+      "bytes": 43966,
+      "sha256": "828243ea4f82495ba16daafbab85604f32bbc7e8ddb12c9c5b634a80307247c7"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.13/member-navigation.txt",
+      "bytes": 6522,
+      "sha256": "b58a766e59a4976408b4cae8dfe0fdb4085bcaf9e01dc0bcd41d9d9cf221c081"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.13/other-owner-packets.json.gz",
+      "bytes": 190801,
+      "sha256": "08d610824f54397d6704cbd20858b50fc70533b3121470f79fddaa5f089cbb0a"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.13/packaging-native-receipt.json",
+      "bytes": 380,
+      "sha256": "92541af7afb5f76eb2d64c26338a94773995a3b98445d323a24e071efed7daa8"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.13/precommit-validation.json",
+      "bytes": 416,
+      "sha256": "53093b9d4023bf9f252d019a0a098a6d5c2e5cd8ae1316a1b01f40164940ed47"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.13/six-manifest-context-clean-receipt.json",
+      "bytes": 1139,
+      "sha256": "c70deff8467ac67e6dc9953bc329d818ae88f65c0090114a4462e5116cd962fc"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.13/six-manifest-context-clean.log",
+      "bytes": 39,
+      "sha256": "e2a0820a7f57cb21b14b45ab127aa0e414d4248383cb35d41dd6c80d902a7604"
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "at": "2026-10-06T16:11:08.652424+00:00",
+  "issue": "hud-bstmy.3.13",
+  "worker": "/root/lane_hl_review",
+  "exclusive_artifact_target": "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target",
+  "phase": "bounded manifest-context six-package CLEAN ONLY",
+  "packages": [
+    "tze_hud_compositor",
+    "tze_hud_widget",
+    "poc_demo",
+    "tze_hud_app",
+    "integration",
+    "benchmark"
+  ],
+  "prior_actual_R3_High_release_ROOT_ACK_verified": true,
+  "current_High_locks_free": [
+    {
+      "path": "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/.cargo-lock",
+      "unlocked": true
+    },
+    {
+      "path": "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/x86_64-pc-windows-gnu/debug/.cargo-lock",
+      "unlocked": true
+    }
+  ],
+  "GPU_allowed": false,
+  "compile_check_clippy_test_CI_allowed": false,
+  "ROOT_target_access_allowed": false,
+  "global_GPU_owner_remains": "hud-lgb6c.2",
+  "authorization": "From actual GEN3 cwd at121c, explicitCARGO_TARGET_DIR High path/jobs1/protoc, one bounded cargo clean with exact six packages ONLY; native/child/rawSHA/source/actualexit/consumerabsence receipt and notify ROOT. No whole-target wipe/assetcopy/otherpackages/compile/check/test/GPU. Purpose invalidate stale oldR3 assetmanifest context before normal authorWT151 retirement/newindependent review originalbranch preparation, not a semantic closure dependency. Preserve ALL current evidence/oldWTs; ROOTalone lifecycle/normalretirement. After actual clean terminal release this limited target lease. Continue no-Cargo source/remote gate audit unless separatelyauthorized.",
+  "errors": []
+}

@@ -1,0 +1,83 @@
+{
+  "source": "121c1e7afe928c55cef3adcc5fb91f4e59fa2d52",
+  "rows": [
+    {
+      "surface": "config",
+      "classification": "implemented",
+      "current_code": [
+        "crates/tze_hud_config/src/raw.rs",
+        "crates/tze_hud_config/src/loader.rs",
+        "crates/tze_hud_config/src/tests.rs",
+        "crates/tze_hud_runtime/src/runtime_context.rs",
+        "app/tze_hud_app/src/main.rs"
+      ],
+      "behavior": "Root/runtime/tab deny_unknown_fields; key/hint parse diagnostic versus malformed syntax. Public strict app rejects invalid configuration before start; shared builder headless fallback remains. Existing 14 negative-key+2 malformed/repeat matrix unchanged."
+    },
+    {
+      "surface": "pure pixels/glyphs",
+      "classification": "implemented",
+      "current_code": [
+        "crates/tze_hud_compositor/tests/common/pixels.rs",
+        "crates/tze_hud_compositor/src/surface.rs",
+        "crates/tze_hud_compositor/src/text.rs"
+      ],
+      "behavior": "Identical RGBA indexing/channel abs_diff<=tolerance/label/channel/coordinate error and old OOB indexing failure; test-only path includes, live read_pixels/capture/GPU/glyphon shaping retained."
+    },
+    {
+      "surface": "telemetry/schema/latency",
+      "classification": "implemented",
+      "current_code": [
+        "crates/tze_hud_telemetry/src/collector.rs",
+        "crates/tze_hud_telemetry/src/record.rs",
+        "crates/tze_hud_telemetry/src/validation.rs",
+        "examples/vertical_slice/tests/budget_assertions.rs",
+        "tests/integration/multi_agent.rs"
+      ],
+      "behavior": "FrameRecorder own convenience gone; all live frame/summary/LatencyBucket fields, samples, bounded eviction, empty None/NoSamples, p99 nearest rank/threshold and partial Uncalibrated factor calibration retained. Normal tests sample real timing; hard asserted ceilings remain conditional."
+    },
+    {
+      "surface": "focus lifecycle",
+      "classification": "implemented",
+      "current_code": [
+        "crates/tze_hud_runtime/src/windowed/mod.rs",
+        "crates/tze_hud_runtime/src/windowed/lifecycle.rs",
+        "crates/tze_hud_runtime/src/windowed/event_loop_harness.rs",
+        "crates/tze_hud_input/src/focus.rs"
+      ],
+      "behavior": "Actual settle clears focus before ring/keyboard; real revoke/grace expiry/fallback, scene/shared try_lock deferral, repeated settle no resurrection, unrelated tile retained. Current exact-head named pass; historical removed-settle mutation and restored pass apply only under precise source equality."
+    },
+    {
+      "surface": "default/auth/concurrent/retry/replay",
+      "classification": "preserved/owner-qualified",
+      "current_code": [
+        "crates/tze_hud_runtime/src/headless.rs",
+        "crates/tze_hud_runtime/src/windowed/network.rs",
+        "crates/tze_hud_runtime/src/shell/safe_mode.rs",
+        "crates/tze_hud_input/src/lib.rs",
+        "crates/tze_hud_protocol/src/session_server/mod.rs"
+      ],
+      "behavior": "Builder sharing, production absent-TOML admission, current session auth/caps/ordering/replay remain. P1/P2/firewall/grip separate owner changes qualified; unchanged GEN3 audit adds no new lock/clock/transport/persistence state. Fixture-owned input wrappers not falsely asserted as current transport wiring."
+    },
+    {
+      "surface": "Windows native/constraint",
+      "classification": "native compilation/ordinary idle proven; constrained execution partial",
+      "current_code": [
+        ".github/workflows/windows.yml",
+        "scripts/ci/windows_smoke.py",
+        "scripts/ci/windows/run-quiescent-efficiency.ps1",
+        "scripts/ci/check_idle_efficiency.py"
+      ],
+      "behavior": "Current native MSVC app/POC build, portal/pair/auth/restart ordinary smoke positive. Actual raw constrained logical_cpu_limit must be2 got4 runtime diagnostic retained; windows_smoke validates require_constrained=False. Canonical constrained sampler uses benchmark overlay and start /affinity3; not executed by these ordinary smoke logs."
+    },
+    {
+      "surface": "weekly hard performance",
+      "classification": "unexecuted current limit",
+      "current_code": [
+        "examples/vertical_slice/tests/budget_assertions.rs",
+        ".github/workflows/perf-assert.yml",
+        ".github/workflows/perf-budget.yml"
+      ],
+      "behavior": "Current normal CI tests real samples with PERF_ASSERT off; no current weekly/constrained reference-envelope/hard ceiling certificate claimed."
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "production_failures": [],
+  "corrections": [
+    {
+      "kind": "historical AST function extent versus lexical brace body",
+      "result": "all72 initially marked changed; same-extractor historical/current correction identifies only TTL actual change",
+      "receipt": "invariant-hash-extent-correction.json"
+    },
+    {
+      "kind": "assertion citation offset",
+      "result": "recomputed from byte offset of actual body; multiline headers no longer shift line positions"
+    },
+    {
+      "kind": "wrong metadata path",
+      "first": "scripts/ci/windows/windows_smoke.py",
+      "actual": "scripts/ci/windows_smoke.py",
+      "first_exit": 1,
+      "exception": "FileNotFoundError during evidence row packaging",
+      "result": "actual current wrapper path validated; no source/gate failure"
+    },
+    {
+      "kind": "ANSI binary context",
+      "result": "strip color escape before Running detection; all named test observations now have actual binary provenance"
+    }
+  ]
+}
