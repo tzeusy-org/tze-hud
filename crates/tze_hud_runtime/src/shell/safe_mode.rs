@@ -22,10 +22,11 @@
 //!
 //! Both operations are idempotent. `SharedState.safe_mode_atomic` is the single
 //! source of truth, so any caller sharing the same state can exit safe mode.
+//! Lease TTL accounting and session notification timestamps use the scene's
+//! injected clock.
 
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, RwLock};
-use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::Mutex;
 
 use tze_hud_protocol::proto::session::{
@@ -64,9 +65,6 @@ pub async fn enter_safe_mode(
     shared_state: &Arc<Mutex<SharedState>>,
     chrome_state: &Arc<RwLock<ChromeState>>,
 ) -> SafeModeEntryResult {
-    let now_ms = now_wall_ms();
-    let now_us = now_ms.saturating_mul(1_000);
-
     let (leases_suspended, sessions_notified) = {
         let st = shared_state.lock().await;
 
@@ -79,14 +77,17 @@ pub async fn enter_safe_mode(
         }
 
         // Suspend all ACTIVE leases (NOT revoke).
-        let leases_suspended = {
+        let (leases_suspended, now_us) = {
             let mut scene = st.scene.lock().await;
+            let now_ms = scene.now_millis();
+            let now_us = scene.now_wall_us();
             scene.suspend_all_leases(now_ms);
-            scene
+            let suspended = scene
                 .leases
                 .values()
                 .filter(|l| l.state == LeaseState::Suspended)
-                .count()
+                .count();
+            (suspended, now_us)
         };
 
         // The event thread reads this lock-free and mutation intake reads it
@@ -129,9 +130,6 @@ pub async fn exit_safe_mode(
     shared_state: &Arc<Mutex<SharedState>>,
     chrome_state: &Arc<RwLock<ChromeState>>,
 ) -> SafeModeExitResult {
-    let now_ms = now_wall_ms();
-    let now_us = now_ms.saturating_mul(1_000);
-
     let st = shared_state.lock().await;
     if !st.safe_mode_atomic.load(Ordering::Acquire) {
         return SafeModeExitResult {
@@ -147,15 +145,17 @@ pub async fn exit_safe_mode(
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .safe_mode_active = false;
 
-    let leases_resumed = {
+    let (leases_resumed, now_us) = {
         let mut scene = st.scene.lock().await;
+        let now_ms = scene.now_millis();
+        let now_us = scene.now_wall_us();
         let suspended = scene
             .leases
             .values()
             .filter(|l| l.state == LeaseState::Suspended)
             .count();
         scene.resume_all_leases(now_ms);
-        suspended
+        (suspended, now_us)
     };
 
     // Mutation intake accepts new batches again.
@@ -175,14 +175,6 @@ pub async fn exit_safe_mode(
         leases_resumed,
         sessions_notified,
     }
-}
-
-/// Current wall-clock time in milliseconds since Unix epoch.
-fn now_wall_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
 }
 
 #[cfg(test)]
@@ -327,25 +319,68 @@ mod tests {
     /// TTL pause: suspension time is excluded from TTL accounting.
     #[tokio::test]
     async fn test_ttl_excluded_during_suspension() {
+        use tze_hud_scene::clock::TestClock;
+
         let fx = Fixture::new();
+        let clock = TestClock::new(1_000);
+        {
+            let st = fx.shared.lock().await;
+            *st.scene.lock().await =
+                SceneGraph::new_with_clock(1920.0, 1080.0, Arc::new(clock.clone()));
+        }
         let lease_id = fx.grant("agent.alpha").await;
         let original_ttl = {
             let st = fx.shared.lock().await;
             st.scene.lock().await.leases[&lease_id].ttl_ms
         };
+        let elapsed_before_suspension = 12_000;
+        clock.advance(elapsed_before_suspension);
 
         fx.enter().await;
+        let remaining_ttl = original_ttl - elapsed_before_suspension;
+        {
+            let st = fx.shared.lock().await;
+            let scene = st.scene.lock().await;
+            let lease = &scene.leases[&lease_id];
+            assert_eq!(lease.state, LeaseState::Suspended);
+            assert_eq!(lease.suspended_at_ms, Some(scene.now_millis()));
+            assert_eq!(lease.ttl_remaining_at_suspend_ms, Some(remaining_ttl));
+        }
+
+        // Longer than the original TTL, but within the suspension timeout.
+        clock.advance(120_000);
+        {
+            let st = fx.shared.lock().await;
+            let mut scene = st.scene.lock().await;
+            assert!(scene.expire_leases().is_empty());
+            assert_eq!(scene.leases[&lease_id].state, LeaseState::Suspended);
+        }
         fx.exit().await;
 
         let post_resume_ttl = {
             let st = fx.shared.lock().await;
-            st.scene.lock().await.leases[&lease_id].ttl_ms
+            let scene = st.scene.lock().await;
+            let lease = &scene.leases[&lease_id];
+            assert_eq!(lease.state, LeaseState::Active);
+            assert_eq!(lease.granted_at_ms, scene.now_millis());
+            lease.ttl_ms
         };
-        // Very little real time elapses; allow 5s of test overhead.
-        assert!(
-            post_resume_ttl >= original_ttl.saturating_sub(5_000),
-            "TTL after resume ({post_resume_ttl}ms) should be ~ original ({original_ttl}ms)"
-        );
+        assert_eq!(post_resume_ttl, remaining_ttl);
+
+        clock.advance(remaining_ttl - 1);
+        {
+            let st = fx.shared.lock().await;
+            let mut scene = st.scene.lock().await;
+            assert!(scene.expire_leases().is_empty());
+            assert_eq!(scene.leases[&lease_id].state, LeaseState::Active);
+        }
+        clock.advance(1);
+        let st = fx.shared.lock().await;
+        let mut scene = st.scene.lock().await;
+        let expiries = scene.expire_leases();
+        assert_eq!(expiries.len(), 1);
+        assert_eq!(expiries[0].lease_id, lease_id);
+        assert_eq!(scene.leases[&lease_id].state, LeaseState::Expired);
     }
 
     /// While safe mode is active `SharedState.safe_mode_atomic` is set, which
