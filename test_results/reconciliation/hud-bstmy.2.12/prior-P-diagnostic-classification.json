@@ -1,0 +1,658 @@
+{
+  "baseline_groups": 20,
+  "groups": [
+    {
+      "baseline_diagnostic": "crates/tze_hud_protocol/src/auth.rs:116:15: warning: function `authenticate_session_init` is never used",
+      "symbols": [
+        "authenticate_session_init"
+      ],
+      "classification_by_symbol": {
+        "authenticate_session_init": "removed; no production caller"
+      },
+      "references": []
+    },
+    {
+      "baseline_diagnostic": "crates/tze_hud_protocol/src/convert.rs:1029:15: warning: function `scene_portal_peer_class_to_proto` is never used",
+      "symbols": [
+        "scene_portal_peer_class_to_proto"
+      ],
+      "classification_by_symbol": {
+        "scene_portal_peer_class_to_proto": "retained under explicit T7 exclusion; no production-use claim"
+      },
+      "references": [
+        {
+          "path": "crates/tze_hud_protocol/src/convert.rs",
+          "line": 1040,
+          "text": "pub fn scene_portal_peer_class_to_proto(p: PortalPeerClass) -> i32 {"
+        },
+        {
+          "path": "crates/tze_hud_protocol/src/convert.rs",
+          "line": 1248,
+          "text": "peer_class: scene_portal_peer_class_to_proto(s.identity.peer_class),"
+        }
+      ]
+    },
+    {
+      "baseline_diagnostic": "crates/tze_hud_protocol/src/convert.rs:1073:15: warning: function `scene_portal_lifecycle_to_proto` is never used",
+      "symbols": [
+        "scene_portal_lifecycle_to_proto"
+      ],
+      "classification_by_symbol": {
+        "scene_portal_lifecycle_to_proto": "retained under explicit T7 exclusion; no production-use claim"
+      },
+      "references": [
+        {
+          "path": "crates/tze_hud_protocol/src/convert.rs",
+          "line": 1084,
+          "text": "pub fn scene_portal_lifecycle_to_proto(s: PortalLifecycleState) -> i32 {"
+        },
+        {
+          "path": "crates/tze_hud_protocol/src/convert.rs",
+          "line": 1250,
+          "text": "lifecycle: scene_portal_lifecycle_to_proto(s.lifecycle),"
+        }
+      ]
+    },
+    {
+      "baseline_diagnostic": "crates/tze_hud_protocol/src/convert.rs:1121:15: warning: function `scene_portal_display_state_to_proto` is never used",
+      "symbols": [
+        "scene_portal_display_state_to_proto"
+      ],
+      "classification_by_symbol": {
+        "scene_portal_display_state_to_proto": "retained under explicit T7 exclusion; no production-use claim"
+      },
+      "references": [
+        {
+          "path": "crates/tze_hud_protocol/src/convert.rs",
+          "line": 1132,
+          "text": "pub fn scene_portal_display_state_to_proto(s: PortalDisplayState) -> i32 {"
+        },
+        {
+          "path": "crates/tze_hud_protocol/src/convert.rs",
+          "line": 1251,
+          "text": "display_state: scene_portal_display_state_to_proto(s.display_state),"
+        }
+      ]
+    },
+    {
+      "baseline_diagnostic": "crates/tze_hud_protocol/src/convert.rs:1160:15: warning: function `scene_portal_part_kind_to_proto` is never used",
+      "symbols": [
+        "scene_portal_part_kind_to_proto"
+      ],
+      "classification_by_symbol": {
+        "scene_portal_part_kind_to_proto": "retained under explicit T7 exclusion; no production-use claim"
+      },
+      "references": [
+        {
+          "path": "crates/tze_hud_protocol/src/convert.rs",
+          "line": 1171,
+          "text": "pub fn scene_portal_part_kind_to_proto(k: PortalPartKind) -> i32 {"
+        },
+        {
+          "path": "crates/tze_hud_protocol/src/convert.rs",
+          "line": 1256,
+          "text": "kind: scene_portal_part_kind_to_proto(part.kind),"
+        }
+      ]
+    },
+    {
+      "baseline_diagnostic": "crates/tze_hud_protocol/src/convert.rs:1232:15: warning: function `scene_portal_surface_to_proto` is never used",
+      "symbols": [
+        "scene_portal_surface_to_proto"
+      ],
+      "classification_by_symbol": {
+        "scene_portal_surface_to_proto": "retained under explicit T7 exclusion; no production-use claim"
+      },
+      "references": [
+        {
+          "path": "crates/tze_hud_protocol/src/convert.rs",
+          "line": 1243,
+          "text": "pub fn scene_portal_surface_to_proto(s: &PortalSurface) -> proto::PortalSurfaceProto {"
+        },
+        {
+          "path": "crates/tze_hud_protocol/src/convert.rs",
+          "line": 1303,
+          "text": "let proto = scene_portal_surface_to_proto(&surface);"
+        }
+      ]
+    },
+    {
+      "baseline_diagnostic": "crates/tze_hud_protocol/src/convert.rs:220:15: warning: function `scene_node_layout_to_proto` is never used",
+      "symbols": [
+        "scene_node_layout_to_proto"
+      ],
+      "classification_by_symbol": {
+        "scene_node_layout_to_proto": "required fixture: cfg(test) scene_node_to_proto and convert::tests"
+      },
+      "references": [
+        {
+          "path": "crates/tze_hud_protocol/src/convert.rs",
+          "line": 226,
+          "text": "fn scene_node_layout_to_proto(layout: NodeLayout) -> i32 {"
+        },
+        {
+          "path": "crates/tze_hud_protocol/src/convert.rs",
+          "line": 685,
+          "text": "layout: scene_node_layout_to_proto(n.layout),"
+        }
+      ]
+    },
+    {
+      "baseline_diagnostic": "crates/tze_hud_protocol/src/convert.rs:23:15: warning: function `resource_id_to_proto` is never used",
+      "symbols": [
+        "resource_id_to_proto"
+      ],
+      "classification_by_symbol": {
+        "resource_id_to_proto": "required fixture: convert::tests resource-id round trips"
+      },
+      "references": [
+        {
+          "path": "crates/tze_hud_protocol/src/convert.rs",
+          "line": 27,
+          "text": "fn resource_id_to_proto(id: ResourceId) -> proto::ResourceIdProto {"
+        },
+        {
+          "path": "crates/tze_hud_protocol/src/convert.rs",
+          "line": 1397,
+          "text": "let proto = resource_id_to_proto(id);"
+        },
+        {
+          "path": "crates/tze_hud_protocol/src/convert.rs",
+          "line": 1406,
+          "text": "let proto = resource_id_to_proto(id);"
+        }
+      ]
+    },
+    {
+      "baseline_diagnostic": "crates/tze_hud_protocol/src/convert.rs:32:15: warning: function `proto_to_resource_id` is never used",
+      "symbols": [
+        "proto_to_resource_id"
+      ],
+      "classification_by_symbol": {
+        "proto_to_resource_id": "required fixture: external fuzz_protocol_boundary + convert::tests resource length/round trips (dev-mode)"
+      },
+      "references": [
+        {
+          "path": "crates/tze_hud_protocol/src/convert.rs",
+          "line": 37,
+          "text": "pub fn proto_to_resource_id(p: &proto::ResourceIdProto) -> Option<ResourceId> {"
+        },
+        {
+          "path": "crates/tze_hud_protocol/src/convert.rs",
+          "line": 1399,
+          "text": "let restored = proto_to_resource_id(&proto).expect(\"must decode 32 bytes\");"
+        },
+        {
+          "path": "crates/tze_hud_protocol/src/convert.rs",
+          "line": 1417,
+          "text": "assert!(proto_to_resource_id(&bad).is_none());"
+        },
+        {
+          "path": "crates/tze_hud_protocol/tests/fuzz_protocol_boundary.rs",
+          "line": 31,
+          "text": "proto_node_to_scene, proto_rect_to_scene, proto_to_resource_id, proto_to_scene_id,"
+        },
+        {
+          "path": "crates/tze_hud_protocol/tests/fuzz_protocol_boundary.rs",
+          "line": 122,
+          "text": "assert_eq!(proto_to_resource_id(&p), None);"
+        },
+        {
+          "path": "crates/tze_hud_protocol/tests/fuzz_protocol_boundary.rs",
+          "line": 131,
+          "text": "assert_eq!(proto_to_resource_id(&p), None);"
+        },
+        {
+          "path": "crates/tze_hud_protocol/tests/fuzz_protocol_boundary.rs",
+          "line": 140,
+          "text": "assert!(proto_to_resource_id(&p).is_some());"
+        },
+        {
+          "path": "crates/tze_hud_protocol/tests/fuzz_protocol_boundary.rs",
+          "line": 694,
+          "text": "let result = proto_to_resource_id(&p);"
+        }
+      ]
+    },
+    {
+      "baseline_diagnostic": "crates/tze_hud_protocol/src/convert.rs:449:15: warning: function `scene_text_overflow_to_proto` is never used",
+      "symbols": [
+        "scene_text_overflow_to_proto"
+      ],
+      "classification_by_symbol": {
+        "scene_text_overflow_to_proto": "required fixture: cfg(test) scene_node_to_proto and convert::tests"
+      },
+      "references": [
+        {
+          "path": "crates/tze_hud_protocol/src/convert.rs",
+          "line": 456,
+          "text": "fn scene_text_overflow_to_proto(ov: TextOverflow) -> i32 {"
+        },
+        {
+          "path": "crates/tze_hud_protocol/src/convert.rs",
+          "line": 633,
+          "text": "overflow: scene_text_overflow_to_proto(tm.overflow),"
+        },
+        {
+          "path": "crates/tze_hud_protocol/src/convert.rs",
+          "line": 1964,
+          "text": "proto_text_overflow_to_scene(scene_text_overflow_to_proto(ov)),"
+        }
+      ]
+    },
+    {
+      "baseline_diagnostic": "crates/tze_hud_protocol/src/convert.rs:457:15: warning: function `scene_color_runs_to_proto` is never used",
+      "symbols": [
+        "scene_color_runs_to_proto"
+      ],
+      "classification_by_symbol": {
+        "scene_color_runs_to_proto": "required fixture: cfg(test) scene_node_to_proto and convert::tests"
+      },
+      "references": [
+        {
+          "path": "crates/tze_hud_protocol/src/convert.rs",
+          "line": 465,
+          "text": "fn scene_color_runs_to_proto(runs: &[TextColorRun]) -> Vec<proto::TextColorRunProto> {"
+        },
+        {
+          "path": "crates/tze_hud_protocol/src/convert.rs",
+          "line": 632,
+          "text": "color_runs: scene_color_runs_to_proto(&tm.color_runs),"
+        },
+        {
+          "path": "crates/tze_hud_protocol/src/convert.rs",
+          "line": 1942,
+          "text": "assert_eq!(scene_color_runs_to_proto(&scene_runs), proto_runs);"
+        }
+      ]
+    },
+    {
+      "baseline_diagnostic": "crates/tze_hud_protocol/src/convert.rs:485:15: warning: function `scene_input_mode_to_proto` is never used",
+      "symbols": [
+        "scene_input_mode_to_proto"
+      ],
+      "classification_by_symbol": {
+        "scene_input_mode_to_proto": "required fixture: convert::tests input-mode round trips"
+      },
+      "references": [
+        {
+          "path": "crates/tze_hud_protocol/src/convert.rs",
+          "line": 494,
+          "text": "fn scene_input_mode_to_proto(m: InputMode) -> proto::TileInputModeProto {"
+        },
+        {
+          "path": "crates/tze_hud_protocol/src/convert.rs",
+          "line": 1571,
+          "text": "let proto = scene_input_mode_to_proto(mode);"
+        },
+        {
+          "path": "crates/tze_hud_protocol/src/convert.rs",
+          "line": 1583,
+          "text": "let proto = scene_input_mode_to_proto(mode);"
+        },
+        {
+          "path": "crates/tze_hud_protocol/src/convert.rs",
+          "line": 1595,
+          "text": "let proto = scene_input_mode_to_proto(mode);"
+        }
+      ]
+    },
+    {
+      "baseline_diagnostic": "crates/tze_hud_protocol/src/convert.rs:581:15: warning: function `scene_node_to_proto` is never used",
+      "symbols": [
+        "scene_node_to_proto"
+      ],
+      "classification_by_symbol": {
+        "scene_node_to_proto": "required fixture: convert::tests and session_server/tests/{invariants,resource_upload,lifecycle_verbs}.rs"
+      },
+      "references": [
+        {
+          "path": "crates/tze_hud_protocol/src/convert.rs",
+          "line": 591,
+          "text": "pub(crate) fn scene_node_to_proto(n: &Node) -> proto::NodeProto {"
+        },
+        {
+          "path": "crates/tze_hud_protocol/src/convert.rs",
+          "line": 696,
+          "text": "/// [`scene_node_to_proto`] returns, so round-tripping a flat node is"
+        },
+        {
+          "path": "crates/tze_hud_protocol/src/convert.rs",
+          "line": 703,
+          "text": "let mut proto = scene_node_to_proto(root);"
+        },
+        {
+          "path": "crates/tze_hud_protocol/src/convert.rs",
+          "line": 1441,
+          "text": "let proto = scene_node_to_proto(&original);"
+        },
+        {
+          "path": "crates/tze_hud_protocol/src/convert.rs",
+          "line": 1477,
+          "text": "let proto = scene_node_to_proto(&original);"
+        },
+        {
+          "path": "crates/tze_hud_protocol/src/convert.rs",
+          "line": 1506,
+          "text": "let proto = scene_node_to_proto(&node);"
+        },
+        {
+          "path": "crates/tze_hud_protocol/src/convert.rs",
+          "line": 1709,
+          "text": "let proto_node = scene_node_to_proto(&scene_node);"
+        },
+        {
+          "path": "crates/tze_hud_protocol/src/convert.rs",
+          "line": 1884,
+          "text": "scene_node_to_proto(&scene_abs).layout,"
+        },
+        {
+          "path": "crates/tze_hud_protocol/src/convert.rs",
+          "line": 1894,
+          "text": "scene_node_to_proto(&scene_flow).layout,"
+        },
+        {
+          "path": "crates/tze_hud_protocol/src/session_server/tests/lifecycle_verbs.rs",
+          "line": 13,
+          "text": "let mut root = crate::convert::scene_node_to_proto(&Node {"
+        },
+        {
+          "path": "crates/tze_hud_protocol/src/session_server/tests/lifecycle_verbs.rs",
+          "line": 24,
+          "text": ".push(crate::convert::scene_node_to_proto(&Node {"
+        },
+        {
+          "path": "crates/tze_hud_protocol/src/session_server/tests/resource_upload.rs",
+          "line": 746,
+          "text": "node: Some(crate::convert::scene_node_to_proto(&root_node)),"
+        },
+        {
+          "path": "crates/tze_hud_protocol/src/session_server/tests/invariants.rs",
+          "line": 406,
+          "text": "node: Some(crate::convert::scene_node_to_proto(&node)),"
+        }
+      ]
+    },
+    {
+      "baseline_diagnostic": "crates/tze_hud_protocol/src/convert.rs:688:15: warning: function `scene_node_tree_to_proto` is never used",
+      "symbols": [
+        "scene_node_tree_to_proto"
+      ],
+      "classification_by_symbol": {
+        "scene_node_tree_to_proto": "required fixture: convert::tests nested-tree round trip"
+      },
+      "references": [
+        {
+          "path": "crates/tze_hud_protocol/src/convert.rs",
+          "line": 683,
+          "text": "// [`scene_node_tree_to_proto`] with a node lookup to emit a nested subtree."
+        },
+        {
+          "path": "crates/tze_hud_protocol/src/convert.rs",
+          "line": 699,
+          "text": "fn scene_node_tree_to_proto("
+        },
+        {
+          "path": "crates/tze_hud_protocol/src/convert.rs",
+          "line": 708,
+          "text": ".map(|child| scene_node_tree_to_proto(child, lookup))"
+        },
+        {
+          "path": "crates/tze_hud_protocol/src/convert.rs",
+          "line": 1849,
+          "text": "let rebuilt = scene_node_tree_to_proto(&flat[0], &lookup);"
+        }
+      ]
+    },
+    {
+      "baseline_diagnostic": "crates/tze_hud_protocol/src/convert.rs:9:15: warning: function `scene_id_to_proto` is never used",
+      "symbols": [
+        "scene_id_to_proto"
+      ],
+      "classification_by_symbol": {
+        "scene_id_to_proto": "required fixture: convert::tests scene-id round trips"
+      },
+      "references": [
+        {
+          "path": "crates/tze_hud_protocol/src/convert.rs",
+          "line": 12,
+          "text": "fn scene_id_to_proto(id: SceneId) -> proto::SceneIdProto {"
+        },
+        {
+          "path": "crates/tze_hud_protocol/src/convert.rs",
+          "line": 1371,
+          "text": "let proto = scene_id_to_proto(id);"
+        },
+        {
+          "path": "crates/tze_hud_protocol/src/convert.rs",
+          "line": 1380,
+          "text": "let proto = scene_id_to_proto(null);"
+        }
+      ]
+    },
+    {
+      "baseline_diagnostic": "crates/tze_hud_protocol/src/session.rs:210:19: warning: methods `get_session`, `get_session_mut`, and `session_count` are never used",
+      "symbols": [
+        "get_session",
+        "get_session_mut",
+        "session_count"
+      ],
+      "classification_by_symbol": {
+        "get_session": "removed; no production caller",
+        "get_session_mut": "removed; no production caller",
+        "session_count": "required fixture: session_server/tests/session_handshake.rs + protected tests/integration/text_stream_portal_adapter.rs (dev-mode)"
+      },
+      "references": [
+        {
+          "path": "crates/tze_hud_protocol/src/session.rs",
+          "line": 215,
+          "text": "pub fn session_count(&self) -> usize {"
+        },
+        {
+          "path": "crates/tze_hud_protocol/src/session_server/tests/session_handshake.rs",
+          "line": 55,
+          "text": "assert_eq!(service.state.lock().await.sessions.session_count(), 0);"
+        },
+        {
+          "path": "crates/tze_hud_protocol/src/session_server/tests/session_handshake.rs",
+          "line": 164,
+          "text": "assert_eq!(state.sessions.session_count(), 0);"
+        },
+        {
+          "path": "crates/tze_hud_protocol/src/session_server/tests/session_handshake.rs",
+          "line": 957,
+          "text": "let count = state.lock().await.sessions.session_count();"
+        },
+        {
+          "path": "crates/tze_hud_protocol/src/session_server/tests/session_handshake.rs",
+          "line": 963,
+          "text": "state.lock().await.sessions.session_count()"
+        },
+        {
+          "path": "tests/integration/text_stream_portal_adapter.rs",
+          "line": 345,
+          "text": "session_count: usize,"
+        },
+        {
+          "path": "tests/integration/text_stream_portal_adapter.rs",
+          "line": 401,
+          "text": "session_count: state.sessions.session_count(),"
+        },
+        {
+          "path": "tests/integration/text_stream_portal_adapter.rs",
+          "line": 903,
+          "text": "scene_verification.session_count, 1,"
+        },
+        {
+          "path": "tests/integration/text_stream_portal_adapter.rs",
+          "line": 1000,
+          "text": "scene_verification.session_count, 1,"
+        }
+      ]
+    },
+    {
+      "baseline_diagnostic": "crates/tze_hud_protocol/src/session_server/lifecycle.rs:25:19: warning: method `allows_mutations` is never used",
+      "symbols": [
+        "allows_mutations"
+      ],
+      "classification_by_symbol": {
+        "allows_mutations": "removed; no production caller"
+      },
+      "references": []
+    },
+    {
+      "baseline_diagnostic": "crates/tze_hud_protocol/src/session_server/service.rs:227:19: warning: methods `inject_input_event`, `broadcast_frame_presented`, and `emit_drag_repositioned_event` are never used",
+      "symbols": [
+        "inject_input_event",
+        "broadcast_frame_presented",
+        "emit_drag_repositioned_event"
+      ],
+      "classification_by_symbol": {
+        "inject_input_event": "required fixture: session_server/tests/events.rs via HudSessionImpl (cfg(test))",
+        "broadcast_frame_presented": "removed; no production caller",
+        "emit_drag_repositioned_event": "required fixture: tests/integration/drag_reposition.rs via HudSessionImpl (dev-mode)"
+      },
+      "references": [
+        {
+          "path": "crates/tze_hud_protocol/src/session_server/service.rs",
+          "line": 211,
+          "text": "pub(crate) fn inject_input_event("
+        },
+        {
+          "path": "crates/tze_hud_protocol/src/session_server/service.rs",
+          "line": 318,
+          "text": "pub fn emit_drag_repositioned_event("
+        },
+        {
+          "path": "crates/tze_hud_protocol/src/session_server/tests/events.rs",
+          "line": 21,
+          "text": "service.inject_input_event(\"agent-a\", batch);"
+        },
+        {
+          "path": "crates/tze_hud_protocol/src/session_server/tests/events.rs",
+          "line": 56,
+          "text": "service.inject_input_event(\"agent-b\", batch);"
+        },
+        {
+          "path": "tests/integration/drag_reposition.rs",
+          "line": 519,
+          "text": "/// WHEN emit_drag_repositioned_event is called"
+        },
+        {
+          "path": "tests/integration/drag_reposition.rs",
+          "line": 549,
+          "text": "service.emit_drag_repositioned_event(element_id, &new_policy, Some(&old_policy));"
+        },
+        {
+          "path": "tests/integration/drag_reposition.rs",
+          "line": 583,
+          "text": "/// WHEN emit_drag_repositioned_event is called with previous_geometry=None"
+        },
+        {
+          "path": "tests/integration/drag_reposition.rs",
+          "line": 601,
+          "text": "service.emit_drag_repositioned_event(element_id, &new_policy, None);"
+        },
+        {
+          "path": "tests/integration/movable_elements_e2e.rs",
+          "line": 739,
+          "text": "// Simulates the runtime path: persist drag geometry \u2192 emit_drag_repositioned_event"
+        }
+      ]
+    },
+    {
+      "baseline_diagnostic": "crates/tze_hud_protocol/src/subscriptions.rs:240:15: warning: function `build_event_batch_message` is never used",
+      "symbols": [
+        "build_event_batch_message"
+      ],
+      "classification_by_symbol": {
+        "build_event_batch_message": "removed; no production caller"
+      },
+      "references": []
+    },
+    {
+      "baseline_diagnostic": "crates/tze_hud_protocol/src/token.rs:154:19: warning: method `evict_expired` is never used",
+      "symbols": [
+        "evict_expired"
+      ],
+      "classification_by_symbol": {
+        "evict_expired": "required fixture: token::tests::test_evict_expired (cfg(test))"
+      },
+      "references": [
+        {
+          "path": "crates/tze_hud_protocol/src/token.rs",
+          "line": 153,
+          "text": "fn evict_expired(&mut self, now_ms: u64) {"
+        },
+        {
+          "path": "crates/tze_hud_protocol/src/token.rs",
+          "line": 327,
+          "text": "/// Expired entries are removed by evict_expired."
+        },
+        {
+          "path": "crates/tze_hud_protocol/src/token.rs",
+          "line": 344,
+          "text": "store.evict_expired(now + 10_000);"
+        }
+      ]
+    }
+  ],
+  "ownership_notes": "ResourceId in convert is tze_hud_scene::ResourceId; HudSessionImpl convenience methods are distinct from retained runtime/direct sender bridges. Windows consumers are windowed/widgets.rs and protected windowed/portal.rs for geometry_policy_to_proto. Global text references are evidence only; classification uses exact owner/cfg and compiler gates.",
+  "additional_narrowed_surfaces": [
+    {
+      "owner": "SharedState",
+      "symbol": "active_tab_mirror_value",
+      "classification": "cfg(test/dev-mode): runtime windowed::test_support; production reads the mirror field directly"
+    },
+    {
+      "owner": "SessionRegistry",
+      "symbol": "session_for_namespace",
+      "classification": "cfg(test/dev-mode): runtime test-harness and inline handshake tests; runtime/test-harness forwards existing protocol/dev-mode"
+    },
+    {
+      "owner": "TokenStore",
+      "symbol": "len",
+      "classification": "private cfg(test): test_evict_expired only; generic .len callers belong to other types"
+    },
+    {
+      "owner": "TokenStore",
+      "symbol": "is_empty",
+      "classification": "removed: no owner-qualified production or fixture caller"
+    },
+    {
+      "owner": "protocol::subscriptions",
+      "symbol": "module",
+      "classification": "crate-visible in default production; public only under existing test/dev-mode for external subscription fixtures"
+    }
+  ],
+  "manifest_changes": [
+    {
+      "path": "crates/tze_hud_runtime/Cargo.toml",
+      "change": "existing test-harness feature forwards existing tze_hud_protocol/dev-mode; no new feature or default change",
+      "reason": "actual event_loop_harness session_for_namespace fixture must compile independently of dependency dev-dependencies"
+    }
+  ],
+  "default_feature_proof": "default-feature-closures.json: all 17 shippable default dependency closures exclude protocol/dev-mode; required just dev-mode-guard also runs",
+  "production_geometry_callers": [
+    {
+      "path": "crates/tze_hud_protocol/src/session_server/service.rs",
+      "line": 307,
+      "context": "reset_element_geometry_override broadcasts retained geometry"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/windowed/widgets.rs",
+      "line": 576,
+      "context": "windowed/Windows drag sender builds retained geometry event directly"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/windowed/portal.rs",
+      "line": 1585,
+      "context": "protected T7 windowed producer, untouched"
+    },
+    {
+      "path": "tests/integration/movable_elements_e2e.rs",
+      "line": 837,
+      "context": "separate integration geometry fixture"
+    }
+  ]
+}

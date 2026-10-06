@@ -1,0 +1,206 @@
+[
+  {
+    "baseRefName": "main",
+    "headRefOid": "f0acdd4ca2b24c68ef8de45a6c39131ea203fd17",
+    "mergeCommit": {
+      "oid": "6c2ce2af2f14c9bafa9694ebe850cec6fab093c3"
+    },
+    "mergedAt": "2026-10-06T02:06:50Z",
+    "number": 1354,
+    "state": "MERGED",
+    "url": "https://github.com/tzeusy-org/tze-hud/pull/1354",
+    "merged_commit_reachable_on_audit_head": true
+  },
+  {
+    "baseRefName": "main",
+    "headRefOid": "986eacad87f69e482750cbea14b0de41f799401c",
+    "mergeCommit": {
+      "oid": "8755604a7109c611789cb14991a5521e9ccde4dd"
+    },
+    "mergedAt": "2026-10-03T09:32:51Z",
+    "number": 1274,
+    "state": "MERGED",
+    "url": "https://github.com/tzeusy-org/tze-hud/pull/1274",
+    "merged_commit_reachable_on_audit_head": true
+  },
+  {
+    "baseRefName": "main",
+    "headRefOid": "b48346a2eb7a25a72e86fd5d4b4f9eb4d965fe92",
+    "mergeCommit": {
+      "oid": "d6bf428a638da275af63f6955701f2cbb507b11d"
+    },
+    "mergedAt": "2026-10-03T09:32:51Z",
+    "number": 1275,
+    "state": "MERGED",
+    "url": "https://github.com/tzeusy-org/tze-hud/pull/1275",
+    "merged_commit_reachable_on_audit_head": true
+  },
+  {
+    "baseRefName": "main",
+    "headRefOid": "e9749fc1e652f5a2e2dcaf88ff0aacb07a3824e6",
+    "mergeCommit": {
+      "oid": "8724438f60f1456b02b22904d1f4ec7c5ce78c14"
+    },
+    "mergedAt": "2026-10-03T06:37:19Z",
+    "number": 1251,
+    "state": "MERGED",
+    "url": "https://github.com/tzeusy-org/tze-hud/pull/1251",
+    "merged_commit_reachable_on_audit_head": true
+  },
+  {
+    "baseRefName": "main",
+    "headRefOid": "434e37916e8e38546d233badf566bd3d5a31066b",
+    "mergeCommit": {
+      "oid": "80e0e5f16dbe2eb07d2bfffc843b0f42a151f8cb"
+    },
+    "mergedAt": "2026-10-03T06:34:02Z",
+    "number": 1255,
+    "state": "MERGED",
+    "url": "https://github.com/tzeusy-org/tze-hud/pull/1255",
+    "merged_commit_reachable_on_audit_head": true
+  },
+  {
+    "baseRefName": "main",
+    "headRefOid": "08be7e75ef832e4bb684726c1385d268b2cd6c67",
+    "mergeCommit": {
+      "oid": "e31cae9cdf30e5814d11437d14401e2111e4f4c9"
+    },
+    "mergedAt": "2026-10-03T06:40:40Z",
+    "number": 1256,
+    "state": "MERGED",
+    "url": "https://github.com/tzeusy-org/tze-hud/pull/1256",
+    "merged_commit_reachable_on_audit_head": true
+  },
+  {
+    "baseRefName": "main",
+    "headRefOid": "a50bec592b1dfc74ec214751df49423ee714a03b",
+    "mergeCommit": {
+      "oid": "96c0c12efd82c6e7daaea527dc6d813f043bb8ab"
+    },
+    "mergedAt": "2026-10-03T07:34:59Z",
+    "number": 1263,
+    "state": "MERGED",
+    "url": "https://github.com/tzeusy-org/tze-hud/pull/1263",
+    "merged_commit_reachable_on_audit_head": true
+  },
+  {
+    "baseRefName": "main",
+    "headRefOid": "8b0601697b425ccc5c4bfc5e30e8db7ecd3d4c65",
+    "mergeCommit": {
+      "oid": "13bd697fcbbb133a1edb5fd234b35604f81b486e"
+    },
+    "mergedAt": "2026-10-03T07:36:40Z",
+    "number": 1264,
+    "state": "MERGED",
+    "url": "https://github.com/tzeusy-org/tze-hud/pull/1264",
+    "merged_commit_reachable_on_audit_head": true
+  },
+  {
+    "baseRefName": "main",
+    "headRefOid": "848fe517cd99d9f5aeec66c9c686871069db52ce",
+    "mergeCommit": {
+      "oid": "7a40d7e9b1396fc340b5cd9d6ab4995e1944f895"
+    },
+    "mergedAt": "2026-10-03T07:37:38Z",
+    "number": 1265,
+    "state": "MERGED",
+    "url": "https://github.com/tzeusy-org/tze-hud/pull/1265",
+    "merged_commit_reachable_on_audit_head": true
+  },
+  {
+    "baseRefName": "main",
+    "headRefOid": "7109b53ff95e1574270f4200fecceb657206865e",
+    "mergeCommit": {
+      "oid": "8d955d27068864611a95cf1a49977c567d94d34a"
+    },
+    "mergedAt": "2026-10-03T10:24:09Z",
+    "number": 1281,
+    "state": "MERGED",
+    "url": "https://github.com/tzeusy-org/tze-hud/pull/1281",
+    "merged_commit_reachable_on_audit_head": true
+  },
+  {
+    "baseRefName": "main",
+    "headRefOid": "446274226e2aac6b36a64bd31b1031f5cb3ebe15",
+    "mergeCommit": {
+      "oid": "7728c7b84b1c033407563fea12613c48afeb18e6"
+    },
+    "mergedAt": "2026-10-03T08:33:30Z",
+    "number": 1268,
+    "state": "MERGED",
+    "url": "https://github.com/tzeusy-org/tze-hud/pull/1268",
+    "merged_commit_reachable_on_audit_head": true
+  },
+  {
+    "baseRefName": "main",
+    "headRefOid": "696082bda1e2477d0d3c26307721252c449ed03a",
+    "mergeCommit": {
+      "oid": "d61e7bf32ab39330f3f06a75ef571797d65c4053"
+    },
+    "mergedAt": "2026-10-03T08:35:47Z",
+    "number": 1269,
+    "state": "MERGED",
+    "url": "https://github.com/tzeusy-org/tze-hud/pull/1269",
+    "merged_commit_reachable_on_audit_head": true
+  },
+  {
+    "baseRefName": "main",
+    "headRefOid": "4b0b20d725e1ed99b7fbbb9a726bf3e558babc2c",
+    "mergeCommit": {
+      "oid": "b890035a777977be7eaa846b6c1879ff091272e7"
+    },
+    "mergedAt": "2026-10-06T02:48:23Z",
+    "number": 1356,
+    "state": "MERGED",
+    "url": "https://github.com/tzeusy-org/tze-hud/pull/1356",
+    "merged_commit_reachable_on_audit_head": true
+  },
+  {
+    "baseRefName": "main",
+    "headRefOid": "6ff752b044ef785e66a9674408cffedab30b7173",
+    "mergeCommit": {
+      "oid": "8dccb4cfbe1e452eac227a67f60c5c2775c89c19"
+    },
+    "mergedAt": "2026-10-06T03:19:21Z",
+    "number": 1359,
+    "state": "MERGED",
+    "url": "https://github.com/tzeusy-org/tze-hud/pull/1359",
+    "merged_commit_reachable_on_audit_head": true
+  },
+  {
+    "baseRefName": "main",
+    "headRefOid": "1d94fc9553423ddf20fc242865f681014db333f7",
+    "mergeCommit": {
+      "oid": "3b5bbb634a7dc6d8a8c9e40f585e5b1868cfb528"
+    },
+    "mergedAt": "2026-10-06T04:09:19Z",
+    "number": 1360,
+    "state": "MERGED",
+    "url": "https://github.com/tzeusy-org/tze-hud/pull/1360",
+    "merged_commit_reachable_on_audit_head": true
+  },
+  {
+    "baseRefName": "main",
+    "headRefOid": "46c0c2b37a4a5176928139e52d8a3edde4e54c49",
+    "mergeCommit": {
+      "oid": "1a05baebb36b946a00c407c80d005c2a22760f4b"
+    },
+    "mergedAt": "2026-10-06T05:22:51Z",
+    "number": 1362,
+    "state": "MERGED",
+    "url": "https://github.com/tzeusy-org/tze-hud/pull/1362",
+    "merged_commit_reachable_on_audit_head": true
+  },
+  {
+    "baseRefName": "main",
+    "headRefOid": "5e573b9e6c04790d509fb443660a5be1a7005e52",
+    "mergeCommit": {
+      "oid": "ec14b684585cb87cf75dd4721e6ffad82f481a50"
+    },
+    "mergedAt": "2026-10-06T06:24:22Z",
+    "number": 1365,
+    "state": "MERGED",
+    "url": "https://github.com/tzeusy-org/tze-hud/pull/1365",
+    "merged_commit_reachable_on_audit_head": true
+  }
+]

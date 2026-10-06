@@ -1,0 +1,88 @@
+{
+  "resource_modules": {
+    "command": [
+      "git",
+      "grep",
+      "-nE",
+      "font_cache|refcount::|sharing::|gc::|budget::",
+      "--",
+      "crates/tze_hud_resource"
+    ],
+    "exit_code": 1,
+    "matches": [],
+    "matches_outside_test_results": [],
+    "stderr": "",
+    "source_head": "398c6f91de6e0d4883b10a41b6c63044e6192730",
+    "classification": "implemented"
+  },
+  "scene_deleted_types": {
+    "command": [
+      "git",
+      "grep",
+      "-nE",
+      "SceneDiff|CursorStyle|EventMask|AccessibilityMeta|TransportConstraint|SimulatedClock",
+      "--",
+      "crates",
+      "examples",
+      "tests"
+    ],
+    "exit_code": 1,
+    "matches": [],
+    "matches_outside_test_results": [],
+    "stderr": "",
+    "source_head": "398c6f91de6e0d4883b10a41b6c63044e6192730",
+    "classification": "implemented"
+  },
+  "registry_protos": {
+    "command": [
+      "git",
+      "grep",
+      "-nE",
+      "ZoneRegistrySnapshotProto|WidgetRegistrySnapshotProto|RenderingPolicyProto|zone_registry_snapshot_to_proto"
+    ],
+    "exit_code": 0,
+    "matches": [
+      "test_results/reconciliation/hud-bstmy.2.6/deletion-checks.json:33:      \"ZoneRegistrySnapshotProto|WidgetRegistrySnapshotProto|RenderingPolicyProto|zone_registry_snapshot_to_proto\""
+    ],
+    "matches_outside_test_results": [],
+    "stderr": "",
+    "source_head": "398c6f91de6e0d4883b10a41b6c63044e6192730",
+    "classification": "deviates: unbounded scan matches historical evidence, not production"
+  },
+  "scene_invariants_module": {
+    "command": [
+      "git",
+      "grep",
+      "-n",
+      "invariants::",
+      "--",
+      "crates",
+      ":!docs"
+    ],
+    "exit_code": 1,
+    "matches": [],
+    "matches_outside_test_results": [],
+    "stderr": "",
+    "source_head": "398c6f91de6e0d4883b10a41b6c63044e6192730",
+    "classification": "implemented"
+  },
+  "deleted_files": {
+    "crates/tze_hud_resource/src/budget.rs": false,
+    "crates/tze_hud_resource/src/sharing.rs": false,
+    "crates/tze_hud_resource/src/gc.rs": false,
+    "crates/tze_hud_resource/src/refcount.rs": false,
+    "crates/tze_hud_resource/src/store.rs": false,
+    "crates/tze_hud_resource/src/font_cache.rs": false,
+    "crates/tze_hud_scene/src/invariants.rs": false,
+    "crates/tze_hud_scene/src/diff.rs": false,
+    "crates/tze_hud_protocol/tests/roundtrip.rs": false,
+    "crates/tze_hud_protocol/tests/widget_publish_integration.rs": false,
+    "crates/tze_hud_protocol/tests/widget_asset_register_integration.rs": false,
+    "crates/tze_hud_protocol/tests/resource_upload_integration.rs": false,
+    "crates/tze_hud_protocol/tests/session_fsm.rs": false
+  },
+  "gen1_repair_deleted_files": {
+    "crates/tze_hud_scene/src/timing/hints.rs": false
+  },
+  "head": "398c6f91de6e0d4883b10a41b6c63044e6192730"
+}

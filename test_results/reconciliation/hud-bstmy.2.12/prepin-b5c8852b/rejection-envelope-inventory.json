@@ -1,0 +1,588 @@
+{
+  "source_head": "b5c8852bb065ec71eabdac1ef41166b325855a8e",
+  "items": [
+    {
+      "kind": "constructor",
+      "symbol": "AuthRejection",
+      "path": "crates/tze_hud_protocol/src/auth.rs",
+      "line": 130,
+      "owner": "identify_session",
+      "attributes": [],
+      "source_class": "default-eligible",
+      "source": "AuthRejection {\n                    code: \"AUTH_FAILED\",\n                    message,\n                    hint: \"Use PreSharedKeyCredential with the agent's paired PSK\".to_string(),\n                }"
+    },
+    {
+      "kind": "constructor",
+      "symbol": "SessionError",
+      "path": "crates/tze_hud_protocol/src/session_server/handshake.rs",
+      "line": 41,
+      "owner": "handle_handshake_read",
+      "attributes": [],
+      "source_class": "default-eligible",
+      "source": "SessionError {\n                code: \"INVALID_HANDSHAKE\".to_string(),\n                message: \"First message must be SessionInit or SessionResume\".to_string(),\n                hint: \"Send SessionInit or SessionResume as the first message on a new stream\"\n                    .to_string(),\n            }"
+    },
+    {
+      "kind": "constructor",
+      "symbol": "SessionError",
+      "path": "crates/tze_hud_protocol/src/session_server/handshake.rs",
+      "line": 48,
+      "owner": "handle_handshake_read",
+      "attributes": [],
+      "source_class": "default-eligible",
+      "source": "SessionError {\n            code: \"HANDSHAKE_TIMEOUT\".to_string(),\n            message: \"Stream closed before handshake\".to_string(),\n            hint: \"Open a new stream and send SessionInit as the first message\".to_string(),\n        }"
+    },
+    {
+      "kind": "constructor",
+      "symbol": "SessionError",
+      "path": "crates/tze_hud_protocol/src/session_server/handshake.rs",
+      "line": 53,
+      "owner": "handle_handshake_read",
+      "attributes": [],
+      "source_class": "default-eligible",
+      "source": "SessionError {\n            code: \"HANDSHAKE_ERROR\".to_string(),\n            message: format!(\"Error receiving handshake: {error}\"),\n            hint: \"Open a new stream and send SessionInit as the first message\".to_string(),\n        }"
+    },
+    {
+      "kind": "constructor",
+      "symbol": "SessionError",
+      "path": "crates/tze_hud_protocol/src/session_server/handshake.rs",
+      "line": 77,
+      "owner": "send_auth_failed",
+      "attributes": [],
+      "source_class": "default-eligible",
+      "source": "SessionError {\n                code: rejection.code.to_string(),\n                message: rejection.message,\n                hint: rejection.hint,\n            }"
+    },
+    {
+      "kind": "constructor",
+      "symbol": "SessionError",
+      "path": "crates/tze_hud_protocol/src/session_server/handshake.rs",
+      "line": 122,
+      "owner": "handle_session_init",
+      "attributes": [
+        "#[allow(clippy::too_many_arguments)]"
+      ],
+      "source_class": "default-eligible",
+      "source": "SessionError {\n                            code: \"UNSUPPORTED_PROTOCOL_VERSION\".to_string(),\n                            message: msg,\n                            hint: format!(\n                                \"{{\\\"runtime_min\\\": {}, \\\"runtime_max\\\": {}}}\",\n                                crate::auth::RUNTIME_MIN_VERSION,\n                                crate::auth::RUNTIME_MAX_VERSION\n                            ),\n                        }"
+    },
+    {
+      "kind": "constructor",
+      "symbol": "SessionError",
+      "path": "crates/tze_hud_protocol/src/session_server/handshake.rs",
+      "line": 180,
+      "owner": "handle_session_init",
+      "attributes": [
+        "#[allow(clippy::too_many_arguments)]"
+      ],
+      "source_class": "default-eligible",
+      "source": "SessionError {\n                        code: error_code.to_string(),\n                        message,\n                        hint: \"Wait for session capacity to become available, then open a new stream with SessionInit\"\n                            .to_string(),\n                    }"
+    },
+    {
+      "kind": "constructor",
+      "symbol": "SessionError",
+      "path": "crates/tze_hud_protocol/src/session_server/handshake.rs",
+      "line": 315,
+      "owner": "handle_session_resume",
+      "attributes": [
+        "#[allow(clippy::too_many_arguments)]"
+      ],
+      "source_class": "default-eligible",
+      "source": "SessionError {\n                        code: err.error_code().to_string(),\n                        message: err.message().to_string(),\n                        hint: err.hint().to_string(),\n                    }"
+    },
+    {
+      "kind": "constructor",
+      "symbol": "SessionError",
+      "path": "crates/tze_hud_protocol/src/session_server/handshake.rs",
+      "line": 378,
+      "owner": "handle_session_resume",
+      "attributes": [
+        "#[allow(clippy::too_many_arguments)]"
+      ],
+      "source_class": "default-eligible",
+      "source": "SessionError {\n                        code: error_code.to_string(),\n                        message,\n                        hint: \"Wait for resource capacity to become available, then open a new stream with SessionInit; this resume token has been consumed\"\n                            .to_string(),\n                    }"
+    },
+    {
+      "kind": "constructor",
+      "symbol": "SessionResumeResult",
+      "path": "crates/tze_hud_protocol/src/session_server/handshake.rs",
+      "line": 439,
+      "owner": "handle_session_resume",
+      "attributes": [
+        "#[allow(clippy::too_many_arguments)]"
+      ],
+      "source_class": "default-eligible",
+      "source": "SessionResumeResult {\n                accepted: true,\n                new_session_token: new_resume_token.clone(),\n                new_server_sequence: seq,\n                // Resume always runs at the highest runtime-supported version.\n                // version = major * 1000 + minor; v1.1 = 1001.\n                negotiated_protocol_version: crate::auth::RUNTIME_MAX_VERSION,\n                active_subscriptions: prior_entry.subscriptions,\n                denied_subscriptions: Vec::new(),\n            }"
+    },
+    {
+      "kind": "constructor",
+      "symbol": "SessionError",
+      "path": "crates/tze_hud_protocol/src/session_server/mod.rs",
+      "line": 220,
+      "owner": "HudSessionImpl::session",
+      "attributes": [
+        "#[tonic::async_trait]"
+      ],
+      "source_class": "default-eligible",
+      "source": "SessionError {\n                                code: \"HANDSHAKE_TIMEOUT\".to_string(),\n                                message: \"Handshake timed out (5000ms)\".to_string(),\n                                hint: \"Send SessionInit as the first message\".to_string(),\n                            }"
+    },
+    {
+      "kind": "constructor",
+      "symbol": "SessionError",
+      "path": "crates/tze_hud_protocol/src/session_server/mod.rs",
+      "line": 725,
+      "owner": "StreamSession::on_client_message",
+      "attributes": [],
+      "source_class": "default-eligible",
+      "source": "SessionError {\n                                        code: code.to_string(),\n                                        message,\n                                        hint: format!(\n                                            \"Open a new stream with SessionInit or SessionResume; send increasing sequence numbers starting at 2 with gaps no larger than {DEFAULT_MAX_SEQUENCE_GAP}\"\n                                        ),\n                                    }"
+    },
+    {
+      "kind": "constructor",
+      "symbol": "ResourceErrorResponse",
+      "path": "crates/tze_hud_protocol/src/session_server/mod.rs",
+      "line": 1217,
+      "owner": "send_resource_error_response",
+      "attributes": [],
+      "source_class": "default-eligible",
+      "source": "ResourceErrorResponse {\n                    request_sequence,\n                    error_code: resource_error_code_i32(err),\n                    message: err.to_string(),\n                    context,\n                    hint,\n                    upload_id: upload_id.map(|u| u.to_vec()).unwrap_or_default(),\n                }"
+    },
+    {
+      "kind": "call",
+      "symbol": "fail",
+      "path": "crates/tze_hud_protocol/src/session_server/mutations.rs",
+      "line": 337,
+      "owner": "handle_mutation_batch",
+      "attributes": [],
+      "source_class": "default-eligible",
+      "source": "fail(\n                    client_sequence,\n                    \"SAFE_MODE_ACTIVE\",\n                    \"the human paused agents; retry after SessionResumed\",\n                )"
+    },
+    {
+      "kind": "call",
+      "symbol": "batch_result",
+      "path": "crates/tze_hud_protocol/src/session_server/mutations.rs",
+      "line": 385,
+      "owner": "handle_mutation_batch",
+      "attributes": [],
+      "source_class": "default-eligible",
+      "source": "batch_result(\n                                client_sequence,\n                                batch.batch_id,\n                                cached.accepted,\n                                cached.created_ids,\n                                cached.error_code,\n                                cached.error_message,\n                            )"
+    },
+    {
+      "kind": "call",
+      "symbol": "batch_result",
+      "path": "crates/tze_hud_protocol/src/session_server/mutations.rs",
+      "line": 428,
+      "owner": "handle_mutation_batch",
+      "attributes": [],
+      "source_class": "default-eligible",
+      "source": "batch_result(\n                                    client_sequence,\n                                    batch.batch_id,\n                                    true,\n                                    Vec::new(),\n                                    \"UNAVAILABLE\".to_string(),\n                                    \"Mutation queue is under pressure (>= 80% capacity).\"\n                                        .to_string(),\n                                )"
+    },
+    {
+      "kind": "call",
+      "symbol": "batch_result",
+      "path": "crates/tze_hud_protocol/src/session_server/mutations.rs",
+      "line": 446,
+      "owner": "handle_mutation_batch",
+      "attributes": [],
+      "source_class": "default-eligible",
+      "source": "batch_result(\n                                    client_sequence,\n                                    batch.batch_id,\n                                    true,\n                                    Vec::new(),\n                                    String::new(),\n                                    String::new(),\n                                )"
+    },
+    {
+      "kind": "call",
+      "symbol": "batch_result",
+      "path": "crates/tze_hud_protocol/src/session_server/mutations.rs",
+      "line": 477,
+      "owner": "handle_mutation_batch",
+      "attributes": [],
+      "source_class": "default-eligible",
+      "source": "batch_result(\n                                client_sequence,\n                                batch.batch_id,\n                                true,\n                                Vec::new(),\n                                String::new(),\n                                String::new(),\n                            )"
+    },
+    {
+      "kind": "call",
+      "symbol": "batch_result",
+      "path": "crates/tze_hud_protocol/src/session_server/mutations.rs",
+      "line": 527,
+      "owner": "handle_mutation_batch",
+      "attributes": [],
+      "source_class": "default-eligible",
+      "source": "batch_result(\n                                client_sequence,\n                                evicted_batch_id,\n                                false,\n                                Vec::new(),\n                                \"UNAVAILABLE\".to_string(),\n                                \"Mutation evicted from queue due to capacity pressure.\".to_string(),\n                            )"
+    },
+    {
+      "kind": "call",
+      "symbol": "batch_result",
+      "path": "crates/tze_hud_protocol/src/session_server/mutations.rs",
+      "line": 543,
+      "owner": "handle_mutation_batch",
+      "attributes": [],
+      "source_class": "default-eligible",
+      "source": "batch_result(\n                                client_sequence,\n                                batch.batch_id,\n                                true,\n                                Vec::new(),\n                                String::new(),\n                                String::new(),\n                            )"
+    },
+    {
+      "kind": "call",
+      "symbol": "batch_result",
+      "path": "crates/tze_hud_protocol/src/session_server/mutations.rs",
+      "line": 564,
+      "owner": "handle_mutation_batch",
+      "attributes": [],
+      "source_class": "default-eligible",
+      "source": "batch_result(\n                                client_sequence,\n                                batch.batch_id,\n                                false,\n                                Vec::new(),\n                                \"UNAVAILABLE\".to_string(),\n                                \"Mutation queue full; backpressure applied.\".to_string(),\n                            )"
+    },
+    {
+      "kind": "call",
+      "symbol": "batch_result",
+      "path": "crates/tze_hud_protocol/src/session_server/mutations.rs",
+      "line": 583,
+      "owner": "handle_mutation_batch",
+      "attributes": [],
+      "source_class": "default-eligible",
+      "source": "batch_result(\n                                client_sequence,\n                                batch.batch_id,\n                                false,\n                                Vec::new(),\n                                \"UNAVAILABLE\".to_string(),\n                                \"Ephemeral mutation dropped; queue at capacity.\".to_string(),\n                            )"
+    },
+    {
+      "kind": "call",
+      "symbol": "batch_result",
+      "path": "crates/tze_hud_protocol/src/session_server/mutations.rs",
+      "line": 611,
+      "owner": "handle_mutation_batch",
+      "attributes": [],
+      "source_class": "default-eligible",
+      "source": "batch_result(\n                        client_sequence,\n                        batch.batch_id,\n                        cached.accepted,\n                        cached.created_ids,\n                        cached.error_code,\n                        cached.error_message,\n                    )"
+    },
+    {
+      "kind": "call",
+      "symbol": "fail",
+      "path": "crates/tze_hud_protocol/src/session_server/mutations.rs",
+      "line": 637,
+      "owner": "handle_mutation_batch",
+      "attributes": [],
+      "source_class": "default-eligible",
+      "source": "fail(\n                        client_sequence,\n                        error_code,\n                        message,\n                    )"
+    },
+    {
+      "kind": "call",
+      "symbol": "batch_result",
+      "path": "crates/tze_hud_protocol/src/session_server/mutations.rs",
+      "line": 671,
+      "owner": "handle_mutation_batch",
+      "attributes": [],
+      "source_class": "default-eligible",
+      "source": "batch_result(\n                        client_sequence,\n                        batch.batch_id,\n                        false,\n                        Vec::new(),\n                        cached.error_code,\n                        cached.error_message,\n                    )"
+    },
+    {
+      "kind": "call",
+      "symbol": "batch_result",
+      "path": "crates/tze_hud_protocol/src/session_server/mutations.rs",
+      "line": 707,
+      "owner": "handle_mutation_batch",
+      "attributes": [],
+      "source_class": "default-eligible",
+      "source": "batch_result(\n                        client_sequence,\n                        batch.batch_id,\n                        false,\n                        Vec::new(),\n                        cached.error_code,\n                        cached.error_message,\n                    )"
+    },
+    {
+      "kind": "call",
+      "symbol": "batch_result",
+      "path": "crates/tze_hud_protocol/src/session_server/mutations.rs",
+      "line": 776,
+      "owner": "handle_mutation_batch",
+      "attributes": [],
+      "source_class": "default-eligible",
+      "source": "batch_result(\n                            client_sequence,\n                            batch.batch_id,\n                            false,\n                            Vec::new(),\n                            cached.error_code,\n                            cached.error_message,\n                        )"
+    },
+    {
+      "kind": "call",
+      "symbol": "batch_result",
+      "path": "crates/tze_hud_protocol/src/session_server/mutations.rs",
+      "line": 815,
+      "owner": "handle_mutation_batch",
+      "attributes": [],
+      "source_class": "default-eligible",
+      "source": "batch_result(\n                    client_sequence,\n                    batch.batch_id,\n                    true,\n                    Vec::new(),\n                    String::new(),\n                    String::new(),\n                )"
+    },
+    {
+      "kind": "call",
+      "symbol": "batch_result",
+      "path": "crates/tze_hud_protocol/src/session_server/mutations.rs",
+      "line": 876,
+      "owner": "handle_mutation_batch",
+      "attributes": [],
+      "source_class": "default-eligible",
+      "source": "batch_result(\n                    client_sequence,\n                    batch.batch_id,\n                    true,\n                    created_ids,\n                    String::new(),\n                    String::new(),\n                )"
+    },
+    {
+      "kind": "call",
+      "symbol": "batch_result",
+      "path": "crates/tze_hud_protocol/src/session_server/mutations.rs",
+      "line": 915,
+      "owner": "handle_mutation_batch",
+      "attributes": [],
+      "source_class": "default-eligible",
+      "source": "batch_result(\n                    client_sequence,\n                    batch.batch_id,\n                    false,\n                    Vec::new(),\n                    error_code.to_string(),\n                    error_message,\n                )"
+    },
+    {
+      "kind": "constructor",
+      "symbol": "RequestResult",
+      "path": "crates/tze_hud_protocol/src/session_server/verbs.rs",
+      "line": 39,
+      "owner": "ok",
+      "attributes": [],
+      "source_class": "default-eligible",
+      "source": "RequestResult {\n        seq,\n        ok: true,\n        ..Default::default()\n    }"
+    },
+    {
+      "kind": "constructor",
+      "symbol": "RequestResult",
+      "path": "crates/tze_hud_protocol/src/session_server/verbs.rs",
+      "line": 49,
+      "owner": "fail",
+      "attributes": [],
+      "source_class": "default-eligible",
+      "source": "RequestResult {\n        seq,\n        ok: false,\n        code: code.to_string(),\n        hint: hint.into(),\n        ..Default::default()\n    }"
+    },
+    {
+      "kind": "constructor",
+      "symbol": "RequestResult",
+      "path": "crates/tze_hud_protocol/src/session_server/verbs.rs",
+      "line": 68,
+      "owner": "batch_result",
+      "attributes": [],
+      "source_class": "default-eligible",
+      "source": "RequestResult {\n        seq,\n        ok: accepted,\n        code,\n        hint,\n        ids: created_ids,\n        batch_id,\n        ..Default::default()\n    }"
+    },
+    {
+      "kind": "call",
+      "symbol": "fail",
+      "path": "crates/tze_hud_protocol/src/session_server/verbs.rs",
+      "line": 172,
+      "owner": "allowed_surface",
+      "attributes": [],
+      "source_class": "default-eligible",
+      "source": "fail(seq, \"INVALID_ARGUMENT\", hint)"
+    },
+    {
+      "kind": "call",
+      "symbol": "fail",
+      "path": "crates/tze_hud_protocol/src/session_server/verbs.rs",
+      "line": 182,
+      "owner": "not_allowed",
+      "attributes": [],
+      "source_class": "default-eligible",
+      "source": "fail(\n        seq,\n        \"NOT_ALLOWED\",\n        format!(\"needs \\\"{entry}\\\" in [agents.{agent}] allow\"),\n    )"
+    },
+    {
+      "kind": "call",
+      "symbol": "fail",
+      "path": "crates/tze_hud_protocol/src/session_server/verbs.rs",
+      "line": 199,
+      "owner": "safe_mode",
+      "attributes": [],
+      "source_class": "default-eligible",
+      "source": "fail(\n        seq,\n        \"SAFE_MODE_ACTIVE\",\n        \"the human paused agents; retry after SessionResumed\",\n    )"
+    },
+    {
+      "kind": "call",
+      "symbol": "fail",
+      "path": "crates/tze_hud_protocol/src/session_server/verbs.rs",
+      "line": 220,
+      "owner": "not_held",
+      "attributes": [],
+      "source_class": "default-eligible",
+      "source": "fail(\n        seq,\n        \"NOT_HELD\",\n        format!(\"you hold nothing on {surface}; ClaimTile or Publish first\"),\n    )"
+    },
+    {
+      "kind": "call",
+      "symbol": "fail",
+      "path": "crates/tze_hud_protocol/src/session_server/verbs.rs",
+      "line": 282,
+      "owner": "handle_claim_tile",
+      "attributes": [],
+      "source_class": "default-eligible",
+      "source": "fail(seq, \"INVALID_ARGUMENT\", \"root node has no data\")"
+    },
+    {
+      "kind": "call",
+      "symbol": "fail",
+      "path": "crates/tze_hud_protocol/src/session_server/verbs.rs",
+      "line": 312,
+      "owner": "handle_claim_tile",
+      "attributes": [],
+      "source_class": "default-eligible",
+      "source": "fail(seq, code, hint)"
+    },
+    {
+      "kind": "constructor",
+      "symbol": "RequestResult",
+      "path": "crates/tze_hud_protocol/src/session_server/verbs.rs",
+      "line": 327,
+      "owner": "handle_claim_tile",
+      "attributes": [],
+      "source_class": "default-eligible",
+      "source": "RequestResult {\n        ids,\n        lease_id: scene_id_to_bytes(lease_id),\n        ttl_ms: ttl,\n        ..ok(seq)\n    }"
+    },
+    {
+      "kind": "call",
+      "symbol": "fail",
+      "path": "crates/tze_hud_protocol/src/session_server/verbs.rs",
+      "line": 514,
+      "owner": "handle_publish",
+      "attributes": [],
+      "source_class": "default-eligible",
+      "source": "fail(\n                    seq,\n                    \"INVALID_ARGUMENT\",\n                    \"tiles take content via ClaimTile root or MutationBatch\",\n                )"
+    },
+    {
+      "kind": "call",
+      "symbol": "fail",
+      "path": "crates/tze_hud_protocol/src/session_server/verbs.rs",
+      "line": 553,
+      "owner": "publish_zone",
+      "attributes": [],
+      "source_class": "default-eligible",
+      "source": "fail(seq, \"INVALID_ARGUMENT\", \"zone publish needs content\")"
+    },
+    {
+      "kind": "call",
+      "symbol": "fail",
+      "path": "crates/tze_hud_protocol/src/session_server/verbs.rs",
+      "line": 556,
+      "owner": "publish_zone",
+      "attributes": [],
+      "source_class": "default-eligible",
+      "source": "fail(\n            seq,\n            \"INVALID_ARGUMENT\",\n            tze_hud_scene::types::BLANK_NOTIFICATION_HINT,\n        )"
+    },
+    {
+      "kind": "call",
+      "symbol": "fail",
+      "path": "crates/tze_hud_protocol/src/session_server/verbs.rs",
+      "line": 565,
+      "owner": "publish_zone",
+      "attributes": [],
+      "source_class": "default-eligible",
+      "source": "fail(\n            seq,\n            \"INVALID_ARGUMENT\",\n            \"breakpoints are only valid for stream_text content\",\n        )"
+    },
+    {
+      "kind": "call",
+      "symbol": "fail",
+      "path": "crates/tze_hud_protocol/src/session_server/verbs.rs",
+      "line": 574,
+      "owner": "publish_zone",
+      "attributes": [],
+      "source_class": "default-eligible",
+      "source": "fail(seq, code, hint)"
+    },
+    {
+      "kind": "call",
+      "symbol": "fail",
+      "path": "crates/tze_hud_protocol/src/session_server/verbs.rs",
+      "line": 602,
+      "owner": "publish_zone",
+      "attributes": [],
+      "source_class": "default-eligible",
+      "source": "fail(seq, validation_error_code(&e), e.to_string())"
+    },
+    {
+      "kind": "call",
+      "symbol": "fail",
+      "path": "crates/tze_hud_protocol/src/session_server/verbs.rs",
+      "line": 603,
+      "owner": "publish_zone",
+      "attributes": [],
+      "source_class": "default-eligible",
+      "source": "fail(seq, \"INTERNAL\", \"zone publish was not applied\")"
+    },
+    {
+      "kind": "call",
+      "symbol": "fail",
+      "path": "crates/tze_hud_protocol/src/session_server/verbs.rs",
+      "line": 630,
+      "owner": "publish_widget",
+      "attributes": [],
+      "source_class": "default-eligible",
+      "source": "fail(seq, validation_error_code(&e), e.to_string())"
+    },
+    {
+      "kind": "call",
+      "symbol": "fail",
+      "path": "crates/tze_hud_protocol/src/session_server/verbs.rs",
+      "line": 715,
+      "owner": "handle_clear",
+      "attributes": [],
+      "source_class": "default-eligible",
+      "source": "fail(seq, validation_error_code(&e), e.to_string())"
+    },
+    {
+      "kind": "constructor",
+      "symbol": "RequestResult",
+      "path": "crates/tze_hud_protocol/src/session_server/verbs.rs",
+      "line": 750,
+      "owner": "handle_hold",
+      "attributes": [],
+      "source_class": "default-eligible",
+      "source": "RequestResult {\n            ttl_ms: hold.ttl_ms,\n            ..ok(seq)\n        }"
+    },
+    {
+      "kind": "constructor",
+      "symbol": "RequestResult",
+      "path": "crates/tze_hud_protocol/src/session_server/verbs.rs",
+      "line": 778,
+      "owner": "handle_hold",
+      "attributes": [],
+      "source_class": "default-eligible",
+      "source": "RequestResult {\n                            lease_id: scene_id_to_bytes(lease),\n                            ttl_ms: ttl,\n                            ..ok(seq)\n                        }"
+    },
+    {
+      "kind": "call",
+      "symbol": "fail",
+      "path": "crates/tze_hud_protocol/src/session_server/verbs.rs",
+      "line": 783,
+      "owner": "handle_hold",
+      "attributes": [],
+      "source_class": "default-eligible",
+      "source": "fail(seq, validation_error_code(&e), e.to_string())"
+    },
+    {
+      "kind": "constructor",
+      "symbol": "AuthRejection",
+      "path": "crates/tze_hud_scene/src/config/agents.rs",
+      "line": 192,
+      "owner": "AgentDirectory::resolve",
+      "attributes": [],
+      "source_class": "default-eligible",
+      "source": "AuthRejection {\n                code: \"AUTH_FAILED\",\n                message: format!(\"PSK belongs to agent {agent_id:?}, not {claimed_id:?}\"),\n                hint: \"present this agent's own PSK\".into(),\n            }"
+    },
+    {
+      "kind": "constructor",
+      "symbol": "AuthRejection",
+      "path": "crates/tze_hud_scene/src/config/agents.rs",
+      "line": 231,
+      "owner": "reject",
+      "attributes": [],
+      "source_class": "default-eligible",
+      "source": "AuthRejection {\n        code: \"AUTH_FAILED\",\n        message: message.to_string(),\n        hint: \"send the agent's paired PSK as the bearer / auth_credential\".to_string(),\n    }"
+    },
+    {
+      "kind": "constructor",
+      "symbol": "RequestResult",
+      "path": "examples/widget_publish_load_harness/src/main.rs",
+      "line": 1008,
+      "owner": "tests::apply_server_message_counts_widget_ack_and_rtt",
+      "attributes": [
+        "#[tokio::test]",
+        "#[cfg(test)]"
+      ],
+      "source_class": "test",
+      "source": "session_proto::RequestResult {\n                seq: 42,\n                ok: true,\n                code: String::new(),\n                hint: String::new(),\n                ..Default::default()\n            }"
+    },
+    {
+      "kind": "constructor",
+      "symbol": "RequestResult",
+      "path": "examples/widget_publish_load_harness/src/main.rs",
+      "line": 1036,
+      "owner": "tests::apply_server_message_records_rejected_widget_ack",
+      "attributes": [
+        "#[tokio::test]",
+        "#[cfg(test)]"
+      ],
+      "source_class": "test",
+      "source": "session_proto::RequestResult {\n                seq: 7,\n                ok: false,\n                code: \"WIDGET_PARAMETER_INVALID\".to_string(),\n                hint: \"bad progress\".to_string(),\n                ..Default::default()\n            }"
+    }
+  ],
+  "limits": [
+    "all constructor/call syntax, manually classify success/rejection and follow dynamic hint/code producers",
+    "default-eligible is not live-call proof",
+    "macro/generated wire types have no handwritten constructors here"
+  ]
+}

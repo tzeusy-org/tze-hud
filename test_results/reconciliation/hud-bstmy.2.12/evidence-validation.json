@@ -1,0 +1,18 @@
+{
+  "source_head": "398c6f91de6e0d4883b10a41b6c63044e6192730",
+  "all_json_valid": true,
+  "coverage_groups": 23,
+  "current_invariant_definitions": 72,
+  "actual_passing_named_invariants": 72,
+  "diagnostic_groups": {
+    "R": 6,
+    "P": 20,
+    "S": 23
+  },
+  "confirmed_residuals": 4,
+  "unexecuted_upload_candidate": 1,
+  "core_test_delta": "+0 ~0 -0",
+  "no_source_changes": true,
+  "all_eight_current_gate_receipts_sha256_verified": true,
+  "all_18_merged_prs_reachable": true
+}

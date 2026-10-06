@@ -1,0 +1,219 @@
+{
+  "source_head": "398c6f91de6e0d4883b10a41b6c63044e6192730",
+  "full_ci_command": [
+    "just",
+    "ci"
+  ],
+  "full_ci_terminal_exit": 0,
+  "rust_passed": 3250,
+  "rust_summaries": 71,
+  "rust_failed": 0,
+  "rust_ignored": 0,
+  "named_invariants_defined_once": 72,
+  "named_invariants_observed_passing": 72,
+  "python_summary_lines": [
+    "Ran 9 tests in 0.001s",
+    "Ran 3 tests in 0.001s",
+    "76 passed, 3 subtests passed in 5.47s",
+    "Ran 103 tests in 0.015s"
+  ],
+  "tool_and_checker_skip_lines": [
+    "SKIPPED: overlay-harness-contract needs PowerShell (pwsh)",
+    "SKIP: integration has no lib/bin target (tests only)"
+  ],
+  "gpu_skip_lines": [],
+  "gpu_execution_provenance": "Repository recipes executed with actual /usr/share/vulkan/icd.d/lvp_icd.json, HEADLESS_FORCE_SOFTWARE=1, TZE_HUD_REQUIRE_GPU=1. Missing GPU must fail the existing helpers; no GPU skip was accepted.",
+  "attempts": "One normal full sweep at source398, terminal0; no retry or failed Rust/CI attempt in GEN2. Prepin source-only b5 inventories retained separately.",
+  "tests_delta": {
+    "added": 0,
+    "modified": 0,
+    "removed": 0
+  },
+  "gate_receipts": [
+    {
+      "label": "dead-code-instrument-unit",
+      "command": [
+        "python3",
+        "-m",
+        "unittest",
+        "scripts/tests/test_dead_code.py",
+        "-v"
+      ],
+      "source_head": "398c6f91de6e0d4883b10a41b6c63044e6192730",
+      "head_after": "398c6f91de6e0d4883b10a41b6c63044e6192730",
+      "exit_code": 0,
+      "elapsed_seconds": 0.06945105099293869,
+      "log_sha256": "fe1e0d8aa4c870ef22308fc2e270ee20cf518dd5a22222548b0dd1c0c1a11de4",
+      "environment": {
+        "CARGO_BUILD_JOBS": null,
+        "CARGO_TARGET_DIR": null,
+        "PROTOC": null,
+        "VK_ICD_FILENAMES": null,
+        "HEADLESS_FORCE_SOFTWARE": null,
+        "TZE_HUD_REQUIRE_GPU": null,
+        "TMPDIR": null
+      }
+    },
+    {
+      "label": "dead-code-protocol",
+      "command": [
+        "python3",
+        "scripts/dead_code.py",
+        "tze_hud_protocol"
+      ],
+      "source_head": "398c6f91de6e0d4883b10a41b6c63044e6192730",
+      "head_after": "398c6f91de6e0d4883b10a41b6c63044e6192730",
+      "exit_code": 0,
+      "elapsed_seconds": 46.597596587002045,
+      "log_sha256": "e6c0b8db7ef5faa8ccf962ca4d0d63b87e41c12775e1031f774d5fe302fc4496",
+      "environment": {
+        "CARGO_BUILD_JOBS": "1",
+        "CARGO_TARGET_DIR": "/home/orca/orca/projects/tze-hud/target",
+        "PROTOC": "/usr/bin/protoc",
+        "VK_ICD_FILENAMES": null,
+        "HEADLESS_FORCE_SOFTWARE": null,
+        "TZE_HUD_REQUIRE_GPU": null,
+        "TMPDIR": "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.2.12/target/audit-scratch"
+      }
+    },
+    {
+      "label": "dead-code-resource",
+      "command": [
+        "python3",
+        "scripts/dead_code.py",
+        "tze_hud_resource"
+      ],
+      "source_head": "398c6f91de6e0d4883b10a41b6c63044e6192730",
+      "head_after": "398c6f91de6e0d4883b10a41b6c63044e6192730",
+      "exit_code": 0,
+      "elapsed_seconds": 28.496943345991895,
+      "log_sha256": "3a9fb7d30d218eb705630f40b505855825fe8d664d252a15b9d5955e3c9096a7",
+      "environment": {
+        "CARGO_BUILD_JOBS": "1",
+        "CARGO_TARGET_DIR": "/home/orca/orca/projects/tze-hud/target",
+        "PROTOC": "/usr/bin/protoc",
+        "VK_ICD_FILENAMES": null,
+        "HEADLESS_FORCE_SOFTWARE": null,
+        "TZE_HUD_REQUIRE_GPU": null,
+        "TMPDIR": "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.2.12/target/audit-scratch"
+      }
+    },
+    {
+      "label": "dead-code-scene",
+      "command": [
+        "python3",
+        "scripts/dead_code.py",
+        "tze_hud_scene"
+      ],
+      "source_head": "398c6f91de6e0d4883b10a41b6c63044e6192730",
+      "head_after": "398c6f91de6e0d4883b10a41b6c63044e6192730",
+      "exit_code": 0,
+      "elapsed_seconds": 8.480127164002624,
+      "log_sha256": "3e8434a31a43203e42d988565ae60487f7aa0b215efa000c500a39a44ffc94f1",
+      "environment": {
+        "CARGO_BUILD_JOBS": "1",
+        "CARGO_TARGET_DIR": "/home/orca/orca/projects/tze-hud/target",
+        "PROTOC": "/usr/bin/protoc",
+        "VK_ICD_FILENAMES": null,
+        "HEADLESS_FORCE_SOFTWARE": null,
+        "TZE_HUD_REQUIRE_GPU": null,
+        "TMPDIR": "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.2.12/target/audit-scratch"
+      }
+    },
+    {
+      "label": "default-app-check",
+      "command": [
+        "cargo",
+        "check",
+        "-p",
+        "tze_hud_app",
+        "--no-default-features"
+      ],
+      "source_head": "398c6f91de6e0d4883b10a41b6c63044e6192730",
+      "head_after": "398c6f91de6e0d4883b10a41b6c63044e6192730",
+      "exit_code": 0,
+      "elapsed_seconds": 11.357144084002357,
+      "log_sha256": "9f8e31177f1253834fbb9d8e723b0a50e158d829379da921fce986caf33084e6",
+      "environment": {
+        "CARGO_BUILD_JOBS": "1",
+        "CARGO_TARGET_DIR": "/home/orca/orca/projects/tze-hud/target",
+        "PROTOC": "/usr/bin/protoc",
+        "VK_ICD_FILENAMES": null,
+        "HEADLESS_FORCE_SOFTWARE": null,
+        "TZE_HUD_REQUIRE_GPU": null,
+        "TMPDIR": null
+      }
+    },
+    {
+      "label": "default-feature-closure",
+      "command": [
+        "just",
+        "dev-mode-guard"
+      ],
+      "source_head": "398c6f91de6e0d4883b10a41b6c63044e6192730",
+      "head_after": "398c6f91de6e0d4883b10a41b6c63044e6192730",
+      "exit_code": 0,
+      "elapsed_seconds": 0.035806708998279646,
+      "log_sha256": "7b0a99a2d90aa61aa77895e9bac8a81ed5389825243edd1b5e0cf09fde358b56",
+      "environment": {
+        "CARGO_BUILD_JOBS": "1",
+        "CARGO_TARGET_DIR": "/home/orca/orca/projects/tze-hud/target",
+        "PROTOC": "/usr/bin/protoc",
+        "VK_ICD_FILENAMES": null,
+        "HEADLESS_FORCE_SOFTWARE": null,
+        "TZE_HUD_REQUIRE_GPU": null,
+        "TMPDIR": null
+      }
+    },
+    {
+      "label": "focused-resource-protocol-scene",
+      "command": [
+        "cargo",
+        "test",
+        "-p",
+        "tze_hud_resource",
+        "-p",
+        "tze_hud_protocol",
+        "-p",
+        "tze_hud_scene",
+        "--all-targets"
+      ],
+      "source_head": "398c6f91de6e0d4883b10a41b6c63044e6192730",
+      "head_after": "398c6f91de6e0d4883b10a41b6c63044e6192730",
+      "exit_code": 0,
+      "elapsed_seconds": 95.03385367500596,
+      "log_sha256": "980cff5350c64e57d9361705b992b350db7c7654c35790a015a47c513fef5d04",
+      "environment": {
+        "CARGO_BUILD_JOBS": "1",
+        "CARGO_TARGET_DIR": "/home/orca/orca/projects/tze-hud/target",
+        "PROTOC": "/usr/bin/protoc",
+        "VK_ICD_FILENAMES": "/usr/share/vulkan/icd.d/lvp_icd.json",
+        "HEADLESS_FORCE_SOFTWARE": "1",
+        "TZE_HUD_REQUIRE_GPU": "1",
+        "TMPDIR": null
+      }
+    },
+    {
+      "label": "full-ci",
+      "command": [
+        "just",
+        "ci"
+      ],
+      "source_head": "398c6f91de6e0d4883b10a41b6c63044e6192730",
+      "head_after": "398c6f91de6e0d4883b10a41b6c63044e6192730",
+      "exit_code": 0,
+      "elapsed_seconds": 680.4730802580016,
+      "log_sha256": "f5657945a3e92294ee804c452723faa47222b327c89b049cc82732f0a72812dc",
+      "environment": {
+        "CARGO_BUILD_JOBS": "1",
+        "CARGO_TARGET_DIR": "/home/orca/orca/projects/tze-hud/target",
+        "PROTOC": "/usr/bin/protoc",
+        "VK_ICD_FILENAMES": "/usr/share/vulkan/icd.d/lvp_icd.json",
+        "HEADLESS_FORCE_SOFTWARE": "1",
+        "TZE_HUD_REQUIRE_GPU": "1",
+        "TMPDIR": null
+      }
+    }
+  ],
+  "performance_limit": "Behavioral test_budget slack/default debug gates are not new reference-hardware latency measurements."
+}

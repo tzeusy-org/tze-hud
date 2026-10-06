@@ -1,0 +1,5 @@
+# narrowed 16 pub items in tze_hud_resource
+# 3 dead item(s) in tze_hud_resource
+crates/tze_hud_resource/src/dedup.rs:100:12: warning: methods `contains`, `is_empty`, and `remove` are never used
+crates/tze_hud_resource/src/dedup.rs:39:9: warning: fields `width_px` and `height_px` are never read
+crates/tze_hud_resource/src/dedup.rs:70:5: warning: fields `resident_ledger` and `font_bytes` are never read

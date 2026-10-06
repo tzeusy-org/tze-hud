@@ -1,0 +1,1407 @@
+{
+  "groups": [
+    {
+      "baseline_diagnostic": "crates/tze_hud_scene/src/graph/leases.rs:21:22: warning: associated items `MAX_TILES_PER_LEASE`, `suspend_lease`, `resume_lease`, and `expire_lease` are never used",
+      "symbols": [
+        "MAX_TILES_PER_LEASE",
+        "suspend_lease",
+        "resume_lease",
+        "expire_lease"
+      ],
+      "references": {
+        "MAX_TILES_PER_LEASE": [
+          "crates/tze_hud_scene/src/graph/leases.rs:21:    pub const MAX_TILES_PER_LEASE: u32 = 64;"
+        ],
+        "suspend_lease": [
+          "tests/integration/text_stream_portal_governance.rs:234:        .suspend_lease(&lease_id, clock.now_millis())",
+          "tests/integration/text_stream_portal_governance.rs:560:        .suspend_lease(&lease_id, clock.now_millis())",
+          "crates/tze_hud_scene/tests/session_lifecycle.rs:823:        .suspend_lease(&lease_frozen, clock.now_millis())",
+          "crates/tze_hud_scene/tests/session_lifecycle.rs:1319:        .suspend_lease(&lease_id, clock.now_millis())",
+          "crates/tze_hud_mcp/src/server/tests.rs:1194:        scene.suspend_lease(&id, 1).expect(\"suspend\");",
+          "crates/tze_hud_mcp/src/server/tests.rs:1226:        scene.suspend_lease(&id, 1).unwrap();",
+          "crates/tze_hud_scene/src/graph/tests.rs:2862:    scene.suspend_lease(&lease_id, clock.now_millis()).unwrap();",
+          "crates/tze_hud_scene/src/graph/tests.rs:2879:    scene.suspend_lease(&lease_id, 1000).unwrap();",
+          "crates/tze_hud_scene/src/graph/tests.rs:2882:    let err = scene.suspend_lease(&lease_id, 2000).unwrap_err();",
+          "crates/tze_hud_scene/src/graph/tests.rs:2898:    scene.suspend_lease(&lease_id, clock.now_millis()).unwrap();",
+          "crates/tze_hud_scene/src/graph/tests.rs:2949:    scene.suspend_lease(&lease_id, 1000).unwrap();",
+          "crates/tze_hud_scene/src/graph/tests.rs:3052:    scene.suspend_lease(&lease_id, clock.now_millis()).unwrap();",
+          "crates/tze_hud_scene/src/graph/tests.rs:3202:    scene.suspend_lease(&lease_id, clock.now_millis()).unwrap();",
+          "crates/tze_hud_scene/src/graph/tests.rs:3231:    scene.suspend_lease(&lease_id, clock.now_millis()).unwrap();",
+          "crates/tze_hud_scene/src/graph/tests.rs:3262:    scene.suspend_lease(&lease_id, clock.now_millis()).unwrap();",
+          "crates/tze_hud_scene/src/graph/tests.rs:3546:    scene.suspend_lease(&l1, clock.now_millis()).unwrap();",
+          "crates/tze_hud_scene/src/graph/tests.rs:3572:    scene.suspend_lease(&lease_id, clock.now_millis()).unwrap();",
+          "crates/tze_hud_scene/src/graph/tests.rs:3626:    scene.suspend_lease(&lease_id, clock.now_millis()).unwrap();",
+          "crates/tze_hud_scene/src/graph/tests.rs:4535:    scene.suspend_lease(&lease_id, clock.now_millis()).unwrap();",
+          "crates/tze_hud_scene/src/graph/tests.rs:4567:    scene.suspend_lease(&lease_id, clock.now_millis()).unwrap();",
+          "crates/tze_hud_scene/src/graph/tests.rs:4872:            LeaseState::Suspended => scene.suspend_lease(&lease, 1_000).unwrap(),",
+          "crates/tze_hud_scene/src/graph/leases.rs:208:    pub fn suspend_lease(&mut self, lease_id: &SceneId, now_ms: u64) -> Result<(), LeaseError> {",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:858:    scene.suspend_lease(&lease, 1).unwrap();"
+        ],
+        "resume_lease": [
+          "tests/integration/text_stream_portal_governance.rs:251:        .resume_lease(&lease_id, clock.now_millis() + 1)",
+          "tests/integration/text_stream_portal_governance.rs:597:        .resume_lease(&lease_id, clock.now_millis() + 1)",
+          "crates/tze_hud_mcp/src/server/tests.rs:1237:    server.scene.lock().await.resume_lease(&lease, 2).unwrap();",
+          "crates/tze_hud_scene/tests/session_lifecycle.rs:1327:        .resume_lease(&lease_id, clock.now_millis())",
+          "crates/tze_hud_scene/src/graph/leases.rs:219:    pub fn resume_lease(&mut self, lease_id: &SceneId, now_ms: u64) -> Result<(), LeaseError> {",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:867:    scene.resume_lease(&lease, 2).unwrap();",
+          "crates/tze_hud_scene/src/graph/tests.rs:2901:    scene.resume_lease(&lease_id, clock.now_millis()).unwrap();",
+          "crates/tze_hud_scene/src/graph/tests.rs:2919:    let err = scene.resume_lease(&lease_id, 1000).unwrap_err();",
+          "crates/tze_hud_scene/src/graph/tests.rs:3233:    scene.resume_lease(&lease_id, clock.now_millis()).unwrap();",
+          "crates/tze_hud_scene/src/graph/tests.rs:3277:    scene.resume_lease(&lease_id, clock.now_millis()).unwrap();"
+        ],
+        "expire_lease": [
+          "crates/tze_hud_scene/src/graph/mod.rs:294:    /// grace/TTL checks in `expire_lease`/`expire_leases` compare against \u2014 a",
+          "crates/tze_hud_scene/src/graph/leases.rs:378:    pub fn expire_lease(&mut self, lease_id: &SceneId) -> Option<LeaseExpiry> {",
+          "crates/tze_hud_scene/src/graph/leases.rs:391:    /// sweep) and [`Self::expire_lease`] (single lease) so both apply the exact",
+          "crates/tze_hud_scene/src/graph/leases.rs:417:    /// [`Self::expire_lease`].",
+          "crates/tze_hud_scene/src/graph/tests.rs:2568:/// hud-i429x: `expire_lease` reaps ONLY the named lease when its grace has",
+          "crates/tze_hud_scene/src/graph/tests.rs:2610:        scene.expire_lease(&lease_b).is_none(),",
+          "crates/tze_hud_scene/src/graph/tests.rs:2611:        \"expire_lease must not reap a lease that is not yet due\"",
+          "crates/tze_hud_scene/src/graph/tests.rs:2618:        .expire_lease(&lease_a)"
+        ]
+      },
+      "group": 1,
+      "classification_by_symbol": {
+        "MAX_TILES_PER_LEASE": "remove unused SceneGraph associated constant",
+        "suspend_lease": "fixture/test-support; MCP named safe-mode and resume gates plus protected integration fixtures",
+        "resume_lease": "fixture/test-support; MCP named resume gate and protected integration fixtures",
+        "expire_lease": "crate-visible cfg(test); exact single-lease expiry fixture"
+      },
+      "current_references": {
+        "MAX_TILES_PER_LEASE": [],
+        "suspend_lease": [
+          "tests/integration/text_stream_portal_governance.rs:234:        .suspend_lease(&lease_id, clock.now_millis())",
+          "tests/integration/text_stream_portal_governance.rs:560:        .suspend_lease(&lease_id, clock.now_millis())",
+          "crates/tze_hud_mcp/src/server/tests.rs:1194:        scene.suspend_lease(&id, 1).expect(\"suspend\");",
+          "crates/tze_hud_mcp/src/server/tests.rs:1226:        scene.suspend_lease(&id, 1).unwrap();",
+          "crates/tze_hud_scene/tests/session_lifecycle.rs:823:        .suspend_lease(&lease_frozen, clock.now_millis())",
+          "crates/tze_hud_scene/tests/session_lifecycle.rs:1319:        .suspend_lease(&lease_id, clock.now_millis())",
+          "crates/tze_hud_scene/src/graph/tests.rs:2862:    scene.suspend_lease(&lease_id, clock.now_millis()).unwrap();",
+          "crates/tze_hud_scene/src/graph/tests.rs:2879:    scene.suspend_lease(&lease_id, 1000).unwrap();",
+          "crates/tze_hud_scene/src/graph/tests.rs:2882:    let err = scene.suspend_lease(&lease_id, 2000).unwrap_err();",
+          "crates/tze_hud_scene/src/graph/tests.rs:2898:    scene.suspend_lease(&lease_id, clock.now_millis()).unwrap();",
+          "crates/tze_hud_scene/src/graph/tests.rs:2949:    scene.suspend_lease(&lease_id, 1000).unwrap();",
+          "crates/tze_hud_scene/src/graph/tests.rs:3052:    scene.suspend_lease(&lease_id, clock.now_millis()).unwrap();",
+          "crates/tze_hud_scene/src/graph/tests.rs:3202:    scene.suspend_lease(&lease_id, clock.now_millis()).unwrap();",
+          "crates/tze_hud_scene/src/graph/tests.rs:3231:    scene.suspend_lease(&lease_id, clock.now_millis()).unwrap();",
+          "crates/tze_hud_scene/src/graph/tests.rs:3262:    scene.suspend_lease(&lease_id, clock.now_millis()).unwrap();",
+          "crates/tze_hud_scene/src/graph/tests.rs:3546:    scene.suspend_lease(&l1, clock.now_millis()).unwrap();",
+          "crates/tze_hud_scene/src/graph/tests.rs:3572:    scene.suspend_lease(&lease_id, clock.now_millis()).unwrap();",
+          "crates/tze_hud_scene/src/graph/tests.rs:3626:    scene.suspend_lease(&lease_id, clock.now_millis()).unwrap();",
+          "crates/tze_hud_scene/src/graph/tests.rs:4535:    scene.suspend_lease(&lease_id, clock.now_millis()).unwrap();",
+          "crates/tze_hud_scene/src/graph/tests.rs:4567:    scene.suspend_lease(&lease_id, clock.now_millis()).unwrap();",
+          "crates/tze_hud_scene/src/graph/tests.rs:4872:            LeaseState::Suspended => scene.suspend_lease(&lease, 1_000).unwrap(),",
+          "crates/tze_hud_scene/src/graph/leases.rs:206:    pub fn suspend_lease(&mut self, lease_id: &SceneId, now_ms: u64) -> Result<(), LeaseError> {",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:858:    scene.suspend_lease(&lease, 1).unwrap();"
+        ],
+        "resume_lease": [
+          "crates/tze_hud_scene/tests/session_lifecycle.rs:1327:        .resume_lease(&lease_id, clock.now_millis())",
+          "crates/tze_hud_mcp/src/server/tests.rs:1237:    server.scene.lock().await.resume_lease(&lease, 2).unwrap();",
+          "tests/integration/text_stream_portal_governance.rs:251:        .resume_lease(&lease_id, clock.now_millis() + 1)",
+          "tests/integration/text_stream_portal_governance.rs:597:        .resume_lease(&lease_id, clock.now_millis() + 1)",
+          "crates/tze_hud_scene/src/graph/tests.rs:2901:    scene.resume_lease(&lease_id, clock.now_millis()).unwrap();",
+          "crates/tze_hud_scene/src/graph/tests.rs:2919:    let err = scene.resume_lease(&lease_id, 1000).unwrap_err();",
+          "crates/tze_hud_scene/src/graph/tests.rs:3233:    scene.resume_lease(&lease_id, clock.now_millis()).unwrap();",
+          "crates/tze_hud_scene/src/graph/tests.rs:3277:    scene.resume_lease(&lease_id, clock.now_millis()).unwrap();",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:867:    scene.resume_lease(&lease, 2).unwrap();",
+          "crates/tze_hud_scene/src/graph/leases.rs:218:    pub fn resume_lease(&mut self, lease_id: &SceneId, now_ms: u64) -> Result<(), LeaseError> {"
+        ],
+        "expire_lease": [
+          "crates/tze_hud_scene/src/graph/tests.rs:2568:/// hud-i429x: `expire_lease` reaps ONLY the named lease when its grace has",
+          "crates/tze_hud_scene/src/graph/tests.rs:2610:        scene.expire_lease(&lease_b).is_none(),",
+          "crates/tze_hud_scene/src/graph/tests.rs:2611:        \"expire_lease must not reap a lease that is not yet due\"",
+          "crates/tze_hud_scene/src/graph/tests.rs:2618:        .expire_lease(&lease_a)",
+          "crates/tze_hud_scene/src/graph/leases.rs:374:    pub(crate) fn expire_lease(&mut self, lease_id: &SceneId) -> Option<LeaseExpiry> {"
+        ]
+      }
+    },
+    {
+      "baseline_diagnostic": "crates/tze_hud_scene/src/graph/overlay.rs:376:19: warning: method `clear_tile_font_scale` is never used",
+      "symbols": [
+        "clear_tile_font_scale"
+      ],
+      "references": {
+        "clear_tile_font_scale": [
+          "crates/tze_hud_scene/src/graph/tests.rs:4449:    scene.clear_tile_font_scale(id);",
+          "crates/tze_hud_scene/src/graph/overlay.rs:376:    pub fn clear_tile_font_scale(&mut self, tile_id: SceneId) {"
+        ]
+      },
+      "group": 2,
+      "classification_by_symbol": {
+        "clear_tile_font_scale": "crate-visible cfg(test); existing graph font-scale fixture"
+      },
+      "current_references": {
+        "clear_tile_font_scale": [
+          "crates/tze_hud_scene/src/graph/tests.rs:4449:    scene.clear_tile_font_scale(id);",
+          "crates/tze_hud_scene/src/graph/overlay.rs:376:    pub(crate) fn clear_tile_font_scale(&mut self, tile_id: SceneId) {"
+        ]
+      }
+    },
+    {
+      "baseline_diagnostic": "crates/tze_hud_scene/src/graph/queries.rs:337:19: warning: methods `update_hover_state`, `update_pressed_state`, `update_focused_state`, `set_drag_active`, and `clear_drag_active` are never used",
+      "symbols": [
+        "update_hover_state",
+        "update_pressed_state",
+        "update_focused_state",
+        "set_drag_active",
+        "clear_drag_active"
+      ],
+      "references": {
+        "update_hover_state": [
+          "crates/tze_hud_scene/tests/hit_test.rs:12://! 6. `update_hover_state` updates `HitRegionLocalState` without agent roundtrip.",
+          "crates/tze_hud_scene/tests/hit_test.rs:504:    let new_hover = scene.update_hover_state(None, &result);",
+          "crates/tze_hud_scene/tests/hit_test.rs:509:        \"hovered must be true after update_hover_state\"",
+          "crates/tze_hud_scene/tests/hit_test.rs:527:    let new_hover = scene.update_hover_state(Some(node_id), &result);",
+          "crates/tze_hud_scene/src/graph/queries.rs:337:    pub fn update_hover_state("
+        ],
+        "update_pressed_state": [
+          "crates/tze_hud_scene/tests/hit_test.rs:542:    scene.update_pressed_state(node_id, true);",
+          "crates/tze_hud_scene/tests/hit_test.rs:545:    scene.update_pressed_state(node_id, false);",
+          "crates/tze_hud_scene/src/graph/queries.rs:369:    pub fn update_pressed_state(&mut self, node_id: SceneId, pressed: bool) {"
+        ],
+        "update_focused_state": [
+          "crates/tze_hud_scene/tests/hit_test.rs:556:    scene.update_focused_state(node_id, true);",
+          "crates/tze_hud_scene/tests/hit_test.rs:559:    scene.update_focused_state(node_id, false);",
+          "crates/tze_hud_scene/src/graph/queries.rs:380:    pub fn update_focused_state(&mut self, node_id: SceneId, focused: bool) {"
+        ],
+        "set_drag_active": [
+          "tests/integration/drag_reposition.rs:618:    scene.set_drag_active(eid);",
+          "crates/tze_hud_scene/src/graph/queries.rs:400:    pub fn set_drag_active(&mut self, element_id: SceneId) {",
+          "crates/tze_hud_compositor/src/renderer/tests/hit_drag.rs:879:    scene.set_drag_active(tile_id);",
+          "crates/tze_hud_compositor/src/renderer/tests/hit_drag.rs:977:    scene.set_drag_active(tile_a);"
+        ],
+        "clear_drag_active": [
+          "tests/integration/drag_reposition.rs:620:    scene.clear_drag_active(eid);",
+          "crates/tze_hud_scene/src/graph/queries.rs:405:    pub fn clear_drag_active(&mut self, element_id: SceneId) {",
+          "crates/tze_hud_compositor/src/renderer/tests/hit_drag.rs:913:    scene.clear_drag_active(tile_id);",
+          "crates/tze_hud_compositor/src/renderer/tests/hit_drag.rs:990:    scene.clear_drag_active(tile_a);"
+        ]
+      },
+      "group": 3,
+      "classification_by_symbol": {
+        "update_hover_state": "test-support; existing external hit-test fixtures",
+        "update_pressed_state": "test-support; existing external hit-test fixtures",
+        "update_focused_state": "test-support; existing external hit-test fixtures",
+        "set_drag_active": "test-support; existing compositor and separate integration fixtures",
+        "clear_drag_active": "test-support; existing compositor and separate integration fixtures"
+      },
+      "current_references": {
+        "update_hover_state": [
+          "crates/tze_hud_scene/tests/hit_test.rs:12://! 6. `update_hover_state` updates `HitRegionLocalState` without agent roundtrip.",
+          "crates/tze_hud_scene/tests/hit_test.rs:504:    let new_hover = scene.update_hover_state(None, &result);",
+          "crates/tze_hud_scene/tests/hit_test.rs:509:        \"hovered must be true after update_hover_state\"",
+          "crates/tze_hud_scene/tests/hit_test.rs:527:    let new_hover = scene.update_hover_state(Some(node_id), &result);",
+          "crates/tze_hud_scene/src/graph/queries.rs:338:    pub fn update_hover_state("
+        ],
+        "update_pressed_state": [
+          "crates/tze_hud_scene/tests/hit_test.rs:542:    scene.update_pressed_state(node_id, true);",
+          "crates/tze_hud_scene/tests/hit_test.rs:545:    scene.update_pressed_state(node_id, false);",
+          "crates/tze_hud_scene/src/graph/queries.rs:371:    pub fn update_pressed_state(&mut self, node_id: SceneId, pressed: bool) {"
+        ],
+        "update_focused_state": [
+          "crates/tze_hud_scene/tests/hit_test.rs:556:    scene.update_focused_state(node_id, true);",
+          "crates/tze_hud_scene/tests/hit_test.rs:559:    scene.update_focused_state(node_id, false);",
+          "crates/tze_hud_scene/src/graph/queries.rs:379:    pub fn update_focused_state(&mut self, node_id: SceneId, focused: bool) {"
+        ],
+        "set_drag_active": [
+          "tests/integration/drag_reposition.rs:618:    scene.set_drag_active(eid);",
+          "crates/tze_hud_compositor/src/renderer/tests/hit_drag.rs:879:    scene.set_drag_active(tile_id);",
+          "crates/tze_hud_compositor/src/renderer/tests/hit_drag.rs:977:    scene.set_drag_active(tile_a);",
+          "crates/tze_hud_scene/src/graph/queries.rs:400:    pub fn set_drag_active(&mut self, element_id: SceneId) {"
+        ],
+        "clear_drag_active": [
+          "tests/integration/drag_reposition.rs:620:    scene.clear_drag_active(eid);",
+          "crates/tze_hud_scene/src/graph/queries.rs:406:    pub fn clear_drag_active(&mut self, element_id: SceneId) {",
+          "crates/tze_hud_compositor/src/renderer/tests/hit_drag.rs:913:    scene.clear_drag_active(tile_id);",
+          "crates/tze_hud_compositor/src/renderer/tests/hit_drag.rs:990:    scene.clear_drag_active(tile_a);"
+        ]
+      }
+    },
+    {
+      "baseline_diagnostic": "crates/tze_hud_scene/src/graph/resources.rs:27:19: warning: method `resource_ref_count` is never used",
+      "symbols": [
+        "resource_ref_count"
+      ],
+      "references": {
+        "resource_ref_count": [
+          "crates/tze_hud_scene/src/graph/resources.rs:27:    pub fn resource_ref_count(&self, id: &ResourceId) -> Option<u32> {",
+          "crates/tze_hud_scene/src/graph/tests.rs:2416:        scene.resource_ref_count(&resource_id),",
+          "crates/tze_hud_scene/src/graph/tests.rs:2430:        scene.resource_ref_count(&resource_id),",
+          "crates/tze_hud_scene/src/graph/tests.rs:2432:        \"resource_ref_count must return None after resource is freed\"",
+          "crates/tze_hud_scene/src/graph/tests.rs:2483:        scene.resource_ref_count(&resource_id),",
+          "crates/tze_hud_scene/src/graph/tests.rs:2495:        scene.resource_ref_count(&resource_id),",
+          "crates/tze_hud_scene/src/graph/tests.rs:2507:        scene.resource_ref_count(&resource_id),",
+          "crates/tze_hud_scene/src/graph/tests.rs:2509:        \"resource_ref_count must return None after last tile removed\"",
+          "crates/tze_hud_scene/src/graph/tests.rs:2554:    assert_eq!(scene.resource_ref_count(&resource_id), Some(1));",
+          "crates/tze_hud_scene/src/graph/tests.rs:2679:    assert_eq!(scene.resource_ref_count(&res_a), Some(1));",
+          "crates/tze_hud_scene/src/graph/tests.rs:2681:        scene.resource_ref_count(&res_b),",
+          "crates/tze_hud_scene/src/graph/tests.rs:2713:        scene.resource_ref_count(&res_b),",
+          "crates/tze_hud_scene/src/graph/tests.rs:2726:    assert_eq!(scene.resource_ref_count(&old_resource_id), Some(1));",
+          "crates/tze_hud_scene/src/graph/tests.rs:2754:        scene.resource_ref_count(&new_resource_id),",
+          "crates/tze_hud_scene/src/graph/tests.rs:2819:    assert_eq!(scene.resource_ref_count(&resource_id), Some(1));",
+          "crates/tze_hud_scene/src/graph/tests.rs:2840:        scene.resource_ref_count(&resource_id),"
+        ]
+      },
+      "group": 4,
+      "classification_by_symbol": {
+        "resource_ref_count": "crate-visible cfg(test); scene resource ownership fixtures; unrelated to deleted resource::ResourceRecord refcount island"
+      },
+      "current_references": {
+        "resource_ref_count": [
+          "crates/tze_hud_scene/src/graph/resources.rs:28:    pub(crate) fn resource_ref_count(&self, id: &ResourceId) -> Option<u32> {",
+          "crates/tze_hud_scene/src/graph/tests.rs:2416:        scene.resource_ref_count(&resource_id),",
+          "crates/tze_hud_scene/src/graph/tests.rs:2430:        scene.resource_ref_count(&resource_id),",
+          "crates/tze_hud_scene/src/graph/tests.rs:2432:        \"resource_ref_count must return None after resource is freed\"",
+          "crates/tze_hud_scene/src/graph/tests.rs:2483:        scene.resource_ref_count(&resource_id),",
+          "crates/tze_hud_scene/src/graph/tests.rs:2495:        scene.resource_ref_count(&resource_id),",
+          "crates/tze_hud_scene/src/graph/tests.rs:2507:        scene.resource_ref_count(&resource_id),",
+          "crates/tze_hud_scene/src/graph/tests.rs:2509:        \"resource_ref_count must return None after last tile removed\"",
+          "crates/tze_hud_scene/src/graph/tests.rs:2554:    assert_eq!(scene.resource_ref_count(&resource_id), Some(1));",
+          "crates/tze_hud_scene/src/graph/tests.rs:2679:    assert_eq!(scene.resource_ref_count(&res_a), Some(1));",
+          "crates/tze_hud_scene/src/graph/tests.rs:2681:        scene.resource_ref_count(&res_b),",
+          "crates/tze_hud_scene/src/graph/tests.rs:2713:        scene.resource_ref_count(&res_b),",
+          "crates/tze_hud_scene/src/graph/tests.rs:2726:    assert_eq!(scene.resource_ref_count(&old_resource_id), Some(1));",
+          "crates/tze_hud_scene/src/graph/tests.rs:2754:        scene.resource_ref_count(&new_resource_id),",
+          "crates/tze_hud_scene/src/graph/tests.rs:2819:    assert_eq!(scene.resource_ref_count(&resource_id), Some(1));",
+          "crates/tze_hud_scene/src/graph/tests.rs:2840:        scene.resource_ref_count(&resource_id),"
+        ]
+      }
+    },
+    {
+      "baseline_diagnostic": "crates/tze_hud_scene/src/graph/snapshot.rs:12:19: warning: associated function `from_json` is never used",
+      "symbols": [
+        "from_json"
+      ],
+      "references": {
+        "from_json": [
+          "crates/tze_hud_scene/tests/snapshot.rs:139:    let deserialized = SceneGraphSnapshot::from_json(&json1).unwrap();",
+          "crates/tze_hud_scene/tests/snapshot.rs:158:    let deserialized = SceneGraphSnapshot::from_json(&json1).unwrap();",
+          "crates/tze_hud_scene/tests/snapshot.rs:240:        let deser = SceneGraphSnapshot::from_json(&json1).unwrap();",
+          "crates/tze_hud_scene/tests/snapshot.rs:354:    let deser = SceneGraphSnapshot::from_json(&json).unwrap();",
+          "crates/tze_hud_scene/tests/snapshot.rs:561:            let deser = SceneGraphSnapshot::from_json(&json1).unwrap();",
+          "crates/tze_hud_scene/tests/session_lifecycle.rs:436:    let snapshot_scene = SceneGraph::from_json(&grace_snapshot_json).expect(\"deserialize snapshot\");",
+          "crates/tze_hud_scene/src/types.rs:2863:    pub fn from_json(json: &str) -> Result<Self, serde_json::Error> {",
+          "crates/tze_hud_scene/src/graph/tests.rs:480:    let restored = SceneGraph::from_json(&json).unwrap();",
+          "crates/tze_hud_scene/src/graph/tests.rs:597:    let restored = SceneGraphSnapshot::from_json(&json).unwrap();",
+          "crates/tze_hud_scene/src/graph/tests.rs:685:    let restored = SceneGraphSnapshot::from_json(&json).unwrap();",
+          "crates/tze_hud_scene/src/graph/tests.rs:2109:    let restored = SceneGraph::from_json(&json).unwrap();",
+          "crates/tze_hud_scene/src/graph/snapshot.rs:12:    pub fn from_json(json: &str) -> Result<Self, serde_json::Error> {"
+        ]
+      },
+      "group": 5,
+      "classification_by_symbol": {
+        "from_json": "SceneGraph: test-support; own lifecycle/snapshot fixtures; serde representation unchanged"
+      },
+      "current_references": {
+        "from_json": [
+          "crates/tze_hud_scene/tests/session_lifecycle.rs:436:    let snapshot_scene = SceneGraph::from_json(&grace_snapshot_json).expect(\"deserialize snapshot\");",
+          "crates/tze_hud_scene/tests/snapshot.rs:139:    let deserialized = SceneGraphSnapshot::from_json(&json1).unwrap();",
+          "crates/tze_hud_scene/tests/snapshot.rs:158:    let deserialized = SceneGraphSnapshot::from_json(&json1).unwrap();",
+          "crates/tze_hud_scene/tests/snapshot.rs:240:        let deser = SceneGraphSnapshot::from_json(&json1).unwrap();",
+          "crates/tze_hud_scene/tests/snapshot.rs:354:    let deser = SceneGraphSnapshot::from_json(&json).unwrap();",
+          "crates/tze_hud_scene/tests/snapshot.rs:561:            let deser = SceneGraphSnapshot::from_json(&json1).unwrap();",
+          "crates/tze_hud_scene/src/types.rs:2844:    pub fn from_json(json: &str) -> Result<Self, serde_json::Error> {",
+          "crates/tze_hud_scene/src/graph/snapshot.rs:13:    pub fn from_json(json: &str) -> Result<Self, serde_json::Error> {",
+          "crates/tze_hud_scene/src/graph/tests.rs:480:    let restored = SceneGraph::from_json(&json).unwrap();",
+          "crates/tze_hud_scene/src/graph/tests.rs:597:    let restored = SceneGraphSnapshot::from_json(&json).unwrap();",
+          "crates/tze_hud_scene/src/graph/tests.rs:685:    let restored = SceneGraphSnapshot::from_json(&json).unwrap();",
+          "crates/tze_hud_scene/src/graph/tests.rs:2109:    let restored = SceneGraph::from_json(&json).unwrap();"
+        ]
+      }
+    },
+    {
+      "baseline_diagnostic": "crates/tze_hud_scene/src/graph/tabs.rs:22:19: warning: methods `create_tab_with_lease` and `switch_active_tab_with_lease` are never used",
+      "symbols": [
+        "create_tab_with_lease",
+        "switch_active_tab_with_lease"
+      ],
+      "references": {
+        "create_tab_with_lease": [
+          "crates/tze_hud_scene/src/mutation.rs:84:    // `apply_batch`. The scene graph's `create_tab_with_lease` /",
+          "crates/tze_hud_scene/src/graph/tabs.rs:22:    pub fn create_tab_with_lease(",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:252:    let tab_id = scene.create_tab_with_lease(\"New Tab\", 0, lease_id).unwrap();"
+        ],
+        "switch_active_tab_with_lease": [
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:254:        .switch_active_tab_with_lease(tab_id, lease_id)",
+          "crates/tze_hud_scene/src/graph/tabs.rs:93:    pub fn switch_active_tab_with_lease("
+        ]
+      },
+      "group": 6,
+      "classification_by_symbol": {
+        "create_tab_with_lease": "crate-visible cfg(test); existing graph spec scenario; real protocol applies explicit manage_tabs gate",
+        "switch_active_tab_with_lease": "crate-visible cfg(test); existing graph spec scenario"
+      },
+      "current_references": {
+        "create_tab_with_lease": [
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:252:    let tab_id = scene.create_tab_with_lease(\"New Tab\", 0, lease_id).unwrap();",
+          "crates/tze_hud_scene/src/graph/tabs.rs:23:    pub(crate) fn create_tab_with_lease("
+        ],
+        "switch_active_tab_with_lease": [
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:254:        .switch_active_tab_with_lease(tab_id, lease_id)",
+          "crates/tze_hud_scene/src/graph/tabs.rs:95:    pub(crate) fn switch_active_tab_with_lease("
+        ]
+      }
+    },
+    {
+      "baseline_diagnostic": "crates/tze_hud_scene/src/graph/tiles.rs:28:19: warning: methods `create_tile_checked` and `update_node_content` are never used",
+      "symbols": [
+        "create_tile_checked",
+        "update_node_content"
+      ],
+      "references": {
+        "create_tile_checked": [
+          "crates/tze_hud_scene/tests/batch_atomicity.rs:1114:        .create_tile_checked(",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:270:        .create_tile_checked(",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:446:    // create_tile_checked requires CreateTiles + ModifyOwnTiles; use correct capabilities",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:451:        .create_tile_checked(",
+          "crates/tze_hud_scene/src/graph/tiles.rs:8:    /// For agent-facing operations use [`create_tile_checked`] which enforces:",
+          "crates/tze_hud_scene/src/graph/tiles.rs:28:    pub fn create_tile_checked(",
+          "crates/tze_hud_protocol/tests/lease_governance.rs:65:        .create_tile_checked(",
+          "crates/tze_hud_protocol/tests/lease_governance.rs:142:        .create_tile_checked(",
+          "crates/tze_hud_protocol/tests/lease_governance.rs:151:        .create_tile_checked(",
+          "crates/tze_hud_protocol/tests/lease_governance.rs:217:    let tile_b = scene.create_tile_checked(",
+          "crates/tze_hud_protocol/tests/lease_governance.rs:667:    let result = scene.create_tile_checked(",
+          "crates/tze_hud_protocol/tests/lease_governance.rs:939:        .create_tile_checked("
+        ],
+        "update_node_content": [
+          "crates/tze_hud_scene/src/graph/tiles.rs:660:    pub fn update_node_content(",
+          "crates/tze_hud_compositor/src/renderer/tests/retained_image.rs:85:        .update_node_content(",
+          "crates/tze_hud_compositor/src/renderer/tests/portal_reveal.rs:11:// built with `add_node_to_tile` and mutated in place with `update_node_content`",
+          "crates/tze_hud_compositor/src/renderer/tests/portal_reveal.rs:157:        .update_node_content(",
+          "crates/tze_hud_compositor/src/renderer/tests/portal_reveal.rs:206:        .update_node_content(",
+          "crates/tze_hud_compositor/src/renderer/tests/portal_reveal.rs:263:        .update_node_content(",
+          "crates/tze_hud_compositor/src/renderer/tests/portal_reveal.rs:317:        .update_node_content("
+        ]
+      },
+      "group": 7,
+      "classification_by_symbol": {
+        "create_tile_checked": "test-support; external protocol lease-governance and scene atomicity fixtures; production mutation path retained",
+        "update_node_content": "test-support; existing compositor retained-image/portal pixel fixtures"
+      },
+      "current_references": {
+        "create_tile_checked": [
+          "crates/tze_hud_scene/tests/batch_atomicity.rs:1114:        .create_tile_checked(",
+          "crates/tze_hud_scene/src/graph/tiles.rs:29:    pub fn create_tile_checked(",
+          "crates/tze_hud_protocol/tests/lease_governance.rs:65:        .create_tile_checked(",
+          "crates/tze_hud_protocol/tests/lease_governance.rs:142:        .create_tile_checked(",
+          "crates/tze_hud_protocol/tests/lease_governance.rs:151:        .create_tile_checked(",
+          "crates/tze_hud_protocol/tests/lease_governance.rs:217:    let tile_b = scene.create_tile_checked(",
+          "crates/tze_hud_protocol/tests/lease_governance.rs:667:    let result = scene.create_tile_checked(",
+          "crates/tze_hud_protocol/tests/lease_governance.rs:939:        .create_tile_checked(",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:270:        .create_tile_checked(",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:446:    // create_tile_checked requires CreateTiles + ModifyOwnTiles; use correct capabilities",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:451:        .create_tile_checked("
+        ],
+        "update_node_content": [
+          "crates/tze_hud_compositor/src/renderer/tests/portal_reveal.rs:11:// built with `add_node_to_tile` and mutated in place with `update_node_content`",
+          "crates/tze_hud_compositor/src/renderer/tests/portal_reveal.rs:157:        .update_node_content(",
+          "crates/tze_hud_compositor/src/renderer/tests/portal_reveal.rs:206:        .update_node_content(",
+          "crates/tze_hud_compositor/src/renderer/tests/portal_reveal.rs:263:        .update_node_content(",
+          "crates/tze_hud_compositor/src/renderer/tests/portal_reveal.rs:317:        .update_node_content(",
+          "crates/tze_hud_protocol/proto/types.proto:265:    UpdateNodeContentMutation   update_node_content    = 6;",
+          "crates/tze_hud_scene/src/graph/tiles.rs:662:    pub fn update_node_content(",
+          "crates/tze_hud_compositor/src/renderer/tests/retained_image.rs:85:        .update_node_content("
+        ]
+      }
+    },
+    {
+      "baseline_diagnostic": "crates/tze_hud_scene/src/graph/zone_ops.rs:109:19: warning: methods `unregister_zone`, `publish_to_zone_with_breakpoints`, and `publish_to_widget` are never used",
+      "symbols": [
+        "unregister_zone",
+        "publish_to_zone_with_breakpoints",
+        "publish_to_widget"
+      ],
+      "references": {
+        "unregister_zone": [
+          "crates/tze_hud_scene/src/graph/zone_ops.rs:109:    pub fn unregister_zone(&mut self, name: &str) -> Option<ZoneDefinition> {",
+          "crates/tze_hud_scene/src/graph/tests.rs:904:    let removed = scene.unregister_zone(\"subtitle\");"
+        ],
+        "publish_to_zone_with_breakpoints": [
+          "crates/tze_hud_scene/src/graph/tests.rs:1409://   - All three entry points (publish_to_zone, publish_to_zone_with_breakpoints,",
+          "crates/tze_hud_scene/src/graph/tests.rs:1620:/// Cross-entry-point: publish_to_zone and publish_to_zone_with_breakpoints",
+          "crates/tze_hud_scene/src/graph/tests.rs:1647:    // Zone via publish_to_zone_with_breakpoints.",
+          "crates/tze_hud_scene/src/graph/tests.rs:1681:        let _ = scene_b.publish_to_zone_with_breakpoints(",
+          "crates/tze_hud_scene/src/graph/tests.rs:1696:        \"publish_to_zone and publish_to_zone_with_breakpoints must produce identical record counts; got {count_a} vs {count_b}\"",
+          "crates/tze_hud_scene/src/graph/zone_ops.rs:406:    pub fn publish_to_zone_with_breakpoints(",
+          "crates/tze_hud_compositor/src/renderer/tests/zone_layers.rs:879:    // Publish StreamText with breakpoints via publish_to_zone_with_breakpoints.",
+          "crates/tze_hud_compositor/src/renderer/tests/zone_layers.rs:881:        .publish_to_zone_with_breakpoints(",
+          "crates/tze_hud_compositor/src/renderer/tests/zone_layers.rs:936:        .publish_to_zone_with_breakpoints(",
+          "crates/tze_hud_compositor/src/renderer/tests/zone_layers.rs:961:        .publish_to_zone_with_breakpoints(",
+          "crates/tze_hud_compositor/src/renderer/tests/zone_layers.rs:1016:        .publish_to_zone_with_breakpoints("
+        ],
+        "publish_to_widget": [
+          "crates/tze_hud_compositor/tests/widget_raster_count.rs:58:        .publish_to_widget(instance, params, \"agent-a\", None, 0, None)",
+          "crates/tze_hud_compositor/tests/widget_transition.rs:124:            .publish_to_widget(GAUGE, params, \"agent-a\", None, ms, None)",
+          "crates/tze_hud_widget/tests/shipped_bundles.rs:93:        .publish_to_widget(widget, params, \"agent.test\", None, 0, None)",
+          "crates/tze_hud_scene/src/types.rs:2385:    /// Mirrors `ZoneDefinition::max_publishers`. Enforced by `publish_to_widget`",
+          "crates/tze_hud_scene/src/types.rs:2621:                    // Only one publication is retained by publish_to_widget;",
+          "crates/tze_hud_scene/src/types.rs:2640:                    // insertion order maintained by publish_to_widget).",
+          "crates/tze_hud_scene/src/validation.rs:174:    /// Returned by `publish_to_widget` under `Stack` contention when the",
+          "crates/tze_hud_compositor/tests/gauge_binding_rendering.rs:535:    /// Returns `(scene, tab_id)` ready for `publish_to_widget(\"gauge\", ...)` calls.",
+          "crates/tze_hud_compositor/tests/gauge_binding_rendering.rs:597:            .publish_to_widget(\"gauge\", params_a, \"agent.a\", None, 0, None)",
+          "crates/tze_hud_compositor/tests/gauge_binding_rendering.rs:603:            .publish_to_widget(\"gauge\", params_b, \"agent.b\", None, 0, None)",
+          "crates/tze_hud_compositor/tests/gauge_binding_rendering.rs:650:            .publish_to_widget(\"gauge\", params_a, \"agent.a\", None, 0, None)",
+          "crates/tze_hud_compositor/tests/gauge_binding_rendering.rs:656:            .publish_to_widget(\"gauge\", params_b, \"agent.b\", None, 0, None)",
+          "crates/tze_hud_compositor/tests/gauge_binding_rendering.rs:715:            .publish_to_widget(",
+          "crates/tze_hud_compositor/tests/gauge_binding_rendering.rs:728:            .publish_to_widget(",
+          "crates/tze_hud_compositor/tests/gauge_binding_rendering.rs:794:            .publish_to_widget(\"gauge\", params, \"agent.all\", None, 0, None)",
+          "crates/tze_hud_scene/src/graph/zone_ops.rs:455:    pub fn publish_to_widget(",
+          "crates/tze_hud_scene/src/graph/zone_ops.rs:475:    /// [`Self::publish_to_widget`], recording `lease_id` as the publishing",
+          "crates/tze_hud_scene/src/graph/tests.rs:1410://     publish_to_widget) now share the single apply_contention function.",
+          "crates/tze_hud_scene/src/graph/tests.rs:1598:        .publish_to_widget(\"counter\", params(), \"agent.a\", None, 0, None)",
+          "crates/tze_hud_scene/src/graph/tests.rs:1603:        .publish_to_widget(\"counter\", params(), \"agent.a\", None, 0, None)",
+          "crates/tze_hud_scene/src/graph/tests.rs:1616:        .publish_to_widget(\"counter\", params(), \"agent.b\", None, 0, None)",
+          "crates/tze_hud_compositor/src/renderer/tests/hit_drag.rs:591:        .publish_to_widget(",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:859:    let result = scene.publish_to_widget(\"gauge\", params(), \"agent.test\", None, 0, None);",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:870:            .publish_to_widget(\"gauge\", params(), \"agent.test\", None, 0, None)",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:877:/// WHEN an f32 NaN value is submitted THEN publish_to_widget returns",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:887:    let result = scene.publish_to_widget(\"gauge\", params, \"agent.test\", None, 0, None);",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:897:/// WHEN an f32 +Inf value is submitted THEN publish_to_widget returns",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:906:    let result = scene.publish_to_widget(\"gauge\", params, \"agent.test\", None, 0, None);",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:916:/// WHEN an f32 -Inf value is submitted THEN publish_to_widget returns",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:925:    let result = scene.publish_to_widget(\"gauge\", params, \"agent.test\", None, 0, None);",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:944:    let result = scene.publish_to_widget(\"gauge\", params, \"agent.test\", None, 0, None);",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:963:    let result = scene.publish_to_widget(\"gauge\", params, \"agent.test\", None, 0, None);",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:981:    let result = scene.publish_to_widget(\"gauge\", params, \"agent.test\", None, 0, None);",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:994:    let result = scene.publish_to_widget(\"gauge\", params, \"agent.test\", None, 0, None);",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1006:    let result = scene.publish_to_widget(\"gauge\", params, \"agent.test\", None, 0, None);",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1027:    let result = scene.publish_to_widget(\"gauge\", params, \"agent.test\", None, 0, None);",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1040:    let result = scene.publish_to_widget(\"no-such-widget\", params, \"agent\", None, 0, None);",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1292:        .publish_to_widget(",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1338:        .publish_to_widget(",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1351:        .publish_to_widget(",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1389:            .publish_to_widget(",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1436:            .publish_to_widget(",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1478:        .publish_to_widget(",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1491:        .publish_to_widget(",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1545:        .publish_to_widget(",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1559:        .publish_to_widget(",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1598:        .publish_to_widget(",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1643:        .publish_to_widget(",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1656:        .publish_to_widget(",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1696:        .publish_to_widget(\"gauge\", params, \"agent.a\", None, 0, None)",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1738:        .publish_to_widget(",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1751:        .publish_to_widget(",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1778:        .publish_to_widget(",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1791:        .publish_to_widget(",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1819:            .publish_to_widget(",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1874:            .publish_to_widget(",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1904:        .publish_to_widget(",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1917:        .publish_to_widget(",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1931:        .publish_to_widget(",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:2012:        .publish_to_widget(",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:2046:        .publish_to_widget(",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:2081:        .publish_to_widget(",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:2118:        .publish_to_widget(",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:2133:        .publish_to_widget(",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:2176:        .publish_to_widget(",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:2221:        .publish_to_widget(",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:2265:        .publish_to_widget(",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:2278:        .publish_to_widget(",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:2317:        .publish_to_widget(",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:2330:        .publish_to_widget(",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:2498:        .publish_to_widget(",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:2511:        .publish_to_widget("
+        ]
+      },
+      "group": 8,
+      "classification_by_symbol": {
+        "unregister_zone": "crate-visible cfg(test); existing graph registration fixture",
+        "publish_to_zone_with_breakpoints": "test-support; existing stream-text rendering fixtures; live publish_to_zone_for_lease remains",
+        "publish_to_widget": "test-support; existing widget/pixel/policy fixtures; live publish_to_widget_for_lease remains"
+      },
+      "current_references": {
+        "unregister_zone": [
+          "crates/tze_hud_scene/src/graph/zone_ops.rs:110:    pub(crate) fn unregister_zone(&mut self, name: &str) -> Option<ZoneDefinition> {",
+          "crates/tze_hud_scene/src/graph/tests.rs:904:    let removed = scene.unregister_zone(\"subtitle\");"
+        ],
+        "publish_to_zone_with_breakpoints": [
+          "crates/tze_hud_scene/src/graph/tests.rs:1409://   - All three entry points (publish_to_zone, publish_to_zone_with_breakpoints,",
+          "crates/tze_hud_scene/src/graph/tests.rs:1620:/// Cross-entry-point: publish_to_zone and publish_to_zone_with_breakpoints",
+          "crates/tze_hud_scene/src/graph/tests.rs:1647:    // Zone via publish_to_zone_with_breakpoints.",
+          "crates/tze_hud_scene/src/graph/tests.rs:1681:        let _ = scene_b.publish_to_zone_with_breakpoints(",
+          "crates/tze_hud_scene/src/graph/tests.rs:1696:        \"publish_to_zone and publish_to_zone_with_breakpoints must produce identical record counts; got {count_a} vs {count_b}\"",
+          "crates/tze_hud_scene/src/graph/zone_ops.rs:408:    pub fn publish_to_zone_with_breakpoints(",
+          "crates/tze_hud_compositor/src/renderer/tests/zone_layers.rs:879:    // Publish StreamText with breakpoints via publish_to_zone_with_breakpoints.",
+          "crates/tze_hud_compositor/src/renderer/tests/zone_layers.rs:881:        .publish_to_zone_with_breakpoints(",
+          "crates/tze_hud_compositor/src/renderer/tests/zone_layers.rs:936:        .publish_to_zone_with_breakpoints(",
+          "crates/tze_hud_compositor/src/renderer/tests/zone_layers.rs:961:        .publish_to_zone_with_breakpoints(",
+          "crates/tze_hud_compositor/src/renderer/tests/zone_layers.rs:1016:        .publish_to_zone_with_breakpoints("
+        ],
+        "publish_to_widget": [
+          "crates/tze_hud_widget/tests/shipped_bundles.rs:93:        .publish_to_widget(widget, params, \"agent.test\", None, 0, None)",
+          "crates/tze_hud_scene/src/validation.rs:174:    /// Returned by `publish_to_widget` under `Stack` contention when the",
+          "crates/tze_hud_scene/src/types.rs:2362:    /// Mirrors `ZoneDefinition::max_publishers`. Enforced by `publish_to_widget`",
+          "crates/tze_hud_scene/src/types.rs:2600:                    // Only one publication is retained by publish_to_widget;",
+          "crates/tze_hud_scene/src/types.rs:2619:                    // insertion order maintained by publish_to_widget).",
+          "crates/tze_hud_compositor/tests/gauge_binding_rendering.rs:535:    /// Returns `(scene, tab_id)` ready for `publish_to_widget(\"gauge\", ...)` calls.",
+          "crates/tze_hud_compositor/tests/gauge_binding_rendering.rs:597:            .publish_to_widget(\"gauge\", params_a, \"agent.a\", None, 0, None)",
+          "crates/tze_hud_compositor/tests/gauge_binding_rendering.rs:603:            .publish_to_widget(\"gauge\", params_b, \"agent.b\", None, 0, None)",
+          "crates/tze_hud_compositor/tests/gauge_binding_rendering.rs:650:            .publish_to_widget(\"gauge\", params_a, \"agent.a\", None, 0, None)",
+          "crates/tze_hud_compositor/tests/gauge_binding_rendering.rs:656:            .publish_to_widget(\"gauge\", params_b, \"agent.b\", None, 0, None)",
+          "crates/tze_hud_compositor/tests/gauge_binding_rendering.rs:715:            .publish_to_widget(",
+          "crates/tze_hud_compositor/tests/gauge_binding_rendering.rs:728:            .publish_to_widget(",
+          "crates/tze_hud_compositor/tests/gauge_binding_rendering.rs:794:            .publish_to_widget(\"gauge\", params, \"agent.all\", None, 0, None)",
+          "crates/tze_hud_compositor/tests/widget_transition.rs:124:            .publish_to_widget(GAUGE, params, \"agent-a\", None, ms, None)",
+          "crates/tze_hud_compositor/tests/widget_raster_count.rs:58:        .publish_to_widget(instance, params, \"agent-a\", None, 0, None)",
+          "crates/tze_hud_scene/src/graph/tests.rs:1410://     publish_to_widget) now share the single apply_contention function.",
+          "crates/tze_hud_scene/src/graph/tests.rs:1598:        .publish_to_widget(\"counter\", params(), \"agent.a\", None, 0, None)",
+          "crates/tze_hud_scene/src/graph/tests.rs:1603:        .publish_to_widget(\"counter\", params(), \"agent.a\", None, 0, None)",
+          "crates/tze_hud_scene/src/graph/tests.rs:1616:        .publish_to_widget(\"counter\", params(), \"agent.b\", None, 0, None)",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:859:    let result = scene.publish_to_widget(\"gauge\", params(), \"agent.test\", None, 0, None);",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:870:            .publish_to_widget(\"gauge\", params(), \"agent.test\", None, 0, None)",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:877:/// WHEN an f32 NaN value is submitted THEN publish_to_widget returns",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:887:    let result = scene.publish_to_widget(\"gauge\", params, \"agent.test\", None, 0, None);",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:897:/// WHEN an f32 +Inf value is submitted THEN publish_to_widget returns",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:906:    let result = scene.publish_to_widget(\"gauge\", params, \"agent.test\", None, 0, None);",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:916:/// WHEN an f32 -Inf value is submitted THEN publish_to_widget returns",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:925:    let result = scene.publish_to_widget(\"gauge\", params, \"agent.test\", None, 0, None);",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:944:    let result = scene.publish_to_widget(\"gauge\", params, \"agent.test\", None, 0, None);",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:963:    let result = scene.publish_to_widget(\"gauge\", params, \"agent.test\", None, 0, None);",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:981:    let result = scene.publish_to_widget(\"gauge\", params, \"agent.test\", None, 0, None);",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:994:    let result = scene.publish_to_widget(\"gauge\", params, \"agent.test\", None, 0, None);",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1006:    let result = scene.publish_to_widget(\"gauge\", params, \"agent.test\", None, 0, None);",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1027:    let result = scene.publish_to_widget(\"gauge\", params, \"agent.test\", None, 0, None);",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1040:    let result = scene.publish_to_widget(\"no-such-widget\", params, \"agent\", None, 0, None);",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1292:        .publish_to_widget(",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1338:        .publish_to_widget(",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1351:        .publish_to_widget(",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1389:            .publish_to_widget(",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1436:            .publish_to_widget(",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1478:        .publish_to_widget(",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1491:        .publish_to_widget(",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1545:        .publish_to_widget(",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1559:        .publish_to_widget(",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1598:        .publish_to_widget(",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1643:        .publish_to_widget(",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1656:        .publish_to_widget(",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1696:        .publish_to_widget(\"gauge\", params, \"agent.a\", None, 0, None)",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1738:        .publish_to_widget(",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1751:        .publish_to_widget(",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1778:        .publish_to_widget(",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1791:        .publish_to_widget(",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1819:            .publish_to_widget(",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1874:            .publish_to_widget(",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1904:        .publish_to_widget(",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1917:        .publish_to_widget(",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1931:        .publish_to_widget(",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:2012:        .publish_to_widget(",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:2046:        .publish_to_widget(",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:2081:        .publish_to_widget(",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:2118:        .publish_to_widget(",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:2133:        .publish_to_widget(",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:2176:        .publish_to_widget(",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:2221:        .publish_to_widget(",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:2265:        .publish_to_widget(",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:2278:        .publish_to_widget(",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:2317:        .publish_to_widget(",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:2330:        .publish_to_widget(",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:2498:        .publish_to_widget(",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:2511:        .publish_to_widget(",
+          "crates/tze_hud_scene/src/graph/zone_ops.rs:458:    pub fn publish_to_widget(",
+          "crates/tze_hud_compositor/src/renderer/tests/hit_drag.rs:591:        .publish_to_widget("
+        ]
+      }
+    },
+    {
+      "baseline_diagnostic": "crates/tze_hud_scene/src/mutation.rs:312:16: warning: field `budget_warning` is never read",
+      "symbols": [
+        "budget_warning"
+      ],
+      "references": {
+        "budget_warning": [
+          "crates/tze_hud_scene/src/mutation.rs:312:    pub budget_warning: bool,",
+          "crates/tze_hud_scene/src/mutation.rs:330:            budget_warning: false,",
+          "crates/tze_hud_scene/src/mutation.rs:458:        let mut budget_warning = false;",
+          "crates/tze_hud_scene/src/mutation.rs:468:                budget_warning = true;",
+          "crates/tze_hud_scene/src/mutation.rs:546:                budget_warning = true;",
+          "crates/tze_hud_scene/src/mutation.rs:563:            budget_warning,",
+          "crates/tze_hud_scene/src/graph/tests.rs:3083:    assert!(!result.budget_warning);",
+          "crates/tze_hud_scene/src/graph/tests.rs:3173:    // 5th tile should succeed (within hard limit) but with budget_warning",
+          "crates/tze_hud_scene/src/graph/tests.rs:3189:    assert!(result.budget_warning);"
+        ]
+      },
+      "group": 9,
+      "classification_by_symbol": {
+        "budget_warning": "Retained MutationResult mutation-return contract, not a production-read claim. Production producers: mutation.rs467/545 and return562; required is_lease_budget_warning calls466/544. Fixture readers: graph/tests.rs3083 (false) and3189 (true); no production reader exists."
+      },
+      "current_references": {
+        "budget_warning": [
+          "crates/tze_hud_scene/src/mutation.rs:311:    pub budget_warning: bool,",
+          "crates/tze_hud_scene/src/mutation.rs:329:            budget_warning: false,",
+          "crates/tze_hud_scene/src/mutation.rs:457:        let mut budget_warning = false;",
+          "crates/tze_hud_scene/src/mutation.rs:467:                budget_warning = true;",
+          "crates/tze_hud_scene/src/mutation.rs:545:                budget_warning = true;",
+          "crates/tze_hud_scene/src/mutation.rs:562:            budget_warning,",
+          "crates/tze_hud_scene/src/graph/tests.rs:3083:    assert!(!result.budget_warning);",
+          "crates/tze_hud_scene/src/graph/tests.rs:3173:    // 5th tile should succeed (within hard limit) but with budget_warning",
+          "crates/tze_hud_scene/src/graph/tests.rs:3189:    assert!(result.budget_warning);"
+        ]
+      }
+    },
+    {
+      "baseline_diagnostic": "crates/tze_hud_scene/src/perf_budget.rs:17:22: warning: constant `TRANSACTION_VALIDATION_BUDGET_US` is never used",
+      "symbols": [
+        "TRANSACTION_VALIDATION_BUDGET_US"
+      ],
+      "references": {
+        "TRANSACTION_VALIDATION_BUDGET_US": [
+          "examples/vertical_slice/tests/budget_assertions.rs:514:    use tze_hud_scene::perf_budget::budgets::TRANSACTION_VALIDATION_BUDGET_US;",
+          "examples/vertical_slice/tests/budget_assertions.rs:516:    let budget_us = test_budget(TRANSACTION_VALIDATION_BUDGET_US);",
+          "crates/tze_hud_scene/src/perf_budget.rs:17:    pub const TRANSACTION_VALIDATION_BUDGET_US: u64 = 200;"
+        ]
+      },
+      "group": 10,
+      "classification_by_symbol": {
+        "TRANSACTION_VALIDATION_BUDGET_US": "test-support; vertical_slice budget_assertions514 named validation budget fixture"
+      },
+      "current_references": {
+        "TRANSACTION_VALIDATION_BUDGET_US": [
+          "crates/tze_hud_scene/src/perf_budget.rs:18:    pub const TRANSACTION_VALIDATION_BUDGET_US: u64 = 200;",
+          "examples/vertical_slice/tests/budget_assertions.rs:514:    use tze_hud_scene::perf_budget::budgets::TRANSACTION_VALIDATION_BUDGET_US;",
+          "examples/vertical_slice/tests/budget_assertions.rs:516:    let budget_us = test_budget(TRANSACTION_VALIDATION_BUDGET_US);"
+        ]
+      }
+    },
+    {
+      "baseline_diagnostic": "crates/tze_hud_scene/src/timing/domains.rs:185:19: warning: methods `after_wall` and `after_mono` are never used",
+      "symbols": [
+        "after_wall",
+        "after_mono"
+      ],
+      "references": {
+        "after_wall": [
+          "crates/tze_hud_scene/src/timing/domains.rs:185:    pub fn after_wall(self, base: WallUs) -> WallUs {",
+          "crates/tze_hud_scene/src/timing/domains.rs:280:        assert_eq!(delta.after_wall(base), WallUs(1_500_000));",
+          "crates/tze_hud_scene/src/timing/domains.rs:294:        assert_eq!(delta.after_wall(base), WallUs(u64::MAX));"
+        ],
+        "after_mono": [
+          "crates/tze_hud_scene/src/timing/domains.rs:191:    pub fn after_mono(self, base: MonoUs) -> MonoUs {",
+          "crates/tze_hud_scene/src/timing/domains.rs:287:        assert_eq!(delta.after_mono(base), MonoUs(2_100_000));"
+        ]
+      },
+      "group": 11,
+      "classification_by_symbol": {
+        "after_wall": "remove with dead DurationUs type",
+        "after_mono": "remove with dead DurationUs type"
+      },
+      "current_references": {
+        "after_wall": [],
+        "after_mono": []
+      }
+    },
+    {
+      "baseline_diagnostic": "crates/tze_hud_scene/src/timing/hints.rs:105:19: warning: methods `as_present_at` and `is_relative` are never used",
+      "symbols": [
+        "as_present_at",
+        "is_relative"
+      ],
+      "references": {
+        "as_present_at": [
+          "crates/tze_hud_scene/src/timing/hints.rs:105:    pub fn as_present_at(self) -> Option<WallUs> {",
+          "crates/tze_hud_scene/src/timing/hints.rs:265:        assert_eq!(s.as_present_at(), Some(t));",
+          "crates/tze_hud_scene/src/timing/hints.rs:273:        assert_eq!(s.as_present_at(), None);"
+        ],
+        "is_relative": [
+          "crates/tze_hud_scene/src/timing/hints.rs:114:    pub fn is_relative(self) -> bool {",
+          "crates/tze_hud_scene/src/timing/hints.rs:266:        assert!(!s.is_relative());",
+          "crates/tze_hud_scene/src/timing/hints.rs:272:        assert!(s.is_relative());",
+          "crates/tze_hud_scene/src/timing/hints.rs:279:        assert!(s.is_relative());",
+          "crates/tze_hud_scene/src/timing/hints.rs:285:        assert!(s.is_relative());"
+        ]
+      },
+      "group": 12,
+      "classification_by_symbol": {
+        "as_present_at": "remove with dead Schedule type",
+        "is_relative": "remove with dead Schedule type"
+      },
+      "current_references": {
+        "as_present_at": [],
+        "is_relative": []
+      }
+    },
+    {
+      "baseline_diagnostic": "crates/tze_hud_scene/src/timing/hints.rs:195:19: warning: associated items `resolve_present_at` and `has_relative_schedule` are never used",
+      "symbols": [
+        "resolve_present_at",
+        "has_relative_schedule"
+      ],
+      "references": {
+        "resolve_present_at": [
+          "crates/tze_hud_scene/src/timing/hints.rs:141:/// [`TimingHints::resolve_present_at`] helper implements this.",
+          "crates/tze_hud_scene/src/timing/hints.rs:195:    pub fn resolve_present_at(",
+          "crates/tze_hud_scene/src/timing/hints.rs:335:        let result = TimingHints::resolve_present_at(Some(&node), Some(&parent), None);",
+          "crates/tze_hud_scene/src/timing/hints.rs:345:        let result = TimingHints::resolve_present_at(Some(&node), Some(&parent), None);",
+          "crates/tze_hud_scene/src/timing/hints.rs:354:        let result = TimingHints::resolve_present_at(None, None, Some(&batch));",
+          "crates/tze_hud_scene/src/timing/hints.rs:361:        let result = TimingHints::resolve_present_at(None, None, None);"
+        ],
+        "has_relative_schedule": [
+          "crates/tze_hud_scene/src/timing/hints.rs:217:    pub fn has_relative_schedule(&self) -> bool {",
+          "crates/tze_hud_scene/src/timing/hints.rs:316:        assert!(h.has_relative_schedule());",
+          "crates/tze_hud_scene/src/timing/hints.rs:323:        assert!(!h.has_relative_schedule());"
+        ]
+      },
+      "group": 13,
+      "classification_by_symbol": {
+        "resolve_present_at": "remove with dead scene TimingHints type",
+        "has_relative_schedule": "remove with dead scene TimingHints type"
+      },
+      "current_references": {
+        "resolve_present_at": [],
+        "has_relative_schedule": []
+      }
+    },
+    {
+      "baseline_diagnostic": "crates/tze_hud_scene/src/types.rs:1064:19: warning: method `node_hit_ids` is never used",
+      "symbols": [
+        "node_hit_ids"
+      ],
+      "references": {
+        "node_hit_ids": [
+          "crates/tze_hud_scene/tests/hit_test.rs:577:    assert_eq!(node_hit.node_hit_ids(), Some((tile_id, node_id)));",
+          "crates/tze_hud_scene/src/types.rs:1064:    pub fn node_hit_ids(&self) -> Option<(SceneId, SceneId)> {"
+        ]
+      },
+      "group": 14,
+      "classification_by_symbol": {
+        "node_hit_ids": "HitResult: test-support; external scene hit_test fixture"
+      },
+      "current_references": {
+        "node_hit_ids": [
+          "crates/tze_hud_scene/tests/hit_test.rs:577:    assert_eq!(node_hit.node_hit_ids(), Some((tile_id, node_id)));",
+          "crates/tze_hud_scene/src/types.rs:1066:    pub fn node_hit_ids(&self) -> Option<(SceneId, SceneId)> {"
+        ]
+      }
+    },
+    {
+      "baseline_diagnostic": "crates/tze_hud_scene/src/types.rs:1205:5: warning: variants `MaxTilesPerLeaseExceeded` and `MaxNodesPerTileExceeded` are never constructed",
+      "symbols": [
+        "MaxTilesPerLeaseExceeded",
+        "MaxNodesPerTileExceeded"
+      ],
+      "references": {
+        "MaxTilesPerLeaseExceeded": [
+          "crates/tze_hud_scene/src/types.rs:1205:    MaxTilesPerLeaseExceeded { current: u32, limit: u32 },",
+          "crates/tze_hud_scene/src/types.rs:1216:            CapsError::MaxTilesPerLeaseExceeded { current, limit } => {"
+        ],
+        "MaxNodesPerTileExceeded": [
+          "crates/tze_hud_scene/src/types.rs:1207:    MaxNodesPerTileExceeded { current: u32, limit: u32 },",
+          "crates/tze_hud_scene/src/types.rs:1219:            CapsError::MaxNodesPerTileExceeded { current, limit } => {"
+        ]
+      },
+      "group": 15,
+      "classification_by_symbol": {
+        "MaxTilesPerLeaseExceeded": "remove never-constructed CapsError variant and Display arm; no serde/wire representation",
+        "MaxNodesPerTileExceeded": "remove never-constructed CapsError variant and Display arm; no serde/wire representation"
+      },
+      "current_references": {
+        "MaxTilesPerLeaseExceeded": [],
+        "MaxNodesPerTileExceeded": []
+      }
+    },
+    {
+      "baseline_diagnostic": "crates/tze_hud_scene/src/types.rs:1234:5: warning: variants `LeaseNotActive` and `BudgetExceeded` are never constructed",
+      "symbols": [
+        "LeaseNotActive",
+        "BudgetExceeded"
+      ],
+      "references": {
+        "LeaseNotActive": [
+          "crates/tze_hud_scene/src/types.rs:1234:    LeaseNotActive(SceneId),",
+          "crates/tze_hud_scene/src/types.rs:1248:            LeaseError::LeaseNotActive(id) => write!(f, \"lease not active: {id}\"),"
+        ],
+        "BudgetExceeded": [
+          "crates/tze_hud_scene/src/error_codes.rs:47:        V::BudgetExceeded { .. } | V::NodeCountExceeded { .. } | V::BatchSizeExceeded { .. } => {",
+          "crates/tze_hud_scene/src/error_codes.rs:63:            ValidationError::BudgetExceeded {",
+          "crates/tze_hud_protocol/src/session_server/mod.rs:1141:        StoreResourceError::BudgetExceeded { .. } => 2,",
+          "crates/tze_hud_scene/src/validation.rs:60:    BudgetExceeded { resource: String },",
+          "crates/tze_hud_scene/src/validation.rs:187:/// - Stage 2 (Budget): `BudgetExceeded`, `BatchSizeExceeded`",
+          "crates/tze_hud_scene/src/validation.rs:201:    BudgetExceeded,",
+          "crates/tze_hud_scene/src/validation.rs:285:            ValidationError::BudgetExceeded { .. } => Self::BudgetExceeded,",
+          "crates/tze_hud_scene/src/validation.rs:433:        ValidationError::BudgetExceeded { resource } => (",
+          "crates/tze_hud_scene/src/graph/tiles.rs:81:            return Err(ValidationError::BudgetExceeded {",
+          "crates/tze_hud_resource/tests/store_behavior.rs:96:    assert!(matches!(err, ResourceError::BudgetExceeded { .. }));",
+          "crates/tze_hud_resource/tests/store_behavior.rs:119:    assert!(matches!(err, ResourceError::BudgetExceeded { .. }));",
+          "crates/tze_hud_resource/tests/store_behavior.rs:139:    assert!(matches!(err, ResourceError::BudgetExceeded { .. }));",
+          "crates/tze_hud_resource/tests/store_behavior.rs:226:    assert!(matches!(err, ResourceError::BudgetExceeded { .. }));",
+          "crates/tze_hud_scene/src/types.rs:1236:    BudgetExceeded(BudgetError),",
+          "crates/tze_hud_scene/src/types.rs:1249:            LeaseError::BudgetExceeded(e) => write!(f, \"budget exceeded: {e}\"),",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:21:// THEN the runtime MUST reject with BudgetExceeded",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:34:        matches!(err, ValidationError::BudgetExceeded { .. }),",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:35:        \"expected BudgetExceeded, got {err:?}\"",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:41:// THEN the runtime MUST reject with BudgetExceeded",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:93:        matches!(err, ValidationError::BudgetExceeded { .. }),",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:94:        \"expected BudgetExceeded, got {err:?}\"",
+          "crates/tze_hud_scene/src/mutation.rs:461:                let err = ValidationError::BudgetExceeded {",
+          "crates/tze_hud_scene/src/mutation.rs:1966:        // not BudgetExceeded.",
+          "crates/tze_hud_resource/src/types.rs:269:    BudgetExceeded { detail: String },",
+          "crates/tze_hud_resource/src/types.rs:312:            ResourceError::BudgetExceeded { .. } => \"RESOURCE_BUDGET_EXCEEDED\",",
+          "crates/tze_hud_scene/src/graph/tabs.rs:60:            return Err(ValidationError::BudgetExceeded {",
+          "crates/tze_hud_resource/src/validation.rs:121:        return Err(ResourceError::BudgetExceeded {",
+          "crates/tze_hud_resource/src/validation.rs:132:        return Err(ResourceError::BudgetExceeded {",
+          "crates/tze_hud_resource/src/validation.rs:584:        assert!(matches!(err, ResourceError::BudgetExceeded { .. }));",
+          "crates/tze_hud_resource/src/validation.rs:596:        assert!(matches!(err, ResourceError::BudgetExceeded { .. }));",
+          "crates/tze_hud_resource/src/upload.rs:223:    /// - `BudgetExceeded` \u2014 decoded size would exceed agent or runtime limit.",
+          "crates/tze_hud_resource/src/upload.rs:501:            return Err(ResourceError::BudgetExceeded {",
+          "crates/tze_hud_resource/src/upload.rs:520:                .map_err(|error| ResourceError::BudgetExceeded {",
+          "crates/tze_hud_resource/src/upload.rs:527:                .map_err(|error| ResourceError::BudgetExceeded {",
+          "crates/tze_hud_resource/src/upload.rs:699:        assert!(matches!(error, ResourceError::BudgetExceeded { .. }));"
+        ]
+      },
+      "group": 16,
+      "classification_by_symbol": {
+        "LeaseNotActive": "remove never-constructed LeaseError variant and Display arm",
+        "BudgetExceeded": "remove only never-constructed LeaseError variant; retain live ValidationError/ResourceError/BudgetError owners"
+      },
+      "current_references": {
+        "LeaseNotActive": [],
+        "BudgetExceeded": [
+          "crates/tze_hud_scene/src/error_codes.rs:47:        V::BudgetExceeded { .. } | V::NodeCountExceeded { .. } | V::BatchSizeExceeded { .. } => {",
+          "crates/tze_hud_scene/src/error_codes.rs:63:            ValidationError::BudgetExceeded {",
+          "crates/tze_hud_resource/tests/store_behavior.rs:96:    assert!(matches!(err, ResourceError::BudgetExceeded { .. }));",
+          "crates/tze_hud_resource/tests/store_behavior.rs:119:    assert!(matches!(err, ResourceError::BudgetExceeded { .. }));",
+          "crates/tze_hud_resource/tests/store_behavior.rs:139:    assert!(matches!(err, ResourceError::BudgetExceeded { .. }));",
+          "crates/tze_hud_resource/tests/store_behavior.rs:226:    assert!(matches!(err, ResourceError::BudgetExceeded { .. }));",
+          "crates/tze_hud_resource/src/types.rs:269:    BudgetExceeded { detail: String },",
+          "crates/tze_hud_resource/src/types.rs:312:            ResourceError::BudgetExceeded { .. } => \"RESOURCE_BUDGET_EXCEEDED\",",
+          "crates/tze_hud_resource/src/validation.rs:121:        return Err(ResourceError::BudgetExceeded {",
+          "crates/tze_hud_resource/src/validation.rs:132:        return Err(ResourceError::BudgetExceeded {",
+          "crates/tze_hud_resource/src/validation.rs:584:        assert!(matches!(err, ResourceError::BudgetExceeded { .. }));",
+          "crates/tze_hud_resource/src/validation.rs:596:        assert!(matches!(err, ResourceError::BudgetExceeded { .. }));",
+          "crates/tze_hud_resource/src/upload.rs:223:    /// - `BudgetExceeded` \u2014 decoded size would exceed agent or runtime limit.",
+          "crates/tze_hud_resource/src/upload.rs:501:            return Err(ResourceError::BudgetExceeded {",
+          "crates/tze_hud_resource/src/upload.rs:520:                .map_err(|error| ResourceError::BudgetExceeded {",
+          "crates/tze_hud_resource/src/upload.rs:527:                .map_err(|error| ResourceError::BudgetExceeded {",
+          "crates/tze_hud_resource/src/upload.rs:699:        assert!(matches!(error, ResourceError::BudgetExceeded { .. }));",
+          "crates/tze_hud_scene/src/validation.rs:60:    BudgetExceeded { resource: String },",
+          "crates/tze_hud_scene/src/validation.rs:187:/// - Stage 2 (Budget): `BudgetExceeded`, `BatchSizeExceeded`",
+          "crates/tze_hud_scene/src/validation.rs:201:    BudgetExceeded,",
+          "crates/tze_hud_scene/src/validation.rs:285:            ValidationError::BudgetExceeded { .. } => Self::BudgetExceeded,",
+          "crates/tze_hud_scene/src/validation.rs:433:        ValidationError::BudgetExceeded { resource } => (",
+          "crates/tze_hud_protocol/src/session_server/mod.rs:1141:        StoreResourceError::BudgetExceeded { .. } => 2,",
+          "crates/tze_hud_scene/src/graph/tabs.rs:61:            return Err(ValidationError::BudgetExceeded {",
+          "crates/tze_hud_scene/src/graph/tiles.rs:82:            return Err(ValidationError::BudgetExceeded {",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:21:// THEN the runtime MUST reject with BudgetExceeded",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:34:        matches!(err, ValidationError::BudgetExceeded { .. }),",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:35:        \"expected BudgetExceeded, got {err:?}\"",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:41:// THEN the runtime MUST reject with BudgetExceeded",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:93:        matches!(err, ValidationError::BudgetExceeded { .. }),",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:94:        \"expected BudgetExceeded, got {err:?}\"",
+          "crates/tze_hud_scene/src/mutation.rs:460:                let err = ValidationError::BudgetExceeded {",
+          "crates/tze_hud_scene/src/mutation.rs:1965:        // not BudgetExceeded."
+        ]
+      }
+    },
+    {
+      "baseline_diagnostic": "crates/tze_hud_scene/src/types.rs:1596:15: warning: function `geometry_policy_to_absolute_rect` is never used",
+      "symbols": [
+        "geometry_policy_to_absolute_rect"
+      ],
+      "references": {
+        "geometry_policy_to_absolute_rect": [
+          "tests/integration/movable_elements_e2e.rs:26:    geometry_policy_to_absolute_rect, rect_to_relative_geometry_policy,",
+          "tests/integration/movable_elements_e2e.rs:631:    let new_rect = geometry_policy_to_absolute_rect(override_policy, new_w, new_h);",
+          "tests/integration/movable_elements_e2e.rs:707:    let orig_rect = geometry_policy_to_absolute_rect(override_policy, original_w, original_h);",
+          "tests/integration/movable_elements_e2e.rs:722:    let new_rect = geometry_policy_to_absolute_rect(override_policy, new_w, new_h);",
+          "crates/tze_hud_scene/src/types.rs:1596:pub fn geometry_policy_to_absolute_rect("
+        ]
+      },
+      "group": 17,
+      "classification_by_symbol": {
+        "geometry_policy_to_absolute_rect": "test-support; separate integration movable-elements fixtures; other live geometry helpers retained"
+      },
+      "current_references": {
+        "geometry_policy_to_absolute_rect": [
+          "tests/integration/movable_elements_e2e.rs:26:    geometry_policy_to_absolute_rect, rect_to_relative_geometry_policy,",
+          "tests/integration/movable_elements_e2e.rs:631:    let new_rect = geometry_policy_to_absolute_rect(override_policy, new_w, new_h);",
+          "tests/integration/movable_elements_e2e.rs:707:    let orig_rect = geometry_policy_to_absolute_rect(override_policy, original_w, original_h);",
+          "tests/integration/movable_elements_e2e.rs:722:    let new_rect = geometry_policy_to_absolute_rect(override_policy, new_w, new_h);",
+          "crates/tze_hud_scene/src/types.rs:1583:pub fn geometry_policy_to_absolute_rect("
+        ]
+      }
+    },
+    {
+      "baseline_diagnostic": "crates/tze_hud_scene/src/types.rs:1907:18: warning: constant `MAX_ACTION_LABEL_LEN` is never used",
+      "symbols": [
+        "MAX_ACTION_LABEL_LEN"
+      ],
+      "references": {
+        "MAX_ACTION_LABEL_LEN": [
+          "crates/tze_hud_scene/src/types.rs:1883:/// notification slot.  Labels exceeding `MAX_ACTION_LABEL_LEN` characters are",
+          "crates/tze_hud_scene/src/types.rs:1890:    /// Maximum `MAX_ACTION_LABEL_LEN` characters.  The runtime does not",
+          "crates/tze_hud_scene/src/types.rs:1907:pub const MAX_ACTION_LABEL_LEN: usize = 32;",
+          "crates/tze_hud_scene/src/types.rs:1949:    /// truncated to `MAX_ACTION_LABEL_LEN` characters."
+        ]
+      },
+      "group": 18,
+      "classification_by_symbol": {
+        "MAX_ACTION_LABEL_LEN": "remove unused, unenforced constant and stale source comment references; actual rendering/schema unchanged"
+      },
+      "current_references": {
+        "MAX_ACTION_LABEL_LEN": []
+      }
+    },
+    {
+      "baseline_diagnostic": "crates/tze_hud_scene/src/types.rs:2540:19: warning: methods `get_instance` and `active_for_widget` are never used",
+      "symbols": [
+        "get_instance",
+        "active_for_widget"
+      ],
+      "references": {
+        "get_instance": [
+          "app/tze_hud_app/tests/production_boot.rs:65:            scene.widget_registry.get_instance(instance).is_some(),",
+          "app/tze_hud_app/tests/benchmark_config_schema.rs:66:            scene.widget_registry.get_instance(instance).is_some(),",
+          "crates/tze_hud_scene/src/types.rs:2540:    pub fn get_instance(&self, instance_name: &str) -> Option<&WidgetInstance> {",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1086:    let retrieved = scene.widget_registry.get_instance(\"cpu-gauge\");"
+        ],
+        "active_for_widget": [
+          "crates/tze_hud_widget/tests/shipped_bundles.rs:304:        let pubs = scene.widget_registry.active_for_widget(widget);",
+          "crates/tze_hud_widget/tests/shipped_bundles.rs:354:    assert!(scene.widget_registry.active_for_widget(\"gauge\").is_empty());",
+          "crates/tze_hud_widget/tests/shipped_bundles.rs:382:    assert_eq!(scene.widget_registry.active_for_widget(w).len(), 1);",
+          "crates/tze_hud_scene/src/types.rs:2563:    pub fn active_for_widget(&self, instance_name: &str) -> &[WidgetPublishRecord] {",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1010:    let pubs = scene.widget_registry.active_for_widget(\"gauge\");",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1689:/// WHEN a publish is recorded THEN active_for_widget returns it.",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1699:    let active = scene.widget_registry.active_for_widget(\"gauge\");",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1764:    let active = scene.widget_registry.active_for_widget(\"gauge\");",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1804:    let active = scene.widget_registry.active_for_widget(\"gauge\");",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1833:    let active = scene.widget_registry.active_for_widget(\"gauge\");",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1888:    let active = scene.widget_registry.active_for_widget(\"gauge\");",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1944:    let active = scene.widget_registry.active_for_widget(\"gauge\");",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:2029:        scene.widget_registry.active_for_widget(\"gauge\").len(),",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:2065:        scene.widget_registry.active_for_widget(\"gauge\").len(),",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:2147:        scene.widget_registry.active_for_widget(\"gauge\").len(),",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:2158:    let remaining = scene.widget_registry.active_for_widget(\"gauge\");",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:2233:    assert_eq!(scene.widget_registry.active_for_widget(\"gauge\").len(), 1);",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:2240:        scene.widget_registry.active_for_widget(\"gauge\").len(),",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:2342:    assert_eq!(scene.widget_registry.active_for_widget(\"gauge\").len(), 2);",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:2348:    let remaining = scene.widget_registry.active_for_widget(\"gauge\");",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:2372:    assert_eq!(scene.widget_registry.active_for_widget(\"gauge\").len(), 0);",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:2457:    let gauge_pubs = scene.widget_registry.active_for_widget(\"gauge\");",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:2466:    let mem_pubs = scene.widget_registry.active_for_widget(\"mem-gauge\");",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:2523:    assert_eq!(scene.widget_registry.active_for_widget(\"gauge\").len(), 2);",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:2540:    let remaining = scene.widget_registry.active_for_widget(\"gauge\");",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:2759:    let widget = scene.widget_registry.active_for_widget(\"gauge\");"
+        ]
+      },
+      "group": 19,
+      "classification_by_symbol": {
+        "get_instance": "WidgetRegistry: test-support for graph spec fixture; two app fixtures adapt real instances lookup",
+        "active_for_widget": "WidgetRegistry: test-support for existing widget/policy/cleanup fixtures"
+      },
+      "current_references": {
+        "get_instance": [
+          "crates/tze_hud_scene/src/types.rs:2518:    pub fn get_instance(&self, instance_name: &str) -> Option<&WidgetInstance> {",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1086:    let retrieved = scene.widget_registry.get_instance(\"cpu-gauge\");"
+        ],
+        "active_for_widget": [
+          "crates/tze_hud_scene/src/types.rs:2542:    pub fn active_for_widget(&self, instance_name: &str) -> &[WidgetPublishRecord] {",
+          "crates/tze_hud_widget/tests/shipped_bundles.rs:304:        let pubs = scene.widget_registry.active_for_widget(widget);",
+          "crates/tze_hud_widget/tests/shipped_bundles.rs:354:    assert!(scene.widget_registry.active_for_widget(\"gauge\").is_empty());",
+          "crates/tze_hud_widget/tests/shipped_bundles.rs:382:    assert_eq!(scene.widget_registry.active_for_widget(w).len(), 1);",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1010:    let pubs = scene.widget_registry.active_for_widget(\"gauge\");",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1689:/// WHEN a publish is recorded THEN active_for_widget returns it.",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1699:    let active = scene.widget_registry.active_for_widget(\"gauge\");",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1764:    let active = scene.widget_registry.active_for_widget(\"gauge\");",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1804:    let active = scene.widget_registry.active_for_widget(\"gauge\");",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1833:    let active = scene.widget_registry.active_for_widget(\"gauge\");",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1888:    let active = scene.widget_registry.active_for_widget(\"gauge\");",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1944:    let active = scene.widget_registry.active_for_widget(\"gauge\");",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:2029:        scene.widget_registry.active_for_widget(\"gauge\").len(),",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:2065:        scene.widget_registry.active_for_widget(\"gauge\").len(),",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:2147:        scene.widget_registry.active_for_widget(\"gauge\").len(),",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:2158:    let remaining = scene.widget_registry.active_for_widget(\"gauge\");",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:2233:    assert_eq!(scene.widget_registry.active_for_widget(\"gauge\").len(), 1);",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:2240:        scene.widget_registry.active_for_widget(\"gauge\").len(),",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:2342:    assert_eq!(scene.widget_registry.active_for_widget(\"gauge\").len(), 2);",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:2348:    let remaining = scene.widget_registry.active_for_widget(\"gauge\");",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:2372:    assert_eq!(scene.widget_registry.active_for_widget(\"gauge\").len(), 0);",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:2457:    let gauge_pubs = scene.widget_registry.active_for_widget(\"gauge\");",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:2466:    let mem_pubs = scene.widget_registry.active_for_widget(\"mem-gauge\");",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:2523:    assert_eq!(scene.widget_registry.active_for_widget(\"gauge\").len(), 2);",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:2540:    let remaining = scene.widget_registry.active_for_widget(\"gauge\");",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:2759:    let widget = scene.widget_registry.active_for_widget(\"gauge\");"
+        ]
+      }
+    },
+    {
+      "baseline_diagnostic": "crates/tze_hud_scene/src/types.rs:2849:19: warning: associated items `verify_checksum`, `to_json`, and `from_json` are never used",
+      "symbols": [
+        "verify_checksum",
+        "to_json",
+        "from_json"
+      ],
+      "references": {
+        "verify_checksum": [
+          "crates/tze_hud_scene/tests/snapshot.rs:94:        snap.verify_checksum(),",
+          "crates/tze_hud_scene/tests/snapshot.rs:108:        !tampered.verify_checksum(),",
+          "crates/tze_hud_scene/tests/snapshot.rs:147:        deserialized.verify_checksum(),",
+          "crates/tze_hud_scene/tests/snapshot.rs:165:    assert!(deserialized.verify_checksum());",
+          "crates/tze_hud_scene/tests/snapshot.rs:191:            snap.verify_checksum(),",
+          "crates/tze_hud_scene/tests/snapshot.rs:572:            prop_assert!(snap.verify_checksum());",
+          "crates/tze_hud_scene/src/graph/tests.rs:494:    assert!(snapshot.verify_checksum());",
+          "crates/tze_hud_scene/src/graph/tests.rs:561:    assert!(snapshot.verify_checksum());",
+          "crates/tze_hud_scene/src/graph/tests.rs:603:    assert!(restored.verify_checksum());",
+          "crates/tze_hud_scene/src/graph/tests.rs:667:/// This preserves `verify_checksum()` for older surface-less snapshots produced",
+          "crates/tze_hud_scene/src/graph/tests.rs:687:    assert!(restored.verify_checksum());",
+          "crates/tze_hud_scene/src/types.rs:2790:    /// [`verify_checksum`](Self::verify_checksum) still succeeds for older",
+          "crates/tze_hud_scene/src/types.rs:2813:    /// `checksum` field set to the empty string. See [`SceneGraphSnapshot::verify_checksum`].",
+          "crates/tze_hud_scene/src/types.rs:2849:    pub fn verify_checksum(&self) -> bool {",
+          "crates/tze_hud_scene/src/graph/snapshot.rs:24:    /// Use [`SceneGraphSnapshot::verify_checksum`] to verify after deserialization."
+        ],
+        "to_json": [
+          "crates/tze_hud_telemetry/src/validation.rs:402:    pub fn to_json(&self) -> Result<String, serde_json::Error> {",
+          "crates/tze_hud_telemetry/src/validation.rs:611:        let json = report.to_json().unwrap();",
+          "crates/tze_hud_telemetry/src/collector.rs:47:        self.summary.to_json()",
+          "crates/tze_hud_telemetry/src/record.rs:583:    pub fn to_json(&self) -> Result<String, serde_json::Error> {",
+          "crates/tze_hud_telemetry/src/record.rs:616:        let json = summary.to_json().unwrap();",
+          "crates/tze_hud_telemetry/src/record.rs:653:        let json = summary.to_json().unwrap();",
+          "crates/tze_hud_telemetry/src/record.rs:732:        let json = summary.to_json().unwrap();",
+          "crates/tze_hud_telemetry/src/record.rs:858:        let json = summary.to_json().unwrap();",
+          "crates/tze_hud_telemetry/src/record.rs:1072:        let json = summary.to_json().unwrap();",
+          "crates/tze_hud_telemetry/src/record.rs:1077:        // to_json uses pretty-print (spaces after colons); check for the value.",
+          "crates/tze_hud_runtime/src/firewall.rs:89:    pub fn to_json(&self) -> Value {",
+          "crates/tze_hud_runtime/src/firewall.rs:686:            TailnetInbound::Allowed.to_json(),",
+          "crates/tze_hud_runtime/src/firewall.rs:689:        let j = blocked_by(\"deny-exe\").to_json();",
+          "crates/tze_hud_scene/tests/snapshot.rs:58:    let json1 = snap1.to_json().unwrap();",
+          "crates/tze_hud_scene/tests/snapshot.rs:59:    let json2 = snap2.to_json().unwrap();",
+          "crates/tze_hud_scene/tests/snapshot.rs:77:    let json1 = snap1.to_json().unwrap();",
+          "crates/tze_hud_scene/tests/snapshot.rs:78:    let json2 = snap2.to_json().unwrap();",
+          "crates/tze_hud_scene/tests/snapshot.rs:137:    let json1 = original.to_json().unwrap();",
+          "crates/tze_hud_scene/tests/snapshot.rs:140:    let json2 = deserialized.to_json().unwrap();",
+          "crates/tze_hud_scene/tests/snapshot.rs:156:    let json1 = original.to_json().unwrap();",
+          "crates/tze_hud_scene/tests/snapshot.rs:159:    let json2 = deserialized.to_json().unwrap();",
+          "crates/tze_hud_scene/tests/snapshot.rs:239:        let json1 = snap.to_json().unwrap();",
+          "crates/tze_hud_scene/tests/snapshot.rs:241:        let json2 = deser.to_json().unwrap();",
+          "crates/tze_hud_scene/tests/snapshot.rs:249:        let json3 = snap2.to_json().unwrap();",
+          "crates/tze_hud_scene/tests/snapshot.rs:277:    let json = snap.to_json().unwrap();",
+          "crates/tze_hud_scene/tests/snapshot.rs:332:    let json = snap.to_json().unwrap();",
+          "crates/tze_hud_scene/tests/snapshot.rs:510:        snap1.to_json().unwrap(),",
+          "crates/tze_hud_scene/tests/snapshot.rs:511:        snap2.to_json().unwrap(),",
+          "crates/tze_hud_scene/tests/snapshot.rs:550:            prop_assert_eq!(s1.to_json().unwrap(), s2.to_json().unwrap());",
+          "crates/tze_hud_scene/tests/snapshot.rs:560:            let json1 = snap.to_json().unwrap();",
+          "crates/tze_hud_scene/tests/snapshot.rs:562:            let json2 = deser.to_json().unwrap();",
+          "crates/tze_hud_mcp/src/error.rs:91:    pub fn to_json(&self) -> serde_json::Value {",
+          "crates/tze_hud_mcp/src/error.rs:150:        let v = e.to_json();",
+          "crates/tze_hud_mcp/src/server.rs:102:        \"content\": [{ \"type\": \"text\", \"text\": err.to_json().to_string() }],",
+          "crates/tze_hud_runtime/src/operator/status.rs:62:    pub fn to_json(&self) -> Value {",
+          "crates/tze_hud_runtime/src/operator/status.rs:346:            \"tailnet_inbound\": tailnet_inbound.to_json(),",
+          "crates/tze_hud_runtime/src/operator/status.rs:349:            \"safe_mode_hotkey\": safe_mode_hotkey().to_json(),",
+          "crates/tze_hud_runtime/src/operator/status.rs:387:            ok.to_json(),",
+          "crates/tze_hud_runtime/src/operator/status.rs:391:            failed().to_json(),",
+          "crates/tze_hud_runtime/src/operator/status.rs:394:        assert_eq!(HotkeyStatus::NotApplicable.to_json(), Value::Null);",
+          "crates/tze_hud_runtime/src/operator/status.rs:399:            pending.to_json(),",
+          "crates/tze_hud_protocol/src/session_server/mod.rs:280:                            .to_json()",
+          "crates/tze_hud_scene/tests/session_lifecycle.rs:90:    fn to_json(&self) -> String {",
+          "crates/tze_hud_scene/tests/session_lifecycle.rs:352:    let json_log = log.to_json();",
+          "crates/tze_hud_runtime/src/shell/system_card.rs:163:        let snapshot_json = scene.take_snapshot(1, 1).to_json().unwrap();",
+          "crates/tze_hud_scene/src/graph/tests.rs:596:    let json = snapshot.to_json().unwrap();",
+          "crates/tze_hud_scene/src/graph/tests.rs:676:    let json = snapshot.to_json().unwrap();",
+          "crates/tze_hud_scene/src/types.rs:2858:    pub fn to_json(&self) -> Result<String, serde_json::Error> {"
+        ],
+        "from_json": [
+          "crates/tze_hud_scene/tests/snapshot.rs:139:    let deserialized = SceneGraphSnapshot::from_json(&json1).unwrap();",
+          "crates/tze_hud_scene/tests/snapshot.rs:158:    let deserialized = SceneGraphSnapshot::from_json(&json1).unwrap();",
+          "crates/tze_hud_scene/tests/snapshot.rs:240:        let deser = SceneGraphSnapshot::from_json(&json1).unwrap();",
+          "crates/tze_hud_scene/tests/snapshot.rs:354:    let deser = SceneGraphSnapshot::from_json(&json).unwrap();",
+          "crates/tze_hud_scene/tests/snapshot.rs:561:            let deser = SceneGraphSnapshot::from_json(&json1).unwrap();",
+          "crates/tze_hud_scene/tests/session_lifecycle.rs:436:    let snapshot_scene = SceneGraph::from_json(&grace_snapshot_json).expect(\"deserialize snapshot\");",
+          "crates/tze_hud_scene/src/types.rs:2863:    pub fn from_json(json: &str) -> Result<Self, serde_json::Error> {",
+          "crates/tze_hud_scene/src/graph/tests.rs:480:    let restored = SceneGraph::from_json(&json).unwrap();",
+          "crates/tze_hud_scene/src/graph/tests.rs:597:    let restored = SceneGraphSnapshot::from_json(&json).unwrap();",
+          "crates/tze_hud_scene/src/graph/tests.rs:685:    let restored = SceneGraphSnapshot::from_json(&json).unwrap();",
+          "crates/tze_hud_scene/src/graph/tests.rs:2109:    let restored = SceneGraph::from_json(&json).unwrap();",
+          "crates/tze_hud_scene/src/graph/snapshot.rs:12:    pub fn from_json(json: &str) -> Result<Self, serde_json::Error> {"
+        ]
+      },
+      "group": 20,
+      "classification_by_symbol": {
+        "verify_checksum": "SceneGraphSnapshot: test-support for current checksum/snapshot fixtures; compute_checksum preserved",
+        "to_json": "SceneGraphSnapshot: retain live public/default production JSON serializer; actual gRPC graph_snap.to_json caller at protocol/session_server/mod.rs277\u2013280. Distinct unrelated telemetry/firewall/log methods are not scene caller evidence",
+        "from_json": "SceneGraphSnapshot: test-support for current snapshot fixtures; serde representation unchanged"
+      },
+      "current_references": {
+        "verify_checksum": [
+          "crates/tze_hud_scene/tests/snapshot.rs:94:        snap.verify_checksum(),",
+          "crates/tze_hud_scene/tests/snapshot.rs:108:        !tampered.verify_checksum(),",
+          "crates/tze_hud_scene/tests/snapshot.rs:147:        deserialized.verify_checksum(),",
+          "crates/tze_hud_scene/tests/snapshot.rs:165:    assert!(deserialized.verify_checksum());",
+          "crates/tze_hud_scene/tests/snapshot.rs:191:            snap.verify_checksum(),",
+          "crates/tze_hud_scene/tests/snapshot.rs:572:            prop_assert!(snap.verify_checksum());",
+          "crates/tze_hud_scene/src/types.rs:2769:    /// [`verify_checksum`](Self::verify_checksum) still succeeds for older",
+          "crates/tze_hud_scene/src/types.rs:2792:    /// `checksum` field set to the empty string. See [`SceneGraphSnapshot::verify_checksum`].",
+          "crates/tze_hud_scene/src/types.rs:2829:    pub fn verify_checksum(&self) -> bool {",
+          "crates/tze_hud_scene/src/graph/tests.rs:494:    assert!(snapshot.verify_checksum());",
+          "crates/tze_hud_scene/src/graph/tests.rs:561:    assert!(snapshot.verify_checksum());",
+          "crates/tze_hud_scene/src/graph/tests.rs:603:    assert!(restored.verify_checksum());",
+          "crates/tze_hud_scene/src/graph/tests.rs:667:/// This preserves `verify_checksum()` for older surface-less snapshots produced",
+          "crates/tze_hud_scene/src/graph/tests.rs:687:    assert!(restored.verify_checksum());"
+        ],
+        "to_json": [
+          "crates/tze_hud_mcp/src/error.rs:91:    pub fn to_json(&self) -> serde_json::Value {",
+          "crates/tze_hud_mcp/src/error.rs:150:        let v = e.to_json();",
+          "crates/tze_hud_telemetry/src/collector.rs:47:        self.summary.to_json()",
+          "crates/tze_hud_mcp/src/server.rs:102:        \"content\": [{ \"type\": \"text\", \"text\": err.to_json().to_string() }],",
+          "crates/tze_hud_telemetry/src/record.rs:583:    pub fn to_json(&self) -> Result<String, serde_json::Error> {",
+          "crates/tze_hud_telemetry/src/record.rs:616:        let json = summary.to_json().unwrap();",
+          "crates/tze_hud_telemetry/src/record.rs:653:        let json = summary.to_json().unwrap();",
+          "crates/tze_hud_telemetry/src/record.rs:732:        let json = summary.to_json().unwrap();",
+          "crates/tze_hud_telemetry/src/record.rs:858:        let json = summary.to_json().unwrap();",
+          "crates/tze_hud_telemetry/src/record.rs:1072:        let json = summary.to_json().unwrap();",
+          "crates/tze_hud_telemetry/src/record.rs:1077:        // to_json uses pretty-print (spaces after colons); check for the value.",
+          "crates/tze_hud_telemetry/src/validation.rs:402:    pub fn to_json(&self) -> Result<String, serde_json::Error> {",
+          "crates/tze_hud_telemetry/src/validation.rs:611:        let json = report.to_json().unwrap();",
+          "crates/tze_hud_runtime/src/firewall.rs:89:    pub fn to_json(&self) -> Value {",
+          "crates/tze_hud_runtime/src/firewall.rs:686:            TailnetInbound::Allowed.to_json(),",
+          "crates/tze_hud_runtime/src/firewall.rs:689:        let j = blocked_by(\"deny-exe\").to_json();",
+          "crates/tze_hud_protocol/src/session_server/mod.rs:280:                            .to_json()",
+          "crates/tze_hud_scene/tests/snapshot.rs:58:    let json1 = snap1.to_json().unwrap();",
+          "crates/tze_hud_scene/tests/snapshot.rs:59:    let json2 = snap2.to_json().unwrap();",
+          "crates/tze_hud_scene/tests/snapshot.rs:77:    let json1 = snap1.to_json().unwrap();",
+          "crates/tze_hud_scene/tests/snapshot.rs:78:    let json2 = snap2.to_json().unwrap();",
+          "crates/tze_hud_scene/tests/snapshot.rs:137:    let json1 = original.to_json().unwrap();",
+          "crates/tze_hud_scene/tests/snapshot.rs:140:    let json2 = deserialized.to_json().unwrap();",
+          "crates/tze_hud_scene/tests/snapshot.rs:156:    let json1 = original.to_json().unwrap();",
+          "crates/tze_hud_scene/tests/snapshot.rs:159:    let json2 = deserialized.to_json().unwrap();",
+          "crates/tze_hud_scene/tests/snapshot.rs:239:        let json1 = snap.to_json().unwrap();",
+          "crates/tze_hud_scene/tests/snapshot.rs:241:        let json2 = deser.to_json().unwrap();",
+          "crates/tze_hud_scene/tests/snapshot.rs:249:        let json3 = snap2.to_json().unwrap();",
+          "crates/tze_hud_scene/tests/snapshot.rs:277:    let json = snap.to_json().unwrap();",
+          "crates/tze_hud_scene/tests/snapshot.rs:332:    let json = snap.to_json().unwrap();",
+          "crates/tze_hud_scene/tests/snapshot.rs:510:        snap1.to_json().unwrap(),",
+          "crates/tze_hud_scene/tests/snapshot.rs:511:        snap2.to_json().unwrap(),",
+          "crates/tze_hud_scene/tests/snapshot.rs:550:            prop_assert_eq!(s1.to_json().unwrap(), s2.to_json().unwrap());",
+          "crates/tze_hud_scene/tests/snapshot.rs:560:            let json1 = snap.to_json().unwrap();",
+          "crates/tze_hud_scene/tests/snapshot.rs:562:            let json2 = deser.to_json().unwrap();",
+          "crates/tze_hud_runtime/src/operator/status.rs:62:    pub fn to_json(&self) -> Value {",
+          "crates/tze_hud_runtime/src/operator/status.rs:346:            \"tailnet_inbound\": tailnet_inbound.to_json(),",
+          "crates/tze_hud_runtime/src/operator/status.rs:349:            \"safe_mode_hotkey\": safe_mode_hotkey().to_json(),",
+          "crates/tze_hud_runtime/src/operator/status.rs:387:            ok.to_json(),",
+          "crates/tze_hud_runtime/src/operator/status.rs:391:            failed().to_json(),",
+          "crates/tze_hud_runtime/src/operator/status.rs:394:        assert_eq!(HotkeyStatus::NotApplicable.to_json(), Value::Null);",
+          "crates/tze_hud_runtime/src/operator/status.rs:399:            pending.to_json(),",
+          "crates/tze_hud_scene/src/types.rs:2838:    pub fn to_json(&self) -> Result<String, serde_json::Error> {",
+          "crates/tze_hud_runtime/src/shell/system_card.rs:163:        let snapshot_json = scene.take_snapshot(1, 1).to_json().unwrap();",
+          "crates/tze_hud_scene/tests/session_lifecycle.rs:90:    fn to_json(&self) -> String {",
+          "crates/tze_hud_scene/tests/session_lifecycle.rs:352:    let json_log = log.to_json();",
+          "crates/tze_hud_scene/src/graph/tests.rs:596:    let json = snapshot.to_json().unwrap();",
+          "crates/tze_hud_scene/src/graph/tests.rs:676:    let json = snapshot.to_json().unwrap();"
+        ],
+        "from_json": [
+          "crates/tze_hud_scene/tests/session_lifecycle.rs:436:    let snapshot_scene = SceneGraph::from_json(&grace_snapshot_json).expect(\"deserialize snapshot\");",
+          "crates/tze_hud_scene/tests/snapshot.rs:139:    let deserialized = SceneGraphSnapshot::from_json(&json1).unwrap();",
+          "crates/tze_hud_scene/tests/snapshot.rs:158:    let deserialized = SceneGraphSnapshot::from_json(&json1).unwrap();",
+          "crates/tze_hud_scene/tests/snapshot.rs:240:        let deser = SceneGraphSnapshot::from_json(&json1).unwrap();",
+          "crates/tze_hud_scene/tests/snapshot.rs:354:    let deser = SceneGraphSnapshot::from_json(&json).unwrap();",
+          "crates/tze_hud_scene/tests/snapshot.rs:561:            let deser = SceneGraphSnapshot::from_json(&json1).unwrap();",
+          "crates/tze_hud_scene/src/graph/tests.rs:480:    let restored = SceneGraph::from_json(&json).unwrap();",
+          "crates/tze_hud_scene/src/graph/tests.rs:597:    let restored = SceneGraphSnapshot::from_json(&json).unwrap();",
+          "crates/tze_hud_scene/src/graph/tests.rs:685:    let restored = SceneGraphSnapshot::from_json(&json).unwrap();",
+          "crates/tze_hud_scene/src/graph/tests.rs:2109:    let restored = SceneGraph::from_json(&json).unwrap();",
+          "crates/tze_hud_scene/src/types.rs:2844:    pub fn from_json(json: &str) -> Result<Self, serde_json::Error> {",
+          "crates/tze_hud_scene/src/graph/snapshot.rs:13:    pub fn from_json(json: &str) -> Result<Self, serde_json::Error> {"
+        ]
+      }
+    },
+    {
+      "baseline_diagnostic": "crates/tze_hud_scene/src/types.rs:3110:19: warning: methods `zones_accepting`, `all_zones`, and `get_occupancy` are never used",
+      "symbols": [
+        "zones_accepting",
+        "all_zones",
+        "get_occupancy"
+      ],
+      "references": {
+        "zones_accepting": [
+          "crates/tze_hud_scene/src/types.rs:3110:    pub fn zones_accepting(&self, media_type: ZoneMediaType) -> Vec<&ZoneDefinition> {",
+          "crates/tze_hud_scene/tests/zone_ontology.rs:498:            .zones_accepting(ZoneMediaType::StreamText)",
+          "crates/tze_hud_scene/tests/zone_ontology.rs:506:            .zones_accepting(ZoneMediaType::ShortTextWithIcon)",
+          "crates/tze_hud_scene/tests/zone_ontology.rs:514:            .zones_accepting(ZoneMediaType::KeyValuePairs)",
+          "crates/tze_hud_scene/tests/zone_ontology.rs:522:            .zones_accepting(ZoneMediaType::StaticImage)",
+          "crates/tze_hud_scene/tests/zone_ontology.rs:530:            .zones_accepting(ZoneMediaType::SolidColor)",
+          "crates/tze_hud_scene/src/graph/tests.rs:929:        .zones_accepting(ZoneMediaType::StreamText);",
+          "crates/tze_hud_scene/src/graph/tests.rs:935:        .zones_accepting(ZoneMediaType::ShortTextWithIcon);"
+        ],
+        "all_zones": [
+          "crates/tze_hud_scene/tests/zone_ontology.rs:442:    let zones = registry.all_zones();",
+          "crates/tze_hud_scene/src/types.rs:3118:    pub fn all_zones(&self) -> Vec<&ZoneDefinition> {"
+        ],
+        "get_occupancy": [
+          "crates/tze_hud_scene/tests/zone_ontology.rs:903:    let occupancy = registry.get_occupancy(\"subtitle\", tab_id).unwrap();",
+          "crates/tze_hud_scene/tests/zone_ontology.rs:924:    let occupancy = registry.get_occupancy(\"subtitle\", tab_id).unwrap();",
+          "crates/tze_hud_scene/tests/zone_ontology.rs:935:    let result = registry.get_occupancy(\"nonexistent\", SceneId::new());",
+          "crates/tze_hud_compositor/tests/gauge_binding_rendering.rs:609:            .get_occupancy(\"gauge\", tab_id)",
+          "crates/tze_hud_compositor/tests/gauge_binding_rendering.rs:661:            .get_occupancy(\"gauge\", tab_id)",
+          "crates/tze_hud_compositor/tests/gauge_binding_rendering.rs:740:            .get_occupancy(\"gauge\", tab_id)",
+          "crates/tze_hud_compositor/tests/gauge_binding_rendering.rs:799:            .get_occupancy(\"gauge\", tab_id)",
+          "crates/tze_hud_scene/src/types.rs:2591:    pub fn get_occupancy(&self, instance_name: &str, tab_id: SceneId) -> Option<WidgetOccupancy> {",
+          "crates/tze_hud_scene/src/types.rs:3138:    pub fn get_occupancy(&self, zone_name: &str, tab_id: SceneId) -> Option<ZoneOccupancy> {",
+          "crates/tze_hud_scene/src/graph/zone_ops.rs:871:        let effective_params = match self.widget_registry.get_occupancy(widget_name, tab_id) {",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1249:        .get_occupancy(\"gauge\", tab_id)",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1276:    let occ = scene.widget_registry.get_occupancy(\"no-such-gauge\", tab_id);",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1280:// \u2500\u2500 get_occupancy per-policy effective_params tests \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1307:        .get_occupancy(\"gauge\", tab_id)",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1366:        .get_occupancy(\"gauge\", tab_id)",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1405:        .get_occupancy(\"gauge\", tab_id)",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1452:        .get_occupancy(\"gauge\", tab_id)",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1509:        .get_occupancy(\"gauge\", tab_id)",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1574:        .get_occupancy(\"gauge\", tab_id)",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1613:        .get_occupancy(\"gauge\", tab_id)",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1671:        .get_occupancy(\"gauge\", tab_id)"
+        ]
+      },
+      "group": 21,
+      "classification_by_symbol": {
+        "zones_accepting": "ZoneRegistry: test-support for ontology fixtures",
+        "all_zones": "ZoneRegistry: test-support for ontology registration fixture",
+        "get_occupancy": "ZoneRegistry: test-support for ontology fixture. Distinct default/live WidgetRegistry::get_occupancy at types.rs2570 is called by graph/zone_ops.rs874."
+      },
+      "current_references": {
+        "zones_accepting": [
+          "crates/tze_hud_scene/tests/zone_ontology.rs:498:            .zones_accepting(ZoneMediaType::StreamText)",
+          "crates/tze_hud_scene/tests/zone_ontology.rs:506:            .zones_accepting(ZoneMediaType::ShortTextWithIcon)",
+          "crates/tze_hud_scene/tests/zone_ontology.rs:514:            .zones_accepting(ZoneMediaType::KeyValuePairs)",
+          "crates/tze_hud_scene/tests/zone_ontology.rs:522:            .zones_accepting(ZoneMediaType::StaticImage)",
+          "crates/tze_hud_scene/tests/zone_ontology.rs:530:            .zones_accepting(ZoneMediaType::SolidColor)",
+          "crates/tze_hud_scene/src/types.rs:3092:    pub fn zones_accepting(&self, media_type: ZoneMediaType) -> Vec<&ZoneDefinition> {",
+          "crates/tze_hud_scene/src/graph/tests.rs:929:        .zones_accepting(ZoneMediaType::StreamText);",
+          "crates/tze_hud_scene/src/graph/tests.rs:935:        .zones_accepting(ZoneMediaType::ShortTextWithIcon);"
+        ],
+        "all_zones": [
+          "crates/tze_hud_scene/tests/zone_ontology.rs:442:    let zones = registry.all_zones();",
+          "crates/tze_hud_scene/src/types.rs:3101:    pub fn all_zones(&self) -> Vec<&ZoneDefinition> {"
+        ],
+        "get_occupancy": [
+          "crates/tze_hud_scene/tests/zone_ontology.rs:903:    let occupancy = registry.get_occupancy(\"subtitle\", tab_id).unwrap();",
+          "crates/tze_hud_scene/tests/zone_ontology.rs:924:    let occupancy = registry.get_occupancy(\"subtitle\", tab_id).unwrap();",
+          "crates/tze_hud_scene/tests/zone_ontology.rs:935:    let result = registry.get_occupancy(\"nonexistent\", SceneId::new());",
+          "crates/tze_hud_scene/src/types.rs:2570:    pub fn get_occupancy(&self, instance_name: &str, tab_id: SceneId) -> Option<WidgetOccupancy> {",
+          "crates/tze_hud_scene/src/types.rs:3122:    pub fn get_occupancy(&self, zone_name: &str, tab_id: SceneId) -> Option<ZoneOccupancy> {",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1249:        .get_occupancy(\"gauge\", tab_id)",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1276:    let occ = scene.widget_registry.get_occupancy(\"no-such-gauge\", tab_id);",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1280:// \u2500\u2500 get_occupancy per-policy effective_params tests \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1307:        .get_occupancy(\"gauge\", tab_id)",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1366:        .get_occupancy(\"gauge\", tab_id)",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1405:        .get_occupancy(\"gauge\", tab_id)",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1452:        .get_occupancy(\"gauge\", tab_id)",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1509:        .get_occupancy(\"gauge\", tab_id)",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1574:        .get_occupancy(\"gauge\", tab_id)",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1613:        .get_occupancy(\"gauge\", tab_id)",
+          "crates/tze_hud_scene/src/graph/spec_scenarios.rs:1671:        .get_occupancy(\"gauge\", tab_id)",
+          "crates/tze_hud_scene/src/graph/zone_ops.rs:874:        let effective_params = match self.widget_registry.get_occupancy(widget_name, tab_id) {",
+          "crates/tze_hud_compositor/tests/gauge_binding_rendering.rs:609:            .get_occupancy(\"gauge\", tab_id)",
+          "crates/tze_hud_compositor/tests/gauge_binding_rendering.rs:661:            .get_occupancy(\"gauge\", tab_id)",
+          "crates/tze_hud_compositor/tests/gauge_binding_rendering.rs:740:            .get_occupancy(\"gauge\", tab_id)",
+          "crates/tze_hud_compositor/tests/gauge_binding_rendering.rs:799:            .get_occupancy(\"gauge\", tab_id)"
+        ]
+      }
+    },
+    {
+      "baseline_diagnostic": "crates/tze_hud_scene/src/types.rs:386:19: warning: method `is_text_bearing` is never used",
+      "symbols": [
+        "is_text_bearing"
+      ],
+      "references": {
+        "is_text_bearing": [
+          "crates/tze_hud_scene/src/types.rs:386:    pub fn is_text_bearing(self) -> bool {",
+          "crates/tze_hud_scene/src/types.rs:3302:            assert!(!k.is_text_bearing(), \"{k:?} must be geometry-only\");",
+          "crates/tze_hud_scene/src/types.rs:3311:            assert!(k.is_text_bearing(), \"{k:?} must be text-bearing\");"
+        ]
+      },
+      "group": 22,
+      "classification_by_symbol": {
+        "is_text_bearing": "PortalPartKind: private cfg(test); existing inline portal-part classification fixtures; real protected production imports of PortalPartKind and variants unchanged"
+      },
+      "current_references": {
+        "is_text_bearing": [
+          "crates/tze_hud_scene/src/types.rs:387:    fn is_text_bearing(self) -> bool {",
+          "crates/tze_hud_scene/src/types.rs:3286:            assert!(!k.is_text_bearing(), \"{k:?} must be geometry-only\");",
+          "crates/tze_hud_scene/src/types.rs:3295:            assert!(k.is_text_bearing(), \"{k:?} must be text-bearing\");"
+        ]
+      }
+    },
+    {
+      "baseline_diagnostic": "crates/tze_hud_scene/src/validation.rs:587:19: warning: method `primary_code` is never used",
+      "symbols": [
+        "primary_code"
+      ],
+      "references": {
+        "primary_code": [
+          "crates/tze_hud_scene/tests/batch_atomicity.rs:142:        rej.primary_code(),",
+          "crates/tze_hud_scene/tests/batch_atomicity.rs:205:    let code = rej.primary_code().unwrap();",
+          "crates/tze_hud_scene/tests/batch_atomicity.rs:265:        rej.primary_code(),",
+          "crates/tze_hud_scene/tests/batch_atomicity.rs:316:        rej.primary_code(),",
+          "crates/tze_hud_scene/tests/batch_atomicity.rs:791:    let code = result.rejection.unwrap().primary_code().unwrap();",
+          "crates/tze_hud_scene/tests/batch_atomicity.rs:835:    let code = result.rejection.unwrap().primary_code().unwrap();",
+          "crates/tze_hud_scene/tests/batch_atomicity.rs:876:    let code = result.rejection.unwrap().primary_code().unwrap();",
+          "crates/tze_hud_scene/tests/batch_atomicity.rs:921:    let code = result.rejection.unwrap().primary_code().unwrap();",
+          "crates/tze_hud_scene/tests/batch_atomicity.rs:976:    let code = result.rejection.unwrap().primary_code().unwrap();",
+          "crates/tze_hud_scene/tests/batch_atomicity.rs:1031:    let code = result.rejection.unwrap().primary_code().unwrap();",
+          "crates/tze_hud_scene/tests/batch_atomicity.rs:1065:    let code = result.rejection.unwrap().primary_code().unwrap();",
+          "crates/tze_hud_scene/src/validation.rs:587:    pub fn primary_code(&self) -> Option<ValidationErrorCode> {",
+          "crates/tze_hud_scene/src/mutation.rs:1955:            rej.primary_code(),",
+          "crates/tze_hud_scene/src/mutation.rs:1989:        let code = rej.primary_code().unwrap();",
+          "crates/tze_hud_scene/src/mutation.rs:2066:            rej.primary_code(),",
+          "crates/tze_hud_scene/src/mutation.rs:2184:            rej.primary_code(),",
+          "crates/tze_hud_scene/src/mutation.rs:2222:        assert_eq!(rej.primary_code(), Some(ValidationErrorCode::NodeNotFound));"
+        ]
+      },
+      "group": 23,
+      "classification_by_symbol": {
+        "primary_code": "BatchRejected: test-support; existing external atomicity and inline mutation fixtures; live error fields/codes unchanged"
+      },
+      "current_references": {
+        "primary_code": [
+          "crates/tze_hud_scene/tests/batch_atomicity.rs:142:        rej.primary_code(),",
+          "crates/tze_hud_scene/tests/batch_atomicity.rs:205:    let code = rej.primary_code().unwrap();",
+          "crates/tze_hud_scene/tests/batch_atomicity.rs:265:        rej.primary_code(),",
+          "crates/tze_hud_scene/tests/batch_atomicity.rs:316:        rej.primary_code(),",
+          "crates/tze_hud_scene/tests/batch_atomicity.rs:791:    let code = result.rejection.unwrap().primary_code().unwrap();",
+          "crates/tze_hud_scene/tests/batch_atomicity.rs:835:    let code = result.rejection.unwrap().primary_code().unwrap();",
+          "crates/tze_hud_scene/tests/batch_atomicity.rs:876:    let code = result.rejection.unwrap().primary_code().unwrap();",
+          "crates/tze_hud_scene/tests/batch_atomicity.rs:921:    let code = result.rejection.unwrap().primary_code().unwrap();",
+          "crates/tze_hud_scene/tests/batch_atomicity.rs:976:    let code = result.rejection.unwrap().primary_code().unwrap();",
+          "crates/tze_hud_scene/tests/batch_atomicity.rs:1031:    let code = result.rejection.unwrap().primary_code().unwrap();",
+          "crates/tze_hud_scene/tests/batch_atomicity.rs:1065:    let code = result.rejection.unwrap().primary_code().unwrap();",
+          "crates/tze_hud_scene/src/mutation.rs:1954:            rej.primary_code(),",
+          "crates/tze_hud_scene/src/mutation.rs:1988:        let code = rej.primary_code().unwrap();",
+          "crates/tze_hud_scene/src/mutation.rs:2065:            rej.primary_code(),",
+          "crates/tze_hud_scene/src/mutation.rs:2183:            rej.primary_code(),",
+          "crates/tze_hud_scene/src/mutation.rs:2221:        assert_eq!(rej.primary_code(), Some(ValidationErrorCode::NodeNotFound));",
+          "crates/tze_hud_scene/src/validation.rs:588:    pub fn primary_code(&self) -> Option<ValidationErrorCode> {"
+        ]
+      }
+    }
+  ],
+  "scope_roots": [
+    "app",
+    "crates (recursive, includes cfg-specific source and benches)",
+    "examples",
+    "tests (including separate integration Cargo package)"
+  ],
+  "identity_exceptions": {
+    "scene_vs_generated_timing": "Removed scene timing::TimingHints; generated protocol TimingHints and mutation::BatchTimingHints remain. protocol/session_server/mutations.rs1084-1099 converts present_at_wall_us/expires_at_wall_us into WallUs batch fields.",
+    "json_snapshot": "Default SceneGraphSnapshot::to_json types.rs2838 remains called by gRPC graph_snap.to_json at protocol/session_server/mod.rs277-280; SceneGraph/SceneGraphSnapshot::from_json are fixture-only. No serde shape changed.",
+    "budget_warning": {
+      "production_readers": [],
+      "production_producers": [
+        "mutation.rs467",
+        "mutation.rs545",
+        "mutation.rs562"
+      ],
+      "fixture_readers": [
+        "graph/tests.rs3083",
+        "graph/tests.rs3189"
+      ],
+      "preserved_live_evaluator_calls": [
+        "mutation.rs466",
+        "mutation.rs544"
+      ],
+      "contract": "Successful mutation still computes soft-limit state before/after applying changes and returns the aggregate warning. Existing no-warning and 80%-threshold fixtures assert the return field. No warning delivery/policy behavior added."
+    },
+    "local_style": "HitRegionNode::local_style remains types.rs1039; actual renderer reads hover_tint/pressed_tint at compositor/renderer/tile_render.rs2528/2534.",
+    "identity_helper": "types.rs tests module remains cfg(test); assert_identity_invariants helper remains and is not classified production debt.",
+    "error_owners": "Only dead CapsError two variants and LeaseError two variants removed. Live ValidationError::BudgetExceeded, ResourceError::BudgetExceeded and BudgetError remain.",
+    "portal_classifier": "is_text_bearing belongs to PortalPartKind, whose type/variants and protected T7 imports remain; only the uncalled method becomes private cfg(test)."
+  },
+  "head": "7b301654c3b1160e24041807b7e6c51b3833bd79",
+  "base": "3b5bbb634a7dc6d8a8c9e40f585e5b1868cfb528"
+}
