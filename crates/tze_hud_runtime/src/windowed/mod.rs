@@ -29,13 +29,11 @@
 //!     This gives the same semantic as the XShape extension / wlr-layer-shell approach
 //!     while using winit's cross-platform API.
 //!
-//! ## Runtime mode switching
+//! ## Multiple monitors
 //!
-//! Mode switching is supported but disruptive (requires surface recreation, spec
-//! line 173). The event loop stores a pending mode switch, tears down the existing
-//! window and compositor, and re-initialises with the new mode on the next
-//! `RedrawRequested` event (where the pending switch is detected before the frame
-//! is presented).
+//! Overlay mode opens one window per connected monitor, all showing the one
+//! scene; see [`displays`]. Monitor hotplug and DPI changes create and tear
+//! down secondary windows; the primary window stays.
 //!
 //! ## Main thread event loop
 //!
@@ -82,7 +80,7 @@ use winit::application::ApplicationHandler;
 use winit::event::{DeviceEvent, DeviceId};
 use winit::event::{ElementState, MouseButton, StartCause, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
-use winit::window::{Fullscreen, Window, WindowAttributes, WindowId, WindowLevel};
+use winit::window::{Fullscreen, Window, WindowAttributes, WindowId};
 
 use crate::scene_startup::run_scene_startup;
 use tze_hud_compositor::{
@@ -172,6 +170,7 @@ impl Drop for FramePacingTimerGuard {
 }
 
 mod config;
+mod displays;
 #[cfg(target_os = "windows")]
 mod global_hotkey;
 mod hittest;
@@ -207,10 +206,9 @@ use self::input_dispatch::{
 use self::keyboard::{ComposerDeliveryContext, PendingKeyboardEvent};
 use self::lifecycle::{
     BENCHMARK_NO_PROGRESS_TIMEOUT, PendingInputLatencySamples, WindowedBenchmarkRunState,
-    WindowedQuiescentEfficiencyRunState, begin_os_mouse_capture, detect_monitor_size,
-    drain_pending_input_latency, end_os_mouse_capture, focus_window_for_text_input,
-    read_windows_clipboard_text, seed_windowed_benchmark_scene, update_surface_repaint_pending,
-    windowed_frame_needs_render,
+    WindowedQuiescentEfficiencyRunState, begin_os_mouse_capture, drain_pending_input_latency,
+    end_os_mouse_capture, focus_window_for_text_input, read_windows_clipboard_text,
+    seed_windowed_benchmark_scene, update_surface_repaint_pending, windowed_frame_needs_render,
 };
 pub use self::network::render_attach_info;
 use self::network::{
@@ -432,16 +430,36 @@ struct WindowedRuntimeState {
     static_hit_regions: Vec<HitRegion>,
     /// Runtime-managed widget hover trackers keyed by widget instance_name.
     widget_hover_trackers: std::collections::HashMap<String, WidgetHoverTracker>,
-    /// Pending mode switch requested at runtime (disruptive — triggers surface
-    /// recreation on the next event loop tick).
-    pending_mode_switch: Option<WindowMode>,
     /// Pending widget SVG assets to register with the compositor after
     /// `init_widget_renderer` is called. Consumed once during first `resumed()`.
     pending_widget_svgs: Vec<crate::widget_startup::WidgetSvgAsset>,
     /// Tracked modifier key state for shortcut detection.
     modifiers: winit::keyboard::ModifiersState,
-    /// Current monitor index for Ctrl+Shift+F8/F9 cycling.
-    current_monitor_index: usize,
+    /// The monitor the primary window covers (`None` before the window
+    /// exists). Its top-left is the scene origin.
+    primary_monitor: Option<displays::MonitorSpec>,
+    /// One overlay window per other connected monitor (hud-1pt5h).
+    secondaries: Vec<displays::SecondaryDisplay>,
+    /// Secondary surfaces + layout for the compositor thread.
+    display_targets: displays::SharedDisplayTargets,
+    /// Set when the monitor layout may have changed; re-synced next turn.
+    displays_dirty: displays::DisplaysDirty,
+    /// Creates secondary surfaces on the compositor's device.
+    surface_factory: Option<tze_hud_compositor::SurfaceFactory>,
+    /// `[displays.<NAME>] zones` from the config: zone name -> display name.
+    zone_displays: std::collections::HashMap<String, String>,
+    /// The window the cursor was last reported in; `CursorMoved` positions
+    /// are relative to it.
+    cursor_window: Option<WindowId>,
+    /// Times each secondary's window was recreated after its surface was
+    /// lost; capped so a persistently failing monitor is left alone.
+    secondary_recreates: std::collections::HashMap<String, u32>,
+    /// Recent re-fits of each overlay window to its monitor, by monitor
+    /// name; bounds a fight with the OS over a window's size.
+    overlay_refits: std::collections::HashMap<String, displays::RefitBudget>,
+    /// Window that received the current left-button press; it keeps
+    /// capturing until release.
+    press_window: Option<WindowId>,
     /// Global design token map from scene startup.
     ///
     /// Stashed here after `run_scene_startup` returns so it can be applied
@@ -878,14 +896,8 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
     }
 
     /// Called by winit when the event loop has processed all pending events for
-    /// the current iteration.  We use this to apply any pending mode switch:
-    /// tearing down the current window/compositor and re-initialising with the
-    /// new mode is safe here because no window events are in flight.
-    ///
-    /// Note: `resumed()` is a *lifecycle* callback (initial app start / app
-    /// resume after suspension) and is NOT triggered by `window.request_redraw()`.
-    /// Pending mode switches must therefore be handled here in `about_to_wait`
-    /// rather than in `resumed()`.
+    /// the current iteration. Re-syncs the per-monitor windows here when the
+    /// monitor layout changed: no window events are in flight.
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         if std::mem::take(&mut self.state.cursor_entry.tick) {
             if let CursorEntryTurn::Quiet { next } = self.cursor_entry_turn() {
@@ -908,11 +920,8 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
             event_loop.exit();
             return;
         }
-        if self.state.pending_mode_switch.is_some() {
-            self.apply_pending_mode_switch();
-            // Re-create the window with the new mode by forwarding to the
-            // initialisation path inside resumed().
-            self.resumed(event_loop);
+        if displays::take_dirty(&self.state.displays_dirty) {
+            self.sync_displays(event_loop);
         }
         self.refresh_cursor_position_from_os();
         self.drain_input_capture_commands();
@@ -1102,68 +1111,57 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                     .with_decorations(false)
             }
             WindowMode::Overlay => {
-                // Determine overlay window dimensions.
-                //
-                // When `overlay_auto_size` is true (the default), query the primary
-                // monitor's physical size via the event loop and use it as the window
-                // dimensions.  This ensures the overlay covers the full display on any
-                // monitor (1080p, 1440p, 4K, etc.) without requiring explicit
-                // --width/--height flags.
-                //
-                // Fall back to the configured width/height if monitor detection fails
-                // (headless environments, missing display server, etc.).
-                let (overlay_w, overlay_h, mon_x, mon_y) = if self.state.config.overlay_auto_size {
-                    detect_monitor_size(
-                        event_loop,
-                        cfg_width,
-                        cfg_height,
-                        self.state.config.monitor_index,
-                    )
+                // Overlay auto-size (the default): the primary window covers
+                // the primary monitor at its native physical size, and
+                // `sync_displays` adds one window per other monitor. Explicit
+                // --width/--height (or no detectable monitor) gives a single
+                // window of the configured size on the primary.
+                let monitors = if self.state.config.overlay_auto_size {
+                    displays::enumerate_monitors(event_loop)
                 } else {
-                    (cfg_width, cfg_height, 0, 0)
+                    None
                 };
-
-                // Update the config so that downstream code (surface init, logging)
-                // sees the resolved dimensions rather than the stale defaults.
-                self.state.config.window.width = overlay_w;
-                self.state.config.window.height = overlay_h;
-
+                let primary = match monitors {
+                    Some((primary, others)) => {
+                        tracing::info!(
+                            primary = %primary.name,
+                            others = ?others.iter().map(|m| m.name.as_str()).collect::<Vec<_>>(),
+                            "overlay: monitors detected"
+                        );
+                        primary
+                    }
+                    None => {
+                        if self.state.config.overlay_auto_size {
+                            tracing::warn!(
+                                cfg_width,
+                                cfg_height,
+                                "overlay: no monitors detected (headless?); using configured size"
+                            );
+                        }
+                        displays::MonitorSpec {
+                            name: "PRIMARY".into(),
+                            x: 0,
+                            y: 0,
+                            width: cfg_width,
+                            height: cfg_height,
+                        }
+                    }
+                };
+                // Downstream code (surface init, logging) sees the resolved
+                // dimensions rather than the stale defaults.
+                self.state.config.window.width = primary.width;
+                self.state.config.window.height = primary.height;
                 tracing::info!(
-                    width = overlay_w,
-                    height = overlay_h,
-                    position_x = mon_x,
-                    position_y = mon_y,
+                    width = primary.width,
+                    height = primary.height,
+                    position_x = primary.x,
+                    position_y = primary.y,
                     auto_size = self.state.config.overlay_auto_size,
                     "window mode: overlay/HUD — transparent borderless always-on-top"
                 );
-                #[cfg(target_os = "windows")]
-                {
-                    use winit::platform::windows::WindowAttributesExtWindows;
-                    WindowAttributes::default()
-                        .with_title(window_title)
-                        .with_inner_size(winit::dpi::PhysicalSize::new(overlay_w, overlay_h))
-                        .with_position(winit::dpi::PhysicalPosition::new(mon_x, mon_y))
-                        .with_transparent(true)
-                        .with_decorations(false)
-                        .with_window_level(WindowLevel::AlwaysOnTop)
-                        // Hide from taskbar so the overlay can't be
-                        // accidentally minimized or alt-tabbed to.
-                        .with_skip_taskbar(true)
-                        // Set WS_EX_NOREDIRECTIONBITMAP at creation time —
-                        // DWM will present the swapchain directly with
-                        // per-pixel alpha from PreMultiplied mode.
-                        .with_no_redirection_bitmap(true)
-                }
-                #[cfg(not(target_os = "windows"))]
-                {
-                    WindowAttributes::default()
-                        .with_title(window_title)
-                        .with_inner_size(winit::dpi::PhysicalSize::new(overlay_w, overlay_h))
-                        .with_position(winit::dpi::PhysicalPosition::new(0i32, 0i32))
-                        .with_transparent(true)
-                        .with_decorations(false)
-                        .with_window_level(WindowLevel::AlwaysOnTop)
-                }
+                let attrs = displays::overlay_window_attributes(window_title, &primary);
+                self.state.primary_monitor = Some(primary);
+                attrs
             }
         };
 
@@ -1367,6 +1365,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
 
         let window_surface = Arc::new(window_surface);
         self.state.window_surface = Some(window_surface.clone());
+        self.state.surface_factory = compositor.surface_factory();
 
         // ── Elevate main thread priority ──────────────────────────────────
         crate::threads::elevate_main_thread_priority();
@@ -1432,6 +1431,8 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
         let safe_mode_for_compositor = Arc::clone(&self.state.safe_mode_atomic);
         let system_card_for_compositor = self.state.system_card.clone();
         let capture_inbox = self.state.capture_inbox.clone();
+        let display_targets = Arc::clone(&self.state.display_targets);
+        let displays_dirty = Arc::clone(&self.state.displays_dirty);
         // A handed-over instance reports ready after its first submitted frame.
         let handoff_child = cfg.handoff.clone();
         let telemetry_collector = TelemetryCollector::new();
@@ -1509,6 +1510,14 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                 let mut benchmark_present_count_seen =
                     surface_for_compositor.presented_frame_count();
                 let mut pending_benchmark_sample = None;
+                // Secondary display windows (hud-1pt5h), re-read from the main
+                // thread's `display_targets` whenever its generation moves.
+                let mut secondaries: Vec<displays::SecondaryTarget> = Vec::new();
+                let mut display_targets_generation = 0u64;
+                // Surfaces already reported lost: a republished target list
+                // that still carries one (the main thread had not processed
+                // the loss yet) must not report it again.
+                let mut reported_lost: Vec<Arc<tze_hud_compositor::WindowSurface>> = Vec::new();
                 crate::diag::diag_write("compositor thread: frame loop STARTED");
 
                 tracing::info!(
@@ -1588,38 +1597,94 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                     let degradation_work_start = Instant::now();
 
                     // ── Resize check ───────────────────────────────────────
-                    // The main thread writes pending_resize_width/height on
-                    // WindowEvent::Resized. We detect and apply it here because
-                    // the compositor thread owns the wgpu::Device required by
-                    // surface.reconfigure().
-                    //
-                    // Read width last (it was written last by the main thread)
-                    // to avoid a torn read: if the main thread is mid-write we
-                    // will see the old width and skip this cycle; the resize
-                    // will be applied on the next frame instead.
-                    let pending_w = surface_for_compositor
-                        .pending_resize_width
-                        .load(std::sync::atomic::Ordering::Acquire);
-                    let pending_h = surface_for_compositor
-                        .pending_resize_height
-                        .load(std::sync::atomic::Ordering::Acquire);
-                    if pending_w > 0 && pending_h > 0 {
+                    // The main thread requests a resize on
+                    // WindowEvent::Resized; it is applied here because the
+                    // compositor thread owns the wgpu::Device required by
+                    // surface.reconfigure(). Taking the request is one swap,
+                    // so a newer one made during the reconfigure is applied
+                    // next iteration instead of being erased.
+                    if let Some((pending_w, pending_h)) =
+                        surface_for_compositor.take_pending_resize()
+                    {
                         surface_for_compositor.reconfigure(
                             pending_w,
                             pending_h,
                             &compositor.device,
                         );
-                        // Reset pending resize (store 0 to signal "handled").
-                        surface_for_compositor
-                            .pending_resize_width
-                            .store(0, std::sync::atomic::Ordering::Release);
-                        surface_for_compositor
-                            .pending_resize_height
-                            .store(0, std::sync::atomic::Ordering::Release);
                         // Update compositor's cached dimensions.
                         compositor.width = pending_w;
                         compositor.height = pending_h;
                     }
+
+                    // ── Display windows (hud-1pt5h) ───────────────────────
+                    // A new layout (monitor added/removed, zone placement)
+                    // replaces the secondary list; every new or reconfigured
+                    // secondary presents on the next built frame.
+                    let mut displays_need_frame = {
+                        let targets = display_targets.lock().unwrap_or_else(|e| e.into_inner());
+                        if targets.generation == display_targets_generation {
+                            false
+                        } else {
+                            display_targets_generation = targets.generation;
+                            compositor.set_display_layout(targets.layout.clone());
+                            reported_lost.retain(|lost| {
+                                targets
+                                    .secondaries
+                                    .iter()
+                                    .any(|(_, surface, _)| Arc::ptr_eq(surface, lost))
+                            });
+                            secondaries = targets
+                                .secondaries
+                                .iter()
+                                .filter(|(_, surface, _)| {
+                                    !reported_lost.iter().any(|lost| Arc::ptr_eq(surface, lost))
+                                })
+                                .map(|(name, surface, origin)| displays::SecondaryTarget {
+                                    name: name.clone(),
+                                    surface: Arc::clone(surface),
+                                    origin: *origin,
+                                    ledger: Default::default(),
+                                })
+                                .collect();
+                            true
+                        }
+                    };
+                    secondaries.retain_mut(|target| {
+                        if let Some((w, h)) = target.surface.take_pending_resize() {
+                            target.surface.reconfigure(w, h, &compositor.device);
+                            target.ledger.invalidate();
+                            displays_need_frame = true;
+                        }
+                        let recovery =
+                            compositor.attempt_pending_surface_recovery(target.surface.as_ref());
+                        if recovery.reconfigured_surface() {
+                            target.ledger.invalidate();
+                            displays_need_frame = true;
+                        }
+                        if recovery.is_terminal() {
+                            // A secondary is not worth the HUD: stop rendering
+                            // it and have the main thread close and recreate
+                            // its window (until then it is click-through and
+                            // shows its last frame).
+                            tracing::error!(
+                                display = %target.name,
+                                "secondary display surface lost; asking the main thread to recreate it"
+                            );
+                            display_targets
+                                .lock()
+                                .unwrap_or_else(|e| e.into_inner())
+                                .report_lost(&target.name);
+                            reported_lost.push(Arc::clone(&target.surface));
+                            displays_dirty.store(true, std::sync::atomic::Ordering::Release);
+                            compositor_wake.notify_main(
+                                crate::idle_efficiency::RuntimeWakeupSource::Resize,
+                            );
+                        }
+                        !recovery.is_terminal()
+                    });
+                    // A secondary whose last present failed (acquire timeout,
+                    // occluded, asleep) is retried on its own backoff deadline
+                    // (`displays::frame_plan`), never at frame cadence.
 
                     // ── Surface recovery check ───────────────────────────
                     // `WindowSurface::acquire_frame` queues real Lost/Outdated
@@ -1657,7 +1722,8 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                         surface_repaint_pending,
                         surface_recovery.reconfigured_surface()
                             || safe_mode_flipped
-                            || card_changed,
+                            || card_changed
+                            || displays_need_frame,
                         false,
                     );
 
@@ -1751,7 +1817,12 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                             benchmark_state.is_some(),
                             surface_repaint_pending,
                         );
-                        continue_at_cadence |= needs_render;
+                        let plan = displays::frame_plan(
+                            needs_render,
+                            secondaries.iter().map(|t| &t.ledger),
+                            Instant::now(),
+                        );
+                        continue_at_cadence |= plan.cadence;
 
                         // ── Admin screenshot (build half) ─────────────────
                         // Runs AFTER the idle gate on purpose: the build steps
@@ -1774,10 +1845,16 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                             (req, compositor.build_windowed_frame(&mut scene, w, h))
                         });
 
-                        if !needs_render {
+                        if !plan.full {
                             // Idle: scene unchanged and nothing animating. Release
                             // the lock without building vertices, encoding, or
-                            // signalling the main thread to present.
+                            // signalling the main thread to present. A secondary
+                            // whose retry came due gets a build, presented to it
+                            // alone (nothing animates, so building steps nothing).
+                            let retry_build = plan.retry_only.then(|| {
+                                let (w, h) = surface_for_compositor.size();
+                                compositor.build_windowed_frame(&mut scene, w, h)
+                            });
                             let scene_deadline_wall_us = scene
                                 .next_publication_expiry_wall_us()
                                 .into_iter()
@@ -1796,6 +1873,20 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                                 lease_expirations.as_ref(),
                                 terminal_lease_expiries,
                             );
+                            if let Some(build) = retry_build
+                                && displays::present_to_secondaries(
+                                    &mut compositor,
+                                    &build,
+                                    &mut secondaries,
+                                    compositor_wake.counters(),
+                                    &display_targets,
+                                )
+                            {
+                                let _ = frame_ready_tx.send(true);
+                                compositor_wake.notify_main(
+                                    crate::idle_efficiency::RuntimeWakeupSource::FrameReady,
+                                );
+                            }
                             let now_us = degradation_clock_start.elapsed().as_micros() as u64;
                             if let Some(event) = degradation_controller.record_quiescent_at(now_us)
                             {
@@ -1885,8 +1976,9 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                             );
 
                             // ── Stage 6–7: Present lock-free ──────────────────
-                            let present_outcome = compositor.present_windowed_frame_with_outcome(
-                                build,
+                            let present_outcome = compositor.present_windowed_frame_to(
+                                &build,
+                                &tze_hud_compositor::FrameTarget::primary(surf_w, surf_h),
                                 surface_for_compositor.as_ref(),
                             );
                             if present_outcome.surface_acquired {
@@ -1895,6 +1987,15 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                             if present_outcome.gpu_submitted {
                                 compositor_wake.counters().record_gpu_submission();
                             }
+                            // Secondary windows present the same build, each
+                            // only when what it shows changed.
+                            let secondary_submitted = displays::present_to_secondaries(
+                                &mut compositor,
+                                &build,
+                                &mut secondaries,
+                                compositor_wake.counters(),
+                                &display_targets,
+                            );
                             let compositor_telemetry = present_outcome.telemetry;
                             let frame_submitted = compositor_telemetry.stage7_gpu_submit_us > 0;
                             surface_repaint_pending = update_surface_repaint_pending(
@@ -1923,6 +2024,11 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                                 // stranding an unpresented scene as "rendered".
                                 last_rendered_scene_version = built_scene_version;
                                 last_rendered_geometry_epoch = built_geometry_epoch;
+                            } else if secondary_submitted {
+                                let _ = frame_ready_tx.send(true);
+                                compositor_wake.notify_main(
+                                    crate::idle_efficiency::RuntimeWakeupSource::FrameReady,
+                                );
                             }
 
                             // ── Broadcast FramePresented (hud-4va6q) ──────────
@@ -2013,8 +2119,24 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                         // ── Admin screenshot (render half) ────────────────
                         // Lock released: render offscreen, copy once, reply.
                         if let Some((req, build)) = capture_job {
-                            let result = compositor
-                                .capture_windowed_frame(build, surface_for_compositor.format());
+                            let (w, h) = build.size();
+                            let target = match &req.display {
+                                None => Some(tze_hud_compositor::FrameTarget::primary(w, h)),
+                                Some(name) => secondaries
+                                    .iter()
+                                    .find(|t| &t.name == name)
+                                    .map(|t| t.frame_target()),
+                            };
+                            let result = match target {
+                                Some(target) => compositor.capture_windowed_frame(
+                                    &build,
+                                    &target,
+                                    surface_for_compositor.format(),
+                                ),
+                                None => Err(tze_hud_compositor::CaptureError::NoSuchDisplay(
+                                    req.display.clone().unwrap_or_default(),
+                                )),
+                            };
                             let _ = req.reply.send(result);
                         }
                     } else {
@@ -2073,9 +2195,20 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                             crate::idle_efficiency::RuntimeWakeupSource::AnimationDeadline,
                         )
                     });
+                    let secondary_retry = displays::next_secondary_retry(
+                        secondaries.iter().map(|t| &t.ledger),
+                        Instant::now(),
+                    )
+                    .map(|at| {
+                        Deadline::new(
+                            at,
+                            crate::idle_efficiency::RuntimeWakeupSource::AnimationDeadline,
+                        )
+                    });
                     let next_deadline = cadence_deadline
                         .into_iter()
                         .chain(timed_deadline)
+                        .chain(secondary_retry)
                         .min_by_key(|candidate| candidate.at);
                     let observed = compositor_wake
                         .compositor()
@@ -2093,6 +2226,20 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
         );
 
         self.state.compositor_handle = Some(compositor_handle);
+
+        // ── Per-monitor windows (hud-1pt5h) ───────────────────────────────
+        // Publish the display layout and open the secondary windows now that
+        // the compositor thread can render them; afterwards re-sync whenever
+        // the monitor layout changes.
+        self.sync_displays(event_loop);
+        #[cfg(target_os = "windows")]
+        {
+            let wake = self.state.wake.clone();
+            displays::spawn_display_change_watcher(
+                Arc::clone(&self.state.displays_dirty),
+                move || wake.notify_main(crate::idle_efficiency::RuntimeWakeupSource::Resize),
+            );
+        }
 
         // Wait for the compositor thread to signal ready (with timeout).
         let tmp_rt = tokio::runtime::Builder::new_current_thread()
@@ -2122,11 +2269,12 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
     fn window_event(
         &mut self,
         event_loop: &ActiveEventLoop,
-        _window_id: WindowId,
+        window_id: WindowId,
         event: WindowEvent,
     ) {
         self.state.cursor_entry.tick = false;
         let wake_source = main_work_source_for_window_event(&event);
+        let secondary = displays::secondary_index(&self.state.secondaries, window_id);
         match event {
             // ── Close ──────────────────────────────────────────────────────
             WindowEvent::CloseRequested => {
@@ -2137,10 +2285,79 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                 event_loop.exit();
             }
 
+            // ── Monitor layout may have changed (hud-1pt5h) ───────────────
+            // Windows moves an overlay whose monitor went away and resizes it
+            // on a DPI change; re-enumerate on the next turn. A DPI change
+            // also asks for this window's monitor-native size.
+            WindowEvent::Moved(_) => {
+                self.state
+                    .displays_dirty
+                    .store(true, std::sync::atomic::Ordering::Release);
+            }
+            WindowEvent::ScaleFactorChanged {
+                mut inner_size_writer,
+                ..
+            } => {
+                self.state
+                    .displays_dirty
+                    .store(true, std::sync::atomic::Ordering::Release);
+                let spec = match secondary {
+                    Some(i) => Some(&self.state.secondaries[i].spec),
+                    None => self.state.primary_monitor.as_ref(),
+                };
+                if let Some(spec) = spec
+                    && self.state.effective_mode == WindowMode::Overlay
+                    && self.state.config.overlay_auto_size
+                {
+                    let _ = inner_size_writer
+                        .request_inner_size(winit::dpi::PhysicalSize::new(spec.width, spec.height));
+                }
+            }
+
             // ── Resize ─────────────────────────────────────────────────────
+            WindowEvent::Resized(physical_size) if secondary.is_some() => {
+                if let Some(source) = wake_source {
+                    self.state.wake.mark_main_work_pending(source);
+                }
+                let display = &self.state.secondaries[secondary.unwrap_or_default()];
+                if (physical_size.width, physical_size.height)
+                    != (display.spec.width, display.spec.height)
+                {
+                    // The OS resized an overlay off its monitor (topology or
+                    // DPI change); re-fit it on the next turn.
+                    self.state
+                        .displays_dirty
+                        .store(true, std::sync::atomic::Ordering::Release);
+                }
+                display
+                    .surface
+                    .request_resize(physical_size.width, physical_size.height);
+                self.state
+                    .wake
+                    .notify_compositor(crate::idle_efficiency::RuntimeWakeupSource::Resize);
+            }
+            // A secondary still being created (not yet registered) resizes
+            // too; its surface is sized when it is registered.
+            WindowEvent::Resized(_)
+                if self
+                    .state
+                    .window
+                    .as_ref()
+                    .is_some_and(|w| w.id() != window_id) => {}
             WindowEvent::Resized(physical_size) => {
                 if let Some(source) = wake_source {
                     self.state.wake.mark_main_work_pending(source);
+                }
+                if self.state.effective_mode == WindowMode::Overlay
+                    && self.state.config.overlay_auto_size
+                    && self.state.primary_monitor.as_ref().is_some_and(|m| {
+                        (physical_size.width, physical_size.height) != (m.width, m.height)
+                    })
+                {
+                    // Same for the primary: it stays pinned to its monitor.
+                    self.state
+                        .displays_dirty
+                        .store(true, std::sync::atomic::Ordering::Release);
                 }
                 if physical_size.width > 0 && physical_size.height > 0 {
                     self.state.config.window.width = physical_size.width;
@@ -2165,19 +2382,13 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                     // The compositor thread owns the wgpu::Device and is the
                     // only thread that can safely call surface.configure().
                     //
-                    // We write the new dimensions atomically. The compositor
-                    // thread reads `pending_resize_width/height` at the start of
-                    // each frame cycle, calls `surface.reconfigure()` when
-                    // non-zero, and resets both fields to 0.
-                    //
-                    // Write height first so the compositor never sees a
-                    // partially-updated pair (width updated, height stale).
-                    surface
-                        .pending_resize_height
-                        .store(physical_size.height, std::sync::atomic::Ordering::Release);
-                    surface
-                        .pending_resize_width
-                        .store(physical_size.width, std::sync::atomic::Ordering::Release);
+                    // The compositor takes the request at the top of its next
+                    // iteration; wake it, since an idle compositor would
+                    // otherwise apply it only when something else woke it.
+                    surface.request_resize(physical_size.width, physical_size.height);
+                    self.state
+                        .wake
+                        .notify_compositor(crate::idle_efficiency::RuntimeWakeupSource::Resize);
                 }
             }
 
@@ -2188,8 +2399,12 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                 if let Some(source) = wake_source {
                     self.state.wake.mark_main_work_pending(source);
                 }
-                self.state.cursor_x = position.x as f32;
-                self.state.cursor_y = position.y as f32;
+                // Positions are window-relative; scene coordinates are
+                // relative to the primary window.
+                let (x, y) = self.cursor_to_scene(secondary, (position.x, position.y));
+                self.state.cursor_x = x;
+                self.state.cursor_y = y;
+                self.state.cursor_window = Some(window_id);
                 self.state.cursor_left_window = false;
 
                 if self.synthesize_left_release_if_physically_up() {
@@ -2203,11 +2418,23 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                 if let Some(source) = wake_source {
                     self.state.wake.mark_main_work_pending(source);
                 }
-                self.state.cursor_left_window = true;
+                // Moving between overlays can deliver the old window's
+                // CursorLeft after the new one's CursorMoved.
+                if self.state.cursor_window.is_none_or(|id| id == window_id) {
+                    self.state.cursor_left_window = true;
+                }
             }
 
             // ── Pointer: button press/release ──────────────────────────────
             WindowEvent::MouseInput { state, button, .. } => {
+                tracing::debug!(
+                    ?state,
+                    ?button,
+                    secondary = ?secondary,
+                    x = self.state.cursor_x,
+                    y = self.state.cursor_y,
+                    "main thread: mouse input"
+                );
                 if let Some(source) = wake_source {
                     self.state.wake.mark_main_work_pending(source);
                 }
@@ -2222,7 +2449,12 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                             end_os_mouse_capture();
                         }
                         self.state.left_button_down = true;
-                        if let Some(window) = &self.state.window {
+                        self.state.press_window = Some(window_id);
+                        let window = match secondary {
+                            Some(i) => Some(&self.state.secondaries[i].window),
+                            None => self.state.window.as_ref(),
+                        };
+                        if let Some(window) = window {
                             focus_window_for_text_input(window);
                             begin_os_mouse_capture(window);
                         }
@@ -2237,6 +2469,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                     self.enqueue_pointer_event(kind);
                     if state == ElementState::Released {
                         self.state.left_button_down = false;
+                        self.state.press_window = None;
                         end_os_mouse_capture();
                         self.update_overlay_cursor_hittest();
                     }
@@ -2264,7 +2497,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
             // Stage 1: Drain keyboard events into the input ring buffer.
             // Map winit keyboard events to InputEventKind::KeyPress / KeyRelease.
             WindowEvent::KeyboardInput { event, .. } => {
-                // ── Monitor cycling: Ctrl+Shift+F9 (next) / Ctrl+Shift+F8 (prev)
+                // ── Shell shortcut: Ctrl+Shift+P opens pairing
                 if event.state == ElementState::Pressed && !event.repeat {
                     use winit::keyboard::{KeyCode, PhysicalKey};
                     let mods = self.state.modifiers;
@@ -2272,33 +2505,14 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                         && mods.shift_key()
                         && !mods.alt_key()
                         && !mods.super_key();
-                    if ctrl_shift {
-                        match event.physical_key {
-                            PhysicalKey::Code(KeyCode::F9) => {
-                                self.cycle_monitor(event_loop, 1);
-                                self.state
-                                    .consumed_shell_shortcut_keydowns
-                                    .insert("F9".to_string());
-                                return;
-                            }
-                            PhysicalKey::Code(KeyCode::KeyP) => {
-                                if let Some(pairing) = &self.state.pairing {
-                                    pairing.open();
-                                }
-                                self.state
-                                    .consumed_shell_shortcut_keydowns
-                                    .insert(physical_key_to_key_code_str(&event.physical_key));
-                                return;
-                            }
-                            PhysicalKey::Code(KeyCode::F8) => {
-                                self.cycle_monitor(event_loop, -1);
-                                self.state
-                                    .consumed_shell_shortcut_keydowns
-                                    .insert("F8".to_string());
-                                return;
-                            }
-                            _ => {}
+                    if ctrl_shift && event.physical_key == PhysicalKey::Code(KeyCode::KeyP) {
+                        if let Some(pairing) = &self.state.pairing {
+                            pairing.open();
                         }
+                        self.state
+                            .consumed_shell_shortcut_keydowns
+                            .insert(physical_key_to_key_code_str(&event.physical_key));
+                        return;
                     }
                 }
 
@@ -2506,6 +2720,10 @@ impl WindowedRuntime {
             .config_toml
             .as_deref()
             .and_then(|toml| toml::from_str(toml).ok());
+        let zone_displays = raw_config_for_startup
+            .as_ref()
+            .map(tze_hud_config::displays::zone_display_assignments)
+            .unwrap_or_default();
 
         let mut pending_widget_svgs: Vec<crate::widget_startup::WidgetSvgAsset> = Vec::new();
         let (
@@ -2921,10 +3139,18 @@ impl WindowedRuntime {
             overlay_capturing: false,
             static_hit_regions: Vec::new(),
             widget_hover_trackers: std::collections::HashMap::new(),
-            pending_mode_switch: None,
             pending_widget_svgs,
             modifiers: winit::keyboard::ModifiersState::empty(),
-            current_monitor_index: 0,
+            primary_monitor: None,
+            secondaries: Vec::new(),
+            display_targets: Default::default(),
+            displays_dirty: Default::default(),
+            surface_factory: None,
+            zone_displays,
+            cursor_window: None,
+            secondary_recreates: Default::default(),
+            overlay_refits: Default::default(),
+            press_window: None,
             global_tokens: startup_compositor_tokens,
             element_repositioned_tx,
             input_event_tx,
@@ -3241,15 +3467,14 @@ mod wake_accounting_tests {
         }
         let lease_id = granted_lease_id.expect("granted lease must carry a SceneId");
 
-        // A mode switch tears down the first compositor generation. The runtime
-        // must keep each sender so the replacement compositor receives a fresh
-        // clone instead of silently dropping connected-session notifications.
+        // Each compositor generation takes clones; the runtime keeps every
+        // sender so a later generation still reaches connected sessions.
         let mut runtime_state = WindowedRuntimeState::new_headless();
         let (frame_presented_tx, _frame_presented_rx) = tokio::sync::broadcast::channel(1);
         runtime_state.frame_presented_tx = Some(frame_presented_tx);
         runtime_state.degradation_notices = Some(Default::default());
         runtime_state.lease_expirations = Some(lease_expirations);
-        let mut app = WinitApp {
+        let app = WinitApp {
             state: runtime_state,
         };
 
@@ -3258,9 +3483,6 @@ mod wake_accounting_tests {
         assert!(first_generation.1.is_some());
         assert!(first_generation.2.is_some());
         drop(first_generation);
-
-        app.state.pending_mode_switch = Some(WindowMode::Overlay);
-        app.apply_pending_mode_switch();
 
         let restarted_generation = app.state.compositor_runtime_senders();
         assert!(app.state.frame_presented_tx.is_some());

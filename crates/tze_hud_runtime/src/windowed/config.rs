@@ -114,8 +114,6 @@ pub struct WindowedConfig {
     pub config_file_path: Option<String>,
     /// Render zone boundaries with colored debug tints.  Default: `false`.
     pub debug_zones: bool,
-    /// Monitor index for overlay placement (0-based).  `None` = primary monitor.
-    pub monitor_index: Option<usize>,
     /// Optional bounded benchmark run for the windowed compositor.
     pub benchmark: Option<WindowedBenchmarkConfig>,
     /// Optional bounded, event-driven quiescent-efficiency measurement.
@@ -142,7 +140,6 @@ impl Default for WindowedConfig {
             config_toml: None,
             config_file_path: None,
             debug_zones: false,
-            monitor_index: None,
             benchmark: None,
             quiescent_efficiency: None,
             relaunch: None,

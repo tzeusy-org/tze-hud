@@ -116,6 +116,65 @@ pub fn report_outcome(tx: &std::sync::mpsc::Sender<HotkeyStatus>, status: Hotkey
     }
 }
 
+/// One overlaid display for `/admin/status`; its list index is the
+/// `/admin/screenshot?display=<i>` index (0 = primary).
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+pub struct DisplayStatus {
+    pub name: String,
+    /// Origin in scene pixels (the primary's top-left is 0,0).
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+    pub primary: bool,
+    /// Zones configured onto this display (`[displays.<NAME>]`).
+    pub zones: Vec<String>,
+}
+
+/// A configured zone placement (`[displays.<NAME>]`) that has no overlay
+/// window; the zone renders on the primary instead.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize)]
+pub struct UnplacedZone {
+    pub zone: String,
+    /// The display name the zone is configured for.
+    pub display: String,
+    pub reason: UnplacedReason,
+}
+
+/// Why a configured display has no overlay window.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UnplacedReason {
+    /// No connected monitor has that name.
+    NotConnected,
+    /// The monitor is connected, but its overlay surface kept failing and the
+    /// runtime stopped recreating it.
+    OverlayFailed,
+}
+
+static DISPLAYS: Mutex<(Vec<DisplayStatus>, Vec<UnplacedZone>)> =
+    Mutex::new((Vec::new(), Vec::new()));
+
+/// Record the overlaid displays (main thread, on startup and every change).
+pub fn set_displays(displays: Vec<DisplayStatus>, unplaced_zones: Vec<UnplacedZone>) {
+    *DISPLAYS.lock().unwrap_or_else(|e| e.into_inner()) = (displays, unplaced_zones);
+}
+
+/// The name of display `index` in `/admin/status` order, if connected.
+pub fn display_name(index: usize) -> Option<String> {
+    DISPLAYS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .0
+        .get(index)
+        .map(|d| d.name.clone())
+}
+
+fn displays_json() -> (Value, Value) {
+    let guard = DISPLAYS.lock().unwrap_or_else(|e| e.into_inner());
+    (json!(guard.0), json!(guard.1))
+}
+
 /// The recorded hotkey outcome, `NotApplicable` until one is set.
 pub fn safe_mode_hotkey() -> HotkeyStatus {
     SAFE_MODE_HOTKEY
@@ -275,6 +334,7 @@ impl StatusSource {
             .unwrap_or_else(|e| crate::firewall::TailnetInbound::Unknown {
                 error: e.to_string(),
             });
+        let (displays, unplaced_zones) = displays_json();
         json!({
             "version": env!("CARGO_PKG_VERSION"),
             "sha": build.map_or("unknown", |b| b.sha.as_str()),
@@ -287,6 +347,8 @@ impl StatusSource {
             "agents": agents,
             "safe_mode": self.safe_mode.load(Ordering::Relaxed),
             "safe_mode_hotkey": safe_mode_hotkey().to_json(),
+            "displays": displays,
+            "unplaced_zones": unplaced_zones,
             "frames_presented": self.presents.as_ref().map(|c| c.snapshot().presents),
             "cpu_pct_2s": cpu_pct_2s,
             "cpu_pct_avg": cpu_pct_avg,

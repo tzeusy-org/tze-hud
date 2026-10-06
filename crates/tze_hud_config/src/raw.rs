@@ -208,4 +208,18 @@ pub struct RawConfig {
     /// Optional design token overrides.
     #[serde(default)]
     pub design_tokens: Option<RawDesignTokens>,
+    /// Optional `[displays.<NAME>]` tables placing zones on a non-primary
+    /// monitor, keyed by OS display name (e.g. `DISPLAY6`).
+    #[serde(default)]
+    pub displays: Option<HashMap<String, RawDisplay>>,
+}
+
+// ─── [displays.<NAME>] ───────────────────────────────────────────────────────
+
+/// `[displays.<NAME>]` table: which zones render on that monitor instead of
+/// the primary.
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct RawDisplay {
+    #[serde(default)]
+    pub zones: Vec<String>,
 }

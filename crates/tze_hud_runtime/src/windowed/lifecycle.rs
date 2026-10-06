@@ -3,7 +3,6 @@ use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant};
 
 use tokio::sync::Mutex;
-use winit::event_loop::ActiveEventLoop;
 use winit::window::Window;
 
 use tze_hud_input::{
@@ -21,8 +20,7 @@ use tze_hud_telemetry::{
     QuiescentEfficiencyValidation, QuiescentMeasurementStatus, SessionSummary,
 };
 
-use crate::channels::{InputEvent, InputEventKind, frame_ready_channel};
-use crate::threads::ShutdownToken;
+use crate::channels::{InputEvent, InputEventKind};
 use crate::window::WindowMode;
 
 use super::input_dispatch::{
@@ -2211,86 +2209,6 @@ impl WinitApp {
 }
 
 impl WinitApp {
-    /// Tear down the current window/compositor and apply a pending mode switch.
-    ///
-    /// Called from `about_to_wait` when `pending_mode_switch` is `Some`.
-    /// After this returns, `self.state.window` is `None` so that `resumed()`
-    /// will re-create the window with the new effective mode.
-    pub(super) fn apply_pending_mode_switch(&mut self) {
-        let new_mode = match self.state.pending_mode_switch.take() {
-            Some(m) => m,
-            None => return,
-        };
-
-        tracing::info!(
-            old_mode = %self.state.effective_mode,
-            new_mode = %new_mode,
-            "runtime mode switch: tearing down existing window for surface recreation"
-        );
-
-        // Join the compositor thread before destroying the surface.
-        if let Some(handle) = self.state.compositor_handle.take() {
-            self.state
-                .shutdown
-                .trigger(crate::threads::ShutdownReason::Clean);
-            self.state
-                .wake
-                .notify_compositor(crate::idle_efficiency::RuntimeWakeupSource::Shutdown);
-            let _ = handle.join();
-        }
-
-        // Drop the surface and window handles.
-        self.state.window_surface = None;
-        self.state.window = None;
-
-        // Re-create the shutdown token for the new session.
-        self.state.shutdown = ShutdownToken::new();
-
-        // Re-create the frame-ready channel.
-        let (new_tx, new_rx) = frame_ready_channel();
-        self.state.frame_ready_tx = Some(new_tx);
-        self.state.frame_ready_rx = new_rx;
-
-        self.state.effective_mode = new_mode;
-        self.state.config.window.mode = new_mode;
-    }
-
-    /// Cycle the overlay to the next (+1) or previous (-1) monitor.
-    ///
-    /// Enumerates available monitors, advances the index, and repositions +
-    /// resizes the window to cover the target monitor's full physical area.
-    /// The compositor surface is reconfigured automatically via the existing
-    /// `WindowEvent::Resized` handler.
-    pub(super) fn cycle_monitor(&mut self, event_loop: &ActiveEventLoop, direction: i32) {
-        let monitors: Vec<_> = event_loop.available_monitors().collect();
-        if monitors.is_empty() {
-            return;
-        }
-        let count = monitors.len();
-        let new_idx = ((self.state.current_monitor_index as i32 + direction)
-            .rem_euclid(count as i32)) as usize;
-        self.state.current_monitor_index = new_idx;
-
-        let m = &monitors[new_idx];
-        let size = m.size();
-        let pos = m.position();
-        tracing::info!(
-            monitor_index = new_idx,
-            name = m.name().as_deref().unwrap_or("<unnamed>"),
-            width = size.width,
-            height = size.height,
-            x = pos.x,
-            y = pos.y,
-            "monitor cycle: moving overlay"
-        );
-
-        if let Some(window) = &self.state.window {
-            window.set_outer_position(winit::dpi::PhysicalPosition::new(pos.x, pos.y));
-            let _ =
-                window.request_inner_size(winit::dpi::PhysicalSize::new(size.width, size.height));
-        }
-    }
-
     /// Check the `FrameReadySignal` and present the frame if the compositor
     /// has signalled one.
     ///
@@ -2310,6 +2228,9 @@ impl WinitApp {
             // Acknowledge the signal.
             let _ = self.state.frame_ready_rx.borrow_and_update();
 
+            // Secondary overlays first: they never carry the primary's
+            // present accounting.
+            let secondary_presented = self.present_secondaries();
             if let Some(surface) = &self.state.window_surface {
                 // Present under the same mutex that guards pending swapchain
                 // ownership so acquire/present cannot interleave into a
@@ -2319,7 +2240,7 @@ impl WinitApp {
                     if let Some(measurement) = self.state.quiescent_efficiency.as_mut() {
                         measurement.record_first_present(Instant::now());
                     }
-                } else {
+                } else if !secondary_presented {
                     // FrameReady signal fired but no texture is pending —
                     // this can happen if acquire_frame() failed on the
                     // compositor thread (error already logged there).
@@ -2334,122 +2255,6 @@ impl WinitApp {
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-
-// ─── Monitor resolution detection ────────────────────────────────────────────
-
-/// Detect the physical size of the primary monitor via the winit event loop.
-///
-/// Used exclusively for overlay auto-sizing: when `overlay_auto_size` is true
-/// and the window mode is `Overlay`, this function is called in `resumed()`
-/// before window creation so the overlay covers the full display area.
-///
-/// ## Resolution order
-///
-/// 1. `event_loop.primary_monitor()` — the OS-designated primary display.
-/// 2. `event_loop.available_monitors().next()` — first enumerated monitor, if
-///    no primary is designated (common on some Wayland compositors).
-/// 3. `(fallback_width, fallback_height)` — the configured dimensions.
-///
-/// ## DPI scaling
-///
-/// `MonitorHandle::size()` returns the **physical** pixel size when the process
-/// has per-monitor DPI awareness set (which is guaranteed by the embedded
-/// application manifest in `tze_hud_app`). The return value is used directly
-/// without scaling — do NOT multiply by `scale_factor()`.
-///
-/// Background: `MonitorHandle::scale_factor()` calls `GetDpiForMonitor` with
-/// `MDT_EFFECTIVE_DPI`, which returns the DPI-awareness-adjusted value (96 for
-/// DPI-unaware processes). If the process is somehow not DPI-aware, both
-/// `size()` and `scale_factor()` are virtualised; multiplying them produces a
-/// doubly-wrong result. The manifest-based DPI awareness declaration (see
-/// `app/tze_hud_app/tze_hud.manifest`) ensures physical values at all times.
-///
-/// ## Errors
-///
-/// Failures (no monitors detected, headless environment) are logged as warnings
-/// and cause a graceful fall back to the configured fallback dimensions.
-/// Returns `(width, height, x_position, y_position)` for the selected monitor.
-///
-/// When `monitor_index` is `Some(i)`, selects the i-th available monitor.
-/// When `None`, uses the primary monitor (or first available as fallback).
-pub(super) fn detect_monitor_size(
-    event_loop: &ActiveEventLoop,
-    fallback_width: u32,
-    fallback_height: u32,
-    monitor_index: Option<usize>,
-) -> (u32, u32, i32, i32) {
-    // Log available monitors for diagnostics.
-    let monitors: Vec<_> = event_loop.available_monitors().collect();
-    for (i, m) in monitors.iter().enumerate() {
-        let size = m.size();
-        let pos = m.position();
-        tracing::info!(
-            index = i,
-            name = m.name().as_deref().unwrap_or("<unnamed>"),
-            width = size.width,
-            height = size.height,
-            x = pos.x,
-            y = pos.y,
-            scale = m.scale_factor(),
-            "available monitor"
-        );
-    }
-
-    // Select monitor: by index, or primary, or first available.
-    let monitor = if let Some(idx) = monitor_index {
-        monitors.get(idx).cloned().or_else(|| {
-            tracing::warn!(
-                requested_index = idx,
-                available = monitors.len(),
-                "overlay: monitor index out of range, falling back to primary"
-            );
-            event_loop
-                .primary_monitor()
-                .or_else(|| monitors.into_iter().next())
-        })
-    } else {
-        event_loop
-            .primary_monitor()
-            .or_else(|| monitors.into_iter().next())
-    };
-
-    match monitor {
-        Some(m) => {
-            let size = m.size();
-            let pos = m.position();
-            let scale = m.scale_factor();
-            if size.width > 0 && size.height > 0 {
-                tracing::info!(
-                    monitor_name = m.name().as_deref().unwrap_or("<unnamed>"),
-                    physical_width = size.width,
-                    physical_height = size.height,
-                    position_x = pos.x,
-                    position_y = pos.y,
-                    scale_factor = scale,
-                    "overlay auto-size: selected monitor"
-                );
-                (size.width, size.height, pos.x, pos.y)
-            } else {
-                tracing::warn!(
-                    fallback_width,
-                    fallback_height,
-                    "overlay auto-size: monitor size returned (0,0); \
-                     using configured fallback dimensions"
-                );
-                (fallback_width, fallback_height, 0, 0)
-            }
-        }
-        None => {
-            tracing::warn!(
-                fallback_width,
-                fallback_height,
-                "overlay auto-size: no monitors detected (headless?); \
-                 using configured fallback dimensions"
-            );
-            (fallback_width, fallback_height, 0, 0)
-        }
-    }
-}
 
 #[cfg(test)]
 mod tests {

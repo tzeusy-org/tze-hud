@@ -146,6 +146,11 @@ impl Compositor {
                 Some(z) => z,
                 None => continue,
             };
+            // Drag handles clamp to the primary display; zones placed on
+            // another display are not draggable.
+            if self.display_layout.zone_display_rect(zone_name).is_some() {
+                continue;
+            }
             let (x, y, w, h) = Self::resolve_zone_geometry(&zone_def.geometry_policy, sw, sh);
             let element_bounds_zone = Rect::new(x, y, w, h);
             let bounds = Self::drag_handle_bounds(element_bounds_zone, style, sw, sh);

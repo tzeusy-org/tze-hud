@@ -28,11 +28,13 @@
 //! | `--help`            | —                      | —            | Print this help and exit.                |
 //! | `--version`         | —                      | —            | Print version and exit.                  |
 //!
-//! ¹ In overlay mode, the primary monitor resolution is auto-detected at startup
-//!   via winit. Falls back to `1920` (width) / `1080` (height) if detection fails
-//!   (headless environment, no display server). Explicit `--width`/`--height` flags
-//!   or `TZE_HUD_WINDOW_WIDTH`/`TZE_HUD_WINDOW_HEIGHT` env vars override
-//!   auto-detection. In fullscreen mode, `1920×1080` is the default (the compositor
+//! ¹ In overlay mode the HUD opens one overlay per connected monitor, each at
+//!   its native resolution; the primary keeps the zone layout (see
+//!   `[displays.<NAME>]` in the config). Falls back to `1920` (width) / `1080`
+//!   (height) if no monitor is detected (headless environment, no display
+//!   server). Explicit `--width`/`--height` flags or
+//!   `TZE_HUD_WINDOW_WIDTH`/`TZE_HUD_WINDOW_HEIGHT` env vars give a single
+//!   window of that size on the primary. In fullscreen mode, `1920×1080` is the default (the compositor
 //!   uses `Fullscreen::Borderless`, which always uses the monitor's native resolution).
 //!
 //! ## Config file resolution order
@@ -204,8 +206,6 @@ struct StartupOptions {
     fps: u32,
     /// When true, render zone boundaries with colored debug tints.
     debug_zones: bool,
-    /// Monitor index for overlay placement (0-based). `None` = primary monitor.
-    monitor_index: Option<usize>,
     /// Path for bounded windowed compositor benchmark output.
     benchmark_emit: Option<String>,
     /// Number of measured frames in benchmark mode.
@@ -249,7 +249,6 @@ impl Default for StartupOptions {
             mcp_port: 9090,
             fps: 60,
             debug_zones: false,
-            monitor_index: None,
             benchmark_emit: None,
             benchmark_frames: 600,
             benchmark_warmup_frames: 120,
@@ -530,16 +529,6 @@ fn parse_options(args: &[String]) -> Result<StartupOptions, String> {
             }
             "--debug-zones" => {
                 opts.debug_zones = true;
-            }
-            "--monitor" => {
-                i += 1;
-                let val = args
-                    .get(i)
-                    .ok_or_else(|| "--monitor requires a monitor index (0-based)".to_string())?;
-                opts.monitor_index = Some(
-                    val.parse::<usize>()
-                        .map_err(|_| format!("--monitor: invalid index: {val:?}"))?,
-                );
             }
             "--benchmark-emit" => {
                 i += 1;
@@ -1131,7 +1120,6 @@ set {DEV_ALLOW_INSECURE_STARTUP_ENV}=1 only in debug/dev runs if you need fallba
         config_toml,
         config_file_path,
         debug_zones: opts.debug_zones,
-        monitor_index: opts.monitor_index,
         benchmark,
         quiescent_efficiency,
         relaunch: Some(Relaunch {
@@ -1211,7 +1199,7 @@ mod tests {
                 assert_eq!((o.width, o.height), (1920, 1080));
                 assert!(!o.explicit_width && !o.explicit_height);
                 assert_eq!((o.grpc_port, o.mcp_port, o.fps), (50051, 9090, 60));
-                assert!(o.config_path.is_none() && o.monitor_index.is_none());
+                assert!(o.config_path.is_none());
                 assert!(o.benchmark_emit.is_none() && o.quiescent_efficiency_emit.is_none());
                 assert_eq!((o.benchmark_frames, o.benchmark_warmup_frames), (600, 120));
                 assert!(
@@ -1256,9 +1244,6 @@ mod tests {
             }),
             ("debug-zones", &[], &["--debug-zones"], |o| {
                 assert!(o.debug_zones)
-            }),
-            ("monitor", &[], &["--monitor", "1"], |o| {
-                assert_eq!(o.monitor_index, Some(1))
             }),
             (
                 "config",
@@ -1482,7 +1467,6 @@ mod tests {
             ("grpc-port missing", &[], &["--grpc-port"], &["--grpc-port"]),
             ("mcp-port missing", &[], &["--mcp-port"], &["--mcp-port"]),
             ("fps missing", &[], &["--fps"], &["--fps"]),
-            ("monitor missing", &[], &["--monitor"], &["--monitor"]),
             (
                 "benchmark-emit missing",
                 &[],
@@ -1527,12 +1511,6 @@ mod tests {
                 &["--mcp-port"],
             ),
             ("fps non-integer", &[], &["--fps", "x"], &["--fps"]),
-            (
-                "monitor non-integer",
-                &[],
-                &["--monitor", "x"],
-                &["--monitor"],
-            ),
             (
                 "benchmark-frames non-integer",
                 &[],

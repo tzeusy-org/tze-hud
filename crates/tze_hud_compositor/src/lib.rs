@@ -5,6 +5,7 @@
 //! Satisfies DR-V2: Headless rendering.
 //! Satisfies DR-V6: No physical GPU required (llvmpipe/WARP).
 
+pub mod display;
 pub mod fonts;
 pub mod markdown;
 pub mod overflow;
@@ -15,6 +16,7 @@ pub mod text;
 pub mod vertical_flow;
 pub mod widget;
 
+pub use display::{DisplayLayout, DisplayRect, FrameTarget, normalize_display_name};
 pub use fonts::{
     BUNDLED_FONT_FACE_COUNT, FontConfig, ResolvedFonts, build_font_system, bundled_font_sources,
     bundled_font_system,
@@ -33,6 +35,8 @@ pub use renderer::{
     LocalComposerStateHandle, PortalViewerEchoQueue, ResizeGripHoverHandle, SystemCardKind,
     SystemCardModel, TileCloseHoverHandle, ViewerEchoAppend, ViewerEchoEntry, ViewerEchoStore,
 };
-pub use surface::{CompositorFrame, CompositorSurface, HeadlessSurface, WindowSurface};
+pub use surface::{
+    CompositorFrame, CompositorSurface, HeadlessSurface, SurfaceFactory, WindowSurface,
+};
 pub use text::{LINE_HEIGHT_MULTIPLIER, StyledRunItem, TextItem, TextRasterizer};
 pub use widget::{WidgetRenderer, interpolate_param};

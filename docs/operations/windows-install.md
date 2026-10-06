@@ -163,6 +163,7 @@ to do.
 | `BUSY` | 429 | a screenshot, restart or update is already running |
 | `UNAVAILABLE` | 503 | no display, compositor silent for 3 s, capture failed, restart or update could not start, or `/pair` could not save `agents.toml` (a new code is shown) |
 | `TOO_LARGE` | 422 | the frame exceeds the screenshot size limit |
+| `NO_SUCH_DISPLAY` | 404 | `/admin/screenshot?display=<i>` names no display in `/admin/status`, or one whose overlay closed since (indexes shift on hot-plug; re-read status) |
 
 ## Update
 

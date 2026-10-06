@@ -1,4 +1,56 @@
+use std::borrow::Cow;
+
 use super::*;
+use crate::display::FrameTarget;
+use crate::pipeline::{RoundedRectBorder, RoundedRectClip};
+
+/// One display window's view of a [`WindowedFrameBuild`], in that window's
+/// pixel / NDC space (see [`Compositor::target_view`]).
+struct TargetView<'a> {
+    width: u32,
+    height: u32,
+    vertices: Cow<'a, [RectVertex]>,
+    textured_cmds: Cow<'a, [TexturedDrawCmd]>,
+    rr_background: Cow<'a, [RoundedRectDrawCmd]>,
+    rr_post: Cow<'a, [RoundedRectDrawCmd]>,
+    text_items: Cow<'a, [TextItem]>,
+    card_items: &'a [TextItem],
+    drag_handle_vertices: Cow<'a, [RectVertex]>,
+    drag_highlight_cmds: Cow<'a, [RoundedRectDrawCmd]>,
+    focus_ring_vertices: Cow<'a, [RectVertex]>,
+    context_menu_vertices: Cow<'a, [RectVertex]>,
+    safe_mode_vertices: Cow<'a, [RectVertex]>,
+    system_card_vertices: &'a [RectVertex],
+    widget_quads: &'a [crate::widget::WidgetDrawQuad],
+}
+
+fn hash_f32s(hasher: &mut impl std::hash::Hasher, values: &[f32]) {
+    for v in values {
+        hasher.write_u32(v.to_bits());
+    }
+}
+
+/// Hash the triangles (3 vertices each) that touch the NDC viewport. A
+/// triangle's bounding box is tested against `[-1, 1]²`; anything wholly off
+/// this window contributes nothing.
+fn hash_visible_triangles(hasher: &mut impl std::hash::Hasher, vertices: &[RectVertex]) {
+    for tri in vertices.chunks(3) {
+        let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+        for v in tri {
+            x0 = x0.min(v.position[0]);
+            x1 = x1.max(v.position[0]);
+            y0 = y0.min(v.position[1]);
+            y1 = y1.max(v.position[1]);
+        }
+        if x1 < -1.0 || x0 > 1.0 || y1 < -1.0 || y0 > 1.0 {
+            continue;
+        }
+        for v in tri {
+            hash_f32s(hasher, &v.position);
+            hash_f32s(hasher, &v.color);
+        }
+    }
+}
 
 /// All CPU-side, scene-free frame data produced under the scene lock by
 /// [`Compositor::build_windowed_frame`] and consumed lock-free by
@@ -26,8 +78,9 @@ pub struct WindowedFrameBuild {
     bg_vertex_count: usize,
     /// Textured image draw commands (composited above the color geometry).
     textured_cmds: Vec<TexturedDrawCmd>,
-    /// Scene-free encode inputs (rounded-rect cmds + prepared text).
-    encode_inputs: EncodeInputs,
+    /// Scene-free encode inputs (rounded-rect cmds + unprepared text). Each
+    /// display window maps and glyphon-prepares its own view at present time.
+    encode_sources: EncodeSources,
     /// Precomputed drag-handle chrome vertices.
     drag_handle_vertices: Vec<RectVertex>,
     /// Active-drag highlight borders, drawn just before the drag-handle pass.
@@ -63,7 +116,7 @@ pub struct WindowedPresentOutcome {
 
 impl WindowedFrameBuild {
     /// Surface dimensions this frame was built for.
-    pub(super) fn size(&self) -> (u32, u32) {
+    pub fn size(&self) -> (u32, u32) {
         (self.surf_w, self.surf_h)
     }
 }
@@ -608,7 +661,7 @@ impl Compositor {
         // This is the second big scene read; collecting it here (rather than
         // inside the former post-acquire `encode_frame`) is what lets the encode
         // stage run lock-free.
-        let encode_inputs = self.collect_encode_inputs(scene, surf_w, surf_h);
+        let encode_sources = self.collect_encode_sources(scene, surf_w, surf_h);
 
         // ── Widget draw geometry (precomputed from the registry) ─────────────
         let widget_quads = self.collect_widget_draw_geometry(scene, sw, sh);
@@ -636,7 +689,7 @@ impl Compositor {
             vertices,
             bg_vertex_count,
             textured_cmds,
-            encode_inputs,
+            encode_sources,
             drag_handle_vertices,
             drag_highlight_cmds,
             focus_ring_vertices,
@@ -675,6 +728,18 @@ impl Compositor {
         build: WindowedFrameBuild,
         surface: &dyn CompositorSurface,
     ) -> WindowedPresentOutcome {
+        let target = FrameTarget::primary(build.surf_w, build.surf_h);
+        self.present_windowed_frame_to(&build, &target, surface)
+    }
+
+    /// Present one display window's view (`target`) of a built frame. The
+    /// same build can be presented to several windows.
+    pub fn present_windowed_frame_to(
+        &mut self,
+        build: &WindowedFrameBuild,
+        target: &FrameTarget,
+        surface: &dyn CompositorSurface,
+    ) -> WindowedPresentOutcome {
         // Acquire frame through the surface trait (surface-agnostic).
         // The CompositorFrame._guard keeps the backing resource alive until drop.
         // Returns None when the swapchain is temporarily unavailable (double
@@ -684,7 +749,7 @@ impl Compositor {
             None => {
                 // Surface unavailable: skip render pass, return zeroed telemetry.
                 // The runtime will retry on the next frame cycle.
-                let mut telemetry = build.telemetry;
+                let mut telemetry = build.telemetry.clone();
                 telemetry.frame_time_us = build.frame_start.elapsed().as_micros() as u64;
                 return WindowedPresentOutcome {
                     telemetry,
@@ -695,9 +760,9 @@ impl Compositor {
         };
         let surface_acquired = frame.acquisition.is_fresh();
 
-        let (encoder, encode_us) = self.encode_windowed_passes(&build, &frame.view);
+        let (encoder, encode_us) = self.encode_windowed_passes(build, target, &frame.view);
         let frame_start = build.frame_start;
-        let mut telemetry = build.telemetry;
+        let mut telemetry = build.telemetry.clone();
         telemetry.stage6_render_encode_us = encode_us;
 
         let submit_start = std::time::Instant::now();
@@ -756,58 +821,277 @@ impl Compositor {
     pub(super) fn encode_windowed_passes(
         &mut self,
         build: &WindowedFrameBuild,
+        target: &FrameTarget,
         view: &wgpu::TextureView,
     ) -> (wgpu::CommandEncoder, u64) {
-        let sw = build.surf_w as f32;
-        let sh = build.surf_h as f32;
+        let tv = self.target_view(build, target);
+        let sw = tv.width as f32;
+        let sh = tv.height as f32;
+
+        // Glyphon prepare for this target (its viewport and pixel space), right
+        // before the encode that replays it.
+        let inputs = self.prepare_encode_inputs(
+            tv.rr_background.into_owned(),
+            tv.rr_post.into_owned(),
+            &tv.text_items,
+            tv.card_items,
+            tv.width,
+            tv.height,
+        );
 
         let (mut encoder, encode_us) = self.encode_from_inputs(
-            &build.vertices,
+            &tv.vertices,
             view,
-            &build.encode_inputs,
-            build.surf_w,
-            build.surf_h,
+            &inputs,
+            tv.width,
+            tv.height,
             self.overlay_mode,
             build.bg_vertex_count,
         );
 
         // ── Image pass: draw textured quads on top of color geometry ─────────
-        self.encode_image_pass(&mut encoder, view, &build.textured_cmds, sw, sh);
+        self.encode_image_pass(&mut encoder, view, &tv.textured_cmds, sw, sh);
 
         // ── Widget pass: composite pre-synced textures above zone content ────
-        self.encode_widget_pass_prepared(&mut encoder, view, &build.widget_quads, sw, sh);
-        self.encode_rounded_rect_pass(&mut encoder, view, &build.drag_highlight_cmds, sw, sh);
-        self.encode_drag_handle_pass(&mut encoder, view, &build.drag_handle_vertices);
+        self.encode_widget_pass_prepared(&mut encoder, view, tv.widget_quads, sw, sh);
+        self.encode_rounded_rect_pass(&mut encoder, view, &tv.drag_highlight_cmds, sw, sh);
+        self.encode_drag_handle_pass(&mut encoder, view, &tv.drag_handle_vertices);
 
         // ── Keyboard focus ring (chrome layer, hud-k6yvb) ───────────────────
         // Drawn above all agent content (input-model §416) for the current focus
         // owner — node OR tile-level, any tile — via the same LoadOp::Load chrome
         // pass the drag handles use.
-        if !build.focus_ring_vertices.is_empty() {
-            self.encode_drag_handle_pass(&mut encoder, view, &build.focus_ring_vertices);
+        if !tv.focus_ring_vertices.is_empty() {
+            self.encode_drag_handle_pass(&mut encoder, view, &tv.focus_ring_vertices);
         }
 
         // ── Chrome context menu (hud-zc7f) ─────────────────────────────────
         // Render the drag-handle reset context menu on top of everything.
-        if !build.context_menu_vertices.is_empty() {
-            self.encode_drag_handle_pass(&mut encoder, view, &build.context_menu_vertices);
+        if !tv.context_menu_vertices.is_empty() {
+            self.encode_drag_handle_pass(&mut encoder, view, &tv.context_menu_vertices);
         }
 
         // ── Safe-mode overlay (hud-jm8nq.10): above all scene content and chrome.
-        if !build.safe_mode_vertices.is_empty() {
-            self.encode_drag_handle_pass(&mut encoder, view, &build.safe_mode_vertices);
+        if !tv.safe_mode_vertices.is_empty() {
+            self.encode_drag_handle_pass(&mut encoder, view, &tv.safe_mode_vertices);
         }
 
         // ── System card (hud-w5zon): the last pass, above the safe-mode overlay,
         // so the pairing code can never be covered.
-        self.encode_system_card_pass(
-            &mut encoder,
-            view,
-            &build.system_card_vertices,
-            &build.encode_inputs,
-        );
+        self.encode_system_card_pass(&mut encoder, view, tv.system_card_vertices, &inputs);
 
         (encoder, encode_us)
+    }
+
+    /// Map a canvas-space build onto one display window (see
+    /// [`crate::display`]). The primary window borrows the build unchanged;
+    /// any other window gets translated copies, its own safe-mode overlay, and
+    /// none of the primary-only chrome (widgets clamp to the canvas; the
+    /// system card belongs to the primary display).
+    fn target_view<'a>(
+        &self,
+        build: &'a WindowedFrameBuild,
+        target: &FrameTarget,
+    ) -> TargetView<'a> {
+        if target.primary && target.is_canvas(build.surf_w, build.surf_h) {
+            return TargetView {
+                width: build.surf_w,
+                height: build.surf_h,
+                vertices: Cow::Borrowed(&build.vertices),
+                textured_cmds: Cow::Borrowed(&build.textured_cmds),
+                rr_background: Cow::Borrowed(&build.encode_sources.rr_background),
+                rr_post: Cow::Borrowed(&build.encode_sources.rr_post),
+                text_items: Cow::Borrowed(&build.encode_sources.text_items),
+                card_items: &build.encode_sources.card_items,
+                drag_handle_vertices: Cow::Borrowed(&build.drag_handle_vertices),
+                drag_highlight_cmds: Cow::Borrowed(&build.drag_highlight_cmds),
+                focus_ring_vertices: Cow::Borrowed(&build.focus_ring_vertices),
+                context_menu_vertices: Cow::Borrowed(&build.context_menu_vertices),
+                safe_mode_vertices: Cow::Borrowed(&build.safe_mode_vertices),
+                system_card_vertices: &build.system_card_vertices,
+                widget_quads: &build.widget_quads,
+            };
+        }
+        let (tw, th) = (target.width.max(1), target.height.max(1));
+        let affine = target.ndc_affine(build.surf_w, build.surf_h);
+        let map = |vertices: &[RectVertex]| -> Vec<RectVertex> {
+            vertices
+                .iter()
+                .map(|v| RectVertex {
+                    position: affine.apply(v.position),
+                    color: v.color,
+                })
+                .collect()
+        };
+        let mut vertices = map(&build.vertices);
+        if self.overlay_mode && vertices.len() >= 6 {
+            // The leading alpha-zeroing quad must cover this whole window, not
+            // the canvas rect mapped into it.
+            let clear = rect_vertices(
+                0.0, 0.0, tw as f32, th as f32, tw as f32, th as f32, [0.0; 4],
+            );
+            vertices[..6].copy_from_slice(&clear);
+        }
+        let (dx, dy) = (-target.x, -target.y);
+        let shift_rr = |cmds: &[RoundedRectDrawCmd]| -> Vec<RoundedRectDrawCmd> {
+            cmds.iter()
+                .map(|cmd| {
+                    let mut cmd = cmd.clone();
+                    cmd.x += dx;
+                    cmd.y += dy;
+                    if let Some(clip) = cmd.clip.as_mut() {
+                        clip.x += dx;
+                        clip.y += dy;
+                    }
+                    cmd
+                })
+                .collect()
+        };
+        let text_items = build
+            .encode_sources
+            .text_items
+            .iter()
+            .map(|item| {
+                let mut item = item.clone();
+                item.pixel_x += dx;
+                item.pixel_y += dy;
+                item.clip_pixel_x += dx;
+                item.clip_pixel_y += dy;
+                item
+            })
+            .collect();
+        let textured_cmds = build
+            .textured_cmds
+            .iter()
+            .map(|cmd| {
+                let mut cmd = cmd.clone();
+                cmd.x += dx;
+                cmd.y += dy;
+                cmd
+            })
+            .collect();
+        let primary_only = |s: &'a [RectVertex]| if target.primary { s } else { &[] };
+        TargetView {
+            width: tw,
+            height: th,
+            vertices: Cow::Owned(vertices),
+            textured_cmds: Cow::Owned(textured_cmds),
+            rr_background: Cow::Owned(shift_rr(&build.encode_sources.rr_background)),
+            rr_post: Cow::Owned(shift_rr(&build.encode_sources.rr_post)),
+            text_items: Cow::Owned(text_items),
+            card_items: if target.primary {
+                &build.encode_sources.card_items
+            } else {
+                &[]
+            },
+            drag_handle_vertices: Cow::Owned(map(&build.drag_handle_vertices)),
+            drag_highlight_cmds: Cow::Owned(shift_rr(&build.drag_highlight_cmds)),
+            focus_ring_vertices: Cow::Owned(map(&build.focus_ring_vertices)),
+            context_menu_vertices: Cow::Owned(map(&build.context_menu_vertices)),
+            safe_mode_vertices: Cow::Owned(self.safe_mode_overlay_vertices(tw as f32, th as f32)),
+            system_card_vertices: primary_only(&build.system_card_vertices),
+            widget_quads: if target.primary {
+                &build.widget_quads
+            } else {
+                &[]
+            },
+        }
+    }
+
+    /// Fingerprint of what `target` would show for `build`: only content that
+    /// lands inside the window counts, so a change elsewhere in the scene (a
+    /// portal on another display) leaves it unchanged and that window need not
+    /// present. Used for non-primary windows; the primary presents every
+    /// rendered frame.
+    pub fn frame_signature(&self, build: &WindowedFrameBuild, target: &FrameTarget) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let tv = self.target_view(build, target);
+        let (w, h) = (tv.width as f32, tv.height as f32);
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        (tv.width, tv.height, self.overlay_mode).hash(&mut hasher);
+        (self.degradation_level as u8).hash(&mut hasher);
+        let bg = build.bg_vertex_count.min(tv.vertices.len());
+        hash_visible_triangles(&mut hasher, &tv.vertices[..bg]);
+        0xB6u8.hash(&mut hasher); // background / rest split
+        hash_visible_triangles(&mut hasher, &tv.vertices[bg..]);
+        for list in [
+            &tv.drag_handle_vertices,
+            &tv.focus_ring_vertices,
+            &tv.context_menu_vertices,
+            &tv.safe_mode_vertices,
+        ] {
+            0xC7u8.hash(&mut hasher);
+            hash_visible_triangles(&mut hasher, list);
+        }
+        let visible =
+            |x: f32, y: f32, cw: f32, ch: f32| x < w && y < h && x + cw > 0.0 && y + ch > 0.0;
+        // Destructure exhaustively: a new draw-command field must be hashed
+        // (or explicitly ignored) here, or a window would keep stale pixels.
+        for cmd in tv.textured_cmds.iter() {
+            let TexturedDrawCmd {
+                resource_id,
+                x,
+                y,
+                w: cw,
+                h: ch,
+                uv_rect,
+                tint,
+            } = cmd;
+            if !visible(*x, *y, *cw, *ch) {
+                continue;
+            }
+            resource_id.hash(&mut hasher);
+            hash_f32s(&mut hasher, &[*x, *y, *cw, *ch]);
+            hash_f32s(&mut hasher, uv_rect);
+            hash_f32s(&mut hasher, tint);
+        }
+        for list in [&tv.rr_background, &tv.rr_post, &tv.drag_highlight_cmds] {
+            0xD8u8.hash(&mut hasher);
+            for cmd in list.iter() {
+                let RoundedRectDrawCmd {
+                    x,
+                    y,
+                    width,
+                    height,
+                    radius,
+                    color,
+                    border,
+                    clip,
+                } = cmd;
+                if !visible(*x, *y, *width, *height) {
+                    continue;
+                }
+                hash_f32s(&mut hasher, &[*x, *y, *width, *height, *radius]);
+                hash_f32s(&mut hasher, color);
+                border.is_some().hash(&mut hasher);
+                if let Some(RoundedRectBorder { width, color }) = border {
+                    hash_f32s(&mut hasher, &[*width]);
+                    hash_f32s(&mut hasher, color);
+                }
+                clip.is_some().hash(&mut hasher);
+                if let Some(RoundedRectClip {
+                    x,
+                    y,
+                    width,
+                    height,
+                }) = clip
+                {
+                    hash_f32s(&mut hasher, &[*x, *y, *width, *height]);
+                }
+            }
+        }
+        for item in tv.text_items.iter().filter(|i| {
+            visible(
+                i.clip_pixel_x,
+                i.clip_pixel_y,
+                i.clip_bounds_width,
+                i.clip_bounds_height,
+            )
+        }) {
+            // Every TextItem field affects pixels; Debug covers them all.
+            format!("{item:?}").hash(&mut hasher);
+        }
+        hasher.finish()
     }
 
     /// Render one frame of the scene to the surface (single-lock convenience).

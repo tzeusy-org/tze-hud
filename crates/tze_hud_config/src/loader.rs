@@ -225,6 +225,9 @@ impl ConfigLoader for TzeHudConfig {
         // ── (13b) Runtime widget asset durable budget relationship ───────────
         runtime_widget_assets::validate_runtime_widget_asset_budgets(&self.raw, &mut errors);
 
+        // ── (13c) [displays] zone placement ────────────────────────────────────
+        crate::displays::validate_displays(&self.raw, &mut errors);
+
         // ── (14) Design token key validation ──────────────────────────────────
         tokens::validate_design_tokens(&self.raw, &mut errors);
         themes::validate_theme(&self.raw, &mut errors);

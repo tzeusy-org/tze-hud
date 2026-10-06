@@ -147,8 +147,18 @@ allow = ["zone:*", "widget:gauge", "portal", "tiles"]
   MCP port, and `*` does not grant it. `/admin/status` includes `tailnet_inbound` (`state`: `allowed`, `blocked`, `unknown`, `not_applicable`; `reason`, `rule` and `fix` when `blocked`; `error` when `unknown`): whether Windows Firewall lets remote agents reach the tailnet bind, and `safe_mode_hotkey`
   (`chord`, `registered`, `error`; `null` when no hotkey is active; `registered: null` while pending): `registered: false`
   means the human safe-mode chord is owned by another program.
+  `/admin/status` `displays` lists the overlaid monitors, primary first:
+  `{name, x, y, width, height, primary, zones}` in scene pixels (the primary's
+  top-left is 0,0; others may be negative) and the zones configured onto each;
+  `unplaced_zones` lists `{zone, display, reason}` placements with no overlay
+  window, rendering on the primary instead: `reason` is `not_connected`, or
+  `overlay_failed` when that monitor's overlay surface was lost and recreated
+  3 times in a row (it is retried when the monitor is reconnected).
   `/admin/screenshot` returns a PNG of the frame the compositor draws (not an
-  OS capture; overlay alpha is as composited): one render on request, no cost
+  OS capture; overlay alpha is as composited) for one display:
+  `?display=<i>` indexes `displays` (default 0, the primary; 404
+  `NO_SUCH_DISPLAY` for an index not in `displays`, or one whose overlay closed
+  since `displays` was read; indexes shift on hot-plug, so re-read status). One render on request, no cost
   while idle, never cached, one at a time (429 `BUSY`), 503 `UNAVAILABLE` after
   3 s or without a display, 422 `TOO_LARGE` past 8192 px per side, 16 Mpx, or a 32 MiB PNG. It
   is not exposed through MCP tools or gRPC.

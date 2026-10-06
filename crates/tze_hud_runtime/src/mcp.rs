@@ -515,10 +515,15 @@ async fn handle_admin(
                 "this runtime has no display to capture",
             )
             .response(),
-            Some(capture) => match capture.capture_png().await {
-                Ok(png) => Response::png(png),
-                Err(e) => e.response(),
-            },
+            Some(capture) => {
+                match query_param(&req.query, "display").map_or(Ok(0), str::parse::<usize>) {
+                    Err(_) => Response::bad_request(),
+                    Ok(display) => match capture.capture_png(display).await {
+                        Ok(png) => Response::png(png),
+                        Err(e) => e.response(),
+                    },
+                }
+            }
         },
         AdminRoute::Restart => match &admin.restart {
             None => unavailable("this runtime cannot restart itself"),

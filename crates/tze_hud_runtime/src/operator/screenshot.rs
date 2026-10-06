@@ -23,6 +23,11 @@ pub const MAX_PNG_BYTES: usize = 32 * 1024 * 1024;
 
 /// One capture request; the compositor answers on `reply`.
 pub struct CaptureRequest {
+    /// Which display: `None` is the primary, `Some(name)` a secondary by
+    /// its display name (resolved from the `/admin/status` index by the
+    /// endpoint, so a reordered or lost secondary can never be confused
+    /// with another).
+    pub display: Option<String>,
     pub reply: oneshot::Sender<Result<CapturedFrame, CaptureError>>,
 }
 
@@ -75,6 +80,10 @@ pub enum ScreenshotError {
     TooLarge,
     /// The GPU readback or PNG encode failed.
     Failed(String),
+    /// The requested display index is not in `/admin/status`, or it is but
+    /// the compositor is not rendering that display (its overlay was closed
+    /// or lost between the status read and the capture, e.g. on hot-plug).
+    NoSuchDisplay(usize),
 }
 
 impl ScreenshotError {
@@ -92,6 +101,14 @@ impl ScreenshotError {
                 "the display is larger than the screenshot limit".to_owned(),
             ),
             Self::Failed(why) => (503, OperatorCode::Unavailable, why.clone()),
+            Self::NoSuchDisplay(i) => (
+                404,
+                OperatorCode::NoSuchDisplay,
+                format!(
+                    "no display {i} is being rendered; re-read /admin/status (indexes \
+                     shift when monitors are plugged or unplugged)"
+                ),
+            ),
         };
         Response::operator_error(status, &OperatorError::new(code, hint))
     }
@@ -121,18 +138,29 @@ pub fn capture_channel(wake: impl Fn() + Send + Sync + 'static) -> (CaptureEndpo
 }
 
 impl CaptureEndpoint {
-    /// Ask the compositor for a frame and return it PNG-encoded.
-    pub async fn capture_png(&self) -> Result<Vec<u8>, ScreenshotError> {
+    /// Ask the compositor for display `display`'s frame (0 = primary) and
+    /// return it PNG-encoded.
+    pub async fn capture_png(&self, index: usize) -> Result<Vec<u8>, ScreenshotError> {
+        let display = match index {
+            0 => None,
+            i => Some(
+                crate::operator::status::display_name(i)
+                    .ok_or(ScreenshotError::NoSuchDisplay(index))?,
+            ),
+        };
         let _permit = self
             .in_flight
             .try_acquire()
             .map_err(|_| ScreenshotError::Busy)?;
         let (reply, answer) = oneshot::channel();
         self.tx
-            .send(CaptureRequest { reply })
+            .send(CaptureRequest { display, reply })
             .map_err(|_| ScreenshotError::Unavailable("the compositor is not running"))?;
         (self.wake)();
         let frame = match tokio::time::timeout(CAPTURE_TIMEOUT, answer).await {
+            Ok(Ok(Err(CaptureError::NoSuchDisplay(_)))) => {
+                return Err(ScreenshotError::NoSuchDisplay(index));
+            }
             Ok(Ok(frame)) => frame?,
             Ok(Err(_)) | Err(_) => {
                 return Err(ScreenshotError::Unavailable(
@@ -240,10 +268,10 @@ mod tests {
     #[tokio::test]
     async fn capture_round_trips_through_the_compositor_thread() {
         let endpoint = fake_compositor(|| Ok(frame_2x2()));
-        let png = endpoint.capture_png().await.unwrap();
+        let png = endpoint.capture_png(0).await.unwrap();
         assert_eq!(&png[..4], b"\x89PNG");
         // The permit is released: a second capture succeeds.
-        assert!(endpoint.capture_png().await.is_ok());
+        assert!(endpoint.capture_png(0).await.is_ok());
     }
 
     #[tokio::test]
@@ -254,13 +282,16 @@ mod tests {
                 height: 9000,
             })
         });
-        assert_eq!(endpoint.capture_png().await, Err(ScreenshotError::TooLarge));
+        assert_eq!(
+            endpoint.capture_png(0).await,
+            Err(ScreenshotError::TooLarge)
+        );
     }
 
     #[tokio::test(start_paused = true)]
     async fn silent_compositor_times_out_as_unavailable() {
         let (endpoint, _inbox) = capture_channel(|| {});
-        let err = endpoint.capture_png().await.unwrap_err();
+        let err = endpoint.capture_png(0).await.unwrap_err();
         assert!(matches!(err, ScreenshotError::Unavailable(_)), "{err:?}");
         assert_eq!(err.response().status, 503);
     }
@@ -270,11 +301,11 @@ mod tests {
         let (endpoint, inbox) = capture_channel(|| {});
         let first = tokio::spawn({
             let e = endpoint.clone();
-            async move { e.capture_png().await }
+            async move { e.capture_png(0).await }
         });
         tokio::task::yield_now().await;
         // While the first waits, a second is refused outright.
-        assert_eq!(endpoint.capture_png().await, Err(ScreenshotError::Busy));
+        assert_eq!(endpoint.capture_png(0).await, Err(ScreenshotError::Busy));
         // The first times out; its queued request is now abandoned.
         assert!(matches!(
             first.await.unwrap(),

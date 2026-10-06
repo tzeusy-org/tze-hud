@@ -312,8 +312,9 @@ pub trait CompositorSurface: Send + 'static {
 /// `pending_resize`. The compositor thread detects a non-zero pending resize at
 /// the start of each frame cycle and calls `reconfigure()`.
 pub struct WindowSurface {
-    /// The underlying wgpu surface (window-backed swapchain).
-    pub surface: wgpu::Surface<'static>,
+    /// The underlying wgpu surface (window-backed swapchain). Dropped by hand
+    /// (see `Drop`) so its swapchain teardown runs under [`gpu_queue_lock`].
+    pub surface: std::mem::ManuallyDrop<wgpu::Surface<'static>>,
     /// Current surface configuration.
     pub config: std::sync::Mutex<wgpu::SurfaceConfiguration>,
     /// Current width in pixels (kept in sync with config).
@@ -339,20 +340,99 @@ pub struct WindowSurface {
     /// Pending recovery lifecycle state, written by actual acquire failures and
     /// consumed by the compositor thread before its next frame build.
     surface_recovery: std::sync::Mutex<SurfaceRecoveryState>,
-    /// Pending resize dimensions signalled from the main thread to the
-    /// compositor thread. `(0, 0)` means no resize pending.
-    ///
-    /// The main thread stores `(new_width, new_height)` atomically on
-    /// `WindowEvent::Resized`. The compositor thread reads this at the start of
-    /// each frame, applies `reconfigure()` with the new dimensions using its
-    /// owned `wgpu::Device`, then resets both fields to `0`.
-    pub pending_resize_width: std::sync::atomic::AtomicU32,
-    pub pending_resize_height: std::sync::atomic::AtomicU32,
+    /// Pending resize signalled from the main thread to the compositor
+    /// thread, packed `width << 32 | height`; `0` means none. One atomic so a
+    /// request is never torn, and taken with a swap so a request made while
+    /// the compositor reconfigures for an older one is kept, not erased.
+    /// See [`Self::request_resize`] / [`Self::take_pending_resize`].
+    pending_resize: std::sync::atomic::AtomicU64,
     /// Number of swapchain textures actually presented by the main thread.
     ///
     /// Windowed benchmarks use this as the presentation acknowledgement; a
     /// compositor-side build or submit attempt is not itself a displayed frame.
     presented_frame_count: std::sync::atomic::AtomicU64,
+    /// Rate limit for acquire-timeout logs: an occluded or asleep window
+    /// times out on every attempt.
+    timeout_log: LogThrottle,
+}
+
+/// Lets one log line through per `interval` and counts the ones it drops.
+#[derive(Debug)]
+pub(crate) struct LogThrottle {
+    interval: std::time::Duration,
+    state: std::sync::Mutex<(Option<std::time::Instant>, u64)>,
+}
+
+impl LogThrottle {
+    pub(crate) fn new(interval: std::time::Duration) -> Self {
+        Self {
+            interval,
+            state: std::sync::Mutex::new((None, 0)),
+        }
+    }
+
+    /// `Some(suppressed)` when a line may be logged at `now` (with the count
+    /// dropped since the last one), `None` when it should be dropped.
+    pub(crate) fn allow(&self, now: std::time::Instant) -> Option<u64> {
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        let (last, suppressed) = &mut *state;
+        if last.is_some_and(|at| now.duration_since(at) < self.interval) {
+            *suppressed += 1;
+            return None;
+        }
+        *last = Some(now);
+        Some(std::mem::take(suppressed))
+    }
+}
+
+/// `width << 32 | height`, or `None` for a zero dimension.
+fn pack_resize(width: u32, height: u32) -> Option<u64> {
+    (width > 0 && height > 0).then(|| (u64::from(width) << 32) | u64::from(height))
+}
+
+fn unpack_resize(packed: u64) -> Option<(u32, u32)> {
+    (packed != 0).then_some(((packed >> 32) as u32, packed as u32))
+}
+
+/// Interval between acquire-timeout log lines for one window.
+const ACQUIRE_TIMEOUT_LOG_INTERVAL: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Serializes every swapchain operation that touches the device's one
+/// `VkQueue` from more than one thread (hud-1pt5h).
+///
+/// wgpu-hal (Vulkan) tears a swapchain down -- on `Surface::configure` of a
+/// configured surface and on `Surface` drop -- with `vkDeviceWaitIdle`, which
+/// requires external synchronization of every queue on the device. wgpu only
+/// orders `vkQueuePresentKHR` against its own submits, not against that wait.
+/// With one window this was moot: the only present (main thread) was for the
+/// same surface the compositor was reconfiguring, whose pending texture it had
+/// just cleared. With one window per monitor the main thread presents window
+/// B while the compositor reconfigures or drops window A, which is what a
+/// monitor unplug/replug does to every window at once, and an unsynchronized
+/// `vkDeviceWaitIdle` racing a present can hang the driver.
+///
+/// Held around main-thread `present()`, every `configure()` (compositor
+/// reconfigure, new-surface creation) and the surface drop. Never held while
+/// taking a swapchain slot lock: the order is always slot, then this.
+pub fn gpu_queue_lock() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+impl Drop for WindowSurface {
+    fn drop(&mut self) {
+        // An acquired-but-unpresented texture must go before its swapchain.
+        let pending = self
+            .swapchain
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .pending
+            .take();
+        let _queue = gpu_queue_lock();
+        drop(pending);
+        // SAFETY: dropped exactly once, here; `self.surface` is not used again.
+        unsafe { std::mem::ManuallyDrop::drop(&mut self.surface) };
+    }
 }
 
 impl WindowSurface {
@@ -367,7 +447,7 @@ impl WindowSurface {
         let width = config.width;
         let height = config.height;
         Self {
-            surface,
+            surface: std::mem::ManuallyDrop::new(surface),
             config: std::sync::Mutex::new(config),
             width: std::sync::atomic::AtomicU32::new(width),
             height: std::sync::atomic::AtomicU32::new(height),
@@ -377,10 +457,28 @@ impl WindowSurface {
             })),
             swapchain_done: std::sync::Arc::new(std::sync::Condvar::new()),
             surface_recovery: std::sync::Mutex::new(SurfaceRecoveryState::default()),
-            pending_resize_width: std::sync::atomic::AtomicU32::new(0),
-            pending_resize_height: std::sync::atomic::AtomicU32::new(0),
+            pending_resize: std::sync::atomic::AtomicU64::new(0),
             presented_frame_count: std::sync::atomic::AtomicU64::new(0),
+            timeout_log: LogThrottle::new(ACQUIRE_TIMEOUT_LOG_INTERVAL),
         }
+    }
+
+    /// Ask the compositor thread to reconfigure to `width` x `height` (main
+    /// thread, on `WindowEvent::Resized`). A newer request replaces an
+    /// unconsumed one; a zero dimension is ignored.
+    pub fn request_resize(&self, width: u32, height: u32) {
+        if let Some(packed) = pack_resize(width, height) {
+            self.pending_resize
+                .store(packed, std::sync::atomic::Ordering::Release);
+        }
+    }
+
+    /// Take the latest resize request, if any (compositor thread).
+    pub fn take_pending_resize(&self) -> Option<(u32, u32)> {
+        unpack_resize(
+            self.pending_resize
+                .swap(0, std::sync::atomic::Ordering::AcqRel),
+        )
     }
 
     /// Texture format the swapchain is configured with.
@@ -443,7 +541,7 @@ impl WindowSurface {
     /// Reconfigure the surface after a window resize.
     ///
     /// MUST be called from the compositor thread (it owns the `wgpu::Device`).
-    /// The main thread signals a resize via `pending_resize_width/height`.
+    /// The main thread signals a resize via [`Self::request_resize`].
     pub fn reconfigure(&self, new_width: u32, new_height: u32, device: &wgpu::Device) {
         if new_width == 0 || new_height == 0 {
             // Zero-size surface is invalid — skip reconfiguration.
@@ -515,7 +613,10 @@ impl WindowSurface {
             .expect("WindowSurface config lock poisoned");
         cfg.width = w;
         cfg.height = h;
-        self.surface.configure(device, &cfg);
+        {
+            let _queue = gpu_queue_lock();
+            self.surface.configure(device, &cfg);
+        }
         self.width.store(w, std::sync::atomic::Ordering::Release);
         self.height.store(h, std::sync::atomic::Ordering::Release);
         tracing::info!(width = w, height = h, "WindowSurface reconfigured");
@@ -573,6 +674,7 @@ impl WindowSurface {
         }
 
         if let Some(texture) = slot.pending.take() {
+            let _queue = gpu_queue_lock();
             texture.present();
             self.presented_frame_count
                 .fetch_add(1, std::sync::atomic::Ordering::Release);
@@ -636,10 +738,16 @@ impl WindowSurface {
         self.observe_wgpu_acquire_failure(&err);
         match err {
             wgpu::SurfaceError::Timeout => {
-                tracing::warn!(
-                    error = %err,
-                    "WindowSurface::acquire_frame: timeout acquiring texture; retrying once"
-                );
+                // One throttle covers both lines: a window that keeps timing
+                // out (occluded, asleep) would otherwise log every attempt.
+                let log = self.timeout_log.allow(std::time::Instant::now());
+                if let Some(suppressed) = log {
+                    tracing::warn!(
+                        error = %err,
+                        suppressed,
+                        "WindowSurface::acquire_frame: timeout acquiring texture; retrying once"
+                    );
+                }
                 match self.surface.get_current_texture() {
                     Ok(t) => {
                         let v = t
@@ -650,12 +758,14 @@ impl WindowSurface {
                     }
                     Err(e2) => {
                         self.observe_wgpu_acquire_failure(&e2);
-                        tracing::error!(
-                            first_error = %err,
-                            second_error = %e2,
-                            "WindowSurface::acquire_frame: retry after timeout also failed; \
-                             skipping frame (runtime will retry next cycle)"
-                        );
+                        if log.is_some() {
+                            tracing::error!(
+                                first_error = %err,
+                                second_error = %e2,
+                                "WindowSurface::acquire_frame: retry after timeout also failed; \
+                                 skipping frame (runtime will retry later)"
+                            );
+                        }
                         None
                     }
                 }
@@ -700,6 +810,59 @@ impl WindowSurface {
             .lock()
             .expect("surface recovery lock poisoned")
             .observe_wgpu_acquire_failure(err);
+    }
+}
+
+/// Creates [`WindowSurface`]s for additional display windows on the same
+/// instance, adapter and device as the compositor's primary surface, with the
+/// primary's format, present mode and alpha mode (one compositor renders all
+/// of them, so the format must match its pipelines).
+#[derive(Clone)]
+pub struct SurfaceFactory {
+    pub(crate) instance: wgpu::Instance,
+    pub(crate) adapter: wgpu::Adapter,
+    pub(crate) device: wgpu::Device,
+    pub(crate) template: wgpu::SurfaceConfiguration,
+}
+
+impl SurfaceFactory {
+    /// Create and configure a surface for `window` at `width` x `height`.
+    pub fn create(
+        &self,
+        window: std::sync::Arc<winit::window::Window>,
+        width: u32,
+        height: u32,
+    ) -> Result<WindowSurface, String> {
+        let surface = self
+            .instance
+            .create_surface(window)
+            .map_err(|e| format!("create_surface: {e}"))?;
+        let caps = surface.get_capabilities(&self.adapter);
+        if !caps.formats.contains(&self.template.format) {
+            return Err(format!(
+                "display surface does not support the primary format {:?}",
+                self.template.format
+            ));
+        }
+        let mut config = self.template.clone();
+        if !caps.alpha_modes.contains(&config.alpha_mode) {
+            config.alpha_mode = caps
+                .alpha_modes
+                .first()
+                .copied()
+                .ok_or("display surface reports no alpha modes")?;
+        }
+        if !caps.present_modes.contains(&config.present_mode) {
+            config.present_mode = wgpu::PresentMode::Fifo;
+        }
+        let max_dim = self.device.limits().max_texture_dimension_2d;
+        config.width = width.clamp(1, max_dim);
+        config.height = height.clamp(1, max_dim);
+        {
+            let _queue = gpu_queue_lock();
+            surface.configure(&self.device, &config);
+        }
+        Ok(WindowSurface::new(surface, config))
     }
 }
 
@@ -1006,6 +1169,62 @@ impl CompositorSurface for HeadlessSurface {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resize_requests_pack_whole_and_ignore_zero() {
+        assert_eq!(
+            pack_resize(3840, 2160).and_then(unpack_resize),
+            Some((3840, 2160))
+        );
+        assert_eq!(
+            pack_resize(u32::MAX, 1).and_then(unpack_resize),
+            Some((u32::MAX, 1))
+        );
+        assert_eq!(pack_resize(0, 2160), None);
+        assert_eq!(pack_resize(3840, 0), None);
+        assert_eq!(unpack_resize(0), None);
+    }
+
+    /// The replug lost-update: a request made while the compositor is
+    /// reconfiguring for an older one must survive (the old code read, then
+    /// reconfigured, then stored 0, erasing the newer request).
+    #[test]
+    fn a_resize_requested_during_a_reconfigure_is_not_lost() {
+        let pending = std::sync::atomic::AtomicU64::new(0);
+        let request = |w, h| {
+            pending.store(
+                pack_resize(w, h).unwrap(),
+                std::sync::atomic::Ordering::Release,
+            )
+        };
+        let take = || unpack_resize(pending.swap(0, std::sync::atomic::Ordering::AcqRel));
+        request(3862, 2182);
+        let first = take();
+        // ... compositor reconfigures to `first`; meanwhile the re-fit lands:
+        request(3840, 2160);
+        assert_eq!(first, Some((3862, 2182)));
+        assert_eq!(take(), Some((3840, 2160)));
+        assert_eq!(take(), None);
+    }
+
+    #[test]
+    fn log_throttle_passes_one_line_per_interval_and_counts_drops() {
+        let throttle = LogThrottle::new(std::time::Duration::from_secs(10));
+        let t0 = std::time::Instant::now();
+        assert_eq!(throttle.allow(t0), Some(0));
+        for i in 1..=119 {
+            let at = t0 + std::time::Duration::from_millis(i * 8);
+            assert_eq!(throttle.allow(at), None, "attempt {i} inside the interval");
+        }
+        assert_eq!(
+            throttle.allow(t0 + std::time::Duration::from_secs(10)),
+            Some(119)
+        );
+        assert_eq!(
+            throttle.allow(t0 + std::time::Duration::from_secs(11)),
+            None
+        );
+    }
 
     #[test]
     fn test_assert_pixel_color_passes_within_tolerance() {

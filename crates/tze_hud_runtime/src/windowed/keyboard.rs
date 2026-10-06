@@ -159,7 +159,7 @@ fn is_bare_tab_chord(key: &str, modifiers: &KeyboardModifiers) -> bool {
 }
 
 /// Decode the reserved subset implemented by [`crate::shell::handle_shortcut`].
-/// Safe-mode, monitor-cycle, and mute chords intentionally return `None`: production
+/// Safe-mode, Ctrl+Shift+P pairing, and mute chords intentionally return `None`: production
 /// handles those at the earlier winit OS-event stage, while in-process callers
 /// still consume them through [`ShellReservedShortcut`] without agent delivery.
 fn chrome_shortcut(raw: &RawKeyDownEvent) -> Option<ChromeShortcut> {
@@ -421,8 +421,8 @@ impl WinitApp {
     /// event at FIFO front rather than leaking it through the agent path.
     fn handle_shell_reserved_shortcut(&mut self, raw: &RawKeyDownEvent) -> ShellShortcutOutcome {
         let Some(shortcut) = chrome_shortcut(raw) else {
-            // Ctrl+Shift+F8/F9 are handled at the OS
-            // event stage. Synthetic/in-process entry still consumes them.
+            // Ctrl+Shift+P is handled at the OS event stage.
+            // Synthetic/in-process entry still consumes it.
             return ShellShortcutOutcome::Consumed;
         };
 
@@ -589,7 +589,7 @@ impl WinitApp {
         // Shell-reserved shortcuts (Ctrl+Tab, Ctrl+1..9, Ctrl+Shift+M, etc.)
         // MUST win over portal resize hotkeys and MUST never reach agents.
         //
-        // Note: Ctrl+Shift+F8/F9 (monitor cycling) is handled even earlier —
+        // Note: Ctrl+Shift+P (pairing) is handled even earlier —
         // in the OS event path (Stage 1, `WindowEvent::KeyboardInput`) — so it
         // never reaches this function at all.  The `is_reserved` check below
         // handles the remaining reserved set that does reach here.
@@ -1449,7 +1449,7 @@ impl WinitApp {
             raw.modifiers.shift,
             raw.modifiers.alt,
         ) {
-            // Monitor-cycle and safe-mode presses are consumed at the earlier
+            // Pairing and safe-mode presses are consumed at the earlier
             // winit OS-event stage, so Stage 2 may see a release without having
             // observed the press. Classifying the release closes that route;
             // identity tracking above also covers modifier-release reordering.

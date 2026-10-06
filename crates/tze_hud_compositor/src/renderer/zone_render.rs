@@ -88,7 +88,7 @@ impl Compositor {
                     continue;
                 }
             }
-            let (x, y, w, h) = Self::resolve_zone_geometry(&zone_def.geometry_policy, sw, sh);
+            let (x, y, w, h) = self.zone_geometry(zone_name, &zone_def.geometry_policy, sw, sh);
 
             let policy = &zone_def.rendering_policy;
 
@@ -502,9 +502,9 @@ impl Compositor {
                 [0.2 * ZA, 0.6 * ZA, 1.0 * ZA, ZA], // blue
                 [0.7 * ZA, 0.3 * ZA, 1.0 * ZA, ZA], // violet
             ];
-            for (idx, (_zone_name, zone_def)) in scene.zone_registry.zones.iter().enumerate() {
+            for (idx, (zone_name, zone_def)) in scene.zone_registry.zones.iter().enumerate() {
                 let color = palette[idx % palette.len()];
-                let (x, y, w, h) = Self::resolve_zone_geometry(&zone_def.geometry_policy, sw, sh);
+                let (x, y, w, h) = self.zone_geometry(zone_name, &zone_def.geometry_policy, sw, sh);
                 vertices.extend_from_slice(&rect_vertices(x, y, w, h, sw, sh, color));
             }
         }

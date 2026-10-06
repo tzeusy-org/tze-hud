@@ -163,8 +163,33 @@ Windows, `--print-attach-info` plus pairing is the more direct path.
   another program owns the chord, `/admin/status` reports
   `registered: false`. Ctrl+Shift+Esc is unusable because Windows reserves it
   for Task Manager.
-- **Window hotkeys.** With the HUD focused, Ctrl+Shift+F8 and Ctrl+Shift+F9
-  cycle monitors, and Ctrl+Shift+P shows a pairing code.
+- **Every monitor is overlaid.** Overlay mode opens one transparent,
+  click-through window per connected monitor at its native resolution, all
+  showing the same scene. Zones stay on the primary monitor unless the config
+  places them elsewhere by OS display name (`/admin/status` `displays` lists
+  the names):
+
+  ```toml
+  [displays.DISPLAY6]
+  zones = ["notification-area"]
+  ```
+
+  A zone placed on a monitor that is not connected falls back to the primary;
+  the log warns and `/admin/status` `unplaced_zones` lists it. So does a zone on
+  a monitor whose overlay surface failed 3 times in a row (reason
+  `overlay_failed`; unplug and replug, or restart, to retry). A monitor that is
+  asleep or occluded is retried on a backoff (100 ms doubling to 2 s), so it
+  does not keep the HUD rendering.
+  Tiles, portals and widgets stay on the primary. Plugging, unplugging or
+  rescaling a monitor opens or closes its window; no restart needed (changing
+  `[displays]` itself does need one). The overlays are not resizable or
+  maximizable, so Windows cannot re-maximize them; if it still moves or
+  resizes one during the change, each one, the primary included, is pinned
+  back to its monitor's bounds afterwards (at most 5 times per 10 s if Windows keeps
+  fighting it, logged as a warning). Explicit `--width`/`--height` gives a
+  single window on the primary. Screenshot one monitor with
+  `hud_admin.py screenshot --display N` (or `--all`).
+- **Window hotkeys.** With the HUD focused, Ctrl+Shift+P shows a pairing code.
 - **Frame pacing** raises the timer resolution to 1 ms
   (`timeBeginPeriod`) while the compositor runs. This is expected.
 - **Config changes need a restart.** Restart the process, or use
