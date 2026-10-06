@@ -1,0 +1,4 @@
+[beads-heartbeat]
+owner=coordinator:coord-20261003b
+last_heartbeat_at=2026-10-03T11:17:44Z
+PR #1290 opened

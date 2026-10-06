@@ -1,0 +1,61 @@
+{
+  "scope": "This W1 assignment only; historical inherited failures remain immutable and separately pinned.",
+  "unexpected_Cargo_or_GPU_gate_failures": [],
+  "intentional_negative": [
+    {
+      "path": ".handoff/hud-bstmy.5.8/gates/03-required-skip-negative/raw.log",
+      "raw_sha256": "1e91782679650d5fc7071fc336736fb8f33686c06f5f1251c8eb504df208220e",
+      "actual_exit": 101,
+      "actual_selected": 1,
+      "passed": 0,
+      "failed": 1,
+      "filtered": 7,
+      "panic": "TZE_HUD_REQUIRE_GPU=1 forbids skipping widget transition assertions",
+      "before_adapter_initialization": "Exact fixture source guard is before common::new_headless_serialized; this source-backed setup ordering is not a hardware probe."
+    }
+  ],
+  "metadata_failures": [
+    {
+      "path": "bootstrap-intermediate-notes-mismatch.json",
+      "actual_exit": 1,
+      "reason": "ROOT heartbeat stanza changed only; actual raw attempt retained, robust successful16 direct canonical native reads accepted."
+    },
+    {
+      "path": "invariant-metadata-initial-qualified-name-failure.json",
+      "actual_exit": 1,
+      "reason": "Qualified docs name incorrectly treated as a Rust identifier; corrected bounded source-path basename matching. Failed inline process PID not captured; no invented native claim."
+    }
+  ],
+  "skips": [
+    {
+      "line": 1,
+      "text": "SKIPPED: overlay-harness-contract needs PowerShell (pwsh)"
+    }
+  ],
+  "GPU_skips": [],
+  "driver_diagnostics": [
+    {
+      "gate": "04-widget-transition-positive",
+      "raw_sha256": "c450f90a11c9a863873bfe3d73cf49a7ca4ab84360990bcf5c9d603e03ea3dbf",
+      "note": "Raw libEGL/MESA/ZINK adapter diagnostics preserved; successful required llvmpipe setup/test execution is the scoped positive, no hardware-GPU claim."
+    },
+    {
+      "gate": "05-widget-raster-count",
+      "raw_sha256": "847762974d768314a6b4cf1f69e4c0f618b7ac5693d971918504734de377a484",
+      "note": "Raw libEGL/MESA/ZINK adapter diagnostics preserved; successful required llvmpipe setup/test execution is the scoped positive, no hardware-GPU claim."
+    },
+    {
+      "gate": "09-final-normal-ci",
+      "raw_sha256": "12493cbcec692f13659519ffa3ff916ff082e4fa7d1801adf3c0f734f3a206bc",
+      "note": "Raw libEGL/MESA/ZINK adapter diagnostics preserved; successful required llvmpipe setup/test execution is the scoped positive, no hardware-GPU claim."
+    }
+  ],
+  "limits": [
+    "Original raster-count fixture retains silent NoAdapter return; its process pass alone does not prove its raster assertions were reached. W1 transition Rig is required-GPU fail closed and both actual instant markers emitted.",
+    "No semantic red run at historical582 or assignedabd is fabricated; source falsification and expected guard negative are separately classified.",
+    "Shared compositor/headless transition behavior and deadline predicates executed; actual windowed physical wake/idle timing is not measured.",
+    "PERF_ASSERT normal off; CI/fixture pass counts are not hard p99 or universal counters/upload/input assertions.",
+    "Unmerged W2 dev counters are not on this source and are not absorbed. Raw counters/render snapshots/FrameTelemetry remain live and unchanged.",
+    "Parent5 acceptance_criteria is actually absent/null; derived blank hash in initial worker presentation is not its canonical value."
+  ]
+}

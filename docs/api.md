@@ -68,7 +68,8 @@ otherwise.
 - Widget: `params` is the typed parameter map. A gRPC publish with
   `transition_ms` > 0 eases f32 and color params from what is on screen; enum
   and string params snap, and so does everything under degradation. The
-  runtime wakes only until the transition lands.
+  runtime wakes only until the transition lands. A zero duration, including
+  an MCP publish, cancels an older transition and snaps to the newest value.
 - Portal: the first publish to `portal:<id>` attaches (`display_name` is
   optional). `content` is the output text, `status` is the lifecycle state,
   and `expects_reply` arms the composer. `key` replaces the newest output

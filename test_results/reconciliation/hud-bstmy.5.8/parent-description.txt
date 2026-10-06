@@ -1,0 +1,3 @@
+Owner-approved changes: wire widget transitions with an injected clock, trim the runtime shell (dead chrome render path, badges module, audit/mute stubs), reduce the change-efficiency artifact to counters, delete the soak suite, rewrite vertical_slice onto T5 verbs. Includes the freeze escalation.
+
+Line refs are at windows-release-pipeline@44d355ef (same content as main@1eb8f7cb); re-grep symbols before editing. The planning survey is not persisted; this bead is self-contained.

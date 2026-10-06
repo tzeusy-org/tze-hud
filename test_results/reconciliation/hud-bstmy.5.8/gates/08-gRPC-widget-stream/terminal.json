@@ -1,0 +1,129 @@
+{
+  "at": "2026-10-06T19:35:24.656511+00:00",
+  "native_pid": 3764112,
+  "child_pid": 3764115,
+  "process_group": 3764115,
+  "source_head": "3c45386a7d29de6702d520f150809e9ec38d2e42",
+  "command": [
+    "cargo",
+    "test",
+    "-p",
+    "tze_hud_protocol",
+    "--lib",
+    "session_server::tests::widget_publish::",
+    "--",
+    "--nocapture"
+  ],
+  "deadline_seconds": 900,
+  "environment": {
+    "CARGO_TARGET_DIR": "/home/orca/orca/projects/tze-hud/target",
+    "CARGO_BUILD_JOBS": "1",
+    "PROTOC": "/usr/bin/protoc",
+    "VK_ICD_FILENAMES": "/usr/share/vulkan/icd.d/lvp_icd.json",
+    "HEADLESS_FORCE_SOFTWARE": "1",
+    "TZE_HUD_REQUIRE_GPU": "1",
+    "LLVMPIPE_CI": "1",
+    "TZE_HUD_SKIP_GPU_TESTS": "unset"
+  },
+  "intentional_required_skip_negative": false,
+  "ended_at": "2026-10-06T19:35:49.433589+00:00",
+  "exit": 0,
+  "seconds": 24.777332974015735,
+  "source_head_after": "3c45386a7d29de6702d520f150809e9ec38d2e42",
+  "source_files": 543,
+  "source_manifest_equal": true,
+  "before_manifest_SHA256": "dd707329003e65c044433b0a11f3450fdbc6521ccd2325020b2546124e5ee323",
+  "after_manifest_SHA256": "dd707329003e65c044433b0a11f3450fdbc6521ccd2325020b2546124e5ee323",
+  "raw_bytes": 1388,
+  "raw_SHA256": "1a8abcc2cf2003941abc2a991383632192d5da8d576ebd7872230c04bfff7c3f",
+  "observed_processes": {
+    "3764115": {
+      "ppid": 3764112,
+      "group": 3764115,
+      "start_ticks": "15647074"
+    },
+    "3764116": {
+      "ppid": 3764115,
+      "group": 3764115,
+      "start_ticks": "15647074"
+    },
+    "3764127": {
+      "ppid": 3764116,
+      "group": 3764115,
+      "start_ticks": "15647091"
+    },
+    "3764206": {
+      "ppid": 3764127,
+      "group": 3764115,
+      "start_ticks": "15647123"
+    },
+    "3764207": {
+      "ppid": 3764206,
+      "group": 3764115,
+      "start_ticks": "15647123"
+    },
+    "3764208": {
+      "ppid": 3764207,
+      "group": 3764115,
+      "start_ticks": "15647123"
+    },
+    "3764211": {
+      "ppid": 3764116,
+      "group": 3764115,
+      "start_ticks": "15647172"
+    },
+    "3764354": {
+      "ppid": 3764116,
+      "group": 3764115,
+      "start_ticks": "15647243"
+    },
+    "3764642": {
+      "ppid": 3764116,
+      "group": 3764115,
+      "start_ticks": "15647843"
+    },
+    "3764978": {
+      "ppid": 3764116,
+      "group": 3764115,
+      "start_ticks": "15648247"
+    },
+    "3765293": {
+      "ppid": 3764978,
+      "group": 3764115,
+      "start_ticks": "15649255"
+    },
+    "3765294": {
+      "ppid": 3765293,
+      "group": 3764115,
+      "start_ticks": "15649255"
+    },
+    "3765295": {
+      "ppid": 3765294,
+      "group": 3764115,
+      "start_ticks": "15649256"
+    }
+  },
+  "observed_pids_absent": [
+    3764115,
+    3764116,
+    3764127,
+    3764206,
+    3764207,
+    3764208,
+    3764211,
+    3764354,
+    3764642,
+    3764978,
+    3765293,
+    3765294,
+    3765295
+  ],
+  "process_group_members_after": {
+    "3764115": []
+  },
+  "child_absent": true,
+  "normal_parallelism": "RUST_TEST_THREADS unset; no --test-threads override",
+  "PERF_ASSERT": "unset, normal off",
+  "SKIP_GPU": "both skip variables unset",
+  "metadata_only_runner": true
+}

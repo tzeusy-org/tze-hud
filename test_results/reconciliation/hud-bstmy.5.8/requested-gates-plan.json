@@ -1,0 +1,230 @@
+{
+  "issue": "hud-bstmy.5.8",
+  "target": "/home/orca/orca/projects/tze-hud/target",
+  "lease_status": "REQUESTED; no Cargo/GPU authorization yet",
+  "environment": {
+    "CARGO_BUILD_JOBS": "1",
+    "PROTOC": "/usr/bin/protoc",
+    "VK_ICD_FILENAMES": "/usr/share/vulkan/icd.d/lvp_icd.json",
+    "HEADLESS_FORCE_SOFTWARE": "1",
+    "TZE_HUD_REQUIRE_GPU": "1",
+    "LLVMPIPE_CI": "1",
+    "SKIP_GPU": "unset except exact intentional fixture negative",
+    "TZE_HUD_PERF_ASSERT": "unset normal off",
+    "test_parallelism": "default",
+    "PATH": "ROOT .venv pytest9.1.1"
+  },
+  "serial_gates": [
+    {
+      "name": "fmt",
+      "argv": [
+        "just",
+        "fmt"
+      ],
+      "deadline": 300
+    },
+    {
+      "name": "build-transition-fixture",
+      "argv": [
+        "cargo",
+        "test",
+        "-p",
+        "tze_hud_compositor",
+        "--test",
+        "widget_transition",
+        "--no-run"
+      ],
+      "deadline": 900
+    },
+    {
+      "name": "required-skip-negative-existing-retarget",
+      "argv": [
+        "cargo",
+        "test",
+        "-p",
+        "tze_hud_compositor",
+        "--test",
+        "widget_transition",
+        "retarget_mid_flight_is_continuous_and_uses_the_new_duration",
+        "--",
+        "--exact",
+        "--nocapture"
+      ],
+      "environment_override": {
+        "TZE_HUD_SKIP_GPU_TESTS": "1",
+        "TZE_HUD_REQUIRE_GPU": "1"
+      },
+      "expected": "actual nonzero/one existing setup failure at require guard, zero GPU initialization; preserve intentional raw failure and do not call it production red. No new fixture/test/species.",
+      "deadline": 300
+    },
+    {
+      "name": "widget-transition-all8",
+      "argv": [
+        "cargo",
+        "test",
+        "-p",
+        "tze_hud_compositor",
+        "--test",
+        "widget_transition",
+        "--",
+        "--nocapture"
+      ],
+      "selected_expected": 8,
+      "required_positive_markers": [
+        "instant retarget 0: cancelled, no deadline or later raster",
+        "instant retarget 1: cancelled, no deadline or later raster"
+      ],
+      "deadline": 300
+    },
+    {
+      "name": "widget-raster-count-existing1",
+      "argv": [
+        "cargo",
+        "test",
+        "-p",
+        "tze_hud_compositor",
+        "--test",
+        "widget_raster_count",
+        "--",
+        "--nocapture"
+      ],
+      "selected_expected": 1,
+      "deadline": 900
+    },
+    {
+      "name": "scene-widget-validation-clear-TTL-contention",
+      "argv": [
+        "cargo",
+        "test",
+        "-p",
+        "tze_hud_scene",
+        "--lib",
+        "graph::widget_tests::",
+        "--",
+        "--nocapture"
+      ],
+      "selected_expected_from_current_source": 44,
+      "deadline": 900
+    },
+    {
+      "name": "MCP-real-dispatch-widget-hold-clear",
+      "argv": [
+        "cargo",
+        "test",
+        "-p",
+        "tze_hud_mcp",
+        "--lib",
+        "server::tests::widget_publish_hold_clear",
+        "--",
+        "--exact",
+        "--nocapture"
+      ],
+      "selected_expected": 1,
+      "deadline": 900
+    },
+    {
+      "name": "gRPC-real-stream-widget-publish",
+      "argv": [
+        "cargo",
+        "test",
+        "-p",
+        "tze_hud_protocol",
+        "--lib",
+        "session_server::tests::widget_publish::",
+        "--",
+        "--nocapture"
+      ],
+      "selected_expected_from_current_source": 7,
+      "deadline": 900
+    },
+    {
+      "name": "workspace-check",
+      "argv": [
+        "cargo",
+        "check",
+        "--workspace"
+      ],
+      "deadline": 900
+    },
+    {
+      "name": "workspace-all-target-clippy",
+      "argv": [
+        "cargo",
+        "clippy",
+        "--workspace",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "deadline": 900
+    },
+    {
+      "name": "ONE-final-normalCI",
+      "argv": [
+        "just",
+        "ci"
+      ],
+      "deadline": 1800,
+      "requirements": "all72 named positive assertions/default17/current Node160 Tile200, rawSHA/actualcount/failure+skip indexing, requireGPU/defaultparallel/PERFnormaloff. No broad repeat for evidence head/main advance."
+    }
+  ],
+  "source_immutable_during_any_child": true,
+  "failures": "Preserve actual first raw/source/group; edits only after actual terminal and ROOT refreeze ACK before continued gates. No source repair expected from negative required-skip fixture.",
+  "no_High_cachewipe_assetscopy_allfeatures_newtests_spec_rebase": true,
+  "scene_existing_named_tests": [
+    "widget_publish_with_suspended_lease_is_safe_mode_active",
+    "widget_publish_f32_nan_rejected",
+    "widget_publish_f32_type_mismatch_rejected",
+    "widget_publish_enum_out_of_allowed_values_rejected",
+    "widget_publish_enum_in_allowed_values_accepted",
+    "widget_publish_f32_in_range_accepted_unchanged",
+    "widget_publish_f32_above_max_clamped",
+    "widget_publish_unknown_parameter_rejected",
+    "widget_publish_nonexistent_widget_rejected",
+    "widget_registry_register_and_retrieve_definition",
+    "widget_registry_register_and_retrieve_instance",
+    "widget_registry_definition_overwrites_on_duplicate_id",
+    "widget_registry_runtime_svg_handle_round_trip",
+    "pending_widget_svg_queue_drains_in_fifo_order",
+    "widget_registry_occupancy_defaults_when_no_publications",
+    "widget_registry_occupancy_unknown_instance_returns_none",
+    "widget_occupancy_latest_wins_merges_over_defaults",
+    "widget_occupancy_latest_wins_uses_most_recent",
+    "widget_occupancy_stack_uses_top_of_stack",
+    "widget_occupancy_stack_top_after_depth_cap",
+    "widget_occupancy_merge_by_key_merges_all_keys_over_defaults",
+    "widget_occupancy_merge_by_key_updated_key_reflects_latest_value",
+    "widget_occupancy_replace_no_default_fallback_for_missing_keys",
+    "widget_occupancy_replace_uses_most_recent_params_only",
+    "widget_registry_publish_recorded_in_active_for_widget",
+    "widget_registry_snapshot_includes_all_types_and_instances",
+    "widget_contention_latest_wins_replaces_previous",
+    "widget_contention_replace_retains_only_latest",
+    "widget_contention_stack_evicts_oldest_at_max_depth",
+    "widget_contention_stack_max_depth_zero_discards_all",
+    "widget_contention_merge_by_key_replaces_same_key",
+    "widget_ttl_publication_not_expired_before_deadline",
+    "widget_ttl_publication_expires_after_deadline",
+    "widget_ttl_empty_entry_cleaned_up_after_expiry",
+    "widget_ttl_only_expired_publication_removed_when_mixed",
+    "widget_ttl_expiry_bumps_scene_version",
+    "widget_ttl_drain_with_no_publications_is_noop",
+    "clear_widget_for_publisher_removes_own_publications",
+    "clear_widget_for_publisher_refreshes_current_params_from_remaining_publish",
+    "clear_widget_for_publisher_only_affects_own_publications",
+    "clear_widget_for_publisher_noop_when_no_publications",
+    "clear_widget_for_publisher_widget_not_found",
+    "clear_publications_for_lease_removes_only_that_leases_widget_pubs",
+    "clear_widget_via_mutation_batch"
+  ],
+  "protocol_existing_named_tests": [
+    "test_durable_widget_publish_receives_result",
+    "test_widget_publish_missing_capability_rejected",
+    "test_widget_publish_wildcard_capability_allows_publish",
+    "test_widget_publish_not_found",
+    "test_widget_publish_unknown_parameter",
+    "test_durable_widget_publish_repeated_requests_are_correlated",
+    "test_ephemeral_widget_no_publish_result"
+  ]
+}

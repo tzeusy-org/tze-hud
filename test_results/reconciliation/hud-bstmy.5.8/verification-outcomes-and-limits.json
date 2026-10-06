@@ -1,0 +1,377 @@
+{
+  "at": "2026-10-06T19:49:59.687584+00:00",
+  "native_metadata_pid": 3811495,
+  "executed_source_head": "3c45386a7d29de6702d520f150809e9ec38d2e42",
+  "assigned_source_base": "abd252ebc70c990fa645a9c3ffad4c75ea8aeae7",
+  "gates": [
+    {
+      "gate": "01-fmt-check",
+      "command": [
+        "just",
+        "fmt"
+      ],
+      "actual_exit": 0,
+      "seconds": 1.659227103984449,
+      "raw_path": ".handoff/hud-bstmy.5.8/gates/01-fmt-check/raw.log",
+      "raw_bytes": 18,
+      "raw_sha256": "16d325ea49e3c0c4529c65190ab96b3451dcee35398186fd341ec3e334329fc3",
+      "source_head_before": "3c45386a7d29de6702d520f150809e9ec38d2e42",
+      "source_head_after": "3c45386a7d29de6702d520f150809e9ec38d2e42",
+      "source_543_equal": true,
+      "Rust_summary_count": 0,
+      "Rust_passed": 0,
+      "Rust_failed": 0,
+      "Rust_ignored": 0,
+      "intentional_required_skip_negative": false,
+      "emitted_instant_markers": []
+    },
+    {
+      "gate": "02-transition-build",
+      "command": [
+        "cargo",
+        "test",
+        "-p",
+        "tze_hud_compositor",
+        "--test",
+        "widget_transition",
+        "--no-run"
+      ],
+      "actual_exit": 0,
+      "seconds": 21.970285797986435,
+      "raw_path": ".handoff/hud-bstmy.5.8/gates/02-transition-build/raw.log",
+      "raw_bytes": 1014,
+      "raw_sha256": "8c198cd24d9d6c07f72dc7d32fcca06017244dca8bc2505c30b57f3d46ad42b2",
+      "source_head_before": "3c45386a7d29de6702d520f150809e9ec38d2e42",
+      "source_head_after": "3c45386a7d29de6702d520f150809e9ec38d2e42",
+      "source_543_equal": true,
+      "Rust_summary_count": 0,
+      "Rust_passed": 0,
+      "Rust_failed": 0,
+      "Rust_ignored": 0,
+      "intentional_required_skip_negative": false,
+      "emitted_instant_markers": []
+    },
+    {
+      "gate": "03-required-skip-negative",
+      "command": [
+        "cargo",
+        "test",
+        "-p",
+        "tze_hud_compositor",
+        "--test",
+        "widget_transition",
+        "retarget_mid_flight_is_continuous_and_uses_the_new_duration",
+        "--",
+        "--exact",
+        "--nocapture"
+      ],
+      "actual_exit": 101,
+      "seconds": 0.4290836350119207,
+      "raw_path": ".handoff/hud-bstmy.5.8/gates/03-required-skip-negative/raw.log",
+      "raw_bytes": 850,
+      "raw_sha256": "1e91782679650d5fc7071fc336736fb8f33686c06f5f1251c8eb504df208220e",
+      "source_head_before": "3c45386a7d29de6702d520f150809e9ec38d2e42",
+      "source_head_after": "3c45386a7d29de6702d520f150809e9ec38d2e42",
+      "source_543_equal": true,
+      "Rust_summary_count": 1,
+      "Rust_passed": 0,
+      "Rust_failed": 1,
+      "Rust_ignored": 0,
+      "intentional_required_skip_negative": true,
+      "emitted_instant_markers": []
+    },
+    {
+      "gate": "04-widget-transition-positive",
+      "command": [
+        "cargo",
+        "test",
+        "-p",
+        "tze_hud_compositor",
+        "--test",
+        "widget_transition",
+        "--",
+        "--nocapture"
+      ],
+      "actual_exit": 0,
+      "seconds": 0.6323663550138008,
+      "raw_path": ".handoff/hud-bstmy.5.8/gates/04-widget-transition-positive/raw.log",
+      "raw_bytes": 1117,
+      "raw_sha256": "c450f90a11c9a863873bfe3d73cf49a7ca4ab84360990bcf5c9d603e03ea3dbf",
+      "source_head_before": "3c45386a7d29de6702d520f150809e9ec38d2e42",
+      "source_head_after": "3c45386a7d29de6702d520f150809e9ec38d2e42",
+      "source_543_equal": true,
+      "Rust_summary_count": 1,
+      "Rust_passed": 8,
+      "Rust_failed": 0,
+      "Rust_ignored": 0,
+      "intentional_required_skip_negative": false,
+      "emitted_instant_markers": [
+        "instant retarget 0: cancelled, no deadline or later raster",
+        "instant retarget 1: cancelled, no deadline or later raster"
+      ]
+    },
+    {
+      "gate": "05-widget-raster-count",
+      "command": [
+        "cargo",
+        "test",
+        "-p",
+        "tze_hud_compositor",
+        "--test",
+        "widget_raster_count",
+        "--",
+        "--nocapture"
+      ],
+      "actual_exit": 0,
+      "seconds": 5.551418888004264,
+      "raw_path": ".handoff/hud-bstmy.5.8/gates/05-widget-raster-count/raw.log",
+      "raw_bytes": 785,
+      "raw_sha256": "847762974d768314a6b4cf1f69e4c0f618b7ac5693d971918504734de377a484",
+      "source_head_before": "3c45386a7d29de6702d520f150809e9ec38d2e42",
+      "source_head_after": "3c45386a7d29de6702d520f150809e9ec38d2e42",
+      "source_543_equal": true,
+      "Rust_summary_count": 1,
+      "Rust_passed": 1,
+      "Rust_failed": 0,
+      "Rust_ignored": 0,
+      "intentional_required_skip_negative": false,
+      "emitted_instant_markers": []
+    },
+    {
+      "gate": "06-scene-widget-contracts",
+      "command": [
+        "cargo",
+        "test",
+        "-p",
+        "tze_hud_scene",
+        "--lib",
+        "graph::widget_tests::",
+        "--",
+        "--nocapture"
+      ],
+      "actual_exit": 0,
+      "seconds": 13.124673290993087,
+      "raw_path": ".handoff/hud-bstmy.5.8/gates/06-scene-widget-contracts/raw.log",
+      "raw_bytes": 4083,
+      "raw_sha256": "a5cf889c7701b1809d0669f572ac5d4e9860b68bf82f4f32196f352ea4de00b4",
+      "source_head_before": "3c45386a7d29de6702d520f150809e9ec38d2e42",
+      "source_head_after": "3c45386a7d29de6702d520f150809e9ec38d2e42",
+      "source_543_equal": true,
+      "Rust_summary_count": 1,
+      "Rust_passed": 44,
+      "Rust_failed": 0,
+      "Rust_ignored": 0,
+      "intentional_required_skip_negative": false,
+      "emitted_instant_markers": []
+    },
+    {
+      "gate": "07-MCP-widget-hold-clear",
+      "command": [
+        "cargo",
+        "test",
+        "-p",
+        "tze_hud_mcp",
+        "--lib",
+        "server::tests::widget_publish_hold_clear",
+        "--",
+        "--exact",
+        "--nocapture"
+      ],
+      "actual_exit": 0,
+      "seconds": 9.836937001993647,
+      "raw_path": ".handoff/hud-bstmy.5.8/gates/07-MCP-widget-hold-clear/raw.log",
+      "raw_bytes": 754,
+      "raw_sha256": "2c2ca71e86f17f64111a3e24b4d25e8ee835ae024f0c8efab5efe1947ca23af3",
+      "source_head_before": "3c45386a7d29de6702d520f150809e9ec38d2e42",
+      "source_head_after": "3c45386a7d29de6702d520f150809e9ec38d2e42",
+      "source_543_equal": true,
+      "Rust_summary_count": 1,
+      "Rust_passed": 1,
+      "Rust_failed": 0,
+      "Rust_ignored": 0,
+      "intentional_required_skip_negative": false,
+      "emitted_instant_markers": []
+    },
+    {
+      "gate": "08-gRPC-widget-stream",
+      "command": [
+        "cargo",
+        "test",
+        "-p",
+        "tze_hud_protocol",
+        "--lib",
+        "session_server::tests::widget_publish::",
+        "--",
+        "--nocapture"
+      ],
+      "actual_exit": 0,
+      "seconds": 24.777332974015735,
+      "raw_path": ".handoff/hud-bstmy.5.8/gates/08-gRPC-widget-stream/raw.log",
+      "raw_bytes": 1388,
+      "raw_sha256": "1a8abcc2cf2003941abc2a991383632192d5da8d576ebd7872230c04bfff7c3f",
+      "source_head_before": "3c45386a7d29de6702d520f150809e9ec38d2e42",
+      "source_head_after": "3c45386a7d29de6702d520f150809e9ec38d2e42",
+      "source_543_equal": true,
+      "Rust_summary_count": 1,
+      "Rust_passed": 7,
+      "Rust_failed": 0,
+      "Rust_ignored": 0,
+      "intentional_required_skip_negative": false,
+      "emitted_instant_markers": []
+    },
+    {
+      "gate": "09-final-normal-ci",
+      "command": [
+        "just",
+        "ci"
+      ],
+      "actual_exit": 0,
+      "seconds": 687.4154186660016,
+      "raw_path": ".handoff/hud-bstmy.5.8/gates/09-final-normal-ci/raw.log",
+      "raw_bytes": 455760,
+      "raw_sha256": "12493cbcec692f13659519ffa3ff916ff082e4fa7d1801adf3c0f734f3a206bc",
+      "source_head_before": "3c45386a7d29de6702d520f150809e9ec38d2e42",
+      "source_head_after": "3c45386a7d29de6702d520f150809e9ec38d2e42",
+      "source_543_equal": true,
+      "Rust_summary_count": 70,
+      "Rust_passed": 3245,
+      "Rust_failed": 0,
+      "Rust_ignored": 0,
+      "intentional_required_skip_negative": false,
+      "emitted_instant_markers": []
+    }
+  ],
+  "default17": [
+    {
+      "line": 2946,
+      "text": "PASS: dev-mode is not enabled by default for tze_hud_app (shipped binary)"
+    },
+    {
+      "line": 2947,
+      "text": "PASS: dev-mode is not enabled by default for benchmark"
+    },
+    {
+      "line": 2949,
+      "text": "PASS: dev-mode is not enabled by default for poc_demo"
+    },
+    {
+      "line": 2950,
+      "text": "PASS: dev-mode is not enabled by default for render_artifacts"
+    },
+    {
+      "line": 2951,
+      "text": "PASS: dev-mode is not enabled by default for tze_hud_compositor"
+    },
+    {
+      "line": 2952,
+      "text": "PASS: dev-mode is not enabled by default for tze_hud_config"
+    },
+    {
+      "line": 2953,
+      "text": "PASS: dev-mode is not enabled by default for tze_hud_input"
+    },
+    {
+      "line": 2954,
+      "text": "PASS: dev-mode is not enabled by default for tze_hud_mcp"
+    },
+    {
+      "line": 2955,
+      "text": "PASS: dev-mode is not enabled by default for tze_hud_projection"
+    },
+    {
+      "line": 2956,
+      "text": "PASS: dev-mode is not enabled by default for tze_hud_protocol"
+    },
+    {
+      "line": 2957,
+      "text": "PASS: dev-mode is not enabled by default for tze_hud_resource"
+    },
+    {
+      "line": 2958,
+      "text": "PASS: dev-mode is not enabled by default for tze_hud_runtime"
+    },
+    {
+      "line": 2959,
+      "text": "PASS: dev-mode is not enabled by default for tze_hud_scene"
+    },
+    {
+      "line": 2960,
+      "text": "PASS: dev-mode is not enabled by default for tze_hud_telemetry"
+    },
+    {
+      "line": 2961,
+      "text": "PASS: dev-mode is not enabled by default for tze_hud_widget"
+    },
+    {
+      "line": 2962,
+      "text": "PASS: dev-mode is not enabled by default for vertical_slice"
+    },
+    {
+      "line": 2963,
+      "text": "PASS: dev-mode is not enabled by default for widget_publish_load_harness"
+    }
+  ],
+  "test_delta": "+0 ~1 -0",
+  "qualified72_path": "final-CI-qualified-invariant-receipts.json",
+  "failure_skip_limits": {
+    "scope": "This W1 assignment only; historical inherited failures remain immutable and separately pinned.",
+    "unexpected_Cargo_or_GPU_gate_failures": [],
+    "intentional_negative": [
+      {
+        "path": ".handoff/hud-bstmy.5.8/gates/03-required-skip-negative/raw.log",
+        "raw_sha256": "1e91782679650d5fc7071fc336736fb8f33686c06f5f1251c8eb504df208220e",
+        "actual_exit": 101,
+        "actual_selected": 1,
+        "passed": 0,
+        "failed": 1,
+        "filtered": 7,
+        "panic": "TZE_HUD_REQUIRE_GPU=1 forbids skipping widget transition assertions",
+        "before_adapter_initialization": "Exact fixture source guard is before common::new_headless_serialized; this source-backed setup ordering is not a hardware probe."
+      }
+    ],
+    "metadata_failures": [
+      {
+        "path": "bootstrap-intermediate-notes-mismatch.json",
+        "actual_exit": 1,
+        "reason": "ROOT heartbeat stanza changed only; actual raw attempt retained, robust successful16 direct canonical native reads accepted."
+      },
+      {
+        "path": "invariant-metadata-initial-qualified-name-failure.json",
+        "actual_exit": 1,
+        "reason": "Qualified docs name incorrectly treated as a Rust identifier; corrected bounded source-path basename matching. Failed inline process PID not captured; no invented native claim."
+      }
+    ],
+    "skips": [
+      {
+        "line": 1,
+        "text": "SKIPPED: overlay-harness-contract needs PowerShell (pwsh)"
+      }
+    ],
+    "GPU_skips": [],
+    "driver_diagnostics": [
+      {
+        "gate": "04-widget-transition-positive",
+        "raw_sha256": "c450f90a11c9a863873bfe3d73cf49a7ca4ab84360990bcf5c9d603e03ea3dbf",
+        "note": "Raw libEGL/MESA/ZINK adapter diagnostics preserved; successful required llvmpipe setup/test execution is the scoped positive, no hardware-GPU claim."
+      },
+      {
+        "gate": "05-widget-raster-count",
+        "raw_sha256": "847762974d768314a6b4cf1f69e4c0f618b7ac5693d971918504734de377a484",
+        "note": "Raw libEGL/MESA/ZINK adapter diagnostics preserved; successful required llvmpipe setup/test execution is the scoped positive, no hardware-GPU claim."
+      },
+      {
+        "gate": "09-final-normal-ci",
+        "raw_sha256": "12493cbcec692f13659519ffa3ff916ff082e4fa7d1801adf3c0f734f3a206bc",
+        "note": "Raw libEGL/MESA/ZINK adapter diagnostics preserved; successful required llvmpipe setup/test execution is the scoped positive, no hardware-GPU claim."
+      }
+    ],
+    "limits": [
+      "Original raster-count fixture retains silent NoAdapter return; its process pass alone does not prove its raster assertions were reached. W1 transition Rig is required-GPU fail closed and both actual instant markers emitted.",
+      "No semantic red run at historical582 or assignedabd is fabricated; source falsification and expected guard negative are separately classified.",
+      "Shared compositor/headless transition behavior and deadline predicates executed; actual windowed physical wake/idle timing is not measured.",
+      "PERF_ASSERT normal off; CI/fixture pass counts are not hard p99 or universal counters/upload/input assertions.",
+      "Unmerged W2 dev counters are not on this source and are not absorbed. Raw counters/render snapshots/FrameTelemetry remain live and unchanged.",
+      "Parent5 acceptance_criteria is actually absent/null; derived blank hash in initial worker presentation is not its canonical value."
+    ]
+  }
+}

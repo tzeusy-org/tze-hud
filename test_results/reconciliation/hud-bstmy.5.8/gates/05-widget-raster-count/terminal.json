@@ -1,0 +1,93 @@
+{
+  "at": "2026-10-06T19:28:59.450515+00:00",
+  "native_pid": 3760047,
+  "child_pid": 3760050,
+  "process_group": 3760050,
+  "source_head": "3c45386a7d29de6702d520f150809e9ec38d2e42",
+  "command": [
+    "cargo",
+    "test",
+    "-p",
+    "tze_hud_compositor",
+    "--test",
+    "widget_raster_count",
+    "--",
+    "--nocapture"
+  ],
+  "deadline_seconds": 900,
+  "environment": {
+    "CARGO_TARGET_DIR": "/home/orca/orca/projects/tze-hud/target",
+    "CARGO_BUILD_JOBS": "1",
+    "PROTOC": "/usr/bin/protoc",
+    "VK_ICD_FILENAMES": "/usr/share/vulkan/icd.d/lvp_icd.json",
+    "HEADLESS_FORCE_SOFTWARE": "1",
+    "TZE_HUD_REQUIRE_GPU": "1",
+    "LLVMPIPE_CI": "1",
+    "TZE_HUD_SKIP_GPU_TESTS": "unset"
+  },
+  "intentional_required_skip_negative": false,
+  "ended_at": "2026-10-06T19:29:05.001680+00:00",
+  "exit": 0,
+  "seconds": 5.551418888004264,
+  "source_head_after": "3c45386a7d29de6702d520f150809e9ec38d2e42",
+  "source_files": 543,
+  "source_manifest_equal": true,
+  "before_manifest_SHA256": "dd707329003e65c044433b0a11f3450fdbc6521ccd2325020b2546124e5ee323",
+  "after_manifest_SHA256": "dd707329003e65c044433b0a11f3450fdbc6521ccd2325020b2546124e5ee323",
+  "raw_bytes": 785,
+  "raw_SHA256": "847762974d768314a6b4cf1f69e4c0f618b7ac5693d971918504734de377a484",
+  "observed_processes": {
+    "3760050": {
+      "ppid": 3760047,
+      "group": 3760050,
+      "start_ticks": "15608553"
+    },
+    "3760051": {
+      "ppid": 3760050,
+      "group": 3760050,
+      "start_ticks": "15608553"
+    },
+    "3760062": {
+      "ppid": 3760051,
+      "group": 3760050,
+      "start_ticks": "15608566"
+    },
+    "3760145": {
+      "ppid": 3760062,
+      "group": 3760050,
+      "start_ticks": "15608630"
+    },
+    "3760146": {
+      "ppid": 3760145,
+      "group": 3760050,
+      "start_ticks": "15608631"
+    },
+    "3760147": {
+      "ppid": 3760146,
+      "group": 3760050,
+      "start_ticks": "15608631"
+    },
+    "3760158": {
+      "ppid": 3760051,
+      "group": 3760050,
+      "start_ticks": "15609085"
+    }
+  },
+  "observed_pids_absent": [
+    3760050,
+    3760051,
+    3760062,
+    3760145,
+    3760146,
+    3760147,
+    3760158
+  ],
+  "process_group_members_after": {
+    "3760050": []
+  },
+  "child_absent": true,
+  "normal_parallelism": "RUST_TEST_THREADS unset; no --test-threads override",
+  "PERF_ASSERT": "unset, normal off",
+  "SKIP_GPU": "both skip variables unset",
+  "metadata_only_runner": true
+}

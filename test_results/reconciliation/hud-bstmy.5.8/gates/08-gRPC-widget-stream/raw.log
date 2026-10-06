@@ -1,0 +1,17 @@
+   Compiling tze_hud_protocol v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.5.8/crates/tze_hud_protocol)
+   Compiling tze_hud_resource v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.5.8/crates/tze_hud_resource)
+   Compiling tze_hud_scene v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.5.8/crates/tze_hud_scene)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 24.55s
+     Running unittests src/lib.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/tze_hud_protocol-874077aa21cd5576)
+
+running 7 tests
+test session_server::tests::widget_publish::test_widget_publish_unknown_parameter ... ok
+test session_server::tests::widget_publish::test_durable_widget_publish_receives_result ... ok
+test session_server::tests::widget_publish::test_widget_publish_wildcard_capability_allows_publish ... ok
+test session_server::tests::widget_publish::test_widget_publish_not_found ... ok
+test session_server::tests::widget_publish::test_ephemeral_widget_no_publish_result ... ok
+test session_server::tests::widget_publish::test_durable_widget_publish_repeated_requests_are_correlated ... ok
+test session_server::tests::widget_publish::test_widget_publish_missing_capability_rejected ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 197 filtered out; finished in 0.06s
+

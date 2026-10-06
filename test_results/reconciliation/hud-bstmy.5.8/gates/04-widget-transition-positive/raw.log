@@ -1,0 +1,25 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.10s
+     Running tests/widget_transition.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/widget_transition-71114c21a185c2a1)
+
+running 8 tests
+libEGL warning: failed to get driver name for fd -1
+
+libEGL warning: MESA-LOADER: failed to retrieve device information
+
+libEGL warning: failed to get driver name for fd -1
+
+MESA: error: ZINK: failed to choose pdev
+libEGL warning: egl: failed to create dri2 screen
+test f32_param_eases_over_transition_ms ... ok
+test enum_param_snaps_while_f32_eases ... ok
+test color_param_eases_component_wise ... ok
+test each_publish_keeps_its_own_transition_ms ... ok
+test degraded_mode_snaps_widget_transition ... ok
+instant retarget 0: cancelled, no deadline or later raster
+instant retarget 1: cancelled, no deadline or later raster
+test rewound_clock_still_lands_and_stops_waking ... ok
+test retarget_mid_flight_is_continuous_and_uses_the_new_duration ... ok
+test transition_stops_waking_after_completion ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.43s
+

@@ -1,0 +1,163 @@
+diff --git a/crates/tze_hud_compositor/src/renderer/tests/idle_gate.rs b/crates/tze_hud_compositor/src/renderer/tests/idle_gate.rs
+index a7298613..2eec3500 100644
+--- a/crates/tze_hud_compositor/src/renderer/tests/idle_gate.rs
++++ b/crates/tze_hud_compositor/src/renderer/tests/idle_gate.rs
+@@ -57,10 +57,6 @@ async fn idle_render_gate_skips_static_scene_renders_on_change_or_animation() {
+         !dirty_idle,
+         "idle frame (no scene change, no animation) MUST skip render/present"
+     );
+-    assert!(
+-        compositor.take_work_counts().is_none(),
+-        "no render invocation must not manufacture a sampled zero-work frame"
+-    );
+ 
+     // -- Case 2: scene-version bump -> RENDER. --
+     // A scene diff / mutation bumps scene.version; the gate must not skip it.
+diff --git a/crates/tze_hud_runtime/src/headless.rs b/crates/tze_hud_runtime/src/headless.rs
+index 5ff5c461..98110688 100644
+--- a/crates/tze_hud_runtime/src/headless.rs
++++ b/crates/tze_hud_runtime/src/headless.rs
+@@ -947,8 +947,7 @@ mod tests {
+                 mutations: vec![SceneMutation::UpdateNodeContent {
+                     tile_id: lower_tile_id,
+                     node_id: lower_node_id,
+-                    // Keep the update inside the retained glyph-inventory envelope.
+-                    // WorkCounts does not observe glyphon atlas uploads.
++                    // The same glyph inventory prevents an undeclared atlas upload.
+                     data: NodeData::TextMarkdown(TextMarkdownNode {
+                         content: "BA".into(),
+                         bounds: Rect::new(0.0, 0.0, 400.0, 240.0),
+@@ -978,17 +977,14 @@ mod tests {
+             .expect("reference runtime init");
+         let _ = install_transparent_overlap_scene(&reference, "BA", false).await;
+         reference.render_frame().await;
+-        let reference_work = reference
+-            .compositor
+-            .take_work_counts()
+-            .expect("reference frame records work");
+         assert!(
+-            reference_work.full_frame,
++            reference
++                .compositor
++                .take_work_counts()
++                .expect("reference frame records work")
++                .full_frame,
+             "fresh reference must use the established full renderer"
+         );
+-        assert!(reference_work.layout > 0, "{reference_work:?}");
+-        assert_eq!((reference_work.raster, reference_work.upload), (0, 0));
+-        assert_eq!(reference_work.damage_px, 1_000 * 500);
+         let reference_pixels = reference.read_pixels();
+         assert_eq!(
+             reference_pixels.len(),
+@@ -1023,10 +1019,6 @@ mod tests {
+             400 * 240,
+             "damage is the lower tile, not the 1000x500 surface"
+         );
+-        assert_eq!(work.damage_px, work.pixels_damaged);
+-        assert_eq!(work.layout, 1, "only changed text needs shaping: {work:?}");
+-        assert_eq!((work.raster, work.upload), (0, 0), "no widget work");
+-        assert!(runtime.compositor.take_work_counts().is_none());
+ 
+         let mut differing_pixels = 0usize;
+         let mut first_difference = None;
+@@ -1121,20 +1113,14 @@ mod tests {
+ 
+         runtime.render_frame().await;
+ 
+-        let work = runtime
+-            .compositor
+-            .take_work_counts()
+-            .expect("fallback frame records work");
+         assert!(
+-            work.full_frame,
++            runtime
++                .compositor
++                .take_work_counts()
++                .expect("fallback frame records work")
++                .full_frame,
+             "a non-closure grip crossing retained damage must fall back to a full frame"
+         );
+-        // Retained preparation can shape before discovering the intruding grip.
+-        // The observation includes that work and the full-frame retry.
+-        assert!((1..=51).contains(&work.layout), "{work:?}");
+-        assert_eq!((work.raster, work.upload), (0, 0));
+-        assert_eq!(work.damage_px, 1_000 * 500);
+-        assert_eq!(work.damage_px, work.pixels_damaged);
+     }
+ 
+     #[tokio::test]
+@@ -1267,10 +1253,6 @@ mod tests {
+         assert!(!work.full_frame, "{work:?}");
+         assert_eq!(work.tiles_redrawn, 1);
+         assert_eq!(work.pixels_damaged, 96 * 92, "damage is the changed tile");
+-        assert_eq!(work.damage_px, work.pixels_damaged);
+-        assert_eq!(work.layout, 1, "one changed text shape: {work:?}");
+-        assert_eq!((work.raster, work.upload), (0, 0), "no widget work");
+-        assert!(runtime.compositor.take_work_counts().is_none());
+ 
+         // Read back both submitted surfaces: LoadOp::Load plus the scoped
+         // scissors must preserve every pixel outside the changed tile and must
+@@ -1342,29 +1324,24 @@ mod tests {
+             );
+         }
+         runtime.render_frame().await;
+-        let degraded_work = runtime
+-            .compositor
+-            .take_work_counts()
+-            .expect("degraded frame records work");
+         assert!(
+-            degraded_work.full_frame,
++            runtime
++                .compositor
++                .take_work_counts()
++                .expect("degraded frame records work")
++                .full_frame,
+             "degraded frames must never take the retained path"
+         );
+-        assert!(degraded_work.layout > 0, "{degraded_work:?}");
+-        assert_eq!((degraded_work.raster, degraded_work.upload), (0, 0));
+-        assert_eq!(degraded_work.damage_px, 1_000 * 500);
+         runtime.degradation_controller = DegradationController::with_defaults();
+         runtime.render_frame().await;
+-        let rebaseline_work = runtime
+-            .compositor
+-            .take_work_counts()
+-            .expect("rebaseline frame records work");
+         assert!(
+-            rebaseline_work.full_frame,
++            runtime
++                .compositor
++                .take_work_counts()
++                .expect("rebaseline frame records work")
++                .full_frame,
+             "returning to the canonical policy requires a fresh full-frame baseline"
+         );
+-        assert_eq!((rebaseline_work.raster, rebaseline_work.upload), (0, 0));
+-        assert_eq!(rebaseline_work.damage_px, 1_000 * 500);
+ 
+         // A canonical scene change that leaves the deliberately narrow proof
+         // envelope (new glyph inventory) must be a structured, non-passing
+@@ -1398,17 +1375,14 @@ mod tests {
+             );
+         }
+         runtime.render_frame().await;
+-        let unsupported_work = runtime
+-            .compositor
+-            .take_work_counts()
+-            .expect("unsupported change records work");
+         assert!(
+-            unsupported_work.full_frame,
++            runtime
++                .compositor
++                .take_work_counts()
++                .expect("unsupported change records work")
++                .full_frame,
+             "a change outside the retained envelope falls back to a full frame"
+         );
+-        assert!(unsupported_work.layout > 0, "{unsupported_work:?}");
+-        assert_eq!((unsupported_work.raster, unsupported_work.upload), (0, 0));
+-        assert_eq!(unsupported_work.damage_px, 1_000 * 500);
+     }
+ 
+     /// Verify that grpc_port = 0 does not start a server by default.

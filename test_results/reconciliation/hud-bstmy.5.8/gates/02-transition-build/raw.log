@@ -1,0 +1,8 @@
+   Compiling tze_hud_scene v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.5.8/crates/tze_hud_scene)
+   Compiling tze_hud_resource v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.5.8/crates/tze_hud_resource)
+   Compiling tze_hud_input v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.5.8/crates/tze_hud_input)
+   Compiling tze_hud_telemetry v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.5.8/crates/tze_hud_telemetry)
+   Compiling tze_hud_compositor v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.5.8/crates/tze_hud_compositor)
+   Compiling tze_hud_widget v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.5.8/crates/tze_hud_widget)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 21.70s
+  Executable tests/widget_transition.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/widget_transition-71114c21a185c2a1)

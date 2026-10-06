@@ -1,0 +1,75 @@
+{
+  "at": "2026-10-06T19:27:04.059094+00:00",
+  "native_pid": 3757226,
+  "child_pid": 3757229,
+  "process_group": 3757229,
+  "source_head": "3c45386a7d29de6702d520f150809e9ec38d2e42",
+  "command": [
+    "just",
+    "fmt"
+  ],
+  "deadline_seconds": 300,
+  "environment": {
+    "CARGO_TARGET_DIR": "/home/orca/orca/projects/tze-hud/target",
+    "CARGO_BUILD_JOBS": "1",
+    "PROTOC": "/usr/bin/protoc",
+    "VK_ICD_FILENAMES": "/usr/share/vulkan/icd.d/lvp_icd.json",
+    "HEADLESS_FORCE_SOFTWARE": "1",
+    "TZE_HUD_REQUIRE_GPU": "1",
+    "LLVMPIPE_CI": "1",
+    "TZE_HUD_SKIP_GPU_TESTS": "unset"
+  },
+  "intentional_required_skip_negative": false,
+  "ended_at": "2026-10-06T19:27:05.717814+00:00",
+  "exit": 0,
+  "seconds": 1.659227103984449,
+  "source_head_after": "3c45386a7d29de6702d520f150809e9ec38d2e42",
+  "source_files": 543,
+  "source_manifest_equal": true,
+  "before_manifest_SHA256": "dd707329003e65c044433b0a11f3450fdbc6521ccd2325020b2546124e5ee323",
+  "after_manifest_SHA256": "dd707329003e65c044433b0a11f3450fdbc6521ccd2325020b2546124e5ee323",
+  "raw_bytes": 18,
+  "raw_SHA256": "16d325ea49e3c0c4529c65190ab96b3451dcee35398186fd341ec3e334329fc3",
+  "observed_processes": {
+    "3757229": {
+      "ppid": 3757226,
+      "group": 3757229,
+      "start_ticks": "15597014"
+    },
+    "3757230": {
+      "ppid": 3757229,
+      "group": 3757229,
+      "start_ticks": "15597014"
+    },
+    "3757232": {
+      "ppid": 3757230,
+      "group": 3757229,
+      "start_ticks": "15597015"
+    },
+    "3757233": {
+      "ppid": 3757232,
+      "group": 3757229,
+      "start_ticks": "15597015"
+    },
+    "3757252": {
+      "ppid": 3757233,
+      "group": 3757229,
+      "start_ticks": "15597028"
+    }
+  },
+  "observed_pids_absent": [
+    3757229,
+    3757230,
+    3757232,
+    3757233,
+    3757252
+  ],
+  "process_group_members_after": {
+    "3757229": []
+  },
+  "child_absent": true,
+  "normal_parallelism": "RUST_TEST_THREADS unset; no --test-threads override",
+  "PERF_ASSERT": "unset, normal off",
+  "SKIP_GPU": "both skip variables unset",
+  "metadata_only_runner": true
+}

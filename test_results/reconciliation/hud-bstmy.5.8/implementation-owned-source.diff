@@ -1,0 +1,122 @@
+diff --git a/crates/tze_hud_compositor/src/renderer/widgets.rs b/crates/tze_hud_compositor/src/renderer/widgets.rs
+index 582328d4..0abab261 100644
+--- a/crates/tze_hud_compositor/src/renderer/widgets.rs
++++ b/crates/tze_hud_compositor/src/renderer/widgets.rs
+@@ -120,15 +120,18 @@ impl super::Compositor {
+             // A published change on an already-visible widget starts a
+             // transition of the newest publication's `transition_ms`, from
+             // what is on screen now (so a retarget mid-flight is continuous).
+-            // First appearance and `transition_ms == 0` snap.
++            // First appearance snaps. An instant publication cancels any older
++            // transition before resolving params, even if its target is unchanged.
+             let transition_ms = registry
+                 .active_publishes
+                 .get(&instance_name)
+                 .and_then(|p| p.iter().max_by_key(|r| r.published_at_wall_us))
+                 .map_or(0, |r| r.transition_ms);
+-            if transition_ms > 0
+-                && let Some(entry) = wr.texture_entry(&instance_name)
+-            {
++            if transition_ms == 0 {
++                if let Some(entry) = wr.texture_entry_mut(&instance_name) {
++                    entry.animation = None;
++                }
++            } else if let Some(entry) = wr.texture_entry(&instance_name) {
+                 let target = entry
+                     .animation
+                     .as_ref()
+diff --git a/crates/tze_hud_compositor/tests/widget_transition.rs b/crates/tze_hud_compositor/tests/widget_transition.rs
+index e0918777..66b6ab00 100644
+--- a/crates/tze_hud_compositor/tests/widget_transition.rs
++++ b/crates/tze_hud_compositor/tests/widget_transition.rs
+@@ -60,12 +60,25 @@ impl Rig {
+     /// A gauge already on screen with `level = 0.0`, `fill_color = black`,
+     /// `severity = info`, published with no transition.
+     async fn new() -> Option<Rig> {
++        let require_gpu = std::env::var("TZE_HUD_REQUIRE_GPU").is_ok_and(|v| v.trim() == "1");
+         if std::env::var("TZE_HUD_SKIP_GPU_TESTS").is_ok_and(|v| v.trim() == "1") {
++            assert!(
++                !require_gpu,
++                "TZE_HUD_REQUIRE_GPU=1 forbids skipping widget transition assertions"
++            );
++            eprintln!("SKIPPED: widget_transition TZE_HUD_SKIP_GPU_TESTS=1");
+             return None;
+         }
+         let mut compositor = match common::new_headless_serialized(256, 256).await {
+             Ok(c) => c,
+-            Err(CompositorError::NoAdapter) => return None,
++            Err(CompositorError::NoAdapter) => {
++                assert!(
++                    !require_gpu,
++                    "TZE_HUD_REQUIRE_GPU=1 but no adapter for widget transition assertions"
++                );
++                eprintln!("SKIPPED: widget_transition no GPU adapter");
++                return None;
++            }
+             Err(e) => panic!("unexpected compositor error: {e}"),
+         };
+         let surface = HeadlessSurface::new(&compositor.device, 256, 256);
+@@ -310,6 +323,49 @@ async fn retarget_mid_flight_is_continuous_and_uses_the_new_duration() {
+         0.0,
+         "lands exactly on the new target"
+     );
++
++    // Duration zero must interrupt a running transition both when choosing a
++    // different target and when choosing the same target as that old animation.
++    for instant_target in [0.0, 1.0] {
++        rig.publish([("level", WidgetParameterValue::F32(0.0))], 0);
++        rig.step(0);
++        rig.publish([("level", WidgetParameterValue::F32(1.0))], 200);
++        rig.step(0);
++        let halfway = level(&rig.step(100));
++        assert!((halfway - 0.5).abs() < 0.01, "active halfway: {halfway}");
++        assert!(
++            rig.compositor
++                .widget_renderer()
++                .unwrap()
++                .has_active_transition()
++        );
++        assert!(rig.compositor.has_inflight_animation(&rig.scene));
++        assert!(rig.compositor.next_animation_deadline().is_some());
++
++        rig.publish([("level", WidgetParameterValue::F32(instant_target))], 0);
++        assert_eq!(
++            level(&rig.step(0)),
++            instant_target,
++            "zero duration snaps without advancing the clock"
++        );
++        assert!(
++            !rig.compositor
++                .widget_renderer()
++                .unwrap()
++                .has_active_transition(),
++            "the old instance animation is cancelled"
++        );
++        assert!(!rig.compositor.has_inflight_animation(&rig.scene));
++        assert!(rig.compositor.next_animation_deadline().is_none());
++        let snapped_rasters = rig.rasters();
++        assert_eq!(level(&rig.step(1_000)), instant_target);
++        assert_eq!(
++            rig.rasters(),
++            snapped_rasters,
++            "a later injected tick must not resume the old transition"
++        );
++        println!("instant retarget {instant_target}: cancelled, no deadline or later raster");
++    }
+ }
+ 
+ #[tokio::test]
+diff --git a/docs/api.md b/docs/api.md
+index bbb83091..0f283d38 100644
+--- a/docs/api.md
++++ b/docs/api.md
+@@ -68,7 +68,8 @@ otherwise.
+ - Widget: `params` is the typed parameter map. A gRPC publish with
+   `transition_ms` > 0 eases f32 and color params from what is on screen; enum
+   and string params snap, and so does everything under degradation. The
+-  runtime wakes only until the transition lands.
++  runtime wakes only until the transition lands. A zero duration, including
++  an MCP publish, cancels an older transition and snaps to the newest value.
+ - Portal: the first publish to `portal:<id>` attaches (`display_name` is
+   optional). `content` is the output text, `status` is the lifecycle state,
+   and `expects_reply` arms the composer. `key` replaces the newest output
