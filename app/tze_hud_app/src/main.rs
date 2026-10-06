@@ -1647,12 +1647,7 @@ mod tests {
         let _guard = ENV_VAR_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         clear_parse_options_env();
         unsafe { std::env::set_var("TZE_HUD_MCP_PORT", "invalid") };
-        let payload = serde_json::json!({
-            "version": 1, "action": "allow", "program": "C:\\HUD\\tze_hud.exe",
-            "ports": [9090, 50051], "parent_pid": 123, "parent_created": 456,
-            "nonce": "1234567890abcdef1234567890abcdef"
-        })
-        .to_string();
+        let payload = r#"{"version":1,"action":"allow","program":"C:\\HUD\\tze_hud.exe","ports":[9090,50051],"parent_pid":123,"parent_created":456,"nonce":"1234567890abcdef1234567890abcdef"}"#.into();
         let initialized = std::cell::Cell::new(false);
         assert!(matches!(
             prepare_startup(
