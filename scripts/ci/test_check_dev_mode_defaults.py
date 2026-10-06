@@ -95,6 +95,36 @@ class DevModeGuardTest(unittest.TestCase):
         rt["features"].update({"default": ["tze_hud_protocol/dev-mode"]})
         self.assertFails(m, "on: tze_hud_protocol")
 
+        for order in (("activate", "forward"), ("forward", "activate")):
+            for activation in ("direct", "indirect", "cyclic"):
+                for repeated_edges in (False, True):
+                    with self.subTest(
+                        order=order, activation=activation, repeated=repeated_edges
+                    ):
+                        m = clean()
+                        app = by_name(m, "tze_hud_app")
+                        runtime = dep("tze_hud_runtime", default=False, optional=True)
+                        runtime["rename"] = "rt"
+                        app["dependencies"] = [runtime]
+                        if repeated_edges:
+                            windows = copy.deepcopy(runtime)
+                            windows["target"] = "cfg(windows)"
+                            build = copy.deepcopy(runtime)
+                            build["kind"] = "build"
+                            app["dependencies"] += [windows, build]
+                        app["features"] = {
+                            "default": list(order),
+                            "forward": ["rt?/dev-mode"],
+                            "activate": ["dep:rt"] if activation == "direct" else ["via"],
+                            "via": ["dep:rt"],
+                        }
+                        if activation == "cyclic":
+                            app["features"]["via"].append("activate")
+                        self.assertFails(m, "tze_hud_app (shipped binary) on: tze_hud_runtime")
+                        self.assertEqual(
+                            run(m), run(m), "replaying metadata must be deterministic"
+                        )
+
     def test_package_outside_app_closure_fails(self):
         m = clean()
         by_name(m, "extra_tool")["features"].update(
@@ -111,6 +141,48 @@ class DevModeGuardTest(unittest.TestCase):
         app["dependencies"].append(dep("tze_hud_protocol", features=["dev-mode"], optional=True))
         rc, out = run(m)
         self.assertEqual(rc, 0, out)
+
+        for alias in ("proto", "protocol_alias"):
+            for kind in (None, "build"):
+                with self.subTest(alias=alias, kind=kind):
+                    m = clean()
+                    app = by_name(m, "tze_hud_app")
+                    protocol = dep(
+                        "tze_hud_protocol", kind, default=False, optional=True
+                    )
+                    protocol["rename"] = alias
+                    app["dependencies"].append(protocol)
+                    app["features"] = {"default": [f"{alias}?/dev-mode"]}
+                    # The package is reachable through the runtime, but this
+                    # weak request must not activate the optional edge.
+                    rc, out = run(m)
+                    self.assertEqual(rc, 0, out)
+                    self.assertIn(
+                        "PASS: dev-mode is not enabled by default for tze_hud_app", out
+                    )
+
+        m = clean()
+        app = by_name(m, "tze_hud_app")
+        fixture = dep("tze_hud_protocol", "dev", default=False)
+        fixture["rename"] = "protocol_fixture"
+        app["dependencies"].append(fixture)
+        app["features"] = {"default": ["protocol_fixture/dev-mode"]}
+        rc, out = run(m)
+        self.assertEqual(rc, 0, out)
+
+        m = clean()
+        app = by_name(m, "tze_hud_app")
+        runtime = dep("tze_hud_runtime", default=False, optional=True)
+        runtime["rename"] = "rt"
+        app["dependencies"] = [runtime]
+        app["features"] = {"default": ["dep:rt", "rt?/harmless"]}
+        by_name(m, "tze_hud_runtime")["features"].update(
+            {"default": ["dev-mode"], "harmless": []}
+        )
+        rc, out = run(m)
+        self.assertEqual(rc, 1, out)  # The runtime's own default root still fails.
+        self.assertIn("PASS: dev-mode is not enabled by default for tze_hud_app", out)
+        self.assertIn("FAIL: dev-mode is enabled by default for tze_hud_runtime", out)
 
     def test_second_target_specific_edge_enabling_dev_mode_fails(self):
         m = clean()

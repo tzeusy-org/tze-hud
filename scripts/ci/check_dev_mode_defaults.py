@@ -64,6 +64,9 @@ class Workspace:
         # emits one entry per kind AND target for the same crate, each with its
         # own features/default-features, so the key must be per entry.
         active = set()
+        # Weak forwarding never activates an optional edge. Retain its requests
+        # so a later activation can replay them, independent of feature order.
+        weak_forwards = {}
         work = [(root, "default")]
         # Non-optional edges are active as soon as their parent is in the closure.
         seen_pkgs = set()
@@ -87,6 +90,8 @@ class Workspace:
                 work.append((target, "default"))
             for f in d["features"]:
                 work.append((target, f))
+            for f in weak_forwards.get((parent, key), ()):
+                work.append((target, f))
 
         add_pkg(root)
         while work:
@@ -103,6 +108,8 @@ class Workspace:
                     dep, sub = item.split("/", 1)
                     weak = dep.endswith("?")
                     dep = dep.rstrip("?")
+                    if weak and dep in edges:
+                        weak_forwards.setdefault((name, dep), set()).add(sub)
                     if dep in edges and (
                         not weak or any((name, id(d)) in active for _, d in edges[dep])
                     ):
