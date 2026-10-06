@@ -2766,7 +2766,7 @@ pub struct SceneGraphSnapshot {
     /// deserialize to an empty map) and `skip_serializing_if` empty on write, so
     /// an empty map is omitted from the canonical JSON. This keeps the checksum
     /// bytes byte-identical to a pre-field snapshot, so
-    /// [`verify_checksum`](Self::verify_checksum) still succeeds for older
+    /// recomputing with [`Self::compute_checksum`] still matches the stored checksum for older
     /// surface-less snapshots instead of failing on a spurious `"portal_surfaces":{}`.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub portal_surfaces: std::collections::BTreeMap<SceneId, PortalSurface>,
@@ -2789,7 +2789,7 @@ pub struct SceneGraphSnapshot {
     /// BLAKE3 checksum (32 bytes as hex) of the canonical serialized content.
     ///
     /// Computed over the JSON-serialized bytes of this struct with the
-    /// `checksum` field set to the empty string. See [`SceneGraphSnapshot::verify_checksum`].
+    /// `checksum` field set to the empty string. See [`SceneGraphSnapshot::compute_checksum`].
     pub checksum: String,
 }
 
