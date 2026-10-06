@@ -314,9 +314,12 @@ impl SceneGraph {
 #[cfg(test)]
 mod tests;
 
-// ─── Spec scenario tests (RFC 0001 §2.1–§2.4) ────────────────────────────────
-//
-// Each test corresponds to a WHEN/THEN scenario from the issue spec.
-
+// Behavior suites share fixtures only in lib-test builds.
+#[cfg(test)]
+mod limits_tests;
 #[cfg(test)]
 mod spec_scenarios;
+#[cfg(test)]
+mod test_helpers;
+#[cfg(test)]
+mod widget_tests;

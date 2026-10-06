@@ -691,56 +691,12 @@ fn test_100k_deterministic_tile_mutations() {
     assert_no_resource_leak(&graph);
 }
 
-// ─── Regression: invalid opacity values ──────────────────────────────────────
-
-/// Invalid opacity values (outside [0.0, 1.0]) must be rejected cleanly.
-#[test]
-fn test_invalid_opacity_rejected() {
-    let mut graph = SceneGraph::new(1920.0, 1080.0);
-    let tab = graph.create_tab("Tab", 0).unwrap();
-    let lease = graph.grant_lease(AGENT, 300_000);
-    let tile_id = graph
-        .create_tile(tab, AGENT, lease, Rect::new(0.0, 0.0, 100.0, 100.0), 1)
-        .unwrap();
-
-    // Opacity > 1.0 must be rejected
-    let result = graph.update_tile_opacity(tile_id, 1.5, AGENT);
-    assert!(result.is_err(), "opacity > 1.0 must be rejected");
-
-    // Opacity < 0.0 must be rejected
-    let result = graph.update_tile_opacity(tile_id, -0.1, AGENT);
-    assert!(result.is_err(), "opacity < 0.0 must be rejected");
-
-    // Valid opacity must be accepted
-    let result = graph.update_tile_opacity(tile_id, 0.5, AGENT);
-    assert!(result.is_ok(), "valid opacity must be accepted");
-
-    let violations = assert_layer0_invariants(&graph);
-    assert!(
-        violations.is_empty(),
-        "Layer 0 violations after opacity tests: {violations:?}"
-    );
-}
-
 /// Empty tab name must be rejected (RFC 0001 §2.2).
 #[test]
 fn test_empty_tab_name_rejected() {
     let mut graph = SceneGraph::new(1920.0, 1080.0);
     let result = graph.create_tab("", 0);
     assert!(result.is_err(), "empty tab name must be rejected");
-}
-
-/// Tab name exceeding MAX_TAB_NAME_BYTES must be rejected.
-#[test]
-fn test_oversized_tab_name_rejected() {
-    use tze_hud_scene::graph::MAX_TAB_NAME_BYTES;
-    let mut graph = SceneGraph::new(1920.0, 1080.0);
-    let long_name = "x".repeat(MAX_TAB_NAME_BYTES + 1);
-    let result = graph.create_tab(&long_name, 0);
-    assert!(
-        result.is_err(),
-        "tab name > MAX_TAB_NAME_BYTES must be rejected"
-    );
 }
 
 /// TextMarkdown content exceeding MAX_MARKDOWN_BYTES must be rejected.
@@ -775,65 +731,11 @@ fn test_oversized_markdown_content_rejected() {
         },
     );
     assert!(
-        result.is_err(),
-        "oversized markdown content must be rejected"
-    );
-}
-
-/// MAX_TABS limit must be enforced.
-#[test]
-fn test_max_tabs_limit_enforced() {
-    use tze_hud_scene::graph::MAX_TABS;
-    let mut graph = SceneGraph::new(1920.0, 1080.0);
-
-    // Fill to the limit.
-    for i in 0..MAX_TABS {
-        graph.create_tab(&format!("Tab{i}"), i as u32).unwrap();
-    }
-
-    // One more must fail.
-    let result = graph.create_tab("Overflow", MAX_TABS as u32);
-    assert!(
-        result.is_err(),
-        "tab creation beyond MAX_TABS must be rejected"
-    );
-
-    let violations = assert_layer0_invariants(&graph);
-    assert!(
-        violations.is_empty(),
-        "Layer 0 violations at max tabs: {violations:?}"
-    );
-}
-
-/// Z-order in the zone-reserved range must be rejected for agent-created tiles.
-#[test]
-fn test_zone_reserved_z_order_rejected() {
-    use tze_hud_scene::graph::ZONE_TILE_Z_MIN;
-    let mut graph = SceneGraph::new(1920.0, 1080.0);
-    let tab = graph.create_tab("Tab", 0).unwrap();
-    let lease = graph.grant_lease(AGENT, 300_000);
-
-    let result = graph.create_tile(
-        tab,
-        AGENT,
-        lease,
-        Rect::new(0.0, 0.0, 100.0, 100.0),
-        ZONE_TILE_Z_MIN,
-    );
-    assert!(
-        result.is_err(),
-        "z_order at ZONE_TILE_Z_MIN must be rejected"
-    );
-
-    let result = graph.create_tile(
-        tab,
-        AGENT,
-        lease,
-        Rect::new(0.0, 0.0, 100.0, 100.0),
-        u32::MAX,
-    );
-    assert!(
-        result.is_err(),
-        "z_order=u32::MAX must be rejected (zone-reserved range)"
+        matches!(
+            result,
+            Err(tze_hud_scene::ValidationError::InvalidField { ref field, .. })
+                if field == "content"
+        ),
+        "oversized markdown content must produce InvalidField(content), got {result:?}"
     );
 }

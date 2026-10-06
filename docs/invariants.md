@@ -14,7 +14,7 @@ dashboard: an agent can say "show this for 8 seconds" in one call.
 
 - `tze_hud_mcp` `test_hud_publish_zone_ttl_sets_content_expiry_and_is_swept`,
   `delay_ms_holds_content_until_due`, `notification_ttl_zero_is_held_and_hold_retimes_it`
-- `tze_hud_scene` `widget_ttl_only_expired_publication_removed_when_mixed`
+- `tze_hud_scene` `graph::widget_tests::widget_ttl_only_expired_publication_removed_when_mixed`
 - `tze_hud_compositor` `test_publication_ttl_ms_uses_expires_at_wall_us`,
   `hold_moves_the_fade_deadline_and_ttl_zero_never_fades`
 - `tze_hud_protocol` (gRPC session) `grpc_zone_publish_ttl_sets_expiry_and_is_swept`,
@@ -64,7 +64,7 @@ shell state exposes no portal identity or transcript.
 - `tze_hud_mcp` `hud_publish_in_safe_mode_returns_safe_mode_active`,
   `safe_mode_does_not_regrant_suspended_mcp_lease`,
   `resume_restores_mcp_publishing`
-- `tze_hud_scene` `widget_publish_with_suspended_lease_is_safe_mode_active`
+- `tze_hud_scene` `graph::widget_tests::widget_publish_with_suspended_lease_is_safe_mode_active`
 - `tze_hud_compositor` `test_chrome_always_above_max_zorder_tile`,
   `windowed_frame_draws_chrome_overlay_in_safe_mode`
 
