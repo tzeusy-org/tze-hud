@@ -1,0 +1,24 @@
+{
+  "native_read_command": [
+    "bd",
+    "show",
+    "hud-bstmy.5.7",
+    "--json"
+  ],
+  "exit_code": 0,
+  "actual_source": "5825a05421a9e588edd5c3c05ebf7f5bac36c0e1",
+  "matched_full_FIRST_fields": {
+    "description": true,
+    "design": true,
+    "acceptance_criteria": true
+  },
+  "field_sha256": {
+    "description": "d827dfe94dd1d361a9cd17cd53bde1a24f915fd888f07709bc00b13dbe2a7a8f",
+    "design": "08c8ab7fc78972c6f1a1ba0d07cfe95b5681dfc220a84ab6d8fe9af2477be660",
+    "acceptance_criteria": "264ee0f0bd25ee1c27387650c84e6a6a6124f9f6befc943b4414528905c9bf7b"
+  },
+  "generation": 1,
+  "second_shaping": false,
+  "canonical_lifecycle_mutation": false,
+  "timestamp_unix": 1791281660.4610634
+}

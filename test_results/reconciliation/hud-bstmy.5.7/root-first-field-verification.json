@@ -1,0 +1,11 @@
+{
+  "at": "2026-10-06T09:19:44.923286+00:00",
+  "issue": "hud-bstmy.5.7",
+  "first_packet_sha256": "ce06ca6c32a322869b89b0f442b36482f30a5d0900fe450301dc7425bfd1197b",
+  "full_canonical_field_match": true,
+  "shaping_attempt": 1,
+  "all5siblings_closed": true,
+  "execution_bootstrap_pending": true,
+  "cargo_lease": null,
+  "safe_ff_authorized_to": "5825a05421a9e588edd5c3c05ebf7f5bac36c0e1"
+}

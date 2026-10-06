@@ -1,0 +1,1100 @@
+{
+  "source": "5825a05421a9e588edd5c3c05ebf7f5bac36c0e1",
+  "no_source_test_spec_delta": true,
+  "test_delta": "+0 ~0 -0",
+  "own_cargo_gates": [
+    {
+      "source": "5825a05421a9e588edd5c3c05ebf7f5bac36c0e1",
+      "head_before": "5825a05421a9e588edd5c3c05ebf7f5bac36c0e1",
+      "runner_native_pid": 2955957,
+      "cwd": "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.5.7",
+      "branch": "agent/hud-bstmy.5.7",
+      "command": [
+        "cargo",
+        "test",
+        "-p",
+        "vertical_slice",
+        "--test",
+        "budget_assertions",
+        "--",
+        "--nocapture"
+      ],
+      "environment": {
+        "CARGO_TARGET_DIR": "/home/orca/orca/projects/tze-hud/target",
+        "CARGO_BUILD_JOBS": "1",
+        "PROTOC": "/usr/bin/protoc",
+        "VK_ICD_FILENAMES": "/usr/share/vulkan/icd.d/lvp_icd.json",
+        "HEADLESS_FORCE_SOFTWARE": "1",
+        "TZE_HUD_REQUIRE_GPU": "1",
+        "TZE_HUD_PERF_ASSERT": "1"
+      },
+      "explicitly_unset": [
+        "TZE_HUD_SKIP_GPU_TESTS",
+        "TZE_HUD_TEST_BUDGET_SLACK",
+        "RUST_TEST_THREADS"
+      ],
+      "profile": "default cargo test profile; normal harness parallelism",
+      "deadline_seconds": 900,
+      "lease": "ROOT .handoff/runtime-audit-budget-cargo-lease.json; this one gate only",
+      "started_unix": 1791280272.2768786,
+      "tracked_before": "",
+      "protoc_version": "libprotoc 3.21.12",
+      "cargo_pid": 2955964,
+      "process_group": 2955964,
+      "exit_code": 0,
+      "timed_out": false,
+      "elapsed_seconds": 13.005,
+      "head_after": "5825a05421a9e588edd5c3c05ebf7f5bac36c0e1",
+      "tracked_after": "",
+      "log": "test_results/reconciliation/hud-bstmy.5.7/vertical-slice-budget-assertions.log",
+      "log_sha256": "a34fb6f818a69968979310aaf3b06cfa3e45d7f08524a633f1d374e5bac2014a",
+      "log_bytes": 2451,
+      "positive_test_lines": [
+        {
+          "line": 14,
+          "text": "test test_input_to_local_ack_p99_within_budget ... ok"
+        },
+        {
+          "line": 15,
+          "text": "test test_input_to_next_present_p99_within_budget ... ok"
+        },
+        {
+          "line": 16,
+          "text": "test test_input_to_scene_commit_p99_within_budget ... ok"
+        },
+        {
+          "line": 18,
+          "text": "test test_frame_time_p99_within_budget ... ok"
+        },
+        {
+          "line": 19,
+          "text": "test test_hit_test_p99_within_budget ... ok"
+        },
+        {
+          "line": 20,
+          "text": "test test_layer1_pixel_readback_background ... ok"
+        },
+        {
+          "line": 21,
+          "text": "test test_layer1_pixel_readback_z_order ... ok"
+        },
+        {
+          "line": 22,
+          "text": "test test_scene_input_highlight_pixels ... ok"
+        },
+        {
+          "line": 23,
+          "text": "test test_scene_disconnect_reclaim_multiagent_pixels ... ok"
+        },
+        {
+          "line": 24,
+          "text": "test test_scene_coalesced_dashboard_pixels ... ok"
+        },
+        {
+          "line": 25,
+          "text": "test test_transaction_validation_p99_within_budget ... ok"
+        },
+        {
+          "line": 26,
+          "text": "test test_layer1_pixel_readback_tile_color ... ok"
+        },
+        {
+          "line": 27,
+          "text": "test test_scene_empty_scene_pixels ... ok"
+        },
+        {
+          "line": 28,
+          "text": "test test_scene_chatty_dashboard_touch_pixels ... ok"
+        },
+        {
+          "line": 29,
+          "text": "test test_scene_max_tiles_stress_pixels ... ok"
+        },
+        {
+          "line": 30,
+          "text": "test test_scene_overlay_passthrough_regions_pixels ... ok"
+        },
+        {
+          "line": 31,
+          "text": "test test_scene_single_tile_solid_pixels ... ok"
+        },
+        {
+          "line": 32,
+          "text": "test test_scene_tab_switch_pixels ... ok"
+        },
+        {
+          "line": 33,
+          "text": "test test_scene_lease_expiry_pixels ... ok"
+        },
+        {
+          "line": 34,
+          "text": "test test_scene_overlapping_tiles_zorder_pixels ... ok"
+        },
+        {
+          "line": 35,
+          "text": "test test_scene_overlay_transparency_pixels ... ok"
+        },
+        {
+          "line": 36,
+          "text": "test test_scene_three_agents_contention_pixels ... ok"
+        },
+        {
+          "line": 37,
+          "text": "test test_scene_three_tiles_no_overlap_pixels ... ok"
+        },
+        {
+          "line": 38,
+          "text": "test test_scene_zone_conflict_two_publishers_pixels ... ok"
+        },
+        {
+          "line": 39,
+          "text": "test test_scene_zone_disconnect_cleanup_pixels ... ok"
+        },
+        {
+          "line": 40,
+          "text": "test test_scene_zone_orchestrate_then_publish_pixels ... ok"
+        },
+        {
+          "line": 41,
+          "text": "test test_scene_zone_publish_subtitle_pixels ... ok"
+        },
+        {
+          "line": 42,
+          "text": "test test_scene_zone_reject_wrong_type_pixels ... ok"
+        },
+        {
+          "line": 44,
+          "text": "test test_texture_upload_p99_within_budget ... ok"
+        },
+        {
+          "line": 46,
+          "text": "test test_stage6_render_encode_p99_within_budget ... ok"
+        }
+      ],
+      "summaries": [
+        {
+          "line": 48,
+          "text": "test result: ok. 30 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.56s"
+        }
+      ],
+      "numeric_p99_pass_lines": [
+        {
+          "line": 17,
+          "text": "[PASS] frame_time p99=2567us within budget=332000us"
+        },
+        {
+          "line": 43,
+          "text": "[PASS] texture_upload p99=14us within budget=40000us"
+        },
+        {
+          "line": 45,
+          "text": "[PASS] stage6_render_encode p99=337us within budget=80000us (spec target=4000us)"
+        }
+      ],
+      "failed_lines": [],
+      "skip_lines": [],
+      "process_terminal": true,
+      "cargo_process_group_still_exists": false,
+      "runner_script_sha256": "88c16907e051df6b8a24c599fe6ee889bbe0e41b60cd7adb37b1a15a2801aba7",
+      "unfiltered_skip_pattern_hits": [
+        {
+          "line": 48,
+          "text": "test result: ok. 30 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.56s"
+        }
+      ],
+      "skip_normalization": "Only ignored-pattern hit is actual summary0ignored; not a skip.",
+      "eight_existing_hard_assertions": [
+        {
+          "test": "test_frame_time_p99_within_budget",
+          "path": "examples/vertical_slice/tests/budget_assertions.rs",
+          "line": 83,
+          "source_sha256": "b32a13d3ccd004df86799d071ddf2b3ad076315e38e61756407d4270a3aac466",
+          "hard_assert_lines": [
+            138
+          ],
+          "positive_actual_execution": [
+            {
+              "line": 18,
+              "text": "test test_frame_time_p99_within_budget ... ok"
+            }
+          ],
+          "branch_enabled_by_actual_environment": true,
+          "numeric_success_value_emitted": true,
+          "numeric_success_lines": [
+            {
+              "line": 17,
+              "text": "[PASS] frame_time p99=2567us within budget=332000us"
+            }
+          ]
+        },
+        {
+          "test": "test_input_to_local_ack_p99_within_budget",
+          "path": "examples/vertical_slice/tests/budget_assertions.rs",
+          "line": 155,
+          "source_sha256": "b32a13d3ccd004df86799d071ddf2b3ad076315e38e61756407d4270a3aac466",
+          "hard_assert_lines": [
+            232
+          ],
+          "positive_actual_execution": [
+            {
+              "line": 14,
+              "text": "test test_input_to_local_ack_p99_within_budget ... ok"
+            }
+          ],
+          "branch_enabled_by_actual_environment": true,
+          "numeric_success_value_emitted": false,
+          "numeric_success_lines": []
+        },
+        {
+          "test": "test_input_to_scene_commit_p99_within_budget",
+          "path": "examples/vertical_slice/tests/budget_assertions.rs",
+          "line": 264,
+          "source_sha256": "b32a13d3ccd004df86799d071ddf2b3ad076315e38e61756407d4270a3aac466",
+          "hard_assert_lines": [
+            297
+          ],
+          "positive_actual_execution": [
+            {
+              "line": 16,
+              "text": "test test_input_to_scene_commit_p99_within_budget ... ok"
+            }
+          ],
+          "branch_enabled_by_actual_environment": true,
+          "numeric_success_value_emitted": false,
+          "numeric_success_lines": []
+        },
+        {
+          "test": "test_input_to_next_present_p99_within_budget",
+          "path": "examples/vertical_slice/tests/budget_assertions.rs",
+          "line": 324,
+          "source_sha256": "b32a13d3ccd004df86799d071ddf2b3ad076315e38e61756407d4270a3aac466",
+          "hard_assert_lines": [
+            379
+          ],
+          "positive_actual_execution": [
+            {
+              "line": 15,
+              "text": "test test_input_to_next_present_p99_within_budget ... ok"
+            }
+          ],
+          "branch_enabled_by_actual_environment": true,
+          "numeric_success_value_emitted": false,
+          "numeric_success_lines": []
+        },
+        {
+          "test": "test_hit_test_p99_within_budget",
+          "path": "examples/vertical_slice/tests/budget_assertions.rs",
+          "line": 395,
+          "source_sha256": "b32a13d3ccd004df86799d071ddf2b3ad076315e38e61756407d4270a3aac466",
+          "hard_assert_lines": [
+            467
+          ],
+          "positive_actual_execution": [
+            {
+              "line": 19,
+              "text": "test test_hit_test_p99_within_budget ... ok"
+            }
+          ],
+          "branch_enabled_by_actual_environment": true,
+          "numeric_success_value_emitted": false,
+          "numeric_success_lines": []
+        },
+        {
+          "test": "test_transaction_validation_p99_within_budget",
+          "path": "examples/vertical_slice/tests/budget_assertions.rs",
+          "line": 484,
+          "source_sha256": "b32a13d3ccd004df86799d071ddf2b3ad076315e38e61756407d4270a3aac466",
+          "hard_assert_lines": [
+            534
+          ],
+          "positive_actual_execution": [
+            {
+              "line": 25,
+              "text": "test test_transaction_validation_p99_within_budget ... ok"
+            }
+          ],
+          "branch_enabled_by_actual_environment": true,
+          "numeric_success_value_emitted": false,
+          "numeric_success_lines": []
+        },
+        {
+          "test": "test_texture_upload_p99_within_budget",
+          "path": "examples/vertical_slice/tests/budget_assertions.rs",
+          "line": 552,
+          "source_sha256": "b32a13d3ccd004df86799d071ddf2b3ad076315e38e61756407d4270a3aac466",
+          "hard_assert_lines": [
+            694
+          ],
+          "positive_actual_execution": [
+            {
+              "line": 44,
+              "text": "test test_texture_upload_p99_within_budget ... ok"
+            }
+          ],
+          "branch_enabled_by_actual_environment": true,
+          "numeric_success_value_emitted": true,
+          "numeric_success_lines": [
+            {
+              "line": 43,
+              "text": "[PASS] texture_upload p99=14us within budget=40000us"
+            }
+          ]
+        },
+        {
+          "test": "test_stage6_render_encode_p99_within_budget",
+          "path": "examples/vertical_slice/tests/budget_assertions.rs",
+          "line": 731,
+          "source_sha256": "b32a13d3ccd004df86799d071ddf2b3ad076315e38e61756407d4270a3aac466",
+          "hard_assert_lines": [
+            842
+          ],
+          "positive_actual_execution": [
+            {
+              "line": 46,
+              "text": "test test_stage6_render_encode_p99_within_budget ... ok"
+            }
+          ],
+          "branch_enabled_by_actual_environment": true,
+          "numeric_success_value_emitted": true,
+          "numeric_success_lines": [
+            {
+              "line": 45,
+              "text": "[PASS] stage6_render_encode p99=337us within budget=80000us (spec target=4000us)"
+            }
+          ]
+        }
+      ],
+      "instrument_limits": [
+        "All8 actual enabled assert_p99_under branches executed successfully at582e. Only3 branches emit numeric success values; the other5 values cannot be recovered from the log and are not fabricated.",
+        "This fixture samples headless pipeline/local input/resource submission, not Windows live wire-roundtrip latency. Input-to-scene-commit uses50000us directly; input-to-next-present uses330000us(10x), other6 use default20x test_budget.",
+        "No proof of W1 zero-duration-on-active or W2 original multidimensional work or W3 runtime widget observation propagation is provided by these unrelated p99 passes."
+      ],
+      "driver_diagnostics": [
+        {
+          "line": 6,
+          "text": "libEGL warning: failed to get driver name for fd -1",
+          "classification": "non-fatal software adapter discovery diagnostic; not Rust failure or skip"
+        },
+        {
+          "line": 8,
+          "text": "libEGL warning: MESA-LOADER: failed to retrieve device information",
+          "classification": "non-fatal software adapter discovery diagnostic; not Rust failure or skip"
+        },
+        {
+          "line": 10,
+          "text": "libEGL warning: failed to get driver name for fd -1",
+          "classification": "non-fatal software adapter discovery diagnostic; not Rust failure or skip"
+        },
+        {
+          "line": 12,
+          "text": "MESA: error: ZINK: failed to choose pdev",
+          "classification": "non-fatal software adapter discovery diagnostic; not Rust failure or skip"
+        },
+        {
+          "line": 13,
+          "text": "libEGL warning: egl: failed to create dri2 screen",
+          "classification": "non-fatal software adapter discovery diagnostic; not Rust failure or skip"
+        }
+      ]
+    }
+  ],
+  "own_terminal_release": {
+    "source": "5825a05421a9e588edd5c3c05ebf7f5bac36c0e1",
+    "native_runner_pid": 2955957,
+    "cargo_pid": 2955964,
+    "native_exec_session_id": 27902,
+    "native_terminal_exit_code": 0,
+    "cargo_exit_code": 0,
+    "cargo_process_group_still_exists": false,
+    "actual_native_receipt_processes_finished": true,
+    "tracked_source_after": "5825a05421a9e588edd5c3c05ebf7f5bac36c0e1",
+    "tracked_clean": true,
+    "lease_release_requested_to_root": true,
+    "no_more_cargo_authorized_here": true,
+    "high_target_accessed": false,
+    "whole_log_sha256": "a34fb6f818a69968979310aaf3b06cfa3e45d7f08524a633f1d374e5bac2014a",
+    "receipt_sha256": "7d245f569705137ff2e00b7b4269a154c994c664f531d4733be53202d9110677",
+    "released_unix": 1791280379.5879424,
+    "root_release_ack_received": true,
+    "root_validation_durable_path": "/home/orca/orca/projects/tze-hud/.handoff/review-evidence/hud-bstmy.5.7/existing-budget-gate"
+  },
+  "root_release_ack": "ROOT independently accepted whole raw SHA/30positive names/8hard sourcebranches/actual3numeric/processgroupabsent and released lease; no remaining Cargo authorization.",
+  "reused_gates": {
+    "fullCI": {
+      "name": "full-ci",
+      "cwd": "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.3.10",
+      "head_before": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261",
+      "command": [
+        "just",
+        "ci"
+      ],
+      "deadline_seconds": 3600,
+      "environment": {
+        "CARGO_TARGET_DIR": "/home/orca/orca/projects/tze-hud/target",
+        "CARGO_BUILD_JOBS": "1",
+        "PROTOC": "/usr/bin/protoc",
+        "VK_ICD_FILENAMES": "/usr/share/vulkan/icd.d/lvp_icd.json",
+        "HEADLESS_FORCE_SOFTWARE": "1",
+        "TZE_HUD_REQUIRE_GPU": "1"
+      },
+      "started_unix": 1791274987.8401158,
+      "tracked_before": "",
+      "head_after": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261",
+      "exit_code": 0,
+      "elapsed_seconds": 637.811,
+      "log": "test_results/reconciliation/hud-bstmy.3.10/gates/full-ci.log",
+      "log_sha256": "23304faa6788a8d49a06b04e10006e9d2d55c34299e48d686c47703ab7e42b9a",
+      "tracked_after": "",
+      "rust_summaries": [
+        {
+          "line": 3077,
+          "passed": 7,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 3083,
+          "passed": 0,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 3090,
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 3096,
+          "passed": 0,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 3105,
+          "passed": 3,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 3129,
+          "passed": 18,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 3135,
+          "passed": 0,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 3142,
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 3161,
+          "passed": 13,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 3177,
+          "passed": 2,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 3184,
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 3201,
+          "passed": 3,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 3838,
+          "passed": 591,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 3867,
+          "passed": 23,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 3882,
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 3897,
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 3907,
+          "passed": 4,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 3929,
+          "passed": 8,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 3956,
+          "passed": 13,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 4175,
+          "passed": 171,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 4585,
+          "passed": 404,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 4633,
+          "passed": 42,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 4848,
+          "passed": 209,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 5059,
+          "passed": 205,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 5069,
+          "passed": 4,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 5084,
+          "passed": 9,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 5093,
+          "passed": 3,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 5132,
+          "passed": 33,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 5159,
+          "passed": 21,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 5177,
+          "passed": 12,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 5271,
+          "passed": 88,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 5285,
+          "passed": 8,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 5900,
+          "passed": 529,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 5908,
+          "passed": 2,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 5914,
+          "passed": 0,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 5967,
+          "passed": 39,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 5984,
+          "passed": 3,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 6305,
+          "passed": 315,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 6333,
+          "passed": 22,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 6348,
+          "passed": 9,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 6374,
+          "passed": 20,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 6387,
+          "passed": 7,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 6409,
+          "passed": 16,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 6434,
+          "passed": 19,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 6455,
+          "passed": 15,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 6507,
+          "passed": 46,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 6590,
+          "passed": 51,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 6601,
+          "passed": 5,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 6614,
+          "passed": 7,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 6628,
+          "passed": 8,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 6651,
+          "passed": 17,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 6667,
+          "passed": 2,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 6711,
+          "passed": 30,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 6726,
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 6746,
+          "passed": 14,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 6781,
+          "passed": 18,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 6806,
+          "passed": 19,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 6819,
+          "passed": 7,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 6837,
+          "passed": 4,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 6854,
+          "passed": 11,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 6873,
+          "passed": 5,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 6893,
+          "passed": 6,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 6921,
+          "passed": 14,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 6930,
+          "passed": 3,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 6956,
+          "passed": 20,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 6977,
+          "passed": 15,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 7004,
+          "passed": 21,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 7022,
+          "passed": 12,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 7043,
+          "passed": 15,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 7129,
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "line": 7153,
+          "passed": 3,
+          "failed": 0,
+          "ignored": 0
+        }
+      ],
+      "rust_totals": {
+        "passed": 3250,
+        "failed": 0,
+        "ignored": 0
+      },
+      "failed_lines": [],
+      "skip_lines": [
+        {
+          "line": 1,
+          "text": "SKIPPED: overlay-harness-contract needs PowerShell (pwsh)"
+        }
+      ],
+      "unfiltered_skip_pattern_hits": [
+        {
+          "line": 1,
+          "text": "SKIPPED: overlay-harness-contract needs PowerShell (pwsh)"
+        },
+        {
+          "line": 3785,
+          "text": "test widget::tests::primitive_plan_does_not_pop_groups_inside_skipped_defs ... ok"
+        },
+        {
+          "line": 5397,
+          "text": "test operator::screenshot::tests::only_one_capture_is_in_flight_and_abandoned_requests_are_skipped ... ok"
+        },
+        {
+          "line": 5667,
+          "text": "test windowed::lifecycle::tests::windowed_benchmark_does_not_count_skipped_present_attempt ... ok"
+        },
+        {
+          "line": 6368,
+          "text": "test passthrough_tile_skipped_reveals_tile_below ... ok"
+        },
+        {
+          "line": 6371,
+          "text": "test proptest_passthrough_skipped ... ok"
+        },
+        {
+          "line": 6453,
+          "text": "test zone_hit_regions_are_skipped_in_serialization ... ok"
+        }
+      ],
+      "skip_pattern_exclusions": [
+        {
+          "line": 3785,
+          "text": "test widget::tests::primitive_plan_does_not_pop_groups_inside_skipped_defs ... ok"
+        },
+        {
+          "line": 5397,
+          "text": "test operator::screenshot::tests::only_one_capture_is_in_flight_and_abandoned_requests_are_skipped ... ok"
+        },
+        {
+          "line": 5667,
+          "text": "test windowed::lifecycle::tests::windowed_benchmark_does_not_count_skipped_present_attempt ... ok"
+        },
+        {
+          "line": 6368,
+          "text": "test passthrough_tile_skipped_reveals_tile_below ... ok"
+        },
+        {
+          "line": 6371,
+          "text": "test proptest_passthrough_skipped ... ok"
+        },
+        {
+          "line": 6453,
+          "text": "test zone_hit_regions_are_skipped_in_serialization ... ok"
+        }
+      ],
+      "skip_normalization": "Successful test names containing skipped are lexical collisions, not skipped gates. Full raw log retained.",
+      "python_results": [
+        {
+          "line": 3038,
+          "text": "Ran 9 tests in 0.000s"
+        },
+        {
+          "line": 3040,
+          "text": "OK"
+        },
+        {
+          "line": 3044,
+          "text": "Ran 3 tests in 0.000s"
+        },
+        {
+          "line": 3046,
+          "text": "OK"
+        },
+        {
+          "line": 7048,
+          "text": "76 passed, 3 subtests passed in 5.41s"
+        },
+        {
+          "line": 7052,
+          "text": "Ran 103 tests in 0.014s"
+        },
+        {
+          "line": 7054,
+          "text": "OK"
+        },
+        {
+          "line": 7105,
+          "text": "  \"status\": \"passed\","
+        }
+      ],
+      "gpu_skipped_lines": [],
+      "named_invariant_unique_executed": 72,
+      "named_invariant_observations": 72
+    },
+    "default_release_dashboard": {
+      "source_head": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261",
+      "actual_native_session": 13855,
+      "all_terminal": true,
+      "live_handles": [],
+      "gates": [
+        {
+          "name": "default-app-tree",
+          "cwd": "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.7.7",
+          "head_before": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261",
+          "head_after": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261",
+          "command": [
+            "cargo",
+            "tree",
+            "-p",
+            "tze_hud_app",
+            "--edges",
+            "normal,build,features"
+          ],
+          "deadline_seconds": 120,
+          "environment": {
+            "CARGO_TARGET_DIR": "/home/orca/orca/projects/tze-hud/target",
+            "CARGO_BUILD_JOBS": "1",
+            "PROTOC": "/usr/bin/protoc",
+            "VK_ICD_FILENAMES": "/usr/share/vulkan/icd.d/lvp_icd.json",
+            "HEADLESS_FORCE_SOFTWARE": "1",
+            "TZE_HUD_REQUIRE_GPU": "1"
+          },
+          "budget_slack": "unset; current test_budget default 20x",
+          "started_unix": 1791276504.6835482,
+          "elapsed_seconds": 0.47,
+          "exit_code": 0,
+          "log": ".handoff/hud-bstmy.7.7/gates/default-app-tree.log",
+          "log_sha256": "1ed92ca17d0595898552a54afd5e52bb72d75aa52211256c7f2da25e81cc9475",
+          "profile": "normal dev tree / existing normal test profile"
+        },
+        {
+          "name": "default-app-release",
+          "cwd": "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.7.7",
+          "head_before": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261",
+          "head_after": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261",
+          "command": [
+            "cargo",
+            "build",
+            "-p",
+            "tze_hud_app",
+            "--release"
+          ],
+          "deadline_seconds": 3600,
+          "environment": {
+            "CARGO_TARGET_DIR": "/home/orca/orca/projects/tze-hud/target",
+            "CARGO_BUILD_JOBS": "1",
+            "PROTOC": "/usr/bin/protoc",
+            "VK_ICD_FILENAMES": "/usr/share/vulkan/icd.d/lvp_icd.json",
+            "HEADLESS_FORCE_SOFTWARE": "1",
+            "TZE_HUD_REQUIRE_GPU": "1"
+          },
+          "budget_slack": "unset; current test_budget default 20x",
+          "started_unix": 1791276505.157128,
+          "elapsed_seconds": 354.361,
+          "exit_code": 0,
+          "log": ".handoff/hud-bstmy.7.7/gates/default-app-release.log",
+          "log_sha256": "01bff5a8c655b2acff0a1410b43b4e5c804e25901e552a31c2cfdf62e44f1ed7",
+          "profile": "release"
+        },
+        {
+          "name": "dashboard-p99",
+          "cwd": "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.7.7",
+          "head_before": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261",
+          "head_after": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261",
+          "command": [
+            "cargo",
+            "test",
+            "-p",
+            "integration",
+            "--test",
+            "dashboard_tile_input",
+            "pressed_state_set_within_4ms_p99_on_refresh",
+            "--",
+            "--exact",
+            "--nocapture"
+          ],
+          "deadline_seconds": 900,
+          "environment": {
+            "CARGO_TARGET_DIR": "/home/orca/orca/projects/tze-hud/target",
+            "CARGO_BUILD_JOBS": "1",
+            "PROTOC": "/usr/bin/protoc",
+            "VK_ICD_FILENAMES": "/usr/share/vulkan/icd.d/lvp_icd.json",
+            "HEADLESS_FORCE_SOFTWARE": "1",
+            "TZE_HUD_REQUIRE_GPU": "1",
+            "TZE_HUD_PERF_ASSERT": "1"
+          },
+          "budget_slack": "unset; current test_budget default 20x",
+          "started_unix": 1791276859.5226207,
+          "elapsed_seconds": 33.4,
+          "exit_code": 0,
+          "log": ".handoff/hud-bstmy.7.7/gates/dashboard-p99.log",
+          "log_sha256": "c7e50f1f94ebedcb22de7a2759187c991de2438656cf9d28a5a40049a99469de",
+          "profile": "normal dev tree / existing normal test profile",
+          "actual_exact_selected_test_pass_lines": 1
+        }
+      ],
+      "no_more_cargo": true,
+      "cache_released": "/home/orca/orca/projects/tze-hud/target",
+      "dashboard_actual_selected_passes": 1,
+      "dashboard_observations": 100,
+      "dashboard_p99_asserted_upper_bound_us": 80000,
+      "numeric_p99_not_emitted": true
+    }
+  },
+  "applicability": "source-applicability.json547exactwhole non-evidence blobs/source-inventory327 sourceSHA plus matched assertion bodies/current callers/env/profile/scenario; old executed8f retained.",
+  "failure_skip_provenance": "operational-provenance.json optionalmetadata139+format/read errors disclosed separately; fullCI onlypwsh toolskip; owned current gate0Rustfail/0ignored/0actualskip,3numeric+5silenthardasserts; directwidgetfixtureNoAdapterblindspot not hidden by passcounts.",
+  "external_limits": [
+    "Windows global hotkey/visual install/actual hostquiescent measurement remain existingneeds-human POC owners, no fabricated Linux proof.",
+    "No optional fresh AST successfulinventory; priorexact327source navigator only.",
+    "No old398/72e/582e broadCI/defaultrelease execution fabricated; source8f proof remains executed8f."
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "at": "2026-10-06T09:53:12.817277+00:00",
+  "source": "5825a05421a9e588edd5c3c05ebf7f5bac36c0e1",
+  "exit_code": 0,
+  "passes": 30,
+  "p99_active_assertions": [
+    "test_frame_time_p99_within_budget",
+    "test_input_to_local_ack_p99_within_budget",
+    "test_input_to_scene_commit_p99_within_budget",
+    "test_input_to_next_present_p99_within_budget",
+    "test_hit_test_p99_within_budget",
+    "test_transaction_validation_p99_within_budget",
+    "test_texture_upload_p99_within_budget",
+    "test_stage6_render_encode_p99_within_budget"
+  ],
+  "numeric_p99_values_emitted": [
+    {
+      "line": 17,
+      "text": "[PASS] frame_time p99=2567us within budget=332000us"
+    },
+    {
+      "line": 43,
+      "text": "[PASS] texture_upload p99=14us within budget=40000us"
+    },
+    {
+      "line": 45,
+      "text": "[PASS] stage6_render_encode p99=337us within budget=80000us (spec target=4000us)"
+    }
+  ],
+  "limitation": "Unchanged existing source prints numeric success only for three of eight, five remaining hard assertions executed with PERF_ASSERT=1 and passed; no values fabricated and no repeat/source modification.",
+  "log_sha256": "a34fb6f818a69968979310aaf3b06cfa3e45d7f08524a633f1d374e5bac2014a",
+  "receipt_sha256": "7d245f569705137ff2e00b7b4269a154c994c664f531d4733be53202d9110677",
+  "release_ack": true,
+  "errors": []
+}

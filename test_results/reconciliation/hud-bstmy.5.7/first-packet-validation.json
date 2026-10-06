@@ -1,0 +1,27 @@
+{
+  "packet_sha256": "ce06ca6c32a322869b89b0f442b36482f30a5d0900fe450301dc7425bfd1197b",
+  "checks": {
+    "single_FIRST": true,
+    "title_under72": true,
+    "three_full_fields": true,
+    "field_byte_hashes": true,
+    "original_five_deps": true,
+    "owner_decision_not_dep": true,
+    "GEN3_limit": true,
+    "zero_test_delta": true,
+    "no_execution_ACK_or_lease": true,
+    "shaping_evidence_all_bytes": true,
+    "tracked_clean": true,
+    "same_pin": true,
+    "prior_evidence_paths_exist": true
+  },
+  "native_branch": "agent/hud-bstmy.5.7",
+  "head": "72e72e932cf343da100e5c9928991683418e7d29",
+  "phase": "FIRST shaping only; execution awaiting ROOT ACK",
+  "artifact_path": ".handoff/hud-bstmy.5.7/first-shaping-packet.json",
+  "test_delta": {
+    "added": 0,
+    "modified": 0,
+    "deleted": 0
+  }
+}

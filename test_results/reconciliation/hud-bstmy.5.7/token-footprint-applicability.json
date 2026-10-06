@@ -1,0 +1,30 @@
+[
+  {
+    "original_root_path": "/home/orca/orca/projects/tze-hud/.handoff/review-evidence/hud-bstmy.3.10/final-author-tree-artifacts/test_results/reconciliation/hud-bstmy.3.10/token-footprint-receipt.json",
+    "copied": "test_results/reconciliation/hud-bstmy.5.7/applicable-token-footprint/token-footprint-receipt.json",
+    "sha256": "d57ff2a24615867c16b666fdb91b067b935c3e79dcd5de005a6449a253276fa0",
+    "executed_source": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261",
+    "applicability": "Current547non-evidence blob equality includes all measured LLM-facing docs/source/recipe inputs; evidence-only new reports are outside this gate input set. No new582e measurement executed."
+  },
+  {
+    "original_root_path": "/home/orca/orca/projects/tze-hud/.handoff/review-evidence/hud-bstmy.3.10/final-author-tree-artifacts/test_results/reconciliation/hud-bstmy.3.10/token-footprint/gate-report.json",
+    "copied": "test_results/reconciliation/hud-bstmy.5.7/applicable-token-footprint/gate-report.json",
+    "sha256": "39c2a7d747ed9ad0df90d7bdcd99fcda6e0c363d07a862c74c390e09eaeb69f7",
+    "executed_source": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261",
+    "applicability": "Current547non-evidence blob equality includes all measured LLM-facing docs/source/recipe inputs; evidence-only new reports are outside this gate input set. No new582e measurement executed."
+  },
+  {
+    "original_root_path": "/home/orca/orca/projects/tze-hud/.handoff/review-evidence/hud-bstmy.3.10/final-author-tree-artifacts/test_results/reconciliation/hud-bstmy.3.10/token-footprint/measurement.json",
+    "copied": "test_results/reconciliation/hud-bstmy.5.7/applicable-token-footprint/measurement.json",
+    "sha256": "3e7e17748454c0e1476e93060db166c9f2d105f01b018bf56c0c12202a9eb78e",
+    "executed_source": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261",
+    "applicability": "Current547non-evidence blob equality includes all measured LLM-facing docs/source/recipe inputs; evidence-only new reports are outside this gate input set. No new582e measurement executed."
+  },
+  {
+    "original_root_path": "/home/orca/orca/projects/tze-hud/.handoff/review-evidence/hud-bstmy.3.10/final-author-tree-artifacts/test_results/reconciliation/hud-bstmy.3.10/token-footprint/repeat.json",
+    "copied": "test_results/reconciliation/hud-bstmy.5.7/applicable-token-footprint/repeat.json",
+    "sha256": "3e7e17748454c0e1476e93060db166c9f2d105f01b018bf56c0c12202a9eb78e",
+    "executed_source": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261",
+    "applicability": "Current547non-evidence blob equality includes all measured LLM-facing docs/source/recipe inputs; evidence-only new reports are outside this gate input set. No new582e measurement executed."
+  }
+]

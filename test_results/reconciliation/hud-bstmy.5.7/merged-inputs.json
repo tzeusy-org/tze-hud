@@ -1,0 +1,1446 @@
+{
+  "timestamp_unix": 1791277743.0346975,
+  "head": "72e72e932cf343da100e5c9928991683418e7d29",
+  "prs": [
+    {
+      "command": [
+        "gh",
+        "pr",
+        "view",
+        "1290",
+        "--json",
+        "number,title,state,headRefOid,mergeCommit,mergedAt,url,files"
+      ],
+      "exit": 0,
+      "stderr": "",
+      "metadata": {
+        "files": [
+          {
+            "path": "crates/tze_hud_compositor/src/renderer/animation.rs",
+            "additions": 17,
+            "deletions": 1,
+            "changeType": "MODIFIED"
+          },
+          {
+            "path": "crates/tze_hud_compositor/src/renderer/widgets.rs",
+            "additions": 35,
+            "deletions": 2,
+            "changeType": "MODIFIED"
+          },
+          {
+            "path": "crates/tze_hud_compositor/src/widget.rs",
+            "additions": 32,
+            "deletions": 83,
+            "changeType": "MODIFIED"
+          },
+          {
+            "path": "crates/tze_hud_compositor/tests/widget_transition.rs",
+            "additions": 323,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "crates/tze_hud_scene/src/graph/mod.rs",
+            "additions": 6,
+            "deletions": 0,
+            "changeType": "MODIFIED"
+          },
+          {
+            "path": "crates/tze_hud_widget/tests/gauge_interpolation.rs",
+            "additions": 0,
+            "deletions": 1157,
+            "changeType": "DELETED"
+          },
+          {
+            "path": "docs/api.md",
+            "additions": 4,
+            "deletions": 1,
+            "changeType": "MODIFIED"
+          }
+        ],
+        "headRefOid": "70578c1be9b18b265eeea1f0bc3a0b4b2b4fbda0",
+        "mergeCommit": {
+          "oid": "9b6a6666c805676f42540c88f26b403f9d387dcb"
+        },
+        "mergedAt": "2026-10-03T11:43:40Z",
+        "number": 1290,
+        "state": "MERGED",
+        "title": "feat(compositor): wire widget transitions on the scene clock [hud-bstmy.5.1]",
+        "url": "https://github.com/tzeusy-org/tze-hud/pull/1290"
+      },
+      "reachability": {
+        "merge_commit": "9b6a6666c805676f42540c88f26b403f9d387dcb",
+        "ancestor_of_current_head": true,
+        "exit": 0
+      }
+    },
+    {
+      "command": [
+        "gh",
+        "pr",
+        "view",
+        "1305",
+        "--json",
+        "number,title,state,headRefOid,mergeCommit,mergedAt,url,files"
+      ],
+      "exit": 0,
+      "stderr": "",
+      "metadata": {
+        "files": [
+          {
+            "path": "crates/tze_hud_compositor/src/lib.rs",
+            "additions": 1,
+            "deletions": 1,
+            "changeType": "MODIFIED"
+          },
+          {
+            "path": "crates/tze_hud_compositor/src/pipeline.rs",
+            "additions": 1,
+            "deletions": 18,
+            "changeType": "MODIFIED"
+          },
+          {
+            "path": "crates/tze_hud_compositor/src/renderer/frame.rs",
+            "additions": 9,
+            "deletions": 395,
+            "changeType": "MODIFIED"
+          },
+          {
+            "path": "crates/tze_hud_compositor/src/renderer/mod.rs",
+            "additions": 3,
+            "deletions": 13,
+            "changeType": "MODIFIED"
+          },
+          {
+            "path": "crates/tze_hud_compositor/src/renderer/tests/surface.rs",
+            "additions": 24,
+            "deletions": 136,
+            "changeType": "MODIFIED"
+          },
+          {
+            "path": "crates/tze_hud_protocol/src/session.rs",
+            "additions": 1,
+            "deletions": 1,
+            "changeType": "MODIFIED"
+          },
+          {
+            "path": "crates/tze_hud_runtime/src/lib.rs",
+            "additions": 3,
+            "deletions": 3,
+            "changeType": "MODIFIED"
+          },
+          {
+            "path": "crates/tze_hud_runtime/src/shell/badges.rs",
+            "additions": 0,
+            "deletions": 875,
+            "changeType": "DELETED"
+          },
+          {
+            "path": "crates/tze_hud_runtime/src/shell/chrome.rs",
+            "additions": 29,
+            "deletions": 1026,
+            "changeType": "MODIFIED"
+          },
+          {
+            "path": "crates/tze_hud_runtime/src/shell/mod.rs",
+            "additions": 24,
+            "deletions": 106,
+            "changeType": "MODIFIED"
+          },
+          {
+            "path": "crates/tze_hud_runtime/src/shell/safe_mode.rs",
+            "additions": 232,
+            "deletions": 1555,
+            "changeType": "MODIFIED"
+          },
+          {
+            "path": "crates/tze_hud_runtime/src/windowed/keyboard.rs",
+            "additions": 7,
+            "deletions": 20,
+            "changeType": "MODIFIED"
+          },
+          {
+            "path": "crates/tze_hud_runtime/src/windowed/mod.rs",
+            "additions": 5,
+            "deletions": 8,
+            "changeType": "MODIFIED"
+          },
+          {
+            "path": "crates/tze_hud_runtime/src/windowed/safe_mode_toggle.rs",
+            "additions": 4,
+            "deletions": 4,
+            "changeType": "MODIFIED"
+          },
+          {
+            "path": "docs/invariants.md",
+            "additions": 1,
+            "deletions": 2,
+            "changeType": "MODIFIED"
+          }
+        ],
+        "headRefOid": "95a0c8050de1ca456f807aa4d02e91d6cd27ca43",
+        "mergeCommit": {
+          "oid": "5b0625034ba283676f087a8a1a6000156c786e57"
+        },
+        "mergedAt": "2026-10-03T14:20:39Z",
+        "number": 1305,
+        "state": "MERGED",
+        "title": "refactor: runtime shell diet; delete dead chrome render path, badges, audit/mute [hud-bstmy.5.2]",
+        "url": "https://github.com/tzeusy-org/tze-hud/pull/1305"
+      },
+      "reachability": {
+        "merge_commit": "5b0625034ba283676f087a8a1a6000156c786e57",
+        "ancestor_of_current_head": true,
+        "exit": 0
+      }
+    },
+    {
+      "command": [
+        "gh",
+        "pr",
+        "view",
+        "1285",
+        "--json",
+        "number,title,state,headRefOid,mergeCommit,mergedAt,url,files"
+      ],
+      "exit": 0,
+      "stderr": "",
+      "metadata": {
+        "files": [
+          {
+            "path": "crates/tze_hud_compositor/src/lib.rs",
+            "additions": 2,
+            "deletions": 2,
+            "changeType": "MODIFIED"
+          },
+          {
+            "path": "crates/tze_hud_compositor/src/renderer/mod.rs",
+            "additions": 3,
+            "deletions": 5,
+            "changeType": "MODIFIED"
+          },
+          {
+            "path": "crates/tze_hud_compositor/src/renderer/retained.rs",
+            "additions": 86,
+            "deletions": 627,
+            "changeType": "MODIFIED"
+          },
+          {
+            "path": "crates/tze_hud_compositor/src/renderer/tests/retained_image.rs",
+            "additions": 16,
+            "deletions": 38,
+            "changeType": "MODIFIED"
+          },
+          {
+            "path": "crates/tze_hud_runtime/src/headless.rs",
+            "additions": 49,
+            "deletions": 220,
+            "changeType": "MODIFIED"
+          },
+          {
+            "path": "crates/tze_hud_telemetry/src/invalidation_closure.rs",
+            "additions": 0,
+            "deletions": 1281,
+            "changeType": "DELETED"
+          },
+          {
+            "path": "crates/tze_hud_telemetry/src/lib.rs",
+            "additions": 2,
+            "deletions": 14,
+            "changeType": "MODIFIED"
+          },
+          {
+            "path": "crates/tze_hud_telemetry/src/work_counts.rs",
+            "additions": 38,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "crates/tze_hud_telemetry/tests/invalidation_closure.rs",
+            "additions": 0,
+            "deletions": 849,
+            "changeType": "DELETED"
+          }
+        ],
+        "headRefOid": "27602163090b7dbcb614253f30da734d6ed03d53",
+        "mergeCommit": {
+          "oid": "625a76635633f93b8de64ce3518e95b3b572c3a9"
+        },
+        "mergedAt": "2026-10-03T11:00:03Z",
+        "number": 1285,
+        "state": "MERGED",
+        "title": "refactor: reduce change-efficiency artifact to WorkCounts [hud-bstmy.5.3]",
+        "url": "https://github.com/tzeusy-org/tze-hud/pull/1285"
+      },
+      "reachability": {
+        "merge_commit": "625a76635633f93b8de64ce3518e95b3b572c3a9",
+        "ancestor_of_current_head": true,
+        "exit": 0
+      }
+    },
+    {
+      "command": [
+        "gh",
+        "pr",
+        "view",
+        "1261",
+        "--json",
+        "number,title,state,headRefOid,mergeCommit,mergedAt,url,files"
+      ],
+      "exit": 0,
+      "stderr": "",
+      "metadata": {
+        "files": [
+          {
+            "path": ".github/workflows/ci.yml",
+            "additions": 3,
+            "deletions": 7,
+            "changeType": "MODIFIED"
+          },
+          {
+            "path": "AGENTS.md",
+            "additions": 1,
+            "deletions": 1,
+            "changeType": "MODIFIED"
+          },
+          {
+            "path": "README.md",
+            "additions": 1,
+            "deletions": 8,
+            "changeType": "MODIFIED"
+          },
+          {
+            "path": "crates/tze_hud_telemetry/src/lib.rs",
+            "additions": 0,
+            "deletions": 5,
+            "changeType": "MODIFIED"
+          },
+          {
+            "path": "crates/tze_hud_telemetry/src/resource_monitor.rs",
+            "additions": 0,
+            "deletions": 967,
+            "changeType": "DELETED"
+          },
+          {
+            "path": "justfile",
+            "additions": 1,
+            "deletions": 2,
+            "changeType": "MODIFIED"
+          },
+          {
+            "path": "tests/integration/Cargo.toml",
+            "additions": 0,
+            "deletions": 14,
+            "changeType": "MODIFIED"
+          },
+          {
+            "path": "tests/integration/soak.rs",
+            "additions": 0,
+            "deletions": 1203,
+            "changeType": "DELETED"
+          }
+        ],
+        "headRefOid": "9e9e85fe7615ac89dcd8e6a758c3d55e9febe3a0",
+        "mergeCommit": {
+          "oid": "be1528b2a50fbe25822120d670ec6f2e07f6f548"
+        },
+        "mergedAt": "2026-10-03T07:11:52Z",
+        "number": 1261,
+        "state": "MERGED",
+        "title": "chore: delete the soak suite and resource_monitor [hud-bstmy.5.4]",
+        "url": "https://github.com/tzeusy-org/tze-hud/pull/1261"
+      },
+      "reachability": {
+        "merge_commit": "be1528b2a50fbe25822120d670ec6f2e07f6f548",
+        "ancestor_of_current_head": true,
+        "exit": 0
+      }
+    },
+    {
+      "command": [
+        "gh",
+        "pr",
+        "view",
+        "1308",
+        "--json",
+        "number,title,state,headRefOid,mergeCommit,mergedAt,url,files"
+      ],
+      "exit": 0,
+      "stderr": "",
+      "metadata": {
+        "files": [
+          {
+            "path": ".github/workflows/ci.yml",
+            "additions": 8,
+            "deletions": 9,
+            "changeType": "MODIFIED"
+          },
+          {
+            "path": "Cargo.lock",
+            "additions": 3,
+            "deletions": 0,
+            "changeType": "MODIFIED"
+          },
+          {
+            "path": "README.md",
+            "additions": 9,
+            "deletions": 14,
+            "changeType": "MODIFIED"
+          },
+          {
+            "path": "app/tze_hud_app/Cargo.toml",
+            "additions": 2,
+            "deletions": 0,
+            "changeType": "MODIFIED"
+          },
+          {
+            "path": "app/tze_hud_app/tests/production_boot.rs",
+            "additions": 61,
+            "deletions": 0,
+            "changeType": "MODIFIED"
+          },
+          {
+            "path": "examples/vertical_slice/Cargo.toml",
+            "additions": 7,
+            "deletions": 13,
+            "changeType": "MODIFIED"
+          },
+          {
+            "path": "examples/vertical_slice/config/production.toml",
+            "additions": 2,
+            "deletions": 5,
+            "changeType": "MODIFIED"
+          },
+          {
+            "path": "examples/vertical_slice/src/main.rs",
+            "additions": 272,
+            "deletions": 1866,
+            "changeType": "MODIFIED"
+          },
+          {
+            "path": "examples/vertical_slice/tests/budget_assertions.rs",
+            "additions": 8,
+            "deletions": 15,
+            "changeType": "MODIFIED"
+          },
+          {
+            "path": "examples/vertical_slice/tests/production_boot.rs",
+            "additions": 16,
+            "deletions": 329,
+            "changeType": "MODIFIED"
+          }
+        ],
+        "headRefOid": "0fd98547ef6e6b3fc0ab8503dc921d08002599a5",
+        "mergeCommit": {
+          "oid": "8b54b225ecfe3558d1ed6e879d99929bf33317b0"
+        },
+        "mergedAt": "2026-10-03T15:12:51Z",
+        "number": 1308,
+        "state": "MERGED",
+        "title": "refactor: rewrite vertical_slice onto the T5 gRPC verbs [hud-bstmy.5.5]",
+        "url": "https://github.com/tzeusy-org/tze-hud/pull/1308"
+      },
+      "reachability": {
+        "merge_commit": "8b54b225ecfe3558d1ed6e879d99929bf33317b0",
+        "ancestor_of_current_head": true,
+        "exit": 0
+      }
+    },
+    {
+      "command": [
+        "gh",
+        "pr",
+        "view",
+        "1371",
+        "--json",
+        "number,title,state,headRefOid,mergeCommit,mergedAt,url,files"
+      ],
+      "exit": 0,
+      "stderr": "",
+      "metadata": {
+        "files": [
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/active-clock-dedupe-all.json",
+            "additions": 668,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/artifact-index.json",
+            "additions": 545,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/artifact-validation.json",
+            "additions": 100,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/blockers.json",
+            "additions": 10,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/cargo-lock-applicability.json",
+            "additions": 10,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/cargo-oracle-activate-forward-metadata.json",
+            "additions": 1,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/cargo-oracle-activate-forward-resolve.json",
+            "additions": 1,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/cargo-oracle-active-build-0-metadata.json",
+            "additions": 1,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/cargo-oracle-active-build-0-resolve.json",
+            "additions": 1,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/cargo-oracle-active-build-0-tree.log",
+            "additions": 3,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/cargo-oracle-active-build-1-metadata.json",
+            "additions": 1,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/cargo-oracle-active-build-1-resolve.json",
+            "additions": 1,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/cargo-oracle-active-build-1-tree.log",
+            "additions": 3,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/cargo-oracle-active-normal-0-metadata.json",
+            "additions": 1,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/cargo-oracle-active-normal-0-resolve.json",
+            "additions": 1,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/cargo-oracle-active-normal-0-tree.log",
+            "additions": 2,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/cargo-oracle-active-normal-1-metadata.json",
+            "additions": 1,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/cargo-oracle-active-normal-1-resolve.json",
+            "additions": 1,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/cargo-oracle-active-normal-1-tree.log",
+            "additions": 2,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/cargo-oracle-dev-only-metadata.json",
+            "additions": 1,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/cargo-oracle-dev-only-resolve.json",
+            "additions": 1,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/cargo-oracle-dev-only-tree.log",
+            "additions": 1,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/cargo-oracle-forward-activate-metadata.json",
+            "additions": 1,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/cargo-oracle-forward-activate-resolve.json",
+            "additions": 1,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/cargo-oracle-inactive-build-metadata.json",
+            "additions": 1,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/cargo-oracle-inactive-build-resolve.json",
+            "additions": 1,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/cargo-oracle-inactive-build-tree.log",
+            "additions": 1,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/cargo-oracle-inactive-normal-metadata.json",
+            "additions": 1,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/cargo-oracle-inactive-normal-resolve.json",
+            "additions": 1,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/cargo-oracle-inactive-normal-tree.log",
+            "additions": 1,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/cargo-oracle-indirect-cycle-metadata.json",
+            "additions": 1,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/cargo-oracle-indirect-cycle-resolve.json",
+            "additions": 1,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/cargo-oracle-indirect-cycle-tree.log",
+            "additions": 2,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/cargo-oracles.json",
+            "additions": 239,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/ci-action-classification.json",
+            "additions": 533,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/ci-action-inventory.json",
+            "additions": 467,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/ci-parity-matrix.json",
+            "additions": 539,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/ci-run-inventory.json",
+            "additions": 355,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/ci-yaml-validation.json",
+            "additions": 10,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/clock-contract-matrix.json",
+            "additions": 406,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/clock-doc-dedupe-all.json",
+            "additions": 255,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/clock-doc-dedupe.json",
+            "additions": 37,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/clock-source-operation-inventory.json",
+            "additions": 3006,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/concurrent-main-applicability.json",
+            "additions": 851,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/coverage-gate-result.json",
+            "additions": 11,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/coverage-gate.log",
+            "additions": 5,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/criteria-snapshot.json",
+            "additions": 609,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/deadline-doc-dedupe-all.json",
+            "additions": 641,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/default-feature-closure-inventory.json",
+            "additions": 2292,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/dev-mode-guard.log",
+            "additions": 19,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/discovered-follow-ups.json",
+            "additions": 1541,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/documentation-assessment.json",
+            "additions": 47,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/dry-run-canonical-app-boot.log",
+            "additions": 1,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/dry-run-cargo-deny.log",
+            "additions": 6,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/dry-run-ci.log",
+            "additions": 44,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/dry-run-clippy-windows-gnu.log",
+            "additions": 14,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/dry-run-overlay-harness-contract.log",
+            "additions": 6,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/dry-run-production-boot.log",
+            "additions": 1,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/dry-run-test-gpu.log",
+            "additions": 5,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/dry-run-test-integration.log",
+            "additions": 1,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/dry-run-test.log",
+            "additions": 1,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/dry-run-token-footprint.log",
+            "additions": 5,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/evidence-whitespace-check.json",
+            "additions": 6,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/exact-main-ci-jobs.json",
+            "additions": 1,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/exact-main-ci-runs.json",
+            "additions": 1,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/finding-source-evidence.json",
+            "additions": 204,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/gpu-path-classification.json",
+            "additions": 7020,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/gpu-root-attestation.json",
+            "additions": 31,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/gpu-source-inventory.json",
+            "additions": 4261,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/gpu-verification-results.json",
+            "additions": 233,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/guard-fixtures.log",
+            "additions": 5,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/guard-instrument-matrix.json",
+            "additions": 71,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/historical-all-function-body-proof.json",
+            "additions": 5295,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/historical-helper-module-proof.json",
+            "additions": 449,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/historical-split-validation.json",
+            "additions": 3179,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/instrument-assessment.json",
+            "additions": 41,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/instrument-diagnostics.json",
+            "additions": 9,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/integrated-ci-applicability.json",
+            "additions": 2111,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/integrated-ci-author-receipt.json",
+            "additions": 21,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/integrated-ci-binary-results.json",
+            "additions": 431,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/integrated-ci-root-attestation.json",
+            "additions": 19,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/integrated-ci.log",
+            "additions": 7140,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/invariant-contract-matrix.json",
+            "additions": 918,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/invariant-execution-receipt.json",
+            "additions": 1093,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/invariant-test-inventory.json",
+            "additions": 733,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/live-main-applicability.json",
+            "additions": 7,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/metadata.json",
+            "additions": 1,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/original-compositor-275-history.json",
+            "additions": 598,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/prebuild-compositor.log",
+            "additions": 17,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/prebuild-pixel.log",
+            "additions": 13,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/protocol-existing-gap-packets.json",
+            "additions": 354,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/python-discovery-inventory.json",
+            "additions": 212,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/read-only-checks.json",
+            "additions": 192,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/recipe-dry-run-inventory.json",
+            "additions": 192,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/renderer-clock-surface-map.json",
+            "additions": 1222,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/report.md",
+            "additions": 45,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/required-main-rules.json",
+            "additions": 1,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/requirements-matrix.json",
+            "additions": 1907,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/test-gpu-1.log",
+            "additions": 860,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.1.15/test-gpu-2.log",
+            "additions": 844,
+            "deletions": 0,
+            "changeType": "ADDED"
+          }
+        ],
+        "headRefOid": "95e28ac353edcad8c66a207cf24a2ca6b5efa441",
+        "mergeCommit": {
+          "oid": "5825a05421a9e588edd5c3c05ebf7f5bac36c0e1"
+        },
+        "mergedAt": "2026-10-06T09:04:01Z",
+        "number": 1371,
+        "state": "MERGED",
+        "title": "chore: publish terminal T8.0 enabler audit [hud-bstmy.1.15]",
+        "url": "https://github.com/tzeusy-org/tze-hud/pull/1371"
+      },
+      "reachability": {
+        "merge_commit": "5825a05421a9e588edd5c3c05ebf7f5bac36c0e1",
+        "ancestor_of_current_head": false,
+        "exit": 1
+      }
+    },
+    {
+      "command": [
+        "gh",
+        "pr",
+        "view",
+        "1372",
+        "--json",
+        "number,title,state,headRefOid,mergeCommit,mergedAt,url,files"
+      ],
+      "exit": 0,
+      "stderr": "",
+      "metadata": {
+        "files": [
+          {
+            "path": "test_results/hud-bstmy.3.10-followups.json",
+            "additions": 131,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/hud-bstmy.3.10-reconciliation.md",
+            "additions": 228,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.3.10/blockers.json",
+            "additions": 29,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.3.10/bootstrap-issues.json",
+            "additions": 504,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.3.10/bootstrap-receipt.json",
+            "additions": 66,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.3.10/candidate-navigation.json.gz",
+            "additions": 0,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.3.10/cargo-terminal-release.json",
+            "additions": 16,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.3.10/compressed-log-index.json",
+            "additions": 85,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.3.10/current-pin.json",
+            "additions": 78,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.3.10/deleted-paths.json",
+            "additions": 61,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.3.10/deletion-scans.json",
+            "additions": 291,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.3.10/enabler-final-receipt.json",
+            "additions": 9,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.3.10/evidence-index.json",
+            "additions": 286,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.3.10/existing-owner-packets/batching-owner.json",
+            "additions": 9,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.3.10/existing-owner-packets/enabler-final.json",
+            "additions": 1541,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.3.10/existing-owner-packets/protocol-final.json",
+            "additions": 397,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.3.10/existing-owner-packets/workcounts-owner.json",
+            "additions": 9,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.3.10/final-main-applicability.json",
+            "additions": 70,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.3.10/g1-public-dispositions.json.gz",
+            "additions": 0,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.3.10/g3-qualified-removals.json",
+            "additions": 70,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.3.10/gates/config-existing-receipt.json",
+            "additions": 45,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.3.10/gates/config-existing.log.gz",
+            "additions": 0,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.3.10/gates/focus-existing-receipt.json",
+            "additions": 45,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.3.10/gates/focus-existing.log.gz",
+            "additions": 0,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.3.10/gates/full-ci-receipt.json",
+            "additions": 560,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.3.10/gates/full-ci.log.gz",
+            "additions": 0,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.3.10/historical-gate-index.json",
+            "additions": 2202,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.3.10/historical-gates/g1-author-ci.log.gz",
+            "additions": 0,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.3.10/historical-gates/g1-initial-receipt.json",
+            "additions": 11,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.3.10/historical-gates/g1-retry-receipt.json",
+            "additions": 15,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.3.10/historical-gates/g1-review-exclusive-retry.log.gz",
+            "additions": 0,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.3.10/historical-gates/g1-review-initial-failed.log.gz",
+            "additions": 0,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.3.10/historical-gates/g2-author-ci.log.gz",
+            "additions": 0,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.3.10/historical-gates/g2-correction.json",
+            "additions": 28,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.3.10/historical-gates/g2-verification.json",
+            "additions": 17,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.3.10/historical-gates/g3-author-ci.log.gz",
+            "additions": 0,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.3.10/historical-gates/g3-ci-receipt.json",
+            "additions": 25,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.3.10/historical-gates/g4-ci-receipt.json",
+            "additions": 16,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.3.10/historical-gates/g4-mutation-receipt.json",
+            "additions": 52,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.3.10/historical-gates/g4-real-settle-mutation.log.gz",
+            "additions": 0,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.3.10/historical-gates/g4-restoration.json",
+            "additions": 7,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.3.10/historical-gates/g4-review-ci.log.gz",
+            "additions": 0,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.3.10/invariant-index.json",
+            "additions": 2584,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.3.10/manifest-surface.json",
+            "additions": 218,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.3.10/merged-outcomes.json",
+            "additions": 62,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.3.10/protocol-final-receipt.json",
+            "additions": 9,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.3.10/qualified-residual-caller-matrix.json",
+            "additions": 2419,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.3.10/reference-index.json.gz",
+            "additions": 0,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.3.10/source-inventory.json.gz",
+            "additions": 0,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.3.10/source-tree-398c6f91.json",
+            "additions": 1776,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.3.10/source-tree-8f61ab81.json",
+            "additions": 1776,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.3.10/test-declaration-inventory.json.gz",
+            "additions": 0,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.3.10/token-footprint-receipt.json",
+            "additions": 19,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.3.10/token-footprint/gate-report.json",
+            "additions": 11,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.3.10/token-footprint/measurement.json",
+            "additions": 260,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.3.10/token-footprint/repeat.json",
+            "additions": 260,
+            "deletions": 0,
+            "changeType": "ADDED"
+          },
+          {
+            "path": "test_results/reconciliation/hud-bstmy.3.10/validation.json",
+            "additions": 18,
+            "deletions": 0,
+            "changeType": "ADDED"
+          }
+        ],
+        "headRefOid": "717e3ed0990caf211a2dbe0ae85e4bd678149dab",
+        "mergeCommit": null,
+        "mergedAt": null,
+        "number": 1372,
+        "state": "OPEN",
+        "title": "Reconcile T8.1b generation 2 and record residual coverage gaps",
+        "url": "https://github.com/tzeusy-org/tze-hud/pull/1372"
+      },
+      "reachability": null
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "executed_sha": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261",
+  "full_ci_log_sha256": "23304faa6788a8d49a06b04e10006e9d2d55c34299e48d686c47703ab7e42b9a",
+  "measurement_repeat_equal": true,
+  "files": [
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.10/token-footprint/gate-report.json",
+      "sha256": "39c2a7d747ed9ad0df90d7bdcd99fcda6e0c363d07a862c74c390e09eaeb69f7"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.10/token-footprint/measurement.json",
+      "sha256": "3e7e17748454c0e1476e93060db166c9f2d105f01b018bf56c0c12202a9eb78e"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.3.10/token-footprint/repeat.json",
+      "sha256": "3e7e17748454c0e1476e93060db166c9f2d105f01b018bf56c0c12202a9eb78e"
+    }
+  ]
+}

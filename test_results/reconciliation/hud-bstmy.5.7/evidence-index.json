@@ -1,0 +1,302 @@
+{
+  "issue": "hud-bstmy.5.7",
+  "audited_source": "5825a05421a9e588edd5c3c05ebf7f5bac36c0e1",
+  "executed_primary_ci_source": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261",
+  "executed_budget_source": "5825a05421a9e588edd5c3c05ebf7f5bac36c0e1",
+  "entries": [
+    {
+      "path": "test_results/hud-bstmy.5.7-followups.json",
+      "bytes": 38998,
+      "sha256": "edb5463e0b4f6e121a06938a49421a163d2b7293592fd1a10b47c6f1a72640a1"
+    },
+    {
+      "path": "test_results/hud-bstmy.5.7-reconciliation.md",
+      "bytes": 18728,
+      "sha256": "47763b403290be3264ce892b3c2ea35b44ed29038116569f16ffbae8c37de8b9"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.7/applicable-full-ci-receipt.json",
+      "bytes": 10008,
+      "sha256": "178c945e960d631fb867a2e3ed2dd36b4d1d48dcda8771198cc968b0aa52b20a"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.7/applicable-full-ci-terminal-release.json",
+      "bytes": 399,
+      "sha256": "053f7bcd679d7fe3b18128d0897d87d343e9f1b16dad9f4f0e348bdea7482f44"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.7/applicable-full-ci.log.gz",
+      "bytes": 69421,
+      "sha256": "b70270485a7c970a235aa9aa4707c11b6a29c43559badbd36d78cdcb1b655a2a"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.7/applicable-missing-gates-receipt.json",
+      "bytes": 3960,
+      "sha256": "2f3deb153783941d3db5195b990091863bb0a2a9b78aa8c980d3601c04deda67"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.7/applicable-qualified-AST-navigation.json.gz",
+      "bytes": 308136,
+      "sha256": "0334bb7464dde508b60a9b46e5b2b4128747008577502bcace589c28487e098c"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.7/applicable-token-footprint/gate-report.json",
+      "bytes": 221,
+      "sha256": "39c2a7d747ed9ad0df90d7bdcd99fcda6e0c363d07a862c74c390e09eaeb69f7"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.7/applicable-token-footprint/measurement.json",
+      "bytes": 6064,
+      "sha256": "3e7e17748454c0e1476e93060db166c9f2d105f01b018bf56c0c12202a9eb78e"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.7/applicable-token-footprint/repeat.json",
+      "bytes": 6064,
+      "sha256": "3e7e17748454c0e1476e93060db166c9f2d105f01b018bf56c0c12202a9eb78e"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.7/applicable-token-footprint/token-footprint-receipt.json",
+      "bytes": 772,
+      "sha256": "d57ff2a24615867c16b666fdb91b067b935c3e79dcd5de005a6449a253276fa0"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.7/artifact-validation.json",
+      "bytes": 3368,
+      "sha256": "8572e73631f34265592d553c449366ce09c78d9c0bb1aa2ca4b172ddc5cdf433"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.7/blockers.json",
+      "bytes": 1278,
+      "sha256": "790480bbb4541af33b3e6b6994d76409cf99f2fbfdc4aa7d48335cc5dde0f62e"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.7/bootstrap-native-receipt.json",
+      "bytes": 2393,
+      "sha256": "f3e008d759bd31b5e4587e42eb7083e93b81e28b4404d39333dfb460efb5f73a"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.7/budget-cargo-terminal-release.json",
+      "bytes": 901,
+      "sha256": "4d6b96eb70cdf888ca634b886a431ab802d188f5936f10e4416450bbf642eab9"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.7/canonical-inputs.json",
+      "bytes": 30691,
+      "sha256": "9364c21e2f8d7625538c5fecbb620136a4f3d1c6573fe6f4c1e90833ef04f14c"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.7/counter-primitive-owner-navigation.json",
+      "bytes": 3285,
+      "sha256": "b2ebc05ecee897a188d2f2c33af56cf34109f372facfe55707c032e4709658d1"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.7/coverage.json",
+      "bytes": 67562,
+      "sha256": "5e5a210d7152a2dc203d01287868c5d829f3fe8e94ecde3210d1e1b33f6c28f0"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.7/current-observation-owners.json",
+      "bytes": 28178,
+      "sha256": "0f2d463061129bb6c72797b079381554e7437660c155639be231b016bdab8c9e"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.7/current-qualified-token-navigation.json",
+      "bytes": 82597,
+      "sha256": "7b678d0ac58f4d07f5285beba22054c18d439c18b838fe5b0439687efb275c98"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.7/dashboard-p99.log",
+      "bytes": 1845,
+      "sha256": "c7e50f1f94ebedcb22de7a2759187c991de2438656cf9d28a5a40049a99469de"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.7/dedupe-current-owners.json",
+      "bytes": 20994,
+      "sha256": "58c4a8f7037de650096afc554a49b9b20f4e4b867811dc4435a22b0f5ab0184a"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.7/dedupe-issues-snapshot.json.gz",
+      "bytes": 1603901,
+      "sha256": "3d4bd64c424358af43769bf3de4de636e7f91f23fb3a0b4ffe23d998b61dec10"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.7/dedupe-owner-actual-pr-outcomes.json",
+      "bytes": 4579,
+      "sha256": "b8a5d2659c2b358c9b845278f90d6d9324444102a6a7b9e016f808ccd802ae21"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.7/dedupe-qualified-owners.json",
+      "bytes": 204960,
+      "sha256": "a449754047786f1c0957b636180995051c88771f1bdc5397cc4017edbfe3407e"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.7/default-app-release.log",
+      "bytes": 9600,
+      "sha256": "01bff5a8c655b2acff0a1410b43b4e5c804e25901e552a31c2cfdf62e44f1ed7"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.7/default-app-tree.log",
+      "bytes": 177197,
+      "sha256": "1ed92ca17d0595898552a54afd5e52bb72d75aa52211256c7f2da25e81cc9475"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.7/deletion-and-owner-navigation.json",
+      "bytes": 10303,
+      "sha256": "90100e9b4b3e7dbbecd6c89b3c9b6526bd7ba13e6cd65b38fe250b0a6051b494"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.7/execution-bootstrap-native-receipt.json",
+      "bytes": 197271,
+      "sha256": "0bdc981b43bfec791da0c6233c70fbd75c0b8ae08a0c29e50369d2f4d60b7ab0"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.7/execution-canonical-inputs.json",
+      "bytes": 143972,
+      "sha256": "4f2b78cb4759888386be00b1a457a8d84dfdd2e4ac3c143078b3e91abeaafd9b"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.7/existing-owners.json",
+      "bytes": 238142,
+      "sha256": "fd48d0fa375fa8f9feddc3ef94aa0347d8e9d312fe0f0c96532c5476b31375a5"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.7/final-canonical-field-match.json",
+      "bytes": 702,
+      "sha256": "bbbb0cfdf31793ba20594029fe7a473fdd1a419ecea11e5ce4ce33ce7bcf0e76"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.7/final-fetched-main-applicability.json",
+      "bytes": 5411,
+      "sha256": "def72ba9ebbf4040d54aadddadaaa82134a02e9fb150f5042119717d859f8595"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.7/first-packet-validation.json",
+      "bytes": 816,
+      "sha256": "9f7b76fc3979a7fcf7a3416c08c71d143ae333d39698dd0f4d4bffb334678ab5"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.7/first-shaping-packet.json",
+      "bytes": 37588,
+      "sha256": "ce06ca6c32a322869b89b0f442b36482f30a5d0900fe450301dc7425bfd1197b"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.7/invariant-test-inventory.json",
+      "bytes": 366012,
+      "sha256": "e76b1aecd0e620e3978988f79449a3368f8bf161bea639993f6da4a862a9004f"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.7/leased-budget-runner.py",
+      "bytes": 4029,
+      "sha256": "88c16907e051df6b8a24c599fe6ee889bbe0e41b60cd7adb37b1a15a2801aba7"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.7/merged-inputs.json",
+      "bytes": 48102,
+      "sha256": "3e659cb92d6ccabfe320d2107cbe7bd7404c711c5e9688fcaf31aa5681ad1232"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.7/operational-provenance.json",
+      "bytes": 6449,
+      "sha256": "87de64b738124e22cac719639726645bc66c8f8a72e450c78854f53f2c6f71b6"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.7/optional-metadata-collect_source_ast-failed.py",
+      "bytes": 7001,
+      "sha256": "e1fd1b9887a679ab3fb13308c2fdd4ba78af0d61adbed8a96bd8e800eb2be208"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.7/optional-metadata-collect_source_ast.py",
+      "bytes": 7067,
+      "sha256": "fef88b6644aae0d048a5d18c6df67fcd055b88baf023c734383149ca2b6c4ca4"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.7/original-assertion-dispositions.json",
+      "bytes": 109391,
+      "sha256": "a4dec39a539fd25e07dbeecbae520d495408656297db816f29e68f8e6df949d8"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.7/original-pr-outcomes.json",
+      "bytes": 8512,
+      "sha256": "ef746938ba77d387bb2c6981c2baeea075d6c675089b4f29a32da98c4f72cc96"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.7/qualified-owner-matrix.json",
+      "bytes": 12043,
+      "sha256": "2ff60c1dacbf11d11b171d3d6b7348aba5363c8c0cc49c3683b9563cf88b0f2a"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.7/root-budget-cargo-lease.json",
+      "bytes": 2198,
+      "sha256": "e7c9d87b4251a2457e9a5e514a2c8ea0efc3b9159bda611408b982e02f218542"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.7/root-budget-independent-validation.json",
+      "bytes": 1348,
+      "sha256": "4c33bad8d3835b58a0563726deff36fa53ed1781e586e8c61088c1f14208aae6"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.7/root-dispatch-packet.json",
+      "bytes": 37588,
+      "sha256": "ce06ca6c32a322869b89b0f442b36482f30a5d0900fe450301dc7425bfd1197b"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.7/root-first-field-verification.json",
+      "bytes": 394,
+      "sha256": "d9e349b79853b5f3be687730d34fafb93e27a5926b16fb2c1c2f7c563cc7f995"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.7/shell-original-assertion-fates.json",
+      "bytes": 5324,
+      "sha256": "91e598dabfbc65cd61675ea30be94af9c7e89c7887398b1e209ecd7b61c854f8"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.7/source-applicability.json",
+      "bytes": 15557,
+      "sha256": "059361a77d4b63208d6ce4bd8227a8689db8d084ad992e1a1dd2902fba435191"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.7/source-inventory.json",
+      "bytes": 115882,
+      "sha256": "8ed1a6ef1c74fc4e72c4be3978f0b1b65ffcf10dbb85e98e25c30f6bbb80724b"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.7/source-shaping-receipt.json",
+      "bytes": 18204,
+      "sha256": "0e4e1a29b6649168d6dfc995a4b7eecfe1cb1573a3e9d9138199117c7a872ede"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.7/token-footprint-applicability.json",
+      "bytes": 2717,
+      "sha256": "26ae8b94ad136475b4a03628e852df98a3424a34996e2d8e9b970fcc212964ed"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.7/verification.json",
+      "bytes": 32816,
+      "sha256": "fe9eafd9df39bf407acb2d65ab1bd2061c0c3f6abe0a111229e3590afb397832"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.7/vertical-slice-budget-assertions-receipt.json",
+      "bytes": 12366,
+      "sha256": "7d245f569705137ff2e00b7b4269a154c994c664f531d4733be53202d9110677"
+    },
+    {
+      "path": "test_results/reconciliation/hud-bstmy.5.7/vertical-slice-budget-assertions.log",
+      "bytes": 2451,
+      "sha256": "a34fb6f818a69968979310aaf3b06cfa3e45d7f08524a633f1d374e5bac2014a"
+    }
+  ],
+  "indexed_files": 56,
+  "index_self_hash": "Not embedded recursively; final native whole-artifact receipt includes this index SHA.",
+  "complete_primary_arrays": {
+    "followups": "test_results/hud-bstmy.5.7-followups.json",
+    "blockers": "test_results/reconciliation/hud-bstmy.5.7/blockers.json"
+  },
+  "failed_skip_index": {
+    "metadata": "operational-provenance.json including optionalAST139, failed source-path/format reads and limitations; no invented complete stderr",
+    "actual_budget": "vertical-slice-budget-assertions-receipt.json exact failed/skip/driver/0ignored normalization and8branches/3numbers",
+    "reusedCI": "applicable-full-ci-receipt.json actualfailed/toolskip normalization + complete lossless rawgzip",
+    "fixtures": "qualified-owner-matrix.json/invariant-test-inventory.json explicit NoAdapter and behavior/test/host limits"
+  },
+  "execution_pins_not_relabelled": true,
+  "test_delta": "+0 ~0 -0"
+}
