@@ -1,0 +1,25 @@
+{
+  "tze_hud_scene": {
+    "TimingHints": true,
+    "MessageClass": false,
+    "DeliveryPolicy": false,
+    "Schedule": false,
+    "DurationUs": false
+  },
+  "tze_hud_resource": {
+    "validate_upload": false,
+    "inc_refcount": false,
+    "dec_refcount": false
+  },
+  "tze_hud_protocol": {
+    "get_session_mut": false,
+    "session_for_namespace": true,
+    "active_tab_mirror_value": true,
+    "build_event_batch_message": false,
+    "authenticate_session_init": false,
+    "scene_node_to_proto": false
+  },
+  "app_scan_root_probe": {
+    "app_only_detected": false
+  }
+}

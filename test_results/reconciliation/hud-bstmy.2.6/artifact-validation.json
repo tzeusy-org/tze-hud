@@ -1,0 +1,15 @@
+{
+  "audited_base": "17de3331b11a1ee55fa22197fd13b99b26dac267",
+  "json_valid": true,
+  "invariant_tests": 70,
+  "missing": 0,
+  "duplicate": 0,
+  "deletion_greps_empty": 4,
+  "deleted_files_absent": 13,
+  "focused_tests_passed": 901,
+  "focused_tests_ignored": 1,
+  "follow_up_candidates": 6,
+  "blockers": 1,
+  "code_changes": 0,
+  "test_definition_delta": "+0 ~0 -0"
+}
