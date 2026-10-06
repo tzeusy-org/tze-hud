@@ -159,7 +159,7 @@ pub fn identify_session(
                 AuthResult::Failed(message) => Err(AuthRejection {
                     code: "AUTH_FAILED",
                     message,
-                    hint: String::new(),
+                    hint: "Use PreSharedKeyCredential with the agent's paired PSK".to_string(),
                 }),
             };
         }

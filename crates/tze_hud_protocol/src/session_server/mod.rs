@@ -76,7 +76,9 @@ use element_persist::{
 };
 #[allow(unused_imports)]
 use freeze_queue::{FREEZE_QUEUE_CAPACITY, FreezeEnqueueResult, SessionFreezeQueue};
-use handshake::{HandshakeCtx, handle_session_init, handle_session_resume};
+use handshake::{HandshakeCtx, handle_handshake_read};
+#[cfg(test)]
+use handshake::{handle_session_init, handle_session_resume};
 pub use input_event_bus::{InputEventReceiver, InputEventRecvError, InputEventSender};
 pub use lease_expiry_bus::{LeaseExpiryNotice, LeaseExpiryReceiver, LeaseExpirySender};
 pub use lifecycle::SessionState;
@@ -203,41 +205,13 @@ impl HudSession for HudSessionImpl {
         // Spawn the session handler task
         tokio::spawn(async move {
             // Wait for the first message (must be SessionInit or SessionResume)
-            let first_msg = match tokio::time::timeout(
+            let first_read = match tokio::time::timeout(
                 tokio::time::Duration::from_millis(5000),
                 inbound.message(),
             )
             .await
             {
-                Ok(Ok(Some(msg))) => msg,
-                Ok(Ok(None)) => {
-                    let _ = tx
-                        .send(Ok(ServerMessage {
-                            sequence: 1,
-                            timestamp_wall_us: now_wall_us(),
-                            payload: Some(ServerPayload::SessionError(SessionError {
-                                code: "HANDSHAKE_TIMEOUT".to_string(),
-                                message: "Stream closed before handshake".to_string(),
-                                hint: String::new(),
-                            })),
-                        }))
-                        .await;
-                    return;
-                }
-                Ok(Err(e)) => {
-                    let _ = tx
-                        .send(Ok(ServerMessage {
-                            sequence: 1,
-                            timestamp_wall_us: now_wall_us(),
-                            payload: Some(ServerPayload::SessionError(SessionError {
-                                code: "HANDSHAKE_ERROR".to_string(),
-                                message: format!("Error receiving handshake: {e}"),
-                                hint: String::new(),
-                            })),
-                        }))
-                        .await;
-                    return;
-                }
+                Ok(read) => read,
                 Err(_) => {
                     let _ = tx
                         .send(Ok(ServerMessage {
@@ -263,29 +237,7 @@ impl HudSession for HudSessionImpl {
                 budget_enforcer: budget_enforcer.as_ref(),
                 peer_ip,
             };
-            let mut session = match first_msg.payload {
-                Some(ClientPayload::SessionInit(init)) => {
-                    handle_session_init(handshake_ctx, &tx, &init).await
-                }
-                Some(ClientPayload::SessionResume(resume)) => {
-                    handle_session_resume(handshake_ctx, &tx, &resume).await
-                }
-                _ => {
-                    let _ = tx
-                        .send(Ok(ServerMessage {
-                            sequence: 1,
-                            timestamp_wall_us: now_wall_us(),
-                            payload: Some(ServerPayload::SessionError(SessionError {
-                                code: "INVALID_HANDSHAKE".to_string(),
-                                message: "First message must be SessionInit or SessionResume"
-                                    .to_string(),
-                                hint: String::new(),
-                            })),
-                        }))
-                        .await;
-                    return;
-                }
-            };
+            let mut session = handle_handshake_read(handshake_ctx, &tx, first_read).await;
 
             let Some(ref mut session) = session else {
                 return; // Handshake failed, error already sent
@@ -767,7 +719,9 @@ impl StreamSession {
                                     payload: Some(ServerPayload::SessionError(SessionError {
                                         code: code.to_string(),
                                         message,
-                                        hint: String::new(),
+                                        hint: format!(
+                                            "Open a new stream with SessionInit or SessionResume; send increasing sequence numbers starting at 2 with gaps no larger than {DEFAULT_MAX_SEQUENCE_GAP}"
+                                        ),
                                     })),
                                 }))
                                 .await;
