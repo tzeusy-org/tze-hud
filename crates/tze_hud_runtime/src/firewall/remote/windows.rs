@@ -230,8 +230,10 @@ impl<'a> PrivilegeScope<'a> {
             restored: false,
         };
         // SAFETY: only one privilege can change, and previous has room for that
-        // complete state. Capture last-error immediately: BOOL success alone
+        // complete state. ReturnLength is required when PreviousState is set.
+        // Capture last-error immediately: BOOL success alone
         // also represents ERROR_NOT_ALL_ASSIGNED and cannot authorize a retry.
+        let mut returned_length = 0;
         unsafe { SetLastError(ERROR_SUCCESS) };
         let adjusted = unsafe {
             AdjustTokenPrivileges(
@@ -240,7 +242,7 @@ impl<'a> PrivilegeScope<'a> {
                 Some(&requested),
                 std::mem::size_of::<TOKEN_PRIVILEGES>() as u32,
                 Some(&mut scope.previous),
-                None,
+                Some(&mut returned_length),
             )
         };
         let status = unsafe { GetLastError() };
