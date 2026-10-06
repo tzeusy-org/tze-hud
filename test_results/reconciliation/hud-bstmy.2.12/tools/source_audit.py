@@ -11,7 +11,10 @@ import tree_sitter_rust
 
 ROOT = Path.cwd()
 OUT = ROOT / 'test_results/reconciliation/hud-bstmy.2.12'
-HEAD = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+CURRENT_GIT_HEAD = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+HEAD = json.loads((OUT / 'audit-context.json').read_text())['source_head']
+source_delta = subprocess.check_output(['git', 'diff', '--name-only', HEAD, '--', '.', ':!test_results/reconciliation/hud-bstmy.2.12'], text=True)
+assert not source_delta, 'Non-evidence source drift: ' + source_delta
 PARSER = Parser(Language(tree_sitter_rust.language()))
 tracked = subprocess.check_output(['git', 'ls-files', '-z']).decode().split('\0')
 files = [x for x in tracked if x.endswith('.rs') and x.startswith(('app/', 'crates/', 'examples/', 'tests/'))]
@@ -121,7 +124,7 @@ def dump(name, value):
     (OUT / name).write_text(json.dumps(value, indent=2)+'\n')
 
 dump('invariant-test-inventory.json', {'source_head': HEAD, 'count': len(inventory), 'tests': inventory})
-dump('source-blob-inventory.json', {'source_head': HEAD, 'roots': ['app', 'crates', 'examples', 'tests'], 'tracked_rust_files': hashes, 'parser_error_files': parse_errors})
+dump('source-blob-inventory.json', {'source_head': HEAD, 'parser_git_context': CURRENT_GIT_HEAD, 'non_evidence_blobs_unchanged_from_source_head': True, 'roots': ['app', 'crates', 'examples', 'tests'], 'tracked_rust_files': hashes, 'parser_error_files': parse_errors})
 dump('current-diagnostic-reference-inventory.json', {'source_head': HEAD, 'groups': matrices, 'limits': ['identifier-only references exclude comments/string literals', 'default-eligible is syntactic eligibility, not a dependency-closure proof', 'field/method names still require owner-qualified human analysis', 'cfg on out-of-line module declaration must be inspected separately', 'macro token trees require a supplemental manual scan']})
 dump('rejection-envelope-inventory.json', {'source_head': HEAD, 'items': envelopes, 'limits': ['all constructor/call syntax, manually classify success/rejection and follow dynamic hint/code producers', 'default-eligible is not live-call proof', 'macro/generated wire types have no handwritten constructors here']})
 print(json.dumps({'head': HEAD, 'rust_files':len(files), 'named_invariants':len(inventory), 'parse_errors':parse_errors, 'diagnostic_groups':{k:len(v) for k,v in matrices.items()}, 'envelopes':len(envelopes)}))

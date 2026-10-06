@@ -8,7 +8,8 @@ from pathlib import Path
 
 OUT = Path('test_results/reconciliation/hud-bstmy.2.12')
 HERE = Path(__file__).resolve().parent
-HEAD = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+HEAD = json.loads((OUT / 'audit-context.json').read_text())['source_head']
+assert not subprocess.check_output(['git','diff','--name-only',HEAD,'--','.',':!test_results/reconciliation/hud-bstmy.2.12'],text=True)
 
 def write(name, value):
     (OUT / name).write_text(json.dumps(value, indent=2) + '\n')
@@ -27,6 +28,13 @@ write('residual-owner-reference-inventory.json', {
     'source_head': HEAD,
     'limits': audit['matrices'] and ['Raw identifier hits require defining-owner/call/reader/cfg qualification; out-of-line cfg and same-name collisions are resolved in the report. No comment or string is a caller.'],
     'symbols': {s: audit['references'].get(s, []) for s in symbols},
+    'owner_qualification': {
+      'ResourceRecord.resource_type': 'LIVE reader crates/tze_hud_resource/src/upload.rs:241 in inline dedup type admission; retain field and constructor parameter. DedupIndex.remove:175 is an additional fixture-only reader, not its sole owner.',
+      'ResourceRecord.width_px/height_px': 'Construction-only fields in dedup.rs:39-41,48-49; no workspace reader. DecodedMeta and live proto/image dimensions are distinct retained types.',
+      'ResourceRecord::new': 'Production upload.rs:531; fixture helper make_record at dedup.rs:202-213 is not a test definition and retains the live resource_type parameter. Other fixture constructor call belongs to the proposed deleted font-GC definition.',
+      'DedupIndex::new_with_resident_ledger': 'Production ResourceStore constructor upload.rs:162 and only font-GC fixture:275. Removing duplicated GC-only handles changes production/shared constructors, no retained test definition.',
+      'protocol safe_mode fixtures': 'Two mechanical StreamSession literals; preserve their assertions. Runtime MutationTrafficClass is a distinct protected T7 owner, never this outbound classifier.'
+    },
 })
 
 remove_names = ['font_gc_releases_the_retained_source_copy_and_ledger_charge',
@@ -135,6 +143,7 @@ for name in ['source_audit.py','run_gate.py','build_report.py','finalize_evidenc
         (tools / name).write_bytes(source.read_bytes())
 
 report = (OUT / 'report.md').read_text()
+report += '\nR2 draft correction: first evidence commit ea190929 incorrectly called ResourceRecord.resource_type GC-only. The actual production reader is resource/upload.rs:241 (inline dedup type admission), so R2 retains the field and ResourceRecord::new parameter unchanged. Width/height alone are constructor-only; make_record is a helper, not a test definition, and other constructor/handle fixture calls lie inside the two proposed deleted definitions. The two-delete test delta remains +0~0-2. caller-correction.json and the typed residual ledger preserve the correction; production/test sources were never edited.\n'
 report = report.replace('Final behavior summaries and named72 execution cross-check are in verification-summary.json once all planned gates terminate. No blanket pass-count closure is claimed.',
     'All planned gates terminated0 at source398. The single normal fullCI passed3250 Rust tests across71 summaries, failed0/ignored0; all72 named invariant definitions were observed passing. Focused resource/protocol/scene passed852/18 and8 Criterion cases. pwsh overlay contract was tool-skipped; the integration default-feature checker skips its tests-only target while the separate integration gate actually ran. No GPU skip. verification-summary.json and named-invariant-execution-inventory.json preserve the exact cross-check; counts do not erase the source/contract gaps.')
 

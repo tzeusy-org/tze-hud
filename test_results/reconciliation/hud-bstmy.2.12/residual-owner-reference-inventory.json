@@ -5564,5 +5564,12 @@
         "source_class": "test"
       }
     ]
+  },
+  "owner_qualification": {
+    "ResourceRecord.resource_type": "LIVE reader crates/tze_hud_resource/src/upload.rs:241 in inline dedup type admission; retain field and constructor parameter. DedupIndex.remove:175 is an additional fixture-only reader, not its sole owner.",
+    "ResourceRecord.width_px/height_px": "Construction-only fields in dedup.rs:39-41,48-49; no workspace reader. DecodedMeta and live proto/image dimensions are distinct retained types.",
+    "ResourceRecord::new": "Production upload.rs:531; fixture helper make_record at dedup.rs:202-213 is not a test definition and retains the live resource_type parameter. Other fixture constructor call belongs to the proposed deleted font-GC definition.",
+    "DedupIndex::new_with_resident_ledger": "Production ResourceStore constructor upload.rs:162 and only font-GC fixture:275. Removing duplicated GC-only handles changes production/shared constructors, no retained test definition.",
+    "protocol safe_mode fixtures": "Two mechanical StreamSession literals; preserve their assertions. Runtime MutationTrafficClass is a distinct protected T7 owner, never this outbound classifier."
   }
 }

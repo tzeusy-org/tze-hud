@@ -1,0 +1,21 @@
+{
+  "audited_source_head": "398c6f91de6e0d4883b10a41b6c63044e6192730",
+  "earlier_draft_commit": "ea190929cfc3dcea869344c57de00e7676f07828",
+  "incorrect_draft_claim": "ResourceRecord.resource_type is used only by the font-GC self-test.",
+  "current_verified_behavior": "resource/upload.rs:241 reads record.resource_type in the live inline dedup type-admission fast path. Retain the field and ResourceRecord::new parameter. Width/height alone are construction-only.",
+  "actual_caller_ledger": {
+    "ResourceRecord::new": [
+      "crates/tze_hud_resource/src/upload.rs:531 production",
+      "crates/tze_hud_resource/src/dedup.rs:203 helper make_record, not a test definition",
+      "crates/tze_hud_resource/src/dedup.rs:283 inside the proposed removed font-GC test"
+    ],
+    "DedupIndex::new_with_resident_ledger": [
+      "crates/tze_hud_resource/src/upload.rs:162 production constructor",
+      "crates/tze_hud_resource/src/dedup.rs:275 inside proposed removed font-GC test"
+    ],
+    "ResourceRecord literals": "Only the struct declaration and its constructor Self block; no external direct literal. DecodedMeta literals retain their own live dimensions."
+  },
+  "proposed_r2_delta": "+0 ~0 -2",
+  "production_or_test_code_changed": false,
+  "classification": "Author evidence correction before strict handoff, not a PR review finding or production fix."
+}

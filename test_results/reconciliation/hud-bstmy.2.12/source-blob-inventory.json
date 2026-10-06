@@ -1,5 +1,7 @@
 {
   "source_head": "398c6f91de6e0d4883b10a41b6c63044e6192730",
+  "parser_git_context": "ea190929cfc3dcea869344c57de00e7676f07828",
+  "non_evidence_blobs_unchanged_from_source_head": true,
   "roots": [
     "app",
     "crates",

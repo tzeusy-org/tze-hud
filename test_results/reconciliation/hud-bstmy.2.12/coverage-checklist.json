@@ -17,7 +17,7 @@
       "id": "C03",
       "requirement": "Keep upload, resident ledger, font and runtime-widget semantics and eight store gates",
       "classification": "implemented",
-      "evidence": "crates/tze_hud_resource/tests/store_behavior.rs:84-309; crates/tze_hud_protocol/src/session_server/upload.rs:239,433; crates/tze_hud_resource/src/resident_ledger.rs:156-206; crates/tze_hud_runtime/src/headless.rs:294-301 and crates/tze_hud_runtime/src/windowed/mod.rs:2830-2838. Physical resident and logical leased-texture budgets are different owners. Concurrent count admission remains a qualified source risk below."
+      "evidence": "crates/tze_hud_resource/tests/store_behavior.rs:84-309; crates/tze_hud_resource/src/upload.rs:241 retains ResourceRecord.resource_type as a live inline dedup admission reader; crates/tze_hud_protocol/src/session_server/upload.rs:239,433; crates/tze_hud_resource/src/resident_ledger.rs:156-206; crates/tze_hud_runtime/src/headless.rs:294-301 and crates/tze_hud_runtime/src/windowed/mod.rs:2830-2838. Physical resident and logical leased-texture budgets are different owners. Concurrent count admission remains a qualified source risk below."
     },
     {
       "id": "C04",
@@ -71,7 +71,7 @@
       "id": "C12",
       "requirement": "Delete/narrow every unprotected item without a current production or necessary fixture user",
       "classification": "partial",
-      "evidence": "R2: three fresh dedup diagnostic groups plus suppressed construction-only InflightUpload fields. P2: write-only heartbeat timestamp and outbound classification helper used only by five classification fixtures. See complete gap packets. Source-name counts are not deletion authority."
+      "evidence": "R2: three fresh dedup diagnostic groups plus suppressed construction-only InflightUpload fields. Record.resource_type remains live through crates/tze_hud_resource/src/upload.rs:241, unlike unread Record dimensions; earlier draft claim corrected explicitly. P2: write-only heartbeat timestamp and outbound classification helper used only by five classification fixtures, plus two mechanical fixture literal edits. See complete gap packets. Source-name counts are not deletion authority."
     },
     {
       "id": "I01",

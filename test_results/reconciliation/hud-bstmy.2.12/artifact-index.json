@@ -12,6 +12,11 @@
       "sha256": "5f065d699ab378b0785979e9bb49a03fc31e44bbecc10edf0d81d5274c6a159f"
     },
     {
+      "path": "caller-correction.json",
+      "bytes": 1366,
+      "sha256": "2ec8a4d9fe56049ad0745874032cda621953bd179105d6b52bda198df784c71d"
+    },
+    {
       "path": "candidate-gate-definition-inventory.json",
       "bytes": 13750,
       "sha256": "0d5fbdd6dcee4e5784a277bfb6f5f0e1738e952b856c20855340f5ef1887f7db"
@@ -23,8 +28,8 @@
     },
     {
       "path": "coverage-checklist.json",
-      "bytes": 11702,
-      "sha256": "d59d3ba21cf3efb58884f88cf6e782a5da537b0861e722a2cc8760099fd5149c"
+      "bytes": 12025,
+      "sha256": "98baa48cd91922236969da720be56d20a3b49c97641fe802569e0bea1849cc38"
     },
     {
       "path": "current-diagnostic-reference-inventory.json",
@@ -133,8 +138,8 @@
     },
     {
       "path": "follow-ups.json",
-      "bytes": 30193,
-      "sha256": "e330970d1c0a1ebd6fb1889ff014f395e81c3b121d38129832a280834921041a"
+      "bytes": 31097,
+      "sha256": "4893cb0eff4cc334bf9fca47a6b0e1e3e6d421940be332ebfacdcd5ffa2143a0"
     },
     {
       "path": "full-ci-receipt.json",
@@ -148,8 +153,8 @@
     },
     {
       "path": "gap-packets.json",
-      "bytes": 37407,
-      "sha256": "8d89db065c930da5d0fff9028df07a2e59485b0b146f496729be0587ee40150d"
+      "bytes": 38319,
+      "sha256": "8ad2bd4bdcc35acc7c912bca7c1a93f82e05db57fcae0847d9ea1a848400d03c"
     },
     {
       "path": "invariant-test-inventory.json",
@@ -238,13 +243,13 @@
     },
     {
       "path": "report.md",
-      "bytes": 26669,
-      "sha256": "6a603521b74f3c6f980cb30261146c725bcefd0ef6ced4758a8fe3992f92cbe7"
+      "bytes": 27857,
+      "sha256": "7be4e4a1226308343510c0910b3965d355e44422214de373f06c35c096def687"
     },
     {
       "path": "residual-owner-reference-inventory.json",
-      "bytes": 165323,
-      "sha256": "7fabe84198eae581659e5194301b9c3ae93ee8ffb5a6b760abcba16e41cb1f13"
+      "bytes": 166476,
+      "sha256": "f2b55ec2147a23c61e575c11afdc03e09c48721804f324412112f04b919d94af"
     },
     {
       "path": "source-applicability.json",
@@ -253,8 +258,8 @@
     },
     {
       "path": "source-blob-inventory.json",
-      "bytes": 59239,
-      "sha256": "b71ea1fa64814e83b0c9dc65703eefb2a7e125dfeee6780f9eb09f2a604ff1e4"
+      "bytes": 59364,
+      "sha256": "5a63188914286a33389c73645a6b9d12156a5b9761b7d6b192d90bbf16c87154"
     },
     {
       "path": "surface-matrix.md",
@@ -263,13 +268,13 @@
     },
     {
       "path": "tools/build_report.py",
-      "bytes": 50625,
-      "sha256": "9cb846d8f4bb620baf7a71311e4c78226ea948f0e08f3eaa4244aabc038f8948"
+      "bytes": 51791,
+      "sha256": "3dd17df3607119a1a48910fcd8e4b0f14de9230c6fd916fdd8d35e96d1933038"
     },
     {
       "path": "tools/finalize_evidence.py",
-      "bytes": 12123,
-      "sha256": "856f477e995b90058658b15279a833aba79d2c093071e3dcb816fde47dfb2169"
+      "bytes": 14045,
+      "sha256": "803916b9c481b2db2ec7375d791e2fe0747183161263bf3d9890f7c7054b56cd"
     },
     {
       "path": "tools/run_gate.py",
@@ -278,8 +283,8 @@
     },
     {
       "path": "tools/source_audit.py",
-      "bytes": 7236,
-      "sha256": "3ab71fc9b95eb5ace71bd08a9b9fbadad6188049d0a04807cb76b65b4d478ba7"
+      "bytes": 7635,
+      "sha256": "bf184d347b8e9e8fa28ea110f54f67b7f1047ecbe5dd3d3cc3876d71a6520a9d"
     },
     {
       "path": "upload-isolation-verification-packet.json",
