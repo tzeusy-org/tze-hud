@@ -11,6 +11,10 @@
 //! present wall-clock is sampled at Stage 7 completion, distinct from the
 //! transport RTT of the mutation submit.
 
+#[path = "../src/test_support.rs"]
+mod gpu_init;
+use gpu_init::serialized_headless_init;
+
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use tze_hud_protocol::proto::FramePresented;
@@ -34,7 +38,9 @@ async fn make_runtime() -> HeadlessRuntime {
         agents: tze_hud_scene::config::AgentDirectory::unrestricted("test"),
         config_toml: None,
     };
-    HeadlessRuntime::new(config).await.expect("runtime init")
+    serialized_headless_init(HeadlessRuntime::new(config))
+        .await
+        .expect("runtime init")
 }
 
 /// Apply a tile-creating `MutationBatch` to the runtime scene and return the

@@ -6,7 +6,10 @@
 //! lifecycle itself is covered by the `vertical_slice` binary's own tests, and
 //! the unpaired-PSK gate by `tze_hud_app`'s `production_boot`.
 //!
-//!   cargo test -p vertical_slice --test production_boot -- --nocapture
+//!   just production-boot
+//!
+//! This binary has one GPU test. It needs no in-process initialization gate;
+//! the recipe still pins the Vulkan loader to llvmpipe on Linux.
 
 use tze_hud_runtime::HeadlessRuntime;
 use tze_hud_runtime::headless::HeadlessConfig;

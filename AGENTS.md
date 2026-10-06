@@ -36,12 +36,17 @@ The toolchain is pinned in `rust-toolchain.toml` (Rust 1.88, matching CI and the
 in every member crate.
 
 GPU tests: run `just test-gpu` (compositor render tests plus runtime `pixel_readback`,
-pinned to Mesa llvmpipe via `VK_ICD_FILENAMES`). Device creation is serialized by a
-process-wide mutex in the compositor `tests/common` helper, the runtime `pixel_helpers`
-helper, and the runtime lib-test `test_support`; the integration, `vertical_slice`, and
-boot suites are not serialized, so every `just` recipe that builds a GPU device pins
-llvmpipe when the ICD is installed. Don't run bare `cargo test -p tze_hud_compositor` on a host with a hardware
-Vulkan ICD (recorded hangs were NVIDIA driver threads). Building needs protoc >= 3.15; set
+pinned to Mesa llvmpipe via `VK_ICD_FILENAMES`). Test-only async gates serialize
+GPU initialization per test process in the compositor helpers, runtime `pixel_helpers`,
+integration GPU suites, `vertical_slice` budget/lifecycle tests, and `present_ack`.
+The shared runtime `test_support` source is included once per external test binary;
+its initialization guard is released before clients or rendering, while runtime-lib
+scenarios keep their existing outer guards. Single-GPU-test binaries (including
+`vertical_slice` production boot) need no in-process gate. Separate processes are
+not coordinated, and canonical-app boot tests still rely on recipe ICD pinning.
+Every `just` recipe that builds a GPU device pins llvmpipe when its ICD is installed;
+discovery supports both `lvp_icd.x86_64.json` and Mesa 25's `lvp_icd.json`. Don't run
+bare `cargo test -p tze_hud_compositor` on a host with a hardware Vulkan ICD (recorded hangs were NVIDIA driver threads). Building needs protoc >= 3.15; set
 `PROTOC=/path/to/protoc` if `/usr/bin/protoc` is older.
 
 On Windows, `just` needs Git for Windows' `sh` and a real `python3`; setup, the

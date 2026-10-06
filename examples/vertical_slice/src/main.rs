@@ -284,6 +284,10 @@ fn text_root(text: &str) -> NodeProto {
 }
 
 #[cfg(test)]
+#[path = "../../../crates/tze_hud_runtime/src/test_support.rs"]
+mod gpu_init;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -293,7 +297,9 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn paired_agent_runs_the_full_lifecycle() {
         let port = free_port();
-        let runtime = boot(port).await.expect("runtime boots");
+        let runtime = gpu_init::serialized_headless_init(boot(port))
+            .await
+            .expect("runtime boots");
         let mut agent = Agent::connect(port, AGENT_PSK).await.expect("handshake");
         let granted = run_lifecycle(&mut agent, async || {
             let scene = runtime.shared_state().lock().await.scene.clone();
@@ -315,7 +321,9 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn unpaired_psk_is_rejected() {
         let port = free_port();
-        let _runtime = boot(port).await.expect("runtime boots");
+        let _runtime = gpu_init::serialized_headless_init(boot(port))
+            .await
+            .expect("runtime boots");
         let err = Agent::connect(port, "not-the-paired-key").await.err();
         assert!(
             err.is_some_and(|e| e.to_string().contains("AUTH_FAILED")),

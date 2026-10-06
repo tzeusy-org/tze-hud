@@ -34,8 +34,13 @@
 //!
 //! To run wall-clock assertions locally or on a reference host:
 //!   ```sh
-//!   TZE_HUD_PERF_ASSERT=1 cargo test -p vertical_slice --test budget_assertions
+//!   VK_ICD_FILENAMES="$(just --evaluate lvp)" HEADLESS_FORCE_SOFTWARE=1 \
+//!     TZE_HUD_PERF_ASSERT=1 cargo test -p vertical_slice --test budget_assertions
 //!   ```
+
+#[path = "../../../crates/tze_hud_runtime/src/test_support.rs"]
+mod gpu_init;
+use gpu_init::serialized_headless_init;
 
 use tze_hud_compositor::HeadlessSurface;
 use tze_hud_input::{PointerEvent, PointerEventKind};
@@ -87,7 +92,9 @@ async fn test_frame_time_p99_within_budget() {
         agents: tze_hud_scene::config::AgentDirectory::unrestricted("test"),
         config_toml: None,
     };
-    let mut runtime = HeadlessRuntime::new(config).await.expect("runtime init");
+    let mut runtime = serialized_headless_init(HeadlessRuntime::new(config))
+        .await
+        .expect("runtime init");
 
     // Create a simple scene with one tile.
     {
@@ -156,7 +163,9 @@ async fn test_input_to_local_ack_p99_within_budget() {
         agents: tze_hud_scene::config::AgentDirectory::unrestricted("test"),
         config_toml: None,
     };
-    let mut runtime = HeadlessRuntime::new(config).await.expect("runtime init");
+    let mut runtime = serialized_headless_init(HeadlessRuntime::new(config))
+        .await
+        .expect("runtime init");
 
     // Set up a scene with a hit region
     {
@@ -270,7 +279,9 @@ async fn test_input_to_scene_commit_p99_within_budget() {
         agents: tze_hud_scene::config::AgentDirectory::unrestricted("test"),
         config_toml: None,
     };
-    let mut runtime = HeadlessRuntime::new(config).await.expect("runtime init");
+    let mut runtime = serialized_headless_init(HeadlessRuntime::new(config))
+        .await
+        .expect("runtime init");
 
     // Set up a minimal scene
     {
@@ -338,7 +349,9 @@ async fn test_input_to_next_present_p99_within_budget() {
         agents: tze_hud_scene::config::AgentDirectory::unrestricted("test"),
         config_toml: None,
     };
-    let mut runtime = HeadlessRuntime::new(config).await.expect("runtime init");
+    let mut runtime = serialized_headless_init(HeadlessRuntime::new(config))
+        .await
+        .expect("runtime init");
 
     // Create a scene with one tile to exercise the full render path
     {
@@ -414,7 +427,9 @@ async fn test_hit_test_p99_within_budget() {
         agents: tze_hud_scene::config::AgentDirectory::unrestricted("test"),
         config_toml: None,
     };
-    let mut runtime = HeadlessRuntime::new(config).await.expect("runtime init");
+    let mut runtime = serialized_headless_init(HeadlessRuntime::new(config))
+        .await
+        .expect("runtime init");
 
     {
         let state = runtime.shared_state().lock().await;
@@ -587,7 +602,9 @@ async fn test_texture_upload_p99_within_budget() {
         agents: tze_hud_scene::config::AgentDirectory::unrestricted("tex-upload-test"),
         config_toml: None,
     };
-    let runtime = HeadlessRuntime::new(config).await.expect("runtime init");
+    let runtime = serialized_headless_init(HeadlessRuntime::new(config))
+        .await
+        .expect("runtime init");
 
     // Ensure there is an active tab for tile creation.
     {
@@ -757,7 +774,9 @@ async fn test_stage6_render_encode_p99_within_budget() {
         agents: tze_hud_scene::config::AgentDirectory::unrestricted("stage6-bench"),
         config_toml: None,
     };
-    let mut runtime = HeadlessRuntime::new(config).await.expect("runtime init");
+    let mut runtime = serialized_headless_init(HeadlessRuntime::new(config))
+        .await
+        .expect("runtime init");
 
     // ── Build scene with TEXT_TILE_COUNT text tiles ───────────────────────────
     // Each tile has a multi-line TextMarkdown node to activate text rasterisation
@@ -892,7 +911,9 @@ async fn test_layer1_pixel_readback_background() {
         agents: tze_hud_scene::config::AgentDirectory::unrestricted("test"),
         config_toml: None,
     };
-    let mut runtime = HeadlessRuntime::new(config).await.expect("runtime init");
+    let mut runtime = serialized_headless_init(HeadlessRuntime::new(config))
+        .await
+        .expect("runtime init");
 
     // Empty scene — every pixel should be the background clear color
     runtime.render_frame().await;
@@ -932,7 +953,9 @@ async fn test_layer1_pixel_readback_tile_color() {
         agents: tze_hud_scene::config::AgentDirectory::unrestricted("test"),
         config_toml: None,
     };
-    let mut runtime = HeadlessRuntime::new(config).await.expect("runtime init");
+    let mut runtime = serialized_headless_init(HeadlessRuntime::new(config))
+        .await
+        .expect("runtime init");
 
     let (tile_x, tile_y, tile_w, tile_h) = (50u32, 50u32, 350u32, 250u32);
     {
@@ -1009,7 +1032,9 @@ async fn test_layer1_pixel_readback_z_order() {
         agents: tze_hud_scene::config::AgentDirectory::unrestricted("test"),
         config_toml: None,
     };
-    let mut runtime = HeadlessRuntime::new(config).await.expect("runtime init");
+    let mut runtime = serialized_headless_init(HeadlessRuntime::new(config))
+        .await
+        .expect("runtime init");
 
     {
         let state = runtime.shared_state().lock().await;
@@ -1115,13 +1140,13 @@ const SCENE_H: u32 = 600;
 
 /// Helper: build a HeadlessRuntime sized for the 25-scene tests.
 async fn make_scene_runtime() -> tze_hud_runtime::HeadlessRuntime {
-    HeadlessRuntime::new(HeadlessConfig {
+    serialized_headless_init(HeadlessRuntime::new(HeadlessConfig {
         width: SCENE_W,
         height: SCENE_H,
         grpc_port: 0,
         agents: tze_hud_scene::config::AgentDirectory::unrestricted("test"),
         config_toml: None,
-    })
+    }))
     .await
     .expect("HeadlessRuntime::new failed")
 }
