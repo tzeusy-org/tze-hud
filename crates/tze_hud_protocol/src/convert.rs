@@ -1,4 +1,6 @@
-//! Conversion between protobuf types and scene graph types.
+//! Decode protobuf inputs into scene types and encode live geometry/portal events.
+//!
+//! Scene-node encoders are test-only fixtures; session snapshots use JSON.
 
 use crate::proto;
 use tze_hud_scene::*;
@@ -6,7 +8,8 @@ use tze_hud_scene::*;
 // ─── Identity round-trips ─────────────────────────────────────────────────────
 
 /// Encode a `SceneId` as a `SceneIdProto` (16 bytes, little-endian).
-pub fn scene_id_to_proto(id: SceneId) -> proto::SceneIdProto {
+#[cfg(test)]
+fn scene_id_to_proto(id: SceneId) -> proto::SceneIdProto {
     proto::SceneIdProto {
         bytes: id.to_bytes_le().to_vec(),
     }
@@ -20,7 +23,8 @@ pub fn proto_to_scene_id(p: &proto::SceneIdProto) -> Option<SceneId> {
 }
 
 /// Encode a `ResourceId` as a `ResourceIdProto` (32 raw bytes, never hex).
-pub fn resource_id_to_proto(id: ResourceId) -> proto::ResourceIdProto {
+#[cfg(test)]
+fn resource_id_to_proto(id: ResourceId) -> proto::ResourceIdProto {
     proto::ResourceIdProto {
         bytes: id.as_bytes().to_vec(),
     }
@@ -29,6 +33,7 @@ pub fn resource_id_to_proto(id: ResourceId) -> proto::ResourceIdProto {
 /// Decode a `ResourceIdProto` back to a `ResourceId`.
 ///
 /// Returns `None` if the `bytes` field is not exactly 32 bytes.
+#[cfg(any(test, feature = "dev-mode"))]
 pub fn proto_to_resource_id(p: &proto::ResourceIdProto) -> Option<ResourceId> {
     ResourceId::from_slice(&p.bytes)
 }
@@ -217,7 +222,8 @@ pub fn proto_node_layout_to_scene(v: i32) -> NodeLayout {
 /// Map a scene [`NodeLayout`] to its `NodeLayoutProto` wire value. `Absolute`
 /// emits UNSPECIFIED (0) so a flat/absolute node stays byte-identical to the
 /// pre-layout wire.
-pub fn scene_node_layout_to_proto(layout: NodeLayout) -> i32 {
+#[cfg(test)]
+fn scene_node_layout_to_proto(layout: NodeLayout) -> i32 {
     match layout {
         NodeLayout::Absolute => proto::NodeLayoutProto::Unspecified as i32,
         NodeLayout::VerticalFlow => proto::NodeLayoutProto::VerticalFlow as i32,
@@ -446,7 +452,8 @@ pub fn proto_text_overflow_to_scene(v: i32) -> TextOverflow {
 
 /// Convert a scene `TextOverflow` to the `TextOverflowProto` i32 used in
 /// `TextMarkdownNodeProto::overflow` (field 7).
-pub fn scene_text_overflow_to_proto(ov: TextOverflow) -> i32 {
+#[cfg(test)]
+fn scene_text_overflow_to_proto(ov: TextOverflow) -> i32 {
     match ov {
         TextOverflow::Clip => proto::TextOverflowProto::Clip as i32,
         TextOverflow::Ellipsis => proto::TextOverflowProto::Ellipsis as i32,
@@ -454,7 +461,8 @@ pub fn scene_text_overflow_to_proto(ov: TextOverflow) -> i32 {
 }
 
 /// Convert a `Box<[TextColorRun]>` to a `Vec<TextColorRunProto>`.
-pub fn scene_color_runs_to_proto(runs: &[TextColorRun]) -> Vec<proto::TextColorRunProto> {
+#[cfg(test)]
+fn scene_color_runs_to_proto(runs: &[TextColorRun]) -> Vec<proto::TextColorRunProto> {
     runs.iter()
         .map(|r| proto::TextColorRunProto {
             start_byte: r.start_byte,
@@ -482,7 +490,8 @@ pub fn proto_input_mode_to_scene(m: proto::TileInputModeProto) -> InputMode {
 }
 
 /// Convert a scene `InputMode` to a `TileInputModeProto`.
-pub fn scene_input_mode_to_proto(m: InputMode) -> proto::TileInputModeProto {
+#[cfg(test)]
+fn scene_input_mode_to_proto(m: InputMode) -> proto::TileInputModeProto {
     match m {
         InputMode::Passthrough => proto::TileInputModeProto::TileInputModePassthrough,
         InputMode::Capture => proto::TileInputModeProto::TileInputModeCapture,
@@ -578,7 +587,8 @@ pub fn geometry_policy_to_proto(gp: &GeometryPolicy) -> proto::GeometryPolicyPro
 }
 
 /// Convert a scene Node to a protobuf NodeProto.
-pub fn scene_node_to_proto(n: &Node) -> proto::NodeProto {
+#[cfg(test)]
+pub(crate) fn scene_node_to_proto(n: &Node) -> proto::NodeProto {
     let data = match &n.data {
         NodeData::SolidColor(sc) => Some(proto::node_proto::Data::SolidColor(
             proto::SolidColorNodeProto {
@@ -685,7 +695,8 @@ pub fn scene_node_to_proto(n: &Node) -> proto::NodeProto {
 /// walk). A leaf root (`children` empty) produces exactly what
 /// [`scene_node_to_proto`] returns, so round-tripping a flat node is
 /// byte-identical.
-pub fn scene_node_tree_to_proto(
+#[cfg(test)]
+fn scene_node_tree_to_proto(
     root: &Node,
     lookup: &std::collections::HashMap<SceneId, Node>,
 ) -> proto::NodeProto {

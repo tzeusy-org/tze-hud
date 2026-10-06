@@ -9,7 +9,11 @@ pub(crate) mod dedup;
 pub(crate) mod lease;
 pub mod session;
 pub mod session_server;
+// Subscription internals are exposed only for external protocol fixtures.
+#[cfg(any(test, feature = "dev-mode"))]
 pub mod subscriptions;
+#[cfg(not(any(test, feature = "dev-mode")))]
+pub(crate) mod subscriptions;
 pub mod token;
 
 /// Generated protobuf types and gRPC service definitions.

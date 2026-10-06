@@ -21,11 +21,6 @@ pub enum SessionState {
 }
 
 impl SessionState {
-    /// Returns true if this state allows mutation submission.
-    pub fn allows_mutations(&self) -> bool {
-        *self == SessionState::Active
-    }
-
     /// Human-readable label for logging.
     pub fn label(&self) -> &'static str {
         match self {

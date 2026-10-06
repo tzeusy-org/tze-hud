@@ -148,21 +148,16 @@ impl TokenStore {
         }
     }
 
-    /// Remove all tokens whose grace period has elapsed.
-    ///
-    /// Safe to call periodically; does not affect valid tokens.
-    pub fn evict_expired(&mut self, now_ms: u64) {
+    /// Remove expired entries in token-store fixtures.
+    #[cfg(test)]
+    fn evict_expired(&mut self, now_ms: u64) {
         self.entries.retain(|_, e| e.is_valid(now_ms));
     }
 
-    /// Number of pending resume entries (for tests and metrics).
-    pub fn len(&self) -> usize {
+    /// Inspect the pending entries in expiry fixtures.
+    #[cfg(test)]
+    fn len(&self) -> usize {
         self.entries.len()
-    }
-
-    /// Returns `true` if the store contains no pending entries.
-    pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
     }
 }
 

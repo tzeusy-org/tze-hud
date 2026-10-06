@@ -131,10 +131,9 @@ impl SharedState {
         *guard = value;
     }
 
-    /// Read the mirrored active tab without touching the scene mutex.
-    ///
-    /// Used by the winit event thread's keyboard-dispatch path so composer
-    /// echo is never blocked by gRPC scene-mutation batches (hud-dwcr7).
+    /// Inspect the active-tab mirror in keyboard-dispatch fixtures without
+    /// touching the scene mutex.
+    #[cfg(any(test, feature = "dev-mode"))]
     pub fn active_tab_mirror_value(&self) -> Option<SceneId> {
         self.active_tab_mirror
             .lock()
@@ -207,23 +206,18 @@ impl SessionRegistry {
         session
     }
 
-    pub fn get_session(&self, session_id: &str) -> Option<&AgentSession> {
-        self.sessions.get(session_id)
-    }
-
-    pub fn get_session_mut(&mut self, session_id: &str) -> Option<&mut AgentSession> {
-        self.sessions.get_mut(session_id)
-    }
-
     pub fn remove_session(&mut self, session_id: &str) -> Option<AgentSession> {
         self.sessions.remove(session_id)
     }
 
+    /// Inspect the connected-session count in lifecycle fixtures.
+    #[cfg(any(test, feature = "dev-mode"))]
     pub fn session_count(&self) -> usize {
         self.sessions.len()
     }
 
-    /// Find the session that owns the given namespace (agent name).
+    /// Find a namespace owner in session-routing fixtures.
+    #[cfg(any(test, feature = "dev-mode"))]
     pub fn session_for_namespace(&self, namespace: &str) -> Option<&AgentSession> {
         self.sessions.values().find(|s| s.namespace == namespace)
     }
