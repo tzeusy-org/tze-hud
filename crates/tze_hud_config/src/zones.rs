@@ -40,19 +40,21 @@ pub const BUILTIN_ZONE_TYPES: &[&str] = &[
 /// Returns `true` if the given zone type name is known (built-in or custom).
 ///
 /// `custom_zone_types` is the set of zone type names defined in `[zones]`.
-pub fn is_known_zone_type(zone_type: &str, custom_zone_types: &[&str]) -> bool {
+#[cfg(test)]
+fn is_known_zone_type(zone_type: &str, custom_zone_types: &[&str]) -> bool {
     BUILTIN_ZONE_TYPES.contains(&zone_type) || custom_zone_types.contains(&zone_type)
 }
 
 /// Returns `true` if `name` is a known v1 built-in zone type.
-pub fn is_builtin_zone_type(name: &str) -> bool {
+fn is_builtin_zone_type(name: &str) -> bool {
     BUILTIN_ZONE_TYPES.contains(&name)
 }
 
 /// Validate a zone type reference, appending an error if it is unknown.
 ///
 /// `field_path` is the dotted config path to the zone reference (for error reporting).
-pub fn validate_zone_type_ref(
+#[cfg(test)]
+pub(crate) fn validate_zone_type_ref(
     zone_type: &str,
     field_path: &str,
     custom_zone_types: &[&str],
@@ -80,7 +82,7 @@ pub fn validate_zone_type_ref(
 ///
 /// The zone registry itself (custom type definitions) is always valid as long as
 /// zone type names are non-empty strings.  Unknown zone type *references* (from
-/// tab zone config) are caught by `validate_zone_type_ref`.
+/// tab zone config) are caught by `validate_tab_zone_references`.
 ///
 /// This function validates the custom zone type definitions have valid keys.
 pub fn validate_zones(zones: &RawZones, errors: &mut Vec<ConfigError>) {
@@ -138,14 +140,6 @@ pub fn validate_tab_zone_references(raw: &RawConfig, errors: &mut Vec<ConfigErro
                 ),
             });
         }
-    }
-}
-
-/// Collect all custom zone type names from the `[zones]` section.
-pub fn custom_zone_type_names(zones: &Option<RawZones>) -> Vec<String> {
-    match zones {
-        Some(z) => z.0.keys().cloned().collect(),
-        None => Vec::new(),
     }
 }
 

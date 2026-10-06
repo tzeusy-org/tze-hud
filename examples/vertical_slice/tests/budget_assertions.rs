@@ -202,6 +202,9 @@ async fn test_input_to_local_ack_p99_within_budget() {
             .unwrap();
     }
 
+    // These input measurements belong to this fixture, independently of frames.
+    let mut input_to_local_ack = LatencyBucket::new("input_to_local_ack");
+    let mut hit_test_latency = LatencyBucket::new("hit_test");
     for _ in 0..EVENT_COUNT {
         let (local_ack_us, hit_test_us) = {
             let state_arc = runtime.shared_state().clone();
@@ -219,28 +222,17 @@ async fn test_input_to_local_ack_p99_within_budget() {
             );
             (result.local_ack_us, result.hit_test_us)
         };
-        runtime
-            .telemetry
-            .summary_mut()
-            .input_to_local_ack
-            .record(local_ack_us);
-        runtime
-            .telemetry
-            .summary_mut()
-            .hit_test_latency
-            .record(hit_test_us);
+        input_to_local_ack.record(local_ack_us);
+        hit_test_latency.record(hit_test_us);
     }
-
-    let summary = runtime.telemetry.summary();
 
     // Timing assertion: gated — wall-clock budget.  (hud-1aswu.3)
     if perf_assert_enabled() {
-        summary
-            .input_to_local_ack
+        input_to_local_ack
             .assert_p99_under(budget_us)
             .expect("input_to_local_ack p99 budget");
     } else {
-        let raw_p99 = summary.input_to_local_ack.p99().unwrap_or(0);
+        let raw_p99 = input_to_local_ack.p99().unwrap_or(0);
         eprintln!(
             "[SKIP-TIMING] input_to_local_ack raw_p99={raw_p99}us; \
              set TZE_HUD_PERF_ASSERT=1 to enforce budget"
@@ -311,14 +303,6 @@ async fn test_input_to_scene_commit_p99_within_budget() {
              set TZE_HUD_PERF_ASSERT=1 to enforce budget"
         );
     }
-
-    // Also record into the shared summary for cross-test consistency
-    runtime
-        .telemetry
-        .summary_mut()
-        .input_to_scene_commit
-        .samples
-        .extend(bucket.samples.iter().copied());
 }
 
 /// Assert that input_to_next_present p99 is under the 33ms budget at 60Hz.
@@ -401,14 +385,6 @@ async fn test_input_to_next_present_p99_within_budget() {
              set TZE_HUD_PERF_ASSERT=1 to enforce budget"
         );
     }
-
-    // Also record into the shared summary for cross-test consistency
-    runtime
-        .telemetry
-        .summary_mut()
-        .input_to_next_present
-        .samples
-        .extend(bucket.samples.iter().copied());
 }
 
 /// Assert that hit-test p99 is under the 100µs budget.
@@ -465,6 +441,7 @@ async fn test_hit_test_p99_within_budget() {
             .unwrap();
     }
 
+    let mut hit_test_latency = LatencyBucket::new("hit_test");
     for _ in 0..EVENT_COUNT {
         let hit_test_us = {
             let state_arc = runtime.shared_state().clone();
@@ -482,22 +459,15 @@ async fn test_hit_test_p99_within_budget() {
             );
             result.hit_test_us
         };
-        runtime
-            .telemetry
-            .summary_mut()
-            .hit_test_latency
-            .record(hit_test_us);
+        hit_test_latency.record(hit_test_us);
     }
-
-    let summary = runtime.telemetry.summary();
     // Timing assertion: gated — wall-clock budget.  (hud-1aswu.3)
     if perf_assert_enabled() {
-        summary
-            .hit_test_latency
+        hit_test_latency
             .assert_p99_under(budget_us)
             .expect("hit_test p99 budget");
     } else {
-        let raw_p99 = summary.hit_test_latency.p99().unwrap_or(0);
+        let raw_p99 = hit_test_latency.p99().unwrap_or(0);
         eprintln!(
             "[SKIP-TIMING] hit_test raw_p99={raw_p99}us; \
              set TZE_HUD_PERF_ASSERT=1 to enforce budget"

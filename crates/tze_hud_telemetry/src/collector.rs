@@ -32,19 +32,9 @@ impl TelemetryCollector {
         &self.summary
     }
 
-    /// Get a mutable reference to the session summary (for recording latencies).
-    pub fn summary_mut(&mut self) -> &mut SessionSummary {
-        &mut self.summary
-    }
-
     /// Get all recorded frames.
     pub fn records(&self) -> &[FrameTelemetry] {
         &self.records
-    }
-
-    /// Emit session summary as JSON.
-    pub fn emit_json(&self) -> Result<String, serde_json::Error> {
-        self.summary.to_json()
     }
 }
 
@@ -59,9 +49,8 @@ impl Default for TelemetryCollector {
 /// Stamps a `FrameTelemetry` record with `timestamp_us` drawn from an
 /// injectable [`Clock`].
 ///
-/// The compositor creates one `FrameRecorder` per session.  In production it
-/// uses [`SystemClock`]; tests inject a [`tze_hud_scene::clock::TestClock`]
-/// for fully deterministic timestamp assertions.
+/// Uses [`SystemClock`] by default; tests inject a
+/// [`tze_hud_scene::clock::TestClock`] for deterministic timestamp assertions.
 ///
 /// ```
 /// use tze_hud_telemetry::collector::FrameRecorder;

@@ -64,7 +64,6 @@ pub(crate) mod widget_startup;
 pub mod window;
 pub mod windowed;
 
-pub use degradation::DegradationController;
 pub use headless::HeadlessRuntime;
 pub use idle_efficiency::{IdleEfficiencyCounters, RuntimeWakeupSource};
 pub use mcp::{McpServerConfig, start_mcp_http_server};

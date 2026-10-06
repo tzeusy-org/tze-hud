@@ -779,18 +779,6 @@ pub(super) fn physical_key_to_u32(key: &winit::keyboard::PhysicalKey) -> u32 {
     }
 }
 
-/// Convert a winit `Key` (logical key) to a string for debug/logging.
-#[allow(dead_code)]
-pub(super) fn winit_logical_to_str(key: &winit::keyboard::Key) -> String {
-    match key {
-        winit::keyboard::Key::Character(s) => s.to_string(),
-        winit::keyboard::Key::Named(named) => format!("{named:?}"),
-        winit::keyboard::Key::Unidentified(native) => format!("Unidentified({native:?})"),
-        winit::keyboard::Key::Dead(Some(c)) => format!("Dead({c})"),
-        winit::keyboard::Key::Dead(None) => "Dead".to_string(),
-    }
-}
-
 /// Map a winit `PhysicalKey` to the DOM `KeyboardEvent.code`-style string
 /// used by `RawKeyDownEvent.key_code` (RFC 0004 §7.4).
 ///
@@ -888,21 +876,6 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(1));
         let t2 = nanoseconds_since_start();
         assert!(t2 > t1, "timestamps must be monotonically increasing");
-    }
-
-    #[test]
-    fn winit_logical_to_str_character() {
-        use winit::keyboard::Key;
-        let key = Key::Character("a".into());
-        assert_eq!(winit_logical_to_str(&key), "a");
-    }
-
-    #[test]
-    fn winit_logical_to_str_dead() {
-        use winit::keyboard::Key;
-        let key = Key::Dead(Some('´'));
-        let s = winit_logical_to_str(&key);
-        assert!(s.starts_with("Dead"));
     }
 
     #[test]

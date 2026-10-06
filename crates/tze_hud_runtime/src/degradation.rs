@@ -100,11 +100,6 @@ pub enum DegradationLevel {
 }
 
 impl DegradationLevel {
-    /// Whether this level is Normal.
-    pub fn is_normal(self) -> bool {
-        self == Self::Normal
-    }
-
     /// Numeric representation for telemetry.
     pub fn as_u8(self) -> u8 {
         self as u8
@@ -154,7 +149,7 @@ impl Default for DegradationConfig {
 ///
 /// Query [`DegradationController::level`] to determine what restrictions should
 /// be applied to the current frame.
-pub struct DegradationController {
+pub(crate) struct DegradationController {
     /// Current degradation level.
     level: DegradationLevel,
 
@@ -182,7 +177,8 @@ pub struct DegradationController {
 
 impl DegradationController {
     /// Create a new controller starting at Normal.
-    pub fn new(config: DegradationConfig) -> Self {
+    #[cfg(test)]
+    pub(crate) fn new(config: DegradationConfig) -> Self {
         Self::with_envelope(
             config,
             DegradationEnvelope::from_effective_fps(60).expect("60 Hz envelope is valid"),
@@ -203,22 +199,14 @@ impl DegradationController {
     }
 
     /// Create a controller with default configuration.
-    pub fn with_defaults() -> Self {
+    #[cfg(test)]
+    pub(crate) fn with_defaults() -> Self {
         Self::new(DegradationConfig::default())
     }
 
     /// The current degradation level.
     pub fn level(&self) -> DegradationLevel {
         self.level
-    }
-
-    /// The current configuration.
-    pub fn config(&self) -> &DegradationConfig {
-        &self.config
-    }
-
-    pub fn envelope(&self) -> DegradationEnvelope {
-        self.envelope
     }
 
     /// Record a completed frame's time (in microseconds) and evaluate
@@ -240,7 +228,8 @@ impl DegradationController {
     /// frame once at least 10 samples exist. Recovery evaluation uses a true
     /// rolling 30-frame window: checked every frame once at least 30 samples
     /// exist, matching the spec ("30-frame rolling window").
-    pub fn record_frame(&mut self, frame_time_us: u64) -> Option<DegradationEvent> {
+    #[cfg(test)]
+    pub(crate) fn record_frame(&mut self, frame_time_us: u64) -> Option<DegradationEvent> {
         self.virtual_now_us = self.virtual_now_us.saturating_add(self.envelope.period_us);
         self.record_frame_at(frame_time_us, self.virtual_now_us)
     }
@@ -377,11 +366,6 @@ impl DegradationController {
                     .map(|since| since.saturating_add(self.envelope.recovery_duration_us))
             })
             .flatten()
-    }
-
-    /// Number of consecutive frames evaluated so far (for testing / telemetry).
-    pub fn frame_number(&self) -> u64 {
-        self.frame_number
     }
 
     /// Build the compositor policy for the frame being built.
