@@ -921,7 +921,7 @@ async fn test_resource_upload_chunk_error_aborts_inflight_tracking() {
     )
     .await
     .expect("closed event lane must not prevent worker termination");
-    let (fresh_tx, _fresh_init, mut fresh_stream) = handshake_with_capabilities(
+    let (fresh_tx, fresh_init, mut fresh_stream) = handshake_with_capabilities(
         &mut client,
         "resource-chunk-error",
         "test-key",
@@ -953,6 +953,97 @@ async fn test_resource_upload_chunk_error_aborts_inflight_tracking() {
         (4, 4),
         "failed chunk and terminated worker must both recover owned slots, retaining cap4"
     );
+
+    let fresh_session_id = match &fresh_init[0].payload {
+        Some(ServerPayload::SessionEstablished(e)) => bytes_to_scene_id(&e.session_id).unwrap(),
+        other => panic!("expected fresh SessionEstablished, got {other:?}"),
+    };
+    let cleanup = shared_state
+        .lock()
+        .await
+        .sessions
+        .observe_cleanup(&fresh_session_id);
+    drop(fresh_tx);
+    drop(fresh_stream);
+    tokio::time::timeout(Duration::from_secs(5), cleanup)
+        .await
+        .unwrap()
+        .unwrap();
+
+    // Saturate a real worker event lane without consuming its first accepted
+    // reply. Closing that full lane must wake a blocked send and finish cleanup.
+    let (commands, command_rx) = tokio::sync::mpsc::channel(64);
+    let (events, event_rx) = tokio::sync::mpsc::channel(1);
+    let event_capacity = events.clone();
+    for color in [70u8, 71] {
+        commands
+            .send(UploadWorkerCommand::Start {
+                request_sequence: u64::from(color),
+                capabilities: vec!["upload_resource".to_string()],
+                start: ResourceUploadStart {
+                    expected_hash: blake3::hash(&[color, 2, 3, 255]).as_bytes().to_vec(),
+                    resource_type: 1,
+                    total_size_bytes: 4,
+                    metadata: Some(ResourceMetadata {
+                        width: 1,
+                        height: 1,
+                        ..Default::default()
+                    }),
+                    inline_data: Vec::new(),
+                },
+            })
+            .await
+            .unwrap();
+    }
+    drop(commands);
+    let worker = tokio::spawn(run_upload_worker(
+        shared_state.clone(),
+        "resource-chunk-error".to_string(),
+        command_rx,
+        events,
+        0,
+        Default::default(),
+    ));
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while event_capacity.capacity() != 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("actual accepted event must fill the worker lane");
+    assert_eq!(event_capacity.capacity(), 0);
+    drop(event_rx);
+    tokio::time::timeout(Duration::from_secs(5), worker)
+        .await
+        .expect("full event lane must not hang worker join")
+        .unwrap();
+    let (full_tx, _full_init, mut full_stream) = handshake_with_capabilities(
+        &mut client,
+        "resource-chunk-error",
+        "test-key",
+        &["upload_resource"],
+    )
+    .await;
+    let mut recovered_after_full_lane = 0;
+    for offset in 0..5u8 {
+        let sequence = 2 + u64::from(offset);
+        full_tx.send(start(sequence, offset + 20)).await.unwrap();
+        let reply = tokio::time::timeout(Duration::from_secs(5), next_server_msg(&mut full_stream))
+            .await
+            .unwrap();
+        match reply.payload {
+            Some(ServerPayload::ResourceUploadAccepted(a)) => {
+                assert_eq!(a.request_sequence, sequence);
+                recovered_after_full_lane += 1;
+            }
+            Some(ServerPayload::ResourceErrorResponse(e)) => {
+                assert_eq!(e.request_sequence, sequence);
+                assert_eq!(e.error_code, 8);
+            }
+            other => panic!("expected post-full-lane capacity admission decision, got {other:?}"),
+        }
+    }
+    assert_eq!(recovered_after_full_lane, 4);
 
     drop(handle);
 }

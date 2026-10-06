@@ -250,6 +250,7 @@ impl HudSession for HudSessionImpl {
 
             // Everything between registration and cleanup runs inside this
             // labeled block so no early exit can skip the cleanup below.
+            let mut upload_worker = None;
             'active: {
                 // Transition: Handshaking/Resuming → Active (RFC 0005 §1.1)
                 session.transition(SessionState::Active);
@@ -325,14 +326,14 @@ impl HudSession for HudSessionImpl {
                     tokio::sync::mpsc::channel::<UploadWorkerCommand>(64);
                 let (upload_event_tx, mut upload_event_rx) =
                     tokio::sync::mpsc::channel::<UploadWorkerEvent>(64);
-                tokio::spawn(run_upload_worker(
+                upload_worker = Some(tokio::spawn(run_upload_worker(
                     state.clone(),
                     session.namespace.clone(),
                     upload_command_rx,
                     upload_event_tx,
                     upload_rate_limit_bytes_per_sec,
                     render_wake.clone(),
-                ));
+                )));
 
                 // Main message loop
                 //
@@ -472,6 +473,16 @@ impl HudSession for HudSessionImpl {
                 }
             }
 
+            // The command sender and event receiver were dropped with the active
+            // loop. Join outside all shared-state locks; the closed event lane
+            // wakes blocked replies/backpressure and the worker aborts only its
+            // owned pending IDs before the cleanup witness can complete.
+            if let Some(worker) = upload_worker {
+                if let Err(error) = worker.await {
+                    tracing::error!(%error, "resource upload worker failed during session cleanup");
+                }
+            }
+
             // Cleanup: disconnect is not release (invariant 4).
             //
             // The session's active leases become ORPHANED (badge shown, content
@@ -481,7 +492,7 @@ impl HudSession for HudSessionImpl {
             // and their content with no agent help. Token and lease grace are
             // measured on the scene clock so they expire together. Tokens are
             // not persisted across process restarts.
-            let (resource_store, namespace_for_cleanup) = {
+            {
                 let mut st = state.lock().await;
                 st.sessions.remove_session(&session.session_id);
                 registry_guard.disarm();
@@ -512,11 +523,7 @@ impl HudSession for HudSessionImpl {
                         now,
                     );
                 }
-                (st.resource_store.clone(), session.namespace.clone())
-            };
-            resource_store
-                .abort_all_uploads(&namespace_for_cleanup)
-                .await;
+            }
             if let Some(enforcer) = &session.budget_enforcer {
                 enforcer.remove_session(session.scene_session_id);
             }
