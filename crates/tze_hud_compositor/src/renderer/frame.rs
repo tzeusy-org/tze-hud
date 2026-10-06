@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use super::*;
 use crate::display::FrameTarget;
-use crate::pipeline::RoundedRectClip;
+use crate::pipeline::{RoundedRectBorder, RoundedRectClip};
 
 /// One display window's view of a [`WindowedFrameBuild`], in that window's
 /// pixel / NDC space (see [`Compositor::target_view`]).
@@ -1055,6 +1055,7 @@ impl Compositor {
                     height,
                     radius,
                     color,
+                    border,
                     clip,
                 } = cmd;
                 if !visible(*x, *y, *width, *height) {
@@ -1062,6 +1063,11 @@ impl Compositor {
                 }
                 hash_f32s(&mut hasher, &[*x, *y, *width, *height, *radius]);
                 hash_f32s(&mut hasher, color);
+                border.is_some().hash(&mut hasher);
+                if let Some(RoundedRectBorder { width, color }) = border {
+                    hash_f32s(&mut hasher, &[*width]);
+                    hash_f32s(&mut hasher, color);
+                }
                 clip.is_some().hash(&mut hasher);
                 if let Some(RoundedRectClip {
                     x,
