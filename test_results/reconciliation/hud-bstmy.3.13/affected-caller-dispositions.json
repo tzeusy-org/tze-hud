@@ -836,16 +836,18 @@
     {
       "qualified": "tze_hud_input::events::SceneLocalPatch::merge_from",
       "path": "crates/tze_hud_input/src/events.rs",
-      "line": 189,
       "kind": "function_item",
-      "production_navigation_hits": [],
-      "roles": {
+      "current_symbol_navigation": [],
+      "current_disposition": "removed-exact-owner",
+      "source_qualification": "R2 removed this exact owner member before audited source121c; current source has no such definition or qualified production consumer. historical_line, historical_roles and historical_production_navigation_hits describe the GEN2 source8f record only, not current callers. The live owning type/fields and unrelated same-name owners remain.",
+      "historical_line": 189,
+      "historical_roles": {
         "comment": 2,
         "production": 1
       },
-      "current_symbol_navigation": [],
-      "current_disposition": "Retained current defining contract and owner-specific production/fixture/cfg consumers; old line positions and lexical hits are navigation only. Current owner chain is read in the defining module and the named import/caller contexts.",
-      "source_qualification": "Affected defining/caller blobs explicitly reviewed; no unchanged-definition=>unchanged-consumer inference."
+      "historical_production_navigation_hits": [],
+      "historical_source": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261",
+      "current_production_consumers": []
     },
     {
       "qualified": "tze_hud_input::focus::FocusManager::on_click",
@@ -1639,16 +1641,18 @@
     {
       "qualified": "tze_hud_input::keyboard::KeyboardModifiers::has_modifier",
       "path": "crates/tze_hud_input/src/keyboard.rs",
-      "line": 64,
       "kind": "function_item",
-      "production_navigation_hits": [],
-      "roles": {
+      "current_symbol_navigation": [],
+      "current_disposition": "removed-exact-owner",
+      "source_qualification": "R2 removed this exact owner member before audited source121c; current source has no such definition or qualified production consumer. historical_line, historical_roles and historical_production_navigation_hits describe the GEN2 source8f record only, not current callers. The live owning type/fields and unrelated same-name owners remain.",
+      "historical_line": 64,
+      "historical_roles": {
         "comment": 1,
         "production": 1
       },
-      "current_symbol_navigation": [],
-      "current_disposition": "Retained current defining contract and owner-specific production/fixture/cfg consumers; old line positions and lexical hits are navigation only. Current owner chain is read in the defining module and the named import/caller contexts.",
-      "source_qualification": "Affected defining/caller blobs explicitly reviewed; no unchanged-definition=>unchanged-consumer inference."
+      "historical_production_navigation_hits": [],
+      "historical_source": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261",
+      "current_production_consumers": []
     },
     {
       "qualified": "tze_hud_input::keyboard::KeyboardProcessor::process_key_down",
@@ -3081,16 +3085,18 @@
     {
       "qualified": "tze_hud_input::InputProcessor::set_composer_suspended",
       "path": "crates/tze_hud_input/src/lib.rs",
-      "line": 1087,
       "kind": "function_item",
-      "production_navigation_hits": [],
-      "roles": {
+      "current_symbol_navigation": [],
+      "current_disposition": "removed-exact-owner",
+      "source_qualification": "R2 removed this exact owner member before audited source121c; current source has no such definition or qualified production consumer. historical_line, historical_roles and historical_production_navigation_hits describe the GEN2 source8f record only, not current callers. The live owning type/fields and unrelated same-name owners remain.",
+      "historical_line": 1087,
+      "historical_roles": {
         "comment": 1,
         "production": 1
       },
-      "current_symbol_navigation": [],
-      "current_disposition": "Retained current defining contract and owner-specific production/fixture/cfg consumers; old line positions and lexical hits are navigation only. Current owner chain is read in the defining module and the named import/caller contexts.",
-      "source_qualification": "Affected defining/caller blobs explicitly reviewed; no unchanged-definition=>unchanged-consumer inference."
+      "historical_production_navigation_hits": [],
+      "historical_source": "8f61ab81dc6aab44229f5eff9ed2eb5be45d8261",
+      "current_production_consumers": []
     },
     {
       "qualified": "tze_hud_input::InputProcessor::request_capture",
