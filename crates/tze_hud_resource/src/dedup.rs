@@ -18,7 +18,6 @@
 //! (spec lines 20-24).
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, Ordering};
 
 use dashmap::DashMap;
 
@@ -27,10 +26,6 @@ use crate::types::{DecodedMeta, ResourceId, ResourceType};
 // ─── Resource record ─────────────────────────────────────────────────────────
 
 /// A stored resource entry in the dedup index.
-///
-/// The `refcount` field is an `AtomicU32` so it can be incremented/decremented
-/// from the compositor thread without locking the map shard.  Refcount update
-/// latency < 1 μs per operation (spec line 319).
 #[derive(Debug)]
 pub struct ResourceRecord {
     /// Content-addressed identifier (equals the map key; stored for
@@ -44,12 +39,6 @@ pub struct ResourceRecord {
     pub width_px: u32,
     /// Height in pixels (images); 0 for fonts.
     pub height_px: u32,
-    /// Scene-graph reference count.  Starts at 0 on initial upload.
-    /// Incremented when a scene node references this resource;
-    /// decremented when the node is removed.  Never goes below 0.
-    ///
-    /// Spec: RFC 0011 §4.1, §4.2.
-    pub refcount: AtomicU32,
 }
 
 impl ResourceRecord {
@@ -60,56 +49,7 @@ impl ResourceRecord {
             decoded_bytes: meta.decoded_bytes,
             width_px: meta.width_px,
             height_px: meta.height_px,
-            refcount: AtomicU32::new(0),
         }
-    }
-
-    /// Atomically increment the refcount.  Returns the new value.
-    ///
-    /// Latency target: < 1 μs (spec line 319).
-    #[inline]
-    pub fn inc_refcount(&self) -> u32 {
-        self.refcount.fetch_add(1, Ordering::Release) + 1
-    }
-
-    /// Atomically decrement the refcount.  Returns the new value.
-    ///
-    /// # Panics (debug only)
-    ///
-    /// Panics in debug builds if the refcount would go below zero (spec
-    /// lines 145-148, §4.4).  In release builds a structured log is emitted
-    /// and the decrement is clamped at 0.
-    #[inline]
-    pub fn dec_refcount(&self) -> u32 {
-        let prev = self
-            .refcount
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |v| {
-                if v == 0 {
-                    // Underflow: clamp; caller should inspect the return value.
-                    None
-                } else {
-                    Some(v - 1)
-                }
-            });
-
-        match prev {
-            Ok(old) => old - 1,
-            Err(_) => {
-                // Refcount underflow.
-                debug_assert!(false, "refcount underflow on resource {}", self.resource_id);
-                tracing::error!(
-                    resource_id = %self.resource_id,
-                    "refcount underflow detected — this is a bug"
-                );
-                0
-            }
-        }
-    }
-
-    /// Current refcount (relaxed load; only for diagnostics).
-    #[inline]
-    pub fn refcount(&self) -> u32 {
-        self.refcount.load(Ordering::Relaxed)
     }
 }
 
@@ -301,45 +241,6 @@ mod tests {
         let existing = index.insert(id, make_record(id, 200)).unwrap_err();
         // The original record (100 bytes) must be returned.
         assert_eq!(existing.decoded_bytes, 100);
-    }
-
-    #[test]
-    fn refcount_starts_at_zero() {
-        let id = ResourceId::from_content(b"refcount-zero");
-        let rec = make_record(id, 128);
-        assert_eq!(rec.refcount(), 0);
-    }
-
-    #[test]
-    fn refcount_inc_dec() {
-        let id = ResourceId::from_content(b"inc-dec");
-        let rec = make_record(id, 128);
-        assert_eq!(rec.inc_refcount(), 1);
-        assert_eq!(rec.inc_refcount(), 2);
-        assert_eq!(rec.dec_refcount(), 1);
-        assert_eq!(rec.dec_refcount(), 0);
-    }
-
-    #[test]
-    #[should_panic(expected = "refcount underflow")]
-    #[cfg(debug_assertions)]
-    fn refcount_underflow_panics_in_debug() {
-        // Spec lines 145-148: underflow MUST panic in debug builds.
-        let id = ResourceId::from_content(b"underflow-debug");
-        let rec = make_record(id, 128);
-        rec.dec_refcount(); // should panic
-    }
-
-    #[test]
-    #[cfg(not(debug_assertions))]
-    fn refcount_underflow_is_clamped_in_release() {
-        // Spec lines 145-148: underflow is clamped at 0 in release builds
-        // (structured error logged instead of panic).
-        let id = ResourceId::from_content(b"underflow-release");
-        let rec = make_record(id, 128);
-        let v = rec.dec_refcount();
-        assert_eq!(v, 0);
-        assert_eq!(rec.refcount(), 0);
     }
 
     #[test]
