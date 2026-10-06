@@ -513,6 +513,24 @@
     ]
   },
   {
+    "test": "sustained_overload_does_not_escalate_past_simplified",
+    "definitions": [
+      {
+        "path": "crates/tze_hud_runtime/src/degradation.rs",
+        "line": 722
+      }
+    ]
+  },
+  {
+    "test": "registered_budget_rejects_mutation_above_tile_limit",
+    "definitions": [
+      {
+        "path": "crates/tze_hud_runtime/src/mutation_budget_bridge.rs",
+        "line": 332
+      }
+    ]
+  },
+  {
     "test": "aggregate_limits_are_atomic_across_agents",
     "definitions": [
       {
@@ -576,6 +594,15 @@
     ]
   },
   {
+    "test": "mutation_batch_oversized_rejected_with_structured_error",
+    "definitions": [
+      {
+        "path": "crates/tze_hud_protocol/tests/fuzz_protocol_boundary.rs",
+        "line": 377
+      }
+    ]
+  },
+  {
     "test": "test_structured_error_has_hint_field",
     "definitions": [
       {
@@ -617,15 +644,6 @@
       {
         "path": "crates/tze_hud_resource/tests/store_behavior.rs",
         "line": 280
-      }
-    ]
-  },
-  {
-    "test": "mutation_batch_oversized_rejected_with_structured_error",
-    "definitions": [
-      {
-        "path": "crates/tze_hud_protocol/tests/fuzz_protocol_boundary.rs",
-        "line": 377
       }
     ]
   }

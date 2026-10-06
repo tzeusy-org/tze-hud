@@ -5,7 +5,8 @@ Worker: `agent/hud-bstmy.2.6`, isolated worktree verified by `assert_worker_cont
 This is an evidence-only change. Production code and test definitions are unchanged.
 
 Outcome: **coverage gaps remain**. The named file/type deletions landed, and all
-70 tests named by the current `docs/invariants.md` exist exactly once. However,
+72 unique tests named by the pinned `docs/invariants.md` exist exactly once
+(78 mentions, including module-qualified references). However,
 all three crates retain production items with no production caller, and seven
 production error construction sites supply an empty hint. The focused suites
 passed (901 passed, 1 ignored); that does not establish the missing contracts.
@@ -29,7 +30,7 @@ API. The implementation commits are `.2.1` = `8755604a` / PR #1274; `.2.2` =
 | Narrow dedup/lease/subscriptions and remove the enumerated dead protocol accessors/converters | hud-bstmy.2.4 | partial | `lib.rs:8,9` makes dedup/lease crate-private, but `:12` still publicly exposes subscriptions. `session.rs:138,214,227`, `subscriptions.rs:240`, `auth.rs:116`, `convert.rs:581,688` retain named zero-production-caller items. See Gap P and all reference lists. |
 | Delete CursorStyle/EventMask/AccessibilityMeta/TransportConstraint/SceneDiff/SimulatedClock and stale initializers | hud-bstmy.2.5 | implemented | Exact sibling grep across crates/examples/tests is empty; `diff.rs` absent. `clock.rs:148` has the unified TestClock. Node hit-region `local_style` is retained and read by `compositor/src/renderer/tile_render.rs:2528,2534`, as required by the non-goal. |
 | Delete scene timing MessageClass/DeliveryPolicy and remaining no-caller scene helpers | hud-bstmy.2.5 | partial | `timing/hints.rs:36,56,143` and root `lib.rs:59` retain the complete unused scene timing-hints model. Its four classes still include `ClockedMediaCue` (`:46`). Production uses protobuf TimingHints and `mutation::BatchTimingHints`, not this type. Other planned helpers remain; 23 narrowed-lib diagnostic groups. Gap S. |
-| Every named invariant gate survives or its reference is updated in the same change | all five siblings | implemented | `invariant-test-inventory.json`: 70 named function definitions, no missing or duplicate definitions. This inventory establishes existence; implementation and gate adequacy are assessed separately below. |
+| Every named invariant gate survives or its reference is updated in the same change | all five siblings | implemented | `invariant-test-inventory.json`: 78 mentions / 72 unique attributed test definitions, no missing or duplicate definitions. This inventory establishes existence; implementation and gate adequacy are assessed separately below. |
 | Add resource behavior tests; provide llvmpipe local verification; strip old comment/proto references | sibling T8 sub-epics | partial, already owned | Resource tests: hud-bstmy.7.1, closed. llvmpipe: `justfile:86` / T8.0. Pre-reset-reference guard: hud-bstmy.8.3, open. Existing RFC/OpenSpec comments, including `scene/src/timing/hints.rs:5` and `resource/src/lib.rs:6`, belong to `.8.3`; no duplicate gap is proposed. |
 | Production/test abstractions need a current user; test user-visible behavior | docs/scope.md:37,62–65; docs/vision.md:85–99 | partial | Named structural removals are complete, but the residual compiled islands falsify the parent universal deletion claim. Unused APIs serving retained invariant fixtures must be gated or replaced with appropriate fixtures, not removed in a way that loses a named contract. |
 
@@ -39,6 +40,14 @@ The inventory contains a file and line for **every named gate**, including ones
 outside these three crates. This audit reads production seams affected by
 T8.1a; runtime/compositor/MCP-only behavior is identified as retained coverage,
 not claimed as independently re-proven by the 901-test command.
+
+The inventory includes the qualified references at `docs/invariants.md:115,123`:
+`degradation::tests::sustained_overload_does_not_escalate_past_simplified`
+(`crates/tze_hud_runtime/src/degradation.rs:722`) and
+`mutation_budget_bridge::tests::registered_budget_rejects_mutation_above_tile_limit`
+(`crates/tze_hud_runtime/src/mutation_budget_bridge.rs:332`). Both declarations carry test
+attributes at the audited base; these runtime gates are inventoried as retained
+coverage and were not executed by the focused scene/resource/protocol command.
 
 `operation-path-inventory.json` records the actual search patterns and roots.
 `remaining-symbol-references.json` enumerates every Rust reference to the named
@@ -136,7 +145,7 @@ app/T7/cfg review, and the affected behavioral gates after gap fixes land.
 
 - `assert_worker_context.py`: pass; correct cwd, branch and common Git directory; no inherited GIT overrides.
 - Four exact deletion greps: zero matches (expected grep exit 1); 13 removed paths absent.
-- Named invariant inventory: 70 definitions; no missing or duplicate definitions.
+- Named invariant inventory: 78 mentions / 72 unique attributed test definitions; no missing or duplicate definitions. Module-qualified references are normalized by their final `::` component, preserving all original 70 entries and adding the two previously omitted declarations.
 - `PROTOC=/usr/bin/protoc CARGO_TARGET_DIR="$PWD/target" cargo test -p tze_hud_scene -p tze_hud_resource -p tze_hud_protocol --quiet`: pass, 901 passed / 1 ignored / 0 failed. System protoc is 3.21.12; the historical ~/.local path is absent.
 - `python3 -m unittest scripts/tests/test_dead_code.py -q`: 2 passed.
 - `TMPDIR="$PWD/target" CARGO_TARGET_DIR="$PWD/target" PROTOC=/usr/bin/protoc python3 scripts/dead_code.py <crate>` for each of the three crates: compiler check passes; residual diagnostics preserved in the logs.
