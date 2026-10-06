@@ -13,7 +13,6 @@ fn direct_handler_test_session(namespace: &str, capabilities: Vec<String>) -> St
         subscriptions: Vec::new(),
         server_sequence: 0,
         resume_token: Vec::new(),
-        last_heartbeat_ms: 0,
         state: SessionState::Active,
         last_client_sequence: 1,
         safe_mode_active: false,

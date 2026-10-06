@@ -1,9 +1,8 @@
 // ─── Traffic Class ───────────────────────────────────────────────────────────
 
 use crate::proto::session::MutationBatch;
-use crate::proto::session::server_message::Payload as ServerPayload;
 
-/// Traffic class for outbound server messages.
+/// Traffic class for inbound mutation batches.
 ///
 /// Each class has different delivery guarantees:
 /// - Transactional: at-least-once, ordered, never dropped.
@@ -11,55 +10,12 @@ use crate::proto::session::server_message::Payload as ServerPayload;
 /// - Ephemeral: at-most-once, latest-wins, dropped under backpressure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrafficClass {
-    /// Reliable, ordered, never dropped. RequestResult, Reclaimed, SessionEstablished, etc.
+    /// Structural mutations: reliable, ordered, never dropped.
     Transactional,
-    /// Coalesced under pressure; intermediate states may be skipped. SceneSnapshot, EventBatch.
+    /// Content mutations: coalesced under pressure; intermediate states may be skipped.
     StateStream,
-    /// Droppable under backpressure; latest value wins. Heartbeat echo, ephemeral ZonePublish.
+    /// Empty batches: droppable under backpressure; latest value wins.
     Ephemeral,
-}
-
-/// Classify an outbound `ServerMessage` payload into its traffic class.
-///
-/// - Session lifecycle responses, RequestResult, Reclaimed,
-///   SessionSuspended, and SessionResumed are Transactional.
-/// - SceneSnapshot and EventBatch are StateStream.
-/// - Heartbeat echoes are Ephemeral.
-pub fn classify_server_payload(payload: &ServerPayload) -> TrafficClass {
-    match payload {
-        // Session lifecycle — always transactional
-        ServerPayload::SessionEstablished(_)
-        | ServerPayload::SessionError(_)
-        | ServerPayload::SessionResumeResult(_)
-        | ServerPayload::SessionSuspended(_)
-        | ServerPayload::SessionResumed(_) => TrafficClass::Transactional,
-
-        // Mutation / lease responses — transactional
-        ServerPayload::RequestResult(_) | ServerPayload::Reclaimed(_) => {
-            TrafficClass::Transactional
-        }
-
-        // Resource-upload responses — transactional.
-        ServerPayload::ResourceUploadAccepted(_)
-        | ServerPayload::ResourceStored(_)
-        | ServerPayload::ResourceErrorResponse(_) => TrafficClass::Transactional,
-
-        // Degradation notice — transactional (never dropped)
-        ServerPayload::DegradationNotice(_) => TrafficClass::Transactional,
-
-        // Scene state / events — state-stream
-        // FramePresented rides the telemetry class: coalesced/droppable under
-        // backpressure (a present-latency probe samples it; hud-91uu6).
-        ServerPayload::SceneSnapshot(_)
-        | ServerPayload::EventBatch(_)
-        | ServerPayload::FramePresented(_) => TrafficClass::StateStream,
-
-        // Heartbeat echo — ephemeral (droppable, latest-wins)
-        ServerPayload::Heartbeat(_) => TrafficClass::Ephemeral,
-
-        // Element repositioned event — transactional (drag completion / reset-to-default)
-        ServerPayload::ElementRepositioned(_) => TrafficClass::Transactional,
-    }
 }
 
 // ─── Inbound mutation traffic class ──────────────────────────────────────────
@@ -70,7 +26,7 @@ pub fn classify_server_payload(payload: &ServerPayload) -> TrafficClass {
 ///
 /// Any structural/identity-changing mutation makes the batch Transactional;
 /// otherwise content mutations are StateStream; empty batch is Ephemeral.
-/// Uses the same `TrafficClass` enum as outbound classification.
+/// Used by the per-session freeze queue to preserve batch delivery semantics.
 pub(super) fn classify_inbound_batch(batch: &MutationBatch) -> TrafficClass {
     for m in &batch.mutations {
         if let Some(ref mutation) = m.mutation {

@@ -22,7 +22,7 @@ use super::freeze_queue::{FREEZE_QUEUE_CAPACITY, SessionFreezeQueue};
 use super::lifecycle::SessionState;
 use super::stream_session::StreamSession;
 use super::upload::UploadByteRateLimiter;
-use super::{DEFAULT_HEARTBEAT_INTERVAL_MS, now_ms, now_wall_us};
+use super::{DEFAULT_HEARTBEAT_INTERVAL_MS, now_wall_us};
 
 /// Dispatch the initial inbound read, including failures before identification.
 pub(super) async fn handle_handshake_read(
@@ -211,7 +211,6 @@ pub(super) async fn handle_session_init(
         subscriptions: sub_result.active.clone(),
         server_sequence: 0,
         resume_token: resume_token.clone(),
-        last_heartbeat_ms: now_ms(),
         state: SessionState::Handshaking,
         last_client_sequence: 1, // SessionInit is sequence 1; start validation from next
         safe_mode_active: false,
@@ -415,7 +414,6 @@ pub(super) async fn handle_session_resume(
         subscriptions: prior_entry.subscriptions.clone(),
         server_sequence: 0,
         resume_token: new_resume_token.clone(),
-        last_heartbeat_ms: now_ms(),
         state: SessionState::Resuming,
         last_client_sequence: 1, // SessionResume is sequence 1; start validation from next
         safe_mode_active: false,

@@ -85,7 +85,7 @@ pub use lifecycle::SessionState;
 use mutations::{apply_queued_batch_to_scene, handle_mutation_batch};
 pub use service::{HudSessionImpl, SessionDeps};
 use stream_session::StreamSession;
-pub use traffic::{TrafficClass, classify_server_payload};
+pub use traffic::TrafficClass;
 use upload::{UploadWorkerCommand, UploadWorkerEvent, run_upload_worker};
 use verbs::{handle_claim_tile, handle_clear, handle_hold, handle_publish};
 
@@ -678,9 +678,6 @@ impl StreamSession {
     ) -> LoopAction {
         match msg_result {
             Ok(Ok(Some(msg))) => {
-                // Update heartbeat timestamp on any received message
-                self.last_heartbeat_ms = now_ms();
-
                 // Retransmit fast-path (RFC 0005 §5.3).
                 //
                 // For lease operations there is no batch_id correlation key;
@@ -1232,8 +1229,6 @@ async fn handle_heartbeat(
     tx: &tokio::sync::mpsc::Sender<Result<ServerMessage, Status>>,
     hb: Heartbeat,
 ) {
-    session.last_heartbeat_ms = now_ms();
-
     let seq = session.next_server_seq();
     let _ = tx
         .send(Ok(ServerMessage {

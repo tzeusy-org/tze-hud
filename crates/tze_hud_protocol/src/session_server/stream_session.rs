@@ -29,7 +29,6 @@ pub(super) struct StreamSession {
     pub(super) subscriptions: Vec<String>,
     pub(super) server_sequence: u64,
     pub(super) resume_token: Vec<u8>,
-    pub(super) last_heartbeat_ms: u64,
 
     /// Current lifecycle state (RFC 0005 §1.1).
     pub(super) state: SessionState,
