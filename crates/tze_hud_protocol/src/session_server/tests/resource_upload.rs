@@ -376,7 +376,6 @@ async fn test_resource_upload_chunked_concurrent_limit_rejected() {
 async fn test_resource_upload_chunked_success_correlates_by_request_sequence() {
     let service = setup_widget_service().await;
     let shared_state = service.state.clone();
-    let store = shared_state.lock().await.resource_store.clone();
     let (mut client, handle) = setup_widget_test_with_service(service).await;
     let (tx, _init_msgs, mut stream) = handshake_with_capabilities(
         &mut client,
@@ -528,6 +527,7 @@ async fn test_resource_upload_chunked_success_correlates_by_request_sequence() {
 
     // A real disconnect must clean only its worker's pending IDs, even when
     // another authenticated connection has the same namespace.
+    let mut retained_check_sequence = 8;
     for (owner, peer, color) in [
         ("resource-correlation", "resource-correlation", 31u8),
         ("resource-owner", "resource-peer", 47u8),
@@ -597,12 +597,40 @@ async fn test_resource_upload_chunked_success_correlates_by_request_sequence() {
                 .expect("actual owner cleanup must finish")
                 .unwrap();
         }
-        for hash in [&expected_a, &expected_b] {
-            let id = tze_hud_resource::ResourceId::from_bytes(hash.as_slice().try_into().unwrap());
-            assert!(
-                store.dedup_index().get(&id).is_some(),
-                "completed immutable resources survive disconnect"
-            );
+        for (hash, bytes) in [(&expected_a, &payload_a), (&expected_b, &payload_b)] {
+            tx.send(ClientMessage {
+                sequence: retained_check_sequence,
+                timestamp_wall_us: now_wall_us(),
+                payload: Some(ClientPayload::ResourceUploadStart(ResourceUploadStart {
+                    expected_hash: hash.clone(),
+                    resource_type: 1,
+                    total_size_bytes: bytes.len() as u64,
+                    metadata: Some(ResourceMetadata {
+                        width: 1,
+                        height: 1,
+                        ..Default::default()
+                    }),
+                    inline_data: bytes.clone(),
+                })),
+            })
+            .await
+            .unwrap();
+            let retained =
+                tokio::time::timeout(Duration::from_secs(5), next_server_msg(&mut stream))
+                    .await
+                    .unwrap();
+            match retained.payload {
+                Some(ServerPayload::ResourceStored(stored)) => {
+                    assert_eq!(stored.request_sequence, retained_check_sequence);
+                    assert!(
+                        stored.was_deduplicated,
+                        "completed immutable resource survives owner cleanup"
+                    );
+                    assert_eq!(stored.resource_id.unwrap().bytes, *hash);
+                }
+                other => panic!("expected retained completed resource, got {other:?}"),
+            }
+            retained_check_sequence += 1;
         }
         peer_tx
             .send(ClientMessage {
