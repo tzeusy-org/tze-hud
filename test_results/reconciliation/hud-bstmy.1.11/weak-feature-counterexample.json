@@ -45,7 +45,7 @@
   },
   "reproduction": [
     "Create isolated two-package workspace from embedded manifests and empty source files; no repository manifest changes.",
-    "cargo metadata --offline --format-version1: resolve runtime dev-mode enabled for BOTH default arrays.",
-    "cargo metadata --offline --format-version1 --no-deps | python3 <repo>/scripts/ci/check_dev_mode_defaults.py: expected1 both; observed0 for activate,forward and1 reversed."
+    "cargo metadata --offline --format-version 1: resolve runtime dev-mode enabled for BOTH default arrays.",
+    "cargo metadata --offline --format-version 1 --no-deps | python3 <repo>/scripts/ci/check_dev_mode_defaults.py: expected1 both; observed0 for activate,forward and1 reversed."
   ]
 }

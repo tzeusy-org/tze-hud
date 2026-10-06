@@ -101,7 +101,7 @@
     {
       "path": "report.md",
       "bytes": 16876,
-      "sha256": "1a5b483b4cf367adc568d03abbb957c4e22c7fc70f9091cc94bce9812ae8b64c"
+      "sha256": "f35f3601919a5d76cf2655702fac5ecb906221229b568ed7e2ab4f71ec3713a4"
     },
     {
       "path": "criteria-snapshot.json",
@@ -135,8 +135,8 @@
     },
     {
       "path": "ci-parity-matrix.json",
-      "bytes": 16376,
-      "sha256": "896b98b77f236dd35bf146a10f59dd12f91d9b3de1b92fa5a216f5ae07934dfe"
+      "bytes": 16377,
+      "sha256": "49a383388f6f14634d6167deae13b89e82f51e865766357c681b24f004cafa2e"
     },
     {
       "path": "python-discovery-inventory.json",
@@ -165,8 +165,8 @@
     },
     {
       "path": "weak-feature-counterexample.json",
-      "bytes": 2265,
-      "sha256": "efbea0fb86a57f159b687a02e33e36c880d9c997f45b047eaf6dee766c97af2b"
+      "bytes": 2267,
+      "sha256": "5ab92819d420a8232ccbf944878b2e1138fe8df07b48c36371bda465119d1335"
     },
     {
       "path": "weak-feature-metadata-activate.json",

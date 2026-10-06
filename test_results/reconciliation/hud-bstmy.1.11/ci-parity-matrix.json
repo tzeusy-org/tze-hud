@@ -308,7 +308,7 @@
       "job_env": {},
       "continue_on_error": false,
       "classification": "reachable guard with demonstrated blind spot",
-      "local": "just dev-mode-guard: identical cargo metadata --format-version1 --no-deps pipeline; weak-order counterexample"
+      "local": "just dev-mode-guard: identical cargo metadata --format-version 1 --no-deps pipeline; weak-order counterexample"
     },
     {
       "job": "test-gpu-pixel-readback",
