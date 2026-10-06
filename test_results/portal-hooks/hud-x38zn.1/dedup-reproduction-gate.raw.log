@@ -1,0 +1,45 @@
+============================= test session starts ==============================
+platform linux -- Python 3.14.4, pytest-9.1.1, pluggy-1.6.0 -- /home/orca/orca/projects/tze-hud/.venv/bin/python3
+cachedir: .pytest_cache
+rootdir: /home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-x38zn.1
+collecting ... collected 8 items / 7 deselected / 1 selected
+
+.claude/skills/user-test/tests/test_portal_client.py::test_hook_unavailable_malformed_privacy_and_state_failures FAILED [100%]
+
+=================================== FAILURES ===================================
+__________ test_hook_unavailable_malformed_privacy_and_state_failures __________
+
+tmp_path = PosixPath('/tmp/pytest-of-orca/pytest-50/test_hook_unavailable_malforme0')
+
+    def test_hook_unavailable_malformed_privacy_and_state_failures(tmp_path):
+        with HookHarness(tmp_path / "failures") as h:
+            h.boot()
+            before = len(h.records)
+            invalid = [b"{", b"[]", b"x" * 65537,
+                       h.payload("PreToolUse", prompt_id=None, tool_name="Read", tool_use_id="x"),
+                       h.payload("PreToolUse", session_id="../escape", tool_name="Read", tool_use_id="x"),
+                       h.payload("PreToolUse", agent_id="subagent", tool_name="Read", tool_use_id="x"),
+                       h.payload("Unknown"), h.payload("SessionStart", source="compact")]
+            for value in invalid:
+                h.finish(h.launch(value))
+            assert len(h.records) == before
+            for final in ["sk-ant-" + "s" * 32, "sk-ant-\x1b[31m" + "s" * 32 + "\x1b[0m", "-----BEGIN PRIVATE KEY-----\nsynthetic", "password=synthetic-canary-12345"]:
+                h.prompt = str(uuid.uuid4())
+                h.event("UserPromptSubmit")
+                h.event("Stop", last_assistant_message=final)
+                assert h.publications()[-1] == {"surface": "portal:synthetic-session", "status": "attached"}
+                assert final not in json.dumps(h.records)
+            h.prompt = str(uuid.uuid4())
+            h.event("UserPromptSubmit")
+            h.event("Stop", last_assistant_message=None)
+            assert "content" not in h.publications()[-1]
+            h.event("Stop", last_assistant_message="status-only")
+>           assert h.publications()[-1].get("content") == "status-only"
+E           AssertionError: assert None == 'status-only'
+E            +  where None = <built-in method get of dict object at 0x7ff006633040>('content')
+E            +    where <built-in method get of dict object at 0x7ff006633040> = {'surface': 'portal:synthetic-session', 'status': 'attached'}.get
+
+.claude/skills/user-test/tests/test_portal_client.py:417: AssertionError
+=========================== short test summary info ============================
+FAILED .claude/skills/user-test/tests/test_portal_client.py::test_hook_unavailable_malformed_privacy_and_state_failures
+======================= 1 failed, 7 deselected in 2.29s ========================
