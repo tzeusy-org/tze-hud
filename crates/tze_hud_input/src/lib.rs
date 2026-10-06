@@ -1778,6 +1778,7 @@ impl InputProcessor {
         display_height: f32,
         is_header_band: bool,
     ) -> DragEventOutcome {
+        let now = Instant::now();
         let device_id = event.device_id;
 
         // Select threshold: primary pointer = 250ms, touch = 1000ms.
@@ -1790,7 +1791,7 @@ impl InputProcessor {
         match event.kind {
             PointerEventKind::Down => {
                 // Start accumulating for this device.
-                let state = DeviceDragState::new(
+                let state = DeviceDragState::new_at(
                     hit_interaction_id.to_string(),
                     element_id,
                     element_kind,
@@ -1798,6 +1799,7 @@ impl InputProcessor {
                     event.y,
                     threshold_ms,
                     is_header_band,
+                    now,
                 );
                 self.drag_states.insert(device_id, state);
                 DragEventOutcome::Accumulating { progress: 0.0 }
@@ -1828,7 +1830,7 @@ impl InputProcessor {
                             return DragEventOutcome::Cancelled;
                         }
                         // Check threshold.
-                        if state.is_threshold_met() {
+                        if state.is_threshold_met_at(now) {
                             // Activate drag: record grab offset.
                             state.phase = DragPhase::Activated;
                             state.grab_offset_x = event.x - element_bounds.x;
@@ -1839,7 +1841,7 @@ impl InputProcessor {
                             };
                         }
                         // Accumulating — update progress.
-                        let progress = state.progress();
+                        let progress = state.progress_at(now);
                         state.last_progress = progress;
                         DragEventOutcome::Accumulating { progress }
                     }

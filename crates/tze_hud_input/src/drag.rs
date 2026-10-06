@@ -142,12 +142,38 @@ impl DeviceDragState {
         threshold_ms: u64,
         immediate: bool,
     ) -> Self {
+        Self::new_at(
+            interaction_id,
+            element_id,
+            element_kind,
+            press_x,
+            press_y,
+            threshold_ms,
+            immediate,
+            Instant::now(),
+        )
+    }
+
+    /// Construct pointer-down state at the supplied monotonic timestamp.
+    // The existing pointer-down values plus its timestamp describe one state;
+    // a separate parameter object would only hide this single construction.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn new_at(
+        interaction_id: String,
+        element_id: SceneId,
+        element_kind: DragHandleElementKind,
+        press_x: f32,
+        press_y: f32,
+        threshold_ms: u64,
+        immediate: bool,
+        now: Instant,
+    ) -> Self {
         Self {
             phase: DragPhase::Accumulating,
             interaction_id,
             element_id,
             element_kind,
-            press_start: Instant::now(),
+            press_start: now,
             press_x,
             press_y,
             grab_offset_x: 0.0,
@@ -160,14 +186,24 @@ impl DeviceDragState {
 
     /// Compute progress toward activation (0.0–1.0).
     pub fn progress(&self) -> f32 {
-        let elapsed_ms = self.press_start.elapsed().as_millis() as f32;
+        self.progress_at(Instant::now())
+    }
+
+    /// Compute progress using the same timestamp as the activation check.
+    pub(crate) fn progress_at(&self, now: Instant) -> f32 {
+        let elapsed_ms = now.saturating_duration_since(self.press_start).as_millis() as f32;
         let threshold = self.threshold_ms as f32;
         (elapsed_ms / threshold).clamp(0.0, 1.0)
     }
 
     /// Whether the activation threshold has been met.
     pub fn is_threshold_met(&self) -> bool {
-        self.press_start.elapsed() >= Duration::from_millis(self.threshold_ms)
+        self.is_threshold_met_at(Instant::now())
+    }
+
+    /// Whether the hold has reached its deadline at the supplied timestamp.
+    pub(crate) fn is_threshold_met_at(&self, now: Instant) -> bool {
+        now.saturating_duration_since(self.press_start) >= Duration::from_millis(self.threshold_ms)
     }
 
     /// Whether the pointer has moved beyond the cancellation tolerance.
@@ -426,19 +462,41 @@ mod tests {
 
     #[test]
     fn device_drag_state_threshold_met_after_duration() {
-        let mut state = DeviceDragState::new(
-            "drag-handle:aabb".to_string(),
-            SceneId::new(),
-            DragHandleElementKind::Tile,
-            100.0,
-            200.0,
-            1, // 1ms threshold so it passes immediately in tests
-            false,
-        );
-        std::thread::sleep(Duration::from_millis(5));
-        assert!(state.is_threshold_met());
-        state.phase = DragPhase::Activated;
-        assert_eq!(state.phase, DragPhase::Activated);
+        let start = Instant::now();
+        for threshold_ms in [
+            LONG_PRESS_POINTER_THRESHOLD_MS,
+            LONG_PRESS_TOUCH_THRESHOLD_MS,
+        ] {
+            let mut state = DeviceDragState::new_at(
+                "drag-handle:aabb".to_string(),
+                SceneId::new(),
+                DragHandleElementKind::Tile,
+                100.0,
+                200.0,
+                threshold_ms,
+                false,
+                start,
+            );
+            assert_eq!(state.press_start, start);
+            assert!(!state.is_threshold_met_at(start));
+            assert_eq!(state.progress_at(start), 0.0);
+            assert_eq!(state.progress_at(start), 0.0);
+
+            let before = start + Duration::from_millis(threshold_ms - 1);
+            assert!(!state.is_threshold_met_at(before));
+            let progress = state.progress_at(before);
+            assert_eq!(progress, (threshold_ms - 1) as f32 / threshold_ms as f32);
+            assert_eq!(state.progress_at(before), progress);
+
+            let deadline = start + Duration::from_millis(threshold_ms);
+            assert!(state.is_threshold_met_at(deadline));
+            assert_eq!(state.progress_at(deadline), 1.0);
+            let after = deadline + Duration::from_millis(1);
+            assert!(state.is_threshold_met_at(after));
+            assert_eq!(state.progress_at(after), 1.0);
+            state.phase = DragPhase::Activated;
+            assert_eq!(state.phase, DragPhase::Activated);
+        }
     }
 
     #[test]
