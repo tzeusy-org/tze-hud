@@ -25,7 +25,7 @@ pub struct FrameTelemetry {
     pub frame_number: u64,
     /// Timestamp of frame start (microseconds since the Unix epoch).
     ///
-    /// Populated by the `FrameRecorder` using wall-clock time (`Clock::now_us()`).
+    /// Defaults to `0` in [`FrameTelemetry::new`]; the constructor does not sample a clock.
     /// Not to be confused with a process-local monotonic offset.
     pub timestamp_us: u64,
     /// Total frame time in microseconds (Stage 1 start → Stage 7 end).
@@ -580,7 +580,8 @@ impl SessionSummary {
         }
     }
 
-    pub fn to_json(&self) -> Result<String, serde_json::Error> {
+    #[cfg(test)]
+    fn to_json(&self) -> Result<String, serde_json::Error> {
         serde_json::to_string_pretty(self)
     }
 }

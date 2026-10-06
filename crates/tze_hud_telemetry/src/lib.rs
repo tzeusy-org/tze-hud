@@ -12,7 +12,7 @@ pub mod record;
 pub mod validation;
 pub mod work_counts;
 
-pub use collector::{FrameRecorder, TelemetryCollector};
+pub use collector::TelemetryCollector;
 pub use idle_efficiency::{
     ConstrainedProfileIdentity, EfficiencyBudgetResult, EfficiencyGpuCounters,
     EfficiencyPacingIdentity, EfficiencyPacingMode, EfficiencyRendererIdentity,

@@ -8,7 +8,6 @@ license.workspace = true
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
-tze_hud_scene = { path = "../tze_hud_scene", version = "0.1.0" }
 
 [lints]
 workspace = true
