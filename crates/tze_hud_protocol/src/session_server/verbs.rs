@@ -62,7 +62,9 @@ fn rejection_hint(code: &str, reason: String) -> String {
         "INVALID_ARGUMENT" => {
             "Correct the rejected request fields and resend as a new request or batch_id"
         }
-        "NOT_ALLOWED" => "Ask the operator to grant the required allow entry, then retry",
+        "NOT_ALLOWED" => {
+            "Ask the operator to grant the required allow entry, then reconnect with a fresh SessionInit or valid SessionResume, then retry"
+        }
         "NOT_HELD" => "ClaimTile or Publish to obtain a holding in this session before retrying",
         "SAFE_MODE_ACTIVE" => "Wait for SessionResumed before retrying",
         "ZONE_NOT_FOUND" => "Use a configured zone name, then resend Publish",

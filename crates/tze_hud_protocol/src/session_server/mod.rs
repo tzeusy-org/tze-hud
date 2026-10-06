@@ -1210,7 +1210,7 @@ async fn send_resource_error_response(
     .to_string();
     let next_action = match err {
         StoreResourceError::CapabilityDenied => {
-            "Ask the operator to grant upload_resource, then retry ResourceUploadStart"
+            "Ask the operator to grant upload_resource in the allow entries, then reconnect with a fresh SessionInit or valid SessionResume, then retry ResourceUploadStart"
         }
         StoreResourceError::BudgetExceeded { .. } => {
             "Use a smaller resource or wait for resource capacity, then retry ResourceUploadStart"

@@ -82,6 +82,14 @@ async fn test_widget_publish_missing_capability_rejected() {
                 "Expected NOT_ALLOWED, got: {}",
                 result.code
             );
+            assert_eq!(result.seq, 2);
+            assert!(result.hint.contains("widget:gauge"));
+            assert!(result.hint.contains("operator"));
+            assert!(result.hint.contains("allow"));
+            assert!(result.hint.contains("reconnect"));
+            assert!(result.hint.contains("fresh SessionInit"));
+            assert!(result.hint.contains("valid SessionResume"));
+            assert!(result.hint.contains("retry"));
         }
         other => panic!("Expected WidgetPublishResult(rejected), got: {other:?}"),
     }
