@@ -1064,30 +1064,14 @@ mod tests {
 
     #[tokio::test]
     async fn mcp_http_tools_list_authenticated() {
-        use std::net::TcpListener as StdListener;
-
-        // Bind to find a free port, then drop to release it for the server.
-        let std_listener = StdListener::bind("127.0.0.1:0").unwrap();
-        let addr: SocketAddr = std_listener.local_addr().unwrap();
-        drop(std_listener);
-
         let scene = make_scene();
-        let config = McpServerConfig {
-            bind_addrs: vec![addr],
-            late_tailnet_port: None,
-            agents: tze_hud_scene::config::AgentDirectory::unrestricted("test-key").shared(),
-            presents: None,
-            capture: None,
-            restart: None,
-            update: None,
-            bind_gate: None,
-            pairing: None,
-        };
+        let config = make_config(0, "test-key");
         let shutdown = ShutdownToken::new();
 
-        let (handle, _mcp_addr) = start_mcp_http_server(scene, config, shutdown.clone(), None)
+        let (handle, addrs) = start_mcp_http_server(scene, config, shutdown.clone(), None)
             .await
             .expect("bind");
+        let addr = addrs[0];
 
         // Give the task time to enter accept loop.
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
@@ -1190,29 +1174,14 @@ mod tests {
 
     #[tokio::test]
     async fn mcp_http_unauthenticated_returns_error() {
-        use std::net::TcpListener as StdListener;
-
-        let std_listener = StdListener::bind("127.0.0.1:0").unwrap();
-        let addr: SocketAddr = std_listener.local_addr().unwrap();
-        drop(std_listener);
-
         let scene = make_scene();
-        let config = McpServerConfig {
-            bind_addrs: vec![addr],
-            late_tailnet_port: None,
-            agents: tze_hud_scene::config::AgentDirectory::unrestricted("real-key").shared(),
-            presents: None,
-            capture: None,
-            restart: None,
-            update: None,
-            bind_gate: None,
-            pairing: None,
-        };
+        let config = make_config(0, "real-key");
         let shutdown = ShutdownToken::new();
 
-        let (handle, _mcp_addr) = start_mcp_http_server(scene, config, shutdown.clone(), None)
+        let (handle, addrs) = start_mcp_http_server(scene, config, shutdown.clone(), None)
             .await
             .expect("bind");
+        let addr = addrs[0];
 
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
 
@@ -1231,29 +1200,14 @@ mod tests {
 
     #[tokio::test]
     async fn mcp_http_wrong_psk_returns_error() {
-        use std::net::TcpListener as StdListener;
-
-        let std_listener = StdListener::bind("127.0.0.1:0").unwrap();
-        let addr: SocketAddr = std_listener.local_addr().unwrap();
-        drop(std_listener);
-
         let scene = make_scene();
-        let config = McpServerConfig {
-            bind_addrs: vec![addr],
-            late_tailnet_port: None,
-            agents: tze_hud_scene::config::AgentDirectory::unrestricted("correct-key").shared(),
-            presents: None,
-            capture: None,
-            restart: None,
-            update: None,
-            bind_gate: None,
-            pairing: None,
-        };
+        let config = make_config(0, "correct-key");
         let shutdown = ShutdownToken::new();
 
-        let (handle, _mcp_addr) = start_mcp_http_server(scene, config, shutdown.clone(), None)
+        let (handle, addrs) = start_mcp_http_server(scene, config, shutdown.clone(), None)
             .await
             .expect("bind");
+        let addr = addrs[0];
 
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
 
@@ -1273,16 +1227,11 @@ mod tests {
 
     #[tokio::test]
     async fn mcp_http_hud_publish_authenticated() {
-        use std::net::TcpListener as StdListener;
         use tze_hud_scene::SceneId;
         use tze_hud_scene::types::{
             ContentionPolicy, GeometryPolicy, LayerAttachment, RenderingPolicy, ZoneDefinition,
             ZoneMediaType,
         };
-
-        let std_listener = StdListener::bind("127.0.0.1:0").unwrap();
-        let addr: SocketAddr = std_listener.local_addr().unwrap();
-        drop(std_listener);
 
         // Seed the scene with a zone so hud_publish has somewhere to write.
         let scene = make_scene();
@@ -1311,22 +1260,13 @@ mod tests {
             );
         }
 
-        let config = McpServerConfig {
-            bind_addrs: vec![addr],
-            late_tailnet_port: None,
-            agents: tze_hud_scene::config::AgentDirectory::unrestricted("test-key").shared(),
-            presents: None,
-            capture: None,
-            restart: None,
-            update: None,
-            bind_gate: None,
-            pairing: None,
-        };
+        let config = make_config(0, "test-key");
         let shutdown = ShutdownToken::new();
 
-        let (handle, _mcp_addr) = start_mcp_http_server(scene, config, shutdown.clone(), None)
+        let (handle, addrs) = start_mcp_http_server(scene, config, shutdown.clone(), None)
             .await
             .expect("bind");
+        let addr = addrs[0];
 
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
 
@@ -1345,24 +1285,8 @@ mod tests {
 
     #[tokio::test]
     async fn mcp_server_shuts_down_cleanly() {
-        use std::net::TcpListener as StdListener;
-
-        let std_listener = StdListener::bind("127.0.0.1:0").unwrap();
-        let addr: SocketAddr = std_listener.local_addr().unwrap();
-        drop(std_listener);
-
         let scene = make_scene();
-        let config = McpServerConfig {
-            bind_addrs: vec![addr],
-            late_tailnet_port: None,
-            agents: tze_hud_scene::config::AgentDirectory::unrestricted("key").shared(),
-            presents: None,
-            capture: None,
-            restart: None,
-            update: None,
-            bind_gate: None,
-            pairing: None,
-        };
+        let config = make_config(0, "key");
         let shutdown = ShutdownToken::new();
 
         let (handle, _mcp_addr) = start_mcp_http_server(scene, config, shutdown.clone(), None)
@@ -1378,5 +1302,8 @@ mod tests {
             result.is_ok(),
             "MCP server task did not exit within 2s after shutdown"
         );
+        result
+            .unwrap()
+            .expect("MCP server task panicked during shutdown");
     }
 }
