@@ -1,0 +1,36 @@
+{
+  "at": "2026-10-06T12:30:06.634707+00:00",
+  "native_pid": 3195177,
+  "cwd": "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-lgb6c.2",
+  "argv": [
+    "just",
+    "fmt"
+  ],
+  "timeout_seconds": 120,
+  "source_head": "0082c28fcdbc9627852d90ced2d5cf99303f4b7a",
+  "environment": {
+    "CARGO_TARGET_DIR": "/home/orca/orca/projects/tze-hud/target",
+    "CARGO_BUILD_JOBS": "1",
+    "PROTOC": "/usr/bin/protoc",
+    "VK_ICD_FILENAMES": "/usr/share/vulkan/icd.d/lvp_icd.json",
+    "HEADLESS_FORCE_SOFTWARE": "1",
+    "TZE_HUD_REQUIRE_GPU": "1"
+  },
+  "python_venv_prefix": "/home/orca/orca/projects/tze-hud/.venv/bin",
+  "default_test_parallelism": true,
+  "SKIP_GPU_TESTS_unset": true,
+  "PERF_ASSERT_unset_normal_gate": true,
+  "source_before_path": ".handoff/hud-lgb6c.2-implementation/gates/fmt-initial-source-before.json",
+  "source_before_sha256": "f310281e35e86280509ee10f7c299dd405e304de659983912114cbb2cedbc989",
+  "exit_code": 0,
+  "log_path": ".handoff/hud-lgb6c.2-implementation/gates/fmt-initial.log",
+  "child_pid": 3195183,
+  "process_group": 3195183,
+  "timed_out": false,
+  "elapsed_seconds": 1.2509789320029086,
+  "head_after": "0082c28fcdbc9627852d90ced2d5cf99303f4b7a",
+  "log_sha256": "16d325ea49e3c0c4529c65190ab96b3451dcee35398186fd341ec3e334329fc3",
+  "source_changes_during_gate": [],
+  "terminal_observed": true,
+  "process_group_absent": true
+}

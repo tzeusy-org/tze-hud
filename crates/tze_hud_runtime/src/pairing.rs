@@ -303,10 +303,10 @@ fn pairing_lines(
         format!("valid for {} minutes", CODE_TTL.as_secs() / 60),
     ];
     if firewall.is_some_and(crate::firewall::TailnetInbound::is_blocked) {
-        lines.push(
-            "Windows Firewall blocks remote agents: see windows-install.md#remote-agents"
-                .to_owned(),
-        );
+        lines.push(format!(
+            "Windows Firewall blocks remote agents: {}",
+            crate::firewall::FIX_HINT
+        ));
     }
     lines
 }
@@ -787,6 +787,8 @@ mod tests {
         let warned = lines(Some(&blocked));
         assert_eq!(warned.len(), 4);
         assert!(warned[3].contains("Windows Firewall"));
+        assert!(warned[3].contains(crate::firewall::FIX_HINT));
+        assert!(warned[3].contains("--allow-remote"));
         assert_eq!(warned[..3], lines(None)[..]);
     }
 

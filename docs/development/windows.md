@@ -272,10 +272,12 @@ Tailscale name or IP (the HUD shows it on the pairing card):
 - `HUD_HOST=<windows-tailscale-name>` for the skill scripts, and
   `curl -s http://<windows-tailscale-ip>:9090/pair -d '{"agent":"claude","code":"<code>"}'`
   to pair by hand.
-- Inbound tailnet traffic crosses Windows Firewall. Accept the firewall prompt
-  on the HUD's first launch, or add a program rule for a dev exe path from an
-  admin PowerShell:
-  `New-NetFirewallRule -DisplayName 'tze_hud dev' -Direction Inbound -Program '<path>\tze_hud.exe' -Protocol TCP -Action Allow`.
+- Inbound tailnet traffic crosses Windows Firewall. Run the intended dev executable
+  with `--allow-remote` (and the same listen-port overrides as startup), then use
+  that executable's `--disallow-remote` to restore its changes before removing it.
+  See [Remote agents](../operations/windows-install.md#remote-agents) for UAC,
+  same-program BLOCK cleanup, full undo and policy limits. Ordinary startup does
+  not modify firewall policy.
 
 Mirrored mode (`networkingMode=mirrored`) looks like the simpler option, but it
 failed on the reference machine (WSL 3.0.1.0, observed 2026-10-04):

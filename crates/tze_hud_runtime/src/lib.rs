@@ -64,6 +64,7 @@ pub(crate) mod widget_startup;
 pub mod window;
 pub mod windowed;
 
+pub use firewall::remote as remote_firewall;
 pub use headless::HeadlessRuntime;
 pub use idle_efficiency::{IdleEfficiencyCounters, RuntimeWakeupSource};
 pub use mcp::{McpServerConfig, start_mcp_http_server};

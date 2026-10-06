@@ -1,0 +1,393 @@
+{
+  "at": "2026-10-06T13:52:38.788809+00:00",
+  "source_commit": "0d538ffbf813f854219b3b4b49376eac7b8849b1",
+  "source_head_after": "0d538ffbf813f854219b3b4b49376eac7b8849b1",
+  "argv": [
+    "just",
+    "ci"
+  ],
+  "environment": {
+    "CARGO_TARGET_DIR": "/home/orca/orca/projects/tze-hud/target",
+    "CARGO_BUILD_JOBS": "1",
+    "PROTOC": "/usr/bin/protoc",
+    "VK_ICD_FILENAMES": "/usr/share/vulkan/icd.d/lvp_icd.json",
+    "HEADLESS_FORCE_SOFTWARE": "1",
+    "TZE_HUD_REQUIRE_GPU": "1"
+  },
+  "actual_exit": 0,
+  "elapsed_seconds": 527.9194395200175,
+  "native_pid": 3330052,
+  "child_pid": 3330055,
+  "process_group_absent": true,
+  "source_changes_during_gate": [],
+  "raw_log_path": "gates/final-current-context-normal-ci.log",
+  "raw_log_sha256": "d7b2785eb05a5fe5fbad155f8c000bbcd985795f4ab3340a6c9f2fbd9c9ce020",
+  "rust_positive_tests_sum": 3252,
+  "rust_positive_summaries": 71,
+  "rust_summary_lines": [
+    {
+      "line": 3038,
+      "passed": 7,
+      "text": "test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s"
+    },
+    {
+      "line": 3044,
+      "passed": 0,
+      "text": "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+    },
+    {
+      "line": 3051,
+      "passed": 1,
+      "text": "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+    },
+    {
+      "line": 3057,
+      "passed": 0,
+      "text": "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+    },
+    {
+      "line": 3066,
+      "passed": 3,
+      "text": "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.61s"
+    },
+    {
+      "line": 3090,
+      "passed": 18,
+      "text": "test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.36s"
+    },
+    {
+      "line": 3096,
+      "passed": 0,
+      "text": "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+    },
+    {
+      "line": 3103,
+      "passed": 1,
+      "text": "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+    },
+    {
+      "line": 3122,
+      "passed": 13,
+      "text": "test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s"
+    },
+    {
+      "line": 3138,
+      "passed": 2,
+      "text": "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.31s"
+    },
+    {
+      "line": 3145,
+      "passed": 1,
+      "text": "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s"
+    },
+    {
+      "line": 3162,
+      "passed": 3,
+      "text": "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.29s"
+    },
+    {
+      "line": 3767,
+      "passed": 591,
+      "text": "test result: ok. 591 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 9.00s"
+    },
+    {
+      "line": 3796,
+      "passed": 23,
+      "text": "test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s"
+    },
+    {
+      "line": 3811,
+      "passed": 1,
+      "text": "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s"
+    },
+    {
+      "line": 3826,
+      "passed": 1,
+      "text": "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.14s"
+    },
+    {
+      "line": 3836,
+      "passed": 4,
+      "text": "test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s"
+    },
+    {
+      "line": 3858,
+      "passed": 8,
+      "text": "test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.36s"
+    },
+    {
+      "line": 3885,
+      "passed": 13,
+      "text": "test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.50s"
+    },
+    {
+      "line": 4104,
+      "passed": 171,
+      "text": "test result: ok. 171 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s"
+    },
+    {
+      "line": 4514,
+      "passed": 404,
+      "text": "test result: ok. 404 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s"
+    },
+    {
+      "line": 4562,
+      "passed": 42,
+      "text": "test result: ok. 42 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+    },
+    {
+      "line": 4777,
+      "passed": 209,
+      "text": "test result: ok. 209 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s"
+    },
+    {
+      "line": 4988,
+      "passed": 205,
+      "text": "test result: ok. 205 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.13s"
+    },
+    {
+      "line": 4998,
+      "passed": 4,
+      "text": "test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+    },
+    {
+      "line": 5013,
+      "passed": 9,
+      "text": "test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+    },
+    {
+      "line": 5022,
+      "passed": 3,
+      "text": "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.69s"
+    },
+    {
+      "line": 5061,
+      "passed": 33,
+      "text": "test result: ok. 33 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s"
+    },
+    {
+      "line": 5088,
+      "passed": 21,
+      "text": "test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+    },
+    {
+      "line": 5106,
+      "passed": 12,
+      "text": "test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+    },
+    {
+      "line": 5198,
+      "passed": 86,
+      "text": "test result: ok. 86 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s"
+    },
+    {
+      "line": 5212,
+      "passed": 8,
+      "text": "test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+    },
+    {
+      "line": 5831,
+      "passed": 533,
+      "text": "test result: ok. 533 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.94s"
+    },
+    {
+      "line": 5839,
+      "passed": 2,
+      "text": "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+    },
+    {
+      "line": 5845,
+      "passed": 0,
+      "text": "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+    },
+    {
+      "line": 5898,
+      "passed": 39,
+      "text": "test result: ok. 39 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.95s"
+    },
+    {
+      "line": 5915,
+      "passed": 3,
+      "text": "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.20s"
+    },
+    {
+      "line": 6236,
+      "passed": 315,
+      "text": "test result: ok. 315 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s"
+    },
+    {
+      "line": 6264,
+      "passed": 22,
+      "text": "test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+    },
+    {
+      "line": 6279,
+      "passed": 9,
+      "text": "test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.16s"
+    },
+    {
+      "line": 6305,
+      "passed": 20,
+      "text": "test result: ok. 20 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+    },
+    {
+      "line": 6318,
+      "passed": 7,
+      "text": "test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.16s"
+    },
+    {
+      "line": 6340,
+      "passed": 16,
+      "text": "test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+    },
+    {
+      "line": 6365,
+      "passed": 19,
+      "text": "test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.29s"
+    },
+    {
+      "line": 6386,
+      "passed": 15,
+      "text": "test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+    },
+    {
+      "line": 6438,
+      "passed": 46,
+      "text": "test result: ok. 46 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s"
+    },
+    {
+      "line": 6521,
+      "passed": 51,
+      "text": "test result: ok. 51 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+    },
+    {
+      "line": 6532,
+      "passed": 5,
+      "text": "test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+    },
+    {
+      "line": 6545,
+      "passed": 7,
+      "text": "test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+    },
+    {
+      "line": 6559,
+      "passed": 8,
+      "text": "test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+    },
+    {
+      "line": 6582,
+      "passed": 17,
+      "text": "test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s"
+    },
+    {
+      "line": 6598,
+      "passed": 2,
+      "text": "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.17s"
+    },
+    {
+      "line": 6642,
+      "passed": 30,
+      "text": "test result: ok. 30 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.51s"
+    },
+    {
+      "line": 6657,
+      "passed": 1,
+      "text": "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.11s"
+    },
+    {
+      "line": 6677,
+      "passed": 14,
+      "text": "test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s"
+    },
+    {
+      "line": 6709,
+      "passed": 18,
+      "text": "test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+    },
+    {
+      "line": 6734,
+      "passed": 19,
+      "text": "test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s"
+    },
+    {
+      "line": 6747,
+      "passed": 7,
+      "text": "test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s"
+    },
+    {
+      "line": 6765,
+      "passed": 4,
+      "text": "test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.40s"
+    },
+    {
+      "line": 6782,
+      "passed": 11,
+      "text": "test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.65s"
+    },
+    {
+      "line": 6801,
+      "passed": 5,
+      "text": "test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.41s"
+    },
+    {
+      "line": 6821,
+      "passed": 6,
+      "text": "test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.18s"
+    },
+    {
+      "line": 6849,
+      "passed": 14,
+      "text": "test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.92s"
+    },
+    {
+      "line": 6858,
+      "passed": 3,
+      "text": "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+    },
+    {
+      "line": 6884,
+      "passed": 20,
+      "text": "test result: ok. 20 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+    },
+    {
+      "line": 6905,
+      "passed": 15,
+      "text": "test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+    },
+    {
+      "line": 6932,
+      "passed": 21,
+      "text": "test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s"
+    },
+    {
+      "line": 6950,
+      "passed": 12,
+      "text": "test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+    },
+    {
+      "line": 6971,
+      "passed": 15,
+      "text": "test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s"
+    },
+    {
+      "line": 7046,
+      "passed": 1,
+      "text": "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.19s"
+    },
+    {
+      "line": 7067,
+      "passed": 3,
+      "text": "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.29s"
+    }
+  ],
+  "failed_test_summary_lines": [],
+  "actual_skip_lines": [
+    "SKIPPED: overlay-harness-contract needs PowerShell (pwsh)"
+  ],
+  "python_summary_lines": [
+    "76 passed, 3 subtests passed in 5.65s"
+  ],
+  "actual_normal_perf_assert_unset": true,
+  "limits": "These actual gate counts do not establish native UAC/policy behavior, measured performance budgets, or universal caller/domain coverage."
+}

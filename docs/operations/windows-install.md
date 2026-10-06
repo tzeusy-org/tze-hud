@@ -106,19 +106,80 @@ and when `/admin/status` is requested, never per frame, and reports
 | `unknown` | the policy could not be read (`error`), for example a third-party firewall |
 | `not_applicable` | no Tailscale address is bound, or not Windows |
 
-When `blocked`, the pairing card (shown for a tailnet address) adds a line,
-"Windows Firewall blocks remote agents". A block rule wins over any allow rule;
-only rules on a currently active profile count. To fix it, add an inbound allow
-rule for `tze_hud.exe` (an elevated PowerShell):
+When `blocked`, the pairing card adds the same `--allow-remote` hint as
+`/admin/status`. The diagnostic is a policy classification, not a connection
+probe; a running HUD may show its cached answer for up to five seconds.
+
+From the executable you intend remote agents to reach, run:
 
 ```powershell
-New-NetFirewallRule -DisplayName "tze_hud" -Direction Inbound -Action Allow `
-  -Program "$env:LOCALAPPDATA\Programs\tze_hud\tze_hud.exe" -Protocol TCP `
-  -RemoteAddress 100.64.0.0/10,fd7a:115c:a1e0::/48
+& "$env:LOCALAPPDATA\Programs\tze_hud\tze_hud.exe" --allow-remote
+# Undo the complete change before uninstalling or removing this executable:
+& "$env:LOCALAPPDATA\Programs\tze_hud\tze_hud.exe" --disallow-remote
 ```
 
-Adjust `-Program` to where `tze_hud.exe` is installed; remove a conflicting block
-rule if `rule` names one. Loopback agents are never affected.
+Use the explicit dev executable path for an in-place build. The helper always
+targets the invoked executable, even if another HUD is installed. It exits
+before starting the HUD or reading `agents.toml`. Ordinary startup and installation
+do not request elevation or change firewall policy. These commands are Windows
+only and cannot be combined with install, pairing, handoff, or other startup actions.
+
+Approve one UAC prompt when needed; an already elevated terminal needs none.
+Cancelling changes nothing. The parent waits for the child's actual exit and
+prints its validated result. If another administrator supplies the UAC credentials,
+the target, ports and original owner's rule environment remain those of the
+invoking process. A failed identity/token check refuses the change.
+
+`--allow-remote` resolves ports from `--mcp-port` / `--grpc-port`, then the invoking
+process's `TZE_HUD_MCP_PORT` / `TZE_HUD_GRPC_PORT`, then 9090 / 50051. Pass the same
+overrides used to start the HUD. Port zero disables that listener; both zero is
+refused. Config TOML has no listen-port keys. An explicit `--config` is validated,
+but does not select a different executable or port. Undo uses its protected journal
+and needs neither the original config nor port overrides.
+
+The helper creates one enabled inbound TCP rule, `tze_hud (tailnet)`, for that
+exact executable, the resolved nonzero ports, both `100.64.0.0/10` and
+`fd7a:115c:a1e0::/48`, and all profiles, with edge traversal disabled. It also
+backs up and removes every inbound BLOCK for that same executable, including
+disabled rules and rules for other ports/protocols/profiles. It reports those
+removed scopes. BLOCK wins over ALLOW, so adding an ALLOW alone cannot fix that
+case. Removing a broad BLOCK can uncover a pre-existing broader ALLOW; the helper's
+new rule is tailnet-only, but it does not certify all other policy as LAN-isolated.
+Generic, other-program, outbound, Group Policy and third-party rules are not changed.
+
+Repeated allows update only the helper-owned rule and retain the first undo baseline.
+`--disallow-remote` restores every saved BLOCK's full exposed properties and original
+name, then removes the helper's ALLOW and undo journal. Existing rules sharing a
+BLOCK's display name are preserved. Opaque Windows rule identifiers may change.
+Unsupported or incompletely readable attributes (including package rules that
+Windows cannot re-add) fail before any policy write. A foreign `tze_hud (tailnet)`
+name, edited helper rule, unsafe ACL/reparse path, conflicting external edit, or
+busy transaction fails without overwriting that state. Self-serialization does
+not make the Windows policy collection atomic against other administrators.
+
+Undo data is under `%ProgramData%\tze_hud\firewall`, protected against unprivileged
+writes and keyed by the canonical executable. It is only authority for this helper's
+undo and interrupted-transaction retry, not a policy export/import facility. An
+interrupted attempt is compensated before retry; failed compensation keeps the
+journal and returns a nonzero result. Keep the executable and journal and retry
+the same explicit command after addressing the reported conflict. If the executable
+is gone or the journal is corrupt, an administrator must recover the recorded policy;
+removing just the ALLOW cannot restore removed BLOCKs. Undo successfully **before**
+uninstalling, reverting the feature, or deleting/replacing its target path. Reverting
+source code does not undo machine policy. No automatic startup/install/uninstall action
+consumes the journal.
+
+A manual PowerShell equivalent for the new ALLOW only is:
+
+```powershell
+New-NetFirewallRule -Name "tze_hud (tailnet)" -DisplayName "tze_hud (tailnet)" -Direction Inbound -Action Allow -Enabled True -Profile Any -Program "$env:LOCALAPPDATA\Programs\tze_hud\tze_hud.exe" -Protocol TCP -LocalPort 9090,50051 -RemoteAddress 100.64.0.0/10,fd7a:115c:a1e0::/48 -EdgeTraversalPolicy Block
+```
+
+Adjust the exact executable and ports. This manual rule has no helper ownership
+marker or undo journal, so the helper treats its name as foreign. It does not override
+BLOCK rules or provide full undo: retain administrator-owned backups before any manual
+BLOCK removal. Prefer the explicit helper for the reversible operation. Loopback binds
+and per-user installation remain unchanged.
 
 ## Logs and operator endpoints
 

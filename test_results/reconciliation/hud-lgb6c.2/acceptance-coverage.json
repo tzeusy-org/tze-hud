@@ -1,0 +1,122 @@
+{
+  "at": "2026-10-06T13:15:08.254287+00:00",
+  "stage": "Final normal local CI actually passed; native MSVC/non-policy Windows execution pending PR.",
+  "rows": [
+    {
+      "ac": 1,
+      "owners": [
+        "app/tze_hud_app/src/main.rs:parse_options/main",
+        "crates/tze_hud_runtime/src/firewall/remote.rs:parse_private_child/control",
+        "crates/tze_hud_runtime/src/firewall/remote/windows.rs:NativeLauncher"
+      ],
+      "behavior": "Only explicit public CLI or validated elevated private child reaches helper; runas exists solely in NativeLauncher::launch_and_wait; ordinary install/pair/status cannot call it",
+      "proof": "Qualified source call-site enumeration plus actual existing parser/control tests; workspace/GNU all-target Clippy",
+      "limit": "No actual native elevation/UAC call"
+    },
+    {
+      "ac": 2,
+      "owners": [
+        "app/tze_hud_app/src/main.rs:main",
+        "crates/tze_hud_runtime/src/firewall/remote/windows.rs:current_request/origin/pin_current_image/expanded"
+      ],
+      "behavior": "Canonical invoked image held read-only through child wait; original PID creation/image/token SID derives identity and environment, ports frozen before alternate-admin child; no config port/schema addition",
+      "proof": "Production code and actual pure builder/parser/result tests; GNU Windows type checking",
+      "limit": "Alternate-admin identity/token/ACL behavior awaits existing owner hud-lgb6c.3 live validation"
+    },
+    {
+      "ac": 3,
+      "owners": [
+        "crates/tze_hud_runtime/src/firewall/remote.rs:RuleSpec/equivalent_allow",
+        "crates/tze_hud_runtime/src/firewall/remote/windows.rs:prepare_owned_allow"
+      ],
+      "behavior": "One owned inbound TCP ALLOW, exact nonzero ports/both CIDRs/all profiles/no edge; exact semantic native formatting only; no adoption of unbacked fixed-name state",
+      "proof": "Actual pure builder/collision assertions; native object fixture compiled for all targets",
+      "limit": "Actual Windows getter formatting awaits native job"
+    },
+    {
+      "ac": 4,
+      "owners": [
+        "crates/tze_hud_runtime/src/firewall/remote.rs:transact",
+        "crates/tze_hud_runtime/src/firewall/remote/windows.rs:entries/image/create_rule/same_program/interfaces"
+      ],
+      "behavior": "Every same-program inbound BLOCK variant backed up in complete supported Rule1/2/3 representation; exact COM object renamed to unique alias before name-based removal; foreign peers preserved; incomplete/unrecreatable state fails before policy writes",
+      "proof": "Actual pure filter/failure fixtures; all native property/VARIANT bindings compiled",
+      "limit": "COM policy enumeration/getter failures and actual machine policy are not simulated by the pure adapter"
+    },
+    {
+      "ac": 5,
+      "owners": [
+        "crates/tze_hud_runtime/src/firewall/remote.rs:validate_journal/recover/transact",
+        "crates/tze_hud_runtime/src/firewall/remote/windows.rs:apply/atomic_write"
+      ],
+      "behavior": "Full semantic block/name multiset restored before helper ALLOW/journal removal, with first baseline/repeat/reconfiguration/intents/completed cursors; conflict retains recovery journal and returns nonzero",
+      "proof": "Actual production transaction under full-state fixture, every store-boundary injected failure and policy-write crash/retry",
+      "limit": "External administrator mutation is non-atomic; no opaque Windows identity preservation claim"
+    },
+    {
+      "ac": 6,
+      "owners": [
+        "crates/tze_hud_runtime/src/firewall/remote/windows.rs:protected_root/verify_file/open_file/atomic_write/NativeLauncher/result_acl/read_result/cleanup_orphan_results"
+      ],
+      "behavior": "Fixed protected ProgramData namespace, admin/SYSTEM writers, original SID result read/delete, exact DACL/owner/no-reparse, per-program share-zero lock, flush-before-write, actual child termination and output/exit validation",
+      "proof": "Code/binding review plus actual pure control/result assertions; GNU all-target compile",
+      "limit": "Native ACL/locking/UAC cancellation/live policy remain unexecuted by agent; bounded orphan cleanup runs only explicit commands"
+    },
+    {
+      "ac": 7,
+      "owners": [
+        "crates/tze_hud_runtime/src/firewall/remote/windows.rs:allowed",
+        "crates/tze_hud_runtime/src/firewall/remote.rs:transact",
+        "crates/tze_hud_runtime/src/firewall.rs:FIX_HINT/decide",
+        "crates/tze_hud_runtime/src/pairing.rs:pairing_lines"
+      ],
+      "behavior": "Fresh existing detector Allowed required after allow or compensation; actual command hint; existing five-second status cache/card JSON semantics preserved; broader existing ALLOW after approved BLOCK cleanup disclosed",
+      "proof": "Actual existing14 detector tests, denied-classification transaction assertion and existing card fixture",
+      "limit": "Policy classification is not network reachability; third-party/GPO/generic BLOCK limits remain. Owner cache-clock hud-bstmy.1.18 separate"
+    },
+    {
+      "ac": 8,
+      "owners": [
+        "fixture-delta.json",
+        "crates/tze_hud_scene/src/graph/limits_tests.rs",
+        "docs/invariants.md"
+      ],
+      "behavior": "Exactly+5~3-0; one production-seam adapter, no extra guard/species/testfarm; protected T7/default namespace unchanged",
+      "proof": "Source test-name enumeration and passing app/firewall/card selections; final CI will verify retained invariant/default gates",
+      "limit": "Passing aggregate counts do not assert feature/platform coverage"
+    },
+    {
+      "ac": 9,
+      "owners": [
+        ".github/workflows/windows.yml",
+        "gates/"
+      ],
+      "behavior": "Required focused Linux/app/card/workspace/fmt/GNU gates, one final corrected-source normal CI and existing MSVC/native job",
+      "proof": "Final local normal just ci actual0 at 0d538ffbf813f854219b3b4b49376eac7b8849b1; raw d7b2785eb05a5fe5fbad155f8c000bbcd985795f4ab3340a6c9f2fbd9c9ce020",
+      "limit": "Actual Windows MSVC release/native five fixtures pending; no native proof inferred from GNU compilation."
+    },
+    {
+      "ac": 10,
+      "owners": [
+        "docs/operations/windows-install.md",
+        "docs/development/windows.md",
+        "docs/api.md",
+        "app/tze_hud_app/src/main.rs:print_help"
+      ],
+      "behavior": "Both commands/UAC/exact target and ports/CIDRs/equivalent manual ALLOW/mandatory BLOCK undo/recovery/rollback-before-uninstall documented",
+      "proof": "Actual source/doc diff review",
+      "limit": "Source revert does not undo policy; manual rule has no helper journal and is not adopted"
+    },
+    {
+      "ac": 11,
+      "owners": [
+        "historical FIRST archive",
+        "implementation bootstrap receipt"
+      ],
+      "behavior": "One accepted FIRST and separate execution ACK, no new shape/lifecycle/live OS action; owner .3 live validation remains separate",
+      "proof": "Durable historical1b5 and implementation0082 native/canonical receipts; root ACKs",
+      "limit": "No invented owner wait or cache-closure prerequisite"
+    }
+  ],
+  "rows_are_qualified_not_universal_coverage": true
+}

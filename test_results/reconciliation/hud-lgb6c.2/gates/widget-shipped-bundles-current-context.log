@@ -1,0 +1,29 @@
+   Compiling toml_edit v0.22.27
+   Compiling tze_hud_scene v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-lgb6c.2/crates/tze_hud_scene)
+   Compiling tze_hud_resource v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-lgb6c.2/crates/tze_hud_resource)
+   Compiling toml v0.8.23
+   Compiling tze_hud_widget v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-lgb6c.2/crates/tze_hud_widget)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 13.90s
+     Running tests/shipped_bundles.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/shipped_bundles-3eeaa504aac01b90)
+
+running 17 tests
+test gauge_and_progress_bar_svgs_have_no_hardcoded_hex_colors ... ok
+test discrete_binding_must_cover_exactly_the_enum_values ... ok
+test invalid_param_rejects_the_whole_publish ... ok
+test wire_code_missing_svg ... ok
+test wire_code_no_manifest ... ok
+test wire_code_svg_parse_error ... ok
+test wire_code_duplicate_type_and_siblings_still_load ... ok
+test wire_code_unresolved_token ... ok
+test wire_code_invalid_manifest ... ok
+test wire_code_binding_unresolvable ... ok
+test shipped_bundles_need_their_tokens ... ok
+test wire_code_invalid_name ... ok
+test status_indicator_status_maps_each_value_to_its_color ... ok
+test status_indicator_latest_publisher_wins_and_partial_updates_keep_other_params ... ok
+test shipped_widgets_clamp_out_of_range_f32 ... ok
+test shipped_bundles_load_and_bind ... ok
+test shipped_widgets_reject_invalid_params ... ok
+
+test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+

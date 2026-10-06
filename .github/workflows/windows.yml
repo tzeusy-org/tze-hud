@@ -64,6 +64,17 @@ jobs:
           TZE_HUD_CHANNEL: ${{ github.ref == 'refs/heads/main' && 'dev' || (startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'ci') }}
         run: cargo build --release --locked -p tze_hud_app --bin tze_hud
 
+      # Pure transaction/launcher fixtures and standalone COM rule objects only:
+      # these tests never modify the runner's firewall or request elevation.
+      - name: Explicit remote helper fixtures (no policy mutation)
+        timeout-minutes: 8
+        shell: pwsh
+        run: |
+          cargo test --release --locked -p tze_hud_runtime --lib firewall::remote:: -- --nocapture
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo test --release --locked -p tze_hud_app --bin tze_hud parse_options_ -- --nocapture
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Build poc_demo.exe (resident-tile driver for the smoke)
         run: cargo build --release --locked -p poc_demo --bin poc_demo
 

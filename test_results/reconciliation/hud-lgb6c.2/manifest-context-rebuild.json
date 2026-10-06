@@ -1,0 +1,60 @@
+{
+  "at": "2026-10-06T13:39:17.228914+00:00",
+  "immutable_final_source": "0d538ffbf813f854219b3b4b49376eac7b8849b1",
+  "diagnosis": "Cached test binaries embedded the removed hud-bstmy.1.17 CARGO_MANIFEST_DIR, so shipped widget assets could not be loaded. This is artifact context, not a source or GPU device failure.",
+  "actual_failures": [
+    {
+      "receipt": "gates/final-corrected-normal-ci.json",
+      "suite": "gauge_binding_rendering",
+      "passed": 19,
+      "failed": 4,
+      "raw_sha256": "115f98aa729492f5ef2620088ca0b2dd3fbea93968dc444f2c83d4efab4b6582"
+    },
+    {
+      "receipt": "gates/final-allocator-corrected-normal-ci.json",
+      "suite": "shipped_bundles",
+      "passed": 9,
+      "failed": 8,
+      "raw_sha256": "7795eacd97e8386a5fea6b85a672f8c81dde51dde4a4798696b493ed8dcda91e"
+    }
+  ],
+  "exact_current_manifest_context_sites": [
+    {
+      "package": "tze_hud_compositor",
+      "source": "crates/tze_hud_compositor/tests/gauge_binding_rendering.rs:501"
+    },
+    {
+      "package": "tze_hud_widget",
+      "source": "crates/tze_hud_widget/tests/shipped_bundles.rs:20"
+    },
+    {
+      "package": "poc_demo",
+      "source": "examples/poc_demo/tests/smoke.rs:29"
+    },
+    {
+      "package": "tze_hud_app",
+      "source": "app/tze_hud_app/tests/benchmark_config_schema.rs:7"
+    },
+    {
+      "package": "integration",
+      "source": "tests/integration/poc_acceptance.rs:79"
+    },
+    {
+      "package": "benchmark",
+      "source": "examples/benchmark/src/token_footprint_calibration.rs:186"
+    }
+  ],
+  "root_authorized_package_rebuilds": [
+    "cargo clean -p tze_hud_compositor",
+    "cargo clean -p tze_hud_widget -p poc_demo -p tze_hud_app -p integration -p benchmark"
+  ],
+  "no_source_bytes_or_asset_copying": true,
+  "no_whole_target_wipe": true,
+  "widget_failed_subset_retest": {
+    "receipt": "gates/widget-shipped-bundles-current-context.json",
+    "passed": 17,
+    "failed": 0,
+    "raw_sha256": "ff8605ce541c775bb2bca8152c9b5f74193862e2acc00af329aecf7e23f81b6c"
+  },
+  "final_normal_CI": "gates/final-current-context-normal-ci.json, currently active, no completed claim"
+}

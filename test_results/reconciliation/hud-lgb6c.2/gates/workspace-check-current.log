@@ -1,0 +1,6 @@
+    Checking tze_hud_runtime v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-lgb6c.2/crates/tze_hud_runtime)
+    Checking render_artifacts v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-lgb6c.2/examples/render_artifacts)
+   Compiling tze_hud_app v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-lgb6c.2/app/tze_hud_app)
+    Checking benchmark v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-lgb6c.2/examples/benchmark)
+    Checking vertical_slice v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-lgb6c.2/examples/vertical_slice)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 3.69s

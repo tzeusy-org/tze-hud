@@ -1,0 +1,17 @@
+   Compiling tze_hud_runtime v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-lgb6c.2/crates/tze_hud_runtime)
+error: function `execute` is never used
+  --> crates/tze_hud_runtime/src/firewall/remote.rs:70:8
+   |
+70 | pub fn execute(action: RemoteAction, ports: [u16; 2]) -> Result<String, String> {
+   |        ^^^^^^^
+   |
+   = note: `-D dead-code` implied by `-D warnings`
+   = help: to override `-D warnings` add `#[allow(dead_code)]`
+
+error: function `execute_child` is never used
+  --> crates/tze_hud_runtime/src/firewall/remote.rs:85:8
+   |
+85 | pub fn execute_child(request: ChildRequest) -> Result<String, String> {
+   |        ^^^^^^^^^^^^^
+
+error: could not compile `tze_hud_runtime` (lib test) due to 2 previous errors

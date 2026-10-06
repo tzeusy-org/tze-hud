@@ -1,0 +1,73 @@
+{
+  "at": "2026-10-06T13:19:03.797439+00:00",
+  "qualified_roots": [
+    "app",
+    "crates",
+    "examples",
+    "tests",
+    ".github"
+  ],
+  "actual_command": "rg -n execute\\(|execute_child\\(|parse_private_child|ShellExecuteExW|RemoteAction|transact\\(|pub\\(crate\\) mod firewall app crates examples tests .github --glob *.rs --glob *.yml",
+  "production_callers": [
+    {
+      "path": "app/tze_hud_app/src/main.rs",
+      "line": 982,
+      "symbol": "remote_firewall::parse_private_child",
+      "before": "ordinary environment-backed parser"
+    },
+    {
+      "path": "app/tze_hud_app/src/main.rs",
+      "line": 984,
+      "symbol": "remote_firewall::execute_child",
+      "guard": "strict private payload then actual elevated-token control guard, returns before startup"
+    },
+    {
+      "path": "app/tze_hud_app/src/main.rs",
+      "line": 1018,
+      "symbol": "remote_firewall::execute",
+      "guard": "actual explicit remote_action only; validated optional config; returns before install/listeners/GPU"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/firewall/remote/windows.rs",
+      "line": 370,
+      "symbol": "ShellExecuteExW",
+      "guard": "only NativeLauncher::launch_and_wait reached by control for public non-elevated action; same canonical executable/runas/private payload"
+    }
+  ],
+  "namespace": {
+    "diagnostic": "pub(crate) mod firewall remains",
+    "public": "only pub use firewall::remote as remote_firewall; typed child fields private",
+    "linux": "explicit command returns Windows-only error; no filesystem/UAC/policy",
+    "default": "no feature-default or install/autostart/config schema changes"
+  },
+  "preservation": [
+    {
+      "path": "crates/tze_hud_input/src/portal_resize.rs",
+      "current_sha256": "238146de2a7562937de06175a34bb604fdd263c162b5d0d85ffe11dcbdde6f03",
+      "base_blob": "812f8850c769784be3734ab034c0df936347d07c",
+      "worker_edits": ""
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/windowed/keyboard.rs",
+      "current_sha256": "dfbe4199c4d15ae073b4905b042ab0ba4e1b474c4d6a39feec3df988d37de727",
+      "base_blob": "149fd3ff96476af62878e9519725b4323ecc5921",
+      "worker_edits": ""
+    },
+    {
+      "path": "docs/invariants.md",
+      "current_sha256": "c8e8554ed6de04b3917b46b5fcea3dade85e7c83ba10bd63221f01161a98ba04",
+      "base_blob": "0fb0ce9598d9cc257096a97afe81a469d755e027",
+      "worker_edits": ""
+    },
+    {
+      "path": "crates/tze_hud_scene/src/graph/limits_tests.rs",
+      "current_sha256": "3f223f61e4c18c4ec39f7b96287c5c59952b79020b03e752f75fed72b66440bf",
+      "base_blob": "c1a2af5b6540bd97b43c8c13843633997187af63",
+      "worker_edits": ""
+    }
+  ],
+  "T7_statement": "Protected ShellReservedShortcut and its production keyboard readers remain byte-identical to assigned0082. MuteToggle has one documentation occurrence and two live assertion-message strings for retained reserved m/M Ctrl+Shift handling; no removal or historical-comment-only claim.",
+  "cache_clock_owner": "hud-bstmy.1.18 merged on later main8e; assigned source old private cache preserved; fresh post-change classification calls existing decide, not cache invalidation or new detector surface.",
+  "live_validation_owner": "hud-lgb6c.3 remains separate existing owner task; not a new implementation prerequisite or proof of native policy action",
+  "no_universal_claim": "This is exact feature caller/control-boundary review, not universal source dead-code or telemetry coverage."
+}

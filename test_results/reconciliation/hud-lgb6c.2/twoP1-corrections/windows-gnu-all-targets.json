@@ -1,0 +1,295 @@
+{
+  "at": "2026-10-06T16:06:41.660999+00:00",
+  "finished_at": "2026-10-06T16:07:04.060210+00:00",
+  "native_runner_pid": 3554900,
+  "child_pid": 3554904,
+  "process_group": 3554904,
+  "command": [
+    "cargo",
+    "clippy",
+    "-p",
+    "tze_hud_app",
+    "-p",
+    "tze_hud_runtime",
+    "--all-targets",
+    "--target",
+    "x86_64-pc-windows-gnu",
+    "--",
+    "-D",
+    "warnings"
+  ],
+  "cwd": "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-lgb6c.2",
+  "deadline_seconds": 900.0,
+  "elapsed_seconds": 22.39923560898751,
+  "exit": 101,
+  "timed_out": false,
+  "source_head_before": "9d4652fb867cad625ec02e2a62014faae9ddaa77",
+  "source_head_after": "9d4652fb867cad625ec02e2a62014faae9ddaa77",
+  "tracked_status_before": "",
+  "tracked_status_after": "",
+  "tracked_source_manifest_rows": 544,
+  "source_equal": true,
+  "source_before_sha256": "759a70e59634afd6075b8261afd1283ab36cd37bad29f472a4fb8bf2f48a6b11",
+  "source_after_sha256": "759a70e59634afd6075b8261afd1283ab36cd37bad29f472a4fb8bf2f48a6b11",
+  "raw_log": "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-lgb6c.2/.handoff/hud-lgb6c.2-author-return-twoP1/windows-gnu-all-targets.log",
+  "raw_sha256": "17fd65a86db51181f38d05a1c0596b073a0186c9a066d801ee90bfd997aaf178",
+  "raw_bytes": 2023,
+  "environment": {
+    "CARGO_TARGET_DIR": "/home/orca/orca/projects/tze-hud/target",
+    "CARGO_BUILD_JOBS": "1",
+    "PROTOC": "/usr/bin/protoc",
+    "VK_ICD_FILENAMES": "/usr/share/vulkan/icd.d/lvp_icd.json",
+    "HEADLESS_FORCE_SOFTWARE": "1",
+    "TZE_HUD_REQUIRE_GPU": "1",
+    "SKIP_GPU_TESTS": "unset",
+    "TZE_HUD_PERF_ASSERT": "unset",
+    "TZE_HUD_TEST_BUDGET_SLACK": "unset",
+    "RUST_TEST_THREADS": "unset"
+  },
+  "python_path_prefix": "/home/orca/orca/projects/tze-hud/.venv/bin",
+  "observed_processes": [
+    {
+      "pid": 3554904,
+      "ppid": 3554900,
+      "pgid": 3554904,
+      "state": "S",
+      "comm": "cargo-clippy",
+      "start_ticks": 14394774
+    },
+    {
+      "pid": 3554921,
+      "ppid": 3554904,
+      "pgid": 3554904,
+      "state": "R",
+      "comm": "cargo",
+      "start_ticks": 14394778
+    },
+    {
+      "pid": 3554972,
+      "ppid": 3554921,
+      "pgid": 3554904,
+      "state": "S",
+      "comm": "clippy-driver",
+      "start_ticks": 14394850
+    },
+    {
+      "pid": 3555072,
+      "ppid": 3554921,
+      "pgid": 3554904,
+      "state": "S",
+      "comm": "clippy-driver",
+      "start_ticks": 14395188
+    },
+    {
+      "pid": 3555091,
+      "ppid": 3554921,
+      "pgid": 3554904,
+      "state": "S",
+      "comm": "clippy-driver",
+      "start_ticks": 14395216
+    },
+    {
+      "pid": 3555206,
+      "ppid": 3555091,
+      "pgid": 3554904,
+      "state": "S",
+      "comm": "cc",
+      "start_ticks": 14395292
+    },
+    {
+      "pid": 3555207,
+      "ppid": 3555206,
+      "pgid": 3554904,
+      "state": "S",
+      "comm": "collect2",
+      "start_ticks": 14395293
+    },
+    {
+      "pid": 3555208,
+      "ppid": 3555207,
+      "pgid": 3554904,
+      "state": "R",
+      "comm": "ld",
+      "start_ticks": 14395293
+    },
+    {
+      "pid": 3555244,
+      "ppid": 3554921,
+      "pgid": 3554904,
+      "state": "S",
+      "comm": "clippy-driver",
+      "start_ticks": 14395430
+    },
+    {
+      "pid": 3555405,
+      "ppid": 3554921,
+      "pgid": 3554904,
+      "state": "S",
+      "comm": "clippy-driver",
+      "start_ticks": 14395613
+    },
+    {
+      "pid": 3555447,
+      "ppid": 3554921,
+      "pgid": 3554904,
+      "state": "S",
+      "comm": "clippy-driver",
+      "start_ticks": 14395677
+    },
+    {
+      "pid": 3555503,
+      "ppid": 3554921,
+      "pgid": 3554904,
+      "state": "S",
+      "comm": "clippy-driver",
+      "start_ticks": 14395758
+    },
+    {
+      "pid": 3555529,
+      "ppid": 3554921,
+      "pgid": 3554904,
+      "state": "S",
+      "comm": "clippy-driver",
+      "start_ticks": 14395815
+    },
+    {
+      "pid": 3555538,
+      "ppid": 3554921,
+      "pgid": 3554904,
+      "state": "S",
+      "comm": "clippy-driver",
+      "start_ticks": 14395851
+    },
+    {
+      "pid": 3555556,
+      "ppid": 3554921,
+      "pgid": 3554904,
+      "state": "S",
+      "comm": "clippy-driver",
+      "start_ticks": 14396047
+    },
+    {
+      "pid": 3555562,
+      "ppid": 3554921,
+      "pgid": 3554904,
+      "state": "S",
+      "comm": "clippy-driver",
+      "start_ticks": 14396077
+    },
+    {
+      "pid": 3555568,
+      "ppid": 3554921,
+      "pgid": 3554904,
+      "state": "S",
+      "comm": "clippy-driver",
+      "start_ticks": 14396098
+    },
+    {
+      "pid": 3555678,
+      "ppid": 3554921,
+      "pgid": 3554904,
+      "state": "S",
+      "comm": "clippy-driver",
+      "start_ticks": 14396378
+    },
+    {
+      "pid": 3555731,
+      "ppid": 3555678,
+      "pgid": 3554904,
+      "state": "S",
+      "comm": "cc",
+      "start_ticks": 14396391
+    },
+    {
+      "pid": 3555732,
+      "ppid": 3555731,
+      "pgid": 3554904,
+      "state": "S",
+      "comm": "collect2",
+      "start_ticks": 14396391
+    },
+    {
+      "pid": 3555733,
+      "ppid": 3555732,
+      "pgid": 3554904,
+      "state": "R",
+      "comm": "ld",
+      "start_ticks": 14396391
+    },
+    {
+      "pid": 3555735,
+      "ppid": 3554921,
+      "pgid": 3554904,
+      "state": "S",
+      "comm": "build-script-bu",
+      "start_ticks": 14396412
+    },
+    {
+      "pid": 3555738,
+      "ppid": 3555735,
+      "pgid": 3554904,
+      "state": "Z",
+      "comm": "x86_64-w64-ming",
+      "start_ticks": 14396413
+    },
+    {
+      "pid": 3555739,
+      "ppid": 3555735,
+      "pgid": 3554904,
+      "state": "S",
+      "comm": "x86_64-w64-ming",
+      "start_ticks": 14396413
+    },
+    {
+      "pid": 3555740,
+      "ppid": 3555739,
+      "pgid": 3554904,
+      "state": "S",
+      "comm": "sh",
+      "start_ticks": 14396413
+    },
+    {
+      "pid": 3555741,
+      "ppid": 3555740,
+      "pgid": 3554904,
+      "state": "S",
+      "comm": "x86_64-w64-ming",
+      "start_ticks": 14396413
+    },
+    {
+      "pid": 3555742,
+      "ppid": 3555741,
+      "pgid": 3554904,
+      "state": "D",
+      "comm": "cc1",
+      "start_ticks": 14396414
+    },
+    {
+      "pid": 3555758,
+      "ppid": 3554921,
+      "pgid": 3554904,
+      "state": "S",
+      "comm": "clippy-driver",
+      "start_ticks": 14396433
+    },
+    {
+      "pid": 3555792,
+      "ppid": 3554921,
+      "pgid": 3554904,
+      "state": "S",
+      "comm": "clippy-driver",
+      "start_ticks": 14396877
+    },
+    {
+      "pid": 3555798,
+      "ppid": 3554921,
+      "pgid": 3554904,
+      "state": "S",
+      "comm": "clippy-driver",
+      "start_ticks": 14396930
+    }
+  ],
+  "remaining_process_group": [],
+  "Rust_result_lines": [],
+  "skip_lines": []
+}
