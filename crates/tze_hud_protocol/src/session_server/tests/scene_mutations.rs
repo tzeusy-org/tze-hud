@@ -238,7 +238,7 @@ async fn test_mutation_result_echoes_client_batch_id() {
         timestamp_wall_us: now_wall_us(),
         payload: Some(ClientPayload::MutationBatch(MutationBatch {
             batch_id: client_batch_id.clone(),
-            lease_id,
+            lease_id: lease_id.clone(),
             mutations: vec![crate::proto::MutationProto {
                 mutation: Some(crate::proto::mutation_proto::Mutation::CreateTile(
                     crate::proto::CreateTileMutation {
@@ -259,7 +259,7 @@ async fn test_mutation_result_echoes_client_batch_id() {
     .await
     .unwrap();
 
-    // The batch will be rejected (no active tab in setup_test).
+    // CreateTile is runtime-internal, so the batch is rejected.
     // Regardless of rejection, MutationResult.batch_id MUST equal client_batch_id.
     let result_msg = next_server_msg(&mut stream).await;
     match &result_msg.payload {
@@ -269,8 +269,71 @@ async fn test_mutation_result_echoes_client_batch_id() {
                 "MutationResult.batch_id must echo the client-provided batch_id \
                      (batch_id must be echoed, not regenerated)"
             );
+            assert!(!result.ok);
+            assert_eq!(result.code, "INVALID_ARGUMENT");
+            assert!(result.hint.contains("ClaimTile"), "{result:?}");
         }
         other => panic!("Expected MutationResult, got: {other:?}"),
+    }
+
+    let malformed_batch_id = uuid::Uuid::now_v7().as_bytes().to_vec();
+    tx.send(ClientMessage {
+        sequence: 4,
+        timestamp_wall_us: now_wall_us(),
+        payload: Some(ClientPayload::MutationBatch(MutationBatch {
+            batch_id: malformed_batch_id.clone(),
+            lease_id: vec![1, 2, 3],
+            mutations: Vec::new(),
+            timing: None,
+        })),
+    })
+    .await
+    .unwrap();
+    let rejected = next_server_msg(&mut stream).await;
+    let rejection = match rejected.payload {
+        Some(ServerPayload::RequestResult(result)) => {
+            assert!(!result.ok);
+            assert_eq!(result.seq, 4);
+            assert_eq!(result.batch_id, malformed_batch_id);
+            assert_eq!(result.code, "INVALID_ARGUMENT");
+            assert!(result.hint.starts_with("Invalid lease_id bytes"));
+            assert!(
+                result
+                    .hint
+                    .contains("16-byte lease_id returned by ClaimTile")
+            );
+            assert!(result.hint.contains("new request or batch_id"));
+            result
+        }
+        other => panic!("Expected malformed lease rejection, got: {other:?}"),
+    };
+
+    // A corrected empty batch would succeed if reapplied. The same batch_id
+    // must instead replay the rejection and its guidance with new correlation.
+    tx.send(ClientMessage {
+        sequence: 5,
+        timestamp_wall_us: now_wall_us(),
+        payload: Some(ClientPayload::MutationBatch(MutationBatch {
+            batch_id: malformed_batch_id,
+            lease_id,
+            mutations: Vec::new(),
+            timing: None,
+        })),
+    })
+    .await
+    .unwrap();
+    let replayed = next_server_msg(&mut stream).await;
+    assert!(replayed.sequence > rejected.sequence);
+    match replayed.payload {
+        Some(ServerPayload::RequestResult(result)) => {
+            assert!(!result.ok);
+            assert_eq!(result.seq, 5);
+            assert_eq!(result.batch_id, rejection.batch_id);
+            assert_eq!(result.code, rejection.code);
+            assert_eq!(result.hint, rejection.hint);
+            assert_eq!(result.ids, rejection.ids);
+        }
+        other => panic!("Expected cached rejection, got: {other:?}"),
     }
 }
 

@@ -50,9 +50,54 @@ pub(super) fn fail(seq: u64, code: &str, hint: impl Into<String>) -> RequestResu
         seq,
         ok: false,
         code: code.to_string(),
-        hint: hint.into(),
+        hint: rejection_hint(code, hint.into()),
         ..Default::default()
     }
+}
+
+/// Keep the rejection reason and add the next action for its existing category.
+/// Mutation replays pass the same cached reason through this deterministic map.
+fn rejection_hint(code: &str, reason: String) -> String {
+    let action = match code {
+        "INVALID_ARGUMENT" => {
+            "Correct the rejected request fields and resend as a new request or batch_id"
+        }
+        "NOT_ALLOWED" => {
+            "Ask the operator to grant the required allow entry, then reconnect with a fresh SessionInit or valid SessionResume, then retry"
+        }
+        "NOT_HELD" => "ClaimTile or Publish to obtain a holding in this session before retrying",
+        "SAFE_MODE_ACTIVE" => "Wait for SessionResumed before retrying",
+        "ZONE_NOT_FOUND" => "Use a configured zone name, then resend Publish",
+        "WIDGET_NOT_FOUND" => "Use a registered widget name, then resend Publish",
+        "WIDGET_PARAMETER_INVALID" => {
+            "Use parameter names, types and values from the widget definition, then resend Publish"
+        }
+        "CONTENT_REJECTED" => {
+            "Use allowed content and a valid publication token; reduce publication/key counts or reuse an existing key before retrying"
+        }
+        "LEASE_NOT_ACTIVE" => {
+            "ClaimTile for a new active lease, then resend with its lease_id and a new batch_id"
+        }
+        "BUDGET_EXCEEDED" => {
+            "Reduce the request or clear unused holdings, then retry as a new request or batch_id when capacity is available"
+        }
+        "TIMESTAMP_TOO_OLD" => {
+            "Use a timestamp within the current session and resend as a new request or batch_id"
+        }
+        "TIMESTAMP_TOO_FUTURE" => {
+            "Move the presentation timestamp within the scheduling horizon and resend as a new request or batch_id"
+        }
+        "TIMESTAMP_EXPIRY_BEFORE_PRESENT" => {
+            "Set expiry after presentation or remove expiry, then resend as a new request or batch_id"
+        }
+        "UNAVAILABLE" => {
+            "Wait for capacity before retrying; use a new batch_id for a cached rejection"
+        }
+        _ => {
+            "Retry as a new request or batch_id; if the failure persists, report it to the operator"
+        }
+    };
+    format!("{reason}; {action}")
 }
 
 /// The `RequestResult` payload for a `MutationBatch`.
@@ -65,6 +110,11 @@ pub(super) fn batch_result(
     hint: String,
 ) -> ServerPayload {
     debug_assert!(code.is_empty() || ERROR_CODES.contains(&code.as_str()));
+    let hint = if accepted {
+        hint
+    } else {
+        rejection_hint(&code, hint)
+    };
     ServerPayload::RequestResult(RequestResult {
         seq,
         ok: accepted,
@@ -279,7 +329,11 @@ pub(super) async fn handle_claim_tile(
         Some(root) => match crate::convert::proto_node_tree_to_scene(root) {
             Some(nodes) => nodes,
             None => {
-                let r = fail(seq, "INVALID_ARGUMENT", "root node has no data");
+                let r = fail(
+                    seq,
+                    "INVALID_ARGUMENT",
+                    "root node has no data; set the root node data variant or omit root in ClaimTile",
+                );
                 return send_cached(session, tx, r).await;
             }
         },

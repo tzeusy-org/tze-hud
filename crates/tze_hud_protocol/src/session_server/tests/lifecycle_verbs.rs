@@ -285,5 +285,9 @@ async fn publish_to_unknown_zone_names_the_zone() {
     let r = request(&tx, &mut stream, 2, ClientPayload::Publish(publish)).await;
     assert_eq!(r.code, "ZONE_NOT_FOUND");
     assert!(r.hint.contains("nope"), "{r:?}");
+    assert!(!r.ok);
+    assert_eq!(r.seq, 2);
+    assert!(r.hint.contains("Use a configured zone name"), "{r:?}");
+    assert!(r.hint.contains("resend Publish"), "{r:?}");
     server.abort();
 }

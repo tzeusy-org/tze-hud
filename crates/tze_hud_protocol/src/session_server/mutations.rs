@@ -654,7 +654,9 @@ pub(super) async fn handle_mutation_batch(
                 accepted: false,
                 created_ids: Vec::new(),
                 error_code: "INVALID_ARGUMENT".to_string(),
-                error_message: "Invalid lease_id bytes".to_string(),
+                error_message:
+                    "Invalid lease_id bytes; use the 16-byte lease_id returned by ClaimTile"
+                        .to_string(),
             };
             if !batch.batch_id.is_empty() {
                 session

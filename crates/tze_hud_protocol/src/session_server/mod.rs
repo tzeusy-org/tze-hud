@@ -1208,8 +1208,48 @@ async fn send_resource_error_response(
         "wire_code": err.wire_code(),
     })
     .to_string();
+    let next_action = match err {
+        StoreResourceError::CapabilityDenied => {
+            "Ask the operator to grant upload_resource in the allow entries, then reconnect with a fresh SessionInit or valid SessionResume, then retry ResourceUploadStart"
+        }
+        StoreResourceError::BudgetExceeded { .. } => {
+            "Use a smaller resource or wait for resource capacity, then retry ResourceUploadStart"
+        }
+        StoreResourceError::SizeExceeded { .. } => {
+            "Declare a positive total_size_bytes and keep raw size, decoded size and dimensions within the reported limits, then retry ResourceUploadStart; use chunks above the inline limit"
+        }
+        StoreResourceError::UnsupportedType(_) => {
+            "Choose a supported resource_type matching the bytes, then retry ResourceUploadStart"
+        }
+        StoreResourceError::DecodeError(_) => {
+            "Repair the resource bytes and metadata for the declared resource_type, recompute expected_hash, then retry ResourceUploadStart"
+        }
+        StoreResourceError::HashMismatch { .. } => {
+            "Compute expected_hash as the 32-byte BLAKE3 hash of the exact upload bytes, then retry ResourceUploadStart"
+        }
+        StoreResourceError::TooManyUploads => {
+            "Complete an in-flight upload before retrying ResourceUploadStart; if none can complete, report stale upload capacity to the operator"
+        }
+        StoreResourceError::InvalidChunk(detail)
+            if detail.contains("unknown upload_id")
+                || detail.contains("not in-flight")
+                || detail.contains("no uploads in flight") =>
+        {
+            "Restart with ResourceUploadStart and wait for ResourceUploadAccepted before sending chunks"
+        }
+        StoreResourceError::InvalidChunk(_) => {
+            "Restart with ResourceUploadStart, then send consecutive chunk_index values from 0 using the returned upload_id"
+        }
+        StoreResourceError::UploadAborted(_) => {
+            "Restart with ResourceUploadStart and use the new returned upload_id"
+        }
+        StoreResourceError::Internal(_) => {
+            "Retry ResourceUploadStart; if the failure persists, report it to the operator"
+        }
+    };
     let hint = serde_json::json!({
         "expected_flow": "ResourceUploadStart -> [ResourceUploadAccepted] -> ResourceUploadChunk* -> ResourceUploadComplete",
+        "next_action": next_action,
     })
     .to_string();
     let seq = session.next_server_seq();
