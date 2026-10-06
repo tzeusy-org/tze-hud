@@ -168,6 +168,25 @@ async fn test_resource_upload_start_requires_upload_resource_capability() {
             assert_eq!(err.request_sequence, 2);
             assert_eq!(err.error_code, 1);
             assert!(err.upload_id.is_empty());
+            assert_eq!(
+                err.message,
+                "RESOURCE_CAPABILITY_DENIED: agent lacks upload_resource capability"
+            );
+            let context: serde_json::Value = serde_json::from_str(&err.context).unwrap();
+            assert_eq!(context["wire_code"], "RESOURCE_CAPABILITY_DENIED");
+            let hint: serde_json::Value = serde_json::from_str(&err.hint).unwrap();
+            assert_eq!(
+                hint["expected_flow"],
+                "ResourceUploadStart -> [ResourceUploadAccepted] -> ResourceUploadChunk* -> ResourceUploadComplete"
+            );
+            let action = hint["next_action"].as_str().unwrap();
+            assert!(action.contains("operator"));
+            assert!(action.contains("upload_resource"));
+            assert!(action.contains("retry ResourceUploadStart"));
+            assert!(action.contains("allow"));
+            assert!(action.contains("reconnect"));
+            assert!(action.contains("fresh SessionInit"));
+            assert!(action.contains("valid SessionResume"));
         }
         other => panic!("expected ResourceErrorResponse, got: {other:?}"),
     }
@@ -786,6 +805,13 @@ async fn test_resource_upload_chunk_error_aborts_inflight_tracking() {
             assert_eq!(err.request_sequence, 2);
             assert_eq!(err.error_code, 7);
             assert_eq!(err.upload_id, upload_id);
+            let hint: serde_json::Value = serde_json::from_str(&err.hint).unwrap();
+            assert!(
+                hint["next_action"]
+                    .as_str()
+                    .unwrap()
+                    .contains("consecutive chunk_index values from 0")
+            );
         }
         other => panic!("expected ResourceErrorResponse after bad chunk, got: {other:?}"),
     }
@@ -805,6 +831,13 @@ async fn test_resource_upload_chunk_error_aborts_inflight_tracking() {
         Some(ServerPayload::ResourceErrorResponse(err)) => {
             assert_eq!(err.request_sequence, 4);
             assert_eq!(err.error_code, 9);
+            let hint: serde_json::Value = serde_json::from_str(&err.hint).unwrap();
+            assert!(
+                hint["next_action"]
+                    .as_str()
+                    .unwrap()
+                    .contains("wait for ResourceUploadAccepted")
+            );
         }
         other => panic!("expected ResourceErrorResponse after aborted upload, got: {other:?}"),
     }
@@ -1017,7 +1050,7 @@ async fn test_resource_upload_chunk_error_aborts_inflight_tracking() {
         .await
         .expect("full event lane must not hang worker join")
         .unwrap();
-    let (full_tx, _full_init, mut full_stream) = handshake_with_capabilities(
+    let (full_tx, full_init, mut full_stream) = handshake_with_capabilities(
         &mut client,
         "resource-chunk-error",
         "test-key",
@@ -1044,6 +1077,183 @@ async fn test_resource_upload_chunk_error_aborts_inflight_tracking() {
         }
     }
     assert_eq!(recovered_after_full_lane, 4);
+
+    // Finish the final R3 session before the independent E2 inline-budget probe.
+    let full_session_id = match &full_init[0].payload {
+        Some(ServerPayload::SessionEstablished(e)) => bytes_to_scene_id(&e.session_id).unwrap(),
+        other => panic!("expected full-lane SessionEstablished, got: {other:?}"),
+    };
+    let cleanup = shared_state
+        .lock()
+        .await
+        .sessions
+        .observe_cleanup(&full_session_id);
+    drop(full_tx);
+    drop(full_stream);
+    tokio::time::timeout(Duration::from_secs(5), cleanup)
+        .await
+        .unwrap()
+        .unwrap();
+
+    // Chunk-slot checks above retain their default limits. Only the following
+    // inline completion guidance probe has no resident texture capacity.
+    shared_state.lock().await.resource_store =
+        tze_hud_resource::ResourceStore::new(tze_hud_resource::ResourceStoreConfig {
+            max_total_texture_bytes: 0,
+            ..Default::default()
+        });
+    let (tx, _init_msgs, mut stream) = handshake_with_capabilities(
+        &mut client,
+        "resource-chunk-error",
+        "test-key",
+        &["upload_resource"],
+    )
+    .await;
+
+    // Repair guidance must describe the category, rather than repeat the
+    // upload-flow diagram for every independent rejection.
+    let rgba = tiny_rgba_1x1([10, 20, 30, 255]);
+    let rgba_hash = blake3::hash(&rgba).as_bytes().to_vec();
+    let metadata = ResourceMetadata {
+        width: 1,
+        height: 1,
+        ..Default::default()
+    };
+    let corrupt_png = b"not a PNG".to_vec();
+    let cases = [
+        (
+            ResourceUploadStart {
+                expected_hash: vec![0; 32],
+                resource_type: 1,
+                total_size_bytes: rgba.len() as u64,
+                metadata: Some(metadata.clone()),
+                inline_data: rgba.clone(),
+            },
+            6,
+            "32-byte BLAKE3 hash",
+        ),
+        (
+            ResourceUploadStart {
+                expected_hash: blake3::hash(&corrupt_png).as_bytes().to_vec(),
+                resource_type: 2,
+                total_size_bytes: corrupt_png.len() as u64,
+                metadata: Some(ResourceMetadata::default()),
+                inline_data: corrupt_png,
+            },
+            5,
+            "Repair the resource bytes and metadata",
+        ),
+        (
+            ResourceUploadStart {
+                expected_hash: rgba_hash.clone(),
+                resource_type: 99,
+                total_size_bytes: rgba.len() as u64,
+                metadata: Some(metadata.clone()),
+                inline_data: rgba.clone(),
+            },
+            4,
+            "Choose a supported resource_type",
+        ),
+        (
+            ResourceUploadStart {
+                expected_hash: rgba_hash.clone(),
+                resource_type: 1,
+                total_size_bytes: (tze_hud_resource::DEFAULT_MAX_RESOURCE_BYTES + 1) as u64,
+                metadata: Some(metadata.clone()),
+                inline_data: Vec::new(),
+            },
+            3,
+            "within the reported limits",
+        ),
+        (
+            ResourceUploadStart {
+                expected_hash: rgba_hash,
+                resource_type: 1,
+                total_size_bytes: rgba.len() as u64,
+                metadata: Some(metadata),
+                inline_data: rgba,
+            },
+            2,
+            "Use a smaller resource or wait for resource capacity",
+        ),
+    ];
+    for (index, (start, code, action)) in cases.into_iter().enumerate() {
+        let sequence = 5 + index as u64;
+        tx.send(ClientMessage {
+            sequence,
+            timestamp_wall_us: now_wall_us(),
+            payload: Some(ClientPayload::ResourceUploadStart(start)),
+        })
+        .await
+        .unwrap();
+        match next_server_msg(&mut stream).await.payload {
+            Some(ServerPayload::ResourceErrorResponse(err)) => {
+                assert_eq!(err.request_sequence, sequence);
+                assert_eq!(err.error_code, code, "{err:?}");
+                assert!(err.upload_id.is_empty());
+                let hint: serde_json::Value = serde_json::from_str(&err.hint).unwrap();
+                assert!(
+                    hint["next_action"].as_str().unwrap().contains(action),
+                    "{err:?}"
+                );
+                assert_eq!(
+                    hint["expected_flow"],
+                    "ResourceUploadStart -> [ResourceUploadAccepted] -> ResourceUploadChunk* -> ResourceUploadComplete"
+                );
+            }
+            other => panic!("expected category-specific ResourceErrorResponse, got: {other:?}"),
+        }
+    }
+
+    // Test category guidance in a fresh namespace, independently of the
+    // earlier failed upload's separate store-cleanup ownership.
+    drop(tx);
+    drop(stream);
+    let (tx, _init_msgs, mut stream) = handshake_with_capabilities(
+        &mut client,
+        "resource-capacity-recovery",
+        "test-key",
+        &["upload_resource"],
+    )
+    .await;
+    // Four accepted unfinished uploads leave the fifth at the existing limit.
+    // The recovery action must use a supported completion call, not an absent
+    // upload-abort verb or an immediate retry that cannot free capacity.
+    for index in 0..5 {
+        let sequence = 2 + index;
+        tx.send(ClientMessage {
+            sequence,
+            timestamp_wall_us: now_wall_us(),
+            payload: Some(ClientPayload::ResourceUploadStart(ResourceUploadStart {
+                expected_hash: blake3::hash(&payload).as_bytes().to_vec(),
+                resource_type: 2,
+                total_size_bytes: payload.len() as u64,
+                metadata: Some(ResourceMetadata::default()),
+                inline_data: Vec::new(),
+            })),
+        })
+        .await
+        .unwrap();
+        match next_server_msg(&mut stream).await.payload {
+            Some(ServerPayload::ResourceUploadAccepted(accepted)) if index < 4 => {
+                assert_eq!(accepted.request_sequence, sequence);
+                assert_eq!(accepted.upload_id.len(), 16);
+            }
+            Some(ServerPayload::ResourceErrorResponse(err)) if index == 4 => {
+                assert_eq!(err.request_sequence, sequence);
+                assert_eq!(err.error_code, 8);
+                let hint: serde_json::Value = serde_json::from_str(&err.hint).unwrap();
+                assert!(
+                    hint["next_action"]
+                        .as_str()
+                        .unwrap()
+                        .contains("Complete an in-flight upload")
+                );
+                assert!(hint["next_action"].as_str().unwrap().contains("operator"));
+            }
+            other => panic!("expected upload capacity result, got: {other:?}"),
+        }
+    }
 
     drop(handle);
 }

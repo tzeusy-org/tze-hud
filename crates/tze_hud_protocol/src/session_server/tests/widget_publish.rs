@@ -166,6 +166,13 @@ async fn test_widget_publish_not_found() {
                 "Expected WIDGET_NOT_FOUND, got: {}",
                 result.code
             );
+            assert_eq!(result.seq, 2);
+            assert!(result.hint.contains("nonexistent"), "{result:?}");
+            assert!(
+                result.hint.contains("Use a registered widget name"),
+                "{result:?}"
+            );
+            assert!(result.hint.contains("resend Publish"), "{result:?}");
         }
         other => panic!("Expected WidgetPublishResult(WIDGET_NOT_FOUND), got: {other:?}"),
     }
@@ -214,12 +221,42 @@ async fn test_widget_publish_unknown_parameter() {
                 "Expected WIDGET_PARAMETER_INVALID, got: {}",
                 result.code
             );
+            assert_eq!(result.seq, 2);
+            assert!(result.hint.contains("bogus_param"), "{result:?}");
+            assert!(result.hint.contains("widget definition"), "{result:?}");
+            assert!(result.hint.contains("resend Publish"), "{result:?}");
         }
         other => {
             panic!("Expected WidgetPublishResult(WIDGET_UNKNOWN_PARAMETER), got: {other:?}")
         }
     }
 
+    // Follow the correction on the same outbound channel and permission set.
+    tx.send(ClientMessage {
+        sequence: 3,
+        timestamp_wall_us: now_wall_us(),
+        payload: Some(ClientPayload::Publish(Publish {
+            surface: "widget:gauge".to_string(),
+            params: vec![crate::proto::WidgetParameterValueProto {
+                param_name: "value".to_string(),
+                value: Some(crate::proto::widget_parameter_value_proto::Value::F32Value(
+                    0.5,
+                )),
+            }],
+            ..Default::default()
+        })),
+    })
+    .await
+    .unwrap();
+    match next_server_msg(&mut stream).await.payload {
+        Some(ServerPayload::RequestResult(result)) => {
+            assert!(result.ok, "{result:?}");
+            assert_eq!(result.seq, 3);
+            assert!(result.code.is_empty());
+            assert!(result.hint.is_empty());
+        }
+        other => panic!("Expected corrected widget Publish result, got: {other:?}"),
+    }
     drop(tx);
 }
 
