@@ -1,0 +1,110 @@
+{
+  "issue": "hud-x38zn.7",
+  "source_head": "b2f58cd757bdfe358d767d9fbb10c5bd92d9ab39",
+  "baseline": "e5e8044550352d2df42e0c903ca4006d2353eeaa",
+  "source_head_only_owned_paths": [
+    "crates/tze_hud_config/src/themes.rs",
+    "docs/api.md"
+  ],
+  "FIRST_scope": {
+    "exact_existing_COLOR_keys": 41,
+    "themes_private_validation_only": true,
+    "public_signatures_Cargo_features_schema_defaults_palettes_renderer_unchanged": true,
+    "CANONICAL_TOKENS_file": {
+      "bytes": 52045,
+      "sha256": "2f39bf45b196fdb0cee1ac30abba404843351702e976ea986afd7d6f3d7495bd"
+    },
+    "PortalPartTokens_defaults_file": {
+      "bytes": 119458,
+      "sha256": "2c64c3abfd32c7ab55e92b54c07cbc28509935217bd3e0c1f1497329050ee51c"
+    },
+    "all_other_Rust_blobs_baseline_equal": true,
+    "all328_Rust_inputs_captured": true,
+    "current72_T7_preserved_via_defining_blob_equality_and_default_normal_CI": true
+  },
+  "tests_delta": "+0~2-0",
+  "nearest_existing_fixtures": {
+    "tests_delta": "+0~2-0",
+    "existing_declarations": [
+      "builtin_themes_are_valid",
+      "full_themes_set_every_semantic_token",
+      "known_or_absent_theme_validates",
+      "parse_theme_rejects_unknown_keys_and_bad_values",
+      "selected_theme_layers_between_canonical_and_config",
+      "unknown_theme_is_a_validation_error_listing_themes",
+      "unset_theme_selects_default"
+    ],
+    "extended": [
+      "builtin_themes_are_valid",
+      "parse_theme_rejects_unknown_keys_and_bad_values"
+    ],
+    "original_assertion_prefixes_retained": true,
+    "other_fixture_bodies_equal": true
+  },
+  "criterion_matrix": [
+    {
+      "criterion": 1,
+      "fate": "implemented_and_executed",
+      "proof": "Independent documented41-key RGB/RGBA/mixedcase/trim table in builtin_themes_are_valid; focused7 and exact-source fullCI171 config tests positive."
+    },
+    {
+      "criterion": 2,
+      "fate": "implemented_and_executed",
+      "proof": "Existing original canonical invalid assertions retained; 41 keys x six bad string forms with exact sorted error rows; each nonstring rejected; empty/unknown/noncolor existing keys rejected. Existing canonical numeric/family/easing validation unchanged and normalCI positive."
+    },
+    {
+      "criterion": 3,
+      "fate": "source_and_execution_verified",
+      "proof": "Only themes.rs+docs/api differ across543 tracked non-evidence baseline hashes; explicit empty-layer resolved map equals full canonical defaults. No palette/default/schema/signature/feature edits."
+    },
+    {
+      "criterion": 4,
+      "fate": "executed",
+      "proof": "Synthetic parsed portal map -> existing resolve_tokens -> existing resolve_portal_tokens, explicit composer override wins, rgba retained and unused/malformed-direct-config color falls back; original selected/unset regression fixtures positive."
+    },
+    {
+      "criterion": 5,
+      "fate": "executed",
+      "proof": "Exactly two existing bodies extended/seven declarations unchanged. fmt1 retained -> scoped formatter0 -> formattedfmt0 -> themes7 -> portal33 -> ONE normalCI3245/70/72/default17/integration17014. No duplicate standalone broad check/clippy."
+    },
+    {
+      "criterion": 6,
+      "fate": "documented",
+      "proof": "Module/API docs describe41 existing-color exception/rejection/no default/palette/layer changes. Existingtheme6 andClassic11 routes retained, no lifecycle or live HUD/settings/model/deploy actions."
+    }
+  ],
+  "current_CI": {
+    "actual_exit": 0,
+    "seconds": 689.0272210449912,
+    "raw_sha256": "fa9564127debde86442b7ae53d8d0d182e4af26563c9a50c06a6eb90831cb4b9",
+    "raw_bytes": 450628,
+    "Rust_passed": 3245,
+    "Rust_summaries": 70,
+    "named72_count": 72,
+    "integration": {
+      "passed": 170,
+      "summaries": 14
+    },
+    "tool_and_metadata_skips": [
+      {
+        "line": 1,
+        "text": "SKIPPED: overlay-harness-contract needs PowerShell (pwsh)"
+      },
+      {
+        "line": 2949,
+        "text": "SKIP: integration has no lib/bin target (tests only)"
+      }
+    ],
+    "GPU_skip_lines": []
+  },
+  "failures_and_limits": [
+    "Initial source gap was source-inferred, not a claimed red behavioral run.",
+    "Initial actual fmt exit1 preserved; only themes.rs formatter corrected ordering/wrap and formattedb2f passed.",
+    "Initial metadata freeze-* stdout filenames reused; initiala698 JSON retained, original old filenames now b2f metadata. Root independently qualified baseline batch.",
+    "Parent HEADLESS_FORCE_SOFTWARE/LLVMPIPE_CI unset; normal actual GPU recipes set HEADLESS_FORCE_SOFTWARE1 with pinned lvp+LIBGL1+REQUIRE_GPU1. PERF normal off, default parallel; separate test-gpu not run.",
+    "No live Windows HUD, owner theme screenshot, host config/settings/model/credential or deployment evidence claimed; those separate existing theme6/restyle/owner scopes remain.",
+    "Independent PR correctness review and authoritative queue merge still required; worker performs no Beads closure."
+  ],
+  "discovered_follow_ups": [],
+  "blockers": []
+}

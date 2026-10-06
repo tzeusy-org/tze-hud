@@ -1,0 +1,40 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.07s
+     Running unittests src/lib.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/tze_hud_config-440996805ebc71bb)
+
+running 33 tests
+test portal_tokens::tests::caret_selection_placeholder_defaults_are_valid ... ok
+test portal_tokens::tests::connecting_marker_token_override_propagates ... ok
+test portal_tokens::tests::default_portal_text_sizes_are_readable_without_focus_resize ... ok
+test portal_tokens::tests::caret_selection_placeholder_overrides_propagate ... ok
+test portal_tokens::tests::degraded_tokens_default_values_are_valid ... ok
+test portal_tokens::tests::connecting_marker_token_is_valid_and_distinct_from_degraded ... ok
+test portal_tokens::tests::degraded_token_overrides_propagate ... ok
+test portal_tokens::tests::focus_ring_defaults_and_override_propagate ... ok
+test portal_tokens::tests::lifecycle_accent_width_default_and_override ... ok
+test portal_tokens::tests::partial_config_resolves_unset_frame_background_to_portal_default_not_grey ... ok
+test portal_tokens::tests::profile_override_changes_transition_ms ... ok
+test portal_tokens::tests::invalid_transition_ms_falls_back_to_default ... ok
+test portal_tokens::tests::profile_override_propagates_to_portal_tokens ... ok
+test portal_tokens::tests::resolve_portal_tokens_all_fields_populated ... ok
+test portal_tokens::tests::invalid_u32_token_triggers_fallback_and_warn_path ... ok
+test portal_tokens::tests::profile_swap_reskins_all_portal_parts ... ok
+test portal_tokens::tests::scroll_indicator_tokens_default_values_are_valid ... ok
+test portal_tokens::tests::profile_override_changes_frame_opacity ... ok
+test portal_tokens::tests::resize_grip_defaults_and_override_propagate ... ok
+test portal_tokens::tests::scroll_indicator_color_override_propagates ... ok
+test portal_tokens::tests::spacing_and_measure_defaults_and_override_propagate ... ok
+test portal_tokens::tests::timestamp_granularity_override_resolves_from_profile ... ok
+test portal_tokens::tests::timestamp_granularity_parses_all_variants_case_insensitively ... ok
+test portal_tokens::tests::timestamp_tokens_default_off_and_secondary_slate ... ok
+test portal_tokens::tests::timestamp_granularity_token_string_round_trips ... ok
+test portal_tokens::tests::token_change_propagates_on_republish ... ok
+test portal_tokens::tests::unparseable_color_token_triggers_fallback_and_warn_path ... ok
+test portal_tokens::tests::timestamp_granularity_unrecognized_override_falls_back_to_default ... ok
+test portal_tokens::tests::resolve_portal_tokens_defaults_on_empty_map ... ok
+test portal_tokens::tests::unparseable_token_falls_back_to_default ... ok
+test portal_tokens::tests::window_management_tokens_default_values_are_valid ... ok
+test portal_tokens::tests::window_management_tokens_override_propagates ... ok
+test portal_tokens::tests::unparseable_numeric_token_triggers_fallback_and_warn_path ... ok
+
+test result: ok. 33 passed; 0 failed; 0 ignored; 0 measured; 138 filtered out; finished in 0.00s
+
