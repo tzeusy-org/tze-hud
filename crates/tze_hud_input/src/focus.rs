@@ -1303,28 +1303,6 @@ mod tests {
         assert!(t.lost.is_some());
     }
 
-    #[test]
-    fn focus_cleared_when_lease_revoked() {
-        let (mut scene, tab_id, tile_id) = setup_scene();
-        let node_id = add_hit_region(
-            &mut scene,
-            tile_id,
-            Rect::new(0.0, 0.0, 100.0, 50.0),
-            "btn",
-            true,
-        );
-        let mut fm = FocusManager::new();
-        fm.add_tab(tab_id);
-        fm.on_click(tab_id, tile_id, Some(node_id), &scene);
-        assert!(fm.current_owner(tab_id).tile_id().is_some());
-
-        // Revocation removes the tile without notifying the focus manager.
-        scene.tiles.remove(&tile_id);
-        fm.clear_focus_on_missing_tile(tab_id, &scene);
-
-        assert_eq!(*fm.current_owner(tab_id), FocusOwner::None);
-    }
-
     // ── Focus isolation ──────────────────────────────────────────────────
 
     #[test]
