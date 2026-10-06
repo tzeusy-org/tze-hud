@@ -106,7 +106,8 @@ impl SceneGraph {
     }
 
     /// Unregister a zone by name. Returns the removed definition if found.
-    pub fn unregister_zone(&mut self, name: &str) -> Option<ZoneDefinition> {
+    #[cfg(test)]
+    pub(crate) fn unregister_zone(&mut self, name: &str) -> Option<ZoneDefinition> {
         let removed = self.zone_registry.unregister(name);
         if removed.is_some() {
             self.version += 1;
@@ -403,6 +404,7 @@ impl SceneGraph {
     /// Breakpoints identify byte offsets in the StreamText where the compositor
     /// pauses progressive reveal.
     #[allow(clippy::too_many_arguments)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn publish_to_zone_with_breakpoints(
         &mut self,
         zone_name: &str,
@@ -452,6 +454,7 @@ impl SceneGraph {
     ///
     /// Follows the widget instance's contention policy (LatestWins, Replace,
     /// Stack, MergeByKey), parallel to zone publishing.
+    #[cfg(any(test, feature = "test-support"))]
     pub fn publish_to_widget(
         &mut self,
         widget_name: &str,
@@ -472,7 +475,7 @@ impl SceneGraph {
         )
     }
 
-    /// [`Self::publish_to_widget`], recording `lease_id` as the publishing
+    /// Publish widget content, recording `lease_id` as the publishing
     /// lease. A terminal lease clears exactly its own publications; `None`
     /// belongs to no lease and survives every reap.
     #[allow(clippy::too_many_arguments)]

@@ -9,6 +9,7 @@ impl SceneGraph {
     }
 
     /// Deserialize a scene graph from JSON.
+    #[cfg(any(test, feature = "test-support"))]
     pub fn from_json(json: &str) -> Result<Self, serde_json::Error> {
         serde_json::from_str(json)
     }
@@ -21,7 +22,8 @@ impl SceneGraph {
     /// # Checksum
     /// The returned `SceneGraphSnapshot.checksum` is a BLAKE3 hash (hex-encoded) computed
     /// over the canonical JSON of the snapshot with the checksum field set to `""`.
-    /// Use [`SceneGraphSnapshot::verify_checksum`] to verify after deserialization.
+    /// Snapshot fixtures verify this value against the canonical content
+    /// after deserialization.
     ///
     /// # Clock arguments
     /// `wall_us` is UTC wall-clock microseconds since epoch (u64). `mono_us` is

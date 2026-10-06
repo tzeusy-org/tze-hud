@@ -5,7 +5,7 @@ impl SceneGraph {
 
     /// Create a tile. This is the unchecked form used internally for scene construction.
     ///
-    /// For agent-facing operations use [`create_tile_checked`] which enforces:
+    /// The checked tile fixture enforces:
     /// - Lease active
     /// - Per-tab tile count limit (1024)
     /// - Bounds positive-size and within-display-area
@@ -25,6 +25,7 @@ impl SceneGraph {
     ///
     /// Requires an active lease. Enforces per-tab tile limit, bounds invariants,
     /// and z_order zone-band reservation.
+    #[cfg(any(test, feature = "test-support"))]
     pub fn create_tile_checked(
         &mut self,
         tab_id: SceneId,
@@ -657,6 +658,7 @@ impl SceneGraph {
     ///
     /// The node must already exist in the scene graph and belong to `tile_id`.
     /// The replacement `data` discriminant must match the existing node's discriminant.
+    #[cfg(any(test, feature = "test-support"))]
     pub fn update_node_content(
         &mut self,
         tile_id: SceneId,

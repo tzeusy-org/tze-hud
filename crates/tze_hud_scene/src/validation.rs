@@ -584,6 +584,7 @@ impl BatchRejected {
     }
 
     /// Return the primary (first) error code.
+    #[cfg(any(test, feature = "test-support"))]
     pub fn primary_code(&self) -> Option<ValidationErrorCode> {
         self.errors.first().map(|e| e.code)
     }

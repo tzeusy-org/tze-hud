@@ -1,11 +1,8 @@
 //! Timing types for tze_hud.
 //!
-//! - [`domains`] — clock-domain newtypes: [`WallUs`], [`MonoUs`], [`DurationUs`].
-//! - [`hints`] — [`TimingHints`] carried on payloads (`present_at`, `expires_at`,
-//!   message class, delivery policy).
+//! - [`domains`] — clock-domain newtypes for live mutation timestamps:
+//!   [`WallUs`] and [`MonoUs`].
 
 pub mod domains;
-pub mod hints;
 
-pub use domains::{DurationUs, MonoUs, WallUs};
-pub use hints::{DeliveryPolicy, MessageClass, Schedule, TimingHints};
+pub use domains::{MonoUs, WallUs};

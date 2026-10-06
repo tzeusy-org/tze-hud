@@ -383,7 +383,8 @@ impl PortalPartKind {
     /// Whether this part carries text (and therefore participates in
     /// `text-portal` readability enforcement). Geometry-only parts
     /// (`Divider`, `CaptureBackstop`, `GestureShield`) return `false`.
-    pub fn is_text_bearing(self) -> bool {
+    #[cfg(test)]
+    fn is_text_bearing(self) -> bool {
         matches!(
             self,
             PortalPartKind::Frame // footer/status text
@@ -1061,6 +1062,7 @@ impl HitResult {
     /// Extract the `(tile_id, node_id)` pair for `NodeHit` results.
     ///
     /// Returns `None` for all other variants.
+    #[cfg(any(test, feature = "test-support"))]
     pub fn node_hit_ids(&self) -> Option<(SceneId, SceneId)> {
         if let HitResult::NodeHit {
             tile_id, node_id, ..
@@ -1201,10 +1203,6 @@ impl LeaseState {
 pub enum CapsError {
     /// Runtime-wide lease limit (64) exceeded — spec §Requirement: Lease Caps.
     MaxRuntimeLeasesExceeded { current: usize, limit: usize },
-    /// Tile-per-lease limit (64) exceeded — spec §Requirement: Lease Caps.
-    MaxTilesPerLeaseExceeded { current: u32, limit: u32 },
-    /// Node-per-tile limit (64) exceeded — spec §Requirement: Lease Caps.
-    MaxNodesPerTileExceeded { current: u32, limit: u32 },
 }
 
 impl std::fmt::Display for CapsError {
@@ -1212,12 +1210,6 @@ impl std::fmt::Display for CapsError {
         match self {
             CapsError::MaxRuntimeLeasesExceeded { current, limit } => {
                 write!(f, "MAX_RUNTIME_LEASES_EXCEEDED: {current} / {limit}")
-            }
-            CapsError::MaxTilesPerLeaseExceeded { current, limit } => {
-                write!(f, "MAX_TILES_PER_LEASE_EXCEEDED: {current} / {limit}")
-            }
-            CapsError::MaxNodesPerTileExceeded { current, limit } => {
-                write!(f, "MAX_NODES_PER_TILE_EXCEEDED: {current} / {limit}")
             }
         }
     }
@@ -1230,10 +1222,6 @@ pub enum LeaseError {
     InvalidTransition { from: LeaseState, to: LeaseState },
     /// Lease not found in the scene graph.
     LeaseNotFound(SceneId),
-    /// Lease exists but is not in Active state.
-    LeaseNotActive(SceneId),
-    /// Mutation would exceed the lease's resource budget.
-    BudgetExceeded(BudgetError),
     /// Lease caps exceeded (runtime-wide or per-session).
     CapsExceeded(CapsError),
 }
@@ -1245,8 +1233,6 @@ impl std::fmt::Display for LeaseError {
                 write!(f, "invalid lease transition: {from:?} -> {to:?}")
             }
             LeaseError::LeaseNotFound(id) => write!(f, "lease not found: {id}"),
-            LeaseError::LeaseNotActive(id) => write!(f, "lease not active: {id}"),
-            LeaseError::BudgetExceeded(e) => write!(f, "budget exceeded: {e}"),
             LeaseError::CapsExceeded(e) => write!(f, "caps exceeded: {e}"),
         }
     }
@@ -1593,6 +1579,7 @@ pub fn rect_to_relative_geometry_policy(
 }
 
 /// Resolve a geometry policy into absolute pixel bounds for the given display size.
+#[cfg(any(test, feature = "test-support"))]
 pub fn geometry_policy_to_absolute_rect(
     policy: GeometryPolicy,
     display_width: f32,
@@ -1880,15 +1867,13 @@ pub struct ZonePublishToken {
 /// (see [`ZoneInteractionKind::Action`] and [`ZoneHitRegion::interaction_id`]).
 ///
 /// Rendering: buttons appear in a horizontal row at the bottom of the
-/// notification slot.  Labels exceeding `MAX_ACTION_LABEL_LEN` characters are
-/// not currently truncated by the runtime — callers should enforce this limit
-/// before publishing.
+/// notification slot. The runtime does not enforce a publish-time label
+/// length limit; callers should keep labels concise for the available space.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NotificationAction {
     /// Human-readable label shown on the button (e.g. "Open", "Snooze").
     ///
-    /// Maximum `MAX_ACTION_LABEL_LEN` characters.  The runtime does not
-    /// currently enforce truncation; callers are responsible.
+    /// The runtime does not enforce a publish-time label length limit.
     pub label: String,
     /// Opaque callback identifier forwarded to the publishing agent when the
     /// button is activated (click or keyboard Enter/Space).
@@ -1898,13 +1883,6 @@ pub struct NotificationAction {
     /// meaningful identifiers for routing clarity.
     pub callback_id: String,
 }
-
-/// Maximum UTF-8 character length for a `NotificationAction` label.
-///
-/// Labels exceeding this limit may overflow the rendered slot.  The runtime
-/// does not currently enforce truncation at publish time; callers should
-/// respect this limit before constructing a [`NotificationAction`].
-pub const MAX_ACTION_LABEL_LEN: usize = 32;
 
 /// Notification payload: text + optional icon + urgency + optional two-line layout + optional action buttons.
 ///
@@ -1945,8 +1923,7 @@ pub struct NotificationPayload {
     /// Optional action buttons shown at the bottom of the notification slot.
     ///
     /// At most `MAX_NOTIFICATION_ACTIONS` actions are rendered; excess entries
-    /// are silently ignored by the compositor.  Each action's label is
-    /// truncated to `MAX_ACTION_LABEL_LEN` characters.
+    /// are silently ignored by the compositor.
     ///
     /// When empty (the default), no action buttons are rendered.
     #[serde(default)]
@@ -2537,6 +2514,7 @@ impl WidgetRegistry {
     }
 
     /// Look up a widget instance by instance_name.
+    #[cfg(any(test, feature = "test-support"))]
     pub fn get_instance(&self, instance_name: &str) -> Option<&WidgetInstance> {
         self.instances.get(instance_name)
     }
@@ -2560,6 +2538,7 @@ impl WidgetRegistry {
     }
 
     /// Get the current active publish(es) for a widget instance.
+    #[cfg(any(test, feature = "test-support"))]
     pub fn active_for_widget(&self, instance_name: &str) -> &[WidgetPublishRecord] {
         self.active_publishes
             .get(instance_name)
@@ -2846,6 +2825,7 @@ impl SceneGraphSnapshot {
     ///
     /// Returns `true` if the stored `checksum` matches the result of
     /// [`Self::compute_checksum`].
+    #[cfg(any(test, feature = "test-support"))]
     pub fn verify_checksum(&self) -> bool {
         let expected = self.compute_checksum();
         self.checksum == expected
@@ -2860,6 +2840,7 @@ impl SceneGraphSnapshot {
     }
 
     /// Deserialize a snapshot from JSON.
+    #[cfg(any(test, feature = "test-support"))]
     pub fn from_json(json: &str) -> Result<Self, serde_json::Error> {
         serde_json::from_str(json)
     }
@@ -3107,6 +3088,7 @@ impl ZoneRegistry {
     }
 
     /// Query zones that accept a given media type.
+    #[cfg(any(test, feature = "test-support"))]
     pub fn zones_accepting(&self, media_type: ZoneMediaType) -> Vec<&ZoneDefinition> {
         self.zones
             .values()
@@ -3115,6 +3097,7 @@ impl ZoneRegistry {
     }
 
     /// Return all zone definitions.
+    #[cfg(any(test, feature = "test-support"))]
     pub fn all_zones(&self) -> Vec<&ZoneDefinition> {
         self.zones.values().collect()
     }
@@ -3135,6 +3118,7 @@ impl ZoneRegistry {
     /// is also not exposed (deferred to post-v1 per spec line 360).
     ///
     /// Returns `None` if the zone is not found.
+    #[cfg(any(test, feature = "test-support"))]
     pub fn get_occupancy(&self, zone_name: &str, tab_id: SceneId) -> Option<ZoneOccupancy> {
         let _zone = self.zones.get(zone_name)?;
         let pubs = self

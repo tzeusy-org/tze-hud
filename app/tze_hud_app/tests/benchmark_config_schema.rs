@@ -63,7 +63,7 @@ async fn benchmark_config_boot_registers_widgets_for_live_publish() {
 
     for instance in ["main-gauge", "main-progress", "main-status"] {
         assert!(
-            scene.widget_registry.get_instance(instance).is_some(),
+            scene.widget_registry.instances.contains_key(instance),
             "expected widget instance `{instance}` from benchmark config"
         );
     }

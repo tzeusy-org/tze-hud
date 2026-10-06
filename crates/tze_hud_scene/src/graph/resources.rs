@@ -24,7 +24,8 @@ impl SceneGraph {
 
     /// Returns the current node reference count for a resource, or `None` if the
     /// resource has not been registered.
-    pub fn resource_ref_count(&self, id: &ResourceId) -> Option<u32> {
+    #[cfg(test)]
+    pub(crate) fn resource_ref_count(&self, id: &ResourceId) -> Option<u32> {
         self.registered_resources.get(id).copied()
     }
 

@@ -62,7 +62,7 @@ async fn production_config_boots_with_builtin_widget_bundles() {
     // fell back to defaults, these instances are absent.
     for instance in ["main-gauge", "main-progress", "main-status"] {
         assert!(
-            scene.widget_registry.get_instance(instance).is_some(),
+            scene.widget_registry.instances.contains_key(instance),
             "expected widget instance `{instance}` from canonical app config; startup likely fell back"
         );
     }

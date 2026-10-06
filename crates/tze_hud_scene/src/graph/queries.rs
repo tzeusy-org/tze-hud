@@ -325,8 +325,8 @@ impl SceneGraph {
 
     /// Update `HitRegionLocalState` for the given point.
     ///
-    /// Called by the input pipeline (Stage 2) immediately after hit-testing to
-    /// provide local visual feedback without waiting for the owning agent.
+    /// Used by hit-test fixtures to reflect local visual feedback without
+    /// waiting for the owning agent.
     /// Sets `hovered = true` on the newly-hit node and `hovered = false` on the
     /// previous hover node (if it changed).
     ///
@@ -334,6 +334,7 @@ impl SceneGraph {
     /// `result`     — the current hit-test result.
     ///
     /// Returns the newly-hovered node ID (if any) for the caller to track.
+    #[cfg(any(test, feature = "test-support"))]
     pub fn update_hover_state(
         &mut self,
         prev_hover: Option<SceneId>,
@@ -362,21 +363,19 @@ impl SceneGraph {
         }
     }
 
-    /// Update pressed state for a node.
+    /// Update pressed state for a node in hit-test fixtures.
     ///
     /// Call with `pressed = true` on PointerDown and `pressed = false` on
     /// PointerUp / capture release.  No-op if the node has no local state entry.
+    #[cfg(any(test, feature = "test-support"))]
     pub fn update_pressed_state(&mut self, node_id: SceneId, pressed: bool) {
         if let Some(state) = self.hit_region_states.get_mut(&node_id) {
             state.pressed = pressed;
         }
     }
 
-    /// Update focused state for a node.
-    ///
-    /// The focus state machine is owned by the input epic; this helper allows
-    /// the compositor to reflect focus changes into local state without a full
-    /// state-machine transition.
+    /// Update focused state for a node in hit-test fixtures.
+    #[cfg(any(test, feature = "test-support"))]
     pub fn update_focused_state(&mut self, node_id: SceneId, focused: bool) {
         if let Some(state) = self.hit_region_states.get_mut(&node_id) {
             state.focused = focused;
@@ -396,12 +395,14 @@ impl SceneGraph {
         }
     }
 
-    /// Mark an element as actively being dragged (show visual feedback).
+    /// Mark an element as actively dragged in drag-feedback fixtures.
+    #[cfg(any(test, feature = "test-support"))]
     pub fn set_drag_active(&mut self, element_id: SceneId) {
         self.overlay.drag_active_elements.insert(element_id);
     }
 
-    /// Clear the active drag mark for an element.
+    /// Clear the active drag mark in drag-feedback fixtures.
+    #[cfg(any(test, feature = "test-support"))]
     pub fn clear_drag_active(&mut self, element_id: SceneId) {
         self.overlay.drag_active_elements.remove(&element_id);
     }
