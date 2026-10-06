@@ -1,0 +1,810 @@
+{
+  "at": "2026-10-06T17:57:45.448355+00:00",
+  "native_pid": 3666291,
+  "source_head": "75ad0f051dca59d6b39166bdb1d9c627bae9dca3",
+  "scope": "current docs/invariants.md named function definitions; source-presence only, not scenario execution/coverage",
+  "docs_sha256": "c8e8554ed6de04b3917b46b5fcea3dade85e7c83ba10bd63221f01161a98ba04",
+  "named_assertion_count": 86,
+  "named_assertions": [
+    {
+      "name": "test_hud_publish_zone_ttl_sets_content_expiry_and_is_swept",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_mcp/src/server/tests.rs",
+          "line": 461
+        }
+      ]
+    },
+    {
+      "name": "delay_ms_holds_content_until_due",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_mcp/src/server/tests.rs",
+          "line": 529
+        }
+      ]
+    },
+    {
+      "name": "notification_ttl_zero_is_held_and_hold_retimes_it",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_mcp/src/server/tests.rs",
+          "line": 751
+        }
+      ]
+    },
+    {
+      "name": "test_publication_ttl_ms_uses_expires_at_wall_us",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_compositor/src/renderer/tests/zone_layers.rs",
+          "line": 525
+        }
+      ]
+    },
+    {
+      "name": "hold_moves_the_fade_deadline_and_ttl_zero_never_fades",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_compositor/src/renderer/tests/idle_gate.rs",
+          "line": 435
+        }
+      ]
+    },
+    {
+      "name": "grpc_zone_publish_ttl_sets_expiry_and_is_swept",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_protocol/src/session_server/tests/invariants.rs",
+          "line": 325
+        }
+      ]
+    },
+    {
+      "name": "grpc_zone_publish_expires_at_is_swept",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_protocol/src/session_server/tests/invariants.rs",
+          "line": 354
+        }
+      ]
+    },
+    {
+      "name": "grpc_zone_publish_present_at_is_held_until_due",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_protocol/src/session_server/tests/invariants.rs",
+          "line": 385
+        }
+      ]
+    },
+    {
+      "name": "grpc_batch_present_at_holds_content_until_due",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_protocol/src/session_server/tests/invariants.rs",
+          "line": 503
+        }
+      ]
+    },
+    {
+      "name": "grpc_batch_expires_at_sweeps_tile",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_protocol/src/session_server/tests/invariants.rs",
+          "line": 547
+        }
+      ]
+    },
+    {
+      "name": "poc_zone_notification_ttl_disappears_unattended",
+      "definitions": [
+        {
+          "path": "tests/integration/poc_acceptance.rs",
+          "line": 738
+        }
+      ]
+    },
+    {
+      "name": "poc_zone_delay_ms_appears_on_schedule",
+      "definitions": [
+        {
+          "path": "tests/integration/poc_acceptance.rs",
+          "line": 770
+        }
+      ]
+    },
+    {
+      "name": "test_hud_publish_zone_contention_policy_latest_wins",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_mcp/src/server/tests.rs",
+          "line": 490
+        }
+      ]
+    },
+    {
+      "name": "test_latest_wins_zone_renders_only_latest_publication",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_compositor/src/renderer/tests/zone_stack.rs",
+          "line": 894
+        }
+      ]
+    },
+    {
+      "name": "test_pointer_move_coalesced_in_batch",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_input/src/batching.rs",
+          "line": 279
+        }
+      ]
+    },
+    {
+      "name": "test_coalesce_scroll_latest_wins",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_input/src/coalescing.rs",
+          "line": 348
+        }
+      ]
+    },
+    {
+      "name": "test_enter_safe_mode_suspends_active_leases",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_runtime/src/shell/safe_mode.rs",
+          "line": 260
+        }
+      ]
+    },
+    {
+      "name": "test_mutations_rejected_via_shared_state_flag",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_runtime/src/shell/safe_mode.rs",
+          "line": 389
+        }
+      ]
+    },
+    {
+      "name": "hotkey_event_enters_safe_mode_and_suspends_leases",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_runtime/src/windowed/safe_mode_toggle.rs",
+          "line": 113
+        }
+      ]
+    },
+    {
+      "name": "safe_mode_hotkey_defaults_overrides_and_rejects_garbage",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_config/src/tests.rs",
+          "line": 737
+        }
+      ]
+    },
+    {
+      "name": "shell_dismiss_override_removes_portal_tile",
+      "definitions": [
+        {
+          "path": "tests/integration/text_stream_portal_governance.rs",
+          "line": 337
+        }
+      ]
+    },
+    {
+      "name": "shell_status_snapshot_exposes_no_portal_identity_or_transcript",
+      "definitions": [
+        {
+          "path": "tests/integration/text_stream_portal_governance.rs",
+          "line": 303
+        }
+      ]
+    },
+    {
+      "name": "viewer_dismiss_tile_revokes_lease_in_any_live_state",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_scene/src/graph/tests.rs",
+          "line": 4766
+        }
+      ]
+    },
+    {
+      "name": "viewer_dismiss_tile_pushes_reclaimed_override",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_protocol/src/session_server/tests/events.rs",
+          "line": 174
+        }
+      ]
+    },
+    {
+      "name": "viewer_dismiss_portal_detaches_and_next_publish_reattaches",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_runtime/src/portal_projection_driver.rs",
+          "line": 1538
+        }
+      ]
+    },
+    {
+      "name": "viewer_close_button_dismisses_hovered_tile_and_notifies_owner",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_runtime/src/windowed/event_loop_harness.rs",
+          "line": 949
+        }
+      ]
+    },
+    {
+      "name": "poc_portal_viewer_dismiss_then_mcp_verbs",
+      "definitions": [
+        {
+          "path": "tests/integration/poc_acceptance.rs",
+          "line": 673
+        }
+      ]
+    },
+    {
+      "name": "tile_close_button_draw_and_hit_region_share_token_geometry",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_compositor/src/renderer/tests/hit_drag.rs",
+          "line": 1006
+        }
+      ]
+    },
+    {
+      "name": "poc_override_safe_mode_wins_with_hung_grpc_agent",
+      "definitions": [
+        {
+          "path": "tests/integration/poc_acceptance.rs",
+          "line": 995
+        }
+      ]
+    },
+    {
+      "name": "poc_override_exit_safe_mode_with_agent_hung_during_it",
+      "definitions": [
+        {
+          "path": "tests/integration/poc_acceptance.rs",
+          "line": 1042
+        }
+      ]
+    },
+    {
+      "name": "poc_override_notifies_the_agent",
+      "definitions": [
+        {
+          "path": "tests/integration/poc_acceptance.rs",
+          "line": 1071
+        }
+      ]
+    },
+    {
+      "name": "hud_publish_in_safe_mode_returns_safe_mode_active",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_mcp/src/server/tests.rs",
+          "line": 1123
+        }
+      ]
+    },
+    {
+      "name": "safe_mode_does_not_regrant_suspended_mcp_lease",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_mcp/src/server/tests.rs",
+          "line": 1182
+        }
+      ]
+    },
+    {
+      "name": "resume_restores_mcp_publishing",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_mcp/src/server/tests.rs",
+          "line": 1214
+        }
+      ]
+    },
+    {
+      "name": "test_chrome_always_above_max_zorder_tile",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_compositor/src/renderer/tests/surface.rs",
+          "line": 38
+        }
+      ]
+    },
+    {
+      "name": "windowed_frame_draws_chrome_overlay_in_safe_mode",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_compositor/src/renderer/safe_mode_overlay.rs",
+          "line": 89
+        }
+      ]
+    },
+    {
+      "name": "disconnect_transitions_to_orphaned_and_sets_disconnection_badge",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_protocol/tests/lease_governance.rs",
+          "line": 84
+        }
+      ]
+    },
+    {
+      "name": "grace_period_expiry_removes_tile_and_nodes",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_protocol/tests/lease_governance.rs",
+          "line": 265
+        }
+      ]
+    },
+    {
+      "name": "disconnect_then_reconnect_within_grace_resumes_same_surface_without_duplication",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_runtime/src/portal_projection_driver.rs",
+          "line": 1767
+        }
+      ]
+    },
+    {
+      "name": "resumed_session_restores_usage_before_accepting_new_mutations",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_runtime/src/mutation_budget_bridge.rs",
+          "line": 460
+        }
+      ]
+    },
+    {
+      "name": "grpc_disconnect_orphans_leases_and_badges_tiles",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_protocol/src/session_server/tests/invariants.rs",
+          "line": 177
+        }
+      ]
+    },
+    {
+      "name": "grpc_resume_within_grace_restores_same_lease_and_tile",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_protocol/src/session_server/tests/invariants.rs",
+          "line": 227
+        }
+      ]
+    },
+    {
+      "name": "grpc_grace_expiry_reclaims_orphaned_lease_and_rejects_resume",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_protocol/src/session_server/tests/invariants.rs",
+          "line": 256
+        }
+      ]
+    },
+    {
+      "name": "render_frame_reclaims_orphaned_lease_after_grace",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_runtime/src/headless.rs",
+          "line": 1435
+        }
+      ]
+    },
+    {
+      "name": "orphaned_tile_emits_disconnection_badge_draw_cmd",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_compositor/src/renderer/tests/focus_chrome.rs",
+          "line": 248
+        }
+      ]
+    },
+    {
+      "name": "poc_portal_abandoned_is_reclaimed",
+      "definitions": [
+        {
+          "path": "tests/integration/poc_acceptance.rs",
+          "line": 711
+        }
+      ]
+    },
+    {
+      "name": "poc_tile_claim_with_placement_two_round_trips",
+      "definitions": [
+        {
+          "path": "tests/integration/poc_acceptance.rs",
+          "line": 838
+        }
+      ]
+    },
+    {
+      "name": "poc_tile_update_then_orphan_then_reclaim_after_grace",
+      "definitions": [
+        {
+          "path": "tests/integration/poc_acceptance.rs",
+          "line": 898
+        }
+      ]
+    },
+    {
+      "name": "tile_lease_reap_keeps_same_namespace_mcp_publications",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_scene/src/graph/spec_scenarios.rs",
+          "line": 327
+        }
+      ]
+    },
+    {
+      "name": "revoked_lease_clears_only_its_publications",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_scene/src/graph/spec_scenarios.rs",
+          "line": 337
+        }
+      ]
+    },
+    {
+      "name": "test_ttl_excluded_during_suspension",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_runtime/src/shell/safe_mode.rs",
+          "line": 321
+        }
+      ]
+    },
+    {
+      "name": "test_lease_identity_preserved_across_suspend_resume",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_runtime/src/shell/safe_mode.rs",
+          "line": 299
+        }
+      ]
+    },
+    {
+      "name": "test_lease_suspend_from_active",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_scene/src/graph/tests.rs",
+          "line": 2801
+        }
+      ]
+    },
+    {
+      "name": "test_lease_resume_from_suspended",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_scene/src/graph/tests.rs",
+          "line": 2836
+        }
+      ]
+    },
+    {
+      "name": "significant_degradation_preserves_hidden_tiles_and_opaques_visible_tiles",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_compositor/src/renderer/tile_render.rs",
+          "line": 3158
+        }
+      ]
+    },
+    {
+      "name": "aggregate_limits_are_atomic_across_agents",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_runtime/src/mutation_budget_bridge.rs",
+          "line": 363
+        }
+      ]
+    },
+    {
+      "name": "agent_texture_budget_rejects_whole_upload_and_stores_nothing",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_resource/tests/store_behavior.rs",
+          "line": 84
+        }
+      ]
+    },
+    {
+      "name": "runtime_wide_texture_cap_is_shared_across_agents",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_resource/tests/store_behavior.rs",
+          "line": 109
+        }
+      ]
+    },
+    {
+      "name": "resource_count_cap_rejects_the_extra_resource",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_resource/tests/store_behavior.rs",
+          "line": 129
+        }
+      ]
+    },
+    {
+      "name": "per_resource_size_cap_rejects_chunked_upload_at_start",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_resource/tests/store_behavior.rs",
+          "line": 151
+        }
+      ]
+    },
+    {
+      "name": "upload_slot_cap_is_per_agent_and_freed_by_abort",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_resource/tests/store_behavior.rs",
+          "line": 172
+        }
+      ]
+    },
+    {
+      "name": "chunked_upload_rejected_at_complete_frees_its_slot_and_stores_nothing",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_resource/tests/store_behavior.rs",
+          "line": 204
+        }
+      ]
+    },
+    {
+      "name": "hint",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_protocol/src/token.rs",
+          "line": 193
+        },
+        {
+          "path": "crates/tze_hud_runtime/src/operator/update.rs",
+          "line": 433
+        }
+      ]
+    },
+    {
+      "name": "mutation_batch_oversized_rejected_with_structured_error",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_protocol/tests/fuzz_protocol_boundary.rs",
+          "line": 377
+        }
+      ]
+    },
+    {
+      "name": "test_structured_error_has_hint_field",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_mcp/src/server/tests.rs",
+          "line": 257
+        }
+      ]
+    },
+    {
+      "name": "error_codes_are_unique_and_documented",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_mcp/src/error.rs",
+          "line": 130
+        }
+      ]
+    },
+    {
+      "name": "every_returned_code_is_in_the_closed_set",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_mcp/src/server/tests.rs",
+          "line": 338
+        }
+      ]
+    },
+    {
+      "name": "rejections_carry_stable_wire_code_and_actionable_detail",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_resource/tests/store_behavior.rs",
+          "line": 236
+        }
+      ]
+    },
+    {
+      "name": "chunk_protocol_errors_have_stable_codes",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_resource/tests/store_behavior.rs",
+          "line": 280
+        }
+      ]
+    },
+    {
+      "name": "graph::widget_tests::widget_ttl_only_expired_publication_removed_when_mixed",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_scene/src/graph/widget_tests.rs",
+          "line": 1096
+        }
+      ]
+    },
+    {
+      "name": "graph::widget_tests::widget_ttl_only_expired_publication_removed_when_mixed",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_scene/src/graph/widget_tests.rs",
+          "line": 1096
+        }
+      ]
+    },
+    {
+      "name": "shell::safe_mode",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_protocol/src/session_server/verbs.rs",
+          "line": 198
+        }
+      ]
+    },
+    {
+      "name": "graph::widget_tests::widget_ttl_only_expired_publication_removed_when_mixed",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_scene/src/graph/widget_tests.rs",
+          "line": 1096
+        }
+      ]
+    },
+    {
+      "name": "shell::safe_mode",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_protocol/src/session_server/verbs.rs",
+          "line": 198
+        }
+      ]
+    },
+    {
+      "name": "graph::widget_tests::widget_ttl_only_expired_publication_removed_when_mixed",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_scene/src/graph/widget_tests.rs",
+          "line": 1096
+        }
+      ]
+    },
+    {
+      "name": "shell::safe_mode",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_protocol/src/session_server/verbs.rs",
+          "line": 198
+        }
+      ]
+    },
+    {
+      "name": "graph::widget_tests::widget_publish_with_suspended_lease_is_safe_mode_active",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_scene/src/graph/widget_tests.rs",
+          "line": 7
+        }
+      ]
+    },
+    {
+      "name": "graph::widget_tests::widget_ttl_only_expired_publication_removed_when_mixed",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_scene/src/graph/widget_tests.rs",
+          "line": 1096
+        }
+      ]
+    },
+    {
+      "name": "shell::safe_mode",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_protocol/src/session_server/verbs.rs",
+          "line": 198
+        }
+      ]
+    },
+    {
+      "name": "graph::widget_tests::widget_publish_with_suspended_lease_is_safe_mode_active",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_scene/src/graph/widget_tests.rs",
+          "line": 7
+        }
+      ]
+    },
+    {
+      "name": "degradation::tests::sustained_overload_does_not_escalate_past_simplified",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_runtime/src/degradation.rs",
+          "line": 706
+        }
+      ]
+    },
+    {
+      "name": "graph::widget_tests::widget_ttl_only_expired_publication_removed_when_mixed",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_scene/src/graph/widget_tests.rs",
+          "line": 1096
+        }
+      ]
+    },
+    {
+      "name": "shell::safe_mode",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_protocol/src/session_server/verbs.rs",
+          "line": 198
+        }
+      ]
+    },
+    {
+      "name": "graph::widget_tests::widget_publish_with_suspended_lease_is_safe_mode_active",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_scene/src/graph/widget_tests.rs",
+          "line": 7
+        }
+      ]
+    },
+    {
+      "name": "degradation::tests::sustained_overload_does_not_escalate_past_simplified",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_runtime/src/degradation.rs",
+          "line": 706
+        }
+      ]
+    },
+    {
+      "name": "mutation_budget_bridge::tests::registered_budget_rejects_mutation_above_tile_limit",
+      "definitions": [
+        {
+          "path": "crates/tze_hud_runtime/src/mutation_budget_bridge.rs",
+          "line": 332
+        }
+      ]
+    }
+  ],
+  "non_function_backticks": [
+    "expires_at",
+    "present_at",
+    "tze_hud_mcp",
+    "tze_hud_scene",
+    "tze_hud_compositor",
+    "tze_hud_protocol",
+    "integration",
+    "tze_hud_input",
+    "tze_hud_runtime",
+    "windowed::safe_mode_toggle",
+    "tze_hud_config",
+    "SessionSuspended",
+    "SessionResumed",
+    "DegradationController",
+    "CompositorDegradationPolicy",
+    "tze_hud_resource",
+    "store_behavior",
+    "delay_ms"
+  ],
+  "protected_source_delta": "",
+  "qualified_name_resolution": "last namespace component matched actual fn definition; retain full documentation name"
+}

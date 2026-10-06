@@ -1,0 +1,15 @@
+{
+  "name": "cwd",
+  "argv": [
+    "pwd",
+    "-P"
+  ],
+  "child_pid": 3655921,
+  "process_group": 3655921,
+  "exit": 0,
+  "stdout": "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.5.9\n",
+  "stderr": "",
+  "stdout_sha256": "2e5b0d3919383b49c8470ccde0062239494327133cbafe9d0ddf5fa4904d87cc",
+  "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "child_absent_after": true
+}

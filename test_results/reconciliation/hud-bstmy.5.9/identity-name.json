@@ -1,0 +1,16 @@
+{
+  "name": "identity-name",
+  "argv": [
+    "git",
+    "config",
+    "user.name"
+  ],
+  "child_pid": 3655928,
+  "process_group": 3655928,
+  "exit": 0,
+  "stdout": "tzeusy-orca\n",
+  "stderr": "",
+  "stdout_sha256": "9939fbd3f786408f4c3226b8602c3a7a3e8cdd0a921c802b93f163822cc13628",
+  "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "child_absent_after": true
+}

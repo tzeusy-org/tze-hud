@@ -1,0 +1,27 @@
+{
+  "at": "2026-10-06T18:10:32.881546+00:00",
+  "native_pid": 3678607,
+  "child_pid": 3678610,
+  "process_group": 3678610,
+  "source_head": "8d7727351c0942e372e999960ea0c49ebb1a7a32",
+  "command": [
+    "cargo",
+    "test",
+    "-p",
+    "tze_hud_compositor",
+    "--lib",
+    "idle_render_gate_skips_static_scene_renders_on_change_or_animation",
+    "--",
+    "--nocapture"
+  ],
+  "deadline_seconds": 300,
+  "environment": {
+    "CARGO_TARGET_DIR": "/home/orca/orca/projects/tze-hud/target",
+    "CARGO_BUILD_JOBS": "1",
+    "PROTOC": "/usr/bin/protoc",
+    "VK_ICD_FILENAMES": "/usr/share/vulkan/icd.d/lvp_icd.json",
+    "HEADLESS_FORCE_SOFTWARE": "1",
+    "TZE_HUD_REQUIRE_GPU": "1",
+    "LLVMPIPE_CI": "1"
+  }
+}

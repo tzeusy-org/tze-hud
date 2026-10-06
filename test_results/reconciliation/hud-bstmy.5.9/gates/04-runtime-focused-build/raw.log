@@ -1,0 +1,13 @@
+   Compiling tze_hud_scene v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.5.9/crates/tze_hud_scene)
+   Compiling tze_hud_resource v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.5.9/crates/tze_hud_resource)
+   Compiling tze_hud_protocol v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.5.9/crates/tze_hud_protocol)
+   Compiling tze_hud_config v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.5.9/crates/tze_hud_config)
+   Compiling tze_hud_projection v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.5.9/crates/tze_hud_projection)
+   Compiling tze_hud_input v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.5.9/crates/tze_hud_input)
+   Compiling tze_hud_telemetry v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.5.9/crates/tze_hud_telemetry)
+   Compiling tze_hud_compositor v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.5.9/crates/tze_hud_compositor)
+   Compiling tze_hud_mcp v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.5.9/crates/tze_hud_mcp)
+   Compiling tze_hud_widget v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.5.9/crates/tze_hud_widget)
+   Compiling tze_hud_runtime v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.5.9/crates/tze_hud_runtime)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 19s
+  Executable unittests src/lib.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/tze_hud_runtime-f806ebfde7d5f5e3)

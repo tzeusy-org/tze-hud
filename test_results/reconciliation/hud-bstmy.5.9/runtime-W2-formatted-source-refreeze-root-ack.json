@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-06T18:05:48.765395+00:00",
+  "ROOT_independent_acceptance": true,
+  "head": "8d7727351c0942e372e999960ea0c49ebb1a7a32",
+  "native_receipt_sha256": "9cec1f896edb1dc9eb298f8feb32e27347971d0d801c9d8747aa1a209c461d87",
+  "actual_format_failure_preserved": "787e0420ecf8c4080f1287e1b5c8cf86ca72b306c6f8e34656c86c7d2415a2da",
+  "format_fix_actual_exit": 0,
+  "FULL_diff_read_formatting_only": true,
+  "source_files_verified": 541,
+  "fixture_delta": "+0 ~7 -0",
+  "existing_lease_continues": ".handoff/runtime-W2-exclusive-ROOT-Cargo-GPU-lease.json",
+  "authorized_next": "Rerun fmt check then existing serial scoped gates. No source changes while gates run."
+}

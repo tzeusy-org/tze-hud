@@ -1,0 +1,16 @@
+{
+  "name": "identity-email",
+  "argv": [
+    "git",
+    "config",
+    "user.email"
+  ],
+  "child_pid": 3655929,
+  "process_group": 3655929,
+  "exit": 0,
+  "stdout": "orca@tze.how\n",
+  "stderr": "",
+  "stdout_sha256": "64b647a5e5afc9cf6122475e8227ec1a7a0d32ccd956448a8f6a6accac49e612",
+  "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "child_absent_after": true
+}

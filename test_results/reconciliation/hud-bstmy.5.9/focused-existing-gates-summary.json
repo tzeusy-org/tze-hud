@@ -1,0 +1,84 @@
+{
+  "at": "2026-10-06T18:11:49.316106+00:00",
+  "native_pid": 3680098,
+  "source_head": "8d7727351c0942e372e999960ea0c49ebb1a7a32",
+  "focused_selectors": 7,
+  "actual_positive_tests": 8,
+  "gates": [
+    {
+      "gate": "05-runtime-canonical",
+      "passed": 1,
+      "raw_sha256": "3285eb25869c1a1c94ea95b43094286535f869715e8a15b1c683d597eebacd05",
+      "source_head": "8d7727351c0942e372e999960ea0c49ebb1a7a32",
+      "exit": 0,
+      "positive_test_lines": [
+        "test headless::tests::canonical_one_node_update_repaints_only_the_changed_tile ... ok"
+      ]
+    },
+    {
+      "gate": "06-runtime-overlap",
+      "passed": 2,
+      "raw_sha256": "12a44097735f30ab483a2f5d966a72e320bdfd6965ba2413010b9e60c00e6375",
+      "source_head": "8d7727351c0942e372e999960ea0c49ebb1a7a32",
+      "exit": 0,
+      "positive_test_lines": [
+        "test headless::tests::transparent_overlap_rejects_nonclosure_idle_grip_that_crosses_damage ... ok",
+        "test headless::tests::transparent_overlap_update_repaints_only_the_changed_tile_and_its_overlap ... ok"
+      ]
+    },
+    {
+      "gate": "08-compositor-reset",
+      "passed": 1,
+      "raw_sha256": "7f3f646ded607763525c8666651c3be6810f8fdd889633f7e13d9060246d631f",
+      "source_head": "8d7727351c0942e372e999960ea0c49ebb1a7a32",
+      "exit": 0,
+      "positive_test_lines": [
+        "test renderer::retained::tests::new_observation_clears_prior_frame_work_counts ... ok"
+      ]
+    },
+    {
+      "gate": "09-compositor-recovery",
+      "passed": 1,
+      "raw_sha256": "50e14407d7b0e0f3bfced4f6e834c5201187aacaec149edda731ca9e4503d5b7",
+      "source_head": "8d7727351c0942e372e999960ea0c49ebb1a7a32",
+      "exit": 0,
+      "positive_test_lines": [
+        "test renderer::tests::retained_image::reconfigured_surface_recovery_forces_a_full_repaint ... ok"
+      ]
+    },
+    {
+      "gate": "10-compositor-idle",
+      "passed": 1,
+      "raw_sha256": "fca59663ef72cc22c197fd951ce1dcd03d84b4d52ecf34696be7e1c3cc3efb02",
+      "source_head": "8d7727351c0942e372e999960ea0c49ebb1a7a32",
+      "exit": 0,
+      "positive_test_lines": [
+        "test renderer::tests::idle_gate::idle_render_gate_skips_static_scene_renders_on_change_or_animation ... ok"
+      ]
+    },
+    {
+      "gate": "12-widget-dev",
+      "passed": 1,
+      "raw_sha256": "6ab42bbdad1add596dbb957dfedf70403569c0697cd128d13adf4382b03449da",
+      "source_head": "8d7727351c0942e372e999960ea0c49ebb1a7a32",
+      "exit": 0,
+      "positive_test_lines": [
+        "test widget_param_update_rasterizes_only_that_instance ... ok"
+      ]
+    },
+    {
+      "gate": "14-widget-default",
+      "passed": 1,
+      "raw_sha256": "8e74da478fff867ece02bde7159bdb8b101b2a6b27c2458509d90a6d1a488ada",
+      "source_head": "8d7727351c0942e372e999960ea0c49ebb1a7a32",
+      "exit": 0,
+      "positive_test_lines": [
+        "test widget_param_update_rasterizes_only_that_instance ... ok"
+      ]
+    }
+  ],
+  "widget_dev_assertion_path_marker": "observed widget frames: first raster/upload=2/2; changed=1/1; unchanged=0/0; admission-denied=1/0",
+  "default_standalone_limit": "actual selected1 passed; original silent NoAdapter path retained and its ok line alone does not independently attest assertion path; dev run has real-operation marker",
+  "PERF_ASSERT": "normal off",
+  "no_source_edits": true
+}

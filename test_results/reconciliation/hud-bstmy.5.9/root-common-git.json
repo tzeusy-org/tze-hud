@@ -1,0 +1,19 @@
+{
+  "name": "root-common-git",
+  "argv": [
+    "git",
+    "-C",
+    "/home/orca/orca/projects/tze-hud",
+    "rev-parse",
+    "--path-format=absolute",
+    "--git-common-dir"
+  ],
+  "child_pid": 3655925,
+  "process_group": 3655925,
+  "exit": 0,
+  "stdout": "/home/orca/orca/projects/tze-hud/.git\n",
+  "stderr": "",
+  "stdout_sha256": "e847e7187c95724df0108f1eaa7c7fd841bd88243f6f309f5d0caa6db922ba20",
+  "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "child_absent_after": true
+}

@@ -1,0 +1,11 @@
+{
+  "at": "2026-10-06T17:45:04.192145+00:00",
+  "verification_native_pid": 3658805,
+  "clean_native_pid": 3658708,
+  "clean_native_absent": true,
+  "clean_process_group": 3658712,
+  "actual_process_group_members": [],
+  "clean_terminal_receipt_sha256": "1feb652c1f512bb662e9a8246c2f2a1daab6fa7a34e2fb520ed01cb1fead26d8",
+  "all_observed_pids_absent": true,
+  "exclusive_clean_only_lease_released": true
+}

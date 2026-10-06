@@ -1,0 +1,63 @@
+{
+  "at": "2026-10-06T17:53:49.903075+00:00",
+  "source_base": "fab85b2e354752906f816690751ec700920e64e3",
+  "tests_added": 0,
+  "tests_extended": 7,
+  "tests_removed": 0,
+  "species": "existing behavior-executing fixtures only",
+  "fixtures": [
+    {
+      "path": "crates/tze_hud_runtime/src/headless.rs",
+      "test": "transparent_overlap_update_repaints_only_the_changed_tile_and_its_overlap",
+      "assertion_scope": "all original pixel equality/repaint contributors + actual one shape, zero widget work, clipped damage, single drain",
+      "source_sha256": "9e67e54479cc571a46ad4743a428e4ecf807d76ffabb8e92e57522e59232f091"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/headless.rs",
+      "test": "transparent_overlap_rejects_nonclosure_idle_grip_that_crosses_damage",
+      "assertion_scope": "full fallback + actual shaping bounded by51 including failed preparation, no widget work, full area",
+      "source_sha256": "9e67e54479cc571a46ad4743a428e4ecf807d76ffabb8e92e57522e59232f091"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/headless.rs",
+      "test": "canonical_one_node_update_repaints_only_the_changed_tile",
+      "assertion_scope": "retained one-node pixel oracle + one shape/scoped area/single drain; degradation/rebaseline/unsupported full frame real dimensions",
+      "source_sha256": "9e67e54479cc571a46ad4743a428e4ecf807d76ffabb8e92e57522e59232f091"
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/renderer/retained.rs",
+      "test": "new_observation_clears_prior_frame_work_counts",
+      "assertion_scope": "existing reset vector now carries all four dimensions and three supplemental fields",
+      "source_sha256": "948cc4b65a81959542d709965afd5ecc7ee701de7f7249f842888359ba77f08e"
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/renderer/tests/retained_image.rs",
+      "test": "reconfigured_surface_recovery_forces_a_full_repaint",
+      "assertion_scope": "both original drains + positive shaping/full area/zero widget work/single drain",
+      "source_sha256": "f71f04853a3c3158b645cd23df891ff2340bc40144d449435e3daaa5a7aa3046"
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/renderer/tests/idle_gate.rs",
+      "test": "idle_render_gate_skips_static_scene_renders_on_change_or_animation",
+      "assertion_scope": "existing idle predicate preserved; no-render invocation yields no manufactured observation",
+      "source_sha256": "d945b021d3bd5bf89a3d80438cc7bc88fe9524c3b651c9f2f2fc391059b96cbe"
+    },
+    {
+      "path": "crates/tze_hud_compositor/tests/widget_raster_count.rs",
+      "test": "widget_param_update_rasterizes_only_that_instance",
+      "assertion_scope": "explicit dev-mode case: actual first2/2, changed1/1, unchanged rendered0/0, denied-admission1/0 raster/upload; raw3/1 and FrameTelemetry live attempt list preserved",
+      "source_sha256": "68ab290fd200b1fe84495a7e28512cfe61075905587f58eb6711f51b304ea2d5"
+    }
+  ],
+  "execution": "UNEXECUTED at this source; no Cargo gate lease",
+  "limits": [
+    "Widget external fixture retains existing silent NoAdapter/explicit skip exits; positive assertion-path output and requireGPU environment must be evidenced, test ok alone is insufficient.",
+    "layout is cache-miss text shaping invocations during headless render, not general layout or commit-prime work.",
+    "raster counts attempts; upload is actual widget RGBA write_texture only, not atlas/resource/static-image work.",
+    "Idle fixture retains a direct predicate scenario; no claimed real windowed frame execution.",
+    "PERF_ASSERT normal off; no clock/stage/timing owner changed."
+  ],
+  "source_head": "8d7727351c0942e372e999960ea0c49ebb1a7a32",
+  "previous_fixture_ledger_preserved": "fixture-assertion-ledger.json",
+  "format_only_change": "existing widget_raster_count fixture formatting only"
+}

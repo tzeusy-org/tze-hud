@@ -1,0 +1,56 @@
+{
+  "at": "2026-10-06T18:19:40.003512+00:00",
+  "source_head": "8d7727351c0942e372e999960ea0c49ebb1a7a32",
+  "scope": "accepted FIRST W2 implementation only; original .5.3 four dimensions plus existing repaint observations",
+  "units": {
+    "layout": "per-headless-frame delta of live TextRasterizer.shape_call_count: cache-miss buffer shaping invocations, not all layout or commit priming",
+    "raster": "delta of sum of live per-instance WidgetRenderer.raster_counts; invocation attempts including unsuccessful raster/admission",
+    "upload": "opt-in cumulative counter increment immediately after actual widget RGBA queue.write_texture; no glyphon/resource/static-image or complete-upload-queue claim",
+    "damage_px": "submitted clipped scoped PixelRect.area, or entire submitted headless viewport area"
+  },
+  "supplemental_fields": [
+    "tiles_redrawn:u32",
+    "pixels_damaged:u64 (same measured repaint area)",
+    "full_frame:bool"
+  ],
+  "observation_boundaries": {
+    "start": "actual render_frame_headless entry; clear prior drain and sample existing cumulative owners",
+    "end": "completed retained or full headless submit/readback tail",
+    "fallback": "retain the original render-entry baseline across failed retained preparation and full fallback",
+    "no_frame": "None after prior drain; no inferred sampled zero-work frame",
+    "actual_unchanged_frame": "Some real observation with shape/raster/upload zeros and full submitted damage",
+    "retry_replay": "single-frame drain; next actual entry discards undrained previous record",
+    "concurrency": "same compositor owner; no global counter/lock/guard changes"
+  },
+  "feature_boundary": {
+    "telemetry": "WorkCounts module/reexport cfg(any(test,feature=dev-mode))",
+    "compositor": "observation state/start/writes/drain and upload observation cfg(any(test,feature=dev-mode)); retained snapshot/render paths remain unconditional",
+    "runtime": "existing dev-mode forwards compositor/telemetry; dev-dependency opts compositor into standalone unit-test assertions",
+    "standalone_compositor": "cfg test observations with telemetry dev-dependency opt-in; external existing widget fixture explicit dev-mode assertions while default test target remains selected",
+    "actual_normal_closures": 17,
+    "default_app_normal_build_tree_dev_mode": false,
+    "default_app_release": "actual0 at8d;168.464s"
+  },
+  "preserved_live_owners": [
+    "TextRasterizer.shape_call_count increment/accessors",
+    "WidgetRenderer.raster_counts increment/read and rasterized_last_sync tracking",
+    "FrameTelemetry/TelemetryCollector/frame order/stage/sample/timing/p99 fields",
+    "retained rendering and snapshot recovery/fallback/pixel behavior",
+    "runtime idle/benchmark/config and windowed rendering",
+    "all72 documented assertions and protected T7 source; Node160/Tile200 unchanged"
+  ],
+  "existing_reader_contract": "all9 original drain expressions retain repaint/pixel behaviors;20 current expressions include single-drain/no-frame and widget observation checks",
+  "test_delta": "+0 ~7 -0",
+  "actual_focused": "seven selectors/eight positive test results at8d, opt-in widget actual operation marker proves count assertions reached",
+  "CI": "RUNNING; no pass claim before terminal",
+  "limits": [
+    "headless observations only; no generalized windowed damage/idle proof",
+    "default widget fixture original silent NoAdapter return retained; ok/count alone does not independently establish assertion path",
+    "PERF_ASSERT normal off; no new p99/timing certification",
+    "source enumeration confirms definitions only; intermediate metadata name collisions/repeated-appends preserved and corrected before final72 result",
+    "W1/W3/W4, FrameRecorder, owner5.6/8.6/T7 and original5.7 closure remain separate"
+  ],
+  "lifecycle_mutation": false,
+  "source_base": "fab85b2e354752906f816690751ec700920e64e3",
+  "native_metadata_pid": 3690106
+}

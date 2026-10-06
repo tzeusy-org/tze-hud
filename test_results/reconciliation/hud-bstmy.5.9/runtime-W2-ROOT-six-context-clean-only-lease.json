@@ -1,0 +1,31 @@
+{
+  "at": "2026-10-06T17:43:24.069546+00:00",
+  "issue": "hud-bstmy.5.9",
+  "worker": "/root/lane_runtime_audit",
+  "exclusive_artifact_target": "/home/orca/orca/projects/tze-hud/target",
+  "phase": "bounded ROOT six-package CLEAN ONLY",
+  "packages": [
+    "tze_hud_compositor",
+    "tze_hud_widget",
+    "poc_demo",
+    "tze_hud_app",
+    "integration",
+    "benchmark"
+  ],
+  "CARGO_BUILD_JOBS": 1,
+  "PROTOC": "/usr/bin/protoc",
+  "GPU_allowed": false,
+  "compile_check_clippy_test_CI_allowed": false,
+  "High_target_access_allowed": false,
+  "observed_unlocked_locks": [
+    {
+      "path": "/home/orca/orca/projects/tze-hud/target/debug/.cargo-lock",
+      "observed_unlocked": true
+    },
+    {
+      "path": "/home/orca/orca/projects/tze-hud/target/x86_64-pc-windows-gnu/debug/.cargo-lock",
+      "observed_unlocked": true
+    }
+  ],
+  "authorization": "From actual newW2cwd@fab, one bounded cargo clean exactsixpackagesONLY targetingROOTtarget explicitly. Preserve actualnative/child/rawSHA/sourcebeforeafter/exit/PIDgroups/locks; reportactualrelease. No fulltargetwipe/assetcopy/otherpackages/compile/check/test/GPU. This discharges compiled oldRuntimeWT assetmanifest contexts before normalretirement/independentreview branchhandoff, not semanticclosure dependency. Own source/artifacts immutable during clean. ROOTalone actualnormalretirement afternewG3/W2binding/current976archive/nativeabsence/cleanrelease."
+}
