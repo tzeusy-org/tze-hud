@@ -286,6 +286,29 @@ pub struct Pairing {
     clock: Arc<dyn PairClock>,
     /// Addresses the HTTP port is bound on; shared with `/admin/status`.
     binds: Arc<Mutex<Vec<SocketAddr>>>,
+    /// Windows Firewall check for the tailnet address, shared with `/admin/status`.
+    firewall: Arc<crate::firewall::FirewallProbe>,
+}
+
+/// The pairing card's lines: code, address, validity, and (only when Windows
+/// Firewall blocks the tailnet address) one warning.
+fn pairing_lines(
+    code: &str,
+    address: String,
+    firewall: Option<&crate::firewall::TailnetInbound>,
+) -> Vec<String> {
+    let mut lines = vec![
+        code.to_owned(),
+        address,
+        format!("valid for {} minutes", CODE_TTL.as_secs() / 60),
+    ];
+    if firewall.is_some_and(crate::firewall::TailnetInbound::is_blocked) {
+        lines.push(
+            "Windows Firewall blocks remote agents: see windows-install.md#remote-agents"
+                .to_owned(),
+        );
+    }
+    lines
 }
 
 impl std::fmt::Debug for Pairing {
@@ -303,6 +326,7 @@ impl Pairing {
         card: SystemCardHandle,
         grpc_port: u16,
     ) -> Self {
+        let binds: Arc<Mutex<Vec<SocketAddr>>> = Arc::default();
         Self {
             state: Mutex::new(state),
             agents,
@@ -310,8 +334,16 @@ impl Pairing {
             card,
             grpc_port,
             clock,
-            binds: Arc::default(),
+            firewall: Arc::new(crate::firewall::FirewallProbe::system(
+                Arc::clone(&binds),
+                vec![grpc_port],
+            )),
+            binds,
         }
+    }
+
+    pub(crate) fn firewall(&self) -> Arc<crate::firewall::FirewallProbe> {
+        Arc::clone(&self.firewall)
     }
 
     pub(crate) fn system(
@@ -353,25 +385,46 @@ impl Pairing {
     }
 
     fn show(&self, issued: &IssuedCode) {
-        let binds = self.binds.lock().unwrap_or_else(|e| e.into_inner());
-        let address = Self::endpoint(&binds).map_or_else(
-            || "this machine, port 9090".to_owned(),
-            |a| format!("http://{a}/pair"),
-        );
-        self.card.set(SystemCard {
+        let (endpoint, address) = {
+            let binds = self.binds.lock().unwrap_or_else(|e| e.into_inner());
+            let endpoint = Self::endpoint(&binds);
+            let address = endpoint.map_or_else(
+                || "this machine, port 9090".to_owned(),
+                |a| format!("http://{a}/pair"),
+            );
+            (endpoint, address)
+        };
+        let on_tailnet =
+            endpoint.is_some_and(|a| !crate::net_addrs::tailnet_addrs(&[a.ip()]).is_empty());
+        // Never wait on the firewall here: use a fresh cached answer, else show
+        // the card now and add the warning when the background check finishes.
+        let known = on_tailnet.then(|| self.firewall.cached()).flatten();
+        let card = SystemCard {
             kind: tze_hud_compositor::SystemCardKind::Pairing,
             title: "Pair an agent".to_owned(),
-            lines: vec![
-                issued.code.clone(),
-                address,
-                format!("valid for {} minutes", CODE_TTL.as_secs() / 60),
-            ],
+            lines: pairing_lines(&issued.code, address.clone(), known.as_ref()),
             // Wall-clock deadline, taken at the same moment as the monotonic
             // code expiry; they can drift apart only if the system clock is
             // adjusted within the 5 minutes. The text is a fixed validity, not
             // a countdown (a countdown would redraw every second).
             expires_at_wall_us: Some(self.clock.wall_us() + CODE_TTL.as_micros() as u64),
-        });
+        };
+        self.card.set(card.clone());
+        if on_tailnet && known.is_none() {
+            let (probe, handle, code) = (
+                Arc::clone(&self.firewall),
+                self.card.clone(),
+                issued.code.clone(),
+            );
+            std::thread::spawn(move || {
+                let verdict = probe.current();
+                if verdict.is_blocked() {
+                    let mut with_warning = card.clone();
+                    with_warning.lines = pairing_lines(&code, address, Some(&verdict));
+                    handle.replace_if_current(&card, with_warning);
+                }
+            });
+        }
     }
 
     fn paused_toast(&self) {
@@ -713,6 +766,56 @@ mod tests {
             .frame_state(rig.clock.wall_us())
             .model
             .map(|m| (m.kind, m.lines))
+    }
+
+    #[test]
+    fn firewall_warning_line_only_when_blocked() {
+        use crate::firewall::{BlockReason, TailnetInbound};
+        let lines = |f: Option<&TailnetInbound>| pairing_lines("111111", "http://x/pair".into(), f);
+        let blocked = TailnetInbound::Blocked {
+            reason: BlockReason::NoAllowRule,
+            rule: None,
+        };
+        assert_eq!(lines(None).len(), 3);
+        for quiet in [
+            TailnetInbound::Allowed,
+            TailnetInbound::NotApplicable,
+            TailnetInbound::Unknown { error: "e".into() },
+        ] {
+            assert_eq!(lines(Some(&quiet)).len(), 3, "{quiet:?}");
+        }
+        let warned = lines(Some(&blocked));
+        assert_eq!(warned.len(), 4);
+        assert!(warned[3].contains("Windows Firewall"));
+        assert_eq!(warned[..3], lines(None)[..]);
+    }
+
+    #[test]
+    fn a_blocked_tailnet_address_adds_the_warning_to_the_card_without_waiting() {
+        use crate::firewall::{BlockReason, FirewallProbe, TailnetInbound};
+        let mut rig = rig();
+        {
+            let mut binds = rig.pairing.binds.lock().unwrap();
+            binds.clear();
+            binds.push("100.100.1.2:9090".parse().unwrap());
+        }
+        rig.pairing.firewall = Arc::new(FirewallProbe::new(|| TailnetInbound::Blocked {
+            reason: BlockReason::NoAllowRule,
+            rule: None,
+        }));
+        rig.pairing.open();
+        // Shown at once without the warning; the background check adds it.
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while card_lines(&rig).unwrap().1.len() < 4 {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "warning never appeared"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let (_, lines) = card_lines(&rig).unwrap();
+        assert_eq!(lines[0], "111111");
+        assert_eq!(lines[1], "http://100.100.1.2:9090/pair");
     }
 
     #[test]
