@@ -10,6 +10,13 @@
 //!
 //! If startup silently falls back to a default/headless policy, these assertions
 //! fail even when runtime construction itself succeeds.
+//!
+//! GPU initialization shares the test-only async gate within this binary. The
+//! guard is released before assertions or client traffic. Run this suite with
+//! `just canonical-app-boot`, which selects the installed llvmpipe ICD.
+
+#[path = "../../../crates/tze_hud_runtime/src/test_support.rs"]
+mod gpu_init;
 
 use tze_hud_runtime::HeadlessRuntime;
 use tze_hud_runtime::headless::HeadlessConfig;
@@ -29,7 +36,8 @@ fn canonical_headless_config() -> HeadlessConfig {
 
 #[tokio::test]
 async fn canonical_app_production_config_boot_succeeds() {
-    let result = HeadlessRuntime::new(canonical_headless_config()).await;
+    let result =
+        gpu_init::serialized_headless_init(HeadlessRuntime::new(canonical_headless_config())).await;
     assert!(
         result.is_ok(),
         "runtime failed to start with app/tze_hud_app/config/production.toml: {:?}",
@@ -39,9 +47,10 @@ async fn canonical_app_production_config_boot_succeeds() {
 
 #[tokio::test]
 async fn production_config_boots_with_builtin_widget_bundles() {
-    let runtime = HeadlessRuntime::new(canonical_headless_config())
-        .await
-        .expect("runtime must start with canonical app production config");
+    let runtime =
+        gpu_init::serialized_headless_init(HeadlessRuntime::new(canonical_headless_config()))
+            .await
+            .expect("runtime must start with canonical app production config");
 
     let scene_handle = {
         let state = runtime.shared_state().lock().await;
@@ -115,11 +124,11 @@ async fn production_config_rejects_unpaired_psk() {
         .with_agent("paired-agent", "paired-key", &["tiles"])
         .directory()
         .expect("paired agent directory");
-    let runtime = HeadlessRuntime::new(HeadlessConfig {
+    let runtime = gpu_init::serialized_headless_init(HeadlessRuntime::new(HeadlessConfig {
         grpc_port: port,
         agents: paired,
         ..canonical_headless_config()
-    })
+    }))
     .await
     .expect("runtime must start with canonical app production config");
     let _server = runtime.start_grpc_server().await.expect("gRPC server");

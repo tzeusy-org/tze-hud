@@ -1,5 +1,7 @@
 //! Test-only headless GPU helpers, also included by path in external test binaries.
 //! Include this module once per binary so all initialization paths share one gate.
+//! Canonical-app production boot uses this gate too; its separate benchmark-config
+//! binary has only one GPU-creating test and needs no initialization guard.
 
 use std::future::Future;
 use tokio::sync::{Mutex, MutexGuard};

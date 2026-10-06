@@ -38,12 +38,13 @@ in every member crate.
 GPU tests: run `just test-gpu` (compositor render tests plus runtime `pixel_readback`,
 pinned to Mesa llvmpipe via `VK_ICD_FILENAMES`). Test-only async gates serialize
 GPU initialization per test process in the compositor helpers, runtime `pixel_helpers`,
-integration GPU suites, `vertical_slice` budget/lifecycle tests, and `present_ack`.
+integration GPU suites, `vertical_slice` budget/lifecycle tests, `present_ack`, and
+canonical-app production boot tests.
 The shared runtime `test_support` source is included once per external test binary;
 its initialization guard is released before clients or rendering, while runtime-lib
 scenarios keep their existing outer guards. Single-GPU-test binaries (including
-`vertical_slice` production boot) need no in-process gate. Separate processes are
-not coordinated, and canonical-app boot tests still rely on recipe ICD pinning.
+`vertical_slice` production boot and canonical-app `benchmark_config_schema`) need
+no in-process gate. Separate processes are not coordinated.
 Every `just` recipe that builds a GPU device pins llvmpipe when its ICD is installed;
 discovery supports both `lvp_icd.x86_64.json` and Mesa 25's `lvp_icd.json`. Don't run
 bare `cargo test -p tze_hud_compositor` on a host with a hardware Vulkan ICD (recorded hangs were NVIDIA driver threads). Building needs protoc >= 3.15; set
