@@ -94,6 +94,50 @@ pub(super) fn start_network_services_with_render_wake(
         return Ok((None, Vec::new(), None, None, None, None, None, Vec::new()));
     }
 
+    start_enabled_network_services(
+        grpc_port,
+        agents,
+        shared_state,
+        runtime_context,
+        render_wake,
+        bind_gate,
+        #[cfg(test)]
+        None,
+    )
+}
+
+/// Exercise enabled startup with a listener that stays owned from allocation
+/// through adoption by the real server. Production port zero stays disabled.
+#[cfg(test)]
+fn start_network_services_on_listener(
+    listener: std::net::TcpListener,
+    agents: SharedAgents,
+    shared_state: Arc<Mutex<SharedState>>,
+    runtime_context: SharedRuntimeContext,
+) -> Result<NetworkServices, Box<dyn std::error::Error>> {
+    let grpc_port = listener.local_addr()?.port();
+    listener.set_nonblocking(true)?;
+    start_enabled_network_services(
+        grpc_port,
+        agents,
+        shared_state,
+        runtime_context,
+        tze_hud_scene::render_wake::RenderWakeNotifier::default(),
+        None,
+        Some(listener),
+    )
+}
+
+#[allow(clippy::type_complexity)]
+fn start_enabled_network_services(
+    grpc_port: u16,
+    agents: SharedAgents,
+    shared_state: Arc<Mutex<SharedState>>,
+    runtime_context: SharedRuntimeContext,
+    render_wake: tze_hud_scene::render_wake::RenderWakeNotifier,
+    bind_gate: Option<crate::operator::handoff::BindGate>,
+    #[cfg(test)] fixture_listener: Option<std::net::TcpListener>,
+) -> Result<NetworkServices, Box<dyn std::error::Error>> {
     // Build the multi-thread Tokio runtime for network tasks.
     let network_rt = NetworkRuntime::new()
         .map_err(|e| format!("windowed runtime: failed to build network Tokio runtime: {e}"))?;
@@ -136,11 +180,21 @@ pub(super) fn start_network_services_with_render_wake(
     // and the returned addresses belong to listeners that are genuinely up.
     // Loopback must bind; a Tailscale address that fails to bind is skipped.
     let mut std_listeners = Vec::with_capacity(addrs.len());
+    #[cfg(test)]
+    if let Some(listener) = fixture_listener {
+        std_listeners.push(listener);
+    }
     // A handed-over instance binds later, once the old one has let go (the
     // spawned task below waits on the gate); until then the planned addresses
     // stand in for the bound ones.
     if bind_gate.is_none() {
         for (i, addr) in addrs.iter().enumerate() {
+            #[cfg(test)]
+            if i == 0 && !std_listeners.is_empty() {
+                // The fixture already owns this loopback listener. All other
+                // binding and serving still uses the production path below.
+                continue;
+            }
             match bind_nonblocking(*addr) {
                 Ok(l) => std_listeners.push(l),
                 Err(e) if i == 0 => {
@@ -546,13 +600,14 @@ mod tests {
     fn start_network_services_nonzero_port_returns_runtime_and_handle() {
         let shared_state = make_shared_state();
         let ctx: SharedRuntimeContext = Arc::new(RuntimeContext::headless_default());
-        // Allocate an ephemeral port so parallel CI runs don't collide on a
-        // fixed port (the listener is now bound eagerly, so a fixed port would
-        // flake under concurrency).
-        let port = std::net::TcpListener::bind("127.0.0.1:0")
-            .and_then(|l| l.local_addr())
-            .map(|a| a.port())
-            .expect("failed to allocate ephemeral port");
+        let listener = std::net::TcpListener::bind("127.0.0.1:0")
+            .expect("failed to allocate ephemeral listener");
+        let port = listener.local_addr().unwrap().port();
+        assert!(
+            start_network_services(port, Default::default(), shared_state.clone(), ctx.clone())
+                .is_err(),
+            "production startup must reject an occupied loopback port"
+        );
         let (
             rt,
             handles,
@@ -562,7 +617,7 @@ mod tests {
             _degradation_notices,
             lease_expirations,
             grpc_addrs,
-        ) = start_network_services(port, Default::default(), shared_state, ctx)
+        ) = start_network_services_on_listener(listener, Default::default(), shared_state, ctx)
             .expect("start_network_services should not error for a valid port");
         assert!(
             rt.is_some(),
@@ -593,26 +648,29 @@ mod tests {
         }
     }
 
-    // These tests verify that start_network_services actually succeeds (does not
-    // silently swallow a bind error). Each test allocates an ephemeral port via
-    // TcpListener::bind(":0") so the OS picks a free port, eliminating port-
-    // conflict flakiness in parallel CI runs.
+    // Positive fixtures keep the OS-selected listener owned until the shared
+    // enabled startup adopts it; releasing only its port would leave a race.
 
     /// `start_network_services` binds loopback and must succeed, not just avoid
     /// erroring on an early-exit code path.
     #[test]
     fn start_network_services_loopback_default_binds_successfully() {
-        let port = std::net::TcpListener::bind("127.0.0.1:0")
-            .and_then(|l| l.local_addr())
-            .map(|a| a.port())
-            .expect("failed to allocate ephemeral port for loopback bind test");
+        let listener = std::net::TcpListener::bind("127.0.0.1:0")
+            .expect("failed to allocate ephemeral listener for loopback bind test");
         let shared_state = make_shared_state();
         let ctx: SharedRuntimeContext = Arc::new(RuntimeContext::headless_default());
-        let (rt, handles, _, _, _, _, _, _) =
-            start_network_services(port, Default::default(), shared_state, ctx)
-                .expect("loopback bind must succeed on a freshly allocated ephemeral port");
+        let (rt, handles, _, _, _, _, _, grpc_addrs) =
+            start_network_services_on_listener(listener, Default::default(), shared_state, ctx)
+                .expect("loopback startup must adopt the owned ephemeral listener");
         assert!(rt.is_some(), "loopback bind must create a NetworkRuntime");
         assert!(!handles.is_empty(), "loopback bind must spawn task handles");
+        rt.as_ref().unwrap().rt.block_on(async {
+            tze_hud_protocol::proto::session::hud_session_client::HudSessionClient::connect(
+                format!("http://{}", grpc_addrs[0]),
+            )
+            .await
+            .expect("the real gRPC server must accept a transport connection");
+        });
         for h in handles {
             h.abort();
         }

@@ -624,6 +624,23 @@ impl HeadlessRuntime {
             .map_err(|e| format!("gRPC server: failed to bind {bind_addr}: {e}"))?;
         tracing::info!(addr = %bind_addr, "gRPC server listener bound");
 
+        Ok(self.serve_grpc_listener(listener))
+    }
+
+    /// Adopt a continuously owned fixture listener without changing the public
+    /// configured-port checks or binding behavior.
+    #[cfg(test)]
+    fn start_grpc_server_on_listener(
+        &self,
+        listener: tokio::net::TcpListener,
+    ) -> tokio::task::JoinHandle<()> {
+        self.serve_grpc_listener(listener)
+    }
+
+    fn serve_grpc_listener(
+        &self,
+        listener: tokio::net::TcpListener,
+    ) -> tokio::task::JoinHandle<()> {
         let service = HudSessionImpl::from_deps(SessionDeps {
             resource_budget: self.runtime_context.resource_budget(),
             budget_enforcer: Some(std::sync::Arc::new(
@@ -641,16 +658,14 @@ impl HeadlessRuntime {
             ..SessionDeps::new(self.state.clone(), self.agents.clone())
         });
 
-        let handle = tokio::spawn(async move {
+        tokio::spawn(async move {
             let incoming = tokio_stream::wrappers::TcpListenerStream::new(listener);
             tonic::transport::Server::builder()
                 .add_service(HudSessionServer::new(service))
                 .serve_with_incoming(incoming)
                 .await
                 .expect("gRPC server failed");
-        });
-
-        Ok(handle)
+        })
     }
 
     /// Process a wheel/trackpad scroll event through the local-first scroll path.
@@ -1498,25 +1513,36 @@ mod tests {
     /// after startup.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_headless_grpc_server_starts() {
-        // Bind to [::1]:0 to get an ephemeral port, then release the listener
-        // before tonic binds.  We use [::1] (IPv6 loopback) rather than
-        // 127.0.0.1 (IPv4) so the probe address matches the gRPC server's
-        // default bind address ([::1]).  An IPv4
-        // probe does not guarantee the same port number is free on IPv6.
-        let listener = std::net::TcpListener::bind("[::1]:0").unwrap();
-        let free_port = listener.local_addr().unwrap().port();
-        drop(listener);
+        // Keep the actual IPv6 loopback listener owned through construction
+        // and move it directly into the shared real gRPC serving path.
+        let listener = tokio::net::TcpListener::bind("[::1]:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
 
         let config = HeadlessConfig {
             width: 64,
             height: 64,
-            grpc_port: free_port,
+            grpc_port: addr.port(),
             agents: AgentDirectory::unrestricted("test"),
             config_toml: None,
         };
         let _runtime_guard = crate::test_support::lock_headless_runtime().await;
         let mut runtime = HeadlessRuntime::new(config).await.expect("runtime init");
-        let _server = runtime.start_grpc_server().await.expect("server start");
+        assert!(
+            runtime.start_grpc_server().await.is_err(),
+            "the public wrapper must reject the occupied configured port"
+        );
+        runtime.config.grpc_port = 0;
+        assert!(
+            runtime.start_grpc_server().await.is_err(),
+            "the public wrapper must keep port zero disabled"
+        );
+        runtime.config.grpc_port = addr.port();
+        let _server = runtime.start_grpc_server_on_listener(listener);
+        tze_hud_protocol::proto::session::hud_session_client::HudSessionClient::connect(format!(
+            "http://{addr}"
+        ))
+        .await
+        .expect("the real IPv6 gRPC server must accept a transport connection");
 
         // Render a frame while the server is running
         let telemetry = runtime.render_frame().await;
@@ -1528,6 +1554,7 @@ mod tests {
             "gRPC server task should still be running"
         );
         _server.abort();
+        assert!(_server.await.unwrap_err().is_cancelled());
     }
 
     /// Verify that config_toml = None produces a headless-default RuntimeContext.
