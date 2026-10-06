@@ -374,7 +374,10 @@ async fn test_resource_upload_chunked_concurrent_limit_rejected() {
 
 #[tokio::test]
 async fn test_resource_upload_chunked_success_correlates_by_request_sequence() {
-    let (mut client, handle) = setup_widget_test().await;
+    let service = setup_widget_service().await;
+    let shared_state = service.state.clone();
+    let store = shared_state.lock().await.resource_store.clone();
+    let (mut client, handle) = setup_widget_test_with_service(service).await;
     let (tx, _init_msgs, mut stream) = handshake_with_capabilities(
         &mut client,
         "resource-correlation",
@@ -523,6 +526,138 @@ async fn test_resource_upload_chunked_success_correlates_by_request_sequence() {
         expected_b
     );
 
+    // A real disconnect must clean only its worker's pending IDs, even when
+    // another authenticated connection has the same namespace.
+    for (owner, peer, color) in [
+        ("resource-correlation", "resource-correlation", 31u8),
+        ("resource-owner", "resource-peer", 47u8),
+    ] {
+        let (owner_tx, owner_init, mut owner_stream) =
+            handshake_with_capabilities(&mut client, owner, "test-key", &["upload_resource"]).await;
+        let (peer_tx, peer_init, mut peer_stream) =
+            handshake_with_capabilities(&mut client, peer, "test-key", &["upload_resource"]).await;
+        let owner_session_id = match &owner_init[0].payload {
+            Some(ServerPayload::SessionEstablished(e)) => bytes_to_scene_id(&e.session_id).unwrap(),
+            other => panic!("expected owner SessionEstablished, got {other:?}"),
+        };
+        let peer_session_id = match &peer_init[0].payload {
+            Some(ServerPayload::SessionEstablished(e)) => bytes_to_scene_id(&e.session_id).unwrap(),
+            other => panic!("expected peer SessionEstablished, got {other:?}"),
+        };
+        assert_ne!(owner_session_id, peer_session_id);
+        let peer_bytes = tiny_rgba_1x1([color, 1, 2, 255]);
+        let start = |sequence, bytes: &[u8]| ClientMessage {
+            sequence,
+            timestamp_wall_us: now_wall_us(),
+            payload: Some(ClientPayload::ResourceUploadStart(ResourceUploadStart {
+                expected_hash: blake3::hash(bytes).as_bytes().to_vec(),
+                resource_type: 1,
+                total_size_bytes: bytes.len() as u64,
+                metadata: Some(ResourceMetadata {
+                    width: 1,
+                    height: 1,
+                    ..Default::default()
+                }),
+                inline_data: Vec::new(),
+            })),
+        };
+        owner_tx.send(start(2, &[color, 9, 9, 255])).await.unwrap();
+        peer_tx.send(start(2, &peer_bytes)).await.unwrap();
+        let owner_accepted =
+            tokio::time::timeout(Duration::from_secs(5), next_server_msg(&mut owner_stream))
+                .await
+                .unwrap();
+        assert!(matches!(
+            owner_accepted.payload,
+            Some(ServerPayload::ResourceUploadAccepted(_))
+        ));
+        let peer_accepted =
+            tokio::time::timeout(Duration::from_secs(5), next_server_msg(&mut peer_stream))
+                .await
+                .unwrap();
+        let peer_upload = match peer_accepted.payload {
+            Some(ServerPayload::ResourceUploadAccepted(a)) => {
+                assert_eq!(a.request_sequence, 2);
+                a.upload_id
+            }
+            other => panic!("expected peer upload acknowledged before disconnect, got {other:?}"),
+        };
+        let (cleanup, duplicate_cleanup) = {
+            let mut st = shared_state.lock().await;
+            (
+                st.sessions.observe_cleanup(&owner_session_id),
+                st.sessions.observe_cleanup(&owner_session_id),
+            )
+        };
+        drop(owner_tx);
+        drop(owner_stream);
+        for witness in [cleanup, duplicate_cleanup] {
+            tokio::time::timeout(Duration::from_secs(5), witness)
+                .await
+                .expect("actual owner cleanup must finish")
+                .unwrap();
+        }
+        for hash in [&expected_a, &expected_b] {
+            let id = tze_hud_resource::ResourceId::from_bytes(hash.as_slice().try_into().unwrap());
+            assert!(
+                store.dedup_index().get(&id).is_some(),
+                "completed immutable resources survive disconnect"
+            );
+        }
+        peer_tx
+            .send(ClientMessage {
+                sequence: 3,
+                timestamp_wall_us: now_wall_us(),
+                payload: Some(ClientPayload::ResourceUploadChunk(ResourceUploadChunk {
+                    upload_id: peer_upload.clone(),
+                    chunk_index: 0,
+                    data: peer_bytes.clone(),
+                })),
+            })
+            .await
+            .unwrap();
+        peer_tx
+            .send(ClientMessage {
+                sequence: 4,
+                timestamp_wall_us: now_wall_us(),
+                payload: Some(ClientPayload::ResourceUploadComplete(
+                    ResourceUploadComplete {
+                        upload_id: peer_upload.clone(),
+                    },
+                )),
+            })
+            .await
+            .unwrap();
+        let completed =
+            tokio::time::timeout(Duration::from_secs(5), next_server_msg(&mut peer_stream))
+                .await
+                .unwrap();
+        match completed.payload {
+            Some(ServerPayload::ResourceStored(stored)) => {
+                assert_eq!(stored.request_sequence, 2);
+                assert_eq!(stored.upload_id, peer_upload);
+                assert_eq!(
+                    stored.resource_id.unwrap().bytes,
+                    blake3::hash(&peer_bytes).as_bytes().to_vec()
+                );
+            }
+            other => {
+                panic!("peer {peer} upload must survive {owner} actual cleanup, got {other:?}")
+            }
+        }
+        let peer_cleanup = shared_state
+            .lock()
+            .await
+            .sessions
+            .observe_cleanup(&peer_session_id);
+        drop(peer_tx);
+        drop(peer_stream);
+        tokio::time::timeout(Duration::from_secs(5), peer_cleanup)
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
     drop(handle);
 }
 
@@ -571,8 +706,10 @@ async fn test_resource_upload_chunked_zero_size_rejected() {
 
 #[tokio::test]
 async fn test_resource_upload_chunk_error_aborts_inflight_tracking() {
-    let (mut client, handle) = setup_widget_test().await;
-    let (tx, _init_msgs, mut stream) = handshake_with_capabilities(
+    let service = setup_widget_service().await;
+    let shared_state = service.state.clone();
+    let (mut client, handle) = setup_widget_test_with_service(service).await;
+    let (tx, init_msgs, mut stream) = handshake_with_capabilities(
         &mut client,
         "resource-chunk-error",
         "test-key",
@@ -643,6 +780,151 @@ async fn test_resource_upload_chunk_error_aborts_inflight_tracking() {
         }
         other => panic!("expected ResourceErrorResponse after aborted upload, got: {other:?}"),
     }
+
+    // All four default slots must be available after the failed chunk. The
+    // fifth Start must still be rejected: cleanup does not relax admission.
+    let start = |sequence, color| ClientMessage {
+        sequence,
+        timestamp_wall_us: now_wall_us(),
+        payload: Some(ClientPayload::ResourceUploadStart(ResourceUploadStart {
+            expected_hash: blake3::hash(&[color, 2, 3, 255]).as_bytes().to_vec(),
+            resource_type: 1,
+            total_size_bytes: 4,
+            metadata: Some(ResourceMetadata {
+                width: 1,
+                height: 1,
+                ..Default::default()
+            }),
+            inline_data: Vec::new(),
+        })),
+    };
+    let mut recovered_after_chunk = 0;
+    for offset in 0..5u8 {
+        let sequence = 5 + u64::from(offset);
+        tx.send(start(sequence, offset)).await.unwrap();
+        let reply = tokio::time::timeout(Duration::from_secs(5), next_server_msg(&mut stream))
+            .await
+            .unwrap();
+        match reply.payload {
+            Some(ServerPayload::ResourceUploadAccepted(a)) => {
+                assert_eq!(a.request_sequence, sequence);
+                recovered_after_chunk += 1;
+            }
+            Some(ServerPayload::ResourceErrorResponse(e)) => {
+                assert_eq!(e.request_sequence, sequence);
+                assert_eq!(e.error_code, 8);
+            }
+            other => panic!("expected capacity admission decision, got {other:?}"),
+        }
+    }
+    let session_id = match &init_msgs[0].payload {
+        Some(ServerPayload::SessionEstablished(e)) => bytes_to_scene_id(&e.session_id).unwrap(),
+        other => panic!("expected SessionEstablished, got {other:?}"),
+    };
+    let cleanup = shared_state
+        .lock()
+        .await
+        .sessions
+        .observe_cleanup(&session_id);
+    drop(tx);
+    drop(stream);
+    tokio::time::timeout(Duration::from_secs(5), cleanup)
+        .await
+        .unwrap()
+        .unwrap();
+
+    // These are the actual production worker and channels. Closing its event
+    // receiver models the session loop ending with Start/Chunk/Complete queued;
+    // no late work may leave a pending store slot after the worker terminates.
+    let (commands, command_rx) = tokio::sync::mpsc::channel(64);
+    let (events, event_rx) = tokio::sync::mpsc::channel(1);
+    let late_id_bytes = tiny_rgba_1x1([99, 98, 97, 255]);
+    commands
+        .send(UploadWorkerCommand::Start {
+            request_sequence: 2,
+            capabilities: vec!["upload_resource".to_string()],
+            start: ResourceUploadStart {
+                expected_hash: blake3::hash(&late_id_bytes).as_bytes().to_vec(),
+                resource_type: 1,
+                total_size_bytes: 4,
+                metadata: Some(ResourceMetadata {
+                    width: 1,
+                    height: 1,
+                    ..Default::default()
+                }),
+                inline_data: Vec::new(),
+            },
+        })
+        .await
+        .unwrap();
+    commands
+        .send(UploadWorkerCommand::Chunk {
+            request_sequence: 3,
+            chunk: ResourceUploadChunk {
+                upload_id: vec![0; 16],
+                chunk_index: 0,
+                data: late_id_bytes,
+            },
+        })
+        .await
+        .unwrap();
+    commands
+        .send(UploadWorkerCommand::Complete {
+            request_sequence: 4,
+            capabilities: vec!["upload_resource".to_string()],
+            complete: ResourceUploadComplete {
+                upload_id: vec![0; 16],
+            },
+        })
+        .await
+        .unwrap();
+    drop(commands);
+    drop(event_rx);
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        run_upload_worker(
+            shared_state.clone(),
+            "resource-chunk-error".to_string(),
+            command_rx,
+            events,
+            0,
+            Default::default(),
+        ),
+    )
+    .await
+    .expect("closed event lane must not prevent worker termination");
+    let (fresh_tx, _fresh_init, mut fresh_stream) = handshake_with_capabilities(
+        &mut client,
+        "resource-chunk-error",
+        "test-key",
+        &["upload_resource"],
+    )
+    .await;
+    let mut recovered_after_worker = 0;
+    for offset in 0..5u8 {
+        let sequence = 2 + u64::from(offset);
+        fresh_tx.send(start(sequence, offset + 10)).await.unwrap();
+        let reply =
+            tokio::time::timeout(Duration::from_secs(5), next_server_msg(&mut fresh_stream))
+                .await
+                .unwrap();
+        match reply.payload {
+            Some(ServerPayload::ResourceUploadAccepted(a)) => {
+                assert_eq!(a.request_sequence, sequence);
+                recovered_after_worker += 1;
+            }
+            Some(ServerPayload::ResourceErrorResponse(e)) => {
+                assert_eq!(e.request_sequence, sequence);
+                assert_eq!(e.error_code, 8);
+            }
+            other => panic!("expected post-worker capacity admission decision, got {other:?}"),
+        }
+    }
+    assert_eq!(
+        (recovered_after_chunk, recovered_after_worker),
+        (4, 4),
+        "failed chunk and terminated worker must both recover owned slots, retaining cap4"
+    );
 
     drop(handle);
 }
