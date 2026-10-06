@@ -33,6 +33,9 @@ pub enum ConfigErrorCode {
     DisplayProfileNotSupported,
     /// An `agents.toml` `psk_sha256` is not 64 hex characters.
     InvalidPskHash,
+    /// Two `agents.toml` agents share one `psk_sha256`, so a PSK would not
+    /// identify one agent.
+    DuplicatePskHash,
     ConfigIncludesNotSupported,
     /// `[widget_bundles].paths` entry does not exist on disk.
     WidgetBundlePathNotFound,

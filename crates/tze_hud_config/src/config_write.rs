@@ -154,11 +154,22 @@ fn apply(src: &str, updates: &[(&str, TokenUpdate)]) -> Result<String, ConfigWri
 
 static TMP_SEQ: AtomicU64 = AtomicU64::new(0);
 
+/// How [`write_atomic`] sets the replacement file's permissions.
+#[derive(Clone, Copy)]
+pub(crate) enum FileMode {
+    /// Keep the permissions of the file being replaced.
+    Inherit,
+    /// Owner read/write only (0600) on Unix. Windows has no mode bits; the
+    /// file takes the directory's ACL.
+    Private,
+}
+
 /// Write `bytes` to a unique temp file beside `path`, fsync it, then `rename`
 /// it over `path`. The temp file is removed if any step fails.
-fn write_atomic(
+pub(crate) fn write_atomic(
     path: &Path,
     bytes: &[u8],
+    mode: FileMode,
     rename: impl FnOnce(&Path, &Path) -> std::io::Result<()>,
 ) -> std::io::Result<()> {
     use std::io::Write;
@@ -171,10 +182,19 @@ fn write_atomic(
     );
     let tmp = dir.map_or_else(|| PathBuf::from(&tmp_name), |d| d.join(&tmp_name));
     let result = (|| {
-        let mut f = std::fs::File::create(&tmp)?;
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        if matches!(mode, FileMode::Private) {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut f = options.open(&tmp)?;
         f.write_all(bytes)?;
         f.sync_all()?;
-        if let Ok(meta) = std::fs::metadata(path) {
+        if matches!(mode, FileMode::Inherit)
+            && let Ok(meta) = std::fs::metadata(path)
+        {
             let _ = std::fs::set_permissions(&tmp, meta.permissions());
         }
         drop(f);
@@ -212,7 +232,8 @@ fn set_design_tokens_with(
     if std::fs::metadata(config_path).is_ok_and(|m| m.permissions().readonly()) {
         return Err(ConfigWriteError::ReadOnlyOrLocked(config_path.to_owned()));
     }
-    write_atomic(config_path, out.as_bytes(), rename).map_err(|e| locked(e.into()))
+    write_atomic(config_path, out.as_bytes(), FileMode::Inherit, rename)
+        .map_err(|e| locked(e.into()))
 }
 
 /// Set or remove `[design_tokens]` keys (`theme`, `font.sans`, `font.mono`,

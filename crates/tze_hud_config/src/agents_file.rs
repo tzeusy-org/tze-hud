@@ -18,6 +18,7 @@ use serde::{Deserialize, Serialize};
 use tze_hud_scene::config::{AgentDirectory, ConfigError, ConfigErrorCode, PskDigest, hash_psk};
 
 use crate::allow::{allow_to_permissions, validate_allow_entry};
+use crate::config_write::{FileMode, write_atomic};
 
 /// File name of the agent store.
 pub const AGENTS_FILE_NAME: &str = "agents.toml";
@@ -118,9 +119,11 @@ impl AgentsFile {
     }
 
     /// Add every agent to `dir`, expanding `allow` lists into permissions.
-    /// Returns every invalid hash and allow entry.
+    /// Returns every invalid hash and allow entry, and every hash already
+    /// used by an earlier agent (in id order): one PSK must identify one agent.
     pub fn add_to(&self, dir: &mut AgentDirectory) -> Result<(), Vec<ConfigError>> {
         let mut errors = Vec::new();
+        let mut owners: BTreeMap<PskDigest, &str> = BTreeMap::new();
         for (agent_id, record) in &self.agents {
             for entry in &record.allow {
                 if let Err(hint) = validate_allow_entry(entry) {
@@ -134,7 +137,15 @@ impl AgentsFile {
                 }
             }
             match parse_digest(&record.psk_sha256) {
+                Some(digest) if owners.contains_key(&digest) => errors.push(ConfigError {
+                    code: ConfigErrorCode::DuplicatePskHash,
+                    field_path: format!("agents.{agent_id}.psk_sha256"),
+                    expected: "a PSK hash no other agent uses".into(),
+                    got: format!("the same hash as agents.{}", owners[&digest]),
+                    hint: "remove one of the two agents, or re-pair it to get its own PSK".into(),
+                }),
                 Some(digest) => {
+                    owners.insert(digest, agent_id);
                     dir.insert(
                         agent_id.clone(),
                         digest,
@@ -174,16 +185,18 @@ pub fn load(path: &Path) -> Result<AgentsFile, AgentsFileError> {
     }
 }
 
-/// Write `agents.toml` atomically: a temp file in the same directory, then a
-/// rename over the target.
+/// Write `agents.toml` atomically: a uniquely named temp file in the same
+/// directory (removed on error), then a rename over the target. The file is
+/// owner-only (0600) on Unix; Windows has no mode bits, so it takes the
+/// directory's ACL.
 pub fn save_atomic(path: &Path, file: &AgentsFile) -> std::io::Result<()> {
     let src = toml::to_string(file).map_err(std::io::Error::other)?;
     if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
         std::fs::create_dir_all(dir)?;
     }
-    let tmp = path.with_extension("toml.tmp");
-    std::fs::write(&tmp, src)?;
-    std::fs::rename(&tmp, path)
+    write_atomic(path, src.as_bytes(), FileMode::Private, |from, to| {
+        std::fs::rename(from, to)
+    })
 }
 
 #[cfg(test)]
@@ -205,6 +218,17 @@ mod tests {
         assert!(!saved.contains(PSK), "agents.toml must not contain the PSK");
         assert!(saved.contains(&hash_psk_hex(PSK)));
         assert_eq!(load(&path).unwrap(), file);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o600, "agents.toml must be owner-only");
+        }
+        let entries: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(entries, [AGENTS_FILE_NAME], "no temp file left behind");
 
         let id = file.directory().unwrap().resolve(PSK, "").unwrap();
         assert_eq!(id.agent_id, "claude");
@@ -237,5 +261,28 @@ mod tests {
             ]
         );
         assert!(AgentsFile::parse("[agents.a]\npsk = \"plaintext\"\n").is_err());
+    }
+
+    #[test]
+    fn a_psk_hash_shared_by_two_agents_is_rejected() {
+        let shared = AgentsFile::default()
+            .with_agent("a", PSK, &["*"])
+            .with_agent("b", PSK, &["*"]);
+        let errors = shared
+            .add_to(&mut AgentDirectory::default())
+            .expect_err("duplicate hash on add");
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].code, ConfigErrorCode::DuplicatePskHash);
+        assert_eq!(errors[0].field_path, "agents.b.psk_sha256");
+
+        // The same file from disk fails strict validation, naming both agents.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(AGENTS_FILE_NAME);
+        save_atomic(&path, &shared).unwrap();
+        let err = load(&path).unwrap().directory().unwrap_err().to_string();
+        assert!(
+            err.contains("agents.b.psk_sha256") && err.contains("agents.a"),
+            "{err}"
+        );
     }
 }
