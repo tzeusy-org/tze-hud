@@ -146,7 +146,10 @@ allow = ["zone:*", "widget:gauge", "portal", "tiles"]
   `GET /admin/status`, `GET /admin/logs`, and `GET /admin/screenshot` on the
   MCP port, and `*` does not grant it. `/admin/status` includes `tailnet_inbound` (`state`: `allowed`, `blocked`, `unknown`, `not_applicable`; `reason`, `rule` and `fix` when `blocked`; `error` when `unknown`): whether Windows Firewall lets remote agents reach the tailnet bind, and `safe_mode_hotkey`
   (`chord`, `registered`, `error`; `null` when no hotkey is active; `registered: null` while pending): `registered: false`
-  means the human safe-mode chord is owned by another program.
+  means the human safe-mode chord is owned by another program. The blocked
+  firewall `fix` names `tze_hud.exe --allow-remote` with the same listen-port
+  overrides as startup; see [the reversible Windows helper](operations/windows-install.md#remote-agents).
+  This policy-derived result is cached for five seconds, not a network probe.
   `/admin/status` `displays` lists the overlaid monitors, primary first:
   `{name, x, y, width, height, primary, zones}` in scene pixels (the primary's
   top-left is 0,0; others may be negative) and the zones configured onto each;

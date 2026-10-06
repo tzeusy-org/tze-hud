@@ -7,6 +7,8 @@
 //! [`decide`] classifies it. The check runs on demand and is cached for
 //! [`CACHE_TTL`]; it is never on the frame path.
 
+pub mod remote;
+
 use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -18,7 +20,8 @@ use serde_json::{Value, json};
 pub const CACHE_TTL: Duration = Duration::from_secs(5);
 
 /// Where the owner is pointed for the fix.
-pub const FIX_HINT: &str = "see docs/operations/windows-install.md#remote-agents";
+pub const FIX_HINT: &str =
+    "run tze_hud.exe --allow-remote with the same --mcp-port/--grpc-port overrides as the HUD";
 
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 pub const PROFILE_DOMAIN: u32 = 1;

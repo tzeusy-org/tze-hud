@@ -138,6 +138,9 @@ OPTIONS:
                            client config snippet) and exit 0 WITHOUT starting the
                            runtime. Honours --config / --mcp-port / --grpc-port
                            so the printed info matches the runtime it describes. Never prints the PSK value.
+    --allow-remote         Explicit Windows-only UAC helper: allow this executable
+                           on its TCP listen ports from the tailnet; retain full undo.
+    --disallow-remote      Restore the saved allow/BLOCK state for this executable.
     --install              Install per user (%LOCALAPPDATA%\Programs\tze_hud), register
                            autostart, and relaunch. A bare launch with no arguments
                            from outside the install dir does this automatically;
@@ -180,6 +183,23 @@ NOTES:
     );
 }
 
+fn finish_remote(result: Result<String, String>) -> ! {
+    use std::io::Write;
+    let code = match result {
+        Ok(message) => {
+            println!("{message}");
+            0
+        }
+        Err(message) => {
+            eprintln!("firewall: {message}");
+            1
+        }
+    };
+    let _ = std::io::stdout().flush();
+    let _ = std::io::stderr().flush();
+    std::process::exit(code)
+}
+
 fn print_version() {
     println!("{BIN_NAME} {VERSION} ({GIT_SHA})");
 }
@@ -220,6 +240,8 @@ struct StartupOptions {
     print_attach_info: bool,
     /// `--install`: install per user even when args are present.
     install: bool,
+    /// Explicit one-shot firewall command; never part of installation.
+    remote_action: Option<tze_hud_runtime::remote_firewall::RemoteAction>,
     /// `--uninstall`: reverse the install and exit.
     uninstall: bool,
     /// `--purge` (with `--uninstall`): also delete config and data dirs.
@@ -255,6 +277,7 @@ impl Default for StartupOptions {
             quiescent_efficiency_emit: None,
             print_attach_info: false,
             install: false,
+            remote_action: None,
             uninstall: false,
             purge: false,
             pair: false,
@@ -362,56 +385,141 @@ fn parse_benchmark_emit_path(value: String, source: &str) -> Result<String, Stri
 /// CLI flags take priority over environment variables.
 fn parse_options(args: &[String]) -> Result<StartupOptions, String> {
     let mut opts = StartupOptions::default();
+    let mut scan = 0;
+    while scan < args.len() {
+        let arg = args[scan].as_str();
+        let action = match arg {
+            "--allow-remote" => Some(tze_hud_runtime::remote_firewall::RemoteAction::Allow),
+            "--disallow-remote" => Some(tze_hud_runtime::remote_firewall::RemoteAction::Disallow),
+            _ => None,
+        };
+        if let Some(action) = action {
+            if opts.remote_action.replace(action).is_some() {
+                return Err("choose --allow-remote or --disallow-remote exactly once".into());
+            }
+        }
+        if matches!(
+            arg,
+            "--config"
+                | "--window-mode"
+                | "--width"
+                | "--height"
+                | "--grpc-port"
+                | "--mcp-port"
+                | "--fps"
+                | "--updated-from"
+                | "--benchmark-emit"
+                | "--benchmark-frames"
+                | "--benchmark-warmup-frames"
+                | "--quiescent-efficiency-emit"
+        ) || (arg == "--handoff"
+            && args
+                .get(scan + 1)
+                .is_some_and(|value| !value.starts_with("--")))
+        {
+            scan += 1;
+        }
+        scan += 1;
+    }
+    let mut remote_mcp_override = false;
+    let mut remote_grpc_override = false;
+    if opts.remote_action.is_some() {
+        let mut i = 0;
+        while i < args.len() {
+            match args[i].as_str() {
+                "--allow-remote" | "--disallow-remote" => {}
+                "--config" => {
+                    i += 1;
+                }
+                "--mcp-port" => {
+                    remote_mcp_override = true;
+                    i += 1;
+                }
+                "--grpc-port" => {
+                    remote_grpc_override = true;
+                    i += 1;
+                }
+                _ => {
+                    return Err(format!(
+                        "{} cannot be mixed with a remote command; only --config and listen-port overrides are accepted",
+                        args[i]
+                    ));
+                }
+            }
+            i += 1;
+        }
+    }
 
-    // Apply environment variables first (lowest priority).
-    if let Ok(v) = std::env::var("TZE_HUD_WINDOW_MODE") {
-        opts.window_mode = parse_window_mode(&v)?;
-    }
-    if let Ok(v) = std::env::var("TZE_HUD_WINDOW_WIDTH") {
-        opts.width = v
-            .parse::<u32>()
-            .map_err(|_| format!("TZE_HUD_WINDOW_WIDTH: invalid integer: {v:?}"))?;
-        opts.explicit_width = true;
-    }
-    if let Ok(v) = std::env::var("TZE_HUD_WINDOW_HEIGHT") {
-        opts.height = v
-            .parse::<u32>()
-            .map_err(|_| format!("TZE_HUD_WINDOW_HEIGHT: invalid integer: {v:?}"))?;
-        opts.explicit_height = true;
-    }
-    if let Ok(v) = std::env::var("TZE_HUD_GRPC_PORT") {
-        opts.grpc_port = v
-            .parse::<u16>()
-            .map_err(|_| format!("TZE_HUD_GRPC_PORT: invalid port: {v:?}"))?;
-    }
-    if let Ok(v) = std::env::var("TZE_HUD_MCP_PORT") {
-        opts.mcp_port = v
-            .parse::<u16>()
-            .map_err(|_| format!("TZE_HUD_MCP_PORT: invalid port: {v:?}"))?;
-    }
-    if let Ok(v) = std::env::var("TZE_HUD_FPS") {
-        opts.fps = v
-            .parse::<u32>()
-            .map_err(|_| format!("TZE_HUD_FPS: invalid integer: {v:?}"))?;
-    }
-    if let Ok(v) = std::env::var("TZE_HUD_BENCHMARK_EMIT") {
-        opts.benchmark_emit = Some(parse_benchmark_emit_path(v, "TZE_HUD_BENCHMARK_EMIT")?);
-    }
-    if let Ok(v) = std::env::var("TZE_HUD_BENCHMARK_FRAMES") {
-        opts.benchmark_frames = v
-            .parse::<u64>()
-            .map_err(|_| format!("TZE_HUD_BENCHMARK_FRAMES: invalid integer: {v:?}"))?;
-    }
-    if let Ok(v) = std::env::var("TZE_HUD_BENCHMARK_WARMUP_FRAMES") {
-        opts.benchmark_warmup_frames = v
-            .parse::<u64>()
-            .map_err(|_| format!("TZE_HUD_BENCHMARK_WARMUP_FRAMES: invalid integer: {v:?}"))?;
-    }
-    if let Ok(v) = std::env::var("TZE_HUD_QUIESCENT_EFFICIENCY_EMIT") {
-        opts.quiescent_efficiency_emit = Some(parse_benchmark_emit_path(
-            v,
-            "TZE_HUD_QUIESCENT_EFFICIENCY_EMIT",
-        )?);
+    // Unrelated startup environment cannot obstruct an undo or retarget a child.
+    // Normal startup retains its existing environment parsing behavior.
+    if opts.remote_action.is_none() {
+        // Apply environment variables first (lowest priority).
+        if let Ok(v) = std::env::var("TZE_HUD_WINDOW_MODE") {
+            opts.window_mode = parse_window_mode(&v)?;
+        }
+        if let Ok(v) = std::env::var("TZE_HUD_WINDOW_WIDTH") {
+            opts.width = v
+                .parse::<u32>()
+                .map_err(|_| format!("TZE_HUD_WINDOW_WIDTH: invalid integer: {v:?}"))?;
+            opts.explicit_width = true;
+        }
+        if let Ok(v) = std::env::var("TZE_HUD_WINDOW_HEIGHT") {
+            opts.height = v
+                .parse::<u32>()
+                .map_err(|_| format!("TZE_HUD_WINDOW_HEIGHT: invalid integer: {v:?}"))?;
+            opts.explicit_height = true;
+        }
+        if let Ok(v) = std::env::var("TZE_HUD_GRPC_PORT") {
+            opts.grpc_port = v
+                .parse::<u16>()
+                .map_err(|_| format!("TZE_HUD_GRPC_PORT: invalid port: {v:?}"))?;
+        }
+        if let Ok(v) = std::env::var("TZE_HUD_MCP_PORT") {
+            opts.mcp_port = v
+                .parse::<u16>()
+                .map_err(|_| format!("TZE_HUD_MCP_PORT: invalid port: {v:?}"))?;
+        }
+        if let Ok(v) = std::env::var("TZE_HUD_FPS") {
+            opts.fps = v
+                .parse::<u32>()
+                .map_err(|_| format!("TZE_HUD_FPS: invalid integer: {v:?}"))?;
+        }
+        if let Ok(v) = std::env::var("TZE_HUD_BENCHMARK_EMIT") {
+            opts.benchmark_emit = Some(parse_benchmark_emit_path(v, "TZE_HUD_BENCHMARK_EMIT")?);
+        }
+        if let Ok(v) = std::env::var("TZE_HUD_BENCHMARK_FRAMES") {
+            opts.benchmark_frames = v
+                .parse::<u64>()
+                .map_err(|_| format!("TZE_HUD_BENCHMARK_FRAMES: invalid integer: {v:?}"))?;
+        }
+        if let Ok(v) = std::env::var("TZE_HUD_BENCHMARK_WARMUP_FRAMES") {
+            opts.benchmark_warmup_frames = v
+                .parse::<u64>()
+                .map_err(|_| format!("TZE_HUD_BENCHMARK_WARMUP_FRAMES: invalid integer: {v:?}"))?;
+        }
+        if let Ok(v) = std::env::var("TZE_HUD_QUIESCENT_EFFICIENCY_EMIT") {
+            opts.quiescent_efficiency_emit = Some(parse_benchmark_emit_path(
+                v,
+                "TZE_HUD_QUIESCENT_EFFICIENCY_EMIT",
+            )?);
+        }
+    } else if opts.remote_action == Some(tze_hud_runtime::remote_firewall::RemoteAction::Allow) {
+        for (cli_override, variable, destination) in [
+            (remote_mcp_override, "TZE_HUD_MCP_PORT", &mut opts.mcp_port),
+            (
+                remote_grpc_override,
+                "TZE_HUD_GRPC_PORT",
+                &mut opts.grpc_port,
+            ),
+        ] {
+            if !cli_override {
+                if let Ok(value) = std::env::var(variable) {
+                    *destination = value
+                        .parse::<u16>()
+                        .map_err(|_| format!("{variable}: invalid listen port"))?;
+                }
+            }
+        }
     }
     // Parse CLI flags (override env vars).
     let mut i = 0usize;
@@ -441,6 +549,7 @@ fn parse_options(args: &[String]) -> Result<StartupOptions, String> {
                 // are already applied. Does not start the runtime.
                 opts.print_attach_info = true;
             }
+            "--allow-remote" | "--disallow-remote" => {}
             "--install" => opts.install = true,
             "--uninstall" => opts.uninstall = true,
             "--purge" => opts.purge = true,
@@ -588,6 +697,12 @@ fn parse_options(args: &[String]) -> Result<StartupOptions, String> {
         return Err("--purge is only valid with --uninstall".to_string());
     }
 
+    if opts.remote_action == Some(tze_hud_runtime::remote_firewall::RemoteAction::Allow)
+        && opts.mcp_port == 0
+        && opts.grpc_port == 0
+    {
+        return Err("--allow-remote requires at least one nonzero listen port".into());
+    }
     Ok(opts)
 }
 
@@ -864,10 +979,47 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Collect CLI args, skipping argv[0] (the binary name).
     let args: Vec<String> = std::env::args().skip(1).collect();
 
+    match tze_hud_runtime::remote_firewall::parse_private_child(&args) {
+        Ok(Some(request)) => {
+            finish_remote(tze_hud_runtime::remote_firewall::execute_child(request))
+        }
+        Ok(None) => {}
+        Err(error) => finish_remote(Err(error)),
+    }
+
     let mut opts = parse_options(&args).unwrap_or_else(|e| {
         eprintln!("error: {e}");
         std::process::exit(1);
     });
+
+    // This one-shot path precedes install/cleanup, instance lock, agents, GPU
+    // and listeners. Explicit config validation never supplies listen ports.
+    if let Some(action) = opts.remote_action {
+        if let Some(path) = opts.config_path.as_deref() {
+            let validation = resolve_config_path(Some(path))
+                .map_err(|_| "explicit configuration file was not found".to_string())
+                .and_then(|path| {
+                    std::fs::read_to_string(path)
+                        .map_err(|e| format!("cannot read explicit configuration: {e}"))
+                })
+                .and_then(|text| {
+                    tze_hud_config::validate_config(&text).map_err(|errors| {
+                        errors
+                            .iter()
+                            .map(|e| format!("{}: {}", e.field_path, e.hint))
+                            .collect::<Vec<_>>()
+                            .join("; ")
+                    })
+                });
+            if let Err(error) = validation {
+                finish_remote(Err(error));
+            }
+        }
+        finish_remote(tze_hud_runtime::remote_firewall::execute(
+            action,
+            [opts.mcp_port, opts.grpc_port],
+        ));
+    }
 
     // ── Attach-info fast path (hud-b7c0m) ─────────────────────────────────────
     // Print the MCP attach-info block and exit *before* acquiring the GPU lock,
@@ -1200,6 +1352,7 @@ mod tests {
                 assert!(!o.explicit_width && !o.explicit_height);
                 assert_eq!((o.grpc_port, o.mcp_port, o.fps), (50051, 9090, 60));
                 assert!(o.config_path.is_none());
+                assert!(o.remote_action.is_none());
                 assert!(o.benchmark_emit.is_none() && o.quiescent_efficiency_emit.is_none());
                 assert_eq!((o.benchmark_frames, o.benchmark_warmup_frames), (600, 120));
                 assert!(
@@ -1214,6 +1367,65 @@ mod tests {
                         || o.updated_from.is_some())
                 );
             }),
+            (
+                "allow flag-looking config filename",
+                &[("TZE_HUD_MCP_PORT", "9290")],
+                &["--allow-remote", "--config", "--mcp-port"],
+                |o| {
+                    assert_eq!(o.config_path.as_deref(), Some("--mcp-port"));
+                    assert_eq!(o.mcp_port, 9290);
+                },
+            ),
+            ("allow remote defaults", &[], &["--allow-remote"], |o| {
+                assert_eq!(
+                    o.remote_action,
+                    Some(tze_hud_runtime::remote_firewall::RemoteAction::Allow)
+                );
+                assert_eq!((o.mcp_port, o.grpc_port), (9090, 50051));
+            }),
+            (
+                "allow remote original ports",
+                &[("TZE_HUD_MCP_PORT", "9290"), ("TZE_HUD_GRPC_PORT", "50052")],
+                &["--allow-remote"],
+                |o| {
+                    assert_eq!((o.mcp_port, o.grpc_port), (9290, 50052));
+                },
+            ),
+            (
+                "allow remote CLI precedence",
+                &[
+                    ("TZE_HUD_MCP_PORT", "invalid"),
+                    ("TZE_HUD_GRPC_PORT", "invalid"),
+                ],
+                &["--allow-remote", "--mcp-port", "9300", "--grpc-port", "0"],
+                |o| {
+                    assert_eq!((o.mcp_port, o.grpc_port), (9300, 0));
+                },
+            ),
+            (
+                "disallow ignores startup environment",
+                &[
+                    ("TZE_HUD_MCP_PORT", "invalid"),
+                    ("TZE_HUD_GRPC_PORT", "invalid"),
+                    ("TZE_HUD_WINDOW_MODE", "invalid"),
+                ],
+                &["--disallow-remote"],
+                |o| {
+                    assert_eq!(
+                        o.remote_action,
+                        Some(tze_hud_runtime::remote_firewall::RemoteAction::Disallow)
+                    );
+                },
+            ),
+            (
+                "allow explicit config",
+                &[],
+                &["--allow-remote", "--config", "my.toml", "--mcp-port", "0"],
+                |o| {
+                    assert_eq!(o.config_path.as_deref(), Some("my.toml"));
+                    assert_eq!(o.mcp_port, 0);
+                },
+            ),
             ("install", &[], &["--install"], |o| {
                 assert!(o.install && !o.uninstall);
             }),
@@ -1394,6 +1606,60 @@ mod tests {
     #[test]
     fn parse_options_rejects() {
         let cases: &[(&str, Env, &[&str], &[&str])] = &[
+            (
+                "remote conflicting modes",
+                &[],
+                &["--allow-remote", "--disallow-remote"],
+                &["remote"],
+            ),
+            (
+                "remote repeated mode",
+                &[],
+                &["--allow-remote", "--allow-remote"],
+                &["remote"],
+            ),
+            (
+                "remote repeated disallow",
+                &[],
+                &["--disallow-remote", "--disallow-remote"],
+                &["remote"],
+            ),
+            (
+                "remote install conflict",
+                &[],
+                &["--allow-remote", "--install"],
+                &["--install"],
+            ),
+            (
+                "remote pairing conflict",
+                &[],
+                &["--disallow-remote", "--pair"],
+                &["--pair"],
+            ),
+            (
+                "remote attach conflict",
+                &[],
+                &["--allow-remote", "--print-attach-info"],
+                &["--print-attach-info"],
+            ),
+            (
+                "remote both ports disabled",
+                &[],
+                &["--allow-remote", "--mcp-port", "0", "--grpc-port", "0"],
+                &["nonzero"],
+            ),
+            (
+                "remote invalid inherited port",
+                &[("TZE_HUD_MCP_PORT", "invalid")],
+                &["--allow-remote"],
+                &["TZE_HUD_MCP_PORT"],
+            ),
+            (
+                "remote invalid private flag",
+                &[],
+                &["--tze-hud-firewall-child"],
+                &["unknown flag"],
+            ),
             (
                 "handoff spec off loopback",
                 &[],
