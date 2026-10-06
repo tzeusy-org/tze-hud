@@ -1,0 +1,42 @@
+[
+  {
+    "name": "protocol-default",
+    "head": "3b5bbb634a7dc6d8a8c9e40f585e5b1868cfb528",
+    "mutation": "ignored in-memory real metadata copy, never manifest write",
+    "expected_exit": 1,
+    "exit": 1,
+    "stdout": "FAIL: dev-mode is enabled by default for tze_hud_app (shipped binary) on: tze_hud_protocol\nFAIL: dev-mode is enabled by default for benchmark on: tze_hud_protocol\nSKIP: integration has no lib/bin target (tests only)\nFAIL: dev-mode is enabled by default for poc_demo on: tze_hud_protocol\nFAIL: dev-mode is enabled by default for render_artifacts on: tze_hud_protocol\nPASS: dev-mode is not enabled by default for tze_hud_compositor\nPASS: dev-mode is not enabled by default for tze_hud_config\nPASS: dev-mode is not enabled by default for tze_hud_input\nPASS: dev-mode is not enabled by default for tze_hud_mcp\nPASS: dev-mode is not enabled by default for tze_hud_projection\nFAIL: dev-mode is enabled by default for tze_hud_protocol on: tze_hud_protocol\nPASS: dev-mode is not enabled by default for tze_hud_resource\nFAIL: dev-mode is enabled by default for tze_hud_runtime on: tze_hud_protocol\nPASS: dev-mode is not enabled by default for tze_hud_scene\nPASS: dev-mode is not enabled by default for tze_hud_telemetry\nPASS: dev-mode is not enabled by default for tze_hud_widget\nFAIL: dev-mode is enabled by default for vertical_slice on: tze_hud_protocol\nFAIL: dev-mode is enabled by default for widget_publish_load_harness on: tze_hud_protocol\n"
+  },
+  {
+    "name": "app-runtime-edge",
+    "head": "3b5bbb634a7dc6d8a8c9e40f585e5b1868cfb528",
+    "mutation": "ignored in-memory real metadata copy, never manifest write",
+    "expected_exit": 1,
+    "exit": 1,
+    "stdout": "FAIL: dev-mode is enabled by default for tze_hud_app (shipped binary) on: tze_hud_runtime\nPASS: dev-mode is not enabled by default for benchmark\nSKIP: integration has no lib/bin target (tests only)\nPASS: dev-mode is not enabled by default for poc_demo\nPASS: dev-mode is not enabled by default for render_artifacts\nPASS: dev-mode is not enabled by default for tze_hud_compositor\nPASS: dev-mode is not enabled by default for tze_hud_config\nPASS: dev-mode is not enabled by default for tze_hud_input\nPASS: dev-mode is not enabled by default for tze_hud_mcp\nPASS: dev-mode is not enabled by default for tze_hud_projection\nPASS: dev-mode is not enabled by default for tze_hud_protocol\nPASS: dev-mode is not enabled by default for tze_hud_resource\nPASS: dev-mode is not enabled by default for tze_hud_runtime\nPASS: dev-mode is not enabled by default for tze_hud_scene\nPASS: dev-mode is not enabled by default for tze_hud_telemetry\nPASS: dev-mode is not enabled by default for tze_hud_widget\nPASS: dev-mode is not enabled by default for vertical_slice\nPASS: dev-mode is not enabled by default for widget_publish_load_harness\n"
+  },
+  {
+    "name": "runtime-indirection",
+    "head": "3b5bbb634a7dc6d8a8c9e40f585e5b1868cfb528",
+    "mutation": "ignored in-memory real metadata copy, never manifest write",
+    "expected_exit": 1,
+    "exit": 1,
+    "stdout": "FAIL: dev-mode is enabled by default for tze_hud_app (shipped binary) on: tze_hud_runtime\nFAIL: dev-mode is enabled by default for benchmark on: tze_hud_runtime\nSKIP: integration has no lib/bin target (tests only)\nPASS: dev-mode is not enabled by default for poc_demo\nFAIL: dev-mode is enabled by default for render_artifacts on: tze_hud_runtime\nPASS: dev-mode is not enabled by default for tze_hud_compositor\nPASS: dev-mode is not enabled by default for tze_hud_config\nPASS: dev-mode is not enabled by default for tze_hud_input\nPASS: dev-mode is not enabled by default for tze_hud_mcp\nPASS: dev-mode is not enabled by default for tze_hud_projection\nPASS: dev-mode is not enabled by default for tze_hud_protocol\nPASS: dev-mode is not enabled by default for tze_hud_resource\nFAIL: dev-mode is enabled by default for tze_hud_runtime on: tze_hud_runtime\nPASS: dev-mode is not enabled by default for tze_hud_scene\nPASS: dev-mode is not enabled by default for tze_hud_telemetry\nPASS: dev-mode is not enabled by default for tze_hud_widget\nFAIL: dev-mode is enabled by default for vertical_slice on: tze_hud_runtime\nPASS: dev-mode is not enabled by default for widget_publish_load_harness\n"
+  },
+  {
+    "name": "weak-activate",
+    "head": "3b5bbb634a7dc6d8a8c9e40f585e5b1868cfb528",
+    "expected_exit": 1,
+    "exit": 0,
+    "stdout": "PASS: dev-mode is not enabled by default for tze_hud_app (shipped binary)\nPASS: dev-mode is not enabled by default for tze_hud_runtime\n",
+    "input": "weak-feature-metadata-activate.json"
+  },
+  {
+    "name": "weak-forward",
+    "head": "3b5bbb634a7dc6d8a8c9e40f585e5b1868cfb528",
+    "expected_exit": 1,
+    "exit": 1,
+    "stdout": "FAIL: dev-mode is enabled by default for tze_hud_app (shipped binary) on: tze_hud_runtime\nPASS: dev-mode is not enabled by default for tze_hud_runtime\n",
+    "input": "weak-feature-metadata-forward.json"
+  }
+]

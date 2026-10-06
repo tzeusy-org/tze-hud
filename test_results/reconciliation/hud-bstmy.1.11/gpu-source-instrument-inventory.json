@@ -1,0 +1,2114 @@
+{
+  "audit_head": "3b5bbb634a7dc6d8a8c9e40f585e5b1868cfb528",
+  "scans": {
+    "raw_device_and_factory": {
+      "pattern": "wgpu::Instance|Instance::new|RequestAdapterOptions|DeviceDescriptor|request_device|request_adapter|(?:HeadlessRuntime|Compositor)::new",
+      "roots": [
+        "crates",
+        "app",
+        "examples",
+        "tests"
+      ],
+      "exit": 0,
+      "matches": [
+        {
+          "file": "tests/integration/subtitle_streaming.rs",
+          "line": 106,
+          "source": "    let runtime = common::serialized_headless_init(HeadlessRuntime::new(config)).await?;"
+        },
+        {
+          "file": "tests/integration/text_stream_portal_adapter.rs",
+          "line": 834,
+          "source": "    let runtime = serialized_headless_init(HeadlessRuntime::new(config)).await?;"
+        },
+        {
+          "file": "tests/integration/text_stream_portal_adapter.rs",
+          "line": 928,
+          "source": "    let runtime = serialized_headless_init(HeadlessRuntime::new(config)).await?;"
+        },
+        {
+          "file": "tests/integration/text_stream_portal_cadence.rs",
+          "line": 269,
+          "source": "    let mut runtime = serialized_headless_init(HeadlessRuntime::new(config))"
+        },
+        {
+          "file": "tests/integration/text_stream_portal_cadence.rs",
+          "line": 436,
+          "source": "    let mut runtime = serialized_headless_init(HeadlessRuntime::new(config))"
+        },
+        {
+          "file": "tests/integration/text_stream_portal_cadence.rs",
+          "line": 733,
+          "source": "    let mut runtime = serialized_headless_init(HeadlessRuntime::new(config))"
+        },
+        {
+          "file": "tests/integration/multi_agent.rs",
+          "line": 146,
+          "source": "    let mut runtime = serialized_headless_init(HeadlessRuntime::new(config)).await?;"
+        },
+        {
+          "file": "tests/integration/multi_agent.rs",
+          "line": 743,
+          "source": "    let runtime = serialized_headless_init(HeadlessRuntime::new(config))"
+        },
+        {
+          "file": "tests/integration/multi_agent.rs",
+          "line": 1062,
+          "source": "    let runtime = serialized_headless_init(HeadlessRuntime::new(config)).await?;"
+        },
+        {
+          "file": "examples/render_artifacts/src/bin/cooperative_projection_readback.rs",
+          "line": 86,
+          "source": "    let mut runtime = HeadlessRuntime::new(HeadlessConfig {"
+        },
+        {
+          "file": "examples/benchmark/src/token_footprint_calibration.rs",
+          "line": 331,
+          "source": "        let runtime = HeadlessRuntime::new(headless_config()).await?;"
+        },
+        {
+          "file": "app/tze_hud_app/tests/benchmark_config_schema.rs",
+          "line": 54,
+          "source": "    let runtime = HeadlessRuntime::new(benchmark_headless_config())"
+        },
+        {
+          "file": "examples/render_artifacts/src/bin/vertical_flow_readback.rs",
+          "line": 162,
+          "source": "    let mut runtime = HeadlessRuntime::new(HeadlessConfig {"
+        },
+        {
+          "file": "app/tze_hud_app/tests/production_boot.rs",
+          "line": 40,
+          "source": "        gpu_init::serialized_headless_init(HeadlessRuntime::new(canonical_headless_config())).await;"
+        },
+        {
+          "file": "app/tze_hud_app/tests/production_boot.rs",
+          "line": 51,
+          "source": "        gpu_init::serialized_headless_init(HeadlessRuntime::new(canonical_headless_config()))"
+        },
+        {
+          "file": "app/tze_hud_app/tests/production_boot.rs",
+          "line": 127,
+          "source": "    let runtime = gpu_init::serialized_headless_init(HeadlessRuntime::new(HeadlessConfig {"
+        },
+        {
+          "file": "examples/benchmark/src/main.rs",
+          "line": 524,
+          "source": "        let mut runtime = match HeadlessRuntime::new(config).await {"
+        },
+        {
+          "file": "examples/benchmark/src/main.rs",
+          "line": 647,
+          "source": "        let mut runtime = match HeadlessRuntime::new(config).await {"
+        },
+        {
+          "file": "examples/benchmark/src/main.rs",
+          "line": 778,
+          "source": "        let mut runtime = HeadlessRuntime::new(config)"
+        },
+        {
+          "file": "examples/benchmark/src/main.rs",
+          "line": 780,
+          "source": "            .expect(\"HeadlessRuntime::new failed — ensure the headless feature is enabled\");"
+        },
+        {
+          "file": "examples/benchmark/src/main.rs",
+          "line": 903,
+          "source": "        let mut runtime = HeadlessRuntime::new(config)"
+        },
+        {
+          "file": "examples/benchmark/src/main.rs",
+          "line": 905,
+          "source": "            .expect(\"HeadlessRuntime::new failed\");"
+        },
+        {
+          "file": "examples/benchmark/src/main.rs",
+          "line": 1222,
+          "source": "        let runtime = HeadlessRuntime::new(config)"
+        },
+        {
+          "file": "examples/benchmark/src/main.rs",
+          "line": 1224,
+          "source": "            .expect(\"HeadlessRuntime::new failed\");"
+        },
+        {
+          "file": "examples/benchmark/src/main.rs",
+          "line": 1425,
+          "source": "        let runtime = HeadlessRuntime::new(config)"
+        },
+        {
+          "file": "examples/benchmark/src/main.rs",
+          "line": 1427,
+          "source": "            .expect(\"HeadlessRuntime::new failed\");"
+        },
+        {
+          "file": "examples/vertical_slice/tests/production_boot.rs",
+          "line": 25,
+          "source": "    let result = HeadlessRuntime::new(HeadlessConfig {"
+        },
+        {
+          "file": "examples/vertical_slice/src/main.rs",
+          "line": 80,
+          "source": "    let runtime = HeadlessRuntime::new(HeadlessConfig {"
+        },
+        {
+          "file": "examples/vertical_slice/tests/budget_assertions.rs",
+          "line": 95,
+          "source": "    let mut runtime = serialized_headless_init(HeadlessRuntime::new(config))"
+        },
+        {
+          "file": "examples/vertical_slice/tests/budget_assertions.rs",
+          "line": 166,
+          "source": "    let mut runtime = serialized_headless_init(HeadlessRuntime::new(config))"
+        },
+        {
+          "file": "examples/vertical_slice/tests/budget_assertions.rs",
+          "line": 282,
+          "source": "    let mut runtime = serialized_headless_init(HeadlessRuntime::new(config))"
+        },
+        {
+          "file": "examples/vertical_slice/tests/budget_assertions.rs",
+          "line": 352,
+          "source": "    let mut runtime = serialized_headless_init(HeadlessRuntime::new(config))"
+        },
+        {
+          "file": "examples/vertical_slice/tests/budget_assertions.rs",
+          "line": 430,
+          "source": "    let mut runtime = serialized_headless_init(HeadlessRuntime::new(config))"
+        },
+        {
+          "file": "examples/vertical_slice/tests/budget_assertions.rs",
+          "line": 605,
+          "source": "    let runtime = serialized_headless_init(HeadlessRuntime::new(config))"
+        },
+        {
+          "file": "examples/vertical_slice/tests/budget_assertions.rs",
+          "line": 777,
+          "source": "    let mut runtime = serialized_headless_init(HeadlessRuntime::new(config))"
+        },
+        {
+          "file": "examples/vertical_slice/tests/budget_assertions.rs",
+          "line": 914,
+          "source": "    let mut runtime = serialized_headless_init(HeadlessRuntime::new(config))"
+        },
+        {
+          "file": "examples/vertical_slice/tests/budget_assertions.rs",
+          "line": 956,
+          "source": "    let mut runtime = serialized_headless_init(HeadlessRuntime::new(config))"
+        },
+        {
+          "file": "examples/vertical_slice/tests/budget_assertions.rs",
+          "line": 1035,
+          "source": "    let mut runtime = serialized_headless_init(HeadlessRuntime::new(config))"
+        },
+        {
+          "file": "examples/vertical_slice/tests/budget_assertions.rs",
+          "line": 1143,
+          "source": "    serialized_headless_init(HeadlessRuntime::new(HeadlessConfig {"
+        },
+        {
+          "file": "examples/vertical_slice/tests/budget_assertions.rs",
+          "line": 1151,
+          "source": "    .expect(\"HeadlessRuntime::new failed\")"
+        },
+        {
+          "file": "crates/tze_hud_runtime/tests/pixel_helpers.rs",
+          "line": 79,
+          "source": "    // Serialize device creation: `HeadlessRuntime::new` does not, and"
+        },
+        {
+          "file": "crates/tze_hud_runtime/tests/pixel_helpers.rs",
+          "line": 85,
+          "source": "    tze_hud_runtime::HeadlessRuntime::new(HeadlessConfig {"
+        },
+        {
+          "file": "crates/tze_hud_runtime/tests/pixel_helpers.rs",
+          "line": 93,
+          "source": "    .expect(\"HeadlessRuntime::new failed\")"
+        },
+        {
+          "file": "crates/tze_hud_runtime/tests/present_ack.rs",
+          "line": 41,
+          "source": "    serialized_headless_init(HeadlessRuntime::new(config))"
+        },
+        {
+          "file": "crates/tze_hud_compositor/tests/gpu_canary.rs",
+          "line": 66,
+          "source": "    match Compositor::new_headless(64, 64).await {"
+        },
+        {
+          "file": "crates/tze_hud_compositor/tests/common/mod.rs",
+          "line": 22,
+          "source": "    Compositor::new_headless(w, h).await"
+        },
+        {
+          "file": "crates/tze_hud_runtime/src/headless.rs",
+          "line": 25,
+          "source": "//! `HeadlessRuntime::new` respects the `HEADLESS_FORCE_SOFTWARE` environment"
+        },
+        {
+          "file": "crates/tze_hud_runtime/src/headless.rs",
+          "line": 206,
+          "source": "        let mut compositor = Compositor::new_headless(config.width, config.height).await?;"
+        },
+        {
+          "file": "crates/tze_hud_runtime/src/headless.rs",
+          "line": 912,
+          "source": "        let mut runtime = HeadlessRuntime::new(HeadlessConfig {"
+        },
+        {
+          "file": "crates/tze_hud_runtime/src/headless.rs",
+          "line": 960,
+          "source": "        let mut reference = HeadlessRuntime::new(config)"
+        },
+        {
+          "file": "crates/tze_hud_runtime/src/headless.rs",
+          "line": 1053,
+          "source": "        let mut runtime = HeadlessRuntime::new(HeadlessConfig {"
+        },
+        {
+          "file": "crates/tze_hud_runtime/src/headless.rs",
+          "line": 1114,
+          "source": "        let mut runtime = HeadlessRuntime::new(HeadlessConfig {"
+        },
+        {
+          "file": "crates/tze_hud_runtime/src/headless.rs",
+          "line": 1384,
+          "source": "        let mut runtime = HeadlessRuntime::new(config).await.expect(\"runtime init\");"
+        },
+        {
+          "file": "crates/tze_hud_runtime/src/headless.rs",
+          "line": 1403,
+          "source": "        let mut runtime = HeadlessRuntime::new(config).await.expect(\"runtime init\");"
+        },
+        {
+          "file": "crates/tze_hud_runtime/src/headless.rs",
+          "line": 1469,
+          "source": "        let mut runtime = HeadlessRuntime::new(config).await.expect(\"runtime init\");"
+        },
+        {
+          "file": "crates/tze_hud_runtime/src/headless.rs",
+          "line": 1518,
+          "source": "        let mut runtime = HeadlessRuntime::new(config).await.expect(\"runtime init\");"
+        },
+        {
+          "file": "crates/tze_hud_runtime/src/headless.rs",
+          "line": 1615,
+          "source": "        let runtime = HeadlessRuntime::new(config).await.expect(\"runtime init\");"
+        },
+        {
+          "file": "crates/tze_hud_runtime/src/headless.rs",
+          "line": 1682,
+          "source": "        let runtime = HeadlessRuntime::new(config).await.expect(\"runtime init\");"
+        },
+        {
+          "file": "crates/tze_hud_compositor/tests/widget_raster_count.rs",
+          "line": 67,
+          "source": "    let mut compositor = match Compositor::new_headless(512, 256).await {"
+        },
+        {
+          "file": "crates/tze_hud_runtime/src/windowed/mod.rs",
+          "line": 1279,
+          "source": "        // We need an async context to call Compositor::new_windowed."
+        },
+        {
+          "file": "crates/tze_hud_runtime/src/windowed/mod.rs",
+          "line": 1291,
+          "source": "                Compositor::new_windowed_constrained("
+        },
+        {
+          "file": "crates/tze_hud_runtime/src/windowed/mod.rs",
+          "line": 1299,
+          "source": "                Compositor::new_windowed_overlay(window_clone, surface_width, surface_height).await"
+        },
+        {
+          "file": "crates/tze_hud_runtime/src/windowed/mod.rs",
+          "line": 1301,
+          "source": "                Compositor::new_windowed(window_clone, surface_width, surface_height).await"
+        },
+        {
+          "file": "crates/tze_hud_runtime/src/windowed/mod.rs",
+          "line": 1303,
+          "source": "            .expect(\"Compositor::new_windowed failed\");"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/surface.rs",
+          "line": 444,
+          "source": "    /// This constructor is called by `Compositor::new_windowed()` after adapter"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/surface.rs",
+          "line": 822,
+          "source": "    pub(crate) instance: wgpu::Instance,"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/text.rs",
+          "line": 706,
+          "source": "    /// (i.e. after `Compositor::new_headless` or `new_windowed`)."
+        },
+        {
+          "file": "crates/tze_hud_runtime/src/windowed/hittest.rs",
+          "line": 551,
+          "source": "        let mut compositor = match Compositor::new_headless(1920, 1080).await {"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/portal_animation.rs",
+          "line": 14,
+          "source": "/// GPU required (for `Compositor::new_headless`); skips gracefully when no"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/portal_animation.rs",
+          "line": 158,
+          "source": "/// GPU required (for `Compositor::new_headless`); skips gracefully when no"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/markdown_cache.rs",
+          "line": 62,
+          "source": "    // Since Compositor::new_headless requires GPU, we test the cache logic"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/mod.rs",
+          "line": 22,
+          "source": "/// indefinitely on `request_adapter` in environments without any GPU"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/mod.rs",
+          "line": 187,
+          "source": "        Compositor::new_headless(w, h).await"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/mod.rs",
+          "line": 779,
+          "source": "        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/mod.rs",
+          "line": 785,
+          "source": "            .request_adapter(&wgpu::RequestAdapterOptions {"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/mod.rs",
+          "line": 795,
+          "source": "            .request_device("
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/mod.rs",
+          "line": 796,
+          "source": "                &wgpu::DeviceDescriptor {"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/mod.rs",
+          "line": 986,
+          "source": "        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/mod.rs",
+          "line": 1000,
+          "source": "            .request_adapter(&wgpu::RequestAdapterOptions {"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/mod.rs",
+          "line": 1031,
+          "source": "            .request_device("
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/mod.rs",
+          "line": 1032,
+          "source": "                &wgpu::DeviceDescriptor {"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/surface.rs",
+          "line": 378,
+          "source": "        Compositor::new_headless(64, 64).await"
+        }
+      ],
+      "by_file": {
+        "app/tze_hud_app/tests/benchmark_config_schema.rs": 1,
+        "app/tze_hud_app/tests/production_boot.rs": 3,
+        "crates/tze_hud_compositor/src/renderer/mod.rs": 8,
+        "crates/tze_hud_compositor/src/renderer/tests/markdown_cache.rs": 1,
+        "crates/tze_hud_compositor/src/renderer/tests/mod.rs": 2,
+        "crates/tze_hud_compositor/src/renderer/tests/portal_animation.rs": 2,
+        "crates/tze_hud_compositor/src/renderer/tests/surface.rs": 1,
+        "crates/tze_hud_compositor/src/surface.rs": 2,
+        "crates/tze_hud_compositor/src/text.rs": 1,
+        "crates/tze_hud_compositor/tests/common/mod.rs": 1,
+        "crates/tze_hud_compositor/tests/gpu_canary.rs": 1,
+        "crates/tze_hud_compositor/tests/widget_raster_count.rs": 1,
+        "crates/tze_hud_runtime/src/headless.rs": 12,
+        "crates/tze_hud_runtime/src/windowed/hittest.rs": 1,
+        "crates/tze_hud_runtime/src/windowed/mod.rs": 5,
+        "crates/tze_hud_runtime/tests/pixel_helpers.rs": 3,
+        "crates/tze_hud_runtime/tests/present_ack.rs": 1,
+        "examples/benchmark/src/main.rs": 10,
+        "examples/benchmark/src/token_footprint_calibration.rs": 1,
+        "examples/render_artifacts/src/bin/cooperative_projection_readback.rs": 1,
+        "examples/render_artifacts/src/bin/vertical_flow_readback.rs": 1,
+        "examples/vertical_slice/src/main.rs": 1,
+        "examples/vertical_slice/tests/budget_assertions.rs": 12,
+        "examples/vertical_slice/tests/production_boot.rs": 1,
+        "tests/integration/multi_agent.rs": 3,
+        "tests/integration/subtitle_streaming.rs": 1,
+        "tests/integration/text_stream_portal_adapter.rs": 2,
+        "tests/integration/text_stream_portal_cadence.rs": 3
+      }
+    },
+    "indirect_test_callers": {
+      "pattern": "make_scene_runtime|new_headless_serialized|Gpu::new|make_compositor_and_surface|serialized_headless_init|require_gpu!|pixel_scene_test!|lock_headless_runtime",
+      "roots": [
+        "crates",
+        "app",
+        "examples",
+        "tests"
+      ],
+      "exit": 0,
+      "matches": [
+        {
+          "file": "tests/integration/text_stream_portal_adapter.rs",
+          "line": 12,
+          "source": "use gpu_init::serialized_headless_init;"
+        },
+        {
+          "file": "tests/integration/text_stream_portal_adapter.rs",
+          "line": 834,
+          "source": "    let runtime = serialized_headless_init(HeadlessRuntime::new(config)).await?;"
+        },
+        {
+          "file": "tests/integration/text_stream_portal_adapter.rs",
+          "line": 928,
+          "source": "    let runtime = serialized_headless_init(HeadlessRuntime::new(config)).await?;"
+        },
+        {
+          "file": "tests/integration/subtitle_streaming.rs",
+          "line": 106,
+          "source": "    let runtime = common::serialized_headless_init(HeadlessRuntime::new(config)).await?;"
+        },
+        {
+          "file": "tests/integration/common/mod.rs",
+          "line": 22,
+          "source": "pub(crate) use gpu_init::serialized_headless_init;"
+        },
+        {
+          "file": "tests/integration/multi_agent.rs",
+          "line": 146,
+          "source": "    let mut runtime = serialized_headless_init(HeadlessRuntime::new(config)).await?;"
+        },
+        {
+          "file": "tests/integration/multi_agent.rs",
+          "line": 743,
+          "source": "    let runtime = serialized_headless_init(HeadlessRuntime::new(config))"
+        },
+        {
+          "file": "tests/integration/multi_agent.rs",
+          "line": 1062,
+          "source": "    let runtime = serialized_headless_init(HeadlessRuntime::new(config)).await?;"
+        },
+        {
+          "file": "tests/integration/text_stream_portal_cadence.rs",
+          "line": 15,
+          "source": "use gpu_init::serialized_headless_init;"
+        },
+        {
+          "file": "tests/integration/text_stream_portal_cadence.rs",
+          "line": 269,
+          "source": "    let mut runtime = serialized_headless_init(HeadlessRuntime::new(config))"
+        },
+        {
+          "file": "tests/integration/text_stream_portal_cadence.rs",
+          "line": 436,
+          "source": "    let mut runtime = serialized_headless_init(HeadlessRuntime::new(config))"
+        },
+        {
+          "file": "tests/integration/text_stream_portal_cadence.rs",
+          "line": 733,
+          "source": "    let mut runtime = serialized_headless_init(HeadlessRuntime::new(config))"
+        },
+        {
+          "file": "examples/vertical_slice/src/main.rs",
+          "line": 300,
+          "source": "        let runtime = gpu_init::serialized_headless_init(boot(port))"
+        },
+        {
+          "file": "examples/vertical_slice/src/main.rs",
+          "line": 324,
+          "source": "        let _runtime = gpu_init::serialized_headless_init(boot(port))"
+        },
+        {
+          "file": "examples/vertical_slice/tests/budget_assertions.rs",
+          "line": 43,
+          "source": "use gpu_init::serialized_headless_init;"
+        },
+        {
+          "file": "examples/vertical_slice/tests/budget_assertions.rs",
+          "line": 95,
+          "source": "    let mut runtime = serialized_headless_init(HeadlessRuntime::new(config))"
+        },
+        {
+          "file": "examples/vertical_slice/tests/budget_assertions.rs",
+          "line": 166,
+          "source": "    let mut runtime = serialized_headless_init(HeadlessRuntime::new(config))"
+        },
+        {
+          "file": "examples/vertical_slice/tests/budget_assertions.rs",
+          "line": 282,
+          "source": "    let mut runtime = serialized_headless_init(HeadlessRuntime::new(config))"
+        },
+        {
+          "file": "examples/vertical_slice/tests/budget_assertions.rs",
+          "line": 352,
+          "source": "    let mut runtime = serialized_headless_init(HeadlessRuntime::new(config))"
+        },
+        {
+          "file": "examples/vertical_slice/tests/budget_assertions.rs",
+          "line": 430,
+          "source": "    let mut runtime = serialized_headless_init(HeadlessRuntime::new(config))"
+        },
+        {
+          "file": "examples/vertical_slice/tests/budget_assertions.rs",
+          "line": 605,
+          "source": "    let runtime = serialized_headless_init(HeadlessRuntime::new(config))"
+        },
+        {
+          "file": "examples/vertical_slice/tests/budget_assertions.rs",
+          "line": 777,
+          "source": "    let mut runtime = serialized_headless_init(HeadlessRuntime::new(config))"
+        },
+        {
+          "file": "examples/vertical_slice/tests/budget_assertions.rs",
+          "line": 914,
+          "source": "    let mut runtime = serialized_headless_init(HeadlessRuntime::new(config))"
+        },
+        {
+          "file": "examples/vertical_slice/tests/budget_assertions.rs",
+          "line": 956,
+          "source": "    let mut runtime = serialized_headless_init(HeadlessRuntime::new(config))"
+        },
+        {
+          "file": "examples/vertical_slice/tests/budget_assertions.rs",
+          "line": 1035,
+          "source": "    let mut runtime = serialized_headless_init(HeadlessRuntime::new(config))"
+        },
+        {
+          "file": "examples/vertical_slice/tests/budget_assertions.rs",
+          "line": 1142,
+          "source": "async fn make_scene_runtime() -> tze_hud_runtime::HeadlessRuntime {"
+        },
+        {
+          "file": "examples/vertical_slice/tests/budget_assertions.rs",
+          "line": 1143,
+          "source": "    serialized_headless_init(HeadlessRuntime::new(HeadlessConfig {"
+        },
+        {
+          "file": "examples/vertical_slice/tests/budget_assertions.rs",
+          "line": 1180,
+          "source": "    let mut runtime = make_scene_runtime().await;"
+        },
+        {
+          "file": "examples/vertical_slice/tests/budget_assertions.rs",
+          "line": 1219,
+          "source": "    let mut runtime = make_scene_runtime().await;"
+        },
+        {
+          "file": "examples/vertical_slice/tests/budget_assertions.rs",
+          "line": 1263,
+          "source": "    let mut runtime = make_scene_runtime().await;"
+        },
+        {
+          "file": "examples/vertical_slice/tests/budget_assertions.rs",
+          "line": 1284,
+          "source": "    let mut runtime = make_scene_runtime().await;"
+        },
+        {
+          "file": "examples/vertical_slice/tests/budget_assertions.rs",
+          "line": 1313,
+          "source": "    let mut runtime = make_scene_runtime().await;"
+        },
+        {
+          "file": "examples/vertical_slice/tests/budget_assertions.rs",
+          "line": 1342,
+          "source": "    let mut runtime = make_scene_runtime().await;"
+        },
+        {
+          "file": "examples/vertical_slice/tests/budget_assertions.rs",
+          "line": 1373,
+          "source": "            let mut runtime = make_scene_runtime().await;"
+        },
+        {
+          "file": "app/tze_hud_app/tests/production_boot.rs",
+          "line": 40,
+          "source": "        gpu_init::serialized_headless_init(HeadlessRuntime::new(canonical_headless_config())).await;"
+        },
+        {
+          "file": "app/tze_hud_app/tests/production_boot.rs",
+          "line": 51,
+          "source": "        gpu_init::serialized_headless_init(HeadlessRuntime::new(canonical_headless_config()))"
+        },
+        {
+          "file": "app/tze_hud_app/tests/production_boot.rs",
+          "line": 127,
+          "source": "    let runtime = gpu_init::serialized_headless_init(HeadlessRuntime::new(HeadlessConfig {"
+        },
+        {
+          "file": "crates/tze_hud_runtime/tests/pixel_readback.rs",
+          "line": 55,
+          "source": "    BG_SRGB, CI_BLEND_TOLERANCE, CI_SOLID_TOLERANCE, SCENE_H, SCENE_W, make_scene_runtime,"
+        },
+        {
+          "file": "crates/tze_hud_runtime/tests/pixel_readback.rs",
+          "line": 73,
+          "source": "            let mut runtime = make_scene_runtime().await;"
+        },
+        {
+          "file": "crates/tze_hud_runtime/tests/pixel_readback.rs",
+          "line": 162,
+          "source": "    let mut runtime = make_scene_runtime().await;"
+        },
+        {
+          "file": "crates/tze_hud_runtime/tests/pixel_readback.rs",
+          "line": 205,
+          "source": "    let mut runtime = make_scene_runtime().await;"
+        },
+        {
+          "file": "crates/tze_hud_runtime/tests/pixel_readback.rs",
+          "line": 258,
+          "source": "    let mut runtime = make_scene_runtime().await;"
+        },
+        {
+          "file": "crates/tze_hud_runtime/tests/pixel_readback.rs",
+          "line": 297,
+          "source": "    let mut runtime = make_scene_runtime().await;"
+        },
+        {
+          "file": "crates/tze_hud_runtime/tests/pixel_readback.rs",
+          "line": 355,
+          "source": "    let mut runtime = make_scene_runtime().await;"
+        },
+        {
+          "file": "crates/tze_hud_runtime/tests/pixel_readback.rs",
+          "line": 395,
+          "source": "    let mut runtime = make_scene_runtime().await;"
+        },
+        {
+          "file": "crates/tze_hud_runtime/tests/pixel_readback.rs",
+          "line": 442,
+          "source": "    let mut runtime = make_scene_runtime().await;"
+        },
+        {
+          "file": "crates/tze_hud_runtime/tests/pixel_readback.rs",
+          "line": 480,
+          "source": "    let mut runtime = make_scene_runtime().await;"
+        },
+        {
+          "file": "crates/tze_hud_runtime/tests/pixel_readback.rs",
+          "line": 517,
+          "source": "    let mut runtime = make_scene_runtime().await;"
+        },
+        {
+          "file": "crates/tze_hud_runtime/tests/pixel_readback.rs",
+          "line": 544,
+          "source": "    let mut runtime = make_scene_runtime().await;"
+        },
+        {
+          "file": "crates/tze_hud_runtime/tests/pixel_readback.rs",
+          "line": 579,
+          "source": "    let mut runtime = make_scene_runtime().await;"
+        },
+        {
+          "file": "crates/tze_hud_runtime/tests/pixel_readback.rs",
+          "line": 620,
+          "source": "    let mut runtime = make_scene_runtime().await;"
+        },
+        {
+          "file": "crates/tze_hud_runtime/tests/pixel_readback.rs",
+          "line": 658,
+          "source": "    let mut runtime = make_scene_runtime().await;"
+        },
+        {
+          "file": "crates/tze_hud_runtime/tests/pixel_readback.rs",
+          "line": 697,
+          "source": "    let mut runtime = make_scene_runtime().await;"
+        },
+        {
+          "file": "crates/tze_hud_runtime/tests/pixel_readback.rs",
+          "line": 735,
+          "source": "    let mut runtime = make_scene_runtime().await;"
+        },
+        {
+          "file": "crates/tze_hud_runtime/tests/pixel_readback.rs",
+          "line": 776,
+          "source": "    let mut runtime = make_scene_runtime().await;"
+        },
+        {
+          "file": "crates/tze_hud_runtime/tests/pixel_readback.rs",
+          "line": 807,
+          "source": "    let mut runtime = make_scene_runtime().await;"
+        },
+        {
+          "file": "crates/tze_hud_runtime/tests/pixel_readback.rs",
+          "line": 835,
+          "source": "    let mut runtime = make_scene_runtime().await;"
+        },
+        {
+          "file": "crates/tze_hud_runtime/tests/pixel_readback.rs",
+          "line": 863,
+          "source": "    let mut runtime = make_scene_runtime().await;"
+        },
+        {
+          "file": "crates/tze_hud_runtime/tests/pixel_readback.rs",
+          "line": 912,
+          "source": "    let mut runtime = make_scene_runtime().await;"
+        },
+        {
+          "file": "crates/tze_hud_runtime/tests/pixel_helpers.rs",
+          "line": 77,
+          "source": "pub async fn make_scene_runtime() -> tze_hud_runtime::HeadlessRuntime {"
+        },
+        {
+          "file": "crates/tze_hud_runtime/tests/present_ack.rs",
+          "line": 16,
+          "source": "use gpu_init::serialized_headless_init;"
+        },
+        {
+          "file": "crates/tze_hud_runtime/tests/present_ack.rs",
+          "line": 41,
+          "source": "    serialized_headless_init(HeadlessRuntime::new(config))"
+        },
+        {
+          "file": "crates/tze_hud_compositor/tests/common/mod.rs",
+          "line": 20,
+          "source": "pub async fn new_headless_serialized(w: u32, h: u32) -> Result<Compositor, CompositorError> {"
+        },
+        {
+          "file": "crates/tze_hud_compositor/tests/common/mod.rs",
+          "line": 46,
+          "source": "        match new_headless_serialized(width, height).await {"
+        },
+        {
+          "file": "crates/tze_hud_compositor/tests/zone_rendering.rs",
+          "line": 108,
+          "source": "    let Some(mut gpu) = Gpu::new(256, 256).await else {"
+        },
+        {
+          "file": "crates/tze_hud_compositor/tests/zone_rendering.rs",
+          "line": 128,
+          "source": "    let Some(mut gpu) = Gpu::new(256, 256).await else {"
+        },
+        {
+          "file": "crates/tze_hud_compositor/tests/zone_rendering.rs",
+          "line": 163,
+          "source": "    let Some(mut gpu) = Gpu::new(256, 256).await else {"
+        },
+        {
+          "file": "crates/tze_hud_compositor/tests/zone_rendering.rs",
+          "line": 197,
+          "source": "    let Some(mut gpu) = Gpu::new(256, 256).await else {"
+        },
+        {
+          "file": "crates/tze_hud_compositor/tests/zone_rendering.rs",
+          "line": 255,
+          "source": "    let Some(mut gpu) = Gpu::new(256, 256).await else {"
+        },
+        {
+          "file": "crates/tze_hud_compositor/tests/zone_rendering.rs",
+          "line": 280,
+          "source": "    let Some(mut gpu) = Gpu::new(512, 512).await else {"
+        },
+        {
+          "file": "crates/tze_hud_compositor/tests/zone_rendering.rs",
+          "line": 307,
+          "source": "    let Some(mut gpu) = Gpu::new(64, 64).await else {"
+        },
+        {
+          "file": "crates/tze_hud_compositor/tests/zone_rendering.rs",
+          "line": 324,
+          "source": "    let Some(mut gpu) = Gpu::new(64, 64).await else {"
+        },
+        {
+          "file": "crates/tze_hud_compositor/tests/zone_rendering.rs",
+          "line": 364,
+          "source": "    let Some(mut gpu) = Gpu::new(256, 256).await else {"
+        },
+        {
+          "file": "crates/tze_hud_compositor/tests/zone_rendering.rs",
+          "line": 394,
+          "source": "    let Some(mut gpu) = Gpu::new(256, 256).await else {"
+        },
+        {
+          "file": "crates/tze_hud_compositor/tests/zone_rendering.rs",
+          "line": 478,
+          "source": "    let Some(mut gpu) = Gpu::new(256, 256).await else {"
+        },
+        {
+          "file": "crates/tze_hud_compositor/tests/zone_rendering.rs",
+          "line": 521,
+          "source": "    let Some(mut gpu) = Gpu::new(256, 256).await else {"
+        },
+        {
+          "file": "crates/tze_hud_compositor/tests/zone_rendering.rs",
+          "line": 556,
+          "source": "    let Some(mut gpu) = Gpu::new(256, 256).await else {"
+        },
+        {
+          "file": "crates/tze_hud_runtime/src/test_support.rs",
+          "line": 12,
+          "source": "/// use `serialized_headless_init` to guard initialization without serializing"
+        },
+        {
+          "file": "crates/tze_hud_runtime/src/test_support.rs",
+          "line": 16,
+          "source": "pub(crate) async fn lock_headless_runtime() -> MutexGuard<'static, ()> {"
+        },
+        {
+          "file": "crates/tze_hud_runtime/src/test_support.rs",
+          "line": 23,
+          "source": "/// call this while already holding `lock_headless_runtime`: the gate is not"
+        },
+        {
+          "file": "crates/tze_hud_runtime/src/test_support.rs",
+          "line": 25,
+          "source": "pub(crate) async fn serialized_headless_init<F: Future>(init: F) -> F::Output {"
+        },
+        {
+          "file": "crates/tze_hud_runtime/src/test_support.rs",
+          "line": 26,
+          "source": "    let _guard = lock_headless_runtime().await;"
+        },
+        {
+          "file": "crates/tze_hud_compositor/tests/widget_transition.rs",
+          "line": 66,
+          "source": "        let mut compositor = match common::new_headless_serialized(256, 256).await {"
+        },
+        {
+          "file": "crates/tze_hud_runtime/src/headless.rs",
+          "line": 676,
+          "source": "        use crate::test_support::serialized_headless_init;"
+        },
+        {
+          "file": "crates/tze_hud_runtime/src/headless.rs",
+          "line": 700,
+          "source": "        let mut first = Box::pin(serialized_headless_init(async {"
+        },
+        {
+          "file": "crates/tze_hud_runtime/src/headless.rs",
+          "line": 717,
+          "source": "        let mut second = Box::pin(serialized_headless_init(async {"
+        },
+        {
+          "file": "crates/tze_hud_runtime/src/headless.rs",
+          "line": 725,
+          "source": "        let mut queued = Box::pin(serialized_headless_init(async {"
+        },
+        {
+          "file": "crates/tze_hud_runtime/src/headless.rs",
+          "line": 738,
+          "source": "            serialized_headless_init(async { Err::<(), _>(\"initialization failed\") }).await,"
+        },
+        {
+          "file": "crates/tze_hud_runtime/src/headless.rs",
+          "line": 742,
+          "source": "        let panic = tokio::spawn(serialized_headless_init(async {"
+        },
+        {
+          "file": "crates/tze_hud_runtime/src/headless.rs",
+          "line": 749,
+          "source": "        let mut cancelled = Box::pin(serialized_headless_init(async {"
+        },
+        {
+          "file": "crates/tze_hud_runtime/src/headless.rs",
+          "line": 765,
+          "source": "            serialized_headless_init(async { \"initialized again\" }).await,"
+        },
+        {
+          "file": "crates/tze_hud_runtime/src/headless.rs",
+          "line": 902,
+          "source": "        let _runtime_guard = crate::test_support::lock_headless_runtime().await;"
+        },
+        {
+          "file": "crates/tze_hud_runtime/src/headless.rs",
+          "line": 1052,
+          "source": "        let _runtime_guard = crate::test_support::lock_headless_runtime().await;"
+        },
+        {
+          "file": "crates/tze_hud_runtime/src/headless.rs",
+          "line": 1113,
+          "source": "        let _runtime_guard = crate::test_support::lock_headless_runtime().await;"
+        },
+        {
+          "file": "crates/tze_hud_runtime/src/headless.rs",
+          "line": 1383,
+          "source": "        let _runtime_guard = crate::test_support::lock_headless_runtime().await;"
+        },
+        {
+          "file": "crates/tze_hud_runtime/src/headless.rs",
+          "line": 1402,
+          "source": "        let _runtime_guard = crate::test_support::lock_headless_runtime().await;"
+        },
+        {
+          "file": "crates/tze_hud_runtime/src/headless.rs",
+          "line": 1468,
+          "source": "        let _runtime_guard = crate::test_support::lock_headless_runtime().await;"
+        },
+        {
+          "file": "crates/tze_hud_runtime/src/headless.rs",
+          "line": 1517,
+          "source": "        let _runtime_guard = crate::test_support::lock_headless_runtime().await;"
+        },
+        {
+          "file": "crates/tze_hud_runtime/src/headless.rs",
+          "line": 1614,
+          "source": "        let _runtime_guard = crate::test_support::lock_headless_runtime().await;"
+        },
+        {
+          "file": "crates/tze_hud_runtime/src/headless.rs",
+          "line": 1681,
+          "source": "        let _runtime_guard = crate::test_support::lock_headless_runtime().await;"
+        },
+        {
+          "file": "crates/tze_hud_runtime/src/windowed/hittest.rs",
+          "line": 550,
+          "source": "        let _runtime_guard = crate::test_support::lock_headless_runtime().await;"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/portal_reveal.rs",
+          "line": 8,
+          "source": "// existing `require_gpu!` + `prime_markdown_cache` idiom; the logic under test is"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/portal_reveal.rs",
+          "line": 110,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/portal_reveal.rs",
+          "line": 192,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/portal_reveal.rs",
+          "line": 243,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/portal_reveal.rs",
+          "line": 301,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/portal_reveal.rs",
+          "line": 548,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(640, 480).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/portal_reveal.rs",
+          "line": 699,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(640, 480).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/focus_chrome.rs",
+          "line": 20,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(400, 300).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/focus_chrome.rs",
+          "line": 109,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(400, 300).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/focus_chrome.rs",
+          "line": 176,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(400, 300).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/focus_chrome.rs",
+          "line": 249,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(400, 300).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/focus_chrome.rs",
+          "line": 305,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(400, 300).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/focus_chrome.rs",
+          "line": 350,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(400, 300).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/focus_chrome.rs",
+          "line": 404,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(400, 300).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/focus_chrome.rs",
+          "line": 442,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(800, 600).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/markdown_cache.rs",
+          "line": 206,
+          "source": "    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(64, 64).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/markdown_cache.rs",
+          "line": 383,
+          "source": "    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(64, 64).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/markdown_cache.rs",
+          "line": 451,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(64, 64).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/markdown_cache.rs",
+          "line": 520,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/markdown_cache.rs",
+          "line": 623,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(64, 64).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/tile_opacity.rs",
+          "line": 57,
+          "source": "    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/tile_opacity.rs",
+          "line": 138,
+          "source": "    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(256, 256).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/tile_opacity.rs",
+          "line": 212,
+          "source": "/// regardless of rasterizer state. `make_compositor_and_surface` deliberately"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/tile_opacity.rs",
+          "line": 219,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/tile_opacity.rs",
+          "line": 314,
+          "source": "    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/tile_opacity.rs",
+          "line": 363,
+          "source": "    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/tile_opacity.rs",
+          "line": 408,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/tile_opacity.rs",
+          "line": 522,
+          "source": "    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/tile_opacity.rs",
+          "line": 537,
+          "source": "    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/tile_opacity.rs",
+          "line": 556,
+          "source": "    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/tile_opacity.rs",
+          "line": 580,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/text_render.rs",
+          "line": 23,
+          "source": "    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(256, 256).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/text_render.rs",
+          "line": 67,
+          "source": "    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(160, 80).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/text_render.rs",
+          "line": 117,
+          "source": "    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(256, 256).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/text_render.rs",
+          "line": 177,
+          "source": "    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(256, 256).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/text_render.rs",
+          "line": 216,
+          "source": "    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/text_render.rs",
+          "line": 299,
+          "source": "    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/text_render.rs",
+          "line": 386,
+          "source": "    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/text_render.rs",
+          "line": 488,
+          "source": "    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(64, 64).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/text_render.rs",
+          "line": 501,
+          "source": "    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(64, 64).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/text_render.rs",
+          "line": 530,
+          "source": "    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/text_render.rs",
+          "line": 646,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(64, 64).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/notification_layout.rs",
+          "line": 16,
+          "source": "    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/notification_layout.rs",
+          "line": 105,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/notification_layout.rs",
+          "line": 192,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/notification_layout.rs",
+          "line": 259,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/notification_layout.rs",
+          "line": 336,
+          "source": "    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/notification_layout.rs",
+          "line": 425,
+          "source": "    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/notification_layout.rs",
+          "line": 495,
+          "source": "    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/notification_layout.rs",
+          "line": 651,
+          "source": "    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/notification_layout.rs",
+          "line": 742,
+          "source": "    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/notification_layout.rs",
+          "line": 902,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/notification_layout.rs",
+          "line": 1074,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/portal_animation.rs",
+          "line": 18,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/portal_animation.rs",
+          "line": 95,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/portal_animation.rs",
+          "line": 162,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/portal_animation.rs",
+          "line": 265,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/hit_drag.rs",
+          "line": 9,
+          "source": "// All tests are GPU-gated (require_gpu!) because populate_zone_hit_regions"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/hit_drag.rs",
+          "line": 17,
+          "source": "    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/hit_drag.rs",
+          "line": 87,
+          "source": "    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/hit_drag.rs",
+          "line": 161,
+          "source": "    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/hit_drag.rs",
+          "line": 248,
+          "source": "    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/hit_drag.rs",
+          "line": 325,
+          "source": "    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/hit_drag.rs",
+          "line": 384,
+          "source": "    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/hit_drag.rs",
+          "line": 455,
+          "source": "    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/hit_drag.rs",
+          "line": 490,
+          "source": "    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/hit_drag.rs",
+          "line": 667,
+          "source": "    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/hit_drag.rs",
+          "line": 724,
+          "source": "    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/hit_drag.rs",
+          "line": 783,
+          "source": "    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/hit_drag.rs",
+          "line": 845,
+          "source": "    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/hit_drag.rs",
+          "line": 1007,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/mod.rs",
+          "line": 34,
+          "source": "/// Process-wide count of GPU-gated tests that hit `require_gpu!`'s early"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/mod.rs",
+          "line": 44,
+          "source": "/// (hud-7o3rw). `require_gpu!` now `eprintln!`s a loud, greppable"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/mod.rs",
+          "line": 55,
+          "source": "/// let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(256, 256).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/mod.rs",
+          "line": 63,
+          "source": "/// carrying the exact `require_gpu!` call site (`file!()`/`line!()` resolve"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/mod.rs",
+          "line": 175,
+          "source": "/// Use the `require_gpu!` macro at the call site to early-return from the"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/mod.rs",
+          "line": 178,
+          "source": "/// let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(256, 256).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/mod.rs",
+          "line": 180,
+          "source": "async fn make_compositor_and_surface(w: u32, h: u32) -> Option<(Compositor, HeadlessSurface)> {"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/surface.rs",
+          "line": 39,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/surface.rs",
+          "line": 106,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(800, 600).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/surface.rs",
+          "line": 187,
+          "source": "    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(256, 256).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/surface.rs",
+          "line": 216,
+          "source": "    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/surface.rs",
+          "line": 304,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(320, 200).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/surface.rs",
+          "line": 338,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(320, 200).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/surface.rs",
+          "line": 432,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/surface.rs",
+          "line": 466,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/surface.rs",
+          "line": 507,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/surface.rs",
+          "line": 608,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/zone_layers.rs",
+          "line": 13,
+          "source": "    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/zone_layers.rs",
+          "line": 95,
+          "source": "    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/zone_layers.rs",
+          "line": 217,
+          "source": "    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/zone_layers.rs",
+          "line": 335,
+          "source": "    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/zone_layers.rs",
+          "line": 674,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/zone_layers.rs",
+          "line": 857,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/zone_layers.rs",
+          "line": 912,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/zone_layers.rs",
+          "line": 988,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/retained_image.rs",
+          "line": 8,
+          "source": "    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(256, 256).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/retained_image.rs",
+          "line": 64,
+          "source": "    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(1_000, 500).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/retained_image.rs",
+          "line": 111,
+          "source": "    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(512, 256).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/idle_gate.rs",
+          "line": 16,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(720, 480).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/idle_gate.rs",
+          "line": 107,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(320, 200).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/idle_gate.rs",
+          "line": 188,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(320, 200).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/idle_gate.rs",
+          "line": 226,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(320, 200).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/idle_gate.rs",
+          "line": 286,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(320, 200).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/idle_gate.rs",
+          "line": 436,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(320, 200).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/markdown_primer.rs",
+          "line": 20,
+          "source": "    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(256, 256).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/markdown_primer.rs",
+          "line": 177,
+          "source": "    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(256, 256).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/markdown_primer.rs",
+          "line": 262,
+          "source": "    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(256, 256).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/composer.rs",
+          "line": 79,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(320, 200).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/composer.rs",
+          "line": 195,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(320, 200).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/composer.rs",
+          "line": 352,
+          "source": "    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(600, 300).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/composer.rs",
+          "line": 489,
+          "source": "    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(600, 400).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/composer.rs",
+          "line": 600,
+          "source": "    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(400, 160).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/composer.rs",
+          "line": 816,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(320, 200).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/composer.rs",
+          "line": 878,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(320, 200).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/composer.rs",
+          "line": 939,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(320, 200).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/composer.rs",
+          "line": 1012,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(320, 200).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/composer.rs",
+          "line": 1623,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(600, 400).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/composer.rs",
+          "line": 2184,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(400, 100).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/composer.rs",
+          "line": 2317,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(400, 400).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/alert_banner.rs",
+          "line": 30,
+          "source": "    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/alert_banner.rs",
+          "line": 142,
+          "source": "    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/alert_banner.rs",
+          "line": 188,
+          "source": "    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/scroll.rs",
+          "line": 12,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(64, 64).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/scroll.rs",
+          "line": 53,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(64, 64).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/scroll.rs",
+          "line": 117,
+          "source": "    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(720, 360).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/scroll.rs",
+          "line": 281,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(480, 320).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/scroll.rs",
+          "line": 373,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(720, 360).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/scroll.rs",
+          "line": 437,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(720, 360).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/scroll.rs",
+          "line": 498,
+          "source": "    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(220, 180).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/scroll.rs",
+          "line": 628,
+          "source": "    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(220, 180).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/scroll.rs",
+          "line": 725,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(800, 520).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/scroll.rs",
+          "line": 968,
+          "source": "    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(720, 360).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/scroll.rs",
+          "line": 1044,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(720, 360).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/scroll.rs",
+          "line": 1286,
+          "source": "    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(720, 360).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/scroll.rs",
+          "line": 1350,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(720, 360).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/scroll.rs",
+          "line": 1388,
+          "source": "    let mut compositor2 = require_gpu!(make_compositor_and_surface(720, 360).await).0;"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/viewer_echo.rs",
+          "line": 9,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(400, 300).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/viewer_echo.rs",
+          "line": 90,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(400, 300).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/viewer_echo.rs",
+          "line": 157,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(400, 300).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/viewer_echo.rs",
+          "line": 271,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(400, 300).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/viewer_echo.rs",
+          "line": 368,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(400, 300).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/viewer_echo.rs",
+          "line": 618,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(400, 300).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/viewer_echo.rs",
+          "line": 659,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(400, 300).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/viewer_echo.rs",
+          "line": 721,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(400, 300).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/viewer_echo.rs",
+          "line": 746,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(400, 300).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/viewer_echo.rs",
+          "line": 775,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(400, 300).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/zone_notification.rs",
+          "line": 10,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/zone_notification.rs",
+          "line": 77,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/zone_notification.rs",
+          "line": 150,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/zone_notification.rs",
+          "line": 237,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/zone_notification.rs",
+          "line": 337,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/zone_notification.rs",
+          "line": 413,
+          "source": "    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/zone_notification.rs",
+          "line": 518,
+          "source": "    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/zone_notification.rs",
+          "line": 630,
+          "source": "    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/zone_notification.rs",
+          "line": 740,
+          "source": "    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/zone_notification.rs",
+          "line": 794,
+          "source": "    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/zone_notification.rs",
+          "line": 851,
+          "source": "    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/zone_notification.rs",
+          "line": 916,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/zone_notification.rs",
+          "line": 969,
+          "source": "    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/zone_notification.rs",
+          "line": 1098,
+          "source": "    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/zone_notification.rs",
+          "line": 1152,
+          "source": "    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/zone_notification.rs",
+          "line": 1204,
+          "source": "    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/zone_stack.rs",
+          "line": 11,
+          "source": "    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/zone_stack.rs",
+          "line": 101,
+          "source": "    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/zone_stack.rs",
+          "line": 230,
+          "source": "    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/zone_stack.rs",
+          "line": 314,
+          "source": "    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/zone_stack.rs",
+          "line": 409,
+          "source": "    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/zone_stack.rs",
+          "line": 556,
+          "source": "    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/zone_stack.rs",
+          "line": 648,
+          "source": "    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/zone_stack.rs",
+          "line": 730,
+          "source": "    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/zone_stack.rs",
+          "line": 799,
+          "source": "    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/zone_stack.rs",
+          "line": 895,
+          "source": "    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);"
+        }
+      ],
+      "by_file": {
+        "app/tze_hud_app/tests/production_boot.rs": 3,
+        "crates/tze_hud_compositor/src/renderer/tests/alert_banner.rs": 3,
+        "crates/tze_hud_compositor/src/renderer/tests/composer.rs": 12,
+        "crates/tze_hud_compositor/src/renderer/tests/focus_chrome.rs": 8,
+        "crates/tze_hud_compositor/src/renderer/tests/hit_drag.rs": 14,
+        "crates/tze_hud_compositor/src/renderer/tests/idle_gate.rs": 6,
+        "crates/tze_hud_compositor/src/renderer/tests/markdown_cache.rs": 5,
+        "crates/tze_hud_compositor/src/renderer/tests/markdown_primer.rs": 3,
+        "crates/tze_hud_compositor/src/renderer/tests/mod.rs": 7,
+        "crates/tze_hud_compositor/src/renderer/tests/notification_layout.rs": 11,
+        "crates/tze_hud_compositor/src/renderer/tests/portal_animation.rs": 4,
+        "crates/tze_hud_compositor/src/renderer/tests/portal_reveal.rs": 7,
+        "crates/tze_hud_compositor/src/renderer/tests/retained_image.rs": 3,
+        "crates/tze_hud_compositor/src/renderer/tests/scroll.rs": 14,
+        "crates/tze_hud_compositor/src/renderer/tests/surface.rs": 10,
+        "crates/tze_hud_compositor/src/renderer/tests/text_render.rs": 11,
+        "crates/tze_hud_compositor/src/renderer/tests/tile_opacity.rs": 11,
+        "crates/tze_hud_compositor/src/renderer/tests/viewer_echo.rs": 10,
+        "crates/tze_hud_compositor/src/renderer/tests/zone_layers.rs": 8,
+        "crates/tze_hud_compositor/src/renderer/tests/zone_notification.rs": 16,
+        "crates/tze_hud_compositor/src/renderer/tests/zone_stack.rs": 10,
+        "crates/tze_hud_compositor/tests/common/mod.rs": 2,
+        "crates/tze_hud_compositor/tests/widget_transition.rs": 1,
+        "crates/tze_hud_compositor/tests/zone_rendering.rs": 13,
+        "crates/tze_hud_runtime/src/headless.rs": 17,
+        "crates/tze_hud_runtime/src/test_support.rs": 5,
+        "crates/tze_hud_runtime/src/windowed/hittest.rs": 1,
+        "crates/tze_hud_runtime/tests/pixel_helpers.rs": 1,
+        "crates/tze_hud_runtime/tests/pixel_readback.rs": 22,
+        "crates/tze_hud_runtime/tests/present_ack.rs": 2,
+        "examples/vertical_slice/src/main.rs": 2,
+        "examples/vertical_slice/tests/budget_assertions.rs": 20,
+        "tests/integration/common/mod.rs": 1,
+        "tests/integration/multi_agent.rs": 3,
+        "tests/integration/subtitle_streaming.rs": 1,
+        "tests/integration/text_stream_portal_adapter.rs": 3,
+        "tests/integration/text_stream_portal_cadence.rs": 4
+      }
+    },
+    "test_module_and_macros": {
+      "pattern": "#\\[path\\s*=|include!|macro_rules!|mod gpu_init|mod common|mod test_support",
+      "roots": [
+        "crates",
+        "app",
+        "examples",
+        "tests"
+      ],
+      "exit": 0,
+      "matches": [
+        {
+          "file": "tests/integration/text_stream_portal_adapter.rs",
+          "line": 10,
+          "source": "#[path = \"../../crates/tze_hud_runtime/src/test_support.rs\"]"
+        },
+        {
+          "file": "tests/integration/text_stream_portal_adapter.rs",
+          "line": 11,
+          "source": "mod gpu_init;"
+        },
+        {
+          "file": "tests/integration/subtitle_streaming.rs",
+          "line": 53,
+          "source": "#[path = \"common/mod.rs\"]"
+        },
+        {
+          "file": "tests/integration/subtitle_streaming.rs",
+          "line": 54,
+          "source": "mod common;"
+        },
+        {
+          "file": "tests/integration/multi_agent.rs",
+          "line": 50,
+          "source": "#[path = \"common/mod.rs\"]"
+        },
+        {
+          "file": "tests/integration/multi_agent.rs",
+          "line": 51,
+          "source": "mod common;"
+        },
+        {
+          "file": "tests/integration/text_stream_portal_cadence.rs",
+          "line": 13,
+          "source": "#[path = \"../../crates/tze_hud_runtime/src/test_support.rs\"]"
+        },
+        {
+          "file": "tests/integration/text_stream_portal_cadence.rs",
+          "line": 14,
+          "source": "mod gpu_init;"
+        },
+        {
+          "file": "app/tze_hud_app/tests/production_boot.rs",
+          "line": 18,
+          "source": "#[path = \"../../../crates/tze_hud_runtime/src/test_support.rs\"]"
+        },
+        {
+          "file": "app/tze_hud_app/tests/production_boot.rs",
+          "line": 19,
+          "source": "mod gpu_init;"
+        },
+        {
+          "file": "crates/tze_hud_config/src/portal_tokens.rs",
+          "line": 1085,
+          "source": "    macro_rules! resolve_color {"
+        },
+        {
+          "file": "crates/tze_hud_config/src/portal_tokens.rs",
+          "line": 1104,
+          "source": "    macro_rules! resolve_f32 {"
+        },
+        {
+          "file": "crates/tze_hud_config/src/portal_tokens.rs",
+          "line": 1123,
+          "source": "    macro_rules! resolve_u32 {"
+        },
+        {
+          "file": "crates/tze_hud_config/src/portal_tokens.rs",
+          "line": 1155,
+          "source": "    macro_rules! resolve_granularity {"
+        },
+        {
+          "file": "tests/integration/common/mod.rs",
+          "line": 5,
+          "source": "//! #[path = \"common/mod.rs\"]"
+        },
+        {
+          "file": "tests/integration/common/mod.rs",
+          "line": 6,
+          "source": "//! mod common;"
+        },
+        {
+          "file": "tests/integration/common/mod.rs",
+          "line": 20,
+          "source": "#[path = \"../../../crates/tze_hud_runtime/src/test_support.rs\"]"
+        },
+        {
+          "file": "tests/integration/common/mod.rs",
+          "line": 21,
+          "source": "mod gpu_init;"
+        },
+        {
+          "file": "examples/vertical_slice/tests/budget_assertions.rs",
+          "line": 41,
+          "source": "#[path = \"../../../crates/tze_hud_runtime/src/test_support.rs\"]"
+        },
+        {
+          "file": "examples/vertical_slice/tests/budget_assertions.rs",
+          "line": 42,
+          "source": "mod gpu_init;"
+        },
+        {
+          "file": "examples/vertical_slice/tests/budget_assertions.rs",
+          "line": 1369,
+          "source": "macro_rules! scene_render_test {"
+        },
+        {
+          "file": "crates/tze_hud_scene/tests/session_lifecycle.rs",
+          "line": 1303,
+          "source": "    macro_rules! record {"
+        },
+        {
+          "file": "crates/tze_hud_scene/tests/session_lifecycle.rs",
+          "line": 1435,
+          "source": "    macro_rules! sample {"
+        },
+        {
+          "file": "examples/vertical_slice/src/main.rs",
+          "line": 287,
+          "source": "#[path = \"../../../crates/tze_hud_runtime/src/test_support.rs\"]"
+        },
+        {
+          "file": "examples/vertical_slice/src/main.rs",
+          "line": 288,
+          "source": "mod gpu_init;"
+        },
+        {
+          "file": "crates/tze_hud_runtime/tests/pixel_readback.rs",
+          "line": 69,
+          "source": "macro_rules! scene_buffer_size_test {"
+        },
+        {
+          "file": "crates/tze_hud_runtime/tests/present_ack.rs",
+          "line": 14,
+          "source": "#[path = \"../src/test_support.rs\"]"
+        },
+        {
+          "file": "crates/tze_hud_runtime/tests/present_ack.rs",
+          "line": 15,
+          "source": "mod gpu_init;"
+        },
+        {
+          "file": "crates/tze_hud_compositor/tests/widget_transition.rs",
+          "line": 7,
+          "source": "mod common;"
+        },
+        {
+          "file": "crates/tze_hud_compositor/tests/widget_transition.rs",
+          "line": 18,
+          "source": "macro_rules! bundle {"
+        },
+        {
+          "file": "crates/tze_hud_compositor/tests/zone_rendering.rs",
+          "line": 9,
+          "source": "mod common;"
+        },
+        {
+          "file": "crates/tze_hud_runtime/src/widget_startup.rs",
+          "line": 46,
+          "source": "macro_rules! builtin_bundle {"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/pipeline.rs",
+          "line": 464,
+          "source": "macro_rules! rounded_rect_shader_common {"
+        },
+        {
+          "file": "crates/tze_hud_runtime/src/lib.rs",
+          "line": 59,
+          "source": "pub(crate) mod test_support;"
+        },
+        {
+          "file": "crates/tze_hud_compositor/tests/widget_raster_count.rs",
+          "line": 18,
+          "source": "macro_rules! bundle {"
+        },
+        {
+          "file": "crates/tze_hud_runtime/src/windowed/mod.rs",
+          "line": 188,
+          "source": "mod test_support;"
+        },
+        {
+          "file": "crates/tze_hud_compositor/src/renderer/tests/mod.rs",
+          "line": 71,
+          "source": "macro_rules! require_gpu {"
+        }
+      ],
+      "by_file": {
+        "app/tze_hud_app/tests/production_boot.rs": 2,
+        "crates/tze_hud_compositor/src/pipeline.rs": 1,
+        "crates/tze_hud_compositor/src/renderer/tests/mod.rs": 1,
+        "crates/tze_hud_compositor/tests/widget_raster_count.rs": 1,
+        "crates/tze_hud_compositor/tests/widget_transition.rs": 2,
+        "crates/tze_hud_compositor/tests/zone_rendering.rs": 1,
+        "crates/tze_hud_config/src/portal_tokens.rs": 4,
+        "crates/tze_hud_runtime/src/lib.rs": 1,
+        "crates/tze_hud_runtime/src/widget_startup.rs": 1,
+        "crates/tze_hud_runtime/src/windowed/mod.rs": 1,
+        "crates/tze_hud_runtime/tests/pixel_readback.rs": 1,
+        "crates/tze_hud_runtime/tests/present_ack.rs": 2,
+        "crates/tze_hud_scene/tests/session_lifecycle.rs": 2,
+        "examples/vertical_slice/src/main.rs": 2,
+        "examples/vertical_slice/tests/budget_assertions.rs": 3,
+        "tests/integration/common/mod.rs": 4,
+        "tests/integration/multi_agent.rs": 2,
+        "tests/integration/subtitle_streaming.rs": 2,
+        "tests/integration/text_stream_portal_adapter.rs": 2,
+        "tests/integration/text_stream_portal_cadence.rs": 2
+      }
+    },
+    "alias_assumptions": {
+      "pattern": "(?:HeadlessRuntime|Compositor)\\s+as\\s+\\w+",
+      "roots": [
+        "crates",
+        "app",
+        "examples",
+        "tests"
+      ],
+      "exit": 1,
+      "matches": [],
+      "by_file": {}
+    }
+  },
+  "limitations": [
+    "Text scans include comments and require actual-body/cfg/target review; absence is not a parser/reachability proof.",
+    "Typed direct factory scan is triangulated against all wgpu instance/adapter/device calls, aliases, metadata roots, helpers/macros and caller modules.",
+    "Per-process initialization gates do not coordinate separate test processes or production constructors."
+  ]
+}

@@ -1,0 +1,859 @@
+test -f /usr/share/vulkan/icd.d/lvp_icd.json || { echo "missing /usr/share/vulkan/icd.d/lvp_icd.json (install mesa-vulkan-drivers)"; exit 1; }
+cargo test -p tze_hud_compositor --all-targets --no-run
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.11s
+  Executable unittests src/lib.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/tze_hud_compositor-b0f954878f132f1a)
+  Executable tests/gauge_binding_rendering.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/gauge_binding_rendering-b889e0ab98e84d0a)
+  Executable tests/gpu_canary.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/gpu_canary-d503c7e6d59188af)
+  Executable tests/widget_raster_count.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/widget_raster_count-852d7fb3e952936f)
+  Executable tests/widget_rasterize_budget.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/widget_rasterize_budget-1ea4c2ed228051c0)
+  Executable tests/widget_transition.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/widget_transition-af2e85ff034f9b87)
+  Executable tests/zone_rendering.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/zone_rendering-0e551acc906944cb)
+  Executable benches/markdown_cache.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/markdown_cache-a4ef16b3e6739f49)
+  Executable benches/overflow_truncate.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/overflow_truncate-743d83a3f68b9c31)
+  Executable benches/widget_rasterize.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/widget_rasterize-b7e2c985cc7a4d00)
+cargo test -p tze_hud_runtime --test pixel_readback --features dev-mode --no-run
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.13s
+  Executable tests/pixel_readback.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/pixel_readback-1392ffb9a62bb0c2)
+VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json HEADLESS_FORCE_SOFTWARE=1 LLVMPIPE_CI=1 TZE_HUD_REQUIRE_GPU=1 timeout 900 cargo test -p tze_hud_compositor --all-targets
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.11s
+     Running unittests src/lib.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/tze_hud_compositor-b0f954878f132f1a)
+
+running 591 tests
+test display::tests::offset_target_maps_its_own_corners_to_ndc_corners ... ok
+test display::tests::primary_target_maps_canvas_ndc_unchanged ... ok
+test display::tests::display_names_match_with_or_without_device_prefix ... ok
+test display::tests::zone_on_connected_secondary_resolves_there ... ok
+test display::tests::unassigned_disconnected_or_primary_zones_stay_on_primary ... ok
+test fonts::tests::registry_value_names_match_family_and_styles_only ... ok
+test fonts::tests::system_lookup_is_noop_off_windows ... ok
+test fonts::tests::token_map_config_normalizes_defaults_and_keywords ... ok
+test markdown::tests::backtick_memo_double_tick_span_correctness ... ok
+test markdown::tests::backtick_memo_inline_code_semantic_correctness ... ok
+test markdown::tests::backtick_memo_multiple_spans_on_one_line ... ok
+test markdown::tests::cache_miss_before_prime ... ok
+test markdown::tests::code_panel_spans_emitted_for_inline_code ... ok
+test markdown::tests::code_panel_spans_emitted_for_fenced_block ... ok
+test markdown::tests::default_markdown_block_spacing_is_compact_for_streamed_transcripts ... ok
+test markdown::tests::different_content_different_cache_entries ... ok
+test markdown::tests::bold_italic_renders_both ... ok
+test markdown::tests::code_background_token_applied_to_inline_code ... ok
+test markdown::tests::emphasis_renders_italic ... ok
+test markdown::tests::code_color_takes_priority_over_code_background ... ok
+test markdown::tests::bold_italic_weight_comes_from_token ... ok
+test markdown::tests::empty_input_produces_empty_output ... ok
+test markdown::tests::bold_weight_comes_from_token ... ok
+test markdown::tests::cache_hit_after_prime ... ok
+test markdown::tests::empty_token_map_gives_defaults ... ok
+test markdown::tests::evict_removes_stale_entries ... ok
+test markdown::tests::excluded_constructs_render_literally ... ok
+test markdown::tests::fenced_code_block_body_is_monospace ... ok
+test markdown::tests::generic_scope_never_receives_portal_preferences ... ok
+test fonts::tests::bundled_fonts_load_exactly_the_embedded_faces ... ok
+test fonts::tests::missing_fonts_dir_is_not_fatal ... ok
+test markdown::tests::heading_h1_stripped_and_styled ... ok
+test markdown::tests::heading_h5_scale_one_is_none ... ok
+test markdown::tests::heading_scale_from_custom_token_map ... ok
+test markdown::tests::is_thematic_break_recognizes_valid_markers ... ok
+test markdown::tests::heading_size_scale_applied ... ok
+test markdown::tests::heading_top_margin_emits_blank_line_before_heading ... ok
+test markdown::tests::link_styled_with_token_color ... ok
+test markdown::tests::headings_h1_through_h6_have_correct_weights ... ok
+test markdown::tests::mixed_content_spans_cover_plain_text ... ok
+test markdown::tests::multiple_thematic_breaks_recorded_in_order ... ok
+test markdown::tests::multibyte_utf8_content_valid_boundaries ... ok
+test markdown::tests::indented_code_block_is_monospace ... ok
+test markdown::tests::link_not_navigable_no_url_in_output ... ok
+test markdown::tests::ordered_list_items_preserve_ordinal ... ok
+test markdown::tests::inline_code_uses_monospace ... ok
+test markdown::tests::ordered_list_items_produce_hanging_indent_metadata ... ok
+test markdown::tests::ordered_list_paren_delimiter_preserves_ordinal ... ok
+test markdown::tests::no_code_panels_without_code_background_token ... ok
+test markdown::tests::parse_hex_color_formats ... ok
+test markdown::tests::paren_table_nested_parens_in_url ... ok
+test markdown::tests::parsed_markdown_carries_line_height_multiplier ... ok
+test markdown::tests::plain_text_passes_through ... ok
+test markdown::tests::portal_transcript_keys_win_over_generic ... ok
+test markdown::tests::portal_transcript_falls_back_to_generic_when_portal_unset ... ok
+test markdown::tests::paren_table_link_semantic_correctness ... ok
+test markdown::tests::portal_transcript_profile_swap_reskins_markdown_tokens ... ok
+test markdown::tests::link_renders_text_not_url ... ok
+test markdown::tests::paren_table_multiple_links_on_one_line ... ok
+test markdown::tests::list_items_produce_hanging_indent_metadata ... ok
+test markdown::tests::portal_transcript_unset_leaves_defaults ... ok
+test markdown::tests::primer_stale_publish_does_not_clobber_newer ... ok
+test markdown::tests::primer_small_payload_swaps_in_synchronously ... ok
+test markdown::tests::primer_evicts_dead_entries_on_reprime ... ok
+test markdown::tests::strong_renders_bold ... ok
+test markdown::tests::same_content_two_token_sets_do_not_collide_in_cache ... ok
+test markdown::tests::thematic_break_ignored_without_separator_token ... ok
+test markdown::tests::separator_tokens_resolve_from_map ... ok
+test markdown::tests::thematic_break_recorded_with_separator_token ... ok
+test markdown::tests::primer_reset_clears_snapshot ... ok
+test markdown::tests::token_defaults_are_canonical ... ok
+test fonts::tests::missing_family_falls_back_to_role_default ... ok
+test markdown::tests::token_heading_margins_parse ... ok
+test markdown::tests::token_line_height_multiplier_clamped ... ok
+test markdown::tests::large_payload_65535_bytes_primes_without_panic ... ok
+test markdown::tests::token_line_height_multiplier_parses ... ok
+test markdown::tests::token_list_item_spacing_parses ... ok
+test markdown::tests::token_map_bold_weight_parsed ... ok
+test markdown::tests::token_map_code_background_parsed ... ok
+test markdown::tests::token_map_link_color_override ... ok
+test markdown::tests::token_map_heading_weight_overrides ... ok
+test markdown::tests::unordered_list_items_have_bullet ... ok
+test markdown::tests::unordered_list_still_uses_bullet_after_fix ... ok
+test overflow::tests::fallback_noop_below_bound ... ok
+test fonts::tests::roles_default_to_ibm_plex_and_dejavu_serif ... ok
+test fonts::tests::fonts_dir_family_is_loaded_and_selected ... ok
+test fonts::tests::configured_bundled_name_resolves_case_insensitively ... ok
+test overflow::tests::fallback_single_giant_line_unwindowed ... ok
+test fonts::tests::plex_weights_resolve_to_distinct_faces ... ok
+test fonts::tests::symbols_missing_from_plex_fall_back_to_dejavu ... ok
+test markdown::tests::primer_large_payload_swaps_in_off_thread ... ok
+test markdown::tests::primer_lands_large_payload_after_many_prior_dispatches ... ok
+test overflow::tests::max_whole_lines_cases ... ok
+test overflow::tests::fallback_window_is_bounded_by_viewport ... ok
+test markdown::tests::adversarial_floods_stay_within_budget ... ok
+test markdown::tests::primer_reader_never_sees_torn_state ... ok
+test overflow::tests::grapheme_cluster_boundary_not_split_mid_cluster ... ok
+test overflow::tests::long_unbroken_token_w30_in_200px_has_visible_prefix ... ok
+test overflow::tests::empty_text_no_truncation ... ok
+test overflow::tests::non_final_line_horizontal_overflow_triggers_truncation ... ok
+test overflow::tests::middle_line_overflow_truncated_at_correct_position ... ok
+test overflow::tests::follow_tail_advances_by_whole_lines ... ok
+test overflow::tests::run_logical_start_returns_min_not_first ... ok
+test overflow::tests::ltr_truncation_unaffected_by_rtl_fix ... ok
+test overflow::tests::mixed_bidi_ltr_rtl_no_corruption ... ok
+test overflow::tests::head_anchored_append_stability_matches_prefix_truncation ... ok
+test overflow::tests::append_stability_truncation_prefix_unchanged ... ok
+test overflow::tests::multiline_beyond_height_is_truncated ... ok
+test markdown::tests::adversarial_inputs_terminate_and_preserve_content ... ok
+test overflow::tests::rtl_arabic_truncation_no_leading_byte_drop ... ok
+test overflow::tests::short_text_fits_unchanged ... ok
+test overflow::tests::tail_anchored_max_lines_one_shows_newest_with_leading_ellipsis ... ok
+test overflow::tests::tail_anchored_non_final_line_horizontal_overflow_triggers_truncation ... ok
+test overflow::tests::tail_anchored_degenerate_inputs_produce_empty ... ok
+test renderer::capture::tests::only_8_bit_four_channel_formats_are_capturable ... ok
+test renderer::capture::tests::size_limits_bound_dimensions_and_total_pixels ... ok
+test renderer::capture::tests::unpad_drops_row_padding_and_swizzles_bgra ... ok
+test renderer::draw_cmds::tests::common_prefix_len_basic_and_char_boundary ... ok
+test renderer::draw_cmds::tests::derive_word_breakpoints_only_covers_region_after_start ... ok
+test renderer::draw_cmds::tests::derive_word_breakpoints_splits_on_whitespace_and_ends_at_len ... ok
+test renderer::draw_cmds::tests::eased_opacity_shares_endpoints_but_curves_the_middle ... ok
+test renderer::draw_cmds::tests::opacity_at_interpolates_between_endpoints ... ok
+test renderer::draw_cmds::tests::opacity_at_respects_from_and_target ... ok
+test renderer::draw_cmds::tests::portal_reveal_leading_segment_fades_others_snap ... ok
+test overflow::tests::truncated_text_is_shorter ... ok
+test renderer::draw_cmds::tests::portal_reveal_progress_increases_leading_alpha_then_completes ... ok
+test renderer::draw_cmds::tests::portal_reveal_settled_is_not_revealing_and_fully_opaque ... ok
+test renderer::draw_cmds::tests::stream_reveal_is_revealing_tracks_progress ... ok
+test renderer::draw_cmds::tests::zero_duration_reports_complete_and_target_opacity ... ok
+test renderer::easing::tests::ease_in_out_is_symmetric_half ... ok
+test renderer::easing::tests::ease_out_quad_decelerates ... ok
+test renderer::easing::tests::easing_clamps_out_of_range ... ok
+test renderer::easing::tests::easing_fixed_endpoints ... ok
+test renderer::easing::tests::easing_is_monotonic_non_decreasing ... ok
+test renderer::easing::tests::lerp_endpoints_and_mid ... ok
+test renderer::easing::tests::scroll_smoother_converges_to_target ... ok
+test renderer::easing::tests::scroll_smoother_is_settled_tracks_inflight_state ... ok
+test renderer::easing::tests::scroll_smoother_frame_rate_independent ... ok
+test renderer::easing::tests::scroll_smoother_monotonic_approach ... ok
+test renderer::easing::tests::scroll_smoother_snaps_within_epsilon ... ok
+test renderer::easing::tests::scroll_smoother_starts_settled ... ok
+test renderer::easing::tests::smooth_factor_endpoints ... ok
+test renderer::easing::tests::smooth_factor_monotonic_in_dt ... ok
+test renderer::easing::tests::smooth_factor_non_positive_tau_snaps ... ok
+test renderer::easing::tests::stream_fade_eased_is_ahead_of_linear_midway ... ok
+test renderer::easing::tests::stream_fade_saturates_after_window ... ok
+test renderer::easing::tests::stream_fade_zero_window_is_full ... ok
+test overflow::tests::truncated_text_ends_with_ellipsis ... ok
+test renderer::easing::tests::stream_fade_ramps_zero_to_one ... ok
+test overflow::tests::single_long_word_truncated_at_grapheme_boundary ... ok
+test renderer::encode_pass::degradation_flat_alpha_tests::significant_policy_forces_visible_flat_geometry_opaque_but_preserves_clear ... ok
+test renderer::image_cache::degradation_texture_tests::nearest_downsample_is_deterministic_and_preserves_rgba_pixels ... ok
+test renderer::retained::tests::device_recovery_invalidates_the_private_snapshot ... ok
+test renderer::image_cache::degradation_texture_tests::current_frame_references_are_never_eviction_candidates ... ok
+test renderer::retained::tests::new_observation_clears_prior_frame_work_counts ... ok
+test renderer::safe_mode_overlay::tests::windowed_frame_draws_chrome_overlay_in_safe_mode ... ok
+test renderer::system_card::tests::system_card_pairing_layout_is_centred_with_code_line ... ok
+test renderer::system_card::tests::system_card_text_items_follow_tokens ... ok
+test renderer::system_card::tests::system_card_toast_anchors_bottom_centre ... ok
+test renderer::retained::tests::dynamic_drag_handle_state_fails_closed_before_retained_planning ... ok
+test renderer::tests::alert_banner::test_alert_banner_backdrop_spans_full_display_width ... ok
+test overflow::tests::tail_anchored_short_text_fits_unchanged ... ok
+test renderer::retained::tests::markdown_bearing_text_fails_closed_before_retained_planning ... ok
+test overflow::tests::truncated_text_remeasures_within_width ... ok
+test renderer::tests::composer::caret_blink_phase_square_wave ... ok
+test renderer::tests::composer::caret_follow_degenerate_inputs_are_safe ... ok
+test renderer::tests::composer::caret_follow_end_shows_tail ... ok
+test overflow::tests::zero_width_produces_empty ... ok
+test renderer::tests::composer::caret_follow_delete_scrolls_back_no_dead_space ... ok
+test renderer::tests::composer::caret_follow_advances_when_typing_past_width ... ok
+test renderer::tests::composer::caret_follow_mid_text_stays_visible ... ok
+test renderer::tests::composer::caret_follow_home_resets_to_zero ... ok
+test renderer::tests::composer::caret_follow_moving_left_reveals_earlier_text ... ok
+test renderer::tests::composer::caret_follow_offset_always_bounded ... ok
+test renderer::tests::composer::caret_stays_within_short_composer_pane ... ok
+test renderer::tests::composer::caret_follow_no_scroll_when_text_fits ... ok
+test renderer::tests::composer::composer_anchor_token_resolves ... ok
+test renderer::tests::composer::composer_content_inset_token_drives_box_geometry ... ok
+libEGL warning: failed to get driver name for fd -1
+
+libEGL warning: MESA-LOADER: failed to retrieve device information
+
+libEGL warning: failed to get driver name for fd -1
+
+MESA: error: ZINK: failed to choose pdev
+libEGL warning: egl: failed to create dri2 screen
+test renderer::tests::alert_banner::test_alert_banner_zero_height_when_inactive ... ok
+test overflow::tests::non_finite_geometry_produces_empty_no_panic ... ok
+test renderer::tests::composer::composer_region_fit_lines_computes_capacity ... ok
+test renderer::tests::alert_banner::test_alert_banner_stacks_by_severity_then_recency ... ok
+test renderer::tests::alert_banner::test_alert_banner_zone_height_grows_with_active_count ... ok
+test renderer::tests::composer::input_history_band_layout_places_history_below_a_top_anchored_composer ... ok
+libEGL warning: failed to get driver name for fd -1
+
+libEGL warning: MESA-LOADER: failed to retrieve device information
+
+libEGL warning: failed to get driver name for fd -1
+
+MESA: error: ZINK: failed to choose pdev
+libEGL warning: egl: failed to create dri2 screen
+test renderer::tests::composer::composer_caret_quad_emitted_at_expected_position ... ok
+test renderer::tests::composer::input_history_block_top_slides_with_scroll_offset ... ok
+test renderer::tests::composer::local_composer_state_handle_slot_semantics ... ok
+test renderer::tests::composer::composer_draft_text_never_contains_caret_glyph ... ok
+test renderer::tests::composer::multiline_default_layout_is_single_line ... ok
+test renderer::tests::composer::multiline_input_box_clamped_to_region ... ok
+test renderer::tests::composer::multiline_input_box_grows_upward_pinned_bottom ... ok
+test renderer::tests::composer::multiline_max_lines_token_default_and_clamp ... ok
+test renderer::tests::composer::multiline_vertical_offset_bounded_and_shrinks_back ... ok
+test renderer::tests::composer::multiline_vertical_offset_keeps_caret_line_visible ... ok
+test renderer::tests::composer::multiline_vertical_offset_moving_up_reveals_earlier_lines ... ok
+test renderer::tests::composer::multiline_visible_line_count_grows_then_caps ... ok
+test renderer::tests::composer::portal_divider_canonical_tokens_reach_markdown_tokens ... ok
+test renderer::tests::composer::separator_rects_degenerate_inputs_are_empty ... ok
+test renderer::tests::composer::separator_rects_placed_on_break_lines ... ok
+test renderer::tests::composer::composer_draft_overflow_is_clipped_to_box_headless ... ok
+test renderer::tests::composer::tile_spacing_tokens_resolve_default_override_and_reject ... ok
+test renderer::tests::composer::composer_echo_confined_to_bottom_strip_full_tile_hitregion ... ok
+test renderer::tests::composer::top_anchored_input_box_pins_to_region_top_and_grows_down ... ok
+test renderer::tests::composer::composer_placeholder_renders_only_when_draft_empty ... ok
+test renderer::tests::composer::viewer_echo_divider_rects_between_adjacent_entries ... ok
+test renderer::tests::composer::viewer_echo_divider_rects_clips_and_degenerate ... ok
+test renderer::tests::composer::composer_selection_styled_run_uses_raw_byte_offsets ... ok
+test renderer::tests::composer::composer_wrapped_draft_stays_in_short_pane_headless ... ok
+test renderer::tests::composer::input_history_block_honors_tile_scroll_offset ... ok
+test overflow::tests::proptest_grapheme_fallback_valid_utf8_boundary ... ok
+test overflow::tests::proptest_truncated_result_fits_within_bounds ... ok
+test renderer::tests::composer::local_composer_text_item_uses_hit_region_bounds ... ok
+test overflow::tests::proptest_tail_anchored_last_line_always_visible ... ok
+test overflow::tests::proptest_truncated_always_ends_with_ellipsis ... ok
+test overflow::tests::proptest_tail_anchored_line_count_fits_within_max_lines ... ok
+test overflow::tests::proptest_tail_anchored_result_shorter_when_truncated ... ok
+test renderer::tests::composer::single_line_composer_publishes_visual_layout ... ok
+test overflow::tests::proptest_tail_anchored_truncated_starts_with_ellipsis ... ok
+test overflow::tests::proptest_tail_anchored_grapheme_cluster_integrity ... ok
+test renderer::tests::hit_drag::drag_z_order_boost_raises_tile_above_peers ... ok
+test renderer::tests::composer::top_anchored_empty_caret_sits_at_pane_origin_no_teleport ... ok
+test overflow::tests::proptest_tail_anchored_rtl_bidi_logical_offset ... ok
+skipping: no text rasterizer (separator path unavailable headless)
+test renderer::tests::composer::transcript_divider_rects_track_tile_scroll_offset ... ok
+test overflow::tests::proptest_whole_line_visibility_no_partial_lines ... ok
+test renderer::tests::focus_chrome::orphaned_tile_emits_disconnection_badge_draw_cmd ... ok
+test renderer::tests::focus_chrome::system_card_emits_draw_cmds_only_while_set ... ok
+test renderer::tests::focus_chrome::test_composerless_node_focus_emits_ring ... ok
+test renderer::tests::focus_chrome::test_focus_ring_suppressed_on_non_active_tab ... ok
+test renderer::tests::focus_chrome::test_focused_hit_region_emits_focus_ring_in_overlay_mode ... ok
+test renderer::tests::focus_chrome::test_portal_tile_emits_resize_grip_in_overlay_mode ... ok
+test overflow::tests::windowed_fallback_matches_full_input_on_large_transcript ... ok
+test renderer::tests::focus_chrome::test_resize_grip_swaps_to_hover_color_for_hovered_tile ... ok
+test renderer::tests::focus_chrome::test_tile_level_focus_owner_emits_ring_in_overlay_mode ... ok
+test renderer::tests::hit_drag::drag_handle_hit_test_wins_on_passthrough_tile ... ok
+test renderer::tests::idle_gate::static_focus_and_resize_grip_transitions_each_dirty_exactly_once ... ok
+test renderer::tests::hit_drag::drag_handle_opacity_switches_to_active_on_hover_state ... ok
+test renderer::tests::hit_drag::drag_handle_regions_cover_visible_tile_zone_and_widget ... ok
+test renderer::tests::markdown_cache::markdown_cache_compute_key_is_deterministic_and_content_addressed ... ok
+test renderer::tests::markdown_cache::markdown_cache_miss_fallback_is_non_lossy ... ok
+test renderer::tests::markdown_cache::portal_markdown_node_ids_scopes_by_scroll_config ... ok
+test renderer::tests::hit_drag::drag_handle_states_stale_entries_pruned_on_repopulate ... ok
+test renderer::tests::hit_drag::drag_visual_feedback_applied_during_active_drag ... ok
+test renderer::tests::hit_drag::portal_frame_gets_full_width_header_band_handle ... ok
+test renderer::tests::hit_drag::portal_resize_scales_and_clamps_text_font ... ok
+test renderer::tests::hit_drag::tile_close_button_draw_and_hit_region_share_token_geometry ... ok
+test renderer::tests::hit_drag::zone_hit_dismiss_region_at_top_right_of_slot ... ok
+test renderer::tests::hit_drag::zone_hit_notification_with_two_actions_produces_three_regions ... ok
+test renderer::tests::hit_drag::zone_hit_populate_clears_on_repeated_calls ... ok
+test renderer::tests::notification_layout::test_notification_body_font_size_token ... ok
+test renderer::tests::notification_layout::test_notification_slot_height_two_line_exceeds_single_line ... ok
+test renderer::tests::hit_drag::zone_hit_single_notification_produces_dismiss_region ... ok
+test renderer::tests::hit_drag::zone_hit_tab_order_is_sequential ... ok
+test renderer::tests::notification_layout::test_notification_text_primary_color_token ... ok
+test renderer::tests::idle_gate::caret_blink_wakes_at_toggle_not_every_frame ... ok
+test renderer::tests::idle_gate::hold_moves_the_fade_deadline_and_ttl_zero_never_fades ... ok
+test renderer::tests::notification_layout::test_pub_anim_state_before_ttl_expiry_opacity_is_1 ... ok
+test renderer::tests::notification_layout::test_pub_anim_state_custom_ttl_3000ms_triggers_fade ... ok
+test renderer::tests::notification_layout::test_pub_anim_state_is_complete_after_150ms ... ok
+test renderer::tests::notification_layout::test_pub_anim_state_opacity_at_75ms_midpoint_is_half ... ok
+test renderer::tests::idle_gate::idle_render_gate_renders_for_composer_echo_and_caret_blink ... ok
+test renderer::tests::notification_layout::test_simultaneous_independent_fades ... ok
+test renderer::tests::idle_gate::idle_render_gate_skips_static_scene_renders_on_change_or_animation ... ok
+test renderer::tests::idle_gate::idle_with_notification_renders_only_at_fade ... ok
+test renderer::tests::idle_gate::notification_countdown_is_not_inflight_animation ... ok
+test renderer::tests::markdown_cache::load_font_bytes_new_font_resets_truncation_cache_scene_version ... ok
+test renderer::tests::notification_layout::test_update_publication_animations_seeds_fresh_state ... ok
+test renderer::tests::markdown_cache::prime_truncation_cache_is_commit_primed_before_render_frame_headless ... ok
+test renderer::tests::markdown_cache::render_frame_headless_is_parse_free_after_commit_time_prime ... ok
+test renderer::tests::markdown_cache::resize_reprime_cadence_defers_inside_interval_then_primes_settled_geometry ... ok
+test renderer::tests::notification_layout::test_dismiss_button_respects_typography_tokens ... ok
+test renderer::tests::portal_reveal::portal_part_index_classifies_parts_and_falls_back ... ok
+test renderer::tests::portal_reveal::portal_part_index_none_when_no_materialized_nodes ... ok
+test renderer::tests::notification_layout::test_dismiss_button_uses_default_font_size_and_weight ... ok
+test renderer::tests::notification_layout::test_notification_stack_adds_dismiss_label_and_reserves_text_width ... ok
+test renderer::tests::notification_layout::test_notification_text_inset_from_backdrop_edges ... ok
+test renderer::tests::notification_layout::test_notification_text_uses_body_typography_token_default ... ok
+test renderer::tests::notification_layout::test_prune_faded_publications_removes_completed_fades ... ok
+hud-991cj bench [small] bytes=540 | rest: 0 reshapes 3.313 ms/frame | scroll: 0 reshapes 2.509 ms/frame | append: 1 reshape (99.389104ms rest, 75.268962ms scroll)
+test renderer::tests::notification_layout::test_rounded_notification_backdrop_uses_two_line_slot_height ... ok
+hud-uyhpn bench (FRAMES=60): markdown cache re-primes baseline=60 fixed=0; prime wall-time baseline=624us fixed=8us
+test renderer::tests::notification_layout::test_stack_reflow_after_publication_pruned ... ok
+test renderer::tests::markdown_cache::drag_move_position_only_skips_content_cache_reprimes_bench ... ok
+test renderer::tests::notification_layout::test_two_line_notification_empty_title_produces_one_text_item ... ok
+test renderer::tests::markdown_primer::markdown_primer_landing_converges_on_render_path_hud_u4lq2 ... ok
+test renderer::tests::notification_layout::test_two_line_notification_title_produces_two_text_items ... ok
+test renderer::tests::notification_layout::test_two_line_notifications_stack_correctly ... ok
+test renderer::tests::markdown_primer::reused_compositor_across_scenes_lands_markdown_primer_hud_u4lq2 ... ok
+test renderer::tests::portal_animation::non_scrollable_tile_has_no_portal_animation_state ... ok
+test renderer::tests::portal_animation::portal_tile_fade_in_starts_on_first_content ... ok
+test renderer::tests::portal_animation::portal_tile_fade_out_starts_on_content_removal ... ok
+test renderer::tests::portal_animation::portal_tile_interrupt_seeds_fade_in_from_eased_opacity ... ok
+test renderer::tests::portal_reveal::portal_surface_container_part_scopes_descendant_text ... ok
+test renderer::tests::portal_reveal::portal_surface_renders_parts_with_per_part_scope_and_clip ... ok
+test renderer::tests::portal_reveal::test_portal_reveal_batched_multinode_reveals_only_grown_node ... ok
+test renderer::tests::portal_reveal::test_portal_reveal_identical_text_nodes_do_not_cross_fade ... ok
+test renderer::tests::portal_reveal::test_portal_reveal_node_flip_does_not_spuriously_reveal ... ok
+test renderer::tests::surface::adapter_identity_preserves_actual_wgpu_fields_without_a_gpu ... ok
+test renderer::tests::portal_reveal::test_portal_reveal_single_node_append_still_reveals ... ok
+test renderer::tests::retained_image::reconfigured_surface_recovery_forces_a_full_repaint ... ok
+test renderer::tests::retained_image::test_static_image_node_composited_with_other_nodes ... ok
+test renderer::tests::retained_image::test_static_image_node_renders_placeholder_quad ... ok
+test renderer::tests::scroll::display_tile_scroll_offset_snaps_headless_and_settles_windowed ... ok
+test renderer::tests::scroll::expanded_portal_chrome_stays_fixed_while_document_content_scrolls_after_resize ... ok
+test renderer::tests::scroll::jump_to_latest_badge_gates_on_scroll_and_unread_count ... ok
+test renderer::tests::scroll::publish_displayed_scroll_offsets_mirrors_smoother_and_clears_headless ... ok
+test renderer::tests::scroll::scrolled_portal_output_tile_clips_geometry_outside_viewport ... ok
+test renderer::tests::scroll::scrolled_rounded_solid_preserves_original_shape_with_viewport_clip ... ok
+hud-991cj bench [64KiB] bytes=64800 | rest: 0 reshapes 2.375 ms/frame | scroll: 0 reshapes 3.218 ms/frame | append: 1 reshape (71.245608ms rest, 96.52873ms scroll)
+test renderer::tests::scroll::test_collect_text_items_applies_tile_scroll_offset ... ok
+test renderer::tests::markdown_primer::scroll_reshape_bench_hud991cj ... ok
+test renderer::tests::scroll::test_collect_text_items_at_tail_ellipsis_uses_tail_anchored_viewport ... ok
+test renderer::tests::scroll::test_collect_text_items_zero_scroll_unchanged ... ok
+test renderer::tests::scroll::test_ensure_icon_texture_resolves_token_placeholder ... ok
+test renderer::tests::scroll::test_ensure_icon_texture_unresolved_token_cleared_after_set_token_map ... ok
+test renderer::tests::scroll::test_zone_stream_text_tail_anchored_opt_in_viewport ... ok
+test renderer::tests::surface::build_windowed_frame_decoupled_from_surface_then_presents ... ok
+test renderer::tests::surface::building_an_idle_frame_leaves_the_idle_gate_inputs_unchanged ... ok
+test renderer::tests::surface::capture_windowed_frame_reads_back_the_built_frame ... ok
+test renderer::tests::surface::frame_signature_ignores_content_outside_the_target ... ok
+test renderer::tests::surface::offset_display_target_shows_scene_translated ... ok
+test renderer::tests::surface::safe_mode_flip_changes_secondary_signature ... ok
+test renderer::tests::surface::test_chrome_always_above_max_zorder_tile ... ok
+test renderer::tests::surface::test_new_headless_with_force_software_env_var ... ok
+test renderer::tests::surface::test_render_frame_via_compositor_surface_trait ... ok
+test renderer::tests::surface::test_system_card_drawn_above_safe_mode_overlay_and_content ... ok
+test renderer::tests::surface::zone_assigned_to_secondary_display_renders_there ... ok
+test renderer::tests::text_render::font_tokens_select_role_families_and_rebuild_only_on_change ... ok
+test renderer::tests::text_render::test_init_text_renderer_idempotent ... ok
+test renderer::tests::text_render::test_text_clip_overflow_stays_within_bounds ... ok
+test renderer::tests::text_render::test_text_ellipsis_overflow_no_panic ... ok
+test renderer::tests::tokens::composer_at_capacity_token_is_distinct_from_background_and_propagates_override ... ok
+test renderer::tests::tokens::composer_caret_color_defaults_to_text_color ... ok
+test renderer::tests::tokens::composer_caret_color_token_override_propagates ... ok
+test renderer::tests::tokens::composer_overlay_default_font_size_matches_readable_portal_default ... ok
+test renderer::tests::tokens::composer_overlay_tokens_defaults_are_valid ... ok
+test renderer::tests::tokens::composer_selection_bg_default_is_visible ... ok
+test renderer::tests::tokens::composer_selection_bg_token_override_propagates ... ok
+test renderer::tests::tokens::resolve_tile_bg_token_default_override ... ok
+test renderer::tests::tokens::resolve_tile_bg_token_returns_fallback_on_absent_token ... ok
+test renderer::tests::tokens::resolve_tile_bg_token_static_image_override ... ok
+test renderer::tests::tokens::resolve_tile_bg_token_text_markdown_override ... ok
+test renderer::tests::tokens::token_fallback_colors_match_canonical_defaults ... ok
+test renderer::tests::text_render::test_text_markdown_node_avoids_placeholder_bar_when_text_renderer_active ... ok
+test renderer::tests::text_render::test_text_markdown_node_renders_visible_text ... ok
+test renderer::tests::scroll::test_zone_stream_text_tail_anchored_primes_newest_content ... ok
+test renderer::tests::text_render::test_text_renderer_empty_scene_no_panic ... ok
+test renderer::tests::text_render::test_zone_notification_renders_visible_text ... ok
+test renderer::tests::text_render::test_stage6_budget_with_text_rendering_active ... ok
+test renderer::tests::text_render::test_zone_status_bar_renders_visible_text ... ok
+test renderer::tests::text_render::test_zone_stream_text_renders_visible_text ... ok
+test renderer::tests::tile_opacity::hud_b0x0m_rounded_solid_color_scaled_by_tile_opacity ... ok
+test renderer::tests::tile_opacity::hud_b0x0m_solid_color_node_fill_scaled_by_tile_opacity ... ok
+test renderer::tests::tile_opacity::hud_b0x0m_static_image_tint_scaled_by_tile_opacity ... ok
+test renderer::tests::zone_layers::test_fade_in_from_clamps_opacity ... ok
+test renderer::tests::zone_layers::test_fade_in_from_starts_at_given_opacity ... ok
+test renderer::tests::tile_opacity::hud_dat3x_fractional_tile_opacity_blends_text ... ok
+test renderer::tests::tile_opacity::hud_dat3x_full_tile_opacity_renders_text_opaque ... ok
+test renderer::tests::zone_layers::test_publication_ttl_ms_uses_expires_at_wall_us ... ok
+test renderer::tests::tile_opacity::hud_dat3x_transient_portal_fade_still_shapes_text ... ok
+test renderer::tests::zone_layers::test_stream_reveal_advance_progresses_breakpoints ... ok
+test renderer::tests::zone_layers::test_stream_reveal_no_breakpoints_reveals_all ... ok
+test renderer::tests::zone_layers::test_stream_reveal_starts_at_first_breakpoint ... ok
+test renderer::tests::tile_opacity::hud_dat3x_zero_tile_opacity_collects_no_text ... ok
+test renderer::tests::tile_opacity::hud_tfm3p_flow_offsets_resolve_without_a_text_rasterizer ... ok
+test renderer::tests::tile_opacity::hud_w41ef_portal_backdrop_opaque_after_resize_grow_no_fade ... ok
+test renderer::tests::tile_opacity::hud_w41ef_portal_content_background_scaled_by_tile_opacity ... ok
+test renderer::tests::viewer_echo::portal_resize_scales_runtime_authored_input_text_and_layout ... ok
+test renderer::tests::viewer_echo::repro_resize_first_frame_keeps_composer_chrome_aligned_with_wrapped_text ... ok
+test renderer::tests::viewer_echo::test_viewer_echo_history_bounded_above_live_box ... ok
+test renderer::tests::zone_notification::test_alert_banner_urgency3_maps_to_severity_critical ... ok
+test renderer::tests::zone_notification::test_alert_banner_urgency_low_maps_to_info ... ok
+test renderer::tests::viewer_echo::test_viewer_echo_renders_embedded_newline_as_multiple_lines ... ok
+test renderer::tests::viewer_echo::test_viewer_echo_renders_kind_distinct_line_above_composer ... ok
+test renderer::tests::zone_notification::test_from_zone_policy_reads_all_policy_fields ... ok
+test renderer::tests::viewer_echo::test_viewer_echo_renders_turn_dividers_between_entries ... ok
+test renderer::tests::viewer_echo::test_viewer_echo_stack_tracks_live_composer_box ... ok
+test renderer::tests::viewer_echo::test_viewer_echo_timestamp_renders_as_styled_run ... ok
+test renderer::tests::viewer_echo::test_viewer_echo_wraps_long_entry ... ok
+test renderer::tests::viewer_echo::test_viewer_echo_zero_timestamp_renders_without_prefix_or_run ... ok
+test renderer::tests::zone_layers::test_collect_text_items_respects_stream_reveal ... ok
+test renderer::tests::zone_layers::test_layer_filter_background_only_emits_background_vertices ... ok
+test renderer::tests::zone_notification::test_notification_urgency_color_tokens ... ok
+test renderer::tests::zone_layers::test_layer_filter_chrome_only_emits_chrome_vertices ... ok
+test renderer::tests::zone_layers::test_static_image_zone_emits_warm_gray_placeholder ... ok
+test renderer::tests::zone_layers::test_three_pass_ordering_independent_of_registration_order ... ok
+test renderer::tests::zone_layers::test_transition_interrupt_starts_fade_in_from_current_opacity ... ok
+test renderer::tests::zone_layers::test_update_stream_reveals_creates_state ... ok
+test renderer::tests::zone_layers::test_update_stream_reveals_resets_on_new_publish ... ok
+test renderer::tests::zone_notification::notification_actions_layout_matches_hit_regions ... ok
+test renderer::tests::zone_notification::test_alert_banner_has_no_border ... ok
+test renderer::tests::zone_notification::test_alert_banner_urgency2_maps_to_severity_warning ... ok
+test renderer::tests::zone_notification::test_backdrop_opacity_overrides_color_alpha ... ok
+test renderer::tests::zone_notification::test_custom_severity_tokens_affect_alert_banner_backdrop ... ok
+test renderer::tests::zone_notification::test_lifecycle_sentinel_keeps_cached_markdown_render_path ... ok
+test renderer::tests::zone_notification::test_no_backdrop_when_backdrop_is_none ... ok
+test renderer::tests::zone_notification::test_notification_area_backdrop_uses_0_8_opacity ... ok
+test renderer::tests::zone_notification::test_notification_area_border_uses_border_default_token ... ok
+test renderer::tests::zone_notification::test_notification_area_does_not_use_severity_tokens ... ok
+test renderer::tests::zone_notification::test_notification_card_border_is_an_sdf_border ... ok
+test renderer::tests::zone_notification::test_notification_no_backdrop_when_backdrop_is_none ... ok
+test renderer::tests::zone_notification::test_notification_with_opaque_backdrop ... ok
+test renderer::tests::zone_stack::test_zone_slot_layout_iter_visible_clips_and_clamps ... ok
+test renderer::tests::zone_notification::test_zone_animation_state_interpolates ... ok
+test renderer::tests::zone_notification::test_severity_color_tokens_override_or_fall_back ... ok
+test renderer::tests::zone_notification::test_zone_animation_state_fade_in_completes ... ok
+test renderer::tests::zone_notification::test_zone_animation_state_fade_out_completes ... ok
+test renderer::text::portal_reveal_render_tests::fade_alpha_increases_with_reveal_progress ... ok
+test renderer::text::portal_reveal_render_tests::fade_dims_leading_segment_and_hides_unrevealed_tail ... ok
+test renderer::text::portal_reveal_render_tests::scale_portal_font_px_scales_and_clamps ... ok
+test renderer::text::portal_reveal_render_tests::settled_reveal_leaves_item_untouched ... ok
+test renderer::text::portal_reveal_render_tests::tail_cursor_color_reads_content_end_marker_only ... ok
+test renderer::text::portal_reveal_render_tests::tail_cursor_glyph_range_is_multibyte_safe ... ok
+test renderer::text::transcript_measure_tests::clamp_narrows_when_cap_below_width ... ok
+test renderer::text::transcript_measure_tests::clamp_never_widens_when_cap_above_width ... ok
+test renderer::text::portal_reveal_render_tests::tail_cursor_recolors_only_the_glyph_and_preserves_styling ... ok
+test renderer::tile_render::composer_draft_color_tests::at_capacity_draft_uses_token_at_capacity_color ... ok
+test renderer::text::transcript_measure_tests::resolve_rejects_negative_and_nonfinite ... ok
+test renderer::text::transcript_measure_tests::resolve_defaults_to_unbounded_when_absent ... ok
+test renderer::text::transcript_measure_tests::clamp_unbounded_returns_full_width ... ok
+test renderer::tile_render::composer_draft_color_tests::placeholder_color_wins_over_at_capacity ... ok
+test renderer::tile_render::degradation_opacity_tests::significant_degradation_preserves_hidden_tiles_and_opaques_visible_tiles ... ok
+test renderer::text::transcript_measure_tests::resolve_parses_positive_measure ... ok
+test renderer::tile_render::lifecycle_accent_tests::accent_bar_clamps_width_and_folds_opacity ... ok
+test renderer::tile_render::flow_fallback_cache_tests::heal_parses_large_content_at_most_once_across_repeated_calls ... ok
+test renderer::tile_render::lifecycle_accent_tests::accent_bar_none_when_invisible ... ok
+test renderer::tile_render::resize_grip_tests::nonpositive_size_yields_empty_dots ... ok
+test renderer::tile_render::flow_fallback_cache_tests::heal_skips_nodes_already_in_the_authoritative_cache ... ok
+test renderer::tile_render::resize_grip_tests::dots_anchor_bottom_right_and_form_diagonal ... ok
+test renderer::tile_render::viewer_echo_timestamp_tests::nonzero_submitted_at_derives_hh_mm_prefix ... ok
+test renderer::tile_render::viewer_echo_timestamp_tests::display_text_prefixes_message_when_timestamped ... ok
+test renderer::tile_render::resize_grip_tests::overrides_flow_through_and_hover_swaps_color ... ok
+test renderer::tile_render::resize_grip_tests::resolver_defaults_are_distinct_and_positive ... ok
+test renderer::tile_render::viewer_echo_timestamp_tests::prefix_wraps_at_day_boundary_and_truncates_seconds ... ok
+test renderer::tile_render::viewer_echo_timestamp_tests::zero_submitted_at_yields_no_prefix ... ok
+test renderer::token_colors::tests::resolve_section_gap_px_defaults_when_absent ... ok
+test renderer::token_colors::tests::jump_to_latest_pill_fill_default_matches_token_set_color_space ... ok
+test renderer::token_colors::tests::resolve_section_gap_px_falls_back_on_malformed_or_negative ... ok
+test renderer::token_colors::tests::resolve_section_gap_px_uses_override_token ... ok
+test renderer::viewer_echo::tests::append_evicts_oldest_beyond_bound ... ok
+test renderer::viewer_echo::tests::append_retains_entries_oldest_first ... ok
+test renderer::viewer_echo::tests::drain_queue_moves_pending_appends_into_store ... ok
+test surface::tests::failed_lost_reconfigure_records_terminal_recovery_outcome ... ok
+test surface::tests::a_resize_requested_during_a_reconfigure_is_not_lost ... ok
+test renderer::viewer_echo::tests::entries_for_absent_tile_is_none ... ok
+test surface::tests::lost_or_outdated_acquire_failure_queues_and_attempts_reconfigure ... ok
+test surface::tests::out_of_memory_and_other_acquire_failures_are_terminal_without_reconfigure ... ok
+test surface::tests::resize_requests_pack_whole_and_ignore_zero ... ok
+test surface::tests::test_acquire_frame_double_failure_returns_none_no_panic ... ok
+test surface::tests::test_assert_pixel_color_fails_outside_tolerance ... ok
+test surface::tests::test_assert_pixel_color_passes_within_tolerance ... ok
+test surface::tests::test_window_surface_atomic_size_fields ... ok
+test surface::tests::two_builds_before_present_report_one_fresh_swapchain_acquisition ... ok
+test renderer::viewer_echo::tests::retain_tiles_drops_dead_tiles ... ok
+test text::tests::apply_opacity_to_color_halves_alpha ... ok
+test text::tests::color_run_spans_cases ... ok
+test surface::tests::log_throttle_passes_one_line_per_interval_and_counts_drops ... ok
+test text::tests::color_runs_no_truncation_preserves_runs_when_text_starts_with_ellipsis ... ok
+test text::tests::extend_selection_quad_to_box_three_part_shape ... ok
+test text::tests::from_text_markdown_node_font_weight_defaults_to_regular ... ok
+test text::tests::from_zone_policy_maps_policy_fields ... ok
+test surface::tests::test_acquire_submit_serialized_against_present_and_reconfigure ... ok
+test text::tests::linear_to_srgb_u8_black ... ok
+test text::tests::linear_to_srgb_u8_midpoint ... ok
+test text::tests::linear_to_srgb_u8_white ... ok
+test renderer::text::transcript_measure_tests::clamped_measure_wraps_tighter_than_full_width ... ok
+test text::tests::compute_inline_backdrop_quads_returns_quad_for_background_color_run ... ok
+test text::tests::intermediate_resize_geometry_re_resolves_truncation ... ok
+test text::tests::portal_part_clip_rect_absolute_part_offset ... ok
+test text::tests::portal_part_clip_rect_disjoint_floors_to_unit ... ok
+test text::tests::portal_part_clip_rect_no_part_clamps_to_tile ... ok
+test text::tests::portal_part_clip_rect_part_cannot_exceed_tile ... ok
+test text::tests::portal_part_clip_rect_part_contains_content ... ok
+test text::tests::multiline_selection_across_hard_newline_fills_interior ... ok
+test text::tests::regression_708a_reslice_for_item_clamps_run_away_from_ellipsis ... ok
+test text::tests::multiline_selection_fills_interior_line_width ... ok
+test text::tests::reslice_color_runs_beyond_truncation_dropped ... ok
+test text::tests::reslice_color_runs_partial_overlap_clamped ... ok
+test text::tests::reslice_color_runs_tail_anchored_run_before_tail_dropped ... ok
+test text::tests::reslice_color_runs_tail_anchored_basic_shift ... ok
+test text::tests::reslice_color_runs_within_range_preserved ... ok
+test text::tests::reslice_styled_runs_beyond_truncation_dropped ... ok
+test text::tests::reslice_styled_runs_partial_overlap_clamped ... ok
+test text::tests::reslice_styled_runs_runs_within_range_preserved ... ok
+test text::tests::reslice_styled_runs_tail_anchored_basic_shift ... ok
+test text::tests::reslice_styled_runs_tail_anchored_first_line_truncated_fallback ... ok
+test text::tests::reslice_styled_runs_tail_anchored_multiple_runs_regression ... ok
+test text::tests::reslice_styled_runs_tail_anchored_partial_overlap_clamped ... ok
+test text::tests::reslice_styled_runs_tail_anchored_run_before_tail_dropped ... ok
+test text::tests::reslice_styled_runs_tail_anchored_single_line_inline_ellipsis ... ok
+test text::tests::rgba_to_srgb_u8_black_and_white ... ok
+test text::tests::set_max_truncation_input_bytes_reaches_cache ... ok
+test text::tests::short_token_stays_single_line ... ok
+test text::tests::overlong_unbroken_token_wraps_at_glyph_level_within_box ... ok
+test text::tests::strip_markdown_empty_input ... ok
+test text::tests::strip_markdown_removes_emphasis ... ok
+test text::tests::strip_markdown_removes_heading_markers ... ok
+test text::tests::styled_runs_effective_measurement_bold_run_raises_weight ... ok
+test text::tests::styled_runs_effective_measurement_max_weight_returned ... ok
+test text::tests::styled_runs_effective_measurement_monospace_run_sets_flag ... ok
+test text::tests::styled_runs_effective_measurement_no_runs ... ok
+test text::tests::styled_runs_no_truncation_preserves_runs_when_text_starts_with_ellipsis ... ok
+test text::tests::text_item_from_small_text_markdown_node_does_not_collapse_height ... ok
+test text::tests::text_item_from_text_markdown_node_insets_margin ... ok
+test text::tests::spaced_text_still_word_wraps ... ok
+test text::tests::configured_bound_changes_truncation_fallback_input ... ok
+test text::tests::truncation_cache_clear_empties_all_entries ... ok
+test text::tests::regression_708b_effective_key_uses_bold_weight_and_truncates_more ... ok
+test text::tests::truncation_cache_miss_before_prime ... ok
+test text::tests::truncation_cache_different_geometry_different_entry ... ok
+test text::tests::truncation_key_encodes_bounds_height_distinctly ... ok
+test text::tests::truncation_key_encodes_bounds_width_distinctly ... ok
+test text::tests::truncation_stale_by_content_cold_start_is_none ... ok
+test text::tests::sequence_of_intermediate_geometries_all_independently_cached ... ok
+test text::tests::truncation_cache_evict_removes_stale_entries ... ok
+test surface::tests::test_present_blocks_until_encoding_completes ... ok
+test text::tests::truncation_cache_hit_after_prime ... ok
+test text::tests::truncation_stale_by_content_serves_deferred_geometry_miss ... ok
+test text::tests::truncation_cache_zero_work_on_unchanged_scene ... ok
+test vertical_flow::tests::flow_total_height_empty_single_and_multi ... ok
+test text::tests::truncation_stale_by_content_tracks_latest_primed_geometry ... ok
+test vertical_flow::tests::cached_flow_height_equals_reparse_fallback_height ... ok
+test text::tests::truncation_stale_index_pruned_on_evict ... ok
+test vertical_flow::tests::flow_child_height_reflects_font_system_state_not_a_fixed_bundled_snapshot ... ok
+test vertical_flow::tests::flow_child_height_forks_on_pixel_bearing_color_runs ... ok
+test vertical_flow::tests::measure_child_height_grows_when_content_wraps_to_more_lines ... ok
+test vertical_flow::tests::measure_child_height_is_at_least_one_line_even_when_empty ... ok
+libEGL warning: failed to get driver name for fd -1
+
+libEGL warning: MESA-LOADER: failed to retrieve device information
+
+libEGL warning: failed to get driver name for fd -1
+
+test vertical_flow::tests::measure_child_height_markdown_degenerate_inputs_stay_finite_and_nan_safe ... ok
+MESA: error: ZINK: failed to choose pdev
+libEGL warning: egl: failed to create dri2 screen
+test vertical_flow::tests::measure_child_height_markdown_heading_taller_than_uniform_line_estimate ... ok
+test vertical_flow::tests::measure_child_height_markdown_matches_independently_shaped_height_for_heading ... ok
+test vertical_flow::tests::measure_child_height_markdown_inline_styles_do_not_panic_and_stay_finite ... ok
+test vertical_flow::tests::measure_child_height_markdown_strips_syntax_before_wrapping ... ok
+test vertical_flow::tests::measure_child_height_markdown_multi_paragraph_grows_with_content ... ok
+test vertical_flow::tests::measure_child_height_markdown_uses_token_line_height_not_plain_text_constant ... ok
+test vertical_flow::tests::measure_child_height_raw_mode_does_not_strip_markdown_syntax ... ok
+test vertical_flow::tests::resolve_tile_flow_offsets_empty_for_all_absolute ... ok
+test vertical_flow::tests::stack_offsets_cases ... ok
+test widget::tests::apply_svg_attribute_cases ... ok
+test widget::tests::compute_transition_t_interpolates_below_rendering_simplified ... ok
+test widget::tests::compute_transition_t_snaps_when_simplified ... ok
+test widget::tests::degradation_snap_yields_final_color_value ... ok
+test widget::tests::degradation_snap_yields_final_f32_value ... ok
+test vertical_flow::tests::measure_child_height_raw_mode_uses_the_real_font_family_not_hardcoded_sans_serif ... ok
+test widget::tests::escape_attr_escapes_quotes_for_generated_text_svg ... ok
+test widget::tests::primitive_plan_falls_back_for_style_attributes ... ok
+test widget::tests::primitive_plan_does_not_pop_groups_inside_skipped_defs ... ok
+test widget::tests::primitive_plan_supports_rounded_rect_attributes ... ok
+test widget::tests::primitive_rounded_rect_rasterizes_corners_without_resvg_fallback ... ok
+test widget::tests::reference_gauge_bar_half_full_renders_blue_in_fill_region ... ok
+test widget::tests::primitive_text_fill_none_is_not_tinted_black ... ok
+test widget::tests::reference_gauge_bar_red_fill_renders_red ... ok
+test widget::tests::reference_gauge_fill_svg_parses_and_rasterizes ... ok
+test widget::tests::reference_gauge_indicator_warning_renders_yellow ... ok
+test widget::tests::renderer_retained_svg_uses_widget_source_class_atomically ... ok
+test widget::tests::retained_plan_bound_cache_includes_primitive_layers_after_static_layers ... ok
+test widget::tests::retained_plan_bound_cache_is_invalidated_by_resolved_binding_values ... ok
+test vertical_flow::tests::resolve_tile_flow_offsets_performs_zero_parse_on_cache_hit ... ok
+test widget::tests::rgba_to_svg_color_formats_by_alpha ... ok
+test widget::tests::snap_composite_rect_rounds_and_clamps ... ok
+test widget::tests::static_svg_layer_cache_evicts_lru_incrementally_to_byte_bound ... ok
+test widget::tests::static_svg_layer_cache_key_uses_full_content_digest ... ok
+test widget::tests::static_svg_layer_cache_skips_entries_above_per_entry_limit ... ok
+test widget::tests::test_apply_binding_and_rasterize ... ok
+test widget::tests::test_color_component_wise_interpolation ... ok
+test widget::tests::test_enum_snaps_immediately ... ok
+test widget::tests::test_f32_linear_interpolation ... ok
+test widget::tests::test_linear_mapping_spec_scenario ... ok
+test widget::tests::test_resolve_direct_color_binding ... ok
+test widget::tests::test_resolve_direct_string_binding ... ok
+test widget::tests::test_resolve_discrete_binding ... ok
+test widget::tests::test_resolve_linear_binding ... ok
+test widget::tests::test_string_snaps_immediately ... ok
+test vertical_flow::tests::resolve_tile_flow_offsets_stacks_flow_children_from_parent_top ... ok
+test widget::tests::text_mask_alpha_bounds_tracks_non_transparent_pixels ... ok
+test renderer::tests::zone_stack::test_stack_zone_renders_separate_backdrop_per_publication ... ok
+test widget::tests::retained_plan_returns_oversize_composed_output_without_caching ... ok
+test widget::tests::retained_plan_static_cache_is_invalidated_by_svg_content ... ok
+test widget::tests::text_content_changes_reuse_primitive_non_text_segments ... ok
+test widget::tests::text_svg_cache_is_stable_across_opacity_only_changes ... ok
+test renderer::tests::zone_stack::test_status_bar_empty_key_icon_map_produces_single_text_item ... ok
+test widget::tests::text_svg_cache_is_stable_across_text_fill_color_changes ... ok
+test vertical_flow::tests::resolve_tile_flow_offsets_parses_once_per_child_on_cache_miss ... ok
+test vertical_flow::tests::measure_child_height_raw_mode_uses_default_line_height_not_real_tokens ... ok
+test renderer::tests::zone_stack::test_status_bar_key_icon_map_produces_per_entry_text_items ... ok
+test renderer::tests::zone_notification::test_rounded_card_border_follows_the_corner ... ok
+test renderer::tests::zone_notification::test_zone_subtitle_with_outline_text_item ... ok
+test renderer::tests::zone_notification::test_zone_subtitle_without_outline_text_item ... ok
+test renderer::tests::zone_stack::test_latest_wins_zone_renders_only_latest_publication ... ok
+test renderer::tests::zone_stack::test_stack_slot_sixth_notification_evicts_oldest ... ok
+test renderer::tests::zone_stack::test_merge_by_key_zone_merges_all_status_bar_entries ... ok
+test renderer::tests::zone_stack::test_stack_slot_clips_at_zone_boundary ... ok
+test renderer::tests::zone_stack::test_stack_slot_layout_five_notifications_distinct_y ... ok
+test renderer::tests::zone_stack::test_merge_by_key_latest_value_wins_for_duplicate_keys ... ok
+test renderer::tests::zone_stack::test_stack_zone_collect_text_items_per_publication ... ok
+test overflow::tests::fallback_visible_window_is_byte_identical_to_full_input ... ok
+
+test result: ok. 591 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.55s
+
+     Running tests/gauge_binding_rendering.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/gauge_binding_rendering-b889e0ab98e84d0a)
+
+running 23 tests
+test gauge_bar_fills_upward_at_level_full ... ok
+test contention::gauge_all_four_params_produce_correct_svg_attributes ... ok
+test gauge_direct_color_binding_blue_produces_hex_0000ff ... ok
+test gauge_direct_color_binding_green_with_alpha ... ok
+test gauge_bar_fills_upward_at_level_half ... ok
+test gauge_direct_color_binding_mutates_bar_fill_in_svg ... ok
+test gauge_direct_color_binding_red_produces_hex_ff0000 ... ok
+test gauge_discrete_binding_severity_error_produces_ff4444 ... ok
+test gauge_discrete_binding_severity_info_produces_4a9eff ... ok
+test gauge_discrete_binding_severity_warning_produces_ffb800 ... ok
+test gauge_linear_binding_level_half_produces_height_100 ... ok
+test gauge_linear_binding_level_quarter_produces_height_50 ... ok
+test gauge_discrete_binding_mutates_indicator_fill_in_svg ... ok
+test gauge_linear_binding_level_one_produces_height_200 ... ok
+test gauge_text_content_binding_empty_label ... ok
+test gauge_text_content_binding_label_cpu_load ... ok
+test gauge_text_content_binding_long_label ... ok
+test gauge_linear_binding_level_zero_produces_height_0 ... ok
+test gauge_bar_upward_at_level_zero_stays_at_bottom ... ok
+test contention::gauge_latestwins_agent_b_overrides_agent_a ... ok
+test contention::gauge_all_four_params_simultaneous_publish ... ok
+test contention::gauge_mergebykey_retains_other_agents_unpublished_params ... ok
+test contention::gauge_latestwins_agent_b_overwrites_agent_a_entirely ... ok
+
+test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/gpu_canary.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/gpu_canary-d503c7e6d59188af)
+
+running 1 test
+libEGL warning: failed to get driver name for fd -1
+
+libEGL warning: MESA-LOADER: failed to retrieve device information
+
+libEGL warning: failed to get driver name for fd -1
+
+MESA: error: ZINK: failed to choose pdev
+libEGL warning: egl: failed to create dri2 screen
+[gpu_canary] wgpu adapter available (TZE_HUD_REQUIRE_GPU=1): GPU test suite will run.
+test gpu_adapter_available_when_required ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+     Running tests/widget_raster_count.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/widget_raster_count-852d7fb3e952936f)
+
+running 1 test
+libEGL warning: failed to get driver name for fd -1
+
+libEGL warning: MESA-LOADER: failed to retrieve device information
+
+libEGL warning: failed to get driver name for fd -1
+
+MESA: error: ZINK: failed to choose pdev
+libEGL warning: egl: failed to create dri2 screen
+test widget_param_update_rasterizes_only_that_instance ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+
+     Running tests/widget_rasterize_budget.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/widget_rasterize_budget-1ea4c2ed228051c0)
+
+running 4 tests
+test gauge_label_text_binding_changes_raster_output ... ok
+test gauge_fill_bindings_are_applied ... ok
+test gauge_512x512_rasterize_produces_non_empty_pixels ... ok
+[widget_rasterize] gauge 512×512: 54691µs (54 ms) — CI threshold: 500ms, spec target (ref hw): 2ms
+test gauge_512x512_rasterize_within_ci_budget ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+
+     Running tests/widget_transition.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/widget_transition-af2e85ff034f9b87)
+
+running 8 tests
+libEGL warning: failed to get driver name for fd -1
+
+libEGL warning: MESA-LOADER: failed to retrieve device information
+
+libEGL warning: failed to get driver name for fd -1
+
+MESA: error: ZINK: failed to choose pdev
+libEGL warning: egl: failed to create dri2 screen
+test color_param_eases_component_wise ... ok
+test retarget_mid_flight_is_continuous_and_uses_the_new_duration ... ok
+test degraded_mode_snaps_widget_transition ... ok
+test enum_param_snaps_while_f32_eases ... ok
+test f32_param_eases_over_transition_ms ... ok
+test each_publish_keeps_its_own_transition_ms ... ok
+test rewound_clock_still_lands_and_stops_waking ... ok
+test transition_stops_waking_after_completion ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.26s
+
+     Running tests/zone_rendering.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/zone_rendering-0e551acc906944cb)
+
+running 13 tests
+libEGL warning: failed to get driver name for fd -1
+
+libEGL warning: MESA-LOADER: failed to retrieve device information
+
+libEGL warning: failed to get driver name for fd -1
+
+MESA: error: ZINK: failed to choose pdev
+libEGL warning: egl: failed to create dri2 screen
+test ambient_background_fills_display_or_stays_clear ... ok
+test ambient_static_image_draws_texture_or_placeholder ... ok
+test ambient_background_shows_only_latest_publication ... ok
+test notification_icon_renders_only_when_bytes_registered ... ok
+test alert_banner_urgency_maps_to_severity_color ... ok
+test alert_banner_stacks_by_severity ... ok
+test notification_urgency_maps_to_backdrop_color ... ok
+test tile_solid_color_radius_rounds_corners ... ok
+test subtitle_text_is_drawn ... ok
+test tile_static_image_fit_modes ... ok
+test zone_backdrop_radius_rounds_corners ... ok
+test subtitle_backdrop_follows_policy ... ok
+test background_layer_renders_below_content_zone ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.39s
+
+     Running benches/markdown_cache.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/markdown_cache-a4ef16b3e6739f49)
+Gnuplot not found, using plotters backend
+Testing markdown_cache/cache_hit/8KiB_warm
+Success
+
+Testing markdown_cache/parse_commit_64kB/cold
+Success
+
+Testing markdown_cache/compute_key/64kB
+Success
+
+     Running benches/overflow_truncate.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/overflow_truncate-743d83a3f68b9c31)
+Gnuplot not found, using plotters backend
+Testing overflow_truncate/small_540B/warm
+Success
+
+Testing overflow_truncate/medium_8KiB/warm
+Success
+
+Testing overflow_truncate/large_64KiB/warm
+Success
+
+Testing overflow_truncate/fallback_64KiB/warm
+Success
+
+     Running benches/widget_rasterize.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/widget_rasterize-b7e2c985cc7a4d00)
+Gnuplot not found, using plotters backend
+Testing widget_rasterize/gauge_512x512/cold_parse
+Success
+
+Testing widget_rasterize/gauge_512x512/warm_identical_params
+Success
+
+Testing widget_rasterize/gauge_512x512/warm_parameter_changing
+Success
+
+Testing widget_rasterize/gauge_512x512/warm_text_changing
+Success
+
+Testing widget_rasterize/gauge_128x128/warm_identical_params
+Success
+
+VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json HEADLESS_FORCE_SOFTWARE=1 LLVMPIPE_CI=1 TZE_HUD_REQUIRE_GPU=1 timeout 900 cargo test -p tze_hud_runtime --test pixel_readback --features dev-mode
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.14s
+     Running tests/pixel_readback.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/pixel_readback-1392ffb9a62bb0c2)
+
+running 39 tests
+libEGL warning: failed to get driver name for fd -1
+
+libEGL warning: MESA-LOADER: failed to retrieve device information
+
+libEGL warning: failed to get driver name for fd -1
+
+MESA: error: ZINK: failed to choose pdev
+libEGL warning: egl: failed to create dri2 screen
+test test_buf_01_empty_scene ... ok
+test test_buf_02_single_tile_solid ... ok
+test test_buf_03_three_tiles_no_overlap ... ok
+test test_buf_05_overlay_transparency ... ok
+test test_buf_04_overlapping_tiles_zorder ... ok
+test test_buf_06_tab_switch ... ok
+test test_buf_15_disconnect_reclaim_multiagent ... ok
+test test_buf_14_overlay_passthrough_regions ... ok
+test test_buf_18_zone_publish_subtitle ... ok
+test test_buf_10_input_highlight ... ok
+test test_buf_12_max_tiles_stress ... ok
+test test_buf_13_three_agents_contention ... ok
+test test_buf_11_coalesced_dashboard ... ok
+test test_buf_07_lease_expiry ... ok
+test test_color_01_empty_scene_all_background ... ok
+test test_buf_17_chatty_dashboard_touch ... ok
+test test_buf_19_zone_reject_wrong_type ... ok
+test test_buf_20_zone_conflict_two_publishers ... ok
+test test_buf_23_zone_disconnect_cleanup ... ok
+test test_buf_21_zone_orchestrate_then_publish ... ok
+test test_color_02_single_tile_solid ... ok
+test test_color_03_three_tiles_no_overlap ... ok
+test test_color_04_overlapping_tiles_zorder ... ok
+test test_color_05_overlay_transparency ... ok
+test test_color_06_tab_switch ... ok
+test test_color_07_lease_expiry_tile_visible ... ok
+test test_color_10_input_highlight_background_tile ... ok
+test test_color_11_coalesced_dashboard_tile_rendered ... ok
+test test_color_12_max_tiles_stress_has_content ... ok
+test test_color_13_three_agents_contention_high_prio_tile ... ok
+test test_color_14_overlay_passthrough_regions_near_background ... ok
+test test_color_15_disconnect_reclaim_multiagent_agents_visible ... ok
+test test_color_17_chatty_dashboard_touch_transparent_tiles ... ok
+test test_color_18_zone_publish_subtitle_region ... ok
+test test_color_20_zone_conflict_two_publishers_has_content ... ok
+test test_color_21_zone_orchestrate_then_publish_has_content ... ok
+test test_color_23_zone_disconnect_cleanup_tile_initially_visible ... ok
+test test_color_19_zone_reject_wrong_type_has_content ... ok
+test test_color_runs_red_error_text_rendered ... ok
+
+test result: ok. 39 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.70s

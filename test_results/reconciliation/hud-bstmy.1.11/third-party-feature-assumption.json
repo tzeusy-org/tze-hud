@@ -1,0 +1,29 @@
+{
+  "command": [
+    "cargo",
+    "metadata",
+    "--offline",
+    "--format-version",
+    "1"
+  ],
+  "exit": 0,
+  "seconds": 0.5,
+  "purpose": "Audit third-party dev-mode assumption and workspace feature-unified resolved target graph; not the shipping-closure guard result.",
+  "total_packages": 470,
+  "third_party_dev_mode_definitions": [],
+  "workspace_dev_mode_resolve_features": [
+    {
+      "name": "tze_hud_protocol",
+      "resolved_features": [
+        "dev-mode"
+      ]
+    },
+    {
+      "name": "tze_hud_runtime",
+      "resolved_features": [
+        "dev-mode",
+        "test-harness"
+      ]
+    }
+  ]
+}

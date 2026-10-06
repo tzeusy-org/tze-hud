@@ -1,0 +1,5 @@
+mkdir -p test_results/token-footprint
+if [ -f /usr/share/vulkan/icd.d/lvp_icd.json ]; then export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json; fi; HEADLESS_FORCE_SOFTWARE=1 cargo run -p benchmark --features headless --bin token_footprint_calibration -- --output test_results/token-footprint/measurement.json
+if [ -f /usr/share/vulkan/icd.d/lvp_icd.json ]; then export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json; fi; HEADLESS_FORCE_SOFTWARE=1 cargo run -p benchmark --features headless --bin token_footprint_calibration -- --output test_results/token-footprint/repeat.json
+cmp test_results/token-footprint/measurement.json test_results/token-footprint/repeat.json
+python3 scripts/ci/check_token_footprint.py --measurement test_results/token-footprint/measurement.json --baseline scripts/ci/token_footprint_baseline.json --output test_results/token-footprint/gate-report.json
