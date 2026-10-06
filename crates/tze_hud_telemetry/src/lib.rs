@@ -2,14 +2,13 @@
 //!
 //! Structured telemetry for tze_hud. Per-frame timing, throughput,
 //! and resource metrics emitted as machine-readable JSON.
-//! Satisfies DR-V3: Structured telemetry.
-//! Satisfies DR-V8: Soak and leak test resource monitoring.
 
 pub mod collector;
 pub mod idle_efficiency;
 pub mod publish_load;
 pub mod record;
 pub mod validation;
+#[cfg(any(test, feature = "dev-mode"))]
 pub mod work_counts;
 
 pub use collector::TelemetryCollector;
@@ -34,4 +33,5 @@ pub use record::{
 pub use validation::{
     AssertionOutcome, BudgetAssertion, CalibrationDimension, HardwareFactors, ValidationReport,
 };
+#[cfg(any(test, feature = "dev-mode"))]
 pub use work_counts::WorkCounts;

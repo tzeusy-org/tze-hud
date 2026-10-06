@@ -29,7 +29,7 @@
 //! | Feature | Purpose |
 //! |---------|---------|
 //! | `headless` | Enable headless GPU surface (required for CI and tests) |
-//! | `dev-mode` | Allow `HeadlessConfig { config_toml: None }` — grants unrestricted capabilities to all agents. **MUST NOT be enabled in production binaries.** Safe for integration tests, examples, and local development. |
+//! | `dev-mode` | Allow `HeadlessConfig { config_toml: None }` — grants unrestricted capabilities to all agents; opt into compositor/telemetry headless work observations. **MUST NOT be enabled in production binaries.** Safe for integration tests, examples, and local development. |
 //!
 //! In unit tests (compiled with `cfg(test)`), the `dev-mode` bypass is also
 //! available without the feature flag, because unit tests run inside the

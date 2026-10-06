@@ -1,38 +1,34 @@
-//! Dev-mode work counters for one rendered frame.
+//! Opt-in observations of one completed headless frame, not a certification.
 //!
-//! Idle costs nothing and work is proportional to change: these counters let a
-//! test (or a developer) see how much a frame repainted. They are plain
-//! observations, not a certification artifact.
+//! Layout counts text cache-miss shaping calls; raster counts widget raster
+//! invocations, including attempts that fail; upload counts widget RGBA
+//! `queue.write_texture` submissions. Glyphon atlas, resource and static-image
+//! uploads are outside that observation, so zero never means no GPU uploads.
+//! Damage is the clipped headless repaint area. Rendering and live raw/frame
+//! telemetry remain enabled without these dev/test observations.
 
 use serde::{Deserialize, Serialize};
 
-/// What one rendered frame repainted.
+/// Actual work performed from headless render entry through a completed submit.
+///
+/// Preparation performed by a failed retained attempt before full fallback is
+/// included. A skipped render produces no observation; draining twice yields
+/// `None`, and the next actual render discards any undrained prior frame.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkCounts {
-    /// Tiles whose background and content were re-encoded.
+    /// Delta of `TextRasterizer::shape_call_count`: cache-miss shaping calls.
+    pub layout: u64,
+    /// Sum of per-instance widget raster-count deltas: entered invocations,
+    /// whether or not rasterization or resource admission succeeds.
+    pub raster: u64,
+    /// Widget RGBA `queue.write_texture` submissions, after resource admission.
+    pub upload: u64,
+    /// Pixels inside the clipped repaint region.
+    pub damage_px: u64,
+    /// Supplemental repaint observation: tiles whose content was re-encoded.
     pub tiles_redrawn: u32,
-    /// Pixels inside the repaint (scissor) region.
+    /// Supplemental repaint observation, equal to `damage_px`.
     pub pixels_damaged: u64,
-    /// True when the whole surface was repainted rather than a scoped region.
+    /// Supplemental repaint observation: the whole surface was repainted.
     pub full_frame: bool,
-}
-
-impl WorkCounts {
-    /// Counts for a full-surface repaint of `tiles` visible tiles.
-    pub fn full_frame(tiles: u32, width: u32, height: u32) -> Self {
-        Self {
-            tiles_redrawn: tiles,
-            pixels_damaged: u64::from(width) * u64::from(height),
-            full_frame: true,
-        }
-    }
-
-    /// Counts for a scoped repaint of `tiles` tiles over `pixels_damaged` pixels.
-    pub fn scoped(tiles: u32, pixels_damaged: u64) -> Self {
-        Self {
-            tiles_redrawn: tiles,
-            pixels_damaged,
-            full_frame: false,
-        }
-    }
 }

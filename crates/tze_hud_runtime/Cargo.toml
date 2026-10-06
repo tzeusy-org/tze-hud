@@ -9,7 +9,7 @@ license.workspace = true
 ## Enable dev-mode: allows `HeadlessConfig { config_toml: None }` to start with
 ## unrestricted capability grants. MUST NOT be enabled in production builds.
 ## Safe to enable in tests (which also compile under `cfg(test)`) and examples.
-dev-mode = []
+dev-mode = ["tze_hud_compositor/dev-mode", "tze_hud_telemetry/dev-mode"]
 ## Expose `windowed::HeadlessEventLoopHarness`: the GPU-free event-loop
 ## harness with a live MCP server and an injected clock, for end-to-end tests
 ## (`tests/integration/poc_acceptance.rs`). Not for production builds.
@@ -58,7 +58,9 @@ windows = { workspace = true }
 [dev-dependencies]
 prost = { workspace = true }
 tze_hud_scene = { path = "../tze_hud_scene", version = "0.1.0" , features = ["test-support"] }
-tze_hud_compositor = { path = "../tze_hud_compositor", version = "0.1.0" }
+# Unit tests compile runtime with cfg(test), but its compositor dependency needs
+# an explicit opt-in for the existing headless work-observation assertions.
+tze_hud_compositor = { path = "../tze_hud_compositor", version = "0.1.0", features = ["dev-mode"] }
 # dev-mode exposes HudSessionImpl::new(scene, psk) for the resident gRPC bridge
 # end-to-end test, which stands up the production session server in-process.
 tze_hud_protocol = { path = "../tze_hud_protocol", version = "0.1.0", features = ["dev-mode"] }

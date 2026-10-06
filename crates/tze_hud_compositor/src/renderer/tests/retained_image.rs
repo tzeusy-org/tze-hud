@@ -70,12 +70,13 @@ async fn reconfigured_surface_recovery_forces_a_full_repaint() {
     // Seed a genuine retained baseline, then make the one direct text change
     // that normally qualifies for a proportional retained render.
     compositor.render_frame_headless(&mut scene, &surface);
-    assert!(
-        compositor
-            .take_work_counts()
-            .expect("baseline frame records work")
-            .full_frame
-    );
+    let baseline_work = compositor
+        .take_work_counts()
+        .expect("baseline frame records work");
+    assert!(baseline_work.full_frame);
+    assert!(baseline_work.layout > 0, "{baseline_work:?}");
+    assert_eq!((baseline_work.raster, baseline_work.upload), (0, 0));
+    assert_eq!(baseline_work.damage_px, 1_000 * 500);
     let mut changed_text = match &scene.nodes[&first_root_id].data {
         NodeData::TextMarkdown(text) => text.clone(),
         other => panic!("expected canonical text root, got {other:?}"),
@@ -103,6 +104,10 @@ async fn reconfigured_surface_recovery_forces_a_full_repaint() {
         .expect("recovered frame records work");
     assert!(work.full_frame, "{work:?}");
     assert_eq!(work.pixels_damaged, 1_000 * 500);
+    assert_eq!(work.damage_px, work.pixels_damaged);
+    assert!(work.layout > 0, "{work:?}");
+    assert_eq!((work.raster, work.upload), (0, 0));
+    assert!(compositor.take_work_counts().is_none());
 }
 
 #[tokio::test]

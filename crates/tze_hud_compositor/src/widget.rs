@@ -2513,6 +2513,10 @@ pub struct WidgetRenderer {
     /// Instances rasterized by the most recent `sync_widget_textures` pass.
     rasterized_last_sync: Vec<String>,
 
+    /// Opt-in cumulative widget RGBA submissions; never counts atlas/resource uploads.
+    #[cfg(any(test, feature = "dev-mode"))]
+    rgba_upload_count: u64,
+
     /// Retained CPU render plans keyed by widget type id.
     render_plans: HashMap<String, WidgetRenderPlan>,
 
@@ -2581,6 +2585,8 @@ impl WidgetRenderer {
             textures: HashMap::new(),
             raster_counts: HashMap::new(),
             rasterized_last_sync: Vec::new(),
+            #[cfg(any(test, feature = "dev-mode"))]
+            rgba_upload_count: 0,
             render_plans: HashMap::new(),
             texture_bind_group_layout,
             texture_pipeline,
@@ -2929,6 +2935,11 @@ impl WidgetRenderer {
             },
         );
 
+        #[cfg(any(test, feature = "dev-mode"))]
+        {
+            self.rgba_upload_count += 1;
+        }
+
         let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some(&format!("widget_sampler_{instance_name}")),
@@ -3182,6 +3193,14 @@ impl WidgetRenderer {
     /// Total SVG rasterizations performed for `instance_name` so far.
     pub fn raster_count(&self, instance_name: &str) -> u64 {
         self.raster_counts.get(instance_name).copied().unwrap_or(0)
+    }
+
+    /// Cumulative existing per-instance invocation counts and actual widget
+    /// RGBA submissions. Raster counters survive texture eviction, so frame
+    /// deltas include failed attempts without treating them as uploads.
+    #[cfg(any(test, feature = "dev-mode"))]
+    pub(crate) fn work_totals(&self) -> (u64, u64) {
+        (self.raster_counts.values().sum(), self.rgba_upload_count)
     }
 
     /// Instances re-rasterized since the last [`Self::begin_sync`].
