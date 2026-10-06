@@ -28,7 +28,7 @@ use tze_hud_scene::types::SceneId;
 /// Bounds the runtime-authored viewer history window so an unbounded reply
 /// stream cannot grow the overlay without limit (mirrors the Bounded Transcript
 /// Viewport principle for the pilot slice).
-pub const MAX_VIEWER_ECHO_ENTRIES: usize = 8;
+pub(crate) const MAX_VIEWER_ECHO_ENTRIES: usize = 8;
 
 /// A runtime-authored viewer reply, addressed to a specific portal tile, pushed
 /// onto the shared queue at submit time by the windowed runtime.
@@ -52,11 +52,11 @@ pub type PortalViewerEchoQueue = Arc<StdMutex<Vec<ViewerEchoAppend>>>;
 
 /// One retained viewer echo entry within a tile's transcript window.
 #[derive(Debug, Clone, PartialEq)]
-pub struct ViewerEchoEntry {
+pub(crate) struct ViewerEchoEntry {
     /// The viewer-authored reply text.
-    pub text: String,
+    pub(crate) text: String,
     /// Wall-clock submit time in microseconds.
-    pub submitted_at_wall_us: u64,
+    pub(crate) submitted_at_wall_us: u64,
 }
 
 /// Per-tile bounded store of runtime-authored viewer echo entries.
@@ -64,18 +64,18 @@ pub struct ViewerEchoEntry {
 /// Entries are retained oldest-first; appends beyond [`MAX_VIEWER_ECHO_ENTRIES`]
 /// evict the oldest so the window stays bounded.
 #[derive(Debug, Default)]
-pub struct ViewerEchoStore {
+pub(crate) struct ViewerEchoStore {
     by_tile: HashMap<SceneId, VecDeque<ViewerEchoEntry>>,
 }
 
 impl ViewerEchoStore {
     /// Construct an empty store.
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::default()
     }
 
     /// Append a viewer entry for `tile_id`, evicting the oldest beyond the bound.
-    pub fn append(&mut self, tile_id: SceneId, text: String, submitted_at_wall_us: u64) {
+    pub(crate) fn append(&mut self, tile_id: SceneId, text: String, submitted_at_wall_us: u64) {
         let queue = self.by_tile.entry(tile_id).or_default();
         queue.push_back(ViewerEchoEntry {
             text,
@@ -87,7 +87,7 @@ impl ViewerEchoStore {
     }
 
     /// Drain a shared append queue into this store (called once per frame).
-    pub fn drain_queue(&mut self, queue: &PortalViewerEchoQueue) {
+    pub(crate) fn drain_queue(&mut self, queue: &PortalViewerEchoQueue) {
         let Ok(mut pending) = queue.lock() else {
             return;
         };
@@ -100,18 +100,18 @@ impl ViewerEchoStore {
     ///
     /// Called each frame with the live tile set so echoes for destroyed portals
     /// do not linger.
-    pub fn retain_tiles(&mut self, is_alive: impl Fn(SceneId) -> bool) {
+    pub(crate) fn retain_tiles(&mut self, is_alive: impl Fn(SceneId) -> bool) {
         self.by_tile.retain(|tile_id, _| is_alive(*tile_id));
     }
 
     /// Retained entries for a tile (oldest first), or `None` when the tile has
     /// no viewer echoes.
-    pub fn entries_for(&self, tile_id: SceneId) -> Option<&VecDeque<ViewerEchoEntry>> {
+    pub(crate) fn entries_for(&self, tile_id: SceneId) -> Option<&VecDeque<ViewerEchoEntry>> {
         self.by_tile.get(&tile_id).filter(|q| !q.is_empty())
     }
 
     /// True when no tile has any retained entries.
-    pub fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.by_tile.values().all(VecDeque::is_empty)
     }
 }

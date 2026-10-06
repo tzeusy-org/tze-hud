@@ -34,7 +34,7 @@ impl Compositor {
     /// possible since the zone_def is gone, so the state is simply pruned).
     ///
     /// Prunes completed transitions.
-    pub fn update_zone_animations(&mut self, scene: &SceneGraph) {
+    pub(crate) fn update_zone_animations(&mut self, scene: &SceneGraph) {
         // Build current active-zone set (zone_name → has active publishes).
         let current_active: HashMap<String, bool> = scene
             .zone_registry
@@ -127,7 +127,7 @@ impl Compositor {
     /// Completed transitions are pruned after each update.
     ///
     /// Must be called once per frame alongside `update_zone_animations`.
-    pub fn update_portal_tile_animations(&mut self, scene: &SceneGraph) {
+    pub(crate) fn update_portal_tile_animations(&mut self, scene: &SceneGraph) {
         // Resolve transition durations from design tokens (§6.1 — no literals).
         let transition_in_ms: u32 = self
             .token_map
@@ -245,7 +245,7 @@ impl Compositor {
     /// - Breakpoints identify byte offsets for progressive reveal.
     /// - Empty breakpoints → reveal all at once.
     /// - Replacement during streaming → cancel old reveal, start new.
-    pub fn update_stream_reveals(&mut self, scene: &SceneGraph) {
+    pub(crate) fn update_stream_reveals(&mut self, scene: &SceneGraph) {
         // Collect zones whose latest publish has breakpoints.
         let mut active_keys: HashMap<String, PubKey> = HashMap::new();
 
@@ -327,7 +327,7 @@ impl Compositor {
     /// lays out. Tiles whose content node carries pixel-bearing color runs (the
     /// legacy raw path) are skipped — their offsets index raw content, not the
     /// stripped plain-text, so a fade cannot be aligned safely.
-    pub fn update_portal_tile_reveals(&mut self, scene: &SceneGraph) {
+    pub(crate) fn update_portal_tile_reveals(&mut self, scene: &SceneGraph) {
         // Phase 1: snapshot (tile_id, node_id, plain_text) for **every eligible
         // markdown node** under every portal tile — not just the first-eligible
         // one (hud-tbdfx). Done in a separate pass so the immutable cache/scene
@@ -599,7 +599,7 @@ impl Compositor {
     /// jump); only subsequent target changes — user scroll or follow-tail
     /// content appends — animate. User scroll stays authoritative (RFC 0013
     /// §3.2): only the visual catch-up is eased, never the target.
-    pub fn update_scroll_smoothing(&mut self, scene: &SceneGraph) {
+    pub(crate) fn update_scroll_smoothing(&mut self, scene: &SceneGraph) {
         if !self.scroll_smoothing_enabled {
             return;
         }

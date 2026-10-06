@@ -49,34 +49,33 @@ impl Default for CompositorDegradationPolicy {
     }
 }
 
-pub mod animation;
-pub mod capture;
-pub mod draw_cmds;
-pub mod easing;
-pub mod encode_pass;
-pub mod focus_ring;
+pub(crate) mod animation;
+pub(crate) mod capture;
+pub(crate) mod draw_cmds;
+pub(crate) mod easing;
+pub(crate) mod encode_pass;
+pub(crate) mod focus_ring;
 pub mod frame;
 pub mod hit_regions;
-pub mod icon;
-pub mod image_cache;
+pub(crate) mod icon;
+pub(crate) mod image_cache;
 mod retained;
 mod safe_mode_overlay;
 mod system_card;
-pub mod text;
-pub mod tile_render;
-pub mod token_colors;
-pub mod viewer_echo;
-pub mod widget_geometry;
-pub mod widgets;
-pub mod zone_render;
+pub(crate) mod text;
+pub(crate) mod tile_render;
+pub(crate) mod token_colors;
+pub(crate) mod viewer_echo;
+pub(crate) mod widget_geometry;
+pub(crate) mod widgets;
+pub(crate) mod zone_render;
 
 // Re-export submodule items into this module's namespace so all existing code
 // in mod.rs can reference them without path changes (move-only, zero refactor).
 use draw_cmds::*;
 use icon::*;
-// pub use re-exports the public items (ImageTextureEntry, LocalComposerState,
-// LocalComposerStateHandle) so callers via `tze_hud_compositor::renderer::*`
-// see unchanged paths.  The pub(crate) helpers are brought in separately.
+// Re-export the externally consumed shared state; renderer-only helpers stay
+// in private imports.
 pub use focus_ring::{FocusRingOwner, FocusRingOwnerHandle};
 pub use system_card::{SystemCardKind, SystemCardModel};
 
@@ -92,16 +91,13 @@ pub type ResizeGripHoverHandle = Arc<StdMutex<Option<SceneId>>>;
 /// close button the compositor should show (hud-jm8nq.11). Same latest-wins
 /// overwrite-and-read contract as [`ResizeGripHoverHandle`].
 pub type TileCloseHoverHandle = Arc<StdMutex<Option<SceneId>>>;
+use image_cache::ImageTextureEntry;
 use image_cache::apply_composer_slot;
-pub use image_cache::{
-    ComposerVisualLayoutHandle, ImageTextureEntry, LocalComposerState, LocalComposerStateHandle,
-};
+pub use image_cache::{ComposerVisualLayoutHandle, LocalComposerState, LocalComposerStateHandle};
 use text::*;
 use token_colors::*;
-pub use viewer_echo::{
-    MAX_VIEWER_ECHO_ENTRIES, PortalViewerEchoQueue, ViewerEchoAppend, ViewerEchoEntry,
-    ViewerEchoStore,
-};
+use viewer_echo::ViewerEchoEntry;
+pub use viewer_echo::{PortalViewerEchoQueue, ViewerEchoAppend};
 
 /// Stable, dependency-free identity for the adapter selected by wgpu.
 ///
@@ -171,7 +167,7 @@ impl WindowSurfaceRecoveryStatus {
 pub struct Compositor {
     pub(crate) resident_ledger: Option<tze_hud_resource::ResidentLedger>,
     pub device: wgpu::Device,
-    pub queue: wgpu::Queue,
+    pub(crate) queue: wgpu::Queue,
     adapter_info: CompositorAdapterInfo,
     pipeline: wgpu::RenderPipeline,
     /// Pipeline with no blending — writes RGBA directly. Used to clear
@@ -1263,11 +1259,6 @@ impl Compositor {
         self.display_layout = layout;
     }
 
-    /// The installed display layout.
-    pub fn display_layout(&self) -> &crate::display::DisplayLayout {
-        &self.display_layout
-    }
-
     /// Resolve a zone's geometry in canvas (scene) pixels: against its
     /// assigned display when that display is connected, else against the
     /// canvas `sw`×`sh`.
@@ -1664,7 +1655,7 @@ impl Compositor {
     /// same update is not applied twice.
     ///
     /// Returns `true` when a new draft (keystroke / caret move) was applied.
-    pub fn drain_local_composer_state(&mut self) -> bool {
+    pub(crate) fn drain_local_composer_state(&mut self) -> bool {
         let new_draft = apply_composer_slot(&self.local_composer_state, &mut self.local_composer);
         if new_draft {
             // Reset the blink phase so the caret is solid right after typing or

@@ -298,7 +298,7 @@ pub fn populate_notification_hit_regions(
 
 /// [`populate_notification_hit_regions`] with zones resolved through a
 /// multi-display `layout` (regions land in scene coordinates).
-pub fn populate_notification_hit_regions_in(
+pub(crate) fn populate_notification_hit_regions_in(
     scene: &mut SceneGraph,
     layout: &crate::display::DisplayLayout,
     sw: f32,

@@ -3,6 +3,8 @@
 //! Each test binary compiles this module separately and uses a subset of it.
 #![allow(dead_code)]
 
+mod pixels;
+
 use tokio::sync::Mutex;
 use tze_hud_compositor::{Compositor, CompositorError, surface::HeadlessSurface};
 use tze_hud_scene::graph::SceneGraph;
@@ -73,13 +75,13 @@ impl Gpu {
 
 impl Frame {
     pub fn at(&self, x: u32, y: u32) -> [u8; 4] {
-        HeadlessSurface::pixel_at(&self.pixels, self.width, x, y)
+        pixels::pixel_at(&self.pixels, self.width, x, y)
     }
 
     /// Panic unless the pixel at (x, y) is within `tol` of `expected` on every channel.
     #[track_caller]
     pub fn expect(&self, x: u32, y: u32, expected: [u8; 4], tol: u8, what: &str) {
-        HeadlessSurface::assert_pixel_color(&self.pixels, self.width, x, y, expected, tol, what)
+        pixels::assert_pixel_color(&self.pixels, self.width, x, y, expected, tol, what)
             .unwrap_or_else(|e| panic!("{what} at ({x},{y}): {e}"));
     }
 

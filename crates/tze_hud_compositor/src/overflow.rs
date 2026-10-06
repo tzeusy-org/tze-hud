@@ -90,16 +90,16 @@ fn run_logical_start(glyphs: &[GlyphInfo]) -> usize {
 type LayoutRunEntry = (usize, f32, Vec<GlyphInfo>);
 
 /// The ellipsis character appended when text is truncated.
-pub const ELLIPSIS: &str = "…";
+pub(crate) const ELLIPSIS: &str = "…";
 
 /// Truncation result returned by [`truncate_for_ellipsis`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct TruncationResult {
     /// The display text — either the original (if it fits) or a truncated
     /// version with `ELLIPSIS` appended.
-    pub text: String,
+    pub(crate) text: String,
     /// `true` when truncation was applied and the ellipsis glyph was appended.
-    pub was_truncated: bool,
+    pub(crate) was_truncated: bool,
 }
 
 /// Viewport anchoring mode for transcript overflow.
@@ -423,7 +423,7 @@ pub fn truncate_for_ellipsis<'a>(
 /// - **Task 3.3 / 3.4 — append stability**: The HEAD-anchored path
 ///   ([`truncate_for_ellipsis`]) handles scrolled-back viewports; this function
 ///   is only called when the viewport is known to be at the tail.
-pub fn truncate_tail_anchored<'a>(
+pub(crate) fn truncate_tail_anchored<'a>(
     text: &str,
     base_attrs: Attrs<'a>,
     bounds_width: f32,

@@ -160,7 +160,7 @@ async fn hud_w41ef_portal_backdrop_opaque_after_resize_grow_no_fade() {
     compositor.render_frame_headless(&mut scene, &surface);
     let px = surface.read_pixels(&compositor.device);
 
-    let a_grown = crate::surface::HeadlessSurface::pixel_at(&px, 256, 180, 180)[3];
+    let a_grown = crate::test_pixels::pixel_at(&px, 256, 180, 180)[3];
     assert!(
         a_grown > 250,
         "grown portal backdrop must stay opaque at full opacity (got alpha={a_grown})"

@@ -31,18 +31,18 @@ fn unreferenced_resource_ids<'a>(
 ///
 /// Created by [`Compositor::ensure_image_texture`] on first reference and
 /// reused across frames until eviction.
-pub struct ImageTextureEntry {
+pub(crate) struct ImageTextureEntry {
     /// The GPU texture holding RGBA pixel data, kept alive for `bind_group`.
     /// Prefixed with `_` to make intent explicit: this field exists solely to
     /// retain ownership and keep the wgpu texture alive as long as the bind
     /// group references it.
-    pub _texture: wgpu::Texture,
+    pub(crate) _texture: wgpu::Texture,
     /// Pre-built bind group (texture view + sampler) ready for draw calls.
-    pub bind_group: wgpu::BindGroup,
+    pub(crate) bind_group: wgpu::BindGroup,
     /// Image width in pixels (needed for fit-mode UV calculations).
-    pub width: u32,
+    pub(crate) width: u32,
     /// Image height in pixels (needed for fit-mode UV calculations).
-    pub height: u32,
+    pub(crate) height: u32,
 }
 
 fn downsample_rgba_nearest(
@@ -444,7 +444,7 @@ impl super::Compositor {
     /// initialized text rasterizer is rebuilt for it (new font system and glyph
     /// atlas — font ids are not stable across font systems) with uploaded
     /// fonts carried over, and cached truncation points are invalidated.
-    pub fn set_font_config(&mut self, config: crate::fonts::FontConfig) {
+    pub(crate) fn set_font_config(&mut self, config: crate::fonts::FontConfig) {
         let config = config.normalized();
         if config == self.configured_fonts {
             return;
@@ -459,7 +459,8 @@ impl super::Compositor {
 
     /// The family each font role currently resolves to, or `None` before the
     /// text renderer is initialized.
-    pub fn resolved_fonts(&self) -> Option<&crate::fonts::ResolvedFonts> {
+    #[cfg(test)]
+    pub(crate) fn resolved_fonts(&self) -> Option<&crate::fonts::ResolvedFonts> {
         self.text_rasterizer.as_ref().map(|r| r.resolved_fonts())
     }
 
@@ -485,7 +486,8 @@ impl super::Compositor {
     /// the scene version has changed.  The cadence gate is bypassed for
     /// forced primes (see `prime_truncation_cache`), ensuring the new font is
     /// reflected immediately on the next commit.  [hud-v2z6u]
-    pub fn load_font_bytes(&mut self, resource_id: [u8; 32], data: &[u8]) -> bool {
+    #[cfg(test)]
+    pub(crate) fn load_font_bytes(&mut self, resource_id: [u8; 32], data: &[u8]) -> bool {
         if let Some(rasterizer) = &mut self.text_rasterizer {
             let was_new = !rasterizer.has_font(&resource_id);
             if was_new
@@ -524,17 +526,6 @@ impl super::Compositor {
             tracing::debug!("load_font_bytes called before text renderer is initialized — skipped");
             false
         }
-    }
-
-    /// Returns `true` if the font with the given `resource_id` has been loaded
-    /// into the `FontSystem`.
-    ///
-    /// Returns `false` if the text renderer is not yet initialized.
-    pub fn has_font(&self, resource_id: &[u8; 32]) -> bool {
-        self.text_rasterizer
-            .as_ref()
-            .map(|r| r.has_font(resource_id))
-            .unwrap_or(false)
     }
 
     // ─── Image texture cache ─────────────────────────────────────────────────
@@ -917,7 +908,7 @@ impl super::Compositor {
     /// Call once per frame after rendering. `referenced_ids` is the set of
     /// `ResourceId`s that appeared in zone publications or tile nodes during
     /// this frame. Any cache entry not in this set is dropped.
-    pub fn evict_unused_image_textures(&mut self, referenced_ids: &HashSet<ResourceId>) {
+    pub(crate) fn evict_unused_image_textures(&mut self, referenced_ids: &HashSet<ResourceId>) {
         let stale_texture_ids =
             unreferenced_resource_ids(self.image_texture_cache.keys(), referenced_ids);
         let stale_byte_ids = unreferenced_resource_ids(self.image_bytes.keys(), referenced_ids);

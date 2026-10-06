@@ -97,11 +97,11 @@ impl Drop for EncodingGuard {
 /// SurfaceTexture alive until after present()." (line 364)
 pub struct CompositorFrame {
     /// Render target for this frame.
-    pub view: wgpu::TextureView,
+    pub(crate) view: wgpu::TextureView,
     /// Ownership guard — keeps the backing resource alive until this frame is dropped.
-    pub _guard: Box<dyn Any + Send>,
+    pub(crate) _guard: Box<dyn Any + Send>,
     /// Whether this build acquired a new surface texture or reused a pending one.
-    pub acquisition: SurfaceFrameAcquisition,
+    pub(crate) acquisition: SurfaceFrameAcquisition,
 }
 
 /// How a compositor build obtained its renderable surface texture.
@@ -110,7 +110,7 @@ pub struct CompositorFrame {
 /// the main thread has not presented it yet. That reuse remains render work but
 /// is not another swapchain acquisition for idle-efficiency telemetry.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SurfaceFrameAcquisition {
+pub(crate) enum SurfaceFrameAcquisition {
     /// This build acquired a new texture from the surface boundary.
     Fresh,
     /// This build reused a texture that was already pending presentation.
@@ -128,7 +128,7 @@ impl SurfaceFrameAcquisition {
 
     /// Whether this build acquired a new surface texture.
     #[must_use]
-    pub const fn is_fresh(self) -> bool {
+    pub(crate) const fn is_fresh(self) -> bool {
         matches!(self, Self::Fresh)
     }
 }
@@ -314,13 +314,13 @@ pub trait CompositorSurface: Send + 'static {
 pub struct WindowSurface {
     /// The underlying wgpu surface (window-backed swapchain). Dropped by hand
     /// (see `Drop`) so its swapchain teardown runs under [`gpu_queue_lock`].
-    pub surface: std::mem::ManuallyDrop<wgpu::Surface<'static>>,
+    pub(crate) surface: std::mem::ManuallyDrop<wgpu::Surface<'static>>,
     /// Current surface configuration.
     pub config: std::sync::Mutex<wgpu::SurfaceConfiguration>,
     /// Current width in pixels (kept in sync with config).
-    pub width: std::sync::atomic::AtomicU32,
+    pub(crate) width: std::sync::atomic::AtomicU32,
     /// Current height in pixels (kept in sync with config).
-    pub height: std::sync::atomic::AtomicU32,
+    pub(crate) height: std::sync::atomic::AtomicU32,
     /// Swapchain-ownership state: the pending `SurfaceTexture` awaiting
     /// presentation plus the compositor's "encode in progress" marker, guarded
     /// by a single mutex.
@@ -414,7 +414,7 @@ const ACQUIRE_TIMEOUT_LOG_INTERVAL: std::time::Duration = std::time::Duration::f
 /// Held around main-thread `present()`, every `configure()` (compositor
 /// reconfigure, new-surface creation) and the surface drop. Never held while
 /// taking a swapchain slot lock: the order is always slot, then this.
-pub fn gpu_queue_lock() -> std::sync::MutexGuard<'static, ()> {
+pub(crate) fn gpu_queue_lock() -> std::sync::MutexGuard<'static, ()> {
     static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
     LOCK.lock().unwrap_or_else(|e| e.into_inner())
 }
@@ -443,7 +443,7 @@ impl WindowSurface {
     ///
     /// This constructor is called by `Compositor::new_windowed()` after adapter
     /// and device creation, so the surface and device are guaranteed compatible.
-    pub fn new(surface: wgpu::Surface<'static>, config: wgpu::SurfaceConfiguration) -> Self {
+    pub(crate) fn new(surface: wgpu::Surface<'static>, config: wgpu::SurfaceConfiguration) -> Self {
         let width = config.width;
         let height = config.height;
         Self {
@@ -982,13 +982,14 @@ impl CompositorSurface for WindowSurface {
 /// - validation-framework/spec.md Requirement: DR-V2 (line 186)
 /// - validation-framework/spec.md Requirement: DR-V6 (line 238)
 pub struct HeadlessSurface {
-    pub texture: wgpu::Texture,
-    pub view: wgpu::TextureView,
-    pub width: u32,
-    pub height: u32,
+    pub(crate) texture: wgpu::Texture,
+    /// Retained view ownership; frame acquisition creates its own render view.
+    _view: wgpu::TextureView,
+    pub(crate) width: u32,
+    pub(crate) height: u32,
     /// Output buffer for pixel readback.
-    pub output_buffer: wgpu::Buffer,
-    pub bytes_per_row: u32,
+    pub(crate) output_buffer: wgpu::Buffer,
+    pub(crate) bytes_per_row: u32,
 }
 
 impl HeadlessSurface {
@@ -1021,7 +1022,7 @@ impl HeadlessSurface {
 
         Self {
             texture,
-            view,
+            _view: view,
             width,
             height,
             output_buffer,
@@ -1039,7 +1040,7 @@ impl HeadlessSurface {
     /// Copy the rendered texture to the readback buffer.
     ///
     /// Call this after the render pass, before submitting the command buffer.
-    pub fn copy_to_buffer(&self, encoder: &mut wgpu::CommandEncoder) {
+    pub(crate) fn copy_to_buffer(&self, encoder: &mut wgpu::CommandEncoder) {
         encoder.copy_texture_to_buffer(
             wgpu::TexelCopyTextureInfo {
                 texture: &self.texture,
@@ -1092,45 +1093,6 @@ impl HeadlessSurface {
         self.output_buffer.unmap();
 
         pixels
-    }
-
-    /// Get pixel at (x, y) from raw RGBA data. Returns [r, g, b, a].
-    pub fn pixel_at(data: &[u8], width: u32, x: u32, y: u32) -> [u8; 4] {
-        let idx = ((y * width + x) * 4) as usize;
-        [data[idx], data[idx + 1], data[idx + 2], data[idx + 3]]
-    }
-
-    /// Assert that a pixel at (x, y) is within `tolerance` of `expected` on
-    /// every channel (R, G, B, A).
-    ///
-    /// Returns `Ok([r, g, b, a])` on pass, `Err(message)` on failure.
-    ///
-    /// The `label` is included in the error message for diagnostic clarity.
-    ///
-    /// Software-rasterised GPU paths (llvmpipe / SwiftShader) may produce
-    /// values that differ from the linear-space input by ±2 per channel due
-    /// to sRGB conversion.  Use `tolerance = 2` for solid fills on CI.
-    pub fn assert_pixel_color(
-        data: &[u8],
-        width: u32,
-        x: u32,
-        y: u32,
-        expected: [u8; 4],
-        tolerance: u8,
-        label: &str,
-    ) -> Result<[u8; 4], String> {
-        let actual = Self::pixel_at(data, width, x, y);
-        for ch in 0..4 {
-            let diff = actual[ch].abs_diff(expected[ch]);
-            if diff > tolerance {
-                return Err(format!(
-                    "pixel assertion failed at ({x},{y}) [{label}]: \
-                     channel {ch} actual={} expected={} diff={} tolerance={}",
-                    actual[ch], expected[ch], diff, tolerance,
-                ));
-            }
-        }
-        Ok(actual)
     }
 }
 
@@ -1232,16 +1194,24 @@ mod tests {
             100, 200, 50, 255, // pixel (0,0)
             10, 20, 30, 255, // pixel (1,0)
         ];
-        HeadlessSurface::assert_pixel_color(&pixels, 2, 0, 0, [100, 200, 50, 255], 0, "exact")
+        crate::test_pixels::assert_pixel_color(&pixels, 2, 0, 0, [100, 200, 50, 255], 0, "exact")
             .expect("exact match should pass");
-        HeadlessSurface::assert_pixel_color(&pixels, 2, 0, 0, [102, 200, 50, 255], 2, "within tol")
-            .expect("within-tolerance should pass");
+        crate::test_pixels::assert_pixel_color(
+            &pixels,
+            2,
+            0,
+            0,
+            [102, 200, 50, 255],
+            2,
+            "within tol",
+        )
+        .expect("within-tolerance should pass");
     }
 
     #[test]
     fn test_assert_pixel_color_fails_outside_tolerance() {
         let pixels: Vec<u8> = vec![100, 200, 50, 255];
-        let result = HeadlessSurface::assert_pixel_color(
+        let result = crate::test_pixels::assert_pixel_color(
             &pixels,
             1,
             0,

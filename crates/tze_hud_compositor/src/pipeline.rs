@@ -5,13 +5,13 @@ use bytemuck::{Pod, Zeroable};
 /// Vertex for rendering colored rectangles.
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
-pub struct RectVertex {
-    pub position: [f32; 2],
-    pub color: [f32; 4],
+pub(crate) struct RectVertex {
+    pub(crate) position: [f32; 2],
+    pub(crate) color: [f32; 4],
 }
 
 impl RectVertex {
-    pub fn desc() -> wgpu::VertexBufferLayout<'static> {
+    pub(crate) fn desc() -> wgpu::VertexBufferLayout<'static> {
         wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<RectVertex>() as wgpu::BufferAddress,
             step_mode: wgpu::VertexStepMode::Vertex,
@@ -33,7 +33,7 @@ impl RectVertex {
 
 /// Generate vertices for a filled rectangle.
 /// Coordinates are in NDC: x in [-1, 1], y in [-1, 1].
-pub fn rect_vertices(
+pub(crate) fn rect_vertices(
     x: f32,
     y: f32,
     w: f32,
@@ -86,14 +86,14 @@ pub fn rect_vertices(
 /// fade-in/fade-out animations.
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
-pub struct TexturedRectVertex {
-    pub position: [f32; 2],
-    pub uv: [f32; 2],
-    pub tint: [f32; 4],
+pub(crate) struct TexturedRectVertex {
+    pub(crate) position: [f32; 2],
+    pub(crate) uv: [f32; 2],
+    pub(crate) tint: [f32; 4],
 }
 
 impl TexturedRectVertex {
-    pub fn desc() -> wgpu::VertexBufferLayout<'static> {
+    pub(crate) fn desc() -> wgpu::VertexBufferLayout<'static> {
         wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<TexturedRectVertex>() as wgpu::BufferAddress,
             step_mode: wgpu::VertexStepMode::Vertex,
@@ -128,7 +128,7 @@ impl TexturedRectVertex {
 /// `uv_rect` is `(u_min, v_min, u_max, v_max)` — use `(0,0,1,1)` for the
 /// full texture, or custom values for fit-mode cropping / letterboxing.
 #[allow(clippy::too_many_arguments)]
-pub fn textured_rect_vertices(
+pub(crate) fn textured_rect_vertices(
     x: f32,
     y: f32,
     w: f32,
@@ -186,7 +186,7 @@ pub fn textured_rect_vertices(
 /// Samples from a 2D texture at the interpolated UV coordinates and multiplies
 /// the result by the per-vertex tint color. This enables fade and opacity
 /// control without a separate uniform buffer.
-pub const TEXTURE_RECT_SHADER: &str = r#"
+pub(crate) const TEXTURE_RECT_SHADER: &str = r#"
 @group(0) @binding(0)
 var t_texture: texture_2d<f32>;
 @group(0) @binding(1)
@@ -224,7 +224,9 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 ///
 /// Binding 0: 2D float texture (filterable)
 /// Binding 1: Filtering sampler
-pub fn create_texture_rect_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+pub(crate) fn create_texture_rect_bind_group_layout(
+    device: &wgpu::Device,
+) -> wgpu::BindGroupLayout {
     device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("image_texture_bgl"),
         entries: &[
@@ -249,7 +251,7 @@ pub fn create_texture_rect_bind_group_layout(device: &wgpu::Device) -> wgpu::Bin
 }
 
 /// Create the render pipeline for textured rectangles (image rendering).
-pub fn create_texture_rect_pipeline(
+pub(crate) fn create_texture_rect_pipeline(
     device: &wgpu::Device,
     bind_group_layout: &wgpu::BindGroupLayout,
     format: wgpu::TextureFormat,
@@ -308,39 +310,39 @@ pub fn create_texture_rect_pipeline(
 /// pipeline in `Compositor::encode_rounded_rect_pass`. A border-only shape has
 /// a transparent `color` (`[0.0; 4]`).
 #[derive(Clone, Debug)]
-pub struct RoundedRectDrawCmd {
+pub(crate) struct RoundedRectDrawCmd {
     /// Original rounded rectangle shape used by the SDF.
-    pub x: f32,
-    pub y: f32,
-    pub width: f32,
-    pub height: f32,
-    pub radius: f32,
+    pub(crate) x: f32,
+    pub(crate) y: f32,
+    pub(crate) width: f32,
+    pub(crate) height: f32,
+    pub(crate) radius: f32,
     /// Fill colour, in `gpu_color` form (premultiplied in overlay mode).
-    pub color: [f32; 4],
+    pub(crate) color: [f32; 4],
     /// Inside border, following the rounded edge.
-    pub border: Option<RoundedRectBorder>,
+    pub(crate) border: Option<RoundedRectBorder>,
     /// Optional raster bounds. When present, the draw quad is clipped to this
     /// rectangle while the SDF still evaluates against the original shape.
-    pub clip: Option<RoundedRectClip>,
+    pub(crate) clip: Option<RoundedRectClip>,
 }
 
 /// An inside border drawn by the SDF shader: the band where
 /// `-width < sdf <= 0`, anti-aliased like the fill edge. Its inner edge is the
 /// shape offset inward by `width`, so corners stay concentric.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct RoundedRectBorder {
+pub(crate) struct RoundedRectBorder {
     /// Border width in physical pixels.
-    pub width: f32,
+    pub(crate) width: f32,
     /// Border colour, in `gpu_color` form like the fill.
-    pub color: [f32; 4],
+    pub(crate) color: [f32; 4],
 }
 
 #[derive(Clone, Copy, Debug)]
-pub struct RoundedRectClip {
-    pub x: f32,
-    pub y: f32,
-    pub width: f32,
-    pub height: f32,
+pub(crate) struct RoundedRectClip {
+    pub(crate) x: f32,
+    pub(crate) y: f32,
+    pub(crate) width: f32,
+    pub(crate) height: f32,
 }
 
 /// Vertex for rendering SDF rounded rectangles.
@@ -351,30 +353,30 @@ pub struct RoundedRectClip {
 /// coordinates; they are converted to NDC in the vertex shader.
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
-pub struct RoundedRectVertex {
+pub(crate) struct RoundedRectVertex {
     /// NDC position of this vertex (computed by `rounded_rect_cmd_vertices`).
-    pub position: [f32; 2],
+    pub(crate) position: [f32; 2],
     /// Pixel-space position of this vertex (passed through to fragment shader).
-    pub frag_pos: [f32; 2],
+    pub(crate) frag_pos: [f32; 2],
     /// Center of the rectangle in pixel space.
-    pub rect_center: [f32; 2],
+    pub(crate) rect_center: [f32; 2],
     /// Half-size (half-width, half-height) of the rectangle in pixel space.
-    pub rect_half_size: [f32; 2],
+    pub(crate) rect_half_size: [f32; 2],
     /// Corner radius in pixels.
-    pub radius: f32,
+    pub(crate) radius: f32,
     /// Fill RGBA as returned by `gpu_color` (non-premultiplied in fullscreen
     /// mode; premultiplied in overlay mode).
-    pub color: [f32; 4],
+    pub(crate) color: [f32; 4],
     /// Inside border width in pixels; 0 draws no border.
-    pub border_width: f32,
+    pub(crate) border_width: f32,
     /// Border RGBA, same form as `color`.
-    pub border_color: [f32; 4],
+    pub(crate) border_color: [f32; 4],
 }
 
 // RoundedRectVertex size: 2+2+2+2+1+4+1+4 = 18 f32 = 72 bytes (no padding).
 
 impl RoundedRectVertex {
-    pub fn desc() -> wgpu::VertexBufferLayout<'static> {
+    pub(crate) fn desc() -> wgpu::VertexBufferLayout<'static> {
         use std::mem::size_of;
         const fn at(
             floats: usize,
@@ -411,7 +413,7 @@ impl RoundedRectVertex {
 /// The raster quad covers `cmd.clip` when set, else the shape; the SDF always
 /// evaluates against the shape, so a clipped edge does not become a new
 /// rounded corner or border. `screen_w` / `screen_h` convert pixels to NDC.
-pub fn rounded_rect_cmd_vertices(
+pub(crate) fn rounded_rect_cmd_vertices(
     cmd: &RoundedRectDrawCmd,
     screen_w: f32,
     screen_h: f32,
@@ -541,7 +543,7 @@ fn coverage_and_fill(in: VertexOutput) -> vec2<f32> {
 ///
 /// In overlay mode use `ROUNDED_RECT_OVERLAY_SHADER` + `PREMULTIPLIED_ALPHA_BLENDING`
 /// instead — see `create_rounded_rect_overlay_pipeline`.
-pub const ROUNDED_RECT_SHADER: &str = concat!(
+pub(crate) const ROUNDED_RECT_SHADER: &str = concat!(
     rounded_rect_shader_common!(),
     r#"
 @fragment
@@ -570,7 +572,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 /// ```
 ///
 /// DWM then composites the framebuffer (already premultiplied) with the desktop.
-pub const ROUNDED_RECT_OVERLAY_SHADER: &str = concat!(
+pub(crate) const ROUNDED_RECT_OVERLAY_SHADER: &str = concat!(
     rounded_rect_shader_common!(),
     r#"
 @fragment
@@ -582,7 +584,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 );
 
 /// The shader source for rendering colored rectangles.
-pub const RECT_SHADER: &str = r#"
+pub(crate) const RECT_SHADER: &str = r#"
 struct VertexInput {
     @location(0) position: vec2<f32>,
     @location(1) color: vec4<f32>,

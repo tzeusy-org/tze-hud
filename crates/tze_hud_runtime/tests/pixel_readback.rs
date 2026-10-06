@@ -55,7 +55,6 @@ use pixel_helpers::{
     BG_SRGB, CI_BLEND_TOLERANCE, CI_SOLID_TOLERANCE, SCENE_H, SCENE_W, make_scene_runtime,
     render_scene_pixels,
 };
-use tze_hud_compositor::HeadlessSurface;
 use tze_hud_scene::test_scenes::{ClockMs, TestSceneRegistry};
 
 // ─── Pixel buffer size assertions (always-enabled, DR-V2) ────────────────────
@@ -172,7 +171,7 @@ async fn test_color_01_empty_scene_all_background() {
     for i in (0..SCENE_W * SCENE_H).step_by(50) {
         let x = i % SCENE_W;
         let y = i / SCENE_W;
-        HeadlessSurface::assert_pixel_color(
+        pixel_helpers::assert_pixel_color(
             &pixels,
             SCENE_W,
             x,
@@ -211,7 +210,7 @@ async fn test_color_02_single_tile_solid() {
     let pixels = render_scene_pixels(&mut runtime, scene).await;
 
     // Tile center (400, 300) — well inside tile bounds.
-    HeadlessSurface::assert_pixel_color(
+    pixel_helpers::assert_pixel_color(
         &pixels,
         SCENE_W,
         400,
@@ -223,7 +222,7 @@ async fn test_color_02_single_tile_solid() {
     .unwrap_or_else(|e| panic!("{e}"));
 
     // Outside tile (10, 10) — must be background.
-    HeadlessSurface::assert_pixel_color(
+    pixel_helpers::assert_pixel_color(
         &pixels,
         SCENE_W,
         10,
@@ -264,7 +263,7 @@ async fn test_color_03_three_tiles_no_overlap() {
     let pixels = render_scene_pixels(&mut runtime, scene).await;
 
     // Tile 1 (text with dark background) — inside at (100, 100).
-    HeadlessSurface::assert_pixel_color(
+    pixel_helpers::assert_pixel_color(
         &pixels,
         SCENE_W,
         100,
@@ -305,7 +304,7 @@ async fn test_color_04_overlapping_tiles_zorder() {
     // Inside z=1 (red) only. Red dominant.
     let red_only_x = (SCENE_W as f32 * 0.15).round() as u32;
     let red_only_y = (SCENE_H as f32 * 0.20).round() as u32;
-    let red_only = HeadlessSurface::pixel_at(&pixels, SCENE_W, red_only_x, red_only_y);
+    let red_only = pixel_helpers::pixel_at(&pixels, SCENE_W, red_only_x, red_only_y);
     assert!(
         red_only[0] > red_only[2] + 50,
         "overlapping_tiles_zorder: red-only sample at ({red_only_x},{red_only_y}) must dominate: pixel={red_only:?}"
@@ -314,7 +313,7 @@ async fn test_color_04_overlapping_tiles_zorder() {
     // Inside z=1 and z=2. z=2 (green) wins.
     let green_wins_x = (SCENE_W as f32 * 0.25).round() as u32;
     let green_wins_y = (SCENE_H as f32 * 0.29).round() as u32;
-    let green_wins = HeadlessSurface::pixel_at(&pixels, SCENE_W, green_wins_x, green_wins_y);
+    let green_wins = pixel_helpers::pixel_at(&pixels, SCENE_W, green_wins_x, green_wins_y);
     assert!(
         green_wins[1] > green_wins[0] + 50 && green_wins[1] > green_wins[2] + 50,
         "overlapping_tiles_zorder: red+green overlap sample at ({green_wins_x},{green_wins_y}) must be green-dominant: pixel={green_wins:?}"
@@ -323,7 +322,7 @@ async fn test_color_04_overlapping_tiles_zorder() {
     // Inside all three. z=3 (blue) wins.
     let blue_wins_x = (SCENE_W as f32 * 0.45).round() as u32;
     let blue_wins_y = (SCENE_H as f32 * 0.45).round() as u32;
-    let blue_wins = HeadlessSurface::pixel_at(&pixels, SCENE_W, blue_wins_x, blue_wins_y);
+    let blue_wins = pixel_helpers::pixel_at(&pixels, SCENE_W, blue_wins_x, blue_wins_y);
     assert!(
         blue_wins[2] > blue_wins[0] + 50 && blue_wins[2] > blue_wins[1] + 50,
         "overlapping_tiles_zorder: all-tile overlap sample at ({blue_wins_x},{blue_wins_y}) must be blue-dominant: pixel={blue_wins:?}"
@@ -361,14 +360,14 @@ async fn test_color_05_overlay_transparency() {
     let pixels = render_scene_pixels(&mut runtime, scene).await;
 
     // Base tile region (50, 50) — blue dominant (0.1, 0.1, 0.5).
-    let base_px = HeadlessSurface::pixel_at(&pixels, SCENE_W, 50, 50);
+    let base_px = pixel_helpers::pixel_at(&pixels, SCENE_W, 50, 50);
     assert!(
         base_px[2] > base_px[0],
         "overlay_transparency: base tile (0.1,0.1,0.5) at (50,50) must be blue-dominant: pixel={base_px:?}"
     );
 
     // Overlay region center (400, 300) — blended, still blue-biased.
-    let blend_px = HeadlessSurface::pixel_at(&pixels, SCENE_W, 400, 300);
+    let blend_px = pixel_helpers::pixel_at(&pixels, SCENE_W, 400, 300);
     assert!(
         blend_px[2] >= blend_px[0],
         "overlay_transparency: blended at (400,300) must keep blue ≥ red: pixel={blend_px:?}"
@@ -401,7 +400,7 @@ async fn test_color_06_tab_switch() {
     let pixels = render_scene_pixels(&mut runtime, scene).await;
 
     // Tab B tile 1 interior at (270, 250) — must show Tab B's purple background.
-    HeadlessSurface::assert_pixel_color(
+    pixel_helpers::assert_pixel_color(
         &pixels,
         SCENE_W,
         270,
@@ -413,7 +412,7 @@ async fn test_color_06_tab_switch() {
     .unwrap_or_else(|e| panic!("{e}"));
 
     // Tab A tile region (200, 80) — Tab A is INACTIVE, must show background.
-    HeadlessSurface::assert_pixel_color(
+    pixel_helpers::assert_pixel_color(
         &pixels,
         SCENE_W,
         200,
@@ -447,7 +446,7 @@ async fn test_color_07_lease_expiry_tile_visible() {
 
     let pixels = render_scene_pixels(&mut runtime, scene).await;
 
-    HeadlessSurface::assert_pixel_color(
+    pixel_helpers::assert_pixel_color(
         &pixels,
         SCENE_W,
         400,
@@ -485,7 +484,7 @@ async fn test_color_10_input_highlight_background_tile() {
 
     let pixels = render_scene_pixels(&mut runtime, scene).await;
 
-    HeadlessSurface::assert_pixel_color(
+    pixel_helpers::assert_pixel_color(
         &pixels,
         SCENE_W,
         10,
@@ -523,7 +522,7 @@ async fn test_color_11_coalesced_dashboard_tile_rendered() {
     let pixels = render_scene_pixels(&mut runtime, scene).await;
 
     // First tile interior at 1920×1080: pad=10, tile_w≈467, center ≈ (243, 183).
-    let tile_px = HeadlessSurface::pixel_at(&pixels, SCENE_W, 243, 183);
+    let tile_px = pixel_helpers::pixel_at(&pixels, SCENE_W, 243, 183);
     assert_eq!(
         tile_px[3], 255,
         "coalesced_dashboard: tile at (243,183) must be opaque"
@@ -586,7 +585,7 @@ async fn test_color_13_three_agents_contention_high_prio_tile() {
 
     let x = (SCENE_W as f32 * 0.45).round() as u32;
     let y = (SCENE_H as f32 * 0.45).round() as u32;
-    let px = HeadlessSurface::pixel_at(&pixels, SCENE_W, x, y);
+    let px = pixel_helpers::pixel_at(&pixels, SCENE_W, x, y);
     assert!(
         px[0] > px[2] + 50,
         "three_agents_contention: all-agent overlap sample at ({x},{y}) must be red-dominant (high_prio z=10): pixel={px:?}"
@@ -626,7 +625,7 @@ async fn test_color_14_overlay_passthrough_regions_near_background() {
     let pixels = render_scene_pixels(&mut runtime, scene).await;
 
     // HitRegion content tile is invisible; overlay darkens the clear bg only.
-    HeadlessSurface::assert_pixel_color(
+    pixel_helpers::assert_pixel_color(
         &pixels,
         SCENE_W,
         400,
@@ -664,14 +663,14 @@ async fn test_color_15_disconnect_reclaim_multiagent_agents_visible() {
     let pixels = render_scene_pixels(&mut runtime, scene).await;
 
     // agent.one tile_a (red 0.8, 0.2, 0.2) at (310, 260).
-    let px_one = HeadlessSurface::pixel_at(&pixels, SCENE_W, 310, 260);
+    let px_one = pixel_helpers::pixel_at(&pixels, SCENE_W, 310, 260);
     assert!(
         px_one[0] > px_one[2] + 30,
         "disconnect_reclaim_multiagent: (310,260) must be red-dominant: pixel={px_one:?}"
     );
 
     // agent.two tile (green 0.2, 0.7, 0.2) at (730, 355).
-    let px_two = HeadlessSurface::pixel_at(&pixels, SCENE_W, 730, 355);
+    let px_two = pixel_helpers::pixel_at(&pixels, SCENE_W, 730, 355);
     assert!(
         px_two[1] > px_two[0] + 30,
         "disconnect_reclaim_multiagent: (730,355) must be green-dominant: pixel={px_two:?}"
@@ -703,7 +702,7 @@ async fn test_color_17_chatty_dashboard_touch_transparent_tiles() {
     let pixels = render_scene_pixels(&mut runtime, scene).await;
 
     // HitRegion tiles are invisible — pixel is the compositor clear colour.
-    HeadlessSurface::assert_pixel_color(
+    pixel_helpers::assert_pixel_color(
         &pixels,
         SCENE_W,
         400,
@@ -741,7 +740,7 @@ async fn test_color_18_zone_publish_subtitle_region() {
     let pixels = render_scene_pixels(&mut runtime, scene).await;
 
     // Above subtitle tile — must be background.
-    HeadlessSurface::assert_pixel_color(
+    pixel_helpers::assert_pixel_color(
         &pixels,
         SCENE_W,
         400,
@@ -755,7 +754,7 @@ async fn test_color_18_zone_publish_subtitle_region() {
     // Subtitle zone tile (semi-transparent black, alpha=0.75) — darker than BG.
     // Sample at (960, 993): centre of the subtitle tile on a 1920×1080 canvas.
     // Tile covers x=192..1728, y=950..1037.
-    let sub_px = HeadlessSurface::pixel_at(&pixels, SCENE_W, 960, 993);
+    let sub_px = pixel_helpers::pixel_at(&pixels, SCENE_W, 960, 993);
     assert!(
         sub_px[0] < BG_SRGB[0] || sub_px[1] < BG_SRGB[1] || sub_px[2] < BG_SRGB[2],
         "zone_publish_subtitle: subtitle at (960,993) must be darker than background: \
@@ -976,7 +975,7 @@ async fn test_color_runs_red_error_text_rendered() {
     let mut found_red_dominant = false;
     'outer: for y in scan_y0..scan_y1 {
         for x in scan_x0..scan_x1 {
-            let px = HeadlessSurface::pixel_at(&pixels, SCENE_W, x, y);
+            let px = pixel_helpers::pixel_at(&pixels, SCENE_W, x, y);
             // R > G + 60 and R > B + 60: strongly red.
             if px[0] > px[1].saturating_add(60) && px[0] > px[2].saturating_add(60) {
                 found_red_dominant = true;

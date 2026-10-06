@@ -156,20 +156,20 @@ pub(super) fn compute_fit_mode(
 /// When no transition is active, the zone is at full opacity (1.0).
 ///
 /// Modeled after `WidgetAnimationState` in `crate::widget`.
-pub struct ZoneAnimationState {
+pub(crate) struct ZoneAnimationState {
     /// Wall-clock time when the transition started.
-    pub transition_start: std::time::Instant,
+    pub(crate) transition_start: std::time::Instant,
     /// Duration of the transition in milliseconds.
-    pub duration_ms: u32,
+    pub(crate) duration_ms: u32,
     /// Opacity at the start of the transition.
-    pub from_opacity: f32,
+    pub(crate) from_opacity: f32,
     /// Target opacity at the end of the transition (0.0 = fade-out, 1.0 = fade-in).
-    pub target_opacity: f32,
+    pub(crate) target_opacity: f32,
 }
 
 impl ZoneAnimationState {
     /// Create a fade-in state (opacity 0 → 1) with the given duration.
-    pub fn fade_in(duration_ms: u32) -> Self {
+    pub(crate) fn fade_in(duration_ms: u32) -> Self {
         Self {
             transition_start: std::time::Instant::now(),
             duration_ms,
@@ -189,7 +189,7 @@ impl ZoneAnimationState {
     /// semantics note: "the fade-out MUST be cancelled immediately and the new
     /// content MUST begin its transition_in_ms fade-in from the current composite
     /// opacity (not from zero)."
-    pub fn fade_in_from(duration_ms: u32, from_opacity: f32) -> Self {
+    pub(crate) fn fade_in_from(duration_ms: u32, from_opacity: f32) -> Self {
         Self {
             transition_start: std::time::Instant::now(),
             duration_ms,
@@ -199,7 +199,7 @@ impl ZoneAnimationState {
     }
 
     /// Create a fade-out state (opacity 1 → 0) with the given duration.
-    pub fn fade_out(duration_ms: u32) -> Self {
+    pub(crate) fn fade_out(duration_ms: u32) -> Self {
         Self {
             transition_start: std::time::Instant::now(),
             duration_ms,
@@ -213,7 +213,7 @@ impl ZoneAnimationState {
     /// A `duration_ms` of `0` reports `1.0` (already complete). Split out so the
     /// time source and the interpolation math are independently testable.
     #[inline]
-    pub fn linear_progress(&self) -> f32 {
+    pub(crate) fn linear_progress(&self) -> f32 {
         if self.duration_ms == 0 {
             return 1.0;
         }
@@ -226,14 +226,14 @@ impl ZoneAnimationState {
     /// `opacity_at(linear_progress())` is the linear fade; passing
     /// `easing.apply(linear_progress())` yields an eased fade.
     #[inline]
-    pub fn opacity_at(&self, t: f32) -> f32 {
+    pub(crate) fn opacity_at(&self, t: f32) -> f32 {
         self.from_opacity + (self.target_opacity - self.from_opacity) * t.clamp(0.0, 1.0)
     }
 
     /// Compute the current interpolated opacity (linear).
     ///
     /// Returns `target_opacity` once the transition has elapsed.
-    pub fn current_opacity(&self) -> f32 {
+    pub(crate) fn current_opacity(&self) -> f32 {
         if self.duration_ms == 0 {
             return self.target_opacity;
         }
@@ -246,7 +246,7 @@ impl ZoneAnimationState {
     /// fades accelerate/decelerate instead of ramping linearly. Zone subtitle
     /// fades keep [`current_opacity`](Self::current_opacity) (linear) so their
     /// contention/timing behavior is unchanged.
-    pub fn current_opacity_eased(&self, easing: super::easing::Easing) -> f32 {
+    pub(crate) fn current_opacity_eased(&self, easing: super::easing::Easing) -> f32 {
         if self.duration_ms == 0 {
             return self.target_opacity;
         }
@@ -254,7 +254,7 @@ impl ZoneAnimationState {
     }
 
     /// Returns `true` if the transition has fully completed.
-    pub fn is_complete(&self) -> bool {
+    pub(crate) fn is_complete(&self) -> bool {
         self.transition_start.elapsed().as_millis() >= self.duration_ms as u128
     }
 }
@@ -286,19 +286,19 @@ pub(crate) type PubKey = (u64, String);
 /// `ZonePublishRecord.expires_at_wall_us` alone. A publication with no expiry
 /// is held until cleared and never fades; `hud_hold` moves the expiry, which
 /// [`Self::retarget`] follows.
-pub struct PublicationAnimationState {
+pub(crate) struct PublicationAnimationState {
     /// Wall-clock instant when the compositor first rendered this publication.
-    pub first_seen: std::time::Instant,
+    pub(crate) first_seen: std::time::Instant,
     /// Fade-out begins once this many ms have elapsed since `first_seen`;
     /// `None` is held until cleared (no fade).
-    pub ttl_ms: Option<u64>,
+    pub(crate) ttl_ms: Option<u64>,
     /// The record expiry `ttl_ms` was derived from, to notice a `hud_hold`.
-    pub source_expiry_us: Option<u64>,
+    pub(crate) source_expiry_us: Option<u64>,
     /// Instant when the fade-out transition started.  `None` means the
     /// publication is still fully visible (TTL has not yet expired).
-    pub fade_start: Option<std::time::Instant>,
+    pub(crate) fade_start: Option<std::time::Instant>,
     /// Fade-out duration in milliseconds (always 150 for notifications).
-    pub fade_duration_ms: u32,
+    pub(crate) fade_duration_ms: u32,
 }
 
 /// Duration of the per-notification fade-out transition (ms).
@@ -306,7 +306,7 @@ pub(crate) const NOTIFICATION_FADE_OUT_MS: u32 = 150;
 
 impl PublicationAnimationState {
     /// Create a new state for a freshly-seen publication.
-    pub fn new(ttl_ms: Option<u64>, source_expiry_us: Option<u64>) -> Self {
+    pub(crate) fn new(ttl_ms: Option<u64>, source_expiry_us: Option<u64>) -> Self {
         Self {
             first_seen: std::time::Instant::now(),
             ttl_ms,
@@ -320,7 +320,7 @@ impl PublicationAnimationState {
     ///
     /// Must be called once per frame per publication.  Idempotent after the
     /// fade has started.
-    pub fn tick(&mut self) {
+    pub(crate) fn tick(&mut self) {
         if self.fade_start.is_none()
             && self
                 .ttl_ms
@@ -332,7 +332,7 @@ impl PublicationAnimationState {
 
     /// Follow a changed record expiry (`hud_hold`): the fade delay counts from
     /// now, and a fade already under way is cancelled.
-    pub fn retarget(&mut self, ttl_ms: Option<u64>, source_expiry_us: Option<u64>) {
+    pub(crate) fn retarget(&mut self, ttl_ms: Option<u64>, source_expiry_us: Option<u64>) {
         *self = Self::new(ttl_ms, source_expiry_us);
     }
 
@@ -341,7 +341,7 @@ impl PublicationAnimationState {
     /// Before fade: 1.0.
     /// During fade: linear interpolation from 1.0 → 0.0.
     /// After fade: 0.0.
-    pub fn current_opacity(&self) -> f32 {
+    pub(crate) fn current_opacity(&self) -> f32 {
         let Some(start) = self.fade_start else {
             return 1.0;
         };
@@ -355,7 +355,7 @@ impl PublicationAnimationState {
 
     /// Instant at which the fade-out will start, or `None` once it has (or
     /// when held: a held publication schedules no wake).
-    pub fn fade_start_deadline(&self) -> Option<std::time::Instant> {
+    pub(crate) fn fade_start_deadline(&self) -> Option<std::time::Instant> {
         if self.fade_start.is_some() {
             return None;
         }
@@ -364,12 +364,12 @@ impl PublicationAnimationState {
     }
 
     /// Returns `true` while the fade-out is running (started, not complete).
-    pub fn is_fading(&self) -> bool {
+    pub(crate) fn is_fading(&self) -> bool {
         self.fade_start.is_some() && !self.is_fade_complete()
     }
 
     /// Returns `true` when the fade-out transition has fully completed.
-    pub fn is_fade_complete(&self) -> bool {
+    pub(crate) fn is_fade_complete(&self) -> bool {
         let Some(start) = self.fade_start else {
             return false;
         };
@@ -393,18 +393,18 @@ pub(super) const STREAM_REVEAL_FRAMES_PER_SEGMENT: u32 = 10;
 /// The `pub_key` ties this state to a specific publication.  When the
 /// latest-wins publication changes, the old state is discarded and a new one
 /// starts from breakpoint index 0.
-pub struct StreamRevealState {
+pub(crate) struct StreamRevealState {
     /// The publication this state tracks.
-    pub pub_key: PubKey,
+    pub(crate) pub_key: PubKey,
     /// Byte-offset breakpoints copied from the publication record.
     /// Expected to be non-decreasing (callers should validate before constructing),
     /// but not enforced here — the compositor is safe regardless of order.
-    pub breakpoints: Vec<usize>,
+    pub(crate) breakpoints: Vec<usize>,
     /// Index into `breakpoints` of the currently-visible segment boundary.
     /// A value of `breakpoints.len()` means the full text is visible.
-    pub segment_idx: usize,
+    pub(crate) segment_idx: usize,
     /// Frame counter within the current segment.
-    pub frames_in_segment: u32,
+    pub(crate) frames_in_segment: u32,
 }
 
 impl StreamRevealState {
@@ -412,7 +412,7 @@ impl StreamRevealState {
     ///
     /// Accepts `Vec<u64>` breakpoints (wire format from `ZonePublishRecord`) and
     /// converts to `Vec<usize>` for internal indexing arithmetic.
-    pub fn new(pub_key: PubKey, breakpoints: Vec<u64>) -> Self {
+    pub(crate) fn new(pub_key: PubKey, breakpoints: Vec<u64>) -> Self {
         Self {
             pub_key,
             breakpoints: breakpoints.into_iter().map(|b| b as usize).collect(),
@@ -425,7 +425,7 @@ impl StreamRevealState {
     ///
     /// Returns `usize::MAX` (reveal all) when no breakpoints are set or all
     /// segments have been revealed.
-    pub fn visible_byte_offset(&self) -> usize {
+    pub(crate) fn visible_byte_offset(&self) -> usize {
         if self.breakpoints.is_empty() || self.segment_idx >= self.breakpoints.len() {
             usize::MAX
         } else {
@@ -440,14 +440,14 @@ impl StreamRevealState {
     /// gate (hud-ilivg) treats an in-progress reveal as a reason to keep
     /// rendering so the animation never freezes mid-reveal.
     #[inline]
-    pub fn is_revealing(&self) -> bool {
+    pub(crate) fn is_revealing(&self) -> bool {
         self.segment_idx < self.breakpoints.len()
     }
 
     /// Advance the reveal state by one frame.
     ///
     /// Returns `true` if the reveal is still in progress (more segments remain).
-    pub fn advance(&mut self) -> bool {
+    pub(crate) fn advance(&mut self) -> bool {
         if self.segment_idx >= self.breakpoints.len() {
             return false; // already fully revealed
         }
@@ -480,30 +480,30 @@ impl StreamRevealState {
 /// when that snapshot grows (a genuine append), so same-length churn (caret
 /// blink, status edits) never re-triggers a fade.
 #[derive(Clone, Debug)]
-pub struct PortalTileStreamReveal {
+pub(crate) struct PortalTileStreamReveal {
     /// The plain-text snapshot this reveal is anchored to. Content growth is
     /// detected by diffing the next frame's plain-text against this.
-    pub plain_text: std::sync::Arc<str>,
+    pub(crate) plain_text: std::sync::Arc<str>,
     /// Byte offset (into `plain_text`) where the revealing (fading) region
     /// starts — the common-prefix boundary with the previous snapshot. Bytes
     /// before this are pre-existing content and always render at full opacity.
-    pub reveal_start: usize,
+    pub(crate) reveal_start: usize,
     /// Absolute byte offsets within `(reveal_start, plain_text.len()]`, one per
     /// word-segment boundary, strictly increasing, with the final entry equal to
     /// `plain_text.len()`. Empty ⇒ nothing to reveal (a settled tile).
-    pub breakpoints: Vec<usize>,
+    pub(crate) breakpoints: Vec<usize>,
     /// Index into `breakpoints` of the currently-fading (leading) segment.
     /// `breakpoints.len()` means the reveal is complete (steady state).
-    pub segment_idx: usize,
+    pub(crate) segment_idx: usize,
     /// Frame counter within the current segment's dwell window.
-    pub frames_in_segment: u32,
+    pub(crate) frames_in_segment: u32,
 }
 
 impl PortalTileStreamReveal {
     /// Build a reveal that fades the `[reveal_start, plain_text.len())` region in
     /// segment-by-segment, using `breakpoints` (absolute, increasing, last ==
     /// `plain_text.len()`).
-    pub fn new(
+    pub(crate) fn new(
         plain_text: std::sync::Arc<str>,
         reveal_start: usize,
         breakpoints: Vec<usize>,
@@ -522,7 +522,7 @@ impl PortalTileStreamReveal {
     /// Used on first sight of a tile so pre-existing content is **not** faded in,
     /// and after a non-append change (edit/shrink) so the renderer shows the new
     /// content immediately. `is_revealing()` is `false`.
-    pub fn settled(plain_text: std::sync::Arc<str>) -> Self {
+    pub(crate) fn settled(plain_text: std::sync::Arc<str>) -> Self {
         let len = plain_text.len();
         Self::new(plain_text, len, Vec::new())
     }
@@ -534,7 +534,7 @@ impl PortalTileStreamReveal {
     /// present-gate (#943) treats an in-flight reveal as a reason to keep
     /// rendering so the fade never freezes mid-reveal.
     #[inline]
-    pub fn is_revealing(&self) -> bool {
+    pub(crate) fn is_revealing(&self) -> bool {
         self.segment_idx < self.breakpoints.len()
     }
 
@@ -542,7 +542,7 @@ impl PortalTileStreamReveal {
     ///
     /// Mirrors [`StreamRevealState::advance`]: dwell each segment for
     /// [`STREAM_REVEAL_FRAMES_PER_SEGMENT`] frames before moving to the next.
-    pub fn advance(&mut self) -> bool {
+    pub(crate) fn advance(&mut self) -> bool {
         if self.segment_idx >= self.breakpoints.len() {
             return false; // already fully revealed
         }
@@ -564,7 +564,7 @@ impl PortalTileStreamReveal {
     /// Returns `1.0` for every byte once the reveal is complete, so a settled
     /// tile is byte-for-byte identical to the no-reveal path (deliverable #3).
     #[inline]
-    pub fn alpha_for_byte(&self, pos: usize, ramp: super::easing::StreamFadeRamp) -> f32 {
+    pub(crate) fn alpha_for_byte(&self, pos: usize, ramp: super::easing::StreamFadeRamp) -> f32 {
         if !self.is_revealing() || pos < self.reveal_start {
             return 1.0;
         }

@@ -177,7 +177,7 @@ impl Default for MarkdownTokens {
 /// [`Portal`]: MarkdownScope::Portal
 /// [`Generic`]: MarkdownScope::Generic
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum MarkdownScope {
+pub(crate) enum MarkdownScope {
     /// The governed text-stream portal transcript surface: prefer `portal.*`
     /// namespaced keys over their generic fallbacks.
     Portal,
@@ -209,7 +209,10 @@ impl MarkdownTokens {
     /// [`MarkdownScope::Generic`] ignores every `portal.*` key and resolves only
     /// the generic (`color.*` / `typography.*` / `spacing.*`) keys, so a
     /// portal-scoped preference can never reach a non-portal surface.
-    pub fn from_token_map_scoped(map: &HashMap<String, String>, scope: MarkdownScope) -> Self {
+    pub(crate) fn from_token_map_scoped(
+        map: &HashMap<String, String>,
+        scope: MarkdownScope,
+    ) -> Self {
         let mut tokens = Self::default();
 
         // Heading weights: typography.heading.{1..6}.weight
@@ -441,7 +444,7 @@ pub struct StyleAttr {
 
 impl StyleAttr {
     /// The "no styling" identity — used for spans with no markdown decoration.
-    pub fn plain() -> Self {
+    pub(crate) fn plain() -> Self {
         Self {
             weight: None,
             italic: false,
@@ -666,13 +669,14 @@ impl MarkdownCache {
 
     /// Number of distinct content hashes currently cached.
     #[inline]
-    pub fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.entries.len()
     }
 
     /// Returns `true` if the cache is empty.
     #[inline]
-    pub fn is_empty(&self) -> bool {
+    #[cfg(test)]
+    pub(crate) fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
 
@@ -681,7 +685,8 @@ impl MarkdownCache {
     /// Each element of `live_keys` should be the BLAKE3 hash of a content
     /// string still referenced by the scene.  This keeps the cache bounded
     /// when scene nodes are removed.
-    pub fn evict_except(&mut self, live_keys: &[[u8; 32]]) {
+    #[cfg(test)]
+    pub(crate) fn evict_except(&mut self, live_keys: &[[u8; 32]]) {
         let keep: std::collections::HashSet<[u8; 32]> = live_keys.iter().copied().collect();
         self.entries.retain(|k, _| keep.contains(k));
     }
@@ -738,13 +743,13 @@ impl MarkdownCache {
 /// present, the source is held as `Arc<str>` so the job ships to the background
 /// parse thread without copying.
 #[derive(Clone)]
-pub struct PrimeJob {
+pub(crate) struct PrimeJob {
     /// BLAKE3 cache key (see [`MarkdownCache::compute_key`]) — folds the content
     /// **and** [`Self::tokens`]' identity, so a portal and a non-portal surface
     /// with identical content occupy distinct entries (hud-3ryie).
-    pub key: [u8; 32],
+    pub(crate) key: [u8; 32],
     /// Raw markdown source — `Some` only when this key needs parsing.
-    pub content: Option<Arc<str>>,
+    pub(crate) content: Option<Arc<str>>,
     /// The scoped token set this content must be parsed with (hud-3ryie).
     ///
     /// Selected per owning tile: [`MarkdownScope::Portal`] tokens for a governed
@@ -753,7 +758,7 @@ pub struct PrimeJob {
     /// refcount bump rather than a deep copy, and ship to the background parse
     /// thread without duplication.  `key` must have been computed with this same
     /// token set, or a cache miss will result.
-    pub tokens: Arc<MarkdownTokens>,
+    pub(crate) tokens: Arc<MarkdownTokens>,
 }
 
 /// Total source bytes below which a prime is parsed inline on the calling
@@ -832,7 +837,7 @@ const INLINE_PARSE_BYTE_THRESHOLD: usize = 4096;
 /// number. An epoch depends only on call order on this primer, so it can never
 /// go backwards regardless of how many different `SceneGraph` instances share
 /// it over its lifetime.
-pub struct MarkdownPrimer {
+pub(crate) struct MarkdownPrimer {
     /// The current cache snapshot, swapped atomically.  Readers `load()` it
     /// lock-free; the commit thread and the background worker `store()` it.
     cache: Arc<arc_swap::ArcSwap<MarkdownCache>>,
@@ -873,7 +878,7 @@ impl Default for MarkdownPrimer {
 
 impl MarkdownPrimer {
     /// Create a primer with an empty cache and a running background parse thread.
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let cache = Arc::new(arc_swap::ArcSwap::from_pointee(MarkdownCache::new()));
         let published_epoch = Arc::new(std::sync::atomic::AtomicU64::new(0));
         let next_epoch = Arc::new(std::sync::atomic::AtomicU64::new(0));
@@ -910,7 +915,7 @@ impl MarkdownPrimer {
     /// it, so a concurrent swap on the background thread cannot free it
     /// mid-read.
     #[inline]
-    pub fn load(&self) -> Arc<MarkdownCache> {
+    pub(crate) fn load(&self) -> Arc<MarkdownCache> {
         self.cache.load_full()
     }
 
@@ -932,7 +937,7 @@ impl MarkdownPrimer {
     /// Every call claims a fresh internal epoch up front (see the hud-u4lq2 note
     /// on [`MarkdownPrimer`]) so the stale-clobber guard orders purely by this
     /// primer's own call sequence, never by caller-supplied scene numbering.
-    pub fn prime(&self, jobs: Vec<PrimeJob>) {
+    pub(crate) fn prime(&self, jobs: Vec<PrimeJob>) {
         let epoch = self
             .next_epoch
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
@@ -1003,7 +1008,7 @@ impl MarkdownPrimer {
     /// stale styling is never served.  Stores an empty snapshot immediately so
     /// readers see a clean (cache-miss → inline-parse) state until the next
     /// prime lands.
-    pub fn reset(&self) {
+    pub(crate) fn reset(&self) {
         // Claim a fresh epoch so any in-flight background rebuild dispatched
         // before this reset cannot clobber it.
         let epoch = self
@@ -1018,15 +1023,10 @@ impl MarkdownPrimer {
         );
     }
 
-    /// Number of entries in the current snapshot (test/diagnostic use).
-    #[inline]
-    pub fn len(&self) -> usize {
-        self.cache.load().len()
-    }
-
     /// Whether the current snapshot is empty (test/diagnostic use).
     #[inline]
-    pub fn is_empty(&self) -> bool {
+    #[cfg(test)]
+    pub(crate) fn is_empty(&self) -> bool {
         self.cache.load().is_empty()
     }
 }
@@ -1140,7 +1140,7 @@ thread_local! {
 /// Tables, images, raw HTML, blockquotes, footnotes, strikethrough, task lists,
 /// and autolinks are **not** parsed.  Their literal source text is included in
 /// the output verbatim so transcript content is never silently dropped.
-pub fn parse_markdown_subset(content: &str, tokens: &MarkdownTokens) -> ParsedMarkdown {
+pub(crate) fn parse_markdown_subset(content: &str, tokens: &MarkdownTokens) -> ParsedMarkdown {
     #[cfg(test)]
     PARSE_MARKDOWN_SUBSET_CALLS.with(|calls| calls.set(calls.get() + 1));
     let mut plain = String::with_capacity(content.len());

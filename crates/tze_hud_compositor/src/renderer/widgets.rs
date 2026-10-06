@@ -53,7 +53,7 @@ impl super::Compositor {
     /// re-rasterization to at most once per parameter change during transitions.
     ///
     /// This should be called once per frame before `render_frame`.
-    pub fn sync_widget_textures(
+    pub(crate) fn sync_widget_textures(
         &mut self,
         scene: &SceneGraph,
         degradation_level: DegradationLevel,
