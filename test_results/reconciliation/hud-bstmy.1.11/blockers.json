@@ -1,0 +1,11 @@
+[
+  {
+    "title": "Coverage gaps remain: dev-mode weak-forwarding guard false negative",
+    "type": "bug",
+    "priority": 2,
+    "depends_on": "hud-bstmy.1.14",
+    "rationale": "Required default-build exclusion guard accepts actual Cargo dev-mode in one allowed feature ordering. Evidence-only PR does not fix it.",
+    "unblock_condition": "hud-bstmy.1.14 repair merges; hud-bstmy.1.15 terminalgen3 verifies all original/current coverage; authoritative durable report merge confirmed. Coverage gaps remain; coordinator alone closes lifecycle.",
+    "existing_gen3": "hud-bstmy.1.15"
+  }
+]

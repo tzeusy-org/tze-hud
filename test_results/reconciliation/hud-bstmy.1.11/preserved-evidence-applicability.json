@@ -1,0 +1,159 @@
+[
+  {
+    "issue": "hud-bstmy.1.12",
+    "evidence_head": "e6628b377d18e281169792a24eebb6d74f5711df",
+    "audit_head": "8dccb4cfbe1e452eac227a67f60c5c2775c89c19",
+    "scope_blob_comparison": [
+      {
+        "file": "crates/tze_hud_runtime/src/test_support.rs",
+        "preserved_blob": "8fe15652d351109527ca0e6ad7e1ddcb70ecf181",
+        "audit_blob": "9da33ab8106eb973eb619d95756684f9b24c040e",
+        "identical": false
+      },
+      {
+        "file": "crates/tze_hud_runtime/src/headless.rs",
+        "preserved_blob": "ae2aa8933d05779ceb9fffcc56bc72488cceb9ed",
+        "audit_blob": "ae2aa8933d05779ceb9fffcc56bc72488cceb9ed",
+        "identical": true
+      },
+      {
+        "file": "tests/integration/common/mod.rs",
+        "preserved_blob": "e0d027638aac07abf373ae16a79aa5f13acd7811",
+        "audit_blob": "e0d027638aac07abf373ae16a79aa5f13acd7811",
+        "identical": true
+      },
+      {
+        "file": "tests/integration/multi_agent.rs",
+        "preserved_blob": "aa913bcd22ab2b1f2eb5ea5cd4ba7bc5b7ab99dd",
+        "audit_blob": "aa913bcd22ab2b1f2eb5ea5cd4ba7bc5b7ab99dd",
+        "identical": true
+      },
+      {
+        "file": "tests/integration/subtitle_streaming.rs",
+        "preserved_blob": "9ea2d874ed7168adaf4d13628d9c9227f0f75f07",
+        "audit_blob": "9ea2d874ed7168adaf4d13628d9c9227f0f75f07",
+        "identical": true
+      },
+      {
+        "file": "tests/integration/text_stream_portal_adapter.rs",
+        "preserved_blob": "bc4b1e60efee227ad517d2b0e4cde4e2d37dc157",
+        "audit_blob": "bc4b1e60efee227ad517d2b0e4cde4e2d37dc157",
+        "identical": true
+      },
+      {
+        "file": "tests/integration/text_stream_portal_cadence.rs",
+        "preserved_blob": "834f0a479d8c61f4a5afffc3c5348f76c46a65eb",
+        "audit_blob": "834f0a479d8c61f4a5afffc3c5348f76c46a65eb",
+        "identical": true
+      },
+      {
+        "file": "examples/vertical_slice/src/main.rs",
+        "preserved_blob": "c22431459d561f7afa8ba3bbe7546a486c4f7ef3",
+        "audit_blob": "c22431459d561f7afa8ba3bbe7546a486c4f7ef3",
+        "identical": true
+      },
+      {
+        "file": "examples/vertical_slice/tests/budget_assertions.rs",
+        "preserved_blob": "5408e37f8fdaf6fb0fc74858c237bde434405227",
+        "audit_blob": "5408e37f8fdaf6fb0fc74858c237bde434405227",
+        "identical": true
+      },
+      {
+        "file": "crates/tze_hud_runtime/tests/present_ack.rs",
+        "preserved_blob": "5b30be217fdeddbc15e6236b773d32e672d0e151",
+        "audit_blob": "5b30be217fdeddbc15e6236b773d32e672d0e151",
+        "identical": true
+      }
+    ],
+    "all_scope_blobs_identical": false,
+    "full_ci_inherited": false,
+    "changed_since_evidence": [
+      "AGENTS.md",
+      "Cargo.lock",
+      "app/tze_hud_app/tests/production_boot.rs",
+      "crates/tze_hud_config/src/raw.rs",
+      "crates/tze_hud_config/src/tests.rs",
+      "crates/tze_hud_config/src/validate.rs",
+      "crates/tze_hud_protocol/src/auth.rs",
+      "crates/tze_hud_protocol/src/session_server/handshake.rs",
+      "crates/tze_hud_protocol/src/session_server/mod.rs",
+      "crates/tze_hud_protocol/src/session_server/tests/session_handshake.rs",
+      "crates/tze_hud_resource/Cargo.toml",
+      "crates/tze_hud_resource/src/dedup.rs",
+      "crates/tze_hud_resource/src/lib.rs",
+      "crates/tze_hud_resource/src/runtime_widget_store.rs",
+      "crates/tze_hud_resource/src/upload.rs",
+      "crates/tze_hud_resource/src/validation.rs",
+      "crates/tze_hud_runtime/src/test_support.rs",
+      "test_results/reconciliation/hud-bstmy.2.6/artifact-validation.json",
+      "test_results/reconciliation/hud-bstmy.2.6/blockers.json",
+      "test_results/reconciliation/hud-bstmy.2.6/dead-code-protocol.log",
+      "test_results/reconciliation/hud-bstmy.2.6/dead-code-resource.log",
+      "test_results/reconciliation/hud-bstmy.2.6/dead-code-scene.log",
+      "test_results/reconciliation/hud-bstmy.2.6/dead-code-tool-tests.log",
+      "test_results/reconciliation/hud-bstmy.2.6/deletion-checks.json",
+      "test_results/reconciliation/hud-bstmy.2.6/focused-tests.log",
+      "test_results/reconciliation/hud-bstmy.2.6/follow-ups.json",
+      "test_results/reconciliation/hud-bstmy.2.6/invariant-test-inventory.json",
+      "test_results/reconciliation/hud-bstmy.2.6/operation-path-inventory.json",
+      "test_results/reconciliation/hud-bstmy.2.6/remaining-symbol-references.json",
+      "test_results/reconciliation/hud-bstmy.2.6/report.md",
+      "test_results/reconciliation/hud-bstmy.2.6/scan-instrument-probe.json"
+    ],
+    "reason": "Scope-specific guard/caller regression and repeated initialization evidence may transfer only to identical bodies; changed dependencies/main surfaces mean the old integrated CI is not an exact-head current whole-workspace proof.",
+    "helper_executable_tail_raw_identical": true,
+    "helper_changed_header_only": true,
+    "transfer_limit": "Admission/release behavior and unchanged caller bodies only. Header docs changed under .1.13. Current independent regression plus current integration/GPU/full CI are separately executed; no inheritance of changed dependency behavior."
+  },
+  {
+    "issue": "hud-bstmy.1.13",
+    "evidence_head": "ccb7e2133bc0caf86be17d0f8c26588a5f977e48",
+    "audit_head": "8dccb4cfbe1e452eac227a67f60c5c2775c89c19",
+    "scope_blob_comparison": [
+      {
+        "file": "crates/tze_hud_runtime/src/test_support.rs",
+        "preserved_blob": "9da33ab8106eb973eb619d95756684f9b24c040e",
+        "audit_blob": "9da33ab8106eb973eb619d95756684f9b24c040e",
+        "identical": true
+      },
+      {
+        "file": "crates/tze_hud_runtime/src/headless.rs",
+        "preserved_blob": "ae2aa8933d05779ceb9fffcc56bc72488cceb9ed",
+        "audit_blob": "ae2aa8933d05779ceb9fffcc56bc72488cceb9ed",
+        "identical": true
+      },
+      {
+        "file": "app/tze_hud_app/tests/production_boot.rs",
+        "preserved_blob": "88bb995b3f29509cb54a74f331c4449c8a7fbbfc",
+        "audit_blob": "88bb995b3f29509cb54a74f331c4449c8a7fbbfc",
+        "identical": true
+      },
+      {
+        "file": "app/tze_hud_app/tests/benchmark_config_schema.rs",
+        "preserved_blob": "8986f17d1d47beab2214e00b0678a4b5cd97f890",
+        "audit_blob": "8986f17d1d47beab2214e00b0678a4b5cd97f890",
+        "identical": true
+      }
+    ],
+    "all_scope_blobs_identical": true,
+    "full_ci_inherited": false,
+    "changed_since_evidence": [
+      "AGENTS.md",
+      "Cargo.lock",
+      "crates/tze_hud_config/src/raw.rs",
+      "crates/tze_hud_config/src/tests.rs",
+      "crates/tze_hud_config/src/validate.rs",
+      "crates/tze_hud_protocol/src/auth.rs",
+      "crates/tze_hud_protocol/src/session_server/handshake.rs",
+      "crates/tze_hud_protocol/src/session_server/mod.rs",
+      "crates/tze_hud_protocol/src/session_server/tests/session_handshake.rs",
+      "crates/tze_hud_resource/Cargo.toml",
+      "crates/tze_hud_resource/src/dedup.rs",
+      "crates/tze_hud_resource/src/lib.rs",
+      "crates/tze_hud_resource/src/runtime_widget_store.rs",
+      "crates/tze_hud_resource/src/upload.rs",
+      "crates/tze_hud_resource/src/validation.rs"
+    ],
+    "reason": "Scope-specific guard/caller regression and repeated initialization evidence may transfer only to identical bodies; changed dependencies/main surfaces mean the old integrated CI is not an exact-head current whole-workspace proof."
+  }
+]

@@ -1,0 +1,108 @@
+{
+  "execution_head": "8dccb4cfbe1e452eac227a67f60c5c2775c89c19",
+  "audit_head": "3b5bbb634a7dc6d8a8c9e40f585e5b1868cfb528",
+  "merged_pr": 1360,
+  "changed_paths": [
+    "crates/tze_hud_protocol/src/auth.rs",
+    "crates/tze_hud_protocol/src/convert.rs",
+    "crates/tze_hud_protocol/src/lib.rs",
+    "crates/tze_hud_protocol/src/session.rs",
+    "crates/tze_hud_protocol/src/session_server/lifecycle.rs",
+    "crates/tze_hud_protocol/src/session_server/mod.rs",
+    "crates/tze_hud_protocol/src/session_server/service.rs",
+    "crates/tze_hud_protocol/src/subscriptions.rs",
+    "crates/tze_hud_protocol/src/token.rs",
+    "crates/tze_hud_protocol/tests/capability_gating.rs",
+    "crates/tze_hud_runtime/Cargo.toml"
+  ],
+  "changed_assessment": "20 protocol helper visibility/deletion groups,11 implementation-only tests removed, runtime test-harness strongly forwards protocol/dev-mode; no default feature addition. Read diff and refreshed source metadata; no weak ?/ declaration in current manifests.",
+  "fresh_source_inventory": [
+    "gpu-source-instrument-inventory.json",
+    "default-feature-closure-inventory.json",
+    "invariant-test-inventory.json",
+    "historical-split-validation.json"
+  ],
+  "blobs": [
+    {
+      "file": "scripts/ci/check_dev_mode_defaults.py",
+      "execution_blob": "cd826ea66a37402d43fa7e1d94bdf858a0133e2f",
+      "audit_blob": "cd826ea66a37402d43fa7e1d94bdf858a0133e2f",
+      "identical": true
+    },
+    {
+      "file": "scripts/ci/test_check_dev_mode_defaults.py",
+      "execution_blob": "9596510fe225e2316efc0fd179bfc47a8e9882ab",
+      "audit_blob": "9596510fe225e2316efc0fd179bfc47a8e9882ab",
+      "identical": true
+    },
+    {
+      "file": "justfile",
+      "execution_blob": "6e5b5f3fc2829056209109444fa9af8ca18cb73d",
+      "audit_blob": "6e5b5f3fc2829056209109444fa9af8ca18cb73d",
+      "identical": true
+    },
+    {
+      "file": ".github/workflows/ci.yml",
+      "execution_blob": "41e6e11cf33a50e90fb072ebd920eb67d3f45d60",
+      "audit_blob": "41e6e11cf33a50e90fb072ebd920eb67d3f45d60",
+      "identical": true
+    },
+    {
+      "file": "docs/invariants.md",
+      "execution_blob": "ad97e9eef7312783439129eee74d1e56e316061b",
+      "audit_blob": "ad97e9eef7312783439129eee74d1e56e316061b",
+      "identical": true
+    },
+    {
+      "file": "Cargo.lock",
+      "execution_blob": "8b9d26d5c690231da9017091f01d74e76ddc6025",
+      "audit_blob": "8b9d26d5c690231da9017091f01d74e76ddc6025",
+      "identical": true
+    },
+    {
+      "file": "crates/tze_hud_runtime/src/test_support.rs",
+      "execution_blob": "9da33ab8106eb973eb619d95756684f9b24c040e",
+      "audit_blob": "9da33ab8106eb973eb619d95756684f9b24c040e",
+      "identical": true
+    },
+    {
+      "file": "crates/tze_hud_runtime/src/headless.rs",
+      "execution_blob": "ae2aa8933d05779ceb9fffcc56bc72488cceb9ed",
+      "audit_blob": "ae2aa8933d05779ceb9fffcc56bc72488cceb9ed",
+      "identical": true
+    },
+    {
+      "file": "crates/tze_hud_runtime/tests/pixel_helpers.rs",
+      "execution_blob": "b37e7b45b107837b2cafa62f5d5b38b2825ae5e1",
+      "audit_blob": "b37e7b45b107837b2cafa62f5d5b38b2825ae5e1",
+      "identical": true
+    },
+    {
+      "file": "crates/tze_hud_runtime/tests/present_ack.rs",
+      "execution_blob": "5b30be217fdeddbc15e6236b773d32e672d0e151",
+      "audit_blob": "5b30be217fdeddbc15e6236b773d32e672d0e151",
+      "identical": true
+    },
+    {
+      "file": "examples/vertical_slice/tests/budget_assertions.rs",
+      "execution_blob": "5408e37f8fdaf6fb0fc74858c237bde434405227",
+      "audit_blob": "5408e37f8fdaf6fb0fc74858c237bde434405227",
+      "identical": true
+    },
+    {
+      "file": "examples/vertical_slice/src/main.rs",
+      "execution_blob": "c22431459d561f7afa8ba3bbe7546a486c4f7ef3",
+      "audit_blob": "c22431459d561f7afa8ba3bbe7546a486c4f7ef3",
+      "identical": true
+    },
+    {
+      "file": "app/tze_hud_app/tests/production_boot.rs",
+      "execution_blob": "88bb995b3f29509cb54a74f331c4449c8a7fbbfc",
+      "audit_blob": "88bb995b3f29509cb54a74f331c4449c8a7fbbfc",
+      "identical": true
+    }
+  ],
+  "named_test_definition_files_unchanged": true,
+  "expensive_evidence_limit": "Old whole-CI run is ONLY8dcc. Unchanged GPU guard/caller/gate source and unchanged named tests support scoped proof reuse; new protocol/cfg owner and manifest paths require separately listed3b focused execution. No old run is relabeled3b.",
+  "refresh_commands": "refresh-verification-results.json"
+}

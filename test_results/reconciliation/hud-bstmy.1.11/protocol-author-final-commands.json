@@ -1,0 +1,58 @@
+[
+  {
+    "command": "cargo check -p tze_hud_protocol --lib",
+    "head": "1d94fc9553423ddf20fc242865f681014db333f7",
+    "started_utc": "2026-10-06T03:29:30.620271+00:00",
+    "finished_utc": "2026-10-06T03:29:32.222358+00:00",
+    "elapsed_s": 1.602,
+    "exit_code": 0,
+    "log": "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.2.8/.handoff/hud-bstmy.2.8/final-production-protocol.log",
+    "environment": {
+      "CARGO_BUILD_JOBS": "1",
+      "PROTOC": "/usr/bin/protoc",
+      "CARGO_TARGET_DIR": "/home/orca/orca/projects/tze-hud/target"
+    }
+  },
+  {
+    "command": "cargo check -p tze_hud_app --bins",
+    "head": "1d94fc9553423ddf20fc242865f681014db333f7",
+    "started_utc": "2026-10-06T03:29:32.222684+00:00",
+    "finished_utc": "2026-10-06T03:29:37.389684+00:00",
+    "elapsed_s": 5.167,
+    "exit_code": 0,
+    "log": "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.2.8/.handoff/hud-bstmy.2.8/final-production-app.log",
+    "environment": {
+      "CARGO_BUILD_JOBS": "1",
+      "PROTOC": "/usr/bin/protoc",
+      "CARGO_TARGET_DIR": "/home/orca/orca/projects/tze-hud/target"
+    }
+  },
+  {
+    "command": "cargo check -p tze_hud_runtime --features test-harness --lib",
+    "head": "1d94fc9553423ddf20fc242865f681014db333f7",
+    "started_utc": "2026-10-06T03:29:37.390100+00:00",
+    "finished_utc": "2026-10-06T03:29:42.339977+00:00",
+    "elapsed_s": 4.95,
+    "exit_code": 0,
+    "log": "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.2.8/.handoff/hud-bstmy.2.8/final-runtime-test-harness.log",
+    "environment": {
+      "CARGO_BUILD_JOBS": "1",
+      "PROTOC": "/usr/bin/protoc",
+      "CARGO_TARGET_DIR": "/home/orca/orca/projects/tze-hud/target"
+    }
+  },
+  {
+    "command": "just ci",
+    "head": "1d94fc9553423ddf20fc242865f681014db333f7",
+    "started_utc": "2026-10-06T03:29:42.340334+00:00",
+    "finished_utc": "2026-10-06T03:40:08.356596+00:00",
+    "elapsed_s": 626.019,
+    "exit_code": 0,
+    "log": "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.2.8/.handoff/hud-bstmy.2.8/full-ci.log",
+    "environment": {
+      "CARGO_BUILD_JOBS": "1",
+      "PROTOC": "/usr/bin/protoc",
+      "CARGO_TARGET_DIR": "/home/orca/orca/projects/tze-hud/target"
+    }
+  }
+]

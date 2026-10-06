@@ -1,0 +1,51 @@
+{
+  "head": "8dccb4cfbe1e452eac227a67f60c5c2775c89c19",
+  "guard_file": "scripts/ci/check_dev_mode_defaults.py",
+  "cases": [
+    {
+      "default_order": [
+        "activate",
+        "forward"
+      ],
+      "dependency_alias": "rt",
+      "weak_forward": "rt?/dev-mode",
+      "cargo_resolved_runtime_features": [
+        "dev-mode"
+      ],
+      "guard_exit": 0,
+      "guard_stdout": "PASS: dev-mode is not enabled by default for tze_hud_app (shipped binary)\nPASS: dev-mode is not enabled by default for tze_hud_runtime\n",
+      "expected_guard_exit": 1,
+      "counterexample": true
+    },
+    {
+      "default_order": [
+        "forward",
+        "activate"
+      ],
+      "dependency_alias": "rt",
+      "weak_forward": "rt?/dev-mode",
+      "cargo_resolved_runtime_features": [
+        "dev-mode"
+      ],
+      "guard_exit": 1,
+      "guard_stdout": "FAIL: dev-mode is enabled by default for tze_hud_app (shipped binary) on: tze_hud_runtime\nPASS: dev-mode is not enabled by default for tze_hud_runtime\n",
+      "expected_guard_exit": 1,
+      "counterexample": false
+    }
+  ],
+  "scratch_only": true,
+  "source_edits": 0,
+  "tests_added": 0,
+  "source_blob": "cd826ea66a37402d43fa7e1d94bdf858a0133e2f",
+  "applicable_at_audit_head": "3b5bbb634a7dc6d8a8c9e40f585e5b1868cfb528",
+  "manifests": {
+    "Cargo.toml": "[workspace]\nmembers=[\"app\",\"runtime\"]\nresolver=\"2\"\n",
+    "app/Cargo.toml": "[package]\nname=\"tze_hud_app\"\nversion=\"0.1.0\"\nedition=\"2024\"\n[dependencies]\nrt={package=\"tze_hud_runtime\",path=\"../runtime\",optional=true,default-features=false}\n[features]\ndefault=[\"forward\", \"activate\"]\nactivate=[\"dep:rt\"]\nforward=[\"rt?/dev-mode\"]\n",
+    "runtime/Cargo.toml": "[package]\nname=\"tze_hud_runtime\"\nversion=\"0.1.0\"\nedition=\"2024\"\n[features]\ndev-mode=[]\n"
+  },
+  "reproduction": [
+    "Create isolated two-package workspace from embedded manifests and empty source files; no repository manifest changes.",
+    "cargo metadata --offline --format-version 1: resolve runtime dev-mode enabled for BOTH default arrays.",
+    "cargo metadata --offline --format-version 1 --no-deps | python3 <repo>/scripts/ci/check_dev_mode_defaults.py: expected1 both; observed0 for activate,forward and1 reversed."
+  ]
+}

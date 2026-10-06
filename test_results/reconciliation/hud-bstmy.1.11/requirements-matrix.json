@@ -1,0 +1,1395 @@
+{
+  "audit_head": "3b5bbb634a7dc6d8a8c9e40f585e5b1868cfb528",
+  "execution_head_full_sweep": "8dccb4cfbe1e452eac227a67f60c5c2775c89c19",
+  "verdict": "partial",
+  "original_criteria_count": 38,
+  "areas": {
+    "A": {
+      "implementing_beads": [
+        "hud-bstmy.1.1",
+        ".1.8",
+        ".1.12",
+        ".1.13"
+      ],
+      "code": [
+        "justfile:42",
+        "crates/tze_hud_runtime/src/test_support.rs:25",
+        "crates/tze_hud_compositor/tests/common/mod.rs:20",
+        "gpu-path-classification.json"
+      ],
+      "gate_species": "Existing actual GPU render/readback/lifecycle plus deterministic wrapper admission/release regression",
+      "evidence": [
+        "gpu-source-instrument-inventory.json",
+        "recipe-dry-run-inventory.json",
+        "verification-results.json",
+        "preserved-evidence-applicability.json"
+      ],
+      "classification": "implemented"
+    },
+    "B": {
+      "implementing_beads": [
+        "hud-bstmy.1.2",
+        ".1.9",
+        ".1.10"
+      ],
+      "code": [
+        "justfile:103",
+        "justfile:109",
+        "justfile:118",
+        "justfile:232",
+        ".github/workflows/ci.yml"
+      ],
+      "gate_species": "Existing integration/Python/token/boot behavior and type/lint/tool contract",
+      "evidence": [
+        "ci-parity-matrix.json",
+        "python-discovery-inventory.json",
+        "verification-results.json",
+        "exact-main-ci-job-evidence.json"
+      ],
+      "classification": "implemented with disclosed local pwsh limitation; exact8dcc remote contract proof"
+    },
+    "C": {
+      "implementing_beads": [
+        "hud-bstmy.1.3",
+        ".1.7"
+      ],
+      "code": [
+        "scripts/ci/check_dev_mode_defaults.py:60",
+        "scripts/ci/check_dev_mode_defaults.py:106",
+        ".github/workflows/ci.yml:435"
+      ],
+      "gate_species": "Existing metadata-fixture guard CLI behavior, actual Cargo metadata oracle",
+      "evidence": [
+        "guard-instrument-matrix.json",
+        "default-feature-closure-inventory.json",
+        "weak-feature-counterexample.json"
+      ],
+      "classification": "partial"
+    },
+    "D": {
+      "implementing_beads": [
+        "hud-bstmy.1.4",
+        ".1.5"
+      ],
+      "code": [
+        "crates/tze_hud_compositor/src/renderer/tests/mod.rs",
+        "crates/tze_hud_protocol/src/session_server/tests/mod.rs",
+        "docs/invariants.md:1"
+      ],
+      "gate_species": "Historical pure-move body/count comparison and retained current contract behavior suites",
+      "evidence": [
+        "historical-split-validation.json",
+        "original-compositor-275-history.json",
+        "invariant-test-inventory.json",
+        "invariant-contract-matrix.json"
+      ],
+      "classification": "implemented"
+    },
+    "E": {
+      "implementing_beads": [
+        "hud-bstmy.8.6 statusquo",
+        ".1.9"
+      ],
+      "code": [
+        ".github/workflows/ci.yml:493",
+        ".github/workflows/ci.yml:503"
+      ],
+      "gate_species": "Read-only owner-answer/ruleset assessment; blocking unit pixel behavior",
+      "evidence": [
+        "criteria-snapshot.json",
+        "required-main-rules.json",
+        "exact-main-ci-runs.json"
+      ],
+      "classification": "implemented"
+    }
+  },
+  "criteria": [
+    {
+      "criterion": "hud-bstmy.1.1:AC1",
+      "requirement": "`cargo fmt --all --check` is clean.",
+      "area": "A",
+      "implementing_beads": [
+        "hud-bstmy.1.1",
+        ".1.8",
+        ".1.12",
+        ".1.13"
+      ],
+      "code": [
+        "justfile:42",
+        "crates/tze_hud_runtime/src/test_support.rs:25",
+        "crates/tze_hud_compositor/tests/common/mod.rs:20",
+        "gpu-path-classification.json"
+      ],
+      "gate_species": "Existing actual GPU render/readback/lifecycle plus deterministic wrapper admission/release regression",
+      "evidence": [
+        "gpu-source-instrument-inventory.json",
+        "recipe-dry-run-inventory.json",
+        "verification-results.json",
+        "preserved-evidence-applicability.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Complete area inventory/code assessment and command-head-specific verification establish this row; tool/platform limits stay explicit, not assumed pass."
+    },
+    {
+      "criterion": "hud-bstmy.1.1:AC2",
+      "requirement": "`cargo clippy --workspace --all-targets -- -D warnings` is clean.",
+      "area": "A",
+      "implementing_beads": [
+        "hud-bstmy.1.1",
+        ".1.8",
+        ".1.12",
+        ".1.13"
+      ],
+      "code": [
+        "justfile:42",
+        "crates/tze_hud_runtime/src/test_support.rs:25",
+        "crates/tze_hud_compositor/tests/common/mod.rs:20",
+        "gpu-path-classification.json"
+      ],
+      "gate_species": "Existing actual GPU render/readback/lifecycle plus deterministic wrapper admission/release regression",
+      "evidence": [
+        "gpu-source-instrument-inventory.json",
+        "recipe-dry-run-inventory.json",
+        "verification-results.json",
+        "preserved-evidence-applicability.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Complete area inventory/code assessment and command-head-specific verification establish this row; tool/platform limits stay explicit, not assumed pass."
+    },
+    {
+      "criterion": "hud-bstmy.1.1:AC3",
+      "requirement": "`just test-gpu` passes twice in a row on this host, each run under 15 minutes, with TZE_HUD_REQUIRE_GPU=1 (GPU tests actually run, not skipped).",
+      "area": "A",
+      "implementing_beads": [
+        "hud-bstmy.1.1",
+        ".1.8",
+        ".1.12",
+        ".1.13"
+      ],
+      "code": [
+        "justfile:42",
+        "crates/tze_hud_runtime/src/test_support.rs:25",
+        "crates/tze_hud_compositor/tests/common/mod.rs:20",
+        "gpu-path-classification.json"
+      ],
+      "gate_species": "Existing actual GPU render/readback/lifecycle plus deterministic wrapper admission/release regression",
+      "evidence": [
+        "gpu-source-instrument-inventory.json",
+        "recipe-dry-run-inventory.json",
+        "verification-results.json",
+        "preserved-evidence-applicability.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Complete area inventory/code assessment and command-head-specific verification establish this row; tool/platform limits stay explicit, not assumed pass."
+    },
+    {
+      "criterion": "hud-bstmy.1.1:AC4",
+      "requirement": "`grep -rn 'tze_hud_compositor --test pixel_readback\\|test-gpu-pixel-readback' justfile AGENTS.md CLAUDE.md README.md` prints nothing.",
+      "area": "A",
+      "implementing_beads": [
+        "hud-bstmy.1.1",
+        ".1.8",
+        ".1.12",
+        ".1.13"
+      ],
+      "code": [
+        "justfile:42",
+        "crates/tze_hud_runtime/src/test_support.rs:25",
+        "crates/tze_hud_compositor/tests/common/mod.rs:20",
+        "gpu-path-classification.json"
+      ],
+      "gate_species": "Existing actual GPU render/readback/lifecycle plus deterministic wrapper admission/release regression",
+      "evidence": [
+        "gpu-source-instrument-inventory.json",
+        "recipe-dry-run-inventory.json",
+        "verification-results.json",
+        "preserved-evidence-applicability.json"
+      ],
+      "classification": "deviates",
+      "assessment": "Literal overbroad grep finds legitimate CI job name in parity exclusion comment; obsolete local recipe/wrong package target absent. Preserve original row, contextualize using .1.9/.1.10 authority, no invented code gap."
+    },
+    {
+      "criterion": "hud-bstmy.1.1:AC5",
+      "requirement": "CLAUDE.md and AGENTS.md no longer say compositor tests deadlock bare; they point at `just test-gpu`.",
+      "area": "A",
+      "implementing_beads": [
+        "hud-bstmy.1.1",
+        ".1.8",
+        ".1.12",
+        ".1.13"
+      ],
+      "code": [
+        "justfile:42",
+        "crates/tze_hud_runtime/src/test_support.rs:25",
+        "crates/tze_hud_compositor/tests/common/mod.rs:20",
+        "gpu-path-classification.json"
+      ],
+      "gate_species": "Existing actual GPU render/readback/lifecycle plus deterministic wrapper admission/release regression",
+      "evidence": [
+        "gpu-source-instrument-inventory.json",
+        "recipe-dry-run-inventory.json",
+        "verification-results.json",
+        "preserved-evidence-applicability.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Complete area inventory/code assessment and command-head-specific verification establish this row; tool/platform limits stay explicit, not assumed pass."
+    },
+    {
+      "criterion": "hud-bstmy.1.1:AC6",
+      "requirement": "Every test named in docs/invariants.md still exists (grep each name) or docs/invariants.md was updated in the same PR.",
+      "area": "A",
+      "implementing_beads": [
+        "hud-bstmy.1.1",
+        ".1.8",
+        ".1.12",
+        ".1.13"
+      ],
+      "code": [
+        "justfile:42",
+        "crates/tze_hud_runtime/src/test_support.rs:25",
+        "crates/tze_hud_compositor/tests/common/mod.rs:20",
+        "gpu-path-classification.json"
+      ],
+      "gate_species": "Existing actual GPU render/readback/lifecycle plus deterministic wrapper admission/release regression",
+      "evidence": [
+        "gpu-source-instrument-inventory.json",
+        "recipe-dry-run-inventory.json",
+        "verification-results.json",
+        "preserved-evidence-applicability.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Complete area inventory/code assessment and command-head-specific verification establish this row; tool/platform limits stay explicit, not assumed pass."
+    },
+    {
+      "criterion": "hud-bstmy.1.1:AC7",
+      "requirement": "`just ci` is green once before handoff.",
+      "area": "A",
+      "implementing_beads": [
+        "hud-bstmy.1.1",
+        ".1.8",
+        ".1.12",
+        ".1.13"
+      ],
+      "code": [
+        "justfile:42",
+        "crates/tze_hud_runtime/src/test_support.rs:25",
+        "crates/tze_hud_compositor/tests/common/mod.rs:20",
+        "gpu-path-classification.json"
+      ],
+      "gate_species": "Existing actual GPU render/readback/lifecycle plus deterministic wrapper admission/release regression",
+      "evidence": [
+        "gpu-source-instrument-inventory.json",
+        "recipe-dry-run-inventory.json",
+        "verification-results.json",
+        "preserved-evidence-applicability.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Complete area inventory/code assessment and command-head-specific verification establish this row; tool/platform limits stay explicit, not assumed pass."
+    },
+    {
+      "criterion": "hud-bstmy.1.2:AC1",
+      "requirement": "`cargo fmt --all --check` is clean.",
+      "area": "B",
+      "implementing_beads": [
+        "hud-bstmy.1.2",
+        ".1.9",
+        ".1.10"
+      ],
+      "code": [
+        "justfile:103",
+        "justfile:109",
+        "justfile:118",
+        "justfile:232",
+        ".github/workflows/ci.yml"
+      ],
+      "gate_species": "Existing integration/Python/token/boot behavior and type/lint/tool contract",
+      "evidence": [
+        "ci-parity-matrix.json",
+        "python-discovery-inventory.json",
+        "verification-results.json",
+        "exact-main-ci-job-evidence.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Complete area inventory/code assessment and command-head-specific verification establish this row; tool/platform limits stay explicit, not assumed pass."
+    },
+    {
+      "criterion": "hud-bstmy.1.2:AC2",
+      "requirement": "`cargo clippy --workspace --all-targets -- -D warnings` is clean.",
+      "area": "B",
+      "implementing_beads": [
+        "hud-bstmy.1.2",
+        ".1.9",
+        ".1.10"
+      ],
+      "code": [
+        "justfile:103",
+        "justfile:109",
+        "justfile:118",
+        "justfile:232",
+        ".github/workflows/ci.yml"
+      ],
+      "gate_species": "Existing integration/Python/token/boot behavior and type/lint/tool contract",
+      "evidence": [
+        "ci-parity-matrix.json",
+        "python-discovery-inventory.json",
+        "verification-results.json",
+        "exact-main-ci-job-evidence.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Complete area inventory/code assessment and command-head-specific verification establish this row; tool/platform limits stay explicit, not assumed pass."
+    },
+    {
+      "criterion": "hud-bstmy.1.2:AC3",
+      "requirement": "`cargo test -p integration` passes (quiet).",
+      "area": "B",
+      "implementing_beads": [
+        "hud-bstmy.1.2",
+        ".1.9",
+        ".1.10"
+      ],
+      "code": [
+        "justfile:103",
+        "justfile:109",
+        "justfile:118",
+        "justfile:232",
+        ".github/workflows/ci.yml"
+      ],
+      "gate_species": "Existing integration/Python/token/boot behavior and type/lint/tool contract",
+      "evidence": [
+        "ci-parity-matrix.json",
+        "python-discovery-inventory.json",
+        "verification-results.json",
+        "exact-main-ci-job-evidence.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Complete area inventory/code assessment and command-head-specific verification establish this row; tool/platform limits stay explicit, not assumed pass."
+    },
+    {
+      "criterion": "hud-bstmy.1.2:AC4",
+      "requirement": "`just test-python` and `just token-footprint` pass.",
+      "area": "B",
+      "implementing_beads": [
+        "hud-bstmy.1.2",
+        ".1.9",
+        ".1.10"
+      ],
+      "code": [
+        "justfile:103",
+        "justfile:109",
+        "justfile:118",
+        "justfile:232",
+        ".github/workflows/ci.yml"
+      ],
+      "gate_species": "Existing integration/Python/token/boot behavior and type/lint/tool contract",
+      "evidence": [
+        "ci-parity-matrix.json",
+        "python-discovery-inventory.json",
+        "verification-results.json",
+        "exact-main-ci-job-evidence.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Complete area inventory/code assessment and command-head-specific verification establish this row; tool/platform limits stay explicit, not assumed pass."
+    },
+    {
+      "criterion": "hud-bstmy.1.2:AC5",
+      "requirement": "`just --dry-run ci` lists test-python and token-footprint; every `--test` target named in ci.yml's integration step is covered by `just test-integration`.",
+      "area": "B",
+      "implementing_beads": [
+        "hud-bstmy.1.2",
+        ".1.9",
+        ".1.10"
+      ],
+      "code": [
+        "justfile:103",
+        "justfile:109",
+        "justfile:118",
+        "justfile:232",
+        ".github/workflows/ci.yml"
+      ],
+      "gate_species": "Existing integration/Python/token/boot behavior and type/lint/tool contract",
+      "evidence": [
+        "ci-parity-matrix.json",
+        "python-discovery-inventory.json",
+        "verification-results.json",
+        "exact-main-ci-job-evidence.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Complete area inventory/code assessment and command-head-specific verification establish this row; tool/platform limits stay explicit, not assumed pass."
+    },
+    {
+      "criterion": "hud-bstmy.1.2:AC6",
+      "requirement": "Each of the six scripts/ci/test_*.py listed in the design either runs in CI and `just test-python` or is deleted with its subject.",
+      "area": "B",
+      "implementing_beads": [
+        "hud-bstmy.1.2",
+        ".1.9",
+        ".1.10"
+      ],
+      "code": [
+        "justfile:103",
+        "justfile:109",
+        "justfile:118",
+        "justfile:232",
+        ".github/workflows/ci.yml"
+      ],
+      "gate_species": "Existing integration/Python/token/boot behavior and type/lint/tool contract",
+      "evidence": [
+        "ci-parity-matrix.json",
+        "python-discovery-inventory.json",
+        "verification-results.json",
+        "exact-main-ci-job-evidence.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Complete area inventory/code assessment and command-head-specific verification establish this row; tool/platform limits stay explicit, not assumed pass."
+    },
+    {
+      "criterion": "hud-bstmy.1.2:AC7",
+      "requirement": "Every test named in docs/invariants.md still exists (grep each name) or docs/invariants.md was updated in the same PR.",
+      "area": "B",
+      "implementing_beads": [
+        "hud-bstmy.1.2",
+        ".1.9",
+        ".1.10"
+      ],
+      "code": [
+        "justfile:103",
+        "justfile:109",
+        "justfile:118",
+        "justfile:232",
+        ".github/workflows/ci.yml"
+      ],
+      "gate_species": "Existing integration/Python/token/boot behavior and type/lint/tool contract",
+      "evidence": [
+        "ci-parity-matrix.json",
+        "python-discovery-inventory.json",
+        "verification-results.json",
+        "exact-main-ci-job-evidence.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Complete area inventory/code assessment and command-head-specific verification establish this row; tool/platform limits stay explicit, not assumed pass."
+    },
+    {
+      "criterion": "hud-bstmy.1.2:AC8",
+      "requirement": "`just ci` is green once before handoff.",
+      "area": "B",
+      "implementing_beads": [
+        "hud-bstmy.1.2",
+        ".1.9",
+        ".1.10"
+      ],
+      "code": [
+        "justfile:103",
+        "justfile:109",
+        "justfile:118",
+        "justfile:232",
+        ".github/workflows/ci.yml"
+      ],
+      "gate_species": "Existing integration/Python/token/boot behavior and type/lint/tool contract",
+      "evidence": [
+        "ci-parity-matrix.json",
+        "python-discovery-inventory.json",
+        "verification-results.json",
+        "exact-main-ci-job-evidence.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Complete area inventory/code assessment and command-head-specific verification establish this row; tool/platform limits stay explicit, not assumed pass."
+    },
+    {
+      "criterion": "hud-bstmy.1.3:AC1",
+      "requirement": "`cargo fmt --all --check` is clean.",
+      "area": "C",
+      "implementing_beads": [
+        "hud-bstmy.1.3",
+        ".1.7"
+      ],
+      "code": [
+        "scripts/ci/check_dev_mode_defaults.py:60",
+        "scripts/ci/check_dev_mode_defaults.py:106",
+        ".github/workflows/ci.yml:435"
+      ],
+      "gate_species": "Existing metadata-fixture guard CLI behavior, actual Cargo metadata oracle",
+      "evidence": [
+        "guard-instrument-matrix.json",
+        "default-feature-closure-inventory.json",
+        "weak-feature-counterexample.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Complete area inventory/code assessment and command-head-specific verification establish this row; tool/platform limits stay explicit, not assumed pass."
+    },
+    {
+      "criterion": "hud-bstmy.1.3:AC2",
+      "requirement": "`cargo clippy --workspace --all-targets -- -D warnings` is clean.",
+      "area": "C",
+      "implementing_beads": [
+        "hud-bstmy.1.3",
+        ".1.7"
+      ],
+      "code": [
+        "scripts/ci/check_dev_mode_defaults.py:60",
+        "scripts/ci/check_dev_mode_defaults.py:106",
+        ".github/workflows/ci.yml:435"
+      ],
+      "gate_species": "Existing metadata-fixture guard CLI behavior, actual Cargo metadata oracle",
+      "evidence": [
+        "guard-instrument-matrix.json",
+        "default-feature-closure-inventory.json",
+        "weak-feature-counterexample.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Complete area inventory/code assessment and command-head-specific verification establish this row; tool/platform limits stay explicit, not assumed pass."
+    },
+    {
+      "criterion": "hud-bstmy.1.3:AC3",
+      "requirement": "`just dev-mode-guard` passes locally and fails when a crate's default features include dev-mode (temporarily edit one Cargo.toml to prove it, then revert).",
+      "area": "C",
+      "implementing_beads": [
+        "hud-bstmy.1.3",
+        ".1.7"
+      ],
+      "code": [
+        "scripts/ci/check_dev_mode_defaults.py:60",
+        "scripts/ci/check_dev_mode_defaults.py:106",
+        ".github/workflows/ci.yml:435"
+      ],
+      "gate_species": "Existing metadata-fixture guard CLI behavior, actual Cargo metadata oracle",
+      "evidence": [
+        "guard-instrument-matrix.json",
+        "default-feature-closure-inventory.json",
+        "weak-feature-counterexample.json"
+      ],
+      "classification": "partial",
+      "assessment": "Listed original mutation cases execute and reject, real defaults pass; universal weak forwarding supported by declared contract has independently proven false-negative ordering."
+    },
+    {
+      "criterion": "hud-bstmy.1.3:AC4",
+      "requirement": "`grep -n 'cargo build --workspace --release\\|dev_mode_not_active_in_release' .github/workflows/ci.yml` prints nothing; the job `name:` is unchanged.",
+      "area": "C",
+      "implementing_beads": [
+        "hud-bstmy.1.3",
+        ".1.7"
+      ],
+      "code": [
+        "scripts/ci/check_dev_mode_defaults.py:60",
+        "scripts/ci/check_dev_mode_defaults.py:106",
+        ".github/workflows/ci.yml:435"
+      ],
+      "gate_species": "Existing metadata-fixture guard CLI behavior, actual Cargo metadata oracle",
+      "evidence": [
+        "guard-instrument-matrix.json",
+        "default-feature-closure-inventory.json",
+        "weak-feature-counterexample.json"
+      ],
+      "classification": "implemented",
+      "assessment": "No redundant LTO command/obsolete reference; required display name unchanged; native Windows owns actual release build."
+    },
+    {
+      "criterion": "hud-bstmy.1.3:AC5",
+      "requirement": "`python3 -c \"import yaml,sys; yaml.safe_load(open('.github/workflows/ci.yml'))\"` succeeds.",
+      "area": "C",
+      "implementing_beads": [
+        "hud-bstmy.1.3",
+        ".1.7"
+      ],
+      "code": [
+        "scripts/ci/check_dev_mode_defaults.py:60",
+        "scripts/ci/check_dev_mode_defaults.py:106",
+        ".github/workflows/ci.yml:435"
+      ],
+      "gate_species": "Existing metadata-fixture guard CLI behavior, actual Cargo metadata oracle",
+      "evidence": [
+        "guard-instrument-matrix.json",
+        "default-feature-closure-inventory.json",
+        "weak-feature-counterexample.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Complete area inventory/code assessment and command-head-specific verification establish this row; tool/platform limits stay explicit, not assumed pass."
+    },
+    {
+      "criterion": "hud-bstmy.1.3:AC6",
+      "requirement": "Every test named in docs/invariants.md still exists (grep each name) or docs/invariants.md was updated in the same PR.",
+      "area": "C",
+      "implementing_beads": [
+        "hud-bstmy.1.3",
+        ".1.7"
+      ],
+      "code": [
+        "scripts/ci/check_dev_mode_defaults.py:60",
+        "scripts/ci/check_dev_mode_defaults.py:106",
+        ".github/workflows/ci.yml:435"
+      ],
+      "gate_species": "Existing metadata-fixture guard CLI behavior, actual Cargo metadata oracle",
+      "evidence": [
+        "guard-instrument-matrix.json",
+        "default-feature-closure-inventory.json",
+        "weak-feature-counterexample.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Complete area inventory/code assessment and command-head-specific verification establish this row; tool/platform limits stay explicit, not assumed pass."
+    },
+    {
+      "criterion": "hud-bstmy.1.3:AC7",
+      "requirement": "`just ci` is green once before handoff.",
+      "area": "C",
+      "implementing_beads": [
+        "hud-bstmy.1.3",
+        ".1.7"
+      ],
+      "code": [
+        "scripts/ci/check_dev_mode_defaults.py:60",
+        "scripts/ci/check_dev_mode_defaults.py:106",
+        ".github/workflows/ci.yml:435"
+      ],
+      "gate_species": "Existing metadata-fixture guard CLI behavior, actual Cargo metadata oracle",
+      "evidence": [
+        "guard-instrument-matrix.json",
+        "default-feature-closure-inventory.json",
+        "weak-feature-counterexample.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Complete area inventory/code assessment and command-head-specific verification establish this row; tool/platform limits stay explicit, not assumed pass."
+    },
+    {
+      "criterion": "hud-bstmy.1.4:AC1",
+      "requirement": "`cargo fmt --all --check` is clean.",
+      "area": "D",
+      "implementing_beads": [
+        "hud-bstmy.1.4",
+        ".1.5"
+      ],
+      "code": [
+        "crates/tze_hud_compositor/src/renderer/tests/mod.rs",
+        "crates/tze_hud_protocol/src/session_server/tests/mod.rs",
+        "docs/invariants.md:1"
+      ],
+      "gate_species": "Historical pure-move body/count comparison and retained current contract behavior suites",
+      "evidence": [
+        "historical-split-validation.json",
+        "original-compositor-275-history.json",
+        "invariant-test-inventory.json",
+        "invariant-contract-matrix.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Delivered split preserved bodies/counts; current monolith absent, modules wired, current invariant definitions attributed and retained; see complete historical/current inventories."
+    },
+    {
+      "criterion": "hud-bstmy.1.4:AC2",
+      "requirement": "`cargo clippy --workspace --all-targets -- -D warnings` is clean.",
+      "area": "D",
+      "implementing_beads": [
+        "hud-bstmy.1.4",
+        ".1.5"
+      ],
+      "code": [
+        "crates/tze_hud_compositor/src/renderer/tests/mod.rs",
+        "crates/tze_hud_protocol/src/session_server/tests/mod.rs",
+        "docs/invariants.md:1"
+      ],
+      "gate_species": "Historical pure-move body/count comparison and retained current contract behavior suites",
+      "evidence": [
+        "historical-split-validation.json",
+        "original-compositor-275-history.json",
+        "invariant-test-inventory.json",
+        "invariant-contract-matrix.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Delivered split preserved bodies/counts; current monolith absent, modules wired, current invariant definitions attributed and retained; see complete historical/current inventories."
+    },
+    {
+      "criterion": "hud-bstmy.1.4:AC3",
+      "requirement": "Compositor tests pass via `just test-gpu` (or `just test` with HEADLESS_FORCE_SOFTWARE=1 if the llvmpipe-recipe bead has not landed); never bare `cargo test -p tze_hud_compositor`.",
+      "area": "D",
+      "implementing_beads": [
+        "hud-bstmy.1.4",
+        ".1.5"
+      ],
+      "code": [
+        "crates/tze_hud_compositor/src/renderer/tests/mod.rs",
+        "crates/tze_hud_protocol/src/session_server/tests/mod.rs",
+        "docs/invariants.md:1"
+      ],
+      "gate_species": "Historical pure-move body/count comparison and retained current contract behavior suites",
+      "evidence": [
+        "historical-split-validation.json",
+        "original-compositor-275-history.json",
+        "invariant-test-inventory.json",
+        "invariant-contract-matrix.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Delivered split preserved bodies/counts; current monolith absent, modules wired, current invariant definitions attributed and retained; see complete historical/current inventories."
+    },
+    {
+      "criterion": "hud-bstmy.1.4:AC4",
+      "requirement": "Test count identical before and after: `grep -rcE '#\\[(tokio::)?test' crates/tze_hud_compositor/src/renderer/` sums to the pre-split count (record both numbers in the PR).",
+      "area": "D",
+      "implementing_beads": [
+        "hud-bstmy.1.4",
+        ".1.5"
+      ],
+      "code": [
+        "crates/tze_hud_compositor/src/renderer/tests/mod.rs",
+        "crates/tze_hud_protocol/src/session_server/tests/mod.rs",
+        "docs/invariants.md:1"
+      ],
+      "gate_species": "Historical pure-move body/count comparison and retained current contract behavior suites",
+      "evidence": [
+        "historical-split-validation.json",
+        "original-compositor-275-history.json",
+        "invariant-test-inventory.json",
+        "invariant-contract-matrix.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Original275 names all retained; five authorized additions precede delivered split280→280; zero changed bodies/assertions at split. Later authorized edits separately inventoried."
+    },
+    {
+      "criterion": "hud-bstmy.1.4:AC5",
+      "requirement": "No test body changed: `git diff --stat -M` shows moves; `git diff -M --color-moved=dimmed-zebra` reviewed.",
+      "area": "D",
+      "implementing_beads": [
+        "hud-bstmy.1.4",
+        ".1.5"
+      ],
+      "code": [
+        "crates/tze_hud_compositor/src/renderer/tests/mod.rs",
+        "crates/tze_hud_protocol/src/session_server/tests/mod.rs",
+        "docs/invariants.md:1"
+      ],
+      "gate_species": "Historical pure-move body/count comparison and retained current contract behavior suites",
+      "evidence": [
+        "historical-split-validation.json",
+        "original-compositor-275-history.json",
+        "invariant-test-inventory.json",
+        "invariant-contract-matrix.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Original275 names all retained; five authorized additions precede delivered split280→280; zero changed bodies/assertions at split. Later authorized edits separately inventoried."
+    },
+    {
+      "criterion": "hud-bstmy.1.4:AC6",
+      "requirement": "crates/tze_hud_compositor/src/renderer/tests.rs no longer exists; no new file exceeds 6,500 lines.",
+      "area": "D",
+      "implementing_beads": [
+        "hud-bstmy.1.4",
+        ".1.5"
+      ],
+      "code": [
+        "crates/tze_hud_compositor/src/renderer/tests/mod.rs",
+        "crates/tze_hud_protocol/src/session_server/tests/mod.rs",
+        "docs/invariants.md:1"
+      ],
+      "gate_species": "Historical pure-move body/count comparison and retained current contract behavior suites",
+      "evidence": [
+        "historical-split-validation.json",
+        "original-compositor-275-history.json",
+        "invariant-test-inventory.json",
+        "invariant-contract-matrix.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Delivered split preserved bodies/counts; current monolith absent, modules wired, current invariant definitions attributed and retained; see complete historical/current inventories."
+    },
+    {
+      "criterion": "hud-bstmy.1.4:AC7",
+      "requirement": "Every test named in docs/invariants.md still exists (grep each name) or docs/invariants.md was updated in the same PR.",
+      "area": "D",
+      "implementing_beads": [
+        "hud-bstmy.1.4",
+        ".1.5"
+      ],
+      "code": [
+        "crates/tze_hud_compositor/src/renderer/tests/mod.rs",
+        "crates/tze_hud_protocol/src/session_server/tests/mod.rs",
+        "docs/invariants.md:1"
+      ],
+      "gate_species": "Historical pure-move body/count comparison and retained current contract behavior suites",
+      "evidence": [
+        "historical-split-validation.json",
+        "original-compositor-275-history.json",
+        "invariant-test-inventory.json",
+        "invariant-contract-matrix.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Delivered split preserved bodies/counts; current monolith absent, modules wired, current invariant definitions attributed and retained; see complete historical/current inventories."
+    },
+    {
+      "criterion": "hud-bstmy.1.4:AC8",
+      "requirement": "`just ci` is green once before handoff.",
+      "area": "D",
+      "implementing_beads": [
+        "hud-bstmy.1.4",
+        ".1.5"
+      ],
+      "code": [
+        "crates/tze_hud_compositor/src/renderer/tests/mod.rs",
+        "crates/tze_hud_protocol/src/session_server/tests/mod.rs",
+        "docs/invariants.md:1"
+      ],
+      "gate_species": "Historical pure-move body/count comparison and retained current contract behavior suites",
+      "evidence": [
+        "historical-split-validation.json",
+        "original-compositor-275-history.json",
+        "invariant-test-inventory.json",
+        "invariant-contract-matrix.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Delivered split preserved bodies/counts; current monolith absent, modules wired, current invariant definitions attributed and retained; see complete historical/current inventories."
+    },
+    {
+      "criterion": "hud-bstmy.1.5:AC1",
+      "requirement": "`cargo fmt --all --check` is clean.",
+      "area": "D",
+      "implementing_beads": [
+        "hud-bstmy.1.4",
+        ".1.5"
+      ],
+      "code": [
+        "crates/tze_hud_compositor/src/renderer/tests/mod.rs",
+        "crates/tze_hud_protocol/src/session_server/tests/mod.rs",
+        "docs/invariants.md:1"
+      ],
+      "gate_species": "Historical pure-move body/count comparison and retained current contract behavior suites",
+      "evidence": [
+        "historical-split-validation.json",
+        "original-compositor-275-history.json",
+        "invariant-test-inventory.json",
+        "invariant-contract-matrix.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Delivered split preserved bodies/counts; current monolith absent, modules wired, current invariant definitions attributed and retained; see complete historical/current inventories."
+    },
+    {
+      "criterion": "hud-bstmy.1.5:AC2",
+      "requirement": "`cargo clippy --workspace --all-targets -- -D warnings` is clean.",
+      "area": "D",
+      "implementing_beads": [
+        "hud-bstmy.1.4",
+        ".1.5"
+      ],
+      "code": [
+        "crates/tze_hud_compositor/src/renderer/tests/mod.rs",
+        "crates/tze_hud_protocol/src/session_server/tests/mod.rs",
+        "docs/invariants.md:1"
+      ],
+      "gate_species": "Historical pure-move body/count comparison and retained current contract behavior suites",
+      "evidence": [
+        "historical-split-validation.json",
+        "original-compositor-275-history.json",
+        "invariant-test-inventory.json",
+        "invariant-contract-matrix.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Delivered split preserved bodies/counts; current monolith absent, modules wired, current invariant definitions attributed and retained; see complete historical/current inventories."
+    },
+    {
+      "criterion": "hud-bstmy.1.5:AC3",
+      "requirement": "`cargo test -p tze_hud_protocol` passes (quiet).",
+      "area": "D",
+      "implementing_beads": [
+        "hud-bstmy.1.4",
+        ".1.5"
+      ],
+      "code": [
+        "crates/tze_hud_compositor/src/renderer/tests/mod.rs",
+        "crates/tze_hud_protocol/src/session_server/tests/mod.rs",
+        "docs/invariants.md:1"
+      ],
+      "gate_species": "Historical pure-move body/count comparison and retained current contract behavior suites",
+      "evidence": [
+        "historical-split-validation.json",
+        "original-compositor-275-history.json",
+        "invariant-test-inventory.json",
+        "invariant-contract-matrix.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Delivered split preserved bodies/counts; current monolith absent, modules wired, current invariant definitions attributed and retained; see complete historical/current inventories."
+    },
+    {
+      "criterion": "hud-bstmy.1.5:AC4",
+      "requirement": "Test count identical before and after (record both in the PR).",
+      "area": "D",
+      "implementing_beads": [
+        "hud-bstmy.1.4",
+        ".1.5"
+      ],
+      "code": [
+        "crates/tze_hud_compositor/src/renderer/tests/mod.rs",
+        "crates/tze_hud_protocol/src/session_server/tests/mod.rs",
+        "docs/invariants.md:1"
+      ],
+      "gate_species": "Historical pure-move body/count comparison and retained current contract behavior suites",
+      "evidence": [
+        "historical-split-validation.json",
+        "original-compositor-275-history.json",
+        "invariant-test-inventory.json",
+        "invariant-contract-matrix.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Delivered split preserved bodies/counts; current monolith absent, modules wired, current invariant definitions attributed and retained; see complete historical/current inventories."
+    },
+    {
+      "criterion": "hud-bstmy.1.5:AC5",
+      "requirement": "`git diff -M --color-moved` shows only moves plus mod.rs scaffolding.",
+      "area": "D",
+      "implementing_beads": [
+        "hud-bstmy.1.4",
+        ".1.5"
+      ],
+      "code": [
+        "crates/tze_hud_compositor/src/renderer/tests/mod.rs",
+        "crates/tze_hud_protocol/src/session_server/tests/mod.rs",
+        "docs/invariants.md:1"
+      ],
+      "gate_species": "Historical pure-move body/count comparison and retained current contract behavior suites",
+      "evidence": [
+        "historical-split-validation.json",
+        "original-compositor-275-history.json",
+        "invariant-test-inventory.json",
+        "invariant-contract-matrix.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Delivered split preserved bodies/counts; current monolith absent, modules wired, current invariant definitions attributed and retained; see complete historical/current inventories."
+    },
+    {
+      "criterion": "hud-bstmy.1.5:AC6",
+      "requirement": "session_server/tests.rs no longer exists; invariant tests (e.g. grpc_disconnect_orphans_leases_and_badges_tiles, grpc_batch_expires_at_sweeps_tile) are found by grep under session_server/tests/.",
+      "area": "D",
+      "implementing_beads": [
+        "hud-bstmy.1.4",
+        ".1.5"
+      ],
+      "code": [
+        "crates/tze_hud_compositor/src/renderer/tests/mod.rs",
+        "crates/tze_hud_protocol/src/session_server/tests/mod.rs",
+        "docs/invariants.md:1"
+      ],
+      "gate_species": "Historical pure-move body/count comparison and retained current contract behavior suites",
+      "evidence": [
+        "historical-split-validation.json",
+        "original-compositor-275-history.json",
+        "invariant-test-inventory.json",
+        "invariant-contract-matrix.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Delivered split preserved bodies/counts; current monolith absent, modules wired, current invariant definitions attributed and retained; see complete historical/current inventories."
+    },
+    {
+      "criterion": "hud-bstmy.1.5:AC7",
+      "requirement": "Every test named in docs/invariants.md still exists (grep each name) or docs/invariants.md was updated in the same PR.",
+      "area": "D",
+      "implementing_beads": [
+        "hud-bstmy.1.4",
+        ".1.5"
+      ],
+      "code": [
+        "crates/tze_hud_compositor/src/renderer/tests/mod.rs",
+        "crates/tze_hud_protocol/src/session_server/tests/mod.rs",
+        "docs/invariants.md:1"
+      ],
+      "gate_species": "Historical pure-move body/count comparison and retained current contract behavior suites",
+      "evidence": [
+        "historical-split-validation.json",
+        "original-compositor-275-history.json",
+        "invariant-test-inventory.json",
+        "invariant-contract-matrix.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Delivered split preserved bodies/counts; current monolith absent, modules wired, current invariant definitions attributed and retained; see complete historical/current inventories."
+    },
+    {
+      "criterion": "hud-bstmy.1.5:AC8",
+      "requirement": "`just ci` is green once before handoff.",
+      "area": "D",
+      "implementing_beads": [
+        "hud-bstmy.1.4",
+        ".1.5"
+      ],
+      "code": [
+        "crates/tze_hud_compositor/src/renderer/tests/mod.rs",
+        "crates/tze_hud_protocol/src/session_server/tests/mod.rs",
+        "docs/invariants.md:1"
+      ],
+      "gate_species": "Historical pure-move body/count comparison and retained current contract behavior suites",
+      "evidence": [
+        "historical-split-validation.json",
+        "original-compositor-275-history.json",
+        "invariant-test-inventory.json",
+        "invariant-contract-matrix.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Delivered split preserved bodies/counts; current monolith absent, modules wired, current invariant definitions attributed and retained; see complete historical/current inventories."
+    },
+    {
+      "criterion": "hud-bstmy.1.7:AC1",
+      "requirement": "Those mutated metadata cases FAIL, real metadata passes; same command used by just dev-mode-guard and CI; scripts/ci unittest with fixture metadata (+1 test file ~4 cases).",
+      "area": "C",
+      "implementing_beads": [
+        "hud-bstmy.1.3",
+        ".1.7"
+      ],
+      "code": [
+        "scripts/ci/check_dev_mode_defaults.py:60",
+        "scripts/ci/check_dev_mode_defaults.py:106",
+        ".github/workflows/ci.yml:435"
+      ],
+      "gate_species": "Existing metadata-fixture guard CLI behavior, actual Cargo metadata oracle",
+      "evidence": [
+        "guard-instrument-matrix.json",
+        "default-feature-closure-inventory.json",
+        "weak-feature-counterexample.json"
+      ],
+      "classification": "partial",
+      "assessment": "Listed original mutation cases execute and reject, real defaults pass; universal weak forwarding supported by declared contract has independently proven false-negative ordering."
+    },
+    {
+      "criterion": "hud-bstmy.1.8:AC1",
+      "requirement": "compositor tests/ only construct devices via common helper (or single-test binaries); dry-run of those recipes shows VK_ICD_FILENAMES when the ICD exists. 0 test delta.",
+      "area": "A",
+      "implementing_beads": [
+        "hud-bstmy.1.1",
+        ".1.8",
+        ".1.12",
+        ".1.13"
+      ],
+      "code": [
+        "justfile:42",
+        "crates/tze_hud_runtime/src/test_support.rs:25",
+        "crates/tze_hud_compositor/tests/common/mod.rs:20",
+        "gpu-path-classification.json"
+      ],
+      "gate_species": "Existing actual GPU render/readback/lifecycle plus deterministic wrapper admission/release regression",
+      "evidence": [
+        "gpu-source-instrument-inventory.json",
+        "recipe-dry-run-inventory.json",
+        "verification-results.json",
+        "preserved-evidence-applicability.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Complete area inventory/code assessment and command-head-specific verification establish this row; tool/platform limits stay explicit, not assumed pass."
+    },
+    {
+      "criterion": "hud-bstmy.1.9:AC1",
+      "requirement": "Statements corrected; AGENTS.md/README lists complete; hud-bstmy.8.6 annotated.",
+      "area": "B",
+      "implementing_beads": [
+        "hud-bstmy.1.2",
+        ".1.9",
+        ".1.10"
+      ],
+      "code": [
+        "justfile:103",
+        "justfile:109",
+        "justfile:118",
+        "justfile:232",
+        ".github/workflows/ci.yml"
+      ],
+      "gate_species": "Existing integration/Python/token/boot behavior and type/lint/tool contract",
+      "evidence": [
+        "ci-parity-matrix.json",
+        "python-discovery-inventory.json",
+        "verification-results.json",
+        "exact-main-ci-job-evidence.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Complete area inventory/code assessment and command-head-specific verification establish this row; tool/platform limits stay explicit, not assumed pass."
+    },
+    {
+      "criterion": "hud-bstmy.1.10:AC1",
+      "requirement": "Every ci.yml run step is reachable from just --dry-run ci or named as excluded. No test delta.",
+      "area": "B",
+      "implementing_beads": [
+        "hud-bstmy.1.2",
+        ".1.9",
+        ".1.10"
+      ],
+      "code": [
+        "justfile:103",
+        "justfile:109",
+        "justfile:118",
+        "justfile:232",
+        ".github/workflows/ci.yml"
+      ],
+      "gate_species": "Existing integration/Python/token/boot behavior and type/lint/tool contract",
+      "evidence": [
+        "ci-parity-matrix.json",
+        "python-discovery-inventory.json",
+        "verification-results.json",
+        "exact-main-ci-job-evidence.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Complete area inventory/code assessment and command-head-specific verification establish this row; tool/platform limits stay explicit, not assumed pass."
+    },
+    {
+      "criterion": "hud-bstmy.1.12:AC1",
+      "requirement": "The implementation cites T8.0 maintenance authority and preserves the existing observable GPU/lifecycle/present-ack assertions. HeadlessRuntime::new, production boot/main behavior, runtime schemas/public API/dependencies/features, adapter policy and required checks gain no production mutex or policy change.",
+      "area": "A",
+      "implementing_beads": [
+        "hud-bstmy.1.1",
+        ".1.8",
+        ".1.12",
+        ".1.13"
+      ],
+      "code": [
+        "justfile:42",
+        "crates/tze_hud_runtime/src/test_support.rs:25",
+        "crates/tze_hud_compositor/tests/common/mod.rs:20",
+        "gpu-path-classification.json"
+      ],
+      "gate_species": "Existing actual GPU render/readback/lifecycle plus deterministic wrapper admission/release regression",
+      "evidence": [
+        "gpu-source-instrument-inventory.json",
+        "recipe-dry-run-inventory.json",
+        "verification-results.json",
+        "preserved-evidence-applicability.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Complete area inventory/code assessment and command-head-specific verification establish this row; tool/platform limits stay explicit, not assumed pass."
+    },
+    {
+      "criterion": "hud-bstmy.1.12:AC2",
+      "requirement": "A single test-only async initialization gate is reused once per affected process. A complete grep/review inventory covers all four integration GPU binaries, every vertical_slice budget constructor and macro expansion, both main.rs lifecycle tests through boot, its single-test production_boot binary, and present_ack's three callers. Newly discovered owned initialization paths are included; GPU-free event-loop harnesses and proven single-GPU-test binaries are explicitly classified.",
+      "area": "A",
+      "implementing_beads": [
+        "hud-bstmy.1.1",
+        ".1.8",
+        ".1.12",
+        ".1.13"
+      ],
+      "code": [
+        "justfile:42",
+        "crates/tze_hud_runtime/src/test_support.rs:25",
+        "crates/tze_hud_compositor/tests/common/mod.rs:20",
+        "gpu-path-classification.json"
+      ],
+      "gate_species": "Existing actual GPU render/readback/lifecycle plus deterministic wrapper admission/release regression",
+      "evidence": [
+        "gpu-source-instrument-inventory.json",
+        "recipe-dry-run-inventory.json",
+        "verification-results.json",
+        "preserved-evidence-applicability.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Complete area inventory/code assessment and command-head-specific verification establish this row; tool/platform limits stay explicit, not assumed pass."
+    },
+    {
+      "criterion": "hud-bstmy.1.12:AC3",
+      "requirement": "The canonical src/test_support.rs cfg(test) production exclusion remains intact. All targeted multi-test initialization paths reach the shared wrapper/gate, with no separate accidental mutex instances, raw bypass, nested acquisition, synchronous mutex held across await or process environment mutation in parallel tests. Existing runtime-lib/pixel/compositor serialization contracts remain valid.",
+      "area": "A",
+      "implementing_beads": [
+        "hud-bstmy.1.1",
+        ".1.8",
+        ".1.12",
+        ".1.13"
+      ],
+      "code": [
+        "justfile:42",
+        "crates/tze_hud_runtime/src/test_support.rs:25",
+        "crates/tze_hud_compositor/tests/common/mod.rs:20",
+        "gpu-path-classification.json"
+      ],
+      "gate_species": "Existing actual GPU render/readback/lifecycle plus deterministic wrapper admission/release regression",
+      "evidence": [
+        "gpu-source-instrument-inventory.json",
+        "recipe-dry-run-inventory.json",
+        "verification-results.json",
+        "preserved-evidence-applicability.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Complete area inventory/code assessment and command-head-specific verification establish this row; tool/platform limits stay explicit, not assumed pass."
+    },
+    {
+      "criterion": "hud-bstmy.1.12:AC4",
+      "requirement": "The guard spans initialization through its awaited result and is released before later clients, scene work, rendering, readback, timing measurements or runtime lifetime. Sequential initialization permits multiple simultaneously live runtimes. Exact constructor/boot outputs and existing error/panic behavior are preserved; no retry or failure swallowing is added.",
+      "area": "A",
+      "implementing_beads": [
+        "hud-bstmy.1.1",
+        ".1.8",
+        ".1.12",
+        ".1.13"
+      ],
+      "code": [
+        "justfile:42",
+        "crates/tze_hud_runtime/src/test_support.rs:25",
+        "crates/tze_hud_compositor/tests/common/mod.rs:20",
+        "gpu-path-classification.json"
+      ],
+      "gate_species": "Existing actual GPU render/readback/lifecycle plus deterministic wrapper admission/release regression",
+      "evidence": [
+        "gpu-source-instrument-inventory.json",
+        "recipe-dry-run-inventory.json",
+        "verification-results.json",
+        "preserved-evidence-applicability.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Complete area inventory/code assessment and command-head-specific verification establish this row; tool/platform limits stay explicit, not assumed pass."
+    },
+    {
+      "criterion": "hud-bstmy.1.12:AC5",
+      "requirement": "Exactly one deterministic regression in runtime-lib headless tests exercises the same initialization wrapper, shows maximum concurrent entry of one, and proves subsequent entry after Err, panic unwind and cancellation, including a dropped queued waiter. Removing the wrapper's gate makes it fail. It uses coordinated async probes, not sleeps or source-text assertions, and is not replicated through path-included helper modules. Net test delta is +1, with existing scenario tests retained.",
+      "area": "A",
+      "implementing_beads": [
+        "hud-bstmy.1.1",
+        ".1.8",
+        ".1.12",
+        ".1.13"
+      ],
+      "code": [
+        "justfile:42",
+        "crates/tze_hud_runtime/src/test_support.rs:25",
+        "crates/tze_hud_compositor/tests/common/mod.rs:20",
+        "gpu-path-classification.json"
+      ],
+      "gate_species": "Existing actual GPU render/readback/lifecycle plus deterministic wrapper admission/release regression",
+      "evidence": [
+        "gpu-source-instrument-inventory.json",
+        "recipe-dry-run-inventory.json",
+        "verification-results.json",
+        "preserved-evidence-applicability.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Complete area inventory/code assessment and command-head-specific verification establish this row; tool/platform limits stay explicit, not assumed pass."
+    },
+    {
+      "criterion": "hud-bstmy.1.12:AC6",
+      "requirement": "Actual selected llvmpipe ICD discovery comes from the current recipe/dry-run and supports both Mesa naming variants. Default-parallel integration GPU binaries, vertical_slice budget/main lifecycle tests and present_ack (dev-mode enabled) pass twice with bounded execution and actual test-count evidence. vertical_slice production boot passes; adapter/ICD absence, skipped tests and timeouts are reported rather than called successful serialization proof.",
+      "area": "A",
+      "implementing_beads": [
+        "hud-bstmy.1.1",
+        ".1.8",
+        ".1.12",
+        ".1.13"
+      ],
+      "code": [
+        "justfile:42",
+        "crates/tze_hud_runtime/src/test_support.rs:25",
+        "crates/tze_hud_compositor/tests/common/mod.rs:20",
+        "gpu-path-classification.json"
+      ],
+      "gate_species": "Existing actual GPU render/readback/lifecycle plus deterministic wrapper admission/release regression",
+      "evidence": [
+        "gpu-source-instrument-inventory.json",
+        "recipe-dry-run-inventory.json",
+        "verification-results.json",
+        "preserved-evidence-applicability.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Complete area inventory/code assessment and command-head-specific verification establish this row; tool/platform limits stay explicit, not assumed pass."
+    },
+    {
+      "criterion": "hud-bstmy.1.12:AC7",
+      "requirement": "just fmt, just clippy (workspace/all-targets), cargo check --workspace and one integrated just ci pass are recorded, with explicit tool-gated SKIP limitations. Existing performance-assert gating/budgets stay unchanged.",
+      "area": "A",
+      "implementing_beads": [
+        "hud-bstmy.1.1",
+        ".1.8",
+        ".1.12",
+        ".1.13"
+      ],
+      "code": [
+        "justfile:42",
+        "crates/tze_hud_runtime/src/test_support.rs:25",
+        "crates/tze_hud_compositor/tests/common/mod.rs:20",
+        "gpu-path-classification.json"
+      ],
+      "gate_species": "Existing actual GPU render/readback/lifecycle plus deterministic wrapper admission/release regression",
+      "evidence": [
+        "gpu-source-instrument-inventory.json",
+        "recipe-dry-run-inventory.json",
+        "verification-results.json",
+        "preserved-evidence-applicability.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Complete area inventory/code assessment and command-head-specific verification establish this row; tool/platform limits stay explicit, not assumed pass."
+    },
+    {
+      "criterion": "hud-bstmy.1.12:AC8",
+      "requirement": "AGENTS.md and affected shared-helper/direct-command documentation describe the test-only, initialization-scoped, per-process guarantee and proven single-test exceptions accurately. README/CLAUDE/justfile claims are reconciled where affected; docs/invariants.md contracts and tests are preserved, with no spec amendment or new investigation document.",
+      "area": "A",
+      "implementing_beads": [
+        "hud-bstmy.1.1",
+        ".1.8",
+        ".1.12",
+        ".1.13"
+      ],
+      "code": [
+        "justfile:42",
+        "crates/tze_hud_runtime/src/test_support.rs:25",
+        "crates/tze_hud_compositor/tests/common/mod.rs:20",
+        "gpu-path-classification.json"
+      ],
+      "gate_species": "Existing actual GPU render/readback/lifecycle plus deterministic wrapper admission/release regression",
+      "evidence": [
+        "gpu-source-instrument-inventory.json",
+        "recipe-dry-run-inventory.json",
+        "verification-results.json",
+        "preserved-evidence-applicability.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Complete area inventory/code assessment and command-head-specific verification establish this row; tool/platform limits stay explicit, not assumed pass."
+    },
+    {
+      "criterion": "hud-bstmy.1.12:AC9",
+      "requirement": "The handoff/PR contains exact commit evidence, the complete caller inventory including macro/test-only boot paths, lock lifetime and failure behavior, preserved test counts and +1 delta, commands/results and limitations. Adjacent canonical-app constructor gaps are reported to .1.11/coordinator instead of silently changing this bead's scope. All Beads lifecycle/dependency changes remain coordinator-owned.",
+      "area": "A",
+      "implementing_beads": [
+        "hud-bstmy.1.1",
+        ".1.8",
+        ".1.12",
+        ".1.13"
+      ],
+      "code": [
+        "justfile:42",
+        "crates/tze_hud_runtime/src/test_support.rs:25",
+        "crates/tze_hud_compositor/tests/common/mod.rs:20",
+        "gpu-path-classification.json"
+      ],
+      "gate_species": "Existing actual GPU render/readback/lifecycle plus deterministic wrapper admission/release regression",
+      "evidence": [
+        "gpu-source-instrument-inventory.json",
+        "recipe-dry-run-inventory.json",
+        "verification-results.json",
+        "preserved-evidence-applicability.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Complete area inventory/code assessment and command-head-specific verification establish this row; tool/platform limits stay explicit, not assumed pass."
+    },
+    {
+      "criterion": "hud-bstmy.1.13:AC1",
+      "requirement": "All three listed constructors in the canonical-app production_boot binary use the same test-only gate through await, with no raw bypass and no gate retained into clients/rendering/runtime lifetime. Existing assertions and all three tests are preserved (Tests: +0 ~0 -0); the existing admission/error/panic/cancellation regression remains passing. Production code and dependency/feature topology are unchanged. The complete app GPU inventory and benchmark single-test exception are recorded. Default-parallel real llvmpipe production_boot execution passes twice with the recipe-selected installed ICD, HEADLESS_FORCE_SOFTWARE=1 and TZE_HUD_REQUIRE_GPU=1, with no GPU skips or --test-threads=1. Run fmt, workspace check and workspace all-targets clippy -D warnings, plus the canonical-app boot recipe and required packet gates. Docs truthfully state per-binary initialization scope and cross-process limit.",
+      "area": "A",
+      "implementing_beads": [
+        "hud-bstmy.1.1",
+        ".1.8",
+        ".1.12",
+        ".1.13"
+      ],
+      "code": [
+        "justfile:42",
+        "crates/tze_hud_runtime/src/test_support.rs:25",
+        "crates/tze_hud_compositor/tests/common/mod.rs:20",
+        "gpu-path-classification.json"
+      ],
+      "gate_species": "Existing actual GPU render/readback/lifecycle plus deterministic wrapper admission/release regression",
+      "evidence": [
+        "gpu-source-instrument-inventory.json",
+        "recipe-dry-run-inventory.json",
+        "verification-results.json",
+        "preserved-evidence-applicability.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Complete area inventory/code assessment and command-head-specific verification establish this row; tool/platform limits stay explicit, not assumed pass."
+    }
+  ],
+  "all_original_scope_retained": true,
+  "original_gen1_audit_contract": {
+    "id": "hud-bstmy.1.6",
+    "title": "Reconcile spec-to-code (gen-1) for T8.0: Enablers (GPU recipe, CI parity, test-file splits)",
+    "status": "closed",
+    "description": "Deep-dive review: compare the original spec/requirements (see epic description and docs/scope.md T8 row, docs/invariants.md) against the implementation delivered by sibling beads under this epic.\n\nMindset: audit the CODEBASE against the spec, not the sibling diffs against their bead descriptions. Your job is to FALSIFY the coverage claim, not to collect confirming evidence. A requirement counts as implemented only after you have read the implementing code; a test existing or the suite being green is never sufficient evidence by itself.\n\nWorkflow:\n1. Re-read the epic description and all sibling bead descriptions/acceptance criteria.\n2. Audit the code. Start from the sibling diffs, but treat the whole codebase as in scope; spec invariants bind pre-existing code too.\n3. For every universal or negative requirement (\"no X anywhere\", \"every Y must\", \"the only path is Z\"): enumerate ALL code paths performing that operation (search the repo) and verify each one.\n4. Audit the instruments: for every guardrail/scan test, read its regex, glob and scan roots and check they cover the mandated surface. For every spec scenario confirm ONE gate pins it (a behavior-executing test, or the designated scan guard for structural invariants).\n5. Where several surfaces implement the same contract, diff them against each other (filters, defaults, ordering, authz).\n6. Produce a checklist mapping every requirement to its implementing bead and code evidence (file:line), classified implemented/partial/missing/deviates.\n7. For every partial or missing requirement, report a cold-start-ready gap candidate in Discovered-Follow-Ups-JSON (priority, parent, deps, exact spec link, acceptance evidence, gate species, expected net test delta).\n8. When gaps remain, report the need for a gen-2 reconciliation and return blocked-awaiting-coordinator with \"coverage gaps remain\" as the unblock condition.\n9. The coordinator dedupes/materializes gaps and closes lifecycle state; this worker never mutates Beads lifecycle.",
+    "design": "Spec sources: docs/scope.md T8 row and Working rules, docs/invariants.md (every named test exists), docs/vision.md, plus every sibling bead under hud-bstmy.1 (their Files/Evidence lists define the deletion surface; verify each deletion grep is empty and each kept test exists). Runs last among implementation siblings. Escalation (needs-human) siblings are deliberately NOT dependencies: their default is status quo, so reconciliation must not wait on an owner answer; if one was answered, include its follow-up bead.",
+    "acceptance_criteria": "1. Every requirement in the epic spec has a corresponding implementation bead.\n2. Universal/negative invariants are verified by enumerating every code path that performs the operation, not by citing a single compliant example.\n3. Guardrail/scan tests were audited for blind spots, and every spec scenario is pinned by exactly one gate species; no gap candidate proposes tests for a scenario that already has one.\n4. Any gaps found are reported as dedupe-ready child-bead candidates under the same epic.\n5. If gaps were found, the handoff reports a next-generation reconciliation candidate.\n6. The close reason records the reconciliation summary.",
+    "notes": null,
+    "external_ref": null,
+    "priority": 1,
+    "issue_type": "task"
+  },
+  "gen2_acceptance_contract": "1. The report identifies an exact audit commit and rereads hud-bstmy.1, original children .1.1-.1.5, gen-1 .1.6, corrections .1.7-.1.10, later relevant children including .1.12, and current docs/scope.md T8/Working rules, docs/vision.md, docs/invariants.md and AGENTS.md. No original scope or criterion is dropped.\n2. Every T8.0 requirement has an implementing-bead/code/gate/evidence row classified implemented, partial, missing or deviates. Split history preserves the original 275/135 test inventories and bodies at the delivered commits; old monolithic files remain absent, topic modules are wired, and the original compositor file-size criterion and named invariant retention are assessed with later edits explained.\n3. Universal inventories cover every shippable workspace default-feature closure, every relevant raw/indirect/macro GPU initialization site, every GPU-building recipe, every CI run step and every docs/invariants.md named test. Single-test exceptions are proven per binary. A single compliant path is never used to establish a universal claim.\n4. Guard code and fixture scope are audited for blind spots. The exact just/CI metadata command passes real metadata; existing clean/negative/repeated-edge/missing-shipped-package fixture cases execute and assert exit behavior. Any uncovered counterexample is documented without editing manifests. Redundant LTO build/reference deletions and unchanged required job display name are verified.\n5. GPU construction serialization and actual llvmpipe ICD selection are independently checked. Dry-runs cover both calibration invocations and every GPU recipe, including any new ones; selected-path discovery supports both Mesa filenames. just test-gpu executes twice under its required-GPU/900-second contracts, or the exact failed/unavailable proof is reported as a limitation, never coverage from skipped tests.\n6. Every ci.yml run step is reachable through just --dry-run ci or explicitly named/classified as excluded. Integration, Python/orphan-script, token-footprint, boot, Windows-GNU clippy, cargo-deny and pwsh paths are traced, semantic differences are reported, and just ci is executed once where possible. SKIPPED tool gates and informational/weekly exclusions remain visible in the evidence.\n7. README.md, AGENTS.md, CLAUDE.md, justfile and CI comments are assessed against actual GPU inclusion, pixel_readback feature unification, complete recipe mapping and skip semantics. Stale text yields precise proposed corrections; no documentation or spec write occurs in this read-only pass.\n8. hud-bstmy.8.6's recorded owner answer and delivered follow-up are assessed when present. Without an answer, status quo/no workflow or ruleset changes is recorded and the audit does not wait for owner approval. The duplicate informational pixel-readback job is distinguished from existing blocking test-unit coverage.\n9. Every audited scenario is pinned by one adequate gate species, and guard scan roots/regexes/globs/eligibility predicates are checked against the full required surface. Gap proposals extend the nearest existing adequate gate; they never add redundant tests merely to prove already-executed behavior. This audit's own net test/code delta is zero.\n10. Partial/missing/deviating coverage and documentation discrepancies are reported as cold-start-ready, dedupe-ready Discovered-Follow-Ups-JSON candidates under hud-bstmy.1 with the specified dependencies/spec/evidence/gate/net-test-delta fields; existing open .1.12 and other overlapping work are linked instead of duplicated.\n11. If gaps remain, the handoff reports blocked-awaiting-coordinator, unblock condition coverage gaps remain, and one gen-3 candidate with proposed blockers. No gen-4 is proposed. If complete, the handoff supplies a coverage summary the coordinator can use as the close reason.\n12. No code, tests, manifests, recipes, workflows, product docs/specs, rulesets or Beads lifecycle are changed. Writes are limited to the authorized audit/coordinator handoff and ordinary generated/ignored build, test-evidence and scratch verification artifacts; failures, skipped checks and pending evidence are explicitly disclosed.\n13. Durable evidence report is committed, pushed and submitted as an evidence-only PR; coordinator confirms merge before closure and keeps the bead blocked if gaps remain.",
+  "lifecycle": "Coverage gap repair + terminalgen3 + authoritative report merge required; report PR alone cannot close."
+}

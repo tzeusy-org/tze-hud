@@ -1,0 +1,43 @@
+mkdir -p test_results/token-footprint
+if [ -f /usr/share/vulkan/icd.d/lvp_icd.json ]; then export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json; fi; HEADLESS_FORCE_SOFTWARE=1 cargo run -p benchmark --features headless --bin token_footprint_calibration -- --output test_results/token-footprint/measurement.json
+   Compiling tze_hud_config v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.1.11/crates/tze_hud_config)
+   Compiling tze_hud_projection v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.1.11/crates/tze_hud_projection)
+   Compiling tze_hud_input v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.1.11/crates/tze_hud_input)
+   Compiling tze_hud_compositor v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.1.11/crates/tze_hud_compositor)
+   Compiling tze_hud_mcp v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.1.11/crates/tze_hud_mcp)
+   Compiling tze_hud_runtime v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.1.11/crates/tze_hud_runtime)
+   Compiling benchmark v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.1.11/examples/benchmark)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 34.29s
+     Running `/home/orca/orca/projects/tze-hud/target/debug/token_footprint_calibration --output test_results/token-footprint/measurement.json`
+libEGL warning: failed to get driver name for fd -1
+
+libEGL warning: MESA-LOADER: failed to retrieve device information
+
+libEGL warning: failed to get driver name for fd -1
+
+MESA: error: ZINK: failed to choose pdev
+libEGL warning: egl: failed to create dri2 screen
+if [ -f /usr/share/vulkan/icd.d/lvp_icd.json ]; then export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json; fi; HEADLESS_FORCE_SOFTWARE=1 cargo run -p benchmark --features headless --bin token_footprint_calibration -- --output test_results/token-footprint/repeat.json
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.34s
+     Running `/home/orca/orca/projects/tze-hud/target/debug/token_footprint_calibration --output test_results/token-footprint/repeat.json`
+libEGL warning: failed to get driver name for fd -1
+
+libEGL warning: MESA-LOADER: failed to retrieve device information
+
+libEGL warning: failed to get driver name for fd -1
+
+MESA: error: ZINK: failed to choose pdev
+libEGL warning: egl: failed to create dri2 screen
+cmp test_results/token-footprint/measurement.json test_results/token-footprint/repeat.json
+python3 scripts/ci/check_token_footprint.py --measurement test_results/token-footprint/measurement.json --baseline scripts/ci/token_footprint_baseline.json --output test_results/token-footprint/gate-report.json
+{
+  "approval": "owner_approved",
+  "budget_violations": [],
+  "improvements": [],
+  "incompatibilities": [],
+  "regressions": [],
+  "schema_version": 1,
+  "status": "passed",
+  "threshold_percent": 5,
+  "warnings": []
+}

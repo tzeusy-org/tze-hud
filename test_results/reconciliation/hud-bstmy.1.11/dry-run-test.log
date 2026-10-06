@@ -1,0 +1,1 @@
+if [ -f /usr/share/vulkan/icd.d/lvp_icd.json ]; then export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json; fi; HEADLESS_FORCE_SOFTWARE=1 TZE_HUD_REQUIRE_GPU=1 cargo test --workspace --all-targets --exclude integration

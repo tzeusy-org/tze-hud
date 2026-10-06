@@ -1,0 +1,17 @@
+{
+  "execution_head": "8dccb4cfbe1e452eac227a67f60c5c2775c89c19",
+  "measurement_sha256": "3e7e17748454c0e1476e93060db166c9f2d105f01b018bf56c0c12202a9eb78e",
+  "repeat_byte_identical": true,
+  "actual_cli_twice": true,
+  "baseline_gate": {
+    "approval": "owner_approved",
+    "budget_violations": [],
+    "improvements": [],
+    "incompatibilities": [],
+    "regressions": [],
+    "schema_version": 1,
+    "status": "passed",
+    "threshold_percent": 5,
+    "warnings": []
+  }
+}

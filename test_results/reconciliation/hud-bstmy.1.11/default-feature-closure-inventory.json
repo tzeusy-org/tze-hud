@@ -1,0 +1,2316 @@
+{
+  "audit_head": "3b5bbb634a7dc6d8a8c9e40f585e5b1868cfb528",
+  "guard_predicate": "lib/bin/rlib/cdylib/dylib/staticlib/proc-macro; excludes tests-only; normal/build kinds; any-target conservative union; workspace path edges only",
+  "packages": [
+    {
+      "package": "tze_hud_scene",
+      "manifest_path": "crates/tze_hud_scene/Cargo.toml",
+      "shippable_by_current_guard": true,
+      "targets": [
+        {
+          "name": "tze_hud_scene",
+          "kind": [
+            "lib"
+          ],
+          "source": "crates/tze_hud_scene/src/lib.rs",
+          "required_features": []
+        },
+        {
+          "name": "batch_atomicity",
+          "kind": [
+            "test"
+          ],
+          "source": "crates/tze_hud_scene/tests/batch_atomicity.rs",
+          "required_features": []
+        },
+        {
+          "name": "fuzz_scene_graph",
+          "kind": [
+            "test"
+          ],
+          "source": "crates/tze_hud_scene/tests/fuzz_scene_graph.rs",
+          "required_features": []
+        },
+        {
+          "name": "hit_test",
+          "kind": [
+            "test"
+          ],
+          "source": "crates/tze_hud_scene/tests/hit_test.rs",
+          "required_features": []
+        },
+        {
+          "name": "proptest_invariants",
+          "kind": [
+            "test"
+          ],
+          "source": "crates/tze_hud_scene/tests/proptest_invariants.rs",
+          "required_features": []
+        },
+        {
+          "name": "session_lifecycle",
+          "kind": [
+            "test"
+          ],
+          "source": "crates/tze_hud_scene/tests/session_lifecycle.rs",
+          "required_features": []
+        },
+        {
+          "name": "snapshot",
+          "kind": [
+            "test"
+          ],
+          "source": "crates/tze_hud_scene/tests/snapshot.rs",
+          "required_features": []
+        },
+        {
+          "name": "zone_interaction",
+          "kind": [
+            "test"
+          ],
+          "source": "crates/tze_hud_scene/tests/zone_interaction.rs",
+          "required_features": []
+        },
+        {
+          "name": "zone_ontology",
+          "kind": [
+            "test"
+          ],
+          "source": "crates/tze_hud_scene/tests/zone_ontology.rs",
+          "required_features": []
+        },
+        {
+          "name": "hit_test",
+          "kind": [
+            "bench"
+          ],
+          "source": "crates/tze_hud_scene/benches/hit_test.rs",
+          "required_features": []
+        },
+        {
+          "name": "snapshot",
+          "kind": [
+            "bench"
+          ],
+          "source": "crates/tze_hud_scene/benches/snapshot.rs",
+          "required_features": []
+        }
+      ],
+      "declared_features": {
+        "test-support": []
+      },
+      "default_features": [],
+      "closure_features": {
+        "tze_hud_scene": [
+          "default"
+        ]
+      },
+      "workspace_edges": {},
+      "dev_edges_excluded": [
+        {
+          "name": "criterion",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "req": "^0.5",
+          "kind": "dev",
+          "rename": null,
+          "optional": false,
+          "uses_default_features": true,
+          "features": [
+            "html_reports"
+          ],
+          "target": null,
+          "registry": null
+        },
+        {
+          "name": "proptest",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "req": "^1",
+          "kind": "dev",
+          "rename": null,
+          "optional": false,
+          "uses_default_features": true,
+          "features": [],
+          "target": null,
+          "registry": null
+        },
+        {
+          "name": "tze_hud_scene",
+          "source": null,
+          "req": "*",
+          "kind": "dev",
+          "rename": null,
+          "optional": false,
+          "uses_default_features": true,
+          "features": [
+            "test-support"
+          ],
+          "target": null,
+          "registry": null,
+          "path": "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.1.11/crates/tze_hud_scene"
+        }
+      ]
+    },
+    {
+      "package": "tze_hud_compositor",
+      "manifest_path": "crates/tze_hud_compositor/Cargo.toml",
+      "shippable_by_current_guard": true,
+      "targets": [
+        {
+          "name": "tze_hud_compositor",
+          "kind": [
+            "lib"
+          ],
+          "source": "crates/tze_hud_compositor/src/lib.rs",
+          "required_features": []
+        },
+        {
+          "name": "gauge_binding_rendering",
+          "kind": [
+            "test"
+          ],
+          "source": "crates/tze_hud_compositor/tests/gauge_binding_rendering.rs",
+          "required_features": []
+        },
+        {
+          "name": "gpu_canary",
+          "kind": [
+            "test"
+          ],
+          "source": "crates/tze_hud_compositor/tests/gpu_canary.rs",
+          "required_features": []
+        },
+        {
+          "name": "widget_raster_count",
+          "kind": [
+            "test"
+          ],
+          "source": "crates/tze_hud_compositor/tests/widget_raster_count.rs",
+          "required_features": []
+        },
+        {
+          "name": "widget_rasterize_budget",
+          "kind": [
+            "test"
+          ],
+          "source": "crates/tze_hud_compositor/tests/widget_rasterize_budget.rs",
+          "required_features": []
+        },
+        {
+          "name": "widget_transition",
+          "kind": [
+            "test"
+          ],
+          "source": "crates/tze_hud_compositor/tests/widget_transition.rs",
+          "required_features": []
+        },
+        {
+          "name": "zone_rendering",
+          "kind": [
+            "test"
+          ],
+          "source": "crates/tze_hud_compositor/tests/zone_rendering.rs",
+          "required_features": []
+        },
+        {
+          "name": "markdown_cache",
+          "kind": [
+            "bench"
+          ],
+          "source": "crates/tze_hud_compositor/benches/markdown_cache.rs",
+          "required_features": []
+        },
+        {
+          "name": "overflow_truncate",
+          "kind": [
+            "bench"
+          ],
+          "source": "crates/tze_hud_compositor/benches/overflow_truncate.rs",
+          "required_features": []
+        },
+        {
+          "name": "widget_rasterize",
+          "kind": [
+            "bench"
+          ],
+          "source": "crates/tze_hud_compositor/benches/widget_rasterize.rs",
+          "required_features": []
+        }
+      ],
+      "declared_features": {},
+      "default_features": [],
+      "closure_features": {
+        "tze_hud_compositor": [
+          "default"
+        ],
+        "tze_hud_input": [
+          "default"
+        ],
+        "tze_hud_scene": [
+          "default"
+        ],
+        "tze_hud_resource": [
+          "default"
+        ],
+        "tze_hud_telemetry": [
+          "default"
+        ]
+      },
+      "workspace_edges": {
+        "tze_hud_input": [
+          {
+            "target": "tze_hud_input",
+            "kind": null,
+            "target_condition": null,
+            "optional": false,
+            "features": [],
+            "uses_default_features": true
+          }
+        ],
+        "tze_hud_resource": [
+          {
+            "target": "tze_hud_resource",
+            "kind": null,
+            "target_condition": null,
+            "optional": false,
+            "features": [],
+            "uses_default_features": true
+          }
+        ],
+        "tze_hud_scene": [
+          {
+            "target": "tze_hud_scene",
+            "kind": null,
+            "target_condition": null,
+            "optional": false,
+            "features": [],
+            "uses_default_features": true
+          }
+        ],
+        "tze_hud_telemetry": [
+          {
+            "target": "tze_hud_telemetry",
+            "kind": null,
+            "target_condition": null,
+            "optional": false,
+            "features": [],
+            "uses_default_features": true
+          }
+        ]
+      },
+      "dev_edges_excluded": [
+        {
+          "name": "criterion",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "req": "^0.5",
+          "kind": "dev",
+          "rename": null,
+          "optional": false,
+          "uses_default_features": true,
+          "features": [
+            "html_reports"
+          ],
+          "target": null,
+          "registry": null
+        },
+        {
+          "name": "proptest",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "req": "^1",
+          "kind": "dev",
+          "rename": null,
+          "optional": false,
+          "uses_default_features": true,
+          "features": [],
+          "target": null,
+          "registry": null
+        },
+        {
+          "name": "tokio",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "req": "^1",
+          "kind": "dev",
+          "rename": null,
+          "optional": false,
+          "uses_default_features": true,
+          "features": [
+            "full"
+          ],
+          "target": null,
+          "registry": null
+        },
+        {
+          "name": "tze_hud_widget",
+          "source": null,
+          "req": "^0.1.0",
+          "kind": "dev",
+          "rename": null,
+          "optional": false,
+          "uses_default_features": true,
+          "features": [],
+          "target": null,
+          "registry": null,
+          "path": "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.1.11/crates/tze_hud_widget"
+        }
+      ]
+    },
+    {
+      "package": "tze_hud_input",
+      "manifest_path": "crates/tze_hud_input/Cargo.toml",
+      "shippable_by_current_guard": true,
+      "targets": [
+        {
+          "name": "tze_hud_input",
+          "kind": [
+            "lib"
+          ],
+          "source": "crates/tze_hud_input/src/lib.rs",
+          "required_features": []
+        }
+      ],
+      "declared_features": {},
+      "default_features": [],
+      "closure_features": {
+        "tze_hud_input": [
+          "default"
+        ],
+        "tze_hud_scene": [
+          "default"
+        ]
+      },
+      "workspace_edges": {
+        "tze_hud_scene": [
+          {
+            "target": "tze_hud_scene",
+            "kind": null,
+            "target_condition": null,
+            "optional": false,
+            "features": [],
+            "uses_default_features": true
+          }
+        ]
+      },
+      "dev_edges_excluded": [
+        {
+          "name": "proptest",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "req": "^1",
+          "kind": "dev",
+          "rename": null,
+          "optional": false,
+          "uses_default_features": true,
+          "features": [],
+          "target": null,
+          "registry": null
+        }
+      ]
+    },
+    {
+      "package": "tze_hud_resource",
+      "manifest_path": "crates/tze_hud_resource/Cargo.toml",
+      "shippable_by_current_guard": true,
+      "targets": [
+        {
+          "name": "tze_hud_resource",
+          "kind": [
+            "lib"
+          ],
+          "source": "crates/tze_hud_resource/src/lib.rs",
+          "required_features": []
+        },
+        {
+          "name": "store_behavior",
+          "kind": [
+            "test"
+          ],
+          "source": "crates/tze_hud_resource/tests/store_behavior.rs",
+          "required_features": []
+        }
+      ],
+      "declared_features": {
+        "test-support": []
+      },
+      "default_features": [],
+      "closure_features": {
+        "tze_hud_resource": [
+          "default"
+        ]
+      },
+      "workspace_edges": {},
+      "dev_edges_excluded": [
+        {
+          "name": "proptest",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "req": "^1",
+          "kind": "dev",
+          "rename": null,
+          "optional": false,
+          "uses_default_features": true,
+          "features": [],
+          "target": null,
+          "registry": null
+        },
+        {
+          "name": "tempfile",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "req": "^3",
+          "kind": "dev",
+          "rename": null,
+          "optional": false,
+          "uses_default_features": true,
+          "features": [],
+          "target": null,
+          "registry": null
+        },
+        {
+          "name": "tze_hud_resource",
+          "source": null,
+          "req": "*",
+          "kind": "dev",
+          "rename": null,
+          "optional": false,
+          "uses_default_features": true,
+          "features": [
+            "test-support"
+          ],
+          "target": null,
+          "registry": null,
+          "path": "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.1.11/crates/tze_hud_resource"
+        }
+      ]
+    },
+    {
+      "package": "tze_hud_telemetry",
+      "manifest_path": "crates/tze_hud_telemetry/Cargo.toml",
+      "shippable_by_current_guard": true,
+      "targets": [
+        {
+          "name": "tze_hud_telemetry",
+          "kind": [
+            "lib"
+          ],
+          "source": "crates/tze_hud_telemetry/src/lib.rs",
+          "required_features": []
+        },
+        {
+          "name": "idle_efficiency",
+          "kind": [
+            "test"
+          ],
+          "source": "crates/tze_hud_telemetry/tests/idle_efficiency.rs",
+          "required_features": []
+        },
+        {
+          "name": "publish_load_artifact",
+          "kind": [
+            "test"
+          ],
+          "source": "crates/tze_hud_telemetry/tests/publish_load_artifact.rs",
+          "required_features": []
+        }
+      ],
+      "declared_features": {},
+      "default_features": [],
+      "closure_features": {
+        "tze_hud_telemetry": [
+          "default"
+        ],
+        "tze_hud_scene": [
+          "default"
+        ]
+      },
+      "workspace_edges": {
+        "tze_hud_scene": [
+          {
+            "target": "tze_hud_scene",
+            "kind": null,
+            "target_condition": null,
+            "optional": false,
+            "features": [],
+            "uses_default_features": true
+          }
+        ]
+      },
+      "dev_edges_excluded": []
+    },
+    {
+      "package": "tze_hud_widget",
+      "manifest_path": "crates/tze_hud_widget/Cargo.toml",
+      "shippable_by_current_guard": true,
+      "targets": [
+        {
+          "name": "tze_hud_widget",
+          "kind": [
+            "lib"
+          ],
+          "source": "crates/tze_hud_widget/src/lib.rs",
+          "required_features": []
+        },
+        {
+          "name": "shipped_bundles",
+          "kind": [
+            "test"
+          ],
+          "source": "crates/tze_hud_widget/tests/shipped_bundles.rs",
+          "required_features": []
+        }
+      ],
+      "declared_features": {},
+      "default_features": [],
+      "closure_features": {
+        "tze_hud_widget": [
+          "default"
+        ],
+        "tze_hud_resource": [
+          "default"
+        ],
+        "tze_hud_scene": [
+          "default"
+        ]
+      },
+      "workspace_edges": {
+        "tze_hud_resource": [
+          {
+            "target": "tze_hud_resource",
+            "kind": null,
+            "target_condition": null,
+            "optional": false,
+            "features": [],
+            "uses_default_features": true
+          }
+        ],
+        "tze_hud_scene": [
+          {
+            "target": "tze_hud_scene",
+            "kind": null,
+            "target_condition": null,
+            "optional": false,
+            "features": [],
+            "uses_default_features": true
+          }
+        ]
+      },
+      "dev_edges_excluded": [
+        {
+          "name": "tempfile",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "req": "^3",
+          "kind": "dev",
+          "rename": null,
+          "optional": false,
+          "uses_default_features": true,
+          "features": [],
+          "target": null,
+          "registry": null
+        },
+        {
+          "name": "tze_hud_scene",
+          "source": null,
+          "req": "^0.1.0",
+          "kind": "dev",
+          "rename": null,
+          "optional": false,
+          "uses_default_features": true,
+          "features": [],
+          "target": null,
+          "registry": null,
+          "path": "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.1.11/crates/tze_hud_scene"
+        }
+      ]
+    },
+    {
+      "package": "tze_hud_runtime",
+      "manifest_path": "crates/tze_hud_runtime/Cargo.toml",
+      "shippable_by_current_guard": true,
+      "targets": [
+        {
+          "name": "tze_hud_runtime",
+          "kind": [
+            "lib"
+          ],
+          "source": "crates/tze_hud_runtime/src/lib.rs",
+          "required_features": []
+        },
+        {
+          "name": "idle_efficiency_counters",
+          "kind": [
+            "test"
+          ],
+          "source": "crates/tze_hud_runtime/tests/idle_efficiency_counters.rs",
+          "required_features": []
+        },
+        {
+          "name": "pixel_helpers",
+          "kind": [
+            "test"
+          ],
+          "source": "crates/tze_hud_runtime/tests/pixel_helpers.rs",
+          "required_features": []
+        },
+        {
+          "name": "pixel_readback",
+          "kind": [
+            "test"
+          ],
+          "source": "crates/tze_hud_runtime/tests/pixel_readback.rs",
+          "required_features": [
+            "dev-mode"
+          ]
+        },
+        {
+          "name": "present_ack",
+          "kind": [
+            "test"
+          ],
+          "source": "crates/tze_hud_runtime/tests/present_ack.rs",
+          "required_features": [
+            "dev-mode"
+          ]
+        }
+      ],
+      "declared_features": {
+        "dev-mode": [],
+        "test-harness": [
+          "tze_hud_protocol/dev-mode"
+        ]
+      },
+      "default_features": [],
+      "closure_features": {
+        "tze_hud_runtime": [
+          "default"
+        ],
+        "tze_hud_compositor": [
+          "default"
+        ],
+        "tze_hud_input": [
+          "default"
+        ],
+        "tze_hud_scene": [
+          "default"
+        ],
+        "tze_hud_resource": [
+          "default"
+        ],
+        "tze_hud_telemetry": [
+          "default"
+        ],
+        "tze_hud_config": [
+          "default"
+        ],
+        "tze_hud_mcp": [
+          "default"
+        ],
+        "tze_hud_projection": [
+          "default",
+          "resident-grpc"
+        ],
+        "tze_hud_protocol": [
+          "default"
+        ],
+        "tze_hud_widget": [
+          "default"
+        ]
+      },
+      "workspace_edges": {
+        "tze_hud_compositor": [
+          {
+            "target": "tze_hud_compositor",
+            "kind": null,
+            "target_condition": null,
+            "optional": false,
+            "features": [],
+            "uses_default_features": true
+          }
+        ],
+        "tze_hud_config": [
+          {
+            "target": "tze_hud_config",
+            "kind": null,
+            "target_condition": null,
+            "optional": false,
+            "features": [],
+            "uses_default_features": true
+          }
+        ],
+        "tze_hud_input": [
+          {
+            "target": "tze_hud_input",
+            "kind": null,
+            "target_condition": null,
+            "optional": false,
+            "features": [],
+            "uses_default_features": true
+          }
+        ],
+        "tze_hud_mcp": [
+          {
+            "target": "tze_hud_mcp",
+            "kind": null,
+            "target_condition": null,
+            "optional": false,
+            "features": [],
+            "uses_default_features": true
+          }
+        ],
+        "tze_hud_projection": [
+          {
+            "target": "tze_hud_projection",
+            "kind": null,
+            "target_condition": null,
+            "optional": false,
+            "features": [
+              "resident-grpc"
+            ],
+            "uses_default_features": true
+          }
+        ],
+        "tze_hud_protocol": [
+          {
+            "target": "tze_hud_protocol",
+            "kind": null,
+            "target_condition": null,
+            "optional": false,
+            "features": [],
+            "uses_default_features": true
+          }
+        ],
+        "tze_hud_resource": [
+          {
+            "target": "tze_hud_resource",
+            "kind": null,
+            "target_condition": null,
+            "optional": false,
+            "features": [],
+            "uses_default_features": true
+          }
+        ],
+        "tze_hud_scene": [
+          {
+            "target": "tze_hud_scene",
+            "kind": null,
+            "target_condition": null,
+            "optional": false,
+            "features": [],
+            "uses_default_features": true
+          }
+        ],
+        "tze_hud_telemetry": [
+          {
+            "target": "tze_hud_telemetry",
+            "kind": null,
+            "target_condition": null,
+            "optional": false,
+            "features": [],
+            "uses_default_features": true
+          }
+        ],
+        "tze_hud_widget": [
+          {
+            "target": "tze_hud_widget",
+            "kind": null,
+            "target_condition": null,
+            "optional": false,
+            "features": [],
+            "uses_default_features": true
+          }
+        ]
+      },
+      "dev_edges_excluded": [
+        {
+          "name": "prost",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "req": "^0.13",
+          "kind": "dev",
+          "rename": null,
+          "optional": false,
+          "uses_default_features": true,
+          "features": [],
+          "target": null,
+          "registry": null
+        },
+        {
+          "name": "tempfile",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "req": "^3",
+          "kind": "dev",
+          "rename": null,
+          "optional": false,
+          "uses_default_features": true,
+          "features": [],
+          "target": null,
+          "registry": null
+        },
+        {
+          "name": "tokio",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "req": "^1",
+          "kind": "dev",
+          "rename": null,
+          "optional": false,
+          "uses_default_features": true,
+          "features": [
+            "full",
+            "test-util"
+          ],
+          "target": null,
+          "registry": null
+        },
+        {
+          "name": "tracing-subscriber",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "req": "^0.3",
+          "kind": "dev",
+          "rename": null,
+          "optional": false,
+          "uses_default_features": true,
+          "features": [
+            "env-filter",
+            "json"
+          ],
+          "target": null,
+          "registry": null
+        },
+        {
+          "name": "tze_hud_compositor",
+          "source": null,
+          "req": "^0.1.0",
+          "kind": "dev",
+          "rename": null,
+          "optional": false,
+          "uses_default_features": true,
+          "features": [],
+          "target": null,
+          "registry": null,
+          "path": "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.1.11/crates/tze_hud_compositor"
+        },
+        {
+          "name": "tze_hud_protocol",
+          "source": null,
+          "req": "^0.1.0",
+          "kind": "dev",
+          "rename": null,
+          "optional": false,
+          "uses_default_features": true,
+          "features": [
+            "dev-mode"
+          ],
+          "target": null,
+          "registry": null,
+          "path": "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.1.11/crates/tze_hud_protocol"
+        },
+        {
+          "name": "tze_hud_scene",
+          "source": null,
+          "req": "^0.1.0",
+          "kind": "dev",
+          "rename": null,
+          "optional": false,
+          "uses_default_features": true,
+          "features": [
+            "test-support"
+          ],
+          "target": null,
+          "registry": null,
+          "path": "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.1.11/crates/tze_hud_scene"
+        }
+      ]
+    },
+    {
+      "package": "tze_hud_config",
+      "manifest_path": "crates/tze_hud_config/Cargo.toml",
+      "shippable_by_current_guard": true,
+      "targets": [
+        {
+          "name": "tze_hud_config",
+          "kind": [
+            "lib"
+          ],
+          "source": "crates/tze_hud_config/src/lib.rs",
+          "required_features": []
+        }
+      ],
+      "declared_features": {},
+      "default_features": [],
+      "closure_features": {
+        "tze_hud_config": [
+          "default"
+        ],
+        "tze_hud_scene": [
+          "default"
+        ]
+      },
+      "workspace_edges": {
+        "tze_hud_scene": [
+          {
+            "target": "tze_hud_scene",
+            "kind": null,
+            "target_condition": null,
+            "optional": false,
+            "features": [],
+            "uses_default_features": true
+          }
+        ]
+      },
+      "dev_edges_excluded": [
+        {
+          "name": "proptest",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "req": "^1",
+          "kind": "dev",
+          "rename": null,
+          "optional": false,
+          "uses_default_features": true,
+          "features": [],
+          "target": null,
+          "registry": null
+        },
+        {
+          "name": "tempfile",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "req": "^3",
+          "kind": "dev",
+          "rename": null,
+          "optional": false,
+          "uses_default_features": true,
+          "features": [],
+          "target": null,
+          "registry": null
+        }
+      ]
+    },
+    {
+      "package": "tze_hud_mcp",
+      "manifest_path": "crates/tze_hud_mcp/Cargo.toml",
+      "shippable_by_current_guard": true,
+      "targets": [
+        {
+          "name": "tze_hud_mcp",
+          "kind": [
+            "lib"
+          ],
+          "source": "crates/tze_hud_mcp/src/lib.rs",
+          "required_features": []
+        }
+      ],
+      "declared_features": {},
+      "default_features": [],
+      "closure_features": {
+        "tze_hud_mcp": [
+          "default"
+        ],
+        "tze_hud_projection": [
+          "default"
+        ],
+        "tze_hud_scene": [
+          "default"
+        ]
+      },
+      "workspace_edges": {
+        "tze_hud_projection": [
+          {
+            "target": "tze_hud_projection",
+            "kind": null,
+            "target_condition": null,
+            "optional": false,
+            "features": [],
+            "uses_default_features": true
+          }
+        ],
+        "tze_hud_scene": [
+          {
+            "target": "tze_hud_scene",
+            "kind": null,
+            "target_condition": null,
+            "optional": false,
+            "features": [],
+            "uses_default_features": true
+          }
+        ]
+      },
+      "dev_edges_excluded": [
+        {
+          "name": "tokio",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "req": "^1",
+          "kind": "dev",
+          "rename": null,
+          "optional": false,
+          "uses_default_features": true,
+          "features": [
+            "full"
+          ],
+          "target": null,
+          "registry": null
+        }
+      ]
+    },
+    {
+      "package": "tze_hud_projection",
+      "manifest_path": "crates/tze_hud_projection/Cargo.toml",
+      "shippable_by_current_guard": true,
+      "targets": [
+        {
+          "name": "tze_hud_projection",
+          "kind": [
+            "lib"
+          ],
+          "source": "crates/tze_hud_projection/src/lib.rs",
+          "required_features": []
+        }
+      ],
+      "declared_features": {
+        "default": [],
+        "resident-grpc": [
+          "dep:tze_hud_config",
+          "dep:tze_hud_protocol",
+          "dep:uuid"
+        ]
+      },
+      "default_features": [],
+      "closure_features": {
+        "tze_hud_projection": [
+          "default"
+        ]
+      },
+      "workspace_edges": {
+        "tze_hud_config": [
+          {
+            "target": "tze_hud_config",
+            "kind": null,
+            "target_condition": null,
+            "optional": true,
+            "features": [],
+            "uses_default_features": true
+          }
+        ],
+        "tze_hud_protocol": [
+          {
+            "target": "tze_hud_protocol",
+            "kind": null,
+            "target_condition": null,
+            "optional": true,
+            "features": [],
+            "uses_default_features": true
+          }
+        ]
+      },
+      "dev_edges_excluded": [
+        {
+          "name": "proptest",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "req": "^1",
+          "kind": "dev",
+          "rename": null,
+          "optional": false,
+          "uses_default_features": true,
+          "features": [],
+          "target": null,
+          "registry": null
+        },
+        {
+          "name": "tze_hud_input",
+          "source": null,
+          "req": "^0.1.0",
+          "kind": "dev",
+          "rename": null,
+          "optional": false,
+          "uses_default_features": true,
+          "features": [],
+          "target": null,
+          "registry": null,
+          "path": "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.1.11/crates/tze_hud_input"
+        },
+        {
+          "name": "tze_hud_scene",
+          "source": null,
+          "req": "^0.1.0",
+          "kind": "dev",
+          "rename": null,
+          "optional": false,
+          "uses_default_features": true,
+          "features": [],
+          "target": null,
+          "registry": null,
+          "path": "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.1.11/crates/tze_hud_scene"
+        }
+      ]
+    },
+    {
+      "package": "tze_hud_protocol",
+      "manifest_path": "crates/tze_hud_protocol/Cargo.toml",
+      "shippable_by_current_guard": true,
+      "targets": [
+        {
+          "name": "tze_hud_protocol",
+          "kind": [
+            "lib"
+          ],
+          "source": "crates/tze_hud_protocol/src/lib.rs",
+          "required_features": []
+        },
+        {
+          "name": "backpressure",
+          "kind": [
+            "test"
+          ],
+          "source": "crates/tze_hud_protocol/tests/backpressure.rs",
+          "required_features": []
+        },
+        {
+          "name": "capability_gating",
+          "kind": [
+            "test"
+          ],
+          "source": "crates/tze_hud_protocol/tests/capability_gating.rs",
+          "required_features": []
+        },
+        {
+          "name": "event_delivery",
+          "kind": [
+            "test"
+          ],
+          "source": "crates/tze_hud_protocol/tests/event_delivery.rs",
+          "required_features": []
+        },
+        {
+          "name": "fuzz_protocol_boundary",
+          "kind": [
+            "test"
+          ],
+          "source": "crates/tze_hud_protocol/tests/fuzz_protocol_boundary.rs",
+          "required_features": []
+        },
+        {
+          "name": "lease_governance",
+          "kind": [
+            "test"
+          ],
+          "source": "crates/tze_hud_protocol/tests/lease_governance.rs",
+          "required_features": []
+        },
+        {
+          "name": "subscriptions",
+          "kind": [
+            "test"
+          ],
+          "source": "crates/tze_hud_protocol/tests/subscriptions.rs",
+          "required_features": []
+        },
+        {
+          "name": "build-script-build",
+          "kind": [
+            "custom-build"
+          ],
+          "source": "crates/tze_hud_protocol/build.rs",
+          "required_features": []
+        }
+      ],
+      "declared_features": {
+        "dev-mode": []
+      },
+      "default_features": [],
+      "closure_features": {
+        "tze_hud_protocol": [
+          "default"
+        ],
+        "tze_hud_resource": [
+          "default"
+        ],
+        "tze_hud_scene": [
+          "default"
+        ]
+      },
+      "workspace_edges": {
+        "tze_hud_resource": [
+          {
+            "target": "tze_hud_resource",
+            "kind": null,
+            "target_condition": null,
+            "optional": false,
+            "features": [],
+            "uses_default_features": true
+          }
+        ],
+        "tze_hud_scene": [
+          {
+            "target": "tze_hud_scene",
+            "kind": null,
+            "target_condition": null,
+            "optional": false,
+            "features": [],
+            "uses_default_features": true
+          }
+        ]
+      },
+      "dev_edges_excluded": [
+        {
+          "name": "proptest",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "req": "^1",
+          "kind": "dev",
+          "rename": null,
+          "optional": false,
+          "uses_default_features": true,
+          "features": [],
+          "target": null,
+          "registry": null
+        },
+        {
+          "name": "tempfile",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "req": "^3",
+          "kind": "dev",
+          "rename": null,
+          "optional": false,
+          "uses_default_features": true,
+          "features": [],
+          "target": null,
+          "registry": null
+        },
+        {
+          "name": "tze_hud_protocol",
+          "source": null,
+          "req": "^0.1.0",
+          "kind": "dev",
+          "rename": null,
+          "optional": false,
+          "uses_default_features": true,
+          "features": [
+            "dev-mode"
+          ],
+          "target": null,
+          "registry": null,
+          "path": "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.1.11/crates/tze_hud_protocol"
+        },
+        {
+          "name": "tze_hud_scene",
+          "source": null,
+          "req": "^0.1.0",
+          "kind": "dev",
+          "rename": null,
+          "optional": false,
+          "uses_default_features": true,
+          "features": [
+            "test-support"
+          ],
+          "target": null,
+          "registry": null,
+          "path": "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.1.11/crates/tze_hud_scene"
+        }
+      ]
+    },
+    {
+      "package": "tze_hud_app",
+      "manifest_path": "app/tze_hud_app/Cargo.toml",
+      "shippable_by_current_guard": true,
+      "targets": [
+        {
+          "name": "tze_hud",
+          "kind": [
+            "bin"
+          ],
+          "source": "app/tze_hud_app/src/main.rs",
+          "required_features": []
+        },
+        {
+          "name": "benchmark_config_schema",
+          "kind": [
+            "test"
+          ],
+          "source": "app/tze_hud_app/tests/benchmark_config_schema.rs",
+          "required_features": []
+        },
+        {
+          "name": "canonical_config_schema",
+          "kind": [
+            "test"
+          ],
+          "source": "app/tze_hud_app/tests/canonical_config_schema.rs",
+          "required_features": []
+        },
+        {
+          "name": "production_boot",
+          "kind": [
+            "test"
+          ],
+          "source": "app/tze_hud_app/tests/production_boot.rs",
+          "required_features": []
+        },
+        {
+          "name": "build-script-build",
+          "kind": [
+            "custom-build"
+          ],
+          "source": "app/tze_hud_app/build.rs",
+          "required_features": []
+        }
+      ],
+      "declared_features": {},
+      "default_features": [],
+      "closure_features": {
+        "tze_hud_app": [
+          "default"
+        ],
+        "tze_hud_config": [
+          "default"
+        ],
+        "tze_hud_scene": [
+          "default"
+        ],
+        "tze_hud_runtime": [
+          "default"
+        ],
+        "tze_hud_compositor": [
+          "default"
+        ],
+        "tze_hud_input": [
+          "default"
+        ],
+        "tze_hud_resource": [
+          "default"
+        ],
+        "tze_hud_telemetry": [
+          "default"
+        ],
+        "tze_hud_mcp": [
+          "default"
+        ],
+        "tze_hud_projection": [
+          "default",
+          "resident-grpc"
+        ],
+        "tze_hud_protocol": [
+          "default"
+        ],
+        "tze_hud_widget": [
+          "default"
+        ]
+      },
+      "workspace_edges": {
+        "tze_hud_config": [
+          {
+            "target": "tze_hud_config",
+            "kind": null,
+            "target_condition": null,
+            "optional": false,
+            "features": [],
+            "uses_default_features": true
+          }
+        ],
+        "tze_hud_runtime": [
+          {
+            "target": "tze_hud_runtime",
+            "kind": null,
+            "target_condition": null,
+            "optional": false,
+            "features": [],
+            "uses_default_features": true
+          }
+        ],
+        "tze_hud_scene": [
+          {
+            "target": "tze_hud_scene",
+            "kind": null,
+            "target_condition": null,
+            "optional": false,
+            "features": [],
+            "uses_default_features": true
+          }
+        ]
+      },
+      "dev_edges_excluded": [
+        {
+          "name": "tokio-stream",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "req": "^0.1",
+          "kind": "dev",
+          "rename": null,
+          "optional": false,
+          "uses_default_features": true,
+          "features": [
+            "sync",
+            "net"
+          ],
+          "target": null,
+          "registry": null
+        },
+        {
+          "name": "toml",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "req": "^0.8",
+          "kind": "dev",
+          "rename": null,
+          "optional": false,
+          "uses_default_features": true,
+          "features": [],
+          "target": null,
+          "registry": null
+        },
+        {
+          "name": "tze_hud_protocol",
+          "source": null,
+          "req": "^0.1.0",
+          "kind": "dev",
+          "rename": null,
+          "optional": false,
+          "uses_default_features": true,
+          "features": [],
+          "target": null,
+          "registry": null,
+          "path": "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.1.11/crates/tze_hud_protocol"
+        }
+      ]
+    },
+    {
+      "package": "vertical_slice",
+      "manifest_path": "examples/vertical_slice/Cargo.toml",
+      "shippable_by_current_guard": true,
+      "targets": [
+        {
+          "name": "vertical_slice",
+          "kind": [
+            "bin"
+          ],
+          "source": "examples/vertical_slice/src/main.rs",
+          "required_features": []
+        },
+        {
+          "name": "budget_assertions",
+          "kind": [
+            "test"
+          ],
+          "source": "examples/vertical_slice/tests/budget_assertions.rs",
+          "required_features": []
+        },
+        {
+          "name": "production_boot",
+          "kind": [
+            "test"
+          ],
+          "source": "examples/vertical_slice/tests/production_boot.rs",
+          "required_features": []
+        }
+      ],
+      "declared_features": {},
+      "default_features": [],
+      "closure_features": {
+        "vertical_slice": [
+          "default"
+        ],
+        "tze_hud_config": [
+          "default"
+        ],
+        "tze_hud_scene": [
+          "default"
+        ],
+        "tze_hud_protocol": [
+          "default"
+        ],
+        "tze_hud_resource": [
+          "default"
+        ],
+        "tze_hud_runtime": [
+          "default"
+        ],
+        "tze_hud_compositor": [
+          "default"
+        ],
+        "tze_hud_input": [
+          "default"
+        ],
+        "tze_hud_telemetry": [
+          "default"
+        ],
+        "tze_hud_mcp": [
+          "default"
+        ],
+        "tze_hud_projection": [
+          "default",
+          "resident-grpc"
+        ],
+        "tze_hud_widget": [
+          "default"
+        ]
+      },
+      "workspace_edges": {
+        "tze_hud_config": [
+          {
+            "target": "tze_hud_config",
+            "kind": null,
+            "target_condition": null,
+            "optional": false,
+            "features": [],
+            "uses_default_features": true
+          }
+        ],
+        "tze_hud_protocol": [
+          {
+            "target": "tze_hud_protocol",
+            "kind": null,
+            "target_condition": null,
+            "optional": false,
+            "features": [],
+            "uses_default_features": true
+          }
+        ],
+        "tze_hud_runtime": [
+          {
+            "target": "tze_hud_runtime",
+            "kind": null,
+            "target_condition": null,
+            "optional": false,
+            "features": [],
+            "uses_default_features": true
+          }
+        ]
+      },
+      "dev_edges_excluded": [
+        {
+          "name": "tze_hud_compositor",
+          "source": null,
+          "req": "^0.1.0",
+          "kind": "dev",
+          "rename": null,
+          "optional": false,
+          "uses_default_features": true,
+          "features": [],
+          "target": null,
+          "registry": null,
+          "path": "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.1.11/crates/tze_hud_compositor"
+        },
+        {
+          "name": "tze_hud_input",
+          "source": null,
+          "req": "^0.1.0",
+          "kind": "dev",
+          "rename": null,
+          "optional": false,
+          "uses_default_features": true,
+          "features": [],
+          "target": null,
+          "registry": null,
+          "path": "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.1.11/crates/tze_hud_input"
+        },
+        {
+          "name": "tze_hud_runtime",
+          "source": null,
+          "req": "^0.1.0",
+          "kind": "dev",
+          "rename": null,
+          "optional": false,
+          "uses_default_features": true,
+          "features": [
+            "dev-mode"
+          ],
+          "target": null,
+          "registry": null,
+          "path": "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.1.11/crates/tze_hud_runtime"
+        },
+        {
+          "name": "tze_hud_scene",
+          "source": null,
+          "req": "^0.1.0",
+          "kind": "dev",
+          "rename": null,
+          "optional": false,
+          "uses_default_features": true,
+          "features": [
+            "test-support"
+          ],
+          "target": null,
+          "registry": null,
+          "path": "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.1.11/crates/tze_hud_scene"
+        },
+        {
+          "name": "tze_hud_telemetry",
+          "source": null,
+          "req": "^0.1.0",
+          "kind": "dev",
+          "rename": null,
+          "optional": false,
+          "uses_default_features": true,
+          "features": [],
+          "target": null,
+          "registry": null,
+          "path": "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.1.11/crates/tze_hud_telemetry"
+        }
+      ]
+    },
+    {
+      "package": "poc_demo",
+      "manifest_path": "examples/poc_demo/Cargo.toml",
+      "shippable_by_current_guard": true,
+      "targets": [
+        {
+          "name": "poc_demo",
+          "kind": [
+            "lib"
+          ],
+          "source": "examples/poc_demo/src/lib.rs",
+          "required_features": []
+        },
+        {
+          "name": "poc_demo",
+          "kind": [
+            "bin"
+          ],
+          "source": "examples/poc_demo/src/main.rs",
+          "required_features": []
+        },
+        {
+          "name": "smoke",
+          "kind": [
+            "test"
+          ],
+          "source": "examples/poc_demo/tests/smoke.rs",
+          "required_features": []
+        }
+      ],
+      "declared_features": {},
+      "default_features": [],
+      "closure_features": {
+        "poc_demo": [
+          "default"
+        ],
+        "tze_hud_protocol": [
+          "default"
+        ],
+        "tze_hud_resource": [
+          "default"
+        ],
+        "tze_hud_scene": [
+          "default"
+        ]
+      },
+      "workspace_edges": {
+        "tze_hud_protocol": [
+          {
+            "target": "tze_hud_protocol",
+            "kind": null,
+            "target_condition": null,
+            "optional": false,
+            "features": [],
+            "uses_default_features": true
+          }
+        ]
+      },
+      "dev_edges_excluded": [
+        {
+          "name": "tze_hud_config",
+          "source": null,
+          "req": "^0.1.0",
+          "kind": "dev",
+          "rename": null,
+          "optional": false,
+          "uses_default_features": true,
+          "features": [],
+          "target": null,
+          "registry": null,
+          "path": "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.1.11/crates/tze_hud_config"
+        },
+        {
+          "name": "tze_hud_runtime",
+          "source": null,
+          "req": "^0.1.0",
+          "kind": "dev",
+          "rename": null,
+          "optional": false,
+          "uses_default_features": true,
+          "features": [
+            "dev-mode",
+            "test-harness"
+          ],
+          "target": null,
+          "registry": null,
+          "path": "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.1.11/crates/tze_hud_runtime"
+        },
+        {
+          "name": "tze_hud_scene",
+          "source": null,
+          "req": "^0.1.0",
+          "kind": "dev",
+          "rename": null,
+          "optional": false,
+          "uses_default_features": true,
+          "features": [],
+          "target": null,
+          "registry": null,
+          "path": "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.1.11/crates/tze_hud_scene"
+        }
+      ]
+    },
+    {
+      "package": "benchmark",
+      "manifest_path": "examples/benchmark/Cargo.toml",
+      "shippable_by_current_guard": true,
+      "targets": [
+        {
+          "name": "benchmark",
+          "kind": [
+            "bin"
+          ],
+          "source": "examples/benchmark/src/main.rs",
+          "required_features": []
+        },
+        {
+          "name": "token_footprint_calibration",
+          "kind": [
+            "bin"
+          ],
+          "source": "examples/benchmark/src/token_footprint_calibration.rs",
+          "required_features": []
+        }
+      ],
+      "declared_features": {
+        "headless": []
+      },
+      "default_features": [],
+      "closure_features": {
+        "benchmark": [
+          "default"
+        ],
+        "tze_hud_input": [
+          "default"
+        ],
+        "tze_hud_scene": [
+          "default"
+        ],
+        "tze_hud_runtime": [
+          "default"
+        ],
+        "tze_hud_compositor": [
+          "default"
+        ],
+        "tze_hud_resource": [
+          "default"
+        ],
+        "tze_hud_telemetry": [
+          "default"
+        ],
+        "tze_hud_config": [
+          "default"
+        ],
+        "tze_hud_mcp": [
+          "default"
+        ],
+        "tze_hud_projection": [
+          "default",
+          "resident-grpc"
+        ],
+        "tze_hud_protocol": [
+          "default"
+        ],
+        "tze_hud_widget": [
+          "default"
+        ]
+      },
+      "workspace_edges": {
+        "tze_hud_input": [
+          {
+            "target": "tze_hud_input",
+            "kind": null,
+            "target_condition": null,
+            "optional": false,
+            "features": [],
+            "uses_default_features": true
+          }
+        ],
+        "tze_hud_runtime": [
+          {
+            "target": "tze_hud_runtime",
+            "kind": null,
+            "target_condition": null,
+            "optional": false,
+            "features": [],
+            "uses_default_features": true
+          }
+        ],
+        "tze_hud_scene": [
+          {
+            "target": "tze_hud_scene",
+            "kind": null,
+            "target_condition": null,
+            "optional": false,
+            "features": [],
+            "uses_default_features": true
+          }
+        ],
+        "tze_hud_telemetry": [
+          {
+            "target": "tze_hud_telemetry",
+            "kind": null,
+            "target_condition": null,
+            "optional": false,
+            "features": [],
+            "uses_default_features": true
+          }
+        ]
+      },
+      "dev_edges_excluded": []
+    },
+    {
+      "package": "widget_publish_load_harness",
+      "manifest_path": "examples/widget_publish_load_harness/Cargo.toml",
+      "shippable_by_current_guard": true,
+      "targets": [
+        {
+          "name": "widget_publish_load_harness",
+          "kind": [
+            "bin"
+          ],
+          "source": "examples/widget_publish_load_harness/src/main.rs",
+          "required_features": []
+        }
+      ],
+      "declared_features": {},
+      "default_features": [],
+      "closure_features": {
+        "widget_publish_load_harness": [
+          "default"
+        ],
+        "tze_hud_protocol": [
+          "default"
+        ],
+        "tze_hud_resource": [
+          "default"
+        ],
+        "tze_hud_scene": [
+          "default"
+        ],
+        "tze_hud_telemetry": [
+          "default"
+        ]
+      },
+      "workspace_edges": {
+        "tze_hud_protocol": [
+          {
+            "target": "tze_hud_protocol",
+            "kind": null,
+            "target_condition": null,
+            "optional": false,
+            "features": [],
+            "uses_default_features": true
+          }
+        ],
+        "tze_hud_telemetry": [
+          {
+            "target": "tze_hud_telemetry",
+            "kind": null,
+            "target_condition": null,
+            "optional": false,
+            "features": [],
+            "uses_default_features": true
+          }
+        ]
+      },
+      "dev_edges_excluded": []
+    },
+    {
+      "package": "render_artifacts",
+      "manifest_path": "examples/render_artifacts/Cargo.toml",
+      "shippable_by_current_guard": true,
+      "targets": [
+        {
+          "name": "render_artifacts",
+          "kind": [
+            "lib"
+          ],
+          "source": "examples/render_artifacts/src/lib.rs",
+          "required_features": []
+        },
+        {
+          "name": "cooperative-projection-readback",
+          "kind": [
+            "bin"
+          ],
+          "source": "examples/render_artifacts/src/bin/cooperative_projection_readback.rs",
+          "required_features": []
+        },
+        {
+          "name": "vertical-flow-readback",
+          "kind": [
+            "bin"
+          ],
+          "source": "examples/render_artifacts/src/bin/vertical_flow_readback.rs",
+          "required_features": []
+        }
+      ],
+      "declared_features": {},
+      "default_features": [],
+      "closure_features": {
+        "render_artifacts": [
+          "default"
+        ],
+        "tze_hud_compositor": [
+          "default"
+        ],
+        "tze_hud_input": [
+          "default"
+        ],
+        "tze_hud_scene": [
+          "default"
+        ],
+        "tze_hud_resource": [
+          "default"
+        ],
+        "tze_hud_telemetry": [
+          "default"
+        ],
+        "tze_hud_runtime": [
+          "default"
+        ],
+        "tze_hud_config": [
+          "default"
+        ],
+        "tze_hud_mcp": [
+          "default"
+        ],
+        "tze_hud_projection": [
+          "default",
+          "resident-grpc"
+        ],
+        "tze_hud_protocol": [
+          "default"
+        ],
+        "tze_hud_widget": [
+          "default"
+        ]
+      },
+      "workspace_edges": {
+        "tze_hud_compositor": [
+          {
+            "target": "tze_hud_compositor",
+            "kind": null,
+            "target_condition": null,
+            "optional": false,
+            "features": [],
+            "uses_default_features": true
+          }
+        ],
+        "tze_hud_runtime": [
+          {
+            "target": "tze_hud_runtime",
+            "kind": null,
+            "target_condition": null,
+            "optional": false,
+            "features": [],
+            "uses_default_features": true
+          }
+        ],
+        "tze_hud_scene": [
+          {
+            "target": "tze_hud_scene",
+            "kind": null,
+            "target_condition": null,
+            "optional": false,
+            "features": [],
+            "uses_default_features": true
+          }
+        ]
+      },
+      "dev_edges_excluded": []
+    },
+    {
+      "package": "integration",
+      "manifest_path": "tests/integration/Cargo.toml",
+      "shippable_by_current_guard": false,
+      "targets": [
+        {
+          "name": "dashboard_tile_input",
+          "kind": [
+            "test"
+          ],
+          "source": "tests/integration/dashboard_tile_input.rs",
+          "required_features": []
+        },
+        {
+          "name": "drag_reposition",
+          "kind": [
+            "test"
+          ],
+          "source": "tests/integration/drag_reposition.rs",
+          "required_features": []
+        },
+        {
+          "name": "movable_elements_e2e",
+          "kind": [
+            "test"
+          ],
+          "source": "tests/integration/movable_elements_e2e.rs",
+          "required_features": []
+        },
+        {
+          "name": "multi_agent",
+          "kind": [
+            "test"
+          ],
+          "source": "tests/integration/multi_agent.rs",
+          "required_features": []
+        },
+        {
+          "name": "poc_acceptance",
+          "kind": [
+            "test"
+          ],
+          "source": "tests/integration/poc_acceptance.rs",
+          "required_features": []
+        },
+        {
+          "name": "subtitle_streaming",
+          "kind": [
+            "test"
+          ],
+          "source": "tests/integration/subtitle_streaming.rs",
+          "required_features": []
+        },
+        {
+          "name": "text_stream_portal_adapter",
+          "kind": [
+            "test"
+          ],
+          "source": "tests/integration/text_stream_portal_adapter.rs",
+          "required_features": []
+        },
+        {
+          "name": "text_stream_portal_cadence",
+          "kind": [
+            "test"
+          ],
+          "source": "tests/integration/text_stream_portal_cadence.rs",
+          "required_features": []
+        },
+        {
+          "name": "text_stream_portal_coalescing",
+          "kind": [
+            "test"
+          ],
+          "source": "tests/integration/text_stream_portal_coalescing.rs",
+          "required_features": []
+        },
+        {
+          "name": "text_stream_portal_composer",
+          "kind": [
+            "test"
+          ],
+          "source": "tests/integration/text_stream_portal_composer.rs",
+          "required_features": []
+        },
+        {
+          "name": "text_stream_portal_governance",
+          "kind": [
+            "test"
+          ],
+          "source": "tests/integration/text_stream_portal_governance.rs",
+          "required_features": []
+        },
+        {
+          "name": "text_stream_portal_markdown",
+          "kind": [
+            "test"
+          ],
+          "source": "tests/integration/text_stream_portal_markdown.rs",
+          "required_features": []
+        },
+        {
+          "name": "text_stream_portal_styling",
+          "kind": [
+            "test"
+          ],
+          "source": "tests/integration/text_stream_portal_styling.rs",
+          "required_features": []
+        },
+        {
+          "name": "text_stream_portal_surface",
+          "kind": [
+            "test"
+          ],
+          "source": "tests/integration/text_stream_portal_surface.rs",
+          "required_features": []
+        }
+      ],
+      "declared_features": {},
+      "default_features": [],
+      "closure_features": {
+        "integration": [
+          "default"
+        ],
+        "tze_hud_compositor": [
+          "default"
+        ],
+        "tze_hud_input": [
+          "default"
+        ],
+        "tze_hud_scene": [
+          "default"
+        ],
+        "tze_hud_resource": [
+          "default"
+        ],
+        "tze_hud_telemetry": [
+          "default"
+        ],
+        "tze_hud_config": [
+          "default"
+        ],
+        "tze_hud_projection": [
+          "default",
+          "resident-grpc"
+        ],
+        "tze_hud_protocol": [
+          "default"
+        ],
+        "tze_hud_runtime": [
+          "default"
+        ],
+        "tze_hud_mcp": [
+          "default"
+        ],
+        "tze_hud_widget": [
+          "default"
+        ]
+      },
+      "workspace_edges": {
+        "tze_hud_compositor": [
+          {
+            "target": "tze_hud_compositor",
+            "kind": null,
+            "target_condition": null,
+            "optional": false,
+            "features": [],
+            "uses_default_features": true
+          }
+        ],
+        "tze_hud_config": [
+          {
+            "target": "tze_hud_config",
+            "kind": null,
+            "target_condition": null,
+            "optional": false,
+            "features": [],
+            "uses_default_features": true
+          }
+        ],
+        "tze_hud_input": [
+          {
+            "target": "tze_hud_input",
+            "kind": null,
+            "target_condition": null,
+            "optional": false,
+            "features": [],
+            "uses_default_features": true
+          }
+        ],
+        "tze_hud_projection": [
+          {
+            "target": "tze_hud_projection",
+            "kind": null,
+            "target_condition": null,
+            "optional": false,
+            "features": [
+              "resident-grpc"
+            ],
+            "uses_default_features": true
+          }
+        ],
+        "tze_hud_protocol": [
+          {
+            "target": "tze_hud_protocol",
+            "kind": null,
+            "target_condition": null,
+            "optional": false,
+            "features": [],
+            "uses_default_features": true
+          }
+        ],
+        "tze_hud_resource": [
+          {
+            "target": "tze_hud_resource",
+            "kind": null,
+            "target_condition": null,
+            "optional": false,
+            "features": [],
+            "uses_default_features": true
+          }
+        ],
+        "tze_hud_runtime": [
+          {
+            "target": "tze_hud_runtime",
+            "kind": null,
+            "target_condition": null,
+            "optional": false,
+            "features": [],
+            "uses_default_features": true
+          }
+        ],
+        "tze_hud_scene": [
+          {
+            "target": "tze_hud_scene",
+            "kind": null,
+            "target_condition": null,
+            "optional": false,
+            "features": [],
+            "uses_default_features": true
+          }
+        ],
+        "tze_hud_telemetry": [
+          {
+            "target": "tze_hud_telemetry",
+            "kind": null,
+            "target_condition": null,
+            "optional": false,
+            "features": [],
+            "uses_default_features": true
+          }
+        ]
+      },
+      "dev_edges_excluded": [
+        {
+          "name": "tze_hud_protocol",
+          "source": null,
+          "req": "^0.1.0",
+          "kind": "dev",
+          "rename": null,
+          "optional": false,
+          "uses_default_features": true,
+          "features": [
+            "dev-mode"
+          ],
+          "target": null,
+          "registry": null,
+          "path": "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.1.11/crates/tze_hud_protocol"
+        },
+        {
+          "name": "tze_hud_runtime",
+          "source": null,
+          "req": "^0.1.0",
+          "kind": "dev",
+          "rename": null,
+          "optional": false,
+          "uses_default_features": true,
+          "features": [
+            "dev-mode",
+            "test-harness"
+          ],
+          "target": null,
+          "registry": null,
+          "path": "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.1.11/crates/tze_hud_runtime"
+        },
+        {
+          "name": "tze_hud_scene",
+          "source": null,
+          "req": "^0.1.0",
+          "kind": "dev",
+          "rename": null,
+          "optional": false,
+          "uses_default_features": true,
+          "features": [
+            "test-support"
+          ],
+          "target": null,
+          "registry": null,
+          "path": "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.1.11/crates/tze_hud_scene"
+        }
+      ]
+    }
+  ],
+  "instrument_verdict": "partial: current closures clean; weak optional forwarding order dependence independently disproves the universal guard claim"
+}

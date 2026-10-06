@@ -1,0 +1,62 @@
+[
+  {
+    "recipe": "ci",
+    "exit": 0,
+    "log": "dry-run-ci.log",
+    "gpu_icd_mentions": 12
+  },
+  {
+    "recipe": "test",
+    "exit": 0,
+    "log": "dry-run-test.log",
+    "gpu_icd_mentions": 2
+  },
+  {
+    "recipe": "test-gpu",
+    "exit": 0,
+    "log": "dry-run-test-gpu.log",
+    "gpu_icd_mentions": 4
+  },
+  {
+    "recipe": "test-integration",
+    "exit": 0,
+    "log": "dry-run-test-integration.log",
+    "gpu_icd_mentions": 2
+  },
+  {
+    "recipe": "token-footprint",
+    "exit": 0,
+    "log": "dry-run-token-footprint.log",
+    "gpu_icd_mentions": 4
+  },
+  {
+    "recipe": "production-boot",
+    "exit": 0,
+    "log": "dry-run-production-boot.log",
+    "gpu_icd_mentions": 2
+  },
+  {
+    "recipe": "canonical-app-boot",
+    "exit": 0,
+    "log": "dry-run-canonical-app-boot.log",
+    "gpu_icd_mentions": 2
+  },
+  {
+    "recipe": "clippy-windows-gnu",
+    "exit": 0,
+    "log": "dry-run-clippy-windows-gnu.log",
+    "gpu_icd_mentions": 0
+  },
+  {
+    "recipe": "cargo-deny",
+    "exit": 0,
+    "log": "dry-run-cargo-deny.log",
+    "gpu_icd_mentions": 0
+  },
+  {
+    "recipe": "overlay-harness-contract",
+    "exit": 0,
+    "log": "dry-run-overlay-harness-contract.log",
+    "gpu_icd_mentions": 0
+  }
+]

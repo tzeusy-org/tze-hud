@@ -1,0 +1,320 @@
+{
+  "on": {
+    "push": {
+      "branches": [
+        "main"
+      ]
+    },
+    "pull_request": {
+      "branches": [
+        "main"
+      ]
+    },
+    "merge_group": ""
+  },
+  "workflow_env": {
+    "APT_OPTS": "-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30",
+    "CARGO_TERM_COLOR": "always",
+    "RUST_BACKTRACE": "1",
+    "HEADLESS_FORCE_SOFTWARE": "1"
+  },
+  "actions": [
+    {
+      "job": "check",
+      "index": 0,
+      "name": null,
+      "uses": "actions/checkout@v5",
+      "with": {},
+      "category": "CI platform/toolchain/provisioning/cache"
+    },
+    {
+      "job": "check",
+      "index": 2,
+      "name": null,
+      "uses": "dtolnay/rust-toolchain@stable",
+      "with": {
+        "toolchain": "1.88"
+      },
+      "category": "CI platform/toolchain/provisioning/cache"
+    },
+    {
+      "job": "check",
+      "index": 3,
+      "name": null,
+      "uses": "Swatinem/rust-cache@v2.9.1",
+      "with": {},
+      "category": "CI platform/toolchain/provisioning/cache"
+    },
+    {
+      "job": "check",
+      "index": 6,
+      "name": null,
+      "uses": "taiki-e/install-action@v2",
+      "with": {
+        "tool": "cargo-machete@0.9.2"
+      },
+      "category": "CI platform/toolchain/provisioning/cache"
+    },
+    {
+      "job": "fmt",
+      "index": 0,
+      "name": null,
+      "uses": "actions/checkout@v5",
+      "with": {},
+      "category": "CI platform/toolchain/provisioning/cache"
+    },
+    {
+      "job": "fmt",
+      "index": 1,
+      "name": null,
+      "uses": "dtolnay/rust-toolchain@stable",
+      "with": {
+        "toolchain": "1.88",
+        "components": "rustfmt"
+      },
+      "category": "CI platform/toolchain/provisioning/cache"
+    },
+    {
+      "job": "clippy",
+      "index": 0,
+      "name": null,
+      "uses": "actions/checkout@v5",
+      "with": {},
+      "category": "CI platform/toolchain/provisioning/cache"
+    },
+    {
+      "job": "clippy",
+      "index": 1,
+      "name": null,
+      "uses": "dtolnay/rust-toolchain@stable",
+      "with": {
+        "toolchain": "1.88",
+        "components": "clippy"
+      },
+      "category": "CI platform/toolchain/provisioning/cache"
+    },
+    {
+      "job": "clippy",
+      "index": 2,
+      "name": null,
+      "uses": "Swatinem/rust-cache@v2.9.1",
+      "with": {},
+      "category": "CI platform/toolchain/provisioning/cache"
+    },
+    {
+      "job": "clippy-windows-gnu",
+      "index": 0,
+      "name": null,
+      "uses": "actions/checkout@v5",
+      "with": {},
+      "category": "CI platform/toolchain/provisioning/cache"
+    },
+    {
+      "job": "clippy-windows-gnu",
+      "index": 1,
+      "name": null,
+      "uses": "dtolnay/rust-toolchain@stable",
+      "with": {
+        "toolchain": "1.88",
+        "components": "clippy",
+        "targets": "x86_64-pc-windows-gnu"
+      },
+      "category": "CI platform/toolchain/provisioning/cache"
+    },
+    {
+      "job": "clippy-windows-gnu",
+      "index": 2,
+      "name": null,
+      "uses": "Swatinem/rust-cache@v2.9.1",
+      "with": {},
+      "category": "CI platform/toolchain/provisioning/cache"
+    },
+    {
+      "job": "test-unit",
+      "index": 0,
+      "name": null,
+      "uses": "actions/checkout@v5",
+      "with": {},
+      "category": "CI platform/toolchain/provisioning/cache"
+    },
+    {
+      "job": "test-unit",
+      "index": 1,
+      "name": null,
+      "uses": "dtolnay/rust-toolchain@stable",
+      "with": {
+        "toolchain": "1.88"
+      },
+      "category": "CI platform/toolchain/provisioning/cache"
+    },
+    {
+      "job": "test-unit",
+      "index": 2,
+      "name": null,
+      "uses": "Swatinem/rust-cache@v2.9.1",
+      "with": {},
+      "category": "CI platform/toolchain/provisioning/cache"
+    },
+    {
+      "job": "test-integration",
+      "index": 0,
+      "name": null,
+      "uses": "actions/checkout@v5",
+      "with": {},
+      "category": "CI platform/toolchain/provisioning/cache"
+    },
+    {
+      "job": "test-integration",
+      "index": 1,
+      "name": null,
+      "uses": "dtolnay/rust-toolchain@stable",
+      "with": {
+        "toolchain": "1.88"
+      },
+      "category": "CI platform/toolchain/provisioning/cache"
+    },
+    {
+      "job": "test-integration",
+      "index": 2,
+      "name": null,
+      "uses": "Swatinem/rust-cache@v2.9.1",
+      "with": {},
+      "category": "CI platform/toolchain/provisioning/cache"
+    },
+    {
+      "job": "test-integration",
+      "index": 7,
+      "name": "Upload token-footprint calibration artifact",
+      "uses": "actions/upload-artifact@v4",
+      "with": {
+        "name": "token-footprint-calibration",
+        "path": "test_results/token-footprint/",
+        "if-no-files-found": "error"
+      },
+      "category": "artifact"
+    },
+    {
+      "job": "production-boot-vertical-slice",
+      "index": 0,
+      "name": null,
+      "uses": "actions/checkout@v5",
+      "with": {},
+      "category": "CI platform/toolchain/provisioning/cache"
+    },
+    {
+      "job": "production-boot-vertical-slice",
+      "index": 1,
+      "name": null,
+      "uses": "dtolnay/rust-toolchain@stable",
+      "with": {
+        "toolchain": "1.88"
+      },
+      "category": "CI platform/toolchain/provisioning/cache"
+    },
+    {
+      "job": "production-boot-vertical-slice",
+      "index": 2,
+      "name": null,
+      "uses": "Swatinem/rust-cache@v2.9.1",
+      "with": {},
+      "category": "CI platform/toolchain/provisioning/cache"
+    },
+    {
+      "job": "canonical-app-production-boot",
+      "index": 0,
+      "name": null,
+      "uses": "actions/checkout@v5",
+      "with": {},
+      "category": "CI platform/toolchain/provisioning/cache"
+    },
+    {
+      "job": "canonical-app-production-boot",
+      "index": 1,
+      "name": null,
+      "uses": "dtolnay/rust-toolchain@stable",
+      "with": {
+        "toolchain": "1.88"
+      },
+      "category": "CI platform/toolchain/provisioning/cache"
+    },
+    {
+      "job": "canonical-app-production-boot",
+      "index": 2,
+      "name": null,
+      "uses": "Swatinem/rust-cache@v2.9.1",
+      "with": {},
+      "category": "CI platform/toolchain/provisioning/cache"
+    },
+    {
+      "job": "user-test-python-suite",
+      "index": 0,
+      "name": null,
+      "uses": "actions/checkout@v5",
+      "with": {},
+      "category": "CI platform/toolchain/provisioning/cache"
+    },
+    {
+      "job": "user-test-python-suite",
+      "index": 1,
+      "name": null,
+      "uses": "actions/setup-python@v5",
+      "with": {
+        "python-version": "3.11"
+      },
+      "category": "CI platform/toolchain/provisioning/cache"
+    },
+    {
+      "job": "dev-mode-guard",
+      "index": 0,
+      "name": null,
+      "uses": "actions/checkout@v5",
+      "with": {},
+      "category": "CI platform/toolchain/provisioning/cache"
+    },
+    {
+      "job": "cargo-deny",
+      "index": 0,
+      "name": null,
+      "uses": "actions/checkout@v5",
+      "with": {},
+      "category": "CI platform/toolchain/provisioning/cache"
+    },
+    {
+      "job": "cargo-deny",
+      "index": 1,
+      "name": "cargo deny check advisories + licenses",
+      "uses": "EmbarkStudios/cargo-deny-action@v2",
+      "with": {
+        "command": "check advisories licenses bans sources",
+        "log-level": "warn"
+      },
+      "category": "validation action"
+    },
+    {
+      "job": "test-gpu-pixel-readback",
+      "index": 0,
+      "name": null,
+      "uses": "actions/checkout@v5",
+      "with": {},
+      "category": "CI platform/toolchain/provisioning/cache"
+    },
+    {
+      "job": "test-gpu-pixel-readback",
+      "index": 1,
+      "name": null,
+      "uses": "dtolnay/rust-toolchain@stable",
+      "with": {
+        "toolchain": "1.88"
+      },
+      "category": "CI platform/toolchain/provisioning/cache"
+    },
+    {
+      "job": "test-gpu-pixel-readback",
+      "index": 2,
+      "name": null,
+      "uses": "Swatinem/rust-cache@v2.9.1",
+      "with": {},
+      "category": "CI platform/toolchain/provisioning/cache"
+    }
+  ]
+}

@@ -1,0 +1,178 @@
+[
+  {
+    "dedupe_key": "dev-mode-guard-weak-feature-fixed-point",
+    "title": "Make dev-mode guard replay weak forwarding after optional activation",
+    "type": "bug",
+    "priority": 2,
+    "complexity": "high",
+    "parent": "hud-bstmy.1",
+    "depends_on": null,
+    "proposed_blockers": [],
+    "existing_overlapping_ids": [
+      "hud-bstmy.1.3 (closed)",
+      "hud-bstmy.1.7 (closed)",
+      "hud-bstmy.1.11",
+      "hud-881w6 (closed limitation note)",
+      "PR1360 (merged; strong fixture-only forwarding, not same bug)"
+    ],
+    "rationale": "Actual Cargo resolves aliased optional rt/dev-mode in both default-feature orderings, but current guard accepts one. No current production default leak was found; required release-exclusion guard is unsound for its explicitly supported weak-feature syntax.",
+    "description": "Outcome: Make per-package default-build feature closure evaluation independent of declaration/work-stack ordering for weak optional dependency feature forwarding. Reject the actual Cargo rt?/dev-mode counterexample in both orderings while preserving inactive weak no-activation semantics and all existing clean/default/dev-only/normal/build/target cases. Scope only the existing guard implementation and its nearest fixtures.",
+    "outcome": "Both equivalent Cargo-resolved default sets fail with exit1; inactive weak forwarding still passes without activating the dependency.",
+    "non_goals": [
+      "No Cargo manifests/defaults/dependency topology or production auth changes.",
+      "No release build restoration, CI job/check name/ruleset/recipe changes, new guard species or mirrored source scans.",
+      "No T7 code/spec/invariant/owner posture change or third-party feature resolver expansion."
+    ],
+    "spec_links": [
+      "docs/scope.md:37 T8",
+      "docs/scope.md:62 Working rules",
+      "docs/vision.md:85 Lessons",
+      "hud-bstmy.1.3 AC3",
+      "hud-bstmy.1.7 acceptance",
+      "hud-bstmy.1.11 designC/AC4",
+      "scripts/ci/check_dev_mode_defaults.py:12 feature-indirection contract"
+    ],
+    "evidence_sha": "3b5bbb634a7dc6d8a8c9e40f585e5b1868cfb528",
+    "evidence": "weak-feature-counterexample.json embeds exact alias, manifests, both orderings, actual Cargo resolve and expected/observed CLI exits; final-guard-dedupe.json records full-body3008 dedupe.",
+    "implementation_surface": [
+      "scripts/ci/check_dev_mode_defaults.py:60 Workspace.closure_features",
+      "scripts/ci/check_dev_mode_defaults.py:81 activate",
+      "scripts/ci/check_dev_mode_defaults.py:106 weak branch",
+      "scripts/ci/test_check_dev_mode_defaults.py:92 test_forwarded_dep_feature_fails",
+      "scripts/ci/test_check_dev_mode_defaults.py:108 test_optional_dep_not_activated_passes"
+    ],
+    "trust_boundary": "Build metadata \u2192 required default-build dev-mode exclusion verdict for released tze_hud_app and all17 shippable workspace package closures. Test/dev-only features are permitted and must not contaminate shipping verdicts.",
+    "design": "Read guard/current all18 metadata package roots and the embedded isolated Cargo oracle. The LIFO traversal discards dep?/sub if no edge is active; activate() never replays it. Retain weak forwarding obligations or compute a finite fixed point so activating the matching optional dependency later forwards its requested feature. Resolve aliases using existing edge keys; never turn an inactive weak reference into a strong dependency activation. Preserve per-entry identity for repeated normal/build and target-conditioned edges, each edge defaults/default-features=false and explicit features. Preserve dev-edge exclusion, per-package roots, missing-shipped failure, deterministic output and finite cycle termination. Do not collapse by package alone or swallow repeated entries. Extend the two existing adequate CLI behavior fixtures using subcases/table data; no new test declaration/species/file. Preserve all other assertions. Re-run isolated actual Cargo resolve as an oracle, not a new permanent source-scan test.",
+    "failure_concurrency_replay_matrix": [
+      {
+        "case": "alias rt optional, default=[activate,forward] and reversed; activate=[dep:rt], forward=[rt?/dev-mode]",
+        "expected": "Cargo oracle dev-mode and guardexit1 both; ordering irrelevant"
+      },
+      {
+        "case": "inactive optional weak alias without any activation",
+        "expected": "No activation, no forwarded feature, guardexit0"
+      },
+      {
+        "case": "activation through intermediate feature or repeated/cyclic feature paths",
+        "expected": "Obligation replay reaches same fixed point, terminates, deterministic verdict"
+      },
+      {
+        "case": "multiple normal/build and target edges to same aliased target, different defaults/features",
+        "expected": "Preserve each activated edge contribution; dev-only edge remains excluded"
+      },
+      {
+        "case": "clean real metadata/outside-app package/missing shipped package",
+        "expected": "Clean17default roots pass; outside-app leak and missing-app fail as existing fixtures pin"
+      },
+      {
+        "case": "process concurrency/retry/cancel",
+        "expected": "Pure invocation-local metadata evaluation: no new global state/cache/lock; replay same metadata gives same verdict; stdin/JSON errors retain existing behavior"
+      }
+    ],
+    "acceptance_criteria": [
+      "Actual embedded Cargo metadata oracle resolves rt dev-mode in both orderings; exact guard pipeline exits1 and names tze_hud_app/runtime in both. No tracked manifest mutation.",
+      "Existing forwarded fixture extends alias/weak/two orders/indirect activation/cyclic replay; existing inactive optional fixture extends explicit weak alias no-activation. All original assertions retained; Tests:+0~2-0; eleven declarations remain.",
+      "Default-features=false, explicit normal/build features, repeated target/build entries, outside-app and missing-app fixtures retain intended outcomes; finite visited state prevents cycles.",
+      "Current real cargo metadata pipeline passes all17 eligible roots. just and CI still use identical command/name; no production/default/feature/API/ruleset edit.",
+      "Run focused scripts/ci guard unittest discovery and just dev-mode-guard, just test-python, fmt/workspace check/all-target clippy and one just ci with installed /usr/bin/protoc3.21.12, jobs1, warm target normal lock and actual recipe-selected llvmpipe. Record actual tool SKIPs/failures; no all-features.",
+      "README/AGENTS/CI docs only change if existing guard description would otherwise become false; normally source explanatory comments suffice. Preserve72 named invariant definitions and T7 boundary. Record exact final test delta, failure diagnostics and pushed PR proof."
+    ],
+    "nearest_existing_tests": [
+      "scripts/ci/test_check_dev_mode_defaults.py::test_forwarded_dep_feature_fails",
+      "scripts/ci/test_check_dev_mode_defaults.py::test_optional_dep_not_activated_passes"
+    ],
+    "gate_species": "Existing metadata-fixture CLI behavior (exit code and diagnostics), checked against isolated actual Cargo resolution.",
+    "tests_delta": {
+      "added": 0,
+      "modified": 2,
+      "removed": 0
+    },
+    "docs_impact": "No standalone docs; maintain existing traversal comments/contract as needed. No invariant/spec amendment or owner decision.",
+    "packet_complete": true,
+    "runnable_after_coordinator_materialization": true,
+    "existing_bead_id": "hud-bstmy.1.14",
+    "issue_id": "hud-bstmy.1.14",
+    "materialized_by": "coordinator; independently reread canonical fields",
+    "do_not_duplicate": true
+  },
+  {
+    "dedupe_key": "t8-enablers-reconciliation-gen3-terminal",
+    "title": "Reconcile T8.0 enablers gen-3 after weak-forwarding guard repair",
+    "type": "task",
+    "priority": 2,
+    "complexity": "high",
+    "reasoning_floor": "XHigh",
+    "parent": "hud-bstmy.1",
+    "depends_on": [
+      "hud-bstmy.1.14"
+    ],
+    "proposed_blockers": [
+      "hud-bstmy.1.14"
+    ],
+    "existing_overlapping_ids": [
+      "hud-bstmy.1.11 partial evidence",
+      "hud-bstmy.7.4 adjacent Node docs correction; dedupe only"
+    ],
+    "rationale": "Gen2 finds a concrete guard coverage gap; final audit must verify the repair and full original/current contracts on a single new main source SHA. Original audit closure is not a prerequisite.",
+    "description": "READ-ONLY terminal gen3 audit of full T8.0 enabler outcome after weak-forwarding repair and all applicable outcomes merge. Preserve every original.1.1-.1.5 criterion and.1.7-.1.10/.12/.13 correction, all72 invariant definitions, T7 and .8.6 status quo. Evidence publication alone cannot close coverage.",
+    "outcome": "Exact-SHA full coverage/partial verdict with complete universal/instrument matrices and durable evidence-only PR; coordinator closure only after merge and complete coverage.",
+    "non_goals": [
+      "No Cargo manifests/defaults/dependency topology or production auth changes.",
+      "No release build restoration, CI job/check name/ruleset/recipe changes, new guard species or mirrored source scans.",
+      "No T7 code/spec/invariant/owner posture change or third-party feature resolver expansion.",
+      "No code/test/doc/manifest/workflow/recipe/Beads lifecycle edits; no gen4 or owner default change."
+    ],
+    "spec_links": [
+      "docs/scope.md:37 T8",
+      "docs/scope.md:62 Working rules",
+      "docs/vision.md:85 Lessons",
+      "hud-bstmy.1.3 AC3",
+      "hud-bstmy.1.7 acceptance",
+      "hud-bstmy.1.11 designC/AC4",
+      "scripts/ci/check_dev_mode_defaults.py:12 feature-indirection contract",
+      "docs/invariants.md:1",
+      "hud-bstmy.1.11 full canonical audit mapA-E in criteria-snapshot.json"
+    ],
+    "implementation_surface": [
+      "Every current package/default closure and guard feature edge",
+      "All raw/indirect/macro/device factories and binary locks/exceptions",
+      "Every GPU recipe/CI run step/action/discovery root/docs claim",
+      "Split merge history/module wiring and all78mentions/72definitions",
+      "Owner-managed .8.6 status and read-only current ruleset"
+    ],
+    "trust_boundary": "Reconciliation claims \u2192 coordinator lifecycle. Passing/blind/skipped guards and merged siblings are not sufficient proof of coverage.",
+    "design": "Outcome and authority: Perform a READ-ONLY terminal gen-3 spec-to-code reconciliation of T8.0 epic hud-bstmy.1. Deliver an exact-commit checklist and a coordinator handoff establishing which original enabler requirements and gen-1 corrections are implemented, partial, missing, or deviating. Falsify the codebase's coverage claims; sibling closure and green tests alone are not proof. Governing sources are docs/scope.md T8 and Working rules, docs/vision.md (test volume is not confidence; Linux is headless CI), docs/invariants.md, AGENTS.md's local harness/GPU contracts, the epic, original children hud-bstmy.1.1-.1.5, gen-1 hud-bstmy.1.6, corrections hud-bstmy.1.7-.1.10, and any later enabler children such as hud-bstmy.1.12. All original criteria remain audit obligations. The broader T8 resource tests/code diet/reference removal belong to their existing sibling epics; record their relationship without implementing or absorbing them into this enabler audit.\n\nNon-goals: No Rust, Python, workflow, recipe, manifest, spec, or product documentation edits; no new tests, production serialization policy, CI/ruleset changes, issue creation/update/close/dependency mutation, or owner decision. The coordinator owns all Beads lifecycle and materializes follow-ups. Do not restore pre-reset RFC/OpenSpec/doctrine requirements. Do not wait for unanswered needs-human escalations whose documented default is status quo.\n\nBootstrap and sequencing: Work in the assigned isolated worktree and expected agent branch; verify actual shell cwd, canonical common Git directory, and absence of repository-identity Git environment overrides. Record HEAD before reading or running checks; re-grep sources because old line numbers are historical. Read AGENTS.md and CLAUDE.md, then compact current parent/sibling fields and dependency state. hud-bstmy.1.7-.1.10 are existing prerequisites; a closed child is an evidence lead, not a coverage verdict. If .1.12 is still open, report the residual serialization finding against that existing bead and allow the coordinator to wire/sequence it; never create a duplicate or silently declare full coverage.\n\nOwned audit map and required rows:\nA. GPU local signal (.1.1, .1.8, and later .1.12): inspect justfile's actual ICD discovery and every GPU-building recipe, compositor renderer/tests/mod.rs, renderer/tests/surface.rs, compositor tests/common/mod.rs and every compositor test binary, runtime src/test_support.rs, runtime tests/pixel_helpers.rs, present_ack.rs, tests/integration, examples/vertical_slice, and canonical app boot tests. Enumerate every device/runtime constructor and every indirect helper or macro caller, including pre-existing sites. Verify one shared async serialization gate per multi-test binary, its protected operation and lifetime, and any single-GPU-test exception by proving no competing creation path exists in that binary. Distinguish construction-only helpers from runtime-lib guards held across an entire scenario, and per-process locks from cross-process coordination. Do not assume HEADLESS_FORCE_SOFTWARE excludes a hardware Vulkan ICD. Enumerate every GPU recipe, including test, test-gpu, test-integration, both token-footprint runs, production-boot and canonical-app-boot, plus newly discovered recipes. Compare their environment and target/feature flags against CI. ICD discovery must follow justfile's actual lvp selection, supporting both lvp_icd.x86_64.json and Mesa 25's lvp_icd.json; dry-runs in this baseline select lvp_icd.json.\nB. Local/CI parity (.1.2, .1.9, .1.10): inspect every run step in .github/workflows/ci.yml and just --dry-run ci. Map validation commands/targets/features/environment to recipes; explicitly classify platform provisioning, artifact upload, informational duplicate pixel-readback, and weekly performance exclusions rather than pretending they are local behavior gates. Verify integration uses all test targets, Python uses pytest plus scripts/ci unittest discovery, deterministic token-footprint calibration/checks are reachable, and all six formerly orphaned Python files are exercised or removed together with dead subjects: test_check_constrained_envelope, test_check_windows_perf_budgets, test_constrained_envelope_runner, test_report_telemetry_trend, test_select_constrained_cpu_pair, test_windowed_overlay_perf_script. Check Windows-GNU clippy, cargo-deny, and the pwsh overlay harness recipe paths and their explicit SKIPPED behavior. Diff README.md, AGENTS.md, CLAUDE.md, justfile comments and CI comments against commands. GPU compositor tests and runtime pixel_readback must be described as included in just test/just ci and blocking test-unit through feature unification; the dedicated informational CI pixel-readback job is a duplicate. Distinguish informational, blocking workflow, and owner-managed required-check status.\nC. Release dev-mode exclusion (.1.3, .1.7): read scripts/ci/check_dev_mode_defaults.py, all workspace Cargo.toml feature/dependency declarations and metadata package/target inventory, and scripts/ci/test_check_dev_mode_defaults.py. Verify the shipped tze_hud_app closure and every shippable workspace package are checked rather than a hardcoded three-package list. Enumerate normal/build edges, dev-edge exclusion, defaults/default-features=false, aliases, optional dependency activation, forwarded/weak feature references, cycles, repeated dependency entries of different kinds/targets, and package/target/third-party assumptions. Audit the instrument's roots and eligibility predicates for blind spots. Run clean real metadata through the exact command shared by just and CI, and execute existing fixture tests for protocol default dev-mode, app-to-runtime feature activation, default feature indirection, forwarded dependency activation, packages outside the app closure, inactive optionals, repeated target/build-kind entries, clean repeated edges and missing shipped package. Any scratch mutated-metadata counterexample stays outside tracked code and restores no files because manifests are never edited. Confirm the redundant cargo build --workspace --release and obsolete dev_mode_not_active_in_release reference are absent from ci.yml, while the required job display name stays unchanged and windows.yml still owns the actual release build.\nD. Pure splits and invariant preservation (.1.4, .1.5): inspect compositor renderer/tests/ and protocol session_server/tests/ module wiring, shared helpers, topic files, absence of their old monolithic tests.rs files, and compositor files' original <=6500-line split criterion. Use the delivered PR/merge history to verify the split commits preserved all test bodies/assertions and before/after counts (original 275 compositor and 135 protocol tests); explain later authorized edits separately rather than treating today's counts as split-era counts. Verify every currently named docs/invariants.md test exists in its owning crate and remains a behavior-executing gate with the documented contract. Inspect relevant implementing code and tests; a name grep only establishes retention. Preserve the T7 boundary and the shared-helper/module paths communicated by the split work.\nE. Required-check escalation hud-bstmy.8.6: read current description, acceptance and owner notes, including the .1.9 correction that pixel_readback already blocks in test-unit. Unanswered means option C/status quo: no required-check or workflow changes, and no dependency on an owner response. If an explicit answer exists, include the resulting implementation bead and actual delivered follow-up in the matrix, verify the stated ruleset coordination through read-only evidence, and report unresolved coordination to the coordinator. Never infer owner approval from elapsed time or a proposed option.\n\nAudit method: For every universal or negative claim, save the complete searched surface and constructor/recipe/package/test inventory, then assess every entry. Compare repeated surfaces side by side for filtering, defaults, scope, target selection and failure handling. Audit guard instruments themselves: feature traversal, target/package exclusions, GPU skip/canary behavior, discovery roots, unittest enumeration and every source-scan regex/glob/root used as evidence. Each scenario needs one adequate gate species: an existing behavior-executing test or the designated structural scan/type/lint rule. Multiple test files may be part of that species; do not propose parallel source-grep tests for behavior already executed. A passing but blind guard is a gap in that guard, not justification for another redundant test.\n\nBehavior and verification matrix: Happy path is complete traced coverage plus clean real metadata and executed representative GPU/CI gates. Invalid metadata or missing shipped package must fail the guard, while legitimate dev-only/test-only and inactive optional edges must retain the documented behavior. Concurrency evidence covers all in-process initialization sites and guard release on failure; do not equate software-adapter selection with serialization. Missing tools, adapter, ICD, skipped tests, timeouts and failed commands are recorded as unverified/failed, never implemented-by-green-skip. Check the recipe's selected ICD before declaring an environment limitation; do not inspect only the old filename. Replay/idempotence means reruns on the same SHA preserve classification and token-footprint measurements, with no new mutation or duplicate gap candidates. Concurrent main changes require a fresh source re-grep and a new evidence SHA; mixed-SHA evidence is invalid. Cancellation leaves an incomplete report whose unexecuted commands are explicit. Rollback and persistent-schema migration are not applicable because this audit changes no production or stored state. Historical split compatibility and named invariant retention remain applicable.\n\nVerification plan: At minimum run just dev-mode-guard and python3 -m unittest discover -s scripts/ci -p test_check_dev_mode_defaults.py; record just --dry-run ci and each GPU recipe, verify CI YAML parses, and inspect all relevant existing test bodies and production implementing paths. Re-run the original local GPU proof through just test-gpu twice, with actual execution, TZE_HUD_REQUIRE_GPU=1 and per-suite 900-second bounds; record compilation separately. Execute just test-integration, just test-python and just token-footprint where this baseline's actual capabilities permit. Run just ci once for the integrated parity proof; its fmt/clippy/check/test/boot contracts remain obligations, and any tool-gated SKIP is explicitly an evidence limitation. Prefer existing valid exact-SHA evidence over blindly re-running unrelated expensive suites, but never substitute old-commit evidence for a changed surface. Do not run bare hardware-ICD compositor tests. Audit creates zero tests and changes zero code lines.\n\nDocumentation impact: No direct documentation/spec amendment is authorized in this READ-ONLY bead. The report must include file:line proposals for any stale README/AGENTS/CLAUDE/justfile/CI/invariants statements, with the governing source and exact discrepancy. Investigation notes belong in the coordinator handoff or subsequent PR description, not new docs investigation files, per docs/scope.md Working rules. A spec change or invariant reduction requires the owner's explicit authority and is not a reconciliation fix.\n\nDeliverable and gap protocol: Return the exact SHA, original requirement -> implementing bead -> code file:line -> gate species -> executed command/result -> classification matrix, complete universal inventories, instrument findings, verification limitations, proposed documentation corrections and a concise close-summary candidate. For every partial/missing/deviating requirement return Discovered-Follow-Ups-JSON entries containing a dedupe key, title, issue type/priority/complexity, parent hud-bstmy.1, proposed blockers and existing overlapping bead/PR IDs, outcome/non-goals, exact current spec link, implementation surface and trust boundary, cold-start design/failure matrix, measurable acceptance evidence, nearest existing test to extend or reason no adequate gate exists, gate species and expected net test delta. Existing .1.12 is a dedupe target, not a new bead. If gaps remain, report blocked-awaiting-coordinator with unblock condition coverage gaps remain and do not propose gen-4: terminal gen-3 must report remaining concrete gaps and remain partial/blocked until those coverage blockers are resolved. Only the coordinator materializes/wires/closes issues. Full coverage requires every original requirement plus current corrections covered, with no unresolved evidence limitation passed off as implemented.\n\nEvidence persistence: Commit and push the read-only report under test_results/reconciliation (selective force-add is authorized by AGENTS) and open an evidence-only PR. This writes no production code or product/spec documentation. Bead closure requires confirmed report merge and all coverage gaps resolved; a report PR alone never establishes complete coverage.\n\nAdditional terminal contract: materialized weak repair is a prerequisite; original .1.11 closure is NEVER a prerequisite. Recheck actual Cargo alias/two ordering/no-activation cases and source fixed-point/per-entry state independently. Link reused proof only with source-blob applicability and distinguish command head from audit head. Re-read .1.13 and merged P/active G changes at current main; refresh all source inventories after concurrency drift. Persist report in test_results/reconciliation and open evidence-only PR. Unresolved coverage means blocked-awaiting-coordinator; no gen4 and no false original closure.\n\nSplit clarification: preserve all275 original planning declarations plus5 separately authorized pre-split additions; the delivered split was280\u2192280 with unchanged bodies. Do not demand stale275 as the delivered count.",
+    "failure_concurrency_replay_matrix": [
+      "Guard clean/negative/weak ordering/inactive optional/cycle/repeated edge/missing app",
+      "Per-binary init admission and release on Err/panic/cancel/queued cancel, no production policy",
+      "Missing adapter/ICD/tool/timeout/skips explicitly unverified; current recipe supports both Mesa filenames",
+      "Deterministic token repeat and same-SHA inventory replay; new main SHA requires fresh re-grep/blob proof",
+      "Split history/current assertion retention and exact current named-invariant contracts"
+    ],
+    "acceptance_criteria": [
+      "Full original/correction criteria matrix uses exact main source SHA, complete constructor/helper/macro/binary/recipe/package/invariant/instrument inventory and implementation-path reading, never passcounts alone.",
+      "Weak repair source and existing fixtures pin both actual Cargo orderings, inactive optional semantics, aliases, cycles and repeated normal/build/target edges; current all17 clean closures pass.",
+      "Run independent guard/fixture/dry-run/YAML checks, representative actual required-GPU behavior and integrated parity gates; reuse expensive proof only for exact applicable blobs, preserve all skipped/failure limits.",
+      "Classify every ci.yml run/action and required versus blocking/informational status; .8.6 unanswered remainsC/statusquo. No owner response wait.",
+      "Retain original275/135 split inventories with authorized later changes separate, current78mentions/72definition attribution, <=6500 split gate, all T7 and current Node160/Tile200 authority; dedupe Node docs against .7.4.",
+      "Audit delta+0~0-0. Commit/push evidence-only report PR. Full coverage closure requires authoritative merge plus every coverage gap resolved. Partial => cold-start dedupe candidates/blockers, never gen4 or dependency on .1.11 closure."
+    ],
+    "gate_species": "Existing contract behavior and designated structural guards; audit adds no tests.",
+    "nearest_existing_tests": [
+      "scripts/ci/test_check_dev_mode_defaults.py::test_forwarded_dep_feature_fails",
+      "scripts/ci/test_check_dev_mode_defaults.py::test_optional_dep_not_activated_passes"
+    ],
+    "tests_delta": {
+      "added": 0,
+      "modified": 0,
+      "removed": 0
+    },
+    "docs_impact": "Evidence only; precise existing-doc discrepancy proposals/dedupe, no product/spec amendment.",
+    "packet_complete": true,
+    "runnable_after_coordinator_materialization": false,
+    "existing_bead_id": "hud-bstmy.1.15",
+    "issue_id": "hud-bstmy.1.15",
+    "materialized_by": "coordinator; independently reread canonical fields",
+    "do_not_duplicate": true
+  }
+]
