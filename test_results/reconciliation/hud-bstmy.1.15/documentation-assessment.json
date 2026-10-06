@@ -1,0 +1,47 @@
+{
+  "head": "398c6f91de6e0d4883b10a41b6c63044e6192730",
+  "classification": "partial comments; commands/parity current implemented",
+  "proposed_rows": [
+    {
+      "file": ".github/workflows/ci.yml",
+      "line": 30,
+      "actual": "cargo-deny is labelled informational; actual job has no continue-on-error and check advisories licenses bans sources; required-main-rules eight omit it.",
+      "proposed": "Describe cargo-deny as workflow-blocking advisories/licenses/bans/sources, outside the current required eight."
+    },
+    {
+      "file": ".github/workflows/ci.yml",
+      "line": 458,
+      "actual": "Comment claims action pinned to specificSHA; uses EmbarkStudios/cargo-deny-action@v2.",
+      "proposed": "Describe current version-tag action truthfully; do not repin action."
+    },
+    {
+      "file": ".github/workflows/ci.yml",
+      "line": 469,
+      "actual": "Comment says onlytwo check gates and bans/sources implicit; actual command explicitly runsfour.",
+      "proposed": "State allfour explicit gates; no command or policy change."
+    },
+    {
+      "file": ".github/workflows/ci.yml",
+      "line": 490,
+      "actual": "Local pixel example is bare cargo without the required localICD selection.",
+      "proposed": "Use just test-gpu in the local example, preserving the actual CI pixel command."
+    },
+    {
+      "file": "scripts/ci/check_dev_mode_defaults.py",
+      "line": 29,
+      "actual": "Docstring lists lib/bin/example eligibility; is_shippable only productionlib/bin kinds, excluding example-only/default non-build targets.",
+      "proposed": "Describe lib/bin/production-library eligibility accurately; preserve predicate and all17 roots."
+    }
+  ],
+  "correct_current_rows": [
+    "AGENTS current Node160/Tile200 wording already corrected by merged .7.4; no reopen/duplicate",
+    "README/AGENTS/CLAUDE/justfile correctly include compositor/pixel in test/ci, scope hardware/NVIDIA warning and list toolSKIPs",
+    "Literal original.1.1 AC4 matches truthful CI duplicate exclusion comment in justfile; later.1.9/.1.10 semantic authority retains that useful reference",
+    "Release-build negative scan: no cargo build --workspace --release or obsolete dev_mode_not_active_in_release in ci.yml; unchanged required job dev-mode guard (release build); Windows release remains windows.yml"
+  ],
+  "existing_overlap": [
+    "hud-bstmy.8.3 owns pre-reset reference guard, not these current comment inaccuracies",
+    "hud-bstmy.8.6 unanswered => statusquoC"
+  ],
+  "writes_authorized": "Evidence only; no docs/spec/workflow/recipe change in this audit."
+}

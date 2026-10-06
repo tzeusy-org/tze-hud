@@ -1,0 +1,10 @@
+[
+  {
+    "title": "Coverage gaps remain in injected live deadlines and current parity comments",
+    "type": "task",
+    "priority": 1,
+    "depends_on": "coordinator-materialized concrete keys in discovered-follow-ups.json; existingprotocolT2 dedupe",
+    "rationale": "Namedtests andallgates pass, but source-confirmed safe-mode clockdomain/drag/cache/fade clock seams andfalsecomments preventcomplete terminalGEN3coverage. NoGEN4/no dependencyon .1.11closure.",
+    "unblock_condition": "EvidencePR authoritative merge plus scopedconcrete repairs merged and current terminalmatrix rechecked against their exactsources/gates, preservingall72/T7/statusquo.8.6. Coordinatoralone materializes/wireslifecycle."
+  }
+]

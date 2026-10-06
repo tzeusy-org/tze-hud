@@ -1,0 +1,2 @@
+tze_hud_app v0.0.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.1.15/.handoff/hud-bstmy.1.15/cargo-oracles-corrected/active-normal-0/app) features=[activate,default,forward]
+└── tze_hud_runtime v0.0.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.1.15/.handoff/hud-bstmy.1.15/cargo-oracles-corrected/active-normal-0/runtime) features=[dev-mode]

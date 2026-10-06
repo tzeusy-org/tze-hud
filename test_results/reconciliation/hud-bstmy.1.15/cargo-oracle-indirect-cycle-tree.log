@@ -1,0 +1,2 @@
+tze_hud_app v0.0.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.1.15/.handoff/hud-bstmy.1.15/cargo-oracles-corrected/indirect-cycle/app) features=[activate,default,forward,via]
+└── tze_hud_runtime v0.0.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.1.15/.handoff/hud-bstmy.1.15/cargo-oracles-corrected/indirect-cycle/runtime) features=[dev-mode]

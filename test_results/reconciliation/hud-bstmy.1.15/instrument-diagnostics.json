@@ -1,0 +1,9 @@
+[
+  {
+    "instrument": "initial Cargo metadata oracle",
+    "exit": 1,
+    "reason": "Incorrectly treated workspace-wide Cargo metadata resolve as the package normal/build oracle for inactive optional case; metadata unifies dev/optional edges. Corrected to package-selected cargo tree normal,build,features.",
+    "source_or_test_failure": false,
+    "failed_scratch_preserved": ".handoff/hud-bstmy.1.15/cargo-oracles"
+  }
+]

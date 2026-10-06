@@ -1,0 +1,41 @@
+{
+  "head": "398c6f91de6e0d4883b10a41b6c63044e6192730",
+  "rows": [
+    {
+      "instrument": "GPU lexical source inventory",
+      "roots": [
+        "crates",
+        "app",
+        "examples",
+        "tests"
+      ],
+      "files": 327,
+      "assessment": "Masks comments/string literals and retains raw adapter/helper/macro operations with owners.66tokens include duplicateInstance/type mentions, not66constructors. Every row classified; binary cfg/module ownership/guard lifetime read separately."
+    },
+    {
+      "instrument": "Named invariant inventory",
+      "assessment": "Backtick mention extraction plus attributed #[test]/#[tokio::test] definitions gives78/72. Complete bodies/implementations read; actual owning logpass lines checked. Retention names are not universalcoverage."
+    },
+    {
+      "instrument": "Historical split comparator",
+      "assessment": "Raw280/135 testbody equality and allfnbody multiplicity prevent helper/method name collisions from silently dropping declarations; linebar and actualmodule files verified. Original275planning preserved+fiveauthorizedadds. Later current240/110topiccounts intentionallydifferent."
+    },
+    {
+      "instrument": "Dev-mode guard",
+      "assessment": "All18package targets/feature/dependency entries and17defaultroots inventoried, normal/build perentry anddevexcluded, conservativealltargetsunion; actual selected-package Cargo tree avoids globaldev/optional resolve overapproximation.470registryassumption independently checked. Weak replay currentfixed."
+    },
+    {
+      "instrument": "Python discovery",
+      "assessment": "All103unittestIDs enumerated with defaulttest*.py, six orphanmodules included. pytestroots exact; defaultsystem3.14 lackingpytest failpreserved, existingrootvenv recipevariable passes. Noinstall/newtests."
+    },
+    {
+      "instrument": "CI status",
+      "assessment": "Every28run/33actionstep and12jobs classified; YAMLBaseLoader retainson andmerge_group. Required8ownercontexts vsblockingworkflow/nonblockingduplicate separate; action versionpin comments explicitlyfalse, no policychange."
+    }
+  ],
+  "audit_test_delta": {
+    "added": 0,
+    "modified": 0,
+    "removed": 0
+  }
+}

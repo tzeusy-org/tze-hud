@@ -1,0 +1,204 @@
+{
+  "head": "398c6f91de6e0d4883b10a41b6c63044e6192730",
+  "source_only_no_new_compiled_probe": true,
+  "rows": [
+    {
+      "file": "crates/tze_hud_runtime/src/shell/safe_mode.rs",
+      "blob": "159329707bbcc6da45029b295a3443319422585b",
+      "ranges": [
+        {
+          "start": 63,
+          "end": 105,
+          "source": "63: pub async fn enter_safe_mode(\n64:     shared_state: &Arc<Mutex<SharedState>>,\n65:     chrome_state: &Arc<RwLock<ChromeState>>,\n66: ) -> SafeModeEntryResult {\n67:     let now_ms = now_wall_ms();\n68:     let now_us = now_ms.saturating_mul(1_000);\n69: \n70:     let (leases_suspended, sessions_notified) = {\n71:         let st = shared_state.lock().await;\n72: \n73:         // Guard: idempotent. `safe_mode_atomic` is the single source of truth.\n74:         if st.safe_mode_atomic.load(Ordering::Acquire) {\n75:             return SafeModeEntryResult {\n76:                 leases_suspended: 0,\n77:                 sessions_notified: 0,\n78:             };\n79:         }\n80: \n81:         // Suspend all ACTIVE leases (NOT revoke).\n82:         let leases_suspended = {\n83:             let mut scene = st.scene.lock().await;\n84:             scene.suspend_all_leases(now_ms);\n85:             scene\n86:                 .leases\n87:                 .values()\n88:                 .filter(|l| l.state == LeaseState::Suspended)\n89:                 .count()\n90:         };\n91: \n92:         // The event thread reads this lock-free and mutation intake reads it\n93:         // under the SharedState lock; Release pairs with their Acquire loads.\n94:         st.safe_mode_atomic.store(true, Ordering::Release);\n95: \n96:         // sequence = 0: the session handler stamps the per-session sequence\n97:         // before delivery; a shared broadcast cannot.\n98:         let suspended_msg = ServerMessage {\n99:             sequence: 0,\n100:             timestamp_wall_us: now_us,\n101:             payload: Some(ServerPayload::SessionSuspended(SessionSuspended {\n102:                 reason: \"safe_mode_entered\".to_string(),\n103:                 timestamp_wall_us: now_us,\n104:             })),\n105:         };"
+        },
+        {
+          "start": 128,
+          "end": 188,
+          "source": "128: pub async fn exit_safe_mode(\n129:     shared_state: &Arc<Mutex<SharedState>>,\n130:     chrome_state: &Arc<RwLock<ChromeState>>,\n131: ) -> SafeModeExitResult {\n132:     let now_ms = now_wall_ms();\n133:     let now_us = now_ms.saturating_mul(1_000);\n134: \n135:     let st = shared_state.lock().await;\n136:     if !st.safe_mode_atomic.load(Ordering::Acquire) {\n137:         return SafeModeExitResult {\n138:             exited: false,\n139:             leases_resumed: 0,\n140:             sessions_notified: 0,\n141:         };\n142:     }\n143: \n144:     // Dismiss the overlay first so the next frame has none.\n145:     chrome_state\n146:         .write()\n147:         .unwrap_or_else(|poisoned| poisoned.into_inner())\n148:         .safe_mode_active = false;\n149: \n150:     let leases_resumed = {\n151:         let mut scene = st.scene.lock().await;\n152:         let suspended = scene\n153:             .leases\n154:             .values()\n155:             .filter(|l| l.state == LeaseState::Suspended)\n156:             .count();\n157:         scene.resume_all_leases(now_ms);\n158:         suspended\n159:     };\n160: \n161:     // Mutation intake accepts new batches again.\n162:     st.safe_mode_atomic.store(false, Ordering::Release);\n163: \n164:     let resumed_msg = ServerMessage {\n165:         sequence: 0,\n166:         timestamp_wall_us: now_us,\n167:         payload: Some(ServerPayload::SessionResumed(SessionResumed {\n168:             timestamp_wall_us: now_us,\n169:         })),\n170:     };\n171:     let sessions_notified = st.sessions.broadcast_server_message(resumed_msg);\n172: \n173:     SafeModeExitResult {\n174:         exited: true,\n175:         leases_resumed,\n176:         sessions_notified,\n177:     }\n178: }\n179: \n180: /// Current wall-clock time in milliseconds since Unix epoch.\n181: fn now_wall_ms() -> u64 {\n182:     SystemTime::now()\n183:         .duration_since(UNIX_EPOCH)\n184:         .unwrap_or_default()\n185:         .as_millis() as u64\n186: }\n187: \n188: #[cfg(test)]"
+        },
+        {
+          "start": 329,
+          "end": 354,
+          "source": "329:     async fn test_ttl_excluded_during_suspension() {\n330:         let fx = Fixture::new();\n331:         let lease_id = fx.grant(\"agent.alpha\").await;\n332:         let original_ttl = {\n333:             let st = fx.shared.lock().await;\n334:             st.scene.lock().await.leases[&lease_id].ttl_ms\n335:         };\n336: \n337:         fx.enter().await;\n338:         fx.exit().await;\n339: \n340:         let post_resume_ttl = {\n341:             let st = fx.shared.lock().await;\n342:             st.scene.lock().await.leases[&lease_id].ttl_ms\n343:         };\n344:         // Very little real time elapses; allow 5s of test overhead.\n345:         assert!(\n346:             post_resume_ttl >= original_ttl.saturating_sub(5_000),\n347:             \"TTL after resume ({post_resume_ttl}ms) should be ~ original ({original_ttl}ms)\"\n348:         );\n349:     }\n350: \n351:     /// While safe mode is active `SharedState.safe_mode_atomic` is set, which\n352:     /// makes the session server reject MutationBatch with SAFE_MODE_ACTIVE.\n353:     #[tokio::test]\n354:     async fn test_mutations_rejected_via_shared_state_flag() {"
+        }
+      ]
+    },
+    {
+      "file": "crates/tze_hud_scene/src/graph/mod.rs",
+      "blob": "1829024a695031df306e064cfbbfa296a62e41d0",
+      "ranges": [
+        {
+          "start": 288,
+          "end": 310,
+          "source": "288:     // \u2500\u2500\u2500 Clock accessor \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n289: \n290:     /// Return the current time in milliseconds from the injected clock.\n291:     ///\n292:     /// Public so callers that stamp lease lifecycle transitions\n293:     /// (`disconnect_lease`/`reconnect_lease`) use the SAME clock domain the\n294:     /// lease expiry/grace checks compare against \u2014 a\n295:     /// wall-clock value from a different source would make grace bounds\n296:     /// inconsistent.\n297:     pub fn now_millis(&self) -> u64 {\n298:         self.clock.now_millis()\n299:     }\n300: \n301:     /// Current wall-clock time in microseconds from the injected clock, the\n302:     /// domain `present_at` / `expires_at` deadlines are compared in.\n303:     pub fn now_wall_us(&self) -> u64 {\n304:         self.clock.now_us()\n305:     }\n306: \n307:     /// Monotonic microseconds from the injected clock, for measuring elapsed\n308:     /// time (animations); never steps backward on a real clock.\n309:     pub fn now_monotonic_us(&self) -> u64 {\n310:         self.clock.monotonic_us()"
+        }
+      ]
+    },
+    {
+      "file": "crates/tze_hud_scene/src/types.rs",
+      "blob": "3584bdbae3b97f088e79d2b5f44adff0b73aa012",
+      "ranges": [
+        {
+          "start": 1372,
+          "end": 1405,
+          "source": "1372:     pub fn suspend(&mut self, now_ms: u64) -> Result<(), LeaseError> {\n1373:         if self.state != LeaseState::Active {\n1374:             return Err(LeaseError::InvalidTransition {\n1375:                 from: self.state,\n1376:                 to: LeaseState::Suspended,\n1377:             });\n1378:         }\n1379:         let remaining = self.effective_remaining_ms(now_ms);\n1380:         self.suspended_at_ms = Some(now_ms);\n1381:         self.ttl_remaining_at_suspend_ms = Some(remaining);\n1382:         self.state = LeaseState::Suspended;\n1383:         Ok(())\n1384:     }\n1385: \n1386:     /// Transition Suspended -> Active (safe mode exit).\n1387:     ///\n1388:     /// Resumes the TTL clock. The `granted_at_ms` and `ttl_ms` are adjusted\n1389:     /// so that the remaining TTL equals what was saved at suspension time.\n1390:     pub fn resume(&mut self, now_ms: u64) -> Result<(), LeaseError> {\n1391:         if self.state != LeaseState::Suspended {\n1392:             return Err(LeaseError::InvalidTransition {\n1393:                 from: self.state,\n1394:                 to: LeaseState::Active,\n1395:             });\n1396:         }\n1397:         // Restore TTL: set granted_at_ms so that granted_at_ms + ttl_ms\n1398:         // equals now_ms + remaining.\n1399:         if let Some(remaining) = self.ttl_remaining_at_suspend_ms {\n1400:             self.granted_at_ms = now_ms;\n1401:             self.ttl_ms = remaining;\n1402:         }\n1403:         self.suspended_at_ms = None;\n1404:         self.ttl_remaining_at_suspend_ms = None;\n1405:         self.state = LeaseState::Active;"
+        }
+      ]
+    },
+    {
+      "file": "crates/tze_hud_input/src/drag.rs",
+      "blob": "031a5bcf18159b632d52bb3d8f17743ab58a75b9",
+      "ranges": [
+        {
+          "start": 145,
+          "end": 171,
+          "source": "145:         Self {\n146:             phase: DragPhase::Accumulating,\n147:             interaction_id,\n148:             element_id,\n149:             element_kind,\n150:             press_start: Instant::now(),\n151:             press_x,\n152:             press_y,\n153:             grab_offset_x: 0.0,\n154:             grab_offset_y: 0.0,\n155:             threshold_ms,\n156:             last_progress: 0.0,\n157:             immediate,\n158:         }\n159:     }\n160: \n161:     /// Compute progress toward activation (0.0\u20131.0).\n162:     pub fn progress(&self) -> f32 {\n163:         let elapsed_ms = self.press_start.elapsed().as_millis() as f32;\n164:         let threshold = self.threshold_ms as f32;\n165:         (elapsed_ms / threshold).clamp(0.0, 1.0)\n166:     }\n167: \n168:     /// Whether the activation threshold has been met.\n169:     pub fn is_threshold_met(&self) -> bool {\n170:         self.press_start.elapsed() >= Duration::from_millis(self.threshold_ms)\n171:     }"
+        },
+        {
+          "start": 427,
+          "end": 445,
+          "source": "427:     #[test]\n428:     fn device_drag_state_threshold_met_after_duration() {\n429:         let mut state = DeviceDragState::new(\n430:             \"drag-handle:aabb\".to_string(),\n431:             SceneId::new(),\n432:             DragHandleElementKind::Tile,\n433:             100.0,\n434:             200.0,\n435:             1, // 1ms threshold so it passes immediately in tests\n436:             false,\n437:         );\n438:         std::thread::sleep(Duration::from_millis(5));\n439:         assert!(state.is_threshold_met());\n440:         state.phase = DragPhase::Activated;\n441:         assert_eq!(state.phase, DragPhase::Activated);\n442:     }\n443: \n444:     #[test]\n445:     fn movement_within_tolerance_does_not_exceed() {"
+        }
+      ]
+    },
+    {
+      "file": "crates/tze_hud_input/src/lib.rs",
+      "blob": "089b65b4e6119c97efdc2847bed898a65209180b",
+      "ranges": [
+        {
+          "start": 1770,
+          "end": 1845,
+          "source": "1770:     pub fn process_drag_handle_pointer(\n1771:         &mut self,\n1772:         event: &PointerEvent,\n1773:         hit_interaction_id: &str,\n1774:         element_id: SceneId,\n1775:         element_kind: DragHandleElementKind,\n1776:         element_bounds: tze_hud_scene::Rect,\n1777:         display_width: f32,\n1778:         display_height: f32,\n1779:         is_header_band: bool,\n1780:     ) -> DragEventOutcome {\n1781:         let device_id = event.device_id;\n1782: \n1783:         // Select threshold: primary pointer = 250ms, touch = 1000ms.\n1784:         let threshold_ms = if device_id == 0 {\n1785:             drag::LONG_PRESS_POINTER_THRESHOLD_MS\n1786:         } else {\n1787:             drag::LONG_PRESS_TOUCH_THRESHOLD_MS\n1788:         };\n1789: \n1790:         match event.kind {\n1791:             PointerEventKind::Down => {\n1792:                 // Start accumulating for this device.\n1793:                 let state = DeviceDragState::new(\n1794:                     hit_interaction_id.to_string(),\n1795:                     element_id,\n1796:                     element_kind,\n1797:                     event.x,\n1798:                     event.y,\n1799:                     threshold_ms,\n1800:                     is_header_band,\n1801:                 );\n1802:                 self.drag_states.insert(device_id, state);\n1803:                 DragEventOutcome::Accumulating { progress: 0.0 }\n1804:             }\n1805:             PointerEventKind::Move => {\n1806:                 let Some(state) = self.drag_states.get_mut(&device_id) else {\n1807:                     return DragEventOutcome::Idle;\n1808:                 };\n1809:                 match state.phase {\n1810:                     DragPhase::Idle => DragEventOutcome::Idle,\n1811:                     DragPhase::Accumulating => {\n1812:                         // Immediate (portal header-band / titlebar) handles engage\n1813:                         // on the FIRST move \u2014 no long-press hold, no early-movement\n1814:                         // cancel (hud-cpjqe). This is what makes a fast titlebar\n1815:                         // drag reliable; the grip path below keeps the hysteresis.\n1816:                         if state.immediate {\n1817:                             state.phase = DragPhase::Activated;\n1818:                             state.grab_offset_x = event.x - element_bounds.x;\n1819:                             state.grab_offset_y = event.y - element_bounds.y;\n1820:                             return DragEventOutcome::Activated {\n1821:                                 element_id: state.element_id,\n1822:                                 element_kind: state.element_kind,\n1823:                             };\n1824:                         }\n1825:                         // Check movement cancellation.\n1826:                         if state.has_exceeded_movement_tolerance(event.x, event.y) {\n1827:                             let _ = self.drag_states.remove(&device_id);\n1828:                             return DragEventOutcome::Cancelled;\n1829:                         }\n1830:                         // Check threshold.\n1831:                         if state.is_threshold_met() {\n1832:                             // Activate drag: record grab offset.\n1833:                             state.phase = DragPhase::Activated;\n1834:                             state.grab_offset_x = event.x - element_bounds.x;\n1835:                             state.grab_offset_y = event.y - element_bounds.y;\n1836:                             return DragEventOutcome::Activated {\n1837:                                 element_id: state.element_id,\n1838:                                 element_kind: state.element_kind,\n1839:                             };\n1840:                         }\n1841:                         // Accumulating \u2014 update progress.\n1842:                         let progress = state.progress();\n1843:                         state.last_progress = progress;\n1844:                         DragEventOutcome::Accumulating { progress }\n1845:                     }"
+        }
+      ]
+    },
+    {
+      "file": "crates/tze_hud_runtime/src/firewall.rs",
+      "blob": "6118c5968361765fc75118111b001559dbeb4a0b",
+      "ranges": [
+        {
+          "start": 16,
+          "end": 19,
+          "source": "16: \n17: /// How long an answer is reused by `/admin/status` and the pairing card.\n18: pub const CACHE_TTL: Duration = Duration::from_secs(5);\n19: "
+        },
+        {
+          "start": 326,
+          "end": 377,
+          "source": "326: pub struct FirewallProbe {\n327:     eval: Box<dyn Fn() -> TailnetInbound + Send + Sync>,\n328:     cache: Mutex<Option<(Instant, TailnetInbound)>>,\n329: }\n330: \n331: impl FirewallProbe {\n332:     pub fn new(eval: impl Fn() -> TailnetInbound + Send + Sync + 'static) -> Self {\n333:         Self {\n334:             eval: Box::new(eval),\n335:             cache: Mutex::new(None),\n336:         }\n337:     }\n338: \n339:     /// The real probe: tailnet addresses come from `binds` at evaluation time,\n340:     /// `extra_ports` (e.g. the gRPC port) are checked alongside their ports.\n341:     pub fn system(binds: Arc<Mutex<Vec<SocketAddr>>>, extra_ports: Vec<u16>) -> Self {\n342:         Self::new(move || {\n343:             let tailnet: Vec<SocketAddr> = binds\n344:                 .lock()\n345:                 .unwrap_or_else(|e| e.into_inner())\n346:                 .iter()\n347:                 .copied()\n348:                 .filter(|a| !crate::net_addrs::tailnet_addrs(&[a.ip()]).is_empty())\n349:                 .collect();\n350:             if !cfg!(target_os = \"windows\") || tailnet.is_empty() {\n351:                 return TailnetInbound::NotApplicable;\n352:             }\n353:             let ports = probe_ports(&tailnet, &extra_ports);\n354:             let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from(\"tze_hud.exe\"));\n355:             decide(true, &read_snapshot(), &exe, &ports)\n356:         })\n357:     }\n358: \n359:     /// A fresh cached answer, if any. Never blocks.\n360:     pub fn cached(&self) -> Option<TailnetInbound> {\n361:         let cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());\n362:         cache\n363:             .as_ref()\n364:             .filter(|(at, _)| at.elapsed() < CACHE_TTL)\n365:             .map(|(_, v)| v.clone())\n366:     }\n367: \n368:     /// The cached answer or a fresh evaluation. Blocks on a cache miss (COM\n369:     /// enumeration can take a while): call from a blocking context.\n370:     pub fn current(&self) -> TailnetInbound {\n371:         if let Some(v) = self.cached() {\n372:             return v;\n373:         }\n374:         let v = (self.eval)();\n375:         *self.cache.lock().unwrap_or_else(|e| e.into_inner()) = Some((Instant::now(), v.clone()));\n376:         v\n377:     }"
+        },
+        {
+          "start": 684,
+          "end": 705,
+          "source": "684:     fn json_shape_and_probe_caching() {\n685:         assert_eq!(\n686:             TailnetInbound::Allowed.to_json(),\n687:             json!({\"state\": \"allowed\"})\n688:         );\n689:         let j = blocked_by(\"deny-exe\").to_json();\n690:         assert_eq!(j[\"state\"], \"blocked\");\n691:         assert_eq!(j[\"reason\"], \"block_rule\");\n692:         assert_eq!(j[\"rule\"], \"deny-exe\");\n693:         assert_eq!(j[\"fix\"], FIX_HINT);\n694: \n695:         let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));\n696:         let c = Arc::clone(&calls);\n697:         let probe = FirewallProbe::new(move || {\n698:             c.fetch_add(1, std::sync::atomic::Ordering::SeqCst);\n699:             TailnetInbound::Allowed\n700:         });\n701:         assert_eq!(probe.cached(), None);\n702:         probe.current();\n703:         probe.current();\n704:         assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);\n705:     }"
+        }
+      ]
+    },
+    {
+      "file": "crates/tze_hud_runtime/src/operator/status.rs",
+      "blob": "e6e0eb6254e3267aca7de6d427c19978d9757af3",
+      "ranges": [
+        {
+          "start": 329,
+          "end": 337,
+          "source": "329:             .collect();\n330:         // COM enumeration is slow on a cache miss; keep it off the async workers.\n331:         let firewall = Arc::clone(&self.firewall);\n332:         let tailnet_inbound = tokio::task::spawn_blocking(move || firewall.current())\n333:             .await\n334:             .unwrap_or_else(|e| crate::firewall::TailnetInbound::Unknown {\n335:                 error: e.to_string(),\n336:             });\n337:         let (displays, unplaced_zones) = displays_json();"
+        }
+      ]
+    },
+    {
+      "file": "crates/tze_hud_runtime/src/pairing.rs",
+      "blob": "fa811e5320b7eea6b828d9d16007b362f8fece42",
+      "ranges": [
+        {
+          "start": 398,
+          "end": 405,
+          "source": "398:             endpoint.is_some_and(|a| !crate::net_addrs::tailnet_addrs(&[a.ip()]).is_empty());\n399:         // Never wait on the firewall here: use a fresh cached answer, else show\n400:         // the card now and add the warning when the background check finishes.\n401:         let known = on_tailnet.then(|| self.firewall.cached()).flatten();\n402:         let card = SystemCard {\n403:             kind: tze_hud_compositor::SystemCardKind::Pairing,\n404:             title: \"Pair an agent\".to_owned(),\n405:             lines: pairing_lines(&issued.code, address.clone(), known.as_ref()),"
+        }
+      ]
+    },
+    {
+      "file": "crates/tze_hud_compositor/src/renderer/draw_cmds.rs",
+      "blob": "c08018c71cd1422311950c6b8b00cc7558043d01",
+      "ranges": [
+        {
+          "start": 170,
+          "end": 225,
+          "source": "170: impl ZoneAnimationState {\n171:     /// Create a fade-in state (opacity 0 \u2192 1) with the given duration.\n172:     pub(crate) fn fade_in(duration_ms: u32) -> Self {\n173:         Self {\n174:             transition_start: std::time::Instant::now(),\n175:             duration_ms,\n176:             from_opacity: 0.0,\n177:             target_opacity: 1.0,\n178:         }\n179:     }\n180: \n181:     /// Create a fade-in state starting from `from_opacity` rather than 0.\n182:     ///\n183:     /// Used for **transition interrupt semantics**: when a new publish arrives\n184:     /// during an active fade-out, the fade-out is cancelled and a fade-in begins\n185:     /// from the current composite opacity (not from zero).  This prevents blank\n186:     /// frames during rapid replacement.\n187:     ///\n188:     /// Per spec \u00a7Subtitle Contention Policy \u2014 Latest Wins, Transition interrupt\n189:     /// semantics note: \"the fade-out MUST be cancelled immediately and the new\n190:     /// content MUST begin its transition_in_ms fade-in from the current composite\n191:     /// opacity (not from zero).\"\n192:     pub(crate) fn fade_in_from(duration_ms: u32, from_opacity: f32) -> Self {\n193:         Self {\n194:             transition_start: std::time::Instant::now(),\n195:             duration_ms,\n196:             from_opacity: from_opacity.clamp(0.0, 1.0),\n197:             target_opacity: 1.0,\n198:         }\n199:     }\n200: \n201:     /// Create a fade-out state (opacity 1 \u2192 0) with the given duration.\n202:     pub(crate) fn fade_out(duration_ms: u32) -> Self {\n203:         Self {\n204:             transition_start: std::time::Instant::now(),\n205:             duration_ms,\n206:             from_opacity: 1.0,\n207:             target_opacity: 0.0,\n208:         }\n209:     }\n210: \n211:     /// Raw linear progress `\u2208 [0, 1]` derived from elapsed wall time.\n212:     ///\n213:     /// A `duration_ms` of `0` reports `1.0` (already complete). Split out so the\n214:     /// time source and the interpolation math are independently testable.\n215:     #[inline]\n216:     pub(crate) fn linear_progress(&self) -> f32 {\n217:         if self.duration_ms == 0 {\n218:             return 1.0;\n219:         }\n220:         let elapsed_ms = self.transition_start.elapsed().as_millis() as f32;\n221:         (elapsed_ms / self.duration_ms as f32).clamp(0.0, 1.0)\n222:     }\n223: \n224:     /// **Pure** opacity at the given (already eased or linear) progress `t`.\n225:     ///"
+        },
+        {
+          "start": 305,
+          "end": 377,
+          "source": "305: pub(crate) const NOTIFICATION_FADE_OUT_MS: u32 = 150;\n306: \n307: impl PublicationAnimationState {\n308:     /// Create a new state for a freshly-seen publication.\n309:     pub(crate) fn new(ttl_ms: Option<u64>, source_expiry_us: Option<u64>) -> Self {\n310:         Self {\n311:             first_seen: std::time::Instant::now(),\n312:             ttl_ms,\n313:             source_expiry_us,\n314:             fade_start: None,\n315:             fade_duration_ms: NOTIFICATION_FADE_OUT_MS,\n316:         }\n317:     }\n318: \n319:     /// Check whether the TTL has expired and start the fade if so.\n320:     ///\n321:     /// Must be called once per frame per publication.  Idempotent after the\n322:     /// fade has started.\n323:     pub(crate) fn tick(&mut self) {\n324:         if self.fade_start.is_none()\n325:             && self\n326:                 .ttl_ms\n327:                 .is_some_and(|ttl| self.first_seen.elapsed().as_millis() as u64 >= ttl)\n328:         {\n329:             self.fade_start = Some(std::time::Instant::now());\n330:         }\n331:     }\n332: \n333:     /// Follow a changed record expiry (`hud_hold`): the fade delay counts from\n334:     /// now, and a fade already under way is cancelled.\n335:     pub(crate) fn retarget(&mut self, ttl_ms: Option<u64>, source_expiry_us: Option<u64>) {\n336:         *self = Self::new(ttl_ms, source_expiry_us);\n337:     }\n338: \n339:     /// Returns the current effective opacity for this publication (0.0\u20131.0).\n340:     ///\n341:     /// Before fade: 1.0.\n342:     /// During fade: linear interpolation from 1.0 \u2192 0.0.\n343:     /// After fade: 0.0.\n344:     pub(crate) fn current_opacity(&self) -> f32 {\n345:         let Some(start) = self.fade_start else {\n346:             return 1.0;\n347:         };\n348:         if self.fade_duration_ms == 0 {\n349:             return 0.0;\n350:         }\n351:         let elapsed_ms = start.elapsed().as_millis() as f32;\n352:         let t = (elapsed_ms / self.fade_duration_ms as f32).clamp(0.0, 1.0);\n353:         1.0 - t\n354:     }\n355: \n356:     /// Instant at which the fade-out will start, or `None` once it has (or\n357:     /// when held: a held publication schedules no wake).\n358:     pub(crate) fn fade_start_deadline(&self) -> Option<std::time::Instant> {\n359:         if self.fade_start.is_some() {\n360:             return None;\n361:         }\n362:         self.ttl_ms\n363:             .map(|ttl| self.first_seen + std::time::Duration::from_millis(ttl))\n364:     }\n365: \n366:     /// Returns `true` while the fade-out is running (started, not complete).\n367:     pub(crate) fn is_fading(&self) -> bool {\n368:         self.fade_start.is_some() && !self.is_fade_complete()\n369:     }\n370: \n371:     /// Returns `true` when the fade-out transition has fully completed.\n372:     pub(crate) fn is_fade_complete(&self) -> bool {\n373:         let Some(start) = self.fade_start else {\n374:             return false;\n375:         };\n376:         start.elapsed().as_millis() >= self.fade_duration_ms as u128\n377:     }"
+        }
+      ]
+    },
+    {
+      "file": "crates/tze_hud_compositor/src/renderer/animation.rs",
+      "blob": "1dfd7184991e59a1bbd6212167d6ca5f3ed2fcc1",
+      "ranges": [
+        {
+          "start": 465,
+          "end": 530,
+          "source": "465:     ///\n466:     /// Call order per frame: `update_zone_animations` \u2192 `update_publication_animations`\n467:     /// \u2192 `prune_faded_publications(scene)` \u2192 render.\n468:     pub fn update_publication_animations(&mut self, scene: &SceneGraph) {\n469:         let now_us = scene.now_wall_us();\n470:         for (zone_name, publishes) in &scene.zone_registry.active_publishes {\n471:             let zone_def = match scene.zone_registry.zones.get(zone_name) {\n472:                 Some(z) => z,\n473:                 None => continue,\n474:             };\n475:             // Only Stack zones get per-publication TTL fade-out.\n476:             if !matches!(zone_def.contention_policy, ContentionPolicy::Stack { .. }) {\n477:                 continue;\n478:             }\n479: \n480:             let zone_states = self\n481:                 .pub_animation_states\n482:                 .entry(zone_name.clone())\n483:                 .or_default();\n484: \n485:             // Build the set of currently-active pub keys for this zone.\n486:             let active_keys: std::collections::HashSet<PubKey> = publishes\n487:                 .iter()\n488:                 .map(|r| (r.published_at_wall_us, r.publisher_namespace.clone()))\n489:                 .collect();\n490: \n491:             // Prune stale entries (publications removed from active_publishes).\n492:             zone_states.retain(|k, _| active_keys.contains(k));\n493: \n494:             // Ensure every active publication has an animation state; tick existing ones.\n495:             for record in publishes {\n496:                 let ttl_ms = Self::publication_fade_delay_ms(record, now_us);\n497:                 let key: PubKey = (\n498:                     record.published_at_wall_us,\n499:                     record.publisher_namespace.clone(),\n500:                 );\n501:                 let state = zone_states.entry(key).or_insert_with(|| {\n502:                     PublicationAnimationState::new(ttl_ms, record.expires_at_wall_us)\n503:                 });\n504:                 if state.source_expiry_us != record.expires_at_wall_us {\n505:                     state.retarget(ttl_ms, record.expires_at_wall_us);\n506:                 }\n507:                 state.tick();\n508:             }\n509:         }\n510: \n511:         // Prune zones no longer present in active_publishes.\n512:         self.pub_animation_states\n513:             .retain(|zone_name, _| scene.zone_registry.active_publishes.contains_key(zone_name));\n514:     }\n515: \n516:     /// Delay (ms from `now_us`) until the fade-out of one publication begins,\n517:     /// or `None` when it has no expiry and is held until cleared.\n518:     ///\n519:     /// The fade starts `NOTIFICATION_FADE_OUT_MS` before the expiry so it\n520:     /// completes before `drain_expired_zone_publications` removes the record\n521:     /// (e.g. 14 850 ms for a 15 s warning). Already expired: fade at once.\n522:     pub(super) fn publication_fade_delay_ms(\n523:         record: &ZonePublishRecord,\n524:         now_us: u64,\n525:     ) -> Option<u64> {\n526:         record.expires_at_wall_us.map(|exp_us| {\n527:             (exp_us.saturating_sub(now_us) / 1_000).saturating_sub(NOTIFICATION_FADE_OUT_MS as u64)\n528:         })\n529:     }\n530: "
+        }
+      ]
+    },
+    {
+      "file": "crates/tze_hud_protocol/src/dedup.rs",
+      "blob": "adea09d3cc3a56c1a3b3bcf63c0791fb15e0a941",
+      "ranges": [
+        {
+          "start": 74,
+          "end": 105,
+          "source": "74: \n75:     /// Purge entries that have exceeded the TTL.\n76:     ///\n77:     /// Called lazily before every `insert` or `lookup` so the window never\n78:     /// silently holds stale entries beyond the spec-mandated 60-second window.\n79:     fn purge_expired(&mut self) {\n80:         let now = Instant::now();\n81:         while let Some(front) = self.order.front() {\n82:             match self.cache.get(front) {\n83:                 Some(entry) if now.duration_since(entry.inserted_at) >= self.ttl => {\n84:                     let key = self.order.pop_front().unwrap();\n85:                     self.cache.remove(&key);\n86:                 }\n87:                 _ => break,\n88:             }\n89:         }\n90:     }\n91: \n92:     /// Look up a `batch_id` in the window.\n93:     ///\n94:     /// Returns `Some(CachedResult)` if the ID is present and not yet expired,\n95:     /// `None` otherwise.\n96:     ///\n97:     /// Expired entries are purged lazily before the lookup.\n98:     pub fn lookup(&mut self, batch_id: &[u8]) -> Option<CachedResult> {\n99:         self.purge_expired();\n100:         let now = Instant::now();\n101:         match self.cache.get(batch_id) {\n102:             Some(entry) if now.duration_since(entry.inserted_at) < self.ttl => {\n103:                 Some(entry.result.clone())\n104:             }\n105:             Some(_) => {"
+        },
+        {
+          "start": 137,
+          "end": 146,
+          "source": "137:         self.order.push_back(batch_id.clone());\n138:         self.cache.insert(\n139:             batch_id,\n140:             Entry {\n141:                 result,\n142:                 inserted_at: Instant::now(),\n143:             },\n144:         );\n145:     }\n146: "
+        },
+        {
+          "start": 223,
+          "end": 240,
+          "source": "223: \n224:     #[test]\n225:     fn test_ttl_expiry() {\n226:         // Use a 1-second TTL for testability; we'll manually manipulate Instants\n227:         // by inserting and then waiting.  For unit test speed we use a 0-second\n228:         // TTL which expires immediately.\n229:         let mut w = DedupWindow::new(1000, 0); // 0s = expires immediately\n230:         let id = b\"expiring00000000\".to_vec();\n231:         w.insert(id.clone(), make_result(true));\n232:         // With ttl=0, the entry should be absent after the next lookup.\n233:         assert!(\n234:             w.lookup(&id).is_none(),\n235:             \"entry should have expired immediately\"\n236:         );\n237:     }\n238: \n239:     #[test]\n240:     fn test_re_insert_after_expiry_treated_as_new() {"
+        }
+      ]
+    },
+    {
+      "file": ".github/workflows/ci.yml",
+      "blob": "41e6e11cf33a50e90fb072ebd920eb67d3f45d60",
+      "ranges": [
+        {
+          "start": 28,
+          "end": 34,
+          "source": "28: #   dev-mode-guard \u2014 cargo-metadata check (no build) that dev-mode is not enabled in the\n29: #     default-build dependency closure of any workspace package, incl. the shipped\n30: #     binary (the actual release build runs in windows.yml)\n31: #   cargo-deny     \u2014 advisories + licenses (informational)\n32: #   test-gpu-pixel-readback \u2014 pixel readback on llvmpipe (informational duplicate: the\n33: #     same pixel_readback tests already run, blocking, inside test-unit via workspace\n34: #     feature unification of tze_hud_runtime/dev-mode)"
+        },
+        {
+          "start": 456,
+          "end": 478,
+          "source": "456:   #\n457:   # Uses EmbarkStudios/cargo-deny-action for a stable, versioned install.\n458:   # Pinned to a specific SHA to prevent supply-chain attacks on CI.\n459: \n460:   cargo-deny:\n461:     name: cargo deny (advisories + licenses)\n462:     runs-on: ubuntu-latest\n463:     timeout-minutes: 10\n464:     steps:\n465:       - uses: actions/checkout@v5\n466:       - name: cargo deny check advisories + licenses\n467:         uses: EmbarkStudios/cargo-deny-action@v2\n468:         with:\n469:           # Check only the two gates relevant to security and license compliance.\n470:           # bans and sources are checked implicitly; explicitly scoping prevents\n471:           # new deny.toml sections from accidentally blocking CI before they are\n472:           # tuned.\n473:           command: check advisories licenses bans sources\n474:           # Log level: warn surfaces yanked-crate and duplicate-version notices\n475:           # without failing the job.\n476:           log-level: warn\n477: \n478:   # \u2500\u2500 GPU pixel readback (informational) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500"
+        },
+        {
+          "start": 488,
+          "end": 492,
+          "source": "488:   #\n489:   # To run locally:\n490:   #   cargo test -p tze_hud_runtime --test pixel_readback --features dev-mode\n491:   #\n492:   # This job is INFORMATIONAL only on PRs and does not block merge. It is a"
+        }
+      ]
+    },
+    {
+      "file": "scripts/ci/check_dev_mode_defaults.py",
+      "blob": "86f9eb0a9c3784e2abeb6228c84f2dbbc1f103aa",
+      "ranges": [
+        {
+          "start": 25,
+          "end": 32,
+          "source": "25: \n26: `tze_hud_app` (the `tze_hud` release binary) is the shipped artifact and is\n27: labelled as such. Every other workspace package is checked too, so one that is\n28: outside the app closure today cannot silently grow a default dev-mode.\n29: Packages with no lib/bin/example target (the `integration` crate: tests only,\n30: and it enables dev-mode on purpose) produce nothing shippable and are skipped.\n31: Third-party crates are not followed: none defines `dev-mode`.\n32: \"\"\""
+        },
+        {
+          "start": 121,
+          "end": 126,
+          "source": "121:             # An optional dependency is also an implicit feature of the same name.\n122:             if feat not in declared and feat in edges:\n123:                 self._turn_on(name, feat, edges, work, activate)\n124:         return enabled\n125: \n126:     @staticmethod"
+        }
+      ]
+    }
+  ]
+}

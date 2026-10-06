@@ -1,0 +1,377 @@
+examples/poc_demo/tests/smoke.rs:63:    let deadline = tokio::time::Instant::now() + Duration::from_secs(45);
+examples/poc_demo/tests/smoke.rs:73:            tokio::time::Instant::now() < deadline,
+tests/integration/text_stream_portal_adapter.rs:38:    std::time::SystemTime::now()
+tests/integration/text_stream_portal_adapter.rs:48:        .elapsed()
+tests/integration/movable_elements_e2e.rs:780:        std::time::SystemTime::now()
+crates/tze_hud_config/src/runtime_widget_assets.rs:121:        std::time::SystemTime::now()
+tests/integration/common/mod.rs:35:    std::time::SystemTime::now()
+crates/tze_hud_input/src/scroll.rs:1022:        let start = Instant::now();
+crates/tze_hud_input/src/scroll.rs:1024:        let elapsed_us = start.elapsed().as_micros() as u64;
+crates/tze_hud_input/src/lib.rs:1110:        let start = Instant::now();
+crates/tze_hud_input/src/lib.rs:1246:            let local_ack_us = start.elapsed().as_micros() as u64;
+crates/tze_hud_input/src/lib.rs:1273:        let hit_start = Instant::now();
+crates/tze_hud_input/src/lib.rs:1275:        let hit_test_us = hit_start.elapsed().as_micros() as u64;
+crates/tze_hud_input/src/lib.rs:1568:        let local_ack_us = start.elapsed().as_micros() as u64;
+crates/tze_hud_input/src/local_feedback.rs:172:            started_at: Instant::now(),
+crates/tze_hud_input/src/local_feedback.rs:179:        self.started_at.elapsed() < self.duration
+crates/tze_hud_input/src/local_feedback.rs:184:        let elapsed = self.started_at.elapsed().as_secs_f32();
+crates/tze_hud_input/src/hit_test.rs:427:                let start = Instant::now();
+crates/tze_hud_input/src/hit_test.rs:429:                start.elapsed().as_micros() as u64
+crates/tze_hud_input/src/drag.rs:150:            press_start: Instant::now(),
+crates/tze_hud_input/src/drag.rs:163:        let elapsed_ms = self.press_start.elapsed().as_millis() as f32;
+crates/tze_hud_input/src/drag.rs:170:        self.press_start.elapsed() >= Duration::from_millis(self.threshold_ms)
+examples/widget_publish_load_harness/src/main.rs:391:    let send_start = Instant::now();
+examples/widget_publish_load_harness/src/main.rs:407:            let pace_start = Instant::now();
+examples/widget_publish_load_harness/src/main.rs:419:                    if pace_start.elapsed() >= limit {
+examples/widget_publish_load_harness/src/main.rs:425:                let now = Instant::now();
+examples/widget_publish_load_harness/src/main.rs:436:    let send_done = Instant::now();
+examples/widget_publish_load_harness/src/main.rs:447:    let aggregate_ack_drain_time_us = elapsed_us(send_done, Instant::now());
+examples/widget_publish_load_harness/src/main.rs:487:    let wall_duration_us = elapsed_us(send_start, Instant::now());
+examples/widget_publish_load_harness/src/main.rs:687:    let send_begin = Instant::now();
+examples/widget_publish_load_harness/src/main.rs:700:        stats.aggregate_send_time_us += send_begin.elapsed().as_micros() as u64;
+examples/widget_publish_load_harness/src/main.rs:795:            stats.rtt_us.push(elapsed_us(start, Instant::now()));
+examples/widget_publish_load_harness/src/main.rs:812:    let deadline = TokioInstant::now() + timeout_dur;
+examples/widget_publish_load_harness/src/main.rs:825:        let now = TokioInstant::now();
+examples/widget_publish_load_harness/src/main.rs:897:    SystemTime::now()
+examples/widget_publish_load_harness/src/main.rs:1003:            .insert(42, Instant::now() - Duration::from_millis(2));
+examples/widget_publish_load_harness/src/main.rs:1031:        state.inflight.lock().await.insert(7, Instant::now());
+examples/widget_publish_load_harness/src/main.rs:1083:        let started = Instant::now();
+examples/widget_publish_load_harness/src/main.rs:1090:            started.elapsed() < Duration::from_secs(1),
+examples/widget_publish_load_harness/src/main.rs:1092:            started.elapsed()
+crates/tze_hud_input/src/batching.rs:135:    let us = SystemTime::now()
+crates/tze_hud_input/src/batching.rs:324:        let start = Instant::now();
+crates/tze_hud_input/src/batching.rs:326:        let elapsed_us = start.elapsed().as_micros() as u64;
+crates/tze_hud_input/src/command.rs:184:        let start = Instant::now();
+crates/tze_hud_input/src/command.rs:216:        let local_ack_us = start.elapsed().as_micros() as u64;
+tests/integration/text_stream_portal_composer.rs:101:/// This test uses `Instant::now()` inside `cargo test` which is inherently
+tests/integration/text_stream_portal_composer.rs:113:    let start = std::time::Instant::now();
+tests/integration/text_stream_portal_composer.rs:121:    let elapsed_us = start.elapsed().as_micros() as u64;
+tests/integration/dashboard_tile_input.rs:264:            let start = Instant::now();
+tests/integration/dashboard_tile_input.rs:275:            let elapsed_us = start.elapsed().as_micros() as u64;
+examples/benchmark/src/cpu_calibration.rs:67:    let overall_start = Instant::now();
+examples/benchmark/src/cpu_calibration.rs:78:    let now_secs = std::time::SystemTime::now()
+examples/benchmark/src/cpu_calibration.rs:88:        calibration_duration_us: overall_start.elapsed().as_micros() as u64,
+examples/benchmark/src/cpu_calibration.rs:94:    let start = Instant::now();
+examples/benchmark/src/cpu_calibration.rs:254:    let elapsed_secs = start.elapsed().as_secs_f64();
+examples/benchmark/src/cpu_calibration.rs:263:    let start = Instant::now();
+examples/benchmark/src/cpu_calibration.rs:280:    let elapsed_secs = start.elapsed().as_secs_f64();
+tests/integration/text_stream_portal_markdown.rs:397:    let t0 = std::time::Instant::now();
+tests/integration/text_stream_portal_markdown.rs:401:    let total_elapsed = t0.elapsed();
+tests/integration/poc_acceptance.rs:111:        let start_ms = std::time::SystemTime::now()
+tests/integration/poc_acceptance.rs:140:        let deadline = Instant::now() + WAIT;
+tests/integration/poc_acceptance.rs:148:            assert!(Instant::now() < deadline, "{tool} did not complete");
+tests/integration/poc_acceptance.rs:172:        let deadline = Instant::now() + WAIT;
+tests/integration/poc_acceptance.rs:180:            assert!(Instant::now() < deadline, "{tool} did not complete");
+tests/integration/poc_acceptance.rs:220:        let deadline = Instant::now() + WAIT;
+tests/integration/poc_acceptance.rs:222:            assert!(Instant::now() < deadline, "event loop never settled");
+tests/integration/poc_acceptance.rs:237:        let deadline = Instant::now() + WAIT;
+tests/integration/poc_acceptance.rs:244:                Instant::now() < deadline,
+tests/integration/poc_acceptance.rs:276:    std::time::SystemTime::now()
+tests/integration/poc_acceptance.rs:955:        let deadline = Instant::now() + WAIT;
+tests/integration/poc_acceptance.rs:965:                Instant::now() < deadline,
+crates/tze_hud_projection/src/resident_grpc.rs:903:        let started = Instant::now();
+crates/tze_hud_projection/src/resident_grpc.rs:948:        let started = Instant::now();
+crates/tze_hud_projection/src/resident_grpc.rs:1021:        let started = Instant::now();
+crates/tze_hud_projection/src/resident_grpc.rs:1060:        let started = Instant::now();
+crates/tze_hud_projection/src/resident_grpc.rs:3278:        elapsed_us: started.elapsed().as_micros() as u64,
+examples/benchmark/src/main.rs:520:        let start = Instant::now();
+examples/benchmark/src/main.rs:531:                    calibration_duration_us: start.elapsed().as_micros() as u64,
+examples/benchmark/src/main.rs:571:                        calibration_duration_us: start.elapsed().as_micros() as u64,
+examples/benchmark/src/main.rs:618:        let timed_start = Instant::now();
+examples/benchmark/src/main.rs:622:        let timed_elapsed = timed_start.elapsed();
+examples/benchmark/src/main.rs:631:            calibration_duration_us: start.elapsed().as_micros() as u64,
+examples/benchmark/src/main.rs:643:        let start = Instant::now();
+examples/benchmark/src/main.rs:654:                    calibration_duration_us: start.elapsed().as_micros() as u64,
+examples/benchmark/src/main.rs:671:                        calibration_duration_us: start.elapsed().as_micros() as u64,
+examples/benchmark/src/main.rs:682:        let timed_start = Instant::now();
+examples/benchmark/src/main.rs:754:        let timed_elapsed_secs = timed_start.elapsed().as_secs_f64();
+examples/benchmark/src/main.rs:761:            calibration_duration_us: start.elapsed().as_micros() as u64,
+examples/benchmark/src/main.rs:825:        let session_start = Instant::now();
+examples/benchmark/src/main.rs:855:        summary.elapsed_us = session_start.elapsed().as_micros() as u64;
+examples/benchmark/src/main.rs:960:        let session_start = Instant::now();
+examples/benchmark/src/main.rs:1022:        summary.elapsed_us = session_start.elapsed().as_micros() as u64;
+examples/benchmark/src/main.rs:1338:        let session_start = Instant::now();
+examples/benchmark/src/main.rs:1347:            let wait_start = Instant::now();
+examples/benchmark/src/main.rs:1348:            while !any_holding() && wait_start.elapsed() < CONTENTION_HOLD * 4 {
+examples/benchmark/src/main.rs:1355:            let frame_start = Instant::now();
+examples/benchmark/src/main.rs:1364:                    frame_time_us = frame_start.elapsed().as_micros() as u64;
+examples/benchmark/src/main.rs:1370:                    frame_time_us = frame_start.elapsed().as_micros() as u64;
+examples/benchmark/src/main.rs:1393:        summary.elapsed_us = session_start.elapsed().as_micros() as u64;
+examples/benchmark/src/main.rs:1489:        let session_start = Instant::now();
+examples/benchmark/src/main.rs:1506:            let frame_start = Instant::now();
+examples/benchmark/src/main.rs:1513:                    frame_time_us = frame_start.elapsed().as_micros() as u64;
+examples/benchmark/src/main.rs:1518:                    frame_time_us = frame_start.elapsed().as_micros() as u64;
+examples/benchmark/src/main.rs:1551:        summary.elapsed_us = session_start.elapsed().as_micros() as u64;
+examples/benchmark/src/main.rs:1998:            let wait_start = Instant::now();
+examples/benchmark/src/main.rs:2000:                && wait_start.elapsed() < Duration::from_millis(20)
+crates/tze_hud_runtime/tests/present_ack.rs:27:    SystemTime::now()
+crates/tze_hud_protocol/tests/event_delivery.rs:271:    std::time::SystemTime::now()
+crates/tze_hud_protocol/src/dedup.rs:80:        let now = Instant::now();
+crates/tze_hud_protocol/src/dedup.rs:100:        let now = Instant::now();
+crates/tze_hud_protocol/src/dedup.rs:142:                inserted_at: Instant::now(),
+crates/tze_hud_protocol/src/session_server/mod.rs:126:    process_start().elapsed().as_micros() as u64
+crates/tze_hud_protocol/src/session_server/mod.rs:130:    std::time::SystemTime::now()
+crates/tze_hud_protocol/src/session_server/mod.rs:137:    std::time::SystemTime::now()
+crates/tze_hud_protocol/src/session_server/upload.rs:506:        let now = Instant::now();
+examples/vertical_slice/tests/budget_assertions.rs:509:        let start = std::time::Instant::now();
+examples/vertical_slice/tests/budget_assertions.rs:526:        let elapsed_us = start.elapsed().as_micros() as u64;
+examples/vertical_slice/tests/budget_assertions.rs:647:        let start = std::time::Instant::now();
+examples/vertical_slice/tests/budget_assertions.rs:686:        upload_bucket.record(start.elapsed().as_micros() as u64);
+crates/tze_hud_resource/src/runtime_widget_store.rs:354:        std::time::SystemTime::now()
+crates/tze_hud_compositor/tests/widget_rasterize_budget.rs:168:    let start = Instant::now();
+crates/tze_hud_compositor/tests/widget_rasterize_budget.rs:170:    let elapsed_us = start.elapsed().as_micros() as u64;
+crates/tze_hud_runtime/src/diag.rs:36:    let ms = SystemTime::now()
+crates/tze_hud_runtime/src/pairing.rs:222:        Instant::now()
+crates/tze_hud_runtime/src/pairing.rs:226:        std::time::SystemTime::now()
+crates/tze_hud_runtime/src/pairing.rs:577:                base: Instant::now(),
+crates/tze_hud_runtime/src/pairing.rs:808:        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+crates/tze_hud_runtime/src/pairing.rs:811:                std::time::Instant::now() < deadline,
+crates/tze_hud_runtime/src/firewall.rs:364:            .filter(|(at, _)| at.elapsed() < CACHE_TTL)
+crates/tze_hud_runtime/src/firewall.rs:375:        *self.cache.lock().unwrap_or_else(|e| e.into_inner()) = Some((Instant::now(), v.clone()));
+crates/tze_hud_resource/src/upload.rs:316:                started_at: Instant::now(),
+crates/tze_hud_runtime/src/mcp.rs:806:        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+crates/tze_hud_runtime/src/mcp.rs:809:                std::time::Instant::now() < deadline,
+crates/tze_hud_runtime/src/net_addrs.rs:90:    let start = tokio::time::Instant::now();
+crates/tze_hud_runtime/src/net_addrs.rs:93:        tokio::time::sleep(retry_delay(start.elapsed())).await;
+crates/tze_hud_runtime/src/degradation.rs:519:        let started = std::time::Instant::now();
+crates/tze_hud_runtime/src/degradation.rs:550:                "validation_wall_time_us": started.elapsed().as_micros() as u64,
+crates/tze_hud_compositor/src/surface.rs:583:            let wait_start = std::time::Instant::now();
+crates/tze_hud_compositor/src/surface.rs:592:                        elapsed_ms = wait_start.elapsed().as_millis() as u64,
+crates/tze_hud_compositor/src/surface.rs:649:        let wait_start = std::time::Instant::now();
+crates/tze_hud_compositor/src/surface.rs:668:                    elapsed_ms = wait_start.elapsed().as_millis() as u64,
+crates/tze_hud_compositor/src/surface.rs:743:                let log = self.timeout_log.allow(std::time::Instant::now());
+crates/tze_hud_compositor/src/surface.rs:1175:        let t0 = std::time::Instant::now();
+crates/tze_hud_mcp/src/tools.rs:758:    let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(wait_ms);
+crates/tze_hud_mcp/src/tools.rs:790:        let now = tokio::time::Instant::now();
+crates/tze_hud_protocol/src/session_server/tests/session_handshake.rs:470:    let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_millis(500);
+crates/tze_hud_protocol/src/session_server/tests/session_handshake.rs:472:        if tokio::time::Instant::now() > deadline {
+crates/tze_hud_runtime/src/mutation_budget_bridge.rs:225:            Instant::now(),
+crates/tze_hud_runtime/src/mutation_budget_bridge.rs:296:            Instant::now(),
+crates/tze_hud_protocol/src/session_server/element_persist.rs:172:    let now_ns = SystemTime::now()
+crates/tze_hud_runtime/src/windowed/widgets.rs:146:            let local_ack_us = input_started_at.elapsed().as_micros() as u64;
+crates/tze_hud_runtime/src/windowed/widgets.rs:315:            Instant::now(),
+crates/tze_hud_runtime/src/widget_hover.rs:301:        let t0 = Instant::now();
+crates/tze_hud_runtime/src/headless.rs:337:            degradation_clock_start: Instant::now(),
+crates/tze_hud_runtime/src/headless.rs:366:        let frame_start = Instant::now();
+crates/tze_hud_runtime/src/headless.rs:370:        let degradation_work_start = Instant::now();
+crates/tze_hud_runtime/src/headless.rs:407:        let s1_start = Instant::now();
+crates/tze_hud_runtime/src/headless.rs:408:        let stage1_us = s1_start.elapsed().as_micros() as u64;
+crates/tze_hud_runtime/src/headless.rs:413:        let s2_start = Instant::now();
+crates/tze_hud_runtime/src/headless.rs:415:        let stage2_us = s2_start.elapsed().as_micros() as u64;
+crates/tze_hud_runtime/src/headless.rs:418:        let s3_start = Instant::now();
+crates/tze_hud_runtime/src/headless.rs:419:        let stage3_us = s3_start.elapsed().as_micros() as u64;
+crates/tze_hud_runtime/src/headless.rs:422:        let s4_start = Instant::now();
+crates/tze_hud_runtime/src/headless.rs:432:        let markdown_prime_start = Instant::now();
+crates/tze_hud_runtime/src/headless.rs:434:        let markdown_prime_us = markdown_prime_start.elapsed().as_micros() as u64;
+crates/tze_hud_runtime/src/headless.rs:446:        let stage4_us = s4_start.elapsed().as_micros() as u64;
+crates/tze_hud_runtime/src/headless.rs:450:        let input_to_scene_commit_us = frame_start.elapsed().as_micros() as u64;
+crates/tze_hud_runtime/src/headless.rs:453:        let s5_start = Instant::now();
+crates/tze_hud_runtime/src/headless.rs:454:        let stage5_us = s5_start.elapsed().as_micros() as u64;
+crates/tze_hud_runtime/src/headless.rs:470:        let frame_time_us = frame_start.elapsed().as_micros() as u64;
+crates/tze_hud_runtime/src/headless.rs:471:        let degradation_work_time_us = degradation_work_start.elapsed().as_micros() as u64;
+crates/tze_hud_runtime/src/headless.rs:487:            let present_wall_us = SystemTime::now()
+crates/tze_hud_runtime/src/headless.rs:550:        let completed_at_us = self.degradation_clock_start.elapsed().as_micros() as u64;
+crates/tze_hud_runtime/src/headless.rs:569:                SystemTime::now()
+crates/tze_hud_runtime/src/headless.rs:579:        let s8_start = Instant::now();
+crates/tze_hud_runtime/src/headless.rs:581:        telemetry.stage8_telemetry_emit_us = s8_start.elapsed().as_micros() as u64;
+crates/tze_hud_runtime/src/operator/handoff.rs:251:    let deadline = Instant::now() + timeout;
+crates/tze_hud_runtime/src/operator/handoff.rs:289:        let now = Instant::now();
+crates/tze_hud_runtime/src/operator/handoff.rs:304:        .saturating_duration_since(Instant::now())
+crates/tze_hud_runtime/src/operator/handoff.rs:536:    let deadline = Instant::now() + window;
+crates/tze_hud_runtime/src/operator/handoff.rs:540:            Err(e) if Instant::now() >= deadline => return Err(e),
+crates/tze_hud_runtime/src/operator/handoff.rs:813:        let deadline = Instant::now() + Duration::from_secs(5);
+crates/tze_hud_runtime/src/operator/handoff.rs:815:            assert!(Instant::now() < deadline, "restart never finished");
+crates/tze_hud_scene/src/clock.rs:68:/// - `now_us()` — `SystemTime::now()` converted to UTC microseconds.
+crates/tze_hud_scene/src/clock.rs:81:            mono_origin: Instant::now(),
+crates/tze_hud_scene/src/clock.rs:99:        SystemTime::now()
+crates/tze_hud_scene/src/clock.rs:110:        self.mono_origin.elapsed().as_micros() as u64 + 1
+crates/tze_hud_runtime/src/windowed/wake.rs:111:    let now_wall_us = SystemTime::now()
+crates/tze_hud_runtime/src/windowed/wake.rs:116:        Instant::now() + Duration::from_micros(deadline_wall_us.saturating_sub(now_wall_us)),
+crates/tze_hud_runtime/src/windowed/wake.rs:185:            let now = Instant::now();
+crates/tze_hud_runtime/src/windowed/wake.rs:548:        let now = Instant::now();
+crates/tze_hud_runtime/src/windowed/wake.rs:557:        let now = Instant::now();
+crates/tze_hud_runtime/src/windowed/wake.rs:574:        let now = Instant::now();
+crates/tze_hud_runtime/src/windowed/wake.rs:584:        let start = Instant::now();
+crates/tze_hud_runtime/src/windowed/wake.rs:623:        let now = Instant::now();
+crates/tze_hud_runtime/src/windowed/wake.rs:664:                Instant::now() + Duration::from_secs(1),
+crates/tze_hud_runtime/src/windowed/wake.rs:680:                Instant::now() + Duration::from_millis(1),
+crates/tze_hud_runtime/src/windowed/wake.rs:894:        let deadline = Instant::now() + Duration::from_secs(1);
+crates/tze_hud_runtime/src/windowed/wake.rs:895:        while wake.main_work_checkpoint().generation == 0 && Instant::now() < deadline {
+crates/tze_hud_runtime/src/windowed/wake.rs:937:        let deadline = Instant::now() + Duration::from_secs(1);
+crates/tze_hud_runtime/src/windowed/wake.rs:938:        while wake.compositor().checkpoint() == compositor_before && Instant::now() < deadline {
+crates/tze_hud_runtime/src/windowed/mod.rs:226:    let now_us = std::time::SystemTime::now()
+crates/tze_hud_runtime/src/windowed/mod.rs:252:        let wall_us = std::time::SystemTime::now()
+crates/tze_hud_runtime/src/windowed/mod.rs:865:                self.on_resume_time_reached(Instant::now());
+crates/tze_hud_runtime/src/windowed/mod.rs:914:        let _ = self.claim_due_scheduled_main_deadline(Instant::now());
+crates/tze_hud_runtime/src/windowed/mod.rs:948:        let now = Instant::now();
+crates/tze_hud_runtime/src/windowed/mod.rs:1015:                let now_wall_us = std::time::SystemTime::now()
+crates/tze_hud_runtime/src/windowed/mod.rs:1393:                Instant::now(),
+crates/tze_hud_runtime/src/windowed/mod.rs:1462:                let degradation_clock_start = Instant::now();
+crates/tze_hud_runtime/src/windowed/mod.rs:1593:                    let frame_start = Instant::now();
+crates/tze_hud_runtime/src/windowed/mod.rs:1597:                    let degradation_work_start = Instant::now();
+crates/tze_hud_runtime/src/windowed/mod.rs:1715:                        std::time::SystemTime::now()
+crates/tze_hud_runtime/src/windowed/mod.rs:1775:                        let markdown_prime_start = Instant::now();
+crates/tze_hud_runtime/src/windowed/mod.rs:1777:                        let markdown_prime_us = markdown_prime_start.elapsed().as_micros() as u64;
+crates/tze_hud_runtime/src/windowed/mod.rs:1823:                            Instant::now(),
+crates/tze_hud_runtime/src/windowed/mod.rs:1890:                            let now_us = degradation_clock_start.elapsed().as_micros() as u64;
+crates/tze_hud_runtime/src/windowed/mod.rs:1939:                            let scene_commit_at = Instant::now();
+crates/tze_hud_runtime/src/windowed/mod.rs:2007:                                degradation_work_start.elapsed().as_micros() as u64;
+crates/tze_hud_runtime/src/windowed/mod.rs:2047:                                let present_wall_us = std::time::SystemTime::now()
+crates/tze_hud_runtime/src/windowed/mod.rs:2072:                            telem.frame_time_us = frame_start.elapsed().as_micros() as u64;
+crates/tze_hud_runtime/src/windowed/mod.rs:2092:                                    Instant::now(),
+crates/tze_hud_runtime/src/windowed/mod.rs:2102:                                degradation_clock_start.elapsed().as_micros() as u64;
+crates/tze_hud_runtime/src/windowed/mod.rs:2200:                        Instant::now(),
+crates/tze_hud_runtime/src/windowed/mod.rs:3268:        let now = Instant::now();
+crates/tze_hud_runtime/src/windowed/mod.rs:3372:            SystemTime::now()
+crates/tze_hud_runtime/src/operator/install.rs:609:        let deadline = Instant::now() + wait;
+crates/tze_hud_runtime/src/operator/install.rs:629:            if Instant::now() >= deadline {
+crates/tze_hud_runtime/src/shell/safe_mode.rs:182:    SystemTime::now()
+crates/tze_hud_runtime/src/element_store.rs:86:    let now_ns = SystemTime::now()
+crates/tze_hud_runtime/src/element_store.rs:376:    SystemTime::now()
+crates/tze_hud_runtime/src/windowed/keyboard.rs:850:            let composer_input_started = Instant::now();
+crates/tze_hud_runtime/src/windowed/keyboard.rs:1730:            let composer_input_started = Instant::now();
+crates/tze_hud_compositor/src/markdown.rs:3189:            let t0 = std::time::Instant::now();
+crates/tze_hud_compositor/src/markdown.rs:3191:            let elapsed = t0.elapsed();
+crates/tze_hud_runtime/src/operator/update.rs:188:    let deadline = Instant::now() + cfg.fetch_timeout + Duration::from_secs(5);
+crates/tze_hud_runtime/src/operator/update.rs:193:            Ok(None) if Instant::now() >= deadline => {
+crates/tze_hud_runtime/src/operator/update.rs:1115:        let deadline = Instant::now() + Duration::from_secs(10);
+crates/tze_hud_runtime/src/operator/update.rs:1117:            assert!(Instant::now() < deadline, "timed out: {what}");
+crates/tze_hud_runtime/src/windowed/portal.rs:2231:        let deadline = Instant::now() + Duration::from_secs(1);
+crates/tze_hud_runtime/src/windowed/portal.rs:2234:                Instant::now() < deadline,
+crates/tze_hud_runtime/src/windowed/portal.rs:2339:        let deadline_at = std::time::Instant::now() + std::time::Duration::from_millis(10);
+crates/tze_hud_runtime/src/windowed/network.rs:643:        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+crates/tze_hud_runtime/src/windowed/network.rs:648:                std::time::Instant::now() < deadline,
+crates/tze_hud_runtime/src/operator/status.rs:306:        let (cpu0, t0) = (process_cpu_secs(), Instant::now());
+crates/tze_hud_runtime/src/operator/status.rs:308:        let (cpu1, t1) = (process_cpu_secs(), Instant::now());
+crates/tze_hud_runtime/src/operator/status.rs:313:        let uptime = process_start().elapsed();
+crates/tze_hud_runtime/src/shell/freeze.rs:788:        s.activate(1_000, Instant::now());
+crates/tze_hud_runtime/src/shell/freeze.rs:797:        s.activate(1_000, Instant::now());
+crates/tze_hud_runtime/src/shell/freeze.rs:808:        let start = Instant::now();
+crates/tze_hud_runtime/src/shell/freeze.rs:821:        let start = Instant::now();
+crates/tze_hud_runtime/src/shell/freeze.rs:831:        s.activate(1_000, Instant::now());
+crates/tze_hud_runtime/src/shell/freeze.rs:847:            Instant::now(),
+crates/tze_hud_runtime/src/shell/freeze.rs:858:        mgr.activate(false, 0, Instant::now());
+crates/tze_hud_runtime/src/shell/freeze.rs:871:        mgr.activate(false, 0, Instant::now());
+crates/tze_hud_runtime/src/shell/freeze.rs:891:        mgr.activate(false, 0, Instant::now());
+crates/tze_hud_runtime/src/shell/freeze.rs:908:        let start = Instant::now();
+crates/tze_hud_runtime/src/shell/freeze.rs:1015:        mgr.activate(false, 0, Instant::now());
+crates/tze_hud_runtime/src/shell/freeze.rs:1032:        mgr.activate(false, 0, Instant::now());
+crates/tze_hud_runtime/src/shell/freeze.rs:1055:        mgr.activate(false, 0, Instant::now());
+crates/tze_hud_runtime/src/shell/freeze.rs:1077:        mgr.activate(false, 0, Instant::now());
+crates/tze_hud_runtime/src/shell/freeze.rs:1096:        mgr.activate(false, 0, Instant::now());
+crates/tze_hud_runtime/src/shell/freeze.rs:1112:        let activated = mgr.activate(true, 0, Instant::now());
+crates/tze_hud_runtime/src/shell/freeze.rs:1121:        mgr.activate(false, 0, Instant::now());
+crates/tze_hud_runtime/src/windowed/displays.rs:344:        if !target.ledger.ready(Instant::now()) {
+crates/tze_hud_runtime/src/windowed/displays.rs:356:        if target.ledger.record(signature, submitted, Instant::now()) {
+crates/tze_hud_runtime/src/windowed/displays.rs:701:        let now = Instant::now();
+crates/tze_hud_runtime/src/windowed/displays.rs:1181:        let t0 = Instant::now();
+crates/tze_hud_runtime/src/windowed/displays.rs:1212:        let t0 = Instant::now();
+crates/tze_hud_runtime/src/windowed/displays.rs:1240:        let t0 = Instant::now();
+crates/tze_hud_runtime/src/windowed/displays.rs:1266:        let now = Instant::now();
+crates/tze_hud_runtime/src/windowed/displays.rs:1289:        let t0 = Instant::now();
+crates/tze_hud_runtime/src/windowed/displays.rs:1336:        let t0 = Instant::now();
+crates/tze_hud_runtime/src/windowed/lifecycle.rs:467:    let start = Instant::now();
+crates/tze_hud_runtime/src/windowed/lifecycle.rs:473:        if start.elapsed() >= budget {
+crates/tze_hud_runtime/src/windowed/lifecycle.rs:819:            last_frame_at: Instant::now(),
+crates/tze_hud_runtime/src/windowed/lifecycle.rs:827:        self.last_frame_at = Instant::now();
+crates/tze_hud_runtime/src/windowed/lifecycle.rs:834:            self.measured_start = Some(Instant::now());
+crates/tze_hud_runtime/src/windowed/lifecycle.rs:859:            self.summary.elapsed_us = start.elapsed().as_micros() as u64;
+crates/tze_hud_runtime/src/windowed/lifecycle.rs:909:        self.last_frame_at.elapsed() > timeout
+crates/tze_hud_runtime/src/windowed/lifecycle.rs:922:            self.summary.elapsed_us = start.elapsed().as_micros() as u64;
+crates/tze_hud_runtime/src/windowed/lifecycle.rs:1623:        let input_started_at = Instant::now();
+crates/tze_hud_runtime/src/windowed/lifecycle.rs:2241:                        measurement.record_first_present(Instant::now());
+crates/tze_hud_runtime/src/windowed/lifecycle.rs:2548:        let started = Instant::now() - std::time::Duration::from_millis(3);
+crates/tze_hud_runtime/src/windowed/lifecycle.rs:2549:        let scene_commit_at = Instant::now() - std::time::Duration::from_millis(1);
+crates/tze_hud_runtime/src/windowed/lifecycle.rs:2553:            drain_pending_input_latency(&pending, scene_commit_at, Instant::now())
+crates/tze_hud_runtime/src/windowed/lifecycle.rs:2561:            drain_pending_input_latency(&pending, scene_commit_at, Instant::now()).is_none(),
+crates/tze_hud_runtime/src/windowed/lifecycle.rs:2569:        let started = Instant::now() - std::time::Duration::from_millis(1);
+crates/tze_hud_runtime/src/windowed/lifecycle.rs:2573:            drain_pending_input_latency(&pending, Instant::now(), Instant::now())
+crates/tze_hud_runtime/src/windowed/lifecycle.rs:2600:        let now = Instant::now();
+crates/tze_hud_runtime/src/windowed/lifecycle.rs:2892:        let start = Instant::now();
+crates/tze_hud_runtime/src/windowed/lifecycle.rs:2894:        let elapsed = start.elapsed();
+crates/tze_hud_runtime/src/windowed/input_dispatch.rs:51:    let now_us = std::time::SystemTime::now()
+crates/tze_hud_runtime/src/windowed/input_dispatch.rs:95:    let now_us = std::time::SystemTime::now()
+crates/tze_hud_runtime/src/windowed/input_dispatch.rs:212:    let now_us = std::time::SystemTime::now()
+crates/tze_hud_runtime/src/windowed/input_dispatch.rs:292:    let now_us = std::time::SystemTime::now()
+crates/tze_hud_runtime/src/windowed/input_dispatch.rs:407:    let now_us = std::time::SystemTime::now()
+crates/tze_hud_runtime/src/windowed/input_dispatch.rs:538:    let now_us = std::time::SystemTime::now()
+crates/tze_hud_runtime/src/windowed/input_dispatch.rs:631:    let now_us = std::time::SystemTime::now()
+crates/tze_hud_runtime/src/windowed/input_dispatch.rs:758:    start.elapsed().as_nanos() as u64
+crates/tze_hud_runtime/src/windowed/event_loop_harness.rs:370:        let deadline = std::time::Instant::now() + SCENE_WAIT;
+crates/tze_hud_runtime/src/windowed/event_loop_harness.rs:379:            assert!(std::time::Instant::now() < deadline, "{BUSY}");
+crates/tze_hud_runtime/src/windowed/event_loop_harness.rs:2007:        let deadline = Instant::now() + Duration::from_secs(1);
+crates/tze_hud_runtime/src/windowed/event_loop_harness.rs:2010:                Instant::now() < deadline,
+crates/tze_hud_runtime/src/windowed/event_loop_harness.rs:2189:        let now = std::time::Instant::now();
+crates/tze_hud_compositor/src/renderer/retained.rs:199:        let frame_start = Instant::now();
+crates/tze_hud_compositor/src/renderer/retained.rs:341:        let encode_start = Instant::now();
+crates/tze_hud_compositor/src/renderer/retained.rs:427:        let stage6_render_encode_us = encode_start.elapsed().as_micros().max(1) as u64;
+crates/tze_hud_compositor/src/renderer/retained.rs:428:        let submit_start = Instant::now();
+crates/tze_hud_compositor/src/renderer/retained.rs:433:        let stage7_gpu_submit_us = submit_start.elapsed().as_micros().max(1) as u64;
+crates/tze_hud_compositor/src/renderer/retained.rs:442:        telemetry.frame_time_us = frame_start.elapsed().as_micros().max(1) as u64;
+crates/tze_hud_compositor/src/renderer/draw_cmds.rs:174:            transition_start: std::time::Instant::now(),
+crates/tze_hud_compositor/src/renderer/draw_cmds.rs:194:            transition_start: std::time::Instant::now(),
+crates/tze_hud_compositor/src/renderer/draw_cmds.rs:204:            transition_start: std::time::Instant::now(),
+crates/tze_hud_compositor/src/renderer/draw_cmds.rs:220:        let elapsed_ms = self.transition_start.elapsed().as_millis() as f32;
+crates/tze_hud_compositor/src/renderer/draw_cmds.rs:258:        self.transition_start.elapsed().as_millis() >= self.duration_ms as u128
+crates/tze_hud_compositor/src/renderer/draw_cmds.rs:278:/// 2. When `first_seen.elapsed() >= ttl_ms`, the compositor sets
+crates/tze_hud_compositor/src/renderer/draw_cmds.rs:279:///    `fade_start = Some(Instant::now())` to begin the 150 ms fade-out.
+crates/tze_hud_compositor/src/renderer/draw_cmds.rs:311:            first_seen: std::time::Instant::now(),
+crates/tze_hud_compositor/src/renderer/draw_cmds.rs:327:                .is_some_and(|ttl| self.first_seen.elapsed().as_millis() as u64 >= ttl)
+crates/tze_hud_compositor/src/renderer/draw_cmds.rs:329:            self.fade_start = Some(std::time::Instant::now());
+crates/tze_hud_compositor/src/renderer/draw_cmds.rs:351:        let elapsed_ms = start.elapsed().as_millis() as f32;
+crates/tze_hud_compositor/src/renderer/draw_cmds.rs:376:        start.elapsed().as_millis() >= self.fade_duration_ms as u128
+crates/tze_hud_compositor/src/renderer/animation.rs:607:        let now = std::time::Instant::now();
+crates/tze_hud_compositor/src/renderer/animation.rs:691:            let elapsed = self.composer_caret_blink_start.elapsed().as_nanos();
+crates/tze_hud_compositor/src/renderer/animation.rs:701:            .map(|_| std::time::Instant::now() + crate::widget::WIDGET_TRANSITION_TICK);
+crates/tze_hud_compositor/src/renderer/frame.rs:540:        let frame_start = std::time::Instant::now();
+crates/tze_hud_compositor/src/renderer/frame.rs:753:                telemetry.frame_time_us = build.frame_start.elapsed().as_micros() as u64;
+crates/tze_hud_compositor/src/renderer/frame.rs:768:        let submit_start = std::time::Instant::now();
+crates/tze_hud_compositor/src/renderer/frame.rs:791:        telemetry.stage7_gpu_submit_us = submit_start.elapsed().as_micros().max(1) as u64;
+crates/tze_hud_compositor/src/renderer/frame.rs:802:            telemetry.frame_time_us = frame_start.elapsed().as_micros() as u64;
+crates/tze_hud_compositor/src/renderer/frame.rs:810:        telemetry.frame_time_us = frame_start.elapsed().as_micros() as u64;
+crates/tze_hud_compositor/src/renderer/frame.rs:1144:        let frame_start = std::time::Instant::now();
+crates/tze_hud_compositor/src/renderer/frame.rs:1233:                telemetry.frame_time_us = frame_start.elapsed().as_micros() as u64;
+crates/tze_hud_compositor/src/renderer/frame.rs:1286:        let submit_start = std::time::Instant::now();
+crates/tze_hud_compositor/src/renderer/frame.rs:1291:        telemetry.stage7_gpu_submit_us = submit_start.elapsed().as_micros() as u64;
+crates/tze_hud_compositor/src/renderer/frame.rs:1293:        telemetry.frame_time_us = frame_start.elapsed().as_micros() as u64;
+crates/tze_hud_compositor/src/renderer/tile_render.rs:639:        if !has_selection && !caret_visible_at(self.composer_caret_blink_start.elapsed()) {
+crates/tze_hud_compositor/src/renderer/mod.rs:898:            composer_caret_blink_start: std::time::Instant::now(),
+crates/tze_hud_compositor/src/renderer/mod.rs:1234:            composer_caret_blink_start: std::time::Instant::now(),
+crates/tze_hud_compositor/src/renderer/mod.rs:1663:            self.composer_caret_blink_start = std::time::Instant::now();
+crates/tze_hud_compositor/src/renderer/mod.rs:1720:            .then(|| image_cache::caret_visible_at(self.composer_caret_blink_start.elapsed()));
+crates/tze_hud_compositor/src/renderer/mod.rs:1959:                .is_some_and(|last| last.elapsed() < std::time::Duration::from_millis(interval_ms))
+crates/tze_hud_compositor/src/renderer/mod.rs:2005:        self.resize_reprime_last_at = Some(std::time::Instant::now());
+crates/tze_hud_compositor/src/renderer/mod.rs:2455:        let encode_start = std::time::Instant::now();
+crates/tze_hud_compositor/src/renderer/mod.rs:2637:        let encode_us = encode_start.elapsed().as_micros() as u64;
+crates/tze_hud_compositor/src/renderer/tests/markdown_primer.rs:72:        let rest_start = Instant::now();
+crates/tze_hud_compositor/src/renderer/tests/markdown_primer.rs:76:        let rest_elapsed = rest_start.elapsed();
+crates/tze_hud_compositor/src/renderer/tests/markdown_primer.rs:82:        let scroll_start = Instant::now();
+crates/tze_hud_compositor/src/renderer/tests/markdown_primer.rs:89:        let scroll_elapsed = scroll_start.elapsed();
+crates/tze_hud_compositor/src/renderer/tests/portal_animation.rs:211:        std::time::Instant::now() - std::time::Duration::from_millis(15_000);
+crates/tze_hud_compositor/src/renderer/tests/notification_layout.rs:840:    state.first_seen = std::time::Instant::now() - std::time::Duration::from_millis(3_001);
+crates/tze_hud_compositor/src/renderer/tests/notification_layout.rs:858:    state.first_seen = std::time::Instant::now() - std::time::Duration::from_secs(1);
+crates/tze_hud_compositor/src/renderer/tests/notification_layout.rs:862:    state.fade_start = Some(std::time::Instant::now() - std::time::Duration::from_millis(75));
+crates/tze_hud_compositor/src/renderer/tests/notification_layout.rs:879:    state.first_seen = std::time::Instant::now() - std::time::Duration::from_secs(1);
+crates/tze_hud_compositor/src/renderer/tests/notification_layout.rs:883:    state.fade_start = Some(std::time::Instant::now() - std::time::Duration::from_millis(151));
+crates/tze_hud_compositor/src/renderer/tests/notification_layout.rs:975:    completed_state.first_seen = std::time::Instant::now() - std::time::Duration::from_secs(1);
+crates/tze_hud_compositor/src/renderer/tests/notification_layout.rs:979:        Some(std::time::Instant::now() - std::time::Duration::from_millis(151));
+crates/tze_hud_compositor/src/renderer/tests/notification_layout.rs:1030:    state_a.first_seen = std::time::Instant::now() - std::time::Duration::from_secs(1);
+crates/tze_hud_compositor/src/renderer/tests/notification_layout.rs:1031:    state_b.first_seen = std::time::Instant::now() - std::time::Duration::from_secs(1);
+crates/tze_hud_compositor/src/renderer/tests/notification_layout.rs:1037:    state_a.fade_start = Some(std::time::Instant::now() - std::time::Duration::from_millis(75));
+crates/tze_hud_compositor/src/renderer/tests/notification_layout.rs:1038:    state_b.fade_start = Some(std::time::Instant::now() - std::time::Duration::from_millis(120));
+crates/tze_hud_compositor/src/renderer/tests/notification_layout.rs:1141:    completed_state.first_seen = std::time::Instant::now() - std::time::Duration::from_secs(1);
+crates/tze_hud_compositor/src/renderer/tests/notification_layout.rs:1144:        Some(std::time::Instant::now() - std::time::Duration::from_millis(151));
+crates/tze_hud_compositor/src/renderer/tests/idle_gate.rs:131:    compositor.composer_caret_blink_start = std::time::Instant::now()
+crates/tze_hud_compositor/src/renderer/tests/idle_gate.rs:209:            s.first_seen = std::time::Instant::now() - std::time::Duration::from_secs(9);
+crates/tze_hud_compositor/src/renderer/tests/idle_gate.rs:326:    compositor.composer_caret_blink_start = std::time::Instant::now()
+crates/tze_hud_compositor/src/renderer/tests/tile_opacity.rs:447:            transition_start: std::time::Instant::now(),
+crates/tze_hud_compositor/src/renderer/tests/tile_opacity.rs:588:            transition_start: std::time::Instant::now(),
+crates/tze_hud_compositor/src/renderer/tests/composer.rs:847:    compositor.composer_caret_blink_start = std::time::Instant::now()
+crates/tze_hud_compositor/src/renderer/tests/composer.rs:891:    compositor.composer_caret_blink_start = std::time::Instant::now();
+crates/tze_hud_compositor/src/renderer/tests/composer.rs:895:    compositor.composer_caret_blink_start = std::time::Instant::now();
+crates/tze_hud_compositor/src/renderer/tests/markdown_cache.rs:480:        Some(std::time::Instant::now() + std::time::Duration::from_secs(3600));
+crates/tze_hud_compositor/src/renderer/tests/markdown_cache.rs:489:        std::time::Instant::now().checked_sub(std::time::Duration::from_secs(3600));
+crates/tze_hud_compositor/src/renderer/tests/markdown_cache.rs:559:    let baseline_start = Instant::now();
+crates/tze_hud_compositor/src/renderer/tests/markdown_cache.rs:572:    let baseline_us = baseline_start.elapsed().as_micros();
+crates/tze_hud_compositor/src/renderer/tests/markdown_cache.rs:576:    let fixed_start = Instant::now();
+crates/tze_hud_compositor/src/renderer/tests/markdown_cache.rs:589:    let fixed_us = fixed_start.elapsed().as_micros();

@@ -1,0 +1,10 @@
+{
+  "head": "398c6f91de6e0d4883b10a41b6c63044e6192730",
+  "parser": "PyYAML BaseLoader (preserves YAML on as string); independent safe_load also succeeded",
+  "jobs": 12,
+  "run_steps": 28,
+  "action_steps": 33,
+  "merge_group_present": true,
+  "required_job_names_unchanged": true,
+  "provisioning_steps": "All apt installation steps retain timeout5 and APT_OPTS; no local installer operation executed."
+}

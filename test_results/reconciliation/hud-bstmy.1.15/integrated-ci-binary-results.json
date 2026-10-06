@@ -1,0 +1,431 @@
+{
+  "head": "398c6f91de6e0d4883b10a41b6c63044e6192730",
+  "rows": [
+    {
+      "owner": "Running unittests src/main.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/benchmark-6da1d50aeea39980)",
+      "passed": 7,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "owner": "Running unittests src/token_footprint_calibration.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/token_footprint_calibration-b4d3be31e081b051)",
+      "passed": 0,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "owner": "Running unittests src/lib.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/poc_demo-e48f59dbd102be1d)",
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "owner": "Running unittests src/main.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/poc_demo-72f1bbe48e4b4247)",
+      "passed": 0,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "owner": "Running tests/smoke.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/smoke-91aa4cba09e181cd)",
+      "passed": 3,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "owner": "Running unittests src/lib.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/render_artifacts-26038b0f0e13b045)",
+      "passed": 18,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "owner": "Running unittests src/bin/cooperative_projection_readback.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/cooperative_projection_readback-7f4d5c8bf98477f2)",
+      "passed": 0,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "owner": "Running unittests src/bin/vertical_flow_readback.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/vertical_flow_readback-dc8d4e36fca2bbc6)",
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "owner": "Running unittests src/main.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/tze_hud-8800ad09a3d853eb)",
+      "passed": 13,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "owner": "Running tests/benchmark_config_schema.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/benchmark_config_schema-ab2dce8da8b0f6c4)",
+      "passed": 2,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "owner": "Running tests/canonical_config_schema.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/canonical_config_schema-feda3ffd869a706f)",
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "owner": "Running tests/production_boot.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/production_boot-9f765298741a45b7)",
+      "passed": 3,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "owner": "Running unittests src/lib.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/tze_hud_compositor-a94a01a45937145e)",
+      "passed": 591,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "owner": "Running tests/gauge_binding_rendering.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/gauge_binding_rendering-666de0b7fe5f44c8)",
+      "passed": 23,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "owner": "Running tests/gpu_canary.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/gpu_canary-70f4b8114a75f850)",
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "owner": "Running tests/widget_raster_count.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/widget_raster_count-5bfefe11073b7423)",
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "owner": "Running tests/widget_rasterize_budget.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/widget_rasterize_budget-59f93e5a3c7f2f01)",
+      "passed": 4,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "owner": "Running tests/widget_transition.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/widget_transition-8b8023f332b84f13)",
+      "passed": 8,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "owner": "Running tests/zone_rendering.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/zone_rendering-d1b2c73072b5bec4)",
+      "passed": 13,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "owner": "Running unittests src/lib.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/tze_hud_config-464e3578a67e3b13)",
+      "passed": 171,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "owner": "Running unittests src/lib.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/tze_hud_input-76bcc105af0e52a5)",
+      "passed": 404,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "owner": "Running unittests src/lib.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/tze_hud_mcp-c33dc76ccd6b0d9b)",
+      "passed": 42,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "owner": "Running unittests src/lib.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/tze_hud_projection-2de622ab7d035808)",
+      "passed": 209,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "owner": "Running unittests src/lib.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/tze_hud_protocol-3005da36ff1d77b9)",
+      "passed": 205,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "owner": "Running tests/backpressure.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/backpressure-a6a6f6014432bbd9)",
+      "passed": 4,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "owner": "Running tests/capability_gating.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/capability_gating-b8a95ec6e33dd86d)",
+      "passed": 9,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "owner": "Running tests/event_delivery.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/event_delivery-0bfb023c7f27d468)",
+      "passed": 3,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "owner": "Running tests/fuzz_protocol_boundary.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/fuzz_protocol_boundary-4877562798ee3fc4)",
+      "passed": 33,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "owner": "Running tests/lease_governance.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/lease_governance-80e75292d9147ede)",
+      "passed": 21,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "owner": "Running tests/subscriptions.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/subscriptions-5d3d255f211e518f)",
+      "passed": 12,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "owner": "Running unittests src/lib.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/tze_hud_resource-80242813e55d305f)",
+      "passed": 88,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "owner": "Running tests/store_behavior.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/store_behavior-530e0c6e98fd8a57)",
+      "passed": 8,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "owner": "Running unittests src/lib.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/tze_hud_runtime-49766e5091b1cf85)",
+      "passed": 529,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "owner": "Running tests/idle_efficiency_counters.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/idle_efficiency_counters-ce4a582622dc86ea)",
+      "passed": 2,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "owner": "Running tests/pixel_helpers.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/pixel_helpers-aa08d294326f1648)",
+      "passed": 0,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "owner": "Running tests/pixel_readback.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/pixel_readback-8da5123119ab89b3)",
+      "passed": 39,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "owner": "Running tests/present_ack.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/present_ack-4e530bf61c7aff2b)",
+      "passed": 3,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "owner": "Running unittests src/lib.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/tze_hud_scene-f6d99de7cad85b2e)",
+      "passed": 315,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "owner": "Running tests/batch_atomicity.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/batch_atomicity-384ef3f8677b0915)",
+      "passed": 22,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "owner": "Running tests/fuzz_scene_graph.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/fuzz_scene_graph-bd5db3d1b7926cba)",
+      "passed": 9,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "owner": "Running tests/hit_test.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/hit_test-7e126a9b1cd22869)",
+      "passed": 20,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "owner": "Running tests/proptest_invariants.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/proptest_invariants-4c7bb9b1e1526b3c)",
+      "passed": 7,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "owner": "Running tests/session_lifecycle.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/session_lifecycle-11b4ade2e2b7b17e)",
+      "passed": 16,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "owner": "Running tests/snapshot.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/snapshot-e6a59a9b6b0ee2e1)",
+      "passed": 19,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "owner": "Running tests/zone_interaction.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/zone_interaction-6d9357c0fd7576c0)",
+      "passed": 15,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "owner": "Running tests/zone_ontology.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/zone_ontology-6df1480367a0ef27)",
+      "passed": 46,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "owner": "Running unittests src/lib.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/tze_hud_telemetry-97c3a1d0a2f1b4cd)",
+      "passed": 51,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "owner": "Running tests/idle_efficiency.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/idle_efficiency-3f4113b0ef185253)",
+      "passed": 5,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "owner": "Running tests/publish_load_artifact.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/publish_load_artifact-9d04bf0919fd6306)",
+      "passed": 7,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "owner": "Running unittests src/lib.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/tze_hud_widget-21f2a9313f1ca194)",
+      "passed": 8,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "owner": "Running tests/shipped_bundles.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/shipped_bundles-dabcb9c4b5d627f7)",
+      "passed": 17,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "owner": "Running unittests src/main.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/vertical_slice-e211dbd9acd907d5)",
+      "passed": 2,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "owner": "Running tests/budget_assertions.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/budget_assertions-dc309dabf089a270)",
+      "passed": 30,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "owner": "Running tests/production_boot.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/production_boot-3b27cb23dc201997)",
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "owner": "Running unittests src/main.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/widget_publish_load_harness-3d858df0a075cb79)",
+      "passed": 14,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "owner": "Running unittests src/main.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/widget_publish_load_harness-3d858df0a075cb79)",
+      "passed": 18,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "owner": "Running unittests src/main.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/widget_publish_load_harness-3d858df0a075cb79)",
+      "passed": 19,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "owner": "Running unittests src/main.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/widget_publish_load_harness-3d858df0a075cb79)",
+      "passed": 7,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "owner": "Running unittests src/main.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/widget_publish_load_harness-3d858df0a075cb79)",
+      "passed": 4,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "owner": "Running unittests src/main.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/widget_publish_load_harness-3d858df0a075cb79)",
+      "passed": 11,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "owner": "Running unittests src/main.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/widget_publish_load_harness-3d858df0a075cb79)",
+      "passed": 5,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "owner": "Running unittests src/main.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/widget_publish_load_harness-3d858df0a075cb79)",
+      "passed": 6,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "owner": "Running unittests src/main.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/widget_publish_load_harness-3d858df0a075cb79)",
+      "passed": 14,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "owner": "Running unittests src/main.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/widget_publish_load_harness-3d858df0a075cb79)",
+      "passed": 3,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "owner": "Running unittests src/main.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/widget_publish_load_harness-3d858df0a075cb79)",
+      "passed": 20,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "owner": "Running unittests src/main.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/widget_publish_load_harness-3d858df0a075cb79)",
+      "passed": 15,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "owner": "Running unittests src/main.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/widget_publish_load_harness-3d858df0a075cb79)",
+      "passed": 21,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "owner": "Running unittests src/main.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/widget_publish_load_harness-3d858df0a075cb79)",
+      "passed": 12,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "owner": "Running unittests src/main.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/widget_publish_load_harness-3d858df0a075cb79)",
+      "passed": 15,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "owner": "Running tests/production_boot.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/production_boot-52f48632a6b32fdf)",
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "owner": "Running tests/production_boot.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/production_boot-2cbd7e796f4337ae)",
+      "passed": 3,
+      "failed": 0,
+      "ignored": 0
+    }
+  ]
+}

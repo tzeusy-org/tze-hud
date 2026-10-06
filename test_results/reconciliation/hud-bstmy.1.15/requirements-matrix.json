@@ -1,0 +1,1907 @@
+{
+  "audit_head": "398c6f91de6e0d4883b10a41b6c63044e6192730",
+  "verdict": "partial",
+  "original_criteria_count": 38,
+  "total_original_correction_terminal_rows": 83,
+  "areas": {
+    "A": {
+      "source": [
+        "justfile:42,78,88",
+        "crates/tze_hud_runtime/src/test_support.rs:14,25",
+        "gpu-path-classification.json"
+      ],
+      "evidence": [
+        "gpu-verification-results.json",
+        "gpu-root-attestation.json",
+        "gpu-path-classification.json",
+        "recipe-dry-run-inventory.json",
+        "integrated-ci-applicability.json"
+      ],
+      "classification": "implemented original enabler implementation; universal clock relationships separately partial"
+    },
+    "B": {
+      "source": [
+        "justfile:109,118,169,189,203,232",
+        ".github/workflows/ci.yml",
+        "ci-parity-matrix.json"
+      ],
+      "evidence": [
+        "ci-parity-matrix.json",
+        "ci-action-classification.json",
+        "python-discovery-inventory.json",
+        "integrated-ci-applicability.json",
+        "exact-main-ci-jobs.json"
+      ],
+      "classification": "partial"
+    },
+    "C": {
+      "source": [
+        "scripts/ci/check_dev_mode_defaults.py:44,60,76,100,121,143",
+        "scripts/ci/test_check_dev_mode_defaults.py:92",
+        "default-feature-closure-inventory.json"
+      ],
+      "evidence": [
+        "guard-fixtures.log",
+        "dev-mode-guard.log",
+        "cargo-oracles.json",
+        "guard-instrument-matrix.json",
+        "third-party-feature-assumption.json",
+        "integrated-ci-applicability.json"
+      ],
+      "classification": "implemented original enabler implementation; universal clock relationships separately partial"
+    },
+    "D": {
+      "source": [
+        "crates/tze_hud_compositor/src/renderer/tests/mod.rs",
+        "crates/tze_hud_protocol/src/session_server/tests/mod.rs",
+        "historical-split-validation.json",
+        "historical-all-function-body-proof.json"
+      ],
+      "evidence": [
+        "original-compositor-275-history.json",
+        "historical-split-validation.json",
+        "historical-helper-module-proof.json",
+        "historical-all-function-body-proof.json",
+        "invariant-contract-matrix.json",
+        "invariant-execution-receipt.json"
+      ],
+      "classification": "implemented original enabler implementation; universal clock relationships separately partial"
+    },
+    "all": {
+      "source": [
+        "docs/invariants.md",
+        "requirements-matrix.json",
+        "clock-contract-matrix.json",
+        "documentation-assessment.json"
+      ],
+      "evidence": [
+        "criteria-snapshot.json",
+        "discovered-follow-ups.json",
+        "blockers.json",
+        "clock-contract-matrix.json",
+        "invariant-contract-matrix.json"
+      ],
+      "classification": "partial"
+    }
+  },
+  "criteria": [
+    {
+      "criterion": "hud-bstmy.1.1:AC1",
+      "requirement": "`cargo fmt --all --check` is clean.",
+      "area": "A",
+      "implementing_bead": "hud-bstmy.1.1",
+      "current_code": [
+        "justfile:42,78,88",
+        "crates/tze_hud_runtime/src/test_support.rs:14,25",
+        "gpu-path-classification.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "gpu-verification-results.json",
+        "gpu-root-attestation.json",
+        "gpu-path-classification.json",
+        "recipe-dry-run-inventory.json",
+        "integrated-ci-applicability.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Current398 integrated just ci executes cargo fmt --check; all18 workspace members are default members, so --all scope is equivalent; actual terminal0."
+    },
+    {
+      "criterion": "hud-bstmy.1.1:AC2",
+      "requirement": "`cargo clippy --workspace --all-targets -- -D warnings` is clean.",
+      "area": "A",
+      "implementing_bead": "hud-bstmy.1.1",
+      "current_code": [
+        "justfile:42,78,88",
+        "crates/tze_hud_runtime/src/test_support.rs:14,25",
+        "gpu-path-classification.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "gpu-verification-results.json",
+        "gpu-root-attestation.json",
+        "gpu-path-classification.json",
+        "recipe-dry-run-inventory.json",
+        "integrated-ci-applicability.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Current398 integrated just ci executes cargo clippy --workspace --all-targets -- -D warnings (including separate integration); actual terminal0."
+    },
+    {
+      "criterion": "hud-bstmy.1.1:AC3",
+      "requirement": "`just test-gpu` passes twice in a row on this host, each run under 15 minutes, with TZE_HUD_REQUIRE_GPU=1 (GPU tests actually run, not skipped).",
+      "area": "A",
+      "implementing_bead": "hud-bstmy.1.1",
+      "current_code": [
+        "justfile:42,78,88",
+        "crates/tze_hud_runtime/src/test_support.rs:14,25",
+        "gpu-path-classification.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "gpu-verification-results.json",
+        "gpu-root-attestation.json",
+        "gpu-path-classification.json",
+        "recipe-dry-run-inventory.json",
+        "integrated-ci-applicability.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Own requiredGPU/default-parallel normal just test-gpu twice actual680/8 each,18.600s and17.308s; separate prebuild105.577s+60.593s; per-suite900s bounded; no skips."
+    },
+    {
+      "criterion": "hud-bstmy.1.1:AC4",
+      "requirement": "`grep -rn 'tze_hud_compositor --test pixel_readback\\|test-gpu-pixel-readback' justfile AGENTS.md CLAUDE.md README.md` prints nothing.",
+      "area": "A",
+      "implementing_bead": "hud-bstmy.1.1",
+      "current_code": [
+        "justfile:42,78,88",
+        "crates/tze_hud_runtime/src/test_support.rs:14,25",
+        "gpu-path-classification.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "gpu-verification-results.json",
+        "gpu-root-attestation.json",
+        "gpu-path-classification.json",
+        "recipe-dry-run-inventory.json",
+        "integrated-ci-applicability.json"
+      ],
+      "classification": "deviates",
+      "assessment": "Literal overbroad grep finds truthful CI duplicate exclusion comment in justfile. Obsolete recipe/wrong-package pixel target gone; .1.9/.1.10 semantic authority preserves truthful reference, no new correction."
+    },
+    {
+      "criterion": "hud-bstmy.1.1:AC5",
+      "requirement": "CLAUDE.md and AGENTS.md no longer say compositor tests deadlock bare; they point at `just test-gpu`.",
+      "area": "A",
+      "implementing_bead": "hud-bstmy.1.1",
+      "current_code": [
+        "justfile:42,78,88",
+        "crates/tze_hud_runtime/src/test_support.rs:14,25",
+        "gpu-path-classification.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "gpu-verification-results.json",
+        "gpu-root-attestation.json",
+        "gpu-path-classification.json",
+        "recipe-dry-run-inventory.json",
+        "integrated-ci-applicability.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Current exact source and designated existing gate evidence retained."
+    },
+    {
+      "criterion": "hud-bstmy.1.1:AC6",
+      "requirement": "Every test named in docs/invariants.md still exists (grep each name) or docs/invariants.md was updated in the same PR.",
+      "area": "A",
+      "implementing_bead": "hud-bstmy.1.1",
+      "current_code": [
+        "justfile:42,78,88",
+        "crates/tze_hud_runtime/src/test_support.rs:14,25",
+        "gpu-path-classification.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "gpu-verification-results.json",
+        "gpu-root-attestation.json",
+        "gpu-path-classification.json",
+        "recipe-dry-run-inventory.json",
+        "integrated-ci-applicability.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Current78 mentions resolve to72 attributed definitions and all72 actual pass lines; complete bodies/implementing paths read. Universal injected-time contract is separately partial, not hidden by retention."
+    },
+    {
+      "criterion": "hud-bstmy.1.1:AC7",
+      "requirement": "`just ci` is green once before handoff.",
+      "area": "A",
+      "implementing_bead": "hud-bstmy.1.1",
+      "current_code": [
+        "justfile:42,78,88",
+        "crates/tze_hud_runtime/src/test_support.rs:14,25",
+        "gpu-path-classification.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "gpu-verification-results.json",
+        "gpu-root-attestation.json",
+        "gpu-path-classification.json",
+        "recipe-dry-run-inventory.json",
+        "integrated-ci-applicability.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Reused exact398 normal just ci actual terminal0/680.473s, independently SHA/recount/source/selector/environment checked; only local pwshSKIP, same398 remote pwsh step succeeded."
+    },
+    {
+      "criterion": "hud-bstmy.1.2:AC1",
+      "requirement": "`cargo fmt --all --check` is clean.",
+      "area": "B",
+      "implementing_bead": "hud-bstmy.1.2",
+      "current_code": [
+        "justfile:109,118,169,189,203,232",
+        ".github/workflows/ci.yml",
+        "ci-parity-matrix.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "ci-parity-matrix.json",
+        "ci-action-classification.json",
+        "python-discovery-inventory.json",
+        "integrated-ci-applicability.json",
+        "exact-main-ci-jobs.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Current398 integrated just ci executes cargo fmt --check; all18 workspace members are default members, so --all scope is equivalent; actual terminal0."
+    },
+    {
+      "criterion": "hud-bstmy.1.2:AC2",
+      "requirement": "`cargo clippy --workspace --all-targets -- -D warnings` is clean.",
+      "area": "B",
+      "implementing_bead": "hud-bstmy.1.2",
+      "current_code": [
+        "justfile:109,118,169,189,203,232",
+        ".github/workflows/ci.yml",
+        "ci-parity-matrix.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "ci-parity-matrix.json",
+        "ci-action-classification.json",
+        "python-discovery-inventory.json",
+        "integrated-ci-applicability.json",
+        "exact-main-ci-jobs.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Current398 integrated just ci executes cargo clippy --workspace --all-targets -- -D warnings (including separate integration); actual terminal0."
+    },
+    {
+      "criterion": "hud-bstmy.1.2:AC3",
+      "requirement": "`cargo test -p integration` passes (quiet).",
+      "area": "B",
+      "implementing_bead": "hud-bstmy.1.2",
+      "current_code": [
+        "justfile:109,118,169,189,203,232",
+        ".github/workflows/ci.yml",
+        "ci-parity-matrix.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "ci-parity-matrix.json",
+        "ci-action-classification.json",
+        "python-discovery-inventory.json",
+        "integrated-ci-applicability.json",
+        "exact-main-ci-jobs.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Current398 integrated command covers integration170/14, Python76+3/103 and both token calibrations/cmp/check; own Python recipe provisioned76+3/103 supplement."
+    },
+    {
+      "criterion": "hud-bstmy.1.2:AC4",
+      "requirement": "`just test-python` and `just token-footprint` pass.",
+      "area": "B",
+      "implementing_bead": "hud-bstmy.1.2",
+      "current_code": [
+        "justfile:109,118,169,189,203,232",
+        ".github/workflows/ci.yml",
+        "ci-parity-matrix.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "ci-parity-matrix.json",
+        "ci-action-classification.json",
+        "python-discovery-inventory.json",
+        "integrated-ci-applicability.json",
+        "exact-main-ci-jobs.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Current398 integrated command covers integration170/14, Python76+3/103 and both token calibrations/cmp/check; own Python recipe provisioned76+3/103 supplement."
+    },
+    {
+      "criterion": "hud-bstmy.1.2:AC5",
+      "requirement": "`just --dry-run ci` lists test-python and token-footprint; every `--test` target named in ci.yml's integration step is covered by `just test-integration`.",
+      "area": "B",
+      "implementing_bead": "hud-bstmy.1.2",
+      "current_code": [
+        "justfile:109,118,169,189,203,232",
+        ".github/workflows/ci.yml",
+        "ci-parity-matrix.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "ci-parity-matrix.json",
+        "ci-action-classification.json",
+        "python-discovery-inventory.json",
+        "integrated-ci-applicability.json",
+        "exact-main-ci-jobs.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Current78 mentions resolve to72 attributed definitions and all72 actual pass lines; complete bodies/implementing paths read. Universal injected-time contract is separately partial, not hidden by retention."
+    },
+    {
+      "criterion": "hud-bstmy.1.2:AC6",
+      "requirement": "Each of the six scripts/ci/test_*.py listed in the design either runs in CI and `just test-python` or is deleted with its subject.",
+      "area": "B",
+      "implementing_bead": "hud-bstmy.1.2",
+      "current_code": [
+        "justfile:109,118,169,189,203,232",
+        ".github/workflows/ci.yml",
+        "ci-parity-matrix.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "ci-parity-matrix.json",
+        "ci-action-classification.json",
+        "python-discovery-inventory.json",
+        "integrated-ci-applicability.json",
+        "exact-main-ci-jobs.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Current exact source and designated existing gate evidence retained."
+    },
+    {
+      "criterion": "hud-bstmy.1.2:AC7",
+      "requirement": "Every test named in docs/invariants.md still exists (grep each name) or docs/invariants.md was updated in the same PR.",
+      "area": "B",
+      "implementing_bead": "hud-bstmy.1.2",
+      "current_code": [
+        "justfile:109,118,169,189,203,232",
+        ".github/workflows/ci.yml",
+        "ci-parity-matrix.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "ci-parity-matrix.json",
+        "ci-action-classification.json",
+        "python-discovery-inventory.json",
+        "integrated-ci-applicability.json",
+        "exact-main-ci-jobs.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Current78 mentions resolve to72 attributed definitions and all72 actual pass lines; complete bodies/implementing paths read. Universal injected-time contract is separately partial, not hidden by retention."
+    },
+    {
+      "criterion": "hud-bstmy.1.2:AC8",
+      "requirement": "`just ci` is green once before handoff.",
+      "area": "B",
+      "implementing_bead": "hud-bstmy.1.2",
+      "current_code": [
+        "justfile:109,118,169,189,203,232",
+        ".github/workflows/ci.yml",
+        "ci-parity-matrix.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "ci-parity-matrix.json",
+        "ci-action-classification.json",
+        "python-discovery-inventory.json",
+        "integrated-ci-applicability.json",
+        "exact-main-ci-jobs.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Reused exact398 normal just ci actual terminal0/680.473s, independently SHA/recount/source/selector/environment checked; only local pwshSKIP, same398 remote pwsh step succeeded."
+    },
+    {
+      "criterion": "hud-bstmy.1.3:AC1",
+      "requirement": "`cargo fmt --all --check` is clean.",
+      "area": "C",
+      "implementing_bead": "hud-bstmy.1.3",
+      "current_code": [
+        "scripts/ci/check_dev_mode_defaults.py:44,60,76,100,121,143",
+        "scripts/ci/test_check_dev_mode_defaults.py:92",
+        "default-feature-closure-inventory.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "guard-fixtures.log",
+        "dev-mode-guard.log",
+        "cargo-oracles.json",
+        "guard-instrument-matrix.json",
+        "third-party-feature-assumption.json",
+        "integrated-ci-applicability.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Current398 integrated just ci executes cargo fmt --check; all18 workspace members are default members, so --all scope is equivalent; actual terminal0."
+    },
+    {
+      "criterion": "hud-bstmy.1.3:AC2",
+      "requirement": "`cargo clippy --workspace --all-targets -- -D warnings` is clean.",
+      "area": "C",
+      "implementing_bead": "hud-bstmy.1.3",
+      "current_code": [
+        "scripts/ci/check_dev_mode_defaults.py:44,60,76,100,121,143",
+        "scripts/ci/test_check_dev_mode_defaults.py:92",
+        "default-feature-closure-inventory.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "guard-fixtures.log",
+        "dev-mode-guard.log",
+        "cargo-oracles.json",
+        "guard-instrument-matrix.json",
+        "third-party-feature-assumption.json",
+        "integrated-ci-applicability.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Current398 integrated just ci executes cargo clippy --workspace --all-targets -- -D warnings (including separate integration); actual terminal0."
+    },
+    {
+      "criterion": "hud-bstmy.1.3:AC3",
+      "requirement": "`just dev-mode-guard` passes locally and fails when a crate's default features include dev-mode (temporarily edit one Cargo.toml to prove it, then revert).",
+      "area": "C",
+      "implementing_bead": "hud-bstmy.1.3",
+      "current_code": [
+        "scripts/ci/check_dev_mode_defaults.py:44,60,76,100,121,143",
+        "scripts/ci/test_check_dev_mode_defaults.py:92",
+        "default-feature-closure-inventory.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "guard-fixtures.log",
+        "dev-mode-guard.log",
+        "cargo-oracles.json",
+        "guard-instrument-matrix.json",
+        "third-party-feature-assumption.json",
+        "integrated-ci-applicability.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Current real17 closures pass; existing negativefixtures plus actual offline scratch Cargo aliases/orderings failguard1 without modifying tracked manifests, as current read-only contract requires."
+    },
+    {
+      "criterion": "hud-bstmy.1.3:AC4",
+      "requirement": "`grep -n 'cargo build --workspace --release\\|dev_mode_not_active_in_release' .github/workflows/ci.yml` prints nothing; the job `name:` is unchanged.",
+      "area": "C",
+      "implementing_bead": "hud-bstmy.1.3",
+      "current_code": [
+        "scripts/ci/check_dev_mode_defaults.py:44,60,76,100,121,143",
+        "scripts/ci/test_check_dev_mode_defaults.py:92",
+        "default-feature-closure-inventory.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "guard-fixtures.log",
+        "dev-mode-guard.log",
+        "cargo-oracles.json",
+        "guard-instrument-matrix.json",
+        "third-party-feature-assumption.json",
+        "integrated-ci-applicability.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Actual obsolete release-build/reference scan empty; required displayname unchanged, Windows release job retained."
+    },
+    {
+      "criterion": "hud-bstmy.1.3:AC5",
+      "requirement": "`python3 -c \"import yaml,sys; yaml.safe_load(open('.github/workflows/ci.yml'))\"` succeeds.",
+      "area": "C",
+      "implementing_bead": "hud-bstmy.1.3",
+      "current_code": [
+        "scripts/ci/check_dev_mode_defaults.py:44,60,76,100,121,143",
+        "scripts/ci/test_check_dev_mode_defaults.py:92",
+        "default-feature-closure-inventory.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "guard-fixtures.log",
+        "dev-mode-guard.log",
+        "cargo-oracles.json",
+        "guard-instrument-matrix.json",
+        "third-party-feature-assumption.json",
+        "integrated-ci-applicability.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Current exact source and designated existing gate evidence retained."
+    },
+    {
+      "criterion": "hud-bstmy.1.3:AC6",
+      "requirement": "Every test named in docs/invariants.md still exists (grep each name) or docs/invariants.md was updated in the same PR.",
+      "area": "C",
+      "implementing_bead": "hud-bstmy.1.3",
+      "current_code": [
+        "scripts/ci/check_dev_mode_defaults.py:44,60,76,100,121,143",
+        "scripts/ci/test_check_dev_mode_defaults.py:92",
+        "default-feature-closure-inventory.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "guard-fixtures.log",
+        "dev-mode-guard.log",
+        "cargo-oracles.json",
+        "guard-instrument-matrix.json",
+        "third-party-feature-assumption.json",
+        "integrated-ci-applicability.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Current78 mentions resolve to72 attributed definitions and all72 actual pass lines; complete bodies/implementing paths read. Universal injected-time contract is separately partial, not hidden by retention."
+    },
+    {
+      "criterion": "hud-bstmy.1.3:AC7",
+      "requirement": "`just ci` is green once before handoff.",
+      "area": "C",
+      "implementing_bead": "hud-bstmy.1.3",
+      "current_code": [
+        "scripts/ci/check_dev_mode_defaults.py:44,60,76,100,121,143",
+        "scripts/ci/test_check_dev_mode_defaults.py:92",
+        "default-feature-closure-inventory.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "guard-fixtures.log",
+        "dev-mode-guard.log",
+        "cargo-oracles.json",
+        "guard-instrument-matrix.json",
+        "third-party-feature-assumption.json",
+        "integrated-ci-applicability.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Reused exact398 normal just ci actual terminal0/680.473s, independently SHA/recount/source/selector/environment checked; only local pwshSKIP, same398 remote pwsh step succeeded."
+    },
+    {
+      "criterion": "hud-bstmy.1.4:AC1",
+      "requirement": "`cargo fmt --all --check` is clean.",
+      "area": "D",
+      "implementing_bead": "hud-bstmy.1.4",
+      "current_code": [
+        "crates/tze_hud_compositor/src/renderer/tests/mod.rs",
+        "crates/tze_hud_protocol/src/session_server/tests/mod.rs",
+        "historical-split-validation.json",
+        "historical-all-function-body-proof.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "original-compositor-275-history.json",
+        "historical-split-validation.json",
+        "historical-helper-module-proof.json",
+        "historical-all-function-body-proof.json",
+        "invariant-contract-matrix.json",
+        "invariant-execution-receipt.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Current398 integrated just ci executes cargo fmt --check; all18 workspace members are default members, so --all scope is equivalent; actual terminal0."
+    },
+    {
+      "criterion": "hud-bstmy.1.4:AC2",
+      "requirement": "`cargo clippy --workspace --all-targets -- -D warnings` is clean.",
+      "area": "D",
+      "implementing_bead": "hud-bstmy.1.4",
+      "current_code": [
+        "crates/tze_hud_compositor/src/renderer/tests/mod.rs",
+        "crates/tze_hud_protocol/src/session_server/tests/mod.rs",
+        "historical-split-validation.json",
+        "historical-all-function-body-proof.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "original-compositor-275-history.json",
+        "historical-split-validation.json",
+        "historical-helper-module-proof.json",
+        "historical-all-function-body-proof.json",
+        "invariant-contract-matrix.json",
+        "invariant-execution-receipt.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Current398 integrated just ci executes cargo clippy --workspace --all-targets -- -D warnings (including separate integration); actual terminal0."
+    },
+    {
+      "criterion": "hud-bstmy.1.4:AC3",
+      "requirement": "Compositor tests pass via `just test-gpu` (or `just test` with HEADLESS_FORCE_SOFTWARE=1 if the llvmpipe-recipe bead has not landed); never bare `cargo test -p tze_hud_compositor`.",
+      "area": "D",
+      "implementing_bead": "hud-bstmy.1.4",
+      "current_code": [
+        "crates/tze_hud_compositor/src/renderer/tests/mod.rs",
+        "crates/tze_hud_protocol/src/session_server/tests/mod.rs",
+        "historical-split-validation.json",
+        "historical-all-function-body-proof.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "original-compositor-275-history.json",
+        "historical-split-validation.json",
+        "historical-helper-module-proof.json",
+        "historical-all-function-body-proof.json",
+        "invariant-contract-matrix.json",
+        "invariant-execution-receipt.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Current exact source and designated existing gate evidence retained."
+    },
+    {
+      "criterion": "hud-bstmy.1.4:AC4",
+      "requirement": "Test count identical before and after: `grep -rcE '#\\[(tokio::)?test' crates/tze_hud_compositor/src/renderer/` sums to the pre-split count (record both numbers in the PR).",
+      "area": "D",
+      "implementing_bead": "hud-bstmy.1.4",
+      "current_code": [
+        "crates/tze_hud_compositor/src/renderer/tests/mod.rs",
+        "crates/tze_hud_protocol/src/session_server/tests/mod.rs",
+        "historical-split-validation.json",
+        "historical-all-function-body-proof.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "original-compositor-275-history.json",
+        "historical-split-validation.json",
+        "historical-helper-module-proof.json",
+        "historical-all-function-body-proof.json",
+        "invariant-contract-matrix.json",
+        "invariant-execution-receipt.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Independent delivered pure-split history compares all280 compositor/135protocol test bodies raw-identical before/after. Original275 planning plusfive authorizedpre-split additions explicit. Allfunction/helper bodies multiplicity and modulewiring independently checked; current lateredits separately listed."
+    },
+    {
+      "criterion": "hud-bstmy.1.4:AC5",
+      "requirement": "No test body changed: `git diff --stat -M` shows moves; `git diff -M --color-moved=dimmed-zebra` reviewed.",
+      "area": "D",
+      "implementing_bead": "hud-bstmy.1.4",
+      "current_code": [
+        "crates/tze_hud_compositor/src/renderer/tests/mod.rs",
+        "crates/tze_hud_protocol/src/session_server/tests/mod.rs",
+        "historical-split-validation.json",
+        "historical-all-function-body-proof.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "original-compositor-275-history.json",
+        "historical-split-validation.json",
+        "historical-helper-module-proof.json",
+        "historical-all-function-body-proof.json",
+        "invariant-contract-matrix.json",
+        "invariant-execution-receipt.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Independent delivered pure-split history compares all280 compositor/135protocol test bodies raw-identical before/after. Original275 planning plusfive authorizedpre-split additions explicit. Allfunction/helper bodies multiplicity and modulewiring independently checked; current lateredits separately listed."
+    },
+    {
+      "criterion": "hud-bstmy.1.4:AC6",
+      "requirement": "crates/tze_hud_compositor/src/renderer/tests.rs no longer exists; no new file exceeds 6,500 lines.",
+      "area": "D",
+      "implementing_bead": "hud-bstmy.1.4",
+      "current_code": [
+        "crates/tze_hud_compositor/src/renderer/tests/mod.rs",
+        "crates/tze_hud_protocol/src/session_server/tests/mod.rs",
+        "historical-split-validation.json",
+        "historical-all-function-body-proof.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "original-compositor-275-history.json",
+        "historical-split-validation.json",
+        "historical-helper-module-proof.json",
+        "historical-all-function-body-proof.json",
+        "invariant-contract-matrix.json",
+        "invariant-execution-receipt.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Current exact source and designated existing gate evidence retained."
+    },
+    {
+      "criterion": "hud-bstmy.1.4:AC7",
+      "requirement": "Every test named in docs/invariants.md still exists (grep each name) or docs/invariants.md was updated in the same PR.",
+      "area": "D",
+      "implementing_bead": "hud-bstmy.1.4",
+      "current_code": [
+        "crates/tze_hud_compositor/src/renderer/tests/mod.rs",
+        "crates/tze_hud_protocol/src/session_server/tests/mod.rs",
+        "historical-split-validation.json",
+        "historical-all-function-body-proof.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "original-compositor-275-history.json",
+        "historical-split-validation.json",
+        "historical-helper-module-proof.json",
+        "historical-all-function-body-proof.json",
+        "invariant-contract-matrix.json",
+        "invariant-execution-receipt.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Current78 mentions resolve to72 attributed definitions and all72 actual pass lines; complete bodies/implementing paths read. Universal injected-time contract is separately partial, not hidden by retention."
+    },
+    {
+      "criterion": "hud-bstmy.1.4:AC8",
+      "requirement": "`just ci` is green once before handoff.",
+      "area": "D",
+      "implementing_bead": "hud-bstmy.1.4",
+      "current_code": [
+        "crates/tze_hud_compositor/src/renderer/tests/mod.rs",
+        "crates/tze_hud_protocol/src/session_server/tests/mod.rs",
+        "historical-split-validation.json",
+        "historical-all-function-body-proof.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "original-compositor-275-history.json",
+        "historical-split-validation.json",
+        "historical-helper-module-proof.json",
+        "historical-all-function-body-proof.json",
+        "invariant-contract-matrix.json",
+        "invariant-execution-receipt.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Reused exact398 normal just ci actual terminal0/680.473s, independently SHA/recount/source/selector/environment checked; only local pwshSKIP, same398 remote pwsh step succeeded."
+    },
+    {
+      "criterion": "hud-bstmy.1.5:AC1",
+      "requirement": "`cargo fmt --all --check` is clean.",
+      "area": "D",
+      "implementing_bead": "hud-bstmy.1.5",
+      "current_code": [
+        "crates/tze_hud_compositor/src/renderer/tests/mod.rs",
+        "crates/tze_hud_protocol/src/session_server/tests/mod.rs",
+        "historical-split-validation.json",
+        "historical-all-function-body-proof.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "original-compositor-275-history.json",
+        "historical-split-validation.json",
+        "historical-helper-module-proof.json",
+        "historical-all-function-body-proof.json",
+        "invariant-contract-matrix.json",
+        "invariant-execution-receipt.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Current398 integrated just ci executes cargo fmt --check; all18 workspace members are default members, so --all scope is equivalent; actual terminal0."
+    },
+    {
+      "criterion": "hud-bstmy.1.5:AC2",
+      "requirement": "`cargo clippy --workspace --all-targets -- -D warnings` is clean.",
+      "area": "D",
+      "implementing_bead": "hud-bstmy.1.5",
+      "current_code": [
+        "crates/tze_hud_compositor/src/renderer/tests/mod.rs",
+        "crates/tze_hud_protocol/src/session_server/tests/mod.rs",
+        "historical-split-validation.json",
+        "historical-all-function-body-proof.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "original-compositor-275-history.json",
+        "historical-split-validation.json",
+        "historical-helper-module-proof.json",
+        "historical-all-function-body-proof.json",
+        "invariant-contract-matrix.json",
+        "invariant-execution-receipt.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Current398 integrated just ci executes cargo clippy --workspace --all-targets -- -D warnings (including separate integration); actual terminal0."
+    },
+    {
+      "criterion": "hud-bstmy.1.5:AC3",
+      "requirement": "`cargo test -p tze_hud_protocol` passes (quiet).",
+      "area": "D",
+      "implementing_bead": "hud-bstmy.1.5",
+      "current_code": [
+        "crates/tze_hud_compositor/src/renderer/tests/mod.rs",
+        "crates/tze_hud_protocol/src/session_server/tests/mod.rs",
+        "historical-split-validation.json",
+        "historical-all-function-body-proof.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "original-compositor-275-history.json",
+        "historical-split-validation.json",
+        "historical-helper-module-proof.json",
+        "historical-all-function-body-proof.json",
+        "invariant-contract-matrix.json",
+        "invariant-execution-receipt.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Current398 workspace all-target test command executes protocol lib/all external tests as a superset of scoped -p protocol; exact owning results in integrated-ci-binary-results.json."
+    },
+    {
+      "criterion": "hud-bstmy.1.5:AC4",
+      "requirement": "Test count identical before and after (record both in the PR).",
+      "area": "D",
+      "implementing_bead": "hud-bstmy.1.5",
+      "current_code": [
+        "crates/tze_hud_compositor/src/renderer/tests/mod.rs",
+        "crates/tze_hud_protocol/src/session_server/tests/mod.rs",
+        "historical-split-validation.json",
+        "historical-all-function-body-proof.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "original-compositor-275-history.json",
+        "historical-split-validation.json",
+        "historical-helper-module-proof.json",
+        "historical-all-function-body-proof.json",
+        "invariant-contract-matrix.json",
+        "invariant-execution-receipt.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Independent delivered pure-split history compares all280 compositor/135protocol test bodies raw-identical before/after. Original275 planning plusfive authorizedpre-split additions explicit. Allfunction/helper bodies multiplicity and modulewiring independently checked; current lateredits separately listed."
+    },
+    {
+      "criterion": "hud-bstmy.1.5:AC5",
+      "requirement": "`git diff -M --color-moved` shows only moves plus mod.rs scaffolding.",
+      "area": "D",
+      "implementing_bead": "hud-bstmy.1.5",
+      "current_code": [
+        "crates/tze_hud_compositor/src/renderer/tests/mod.rs",
+        "crates/tze_hud_protocol/src/session_server/tests/mod.rs",
+        "historical-split-validation.json",
+        "historical-all-function-body-proof.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "original-compositor-275-history.json",
+        "historical-split-validation.json",
+        "historical-helper-module-proof.json",
+        "historical-all-function-body-proof.json",
+        "invariant-contract-matrix.json",
+        "invariant-execution-receipt.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Independent delivered pure-split history compares all280 compositor/135protocol test bodies raw-identical before/after. Original275 planning plusfive authorizedpre-split additions explicit. Allfunction/helper bodies multiplicity and modulewiring independently checked; current lateredits separately listed."
+    },
+    {
+      "criterion": "hud-bstmy.1.5:AC6",
+      "requirement": "session_server/tests.rs no longer exists; invariant tests (e.g. grpc_disconnect_orphans_leases_and_badges_tiles, grpc_batch_expires_at_sweeps_tile) are found by grep under session_server/tests/.",
+      "area": "D",
+      "implementing_bead": "hud-bstmy.1.5",
+      "current_code": [
+        "crates/tze_hud_compositor/src/renderer/tests/mod.rs",
+        "crates/tze_hud_protocol/src/session_server/tests/mod.rs",
+        "historical-split-validation.json",
+        "historical-all-function-body-proof.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "original-compositor-275-history.json",
+        "historical-split-validation.json",
+        "historical-helper-module-proof.json",
+        "historical-all-function-body-proof.json",
+        "invariant-contract-matrix.json",
+        "invariant-execution-receipt.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Current78 mentions resolve to72 attributed definitions and all72 actual pass lines; complete bodies/implementing paths read. Universal injected-time contract is separately partial, not hidden by retention."
+    },
+    {
+      "criterion": "hud-bstmy.1.5:AC7",
+      "requirement": "Every test named in docs/invariants.md still exists (grep each name) or docs/invariants.md was updated in the same PR.",
+      "area": "D",
+      "implementing_bead": "hud-bstmy.1.5",
+      "current_code": [
+        "crates/tze_hud_compositor/src/renderer/tests/mod.rs",
+        "crates/tze_hud_protocol/src/session_server/tests/mod.rs",
+        "historical-split-validation.json",
+        "historical-all-function-body-proof.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "original-compositor-275-history.json",
+        "historical-split-validation.json",
+        "historical-helper-module-proof.json",
+        "historical-all-function-body-proof.json",
+        "invariant-contract-matrix.json",
+        "invariant-execution-receipt.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Current78 mentions resolve to72 attributed definitions and all72 actual pass lines; complete bodies/implementing paths read. Universal injected-time contract is separately partial, not hidden by retention."
+    },
+    {
+      "criterion": "hud-bstmy.1.5:AC8",
+      "requirement": "`just ci` is green once before handoff.",
+      "area": "D",
+      "implementing_bead": "hud-bstmy.1.5",
+      "current_code": [
+        "crates/tze_hud_compositor/src/renderer/tests/mod.rs",
+        "crates/tze_hud_protocol/src/session_server/tests/mod.rs",
+        "historical-split-validation.json",
+        "historical-all-function-body-proof.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "original-compositor-275-history.json",
+        "historical-split-validation.json",
+        "historical-helper-module-proof.json",
+        "historical-all-function-body-proof.json",
+        "invariant-contract-matrix.json",
+        "invariant-execution-receipt.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Reused exact398 normal just ci actual terminal0/680.473s, independently SHA/recount/source/selector/environment checked; only local pwshSKIP, same398 remote pwsh step succeeded."
+    },
+    {
+      "criterion": "hud-bstmy.1.6:AC1",
+      "requirement": "Every requirement in the epic spec has a corresponding implementation bead.",
+      "area": "all",
+      "implementing_bead": "hud-bstmy.1.6",
+      "current_code": [
+        "docs/invariants.md",
+        "requirements-matrix.json",
+        "clock-contract-matrix.json",
+        "documentation-assessment.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "criteria-snapshot.json",
+        "discovered-follow-ups.json",
+        "blockers.json",
+        "clock-contract-matrix.json",
+        "invariant-contract-matrix.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Current exact source and designated existing gate evidence retained."
+    },
+    {
+      "criterion": "hud-bstmy.1.6:AC2",
+      "requirement": "Universal/negative invariants are verified by enumerating every code path that performs the operation, not by citing a single compliant example.",
+      "area": "all",
+      "implementing_bead": "hud-bstmy.1.6",
+      "current_code": [
+        "docs/invariants.md",
+        "requirements-matrix.json",
+        "clock-contract-matrix.json",
+        "documentation-assessment.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "criteria-snapshot.json",
+        "discovered-follow-ups.json",
+        "blockers.json",
+        "clock-contract-matrix.json",
+        "invariant-contract-matrix.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Current exact source and designated existing gate evidence retained."
+    },
+    {
+      "criterion": "hud-bstmy.1.6:AC3",
+      "requirement": "Guardrail/scan tests were audited for blind spots, and every spec scenario is pinned by exactly one gate species; no gap candidate proposes tests for a scenario that already has one.",
+      "area": "all",
+      "implementing_bead": "hud-bstmy.1.6",
+      "current_code": [
+        "docs/invariants.md",
+        "requirements-matrix.json",
+        "clock-contract-matrix.json",
+        "documentation-assessment.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "criteria-snapshot.json",
+        "discovered-follow-ups.json",
+        "blockers.json",
+        "clock-contract-matrix.json",
+        "invariant-contract-matrix.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Current exact source and designated existing gate evidence retained."
+    },
+    {
+      "criterion": "hud-bstmy.1.6:AC4",
+      "requirement": "Any gaps found are reported as dedupe-ready child-bead candidates under the same epic.",
+      "area": "all",
+      "implementing_bead": "hud-bstmy.1.6",
+      "current_code": [
+        "docs/invariants.md",
+        "requirements-matrix.json",
+        "clock-contract-matrix.json",
+        "documentation-assessment.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "criteria-snapshot.json",
+        "discovered-follow-ups.json",
+        "blockers.json",
+        "clock-contract-matrix.json",
+        "invariant-contract-matrix.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Current exact source and designated existing gate evidence retained."
+    },
+    {
+      "criterion": "hud-bstmy.1.6:AC5",
+      "requirement": "If gaps were found, the handoff reports a next-generation reconciliation candidate.",
+      "area": "all",
+      "implementing_bead": "hud-bstmy.1.6",
+      "current_code": [
+        "docs/invariants.md",
+        "requirements-matrix.json",
+        "clock-contract-matrix.json",
+        "documentation-assessment.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "criteria-snapshot.json",
+        "discovered-follow-ups.json",
+        "blockers.json",
+        "clock-contract-matrix.json",
+        "invariant-contract-matrix.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Current exact source and designated existing gate evidence retained."
+    },
+    {
+      "criterion": "hud-bstmy.1.6:AC6",
+      "requirement": "The close reason records the reconciliation summary.",
+      "area": "all",
+      "implementing_bead": "hud-bstmy.1.6",
+      "current_code": [
+        "docs/invariants.md",
+        "requirements-matrix.json",
+        "clock-contract-matrix.json",
+        "documentation-assessment.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "criteria-snapshot.json",
+        "discovered-follow-ups.json",
+        "blockers.json",
+        "clock-contract-matrix.json",
+        "invariant-contract-matrix.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Current exact source and designated existing gate evidence retained."
+    },
+    {
+      "criterion": "hud-bstmy.1.7:AC1",
+      "requirement": "Those mutated metadata cases FAIL, real metadata passes; same command used by just dev-mode-guard and CI; scripts/ci unittest with fixture metadata (+1 test file ~4 cases).",
+      "area": "C",
+      "implementing_bead": "hud-bstmy.1.7",
+      "current_code": [
+        "scripts/ci/check_dev_mode_defaults.py:44,60,76,100,121,143",
+        "scripts/ci/test_check_dev_mode_defaults.py:92",
+        "default-feature-closure-inventory.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "guard-fixtures.log",
+        "dev-mode-guard.log",
+        "cargo-oracles.json",
+        "guard-instrument-matrix.json",
+        "third-party-feature-assumption.json",
+        "integrated-ci-applicability.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Current exact source and designated existing gate evidence retained."
+    },
+    {
+      "criterion": "hud-bstmy.1.8:AC1",
+      "requirement": "compositor tests/ only construct devices via common helper (or single-test binaries); dry-run of those recipes shows VK_ICD_FILENAMES when the ICD exists. 0 test delta.",
+      "area": "A",
+      "implementing_bead": "hud-bstmy.1.8",
+      "current_code": [
+        "justfile:42,78,88",
+        "crates/tze_hud_runtime/src/test_support.rs:14,25",
+        "gpu-path-classification.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "gpu-verification-results.json",
+        "gpu-root-attestation.json",
+        "gpu-path-classification.json",
+        "recipe-dry-run-inventory.json",
+        "integrated-ci-applicability.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Current exact source and designated existing gate evidence retained."
+    },
+    {
+      "criterion": "hud-bstmy.1.9:AC1",
+      "requirement": "Statements corrected; AGENTS.md/README lists complete; hud-bstmy.8.6 annotated.",
+      "area": "B",
+      "implementing_bead": "hud-bstmy.1.9",
+      "current_code": [
+        "justfile:109,118,169,189,203,232",
+        ".github/workflows/ci.yml",
+        "ci-parity-matrix.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "ci-parity-matrix.json",
+        "ci-action-classification.json",
+        "python-discovery-inventory.json",
+        "integrated-ci-applicability.json",
+        "exact-main-ci-jobs.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Current exact source and designated existing gate evidence retained."
+    },
+    {
+      "criterion": "hud-bstmy.1.10:AC1",
+      "requirement": "Every ci.yml run step is reachable from just --dry-run ci or named as excluded. No test delta.",
+      "area": "B",
+      "implementing_bead": "hud-bstmy.1.10",
+      "current_code": [
+        "justfile:109,118,169,189,203,232",
+        ".github/workflows/ci.yml",
+        "ci-parity-matrix.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "ci-parity-matrix.json",
+        "ci-action-classification.json",
+        "python-discovery-inventory.json",
+        "integrated-ci-applicability.json",
+        "exact-main-ci-jobs.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Current78 mentions resolve to72 attributed definitions and all72 actual pass lines; complete bodies/implementing paths read. Universal injected-time contract is separately partial, not hidden by retention."
+    },
+    {
+      "criterion": "hud-bstmy.1.11:AC1",
+      "requirement": "The report identifies an exact audit commit and rereads hud-bstmy.1, original children .1.1-.1.5, gen-1 .1.6, corrections .1.7-.1.10, later relevant children including .1.12, and current docs/scope.md T8/Working rules, docs/vision.md, docs/invariants.md and AGENTS.md. No original scope or criterion is dropped.",
+      "area": "all",
+      "implementing_bead": "hud-bstmy.1.11",
+      "current_code": [
+        "docs/invariants.md",
+        "requirements-matrix.json",
+        "clock-contract-matrix.json",
+        "documentation-assessment.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "criteria-snapshot.json",
+        "discovered-follow-ups.json",
+        "blockers.json",
+        "clock-contract-matrix.json",
+        "invariant-contract-matrix.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Current exact source and designated existing gate evidence retained."
+    },
+    {
+      "criterion": "hud-bstmy.1.11:AC2",
+      "requirement": "Every T8.0 requirement has an implementing-bead/code/gate/evidence row classified implemented, partial, missing or deviates. Split history preserves the original 275/135 test inventories and bodies at the delivered commits; old monolithic files remain absent, topic modules are wired, and the original compositor file-size criterion and named invariant retention are assessed with later edits explained.",
+      "area": "all",
+      "implementing_bead": "hud-bstmy.1.11",
+      "current_code": [
+        "docs/invariants.md",
+        "requirements-matrix.json",
+        "clock-contract-matrix.json",
+        "documentation-assessment.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "criteria-snapshot.json",
+        "discovered-follow-ups.json",
+        "blockers.json",
+        "clock-contract-matrix.json",
+        "invariant-contract-matrix.json"
+      ],
+      "classification": "partial",
+      "assessment": "Current concrete live-clock/comment gaps are surfaced with complete cold-start packets; existing protocolT2/T7 ownership linked, no GEN4/no dependency on partial.1.11 closure."
+    },
+    {
+      "criterion": "hud-bstmy.1.11:AC3",
+      "requirement": "Universal inventories cover every shippable workspace default-feature closure, every relevant raw/indirect/macro GPU initialization site, every GPU-building recipe, every CI run step and every docs/invariants.md named test. Single-test exceptions are proven per binary. A single compliant path is never used to establish a universal claim.",
+      "area": "all",
+      "implementing_bead": "hud-bstmy.1.11",
+      "current_code": [
+        "docs/invariants.md",
+        "requirements-matrix.json",
+        "clock-contract-matrix.json",
+        "documentation-assessment.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "criteria-snapshot.json",
+        "discovered-follow-ups.json",
+        "blockers.json",
+        "clock-contract-matrix.json",
+        "invariant-contract-matrix.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Current78 mentions resolve to72 attributed definitions and all72 actual pass lines; complete bodies/implementing paths read. Universal injected-time contract is separately partial, not hidden by retention."
+    },
+    {
+      "criterion": "hud-bstmy.1.11:AC4",
+      "requirement": "Guard code and fixture scope are audited for blind spots. The exact just/CI metadata command passes real metadata; existing clean/negative/repeated-edge/missing-shipped-package fixture cases execute and assert exit behavior. Any uncovered counterexample is documented without editing manifests. Redundant LTO build/reference deletions and unchanged required job display name are verified.",
+      "area": "all",
+      "implementing_bead": "hud-bstmy.1.11",
+      "current_code": [
+        "docs/invariants.md",
+        "requirements-matrix.json",
+        "clock-contract-matrix.json",
+        "documentation-assessment.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "criteria-snapshot.json",
+        "discovered-follow-ups.json",
+        "blockers.json",
+        "clock-contract-matrix.json",
+        "invariant-contract-matrix.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Current exact source and designated existing gate evidence retained."
+    },
+    {
+      "criterion": "hud-bstmy.1.11:AC5",
+      "requirement": "GPU construction serialization and actual llvmpipe ICD selection are independently checked. Dry-runs cover both calibration invocations and every GPU recipe, including any new ones; selected-path discovery supports both Mesa filenames. just test-gpu executes twice under its required-GPU/900-second contracts, or the exact failed/unavailable proof is reported as a limitation, never coverage from skipped tests.",
+      "area": "all",
+      "implementing_bead": "hud-bstmy.1.11",
+      "current_code": [
+        "docs/invariants.md",
+        "requirements-matrix.json",
+        "clock-contract-matrix.json",
+        "documentation-assessment.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "criteria-snapshot.json",
+        "discovered-follow-ups.json",
+        "blockers.json",
+        "clock-contract-matrix.json",
+        "invariant-contract-matrix.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Current exact source and designated existing gate evidence retained."
+    },
+    {
+      "criterion": "hud-bstmy.1.11:AC6",
+      "requirement": "Every ci.yml run step is reachable through just --dry-run ci or explicitly named/classified as excluded. Integration, Python/orphan-script, token-footprint, boot, Windows-GNU clippy, cargo-deny and pwsh paths are traced, semantic differences are reported, and just ci is executed once where possible. SKIPPED tool gates and informational/weekly exclusions remain visible in the evidence.",
+      "area": "all",
+      "implementing_bead": "hud-bstmy.1.11",
+      "current_code": [
+        "docs/invariants.md",
+        "requirements-matrix.json",
+        "clock-contract-matrix.json",
+        "documentation-assessment.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "criteria-snapshot.json",
+        "discovered-follow-ups.json",
+        "blockers.json",
+        "clock-contract-matrix.json",
+        "invariant-contract-matrix.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Current398 integrated just ci executes cargo clippy --workspace --all-targets -- -D warnings (including separate integration); actual terminal0."
+    },
+    {
+      "criterion": "hud-bstmy.1.11:AC7",
+      "requirement": "README.md, AGENTS.md, CLAUDE.md, justfile and CI comments are assessed against actual GPU inclusion, pixel_readback feature unification, complete recipe mapping and skip semantics. Stale text yields precise proposed corrections; no documentation or spec write occurs in this read-only pass.",
+      "area": "all",
+      "implementing_bead": "hud-bstmy.1.11",
+      "current_code": [
+        "docs/invariants.md",
+        "requirements-matrix.json",
+        "clock-contract-matrix.json",
+        "documentation-assessment.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "criteria-snapshot.json",
+        "discovered-follow-ups.json",
+        "blockers.json",
+        "clock-contract-matrix.json",
+        "invariant-contract-matrix.json"
+      ],
+      "classification": "partial",
+      "assessment": "Current concrete live-clock/comment gaps are surfaced with complete cold-start packets; existing protocolT2/T7 ownership linked, no GEN4/no dependency on partial.1.11 closure."
+    },
+    {
+      "criterion": "hud-bstmy.1.11:AC8",
+      "requirement": "hud-bstmy.8.6's recorded owner answer and delivered follow-up are assessed when present. Without an answer, status quo/no workflow or ruleset changes is recorded and the audit does not wait for owner approval. The duplicate informational pixel-readback job is distinguished from existing blocking test-unit coverage.",
+      "area": "all",
+      "implementing_bead": "hud-bstmy.1.11",
+      "current_code": [
+        "docs/invariants.md",
+        "requirements-matrix.json",
+        "clock-contract-matrix.json",
+        "documentation-assessment.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "criteria-snapshot.json",
+        "discovered-follow-ups.json",
+        "blockers.json",
+        "clock-contract-matrix.json",
+        "invariant-contract-matrix.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Current exact source and designated existing gate evidence retained."
+    },
+    {
+      "criterion": "hud-bstmy.1.11:AC9",
+      "requirement": "Every audited scenario is pinned by one adequate gate species, and guard scan roots/regexes/globs/eligibility predicates are checked against the full required surface. Gap proposals extend the nearest existing adequate gate; they never add redundant tests merely to prove already-executed behavior. This audit's own net test/code delta is zero.",
+      "area": "all",
+      "implementing_bead": "hud-bstmy.1.11",
+      "current_code": [
+        "docs/invariants.md",
+        "requirements-matrix.json",
+        "clock-contract-matrix.json",
+        "documentation-assessment.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "criteria-snapshot.json",
+        "discovered-follow-ups.json",
+        "blockers.json",
+        "clock-contract-matrix.json",
+        "invariant-contract-matrix.json"
+      ],
+      "classification": "partial",
+      "assessment": "Current concrete live-clock/comment gaps are surfaced with complete cold-start packets; existing protocolT2/T7 ownership linked, no GEN4/no dependency on partial.1.11 closure."
+    },
+    {
+      "criterion": "hud-bstmy.1.11:AC10",
+      "requirement": "Partial/missing/deviating coverage and documentation discrepancies are reported as cold-start-ready, dedupe-ready Discovered-Follow-Ups-JSON candidates under hud-bstmy.1 with the specified dependencies/spec/evidence/gate/net-test-delta fields; existing open .1.12 and other overlapping work are linked instead of duplicated.",
+      "area": "all",
+      "implementing_bead": "hud-bstmy.1.11",
+      "current_code": [
+        "docs/invariants.md",
+        "requirements-matrix.json",
+        "clock-contract-matrix.json",
+        "documentation-assessment.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "criteria-snapshot.json",
+        "discovered-follow-ups.json",
+        "blockers.json",
+        "clock-contract-matrix.json",
+        "invariant-contract-matrix.json"
+      ],
+      "classification": "partial",
+      "assessment": "Current concrete live-clock/comment gaps are surfaced with complete cold-start packets; existing protocolT2/T7 ownership linked, no GEN4/no dependency on partial.1.11 closure."
+    },
+    {
+      "criterion": "hud-bstmy.1.11:AC11",
+      "requirement": "If gaps remain, the handoff reports blocked-awaiting-coordinator, unblock condition coverage gaps remain, and one gen-3 candidate with proposed blockers. No gen-4 is proposed. If complete, the handoff supplies a coverage summary the coordinator can use as the close reason.",
+      "area": "all",
+      "implementing_bead": "hud-bstmy.1.11",
+      "current_code": [
+        "docs/invariants.md",
+        "requirements-matrix.json",
+        "clock-contract-matrix.json",
+        "documentation-assessment.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "criteria-snapshot.json",
+        "discovered-follow-ups.json",
+        "blockers.json",
+        "clock-contract-matrix.json",
+        "invariant-contract-matrix.json"
+      ],
+      "classification": "partial",
+      "assessment": "Current concrete live-clock/comment gaps are surfaced with complete cold-start packets; existing protocolT2/T7 ownership linked, no GEN4/no dependency on partial.1.11 closure."
+    },
+    {
+      "criterion": "hud-bstmy.1.11:AC12",
+      "requirement": "No code, tests, manifests, recipes, workflows, product docs/specs, rulesets or Beads lifecycle are changed. Writes are limited to the authorized audit/coordinator handoff and ordinary generated/ignored build, test-evidence and scratch verification artifacts; failures, skipped checks and pending evidence are explicitly disclosed.",
+      "area": "all",
+      "implementing_bead": "hud-bstmy.1.11",
+      "current_code": [
+        "docs/invariants.md",
+        "requirements-matrix.json",
+        "clock-contract-matrix.json",
+        "documentation-assessment.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "criteria-snapshot.json",
+        "discovered-follow-ups.json",
+        "blockers.json",
+        "clock-contract-matrix.json",
+        "invariant-contract-matrix.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Current exact source and designated existing gate evidence retained."
+    },
+    {
+      "criterion": "hud-bstmy.1.11:AC13",
+      "requirement": "Durable evidence report is committed, pushed and submitted as an evidence-only PR; coordinator confirms merge before closure and keeps the bead blocked if gaps remain.",
+      "area": "all",
+      "implementing_bead": "hud-bstmy.1.11",
+      "current_code": [
+        "docs/invariants.md",
+        "requirements-matrix.json",
+        "clock-contract-matrix.json",
+        "documentation-assessment.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "criteria-snapshot.json",
+        "discovered-follow-ups.json",
+        "blockers.json",
+        "clock-contract-matrix.json",
+        "invariant-contract-matrix.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Current exact source and designated existing gate evidence retained."
+    },
+    {
+      "criterion": "hud-bstmy.1.12:AC1",
+      "requirement": "The implementation cites T8.0 maintenance authority and preserves the existing observable GPU/lifecycle/present-ack assertions. HeadlessRuntime::new, production boot/main behavior, runtime schemas/public API/dependencies/features, adapter policy and required checks gain no production mutex or policy change.",
+      "area": "A",
+      "implementing_bead": "hud-bstmy.1.12",
+      "current_code": [
+        "justfile:42,78,88",
+        "crates/tze_hud_runtime/src/test_support.rs:14,25",
+        "gpu-path-classification.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "gpu-verification-results.json",
+        "gpu-root-attestation.json",
+        "gpu-path-classification.json",
+        "recipe-dry-run-inventory.json",
+        "integrated-ci-applicability.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Current exact source and designated existing gate evidence retained."
+    },
+    {
+      "criterion": "hud-bstmy.1.12:AC2",
+      "requirement": "A single test-only async initialization gate is reused once per affected process. A complete grep/review inventory covers all four integration GPU binaries, every vertical_slice budget constructor and macro expansion, both main.rs lifecycle tests through boot, its single-test production_boot binary, and present_ack's three callers. Newly discovered owned initialization paths are included; GPU-free event-loop harnesses and proven single-GPU-test binaries are explicitly classified.",
+      "area": "A",
+      "implementing_bead": "hud-bstmy.1.12",
+      "current_code": [
+        "justfile:42,78,88",
+        "crates/tze_hud_runtime/src/test_support.rs:14,25",
+        "gpu-path-classification.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "gpu-verification-results.json",
+        "gpu-root-attestation.json",
+        "gpu-path-classification.json",
+        "recipe-dry-run-inventory.json",
+        "integrated-ci-applicability.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Current exact source and designated existing gate evidence retained."
+    },
+    {
+      "criterion": "hud-bstmy.1.12:AC3",
+      "requirement": "The canonical src/test_support.rs cfg(test) production exclusion remains intact. All targeted multi-test initialization paths reach the shared wrapper/gate, with no separate accidental mutex instances, raw bypass, nested acquisition, synchronous mutex held across await or process environment mutation in parallel tests. Existing runtime-lib/pixel/compositor serialization contracts remain valid.",
+      "area": "A",
+      "implementing_bead": "hud-bstmy.1.12",
+      "current_code": [
+        "justfile:42,78,88",
+        "crates/tze_hud_runtime/src/test_support.rs:14,25",
+        "gpu-path-classification.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "gpu-verification-results.json",
+        "gpu-root-attestation.json",
+        "gpu-path-classification.json",
+        "recipe-dry-run-inventory.json",
+        "integrated-ci-applicability.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Current exact source and designated existing gate evidence retained."
+    },
+    {
+      "criterion": "hud-bstmy.1.12:AC4",
+      "requirement": "The guard spans initialization through its awaited result and is released before later clients, scene work, rendering, readback, timing measurements or runtime lifetime. Sequential initialization permits multiple simultaneously live runtimes. Exact constructor/boot outputs and existing error/panic behavior are preserved; no retry or failure swallowing is added.",
+      "area": "A",
+      "implementing_bead": "hud-bstmy.1.12",
+      "current_code": [
+        "justfile:42,78,88",
+        "crates/tze_hud_runtime/src/test_support.rs:14,25",
+        "gpu-path-classification.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "gpu-verification-results.json",
+        "gpu-root-attestation.json",
+        "gpu-path-classification.json",
+        "recipe-dry-run-inventory.json",
+        "integrated-ci-applicability.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Current exact source and designated existing gate evidence retained."
+    },
+    {
+      "criterion": "hud-bstmy.1.12:AC5",
+      "requirement": "Exactly one deterministic regression in runtime-lib headless tests exercises the same initialization wrapper, shows maximum concurrent entry of one, and proves subsequent entry after Err, panic unwind and cancellation, including a dropped queued waiter. Removing the wrapper's gate makes it fail. It uses coordinated async probes, not sleeps or source-text assertions, and is not replicated through path-included helper modules. Net test delta is +1, with existing scenario tests retained.",
+      "area": "A",
+      "implementing_bead": "hud-bstmy.1.12",
+      "current_code": [
+        "justfile:42,78,88",
+        "crates/tze_hud_runtime/src/test_support.rs:14,25",
+        "gpu-path-classification.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "gpu-verification-results.json",
+        "gpu-root-attestation.json",
+        "gpu-path-classification.json",
+        "recipe-dry-run-inventory.json",
+        "integrated-ci-applicability.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Current exact source and designated existing gate evidence retained."
+    },
+    {
+      "criterion": "hud-bstmy.1.12:AC6",
+      "requirement": "Actual selected llvmpipe ICD discovery comes from the current recipe/dry-run and supports both Mesa naming variants. Default-parallel integration GPU binaries, vertical_slice budget/main lifecycle tests and present_ack (dev-mode enabled) pass twice with bounded execution and actual test-count evidence. vertical_slice production boot passes; adapter/ICD absence, skipped tests and timeouts are reported rather than called successful serialization proof.",
+      "area": "A",
+      "implementing_bead": "hud-bstmy.1.12",
+      "current_code": [
+        "justfile:42,78,88",
+        "crates/tze_hud_runtime/src/test_support.rs:14,25",
+        "gpu-path-classification.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "gpu-verification-results.json",
+        "gpu-root-attestation.json",
+        "gpu-path-classification.json",
+        "recipe-dry-run-inventory.json",
+        "integrated-ci-applicability.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Current exact source and designated existing gate evidence retained."
+    },
+    {
+      "criterion": "hud-bstmy.1.12:AC7",
+      "requirement": "just fmt, just clippy (workspace/all-targets), cargo check --workspace and one integrated just ci pass are recorded, with explicit tool-gated SKIP limitations. Existing performance-assert gating/budgets stay unchanged.",
+      "area": "A",
+      "implementing_bead": "hud-bstmy.1.12",
+      "current_code": [
+        "justfile:42,78,88",
+        "crates/tze_hud_runtime/src/test_support.rs:14,25",
+        "gpu-path-classification.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "gpu-verification-results.json",
+        "gpu-root-attestation.json",
+        "gpu-path-classification.json",
+        "recipe-dry-run-inventory.json",
+        "integrated-ci-applicability.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Current398 integrated just ci executes cargo fmt --check; all18 workspace members are default members, so --all scope is equivalent; actual terminal0."
+    },
+    {
+      "criterion": "hud-bstmy.1.12:AC8",
+      "requirement": "AGENTS.md and affected shared-helper/direct-command documentation describe the test-only, initialization-scoped, per-process guarantee and proven single-test exceptions accurately. README/CLAUDE/justfile claims are reconciled where affected; docs/invariants.md contracts and tests are preserved, with no spec amendment or new investigation document.",
+      "area": "A",
+      "implementing_bead": "hud-bstmy.1.12",
+      "current_code": [
+        "justfile:42,78,88",
+        "crates/tze_hud_runtime/src/test_support.rs:14,25",
+        "gpu-path-classification.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "gpu-verification-results.json",
+        "gpu-root-attestation.json",
+        "gpu-path-classification.json",
+        "recipe-dry-run-inventory.json",
+        "integrated-ci-applicability.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Current exact source and designated existing gate evidence retained."
+    },
+    {
+      "criterion": "hud-bstmy.1.12:AC9",
+      "requirement": "The handoff/PR contains exact commit evidence, the complete caller inventory including macro/test-only boot paths, lock lifetime and failure behavior, preserved test counts and +1 delta, commands/results and limitations. Adjacent canonical-app constructor gaps are reported to .1.11/coordinator instead of silently changing this bead's scope. All Beads lifecycle/dependency changes remain coordinator-owned.",
+      "area": "A",
+      "implementing_bead": "hud-bstmy.1.12",
+      "current_code": [
+        "justfile:42,78,88",
+        "crates/tze_hud_runtime/src/test_support.rs:14,25",
+        "gpu-path-classification.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "gpu-verification-results.json",
+        "gpu-root-attestation.json",
+        "gpu-path-classification.json",
+        "recipe-dry-run-inventory.json",
+        "integrated-ci-applicability.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Current exact source and designated existing gate evidence retained."
+    },
+    {
+      "criterion": "hud-bstmy.1.13:AC1",
+      "requirement": "All three listed constructors in the canonical-app production_boot binary use the same test-only gate through await, with no raw bypass and no gate retained into clients/rendering/runtime lifetime. Existing assertions and all three tests are preserved (Tests: +0 ~0 -0); the existing admission/error/panic/cancellation regression remains passing. Production code and dependency/feature topology are unchanged. The complete app GPU inventory and benchmark single-test exception are recorded. Default-parallel real llvmpipe production_boot execution passes twice with the recipe-selected installed ICD, HEADLESS_FORCE_SOFTWARE=1 and TZE_HUD_REQUIRE_GPU=1, with no GPU skips or --test-threads=1. Run fmt, workspace check and workspace all-targets clippy -D warnings, plus the canonical-app boot recipe and required packet gates. Docs truthfully state per-binary initialization scope and cross-process limit.",
+      "area": "A",
+      "implementing_bead": "hud-bstmy.1.13",
+      "current_code": [
+        "justfile:42,78,88",
+        "crates/tze_hud_runtime/src/test_support.rs:14,25",
+        "gpu-path-classification.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "gpu-verification-results.json",
+        "gpu-root-attestation.json",
+        "gpu-path-classification.json",
+        "recipe-dry-run-inventory.json",
+        "integrated-ci-applicability.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Current398 integrated just ci executes cargo fmt --check; all18 workspace members are default members, so --all scope is equivalent; actual terminal0."
+    },
+    {
+      "criterion": "hud-bstmy.1.14:AC1",
+      "requirement": "Actual embedded Cargo metadata oracle resolves rt dev-mode in both orderings; exact guard pipeline exits1 and names tze_hud_app/runtime in both. No tracked manifest mutation.",
+      "area": "C",
+      "implementing_bead": "hud-bstmy.1.14",
+      "current_code": [
+        "scripts/ci/check_dev_mode_defaults.py:44,60,76,100,121,143",
+        "scripts/ci/test_check_dev_mode_defaults.py:92",
+        "default-feature-closure-inventory.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "guard-fixtures.log",
+        "dev-mode-guard.log",
+        "cargo-oracles.json",
+        "guard-instrument-matrix.json",
+        "third-party-feature-assumption.json",
+        "integrated-ci-applicability.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Current exact source and designated existing gate evidence retained."
+    },
+    {
+      "criterion": "hud-bstmy.1.14:AC2",
+      "requirement": "Existing forwarded fixture extends alias/weak/two orders/indirect activation/cyclic replay; existing inactive optional fixture extends explicit weak alias no-activation. All original assertions retained; Tests:+0~2-0; eleven declarations remain.",
+      "area": "C",
+      "implementing_bead": "hud-bstmy.1.14",
+      "current_code": [
+        "scripts/ci/check_dev_mode_defaults.py:44,60,76,100,121,143",
+        "scripts/ci/test_check_dev_mode_defaults.py:92",
+        "default-feature-closure-inventory.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "guard-fixtures.log",
+        "dev-mode-guard.log",
+        "cargo-oracles.json",
+        "guard-instrument-matrix.json",
+        "third-party-feature-assumption.json",
+        "integrated-ci-applicability.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Current exact source and designated existing gate evidence retained."
+    },
+    {
+      "criterion": "hud-bstmy.1.14:AC3",
+      "requirement": "Default-features=false, explicit normal/build features, repeated target/build entries, outside-app and missing-app fixtures retain intended outcomes; finite visited state prevents cycles.",
+      "area": "C",
+      "implementing_bead": "hud-bstmy.1.14",
+      "current_code": [
+        "scripts/ci/check_dev_mode_defaults.py:44,60,76,100,121,143",
+        "scripts/ci/test_check_dev_mode_defaults.py:92",
+        "default-feature-closure-inventory.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "guard-fixtures.log",
+        "dev-mode-guard.log",
+        "cargo-oracles.json",
+        "guard-instrument-matrix.json",
+        "third-party-feature-assumption.json",
+        "integrated-ci-applicability.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Current exact source and designated existing gate evidence retained."
+    },
+    {
+      "criterion": "hud-bstmy.1.14:AC4",
+      "requirement": "Current real cargo metadata pipeline passes all17 eligible roots. just and CI still use identical command/name; no production/default/feature/API/ruleset edit.",
+      "area": "C",
+      "implementing_bead": "hud-bstmy.1.14",
+      "current_code": [
+        "scripts/ci/check_dev_mode_defaults.py:44,60,76,100,121,143",
+        "scripts/ci/test_check_dev_mode_defaults.py:92",
+        "default-feature-closure-inventory.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "guard-fixtures.log",
+        "dev-mode-guard.log",
+        "cargo-oracles.json",
+        "guard-instrument-matrix.json",
+        "third-party-feature-assumption.json",
+        "integrated-ci-applicability.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Current exact source and designated existing gate evidence retained."
+    },
+    {
+      "criterion": "hud-bstmy.1.14:AC5",
+      "requirement": "Run focused scripts/ci guard unittest discovery and just dev-mode-guard, just test-python, fmt/workspace check/all-target clippy and one just ci with installed /usr/bin/protoc3.21.12, jobs1, warm target normal lock and actual recipe-selected llvmpipe. Record actual tool SKIPs/failures; no all-features.",
+      "area": "C",
+      "implementing_bead": "hud-bstmy.1.14",
+      "current_code": [
+        "scripts/ci/check_dev_mode_defaults.py:44,60,76,100,121,143",
+        "scripts/ci/test_check_dev_mode_defaults.py:92",
+        "default-feature-closure-inventory.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "guard-fixtures.log",
+        "dev-mode-guard.log",
+        "cargo-oracles.json",
+        "guard-instrument-matrix.json",
+        "third-party-feature-assumption.json",
+        "integrated-ci-applicability.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Current398 integrated just ci executes cargo fmt --check; all18 workspace members are default members, so --all scope is equivalent; actual terminal0."
+    },
+    {
+      "criterion": "hud-bstmy.1.14:AC6",
+      "requirement": "README/AGENTS/CI docs only change if existing guard description would otherwise become false; normally source explanatory comments suffice. Preserve72 named invariant definitions and T7 boundary. Record exact final test delta, failure diagnostics and pushed PR proof.",
+      "area": "C",
+      "implementing_bead": "hud-bstmy.1.14",
+      "current_code": [
+        "scripts/ci/check_dev_mode_defaults.py:44,60,76,100,121,143",
+        "scripts/ci/test_check_dev_mode_defaults.py:92",
+        "default-feature-closure-inventory.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "guard-fixtures.log",
+        "dev-mode-guard.log",
+        "cargo-oracles.json",
+        "guard-instrument-matrix.json",
+        "third-party-feature-assumption.json",
+        "integrated-ci-applicability.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Current78 mentions resolve to72 attributed definitions and all72 actual pass lines; complete bodies/implementing paths read. Universal injected-time contract is separately partial, not hidden by retention."
+    },
+    {
+      "criterion": "hud-bstmy.1.15:AC1",
+      "requirement": "Full original/correction criteria matrix uses exact main source SHA, complete constructor/helper/macro/binary/recipe/package/invariant/instrument inventory and implementation-path reading, never passcounts alone.",
+      "area": "all",
+      "implementing_bead": "hud-bstmy.1.15",
+      "current_code": [
+        "docs/invariants.md",
+        "requirements-matrix.json",
+        "clock-contract-matrix.json",
+        "documentation-assessment.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "criteria-snapshot.json",
+        "discovered-follow-ups.json",
+        "blockers.json",
+        "clock-contract-matrix.json",
+        "invariant-contract-matrix.json"
+      ],
+      "classification": "partial",
+      "assessment": "Full inventories/criteria and current72/T7/Node160/Tile200/100k assessed; five concrete bounded repairs plus existingT2 link; evidence publication does not close remaining coverage. No GEN4 or owner wait."
+    },
+    {
+      "criterion": "hud-bstmy.1.15:AC2",
+      "requirement": "Weak repair source and existing fixtures pin both actual Cargo orderings, inactive optional semantics, aliases, cycles and repeated normal/build/target edges; current all17 clean closures pass.",
+      "area": "all",
+      "implementing_bead": "hud-bstmy.1.15",
+      "current_code": [
+        "docs/invariants.md",
+        "requirements-matrix.json",
+        "clock-contract-matrix.json",
+        "documentation-assessment.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "criteria-snapshot.json",
+        "discovered-follow-ups.json",
+        "blockers.json",
+        "clock-contract-matrix.json",
+        "invariant-contract-matrix.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Current exact source and designated existing gate evidence retained."
+    },
+    {
+      "criterion": "hud-bstmy.1.15:AC3",
+      "requirement": "Run independent guard/fixture/dry-run/YAML checks, representative actual required-GPU behavior and integrated parity gates; reuse expensive proof only for exact applicable blobs, preserve all skipped/failure limits.",
+      "area": "all",
+      "implementing_bead": "hud-bstmy.1.15",
+      "current_code": [
+        "docs/invariants.md",
+        "requirements-matrix.json",
+        "clock-contract-matrix.json",
+        "documentation-assessment.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "criteria-snapshot.json",
+        "discovered-follow-ups.json",
+        "blockers.json",
+        "clock-contract-matrix.json",
+        "invariant-contract-matrix.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Current exact source and designated existing gate evidence retained."
+    },
+    {
+      "criterion": "hud-bstmy.1.15:AC4",
+      "requirement": "Classify every ci.yml run/action and required versus blocking/informational status; .8.6 unanswered remainsC/statusquo. No owner response wait.",
+      "area": "all",
+      "implementing_bead": "hud-bstmy.1.15",
+      "current_code": [
+        "docs/invariants.md",
+        "requirements-matrix.json",
+        "clock-contract-matrix.json",
+        "documentation-assessment.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "criteria-snapshot.json",
+        "discovered-follow-ups.json",
+        "blockers.json",
+        "clock-contract-matrix.json",
+        "invariant-contract-matrix.json"
+      ],
+      "classification": "partial",
+      "assessment": "Full inventories/criteria and current72/T7/Node160/Tile200/100k assessed; five concrete bounded repairs plus existingT2 link; evidence publication does not close remaining coverage. No GEN4 or owner wait."
+    },
+    {
+      "criterion": "hud-bstmy.1.15:AC5",
+      "requirement": "Retain original275/135 split inventories with authorized later changes separate, current78mentions/72definition attribution, <=6500 split gate, all T7 and current Node160/Tile200 authority; dedupe Node docs against .7.4.",
+      "area": "all",
+      "implementing_bead": "hud-bstmy.1.15",
+      "current_code": [
+        "docs/invariants.md",
+        "requirements-matrix.json",
+        "clock-contract-matrix.json",
+        "documentation-assessment.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "criteria-snapshot.json",
+        "discovered-follow-ups.json",
+        "blockers.json",
+        "clock-contract-matrix.json",
+        "invariant-contract-matrix.json"
+      ],
+      "classification": "implemented",
+      "assessment": "Full inventories/criteria and current72/T7/Node160/Tile200/100k assessed; five concrete bounded repairs plus existingT2 link; evidence publication does not close remaining coverage. No GEN4 or owner wait."
+    },
+    {
+      "criterion": "hud-bstmy.1.15:AC6",
+      "requirement": "Audit delta+0~0-0. Commit/push evidence-only report PR. Full coverage closure requires authoritative merge plus every coverage gap resolved. Partial => cold-start dedupe candidates/blockers, never gen4 or dependency on .1.11 closure.",
+      "area": "all",
+      "implementing_bead": "hud-bstmy.1.15",
+      "current_code": [
+        "docs/invariants.md",
+        "requirements-matrix.json",
+        "clock-contract-matrix.json",
+        "documentation-assessment.json"
+      ],
+      "gate_species": "Existing behavior/type/lint/metadata-fixture gate or delivered structural split comparison; no new tests/source scan species.",
+      "executed_evidence": [
+        "criteria-snapshot.json",
+        "discovered-follow-ups.json",
+        "blockers.json",
+        "clock-contract-matrix.json",
+        "invariant-contract-matrix.json"
+      ],
+      "classification": "partial",
+      "assessment": "Full inventories/criteria and current72/T7/Node160/Tile200/100k assessed; five concrete bounded repairs plus existingT2 link; evidence publication does not close remaining coverage. No GEN4 or owner wait."
+    }
+  ],
+  "owner_8_6": "Self-read full owner record; unansweredC/statusquo. Current eight required contexts verified; no owner response prerequisite.",
+  "publication": "Evidence-only report committed/pushed/PR required. Authoritative report merge plus all actual coverage repairs are closure requirements.",
+  "invariant_retention": "All72 preserved and observed; this is distinct from full universal source coverage.",
+  "partial_1_11": "Existing historical evidence used as lead; blocked lifecycle never becomes a prerequisite. No GEN4."
+}
