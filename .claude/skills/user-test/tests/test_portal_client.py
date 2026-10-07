@@ -390,6 +390,159 @@ def test_hook_subprocess_replay_prompt_races_and_reaping(tmp_path):
         assert not h.workers()  # watchdog kills/reaps its actual HTTP process
         h.release.set()
 
+    # Terminate only the known fixture supervisor after its HTTP child has
+    # actually been admitted. This does not model Claude's cancellation policy
+    # or imply that stopping a client rolls back an already-sent request.
+    import signal
+
+    observations = []
+    observation_path = tmp_path / "cancellation-observations.json"
+
+    def record_observations():
+        observation_path.write_text(json.dumps(observations, indent=2))
+
+    def process_identity(pid):
+        try:
+            stat = Path(f"/proc/{pid}/stat").read_text()
+            fields = stat[stat.rfind(")") + 2:].split()
+            return {"pid": pid, "state": fields[0], "ppid": int(fields[1]),
+                    "pgid": int(fields[2]), "start_ticks": int(fields[19])}
+        except (OSError, ValueError, IndexError):
+            return None
+
+    def child_running(identity):
+        current = process_identity(identity["pid"])
+        return (current is not None and current["start_ticks"] == identity["start_ticks"]
+                and current["state"] not in ("Z", "X"))
+
+    for kind, termination, budget in [
+        ("PreToolUse", signal.SIGKILL, 1.0),
+        ("PreToolUse", signal.SIGTERM, 1.0),
+        ("SessionEnd", signal.SIGKILL, 1.2),
+        ("SessionEnd", signal.SIGTERM, 1.2),
+    ]:
+        with HookHarness(tmp_path / f"cancel-{kind}-{termination.value}") as h:
+            h.boot()
+            h.trickle = True
+            parent = None
+            child = None
+            observe_next = False
+            admission_overlaps = []
+            original_POST = h.server.RequestHandlerClass.do_POST
+
+            def observe_POST(handler):
+                if observe_next and child is not None and child_running(child):
+                    admission_overlaps.append(process_identity(child["pid"]))
+                original_POST(handler)
+
+            h.server.RequestHandlerClass.do_POST = observe_POST
+            row = {"event": kind, "signal": termination.name, "production_budget": budget,
+                   "startup_scheduler_slack": 1.5, "remote_rollback_claimed": False}
+            observations.append(row)
+            started = time.monotonic()
+            try:
+                parent = h.launch(h.payload(kind, tool_use_id="cancelled", tool_name="Read"))
+                row["supervisor"] = process_identity(parent.pid)
+                assert h.received.wait(2), "owned HTTP child was not admitted"
+                row["received_seconds"] = time.monotonic() - started
+                # Read only this known parent's direct children, then verify
+                # cwd, command, start time and the child's separate group.
+                children = Path(f"/proc/{parent.pid}/task/{parent.pid}/children").read_text().split()
+                candidates = []
+                for value in children:
+                    pid = int(value)
+                    identity = process_identity(pid)
+                    if identity is None:
+                        continue
+                    args = Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")
+                    if (Path(f"/proc/{pid}/cwd").resolve() == h.home
+                            and str(HOOK).encode() in args and b"--deliver" in args):
+                        candidates.append(identity)
+                assert len(candidates) == 1
+                child = candidates[0]
+                assert child["ppid"] == parent.pid and child["pgid"] == child["pid"]
+                assert child_running(child)
+                row["admitted_child"] = child.copy()
+                record_observations()
+
+                # Never killpg(parent.pid): the public fixture process may
+                # share pytest's group. SIGKILL cannot execute parent finally.
+                parent.send_signal(termination)
+                stdout, stderr = parent.communicate(timeout=2)
+                assert stdout == stderr == b""
+                row["supervisor_returncode"] = parent.returncode
+                row["supervisor_terminal_seconds"] = time.monotonic() - started
+                row["child_live_after_supervisor"] = child_running(child)
+                if row["child_live_after_supervisor"]:
+                    with (h.marker().parent / "delivery.lock").open("r+") as delivery_lock:
+                        try:
+                            fcntl.flock(delivery_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                            lock_retained = False
+                        except BlockingIOError:
+                            lock_retained = True
+                    row["delivery_lock_retained_while_child_live"] = lock_retained
+                    record_observations()
+                    assert lock_retained, "supervisor death released delivery ownership while its HTTP child was live"
+
+                    observe_next = True
+                    if kind == "SessionEnd":
+                        h.event("SessionStart", source="resume", wait=False)
+                    else:
+                        h.event("PreToolUse", tool_use_id="after-cancel", tool_name="Bash", wait=False)
+                    assert not admission_overlaps, "next delivery overlapped the surviving old HTTP client"
+
+                # An explicit 1.5s interpreter/scheduler allowance is separate
+                # from the unchanged absolute production network deadline.
+                limit = started + budget + 1.5
+                while child_running(child) and time.monotonic() < limit:
+                    time.sleep(0.01)
+                row["client_terminal_seconds"] = time.monotonic() - started
+                row["client_terminal_identity"] = process_identity(child["pid"])
+                row["overlapping_next_admissions"] = admission_overlaps
+                record_observations()
+                assert not child_running(child), "HTTP child outlived independent cancellation deadline"
+                assert row["client_terminal_seconds"] < budget + 1.5
+                if termination == signal.SIGKILL:
+                    assert parent.returncode == -signal.SIGKILL
+                    row["reaped_by_dead_supervisor_claimed"] = False
+                else:
+                    assert parent.returncode == 0  # explicit catchable cleanup
+                    assert process_identity(child["pid"]) is None  # living parent reaped
+                with (h.marker().parent / "delivery.lock").open("r+") as delivery_lock:
+                    fcntl.flock(delivery_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+                h.trickle = False
+                h.release.set()
+                if kind == "SessionEnd":
+                    h.event("SessionStart", source="resume")
+                    h.prompt = str(uuid.uuid4())
+                    h.event("UserPromptSubmit")
+                before = len(h.records)
+                h.event("PreToolUse", tool_use_id="genuine-recovery", tool_name="Read")
+                assert len(h.records) > before
+                assert h.publications()[-1]["content"] == "Read: running"
+                row["next_genuine_event_recovered"] = True
+                record_observations()
+            finally:
+                # RED can stop at the first ownership assertion. Release the
+                # fake server and clean only exact fixture-owned identities.
+                h.release.set()
+                if parent is not None and parent.poll() is None:
+                    parent.kill()
+                    parent.communicate(timeout=2)
+                if child is not None and child_running(child):
+                    try:
+                        os.killpg(child["pgid"], signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    cleanup_limit = time.monotonic() + 2
+                    while child_running(child) and time.monotonic() < cleanup_limit:
+                        time.sleep(0.01)
+                    assert not child_running(child), "owned RED/GREEN child cleanup did not terminate"
+                row["teardown_child_identity"] = None if child is None else process_identity(child["pid"])
+                row["teardown_child_live"] = child is not None and child_running(child)
+                record_observations()
+
 
 def test_hook_unavailable_malformed_privacy_and_state_failures(tmp_path):
     with HookHarness(tmp_path / "failures") as h:

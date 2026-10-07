@@ -192,8 +192,14 @@ Marker admission is at most 5 ms and never covers network I/O. The independent
 atomic marker records the prompt before Claude's next work. A separate delivery
 lock admits ordinary publishers for at most 50 ms. One supervised HTTP child gets
 350 ms per request and a 1.0 s total watchdog; SessionEnd has 1.2 s total. The
-supervisor kills/reaps that child before releasing its delivery lock. Startup,
-filesystem and scheduler overhead are separate from these network deadlines;
+living supervisor kills/reaps its known child on timeout, errors or catchable
+SIGTERM before releasing its delivery lock. The child also arms a default-action
+real-time timer for the remaining absolute budget before network I/O and inherits
+the delivery-lock descriptor. If the supervisor dies abruptly, that descriptor
+keeps ownership until the child terminates; OS adoption/reaping is distinct from
+the dead parent reaping it. Incomplete job input exits silently, and a late child
+does not start HTTP after its deadline. Interpreter startup, filesystem, OS
+scheduling and stopped-process delays are separate from these network deadlines;
 real owner-host tool AND prompt-side overhead must be measured below 50 ms. An
 async flag or successful local fixture does not establish that live limit.
 

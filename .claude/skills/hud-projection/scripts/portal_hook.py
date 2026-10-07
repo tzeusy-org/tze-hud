@@ -128,7 +128,7 @@ def lock(path, budget):
                 if time.monotonic() >= deadline:
                     raise TimeoutError("hook metadata busy")
                 time.sleep(min(0.001, max(0, deadline - time.monotonic())))
-        yield
+        yield fd
     finally:
         os.close(fd)
 
@@ -386,20 +386,43 @@ def supervise(event):
     budget = END_BUDGET if event["event"] == "SessionEnd" else DELIVERY_BUDGET
     deadline = time.monotonic() + budget
     admission = max(0, budget - 0.050) if event["event"] == "SessionEnd" else 0.050
-    with lock(metadata.directory / "delivery.lock", admission):
+    with lock(metadata.directory / "delivery.lock", admission) as delivery_fd:
         if not applicable(metadata.current(), event):
             return
         job = {"event": event, "deadline": deadline}
-        process = subprocess.Popen(
-            [sys.executable, str(Path(__file__).resolve()), "--deliver"],
-            stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        )
+        process = None
+        previous_handler = signal.getsignal(signal.SIGTERM)
+
+        def cancel_supervisor(_signum, _frame):
+            raise SystemExit
+
         try:
+            signal.signal(signal.SIGTERM, cancel_supervisor)
+            process = subprocess.Popen(
+                [sys.executable, str(Path(__file__).resolve()), "--deliver"],
+                stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                start_new_session=True, pass_fds=(delivery_fd,),
+            )
             process.communicate(json.dumps(job).encode(), timeout=max(0.001, deadline - time.monotonic()))
         except subprocess.TimeoutExpired:
-            os.killpg(process.pid, signal.SIGKILL)
-            process.communicate()
+            pass
+        finally:
+            # Repeated catchable cancellation must not interrupt owned cleanup.
+            # SIGKILL cannot run this block: the child's timer and inherited fd
+            # independently retain the deadline and delivery ownership.
+            signal.signal(signal.SIGTERM, signal.SIG_IGN)
+            try:
+                if process is not None:
+                    if process.poll() is None:
+                        try:
+                            os.killpg(process.pid, signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
+                    process.wait()
+                    if process.stdin is not None:
+                        process.stdin.close()
+            finally:
+                signal.signal(signal.SIGTERM, previous_handler)
 
 
 def handle(event):
@@ -446,7 +469,17 @@ def main():
                 return
             payload = json.loads(raw)
             if sys.argv[1:] == ["--deliver"]:
-                delivery(payload["event"], payload["deadline"])
+                remaining = payload["deadline"] - time.monotonic()
+                if remaining <= 0:
+                    return
+                # Default-action termination is independent of the supervisor
+                # and cannot be swallowed by network/operational exception code.
+                signal.signal(signal.SIGALRM, signal.SIG_DFL)
+                signal.setitimer(signal.ITIMER_REAL, remaining)
+                try:
+                    delivery(payload["event"], payload["deadline"])
+                finally:
+                    signal.setitimer(signal.ITIMER_REAL, 0)
             elif sys.argv[1:] == ["--supervise"]:
                 supervise(payload)
             elif not sys.argv[1:]:
