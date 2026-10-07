@@ -1,0 +1,37 @@
+# hud-1dnk5.2 Stage A: prospective only. CI and just test still use cargo test.
+# Verify the installed 0.9.114 list/show-config identities before enabling this
+# runner: source-derived package/binary/module names are not executed matches.
+nextest-version = { required = "0.9.114" }
+
+[profile.default]
+retries = 0
+slow-timeout = { period = "60s", terminate-after = 2, grace-period = "10s" }
+failure-output = "immediate-final"
+
+[profile.default.junit]
+path = "junit.xml"
+store-success-output = true
+store-failure-output = true
+
+[test-groups.gpu]
+max-threads = 1
+
+[[profile.default.overrides]]
+# Existing vertical_slice production boot flake; no package-wide retries.
+filter = "package(=vertical_slice) & binary(=production_boot) & test(=production_config_boot_succeeds)"
+retries = 2
+
+[[profile.default.overrides]]
+# hud-dh0jy: one host-load watchdog failure, not an observed CI flake. Preserve
+# all three adversarial floods and their existing timing/content assertions.
+filter = "package(=tze_hud_compositor) & binary(=tze_hud_compositor) & test(=markdown::tests::adversarial_floods_stay_within_budget)"
+retries = 2
+
+[[profile.default.overrides]]
+# ONE cross-process GPU group for constructor-reaching packages. Some CPU tests
+# inside these packages are conservatively serialized; other CPU packages stay
+# normally parallel. Retry overrides inherit this per-setting group assignment.
+# Reconcile every actually selected constructor/caller and all five Criterion
+# targets before migration; an in-process initialization lock is insufficient.
+filter = "package(=tze_hud_compositor) | package(=tze_hud_runtime) | package(=vertical_slice) | package(=tze_hud_app)"
+test-group = "gpu"
