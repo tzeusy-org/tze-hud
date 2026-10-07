@@ -211,6 +211,8 @@ dead-code crate:
 # ── Dev host ─────────────────────────────────────────────────────────────────
 
 # Idempotent; re-run after adding deps. `just bootstrap --check` reports only.
+# Includes mold and native-Linux Cargo flags, preserving existing user settings.
+# Cross-builds keep their own target linker/flags; no system ld is replaced.
 # Install or report everything this dev host needs
 bootstrap *args:
     scripts/dev-bootstrap.sh {{args}}

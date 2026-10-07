@@ -65,11 +65,20 @@ jobs:
     name: cargo check
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      # Native Linux only: preserve MinGW/MSVC flags and the system ld.
+      CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
     steps:
       - uses: actions/checkout@v5
       - name: Test fullscreen vs overlay harness contract
         shell: pwsh
         run: .\scripts\ci\windows\test-windowed-fullscreen-overlay-perf.ps1
+      - name: Install pinned mold (native Linux linker)
+        uses: rui314/setup-mold@10ca16bf91dc22e05ebdc935cad9c75ea248f621
+        timeout-minutes: 5
+        with:
+          mold-version: "2.42.1"
+          make-default: false
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: "1.88"
@@ -114,8 +123,17 @@ jobs:
     name: cargo clippy
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      # Native Linux only: preserve MinGW/MSVC flags and the system ld.
+      CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
     steps:
       - uses: actions/checkout@v5
+      - name: Install pinned mold (native Linux linker)
+        uses: rui314/setup-mold@10ca16bf91dc22e05ebdc935cad9c75ea248f621
+        timeout-minutes: 5
+        with:
+          mold-version: "2.42.1"
+          make-default: false
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: "1.88"
@@ -157,8 +175,17 @@ jobs:
     name: cargo clippy (windows-gnu cross-target)
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      # Native Linux only: preserve MinGW/MSVC flags and the system ld.
+      CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
     steps:
       - uses: actions/checkout@v5
+      - name: Install pinned mold (native Linux linker)
+        uses: rui314/setup-mold@10ca16bf91dc22e05ebdc935cad9c75ea248f621
+        timeout-minutes: 5
+        with:
+          mold-version: "2.42.1"
+          make-default: false
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: "1.88"
@@ -196,6 +223,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: [check]
+    env:
+      # Native Linux only: preserve MinGW/MSVC flags and the system ld.
+      CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
     steps:
       - uses: actions/checkout@v5
         # Temporary hud-1dnk5.2 A/B/C measurement control: compare exact PR heads
@@ -204,6 +234,12 @@ jobs:
         # after the controlled profile/linker and runner pairs are accepted.
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Install pinned mold (native Linux linker)
+        uses: rui314/setup-mold@10ca16bf91dc22e05ebdc935cad9c75ea248f621
+        timeout-minutes: 5
+        with:
+          mold-version: "2.42.1"
+          make-default: false
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: "1.88"
@@ -253,6 +289,8 @@ jobs:
             protoc --version
             cc --version | sed -n '1p'
             ld --version | sed -n '1p'
+            # GNU ld remains the system default; native target flags choose mold.
+            mold --version
             /usr/bin/time --version | sed -n '1p'
             for key in RUSTFLAGS CARGO_ENCODED_RUSTFLAGS CARGO_BUILD_TARGET CARGO_TARGET_DIR \
               CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS HEADLESS_FORCE_SOFTWARE \
@@ -360,8 +398,17 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: [check]
+    env:
+      # Native Linux only: preserve MinGW/MSVC flags and the system ld.
+      CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
     steps:
       - uses: actions/checkout@v5
+      - name: Install pinned mold (native Linux linker)
+        uses: rui314/setup-mold@10ca16bf91dc22e05ebdc935cad9c75ea248f621
+        timeout-minutes: 5
+        with:
+          mold-version: "2.42.1"
+          make-default: false
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: "1.88"
@@ -431,8 +478,17 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: [check]
+    env:
+      # Native Linux only: preserve MinGW/MSVC flags and the system ld.
+      CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
     steps:
       - uses: actions/checkout@v5
+      - name: Install pinned mold (native Linux linker)
+        uses: rui314/setup-mold@10ca16bf91dc22e05ebdc935cad9c75ea248f621
+        timeout-minutes: 5
+        with:
+          mold-version: "2.42.1"
+          make-default: false
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: "1.88"
@@ -474,8 +530,17 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: [check]
+    env:
+      # Native Linux only: preserve MinGW/MSVC flags and the system ld.
+      CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
     steps:
       - uses: actions/checkout@v5
+      - name: Install pinned mold (native Linux linker)
+        uses: rui314/setup-mold@10ca16bf91dc22e05ebdc935cad9c75ea248f621
+        timeout-minutes: 5
+        with:
+          mold-version: "2.42.1"
+          make-default: false
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: "1.88"
@@ -618,8 +683,17 @@ jobs:
     timeout-minutes: 15
     needs: [test-unit]
     continue-on-error: true  # informational duplicate of test-unit coverage; see comment above
+    env:
+      # Native Linux only: preserve MinGW/MSVC flags and the system ld.
+      CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
     steps:
       - uses: actions/checkout@v5
+      - name: Install pinned mold (native Linux linker)
+        uses: rui314/setup-mold@10ca16bf91dc22e05ebdc935cad9c75ea248f621
+        timeout-minutes: 5
+        with:
+          mold-version: "2.42.1"
+          make-default: false
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: "1.88"

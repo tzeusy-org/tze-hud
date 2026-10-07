@@ -18,6 +18,7 @@ set -euo pipefail
 # Required apt packages (mirror the CI apt installs in .github/workflows/ci.yml).
 APT_PACKAGES=(
     build-essential pkg-config cmake
+    mold                                    # native Linux links; never replaces system ld
     protobuf-compiler                       # tze_hud_protocol build (protoc >= 3.15)
     mesa-vulkan-drivers libvulkan1          # llvmpipe Vulkan ICD for GPU tests
     libegl-mesa0 libgl1-mesa-dri
@@ -128,6 +129,158 @@ else
         elif install_cargo_tool "$tool"; then fix "$tool"
         else warn "$tool install failed (optional; its just gate skips)"; fi
     done
+fi
+
+# ── Native Linux linker ─────────────────────────────────────────────────────
+# Cargo target flags leave MinGW/MSVC and unrelated user settings alone.
+# --check reads/reports only. The package version may differ from pinned CI mold.
+section "native Linux linker"
+if ! command -v mold >/dev/null; then
+    miss "mold (apt install mold)"
+elif ! command -v rustc >/dev/null || ! command -v python3 >/dev/null; then
+    miss "rustc and Python 3.11+ are required to check native Cargo linker settings"
+else
+    native_target=$(rustc -vV | sed -n 's/^host: //p')
+    case "$native_target" in
+        *-linux-*)
+            cargo_config="${CARGO_HOME:-$HOME/.cargo}/config.toml"
+            if python3 - "$CHECK_ONLY" "$cargo_config" "$native_target" <<'PY'
+import copy
+import fcntl
+import json
+import os
+from pathlib import Path
+import re
+import stat
+import sys
+import tempfile
+
+try:
+    import tomllib
+except ImportError:
+    sys.exit("  MISSING Python 3.11+ (safe Cargo TOML parsing requires tomllib)")
+
+check_only, filename, host = sys.argv[1:]
+path = Path(filename)
+class UnsafeConfig(ValueError):
+    pass
+
+try:
+    if path.is_symlink() or path.with_name("config").exists() or path.with_name("config").is_symlink():
+        raise UnsafeConfig("legacy/symlink Cargo config requires a manual native-linker merge")
+    original = path.read_bytes() if path.exists() else b""
+    text = original.decode()
+    data = tomllib.loads(text)
+    targets = data.get("target", {})
+    native = targets.get(host, {})
+    if not isinstance(targets, dict) or not isinstance(native, dict):
+        raise UnsafeConfig("unsupported Cargo target configuration")
+    if any(not isinstance(value, dict) for value in targets.values()):
+        raise UnsafeConfig("unsupported Cargo target configuration")
+    if any(name.startswith("cfg(") and "rustflags" in value for name, value in targets.items()):
+        raise UnsafeConfig("conditional target rustflags require a manual native-linker merge")
+    flags = native.get("rustflags", data.get("build", {}).get("rustflags", []))
+    if not isinstance(flags, list) or not all(isinstance(flag, str) for flag in flags):
+        raise UnsafeConfig("non-array rustflags require a manual native-linker merge")
+    if any(flag.startswith(("linker=", "-Clinker=")) for flag in flags):
+        raise UnsafeConfig("rustflags select a linker directly; existing settings were retained")
+    driver = native.get("linker", "cc")
+    if not isinstance(driver, str) or not re.search(r"(?:^|-)(?:cc|gcc|clang)(?:-[0-9.]+)?$", Path(driver).name):
+        raise UnsafeConfig("native linker is not a recognized compiler driver; existing settings were retained")
+    linker_flags = [flag for flag in flags if "fuse-ld=" in flag]
+    if any(flag not in ["link-arg=-fuse-ld=mold", "-Clink-arg=-fuse-ld=mold"] for flag in linker_flags):
+        raise UnsafeConfig("conflicting native linker flags; existing settings were retained")
+    if any(flag == "link-arg=-fuse-ld=mold" and (index == 0 or flags[index - 1] != "-C") for index, flag in enumerate(flags)):
+        raise UnsafeConfig("malformed native mold flags; existing settings were retained")
+    if "rustflags" in native and linker_flags:
+        print("  ok      native Cargo mold flags (existing flags retained)")
+        sys.exit(0)
+    if check_only == "1":
+        raise UnsafeConfig("native Cargo mold flags are absent (re-run bootstrap without --check)")
+
+    desired = flags if linker_flags else flags + ["-C", "link-arg=-fuse-ld=mold"]
+    expected = copy.deepcopy(data)
+    expected.setdefault("target", {}).setdefault(host, {})["rustflags"] = desired
+    header = re.compile(r"(?m)^\s*\[target\.(?:" + re.escape(host) + r'|"' + re.escape(host) + r'")\]\s*(?:#[^\n]*)?$')
+    match = header.search(text)
+    encoded = json.dumps(desired)
+    if host not in targets:
+        candidate = text.rstrip() + "\n\n[target." + host + "]\nrustflags = " + encoded + "\n"
+    elif match is None:
+        raise UnsafeConfig("unsupported target-table layout; existing settings were retained")
+    elif "rustflags" not in native:
+        candidate = text[:match.end()] + "\nrustflags = " + encoded + text[match.end():]
+    else:
+        # Append within the existing array, preserving its comments and every
+        # unrelated byte. A full TOML semantic comparison selects the real ']'.
+        end = re.search(r"(?m)^\s*\[", text[match.end():])
+        limit = match.end() + end.start() if end else len(text)
+        key = re.search(r"(?m)^\s*rustflags\s*=", text[match.end():limit])
+        if key is None:
+            raise UnsafeConfig("unsupported rustflags layout; existing settings were retained")
+        start = match.end() + key.end()
+        candidate = None
+        additions = json.dumps(["-C", "link-arg=-fuse-ld=mold"])[1:-1]
+        for closing in [index for index in range(start, limit) if text[index] == "]"]:
+            for separator in [", " if flags else "", " "]:
+                attempt = text[:closing] + separator + additions + text[closing:]
+                try:
+                    if tomllib.loads(attempt) == expected:
+                        candidate = attempt
+                        break
+                except tomllib.TOMLDecodeError:
+                    pass
+            if candidate is not None:
+                break
+        if candidate is None:
+            raise UnsafeConfig("unsupported rustflags array; existing settings were retained")
+    if tomllib.loads(candidate) != expected:
+        raise UnsafeConfig("Cargo config merge changed unrelated settings; no write performed")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    # Serialize bootstrap writers. External config editors need to remain idle;
+    # their intervening content changes fail closed at the final check.
+    lock = (path.parent / ".tze-hud-mold-config.lock").open("a")
+    fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    current = path.read_bytes() if path.exists() else b""
+    if current != original or path.is_symlink():
+        raise UnsafeConfig("Cargo config changed during merge; re-run bootstrap")
+    mode = stat.S_IMODE(path.stat().st_mode) if path.exists() else 0o644
+    fd, temporary = tempfile.mkstemp(prefix=".tze-hud-mold-", dir=path.parent)
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(candidate.encode())
+        if (path.read_bytes() if path.exists() else b"") != original or path.is_symlink():
+            raise UnsafeConfig("Cargo config changed during merge; re-run bootstrap")
+        os.chmod(temporary, mode)
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+    lock.close()
+    print("  fixed   native Cargo mold flags (existing flags retained)")
+except UnsafeConfig as error:
+    # Do not print file contents or inherited flag values.
+    print("  MISSING " + str(error), file=sys.stderr)
+    sys.exit(1)
+except (OSError, UnicodeError, ValueError, TypeError, AttributeError) as error:
+    print("  MISSING Cargo config could not be safely read or merged (" + type(error).__name__ + ")", file=sys.stderr)
+    sys.exit(1)
+PY
+            then
+                ok "$(mold --version)"
+            else
+                miss "native Cargo linker configuration (no unsafe overwrite)"
+            fi
+            # Higher-priority environment flags may deliberately override Cargo
+            # config. Report names only; never discard or print their values.
+            native_flag_name="CARGO_TARGET_${native_target^^}_RUSTFLAGS"
+            native_flag_name="${native_flag_name//-/_}"
+            for flag_name in RUSTFLAGS CARGO_ENCODED_RUSTFLAGS "$native_flag_name"; do
+                if [[ -v $flag_name ]]; then warn "$flag_name is set; verify the effective native linker"; fi
+            done
+            ;;
+        *) warn "mold configuration applies only to native Linux targets" ;;
+    esac
 fi
 
 # ── Python ──────────────────────────────────────────────────────────────────
