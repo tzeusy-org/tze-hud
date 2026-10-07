@@ -221,13 +221,25 @@ jobs:
   test-unit:
     name: cargo test (unit)
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: ${{ github.event_name == 'pull_request' && github.event.pull_request.number == 1397 && github.event.pull_request.head.ref == 'agent/hud-1dnk5.2' && github.event.pull_request.head.repo.full_name == github.repository && 8 || 15 }}
     needs: [check]
     env:
+      PAIRED_MODE: ${{ github.event_name == 'pull_request' && github.event.pull_request.number == 1397 && github.event.pull_request.head.ref == 'agent/hud-1dnk5.2' && github.event.pull_request.head.repo.full_name == github.repository }}
       # Native Linux only: preserve MinGW/MSVC flags and the system ld.
       CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
     steps:
+      - name: Initialize bounded frozen-source pair
+        if: env.PAIRED_MODE == 'true'
+        timeout-minutes: 1
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$RUNNER_TEMP" = /* && -d "$RUNNER_TEMP" && ! -L "$RUNNER_TEMP" ]]
+          work=$(mktemp -d "$RUNNER_TEMP/compile-diet-pair.XXXXXX"); pair="$work/evidence"; mkdir "$pair"
+          printf 'PAIRED_ROOT=%s\nPAIRED_EVIDENCE=%s\nPAIRED_START=%s\n' "$work" "$pair" "$(date +%s)" >> "$GITHUB_ENV"
+          printf 'setup=not-reached\nA=not-reached\nB=not-reached\n' > "$pair/status.log"
       - uses: actions/checkout@v5
+        timeout-minutes: ${{ env.PAIRED_MODE == 'true' && 1 || 15 }}
         # Temporary hud-1dnk5.2 A/B/C measurement control: compare exact PR heads
         # without attributing moving merge-context source changes to the tools.
         # merge_group/push retain their actual event sha. Restore normal checkout
@@ -236,11 +248,12 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Install pinned mold (native Linux linker)
         uses: rui314/setup-mold@10ca16bf91dc22e05ebdc935cad9c75ea248f621
-        timeout-minutes: 5
+        timeout-minutes: ${{ env.PAIRED_MODE == 'true' && 1 || 5 }}
         with:
           mold-version: "2.42.1"
           make-default: false
       - uses: dtolnay/rust-toolchain@stable
+        timeout-minutes: ${{ env.PAIRED_MODE == 'true' && 1 || 15 }}
         with:
           toolchain: "1.88"
       # timeout-minutes caps cache-save hangs (incident: PR #606, canonical-app-production-boot
@@ -248,7 +261,7 @@ jobs:
       # v2.9.1 pins to a specific stable release rather than the floating v2 alias.
       - uses: Swatinem/rust-cache@v2.9.1
         id: unit-cache
-        timeout-minutes: 10
+        timeout-minutes: ${{ env.PAIRED_MODE == 'true' && 1 || 10 }}
         # Temporary A/B/C control: lookup hits are NOT restored warm caches.
         # Keep both pairs on fresh hosted targets; restore ordinary caching only
         # after the controlled measurements, before the final normal matrix.
@@ -256,7 +269,7 @@ jobs:
           lookup-only: true
           save-if: false
       - name: Install Mesa / llvmpipe + protobuf compiler
-        timeout-minutes: 5
+        timeout-minutes: ${{ env.PAIRED_MODE == 'true' && 1 || 5 }}
         run: |
           sudo apt-get $APT_OPTS update -q
           sudo apt-get $APT_OPTS install -y --no-install-recommends \
@@ -266,7 +279,146 @@ jobs:
             libegl-mesa0 \
             libgl1-mesa-dri \
             protobuf-compiler
+      - name: Measure frozen A and B on this single runner
+        if: env.PAIRED_MODE == 'true'
+        shell: bash
+        env:
+          TZE_HUD_REQUIRE_GPU: "1"
+          CACHE_LOOKUP_HIT: ${{ steps.unit-cache.outputs.cache-hit }}
+        run: |
+          set -euo pipefail
+          pair=$PAIRED_EVIDENCE; work=$PAIRED_ROOT; controller=$PWD; controller_head=$(git rev-parse HEAD)
+          [[ "$work" == "$RUNNER_TEMP"/compile-diet-pair.* && -d "$work" && ! -L "$work" && "$pair" == "$work/evidence" && -d "$pair" && ! -L "$pair" ]]
+          deadline=$((PAIRED_START + 420)); group=; source=; evidence=$pair
+          remaining() { local seconds=$((deadline - $(date +%s))); ((seconds > 0)) || return 124; printf '%s\n' "$seconds"; }
+          members() { ps -e -o pid=,ppid=,pgid=,stat=,comm= | awk -v g="$group" '$3 == g' > "$evidence/process-group-last.log"; [[ -s "$evidence/process-group-last.log" ]]; }
+          stop_group() {
+            [[ -n "$group" ]] || return 0
+            [[ "$group" =~ ^[0-9]+$ && "$group" != "$(ps -o pgid= -p $$ | tr -d ' ')" ]] || return 1
+            if members; then
+              kill -TERM -- "-$group" || true
+              for attempt in {1..10}; do members || break; sleep 0.5; done
+              if members; then kill -KILL -- "-$group" || true; sleep 1; fi
+            fi
+            ! members
+          }
+          inputs() { git ls-files -z '*.rs' '*.proto' '*.toml' Cargo.lock rust-toolchain.toml justfile scripts/dev-bootstrap.sh .github/workflows/ci.yml | sort -z | xargs -0 sha256sum; }
+          close_source() {
+            [[ -n "$source" ]] || return 0
+            (cd "$source"; git rev-parse HEAD > "$evidence/head-after.log"; git status --porcelain --untracked-files=no > "$evidence/status-after.log"; inputs > "$evidence/source-after.sha256") || return 1
+            cmp -s "$evidence/head-before.log" "$evidence/head-after.log" && [[ ! -s "$evidence/status-after.log" ]] && cmp -s "$evidence/source-before.sha256" "$evidence/source-after.sha256"
+          }
+          finish() {
+            result=$?; trap - EXIT; set +e
+            # A signal may reach this trap before the pipeline returns its PID.
+            if [[ -z "$group" && -s "$evidence/process.log" ]]; then group=$(sed -n '2p' "$evidence/process.log"); fi
+            stop_group; terminal=$?; ((terminal == 0)) || result=1
+            if ((terminal == 0)); then
+              close_source || result=1
+              for frozen_leg in A B; do
+                if [[ -f "$pair/initial-$frozen_leg-source.sha256" ]]; then
+                  (cd "$work/source-$frozen_leg"; inputs > "$pair/final-$frozen_leg-source.sha256"; git status --porcelain --untracked-files=no > "$pair/final-$frozen_leg-status.log"; git ls-tree -r HEAD > "$pair/final-$frozen_leg-tree.log") || result=1
+                  cmp -s "$pair/initial-$frozen_leg-source.sha256" "$pair/final-$frozen_leg-source.sha256" && [[ ! -s "$pair/final-$frozen_leg-status.log" ]] && cmp -s "$pair/tree-$frozen_leg.log" "$pair/final-$frozen_leg-tree.log" || result=1
+                fi
+              done
+            fi
+            [[ "$(git -C "$controller" rev-parse HEAD)" == "$controller_head" && -z "$(git -C "$controller" status --porcelain --untracked-files=no)" ]] || result=1
+            printf 'controller_exit=%s\nprocess_group_terminal=%s\nelapsed_seconds=%s\n' "$result" "$terminal" "$(($(date +%s)-PAIRED_START))" >> "$pair/status.log"
+            (cd "$pair"; find . -type f ! -name artifact-files.sha256 -print0 | sort -z | xargs -0 sha256sum > artifact-files.sha256) || result=1
+            exit "$result"
+          }
+          trap finish EXIT; trap 'exit 143' TERM INT
+          remaining > "$pair/remaining-after-setup.log"
+          [[ "$HEADLESS_FORCE_SOFTWARE" == 1 && "$TZE_HUD_REQUIRE_GPU" == 1 ]]
+          [[ "$CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS" == '-C link-arg=-fuse-ld=mold' ]]
+          if [[ "${CARGO_INCREMENTAL:-}" != 0 ]]; then printf 'rejected_override_name=CARGO_INCREMENTAL; expected_pinned_action_zero\n' >> "$pair/status.log"; exit 1; fi
+          # Fail before Cargo on inherited precedence/profile/compiler uncertainty;
+          # record variable NAMES, never inherited values or credential files.
+          for key in $(compgen -e); do
+            case "$key" in
+              CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS|CARGO_INCREMENTAL) ;;
+              RUSTFLAGS|RUSTDOCFLAGS|CARGO_ENCODED_RUSTFLAGS|CARGO_ENCODED_RUSTDOCFLAGS|CARGO_BUILD_*|CARGO_TARGET_*|CARGO_PROFILE_*|RUSTC|RUSTDOC|RUSTC_WRAPPER|RUSTC_WORKSPACE_WRAPPER|CC|CXX|AR|VK_ICD_FILENAMES|TZE_HUD_PERF_ASSERT|TZE_HUD_TEST_BUDGET_SLACK|TZE_HUD_SKIP_GPU_TESTS|SKIP_GPU_TESTS|RUST_TEST_THREADS)
+                printf 'rejected_override_name=%s\n' "$key" >> "$pair/status.log"; exit 1 ;;
+            esac
+          done
+          cargo_home=${CARGO_HOME:-$HOME/.cargo}
+          for file in "$cargo_home/config" "$cargo_home/config.toml"; do
+            if [[ -e "$file" || -L "$file" ]]; then printf 'global_Cargo_config_present=refused\n' >> "$pair/status.log"; exit 1; fi
+          done
+          [[ ! -e "$controller/target" && ! -L "$controller/target" ]]
+          # Upload ONLY small evidence; disposable source/compiled targets are siblings.
+          {
+            date -u; printf 'controller_head=%s\ncontroller_tree=%s\nrun_id=%s\nattempt=%s\nevent=%s\njob=%s\n' "$controller_head" "$(git rev-parse HEAD^{tree})" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$GITHUB_EVENT_NAME" "$GITHUB_JOB"
+            printf 'image=%s/%s\nrunner=%s/%s\ncache_lookup_hit=%s\nlookup_only=true\nsave=false\norder=A-then-B\nshared_deadline=%s\n' "${ImageOS:-unknown}" "${ImageVersion:-unknown}" "$RUNNER_OS" "$RUNNER_ARCH" "${CACHE_LOOKUP_HIT:-unknown}" "$deadline"
+            printf 'expected_pinned_shared_CARGO_INCREMENTAL=0\n'
+            uname -srm; lscpu; rustc --version --verbose; cargo --version; protoc --version
+            cc --version | sed -n '1p'; ld --version | sed -n '1p'; mold --version; /usr/bin/time --version | sed -n '1p'; timeout --version | sed -n '1p'
+            sha256sum .github/workflows/ci.yml .cargo/config.toml
+          } > "$pair/context.log"
+          rustc --version | grep -E '^rustc 1\.88\.0 '; mold --version | grep -E '^mold 2\.42\.1 '
+          printf 'timed_wrapper=time+timeout+launcher+awk; same_both_legs; not_isolated_compiler_or_linker_CPU\n' >> "$pair/context.log"
+          A=268033bbb7e3a390961619843c8a525a4d6c322b; B=589e8b33bcac332b577ec6b449bca22a8140be74
+          timeout --signal=TERM --kill-after=5s "$(remaining)s" git fetch --no-tags origin "$A" "$B" > "$pair/fetch-refs.log" 2>&1
+          [[ "$(git rev-parse "$A^{commit}")" == "$A" && "$(git rev-parse "$B^{commit}")" == "$B" && "$(git rev-parse "$B^")" == "$A" ]]
+          [[ "$(git rev-parse "$A^{tree}")" == 55db8ce1eeeb92605e67545f3b8acbe6bdce9fb8 && "$(git rev-parse "$B^{tree}")" == bb03991326d6fb517e2fbd416907bad7e0afd70e ]]
+          git diff --name-only "$A" "$B" > "$pair/A-B-owner-differences.log"
+          printf '.github/workflows/ci.yml\nCargo.toml\njustfile\nscripts/dev-bootstrap.sh\n' | cmp - "$pair/A-B-owner-differences.log"
+          mkdir "$work/empty-hooks"
+          for leg in A B; do
+            timeout --signal=TERM --kill-after=5s "$(remaining)s" git -c core.hooksPath="$work/empty-hooks" worktree add --detach "$work/source-$leg" "${!leg}" >> "$pair/worktrees.log" 2>&1
+            [[ ! -e "$work/target-$leg" && ! -L "$work/target-$leg" ]]
+            directory="$work/source-$leg"
+            [[ "$(sha256sum "$directory/.cargo/config.toml" | cut -d' ' -f1)" == 2842d5787c401050529a4fece3ebff5510166212952f93d0f1ed5e16c130f038 ]]
+            [[ ! -e "$directory/.cargo/config" && ! -L "$directory/.cargo/config" ]]
+            while [[ "$directory" != / ]]; do
+              directory=$(dirname "$directory")
+              for file in "$directory/.cargo/config" "$directory/.cargo/config.toml"; do [[ ! -e "$file" && ! -L "$file" ]] || { printf 'ancestor_Cargo_config_present=refused\n' >> "$pair/status.log"; exit 1; }; done
+            done
+            (cd "$work/source-$leg"; git ls-tree -r HEAD; git status --porcelain --untracked-files=no) > "$pair/tree-$leg.log"
+            (cd "$work/source-$leg"; [[ -z "$(git status --porcelain --untracked-files=no)" ]]; inputs) > "$pair/initial-$leg-source.sha256"
+          done
+          cmp "$work/source-A/Cargo.lock" "$work/source-B/Cargo.lock"
+          common_limit=$(remaining); ((common_limit <= 60)) || common_limit=60
+          set +e
+          (cd "$work/source-A"; env -u CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS CARGO_TARGET_DIR="$work/fetch-only" /usr/bin/time -p -o "$pair/common-fetch-time.log" timeout --signal=TERM --kill-after=5s "${common_limit}s" cargo fetch --locked --target x86_64-unknown-linux-gnu) > "$pair/common-fetch.log" 2>&1
+          fetch_exit=$?; set -e; printf 'common_fetch_exit=%s\n' "$fetch_exit" >> "$pair/status.log"
+          ((fetch_exit == 0)) || exit "$fetch_exit"
+          [[ ! -e "$work/target-A" && ! -L "$work/target-A" && ! -e "$work/target-B" && ! -L "$work/target-B" ]]
+          for leg in A B; do
+            source="$work/source-$leg"; evidence="$pair/$leg"; mkdir "$evidence"; cd "$source"
+            [[ "$(git rev-parse HEAD)" == "${!leg}" && -z "$(git status --porcelain --untracked-files=no)" && ! -e "$work/target-$leg" ]]
+            git rev-parse HEAD > "$evidence/head-before.log"; inputs > "$evidence/source-before.sha256"
+            export CARGO_TARGET_DIR="$work/target-$leg"
+            if [[ "$leg" == A ]]; then unset CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS; else export CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS='-C link-arg=-fuse-ld=mold'; fi
+            printf 'leg=%s\ncwd=%s\ntarget=%s\ntarget_before=absent\nGPU_required=1\nsoftware=1\nPERF_SKIP_slack_VK=unset\ncargo_argv=cargo test --workspace --all-targets --exclude integration\n' "$leg" "$PWD" "$CARGO_TARGET_DIR" > "$evidence/context.log"
+            if [[ "$leg" == B ]]; then printf '%s' "$CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS" | sha256sum >> "$evidence/context.log"; else printf 'native_rustflag=unset\n' >> "$evidence/context.log"; fi
+            limit=$(remaining); printf '%s=started remaining=%s\n' "$leg" "$limit" >> "$pair/status.log"
+            set +e
+            /usr/bin/time -p -o "$evidence/command-time.log" timeout --signal=TERM --kill-after=5s "${limit}s" bash -c 'printf "%s\n%s\n" "$BASHPID" "$(ps -o pgid= -p "$BASHPID" | tr -d " ")" > "$1/process.log"; exec cargo test --workspace --all-targets --exclude integration' _ "$evidence" 2>&1 \
+              | awk -v raw="$evidence/cargo-test.log" -v stamped="$evidence/timestamped-output.log" -v phases="$evidence/output-phases.log" '
+                { epoch=systime(); print; print $0 >> raw; print epoch "\t" $0 >> stamped; plain=$0; gsub(/\033\[[0-9;]*[[:alpha:]]/, "", plain);
+                  if(plain ~ /Finished .*target\(s\) in/) finished=plain; if(plain ~ /Running / && first=="") first=epoch; last=epoch; fflush(); }
+                END { if(finished!="") print "cargo_finished_line=" finished > phases; else print "cargo_compile_completion=not-reached" > phases;
+                  if(first!="") { print "first_running_epoch_seconds=" first >> phases; print "last_output_epoch_seconds=" last >> phases; print "execution_output_span_seconds=" last-first >> phases; } else print "test_execution=not-reached" >> phases; }'
+            pipeline=("${PIPESTATUS[@]}"); set -e
+            printf 'cargo_time_timeout_exit=%s\nlogger_exit=%s\n' "${pipeline[0]}" "${pipeline[1]}" > "$evidence/exit.log"
+            [[ -s "$evidence/process.log" ]] || { printf 'timed_process_identity=missing; STOP\n' >> "$pair/status.log"; exit 1; }
+            group=$(sed -n '2p' "$evidence/process.log")
+            [[ "$group" =~ ^[0-9]+$ ]] || exit 1
+            if members; then printf 'unexpected_live_timed_group_after_wait=STOP\n' >> "$pair/status.log"; exit 1; fi
+            stop_group; printf 'process_group_terminal=true\n' >> "$evidence/exit.log"; group=
+            close_source; printf 'source_before_after=equal\n' >> "$evidence/exit.log"; source=
+            awk '{plain=$0; gsub(/\033\[[0-9;]*[[:alpha:]]/, "", plain); if(plain ~ /Updating|Downloading|Downloaded|index|network/) print NR "\t" plain}' "$evidence/cargo-test.log" > "$evidence/timed-network-index-diagnostics.log"
+            wc -l "$evidence/timed-network-index-diagnostics.log" > "$evidence/timed-network-index-diagnostic-count.log"
+            printf 'absence_of_diagnostics_NOT_zero_network_IO; fixed_order_shared_OS_registry_single_pair_NOT_pure_linker_CPU\n' >> "$evidence/context.log"
+            find "$CARGO_TARGET_DIR" -type f | wc -l > "$evidence/target-files-after.log"; du -sk "$CARGO_TARGET_DIR" > "$evidence/target-KiB-after.log"
+            printf '%s=cargo_exit:%s logger_exit:%s\n' "$leg" "${pipeline[0]}" "${pipeline[1]}" >> "$pair/status.log"
+            ((pipeline[0] == 0)) || exit "${pipeline[0]}"; ((pipeline[1] == 0)) || exit "${pipeline[1]}"
+            remaining > "$evidence/remaining-after-terminal.log"
+          done
+          cd "$controller"; printf 'pair=complete; treatment=profiles_plus_mold; interpretation=single_fixed_order_bundled_observation\n' >> "$pair/status.log"
       - name: Record controlled test-unit measurement context
+        if: env.PAIRED_MODE != 'true'
         shell: bash
         run: |
           evidence=test_results/compile-diet/unit
@@ -318,6 +470,7 @@ jobs:
         env:
           CACHE_LOOKUP_HIT: ${{ steps.unit-cache.outputs.cache-hit }}
       - name: cargo test (workspace, exclude integration)
+        if: env.PAIRED_MODE != 'true'
         shell: bash
         run: |
           evidence=test_results/compile-diet/unit
@@ -378,11 +531,12 @@ jobs:
           # of silently skipping ~129 compositor GPU tests (hud-2sxfk).
           TZE_HUD_REQUIRE_GPU: "1"
       - name: Upload controlled test-unit measurement
+        timeout-minutes: ${{ env.PAIRED_MODE == 'true' && 1 || 15 }}
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: compile-diet-test-unit-${{ github.run_id }}-${{ github.run_attempt }}
-          path: test_results/compile-diet/unit/
+          path: ${{ env.PAIRED_MODE == 'true' && env.PAIRED_EVIDENCE || 'test_results/compile-diet/unit/' }}
           # Setup failures remain real failures even when no measurement began.
           if-no-files-found: warn
 
