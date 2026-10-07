@@ -91,7 +91,15 @@ jobs:
       - name: Install protobuf compiler (required by tze_hud_protocol build script)
         timeout-minutes: 5
         run: |
-          sudo apt-get $APT_OPTS update -q
+          # Remove only the observed Azure HTTP route; keep signed HTTPS fallbacks.
+          # An unsupported hosted image layout must fail before package acquisition.
+          apt_mirror_list=/etc/apt/apt-mirrors.txt
+          test -f "$apt_mirror_list"
+          test ! -L "$apt_mirror_list"
+          grep -Eq '^https://archive[.]ubuntu[.]com/ubuntu/?([[:space:]]|$)' "$apt_mirror_list"
+          grep -Eq '^https://security[.]ubuntu[.]com/ubuntu/?([[:space:]]|$)' "$apt_mirror_list"
+          sudo sed -Ei '\|^http://azure[.]archive[.]ubuntu[.]com/ubuntu/?([[:space:]].*)?$|d' "$apt_mirror_list"
+          sudo apt-get $APT_OPTS update -q --error-on=any
           sudo apt-get $APT_OPTS install -y --no-install-recommends protobuf-compiler
       - name: cargo check (workspace)
         run: cargo check --workspace
@@ -147,7 +155,15 @@ jobs:
       - name: Install protobuf compiler (required by tze_hud_protocol build script)
         timeout-minutes: 5
         run: |
-          sudo apt-get $APT_OPTS update -q
+          # Remove only the observed Azure HTTP route; keep signed HTTPS fallbacks.
+          # An unsupported hosted image layout must fail before package acquisition.
+          apt_mirror_list=/etc/apt/apt-mirrors.txt
+          test -f "$apt_mirror_list"
+          test ! -L "$apt_mirror_list"
+          grep -Eq '^https://archive[.]ubuntu[.]com/ubuntu/?([[:space:]]|$)' "$apt_mirror_list"
+          grep -Eq '^https://security[.]ubuntu[.]com/ubuntu/?([[:space:]]|$)' "$apt_mirror_list"
+          sudo sed -Ei '\|^http://azure[.]archive[.]ubuntu[.]com/ubuntu/?([[:space:]].*)?$|d' "$apt_mirror_list"
+          sudo apt-get $APT_OPTS update -q --error-on=any
           sudo apt-get $APT_OPTS install -y --no-install-recommends protobuf-compiler
       - name: cargo clippy (workspace, all targets, deny warnings)
         run: cargo clippy --workspace --all-targets -- -D warnings
@@ -197,7 +213,15 @@ jobs:
       - name: Install protobuf compiler + MinGW cross toolchain
         timeout-minutes: 5
         run: |
-          sudo apt-get $APT_OPTS update -q
+          # Remove only the observed Azure HTTP route; keep signed HTTPS fallbacks.
+          # An unsupported hosted image layout must fail before package acquisition.
+          apt_mirror_list=/etc/apt/apt-mirrors.txt
+          test -f "$apt_mirror_list"
+          test ! -L "$apt_mirror_list"
+          grep -Eq '^https://archive[.]ubuntu[.]com/ubuntu/?([[:space:]]|$)' "$apt_mirror_list"
+          grep -Eq '^https://security[.]ubuntu[.]com/ubuntu/?([[:space:]]|$)' "$apt_mirror_list"
+          sudo sed -Ei '\|^http://azure[.]archive[.]ubuntu[.]com/ubuntu/?([[:space:]].*)?$|d' "$apt_mirror_list"
+          sudo apt-get $APT_OPTS update -q --error-on=any
           sudo apt-get $APT_OPTS install -y --no-install-recommends \
             protobuf-compiler \
             mingw-w64
@@ -246,7 +270,15 @@ jobs:
       - name: Install Mesa / llvmpipe + protobuf compiler
         timeout-minutes: 5
         run: |
-          sudo apt-get $APT_OPTS update -q
+          # Remove only the observed Azure HTTP route; keep signed HTTPS fallbacks.
+          # An unsupported hosted image layout must fail before package acquisition.
+          apt_mirror_list=/etc/apt/apt-mirrors.txt
+          test -f "$apt_mirror_list"
+          test ! -L "$apt_mirror_list"
+          grep -Eq '^https://archive[.]ubuntu[.]com/ubuntu/?([[:space:]]|$)' "$apt_mirror_list"
+          grep -Eq '^https://security[.]ubuntu[.]com/ubuntu/?([[:space:]]|$)' "$apt_mirror_list"
+          sudo sed -Ei '\|^http://azure[.]archive[.]ubuntu[.]com/ubuntu/?([[:space:]].*)?$|d' "$apt_mirror_list"
+          sudo apt-get $APT_OPTS update -q --error-on=any
           sudo apt-get $APT_OPTS install -y --no-install-recommends \
             libvulkan1 \
             mesa-vulkan-drivers \
@@ -358,7 +390,15 @@ jobs:
       - name: Install Mesa / llvmpipe + protobuf compiler
         timeout-minutes: 5
         run: |
-          sudo apt-get $APT_OPTS update -q
+          # Remove only the observed Azure HTTP route; keep signed HTTPS fallbacks.
+          # An unsupported hosted image layout must fail before package acquisition.
+          apt_mirror_list=/etc/apt/apt-mirrors.txt
+          test -f "$apt_mirror_list"
+          test ! -L "$apt_mirror_list"
+          grep -Eq '^https://archive[.]ubuntu[.]com/ubuntu/?([[:space:]]|$)' "$apt_mirror_list"
+          grep -Eq '^https://security[.]ubuntu[.]com/ubuntu/?([[:space:]]|$)' "$apt_mirror_list"
+          sudo sed -Ei '\|^http://azure[.]archive[.]ubuntu[.]com/ubuntu/?([[:space:]].*)?$|d' "$apt_mirror_list"
+          sudo apt-get $APT_OPTS update -q --error-on=any
           sudo apt-get $APT_OPTS install -y --no-install-recommends \
             libvulkan1 \
             mesa-vulkan-drivers \
@@ -438,7 +478,15 @@ jobs:
       - name: Install Mesa / llvmpipe + protobuf compiler
         timeout-minutes: 5
         run: |
-          sudo apt-get $APT_OPTS update -q
+          # Remove only the observed Azure HTTP route; keep signed HTTPS fallbacks.
+          # An unsupported hosted image layout must fail before package acquisition.
+          apt_mirror_list=/etc/apt/apt-mirrors.txt
+          test -f "$apt_mirror_list"
+          test ! -L "$apt_mirror_list"
+          grep -Eq '^https://archive[.]ubuntu[.]com/ubuntu/?([[:space:]]|$)' "$apt_mirror_list"
+          grep -Eq '^https://security[.]ubuntu[.]com/ubuntu/?([[:space:]]|$)' "$apt_mirror_list"
+          sudo sed -Ei '\|^http://azure[.]archive[.]ubuntu[.]com/ubuntu/?([[:space:]].*)?$|d' "$apt_mirror_list"
+          sudo apt-get $APT_OPTS update -q --error-on=any
           sudo apt-get $APT_OPTS install -y --no-install-recommends \
             libvulkan1 \
             mesa-vulkan-drivers \
@@ -490,7 +538,15 @@ jobs:
       - name: Install Mesa / llvmpipe + protobuf compiler
         timeout-minutes: 5
         run: |
-          sudo apt-get $APT_OPTS update -q
+          # Remove only the observed Azure HTTP route; keep signed HTTPS fallbacks.
+          # An unsupported hosted image layout must fail before package acquisition.
+          apt_mirror_list=/etc/apt/apt-mirrors.txt
+          test -f "$apt_mirror_list"
+          test ! -L "$apt_mirror_list"
+          grep -Eq '^https://archive[.]ubuntu[.]com/ubuntu/?([[:space:]]|$)' "$apt_mirror_list"
+          grep -Eq '^https://security[.]ubuntu[.]com/ubuntu/?([[:space:]]|$)' "$apt_mirror_list"
+          sudo sed -Ei '\|^http://azure[.]archive[.]ubuntu[.]com/ubuntu/?([[:space:]].*)?$|d' "$apt_mirror_list"
+          sudo apt-get $APT_OPTS update -q --error-on=any
           sudo apt-get $APT_OPTS install -y --no-install-recommends \
             libvulkan1 \
             mesa-vulkan-drivers \
@@ -643,7 +699,15 @@ jobs:
       - name: Install Mesa / llvmpipe + Vulkan loader + protobuf compiler
         timeout-minutes: 5
         run: |
-          sudo apt-get $APT_OPTS update -q
+          # Remove only the observed Azure HTTP route; keep signed HTTPS fallbacks.
+          # An unsupported hosted image layout must fail before package acquisition.
+          apt_mirror_list=/etc/apt/apt-mirrors.txt
+          test -f "$apt_mirror_list"
+          test ! -L "$apt_mirror_list"
+          grep -Eq '^https://archive[.]ubuntu[.]com/ubuntu/?([[:space:]]|$)' "$apt_mirror_list"
+          grep -Eq '^https://security[.]ubuntu[.]com/ubuntu/?([[:space:]]|$)' "$apt_mirror_list"
+          sudo sed -Ei '\|^http://azure[.]archive[.]ubuntu[.]com/ubuntu/?([[:space:]].*)?$|d' "$apt_mirror_list"
+          sudo apt-get $APT_OPTS update -q --error-on=any
           sudo apt-get $APT_OPTS install -y --no-install-recommends \
             libvulkan1 \
             mesa-vulkan-drivers \
