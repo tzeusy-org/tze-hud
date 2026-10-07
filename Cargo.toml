@@ -152,6 +152,13 @@ warnings = "deny"
 # makes the policy explicit and IDE-visible without changing CI behaviour.
 all = "deny"
 
+[profile.dev]
+# Keep useful backtrace locations without full variable/type debug information.
+debug = "line-tables-only"
+
+[profile.test]
+debug = "line-tables-only"
+
 [profile.release]
 lto = true
 codegen-units = 1

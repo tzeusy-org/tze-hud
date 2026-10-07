@@ -18,7 +18,8 @@
 #   clippy         — cargo clippy --all-targets -D warnings (incl. tests/examples/benches)
 #   clippy-windows-gnu — cargo clippy --target x86_64-pc-windows-gnu -D warnings on the
 #     crates carrying cfg(windows) code, which the Linux clippy job never compiles
-#   test-unit      — cargo test --workspace --all-targets --exclude integration
+#   test-unit      — pinned cargo nextest run --workspace --all-targets --exclude integration
+#                    --features tze_hud_runtime/dev-mode (required check name unchanged)
 #   test-integration — cargo test -p integration --tests
 #                    + deterministic LLM-facing token-footprint gate
 #   production-boot-vertical-slice / canonical-app-production-boot — boot the
@@ -32,7 +33,7 @@
 #     outside the current eight required checks)
 #   test-gpu-pixel-readback — pixel readback on llvmpipe (informational duplicate: the
 #     same pixel_readback tests already run, blocking, inside test-unit via workspace
-#     feature unification of tze_hud_runtime/dev-mode)
+#     the explicit tze_hud_runtime/dev-mode feature)
 #
 # GPU jobs run with HEADLESS_FORCE_SOFTWARE=1 (llvmpipe on Linux) so no
 # hardware GPU is needed.
@@ -65,11 +66,20 @@ jobs:
     name: cargo check
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      # Native Linux only: preserve MinGW/MSVC flags and the system ld.
+      CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
     steps:
       - uses: actions/checkout@v5
       - name: Test fullscreen vs overlay harness contract
         shell: pwsh
         run: .\scripts\ci\windows\test-windowed-fullscreen-overlay-perf.ps1
+      - name: Install pinned mold (native Linux linker)
+        uses: rui314/setup-mold@10ca16bf91dc22e05ebdc935cad9c75ea248f621
+        timeout-minutes: 5
+        with:
+          mold-version: "2.42.1"
+          make-default: false
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: "1.88"
@@ -81,7 +91,15 @@ jobs:
       - name: Install protobuf compiler (required by tze_hud_protocol build script)
         timeout-minutes: 5
         run: |
-          sudo apt-get $APT_OPTS update -q
+          # Remove only the observed Azure HTTP route; keep signed HTTPS fallbacks.
+          # An unsupported hosted image layout must fail before package acquisition.
+          apt_mirror_list=/etc/apt/apt-mirrors.txt
+          test -f "$apt_mirror_list"
+          test ! -L "$apt_mirror_list"
+          grep -Eq '^https://archive[.]ubuntu[.]com/ubuntu/?([[:space:]]|$)' "$apt_mirror_list"
+          grep -Eq '^https://security[.]ubuntu[.]com/ubuntu/?([[:space:]]|$)' "$apt_mirror_list"
+          sudo sed -Ei '\|^http://azure[.]archive[.]ubuntu[.]com/ubuntu/?([[:space:]].*)?$|d' "$apt_mirror_list"
+          sudo apt-get $APT_OPTS update -q --error-on=any
           sudo apt-get $APT_OPTS install -y --no-install-recommends protobuf-compiler
       - name: cargo check (workspace)
         run: cargo check --workspace
@@ -114,8 +132,17 @@ jobs:
     name: cargo clippy
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      # Native Linux only: preserve MinGW/MSVC flags and the system ld.
+      CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
     steps:
       - uses: actions/checkout@v5
+      - name: Install pinned mold (native Linux linker)
+        uses: rui314/setup-mold@10ca16bf91dc22e05ebdc935cad9c75ea248f621
+        timeout-minutes: 5
+        with:
+          mold-version: "2.42.1"
+          make-default: false
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: "1.88"
@@ -128,7 +155,15 @@ jobs:
       - name: Install protobuf compiler (required by tze_hud_protocol build script)
         timeout-minutes: 5
         run: |
-          sudo apt-get $APT_OPTS update -q
+          # Remove only the observed Azure HTTP route; keep signed HTTPS fallbacks.
+          # An unsupported hosted image layout must fail before package acquisition.
+          apt_mirror_list=/etc/apt/apt-mirrors.txt
+          test -f "$apt_mirror_list"
+          test ! -L "$apt_mirror_list"
+          grep -Eq '^https://archive[.]ubuntu[.]com/ubuntu/?([[:space:]]|$)' "$apt_mirror_list"
+          grep -Eq '^https://security[.]ubuntu[.]com/ubuntu/?([[:space:]]|$)' "$apt_mirror_list"
+          sudo sed -Ei '\|^http://azure[.]archive[.]ubuntu[.]com/ubuntu/?([[:space:]].*)?$|d' "$apt_mirror_list"
+          sudo apt-get $APT_OPTS update -q --error-on=any
           sudo apt-get $APT_OPTS install -y --no-install-recommends protobuf-compiler
       - name: cargo clippy (workspace, all targets, deny warnings)
         run: cargo clippy --workspace --all-targets -- -D warnings
@@ -157,8 +192,17 @@ jobs:
     name: cargo clippy (windows-gnu cross-target)
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      # Native Linux only: preserve MinGW/MSVC flags and the system ld.
+      CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
     steps:
       - uses: actions/checkout@v5
+      - name: Install pinned mold (native Linux linker)
+        uses: rui314/setup-mold@10ca16bf91dc22e05ebdc935cad9c75ea248f621
+        timeout-minutes: 5
+        with:
+          mold-version: "2.42.1"
+          make-default: false
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: "1.88"
@@ -169,7 +213,15 @@ jobs:
       - name: Install protobuf compiler + MinGW cross toolchain
         timeout-minutes: 5
         run: |
-          sudo apt-get $APT_OPTS update -q
+          # Remove only the observed Azure HTTP route; keep signed HTTPS fallbacks.
+          # An unsupported hosted image layout must fail before package acquisition.
+          apt_mirror_list=/etc/apt/apt-mirrors.txt
+          test -f "$apt_mirror_list"
+          test ! -L "$apt_mirror_list"
+          grep -Eq '^https://archive[.]ubuntu[.]com/ubuntu/?([[:space:]]|$)' "$apt_mirror_list"
+          grep -Eq '^https://security[.]ubuntu[.]com/ubuntu/?([[:space:]]|$)' "$apt_mirror_list"
+          sudo sed -Ei '\|^http://azure[.]archive[.]ubuntu[.]com/ubuntu/?([[:space:]].*)?$|d' "$apt_mirror_list"
+          sudo apt-get $APT_OPTS update -q --error-on=any
           sudo apt-get $APT_OPTS install -y --no-install-recommends \
             protobuf-compiler \
             mingw-w64
@@ -194,10 +246,19 @@ jobs:
   test-unit:
     name: cargo test (unit)
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 8
     needs: [check]
+    env:
+      # Native Linux only; preserve Windows target linkage.
+      CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
     steps:
       - uses: actions/checkout@v5
+      - name: Install pinned mold (native Linux linker)
+        uses: rui314/setup-mold@10ca16bf91dc22e05ebdc935cad9c75ea248f621
+        timeout-minutes: 5
+        with:
+          mold-version: "2.42.1"
+          make-default: false
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: "1.88"
@@ -209,7 +270,15 @@ jobs:
       - name: Install Mesa / llvmpipe + protobuf compiler
         timeout-minutes: 5
         run: |
-          sudo apt-get $APT_OPTS update -q
+          # Remove only the observed Azure HTTP route; keep signed HTTPS fallbacks.
+          # An unsupported hosted image layout must fail before package acquisition.
+          apt_mirror_list=/etc/apt/apt-mirrors.txt
+          test -f "$apt_mirror_list"
+          test ! -L "$apt_mirror_list"
+          grep -Eq '^https://archive[.]ubuntu[.]com/ubuntu/?([[:space:]]|$)' "$apt_mirror_list"
+          grep -Eq '^https://security[.]ubuntu[.]com/ubuntu/?([[:space:]]|$)' "$apt_mirror_list"
+          sudo sed -Ei '\|^http://azure[.]archive[.]ubuntu[.]com/ubuntu/?([[:space:]].*)?$|d' "$apt_mirror_list"
+          sudo apt-get $APT_OPTS update -q --error-on=any
           sudo apt-get $APT_OPTS install -y --no-install-recommends \
             libvulkan1 \
             mesa-vulkan-drivers \
@@ -217,17 +286,75 @@ jobs:
             libegl-mesa0 \
             libgl1-mesa-dri \
             protobuf-compiler
-      - name: cargo test (workspace, exclude integration)
+      - name: Install pinned Nextest
+        uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad
+        timeout-minutes: 2
+        with:
+          tool: cargo-nextest@0.9.114
+          checksum: true
+          fallback: none
+      - name: cargo nextest (workspace, exclude integration)
+        shell: bash
         run: |
-          cargo test \
-            --workspace \
-            --all-targets \
-            --exclude integration
+          set -euo pipefail
+          evidence=test_results/compile-diet/nextest
+          mkdir -p "$evidence"
+          inputs() { git ls-files -z '*.rs' '*.proto' '*.toml' Cargo.lock rust-toolchain.toml justfile scripts/dev-bootstrap.sh .github/workflows/ci.yml | sort -z | xargs -0 sha256sum; }
+          finish() {
+            status=$?; trap - EXIT
+            inputs > "$evidence/source-after.sha256" || status=1
+            cmp -s "$evidence/source-before.sha256" "$evidence/source-after.sha256" || status=1
+            printf 'command_exit=%s\nfinished_utc=%s\n' "$status" "$(date -u +%FT%TZ)" > "$evidence/terminal.log"
+            ps -e -o pid,ppid,pgid,stat,comm > "$evidence/processes-after.log"
+            exit "$status"
+          }
+          inputs > "$evidence/source-before.sha256"
+          trap finish EXIT
+          git rev-parse HEAD > "$evidence/checkout-head.txt"
+          git ls-tree -r HEAD > "$evidence/checkout-tree.txt"
+          for control in SKIP_GPU_TESTS TZE_HUD_SKIP_GPU_TESTS RUST_TEST_THREADS NEXTEST_RETRIES NEXTEST_TEST_THREADS NEXTEST_PROFILE TZE_HUD_PERF_ASSERT TZE_HUD_TEST_BUDGET_SLACK; do
+            if [[ -v "$control" ]]; then printf 'unexpected control: %s\n' "$control" >&2; exit 1; fi
+          done
+          cargo nextest --version | tee "$evidence/nextest-version.txt"
+          grep -Eq '^cargo-nextest 0\.9\.114([[:space:]]|$)' "$evidence/nextest-version.txt"
+          rustc -vV > "$evidence/rustc-version.txt"
+          cargo --version > "$evidence/cargo-version.txt"
+          mold --version > "$evidence/mold-version.txt"
+          if [[ -f /usr/share/vulkan/icd.d/lvp_icd.x86_64.json ]]; then
+            export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+          elif [[ -f /usr/share/vulkan/icd.d/lvp_icd.json ]]; then
+            export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json
+          else
+            echo 'required llvmpipe ICD is missing' >&2; exit 1
+          fi
+          printf 'started_utc=%s\nHEADLESS_FORCE_SOFTWARE=1\nTZE_HUD_REQUIRE_GPU=1\nprofile=default\nCPU_threads=default\n' "$(date -u +%FT%TZ)" > "$evidence/context.log"
+          cargo nextest list --workspace --all-targets --exclude integration --features tze_hud_runtime/dev-mode --list-type binaries-only --message-format json > "$evidence/binaries.json" 2> "$evidence/binaries.stderr"
+          cargo nextest list --workspace --all-targets --exclude integration --features tze_hud_runtime/dev-mode --message-format json > "$evidence/tests.json" 2> "$evidence/tests.stderr"
+          cargo nextest show-config test-groups --show-default --workspace --all-targets --exclude integration --features tze_hud_runtime/dev-mode > "$evidence/groups.txt" 2> "$evidence/groups.stderr"
+          ps -e -o pid,ppid,pgid,stat,comm > "$evidence/processes-before.log"
+          set +e
+          /usr/bin/time -v -o "$evidence/run-time.txt" \
+            cargo nextest run --workspace --all-targets --exclude integration --features tze_hud_runtime/dev-mode \
+            2>&1 | tee "$evidence/run.log"
+          outcomes=("${PIPESTATUS[@]}")
+          set -e
+          printf 'timed_runner_exit=%s\nlogger_exit=%s\n' "${outcomes[0]}" "${outcomes[1]}" > "$evidence/run-exits.log"
+          ((outcomes[1] == 0)) || exit "${outcomes[1]}"
+          exit "${outcomes[0]}"
         env:
-          # Require a GPU adapter — Mesa llvmpipe is installed above.
-          # If the adapter is missing the gpu_canary test fails loudly instead
-          # of silently skipping ~129 compositor GPU tests (hud-2sxfk).
+          # Missing GPU setup is a real failure; the ONE Nextest GPU group
+          # coordinates separate test processes, unlike in-process test locks.
           TZE_HUD_REQUIRE_GPU: "1"
+      - name: Upload Nextest unit evidence (success or failure)
+        if: always()
+        uses: actions/upload-artifact@v4
+        timeout-minutes: 1
+        with:
+          name: nextest-unit-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            test_results/compile-diet/nextest/
+            target/nextest/default/junit.xml
+          if-no-files-found: warn
 
   # ── Integration: headless multi-crate suites ───────────────────────────────
   #
@@ -241,8 +368,17 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: [check]
+    env:
+      # Native Linux only: preserve MinGW/MSVC flags and the system ld.
+      CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
     steps:
       - uses: actions/checkout@v5
+      - name: Install pinned mold (native Linux linker)
+        uses: rui314/setup-mold@10ca16bf91dc22e05ebdc935cad9c75ea248f621
+        timeout-minutes: 5
+        with:
+          mold-version: "2.42.1"
+          make-default: false
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: "1.88"
@@ -254,7 +390,15 @@ jobs:
       - name: Install Mesa / llvmpipe + protobuf compiler
         timeout-minutes: 5
         run: |
-          sudo apt-get $APT_OPTS update -q
+          # Remove only the observed Azure HTTP route; keep signed HTTPS fallbacks.
+          # An unsupported hosted image layout must fail before package acquisition.
+          apt_mirror_list=/etc/apt/apt-mirrors.txt
+          test -f "$apt_mirror_list"
+          test ! -L "$apt_mirror_list"
+          grep -Eq '^https://archive[.]ubuntu[.]com/ubuntu/?([[:space:]]|$)' "$apt_mirror_list"
+          grep -Eq '^https://security[.]ubuntu[.]com/ubuntu/?([[:space:]]|$)' "$apt_mirror_list"
+          sudo sed -Ei '\|^http://azure[.]archive[.]ubuntu[.]com/ubuntu/?([[:space:]].*)?$|d' "$apt_mirror_list"
+          sudo apt-get $APT_OPTS update -q --error-on=any
           sudo apt-get $APT_OPTS install -y --no-install-recommends \
             libvulkan1 \
             mesa-vulkan-drivers \
@@ -312,8 +456,17 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: [check]
+    env:
+      # Native Linux only: preserve MinGW/MSVC flags and the system ld.
+      CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
     steps:
       - uses: actions/checkout@v5
+      - name: Install pinned mold (native Linux linker)
+        uses: rui314/setup-mold@10ca16bf91dc22e05ebdc935cad9c75ea248f621
+        timeout-minutes: 5
+        with:
+          mold-version: "2.42.1"
+          make-default: false
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: "1.88"
@@ -325,7 +478,15 @@ jobs:
       - name: Install Mesa / llvmpipe + protobuf compiler
         timeout-minutes: 5
         run: |
-          sudo apt-get $APT_OPTS update -q
+          # Remove only the observed Azure HTTP route; keep signed HTTPS fallbacks.
+          # An unsupported hosted image layout must fail before package acquisition.
+          apt_mirror_list=/etc/apt/apt-mirrors.txt
+          test -f "$apt_mirror_list"
+          test ! -L "$apt_mirror_list"
+          grep -Eq '^https://archive[.]ubuntu[.]com/ubuntu/?([[:space:]]|$)' "$apt_mirror_list"
+          grep -Eq '^https://security[.]ubuntu[.]com/ubuntu/?([[:space:]]|$)' "$apt_mirror_list"
+          sudo sed -Ei '\|^http://azure[.]archive[.]ubuntu[.]com/ubuntu/?([[:space:]].*)?$|d' "$apt_mirror_list"
+          sudo apt-get $APT_OPTS update -q --error-on=any
           sudo apt-get $APT_OPTS install -y --no-install-recommends \
             libvulkan1 \
             mesa-vulkan-drivers \
@@ -355,8 +516,17 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: [check]
+    env:
+      # Native Linux only: preserve MinGW/MSVC flags and the system ld.
+      CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
     steps:
       - uses: actions/checkout@v5
+      - name: Install pinned mold (native Linux linker)
+        uses: rui314/setup-mold@10ca16bf91dc22e05ebdc935cad9c75ea248f621
+        timeout-minutes: 5
+        with:
+          mold-version: "2.42.1"
+          make-default: false
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: "1.88"
@@ -368,7 +538,15 @@ jobs:
       - name: Install Mesa / llvmpipe + protobuf compiler
         timeout-minutes: 5
         run: |
-          sudo apt-get $APT_OPTS update -q
+          # Remove only the observed Azure HTTP route; keep signed HTTPS fallbacks.
+          # An unsupported hosted image layout must fail before package acquisition.
+          apt_mirror_list=/etc/apt/apt-mirrors.txt
+          test -f "$apt_mirror_list"
+          test ! -L "$apt_mirror_list"
+          grep -Eq '^https://archive[.]ubuntu[.]com/ubuntu/?([[:space:]]|$)' "$apt_mirror_list"
+          grep -Eq '^https://security[.]ubuntu[.]com/ubuntu/?([[:space:]]|$)' "$apt_mirror_list"
+          sudo sed -Ei '\|^http://azure[.]archive[.]ubuntu[.]com/ubuntu/?([[:space:]].*)?$|d' "$apt_mirror_list"
+          sudo apt-get $APT_OPTS update -q --error-on=any
           sudo apt-get $APT_OPTS install -y --no-install-recommends \
             libvulkan1 \
             mesa-vulkan-drivers \
@@ -499,8 +677,17 @@ jobs:
     timeout-minutes: 15
     needs: [test-unit]
     continue-on-error: true  # informational duplicate of test-unit coverage; see comment above
+    env:
+      # Native Linux only: preserve MinGW/MSVC flags and the system ld.
+      CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
     steps:
       - uses: actions/checkout@v5
+      - name: Install pinned mold (native Linux linker)
+        uses: rui314/setup-mold@10ca16bf91dc22e05ebdc935cad9c75ea248f621
+        timeout-minutes: 5
+        with:
+          mold-version: "2.42.1"
+          make-default: false
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: "1.88"
@@ -512,7 +699,15 @@ jobs:
       - name: Install Mesa / llvmpipe + Vulkan loader + protobuf compiler
         timeout-minutes: 5
         run: |
-          sudo apt-get $APT_OPTS update -q
+          # Remove only the observed Azure HTTP route; keep signed HTTPS fallbacks.
+          # An unsupported hosted image layout must fail before package acquisition.
+          apt_mirror_list=/etc/apt/apt-mirrors.txt
+          test -f "$apt_mirror_list"
+          test ! -L "$apt_mirror_list"
+          grep -Eq '^https://archive[.]ubuntu[.]com/ubuntu/?([[:space:]]|$)' "$apt_mirror_list"
+          grep -Eq '^https://security[.]ubuntu[.]com/ubuntu/?([[:space:]]|$)' "$apt_mirror_list"
+          sudo sed -Ei '\|^http://azure[.]archive[.]ubuntu[.]com/ubuntu/?([[:space:]].*)?$|d' "$apt_mirror_list"
+          sudo apt-get $APT_OPTS update -q --error-on=any
           sudo apt-get $APT_OPTS install -y --no-install-recommends \
             libvulkan1 \
             mesa-vulkan-drivers \
