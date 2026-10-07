@@ -495,3 +495,109 @@ def test_hook_unavailable_malformed_privacy_and_state_failures(tmp_path):
             h.event("PreToolUse", tool_use_id="recovered-state", tool_name="Read")
             assert h.publications()[-1]["content"] == "Read: running"
             assert not h.workers()
+
+    # Existing empty metadata is corruption, not an absent first-delivery file.
+    # Preserve an acknowledged terminal stage before exercising its delayed Pre.
+    with HookHarness(tmp_path / "existing-empty-delivery") as h:
+        h.boot()
+        h.event("PostToolUse", tool_use_id="completed-before-corruption", tool_name="Read")
+        key = h.publications()[-1]["key"]
+        delivery_path = h.marker().parent / "delivery.json"
+        assert json.loads(delivery_path.read_text())["tools"][key] == 2
+        delivery_path.write_text("{}")
+        before = len(h.records)
+        started = time.monotonic()
+        h.event("PreToolUse", tool_use_id="completed-before-corruption", tool_name="Read")
+        assert len(h.records) == before
+        assert time.monotonic() - started < 2.5 and not h.workers()
+        assert delivery_path.read_text() == "{}"
+        assert (h.marker().parent / "disabled.json").exists()
+        h.event("PreToolUse", tool_use_id="disabled-after-corruption", tool_name="Read")
+        assert len(h.records) == before
+
+        # Repair the corrupt entry, then explicitly recover. Genuine absence
+        # initializes normally; it must not be rejected along with existing {}.
+        delivery_path.unlink()
+        h.event("SessionStart", source="resume")
+        assert not (h.marker().parent / "disabled.json").exists()
+        h.prompt = str(uuid.uuid4())
+        h.event("UserPromptSubmit")
+        h.event("PreToolUse", tool_use_id="first-after-recovery", tool_name="Read")
+        assert h.publications()[-1]["content"] == "Read: running"
+        assert json.loads(delivery_path.read_text())["generation"] == json.loads(h.marker().read_text())["generation"]
+        assert not h.workers()
+
+    for previous_generation in (False, True):
+        with HookHarness(tmp_path / ("valid-delivery-" + str(previous_generation))) as h:
+            h.boot()
+            delivery_path = h.marker().parent / "delivery.json"
+            marker = json.loads(h.marker().read_text())
+            state = json.loads(delivery_path.read_text())
+            assert state == {"generation": marker["generation"], "tools": {}, "finals": {}}
+            if previous_generation:
+                h.event("PostToolUse", tool_use_id="valid-empty-or-old", tool_name="Read")
+                state = json.loads(delivery_path.read_text())
+                state["generation"] = "0" * 32
+                assert state["generation"] != marker["generation"]
+                state["finals"] = {h.prompt: "a" * 64}
+            delivery_path.write_text(json.dumps(state))
+            before = len(h.records)
+            h.event("PreToolUse", tool_use_id="valid-empty-or-old", tool_name="Read")
+            assert len(h.records) == before + 2
+            assert h.publications()[-1]["content"] == "Read: running"
+            saved = json.loads(delivery_path.read_text())
+            assert saved["generation"] == marker["generation"] and saved["finals"] == {}
+            assert saved["tools"] == {h.publications()[-1]["key"]: 1}
+            h.event("PostToolUse", tool_use_id="valid-empty-or-old", tool_name="Read")
+            assert h.publications()[-1]["content"] == "Read: completed"
+            before = len(h.records)
+            h.event("PreToolUse", tool_use_id="valid-empty-or-old", tool_name="Read")
+            assert len(h.records) == before and not (h.marker().parent / "disabled.json").exists()
+
+    # Every malformed existing object is validated before a generation reset,
+    # including truthy objects and invalid required members. Use the same real
+    # subprocess/MCP seam, rather than a second validator-only test species.
+    valid = {"generation": "0" * 32, "tools": {}, "finals": {}}
+    malformed = [
+        ("missing-generation", {k: v for k, v in valid.items() if k != "generation"}),
+        ("missing-tools", {k: v for k, v in valid.items() if k != "tools"}),
+        ("missing-finals", {k: v for k, v in valid.items() if k != "finals"}),
+        ("bad-generation", dict(valid, generation="not-a-generation")),
+        ("bad-prompt", dict(valid, prompt="not-a-prompt")),
+        ("nonobject-tools", dict(valid, tools=[])),
+        ("nonobject-finals", dict(valid, finals=[])),
+        ("invalid-stage", dict(valid, tools={"cc-tool-" + "a" * 64: 3})),
+        ("invalid-tool-key", dict(valid, tools={"raw-tool-id": 2})),
+        ("invalid-final-key", dict(valid, finals={"not-a-prompt": "a" * 64})),
+        ("invalid-final-hash", dict(valid, finals={str(uuid.UUID(int=1)): "bad-hash"})),
+        ("tool-map-over-cap", dict(valid, tools={f"cc-tool-{i:064x}": 2 for i in range(257)})),
+        ("final-map-over-cap", dict(valid, finals={str(uuid.UUID(int=i)): "a" * 64 for i in range(17)})),
+        ("unexpected-member", dict(valid, unexpected="synthetic-private-field")),
+        ("non-dictionary", []),
+    ]
+    for name, raw in [(name, json.dumps(value)) for name, value in malformed] + [
+        ("invalid-json", "{"), ("oversize-state", " " * 32769), ("unsafe-mode", json.dumps(valid)),
+    ]:
+        with HookHarness(tmp_path / ("malformed-delivery-" + name)) as h:
+            h.boot()
+            delivery_path = h.marker().parent / "delivery.json"
+            delivery_path.write_text(raw)
+            if name == "unsafe-mode":
+                delivery_path.chmod(0o644)
+            before = len(h.records)
+            h.event("PreToolUse", tool_use_id="malformed-existing-state", tool_name="Read")
+            assert len(h.records) == before, name
+            assert (h.marker().parent / "disabled.json").exists(), name
+            assert not h.workers()
+
+    # A falsy existing marker still admits no ordinary event; an explicit
+    # start validates it instead of treating it as a missing marker.
+    with HookHarness(tmp_path / "existing-empty-marker") as h:
+        h.boot()
+        h.marker().write_text("{}")
+        before = len(h.records)
+        h.event("PreToolUse", tool_use_id="empty-marker", tool_name="Read")
+        assert len(h.records) == before
+        h.event("SessionStart", source="resume")
+        assert len(h.records) == before and (h.marker().parent / "disabled.json").exists()
+        assert not h.workers()

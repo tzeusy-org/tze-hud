@@ -1,0 +1,7 @@
+{
+  "diagnostic_native_pid": 4135142,
+  "failed_inline_native_pid": "UNKNOWN not journaled before KeyError",
+  "actual_tool_exit": 1,
+  "exception": "KeyError native_pid while aggregating RED-freeze proof schema; gate/source bytes unchanged, no tests rerun",
+  "actual_keys_corrected_next": true
+}

@@ -302,13 +302,13 @@ def delivery(event, deadline):
     import portal_client
     metadata = Metadata(event["session"])
     try:
-        state = read_state(metadata.delivery, {})
-        if state:
+        state = read_state(metadata.delivery)
+        if state is not None:
             validate_delivery(state)
     except (OSError, ValueError):
         metadata.disable()
         raise
-    if state.get("generation") != event["generation"]:
+    if state is None or state.get("generation") != event["generation"]:
         state = {"generation": event["generation"], "tools": {}, "finals": {}}
     if not applicable(metadata.current(), event):
         return

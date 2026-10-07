@@ -1,0 +1,124 @@
+{
+  "schema": "bounded-existing-PR-author-return-v2",
+  "review": "hud-svq9i",
+  "original": "hud-x38zn.1",
+  "PR": 1390,
+  "reviewed_head": "91e571e38af1b7eccb62cc026d71012b5207497e",
+  "source_branch": "agent/hud-x38zn.1",
+  "implementation_author": "/root/lane_hl_review",
+  "independent_reviewer": "/root/lane_runtime_audit",
+  "status": "corrections-required",
+  "same_original_same_PR": true,
+  "second_substantive_return_same_invariant": true,
+  "no_new_issue_generation_dependency": true,
+  "priority": 2,
+  "title": "Validate every existing delivery-state object before MCP admission",
+  "inline_comment_id": 4201415449,
+  "inline_url": "https://github.com/tzeusy-org/tze-hud/pull/1390#discussion_r4201415449",
+  "source_only_counterexample_UNEXECUTED": {
+    "preconditions": [
+      "Valid current open marker and an acknowledged completed tool stage exist.",
+      "Existing own0600 regular delivery.json contains {}.",
+      "Delayed PreToolUse arrives for that same prompt/tool identity."
+    ],
+    "path": [
+      ".claude/skills/hud-projection/scripts/portal_hook.py:305 read_state returns existing dictionary {}",
+      ".claude/skills/hud-projection/scripts/portal_hook.py:306 falsy object skips validate_delivery",
+      ".claude/skills/hud-projection/scripts/portal_hook.py:311-312 missing generation initializes state and erases prior terminal history",
+      ".claude/skills/hud-projection/scripts/portal_hook.py:313-322 valid marker admits start without recorded stage",
+      ".claude/skills/hud-projection/scripts/portal_hook.py:362 hud_publish can emit running before any state refusal"
+    ],
+    "claims": "Source control flow only; no actual reproduction, exploit, credential disclosure or filesystem corruption cause claimed. Existing malformed delivery also permits unrelated new activity despite fail-closed promise."
+  },
+  "authority": {
+    "current_original": "Full accepted FIRST requires invalid/unsafe metadata refusal before activity, strict bounded delivery shape and terminal-stage replay retention.",
+    "documentation": "claude-code-hooks.md:231-235 malformed-state failures publish no new activity",
+    "validator": "portal_hook.py:183-197 requires generation/tools/finals (+optional prompt)",
+    "legitimate_writers": [
+      "Absent delivery metadata alone returns default {} before initialization.",
+      "delivery generation initializer emits generation/tools/finals, optional prompt added for tools.",
+      "ACK commit writes that validated/initialized state; no production writer emits {}.",
+      "Metadata.mark writes a different strict marker schema; disable writes independent sentinel."
+    ]
+  },
+  "active_failure_matrix": [
+    {
+      "input": "genuinely absent delivery path",
+      "expected": "normal initialized first delivery",
+      "existing_source": "read_state(default) and initializer",
+      "scope": "preserve"
+    },
+    {
+      "input": "existing {} delivery object with valid current marker",
+      "expected": "refuse before any MCP; disable ordinary jobs",
+      "existing_source": "current validation bypass",
+      "scope": "actual same-fixture RED/repair/recovery required"
+    },
+    {
+      "input": "truthy object missing generation/tools/finals, bad generation/prompt, nonobject tools/finals, invalid stage/key/final hash or over-cap map",
+      "expected": "reject before MCP; retain existing strict validator",
+      "existing_source": "validator/source only; not all variants currently empirical",
+      "scope": "meaningful table branches inside same fixture; no broad schema/factory"
+    },
+    {
+      "input": "valid generation with empty tools/finals maps",
+      "expected": "accepted legitimate initialized state",
+      "existing_source": "real writer shape",
+      "scope": "preserve; do not reject valid empty collections"
+    },
+    {
+      "input": "fully valid state from old generation",
+      "expected": "validate before safe new-generation reset",
+      "existing_source": "current initialization after schema validation",
+      "scope": "preserve"
+    },
+    {
+      "input": "invalid JSON/non-dictionary/oversize/dangling marker or delivery/wrong ownership or modes",
+      "expected": "refuse before MCP",
+      "existing_source": "read_state/private_file/validator",
+      "scope": "retain prior checks; dangling actual GREEN separate"
+    },
+    {
+      "input": "present disabled entry including dangling sentinel",
+      "expected": "ordinary events publish nothing; successful explicit SessionStart recovery only",
+      "existing_source": "lexists current/mark",
+      "scope": "retain actual P2 GREEN/recovery"
+    },
+    {
+      "input": "empty existing marker",
+      "expected": "ordinary activity not admitted; explicit SessionStart validates/refuses",
+      "existing_source": "current falsy return and mark presence validator",
+      "scope": "preserve no-network result, no unrelated rewrite"
+    }
+  ],
+  "bounded_correction_scope": {
+    "production_owner": ".claude/skills/hud-projection/scripts/portal_hook.py",
+    "behavior": "Keep genuine absence distinguishable from every existing parsed delivery object and invoke strict validation for existing objects before reset or MCP, including the empty object. Preserve current lock/disabled/NOFOLLOW/ACK/dedup/recovery behavior. Author chooses the smallest local presence/default distinction; reviewer supplies no patch.",
+    "caller_map": [
+      "read_state -> Metadata.current/mark/purge and delivery",
+      "delivery -> validate_delivery before initializer/admission",
+      "delivery -> applicable/current/stage check -> call_tool -> ACK write_state",
+      "Metadata.current -> handle/supervise/delivery/catch_up before and after ACK",
+      "Metadata.mark -> intentional starts/prompts/Stop/End; disabled sentinel remains separate"
+    ],
+    "nearest_fixture": ".claude/skills/user-test/tests/test_portal_client.py::test_hook_unavailable_malformed_privacy_and_state_failures",
+    "planned_test_delta": "+0~1-0",
+    "empirical_RED_required": "On uncorrected91e with the SAME existing extended fixture, establish valid active marker and acknowledged terminal stage, put {} into own existing delivery path, then drive delayed Pre and assert no additional captured MCP. Preserve actual failure/raw/source/phase/count; do not invent red from this review.",
+    "recovery_required": "Same fixture positive after narrow correction: zero new calls on malformed existing state, silent0 and bounded actual process/group termination, disabled/recovery and absent first-delivery positives. Existing8 plus one normal just test-python under future ROOT lease; all prior assertions retained.",
+    "test_meaning": "Behavior-executing existing loopback/subprocess harness; selected malformed shape branches distinguish genuine absence/valid empty maps/corruption without a new fixture or source-scan species.",
+    "documents_and_evidence": "Keep fail-closed promise. Preserve all prior initial/P2 red and green raw logs/pins, disabled RED unexecuted status, source3lexists correction and owner live limits. Update current evidence without upgrading earlier executions.",
+    "defaults_preserved": [
+      "default rpc60/three positional fields",
+      "hookHTTP350ms/whole1s/End1.2s",
+      "64KiB input/32KiB state/8KiB text/256tools/16prompts",
+      "seven events/intentional start sources/finite600000ms hold",
+      "no Rust/runtime/API/schema/config/manifest/T7/current72/default17/Node160/Tile200 change"
+    ],
+    "rollback": "Same existing branch/PR owner. Opt-in hooks remain removable without other settings or runtime changes."
+  },
+  "root_handoff": "ROOT routes original High author only after this actual PRIMARY terminal/currentWHOLE acceptance and that lane currentClassic PRIMARY acceptance/native binding. No reviewer source/test/probe/retirement/lifecycle action. Existing review remains blocked pending corrected exact-head independent re-review.",
+  "original_live_acceptance": "Required recorded owner payload, HUD progress/final/status/screenshots, zero model mirroring calls and actual tool+prompt<50ms remain UNEXECUTED in same original; no duplicate acceptance bead.",
+  "two_correction_checkpoint": "Same cache fail-closed invariant, now explicitly distinguish actual absence, existing malformed object and valid empty collections/old-generation reset. No new trust boundary/subsystem/risk class or generation.",
+  "thread_id": "PRRT_kwDORtExfM6psejX",
+  "current_thread_unresolved": true
+}
