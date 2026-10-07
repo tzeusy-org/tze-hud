@@ -1,0 +1,132 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+__________ test_hook_unavailable_malformed_privacy_and_state_failures __________
+
+tmp_path = PosixPath('/home/orca/.cache/beads-coordinator-private-tests/pytest-of-orca/pytest-0/test_hook_unavailable_malforme0')
+
+    def test_hook_unavailable_malformed_privacy_and_state_failures(tmp_path):
+        with HookHarness(tmp_path / "failures") as h:
+            h.boot()
+            before = len(h.records)
+            invalid = [b"{", b"[]", b"x" * 65537,
+                       h.payload("PreToolUse", prompt_id=None, tool_name="Read", tool_use_id="x"),
+                       h.payload("PreToolUse", session_id="../escape", tool_name="Read", tool_use_id="x"),
+                       h.payload("PreToolUse", agent_id="subagent", tool_name="Read", tool_use_id="x"),
+                       h.payload("Unknown"), h.payload("SessionStart", source="compact")]
+            for value in invalid:
+                h.finish(h.launch(value))
+            assert len(h.records) == before
+            for final in ["sk-ant-" + "s" * 32, "sk-ant-\x1b[31m" + "s" * 32 + "\x1b[0m", "-----BEGIN PRIVATE KEY-----\nsynthetic", "password=synthetic-canary-12345"]:
+                h.prompt = str(uuid.uuid4())
+                h.event("UserPromptSubmit")
+                h.event("Stop", last_assistant_message=final)
+                assert h.publications()[-1] == {"surface": "portal:synthetic-session", "status": "attached"}
+                assert final not in json.dumps(h.records)
+            h.prompt = str(uuid.uuid4())
+            h.event("UserPromptSubmit")
+            h.event("Stop", last_assistant_message=None)
+            assert "content" not in h.publications()[-1]
+            h.event("Stop", last_assistant_message="status-only")
+            assert h.publications()[-1].get("content") == "status-only"
+            h.prompt = str(uuid.uuid4())
+            h.event("UserPromptSubmit")
+            h.event("Stop", last_assistant_message="界" * 4000)
+            truncated = h.publications()[-1]["content"]
+            assert len(truncated.encode()) <= 8192 and truncated.endswith("[truncated]")
+            assert "�" not in truncated
+            h.event("SessionStart", source="resume")
+            h.prompt = str(uuid.uuid4())
+            h.event("UserPromptSubmit")
+            h.event("PreToolUse", tool_use_id="retained", tool_name="Read")
+            retained_key = h.publications()[-1]["key"]
+            delivery_path = h.marker().parent / "delivery.json"
+            saturated = json.loads(delivery_path.read_text())
+            saturated["tools"] = {f"cc-tool-{i:064x}": 1 for i in range(255)}
+            saturated["tools"][retained_key] = 1
+            delivery_path.write_text(json.dumps(saturated))
+            before = len(h.records)
+            h.event("PreToolUse", tool_use_id="over-cap", tool_name="Read")
+            assert len(h.records) == before
+            h.event("PostToolUse", tool_use_id="retained", tool_name="Read")
+            assert h.publications()[-1]["content"] == "Read: completed"
+            assert len(json.loads(delivery_path.read_text())["tools"]) == 256
+            h.marker().write_text("invalid JSON")
+            before = len(h.records)
+            h.event("PreToolUse", tool_use_id="broken-state", tool_name="Read")
+            assert len(h.records) == before
+            assert (h.marker().parent / "disabled.json").exists()
+    
+        with HookHarness(tmp_path / "unsafe-cache") as h:
+            outside = h.home / "untouched"
+            outside.mkdir()
+            cache = h.home / ".cache/tze-hud"
+            cache.mkdir(parents=True)
+            (cache / "claude-hooks").symlink_to(outside, target_is_directory=True)
+            h.event("SessionStart", source="startup")
+            h.event("UserPromptSubmit")
+            assert not h.records and not list(outside.iterdir())
+    
+        with HookHarness(tmp_path / "unavailable") as h:
+            h.boot()
+            h.server.shutdown()
+            h.server.server_close()
+            started = time.monotonic()
+            h.event("PreToolUse", tool_use_id="down", tool_name="Read")
+            assert time.monotonic() - started < 2.5
+            assert not h.workers()
+            (h.home / ".config/tze-hud/127.0.0.1.psk").unlink()
+            h.event("Stop", last_assistant_message="unpaired")
+            assert not h.workers()
+    
+        # An existing unsafe entry is not absent metadata. Refuse it before any
+        # MCP request, even when the session's marker is otherwise valid/current.
+        for filename in ("delivery.json", "disabled.json"):
+            with HookHarness(tmp_path / ("dangling-" + filename)) as h:
+                h.boot()
+                marker = json.loads(h.marker().read_text())
+                assert marker["prompt"] == h.prompt and not marker["ended"]
+                path = h.marker().parent / filename
+                path.unlink(missing_ok=True)
+                missing = h.home / "missing-state-target"
+                path.symlink_to(missing)
+                assert path.is_symlink() and not path.exists()
+                before = len(h.records)
+                started = time.monotonic()
+                h.event("PreToolUse", tool_use_id="unsafe-state", tool_name="Read")
+                assert len(h.records) == before
+                assert time.monotonic() - started < 2.5
+                assert not h.workers()
+                assert not missing.exists() and path.is_symlink()
+    
+                # Only explicit recovery starts a fresh generation; genuinely
+                # absent delivery metadata still permits ordinary first delivery.
+                path.unlink()
+                h.event("SessionStart", source="resume")
+                assert not (h.marker().parent / "disabled.json").exists()
+                h.prompt = str(uuid.uuid4())
+                h.event("UserPromptSubmit")
+                h.event("PreToolUse", tool_use_id="recovered-state", tool_name="Read")
+                assert h.publications()[-1]["content"] == "Read: running"
+                assert not h.workers()
+    
+        # Existing empty metadata is corruption, not an absent first-delivery file.
+        # Preserve an acknowledged terminal stage before exercising its delayed Pre.
+        with HookHarness(tmp_path / "existing-empty-delivery") as h:
+            h.boot()
+            h.event("PostToolUse", tool_use_id="completed-before-corruption", tool_name="Read")
+            key = h.publications()[-1]["key"]
+            delivery_path = h.marker().parent / "delivery.json"
+            assert json.loads(delivery_path.read_text())["tools"][key] == 2
+            delivery_path.write_text("{}")
+            before = len(h.records)
+            started = time.monotonic()
+            h.event("PreToolUse", tool_use_id="completed-before-corruption", tool_name="Read")
+>           assert len(h.records) == before
+E           AssertionError: assert 6 == 4
+E            +  where 6 = len([{'jsonrpc': '2.0', 'id': 1, 'method': 'tools/call', 'params': {'name': 'hud_publish', 'arguments': {'surface': 'porta... 'tools/call', 'params': {'name': 'hud_hold', 'arguments': {'surface': 'portal:synthetic-session', 'ttl_ms': 600000}}}])
+E            +    where [{'jsonrpc': '2.0', 'id': 1, 'method': 'tools/call', 'params': {'name': 'hud_publish', 'arguments': {'surface': 'porta... 'tools/call', 'params': {'name': 'hud_hold', 'arguments': {'surface': 'portal:synthetic-session', 'ttl_ms': 600000}}}] = <test_portal_client.HookHarness object at 0x74631abbb770>.records
+
+.claude/skills/user-test/tests/test_portal_client.py:511: AssertionError
+=========================== short test summary info ============================
+FAILED .claude/skills/user-test/tests/test_portal_client.py::test_hook_unavailable_malformed_privacy_and_state_failures
+1 failed in 7.54s

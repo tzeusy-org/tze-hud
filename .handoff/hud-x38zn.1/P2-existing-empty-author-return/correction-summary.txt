@@ -1,0 +1,9 @@
+SECOND bounded existing-empty delivery correction for PR1390
+
+Existing delivery {} is now validated before generation reset or MCP admission. True absence still initializes normally, and valid empty maps/old-generation state retain their existing paths. Only three private delivery expressions changed; all default RPC, lock, privacy, replay and transport behavior remains unchanged.
+
+The same existing failure fixture was extended (+0~1-0): acknowledged Post stage2, corruption to{}, delayed same-tool Pre must send zero extra MCP; disable/recovery, valid empty/old-generation states, 18 representative malformed-state branches and empty-marker refusal are also checked. All eight original names/body prefixes and the other seven whole bodies remain.
+
+Actual RED: unchanged Git91e production + fixtureDIRTY1, 1failed, six versus four captured MCP objects. Later new cases were not reached. GREEN: frozen hook+fixtureDIRTY2 bytes while HEAD remained91e; 1passed selector, 8passed file, ONE normal Python suite79pytest+3subtests+103unittest. Published Git blobs must equal GREEN bytes. RED/GREEN raw receipts, full five-owner21-row/eight-class cold return and process sampling limits are retained here.
+
+No Rust/Cargo/GPU/live host/settings/model calls or real secrets were used. Representative malformed branches do not claim every schema/filesystem variant; wrong UID/bool-stage retain source-only qualification. Already-inflight request uncertainty remains. Live HUD status/screenshots, recorded owner payloads, zero mirroring model calls and both tool/prompt<50ms remain UNEXECUTED; this code correction cannot close full original acceptance.

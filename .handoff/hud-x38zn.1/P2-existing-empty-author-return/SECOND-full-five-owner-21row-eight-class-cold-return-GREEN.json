@@ -1,0 +1,2266 @@
+{
+  "schema": "SECOND-same-invariant-full-five-owner-21row-eight-class-cold-return-GREEN-v1",
+  "native_pid": 4136680,
+  "at": 1791333074.1408823,
+  "governing_packet_SHA256": "4e44e57df1e84f059538427bcbfc88b421e02ab53bfb7e97adffe47b24ed5832",
+  "all5_owner_files_read_full_before_repair": [
+    ".claude/skills/hud-projection/scripts/portal_hook.py",
+    ".claude/skills/hud-projection/scripts/portal_client.py",
+    ".claude/skills/hud-projection/references/claude-code-hooks.md",
+    ".claude/skills/hud-projection/SKILL.md",
+    ".claude/skills/user-test/tests/test_portal_client.py"
+  ],
+  "source5_baseline_Git91e": {
+    ".claude/skills/hud-projection/scripts/portal_hook.py": {
+      "bytes": 18204,
+      "sha256": "d62bd0dbfd97f51f3f52b095a23ac15870b734bfaf776edd38f6ffb0a84d0f55"
+    },
+    ".claude/skills/hud-projection/scripts/portal_client.py": {
+      "bytes": 7165,
+      "sha256": "9c6423e54244c76484630f4da687c8ff8056a00cd4fb8858ba86c6c156f6790c"
+    },
+    ".claude/skills/hud-projection/references/claude-code-hooks.md": {
+      "bytes": 12287,
+      "sha256": "ed6754b669b0182a4bc7478090c0cd040629fe478b9ade3efb4bdfa755880283"
+    },
+    ".claude/skills/hud-projection/SKILL.md": {
+      "bytes": 6110,
+      "sha256": "d4063f4f5531ff5ca2b58ae0d48cd8f38e71646c6de7b7ce58fd0181623850e3"
+    },
+    ".claude/skills/user-test/tests/test_portal_client.py": {
+      "bytes": 22465,
+      "sha256": "b6a84122c4c86afb1d36b2ececf50f181c0a5ac0a21d0b4bf776be1b16b32e71"
+    }
+  },
+  "source5_GREEN_DIRTY2": {
+    ".claude/skills/hud-projection/scripts/portal_hook.py": {
+      "bytes": 18229,
+      "sha256": "f43ba314d8a6f1888c6cb75210fd4b3cd3c284032dc0b858a2b76f18a0c60432"
+    },
+    ".claude/skills/hud-projection/scripts/portal_client.py": {
+      "bytes": 7165,
+      "sha256": "9c6423e54244c76484630f4da687c8ff8056a00cd4fb8858ba86c6c156f6790c"
+    },
+    ".claude/skills/hud-projection/references/claude-code-hooks.md": {
+      "bytes": 12287,
+      "sha256": "ed6754b669b0182a4bc7478090c0cd040629fe478b9ade3efb4bdfa755880283"
+    },
+    ".claude/skills/hud-projection/SKILL.md": {
+      "bytes": 6110,
+      "sha256": "d4063f4f5531ff5ca2b58ae0d48cd8f38e71646c6de7b7ce58fd0181623850e3"
+    },
+    ".claude/skills/user-test/tests/test_portal_client.py": {
+      "bytes": 28642,
+      "sha256": "7b1bdeb824da227aeaa192d7cab774b6c8f574cc20bfbe4626172f46e3efef50"
+    }
+  },
+  "baseline_HEAD": "91e571e38af1b7eccb62cc026d71012b5207497e",
+  "source_provenance": "Actual RED on unchanged91e production+fixtureDIRTY1; actual GREEN on frozenDIRTY2 source5 whileHEAD91e. Future publishedGit blobs must match, never fixedGit91e execution.",
+  "rows": [
+    {
+      "contract": "Owner opt-in and official event shape",
+      "historical_independent91e_assessment": {
+        "contract": "Owner opt-in and official event shape",
+        "qualified_source": "SKILL.md; references/claude-code-hooks.md complete settings JSON",
+        "assessment": "Seven command hooks with direct argv. Tools and Stop async; fast marker hooks and bounded SessionEnd synchronous. Intentional startup/resume/clear only; main session agent_id filter. No installation, model hook, asyncRewake, control output, permission override or new MCP tool.",
+        "proof_status": "source and metadata settings parse positive; live owner unexecuted",
+        "nearest_existing_fixture": null,
+        "current_author_scope": "Full current owner/caller source read at91e; production UNFIXED; RED/GREEN upcoming, no earlier result relabeled."
+      },
+      "current_GREEN_status": "Source confirmed, synthetic settings metadata only; owner install/live session UNEXECUTED",
+      "current_GREEN_assessment": "No hooks/settings block or skill/reference change. Existing opt-in seven hooks/directargv/async markers and silence remain unchanged.",
+      "current_source5": {
+        ".claude/skills/hud-projection/scripts/portal_hook.py": {
+          "bytes": 18229,
+          "sha256": "f43ba314d8a6f1888c6cb75210fd4b3cd3c284032dc0b858a2b76f18a0c60432"
+        },
+        ".claude/skills/hud-projection/scripts/portal_client.py": {
+          "bytes": 7165,
+          "sha256": "9c6423e54244c76484630f4da687c8ff8056a00cd4fb8858ba86c6c156f6790c"
+        },
+        ".claude/skills/hud-projection/references/claude-code-hooks.md": {
+          "bytes": 12287,
+          "sha256": "ed6754b669b0182a4bc7478090c0cd040629fe478b9ade3efb4bdfa755880283"
+        },
+        ".claude/skills/hud-projection/SKILL.md": {
+          "bytes": 6110,
+          "sha256": "d4063f4f5531ff5ca2b58ae0d48cd8f38e71646c6de7b7ce58fd0181623850e3"
+        },
+        ".claude/skills/user-test/tests/test_portal_client.py": {
+          "bytes": 28642,
+          "sha256": "7b1bdeb824da227aeaa192d7cab774b6c8f574cc20bfbe4626172f46e3efef50"
+        }
+      },
+      "evidence_paths": [
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/GREEN-freeze/native-terminal-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/existing-empty-GREEN-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/existing8-GREEN-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/normal-test-python-GREEN-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/Python-resource-release.json"
+      ]
+    },
+    {
+      "contract": "Payload and content trust",
+      "historical_independent91e_assessment": {
+        "contract": "Payload and content trust",
+        "qualified_source": ".claude/skills/hud-projection/scripts/portal_hook.py:71-105,57-68,438-461",
+        "assessment": "Bounded64KiB stdin; ASCII session<=96/UUID prompt/tool id<=256 bytes. Normalize before spawning; fixed tool labels discard raw inputs/results/errors/cwd/transcript/unknown fields. Stop uses final text with credential guard before and after control/escape removal, UTF8 truncation8KiB. No transcript access or universal secret classifier.",
+        "proof_status": "source plus existing lifecycle/failure fixture; no credential reads or owner session",
+        "nearest_existing_fixture": ".claude/skills/user-test/tests/test_portal_client.py::test_hook_lifecycle_over_real_mcp_surface",
+        "current_author_scope": "Full current owner/caller source read at91e; production UNFIXED; RED/GREEN upcoming, no earlier result relabeled."
+      },
+      "current_GREEN_status": "Existing lifecycle/failure fixtures actual GREEN PASS; no real credential/model/session reads",
+      "current_GREEN_assessment": "Same normalized metadata, fixedlabels,64KiB input/8KiB final privacy guard. The three admission expressions add no payload forwarding or classifier promise.",
+      "current_source5": {
+        ".claude/skills/hud-projection/scripts/portal_hook.py": {
+          "bytes": 18229,
+          "sha256": "f43ba314d8a6f1888c6cb75210fd4b3cd3c284032dc0b858a2b76f18a0c60432"
+        },
+        ".claude/skills/hud-projection/scripts/portal_client.py": {
+          "bytes": 7165,
+          "sha256": "9c6423e54244c76484630f4da687c8ff8056a00cd4fb8858ba86c6c156f6790c"
+        },
+        ".claude/skills/hud-projection/references/claude-code-hooks.md": {
+          "bytes": 12287,
+          "sha256": "ed6754b669b0182a4bc7478090c0cd040629fe478b9ade3efb4bdfa755880283"
+        },
+        ".claude/skills/hud-projection/SKILL.md": {
+          "bytes": 6110,
+          "sha256": "d4063f4f5531ff5ca2b58ae0d48cd8f38e71646c6de7b7ce58fd0181623850e3"
+        },
+        ".claude/skills/user-test/tests/test_portal_client.py": {
+          "bytes": 28642,
+          "sha256": "7b1bdeb824da227aeaa192d7cab774b6c8f574cc20bfbe4626172f46e3efef50"
+        }
+      },
+      "evidence_paths": [
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/GREEN-freeze/native-terminal-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/existing-empty-GREEN-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/existing8-GREEN-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/normal-test-python-GREEN-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/Python-resource-release.json"
+      ]
+    },
+    {
+      "contract": "Private metadata paths/files",
+      "historical_independent91e_assessment": {
+        "contract": "Private metadata paths/files",
+        "qualified_source": ".claude/skills/hud-projection/scripts/portal_hook.py:108-161,200-224",
+        "assessment": "Hashed hostname/session/profile cache outside repo; own private root/session and regular0600 files, O_NOFOLLOW. Local marker lock never covers network. Atomic replacement, fixed filenames and bounded32KiB.",
+        "proof_status": "positive except existing-empty-delivery object finding; no filesystem behavior run",
+        "nearest_existing_fixture": null,
+        "current_author_scope": "Full current owner/caller source read at91e; production UNFIXED; RED/GREEN upcoming, no earlier result relabeled."
+      },
+      "current_GREEN_status": "Existing failure fixture actual GREEN PASS; wrong-UID and every adversarial filesystem schedule remain source-only",
+      "current_GREEN_assessment": "O_NOFOLLOW/private own0600/cache bounds unchanged. Read absence returns None; existing{} validates instead of reinitializing.",
+      "current_source5": {
+        ".claude/skills/hud-projection/scripts/portal_hook.py": {
+          "bytes": 18229,
+          "sha256": "f43ba314d8a6f1888c6cb75210fd4b3cd3c284032dc0b858a2b76f18a0c60432"
+        },
+        ".claude/skills/hud-projection/scripts/portal_client.py": {
+          "bytes": 7165,
+          "sha256": "9c6423e54244c76484630f4da687c8ff8056a00cd4fb8858ba86c6c156f6790c"
+        },
+        ".claude/skills/hud-projection/references/claude-code-hooks.md": {
+          "bytes": 12287,
+          "sha256": "ed6754b669b0182a4bc7478090c0cd040629fe478b9ade3efb4bdfa755880283"
+        },
+        ".claude/skills/hud-projection/SKILL.md": {
+          "bytes": 6110,
+          "sha256": "d4063f4f5531ff5ca2b58ae0d48cd8f38e71646c6de7b7ce58fd0181623850e3"
+        },
+        ".claude/skills/user-test/tests/test_portal_client.py": {
+          "bytes": 28642,
+          "sha256": "7b1bdeb824da227aeaa192d7cab774b6c8f574cc20bfbe4626172f46e3efef50"
+        }
+      },
+      "evidence_paths": [
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/GREEN-freeze/native-terminal-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/existing-empty-GREEN-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/existing8-GREEN-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/normal-test-python-GREEN-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/Python-resource-release.json"
+      ]
+    },
+    {
+      "contract": "Current dangling-link P2",
+      "historical_independent91e_assessment": {
+        "contract": "Current dangling-link P2",
+        "qualified_source": ".claude/skills/hud-projection/scripts/portal_hook.py:136-147,230-267,301-313",
+        "assessment": "Three lexists changes distinguish dangling entries from absence before MCP. read_state reaches private_file for dangling marker/delivery; disabled presence blocks jobs. Explicit SessionStart only removes its own sentinel. Genuine missing delivery state retains initialization.",
+        "proof_status": "actual author RED delivery only1fail; corrected GREEN delivery+disabled/recovery1pass; independent source5 equality91e",
+        "nearest_existing_fixture": ".claude/skills/user-test/tests/test_portal_client.py::test_hook_unavailable_malformed_privacy_and_state_failures",
+        "current_author_scope": "Full current owner/caller source read at91e; production UNFIXED; RED/GREEN upcoming, no earlier result relabeled."
+      },
+      "current_GREEN_status": "Prior dangling RED/GREEN retained and current fullfile8 PASS",
+      "current_GREEN_assessment": "All three lexists calls untouched. Current failure body contains original dangling delivery/disabled and explicit recovery assertions as an unchanged prefix.",
+      "current_source5": {
+        ".claude/skills/hud-projection/scripts/portal_hook.py": {
+          "bytes": 18229,
+          "sha256": "f43ba314d8a6f1888c6cb75210fd4b3cd3c284032dc0b858a2b76f18a0c60432"
+        },
+        ".claude/skills/hud-projection/scripts/portal_client.py": {
+          "bytes": 7165,
+          "sha256": "9c6423e54244c76484630f4da687c8ff8056a00cd4fb8858ba86c6c156f6790c"
+        },
+        ".claude/skills/hud-projection/references/claude-code-hooks.md": {
+          "bytes": 12287,
+          "sha256": "ed6754b669b0182a4bc7478090c0cd040629fe478b9ade3efb4bdfa755880283"
+        },
+        ".claude/skills/hud-projection/SKILL.md": {
+          "bytes": 6110,
+          "sha256": "d4063f4f5531ff5ca2b58ae0d48cd8f38e71646c6de7b7ce58fd0181623850e3"
+        },
+        ".claude/skills/user-test/tests/test_portal_client.py": {
+          "bytes": 28642,
+          "sha256": "7b1bdeb824da227aeaa192d7cab774b6c8f574cc20bfbe4626172f46e3efef50"
+        }
+      },
+      "evidence_paths": [
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/GREEN-freeze/native-terminal-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/existing-empty-GREEN-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/existing8-GREEN-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/normal-test-python-GREEN-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/Python-resource-release.json"
+      ]
+    },
+    {
+      "contract": "Existing malformed delivery object",
+      "historical_independent91e_assessment": {
+        "contract": "Existing malformed delivery object",
+        "qualified_source": ".claude/skills/hud-projection/scripts/portal_hook.py:183-197,301-313,362",
+        "assessment": "Existing {} is a dictionary but falsy, skips validate_delivery, and resets into fresh state before publication. Validator requires generation/tools/finals. No legitimate writer emits {}. A completed stage can be forgotten and delayed Pre can replace it. True absence and a valid empty tools/finals state must remain distinct.",
+        "proof_status": "P2 correction-required; source-derived UNEXECUTED",
+        "nearest_existing_fixture": ".claude/skills/user-test/tests/test_portal_client.py::test_hook_unavailable_malformed_privacy_and_state_failures",
+        "current_author_scope": "Full current owner/caller source read at91e; production UNFIXED; RED/GREEN upcoming, no earlier result relabeled."
+      },
+      "current_GREEN_status": "ACTUAL RED1 then GREEN1: acknowledged Post2, existing{} delayed Pre now zero MCP",
+      "current_GREEN_assessment": "Exactly three private delivery expressions distinguish missing None from existing dictionaries; malformed existing object disables before send. RED actual6vs4 retained, all later RED legs UNEXECUTED.",
+      "current_source5": {
+        ".claude/skills/hud-projection/scripts/portal_hook.py": {
+          "bytes": 18229,
+          "sha256": "f43ba314d8a6f1888c6cb75210fd4b3cd3c284032dc0b858a2b76f18a0c60432"
+        },
+        ".claude/skills/hud-projection/scripts/portal_client.py": {
+          "bytes": 7165,
+          "sha256": "9c6423e54244c76484630f4da687c8ff8056a00cd4fb8858ba86c6c156f6790c"
+        },
+        ".claude/skills/hud-projection/references/claude-code-hooks.md": {
+          "bytes": 12287,
+          "sha256": "ed6754b669b0182a4bc7478090c0cd040629fe478b9ade3efb4bdfa755880283"
+        },
+        ".claude/skills/hud-projection/SKILL.md": {
+          "bytes": 6110,
+          "sha256": "d4063f4f5531ff5ca2b58ae0d48cd8f38e71646c6de7b7ce58fd0181623850e3"
+        },
+        ".claude/skills/user-test/tests/test_portal_client.py": {
+          "bytes": 28642,
+          "sha256": "7b1bdeb824da227aeaa192d7cab774b6c8f574cc20bfbe4626172f46e3efef50"
+        }
+      },
+      "evidence_paths": [
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/GREEN-freeze/native-terminal-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/existing-empty-GREEN-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/existing8-GREEN-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/normal-test-python-GREEN-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/Python-resource-release.json"
+      ]
+    },
+    {
+      "contract": "Other invalid-state variants",
+      "historical_independent91e_assessment": {
+        "contract": "Other invalid-state variants",
+        "qualified_source": ".claude/skills/hud-projection/scripts/portal_hook.py:136-147,166-197,230-267,301-313",
+        "assessment": "Invalid JSON/nondictionary/oversize fails read. Truthy missing or malformed generation/tools/finals enters validator; invalid terminal values/UUID/hash shapes are rejected before send. Empty marker admits no ordinary activity and explicit SessionStart validates existing marker. Disabled contents are irrelevant: any present entry blocks. Existing {} delivery is the uncovered truthiness branch.",
+        "proof_status": "qualified source only; current fixtures cover malformed marker/directory link/caps, not every schema variant",
+        "nearest_existing_fixture": null,
+        "current_author_scope": "Full current owner/caller source read at91e; production UNFIXED; RED/GREEN upcoming, no earlier result relabeled."
+      },
+      "current_GREEN_status": "18 representative malformed branches actual GREEN PASS; not all possible schema or filesystem variants empirical",
+      "current_GREEN_assessment": "Required member/map/generation/prompt/stage/key/hash/cap/unknownmember/nondictionary/invalidJSON/oversize/unsafe-mode cases are exercised inside the same fixture. Bool-stage and wrong-UID remain existing source checks, not claimed executed new branches.",
+      "current_source5": {
+        ".claude/skills/hud-projection/scripts/portal_hook.py": {
+          "bytes": 18229,
+          "sha256": "f43ba314d8a6f1888c6cb75210fd4b3cd3c284032dc0b858a2b76f18a0c60432"
+        },
+        ".claude/skills/hud-projection/scripts/portal_client.py": {
+          "bytes": 7165,
+          "sha256": "9c6423e54244c76484630f4da687c8ff8056a00cd4fb8858ba86c6c156f6790c"
+        },
+        ".claude/skills/hud-projection/references/claude-code-hooks.md": {
+          "bytes": 12287,
+          "sha256": "ed6754b669b0182a4bc7478090c0cd040629fe478b9ade3efb4bdfa755880283"
+        },
+        ".claude/skills/hud-projection/SKILL.md": {
+          "bytes": 6110,
+          "sha256": "d4063f4f5531ff5ca2b58ae0d48cd8f38e71646c6de7b7ce58fd0181623850e3"
+        },
+        ".claude/skills/user-test/tests/test_portal_client.py": {
+          "bytes": 28642,
+          "sha256": "7b1bdeb824da227aeaa192d7cab774b6c8f574cc20bfbe4626172f46e3efef50"
+        }
+      },
+      "evidence_paths": [
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/GREEN-freeze/native-terminal-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/existing-empty-GREEN-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/existing8-GREEN-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/normal-test-python-GREEN-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/Python-resource-release.json"
+      ]
+    },
+    {
+      "contract": "Lifecycle admission",
+      "historical_independent91e_assessment": {
+        "contract": "Lifecycle admission",
+        "qualified_source": ".claude/skills/hud-projection/scripts/portal_hook.py:242-267,405-433",
+        "assessment": "Fast marker selects generation/current prompt, closes Stop prompt before delivery, ends SessionEnd before clear. Compact/fork/unknown start does not reopen; successful explicit start can recover disabled metadata.",
+        "proof_status": "source/retained existing replay fixture positive; actual host timings unexecuted",
+        "nearest_existing_fixture": ".claude/skills/user-test/tests/test_portal_client.py::test_hook_subprocess_replay_prompt_races_and_reaping",
+        "current_author_scope": "Full current owner/caller source read at91e; production UNFIXED; RED/GREEN upcoming, no earlier result relabeled."
+      },
+      "current_GREEN_status": "Existing8 fullfile actual GREEN PASS; live host max/p95 UNEXECUTED",
+      "current_GREEN_assessment": "Fast marker/admission/SessionStart handling unchanged. Corrupt entry refusal, subsequent disabled jobs and owner-fixture removing corruption then explicit successful SessionStart recovery are positive.",
+      "current_source5": {
+        ".claude/skills/hud-projection/scripts/portal_hook.py": {
+          "bytes": 18229,
+          "sha256": "f43ba314d8a6f1888c6cb75210fd4b3cd3c284032dc0b858a2b76f18a0c60432"
+        },
+        ".claude/skills/hud-projection/scripts/portal_client.py": {
+          "bytes": 7165,
+          "sha256": "9c6423e54244c76484630f4da687c8ff8056a00cd4fb8858ba86c6c156f6790c"
+        },
+        ".claude/skills/hud-projection/references/claude-code-hooks.md": {
+          "bytes": 12287,
+          "sha256": "ed6754b669b0182a4bc7478090c0cd040629fe478b9ade3efb4bdfa755880283"
+        },
+        ".claude/skills/hud-projection/SKILL.md": {
+          "bytes": 6110,
+          "sha256": "d4063f4f5531ff5ca2b58ae0d48cd8f38e71646c6de7b7ce58fd0181623850e3"
+        },
+        ".claude/skills/user-test/tests/test_portal_client.py": {
+          "bytes": 28642,
+          "sha256": "7b1bdeb824da227aeaa192d7cab774b6c8f574cc20bfbe4626172f46e3efef50"
+        }
+      },
+      "evidence_paths": [
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/GREEN-freeze/native-terminal-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/existing-empty-GREEN-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/existing8-GREEN-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/normal-test-python-GREEN-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/Python-resource-release.json"
+      ]
+    },
+    {
+      "contract": "Replay/stage/final hash",
+      "historical_independent91e_assessment": {
+        "contract": "Replay/stage/final hash",
+        "qualified_source": ".claude/skills/hud-projection/scripts/portal_hook.py:290-326,366-375",
+        "assessment": "Prompt+tool hash key; terminal stage dominates delayed start, tools after Stop rejected, acknowledged equal final hashes dedup. Typed content hashing distinguishes absent text from literal status-only; failed same-prompt Stop can retry without reopening tools. Existing empty-state corruption undermines preserved terminal history.",
+        "proof_status": "positive ordinary trace; existing-empty-state counterexample UNEXECUTED; original dedup red/recovery retained",
+        "nearest_existing_fixture": null,
+        "current_author_scope": "Full current owner/caller source read at91e; production UNFIXED; RED/GREEN upcoming, no earlier result relabeled."
+      },
+      "current_GREEN_status": "Existing replay fixture and new same-tool completion corruption/refusal actual GREEN PASS",
+      "current_GREEN_assessment": "Current/old valid generation branches retain empty-map admission and safe reset, then Post/delayedPre terminal dominance. No new retry/store/epoch rule.",
+      "current_source5": {
+        ".claude/skills/hud-projection/scripts/portal_hook.py": {
+          "bytes": 18229,
+          "sha256": "f43ba314d8a6f1888c6cb75210fd4b3cd3c284032dc0b858a2b76f18a0c60432"
+        },
+        ".claude/skills/hud-projection/scripts/portal_client.py": {
+          "bytes": 7165,
+          "sha256": "9c6423e54244c76484630f4da687c8ff8056a00cd4fb8858ba86c6c156f6790c"
+        },
+        ".claude/skills/hud-projection/references/claude-code-hooks.md": {
+          "bytes": 12287,
+          "sha256": "ed6754b669b0182a4bc7478090c0cd040629fe478b9ade3efb4bdfa755880283"
+        },
+        ".claude/skills/hud-projection/SKILL.md": {
+          "bytes": 6110,
+          "sha256": "d4063f4f5531ff5ca2b58ae0d48cd8f38e71646c6de7b7ce58fd0181623850e3"
+        },
+        ".claude/skills/user-test/tests/test_portal_client.py": {
+          "bytes": 28642,
+          "sha256": "7b1bdeb824da227aeaa192d7cab774b6c8f574cc20bfbe4626172f46e3efef50"
+        }
+      },
+      "evidence_paths": [
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/GREEN-freeze/native-terminal-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/existing-empty-GREEN-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/existing8-GREEN-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/normal-test-python-GREEN-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/Python-resource-release.json"
+      ]
+    },
+    {
+      "contract": "Observable races and catch-up",
+      "historical_independent91e_assessment": {
+        "contract": "Observable races and catch-up",
+        "qualified_source": ".claude/skills/hud-projection/scripts/portal_hook.py:338-381",
+        "assessment": "Independent marker before-send and after-ACK checks, one content-free same-generation active catch-up or same-generation ended clear; newer observable generation suppresses old cleanup.",
+        "proof_status": "existing controlled acknowledgment race positive; not universal transport ordering",
+        "nearest_existing_fixture": null,
+        "current_author_scope": "Full current owner/caller source read at91e; production UNFIXED; RED/GREEN upcoming, no earlier result relabeled."
+      },
+      "current_GREEN_status": "Existing controlled acknowledgment-race fixture actual GREEN PASS; no universal inflight ordering",
+      "current_GREEN_assessment": "Single catch-up, before-send/after-ACK marker comparison and newer-generation behavior unchanged.",
+      "current_source5": {
+        ".claude/skills/hud-projection/scripts/portal_hook.py": {
+          "bytes": 18229,
+          "sha256": "f43ba314d8a6f1888c6cb75210fd4b3cd3c284032dc0b858a2b76f18a0c60432"
+        },
+        ".claude/skills/hud-projection/scripts/portal_client.py": {
+          "bytes": 7165,
+          "sha256": "9c6423e54244c76484630f4da687c8ff8056a00cd4fb8858ba86c6c156f6790c"
+        },
+        ".claude/skills/hud-projection/references/claude-code-hooks.md": {
+          "bytes": 12287,
+          "sha256": "ed6754b669b0182a4bc7478090c0cd040629fe478b9ade3efb4bdfa755880283"
+        },
+        ".claude/skills/hud-projection/SKILL.md": {
+          "bytes": 6110,
+          "sha256": "d4063f4f5531ff5ca2b58ae0d48cd8f38e71646c6de7b7ce58fd0181623850e3"
+        },
+        ".claude/skills/user-test/tests/test_portal_client.py": {
+          "bytes": 28642,
+          "sha256": "7b1bdeb824da227aeaa192d7cab774b6c8f574cc20bfbe4626172f46e3efef50"
+        }
+      },
+      "evidence_paths": [
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/GREEN-freeze/native-terminal-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/existing-empty-GREEN-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/existing8-GREEN-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/normal-test-python-GREEN-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/Python-resource-release.json"
+      ]
+    },
+    {
+      "contract": "Transport uncertainty",
+      "historical_independent91e_assessment": {
+        "contract": "Transport uncertainty",
+        "qualified_source": "references/claude-code-hooks.md:208-229; .claude/skills/hud-projection/scripts/portal_hook.py:328-402",
+        "assessment": "Already-sent/timed-out HTTP can apply after local marker/clear; killing client is not rollback. No server epoch/CAS. Late execution after resume lacks documented generation ID. Next genuine event reconciles; no persistent retries.",
+        "proof_status": "explicit accepted limitation, no simulated live server guarantee",
+        "nearest_existing_fixture": null,
+        "current_author_scope": "Full current owner/caller source read at91e; production UNFIXED; RED/GREEN upcoming, no earlier result relabeled."
+      },
+      "current_GREEN_status": "Accepted transport uncertainty unchanged",
+      "current_GREEN_assessment": "Timed-out/already-sent request can still apply; local teardown is not server rollback. No persistent daemon/retry/CAS/epoch introduced.",
+      "current_source5": {
+        ".claude/skills/hud-projection/scripts/portal_hook.py": {
+          "bytes": 18229,
+          "sha256": "f43ba314d8a6f1888c6cb75210fd4b3cd3c284032dc0b858a2b76f18a0c60432"
+        },
+        ".claude/skills/hud-projection/scripts/portal_client.py": {
+          "bytes": 7165,
+          "sha256": "9c6423e54244c76484630f4da687c8ff8056a00cd4fb8858ba86c6c156f6790c"
+        },
+        ".claude/skills/hud-projection/references/claude-code-hooks.md": {
+          "bytes": 12287,
+          "sha256": "ed6754b669b0182a4bc7478090c0cd040629fe478b9ade3efb4bdfa755880283"
+        },
+        ".claude/skills/hud-projection/SKILL.md": {
+          "bytes": 6110,
+          "sha256": "d4063f4f5531ff5ca2b58ae0d48cd8f38e71646c6de7b7ce58fd0181623850e3"
+        },
+        ".claude/skills/user-test/tests/test_portal_client.py": {
+          "bytes": 28642,
+          "sha256": "7b1bdeb824da227aeaa192d7cab774b6c8f574cc20bfbe4626172f46e3efef50"
+        }
+      },
+      "evidence_paths": [
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/GREEN-freeze/native-terminal-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/existing-empty-GREEN-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/existing8-GREEN-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/normal-test-python-GREEN-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/Python-resource-release.json"
+      ]
+    },
+    {
+      "contract": "Process bounds and silent failure",
+      "historical_independent91e_assessment": {
+        "contract": "Process bounds and silent failure",
+        "qualified_source": ".claude/skills/hud-projection/scripts/portal_hook.py:384-461",
+        "assessment": "HTTP350ms/whole1s/End1.2s, finite admitted child; kill/reap before delivery lock release. Only normalized child stdin; stdout/stderr sink; silent0 on malformed/unsupported/unpaired/transport errors. Supervisor/watchdog fixtures inspect owned children.",
+        "proof_status": "author actual fixture positives; no reviewer execution, scheduler/startup/filesystem overhead not certified",
+        "nearest_existing_fixture": null,
+        "current_author_scope": "Full current owner/caller source read at91e; production UNFIXED; RED/GREEN upcoming, no earlier result relabeled."
+      },
+      "current_GREEN_status": "Existing supervision/race/failure fixtures GREEN PASS; observed process teardown verified",
+      "current_GREEN_assessment": "All four runner receipts are terminal, source immutable perphase, observed groups absent. Short-lived unsampled reparented descendants not individually claimed; no <50ms live host assertion.",
+      "current_source5": {
+        ".claude/skills/hud-projection/scripts/portal_hook.py": {
+          "bytes": 18229,
+          "sha256": "f43ba314d8a6f1888c6cb75210fd4b3cd3c284032dc0b858a2b76f18a0c60432"
+        },
+        ".claude/skills/hud-projection/scripts/portal_client.py": {
+          "bytes": 7165,
+          "sha256": "9c6423e54244c76484630f4da687c8ff8056a00cd4fb8858ba86c6c156f6790c"
+        },
+        ".claude/skills/hud-projection/references/claude-code-hooks.md": {
+          "bytes": 12287,
+          "sha256": "ed6754b669b0182a4bc7478090c0cd040629fe478b9ade3efb4bdfa755880283"
+        },
+        ".claude/skills/hud-projection/SKILL.md": {
+          "bytes": 6110,
+          "sha256": "d4063f4f5531ff5ca2b58ae0d48cd8f38e71646c6de7b7ce58fd0181623850e3"
+        },
+        ".claude/skills/user-test/tests/test_portal_client.py": {
+          "bytes": 28642,
+          "sha256": "7b1bdeb824da227aeaa192d7cab774b6c8f574cc20bfbe4626172f46e3efef50"
+        }
+      },
+      "evidence_paths": [
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/GREEN-freeze/native-terminal-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/existing-empty-GREEN-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/existing8-GREEN-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/normal-test-python-GREEN-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/Python-resource-release.json"
+      ]
+    },
+    {
+      "contract": "Finite lifetime and purge",
+      "historical_independent91e_assessment": {
+        "contract": "Finite lifetime and purge",
+        "qualified_source": ".claude/skills/hud-projection/scripts/portal_hook.py:269-287,376-379",
+        "assessment": "Separate600000ms hold, no publishTTL/indefinite hold/daemon/polling. At most16 owned directory entries checked for24h ended state; lock files retained. SessionEnd best-effort and finite reclaim fallback.",
+        "proof_status": "source and existing cleanup fixture; no guaranteed expiry fairness or host latency claim",
+        "nearest_existing_fixture": null,
+        "current_author_scope": "Full current owner/caller source read at91e; production UNFIXED; RED/GREEN upcoming, no earlier result relabeled."
+      },
+      "current_GREEN_status": "Existing lifecycle cleanup fixture GREEN PASS; finite lifetime source unchanged",
+      "current_GREEN_assessment": "600000ms hold/24h bounded cleanup/16 entries and best-effort SessionEnd remain. No perpetual hold or timer.",
+      "current_source5": {
+        ".claude/skills/hud-projection/scripts/portal_hook.py": {
+          "bytes": 18229,
+          "sha256": "f43ba314d8a6f1888c6cb75210fd4b3cd3c284032dc0b858a2b76f18a0c60432"
+        },
+        ".claude/skills/hud-projection/scripts/portal_client.py": {
+          "bytes": 7165,
+          "sha256": "9c6423e54244c76484630f4da687c8ff8056a00cd4fb8858ba86c6c156f6790c"
+        },
+        ".claude/skills/hud-projection/references/claude-code-hooks.md": {
+          "bytes": 12287,
+          "sha256": "ed6754b669b0182a4bc7478090c0cd040629fe478b9ade3efb4bdfa755880283"
+        },
+        ".claude/skills/hud-projection/SKILL.md": {
+          "bytes": 6110,
+          "sha256": "d4063f4f5531ff5ca2b58ae0d48cd8f38e71646c6de7b7ce58fd0181623850e3"
+        },
+        ".claude/skills/user-test/tests/test_portal_client.py": {
+          "bytes": 28642,
+          "sha256": "7b1bdeb824da227aeaa192d7cab774b6c8f574cc20bfbe4626172f46e3efef50"
+        }
+      },
+      "evidence_paths": [
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/GREEN-freeze/native-terminal-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/existing-empty-GREEN-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/existing8-GREEN-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/normal-test-python-GREEN-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/Python-resource-release.json"
+      ]
+    },
+    {
+      "contract": "Public/default Python callers",
+      "historical_independent91e_assessment": {
+        "contract": "Public/default Python callers",
+        "qualified_source": "portal_client.py:57-107 and all commands; test_portal_client.py original5",
+        "assessment": "rpc default60 and original three positional fields; call_tool without timeout retains old call shape, only hook opts short keyword deadline. CLI publish/poll/ack/status/clear/hold and error exits preserved.",
+        "proof_status": "all8names/prefixes, other7whole, original5prefixes independently AST-equal; AST is metadata not execution",
+        "nearest_existing_fixture": null,
+        "current_author_scope": "Full current owner/caller source read at91e; production UNFIXED; RED/GREEN upcoming, no earlier result relabeled."
+      },
+      "current_GREEN_status": "Original8 bodies retained, other7 whole AST; existing8 current PASS; client byteexact91e",
+      "current_GREEN_assessment": "RPC default60/positional call compatibility and hook-specific shorttimeout untouched. No public Python signature/helper changes.",
+      "current_source5": {
+        ".claude/skills/hud-projection/scripts/portal_hook.py": {
+          "bytes": 18229,
+          "sha256": "f43ba314d8a6f1888c6cb75210fd4b3cd3c284032dc0b858a2b76f18a0c60432"
+        },
+        ".claude/skills/hud-projection/scripts/portal_client.py": {
+          "bytes": 7165,
+          "sha256": "9c6423e54244c76484630f4da687c8ff8056a00cd4fb8858ba86c6c156f6790c"
+        },
+        ".claude/skills/hud-projection/references/claude-code-hooks.md": {
+          "bytes": 12287,
+          "sha256": "ed6754b669b0182a4bc7478090c0cd040629fe478b9ade3efb4bdfa755880283"
+        },
+        ".claude/skills/hud-projection/SKILL.md": {
+          "bytes": 6110,
+          "sha256": "d4063f4f5531ff5ca2b58ae0d48cd8f38e71646c6de7b7ce58fd0181623850e3"
+        },
+        ".claude/skills/user-test/tests/test_portal_client.py": {
+          "bytes": 28642,
+          "sha256": "7b1bdeb824da227aeaa192d7cab774b6c8f574cc20bfbe4626172f46e3efef50"
+        }
+      },
+      "evidence_paths": [
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/GREEN-freeze/native-terminal-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/existing-empty-GREEN-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/existing8-GREEN-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/normal-test-python-GREEN-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/Python-resource-release.json"
+      ]
+    },
+    {
+      "contract": "Production surface and owner boundary",
+      "historical_independent91e_assessment": {
+        "contract": "Production surface and owner boundary",
+        "qualified_source": "portal_op.rs full; hub.rs:342-425; runtime MCP bridge rg; docs/api.md",
+        "assessment": "Existing tools/call -> authenticated agent+portal key -> publish/status/hold/clear. Coalescing same key replaces latest unit; status applied after text activation. Hook8KiB text fits16KiB, session<=96 and key<=73 fit128. No input collection/permission relay absorption.",
+        "proof_status": "qualified unchanged source; loopback fixtures are not live HUD",
+        "nearest_existing_fixture": null,
+        "current_author_scope": "Full current owner/caller source read at91e; production UNFIXED; RED/GREEN upcoming, no earlier result relabeled."
+      },
+      "current_GREEN_status": "Python source boundary preserved; no live HUD execution",
+      "current_GREEN_assessment": "Same tools/call agent+portal surface semantics; synthetic loopback validates captured calls only. No input relay/permission/schema/Rust edits.",
+      "current_source5": {
+        ".claude/skills/hud-projection/scripts/portal_hook.py": {
+          "bytes": 18229,
+          "sha256": "f43ba314d8a6f1888c6cb75210fd4b3cd3c284032dc0b858a2b76f18a0c60432"
+        },
+        ".claude/skills/hud-projection/scripts/portal_client.py": {
+          "bytes": 7165,
+          "sha256": "9c6423e54244c76484630f4da687c8ff8056a00cd4fb8858ba86c6c156f6790c"
+        },
+        ".claude/skills/hud-projection/references/claude-code-hooks.md": {
+          "bytes": 12287,
+          "sha256": "ed6754b669b0182a4bc7478090c0cd040629fe478b9ade3efb4bdfa755880283"
+        },
+        ".claude/skills/hud-projection/SKILL.md": {
+          "bytes": 6110,
+          "sha256": "d4063f4f5531ff5ca2b58ae0d48cd8f38e71646c6de7b7ce58fd0181623850e3"
+        },
+        ".claude/skills/user-test/tests/test_portal_client.py": {
+          "bytes": 28642,
+          "sha256": "7b1bdeb824da227aeaa192d7cab774b6c8f574cc20bfbe4626172f46e3efef50"
+        }
+      },
+      "evidence_paths": [
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/GREEN-freeze/native-terminal-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/existing-empty-GREEN-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/existing8-GREEN-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/normal-test-python-GREEN-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/Python-resource-release.json"
+      ]
+    },
+    {
+      "contract": "Defaults and protected owners",
+      "historical_independent91e_assessment": {
+        "contract": "Defaults and protected owners",
+        "qualified_source": "Git full non-evidence pathset and source5 hash manifest",
+        "assessment": "Only five Python/docs/skill/test owners plus evidence paths; no Rust/API/schema/config/manifest/budgets/current72/T7/default17/Node160/Tile200 changed. Parser7/theme6/Classic11/permission relay remain separate owners.",
+        "proof_status": "source preservation, no Rust/fullCI or closure claims",
+        "nearest_existing_fixture": null,
+        "current_author_scope": "Full current owner/caller source read at91e; production UNFIXED; RED/GREEN upcoming, no earlier result relabeled."
+      },
+      "current_GREEN_status": "Source protection verified by five-owner snapshot and only2 tracked diffs",
+      "current_GREEN_assessment": "Three nonmodified owners byteexact91e, hook only3 expressions, existing fixture append only. All Rust/config/manifests/workflows/72/T7/default17/Node160/Tile200 unchanged in this correction.",
+      "current_source5": {
+        ".claude/skills/hud-projection/scripts/portal_hook.py": {
+          "bytes": 18229,
+          "sha256": "f43ba314d8a6f1888c6cb75210fd4b3cd3c284032dc0b858a2b76f18a0c60432"
+        },
+        ".claude/skills/hud-projection/scripts/portal_client.py": {
+          "bytes": 7165,
+          "sha256": "9c6423e54244c76484630f4da687c8ff8056a00cd4fb8858ba86c6c156f6790c"
+        },
+        ".claude/skills/hud-projection/references/claude-code-hooks.md": {
+          "bytes": 12287,
+          "sha256": "ed6754b669b0182a4bc7478090c0cd040629fe478b9ade3efb4bdfa755880283"
+        },
+        ".claude/skills/hud-projection/SKILL.md": {
+          "bytes": 6110,
+          "sha256": "d4063f4f5531ff5ca2b58ae0d48cd8f38e71646c6de7b7ce58fd0181623850e3"
+        },
+        ".claude/skills/user-test/tests/test_portal_client.py": {
+          "bytes": 28642,
+          "sha256": "7b1bdeb824da227aeaa192d7cab774b6c8f574cc20bfbe4626172f46e3efef50"
+        }
+      },
+      "evidence_paths": [
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/GREEN-freeze/native-terminal-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/existing-empty-GREEN-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/existing8-GREEN-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/normal-test-python-GREEN-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/Python-resource-release.json"
+      ]
+    },
+    {
+      "contract": "Growth and per-phase evidence",
+      "historical_independent91e_assessment": {
+        "contract": "Growth and per-phase evidence",
+        "qualified_source": "test_portal_client.py and author current834 raw receipts",
+        "assessment": "Original+3~1-0, correction+0~1-0. Nearest cohesive subprocess/loopback species retained, no source guard/new fixture. RED HEAD2d fixture dirty1 reproduces delivery extra call; disabled RED not reached. GREEN HEAD2d dirty2 fixed source5 equals published91e.",
+        "proof_status": "verified actual1fail/1pass/8pass/79pytest+3subtests/103unittest; not immutable2d fix execution",
+        "nearest_existing_fixture": null,
+        "current_author_scope": "Full current owner/caller source read at91e; production UNFIXED; RED/GREEN upcoming, no earlier result relabeled."
+      },
+      "current_GREEN_status": "Correction+0~1-0, all8 names and historical original+3~1-0 retained",
+      "current_GREEN_assessment": "RED HEAD91e fixtureDIRTY1 then GREEN HEAD91e hook+fixtureDIRTY2; published future Git blobs must equal GREEN. Four current raw gates preserve1FAIL then1/8/79+3subtests/103 PASS, no immutable91e fix execution.",
+      "current_source5": {
+        ".claude/skills/hud-projection/scripts/portal_hook.py": {
+          "bytes": 18229,
+          "sha256": "f43ba314d8a6f1888c6cb75210fd4b3cd3c284032dc0b858a2b76f18a0c60432"
+        },
+        ".claude/skills/hud-projection/scripts/portal_client.py": {
+          "bytes": 7165,
+          "sha256": "9c6423e54244c76484630f4da687c8ff8056a00cd4fb8858ba86c6c156f6790c"
+        },
+        ".claude/skills/hud-projection/references/claude-code-hooks.md": {
+          "bytes": 12287,
+          "sha256": "ed6754b669b0182a4bc7478090c0cd040629fe478b9ade3efb4bdfa755880283"
+        },
+        ".claude/skills/hud-projection/SKILL.md": {
+          "bytes": 6110,
+          "sha256": "d4063f4f5531ff5ca2b58ae0d48cd8f38e71646c6de7b7ce58fd0181623850e3"
+        },
+        ".claude/skills/user-test/tests/test_portal_client.py": {
+          "bytes": 28642,
+          "sha256": "7b1bdeb824da227aeaa192d7cab774b6c8f574cc20bfbe4626172f46e3efef50"
+        }
+      },
+      "evidence_paths": [
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/GREEN-freeze/native-terminal-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/existing-empty-GREEN-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/existing8-GREEN-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/normal-test-python-GREEN-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/Python-resource-release.json"
+      ]
+    },
+    {
+      "contract": "Original AC1 snippet",
+      "historical_independent91e_assessment": {
+        "contract": "Original AC1 snippet",
+        "qualified_source": "SKILL.md/reference complete JSON",
+        "assessment": "Documented opt-in block delivered and metadata shape inspected. Nothing installed.",
+        "proof_status": "code portion implemented; actual owner enablement pending",
+        "nearest_existing_fixture": null,
+        "current_author_scope": "Full current owner/caller source read at91e; production UNFIXED; RED/GREEN upcoming, no earlier result relabeled."
+      },
+      "current_GREEN_status": "Original AC1 code/document portion unchanged; owner enablement pending",
+      "current_GREEN_assessment": "Existing opt-in settings block retained byteexact. No settings installation.",
+      "current_source5": {
+        ".claude/skills/hud-projection/scripts/portal_hook.py": {
+          "bytes": 18229,
+          "sha256": "f43ba314d8a6f1888c6cb75210fd4b3cd3c284032dc0b858a2b76f18a0c60432"
+        },
+        ".claude/skills/hud-projection/scripts/portal_client.py": {
+          "bytes": 7165,
+          "sha256": "9c6423e54244c76484630f4da687c8ff8056a00cd4fb8858ba86c6c156f6790c"
+        },
+        ".claude/skills/hud-projection/references/claude-code-hooks.md": {
+          "bytes": 12287,
+          "sha256": "ed6754b669b0182a4bc7478090c0cd040629fe478b9ade3efb4bdfa755880283"
+        },
+        ".claude/skills/hud-projection/SKILL.md": {
+          "bytes": 6110,
+          "sha256": "d4063f4f5531ff5ca2b58ae0d48cd8f38e71646c6de7b7ce58fd0181623850e3"
+        },
+        ".claude/skills/user-test/tests/test_portal_client.py": {
+          "bytes": 28642,
+          "sha256": "7b1bdeb824da227aeaa192d7cab774b6c8f574cc20bfbe4626172f46e3efef50"
+        }
+      },
+      "evidence_paths": [
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/GREEN-freeze/native-terminal-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/existing-empty-GREEN-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/existing8-GREEN-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/normal-test-python-GREEN-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/Python-resource-release.json"
+      ]
+    },
+    {
+      "contract": "Original AC2 live owner HUD/zero model mirroring calls",
+      "historical_independent91e_assessment": {
+        "contract": "Original AC2 live owner HUD/zero model mirroring calls",
+        "qualified_source": "original exact AC2/reference owner verification",
+        "assessment": "Real interactive progress/final/status/screenshots and filtered model transcript showing zero mirroring hud_publish calls remain required in same original. Static source adds no model call; it does not prove a recorded owner session.",
+        "proof_status": "UNEXECUTED; original remains PARTIAL even eventual code merge",
+        "nearest_existing_fixture": null,
+        "current_author_scope": "Full current owner/caller source read at91e; production UNFIXED; RED/GREEN upcoming, no earlier result relabeled."
+      },
+      "current_GREEN_status": "Original AC2 live status/screenshots/model-call transcript UNEXECUTED",
+      "current_GREEN_assessment": "No model calls introduced by source. Synthetic tests cannot establish actual owner zero-mirroring-modelcalls or live HUD appearance.",
+      "current_source5": {
+        ".claude/skills/hud-projection/scripts/portal_hook.py": {
+          "bytes": 18229,
+          "sha256": "f43ba314d8a6f1888c6cb75210fd4b3cd3c284032dc0b858a2b76f18a0c60432"
+        },
+        ".claude/skills/hud-projection/scripts/portal_client.py": {
+          "bytes": 7165,
+          "sha256": "9c6423e54244c76484630f4da687c8ff8056a00cd4fb8858ba86c6c156f6790c"
+        },
+        ".claude/skills/hud-projection/references/claude-code-hooks.md": {
+          "bytes": 12287,
+          "sha256": "ed6754b669b0182a4bc7478090c0cd040629fe478b9ade3efb4bdfa755880283"
+        },
+        ".claude/skills/hud-projection/SKILL.md": {
+          "bytes": 6110,
+          "sha256": "d4063f4f5531ff5ca2b58ae0d48cd8f38e71646c6de7b7ce58fd0181623850e3"
+        },
+        ".claude/skills/user-test/tests/test_portal_client.py": {
+          "bytes": 28642,
+          "sha256": "7b1bdeb824da227aeaa192d7cab774b6c8f574cc20bfbe4626172f46e3efef50"
+        }
+      },
+      "evidence_paths": [
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/GREEN-freeze/native-terminal-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/existing-empty-GREEN-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/existing8-GREEN-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/normal-test-python-GREEN-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/Python-resource-release.json"
+      ]
+    },
+    {
+      "contract": "Original AC3 latency/silence",
+      "historical_independent91e_assessment": {
+        "contract": "Original AC3 latency/silence",
+        "qualified_source": "original exact AC3/reference timing boundaries",
+        "assessment": "Down/malformed/child bounds synthetic positives retained. Real tool AND prompt-side max/p95<50ms remain unexecuted; lock budget, async flag, broad suite durations and pass count cannot establish them.",
+        "proof_status": "UNEXECUTED live timing; no owner host action",
+        "nearest_existing_fixture": null,
+        "current_author_scope": "Full current owner/caller source read at91e; production UNFIXED; RED/GREEN upcoming, no earlier result relabeled."
+      },
+      "current_GREEN_status": "Original AC3 synthetic silence/down/process bounds PASS; live tool AND prompt<50ms UNEXECUTED",
+      "current_GREEN_assessment": "Suite23/28/33sec durations and async configuration are not live perhook latency proof.",
+      "current_source5": {
+        ".claude/skills/hud-projection/scripts/portal_hook.py": {
+          "bytes": 18229,
+          "sha256": "f43ba314d8a6f1888c6cb75210fd4b3cd3c284032dc0b858a2b76f18a0c60432"
+        },
+        ".claude/skills/hud-projection/scripts/portal_client.py": {
+          "bytes": 7165,
+          "sha256": "9c6423e54244c76484630f4da687c8ff8056a00cd4fb8858ba86c6c156f6790c"
+        },
+        ".claude/skills/hud-projection/references/claude-code-hooks.md": {
+          "bytes": 12287,
+          "sha256": "ed6754b669b0182a4bc7478090c0cd040629fe478b9ade3efb4bdfa755880283"
+        },
+        ".claude/skills/hud-projection/SKILL.md": {
+          "bytes": 6110,
+          "sha256": "d4063f4f5531ff5ca2b58ae0d48cd8f38e71646c6de7b7ce58fd0181623850e3"
+        },
+        ".claude/skills/user-test/tests/test_portal_client.py": {
+          "bytes": 28642,
+          "sha256": "7b1bdeb824da227aeaa192d7cab774b6c8f574cc20bfbe4626172f46e3efef50"
+        }
+      },
+      "evidence_paths": [
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/GREEN-freeze/native-terminal-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/existing-empty-GREEN-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/existing8-GREEN-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/normal-test-python-GREEN-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/Python-resource-release.json"
+      ]
+    },
+    {
+      "contract": "Original AC4 recorded payload",
+      "historical_independent91e_assessment": {
+        "contract": "Original AC4 recorded payload",
+        "qualified_source": "original exact AC4/HookHarness",
+        "assessment": "Headless real subprocess/loopback fixture exists but payloads are docs-derived synthetic, not recorded owner hook payloads.",
+        "proof_status": "synthetic positive; recorded payload acceptance UNEXECUTED",
+        "nearest_existing_fixture": null,
+        "current_author_scope": "Full current owner/caller source read at91e; production UNFIXED; RED/GREEN upcoming, no earlier result relabeled."
+      },
+      "current_GREEN_status": "Original AC4 headless synthetic payload fixture PASS; actual recorded payload UNEXECUTED",
+      "current_GREEN_assessment": "Docs-derived loopback payloads do not replace recorded owner hook payloads.",
+      "current_source5": {
+        ".claude/skills/hud-projection/scripts/portal_hook.py": {
+          "bytes": 18229,
+          "sha256": "f43ba314d8a6f1888c6cb75210fd4b3cd3c284032dc0b858a2b76f18a0c60432"
+        },
+        ".claude/skills/hud-projection/scripts/portal_client.py": {
+          "bytes": 7165,
+          "sha256": "9c6423e54244c76484630f4da687c8ff8056a00cd4fb8858ba86c6c156f6790c"
+        },
+        ".claude/skills/hud-projection/references/claude-code-hooks.md": {
+          "bytes": 12287,
+          "sha256": "ed6754b669b0182a4bc7478090c0cd040629fe478b9ade3efb4bdfa755880283"
+        },
+        ".claude/skills/hud-projection/SKILL.md": {
+          "bytes": 6110,
+          "sha256": "d4063f4f5531ff5ca2b58ae0d48cd8f38e71646c6de7b7ce58fd0181623850e3"
+        },
+        ".claude/skills/user-test/tests/test_portal_client.py": {
+          "bytes": 28642,
+          "sha256": "7b1bdeb824da227aeaa192d7cab774b6c8f574cc20bfbe4626172f46e3efef50"
+        }
+      },
+      "evidence_paths": [
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/GREEN-freeze/native-terminal-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/existing-empty-GREEN-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/existing8-GREEN-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/normal-test-python-GREEN-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/Python-resource-release.json"
+      ]
+    },
+    {
+      "contract": "Merge and review mechanics",
+      "historical_independent91e_assessment": {
+        "contract": "Merge and review mechanics",
+        "qualified_source": "fresh exact91e rules/checks/paged GraphQL+REST/readiness",
+        "assessment": "Required8/app15368 SUCCESS, current0-required approval rule; prior dangling thread resolved and concrete reply verified. New current outcome finding must stay unresolved; no enqueue despite green CI.",
+        "proof_status": "read-only verified; no queue action",
+        "nearest_existing_fixture": null,
+        "current_author_scope": "Full current owner/caller source read at91e; production UNFIXED; RED/GREEN upcoming, no earlier result relabeled."
+      },
+      "current_GREEN_status": "Publication/thread reply/resolution pending separate ROOT acceptance; no queue/lifecycle actions",
+      "current_GREEN_assessment": "Existing PR1390/reviewsvq9i retained. Corrected published head and factual comment4201415449 response still require publication authorization; independent re-review later, original full live AC pending.",
+      "current_source5": {
+        ".claude/skills/hud-projection/scripts/portal_hook.py": {
+          "bytes": 18229,
+          "sha256": "f43ba314d8a6f1888c6cb75210fd4b3cd3c284032dc0b858a2b76f18a0c60432"
+        },
+        ".claude/skills/hud-projection/scripts/portal_client.py": {
+          "bytes": 7165,
+          "sha256": "9c6423e54244c76484630f4da687c8ff8056a00cd4fb8858ba86c6c156f6790c"
+        },
+        ".claude/skills/hud-projection/references/claude-code-hooks.md": {
+          "bytes": 12287,
+          "sha256": "ed6754b669b0182a4bc7478090c0cd040629fe478b9ade3efb4bdfa755880283"
+        },
+        ".claude/skills/hud-projection/SKILL.md": {
+          "bytes": 6110,
+          "sha256": "d4063f4f5531ff5ca2b58ae0d48cd8f38e71646c6de7b7ce58fd0181623850e3"
+        },
+        ".claude/skills/user-test/tests/test_portal_client.py": {
+          "bytes": 28642,
+          "sha256": "7b1bdeb824da227aeaa192d7cab774b6c8f574cc20bfbe4626172f46e3efef50"
+        }
+      },
+      "evidence_paths": [
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/GREEN-freeze/native-terminal-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/existing-empty-GREEN-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/existing8-GREEN-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/normal-test-python-GREEN-receipt.json",
+        ".handoff/hud-x38zn.1/P2-existing-empty-author-return/Python-resource-release.json"
+      ]
+    }
+  ],
+  "eight_classes": [
+    {
+      "input": "genuinely absent delivery path",
+      "expected": "normal initialized first delivery",
+      "existing_source": "read_state(default) and initializer",
+      "scope": "preserve",
+      "current_GREEN_status": "PASS",
+      "current_evidence": "Current missing startup/recovery and full8 retained positives; missingNone only initialization",
+      "RED_limit": "Only first existing{} failed; later new branches not reached in RED"
+    },
+    {
+      "input": "existing {} delivery object with valid current marker",
+      "expected": "refuse before any MCP; disable ordinary jobs",
+      "existing_source": "current validation bypass",
+      "scope": "actual same-fixture RED/repair/recovery required",
+      "current_GREEN_status": "RED1 then GREEN1",
+      "current_evidence": "Actual first6vs4 RED; current0extraMCP/disabled/recovery PASS",
+      "RED_limit": "Only first existing{} failed; later new branches not reached in RED"
+    },
+    {
+      "input": "truthy object missing generation/tools/finals, bad generation/prompt, nonobject tools/finals, invalid stage/key/final hash or over-cap map",
+      "expected": "reject before MCP; retain existing strict validator",
+      "existing_source": "validator/source only; not all variants currently empirical",
+      "scope": "meaningful table branches inside same fixture; no broad schema/factory",
+      "current_GREEN_status": "Representative18 GREENPASS; limits retained",
+      "current_evidence": "18 table cases executed; not every validator variant, boolstage remains source-only",
+      "RED_limit": "Only first existing{} failed; later new branches not reached in RED"
+    },
+    {
+      "input": "valid generation with empty tools/finals maps",
+      "expected": "accepted legitimate initialized state",
+      "existing_source": "real writer shape",
+      "scope": "preserve; do not reject valid empty collections",
+      "current_GREEN_status": "PASS",
+      "current_evidence": "Actual valid initialized currentgen tools{} finals{} accepted",
+      "RED_limit": "Only first existing{} failed; later new branches not reached in RED"
+    },
+    {
+      "input": "fully valid state from old generation",
+      "expected": "validate before safe new-generation reset",
+      "existing_source": "current initialization after schema validation",
+      "scope": "preserve",
+      "current_GREEN_status": "PASS",
+      "current_evidence": "Actual fullyvalidoldgeneration validates then resets, retains newPost/delayedPre",
+      "RED_limit": "Only first existing{} failed; later new branches not reached in RED"
+    },
+    {
+      "input": "invalid JSON/non-dictionary/oversize/dangling marker or delivery/wrong ownership or modes",
+      "expected": "refuse before MCP",
+      "existing_source": "read_state/private_file/validator",
+      "scope": "retain prior checks; dangling actual GREEN separate",
+      "current_GREEN_status": "Representative GREENPASS/sourcequalified",
+      "current_evidence": "Current invalidJSON/nondict/oversize/0644 and retained dangling/private fixture positives; wrongUID source-only",
+      "RED_limit": "Only first existing{} failed; later new branches not reached in RED"
+    },
+    {
+      "input": "present disabled entry including dangling sentinel",
+      "expected": "ordinary events publish nothing; successful explicit SessionStart recovery only",
+      "existing_source": "lexists current/mark",
+      "scope": "retain actual P2 GREEN/recovery",
+      "current_GREEN_status": "PASS",
+      "current_evidence": "Retained current disabled/dangling and explicit successful start recovery; no sentinel content validation change",
+      "RED_limit": "Only first existing{} failed; later new branches not reached in RED"
+    },
+    {
+      "input": "empty existing marker",
+      "expected": "ordinary activity not admitted; explicit SessionStart validates/refuses",
+      "existing_source": "current falsy return and mark presence validator",
+      "scope": "preserve no-network result, no unrelated rewrite",
+      "current_GREEN_status": "PASS",
+      "current_evidence": "Ordinary empty-marker no MCP; explicit start refuses/disabled, no marker production edit",
+      "RED_limit": "Only first existing{} failed; later new branches not reached in RED"
+    }
+  ],
+  "source_repair": "ONLY3 delivery expressions; all other top-level hook AST/public signature unchanged; fixtureEXACTRED bytes/all8 original AST-prefixes/other7whole",
+  "current_execution": {
+    "RED_selector": "1 failed; extra MCP6vs4 after acknowledged Post2; later new cases UNEXECUTED",
+    "GREEN_selector": "1 passed; all later table/recovery cases reached",
+    "GREEN_fullfile": "8 passed",
+    "ONE_normal_test_python": "79 pytest +3 subtests +103 unittest passed"
+  },
+  "raw_gate_receipts": [
+    {
+      "name": "existing-empty-RED",
+      "receipt_path": ".handoff/hud-x38zn.1/P2-existing-empty-author-return/existing-empty-RED-receipt.json",
+      "receipt_SHA256": "bb3c69425b1157bb47e272be1338a4ff43d84997cbf7e972044218ed10e88b2a",
+      "raw_path": ".handoff/hud-x38zn.1/P2-existing-empty-author-return/existing-empty-RED.log",
+      "raw_SHA256": "de0676a67a562c3f654236a5ad8a9d1a18b01d01f239f22ac24388e3defd73f0",
+      "actual_exit": 1,
+      "seconds": 7.744184470997425,
+      "phase": "RED",
+      "source5_before": {
+        ".claude/skills/hud-projection/scripts/portal_hook.py": {
+          "bytes": 18204,
+          "sha256": "d62bd0dbfd97f51f3f52b095a23ac15870b734bfaf776edd38f6ffb0a84d0f55"
+        },
+        ".claude/skills/hud-projection/scripts/portal_client.py": {
+          "bytes": 7165,
+          "sha256": "9c6423e54244c76484630f4da687c8ff8056a00cd4fb8858ba86c6c156f6790c"
+        },
+        ".claude/skills/hud-projection/references/claude-code-hooks.md": {
+          "bytes": 12287,
+          "sha256": "ed6754b669b0182a4bc7478090c0cd040629fe478b9ade3efb4bdfa755880283"
+        },
+        ".claude/skills/hud-projection/SKILL.md": {
+          "bytes": 6110,
+          "sha256": "d4063f4f5531ff5ca2b58ae0d48cd8f38e71646c6de7b7ce58fd0181623850e3"
+        },
+        ".claude/skills/user-test/tests/test_portal_client.py": {
+          "bytes": 28642,
+          "sha256": "7b1bdeb824da227aeaa192d7cab774b6c8f574cc20bfbe4626172f46e3efef50"
+        }
+      },
+      "source5_after": {
+        ".claude/skills/hud-projection/scripts/portal_hook.py": {
+          "bytes": 18204,
+          "sha256": "d62bd0dbfd97f51f3f52b095a23ac15870b734bfaf776edd38f6ffb0a84d0f55"
+        },
+        ".claude/skills/hud-projection/scripts/portal_client.py": {
+          "bytes": 7165,
+          "sha256": "9c6423e54244c76484630f4da687c8ff8056a00cd4fb8858ba86c6c156f6790c"
+        },
+        ".claude/skills/hud-projection/references/claude-code-hooks.md": {
+          "bytes": 12287,
+          "sha256": "ed6754b669b0182a4bc7478090c0cd040629fe478b9ade3efb4bdfa755880283"
+        },
+        ".claude/skills/hud-projection/SKILL.md": {
+          "bytes": 6110,
+          "sha256": "d4063f4f5531ff5ca2b58ae0d48cd8f38e71646c6de7b7ce58fd0181623850e3"
+        },
+        ".claude/skills/user-test/tests/test_portal_client.py": {
+          "bytes": 28642,
+          "sha256": "7b1bdeb824da227aeaa192d7cab774b6c8f574cc20bfbe4626172f46e3efef50"
+        }
+      },
+      "native_pid": 4109514,
+      "observed_descendant_PIDs": [
+        4109516,
+        4109518,
+        4109519,
+        4109524,
+        4109525,
+        4109526,
+        4109527,
+        4109528,
+        4109529,
+        4109530,
+        4109531,
+        4109532,
+        4109533,
+        4109534,
+        4109538,
+        4109539,
+        4109542,
+        4109547,
+        4109548,
+        4109551,
+        4109556,
+        4109557,
+        4109560,
+        4109565,
+        4109566,
+        4109569,
+        4109574,
+        4109575,
+        4109578,
+        4109579,
+        4109582,
+        4109587,
+        4109588,
+        4109591,
+        4109592,
+        4109597,
+        4109598,
+        4109601,
+        4109602,
+        4109603,
+        4109604,
+        4109607,
+        4109609,
+        4109610,
+        4109612,
+        4109613,
+        4109618,
+        4109619,
+        4109620,
+        4109621,
+        4109623,
+        4109624,
+        4109629,
+        4109630,
+        4109631,
+        4109632,
+        4109633,
+        4109634,
+        4109637,
+        4109638,
+        4109642,
+        4109643,
+        4109655,
+        4109656,
+        4109657,
+        4109658,
+        4109659,
+        4109662,
+        4109663,
+        4109667,
+        4109668,
+        4109673,
+        4109674,
+        4109677,
+        4109678
+      ],
+      "observed_groups": [
+        4109516,
+        4109533,
+        4109534,
+        4109539,
+        4109548,
+        4109557,
+        4109566,
+        4109575,
+        4109579,
+        4109588,
+        4109598,
+        4109602,
+        4109604,
+        4109619,
+        4109621,
+        4109630,
+        4109633,
+        4109634,
+        4109638,
+        4109658,
+        4109659,
+        4109663,
+        4109674,
+        4109678
+      ]
+    },
+    {
+      "name": "existing-empty-GREEN",
+      "receipt_path": ".handoff/hud-x38zn.1/P2-existing-empty-author-return/existing-empty-GREEN-receipt.json",
+      "receipt_SHA256": "a18d5a1c004f183aa04d41660eafd32fab6f5fdb303039ddfa44b27fc7b3c973",
+      "raw_path": ".handoff/hud-x38zn.1/P2-existing-empty-author-return/existing-empty-GREEN.log",
+      "raw_SHA256": "e9332dec30b0592eaa280d219e5480cd533c1af5c84c191b4c8f3d09f9b8a8ee",
+      "actual_exit": 0,
+      "seconds": 23.1348756950174,
+      "phase": "GREEN",
+      "source5_before": {
+        ".claude/skills/hud-projection/scripts/portal_hook.py": {
+          "bytes": 18229,
+          "sha256": "f43ba314d8a6f1888c6cb75210fd4b3cd3c284032dc0b858a2b76f18a0c60432"
+        },
+        ".claude/skills/hud-projection/scripts/portal_client.py": {
+          "bytes": 7165,
+          "sha256": "9c6423e54244c76484630f4da687c8ff8056a00cd4fb8858ba86c6c156f6790c"
+        },
+        ".claude/skills/hud-projection/references/claude-code-hooks.md": {
+          "bytes": 12287,
+          "sha256": "ed6754b669b0182a4bc7478090c0cd040629fe478b9ade3efb4bdfa755880283"
+        },
+        ".claude/skills/hud-projection/SKILL.md": {
+          "bytes": 6110,
+          "sha256": "d4063f4f5531ff5ca2b58ae0d48cd8f38e71646c6de7b7ce58fd0181623850e3"
+        },
+        ".claude/skills/user-test/tests/test_portal_client.py": {
+          "bytes": 28642,
+          "sha256": "7b1bdeb824da227aeaa192d7cab774b6c8f574cc20bfbe4626172f46e3efef50"
+        }
+      },
+      "source5_after": {
+        ".claude/skills/hud-projection/scripts/portal_hook.py": {
+          "bytes": 18229,
+          "sha256": "f43ba314d8a6f1888c6cb75210fd4b3cd3c284032dc0b858a2b76f18a0c60432"
+        },
+        ".claude/skills/hud-projection/scripts/portal_client.py": {
+          "bytes": 7165,
+          "sha256": "9c6423e54244c76484630f4da687c8ff8056a00cd4fb8858ba86c6c156f6790c"
+        },
+        ".claude/skills/hud-projection/references/claude-code-hooks.md": {
+          "bytes": 12287,
+          "sha256": "ed6754b669b0182a4bc7478090c0cd040629fe478b9ade3efb4bdfa755880283"
+        },
+        ".claude/skills/hud-projection/SKILL.md": {
+          "bytes": 6110,
+          "sha256": "d4063f4f5531ff5ca2b58ae0d48cd8f38e71646c6de7b7ce58fd0181623850e3"
+        },
+        ".claude/skills/user-test/tests/test_portal_client.py": {
+          "bytes": 28642,
+          "sha256": "7b1bdeb824da227aeaa192d7cab774b6c8f574cc20bfbe4626172f46e3efef50"
+        }
+      },
+      "native_pid": 4132085,
+      "observed_descendant_PIDs": [
+        4132086,
+        4132088,
+        4132089,
+        4132094,
+        4132095,
+        4132096,
+        4132097,
+        4132098,
+        4132099,
+        4132100,
+        4132101,
+        4132102,
+        4132107,
+        4132108,
+        4132111,
+        4132117,
+        4132118,
+        4132121,
+        4132147,
+        4132161,
+        4132188,
+        4132193,
+        4132194,
+        4132197,
+        4132202,
+        4132203,
+        4132206,
+        4132207,
+        4132210,
+        4132215,
+        4132216,
+        4132219,
+        4132220,
+        4132225,
+        4132226,
+        4132229,
+        4132230,
+        4132231,
+        4132232,
+        4132235,
+        4132237,
+        4132238,
+        4132240,
+        4132241,
+        4132252,
+        4132255,
+        4132256,
+        4132257,
+        4132259,
+        4132260,
+        4132265,
+        4132266,
+        4132267,
+        4132268,
+        4132273,
+        4132274,
+        4132282,
+        4132283,
+        4132284,
+        4132285,
+        4132288,
+        4132289,
+        4132290,
+        4132296,
+        4132297,
+        4132301,
+        4132302,
+        4132307,
+        4132308,
+        4132311,
+        4132312,
+        4132313,
+        4132314,
+        4132315,
+        4132320,
+        4132321,
+        4132325,
+        4132326,
+        4132331,
+        4132332,
+        4132335,
+        4132336,
+        4132339,
+        4132340,
+        4132342,
+        4132343,
+        4132348,
+        4132349,
+        4132352,
+        4132353,
+        4132356,
+        4132357,
+        4132360,
+        4132361,
+        4132363,
+        4132364,
+        4132369,
+        4132370,
+        4132379,
+        4132380,
+        4132404,
+        4132405,
+        4132407,
+        4132408,
+        4132409,
+        4132410,
+        4132413,
+        4132414,
+        4132416,
+        4132417,
+        4132422,
+        4132423,
+        4132425,
+        4132426,
+        4132431,
+        4132432,
+        4132435,
+        4132437,
+        4132438,
+        4132439,
+        4132442,
+        4132443,
+        4132445,
+        4132446,
+        4132451,
+        4132452,
+        4132456,
+        4132457,
+        4132458,
+        4132459,
+        4132462,
+        4132463,
+        4132473,
+        4132474,
+        4132479,
+        4132480,
+        4132500,
+        4132520,
+        4132534,
+        4132535,
+        4132537,
+        4132538,
+        4132543,
+        4132544,
+        4132546,
+        4132547,
+        4132552,
+        4132553,
+        4132555,
+        4132556,
+        4132561,
+        4132562,
+        4132564,
+        4132565,
+        4132570,
+        4132571,
+        4132612,
+        4132613,
+        4132614,
+        4132615,
+        4132619,
+        4132620,
+        4132629,
+        4132630,
+        4132635,
+        4132636,
+        4132639,
+        4132640,
+        4132645,
+        4132646,
+        4132648,
+        4132649,
+        4132654,
+        4132655,
+        4132689,
+        4132690,
+        4132695,
+        4132696
+      ],
+      "observed_groups": [
+        4132086,
+        4132108,
+        4132118,
+        4132161,
+        4132194,
+        4132203,
+        4132207,
+        4132216,
+        4132226,
+        4132230,
+        4132232,
+        4132255,
+        4132257,
+        4132266,
+        4132274,
+        4132284,
+        4132285,
+        4132297,
+        4132308,
+        4132312,
+        4132321,
+        4132332,
+        4132336,
+        4132340,
+        4132349,
+        4132353,
+        4132357,
+        4132361,
+        4132370,
+        4132405,
+        4132409,
+        4132410,
+        4132414,
+        4132423,
+        4132432,
+        4132438,
+        4132439,
+        4132443,
+        4132452,
+        4132458,
+        4132459,
+        4132463,
+        4132480,
+        4132535,
+        4132544,
+        4132553,
+        4132562,
+        4132571,
+        4132614,
+        4132615,
+        4132620,
+        4132636,
+        4132646,
+        4132655
+      ]
+    },
+    {
+      "name": "existing8-GREEN",
+      "receipt_path": ".handoff/hud-x38zn.1/P2-existing-empty-author-return/existing8-GREEN-receipt.json",
+      "receipt_SHA256": "d248c81d1a0371bad9b80d762dda5df687f94042c0075ad33d8a1ba1bd35b0a3",
+      "raw_path": ".handoff/hud-x38zn.1/P2-existing-empty-author-return/existing8-GREEN.log",
+      "raw_SHA256": "bae48933479ed23ce2c2598aec9ccc2537534875dab3999d48685469d4020b01",
+      "actual_exit": 0,
+      "seconds": 27.973095330002252,
+      "phase": "GREEN",
+      "source5_before": {
+        ".claude/skills/hud-projection/scripts/portal_hook.py": {
+          "bytes": 18229,
+          "sha256": "f43ba314d8a6f1888c6cb75210fd4b3cd3c284032dc0b858a2b76f18a0c60432"
+        },
+        ".claude/skills/hud-projection/scripts/portal_client.py": {
+          "bytes": 7165,
+          "sha256": "9c6423e54244c76484630f4da687c8ff8056a00cd4fb8858ba86c6c156f6790c"
+        },
+        ".claude/skills/hud-projection/references/claude-code-hooks.md": {
+          "bytes": 12287,
+          "sha256": "ed6754b669b0182a4bc7478090c0cd040629fe478b9ade3efb4bdfa755880283"
+        },
+        ".claude/skills/hud-projection/SKILL.md": {
+          "bytes": 6110,
+          "sha256": "d4063f4f5531ff5ca2b58ae0d48cd8f38e71646c6de7b7ce58fd0181623850e3"
+        },
+        ".claude/skills/user-test/tests/test_portal_client.py": {
+          "bytes": 28642,
+          "sha256": "7b1bdeb824da227aeaa192d7cab774b6c8f574cc20bfbe4626172f46e3efef50"
+        }
+      },
+      "source5_after": {
+        ".claude/skills/hud-projection/scripts/portal_hook.py": {
+          "bytes": 18229,
+          "sha256": "f43ba314d8a6f1888c6cb75210fd4b3cd3c284032dc0b858a2b76f18a0c60432"
+        },
+        ".claude/skills/hud-projection/scripts/portal_client.py": {
+          "bytes": 7165,
+          "sha256": "9c6423e54244c76484630f4da687c8ff8056a00cd4fb8858ba86c6c156f6790c"
+        },
+        ".claude/skills/hud-projection/references/claude-code-hooks.md": {
+          "bytes": 12287,
+          "sha256": "ed6754b669b0182a4bc7478090c0cd040629fe478b9ade3efb4bdfa755880283"
+        },
+        ".claude/skills/hud-projection/SKILL.md": {
+          "bytes": 6110,
+          "sha256": "d4063f4f5531ff5ca2b58ae0d48cd8f38e71646c6de7b7ce58fd0181623850e3"
+        },
+        ".claude/skills/user-test/tests/test_portal_client.py": {
+          "bytes": 28642,
+          "sha256": "7b1bdeb824da227aeaa192d7cab774b6c8f574cc20bfbe4626172f46e3efef50"
+        }
+      },
+      "native_pid": 4132830,
+      "observed_descendant_PIDs": [
+        4132831,
+        4132833,
+        4132834,
+        4132835,
+        4132836,
+        4132839,
+        4132840,
+        4132843,
+        4132844,
+        4132847,
+        4132848,
+        4132851,
+        4132852,
+        4132855,
+        4132856,
+        4132859,
+        4132860,
+        4132863,
+        4132864,
+        4132879,
+        4132900,
+        4132924,
+        4132925,
+        4132926,
+        4132927,
+        4132930,
+        4132931,
+        4132934,
+        4132935,
+        4132946,
+        4132951,
+        4132953,
+        4132954,
+        4132955,
+        4132963,
+        4132967,
+        4132974,
+        4132983,
+        4132984,
+        4132989,
+        4132990,
+        4132991,
+        4132999,
+        4133015,
+        4133016,
+        4133018,
+        4133019,
+        4133020,
+        4133039,
+        4133040,
+        4133044,
+        4133045,
+        4133046,
+        4133047,
+        4133048,
+        4133049,
+        4133052,
+        4133053,
+        4133054,
+        4133056,
+        4133057,
+        4133062,
+        4133063,
+        4133136,
+        4133137,
+        4133142,
+        4133143,
+        4133144,
+        4133145,
+        4133146,
+        4133147,
+        4133158,
+        4133163,
+        4133164,
+        4133169,
+        4133170,
+        4133173,
+        4133174,
+        4133175,
+        4133183,
+        4133192,
+        4133196,
+        4133197,
+        4133198,
+        4133219,
+        4133220,
+        4133223,
+        4133244,
+        4133245,
+        4133248,
+        4133253,
+        4133254,
+        4133257,
+        4133258,
+        4133261,
+        4133266,
+        4133267,
+        4133270,
+        4133280,
+        4133290,
+        4133291,
+        4133301,
+        4133302,
+        4133303,
+        4133304,
+        4133307,
+        4133316,
+        4133317,
+        4133319,
+        4133320,
+        4133325,
+        4133326,
+        4133327,
+        4133328,
+        4133330,
+        4133331,
+        4133332,
+        4133333,
+        4133336,
+        4133337,
+        4133338,
+        4133339,
+        4133344,
+        4133345,
+        4133349,
+        4133350,
+        4133355,
+        4133356,
+        4133357,
+        4133362,
+        4133363,
+        4133369,
+        4133370,
+        4133375,
+        4133376,
+        4133397,
+        4133398,
+        4133399,
+        4133400,
+        4133401,
+        4133402,
+        4133403,
+        4133406,
+        4133407,
+        4133441,
+        4133442,
+        4133447,
+        4133448,
+        4133451,
+        4133452,
+        4133455,
+        4133456,
+        4133458,
+        4133459,
+        4133464,
+        4133465,
+        4133468,
+        4133469,
+        4133472,
+        4133473,
+        4133476,
+        4133477,
+        4133479,
+        4133480,
+        4133481,
+        4133482,
+        4133495,
+        4133496,
+        4133499,
+        4133500,
+        4133505,
+        4133506,
+        4133508,
+        4133509,
+        4133514,
+        4133515,
+        4133517,
+        4133518,
+        4133531,
+        4133532,
+        4133534,
+        4133535,
+        4133540,
+        4133541,
+        4133543,
+        4133544,
+        4133549,
+        4133550,
+        4133590,
+        4133591,
+        4133596,
+        4133597,
+        4133606,
+        4133607,
+        4133612,
+        4133613,
+        4133615,
+        4133616,
+        4133621,
+        4133622,
+        4133633,
+        4133634,
+        4133639,
+        4133640,
+        4133642,
+        4133643,
+        4133648,
+        4133649,
+        4133651,
+        4133653,
+        4133658,
+        4133659,
+        4133661,
+        4133662,
+        4133667,
+        4133668,
+        4133670,
+        4133671,
+        4133676,
+        4133677,
+        4133679,
+        4133680,
+        4133685,
+        4133686,
+        4133688,
+        4133689,
+        4133694,
+        4133695,
+        4133697,
+        4133698,
+        4133699,
+        4133700,
+        4133703,
+        4133704,
+        4133706,
+        4133707,
+        4133712,
+        4133713,
+        4133717,
+        4133718,
+        4133723,
+        4133724
+      ],
+      "observed_groups": [
+        4132831,
+        4132835,
+        4132836,
+        4132840,
+        4132844,
+        4132848,
+        4132852,
+        4132856,
+        4132860,
+        4132864,
+        4132926,
+        4132927,
+        4132931,
+        4132935,
+        4132951,
+        4132955,
+        4132967,
+        4132983,
+        4132984,
+        4132991,
+        4133016,
+        4133040,
+        4133048,
+        4133049,
+        4133063,
+        4133170,
+        4133174,
+        4133175,
+        4133192,
+        4133197,
+        4133198,
+        4133220,
+        4133245,
+        4133254,
+        4133258,
+        4133267,
+        4133291,
+        4133302,
+        4133304,
+        4133326,
+        4133328,
+        4133332,
+        4133333,
+        4133337,
+        4133345,
+        4133363,
+        4133376,
+        4133398,
+        4133402,
+        4133403,
+        4133407,
+        4133448,
+        4133452,
+        4133456,
+        4133465,
+        4133469,
+        4133473,
+        4133477,
+        4133481,
+        4133482,
+        4133496,
+        4133506,
+        4133515,
+        4133532,
+        4133541,
+        4133550,
+        4133597,
+        4133613,
+        4133622,
+        4133640,
+        4133649,
+        4133659,
+        4133668,
+        4133677,
+        4133686,
+        4133695,
+        4133699,
+        4133700,
+        4133704,
+        4133713
+      ]
+    },
+    {
+      "name": "normal-test-python-GREEN",
+      "receipt_path": ".handoff/hud-x38zn.1/P2-existing-empty-author-return/normal-test-python-GREEN-receipt.json",
+      "receipt_SHA256": "df80fba1aa5e8e4751a54e2accb76dd5f962fdb30b5721492026e0f63e504442",
+      "raw_path": ".handoff/hud-x38zn.1/P2-existing-empty-author-return/normal-test-python-GREEN.log",
+      "raw_SHA256": "7ce3ba11a0ee6e649b39dc702accc2143842646fc9c503c3e97e2bf970de08cc",
+      "actual_exit": 0,
+      "seconds": 32.98449887498282,
+      "phase": "GREEN",
+      "source5_before": {
+        ".claude/skills/hud-projection/scripts/portal_hook.py": {
+          "bytes": 18229,
+          "sha256": "f43ba314d8a6f1888c6cb75210fd4b3cd3c284032dc0b858a2b76f18a0c60432"
+        },
+        ".claude/skills/hud-projection/scripts/portal_client.py": {
+          "bytes": 7165,
+          "sha256": "9c6423e54244c76484630f4da687c8ff8056a00cd4fb8858ba86c6c156f6790c"
+        },
+        ".claude/skills/hud-projection/references/claude-code-hooks.md": {
+          "bytes": 12287,
+          "sha256": "ed6754b669b0182a4bc7478090c0cd040629fe478b9ade3efb4bdfa755880283"
+        },
+        ".claude/skills/hud-projection/SKILL.md": {
+          "bytes": 6110,
+          "sha256": "d4063f4f5531ff5ca2b58ae0d48cd8f38e71646c6de7b7ce58fd0181623850e3"
+        },
+        ".claude/skills/user-test/tests/test_portal_client.py": {
+          "bytes": 28642,
+          "sha256": "7b1bdeb824da227aeaa192d7cab774b6c8f574cc20bfbe4626172f46e3efef50"
+        }
+      },
+      "source5_after": {
+        ".claude/skills/hud-projection/scripts/portal_hook.py": {
+          "bytes": 18229,
+          "sha256": "f43ba314d8a6f1888c6cb75210fd4b3cd3c284032dc0b858a2b76f18a0c60432"
+        },
+        ".claude/skills/hud-projection/scripts/portal_client.py": {
+          "bytes": 7165,
+          "sha256": "9c6423e54244c76484630f4da687c8ff8056a00cd4fb8858ba86c6c156f6790c"
+        },
+        ".claude/skills/hud-projection/references/claude-code-hooks.md": {
+          "bytes": 12287,
+          "sha256": "ed6754b669b0182a4bc7478090c0cd040629fe478b9ade3efb4bdfa755880283"
+        },
+        ".claude/skills/hud-projection/SKILL.md": {
+          "bytes": 6110,
+          "sha256": "d4063f4f5531ff5ca2b58ae0d48cd8f38e71646c6de7b7ce58fd0181623850e3"
+        },
+        ".claude/skills/user-test/tests/test_portal_client.py": {
+          "bytes": 28642,
+          "sha256": "7b1bdeb824da227aeaa192d7cab774b6c8f574cc20bfbe4626172f46e3efef50"
+        }
+      },
+      "native_pid": 4133836,
+      "observed_descendant_PIDs": [
+        4133837,
+        4133839,
+        4133840,
+        4133842,
+        4133844,
+        4133845,
+        4133847,
+        4133849,
+        4133851,
+        4133853,
+        4133854,
+        4133856,
+        4133865,
+        4133867,
+        4133868,
+        4133869,
+        4133889,
+        4133890,
+        4133906,
+        4133908,
+        4133920,
+        4133921,
+        4133924,
+        4133925,
+        4133928,
+        4133929,
+        4133932,
+        4133933,
+        4133936,
+        4133937,
+        4133940,
+        4133941,
+        4133943,
+        4133944,
+        4133964,
+        4133965,
+        4133970,
+        4133971,
+        4133974,
+        4133975,
+        4133976,
+        4133977,
+        4133979,
+        4133980,
+        4133981,
+        4133984,
+        4133985,
+        4133986,
+        4133991,
+        4133994,
+        4133995,
+        4133997,
+        4134004,
+        4134005,
+        4134007,
+        4134008,
+        4134009,
+        4134014,
+        4134015,
+        4134018,
+        4134019,
+        4134020,
+        4134021,
+        4134027,
+        4134028,
+        4134029,
+        4134038,
+        4134039,
+        4134044,
+        4134045,
+        4134048,
+        4134049,
+        4134054,
+        4134055,
+        4134056,
+        4134057,
+        4134058,
+        4134059,
+        4134060,
+        4134061,
+        4134062,
+        4134063,
+        4134064,
+        4134067,
+        4134068,
+        4134071,
+        4134072,
+        4134073,
+        4134076,
+        4134077,
+        4134080,
+        4134085,
+        4134086,
+        4134089,
+        4134094,
+        4134095,
+        4134098,
+        4134103,
+        4134104,
+        4134107,
+        4134108,
+        4134111,
+        4134116,
+        4134117,
+        4134120,
+        4134121,
+        4134126,
+        4134127,
+        4134141,
+        4134145,
+        4134152,
+        4134153,
+        4134156,
+        4134158,
+        4134159,
+        4134169,
+        4134170,
+        4134171,
+        4134172,
+        4134175,
+        4134176,
+        4134177,
+        4134178,
+        4134180,
+        4134181,
+        4134186,
+        4134187,
+        4134188,
+        4134189,
+        4134194,
+        4134195,
+        4134206,
+        4134218,
+        4134232,
+        4134233,
+        4134234,
+        4134239,
+        4134240,
+        4134244,
+        4134245,
+        4134246,
+        4134247,
+        4134250,
+        4134251,
+        4134254,
+        4134255,
+        4134256,
+        4134257,
+        4134258,
+        4134259,
+        4134260,
+        4134263,
+        4134264,
+        4134306,
+        4134307,
+        4134308,
+        4134309,
+        4134312,
+        4134313,
+        4134316,
+        4134317,
+        4134320,
+        4134332,
+        4134346,
+        4134347,
+        4134352,
+        4134353,
+        4134356,
+        4134357,
+        4134360,
+        4134361,
+        4134364,
+        4134365,
+        4134367,
+        4134368,
+        4134373,
+        4134374,
+        4134377,
+        4134378,
+        4134383,
+        4134384,
+        4134386,
+        4134387,
+        4134388,
+        4134389,
+        4134392,
+        4134393,
+        4134395,
+        4134396,
+        4134401,
+        4134402,
+        4134406,
+        4134418,
+        4134432,
+        4134433,
+        4134435,
+        4134436,
+        4134437,
+        4134438,
+        4134441,
+        4134442,
+        4134445,
+        4134446,
+        4134451,
+        4134452,
+        4134474,
+        4134475,
+        4134480,
+        4134481,
+        4134483,
+        4134484,
+        4134485,
+        4134486,
+        4134489,
+        4134490,
+        4134492,
+        4134493,
+        4134498,
+        4134499,
+        4134521,
+        4134522,
+        4134523,
+        4134524,
+        4134528,
+        4134529,
+        4134535,
+        4134536,
+        4134541,
+        4134542,
+        4134544,
+        4134545,
+        4134550,
+        4134551,
+        4134554,
+        4134555,
+        4134561,
+        4134570,
+        4134572,
+        4134573,
+        4134578,
+        4134579,
+        4134581,
+        4134593,
+        4134607,
+        4134608,
+        4134610,
+        4134611,
+        4134616,
+        4134617,
+        4134619,
+        4134620,
+        4134625,
+        4134626,
+        4134628,
+        4134629,
+        4134634,
+        4134635,
+        4134636,
+        4134662,
+        4134676,
+        4134688,
+        4134693,
+        4134705,
+        4134729,
+        4134750,
+        4134751
+      ],
+      "observed_groups": [
+        4133837,
+        4133908,
+        4133921,
+        4133925,
+        4133929,
+        4133933,
+        4133937,
+        4133941,
+        4133971,
+        4133975,
+        4133977,
+        4133981,
+        4133985,
+        4133995,
+        4134005,
+        4134015,
+        4134045,
+        4134063,
+        4134064,
+        4134068,
+        4134072,
+        4134073,
+        4134077,
+        4134086,
+        4134095,
+        4134104,
+        4134108,
+        4134117,
+        4134127,
+        4134145,
+        4134153,
+        4134171,
+        4134172,
+        4134176,
+        4134178,
+        4134187,
+        4134195,
+        4134240,
+        4134246,
+        4134247,
+        4134251,
+        4134255,
+        4134259,
+        4134260,
+        4134264,
+        4134308,
+        4134309,
+        4134313,
+        4134317,
+        4134332,
+        4134353,
+        4134357,
+        4134361,
+        4134365,
+        4134374,
+        4134384,
+        4134388,
+        4134389,
+        4134393,
+        4134402,
+        4134433,
+        4134437,
+        4134438,
+        4134442,
+        4134452,
+        4134481,
+        4134485,
+        4134486,
+        4134490,
+        4134499,
+        4134523,
+        4134524,
+        4134529,
+        4134542,
+        4134551,
+        4134570,
+        4134579,
+        4134608,
+        4134617,
+        4134626
+      ]
+    }
+  ],
+  "current_release_path": ".handoff/hud-x38zn.1/P2-existing-empty-author-return/Python-resource-release.json",
+  "metadata_diagnostics_preserved": "Initial native archive row-schema and inline release native_pid/native_verifier_pid KeyError are metadata-only; initial inline release PID UNKNOWN not individually claimed; no tests/source reruns for metadata.",
+  "live_original_acceptance_pending": true,
+  "SECOND_cold_return_complete_before_publication": true,
+  "new_issue_generation_dependency_framework_storage_API": false
+}

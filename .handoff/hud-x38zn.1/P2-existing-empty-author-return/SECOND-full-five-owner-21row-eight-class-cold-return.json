@@ -1,0 +1,285 @@
+{
+  "schema": "SECOND-same-invariant-full-five-owner-cold-return-RED-plan-v1",
+  "source_HEAD": "91e571e38af1b7eccb62cc026d71012b5207497e",
+  "source5_baseline": {
+    ".claude/skills/hud-projection/scripts/portal_hook.py": {
+      "bytes": 18204,
+      "sha256": "d62bd0dbfd97f51f3f52b095a23ac15870b734bfaf776edd38f6ffb0a84d0f55"
+    },
+    ".claude/skills/hud-projection/scripts/portal_client.py": {
+      "bytes": 7165,
+      "sha256": "9c6423e54244c76484630f4da687c8ff8056a00cd4fb8858ba86c6c156f6790c"
+    },
+    ".claude/skills/hud-projection/references/claude-code-hooks.md": {
+      "bytes": 12287,
+      "sha256": "ed6754b669b0182a4bc7478090c0cd040629fe478b9ade3efb4bdfa755880283"
+    },
+    ".claude/skills/hud-projection/SKILL.md": {
+      "bytes": 6110,
+      "sha256": "d4063f4f5531ff5ca2b58ae0d48cd8f38e71646c6de7b7ce58fd0181623850e3"
+    },
+    ".claude/skills/user-test/tests/test_portal_client.py": {
+      "bytes": 22465,
+      "sha256": "b6a84122c4c86afb1d36b2ececf50f181c0a5ac0a21d0b4bf776be1b16b32e71"
+    }
+  },
+  "source5_current_RED_fixture_dirty1": {
+    ".claude/skills/hud-projection/scripts/portal_hook.py": {
+      "bytes": 18204,
+      "sha256": "d62bd0dbfd97f51f3f52b095a23ac15870b734bfaf776edd38f6ffb0a84d0f55"
+    },
+    ".claude/skills/hud-projection/scripts/portal_client.py": {
+      "bytes": 7165,
+      "sha256": "9c6423e54244c76484630f4da687c8ff8056a00cd4fb8858ba86c6c156f6790c"
+    },
+    ".claude/skills/hud-projection/references/claude-code-hooks.md": {
+      "bytes": 12287,
+      "sha256": "ed6754b669b0182a4bc7478090c0cd040629fe478b9ade3efb4bdfa755880283"
+    },
+    ".claude/skills/hud-projection/SKILL.md": {
+      "bytes": 6110,
+      "sha256": "d4063f4f5531ff5ca2b58ae0d48cd8f38e71646c6de7b7ce58fd0181623850e3"
+    },
+    ".claude/skills/user-test/tests/test_portal_client.py": {
+      "bytes": 28642,
+      "sha256": "7b1bdeb824da227aeaa192d7cab774b6c8f574cc20bfbe4626172f46e3efef50"
+    }
+  },
+  "all5_current_owners_read_full": [
+    ".claude/skills/hud-projection/scripts/portal_hook.py",
+    ".claude/skills/hud-projection/scripts/portal_client.py",
+    ".claude/skills/hud-projection/references/claude-code-hooks.md",
+    ".claude/skills/hud-projection/SKILL.md",
+    ".claude/skills/user-test/tests/test_portal_client.py"
+  ],
+  "original21_contract_rows": [
+    {
+      "contract": "Owner opt-in and official event shape",
+      "qualified_source": "SKILL.md; references/claude-code-hooks.md complete settings JSON",
+      "assessment": "Seven command hooks with direct argv. Tools and Stop async; fast marker hooks and bounded SessionEnd synchronous. Intentional startup/resume/clear only; main session agent_id filter. No installation, model hook, asyncRewake, control output, permission override or new MCP tool.",
+      "proof_status": "source and metadata settings parse positive; live owner unexecuted",
+      "nearest_existing_fixture": null,
+      "current_author_scope": "Full current owner/caller source read at91e; production UNFIXED; RED/GREEN upcoming, no earlier result relabeled."
+    },
+    {
+      "contract": "Payload and content trust",
+      "qualified_source": ".claude/skills/hud-projection/scripts/portal_hook.py:71-105,57-68,438-461",
+      "assessment": "Bounded64KiB stdin; ASCII session<=96/UUID prompt/tool id<=256 bytes. Normalize before spawning; fixed tool labels discard raw inputs/results/errors/cwd/transcript/unknown fields. Stop uses final text with credential guard before and after control/escape removal, UTF8 truncation8KiB. No transcript access or universal secret classifier.",
+      "proof_status": "source plus existing lifecycle/failure fixture; no credential reads or owner session",
+      "nearest_existing_fixture": ".claude/skills/user-test/tests/test_portal_client.py::test_hook_lifecycle_over_real_mcp_surface",
+      "current_author_scope": "Full current owner/caller source read at91e; production UNFIXED; RED/GREEN upcoming, no earlier result relabeled."
+    },
+    {
+      "contract": "Private metadata paths/files",
+      "qualified_source": ".claude/skills/hud-projection/scripts/portal_hook.py:108-161,200-224",
+      "assessment": "Hashed hostname/session/profile cache outside repo; own private root/session and regular0600 files, O_NOFOLLOW. Local marker lock never covers network. Atomic replacement, fixed filenames and bounded32KiB.",
+      "proof_status": "positive except existing-empty-delivery object finding; no filesystem behavior run",
+      "nearest_existing_fixture": null,
+      "current_author_scope": "Full current owner/caller source read at91e; production UNFIXED; RED/GREEN upcoming, no earlier result relabeled."
+    },
+    {
+      "contract": "Current dangling-link P2",
+      "qualified_source": ".claude/skills/hud-projection/scripts/portal_hook.py:136-147,230-267,301-313",
+      "assessment": "Three lexists changes distinguish dangling entries from absence before MCP. read_state reaches private_file for dangling marker/delivery; disabled presence blocks jobs. Explicit SessionStart only removes its own sentinel. Genuine missing delivery state retains initialization.",
+      "proof_status": "actual author RED delivery only1fail; corrected GREEN delivery+disabled/recovery1pass; independent source5 equality91e",
+      "nearest_existing_fixture": ".claude/skills/user-test/tests/test_portal_client.py::test_hook_unavailable_malformed_privacy_and_state_failures",
+      "current_author_scope": "Full current owner/caller source read at91e; production UNFIXED; RED/GREEN upcoming, no earlier result relabeled."
+    },
+    {
+      "contract": "Existing malformed delivery object",
+      "qualified_source": ".claude/skills/hud-projection/scripts/portal_hook.py:183-197,301-313,362",
+      "assessment": "Existing {} is a dictionary but falsy, skips validate_delivery, and resets into fresh state before publication. Validator requires generation/tools/finals. No legitimate writer emits {}. A completed stage can be forgotten and delayed Pre can replace it. True absence and a valid empty tools/finals state must remain distinct.",
+      "proof_status": "P2 correction-required; source-derived UNEXECUTED",
+      "nearest_existing_fixture": ".claude/skills/user-test/tests/test_portal_client.py::test_hook_unavailable_malformed_privacy_and_state_failures",
+      "current_author_scope": "Full current owner/caller source read at91e; production UNFIXED; RED/GREEN upcoming, no earlier result relabeled."
+    },
+    {
+      "contract": "Other invalid-state variants",
+      "qualified_source": ".claude/skills/hud-projection/scripts/portal_hook.py:136-147,166-197,230-267,301-313",
+      "assessment": "Invalid JSON/nondictionary/oversize fails read. Truthy missing or malformed generation/tools/finals enters validator; invalid terminal values/UUID/hash shapes are rejected before send. Empty marker admits no ordinary activity and explicit SessionStart validates existing marker. Disabled contents are irrelevant: any present entry blocks. Existing {} delivery is the uncovered truthiness branch.",
+      "proof_status": "qualified source only; current fixtures cover malformed marker/directory link/caps, not every schema variant",
+      "nearest_existing_fixture": null,
+      "current_author_scope": "Full current owner/caller source read at91e; production UNFIXED; RED/GREEN upcoming, no earlier result relabeled."
+    },
+    {
+      "contract": "Lifecycle admission",
+      "qualified_source": ".claude/skills/hud-projection/scripts/portal_hook.py:242-267,405-433",
+      "assessment": "Fast marker selects generation/current prompt, closes Stop prompt before delivery, ends SessionEnd before clear. Compact/fork/unknown start does not reopen; successful explicit start can recover disabled metadata.",
+      "proof_status": "source/retained existing replay fixture positive; actual host timings unexecuted",
+      "nearest_existing_fixture": ".claude/skills/user-test/tests/test_portal_client.py::test_hook_subprocess_replay_prompt_races_and_reaping",
+      "current_author_scope": "Full current owner/caller source read at91e; production UNFIXED; RED/GREEN upcoming, no earlier result relabeled."
+    },
+    {
+      "contract": "Replay/stage/final hash",
+      "qualified_source": ".claude/skills/hud-projection/scripts/portal_hook.py:290-326,366-375",
+      "assessment": "Prompt+tool hash key; terminal stage dominates delayed start, tools after Stop rejected, acknowledged equal final hashes dedup. Typed content hashing distinguishes absent text from literal status-only; failed same-prompt Stop can retry without reopening tools. Existing empty-state corruption undermines preserved terminal history.",
+      "proof_status": "positive ordinary trace; existing-empty-state counterexample UNEXECUTED; original dedup red/recovery retained",
+      "nearest_existing_fixture": null,
+      "current_author_scope": "Full current owner/caller source read at91e; production UNFIXED; RED/GREEN upcoming, no earlier result relabeled."
+    },
+    {
+      "contract": "Observable races and catch-up",
+      "qualified_source": ".claude/skills/hud-projection/scripts/portal_hook.py:338-381",
+      "assessment": "Independent marker before-send and after-ACK checks, one content-free same-generation active catch-up or same-generation ended clear; newer observable generation suppresses old cleanup.",
+      "proof_status": "existing controlled acknowledgment race positive; not universal transport ordering",
+      "nearest_existing_fixture": null,
+      "current_author_scope": "Full current owner/caller source read at91e; production UNFIXED; RED/GREEN upcoming, no earlier result relabeled."
+    },
+    {
+      "contract": "Transport uncertainty",
+      "qualified_source": "references/claude-code-hooks.md:208-229; .claude/skills/hud-projection/scripts/portal_hook.py:328-402",
+      "assessment": "Already-sent/timed-out HTTP can apply after local marker/clear; killing client is not rollback. No server epoch/CAS. Late execution after resume lacks documented generation ID. Next genuine event reconciles; no persistent retries.",
+      "proof_status": "explicit accepted limitation, no simulated live server guarantee",
+      "nearest_existing_fixture": null,
+      "current_author_scope": "Full current owner/caller source read at91e; production UNFIXED; RED/GREEN upcoming, no earlier result relabeled."
+    },
+    {
+      "contract": "Process bounds and silent failure",
+      "qualified_source": ".claude/skills/hud-projection/scripts/portal_hook.py:384-461",
+      "assessment": "HTTP350ms/whole1s/End1.2s, finite admitted child; kill/reap before delivery lock release. Only normalized child stdin; stdout/stderr sink; silent0 on malformed/unsupported/unpaired/transport errors. Supervisor/watchdog fixtures inspect owned children.",
+      "proof_status": "author actual fixture positives; no reviewer execution, scheduler/startup/filesystem overhead not certified",
+      "nearest_existing_fixture": null,
+      "current_author_scope": "Full current owner/caller source read at91e; production UNFIXED; RED/GREEN upcoming, no earlier result relabeled."
+    },
+    {
+      "contract": "Finite lifetime and purge",
+      "qualified_source": ".claude/skills/hud-projection/scripts/portal_hook.py:269-287,376-379",
+      "assessment": "Separate600000ms hold, no publishTTL/indefinite hold/daemon/polling. At most16 owned directory entries checked for24h ended state; lock files retained. SessionEnd best-effort and finite reclaim fallback.",
+      "proof_status": "source and existing cleanup fixture; no guaranteed expiry fairness or host latency claim",
+      "nearest_existing_fixture": null,
+      "current_author_scope": "Full current owner/caller source read at91e; production UNFIXED; RED/GREEN upcoming, no earlier result relabeled."
+    },
+    {
+      "contract": "Public/default Python callers",
+      "qualified_source": "portal_client.py:57-107 and all commands; test_portal_client.py original5",
+      "assessment": "rpc default60 and original three positional fields; call_tool without timeout retains old call shape, only hook opts short keyword deadline. CLI publish/poll/ack/status/clear/hold and error exits preserved.",
+      "proof_status": "all8names/prefixes, other7whole, original5prefixes independently AST-equal; AST is metadata not execution",
+      "nearest_existing_fixture": null,
+      "current_author_scope": "Full current owner/caller source read at91e; production UNFIXED; RED/GREEN upcoming, no earlier result relabeled."
+    },
+    {
+      "contract": "Production surface and owner boundary",
+      "qualified_source": "portal_op.rs full; hub.rs:342-425; runtime MCP bridge rg; docs/api.md",
+      "assessment": "Existing tools/call -> authenticated agent+portal key -> publish/status/hold/clear. Coalescing same key replaces latest unit; status applied after text activation. Hook8KiB text fits16KiB, session<=96 and key<=73 fit128. No input collection/permission relay absorption.",
+      "proof_status": "qualified unchanged source; loopback fixtures are not live HUD",
+      "nearest_existing_fixture": null,
+      "current_author_scope": "Full current owner/caller source read at91e; production UNFIXED; RED/GREEN upcoming, no earlier result relabeled."
+    },
+    {
+      "contract": "Defaults and protected owners",
+      "qualified_source": "Git full non-evidence pathset and source5 hash manifest",
+      "assessment": "Only five Python/docs/skill/test owners plus evidence paths; no Rust/API/schema/config/manifest/budgets/current72/T7/default17/Node160/Tile200 changed. Parser7/theme6/Classic11/permission relay remain separate owners.",
+      "proof_status": "source preservation, no Rust/fullCI or closure claims",
+      "nearest_existing_fixture": null,
+      "current_author_scope": "Full current owner/caller source read at91e; production UNFIXED; RED/GREEN upcoming, no earlier result relabeled."
+    },
+    {
+      "contract": "Growth and per-phase evidence",
+      "qualified_source": "test_portal_client.py and author current834 raw receipts",
+      "assessment": "Original+3~1-0, correction+0~1-0. Nearest cohesive subprocess/loopback species retained, no source guard/new fixture. RED HEAD2d fixture dirty1 reproduces delivery extra call; disabled RED not reached. GREEN HEAD2d dirty2 fixed source5 equals published91e.",
+      "proof_status": "verified actual1fail/1pass/8pass/79pytest+3subtests/103unittest; not immutable2d fix execution",
+      "nearest_existing_fixture": null,
+      "current_author_scope": "Full current owner/caller source read at91e; production UNFIXED; RED/GREEN upcoming, no earlier result relabeled."
+    },
+    {
+      "contract": "Original AC1 snippet",
+      "qualified_source": "SKILL.md/reference complete JSON",
+      "assessment": "Documented opt-in block delivered and metadata shape inspected. Nothing installed.",
+      "proof_status": "code portion implemented; actual owner enablement pending",
+      "nearest_existing_fixture": null,
+      "current_author_scope": "Full current owner/caller source read at91e; production UNFIXED; RED/GREEN upcoming, no earlier result relabeled."
+    },
+    {
+      "contract": "Original AC2 live owner HUD/zero model mirroring calls",
+      "qualified_source": "original exact AC2/reference owner verification",
+      "assessment": "Real interactive progress/final/status/screenshots and filtered model transcript showing zero mirroring hud_publish calls remain required in same original. Static source adds no model call; it does not prove a recorded owner session.",
+      "proof_status": "UNEXECUTED; original remains PARTIAL even eventual code merge",
+      "nearest_existing_fixture": null,
+      "current_author_scope": "Full current owner/caller source read at91e; production UNFIXED; RED/GREEN upcoming, no earlier result relabeled."
+    },
+    {
+      "contract": "Original AC3 latency/silence",
+      "qualified_source": "original exact AC3/reference timing boundaries",
+      "assessment": "Down/malformed/child bounds synthetic positives retained. Real tool AND prompt-side max/p95<50ms remain unexecuted; lock budget, async flag, broad suite durations and pass count cannot establish them.",
+      "proof_status": "UNEXECUTED live timing; no owner host action",
+      "nearest_existing_fixture": null,
+      "current_author_scope": "Full current owner/caller source read at91e; production UNFIXED; RED/GREEN upcoming, no earlier result relabeled."
+    },
+    {
+      "contract": "Original AC4 recorded payload",
+      "qualified_source": "original exact AC4/HookHarness",
+      "assessment": "Headless real subprocess/loopback fixture exists but payloads are docs-derived synthetic, not recorded owner hook payloads.",
+      "proof_status": "synthetic positive; recorded payload acceptance UNEXECUTED",
+      "nearest_existing_fixture": null,
+      "current_author_scope": "Full current owner/caller source read at91e; production UNFIXED; RED/GREEN upcoming, no earlier result relabeled."
+    },
+    {
+      "contract": "Merge and review mechanics",
+      "qualified_source": "fresh exact91e rules/checks/paged GraphQL+REST/readiness",
+      "assessment": "Required8/app15368 SUCCESS, current0-required approval rule; prior dangling thread resolved and concrete reply verified. New current outcome finding must stay unresolved; no enqueue despite green CI.",
+      "proof_status": "read-only verified; no queue action",
+      "nearest_existing_fixture": null,
+      "current_author_scope": "Full current owner/caller source read at91e; production UNFIXED; RED/GREEN upcoming, no earlier result relabeled."
+    }
+  ],
+  "eight_classes": [
+    {
+      "input": "genuinely absent delivery path",
+      "expected": "normal initialized first delivery",
+      "existing_source": "read_state(default) and initializer",
+      "scope": "preserve"
+    },
+    {
+      "input": "existing {} delivery object with valid current marker",
+      "expected": "refuse before any MCP; disable ordinary jobs",
+      "existing_source": "current validation bypass",
+      "scope": "actual same-fixture RED/repair/recovery required"
+    },
+    {
+      "input": "truthy object missing generation/tools/finals, bad generation/prompt, nonobject tools/finals, invalid stage/key/final hash or over-cap map",
+      "expected": "reject before MCP; retain existing strict validator",
+      "existing_source": "validator/source only; not all variants currently empirical",
+      "scope": "meaningful table branches inside same fixture; no broad schema/factory"
+    },
+    {
+      "input": "valid generation with empty tools/finals maps",
+      "expected": "accepted legitimate initialized state",
+      "existing_source": "real writer shape",
+      "scope": "preserve; do not reject valid empty collections"
+    },
+    {
+      "input": "fully valid state from old generation",
+      "expected": "validate before safe new-generation reset",
+      "existing_source": "current initialization after schema validation",
+      "scope": "preserve"
+    },
+    {
+      "input": "invalid JSON/non-dictionary/oversize/dangling marker or delivery/wrong ownership or modes",
+      "expected": "refuse before MCP",
+      "existing_source": "read_state/private_file/validator",
+      "scope": "retain prior checks; dangling actual GREEN separate"
+    },
+    {
+      "input": "present disabled entry including dangling sentinel",
+      "expected": "ordinary events publish nothing; successful explicit SessionStart recovery only",
+      "existing_source": "lexists current/mark",
+      "scope": "retain actual P2 GREEN/recovery"
+    },
+    {
+      "input": "empty existing marker",
+      "expected": "ordinary activity not admitted; explicit SessionStart validates/refuses",
+      "existing_source": "current falsy return and mark presence validator",
+      "scope": "preserve no-network result, no unrelated rewrite"
+    }
+  ],
+  "actual_new_execution_status": "UNEXECUTED; no Python/test command yet",
+  "fixture_table_plan": {
+    "existing_empty": "First branch after unchanged original body establishes acknowledged Post stage2, corrupts existing delivery to{}, delayed same-tool Pre expects ZERO new captured MCP/silent bounded0. ExpectedRED stops here; later branches must not be claimed executed.",
+    "absence_recovery": "After corruption refusal/disabled, owner-fixture removes corrupt entry then explicit SessionStart+newprompt+firstPre accepted.",
+    "valid_empty_and_old_generation": "Two actual writer-shape branches accept empty maps and validate oldgeneration before reset; retain subsequent Post/delayedPre replay.",
+    "malformed_existing": "18 table branches: missing required members/generation/prompt/map shapes/stage/key/hash/overcaps/unexpectedmember/nondictionary/invalidJSON/oversize/unsafe mode, all beforeMCP.",
+    "existing_empty_marker": "Ordinary event makes no MCP; explicit start validates/refuses existing{}; no marker production change."
+  },
+  "all_original5_prefixes": "Transitive: published91e8 bodies equal previous author GREEN source5; all8 now retain entire baseline body prefixes, other7 whole. Current correction +0~1-0, original+3~1-0 kept distinct.",
+  "live_owner_limits": "Recorded events/screenshots/status/zero mirroring modelcalls/tool AND prompt<50ms UNEXECUTED. Synthetic loopback/privatefakeHOME fixture is not live proof. No host/settings/model/PSK values/Cargo/GPU/newstorage/API/framework."
+}

@@ -1,0 +1,134 @@
+{
+  "schema": "bounded-Python-gate-v1",
+  "name": "dangling-state-RED",
+  "native_pid": 4004426,
+  "child_pid": 4004428,
+  "argv": [
+    "/home/orca/orca/projects/tze-hud/.venv/bin/python3",
+    "-m",
+    "pytest",
+    "-q",
+    ".claude/skills/user-test/tests/test_portal_client.py::test_hook_unavailable_malformed_privacy_and_state_failures"
+  ],
+  "exit": 1,
+  "seconds": 5.598885215993505,
+  "source5_before": {
+    ".claude/skills/hud-projection/scripts/portal_hook.py": {
+      "bytes": 18180,
+      "sha256": "e30901c0f0a37a00711af1ba901ff5f77cdb44856c4b4f19f85dc3b58b90e196"
+    },
+    ".claude/skills/hud-projection/scripts/portal_client.py": {
+      "bytes": 7165,
+      "sha256": "9c6423e54244c76484630f4da687c8ff8056a00cd4fb8858ba86c6c156f6790c"
+    },
+    ".claude/skills/hud-projection/references/claude-code-hooks.md": {
+      "bytes": 12287,
+      "sha256": "ed6754b669b0182a4bc7478090c0cd040629fe478b9ade3efb4bdfa755880283"
+    },
+    ".claude/skills/hud-projection/SKILL.md": {
+      "bytes": 6110,
+      "sha256": "d4063f4f5531ff5ca2b58ae0d48cd8f38e71646c6de7b7ce58fd0181623850e3"
+    },
+    ".claude/skills/user-test/tests/test_portal_client.py": {
+      "bytes": 22465,
+      "sha256": "b6a84122c4c86afb1d36b2ececf50f181c0a5ac0a21d0b4bf776be1b16b32e71"
+    }
+  },
+  "source5_after": {
+    ".claude/skills/hud-projection/scripts/portal_hook.py": {
+      "bytes": 18180,
+      "sha256": "e30901c0f0a37a00711af1ba901ff5f77cdb44856c4b4f19f85dc3b58b90e196"
+    },
+    ".claude/skills/hud-projection/scripts/portal_client.py": {
+      "bytes": 7165,
+      "sha256": "9c6423e54244c76484630f4da687c8ff8056a00cd4fb8858ba86c6c156f6790c"
+    },
+    ".claude/skills/hud-projection/references/claude-code-hooks.md": {
+      "bytes": 12287,
+      "sha256": "ed6754b669b0182a4bc7478090c0cd040629fe478b9ade3efb4bdfa755880283"
+    },
+    ".claude/skills/hud-projection/SKILL.md": {
+      "bytes": 6110,
+      "sha256": "d4063f4f5531ff5ca2b58ae0d48cd8f38e71646c6de7b7ce58fd0181623850e3"
+    },
+    ".claude/skills/user-test/tests/test_portal_client.py": {
+      "bytes": 22465,
+      "sha256": "b6a84122c4c86afb1d36b2ececf50f181c0a5ac0a21d0b4bf776be1b16b32e71"
+    }
+  },
+  "source_immutable": true,
+  "observed_descendant_PIDs": [
+    4004428,
+    4004430,
+    4004431,
+    4004438,
+    4004439,
+    4004440,
+    4004441,
+    4004442,
+    4004443,
+    4004444,
+    4004449,
+    4004452,
+    4004455,
+    4004460,
+    4004461,
+    4004464,
+    4004469,
+    4004470,
+    4004473,
+    4004478,
+    4004479,
+    4004482,
+    4004487,
+    4004488,
+    4004491,
+    4004492,
+    4004495,
+    4004500,
+    4004510,
+    4004513,
+    4004514,
+    4004519,
+    4004520,
+    4004523,
+    4004524,
+    4004525,
+    4004526,
+    4004529,
+    4004531,
+    4004532,
+    4004542,
+    4004543,
+    4004566,
+    4004567,
+    4004568,
+    4004569,
+    4004571,
+    4004572,
+    4004577,
+    4004578
+  ],
+  "observed_groups": [
+    4004428,
+    4004452,
+    4004461,
+    4004470,
+    4004479,
+    4004488,
+    4004492,
+    4004510,
+    4004520,
+    4004524,
+    4004526,
+    4004567,
+    4004569,
+    4004578
+  ],
+  "live_observed_PIDs_at_terminal": [],
+  "group_members_at_terminal": [],
+  "observation_limits": "30ms descendant/group sampling; no unknown PID absence claim",
+  "raw_path": ".handoff/hud-x38zn.1/P2-author-return/dangling-state-RED.log",
+  "raw_bytes": 6335,
+  "raw_SHA256": "80f2544d49ef0dfca23217a73345dfcb2dcdf05173c8accd48e27f529f3f79f9"
+}

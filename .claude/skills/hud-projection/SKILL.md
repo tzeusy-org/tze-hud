@@ -26,7 +26,9 @@ session publishes its output, the human reads it on the HUD and types replies
 into the portal composer, and the session collects those replies.
 
 Hard boundaries:
-- Cooperative opt-in. The session calls the tools on purpose.
+- Cooperative opt-in. The session calls the tools on purpose, or the owner
+  explicitly installs the optional [Claude Code hooks](references/claude-code-hooks.md)
+  to mirror safe tool progress and opted-in final replies without model calls.
 - Not PTY, tmux, shell, or terminal capture.
 - The portal authority runs in-process in the runtime and holds only
   ephemeral state (visible transcript window, pending input, lifecycle). The
@@ -97,6 +99,16 @@ python3 $CLIENT clear   --id my-session
 ```
 
 `poll --ack` acks every item it prints.
+
+## Optional Claude Code mirroring
+
+[Claude Code hooks](references/claude-code-hooks.md) provides a complete opt-in
+settings block for the main conversation on a POSIX Claude host. It uses the
+same paired client and portal; it installs nothing automatically. Progress
+contains fixed tool labels, never tool inputs/results. Final replies are the
+owner's explicit privacy opt-in. The reference describes finite quiet holds,
+bounded delivery, prompt ordering limits and the required live owner proof.
+Explicit model/client publication and input collection remain available.
 
 ## MCP client
 

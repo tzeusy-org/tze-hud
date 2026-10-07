@@ -1,0 +1,16 @@
+/home/orca/orca/projects/tze-hud/.venv/bin/python3 -m pytest .claude/skills/user-test/tests/ .claude/skills/user-test/scripts/test_hud_grpc_client.py scripts/tests/ -q
+..................................................................... [ 87%]
+..........                                                               [100%]
+79 passed, 3 subtests passed in 17.13s
+/home/orca/orca/projects/tze-hud/.venv/bin/python3 -m unittest discover -s scripts/ci
+.......................................................................................................
+----------------------------------------------------------------------
+Ran 103 tests in 0.012s
+
+OK
+No main-pinned Windows performance baseline found — no green main artifact yet. Trend deltas will appear once main publishes a baseline summary.
+Windows performance budget — cross-run trend deltas:
+  steady_state_render.frame_time_p99: 14100us -> 14800us (+700us, +5.0%, within budget)
+No main-pinned Windows performance baseline found — no green main artifact yet. Trend deltas will appear once main publishes a baseline summary.
+Windows performance budget — cross-run trend deltas:
+  steady_state_render.frame_time_p99: 14100us -> 14800us (+700us, +5.0%, within budget)
