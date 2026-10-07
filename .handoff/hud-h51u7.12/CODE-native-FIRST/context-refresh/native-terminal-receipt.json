@@ -1,0 +1,119 @@
+{
+  "schema": "Blueprint12-explicit-ROOT-related-context-refresh-v1",
+  "native_pid": 3319,
+  "at": 1791335348.593414,
+  "commands": [
+    {
+      "role": "classic",
+      "pid": 3321,
+      "pgid": 3321,
+      "exit": 0,
+      "stdout": ".handoff/hud-h51u7.12/CODE-native-FIRST/context-refresh/classic.stdout",
+      "stdout_SHA256": "7f7c090c3bf7187fbd71436c6edb29198af3aecb3639573b3818aba255283945",
+      "stderr": ".handoff/hud-h51u7.12/CODE-native-FIRST/context-refresh/classic.stderr",
+      "stderr_SHA256": "36bb59ba400251443723e2ec8b5684ccb53df3598f63fded1c0c1399b64f62ae"
+    },
+    {
+      "role": "dependent_theme",
+      "pid": 3358,
+      "pgid": 3358,
+      "exit": 0,
+      "stdout": ".handoff/hud-h51u7.12/CODE-native-FIRST/context-refresh/dependent_theme.stdout",
+      "stdout_SHA256": "9f46cf83bd5d98d050ede3fb5f947587e8442f7cc9edb8540ee261e0a6adf3dd",
+      "stderr": ".handoff/hud-h51u7.12/CODE-native-FIRST/context-refresh/dependent_theme.stderr",
+      "stderr_SHA256": "36bb59ba400251443723e2ec8b5684ccb53df3598f63fded1c0c1399b64f62ae"
+    }
+  ],
+  "fields": [
+    {
+      "role": "classic",
+      "field": "description",
+      "presence": true,
+      "null": false,
+      "JSON_SHA256": "3c8987d267051e8cb2c99af311ebb2e0896cc1bda34b3f9224b348446008fee9",
+      "RAW_UTF8_SHA256": "855d8934231f075655b6fd512f606d59c0c7077a71dbd93365773860cdab8f01",
+      "DDA_equal_original_FIRST": true,
+      "dispatch_compare": "exact"
+    },
+    {
+      "role": "classic",
+      "field": "design",
+      "presence": true,
+      "null": false,
+      "JSON_SHA256": "1b47803edd29e6519c55f99ca591970c34372e8d2754757683398a469143db3a",
+      "RAW_UTF8_SHA256": "646690c3414923f593d8ad27ddaf1f7637f28a8df7c920cb56204ee1df155c21",
+      "DDA_equal_original_FIRST": true,
+      "dispatch_compare": "exact"
+    },
+    {
+      "role": "classic",
+      "field": "acceptance_criteria",
+      "presence": true,
+      "null": false,
+      "JSON_SHA256": "4d6fcbee84b1b9490328abed0c49bdc64a66ff11e1a02bacd625ef3159a8cfbc",
+      "RAW_UTF8_SHA256": "def1ffc57661c11daceb25093b27d7461f55a622ff7cc0c89a8e682d70d5a9d8",
+      "DDA_equal_original_FIRST": true,
+      "dispatch_compare": "exact"
+    },
+    {
+      "role": "classic",
+      "field": "notes",
+      "presence": true,
+      "null": false,
+      "JSON_SHA256": "891bd99da3bb717780e568a74df4739004f776a022dba2407a636f299b5807e3",
+      "RAW_UTF8_SHA256": "52b457d670aa377da7b96f31670d5fac8727894b1673d9177dcd6c0f0afb5a92",
+      "DDA_equal_original_FIRST": false,
+      "dispatch_compare": "HB-block removal plus outer strip only"
+    },
+    {
+      "role": "dependent_theme",
+      "field": "description",
+      "presence": true,
+      "null": false,
+      "JSON_SHA256": "bc5883393e232f74c7e8c4a0bc31c9e477f662705e4f29f246dd431128d9f8d7",
+      "RAW_UTF8_SHA256": "ab562ec47204db2b7f4935af3ac7f444f85ba7fa094e86dc2a9dd16c87bac057",
+      "DDA_equal_original_FIRST": true,
+      "dispatch_compare": "exact"
+    },
+    {
+      "role": "dependent_theme",
+      "field": "design",
+      "presence": true,
+      "null": false,
+      "JSON_SHA256": "6e034277e3215999e10f0c00464f5f8e00311cde75257f8760c90072ed93b9ea",
+      "RAW_UTF8_SHA256": "398ce169ea2a53274d735baa56a7d3c5a95ef87120bd3e02ae64abf22e95fe6b",
+      "DDA_equal_original_FIRST": true,
+      "dispatch_compare": "exact"
+    },
+    {
+      "role": "dependent_theme",
+      "field": "acceptance_criteria",
+      "presence": true,
+      "null": false,
+      "JSON_SHA256": "f71c89768267c7aa6cc3320a21375c2de1a7d54945aa951cb6e1c11487be908e",
+      "RAW_UTF8_SHA256": "d5641ff055c7c62b0772d43f4f5b10e73c2c581903a0ac787dcea95772b989c9",
+      "DDA_equal_original_FIRST": true,
+      "dispatch_compare": "exact"
+    },
+    {
+      "role": "dependent_theme",
+      "field": "notes",
+      "presence": true,
+      "null": false,
+      "JSON_SHA256": "a4400736722aa0569f2062b4d9af5826f4c646e2cf3974a372b0d629994da89b",
+      "RAW_UTF8_SHA256": "1749942a9c7a6c061fdc6b0e38df89a8dde0671914420d79e4b375dc99e1b8be",
+      "DDA_equal_original_FIRST": false,
+      "dispatch_compare": "HB-block removal plus outer strip only"
+    }
+  ],
+  "current_dispatch_SHA256": "93db45c10df4bf57092a2e5663c9c5d3d224e87a1be0b0cdd36856a9396910da",
+  "original_dispatch_SHA256": "bd544850cf886abcffadf184896d55487d81b4b010133b635eef1710c4b66339",
+  "status": {
+    "classic": "closed",
+    "dependent_theme": "open"
+  },
+  "unchanged_DDA_prior_FULL_reads_reused_with_exact_bytes_verified": true,
+  "notes_FULL_current_read": true,
+  "source_head_immutable": "0c2ffa70898275811d2efa755ef33e967ef861fb",
+  "source_or_gates_reexecuted": false
+}

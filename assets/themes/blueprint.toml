@@ -37,7 +37,10 @@
 "color.on_error.container"        = "#F6F7F9"   # light-gray5
 
 # ── State layers (minimal-button hover/active tints) ────────────────────────
-"state.hover.opacity"             = "0.15"
+# Opaque highest card: one on_surface hover layer keeps variant text >= 4.5:1
+# in sRGB and linear-light blending. Not a guarantee for translucent surfaces,
+# primary text, pressed/stacked layers, fades, or explicit config overrides.
+"state.hover.opacity"             = "0.01"
 "state.pressed.opacity"           = "0.30"
 "focus.ring.width"                = "2"
 "focus.ring.offset"               = "2"

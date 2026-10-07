@@ -288,6 +288,17 @@ again. An unknown theme name fails config validation with
 overrides for values specific to one deployment. The visual design
 belongs in a theme.
 
+Blueprint uses a `0.01` hover opacity for its intended opaque highest card:
+`color.surface.container.highest` at alpha 1, then one `color.on_surface`
+hover layer, then opaque `color.on_surface.variant` text. The selected values
+meet unrounded 4.5:1 contrast in both sRGB and linear-light source-over models.
+This is a config-level composition contract, not evidence of a current hover
+consumer or a rendered screenshot. It does not certify a whole surface at
+`opacity.surface = 0.96` over white, primary-colored text, pressed or stacked
+layers, fades, or explicit config overrides. Surface opacity, pressed opacity
+and the other palette values remain unchanged; consumers must validate their
+actual composition.
+
 Theme files accept canonical keys and the 41 existing portal color keys
 documented in `crates/tze_hud_config/src/portal_tokens.rs`, including
 `portal.frame.background`, `portal.transcript.background`, and

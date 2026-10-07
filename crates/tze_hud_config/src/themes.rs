@@ -281,6 +281,56 @@ mod tests {
             resolve_tokens(&DesignTokenMap::new(), &DesignTokenMap::new()),
             canonical
         );
+
+        // The intended Blueprint card is opaque highest, then ONE on_surface
+        // hover layer, then opaque variant text. Check the actual selected
+        // values in both blend spaces; no whole-surface opacity or pressed tint.
+        let blueprint = builtin_theme("blueprint").unwrap();
+        let selected = resolve_config_tokens(&tokens(&[(THEME_KEY, "blueprint")]));
+        for key in [
+            "color.surface.container.highest",
+            "color.on_surface",
+            "color.on_surface.variant",
+            "state.hover.opacity",
+        ] {
+            assert_eq!(selected[key], blueprint[key], "Blueprint must supply {key}");
+        }
+        let rgb = |key: &str| {
+            let hex = selected[key].trim().strip_prefix('#').unwrap();
+            assert_eq!(hex.len(), 6, "{key} must be opaque for this card");
+            [0, 2, 4].map(|i| f64::from(u8::from_str_radix(&hex[i..i + 2], 16).unwrap()) / 255.0)
+        };
+        let linearize = |channel: f64| {
+            if channel <= 0.04045 {
+                channel / 12.92
+            } else {
+                ((channel + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        let luminance =
+            |channels: [f64; 3]| 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2];
+        let highest = rgb("color.surface.container.highest");
+        let layer = rgb("color.on_surface");
+        let text = luminance(rgb("color.on_surface.variant").map(linearize));
+        let hover = selected["state.hover.opacity"].parse::<f64>().unwrap();
+        assert!((0.0..=1.0).contains(&hover));
+        for (space, highest, layer) in [
+            ("sRGB", highest, layer),
+            ("linear-light", highest.map(linearize), layer.map(linearize)),
+        ] {
+            let hovered: [f64; 3] =
+                std::array::from_fn(|i| highest[i] * (1.0 - hover) + layer[i] * hover);
+            let background = luminance(if space == "sRGB" {
+                hovered.map(linearize)
+            } else {
+                hovered
+            });
+            let contrast = (text.max(background) + 0.05) / (text.min(background) + 0.05);
+            assert!(
+                contrast >= 4.5,
+                "Blueprint opaque hovered highest/variant contrast in {space}: {contrast}"
+            );
+        }
     }
 
     /// Every built-in theme declares a complete semantic palette. Shared
