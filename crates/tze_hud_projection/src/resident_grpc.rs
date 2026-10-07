@@ -3304,6 +3304,9 @@ fn new_node_id_le() -> Vec<u8> {
 /// card. Transition values remain runtime-owned and are not part of this render
 /// payload.
 ///
+/// Config hex colors carry encoded sRGB channels. Decode RGB to linear light for
+/// the scene's compositor/text consumers; alpha passes through unchanged.
+///
 /// ## Usage
 ///
 /// ```rust,ignore
@@ -3325,197 +3328,60 @@ fn new_node_id_le() -> Vec<u8> {
 pub fn portal_visual_tokens_from_part_tokens(
     part: &tze_hud_config::PortalPartTokens,
 ) -> PortalVisualTokens {
+    let linear_channel = |encoded: f32| {
+        if encoded <= 0.04045 {
+            encoded / 12.92
+        } else {
+            ((encoded + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    let linear_color = |color: &tze_hud_config::tokens::Rgba| proto::Rgba {
+        r: linear_channel(color.r),
+        g: linear_channel(color.g),
+        b: linear_channel(color.b),
+        a: color.a,
+    };
     PortalVisualTokens {
-        frame_background: proto::Rgba {
-            r: part.frame_background.r,
-            g: part.frame_background.g,
-            b: part.frame_background.b,
-            a: part.frame_background.a,
-        },
+        frame_background: linear_color(&part.frame_background),
         frame_opacity: part.frame_opacity,
-        header_text_color: proto::Rgba {
-            r: part.header_text_color.r,
-            g: part.header_text_color.g,
-            b: part.header_text_color.b,
-            a: part.header_text_color.a,
-        },
+        header_text_color: linear_color(&part.header_text_color),
         header_font_size_px: part.header_font_size_px,
-        divider_color: proto::Rgba {
-            r: part.divider_color.r,
-            g: part.divider_color.g,
-            b: part.divider_color.b,
-            a: part.divider_color.a,
-        },
-        divider_grip_color: proto::Rgba {
-            r: part.resize_grip_color.r,
-            g: part.resize_grip_color.g,
-            b: part.resize_grip_color.b,
-            a: part.resize_grip_color.a,
-        },
+        divider_color: linear_color(&part.divider_color),
+        divider_grip_color: linear_color(&part.resize_grip_color),
         content_inset_px: part.content_inset_px,
-        transcript_background: proto::Rgba {
-            r: part.transcript_background.r,
-            g: part.transcript_background.g,
-            b: part.transcript_background.b,
-            a: part.transcript_background.a,
-        },
-        transcript_text_color: proto::Rgba {
-            r: part.transcript_text_color.r,
-            g: part.transcript_text_color.g,
-            b: part.transcript_text_color.b,
-            a: part.transcript_text_color.a,
-        },
-        transcript_system_color: proto::Rgba {
-            r: part.transcript_system_color.r,
-            g: part.transcript_system_color.g,
-            b: part.transcript_system_color.b,
-            a: part.transcript_system_color.a,
-        },
+        transcript_background: linear_color(&part.transcript_background),
+        transcript_text_color: linear_color(&part.transcript_text_color),
+        transcript_system_color: linear_color(&part.transcript_system_color),
         transcript_font_size_px: part.transcript_font_size_px,
-        transcript_dim_text_color: proto::Rgba {
-            r: part.transcript_dim_text_color.r,
-            g: part.transcript_dim_text_color.g,
-            b: part.transcript_dim_text_color.b,
-            a: part.transcript_dim_text_color.a,
-        },
-        transcript_dim_background: proto::Rgba {
-            r: part.transcript_dim_background.r,
-            g: part.transcript_dim_background.g,
-            b: part.transcript_dim_background.b,
-            a: part.transcript_dim_background.a,
-        },
-        stale_marker_color: proto::Rgba {
-            r: part.stale_marker_color.r,
-            g: part.stale_marker_color.g,
-            b: part.stale_marker_color.b,
-            a: part.stale_marker_color.a,
-        },
-        disconnect_badge_color: proto::Rgba {
-            r: part.disconnect_badge_color.r,
-            g: part.disconnect_badge_color.g,
-            b: part.disconnect_badge_color.b,
-            a: part.disconnect_badge_color.a,
-        },
+        transcript_dim_text_color: linear_color(&part.transcript_dim_text_color),
+        transcript_dim_background: linear_color(&part.transcript_dim_background),
+        stale_marker_color: linear_color(&part.stale_marker_color),
+        disconnect_badge_color: linear_color(&part.disconnect_badge_color),
         disconnect_badge_width_px: part.disconnect_badge_width_px,
-        unread_indicator_color: proto::Rgba {
-            r: part.unread_indicator_color.r,
-            g: part.unread_indicator_color.g,
-            b: part.unread_indicator_color.b,
-            a: part.unread_indicator_color.a,
-        },
-        unread_divider_color: proto::Rgba {
-            r: part.unread_divider_color.r,
-            g: part.unread_divider_color.g,
-            b: part.unread_divider_color.b,
-            a: part.unread_divider_color.a,
-        },
-        awaiting_reply_color: proto::Rgba {
-            r: part.awaiting_reply_color.r,
-            g: part.awaiting_reply_color.g,
-            b: part.awaiting_reply_color.b,
-            a: part.awaiting_reply_color.a,
-        },
-        empty_state_color: proto::Rgba {
-            r: part.empty_state_color.r,
-            g: part.empty_state_color.g,
-            b: part.empty_state_color.b,
-            a: part.empty_state_color.a,
-        },
-        connecting_marker_color: proto::Rgba {
-            r: part.connecting_marker_color.r,
-            g: part.connecting_marker_color.g,
-            b: part.connecting_marker_color.b,
-            a: part.connecting_marker_color.a,
-        },
-        activity_cue_color: proto::Rgba {
-            r: part.activity_cue_color.r,
-            g: part.activity_cue_color.g,
-            b: part.activity_cue_color.b,
-            a: part.activity_cue_color.a,
-        },
-        streaming_cursor_color: proto::Rgba {
-            r: part.streaming_cursor_color.r,
-            g: part.streaming_cursor_color.g,
-            b: part.streaming_cursor_color.b,
-            a: part.streaming_cursor_color.a,
-        },
-        delivery_inflight_color: proto::Rgba {
-            r: part.delivery_inflight_color.r,
-            g: part.delivery_inflight_color.g,
-            b: part.delivery_inflight_color.b,
-            a: part.delivery_inflight_color.a,
-        },
-        delivery_delivered_color: proto::Rgba {
-            r: part.delivery_delivered_color.r,
-            g: part.delivery_delivered_color.g,
-            b: part.delivery_delivered_color.b,
-            a: part.delivery_delivered_color.a,
-        },
-        delivery_failed_color: proto::Rgba {
-            r: part.delivery_failed_color.r,
-            g: part.delivery_failed_color.g,
-            b: part.delivery_failed_color.b,
-            a: part.delivery_failed_color.a,
-        },
-        timestamp_color: proto::Rgba {
-            r: part.timestamp_color.r,
-            g: part.timestamp_color.g,
-            b: part.timestamp_color.b,
-            a: part.timestamp_color.a,
-        },
+        unread_indicator_color: linear_color(&part.unread_indicator_color),
+        unread_divider_color: linear_color(&part.unread_divider_color),
+        awaiting_reply_color: linear_color(&part.awaiting_reply_color),
+        empty_state_color: linear_color(&part.empty_state_color),
+        connecting_marker_color: linear_color(&part.connecting_marker_color),
+        activity_cue_color: linear_color(&part.activity_cue_color),
+        streaming_cursor_color: linear_color(&part.streaming_cursor_color),
+        delivery_inflight_color: linear_color(&part.delivery_inflight_color),
+        delivery_delivered_color: linear_color(&part.delivery_delivered_color),
+        delivery_failed_color: linear_color(&part.delivery_failed_color),
+        timestamp_color: linear_color(&part.timestamp_color),
         timestamp_granularity: part.timestamp_granularity,
-        lifecycle_active_color: proto::Rgba {
-            r: part.lifecycle_active_color.r,
-            g: part.lifecycle_active_color.g,
-            b: part.lifecycle_active_color.b,
-            a: part.lifecycle_active_color.a,
-        },
-        lifecycle_attached_color: proto::Rgba {
-            r: part.lifecycle_attached_color.r,
-            g: part.lifecycle_attached_color.g,
-            b: part.lifecycle_attached_color.b,
-            a: part.lifecycle_attached_color.a,
-        },
-        lifecycle_attention_color: proto::Rgba {
-            r: part.lifecycle_attention_color.r,
-            g: part.lifecycle_attention_color.g,
-            b: part.lifecycle_attention_color.b,
-            a: part.lifecycle_attention_color.a,
-        },
-        lifecycle_inactive_color: proto::Rgba {
-            r: part.lifecycle_inactive_color.r,
-            g: part.lifecycle_inactive_color.g,
-            b: part.lifecycle_inactive_color.b,
-            a: part.lifecycle_inactive_color.a,
-        },
+        lifecycle_active_color: linear_color(&part.lifecycle_active_color),
+        lifecycle_attached_color: linear_color(&part.lifecycle_attached_color),
+        lifecycle_attention_color: linear_color(&part.lifecycle_attention_color),
+        lifecycle_inactive_color: linear_color(&part.lifecycle_inactive_color),
         lifecycle_accent_width_px: part.lifecycle_accent_width_px,
         header_height_px: part.header_height_px,
         section_gap_px: part.section_gap_px,
-        collapsed_background: proto::Rgba {
-            r: part.collapsed_background.r,
-            g: part.collapsed_background.g,
-            b: part.collapsed_background.b,
-            a: part.collapsed_background.a,
-        },
-        collapsed_text_color: proto::Rgba {
-            r: part.collapsed_text_color.r,
-            g: part.collapsed_text_color.g,
-            b: part.collapsed_text_color.b,
-            a: part.collapsed_text_color.a,
-        },
+        collapsed_background: linear_color(&part.collapsed_background),
+        collapsed_text_color: linear_color(&part.collapsed_text_color),
         collapsed_font_size_px: part.collapsed_font_size_px,
-        composer_background: proto::Rgba {
-            r: part.composer_background.r,
-            g: part.composer_background.g,
-            b: part.composer_background.b,
-            a: part.composer_background.a,
-        },
-        composer_text_color: proto::Rgba {
-            r: part.composer_text_color.r,
-            g: part.composer_text_color.g,
-            b: part.composer_text_color.b,
-            a: part.composer_text_color.a,
-        },
+        composer_background: linear_color(&part.composer_background),
+        composer_text_color: linear_color(&part.composer_text_color),
         composer_font_size_px: part.composer_font_size_px,
     }
 }
@@ -5099,16 +4965,26 @@ mod tests {
         );
     }
 
-    /// The `unread_indicator_color` `PortalVisualTokens` field maps 1:1 from
+    /// The `unread_indicator_color` `PortalVisualTokens` field maps from
     /// the source `PortalPartTokens` channel (single-source-of-truth
     /// invariant, same as the other token-mapping tests in this module).
     #[test]
     fn portal_visual_tokens_from_part_tokens_maps_unread_indicator_color() {
         let part = tze_hud_config::PortalPartTokens::default();
         let visual = portal_visual_tokens_from_part_tokens(&part);
-        assert_eq!(
-            visual.unread_indicator_color.r,
-            part.unread_indicator_color.r
+        let expected_linear = |encoded: f32| {
+            let encoded = f64::from(encoded);
+            if encoded <= 0.04045 {
+                encoded / 12.92
+            } else {
+                ((encoded + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        assert!(
+            (f64::from(visual.unread_indicator_color.r)
+                - expected_linear(part.unread_indicator_color.r))
+            .abs()
+                < 1e-6
         );
         assert_eq!(
             visual.unread_indicator_color.a,
@@ -5116,14 +4992,27 @@ mod tests {
         );
     }
 
-    /// The `awaiting_reply_color` `PortalVisualTokens` field maps 1:1 from the
+    /// The `awaiting_reply_color` `PortalVisualTokens` field maps from the
     /// source `PortalPartTokens` channel (hud-jip0k), same single-source-of-truth
     /// invariant as the other token-mapping tests in this module.
     #[test]
     fn portal_visual_tokens_from_part_tokens_maps_awaiting_reply_color() {
         let part = tze_hud_config::PortalPartTokens::default();
         let visual = portal_visual_tokens_from_part_tokens(&part);
-        assert_eq!(visual.awaiting_reply_color.r, part.awaiting_reply_color.r);
+        let expected_linear = |encoded: f32| {
+            let encoded = f64::from(encoded);
+            if encoded <= 0.04045 {
+                encoded / 12.92
+            } else {
+                ((encoded + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        assert!(
+            (f64::from(visual.awaiting_reply_color.r)
+                - expected_linear(part.awaiting_reply_color.r))
+            .abs()
+                < 1e-6
+        );
         assert_eq!(visual.awaiting_reply_color.a, part.awaiting_reply_color.a);
     }
 
@@ -6038,16 +5927,39 @@ mod tests {
         assert_eq!(unread_divider_boundary(&state), Some(1));
     }
 
-    /// The `unread_divider_color` `PortalVisualTokens` field maps 1:1 from the
+    /// The `unread_divider_color` `PortalVisualTokens` field maps from the
     /// source `PortalPartTokens` channel and is distinct from the ambient unread
     /// count token so the two affordances can be reskinned separately.
     #[test]
     fn portal_visual_tokens_from_part_tokens_maps_unread_divider_color() {
         let part = tze_hud_config::PortalPartTokens::default();
         let visual = portal_visual_tokens_from_part_tokens(&part);
-        assert_eq!(visual.unread_divider_color.r, part.unread_divider_color.r);
-        assert_eq!(visual.unread_divider_color.g, part.unread_divider_color.g);
-        assert_eq!(visual.unread_divider_color.b, part.unread_divider_color.b);
+        let expected_linear = |encoded: f32| {
+            let encoded = f64::from(encoded);
+            if encoded <= 0.04045 {
+                encoded / 12.92
+            } else {
+                ((encoded + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        assert!(
+            (f64::from(visual.unread_divider_color.r)
+                - expected_linear(part.unread_divider_color.r))
+            .abs()
+                < 1e-6
+        );
+        assert!(
+            (f64::from(visual.unread_divider_color.g)
+                - expected_linear(part.unread_divider_color.g))
+            .abs()
+                < 1e-6
+        );
+        assert!(
+            (f64::from(visual.unread_divider_color.b)
+                - expected_linear(part.unread_divider_color.b))
+            .abs()
+                < 1e-6
+        );
         assert_eq!(visual.unread_divider_color.a, part.unread_divider_color.a);
         assert_ne!(
             visual.unread_divider_color, visual.unread_indicator_color,
@@ -6264,26 +6176,43 @@ mod tests {
         }
     }
 
-    /// The three delivery `PortalVisualTokens` fields map 1:1 from their
+    /// The three delivery `PortalVisualTokens` fields map from their
     /// `PortalPartTokens` counterparts (hud-g1ena.1), so a profile/token change
     /// reskins the delivery cue end-to-end with no adapter logic change.
     #[test]
     fn portal_visual_tokens_from_part_tokens_maps_delivery_fields() {
         let part = tze_hud_config::PortalPartTokens::default();
         let visual = portal_visual_tokens_from_part_tokens(&part);
-        assert_eq!(
-            visual.delivery_inflight_color.r,
-            part.delivery_inflight_color.r
+        let expected_linear = |encoded: f32| {
+            let encoded = f64::from(encoded);
+            if encoded <= 0.04045 {
+                encoded / 12.92
+            } else {
+                ((encoded + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        assert!(
+            (f64::from(visual.delivery_inflight_color.r)
+                - expected_linear(part.delivery_inflight_color.r))
+            .abs()
+                < 1e-6
         );
         assert_eq!(
             visual.delivery_inflight_color.a,
             part.delivery_inflight_color.a
         );
-        assert_eq!(
-            visual.delivery_delivered_color.g,
-            part.delivery_delivered_color.g
+        assert!(
+            (f64::from(visual.delivery_delivered_color.g)
+                - expected_linear(part.delivery_delivered_color.g))
+            .abs()
+                < 1e-6
         );
-        assert_eq!(visual.delivery_failed_color.b, part.delivery_failed_color.b);
+        assert!(
+            (f64::from(visual.delivery_failed_color.b)
+                - expected_linear(part.delivery_failed_color.b))
+            .abs()
+                < 1e-6
+        );
         // The three classes must be visually distinct so a viewer can tell
         // in-flight from delivered from failed at a glance.
         assert_ne!(
@@ -6559,17 +6488,31 @@ mod tests {
     }
 
     /// The `activity_cue_color` / `streaming_cursor_color` `PortalVisualTokens`
-    /// fields map 1:1 from the source `PortalPartTokens` channels
+    /// fields map from the source `PortalPartTokens` channels
     /// (single-source-of-truth invariant, matching the other token-mapping tests).
     #[test]
     fn portal_visual_tokens_from_part_tokens_maps_activity_and_cursor_fields() {
         let part = tze_hud_config::PortalPartTokens::default();
         let visual = portal_visual_tokens_from_part_tokens(&part);
-        assert_eq!(visual.activity_cue_color.r, part.activity_cue_color.r);
+        let expected_linear = |encoded: f32| {
+            let encoded = f64::from(encoded);
+            if encoded <= 0.04045 {
+                encoded / 12.92
+            } else {
+                ((encoded + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        assert!(
+            (f64::from(visual.activity_cue_color.r) - expected_linear(part.activity_cue_color.r))
+                .abs()
+                < 1e-6
+        );
         assert_eq!(visual.activity_cue_color.a, part.activity_cue_color.a);
-        assert_eq!(
-            visual.streaming_cursor_color.r,
-            part.streaming_cursor_color.r
+        assert!(
+            (f64::from(visual.streaming_cursor_color.r)
+                - expected_linear(part.streaming_cursor_color.r))
+            .abs()
+                < 1e-6
         );
         assert_eq!(
             visual.streaming_cursor_color.a,
@@ -6711,23 +6654,37 @@ mod tests {
         );
     }
 
-    /// The lifecycle `PortalVisualTokens` fields map 1:1 from the source
-    /// `PortalPartTokens` channels (single-source-of-truth invariant).
+    /// The lifecycle `PortalVisualTokens` fields map from the source
+    /// `PortalPartTokens` channels (decoded RGB, unchanged alpha; single-source-of-truth invariant).
     #[test]
     fn portal_visual_tokens_from_part_tokens_maps_lifecycle_fields() {
         let part = tze_hud_config::PortalPartTokens::default();
         let visual = portal_visual_tokens_from_part_tokens(&part);
-        assert_eq!(
-            visual.lifecycle_active_color.r,
-            part.lifecycle_active_color.r
+        let expected_linear = |encoded: f32| {
+            let encoded = f64::from(encoded);
+            if encoded <= 0.04045 {
+                encoded / 12.92
+            } else {
+                ((encoded + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        assert!(
+            (f64::from(visual.lifecycle_active_color.r)
+                - expected_linear(part.lifecycle_active_color.r))
+            .abs()
+                < 1e-6
         );
-        assert_eq!(
-            visual.lifecycle_attached_color.g,
-            part.lifecycle_attached_color.g
+        assert!(
+            (f64::from(visual.lifecycle_attached_color.g)
+                - expected_linear(part.lifecycle_attached_color.g))
+            .abs()
+                < 1e-6
         );
-        assert_eq!(
-            visual.lifecycle_attention_color.b,
-            part.lifecycle_attention_color.b
+        assert!(
+            (f64::from(visual.lifecycle_attention_color.b)
+                - expected_linear(part.lifecycle_attention_color.b))
+            .abs()
+                < 1e-6
         );
         assert_eq!(
             visual.lifecycle_inactive_color.a,
@@ -6877,22 +6834,371 @@ mod tests {
         );
     }
 
-    /// The degraded `PortalVisualTokens` fields map 1:1 from the source
-    /// `PortalPartTokens` channels (single-source-of-truth invariant).
+    /// The degraded `PortalVisualTokens` fields map from the source
+    /// `PortalPartTokens` channels (decoded RGB, unchanged alpha; single-source-of-truth invariant).
     #[test]
     fn portal_visual_tokens_from_part_tokens_maps_degraded_fields() {
         let part = tze_hud_config::PortalPartTokens::default();
         let visual = portal_visual_tokens_from_part_tokens(&part);
-        assert_eq!(
-            visual.transcript_dim_text_color.r,
-            part.transcript_dim_text_color.r
+        let expected_linear = |encoded: f32| {
+            let encoded = f64::from(encoded);
+            if encoded <= 0.04045 {
+                encoded / 12.92
+            } else {
+                ((encoded + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        assert!(
+            (f64::from(visual.transcript_dim_text_color.r)
+                - expected_linear(part.transcript_dim_text_color.r))
+            .abs()
+                < 1e-6
         );
-        assert_eq!(
-            visual.transcript_dim_background.g,
-            part.transcript_dim_background.g
+        assert!(
+            (f64::from(visual.transcript_dim_background.g)
+                - expected_linear(part.transcript_dim_background.g))
+            .abs()
+                < 1e-6
         );
-        assert_eq!(visual.stale_marker_color.b, part.stale_marker_color.b);
+        assert!(
+            (f64::from(visual.stale_marker_color.b) - expected_linear(part.stale_marker_color.b))
+                .abs()
+                < 1e-6
+        );
         assert_eq!(visual.stale_marker_color.a, part.stale_marker_color.a);
+
+        // Follow the real profile resolution path. Nonendpoint colors distinguish
+        // encoded config RGB from the linear RGB required by scene consumers.
+        let overrides = tze_hud_config::tokens::DesignTokenMap::from([
+            (
+                tze_hud_config::portal_tokens::PORTAL_TOKEN_TRANSCRIPT_DIM_TEXT_COLOR.to_string(),
+                "#80808000".to_string(),
+            ),
+            (
+                tze_hud_config::portal_tokens::PORTAL_TOKEN_TRANSCRIPT_DIM_BACKGROUND.to_string(),
+                "#0A7FD980".to_string(),
+            ),
+            (
+                tze_hud_config::portal_tokens::PORTAL_TOKEN_STALE_MARKER_COLOR.to_string(),
+                "#7F4A90FF".to_string(),
+            ),
+        ]);
+        let resolved = tze_hud_config::tokens::resolve_tokens(
+            &tze_hud_config::tokens::DesignTokenMap::new(),
+            &overrides,
+        );
+        let overridden_part = tze_hud_config::resolve_portal_tokens(&resolved);
+        let overridden_visual = portal_visual_tokens_from_part_tokens(&overridden_part);
+        // Independent IEC61966-2-1 constants, not the production decoder.
+        let cases = [
+            (
+                "dim text",
+                &overridden_part.transcript_dim_text_color,
+                overridden_visual.transcript_dim_text_color,
+                [128_u8, 128, 128, 0],
+                [0.21586050011389926_f64; 3],
+            ),
+            (
+                "dim background",
+                &overridden_part.transcript_dim_background,
+                overridden_visual.transcript_dim_background,
+                [10_u8, 127, 217, 128],
+                [
+                    0.003035269835488375_f64,
+                    0.21223075741405523,
+                    0.6938717612919899,
+                ],
+            ),
+            (
+                "stale marker",
+                &overridden_part.stale_marker_color,
+                overridden_visual.stale_marker_color,
+                [127_u8, 74, 144, 255],
+                [
+                    0.21223075741405523_f64,
+                    0.06847816984440017,
+                    0.2788942634768104,
+                ],
+            ),
+        ];
+        for (name, source, result, encoded, _) in &cases {
+            for (actual, byte) in [source.r, source.g, source.b].into_iter().zip(encoded) {
+                assert_eq!(
+                    actual.to_bits(),
+                    (f32::from(*byte) / 255.0).to_bits(),
+                    "{name}: config must retain encoded byte/255 RGB",
+                );
+            }
+            assert_eq!(
+                source.a.to_bits(),
+                (f32::from(encoded[3]) / 255.0).to_bits()
+            );
+            assert_eq!(
+                result.a.to_bits(),
+                source.a.to_bits(),
+                "{name}: zero, partial and full alpha must pass through unchanged",
+            );
+        }
+        for (name, _, result, _, expected) in &cases {
+            for (channel, (actual, reference)) in [result.r, result.g, result.b]
+                .into_iter()
+                .zip(expected)
+                .enumerate()
+            {
+                assert!(
+                    (f64::from(actual) - reference).abs() < 1e-6,
+                    "{name} RGB channel {channel} must be linear: got {actual}, expected {reference}",
+                );
+            }
+        }
+
+        // Every bridge field is exercised with the real defaults and a distinct
+        // resolved override, so omitted decoding or a cross-wired field fails.
+        let color_keys = [
+            "portal.frame.background",
+            "portal.header.text_color",
+            "portal.divider.color",
+            "portal.window.resize_grip.color",
+            "portal.transcript.background",
+            "portal.transcript.text_color",
+            "portal.transcript.system_color",
+            "portal.transcript.dim_text_color",
+            "portal.transcript.dim_background",
+            "portal.stale_marker.color",
+            "portal.disconnect_badge.color",
+            "portal.unread_indicator.color",
+            "portal.unread_divider.color",
+            "portal.awaiting_reply.color",
+            "portal.empty_state.color",
+            "portal.connecting_marker.color",
+            "portal.activity_cue.color",
+            "portal.streaming_cursor.color",
+            "portal.delivery.inflight_color",
+            "portal.delivery.delivered_color",
+            "portal.delivery.failed_color",
+            "portal.timestamp.color",
+            "portal.lifecycle.active_color",
+            "portal.lifecycle.attached_color",
+            "portal.lifecycle.attention_color",
+            "portal.lifecycle.inactive_color",
+            "portal.collapsed_card.background",
+            "portal.collapsed_card.text_color",
+            "portal.composer.background",
+            "portal.composer.text_color",
+        ];
+        let mut all_overrides = tze_hud_config::tokens::DesignTokenMap::new();
+        let mut encoded_overrides = Vec::new();
+        for (index, key) in color_keys.iter().enumerate() {
+            let index = index as u8;
+            let encoded = [
+                index + 1,
+                200 - index * 3,
+                50 + index * 4,
+                match index % 3 {
+                    0 => 0,
+                    1 => 128,
+                    _ => 255,
+                },
+            ];
+            all_overrides.insert(
+                (*key).to_string(),
+                format!(
+                    "#{:02X}{:02X}{:02X}{:02X}",
+                    encoded[0], encoded[1], encoded[2], encoded[3]
+                ),
+            );
+            encoded_overrides.push(encoded);
+        }
+        let all_resolved = tze_hud_config::tokens::resolve_tokens(
+            &tze_hud_config::tokens::DesignTokenMap::new(),
+            &all_overrides,
+        );
+        let all_part = tze_hud_config::resolve_portal_tokens(&all_resolved);
+        let all_visual = portal_visual_tokens_from_part_tokens(&all_part);
+        for (case, source, target) in [
+            ("default", &part, &visual),
+            ("override", &all_part, &all_visual),
+        ] {
+            let mapped = [
+                (
+                    "portal.frame.background",
+                    &source.frame_background,
+                    target.frame_background,
+                ),
+                (
+                    "portal.header.text_color",
+                    &source.header_text_color,
+                    target.header_text_color,
+                ),
+                (
+                    "portal.divider.color",
+                    &source.divider_color,
+                    target.divider_color,
+                ),
+                (
+                    "portal.window.resize_grip.color",
+                    &source.resize_grip_color,
+                    target.divider_grip_color,
+                ),
+                (
+                    "portal.transcript.background",
+                    &source.transcript_background,
+                    target.transcript_background,
+                ),
+                (
+                    "portal.transcript.text_color",
+                    &source.transcript_text_color,
+                    target.transcript_text_color,
+                ),
+                (
+                    "portal.transcript.system_color",
+                    &source.transcript_system_color,
+                    target.transcript_system_color,
+                ),
+                (
+                    "portal.transcript.dim_text_color",
+                    &source.transcript_dim_text_color,
+                    target.transcript_dim_text_color,
+                ),
+                (
+                    "portal.transcript.dim_background",
+                    &source.transcript_dim_background,
+                    target.transcript_dim_background,
+                ),
+                (
+                    "portal.stale_marker.color",
+                    &source.stale_marker_color,
+                    target.stale_marker_color,
+                ),
+                (
+                    "portal.disconnect_badge.color",
+                    &source.disconnect_badge_color,
+                    target.disconnect_badge_color,
+                ),
+                (
+                    "portal.unread_indicator.color",
+                    &source.unread_indicator_color,
+                    target.unread_indicator_color,
+                ),
+                (
+                    "portal.unread_divider.color",
+                    &source.unread_divider_color,
+                    target.unread_divider_color,
+                ),
+                (
+                    "portal.awaiting_reply.color",
+                    &source.awaiting_reply_color,
+                    target.awaiting_reply_color,
+                ),
+                (
+                    "portal.empty_state.color",
+                    &source.empty_state_color,
+                    target.empty_state_color,
+                ),
+                (
+                    "portal.connecting_marker.color",
+                    &source.connecting_marker_color,
+                    target.connecting_marker_color,
+                ),
+                (
+                    "portal.activity_cue.color",
+                    &source.activity_cue_color,
+                    target.activity_cue_color,
+                ),
+                (
+                    "portal.streaming_cursor.color",
+                    &source.streaming_cursor_color,
+                    target.streaming_cursor_color,
+                ),
+                (
+                    "portal.delivery.inflight_color",
+                    &source.delivery_inflight_color,
+                    target.delivery_inflight_color,
+                ),
+                (
+                    "portal.delivery.delivered_color",
+                    &source.delivery_delivered_color,
+                    target.delivery_delivered_color,
+                ),
+                (
+                    "portal.delivery.failed_color",
+                    &source.delivery_failed_color,
+                    target.delivery_failed_color,
+                ),
+                (
+                    "portal.timestamp.color",
+                    &source.timestamp_color,
+                    target.timestamp_color,
+                ),
+                (
+                    "portal.lifecycle.active_color",
+                    &source.lifecycle_active_color,
+                    target.lifecycle_active_color,
+                ),
+                (
+                    "portal.lifecycle.attached_color",
+                    &source.lifecycle_attached_color,
+                    target.lifecycle_attached_color,
+                ),
+                (
+                    "portal.lifecycle.attention_color",
+                    &source.lifecycle_attention_color,
+                    target.lifecycle_attention_color,
+                ),
+                (
+                    "portal.lifecycle.inactive_color",
+                    &source.lifecycle_inactive_color,
+                    target.lifecycle_inactive_color,
+                ),
+                (
+                    "portal.collapsed_card.background",
+                    &source.collapsed_background,
+                    target.collapsed_background,
+                ),
+                (
+                    "portal.collapsed_card.text_color",
+                    &source.collapsed_text_color,
+                    target.collapsed_text_color,
+                ),
+                (
+                    "portal.composer.background",
+                    &source.composer_background,
+                    target.composer_background,
+                ),
+                (
+                    "portal.composer.text_color",
+                    &source.composer_text_color,
+                    target.composer_text_color,
+                ),
+            ];
+            for (index, (key, source, result)) in mapped.iter().enumerate() {
+                let encoded = [source.r, source.g, source.b];
+                if case == "override" {
+                    for (actual, byte) in encoded.into_iter().zip(&encoded_overrides[index]) {
+                        assert_eq!(
+                            actual.to_bits(),
+                            (f32::from(*byte) / 255.0).to_bits(),
+                            "{key}: distinct override must reach its own config field",
+                        );
+                    }
+                    assert_eq!(
+                        source.a.to_bits(),
+                        (f32::from(encoded_overrides[index][3]) / 255.0).to_bits(),
+                    );
+                }
+                for (actual, encoded) in [result.r, result.g, result.b].into_iter().zip(encoded) {
+                    assert!(
+                        (f64::from(actual) - expected_linear(encoded)).abs() < 1e-6,
+                        "{case} {key}: bridge RGB must decode the matching config field",
+                    );
+                }
+                assert_eq!(
+                    result.a.to_bits(),
+                    source.a.to_bits(),
+                    "{case} {key}: alpha must remain bit-exact",
+                );
+            }
+        }
     }
 
     #[test]
@@ -7142,27 +7448,49 @@ mod tests {
         );
     }
 
-    /// The `empty_state_color` `PortalVisualTokens` field maps 1:1 from the
+    /// The `empty_state_color` `PortalVisualTokens` field maps from the
     /// source `PortalPartTokens` channel (hud-g1ena.6), same single-source-of-
     /// truth invariant as the other token-mapping tests in this module.
     #[test]
     fn portal_visual_tokens_from_part_tokens_maps_empty_state_color() {
         let part = tze_hud_config::PortalPartTokens::default();
         let visual = portal_visual_tokens_from_part_tokens(&part);
-        assert_eq!(visual.empty_state_color.r, part.empty_state_color.r);
+        let expected_linear = |encoded: f32| {
+            let encoded = f64::from(encoded);
+            if encoded <= 0.04045 {
+                encoded / 12.92
+            } else {
+                ((encoded + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        assert!(
+            (f64::from(visual.empty_state_color.r) - expected_linear(part.empty_state_color.r))
+                .abs()
+                < 1e-6
+        );
         assert_eq!(visual.empty_state_color.a, part.empty_state_color.a);
     }
 
-    /// The `connecting_marker_color` `PortalVisualTokens` field maps 1:1 from the
+    /// The `connecting_marker_color` `PortalVisualTokens` field maps from the
     /// source `PortalPartTokens` channel (hud-g1ena.7), same single-source-of-
     /// truth invariant as the other token-mapping tests in this module.
     #[test]
     fn portal_visual_tokens_from_part_tokens_maps_connecting_marker_color() {
         let part = tze_hud_config::PortalPartTokens::default();
         let visual = portal_visual_tokens_from_part_tokens(&part);
-        assert_eq!(
-            visual.connecting_marker_color.r,
-            part.connecting_marker_color.r
+        let expected_linear = |encoded: f32| {
+            let encoded = f64::from(encoded);
+            if encoded <= 0.04045 {
+                encoded / 12.92
+            } else {
+                ((encoded + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        assert!(
+            (f64::from(visual.connecting_marker_color.r)
+                - expected_linear(part.connecting_marker_color.r))
+            .abs()
+                < 1e-6
         );
         assert_eq!(
             visual.connecting_marker_color.a,
@@ -7308,7 +7636,18 @@ mod tests {
     fn portal_visual_tokens_from_part_tokens_maps_timestamp_fields() {
         let part = tze_hud_config::PortalPartTokens::default();
         let visual = portal_visual_tokens_from_part_tokens(&part);
-        assert_eq!(visual.timestamp_color.r, part.timestamp_color.r);
+        let expected_linear = |encoded: f32| {
+            let encoded = f64::from(encoded);
+            if encoded <= 0.04045 {
+                encoded / 12.92
+            } else {
+                ((encoded + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        assert!(
+            (f64::from(visual.timestamp_color.r) - expected_linear(part.timestamp_color.r)).abs()
+                < 1e-6
+        );
         assert_eq!(visual.timestamp_color.a, part.timestamp_color.a);
         assert_eq!(visual.timestamp_granularity, part.timestamp_granularity);
         // Ambient default is Off — the base surface stays calm (profile opt-in).
