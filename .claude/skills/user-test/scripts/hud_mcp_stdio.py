@@ -44,6 +44,10 @@ def invalid_number(_):
     raise ValueError("nonfinite JSON number")
 
 
+def valid_id(value):
+    return type(value) in (str, int)
+
+
 def worker(parent: int, deadline: float) -> int:
     """Arm death/deadline before IPC, key loading or network; no worker descendants."""
     libc = ctypes.CDLL(None, use_errno=True)
@@ -59,13 +63,19 @@ def worker(parent: int, deadline: float) -> int:
     failed = False
     try:
         data = sys.stdin.buffer.read(MAX_REQUEST + 4097)
-        job = json.loads(data)
+        job = json.loads(data, parse_constant=invalid_number)
+        json.dumps(job, allow_nan=False)  # Also reject exponent overflow before key loading.
         request = job["request"]
+        if not isinstance(request, dict) or request.get("jsonrpc") != "2.0" or not isinstance(request.get("method"), str):
+            raise ValueError("invalid worker request")
         request_id = request.get("id")
         notification = "id" not in request
+        if not notification and not valid_id(request_id):
+            request_id = None
+            raise ValueError("invalid worker request ID")
         key = hud_env.adapter_key(job["endpoint"])
         url = urlsplit(job["endpoint"]["url"])
-        body = json.dumps(request, ensure_ascii=False, separators=(",", ":")).encode()
+        body = json.dumps(request, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode()
         headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json",
                    "Accept": "application/json, text/event-stream", "Connection": "close"}
         if job["protocol"]:
@@ -81,16 +91,17 @@ def worker(parent: int, deadline: float) -> int:
             connection.close()
         if len(raw) > MAX_RESPONSE or key.encode() in raw:
             raise ValueError("unsafe or oversized response")
-        result = None if notification else json.loads(raw)
-        if key in json.dumps(result, ensure_ascii=False):
+        result = None if notification else json.loads(raw, parse_constant=invalid_number)
+        if key in json.dumps(result, ensure_ascii=False, allow_nan=False):
             raise ValueError("selected credential in decoded response")
-        if not notification and (not isinstance(result, dict) or result.get("jsonrpc") != "2.0" or result.get("id") != request_id):
+        if not notification and (not isinstance(result, dict) or result.get("jsonrpc") != "2.0"
+                                 or not valid_id(result.get("id")) or result.get("id") != request_id):
             raise ValueError("invalid response")
     except Exception:
         failed = True
         result = None if notification else failure(request_id)
     # Parent owns stdout; this pipe carries one bounded private result only.
-    sys.stdout.buffer.write(json.dumps(result, ensure_ascii=False, separators=(",", ":")).encode())
+    sys.stdout.buffer.write(json.dumps(result, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode())
     sys.stdout.buffer.flush()
     return 1 if notification and failed else 0
 
@@ -136,7 +147,13 @@ class Adapter:
         self.stop = True
 
     def queue(self, response):
-        data = json.dumps(response, ensure_ascii=False, separators=(",", ":")).encode() + b"\n"
+        request_id = response.get("id") if isinstance(response, dict) else None
+        try:
+            if not isinstance(response, dict) or (not valid_id(request_id) and not (request_id is None and "error" in response)):
+                raise ValueError("invalid response ID")
+            data = json.dumps(response, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode() + b"\n"
+        except (TypeError, ValueError):
+            data = json.dumps(failure(request_id if valid_id(request_id) else None), allow_nan=False).encode() + b"\n"
         if len(data) > MAX_RESPONSE or len(self.output) + len(data) > MAX_OUTPUT:
             self.stop = self.fatal = True
             return
@@ -182,14 +199,14 @@ class Adapter:
             return
         method, request_id = request["method"], request.get("id")
         has_id = "id" in request
-        if has_id and (isinstance(request_id, bool) or not isinstance(request_id, (str, int, float))):
+        if has_id and not valid_id(request_id):
             self.queue(failure(None, "Invalid request ID"))
             return
         if method == "notifications/cancelled":
             params = request.get("params")
             if not has_id and isinstance(params, dict):
                 wanted = params.get("requestId")
-                if not isinstance(wanted, bool) and isinstance(wanted, (str, int, float)):
+                if valid_id(wanted):
                     self.waiting = [(r, d) for r, d in self.waiting if r.get("id") != wanted or r.get("method") == "initialize"]
                     self.abort([t for t in self.tasks if "id" in t.request and t.request["id"] == wanted
                                 and t.request["method"] != "initialize" and not t.result_seen])
@@ -216,8 +233,13 @@ class Adapter:
             if has_id:
                 self.queue(failure(request_id, "HUD connection not ready or at capacity"))
             return
-        payload = json.dumps({"request": request, "endpoint": self.endpoint, "protocol": self.protocol},
-                             ensure_ascii=False, separators=(",", ":")).encode()
+        try:
+            payload = json.dumps({"request": request, "endpoint": self.endpoint, "protocol": self.protocol},
+                                 ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode()
+        except (TypeError, ValueError):
+            if has_id:
+                self.queue(failure(request_id))
+            return
         process = subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "--worker", str(os.getpid()), str(deadline)],
                                    stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
         try:
@@ -261,17 +283,26 @@ class Adapter:
             if len(line) > MAX_REQUEST:
                 self.queue(failure(None, "Request exceeds the HUD client limit"))
                 continue
+            request = None
             try:
                 request = json.loads(line, parse_constant=invalid_number)
-            except (ValueError, UnicodeError):
-                self.queue(failure(None, "Invalid JSON-RPC message"))
+                json.dumps(request, allow_nan=False)  # Finite literals can overflow Python floats.
+            except (TypeError, ValueError, UnicodeError):
+                request_id = request.get("id") if isinstance(request, dict) else None
+                self.queue(failure(request_id if valid_id(request_id) else None, "Invalid JSON-RPC message"))
                 continue
             self.admit(request, deadline)
 
     def result(self, task):
         try:
-            response = json.loads(task.output)
-        except (ValueError, UnicodeError):
+            response = json.loads(task.output, parse_constant=invalid_number)
+            json.dumps(response, allow_nan=False)
+            if "id" in task.request:
+                if not isinstance(response, dict) or response.get("jsonrpc") != "2.0" or not valid_id(response.get("id")) or response.get("id") != task.request["id"]:
+                    raise ValueError("invalid worker response")
+            elif response is not None:
+                raise ValueError("invalid worker notification response")
+        except (TypeError, ValueError, UnicodeError):
             response = failure(task.request.get("id"))
         if task.cancelled:
             return

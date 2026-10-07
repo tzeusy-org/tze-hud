@@ -10,6 +10,7 @@ import subprocess
 import sys
 import threading
 import time
+from decimal import Decimal
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -67,6 +68,15 @@ class FakeHud(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(data)
                 return
+            if mode in {"raw-overflow", "raw-nan", "raw-infinity", "raw-negative-infinity",
+                        "raw-float-id", "raw-bool-id", "raw-finite"}:
+                numeric = {"raw-overflow": "1e309", "raw-nan": "NaN", "raw-infinity": "Infinity",
+                           "raw-negative-infinity": "-Infinity", "raw-finite": "0.125"}
+                wire_id = "true" if mode == "raw-bool-id" else json.dumps(
+                    float(request_id) if mode == "raw-float-id" else request_id
+                )
+                result = '{"value":' + numeric[mode] + '}' if mode in numeric else "{}"
+                return self.reply(200, ('{"jsonrpc":"2.0","id":' + wire_id + ',"result":' + result + '}').encode())
             if mode == "trickle":
                 self.send_response(200)
                 self.send_header("Content-Length", "100000")
@@ -110,7 +120,7 @@ class FakeHud(BaseHTTPRequestHandler):
         self.reply(200, {"agent": body["agent"], "psk": psk, "mcp": "http://h:9090/mcp", "grpc": "h:50051"})
 
     def reply(self, status, payload):
-        data = json.dumps(payload).encode()
+        data = payload if isinstance(payload, bytes) else json.dumps(payload).encode()
         self.send_response(status)
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
@@ -202,13 +212,13 @@ class AdapterProcess:
         self.children.update(owned_children(self.process.pid))
         (self.home / "adapter-owned-identities.json").write_text(json.dumps(self.children))
 
-    def send(self, method, request_id=None, params=None):
+    def send(self, method, request_id=None, params=None, *, raw=None):
         body = {"jsonrpc": "2.0", "method": method}
         if request_id is not None:
             body["id"] = request_id
         if params is not None:
             body["params"] = params
-        data = memoryview(json.dumps(body, ensure_ascii=False).encode() + b"\n")
+        data = memoryview((json.dumps(body, ensure_ascii=False).encode() if raw is None else raw) + b"\n")
         end = time.monotonic() + 3
         with selectors.DefaultSelector() as selector:
             selector.register(self.process.stdin, selectors.EVENT_WRITE)
@@ -217,7 +227,7 @@ class AdapterProcess:
                 data = data[os.write(self.process.stdin.fileno(), data):]
         self.sample()
 
-    def receive(self, timeout=3):
+    def receive(self, timeout=3, *, strict=False):
         end = time.monotonic() + timeout
         while b"\n" not in self.buffer:
             self.sample()
@@ -227,7 +237,20 @@ class AdapterProcess:
             self.buffer.extend(data)
         line, _, rest = self.buffer.partition(b"\n")
         self.buffer = bytearray(rest)
-        return json.loads(line)
+        if not strict:
+            return json.loads(line)
+
+        def reject_constant(_):
+            raise ValueError("nonfinite numeric token")
+
+        try:
+            response = json.loads(line, parse_float=Decimal, parse_constant=reject_constant)
+        except (ValueError, UnicodeError):
+            raise AssertionError("adapter emitted invalid numeric JSON on MCP stdout") from None
+        assert isinstance(response, dict) and response.get("jsonrpc") == "2.0", "invalid MCP response object"
+        request_id = response.get("id")
+        assert (request_id is None and "error" in response) or type(request_id) in (str, int), "invalid MCP response ID"
+        return response
 
     def ready(self):
         self.send("initialize", 1, {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "fixture", "version": "1"}})
@@ -601,4 +624,99 @@ def test_mcp_headers_needs_a_bare_host(hud):
         adapter.process.stdout.close()
         FakeHud.release.set()
         assert adapter.process.wait(timeout=3) == 1
+    assert FakeHud.last_psk not in adapter.stderr
+
+    # Raw wire input and a decimal-based receiver are independent of the adapter's
+    # float parser. On uncorrected production the first response contains Infinity,
+    # which must be a causal AssertionError rather than an uncaught parse exception.
+    with AdapterProcess(home) as adapter:
+        previous = len(FakeHud.requests)
+        adapter.send("", raw=b'{"jsonrpc":"2.0","id":1e309,"method":"ping"}')
+        refused = adapter.receive(strict=True)
+        assert refused["id"] is None and refused["error"]["code"] == -32603
+        assert len(FakeHud.requests) == previous
+        for invalid_id in [b"-1e309", b"1.5", b"1.0", b"true", b"null"]:
+            adapter.send("", raw=b'{"jsonrpc":"2.0","id":' + invalid_id + b',"method":"ping"}')
+            refused = adapter.receive(strict=True)
+            assert refused["id"] is None and refused["error"]["code"] == -32603
+            assert len(FakeHud.requests) == previous
+        adapter.ready()
+        for request_id, raw in [
+            ("overflow-params", b'{"jsonrpc":"2.0","id":"overflow-params","method":"ping","params":{"nested":[{"value":1e309}]}}'),
+            (100, b'{"jsonrpc":"2.0","id":100,"method":"ping","params":{"value":-1e309}}'),
+        ]:
+            previous = len(FakeHud.requests)
+            adapter.send("", raw=raw)
+            refused = adapter.receive(strict=True)
+            assert refused["id"] == request_id and refused["error"]["code"] == -32603
+            assert len(FakeHud.requests) == previous
+            adapter.send("ping", "recovered-" + str(request_id))
+            assert adapter.receive(strict=True)["result"] == {}
+        for token in [b"NaN", b"Infinity", b"-Infinity"]:
+            previous = len(FakeHud.requests)
+            adapter.send("", raw=b'{"jsonrpc":"2.0","id":"invalid-token","method":"ping","params":{"value":' + token + b'}}')
+            refused = adapter.receive(strict=True)
+            assert refused["id"] is None and refused["error"]["code"] == -32603
+            assert len(FakeHud.requests) == previous
+        finite = {"nested": [0.125, -0.25, 1e-10, True, "Infinity is ordinary text"]}
+        adapter.send("ping", "finite-parameters", finite)
+        assert adapter.receive(strict=True) == {"jsonrpc": "2.0", "id": "finite-parameters", "result": {}}
+        assert FakeHud.requests[-1]["body"]["params"] == finite and FakeHud.requests[-1]["authorized"]
+
+    FakeHud.release = threading.Event()
+    with AdapterProcess(home) as adapter:
+        adapter.ready()
+        FakeHud.modes[1] = "hold"  # Reuse a completed integer ID; bool/float must not alias it.
+        with FakeHud.condition:
+            FakeHud.entered.pop(1, None)
+        previous = len(FakeHud.requests)
+        adapter.send("ping", 1)
+        wait_request(1)
+        held = owned_children(adapter.process.pid)
+        assert len(held) == 1
+        for invalid_cancel in [1.0, 1.5, True, None]:
+            adapter.send("notifications/cancelled", params={"requestId": invalid_cancel})
+        adapter.send("ping", "control-after-invalid-cancel")
+        assert adapter.receive(strict=True)["id"] == "control-after-invalid-cancel"
+        assert all(child_live(pid, identity) for pid, identity in held.items())
+        before_overflow_cancel = len(FakeHud.requests)
+        adapter.send("", raw=b'{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":1e309}}')
+        refused = adapter.receive(strict=True)
+        assert refused["id"] is None and refused["error"]["code"] == -32603
+        assert len(FakeHud.requests) == before_overflow_cancel
+        adapter.send("ping", "control-after-overflow-cancel")
+        assert adapter.receive(strict=True)["result"] == {}
+        assert all(child_live(pid, identity) for pid, identity in held.items())
+        FakeHud.release.set()
+        assert adapter.receive(strict=True) == {"jsonrpc": "2.0", "id": 1, "result": {}}
+        assert sum(r["body"].get("id") == 1 for r in FakeHud.requests[previous:]) == 1
+    FakeHud.modes.pop(1)
+
+    with AdapterProcess(home) as adapter:
+        adapter.ready()
+        for request_id, mode in enumerate([
+            "raw-overflow", "raw-nan", "raw-infinity", "raw-negative-infinity", "raw-float-id"
+        ], start=1010):
+            FakeHud.modes[request_id] = mode
+            previous = len(FakeHud.requests)
+            adapter.send("ping", request_id)
+            refused = adapter.receive(strict=True)
+            assert refused["id"] == request_id and refused["error"]["code"] == -32603
+            assert len(FakeHud.requests) == previous + 1 and FakeHud.requests[-1]["authorized"]
+            assert FakeHud.requests[-1]["body"]["id"] == request_id
+            adapter.send("ping", "recovered-upstream-" + str(request_id))
+            assert adapter.receive(strict=True)["result"] == {}
+        # Equality alone aliases both 1014.0 with 1014 above and true with 1 here.
+        FakeHud.modes[1] = "raw-bool-id"
+        previous = len(FakeHud.requests)
+        adapter.send("ping", 1)
+        refused = adapter.receive(strict=True)
+        assert refused["id"] == 1 and refused["error"]["code"] == -32603
+        assert len(FakeHud.requests) == previous + 1 and FakeHud.requests[-1]["authorized"]
+        FakeHud.modes.pop(1)
+        FakeHud.modes[1020] = "raw-finite"
+        adapter.send("ping", 1020)
+        assert adapter.receive(strict=True) == {"jsonrpc": "2.0", "id": 1020, "result": {"value": Decimal("0.125")}}
+        adapter.send("ping", "final-valid-ping")
+        assert adapter.receive(strict=True)["result"] == {}
     assert FakeHud.last_psk not in adapter.stderr
