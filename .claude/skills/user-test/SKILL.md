@@ -21,6 +21,21 @@ Contract: `docs/api.md` (pairing, `hud_*` verbs) and
 MCP URL, the gRPC target, and the PSK file `~/.config/tze-hud/$HUD_HOST.psk`
 from it. The PSK is never printed; do not read the file into context.
 
+Claude's project MCP entry uses a Linux/WSL stdio adapter: one paired host works
+without exporting `HUD_HOST`; multiple hosts require explicit selection. New
+pairing writes private nonsecret `<hostname>.endpoint.json` with the actual
+HTTP port and selected-key fingerprint. No endpoint metadata means legacy9090;
+an old custom port requires re-pairing or explicit `HUD_HOST`. Present invalid
+or stale metadata is refused. The established `.psk` store is the only raw-key
+file; no key belongs in MCP config, argv, environment or evidence. Ordinary
+admin scripts below still use explicit `HUD_HOST`. Fresh Claude authenticated
+five-tool discovery is separate live acceptance, not proven by fake fixtures.
+The adapter bounds four HTTP workers and whole requests to 60s; EOF/signals
+abort with one global 1s TERM + 1s KILL/reap budget, subject to OS scheduling.
+Abrupt parent death relies on Linux kernel termination/OS adoption; native
+Windows/macOS client lifetime is unsupported. Remote accepted work is uncertain
+and never automatically replayed.
+
 ## Steps
 
 1. **Owner, once:** double-click `tze_hud.exe` on the Windows host (installs

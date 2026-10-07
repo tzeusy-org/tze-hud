@@ -4,13 +4,17 @@
 target, and PSK file all derive from it. The PSK lives in
 `~/.config/tze-hud/<host>.psk` (mode 0600, written by `hud_pair.py`) and is
 never printed: errors name the file, not its contents.
+The stdio adapter has separate strict helpers for sole-host discovery and
+private nonsecret endpoint records; explicit client APIs below keep their defaults.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
+import stat
 import sys
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -79,6 +83,128 @@ def load_psk(raw: str | None = None, env: str | None = None) -> str:
 def resolve(url: str | None = None, psk_env: str | None = None) -> tuple[str, str]:
     """(mcp_url, psk) from an explicit URL or HUD_HOST; PSK from env or file."""
     return mcp_url(url), load_psk(url, psk_env)
+
+
+PAIR_COMMAND = "python3 .claude/skills/user-test/scripts/hud_pair.py --host <HUD-address[:port]> --code <on-screen-code>"
+
+
+def _adapter_url(raw: str) -> tuple[str, str]:
+    """Strict adapter-only HTTP origin; ordinary explicit client helpers stay unchanged."""
+    try:
+        parts = urlsplit(raw if "://" in raw else f"http://{raw}")
+        host = parts.hostname
+        port = parts.port if parts.port is not None else MCP_PORT
+        if (
+            parts.scheme != "http" or not host or not 1 <= port <= 65535
+            or parts.username is not None or parts.password is not None
+            or parts.query or parts.fragment or parts.path not in ("", "/", "/mcp")
+            or re.search(r"[^a-zA-Z0-9_.:\-]", host)
+        ):
+            raise ValueError
+    except ValueError:
+        raise HudEnvError("invalid HUD endpoint; use an HTTP host[:port], without variables or credentials") from None
+    rendered = f"[{host}]" if ":" in host else host
+    return host, f"http://{rendered}:{port}/mcp"
+
+
+def _private_bytes(path: Path, limit: int) -> bytes:
+    """Read only the selected owner-private regular file, without following its symlink."""
+    try:
+        directory = path.parent.lstat()
+        if not stat.S_ISDIR(directory.st_mode) or directory.st_uid != os.getuid() or directory.st_mode & 0o077:
+            raise HudEnvError("unsafe HUD pairing directory; re-pair privately")
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        try:
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
+                raise HudEnvError("unsafe selected HUD file; re-pair privately")
+            data = os.read(fd, limit + 1)
+            if len(data) > limit:
+                raise HudEnvError("oversized selected HUD file; re-pair")
+            return data
+        finally:
+            os.close(fd)
+    except OSError:
+        raise HudEnvError(f"cannot read selected private HUD file; pair first: {PAIR_COMMAND}") from None
+
+
+def _endpoint_record(host: str) -> dict | None:
+    path = config_dir() / f"{host}.endpoint.json"
+    if not os.path.lexists(path):
+        return None
+    try:
+        record = json.loads(_private_bytes(path, 4096))
+        if not isinstance(record, dict) or set(record) != {"schema", "mcp_url", "psk_sha256"}:
+            raise ValueError
+        if type(record["schema"]) is not int or record["schema"] != 1:
+            raise ValueError
+        found_host, url = _adapter_url(record["mcp_url"])
+        if found_host != host or url != record["mcp_url"]:
+            raise ValueError
+        if not isinstance(record["psk_sha256"], str) or not re.fullmatch(r"[0-9a-f]{64}", record["psk_sha256"]):
+            raise ValueError
+        return record
+    except (ValueError, TypeError, KeyError, UnicodeError):
+        raise HudEnvError("invalid HUD endpoint record; re-pair, no default-port fallback") from None
+
+
+def adapter_endpoint() -> dict:
+    """Pin a nonsecret endpoint once; discovery inspects names/stats, never key contents."""
+    raw = os.environ.get("HUD_HOST", "")
+    if raw:
+        host, url = _adapter_url(raw)
+        _endpoint_record(host)  # Present malformed metadata is never a silent fallback.
+        return {"host": host, "url": url, "explicit": True}
+    try:
+        directory = config_dir().lstat()
+        if not stat.S_ISDIR(directory.st_mode) or directory.st_uid != os.getuid() or directory.st_mode & 0o077:
+            raise HudEnvError("unsafe HUD pairing directory; re-pair privately")
+        candidates = []
+        for path in config_dir().iterdir():
+            if not path.name.endswith(".psk"):
+                continue
+            info = path.lstat()
+            if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
+                raise HudEnvError("unsafe HUD pairing file; re-pair privately")
+            name = path.name.removesuffix(".psk")
+            host, _ = _adapter_url(f"[{name}]" if ":" in name else name)
+            if name != host:
+                raise HudEnvError("invalid HUD pairing filename; select HUD_HOST explicitly")
+            candidates.append(host)
+    except FileNotFoundError:
+        candidates = []
+    except OSError:
+        raise HudEnvError("cannot inspect HUD pairing directory") from None
+    if not candidates:
+        raise HudEnvError(f"no paired HUD; run {PAIR_COMMAND}")
+    if len(candidates) != 1:
+        raise HudEnvError("multiple paired HUDs; set HUD_HOST to the intended host[:port]")
+    host = candidates[0]
+    record = _endpoint_record(host)
+    _, legacy = _adapter_url(f"[{host}]" if ":" in host else host)
+    return {"host": host, "url": record["mcp_url"] if record else legacy, "explicit": False}
+
+
+def adapter_key(endpoint: dict) -> str:
+    """Load just the selected key before auth; rotation cannot retarget a running adapter."""
+    host = endpoint["host"]
+    try:
+        key = _private_bytes(config_dir() / f"{host}.psk", 256).decode("utf-8").strip()
+    except UnicodeError:
+        raise HudEnvError("invalid selected HUD key; re-pair") from None
+    if not key or re.search(r"[\r\n]", key):
+        raise HudEnvError("invalid selected HUD key; re-pair")
+    record = _endpoint_record(host)
+    if record:
+        if record["psk_sha256"] != hashlib.sha256(key.encode()).hexdigest():
+            raise HudEnvError("stale HUD endpoint record; re-pair")
+        if not endpoint["explicit"] and record["mcp_url"] != endpoint["url"]:
+            raise HudEnvError("HUD endpoint changed; reconnect the MCP client")
+    elif not endpoint["explicit"]:
+        _, legacy = _adapter_url(f"[{host}]" if ":" in host else host)
+        if endpoint["url"] != legacy:
+            raise HudEnvError("HUD endpoint record disappeared; reconnect or re-pair")
+    return key
 
 
 def main(argv: list[str]) -> int:

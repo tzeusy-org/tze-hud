@@ -32,7 +32,7 @@ Set `HUD_HOST` to the HUD's host. With no paired agent the HUD shows a
 6-digit code; trade it for your PSK:
 
 ```bash
-HUD_HOST=<host> python3 .claude/skills/user-test/scripts/hud_pair.py --code 482913
+python3 .claude/skills/user-test/scripts/hud_pair.py --host <host[:port]> --code 482913
 ```
 
 The PSK lands in `~/.config/tze-hud/<host>.psk` (mode 0600) and is never
@@ -42,15 +42,26 @@ may publish to.
 
 ### 2. MCP server configuration
 
-The repo's `.mcp.json` already defines `tze-hud` (template:
-`mcp.template.json`). Set `HUD_HOST` to the **bare** host (no port or scheme;
-the URL appends `:9090`). Its `headersHelper` sends the paired PSK as the
-bearer.
+The repo's `.mcp.json` defines `tze-hud` through the Linux/WSL stdio adapter
+(template: `mcp.template.json`). A sole paired host is selected without
+`HUD_HOST`; multiple hosts require explicit selection, and explicit `HUD_HOST`
+wins. New pairs privately persist their actual port in nonsecret endpoint
+metadata. Old key-only pairs use 9090; old custom ports need re-pairing or
+explicit `HUD_HOST`. Invalid/stale metadata fails closed. No PSK sits in the
+MCP config or process arguments. Ordinary explicit Python clients are unchanged.
+Project trust and same-name local/user overrides remain normal client controls.
+Requests have absolute 60s deadlines and four owned worker slots. Cancellation,
+EOF and termination stop local work with one global 1s TERM + 1s KILL/reap
+budget; already delivered remote work remains uncertain, with no POST replay.
+Abrupt-parent cleanup is Linux/WSL kernel termination with OS adoption, not a
+claim that a dead parent can reap. Native Windows/macOS client conformance and
+hard real-time startup/cleanup are not established.
 
 ### 3. Verify connectivity
 
-`tools/list` should show the five `hud_*` tools. Call `hud_surfaces` to
-confirm the connection.
+In a fresh Claude session with `HUD_HOST` genuinely unset and one paired host,
+observe authenticated upstream discovery and the five `hud_*` tools, then call
+`hud_surfaces`. Cached names or a CLI exit code alone do not prove connectivity.
 
 ## Tools
 

@@ -71,8 +71,20 @@ or, from this repo, which saves the PSK to `~/.config/tze-hud/<host>.psk`
 (mode 0600, never printed) for the other skill scripts:
 
 ```sh
-HUD_HOST=<tailscale-ip> python3 .claude/skills/user-test/scripts/hud_pair.py --code 482913 --agent claude --admin
+python3 .claude/skills/user-test/scripts/hud_pair.py --host <tailscale-ip[:port]> --code 482913 --agent claude --admin
 ```
+
+The Python helper also writes a private nonsecret `<host>.endpoint.json` record
+containing schema1, the actual pairing HTTP origin/port `/mcp`, and the stored
+key's SHA-256. It does not trust an advertised reply hostname for this record.
+If metadata storage fails after the key is written, pairing reports failure;
+re-pair to repair the partial state. In a fresh Linux/WSL Claude session the
+project stdio MCP entry selects one paired host without `HUD_HOST`; multiple
+hosts require explicit selection. Old key-only pairs default to 9090, so a lost
+old custom port needs explicit `HUD_HOST` or re-pairing. Bad/stale metadata is
+refused. This does not change the Windows HUD or ordinary admin clients, which
+still select `HUD_HOST` explicitly. Live fresh-session authenticated discovery
+of all five tools remains required; code/fake fixtures do not establish it.
 
 The reply carries the PSK (once), the MCP URL, and the gRPC address. The HUD
 stores only the PSK's SHA-256 in `%APPDATA%\tze_hud\agents.toml`. Add

@@ -1,9 +1,13 @@
 {
   "mcpServers": {
     "tze-hud": {
-      "type": "http",
-      "url": "http://${HUD_HOST}:9090/mcp",
-      "headersHelper": "python3 .claude/skills/user-test/scripts/hud_env.py mcp-headers"
+      "type": "stdio",
+      "command": "python3",
+      "args": [
+        "-u",
+        "-c",
+        "import os,runpy; runpy.run_path(os.path.join(os.environ['CLAUDE_PROJECT_DIR'], '.claude/skills/user-test/scripts/hud_mcp_stdio.py'), run_name='__main__')"
+      ]
     }
   }
 }
