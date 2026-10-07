@@ -221,11 +221,59 @@ jobs:
   test-unit:
     name: cargo test (unit)
     runs-on: ubuntu-latest
-    timeout-minutes: ${{ github.event_name == 'pull_request' && github.event.pull_request.number == 1397 && github.event.pull_request.head.ref == 'agent/hud-1dnk5.2' && github.event.pull_request.head.repo.full_name == github.repository && 8 || 15 }}
+    timeout-minutes: 8
     needs: [check]
     env:
-      PAIRED_MODE: ${{ github.event_name == 'pull_request' && github.event.pull_request.number == 1397 && github.event.pull_request.head.ref == 'agent/hud-1dnk5.2' && github.event.pull_request.head.repo.full_name == github.repository }}
-      # Native Linux only: preserve MinGW/MSVC flags and the system ld.
+      # Native Linux only; preserve Windows target linkage.
+      CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install pinned mold (native Linux linker)
+        uses: rui314/setup-mold@10ca16bf91dc22e05ebdc935cad9c75ea248f621
+        timeout-minutes: 5
+        with:
+          mold-version: "2.42.1"
+          make-default: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.88"
+      # timeout-minutes caps cache-save hangs (incident: PR #606, canonical-app-production-boot
+      # hung 15+ min in the Swatinem/rust-cache post-step, required --admin merge).
+      # v2.9.1 pins to a specific stable release rather than the floating v2 alias.
+      - uses: Swatinem/rust-cache@v2.9.1
+        timeout-minutes: 10
+      - name: Install Mesa / llvmpipe + protobuf compiler
+        timeout-minutes: 5
+        run: |
+          sudo apt-get $APT_OPTS update -q
+          sudo apt-get $APT_OPTS install -y --no-install-recommends \
+            libvulkan1 \
+            mesa-vulkan-drivers \
+            mesa-utils \
+            libegl-mesa0 \
+            libgl1-mesa-dri \
+            protobuf-compiler
+      - name: cargo test (workspace, exclude integration)
+        run: |
+          cargo test \
+            --workspace \
+            --all-targets \
+            --exclude integration
+        env:
+          # Require a GPU adapter — Mesa llvmpipe is installed above.
+          # If the adapter is missing the gpu_canary test fails loudly instead
+          # of silently skipping ~129 compositor GPU tests (hud-2sxfk).
+          TZE_HUD_REQUIRE_GPU: "1"
+
+  # Temporary, non-required measurement; remove before final normal readiness.
+  compile-diet-measurement:
+    name: frozen compile-diet comparison (temporary, non-required)
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.number == 1397 && github.event.pull_request.draft == true && github.event.pull_request.head.ref == 'agent/hud-1dnk5.2' && github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [check]
+    env:
+      PAIRED_MODE: "true"
       CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
     steps:
       - name: Initialize bounded frozen-source pair
@@ -289,7 +337,7 @@ jobs:
           set -euo pipefail
           pair=$PAIRED_EVIDENCE; work=$PAIRED_ROOT; controller=$PWD; controller_head=$(git rev-parse HEAD)
           [[ "$work" == "$RUNNER_TEMP"/compile-diet-pair.* && -d "$work" && ! -L "$work" && "$pair" == "$work/evidence" && -d "$pair" && ! -L "$pair" ]]
-          deadline=$((PAIRED_START + 420)); group=; source=; evidence=$pair
+          deadline=$((PAIRED_START + 780)); group=; source=; evidence=$pair
           remaining() { local seconds=$((deadline - $(date +%s))); ((seconds > 0)) || return 124; printf '%s\n' "$seconds"; }
           members() { ps -e -o pid=,ppid=,pgid=,stat=,comm= | awk -v g="$group" '$3 == g' > "$evidence/process-group-last.log"; [[ -s "$evidence/process-group-last.log" ]]; }
           stop_group() {
@@ -417,125 +465,12 @@ jobs:
             remaining > "$evidence/remaining-after-terminal.log"
           done
           cd "$controller"; printf 'pair=complete; treatment=profiles_plus_mold; interpretation=single_fixed_order_bundled_observation\n' >> "$pair/status.log"
-      - name: Record controlled test-unit measurement context
-        if: env.PAIRED_MODE != 'true'
-        shell: bash
-        run: |
-          evidence=test_results/compile-diet/unit
-          mkdir -p "$evidence"
-          {
-            date -u +started_at=%Y-%m-%dT%H:%M:%SZ
-            git rev-parse HEAD
-            git rev-parse HEAD^{tree}
-            git status --porcelain --untracked-files=no
-            printf 'event=%s\nrun_id=%s\nrun_attempt=%s\njob=%s\n' \
-              "$GITHUB_EVENT_NAME" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$GITHUB_JOB"
-            printf 'runner_os=%s\nrunner_arch=%s\nimage_os=%s\nimage_version=%s\n' \
-              "$RUNNER_OS" "$RUNNER_ARCH" "${ImageOS:-not-reported}" "${ImageVersion:-not-reported}"
-            printf 'cache_lookup_hit=%s\ncache_lookup_only=true\ncache_save=false\n' \
-              "${CACHE_LOOKUP_HIT:-not-reported}"
-            uname -srm
-            lscpu
-            rustc --version --verbose
-            cargo --version
-            protoc --version
-            cc --version | sed -n '1p'
-            ld --version | sed -n '1p'
-            # GNU ld remains the system default; native target flags choose mold.
-            mold --version
-            /usr/bin/time --version | sed -n '1p'
-            for key in RUSTFLAGS CARGO_ENCODED_RUSTFLAGS CARGO_BUILD_TARGET CARGO_TARGET_DIR \
-              CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS HEADLESS_FORCE_SOFTWARE \
-              VK_ICD_FILENAMES TZE_HUD_PERF_ASSERT TZE_HUD_TEST_BUDGET_SLACK TZE_HUD_SKIP_GPU_TESTS; do
-              if [[ -v "$key" ]]; then
-                printf '%s=set sha256=' "$key"
-                printf '%s' "${!key}" | sha256sum | cut -d' ' -f1
-              else
-                printf '%s=unset\n' "$key"
-              fi
-            done
-            if [[ -d target ]]; then
-              printf 'default_target_files_before='
-              find target -type f | wc -l
-            else
-              printf 'default_target_before=absent\n'
-            fi
-          } | tee "$evidence/context.log"
-          # Complete immutable tree plus materialized compile/config inputs;
-          # hashes disclose no source/config values or inherited secret flags.
-          git ls-tree -r HEAD > "$evidence/checkout-tree.log"
-          git ls-files -z '*.rs' '*.proto' '*.toml' Cargo.lock rust-toolchain.toml \
-            justfile scripts/dev-bootstrap.sh .github/workflows/ci.yml \
-            | sort -z | xargs -0 sha256sum > "$evidence/source-inputs.sha256"
-        env:
-          CACHE_LOOKUP_HIT: ${{ steps.unit-cache.outputs.cache-hit }}
-      - name: cargo test (workspace, exclude integration)
-        if: env.PAIRED_MODE != 'true'
-        shell: bash
-        run: |
-          evidence=test_results/compile-diet/unit
-          # Keep the existing cargo argv/features/environment. Logging overhead
-          # is included; output timestamps have one-second resolution. Cargo's
-          # Finished duration combines compile/link, not linker-only time.
-          set +e
-          /usr/bin/time -p -o "$evidence/command-time.log" cargo test \
-            --workspace \
-            --all-targets \
-            --exclude integration 2>&1 \
-            | awk -v raw="$evidence/cargo-test.log" \
-                -v stamped="$evidence/timestamped-output.log" \
-                -v phases="$evidence/output-phases.log" '
-                {
-                  epoch = systime()
-                  print
-                  print $0 >> raw
-                  print epoch "\t" $0 >> stamped
-                  plain = $0
-                  gsub(/\033\[[0-9;]*[[:alpha:]]/, "", plain)
-                  if (plain ~ /Finished .*target\(s\) in/) finished = plain
-                  if (plain ~ /Running / && first_running == "") first_running = epoch
-                  last_output = epoch
-                  fflush()
-                }
-                END {
-                  if (finished != "") print "cargo_finished_line=" finished > phases
-                  else print "cargo_compile_completion=not-reached" > phases
-                  if (first_running != "") {
-                    print "first_running_epoch_seconds=" first_running >> phases
-                    print "last_output_epoch_seconds=" last_output >> phases
-                    print "execution_output_span_seconds=" last_output - first_running >> phases
-                  } else print "test_execution=not-reached" >> phases
-                }'
-          pipeline=("${PIPESTATUS[@]}")
-          set -e
-          printf 'cargo_time_exit=%s\nlogger_exit=%s\n' \
-            "${pipeline[0]}" "${pipeline[1]}" > "$evidence/exit.log"
-          git rev-parse HEAD > "$evidence/head-after.log"
-          git status --porcelain --untracked-files=no > "$evidence/source-status-after.log"
-          git ls-files -z '*.rs' '*.proto' '*.toml' Cargo.lock rust-toolchain.toml \
-            justfile scripts/dev-bootstrap.sh .github/workflows/ci.yml \
-            | sort -z | xargs -0 sha256sum > "$evidence/source-inputs-after.sha256"
-          if cmp -s "$evidence/source-inputs.sha256" "$evidence/source-inputs-after.sha256"; then
-            printf 'materialized_source_before_after=equal\n' > "$evidence/source-equality.log"
-          else
-            printf 'materialized_source_before_after=CHANGED; timing pair is incomparable\n' \
-              > "$evidence/source-equality.log"
-          fi
-          sha256sum "$evidence"/*.log "$evidence"/source-inputs*.sha256 \
-            > "$evidence/artifact-files.sha256"
-          if ((pipeline[0] != 0)); then exit "${pipeline[0]}"; fi
-          if ((pipeline[1] != 0)); then exit "${pipeline[1]}"; fi
-        env:
-          # Require a GPU adapter — Mesa llvmpipe is installed above.
-          # If the adapter is missing the gpu_canary test fails loudly instead
-          # of silently skipping ~129 compositor GPU tests (hud-2sxfk).
-          TZE_HUD_REQUIRE_GPU: "1"
       - name: Upload controlled test-unit measurement
         timeout-minutes: ${{ env.PAIRED_MODE == 'true' && 1 || 15 }}
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: compile-diet-test-unit-${{ github.run_id }}-${{ github.run_attempt }}
+          name: compile-diet-fixed-pair-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ env.PAIRED_MODE == 'true' && env.PAIRED_EVIDENCE || 'test_results/compile-diet/unit/' }}
           # Setup failures remain real failures even when no measurement began.
           if-no-files-found: warn
