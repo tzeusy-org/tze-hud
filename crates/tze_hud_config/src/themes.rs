@@ -283,12 +283,10 @@ mod tests {
         );
     }
 
-    /// Tonal Glass is the design-system baseline: it sets every semantic
-    /// token so it reads as a complete template for new themes.
+    /// Every built-in theme declares a complete semantic palette. Shared
+    /// values are intentional declarations, rather than canonical fallback.
     #[test]
     fn full_themes_set_every_semantic_token() {
-        // `classic` only restates the pre-redesign overrides; every other
-        // built-in theme must define the whole semantic palette.
         let semantic = [
             "color.surface",
             "color.on_",
@@ -307,14 +305,80 @@ mod tests {
             "font.",
             "type.",
         ];
-        for name in builtin_theme_names().filter(|n| *n != "classic") {
+        for name in builtin_theme_names() {
             let theme = builtin_theme(name).unwrap();
+            let resolved = resolve_config_tokens(&tokens(&[(THEME_KEY, name)]));
             for t in CANONICAL_TOKENS {
                 if t.key != "color.outline.default" && semantic.iter().any(|p| t.key.starts_with(p))
                 {
                     assert!(theme.contains_key(t.key), "{name} misses {}", t.key);
+                    assert_eq!(resolved[t.key], theme[t.key], "{name}: {} fell back", t.key);
                 }
             }
+        }
+
+        let classic = builtin_theme("classic").unwrap();
+        for (role, legacy) in [
+            ("color.on_surface", "color.text.primary"),
+            ("color.outline", "color.border.default"),
+            (
+                "color.caution.container",
+                "color.notification.urgency.urgent",
+            ),
+            (
+                "color.error.container",
+                "color.notification.urgency.critical",
+            ),
+            ("type.body.m.size", "typography.body.size"),
+            ("type.body.m.weight", "typography.body.weight"),
+        ] {
+            assert_eq!(
+                classic[role], classic[legacy],
+                "Classic {role} lost its legacy meaning"
+            );
+        }
+
+        // Opaque declared text/fill pairs only: no wallpaper, state layer or
+        // user override is certified by these unrounded contrast assertions.
+        let luminance = |key: &str| {
+            let color = crate::tokens::parse_color_hex(&classic[key]).unwrap();
+            assert_eq!(color.a, 1.0, "{key} must be opaque for this text pair");
+            let linear = |component: f32| {
+                let c = f64::from(component);
+                if c <= 0.04045 {
+                    c / 12.92
+                } else {
+                    ((c + 0.055) / 1.055).powf(2.4)
+                }
+            };
+            0.2126 * linear(color.r) + 0.7152 * linear(color.g) + 0.0722 * linear(color.b)
+        };
+        for (foreground, background) in [
+            ("color.on_surface", "color.surface"),
+            ("color.on_surface", "color.surface.container.low"),
+            ("color.on_surface", "color.surface.container"),
+            ("color.on_surface", "color.surface.container.high"),
+            ("color.on_surface", "color.surface.container.highest"),
+            ("color.on_surface.variant", "color.surface"),
+            ("color.on_surface.variant", "color.surface.container.low"),
+            ("color.on_surface.variant", "color.surface.container"),
+            ("color.on_surface.variant", "color.surface.container.high"),
+            (
+                "color.on_surface.variant",
+                "color.surface.container.highest",
+            ),
+            ("color.on_primary", "color.primary"),
+            ("color.on_primary.container", "color.primary.container"),
+            ("color.on_caution.container", "color.caution.container"),
+            ("color.on_error.container", "color.error.container"),
+        ] {
+            let a = luminance(foreground);
+            let b = luminance(background);
+            let ratio = (a.max(b) + 0.05) / (a.min(b) + 0.05);
+            assert!(
+                ratio >= 4.5,
+                "Classic {foreground} on {background}: {ratio}"
+            );
         }
     }
 
@@ -412,6 +476,8 @@ mod tests {
             ("theme", "classic"),
             ("border.radius.medium", "3"),
             ("custom.key", "x"),
+            ("color.on_surface", "#FFFFFF"),
+            ("color.surface.container", "#102030"),
         ]);
         let resolved = resolve_config_tokens(&config);
         // classic sets these; config does not.
@@ -427,6 +493,12 @@ mod tests {
                 .default_value
         );
         assert!(!resolved.contains_key(THEME_KEY));
+        // Explicit semantic overrides also beat selected Classic declarations.
+        let classic = builtin_theme("classic").unwrap();
+        for key in ["color.on_surface", "color.surface.container"] {
+            assert_ne!(classic[key], config[key]);
+            assert_eq!(resolved[key], config[key]);
+        }
     }
 
     #[test]

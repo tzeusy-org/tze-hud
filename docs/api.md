@@ -267,7 +267,10 @@ canonical keys, their descriptions, and their defaults are in
 built-in themes are `assets/themes/<name>.toml`, compiled into the exe:
 `tonal-glass` (the default), `blueprint` (after Palantir's open-source
 Blueprint dark theme: neutral grays, 4 px corners, Segoe UI), and `classic`
-(the look before the redesign).
+(the look before the redesign: black/navy surfaces, white text and a blue
+interaction accent). Classic declares the complete semantic palette while
+retaining its legacy notification values. Shared spacing, type and easing
+literals are explicit theme choices; they do not indicate missing roles.
 Config picks one with the reserved key `theme`:
 
 ```toml
