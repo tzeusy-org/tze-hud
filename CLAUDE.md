@@ -51,10 +51,16 @@ To project this session onto the HUD, use the **`hud-projection`** skill
 (`.claude/skills/hud-projection/SKILL.md`). It is cooperative opt-in
 projection through the MCP verbs on `portal:<id>`: `hud_publish` (the first
 publish attaches), `hud_input` (replies, acked in the same call), and
-`hud_clear` (detach). Set `HUD_HOST` and pair once with the code the HUD shows
-(`.claude/skills/user-test/scripts/hud_pair.py --code <code>`); the PSK goes to
-`~/.config/tze-hud/$HUD_HOST.psk` and is the MCP bearer (the project `.mcp.json`
-sends it; `HUD_HOST` must be a bare host there). The paired agent gets
+`hud_clear` (detach). Pair once with the code the HUD shows:
+`python3 .claude/skills/user-test/scripts/hud_pair.py --host <HUD-address[:port]> --code <on-screen-code>`.
+The PSK stays in `~/.config/tze-hud/<hostname>.psk`; a private nonsecret endpoint
+record retains the actual pairing port. The project MCP stdio adapter discovers
+one paired host without `HUD_HOST`; multiple hosts require explicit `HUD_HOST`.
+An old key without metadata uses 9090; an old custom port needs re-pairing or
+explicit selection. Ordinary Python clients still use `HUD_HOST`. The adapter
+runs on Linux/WSL; native Windows/macOS client lifetime support is not claimed.
+Fresh authenticated Claude discovery, including five upstream tools, remains
+the live acceptance check; cached tools alone are insufficient. The paired agent gets
 `allow = ["*"]`; an `[agents.<id>] allow` list in the HUD's `agents.toml` (PSK
 hashes only, beside the config) must include `portal`. For one-shot
 zone publishing, use **`th-hud-publish`**.

@@ -112,11 +112,30 @@ Explicit model/client publication and input collection remain available.
 
 ## MCP client
 
-The repo's `.mcp.json` already defines `tze-hud` (template:
-`mcp.template.json`). Set `HUD_HOST` to the **bare** host (no port or scheme;
-the URL appends `:9090`); its `headersHelper` sends the paired PSK as the
-bearer, so no secret sits in the config. Claude Code runs the helper from the
-project dir after you trust the workspace.
+The repo's `.mcp.json` defines `tze-hud` (template: `mcp.template.json`) as a
+Linux/WSL stdio adapter to the existing authenticated HTTP server. Claude supplies
+`CLAUDE_PROJECT_DIR` inside the child after ordinary project approval; no shell
+URL interpolation or secret sits in the config. One paired private key filename
+selects the HUD without `HUD_HOST`; explicit `HUD_HOST` wins, and multiple keys
+require explicit selection. With none, run:
+
+```bash
+python3 .claude/skills/user-test/scripts/hud_pair.py --host <HUD-address[:port]> --code <on-screen-code>
+```
+
+New pairs store the actual port in private nonsecret endpoint metadata. Old
+keys without metadata use 9090; an old custom port needs explicit selection or
+re-pairing. Invalid/stale metadata is refused. Existing local/user same-name
+MCP entries can shadow the project entry; use normal client controls to resolve
+that, without overwriting trust/settings. Verify a fresh authenticated
+`initialize`/`tools/list` and all five actual tools, not cached status alone.
+The adapter owns at most four HTTP children, with absolute 60s deadlines and
+one global 1s TERM plus 1s KILL/reap cleanup budget. EOF/cancellation stops local
+work; already accepted remote mutations remain uncertain and are never replayed.
+Abrupt Linux parent death terminates workers through the kernel; the dead parent
+cannot reap them. Startup/OS scheduling and native Windows/macOS lifetime remain
+qualified. Client frames/replies and output queues are bounded; stalled stdout
+stops the adapter. Ordinary explicit CLI publication above is unchanged.
 
 ## Source of truth
 
