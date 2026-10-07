@@ -28,8 +28,9 @@ Install these and make sure each one is on `PATH`:
 | Visual Studio Build Tools, "Desktop development with C++" | MSVC linker, plus `rc.exe` from the Windows SDK | `app/tze_hud_app/build.rs` embeds the DPI manifest with `embed-resource`, which needs the SDK resource compiler |
 | rustup | Toolchain | `rust-toolchain.toml` pins 1.88 with rustfmt and clippy. The default host triple must be `x86_64-pc-windows-msvc` |
 | `protoc` | `tze_hud_protocol` build | CI uses protobuf v29.3 `win64.zip`. Unzip it and add `bin\` to `PATH`, or set `PROTOC` |
-| Git for Windows | Git, plus the `sh` that runs `just` recipes, git hooks, and Claude Code's Bash tool | See [Git settings](#git-settings) |
+| Git for Windows | Git, plus `sh`, `bash`, `env` and `cygpath` for `just` recipes and git hooks | See [Git settings](#git-settings); Bash shebang recipes use their declared interpreter |
 | `just` | `just ci` and other recipes | `winget install Casey.Just` |
+| `cargo-nextest`0.9.114 | Required by `just test` | `cargo install --locked --version 0.9.114 cargo-nextest`; verify `cargo nextest --version` |
 | Python 3 | `scripts/ci/*.py`, skill scripts | See [`python3`](#python3) |
 | `gh` | PRs, releases | |
 | Tailscale | Reaching the Beads Dolt server | See [Beads](#beads) |
@@ -208,11 +209,13 @@ unchanged against `http://127.0.0.1:9090/mcp`:
 
 ## Running the gates
 
-`just` runs recipes with `sh` on every platform, including Windows. The recipes
-use POSIX syntax, such as `VAR=1 cmd`, `[ -f ... ]`, `mkdir -p`, `cmp`, and
-`python3`. Run `just` either from Git Bash, or from PowerShell with Git's
-`usr\bin` on `PATH`. In plain PowerShell without that, recipes fail with
-"could not find `sh`".
+Ordinary linewise `just` recipes use `sh`, including on Windows. Bash shebang
+recipes, including `test`, use their declared `#!/usr/bin/env bash` interpreter.
+The recipes also use POSIX utilities and `python3`. Run `just` from Git Bash,
+or from PowerShell with Git's `usr\bin` on `PATH` so `sh`, `bash`, `env` and
+`cygpath` are available. In plain PowerShell without that, shell recipes fail.
+`just test` requires exactly `cargo-nextest`0.9.114 and uses the same arguments
+as Linux CI: `cargo nextest run --workspace --all-targets --exclude integration --features tze_hud_runtime/dev-mode`.
 
 | Recipe | On Windows |
 |---|---|
@@ -227,8 +230,14 @@ use POSIX syntax, such as `VAR=1 cmd`, `[ -f ... ]`, `mkdir -p`, `cmp`, and
 The hardware-GPU note: on Linux, concurrent device creation with a hardware
 Vulkan ICD (NVIDIA) has hung tests, which is why the recipes pin llvmpipe
 there. Headless test adapters use `Backends::all()`, so on Windows the NVIDIA
-Vulkan driver may still be loaded alongside WARP. If `just test` hangs, rerun
-the stuck crate with `-- --test-threads=1` and record the result in this doc.
+Vulkan driver may still be loaded alongside WARP. Nextest's `gpu` group limits
+constructor-reaching test processes to one, conservatively including CPU cases
+in those packages; other CPU cases retain normal global parallelism. For a
+separate diagnostic Nextest command, global concurrency is `--test-threads=1`,
+without libtest's `--` separator. Retained focused libtest
+commands use `cargo test -p <crate> -- --test-threads=1`. Record the exact
+command/features/adapter and result; this diagnostic is not a substitute for
+the normal parallel merge gate or proof that the full Windows suite passes.
 
 All workspace targets, tests included, compiled for Windows as of 2026-10-04.
 This was checked with
@@ -353,8 +362,8 @@ arguments.
 again whenever a dependency is added. It is idempotent, and it installs or
 reports everything the gates need. That includes `mesa-vulkan-drivers` and
 `libvulkan1`, so GPU recipes pin llvmpipe instead of the WSL GPU driver,
-`protoc` 3.15 or later, `mingw-w64` for `clippy-windows-gnu`, and the Python
-venv for `just test-python`. Without passwordless sudo, it prints the
+`protoc` 3.15 or later, `mingw-w64` for `clippy-windows-gnu`, required pinned
+`cargo-nextest`0.9.114 for `just test`, and the Python venv for `just test-python`. Without passwordless sudo, it prints the
 `apt-get install` line to run, and `just bootstrap --check` reports without
 installing. It also checks WSL interop, networking mode, and Tailscale. New
 dependencies go in its manifest at the top of `scripts/dev-bootstrap.sh`, and

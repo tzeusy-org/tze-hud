@@ -1,6 +1,6 @@
-# hud-1dnk5.2 Stage A: prospective only. CI and just test still use cargo test.
-# Verify the installed 0.9.114 list/show-config identities before enabling this
-# runner: source-derived package/binary/module names are not executed matches.
+# CI and just test use pinned cargo-nextest 0.9.114 with the default profile.
+# Verify actual list/show-config identities; source-derived names are not proof
+# that a test ran or that its effective GPU group was selected.
 nextest-version = { required = "0.9.114" }
 
 [profile.default]
@@ -32,6 +32,9 @@ retries = 2
 # inside these packages are conservatively serialized; other CPU packages stay
 # normally parallel. Retry overrides inherit this per-setting group assignment.
 # Reconcile every actually selected constructor/caller and all five Criterion
-# targets before migration; an in-process initialization lock is insufficient.
-filter = "package(=tze_hud_compositor) | package(=tze_hud_runtime) | package(=vertical_slice) | package(=tze_hud_app)"
+# targets before execution; an in-process initialization lock is insufficient.
+# The five existing Criterion callback/setup chains are CPU-only. A new or
+# unresolved GPU bench must join THIS group rather than blindly inherit this
+# exclusion. Their actual identities/default-group assignment remain required.
+filter = "(package(=tze_hud_compositor) | package(=tze_hud_runtime) | package(=vertical_slice) | package(=tze_hud_app)) & not kind(bench)"
 test-group = "gpu"

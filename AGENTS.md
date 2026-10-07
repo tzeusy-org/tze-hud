@@ -13,7 +13,7 @@ just check           # cargo check (fast compilation gate)
 just fmt             # cargo fmt --check
 just fmt-fix         # cargo fmt (apply formatting)
 just clippy          # cargo clippy --workspace --all-targets -D warnings
-just test            # cargo test --workspace --all-targets --exclude integration (incl. GPU + pixel_readback)
+just test            # cargo nextest run --workspace --all-targets --exclude integration --features tze_hud_runtime/dev-mode (GPU + pixel_readback)
 just test-gpu        # GPU subset only (compositor + pixel_readback), llvmpipe-pinned
 just test-integration # integration headless suites
 just test-python     # pure-Python suites (pytest + scripts/ci unittest)

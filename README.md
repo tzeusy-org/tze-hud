@@ -268,7 +268,7 @@ To install on Windows, see [Windows install and operation](#12-windows-install-a
 
 CI-backed checks for the canonical path:
 - `app/tze_hud_app/tests/canonical_config_schema.rs` validates `app/tze_hud_app/config/production.toml`.
-- CI `test-unit` job runs `cargo test --workspace --all-targets --exclude integration`, which includes that test.
+- CI `test-unit` job runs pinned Nextest0.9.114 with `cargo nextest run --workspace --all-targets --exclude integration --features tze_hud_runtime/dev-mode`, which includes that test.
 
 ## 1.2) Windows install and operation
 
@@ -333,9 +333,20 @@ vncserver -kill :1
 
 ### Fast baseline (workspace tests except `integration` package)
 
+Install pinned `cargo-nextest`0.9.114 (`just bootstrap` on Linux/WSL, or
+`cargo install --locked --version 0.9.114 cargo-nextest`) and verify
+`cargo nextest --version`. Then run the software/required-GPU harness:
+
 ```bash
-cargo test --workspace --all-targets --exclude integration
+just test
 ```
+
+CI and `just test` use the same runner arguments:
+`cargo nextest run --workspace --all-targets --exclude integration --features tze_hud_runtime/dev-mode`.
+The default profile assigns GPU-owning packages' non-bench tests to one Nextest
+test group with capacity one, conservatively including some CPU cases. Other
+CPU packages and the five known CPU Criterion targets remain parallel. The
+separate integration and focused libtest recipes below remain unchanged.
 
 ### Scene/property tests
 

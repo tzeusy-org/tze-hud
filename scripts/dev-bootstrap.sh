@@ -34,6 +34,8 @@ REQUIRED_COMMANDS=(
 RUST_TARGETS=(x86_64-pc-windows-gnu)
 # Optional cargo tools: their `just` gates SKIP loudly when absent.
 CARGO_TOOLS=(cargo-deny cargo-machete)
+# Required test runner, pinned to the CI version (Rust build MSRV 1.88).
+NEXTEST_VERSION=0.9.114
 # Python deps live in scripts/requirements-dev.txt (shared with CI).
 PY_REQUIREMENTS=scripts/requirements-dev.txt
 VENV=.venv
@@ -129,6 +131,24 @@ else
         elif install_cargo_tool "$tool"; then fix "$tool"
         else warn "$tool install failed (optional; its just gate skips)"; fi
     done
+fi
+
+# ── Required test runner ────────────────────────────────────────────────────
+# Lookup/version only in --check: no install, discovery, config or PATH write.
+section "cargo-nextest"
+nextest_ready() {
+    command -v cargo-nextest >/dev/null \
+        && cargo nextest --version 2>/dev/null \
+            | awk -v wanted="$NEXTEST_VERSION" '$1 == "cargo-nextest" && $2 == wanted { found=1 } END { exit !found }'
+}
+if nextest_ready; then
+    ok "cargo-nextest $NEXTEST_VERSION"
+elif ((CHECK_ONLY)) || ! command -v cargo >/dev/null; then
+    miss "cargo-nextest $NEXTEST_VERSION (absent or wrong version)"
+elif cargo install --locked --version "$NEXTEST_VERSION" cargo-nextest && nextest_ready; then
+    fix "cargo-nextest $NEXTEST_VERSION"
+else
+    miss "cargo-nextest $NEXTEST_VERSION (locked install failed or wrong version)"
 fi
 
 # ── Native Linux linker ─────────────────────────────────────────────────────

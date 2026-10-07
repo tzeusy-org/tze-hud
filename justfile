@@ -26,7 +26,7 @@
 #
 # GPU tests (compositor render tests + runtime pixel_readback) already run inside
 # `just test` and therefore `just ci`, as they do in the blocking CI test-unit job
-# (workspace feature unification enables tze_hud_runtime/dev-mode, so pixel_readback
+# (the explicit feature enables tze_hud_runtime/dev-mode, so pixel_readback
 # is built and run). `just test-gpu` runs just that GPU subset and fails if the
 # llvmpipe ICD is missing (the strict GPU lane).
 #
@@ -69,16 +69,23 @@ clippy:
 
 # Unit and crate tests — excludes integration package (mirror CI test-unit job)
 # Includes the GPU compositor tests and runtime pixel_readback (the latter via
-# workspace feature unification). Requires Mesa llvmpipe (libvulkan1 +
+# the explicit tze_hud_runtime/dev-mode feature). Requires Mesa llvmpipe (libvulkan1 +
 # mesa-vulkan-drivers).
 # Uses the llvmpipe ICD when installed so a hardware ICD is never loaded.
 test:
-    if [ -f {{lvp}} ]; then export VK_ICD_FILENAMES={{lvp}}; fi; \
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for control in SKIP_GPU_TESTS TZE_HUD_SKIP_GPU_TESTS RUST_TEST_THREADS NEXTEST_RETRIES NEXTEST_TEST_THREADS NEXTEST_PROFILE TZE_HUD_PERF_ASSERT TZE_HUD_TEST_BUDGET_SLACK; do
+        if [[ -v "$control" ]]; then printf 'unexpected control: %s\n' "$control" >&2; exit 1; fi
+    done
+    cargo nextest --version | grep -Eq '^cargo-nextest 0\.9\.114([[:space:]]|$)'
+    if [ -f {{lvp}} ]; then export VK_ICD_FILENAMES={{lvp}}; fi
     HEADLESS_FORCE_SOFTWARE=1 TZE_HUD_REQUIRE_GPU=1 \
-        cargo test \
+        cargo nextest run \
             --workspace \
             --all-targets \
-            --exclude integration
+            --exclude integration \
+            --features tze_hud_runtime/dev-mode
 
 # GPU tests on llvmpipe only: compositor render tests and runtime pixel_readback.
 # Fails if the llvmpipe ICD is missing; GPU tests must run, never skip.
