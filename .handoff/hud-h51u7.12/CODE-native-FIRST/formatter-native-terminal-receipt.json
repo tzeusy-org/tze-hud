@@ -1,0 +1,21 @@
+{
+  "schema": "Blueprint12-authorized-owned-formatter-v1",
+  "native_pid": 4177935,
+  "child_pid": 4177936,
+  "pgid": 4177936,
+  "actual_exit": 0,
+  "seconds": 0.16437671502353624,
+  "argv": [
+    "rustfmt",
+    "--edition",
+    "2024",
+    "crates/tze_hud_config/src/themes.rs"
+  ],
+  "before_SHA256": "18b6a15be69f557acf544874fcac5f5be1eea9bfed1df32caecc076e22dfb0c6",
+  "after_SHA256": "8e8a56d67bf1769cd32ee66b5b570fe7c5f2d0686f2582dfaf06a30a515a8c12",
+  "stdout_path": ".handoff/hud-h51u7.12/CODE-native-FIRST/source-owned-rustfmt.stdout",
+  "stderr_path": ".handoff/hud-h51u7.12/CODE-native-FIRST/source-owned-rustfmt.stderr",
+  "stdout_SHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "stderr_SHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "no_Cargo_or_compilation": true
+}

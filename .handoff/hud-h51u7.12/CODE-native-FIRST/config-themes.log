@@ -1,0 +1,16 @@
+   Compiling tze_hud_scene v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-h51u7.12/crates/tze_hud_scene)
+   Compiling tze_hud_config v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-h51u7.12/crates/tze_hud_config)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 11.03s
+     Running unittests src/lib.rs (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/.lane-cache/lane_review/target/debug/deps/tze_hud_config-440996805ebc71bb)
+
+running 7 tests
+test themes::tests::full_themes_set_every_semantic_token ... ok
+test themes::tests::known_or_absent_theme_validates ... ok
+test themes::tests::selected_theme_layers_between_canonical_and_config ... ok
+test themes::tests::unknown_theme_is_a_validation_error_listing_themes ... ok
+test themes::tests::builtin_themes_are_valid ... ok
+test themes::tests::parse_theme_rejects_unknown_keys_and_bad_values ... ok
+test themes::tests::unset_theme_selects_default ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 164 filtered out; finished in 0.00s
+

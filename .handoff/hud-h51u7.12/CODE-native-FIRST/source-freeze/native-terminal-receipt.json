@@ -1,0 +1,345 @@
+{
+  "schema": "Blueprint12-authorized-source-freeze-v1",
+  "native_pid": 4178679,
+  "at": 1791334367.0790353,
+  "commands": [
+    {
+      "name": "initial-dirty3",
+      "argv": [
+        "git",
+        "status",
+        "--porcelain",
+        "--untracked-files=no"
+      ],
+      "pid": 4178680,
+      "pgid": 4178680,
+      "exit": 0,
+      "stdout_path": ".handoff/hud-h51u7.12/CODE-native-FIRST/source-freeze/initial-dirty3.stdout",
+      "stderr_path": ".handoff/hud-h51u7.12/CODE-native-FIRST/source-freeze/initial-dirty3.stderr",
+      "stdout_SHA256": "ebad2171a3b370be57611383e3c7aa2da6bed69c31646f806abe7489a4a479c0",
+      "stderr_SHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "initial-baseline-head",
+      "argv": [
+        "git",
+        "rev-parse",
+        "HEAD"
+      ],
+      "pid": 4178683,
+      "pgid": 4178683,
+      "exit": 0,
+      "stdout_path": ".handoff/hud-h51u7.12/CODE-native-FIRST/source-freeze/initial-baseline-head.stdout",
+      "stderr_path": ".handoff/hud-h51u7.12/CODE-native-FIRST/source-freeze/initial-baseline-head.stderr",
+      "stdout_SHA256": "ff6d71a925d7da2e79248f7c509443f5cb6d3ddde6f29039a695bafa007419be",
+      "stderr_SHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "baseline-owned-0",
+      "argv": [
+        "git",
+        "show",
+        "a76bb9f73a497f3a96467a45ddb7c42a62b3ab87:assets/themes/blueprint.toml"
+      ],
+      "pid": 4178684,
+      "pgid": 4178684,
+      "exit": 0,
+      "stdout_path": ".handoff/hud-h51u7.12/CODE-native-FIRST/source-freeze/baseline-owned-0.stdout",
+      "stderr_path": ".handoff/hud-h51u7.12/CODE-native-FIRST/source-freeze/baseline-owned-0.stderr",
+      "stdout_SHA256": "63053276c31cf2f691b83d72d6aefe655c2fb1051e68373a15a0b855583db369",
+      "stderr_SHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "baseline-owned-1",
+      "argv": [
+        "git",
+        "show",
+        "a76bb9f73a497f3a96467a45ddb7c42a62b3ab87:crates/tze_hud_config/src/themes.rs"
+      ],
+      "pid": 4178685,
+      "pgid": 4178685,
+      "exit": 0,
+      "stdout_path": ".handoff/hud-h51u7.12/CODE-native-FIRST/source-freeze/baseline-owned-1.stdout",
+      "stderr_path": ".handoff/hud-h51u7.12/CODE-native-FIRST/source-freeze/baseline-owned-1.stderr",
+      "stdout_SHA256": "a51de742f124ca021c608a52b6d757c8b37979abd4f486c968c7d80cd2ff5644",
+      "stderr_SHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "baseline-owned-2",
+      "argv": [
+        "git",
+        "show",
+        "a76bb9f73a497f3a96467a45ddb7c42a62b3ab87:docs/api.md"
+      ],
+      "pid": 4178686,
+      "pgid": 4178686,
+      "exit": 0,
+      "stdout_path": ".handoff/hud-h51u7.12/CODE-native-FIRST/source-freeze/baseline-owned-2.stdout",
+      "stderr_path": ".handoff/hud-h51u7.12/CODE-native-FIRST/source-freeze/baseline-owned-2.stderr",
+      "stdout_SHA256": "f1cbab614730024d0b64c5941038239c1260a24ff4632a672886e5888d18c398",
+      "stderr_SHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "exact-dirty3-source-diff",
+      "argv": [
+        "git",
+        "diff",
+        "--",
+        "assets/themes/blueprint.toml",
+        "crates/tze_hud_config/src/themes.rs",
+        "docs/api.md"
+      ],
+      "pid": 4178687,
+      "pgid": 4178687,
+      "exit": 0,
+      "stdout_path": ".handoff/hud-h51u7.12/CODE-native-FIRST/source-freeze/exact-dirty3-source-diff.stdout",
+      "stderr_path": ".handoff/hud-h51u7.12/CODE-native-FIRST/source-freeze/exact-dirty3-source-diff.stderr",
+      "stdout_SHA256": "c180c9f1d326226a61b02a0c01ddec4839e65bfd16d04ca3f39417311336640a",
+      "stderr_SHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "stage-only3-source-paths",
+      "argv": [
+        "git",
+        "add",
+        "--",
+        "assets/themes/blueprint.toml",
+        "crates/tze_hud_config/src/themes.rs",
+        "docs/api.md"
+      ],
+      "pid": 4178690,
+      "pgid": 4178690,
+      "exit": 0,
+      "stdout_path": ".handoff/hud-h51u7.12/CODE-native-FIRST/source-freeze/stage-only3-source-paths.stdout",
+      "stderr_path": ".handoff/hud-h51u7.12/CODE-native-FIRST/source-freeze/stage-only3-source-paths.stderr",
+      "stdout_SHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_SHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "source-commit",
+      "argv": [
+        "git",
+        "commit",
+        "-m",
+        "fix: restore Blueprint opaque hover contrast [hud-h51u7.12]"
+      ],
+      "pid": 4178693,
+      "pgid": 4178693,
+      "exit": 0,
+      "stdout_path": ".handoff/hud-h51u7.12/CODE-native-FIRST/source-freeze/source-commit.stdout",
+      "stderr_path": ".handoff/hud-h51u7.12/CODE-native-FIRST/source-freeze/source-commit.stderr",
+      "stdout_SHA256": "987c647011ada2867c320fc0a68548a3b0430806dd7d0fff8b4ea40e1b795b26",
+      "stderr_SHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "source-frozen-head",
+      "argv": [
+        "git",
+        "rev-parse",
+        "HEAD"
+      ],
+      "pid": 4178700,
+      "pgid": 4178700,
+      "exit": 0,
+      "stdout_path": ".handoff/hud-h51u7.12/CODE-native-FIRST/source-freeze/source-frozen-head.stdout",
+      "stderr_path": ".handoff/hud-h51u7.12/CODE-native-FIRST/source-freeze/source-frozen-head.stderr",
+      "stdout_SHA256": "b928d3e580d26b8ef1a783f5cadd2c8d9c6c278b343162ef6066aaa4b60cf6ca",
+      "stderr_SHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "source-only-owned-paths",
+      "argv": [
+        "git",
+        "diff",
+        "--name-only",
+        "a76bb9f73a497f3a96467a45ddb7c42a62b3ab87",
+        "0c2ffa70898275811d2efa755ef33e967ef861fb"
+      ],
+      "pid": 4178701,
+      "pgid": 4178701,
+      "exit": 0,
+      "stdout_path": ".handoff/hud-h51u7.12/CODE-native-FIRST/source-freeze/source-only-owned-paths.stdout",
+      "stderr_path": ".handoff/hud-h51u7.12/CODE-native-FIRST/source-freeze/source-only-owned-paths.stderr",
+      "stdout_SHA256": "787fb327e9e35f2572f90fb0c4c2811a31413b59d94adc6a7a561de4f0facbcf",
+      "stderr_SHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "exact-frozen-source-diff",
+      "argv": [
+        "git",
+        "diff",
+        "a76bb9f73a497f3a96467a45ddb7c42a62b3ab87",
+        "0c2ffa70898275811d2efa755ef33e967ef861fb",
+        "--",
+        "assets/themes/blueprint.toml",
+        "crates/tze_hud_config/src/themes.rs",
+        "docs/api.md"
+      ],
+      "pid": 4178702,
+      "pgid": 4178702,
+      "exit": 0,
+      "stdout_path": ".handoff/hud-h51u7.12/CODE-native-FIRST/source-freeze/exact-frozen-source-diff.stdout",
+      "stderr_path": ".handoff/hud-h51u7.12/CODE-native-FIRST/source-freeze/exact-frozen-source-diff.stderr",
+      "stdout_SHA256": "c180c9f1d326226a61b02a0c01ddec4839e65bfd16d04ca3f39417311336640a",
+      "stderr_SHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "all-tracked-source-manifest",
+      "argv": [
+        "git",
+        "ls-files",
+        "--stage"
+      ],
+      "pid": 4178703,
+      "pgid": 4178703,
+      "exit": 0,
+      "stdout_path": ".handoff/hud-h51u7.12/CODE-native-FIRST/source-freeze/all-tracked-source-manifest.stdout",
+      "stderr_path": ".handoff/hud-h51u7.12/CODE-native-FIRST/source-freeze/all-tracked-source-manifest.stderr",
+      "stdout_SHA256": "88434ddb80808773a96daa7b05d91f1609a6c8c819bbb7582bae4da76dba3ee2",
+      "stderr_SHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "baseline-all-source-Git-batch",
+      "argv": [
+        "git",
+        "cat-file",
+        "--batch"
+      ],
+      "pid": 4178704,
+      "pgid": 4178704,
+      "exit": 0,
+      "stdout_path": ".handoff/hud-h51u7.12/CODE-native-FIRST/source-freeze/baseline-all-source-Git-batch.stdout",
+      "stderr_path": ".handoff/hud-h51u7.12/CODE-native-FIRST/source-freeze/baseline-all-source-Git-batch.stderr",
+      "stdout_SHA256": "78843880a3919e27d4f323cf2532970346834653673f61f70c135fbffc295056",
+      "stderr_SHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "all_batch_RAW_actually_persisted": true
+    },
+    {
+      "name": "final-tracked-clean",
+      "argv": [
+        "git",
+        "status",
+        "--porcelain",
+        "--untracked-files=no"
+      ],
+      "pid": 4178705,
+      "pgid": 4178705,
+      "exit": 0,
+      "stdout_path": ".handoff/hud-h51u7.12/CODE-native-FIRST/source-freeze/final-tracked-clean.stdout",
+      "stderr_path": ".handoff/hud-h51u7.12/CODE-native-FIRST/source-freeze/final-tracked-clean.stderr",
+      "stdout_SHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_SHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "Original-context-helper",
+      "argv": [
+        "python3",
+        "/home/orca/.dotfiles/ai-bootstrap/skills/personal/beads-orchestration/subskills/beads-worker/scripts/assert_worker_context.py",
+        "--repo-root",
+        "/home/orca/orca/projects/tze-hud",
+        "--worktree-path",
+        "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-h51u7.12",
+        "--current-path",
+        "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-h51u7.12",
+        "--issue-id",
+        "hud-h51u7.12"
+      ],
+      "pid": 4178708,
+      "pgid": 4178708,
+      "exit": 0,
+      "stdout_path": ".handoff/hud-h51u7.12/CODE-native-FIRST/source-freeze/Original-context-helper.stdout",
+      "stderr_path": ".handoff/hud-h51u7.12/CODE-native-FIRST/source-freeze/Original-context-helper.stderr",
+      "stdout_SHA256": "f535dfcf93c5dd1a863d5d54523a51be0ffd38296da3a6467bcab331e09fa133",
+      "stderr_SHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "baseline_CODE_a76": "a76bb9f73a497f3a96467a45ddb7c42a62b3ab87",
+  "frozen_source_head": "0c2ffa70898275811d2efa755ef33e967ef861fb",
+  "initial_actual_dirty3_preserved": " M assets/themes/blueprint.toml\n M crates/tze_hud_config/src/themes.rs\n M docs/api.md\n",
+  "tracked_clean_after_source_commit": true,
+  "owned_paths": [
+    "assets/themes/blueprint.toml",
+    "crates/tze_hud_config/src/themes.rs",
+    "docs/api.md"
+  ],
+  "exact_source_diff_SHA256": "c180c9f1d326226a61b02a0c01ddec4839e65bfd16d04ca3f39417311336640a",
+  "all_tracked_non_evidence_source_count": 543,
+  "union_count": 372,
+  "Rust_count": 328,
+  "source_manifest_path": ".handoff/hud-h51u7.12/CODE-native-FIRST/source-freeze/full-source-manifest.json",
+  "source_manifest_SHA256": "f58fd13348b42ba8f5a72d5d6eecdb2eff1634dd912c930c2c27101cbea3bfb1",
+  "all_other_tracked_sources_byteexact_CODE_a76": true,
+  "only_hover_value_015_to001_all_other_theme_values_unchanged": true,
+  "protected_Blueprint_values_unchanged": {
+    "color.surface.container.highest": "#383E47",
+    "color.on_surface": "#F6F7F9",
+    "color.on_surface.variant": "#ABB3BF",
+    "color.primary": "#4C90F0",
+    "opacity.surface": "0.96",
+    "state.pressed.opacity": "0.30"
+  },
+  "fixture_ledger": [
+    {
+      "name": "builtin_themes_are_valid",
+      "baseline_body_SHA256": "9c9db4297efba63e883da3f5fc7863cc0c719e2621e0974b66b08304ff6d313b",
+      "current_body_SHA256": "15a0372a92baf2184f713de36fcb5929ae032a639ba82aaf984e40a4ecbe3948",
+      "all_original_body_statements_byteexact_prefix": true,
+      "other6_whole_bodies_byteexact": false
+    },
+    {
+      "name": "full_themes_set_every_semantic_token",
+      "baseline_body_SHA256": "15909b2bf507f34cc4cbb8998413b4f1e4ce43c50a804bfeabec5cffe135ce77",
+      "current_body_SHA256": "15909b2bf507f34cc4cbb8998413b4f1e4ce43c50a804bfeabec5cffe135ce77",
+      "all_original_body_statements_byteexact_prefix": false,
+      "other6_whole_bodies_byteexact": true
+    },
+    {
+      "name": "parse_theme_rejects_unknown_keys_and_bad_values",
+      "baseline_body_SHA256": "4065984a80b8a17716fff1fa6478c0b1b9dd1742f1ee2b6a4ef263db483ccdee",
+      "current_body_SHA256": "4065984a80b8a17716fff1fa6478c0b1b9dd1742f1ee2b6a4ef263db483ccdee",
+      "all_original_body_statements_byteexact_prefix": false,
+      "other6_whole_bodies_byteexact": true
+    },
+    {
+      "name": "unset_theme_selects_default",
+      "baseline_body_SHA256": "b5e63ae68251e19310aed744ddf03a96254e8c4ab8cddeb9264d211115cb7e20",
+      "current_body_SHA256": "b5e63ae68251e19310aed744ddf03a96254e8c4ab8cddeb9264d211115cb7e20",
+      "all_original_body_statements_byteexact_prefix": false,
+      "other6_whole_bodies_byteexact": true
+    },
+    {
+      "name": "selected_theme_layers_between_canonical_and_config",
+      "baseline_body_SHA256": "46f7cbd1e5c5c73731c10750c5828db23faf4cfc4a852efd5797b2a22caaca21",
+      "current_body_SHA256": "46f7cbd1e5c5c73731c10750c5828db23faf4cfc4a852efd5797b2a22caaca21",
+      "all_original_body_statements_byteexact_prefix": false,
+      "other6_whole_bodies_byteexact": true
+    },
+    {
+      "name": "unknown_theme_is_a_validation_error_listing_themes",
+      "baseline_body_SHA256": "81e65d3c7f70beccd29c4d56f07d6438f7b9eba71e8417eba087d631afddaa82",
+      "current_body_SHA256": "81e65d3c7f70beccd29c4d56f07d6438f7b9eba71e8417eba087d631afddaa82",
+      "all_original_body_statements_byteexact_prefix": false,
+      "other6_whole_bodies_byteexact": true
+    },
+    {
+      "name": "known_or_absent_theme_validates",
+      "baseline_body_SHA256": "4174dff5ec1120cfeb8dd18e693d6397d0c846f23246975ac9b578b458a0511d",
+      "current_body_SHA256": "4174dff5ec1120cfeb8dd18e693d6397d0c846f23246975ac9b578b458a0511d",
+      "all_original_body_statements_byteexact_prefix": false,
+      "other6_whole_bodies_byteexact": true
+    }
+  ],
+  "tests_delta": "+0~1-0",
+  "all7_original_names_and_original_builtin_body_prefix_other6_whole": true,
+  "themes_production_prefix_byteexact_including_merged_parser41": true,
+  "current72_T7_Node160_Tile200_default17_source_preserved_at_CODE_a76": true,
+  "fixture_actual_production_builtin_and_selector_loaded_values": true,
+  "intended_composition": "f64 exact hex RGBchannels/255; opaque highest alpha1; one on_surface layer at actual loadedhover; opaque variant text; unrounded>=4.5 both sRGB and linear-light models. No whole-surface0.96/pressed/stacked layers.",
+  "documentation_limits": "No currenthoverconsumer/recoveredunpublishedboard/renderer/screenshot/ownerproof or translucent0.96-overwhite/primaryastext/pressed/fade/explicitoverride conformance claim",
+  "formatter_path": ".handoff/hud-h51u7.12/CODE-native-FIRST/formatter-native-terminal-receipt.json",
+  "formatter_scope": "Rootauthorized standalone rustfmt ONLY themes.rs actual0 before sourcefreeze; no Cargo",
+  "execution_status": "No Rust fixture/gate/compile executed; source-only; source543 raw/current/baseline proof is metadata",
+  "gate_plan": "After ROOT freeze+exclusiveCPUlease fmtCHECK then existing themes::tests::7 positives. ONE separately authorized globalGPU normalCI supplies workspacecheck/alltargetClippy/default17/current72/integration/boots/WindowsGNU/toollimits; no duplicate broad standalone gates. No current physical screenshot claims.",
+  "no_Cargo_GPU_tests_cache_host_publication_lifecycle_or_freshness_rebase": true,
+  "WAIT_ROOT_SOURCE_FREEZE_AND_RESOURCE_ACK": true
+}
