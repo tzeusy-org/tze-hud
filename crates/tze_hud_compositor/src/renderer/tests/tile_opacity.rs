@@ -165,6 +165,102 @@ async fn hud_w41ef_portal_backdrop_opaque_after_resize_grow_no_fade() {
         a_grown > 250,
         "grown portal backdrop must stay opaque at full opacity (got alpha={a_grown})"
     );
+
+    // Inspect the real windowed draw list as well: headless blending does not
+    // establish live overlay REPLACE alpha. Pin only this fixture's settled fade.
+    compositor.portal_tile_anim_states.insert(
+        tile_id,
+        super::draw_cmds::ZoneAnimationState {
+            transition_start: std::time::Instant::now(),
+            duration_ms: 0,
+            from_opacity: 1.0,
+            target_opacity: 1.0,
+        },
+    );
+    let resource_id = ResourceId::of(b"hud-1wizi settled drag image");
+    compositor.register_image_bytes(resource_id, std::sync::Arc::from(vec![255u8; 16]), 2, 2);
+    assert!(compositor.ensure_image_texture(resource_id, 2, 2));
+    scene.register_resource(resource_id);
+    let root_id = scene.tiles[&tile_id].root_node.unwrap();
+    scene
+        .add_node_to_tile(
+            tile_id,
+            Some(root_id),
+            Node {
+                layout: Default::default(),
+                id: SceneId::new(),
+                children: vec![],
+                data: NodeData::StaticImage(StaticImageNode {
+                    resource_id,
+                    width: 2,
+                    height: 2,
+                    decoded_bytes: 16,
+                    fit_mode: ImageFitMode::Fill,
+                    bounds: Rect::new(20.0, 20.0, 10.0, 10.0),
+                }),
+            },
+        )
+        .unwrap();
+    compositor.prime_markdown_cache(&scene);
+    compositor.prime_truncation_cache(&scene);
+    let version = scene.version;
+    let mut baseline = None;
+    for phase in 0..4 {
+        match phase {
+            1 => scene.set_drag_active(tile_id),
+            2 => {
+                let tile = scene.tiles.get_mut(&tile_id).unwrap();
+                tile.bounds.x += 5.0;
+                tile.bounds.y += 5.0;
+                scene.bump_geometry_epoch();
+            }
+            3 => scene.clear_drag_active(tile_id),
+            _ => {}
+        }
+        let build = compositor.build_windowed_frame(&mut scene, 256, 256);
+        let body_alpha: Vec<_> = build
+            .flat_rect_vertices()
+            .iter()
+            .map(|vertex| vertex.color[3])
+            .collect();
+        let text_alpha: Vec<_> = compositor
+            .collect_text_items(&scene, 256.0, 256.0)
+            .iter()
+            .map(|item| item.opacity)
+            .collect();
+        assert!(!body_alpha.is_empty());
+        assert!(!text_alpha.is_empty());
+        let mut vertices = Vec::new();
+        let mut images = Vec::new();
+        compositor.render_node(
+            root_id,
+            &scene.tiles[&tile_id],
+            &scene,
+            &mut vertices,
+            &mut images,
+            256.0,
+            256.0,
+        );
+        let image_alpha: Vec<_> = images.iter().map(|image| image.tint[3]).collect();
+        assert_eq!(
+            image_alpha.len(),
+            1,
+            "inspect a real uploaded image, not the placeholder"
+        );
+        let alphas = (body_alpha, text_alpha, image_alpha);
+        if let Some(baseline) = baseline.as_ref() {
+            assert_eq!(
+                &alphas, baseline,
+                "settled activation/move/release cannot lower body alpha"
+            );
+        } else {
+            baseline = Some(alphas);
+        }
+        assert_eq!(
+            scene.version, version,
+            "position and feedback leave content unchanged"
+        );
+    }
 }
 
 // ─── hud-b0x0m: every tile node fill type fades with the tile, not just the ──

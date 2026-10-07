@@ -1,0 +1,339 @@
+{
+  "schema": "existing-bead-FIRST-proposed-fields-v1",
+  "issue_id": "hud-1wizi",
+  "phase": "FIRST COMPLETE proposal only; ROOT installation/execution pending",
+  "first_attempt_this_run": true,
+  "parent_id": null,
+  "description": "## Problem\nThe active-drag highlight (a 2px white inside border, `DRAG_HIGHLIGHT_BORDER_PX`) and the drag z-order boost never appear in the live HUD. Owner live check on 2026-10-07 (main 68ef7825, Windows, DISPLAY7): long-press-dragging a portal by its title bar moves it and the drop persists, but no white border shows. Instead the whole portal turns translucent while dragging (cause not yet identified).\n\n## Root cause (verified by reading code)\n`SceneGraph::set_drag_active` / `clear_drag_active` (`crates/tze_hud_scene/src/graph/queries.rs:400-412`) are only called from compositor tests (`renderer/tests/hit_drag.rs`). The runtime's `apply_drag_handle_pointer_event` (`crates/tze_hud_runtime/src/windowed/portal.rs`, the `DragEventOutcome::Activated` arm, ~line 476) only logs; `Released`/`Cancelled` never clear. So `scene.is_drag_active(..)` is always false in production, and `drag_highlight_cmds` (`renderer/widget_geometry.rs:221`), `effective_tile_z_order` and the handle's active opacity (`tile_render.rs:425-445`, `widget_geometry.rs:262`) are dead in the live path. It was never wired (no runtime caller at `pre-reset` either). #1342 moved the highlight to the SDF pipeline and its tests pass because they call `set_drag_active` directly.\n\n## Fix\n- On `Activated`, call `scene.set_drag_active(element_id)`; on `Released` and `Cancelled` (and on tile removal, already handled in node_tree.rs:172), call `clear_drag_active`. For a whole-portal drag, mark the element whose drag-handle entry carries the bounds of the whole portal so the border wraps the whole portal, not one constituent tile.\n- Find what makes the portal translucent during a drag (candidates: the portal tile fade/anim opacity on geometry change, or retained-lane decline path) and remove it unless it is an intentional spec'd affordance; the drag-to-reposition rule says no animated transitions.\n- Make sure the frame re-presents when drag-active toggles (frame_signature includes drag_highlight_cmds).\n\n## Acceptance\n- A runtime-level test drives pointer down → hold ≥ LONG_PRESS_POINTER_THRESHOLD_MS → move through `apply_drag_handle_pointer_event` and asserts `scene.is_drag_active(..)` is true while dragging and false after release and after cancel.\n- A compositor test asserts the highlight border wraps the whole portal's bounds for a portal drag.\n- The portal keeps full opacity while dragged (or the translucency is documented as intended).\n- Owner live check: a thin white border around the whole portal while dragging, gone on drop.\n",
+  "description_preservation": "byte-exact original; not proposed rewrite",
+  "design": "FIRST execution packet for the existing hud-1wizi bug. This packet completes the missing formal fields; it does not implement the bug. Preserve the original description, including its Problem, Root cause, Fix and four embedded Acceptance bullets, verbatim. Priority 2 and bug type remain. Proposed size: medium; proposed complexity: high because correct terminal handling crosses the real pointer callback, scene-lock contention, gesture identity and presentation admission. This is one existing outcome, not a new input feature or a second shaping attempt.\n\nAuthority and evidence\n\nThe governing documents are current docs/vision.md, docs/api.md, docs/invariants.md and docs/scope.md, plus AGENTS.md and CLAUDE.md. The owner already requested whole-portal drag feedback and no drag-to-reposition animation. The existing 2 px inside white border, alpha 0.9, DRAG_Z_ORDER_BOOST=0x1000 and DRAG_OPACITY_BOOST=1.0 are retained affordances, not a newly designed style or token family. No palette, token, default theme, portal layout, public payload, Node or Tile field changes belong here. Retired RFC/OpenSpec comments identify history, not governing authority.\n\nThe original description records an owner live failure on main 68ef7825, Windows DISPLAY7: the portal moves and its drop persists, but its border is missing and it appears translucent. That is owner-reported actual observation, not a run by this worker. This FIRST stage inspected source at e5e8044550352d2df42e0c903ca4006d2353eeaa. No executable, GPU, screenshot, Windows session or translucency reproduction was run. Source manifest and real command receipts are supplied separately. Original related per-monitor feature hud-1pt5h, physical acceptance owner hud-1pt5h.3 and foreign CLOSED children .1/.2 retain their scope and ownership. Tile-contract proposal changes, minimized restore, refit deadlines, ordinary watchdog, display identity and UI scale are not prerequisites for or scope absorbed by this bug.\n\nCurrent source facts\n\n1. windowed/mod.rs maps CursorMoved and left MouseInput through enqueue_pointer_event; lifecycle.rs constructs a real primary-pointer PointerEvent and calls InputProcessor::process then apply_drag_handle_pointer_event under the existing SharedState -> scene lock order. apply_drag_handle_pointer_event at portal.rs379 has one production caller, lifecycle.rs2015. The Activated arm at portal.rs476 only logs. Cancelled at483 and Released at530 do not clear drag-active feedback. This confirms the missing caller seam at this source pin.\n2. SceneGraph::set_drag_active/clear_drag_active at queries.rs398–407 are currently cfg(any(test, feature=\"test-support\")) and only mutate the HashSet. The original description's caller statement is historical: current selected all-root search also finds the existing external integration bookkeeping fixture, besides compositor fixtures. Future runtime wiring must make these existing methods available in normal production builds, with unchanged names/signatures and no test-support/dev-mode dependency opt-in. The default app check must exercise this path; test-feature unification alone would mask a mistake.\n3. collect_drag_handle_entries at widget_geometry.rs88–127 gets a header-band target from portal_header_band_anchors and assigns element_bounds=tile.bounds. The header strip is the hit region, not the border bounds. portal_band_anchor_tile at queries.rs111 excludes an equal-bounds input-passthrough capture-backstop; portal_anchor_tile at78 selects the largest same-lease tile, ties by id, and can select that backstop. resolve_portal_group at portal.rs721 uses the latter for whole-group translation. A declared PortalSurface Header is preferred; the retained raw-tile fallback uses the existing scrollable-lease rule. These identities must remain coherent without silently replacing the visible handle target with a passthrough sibling.\n4. drag_highlight_cmds at widget_geometry.rs221 filters active entry.element_id and emits the inside SDF border on entry.element_bounds. The existing header band draws no grip slab. frame.rs647 includes this list in WindowedFrameBuild and frame_signature at1006/1048 hashes its visible commands. The signature is downstream of the runtime idle render gate at windowed/mod.rs1812. Merely inserting the active id cannot make that gate build a changed border. Position-only geometry_epoch invalidation is required when feedback membership changes; do not bump scene.version and re-prime content caches on every drag event.\n5. effective_tile_z_order at tile_render.rs424 currently checks only tile.id. Raising just the frame while leaving its transcript/composer at their old sort keys can break whole-group layering. Keep one visible border target, and derive the same boost for the existing contained same-lease portal members, including the equal-bounds backstop when appropriate. Do not mark every pane active and thereby emit constituent borders. Preserve each member's original z_order, relative ordering and saturating addition; chrome still paints above agent content. Far-corner drag shields and unrelated lease members outside the portal bounds remain excluded.\n6. InputProcessor's ordinary grip uses the existing pointer 250 ms/touch 1000 ms hold and 10 dp movement tolerance. Header-band immediate=true activates on the first move, without that hold. This bug must preserve both semantics, quick-tap focus, capture dispatch, snapping/clamping, whole-group geometry locks and release persistence.\n7. node_tree.rs172 removes a tile's active mark when removing the tile and records its id. prune_portal_resize_states at portal.rs1754 drains those ids but currently does not prune InputProcessor.drag_states. A late Move or Up must never recreate feedback on a removed target, a newly attached portal or a recreated window.\n8. lifecycle.rs1671 gives active Move/Up the bounded 12 ms interactive lock budget. On exhausted SharedState or scene acquisition, it drops the local update; mod.rs2478 then clears left_button_down/press_window and releases OS capture. synthesize_left_release_if_physically_up also clears that flag after dispatch. A naive active mark can therefore remain after a lost Up. This is a source-confirmed conditional terminal-loss seam, not an observed contention failure. Repair it only for the existing drag terminal, not with a generic pointer FIFO or another notification/composer input implementation.\n\nImplementation design after ROOT accepts and separately dispatches execution\n\nScene feedback and visible target: remove only the two existing methods' fixture-only cfg restriction. Have set/clear advance geometry_epoch only when insert/remove actually changes membership. Preserve the public signatures and the set's current semantics, including fixture use of arbitrary SceneIds; absent removed runtime targets are rejected by runtime reconciliation, not by changing this existing API. Repeated set/clear must be no-ops for dirty accounting. Neither operation changes scene.version, lease, user geometry override, graph schema or heap-backed Node/Tile layout.\n\nRuntime activation and cleanup: keep the original hit/gesture element for movement and persisted geometry. Derive its feedback target from the actual currently generated drag-handle identity: for a real whole portal, use the visible portal-band anchor whose tile bounds contain the whole portal; for an ordinary tile retain its own target. Preserve declared PortalSurface ownership and raw-tile fallback. After recognizer transitions, reconcile active targets from remaining Activated device states against the live scene. This clears the terminal target only when no other active device still owns it; cancellation of one gesture cannot erase another's feedback. Cancelled, Released, a replacement Down for that same device, removed target and stale state all end the old ownership. No input state or highlight is created during Accumulating/Idle. State reconciliation runs on existing events/removal work, with no clock, timer or recurring idle scan.\n\nSingle border and group sorting: retain one active visible target/DragHandleEntry, whose element_bounds is the portal frame rectangle. Add only a compositor-private group-membership predicate alongside the existing drag boost helpers when needed to apply that mark's sort-key boost to the same portal cohort that translation moves. Resolve from the existing scene lease, visible frame bounds and portal/scrollable qualification; include same-lease contained members and exclude the parked shield. There is no new scene field, public group API or generalized grouping system. A plain non-portal tile remains a one-element drag. Apply the predicate consistently to the existing sorted geometry, text, image and hit-region consumers; reuse sort_tiles_with_drag_boost rather than introduce another ordering. Keep body opacity and node alpha unchanged. Highlight geometry remains border-only, drawn above widgets in the existing SDF pass, with no scale, shadow, pulse or transition. Avoid duplicated border commands for multiple handles resolving to the same feedback target.\n\nTerminal loss under lock contention: retain one private primary-pointer terminal context seeded during the successful initiating Down under the existing scene lock. Its active portion retains the already known target/lease/window/gesture identity; its optional terminal portion is filled only when an actual Up for that drag cannot complete scene acquisition. This avoids pretending that an unavailable scene can supply lease identity at the failed Up. The terminal snapshot includes the original PointerEvent coordinates/timestamp, device id, held drag element/interaction id and existing press_start identity, original lease identity, and original press-window WindowId. That WindowId denotes the original window lifetime, never the current secondary index or a newly recreated window. There is one private Option context with an optional held terminal event, not a FIFO for all pointer events, a daemon, a retry clock or a public type. Check the original gesture still matches, the target/lease is live, and the captured window is still the original live window before replay. A removed target/window cancels and clears the old feedback; it does not move or persist onto a replacement. GPU-free fixture contexts can retain their established absent-native-window representation; production must check actual window lifetime.\n\nReplay only the drag terminal through the same drag application/persistence seam, outside-lock persistence afterward; do not re-enqueue the already emitted input-ring event, rerun generic pointer actions, deliver a second agent PointerUp/CaptureReleased, or duplicate compositor input-latency observations. Register the existing schedule_shared_scene_availability_wake when retry is required and drain once on the existing main settle turn after availability. Include this pending state in the existing deferred-work decision; no short polling deadline or recurring wake while idle. Retain the original snapshot until success or explicit invalid-target cancellation. Repeated observations coalesce only when they refer to the same held gesture. Resolve/cancel the old snapshot before a newer Down can create a same-device gesture; if the scene is still unavailable, do not admit that newer drag. Never let a stale Up terminate a newly created gesture. Ordinary move/drop behavior, unrelated input deferral, capture routing and OS release remain under existing owners. This private state requires initializing all three current WindowedRuntimeState literals (production mod.rs3102, portal.rs2061, event_loop_harness.rs109) and workspace ALL-TARGET checks. No InputProcessor public struct or protocol message gains a field.\n\nRemoval: extend the existing eager removed-id/fallback-prune seam to drop obsolete device drag state, clear its old marker and discard its matching pending terminal. A missing target is terminal; do not synthesize zero-size release/persistence or resurrect it from late input. Because the active target may be a visible sibling of the largest lease anchor, cancellation checks the captured marker and the original held identity, not only whichever anchor happens to resolve after removal. Preserve cleanup of the unrelated remaining portal and other-device marks. Release, viewer dismiss, expiry, portal detach, raw DeleteTile and tab/window removal all reach existing scene removal or local terminal cleanup; no lease/capture protocol change belongs here.\n\nOpacity diagnosis and acceptance\n\nDo not claim that enabling feedback fixes the separate translucency. At the inspected pin, update_portal_tile_animations at animation.rs130–208 starts fades on root-content presence transitions, not geometry changes. portal_tile_anim_opacity multiplies the existing base opacity; DRAG_OPACITY_BOOST=1 cannot lower it. The narrow retained renderer is entered by render_frame_headless only and its snapshot rejects scrollable portal, portal-surface and active-drag state; a retained-decline theory is therefore not evidence for this windowed failure. The current inspected runtime drag and OS SetCapture/ReleaseCapture functions do not assign a tile/window alpha. These facts exclude asserted explanations within the inspected seams, but do not identify the live cause or exclude an uninspected native/compositing interaction.\n\nFirst preserve the established body's effective opacity through activation, position-only move and release, with settled portal content, using actual windowed build/draw-command colors/tints as the blend-independent proof. Existing headless pixel readback always blends and does not reproduce the live overlay REPLACE path; it cannot certify Windows opacity. Preserve intended attach/detach/content fade, ordinary token translucency and degradation, and do not globally force every theme/body alpha to1. Full opacity in this bug means no additional drag-induced attenuation of that settled portal's intended body opacity. If the actual path changes effective opacity, retain the concrete producer/caller/command evidence and remove only that unintentional drag-dependent attenuation in this same bug. Do not delete unrelated transition policy on speculation or document the unexplained observation as intended merely to pass acceptance.\n\nIf source/fixture wiring passes but the live translucency cannot be reproduced/attributed, say exactly that in the PR and keep the original opacity and owner live criterion pending. A code PR can be reviewed/merged for bounded delivered behavior without closing the full existing bug. The owner-requested alternative of documenting an intentional translucency requires an actual governing affordance; none was found here. No new owner decision, blocker bead or unrelated diagnostic project is invented.\n\nExisting fixture plan: Tests: +0 ~7 -0, tentative but exact selected functions below\n\n1. runtime windowed::portal::tests::drag_to_move_long_press_moves_tile_bounds: retain actual InputProcessor hit processing and apply_drag_handle_pointer_event. Assert inactive Down/Accumulating, active Activated and Moved, cleared Released and persist payload. Extend with cancellation after movement tolerance, removed target/late input and another active device so cleanup cannot steal feedback. Age the existing press_start relative to an injected/test reference if feasible instead of adding sleep; do not add a clock API or alter thresholds. Existing quick-tap and touch suites remain unchanged positive gates.\n2. runtime windowed::portal::tests::header_band_anchor_is_the_frame_and_band_drag_is_position_only: upgrade its helper-only translation portion to the real WinitApp::enqueue_pointer_event path using the existing make_windowed_keyboard_test_app/multi_surface_portal_scene factories, generated header-band hit regions and lock-free snapshot. Drive Down, first Move activation, movement and Up; assert visible band identity, full group geometry, one marker, no version bump, correct epoch changes and group persistence. Add a bounded held-scene-lock Up case: pending exact terminal survives release, availability/settle completes once, later Down remains a distinct gesture. Add cancel/removal cases in this fixture; do not replace it with a reconstructed closure or new harness/species.\n3. runtime windowed::portal::tests::drag_to_move_quick_tap_does_not_move_tile: retain click-focus and no movement; assert no active marker or repaint accounting for a quick tap and early movement cancellation. This catches accidental unconditional Down marking.\n4. compositor renderer::tests::hit_drag::drag_visual_feedback_applied_during_active_drag: retain its grip opacity/border-only checks and reuse its compositor construction for a portal frame, transcript, composer, equal-bounds passthrough backstop and excluded shield. Assert exactly one border on full visible frame x/y/width/height, width DRAG_HIGHLIGHT_BORDER_PX, unchanged grip-quad count, all intended group members coherently boosted against a peer, original z values unchanged, and no border after clear. Retain the separate existing pure drag_z_order_boost_raises_tile_above_peers as a positive gate, not an additional modified species.\n5. compositor renderer::tests::tile_opacity::hud_w41ef_portal_backdrop_opaque_after_resize_grow_no_fade: retain its resize assertion; add settled position-only activation/move/release using build_windowed_frame and blend-independent fill/tint/effective-opacity assertions. Do not substitute headless readback for the live-overlay alpha check or remove legitimate content-fade coverage.\n6. compositor renderer::tests::surface::frame_signature_ignores_content_outside_the_target: retain off-target versus overlapping-target behavior, add idle/active/moved/cleared border signatures from actual WindowedFrameBuild. Activation/clear change the intersecting target's signature; off-target windows stay unchanged. Repeated unchanged marking leaves the signature unchanged. This checks downstream signature behavior separately from runtime dirty admission.\n7. external integration drag_reposition::scene_drag_active_elements_set_cleared_correctly: retain existing public set/read/clear behavior; extend with geometry_epoch idempotence and unchanged version. This compiles the unchanged methods through a real external consumer; it must not be the only proof because its test-support dev feature can hide production gating.\n\nThese seven extend existing behavior fixtures, reuse existing factories and assert outcomes rather than source strings. Constructor updates in the existing event-loop harness add no fixture. No new test function/file, guard scan, suite, GPU factory, parser/tool build or golden styling table is proposed. Actual delta is confirmed against the future implementation diff before execution/publication; no budget ratchet is changed. The current FIRST stage's actual delta is +0 ~0 -0.\n\nOwned surface and compatibility\n\nPlanned production edits are limited to scene queries.rs; runtime portal.rs/lifecycle.rs/mod.rs; compositor tile_render.rs for group sorting; plus the existing runtime harness initializer and the seven existing fixture bodies above. widget_geometry.rs, frame.rs, animation.rs, node_tree.rs, input lib/drag.rs, projection, Windows capture and display mapping are currently reader/reference surfaces, not assumed repair targets. A proven in-scope opacity producer can justify a narrow additional edit with source evidence and an updated owned diff/ledger; no speculative animation/retained/native patch is planned. Update the existing API's human-local drag explanation only if needed to state delivered semantics and honest limits; no new spec/report subtree or model-facing token is created. Constructor/cfg checks must cover all workspace tests, benches/examples and the external integration Cargo package.\n\nPreserve T7's portal/composer precedence and protected public surface, all current72 invariant references, default17 normal app dependency closure, Node<160 and Tile<200, safe mode/dismiss authority, leases/TTL/disconnect/replay, agent transaction versus coalesced message classes, geometry override durability, snapping/size bounds, chrome ordering, screen coordinate mapping and live counters. Node/Tile/protobuf/serde/config/MCP/grpc schemas and defaults stay unchanged. No auth, capability, budget, capture or public error-code change. The single context field added for lost Up is WindowedRuntimeState-private and has no serialization/migration or test-only feature requirement. Linux/default and Windows cfg implementations must build, including app release without test-support/dev-mode leakage.\n\nVerification after separate execution ACK and explicit lease\n\nFreeze exact owned source, initializer map and seven-fixture ledger. Run proportional existing runtime drag/header/tap selectors with positive counts, compositor hit_drag/opacity/surface fixtures with llvmpipe/software/REQUIRE_GPU=1 and no skips, and external integration drag_reposition in its separate Cargo package. Normal default test parallelism, jobs1, Rust1.88/protoc3.21.12, suite/build deadlines and raw SHA/native PID/group/exit/source-before-after receipts apply. Preserve real red results before fixes, without inventing a red run now. Run fmt, current normal app default dependency closure/dev-mode-guard and normal cargo check --workspace; workspace ALL-TARGET Clippy and Windows GNU/app production checks cover every constructor/cfg caller. One final normal just ci can supply its named check/clippy/test positives; do not repeat broad gates for report-only head changes. Windows native required CI remains distinct from GNU compile and headless fixtures. PERF_ASSERT is normally off; passing this bug's fixtures is not a measured performance/idle/Windows proof.\n\nLater explicitly authorized owner live acceptance on the Windows overlay must show the whole-portal border while dragging and its disappearance on drop/cancel, unchanged intended settled body opacity and durable group position; retain runtime/build head, monitor, coordinates/screenshots or recorded owner observations and actual limits. No host action is authorized by this FIRST packet. Current lack of physical evidence is not a speculative new dependency or permission to close this bug. ROOT alone installs canonical fields, dispatches code/gates/host actions and decides lifecycle after independent exact-head review/normal queue.\n\nFailure, time, concurrency and rollback\n\nQuick tap/under-threshold movement: no active border, no geometry mutation; existing focus behavior survives. Header first move: activation is immediate, while a grip needs its existing threshold. Cancellation: clear exactly its old target, with no persist. Release: clear before presentation, retain actual terminal coordinates and persist once after locks. Contended Up: one held-gesture snapshot, exact original identity, availability-driven retry; no generic action replay or newer-gesture termination. Removed target/lease/window: cancel old state/snapshot, clear feedback, never fabricate zero-size geometry or route to an incarnation replacement. Same target/two devices: clear only after the final actual owner ends; different targets remain independent. New Down while old terminal is pending: finish/cancel the original first or decline admitting the new drag until the existing scene is available. Lock/GPU/surface failure: retain original fault fate and exact diagnostics; no unbounded wait, fabricated ACK/present or blanket idle wake. Duplicate set/clear and duplicate terminal: no extra epoch, frame, geometry override or delivery. Content changes during drag: legitimate content fade/lease/TTL rules remain; geometry alone never introduces a drag fade. Active tab/display changes: use current captured SceneId/lease/WindowId and existing coordinate conversion, not display ordinal or portal display_name. Reaping/removal clears stale feedback before later attachment. All cases are planned verification, not executed claims.\n\nRollback is a normal revert of this bug's owned runtime/scene/compositor/fixture/doc commit, restoring prior missing feedback while leaving every unrelated merged owner intact; the private pending Option has no persisted data migration. Proposal rollback replaces the unexecuted design/AC before dispatch. Do not rebase/freshen source solely to claim later evidence. Existing hud-bstmy.5.11 retained-input budget fixtures, hud-bstmy.4.5 deletion of unwired batching, hud-3m097 action/jump PointerUp harness, and per-monitor children are related, not duplicates or substitute owners. No follow-up child, fourth generation, new issue or canonical lifecycle write is requested by this proposal.\n",
+  "acceptance_criteria": "Original embedded acceptance, preserved verbatim:\n- A runtime-level test drives pointer down → hold ≥ LONG_PRESS_POINTER_THRESHOLD_MS → move through `apply_drag_handle_pointer_event` and asserts `scene.is_drag_active(..)` is true while dragging and false after release and after cancel.\n- A compositor test asserts the highlight border wraps the whole portal's bounds for a portal drag.\n- The portal keeps full opacity while dragged (or the translucency is documented as intended).\n- Owner live check: a thin white border around the whole portal while dragging, gone on drop.\n\nAdditional delivery and evidence checks:\n1. Existing production set_drag_active/clear_drag_active signatures are callable without test-support/dev-mode; membership changes advance geometry_epoch exactly once and preserve scene.version, duplicate calls are no-ops, and normal app default-build checks remain clean.\n2. Real generated portal header-band hit processing selects the visible whole-portal handle target rather than a constituent or equal-bounds passthrough backstop. Header first-move activation and grip hold/tolerance/quick-tap behavior remain unchanged. All intended portal members keep coherent boosted order, exactly one inside 2px border wraps the full portal, the parked shield is excluded and original z values are unchanged.\n3. The real runtime event/drag/persistence seam clears release/cancel feedback; removed target/lease/window cannot resurrect state or fabricate persistence. A bounded held-lock Up case preserves its actual original event and gesture/window identity, retries through the existing availability wake/settle exactly once, and cannot end a newer Down or steal another device target. No generic event FIFO, duplicate input/delivery/telemetry, polling timer or new public schema is introduced.\n4. Activation, movement and clearing admit required builds through geometry_epoch and produce corresponding actual windowed border signatures only for intersecting targets. Unchanged marking/content stays quiescent; no content-cache scene.version churn or fabricated present/ACK occurs.\n5. Settled portal body colors/tints/effective opacity remain unchanged by geometry-only drag through the actual windowed build. Legitimate attach/detach/content fades and theme alpha stay intact. Any asserted live translucency cause must name a real producer/caller and its evidence; headless retained decline or geometry-triggered fade are not assumed causes. Source-only passing fixtures cannot discharge the owner Windows opacity/border criterion.\n6. Extend the seven named existing behavior fixtures (tentative Tests: +0 ~7 -0), retain existing quick-tap/touch/z-boost and current72/T7 behavior, default17 app closure, Node<160/Tile<200, lease/TTL/replay/override/capture and public API/token/schema contracts. All three WindowedRuntimeState literals and the separate external integration package compile under workspace ALL-TARGET checks; no test farm, styling framework, test-budget raise or speculative native patch.\n7. After separate execution and artifact/GPU lease, preserve exact source/commands/environment/positive selections/raw SHA/exit/owned PID-group release for proportional focused gates, required normal workspace/default/cfg checks and ONE final normal just ci. Windows native CI and later authorized owner live observation are qualified separately. No gates or host actions are executed by this FIRST. The full original bug remains partial until its original owner live border and opacity acceptance is satisfied.\n",
+  "classification": {
+    "priority": 2,
+    "issue_type": "bug",
+    "estimated_size": "medium",
+    "complexity": "high",
+    "reason": "real terminal-loss/gesture identity and scene-lock/presentation admission risks within original release/cancel outcome; not feature scope growth"
+  },
+  "original_field_presence": {
+    "description": true,
+    "design": false,
+    "acceptance_criteria": false
+  },
+  "source_pin": "e5e8044550352d2df42e0c903ca4006d2353eeaa",
+  "owner_observation": {
+    "source": "original canonical description",
+    "owner_version": "main68ef7825",
+    "platform": "Windows DISPLAY7",
+    "worker_executed": false,
+    "raw_owner_capture_available_in_this_packet": false
+  },
+  "owned_surface": [
+    {
+      "path": "crates/tze_hud_scene/src/graph/queries.rs",
+      "planned": "existing method production cfg availability and idempotent geometry_epoch only",
+      "public_surface": "existing signatures preserved; normal cfg availability restored"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/windowed/portal.rs",
+      "planned": "actual activation/terminal reconciliation, removed-target cleanup, existing runtime fixtures and initializer",
+      "public_surface": "private windowed functions only"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/windowed/lifecycle.rs",
+      "planned": "one gesture-bound held terminal context, actual coordinates, same drag seam retry/persistence; no generic pointer redelivery",
+      "public_surface": "private"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/windowed/mod.rs",
+      "planned": "one private context/production initializer/settle existing availability work",
+      "public_surface": "WindowedRuntimeState private; no schema"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/windowed/event_loop_harness.rs",
+      "planned": "existing state initializer completeness only",
+      "public_surface": "existing test-harness feature unchanged"
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/renderer/tile_render.rs",
+      "planned": "private existing portal cohort z predicate shared by current sort consumers",
+      "public_surface": "private"
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/renderer/tests/hit_drag.rs",
+      "planned": "extend existing behavior fixture",
+      "public_surface": "no new test species"
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/renderer/tests/tile_opacity.rs",
+      "planned": "extend existing behavior fixture",
+      "public_surface": "no new test species"
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/renderer/tests/surface.rs",
+      "planned": "extend existing behavior fixture",
+      "public_surface": "no new test species"
+    },
+    {
+      "path": "tests/integration/drag_reposition.rs",
+      "planned": "extend existing behavior fixture",
+      "public_surface": "no new test species"
+    },
+    {
+      "path": "docs/api.md",
+      "planned": "bounded existing local drag explanation if needed; honest delivered and Windows limit",
+      "public_surface": "no model payload/default/token changes"
+    }
+  ],
+  "caller_cfg_reader_matrix": [
+    {
+      "owner": "winit MouseInput/CursorMoved/synthetic release",
+      "source": "windowed/mod.rs2406–2482; lifecycle.rs1476,1600",
+      "role": "actual OS event, captured press WindowId, coords and release; primary device0",
+      "fate": "preserve original origin/gesture, one terminal retry, no newer Down confusion"
+    },
+    {
+      "owner": "runtime drag application",
+      "source": "windowed/lifecycle.rs2015 -> portal.rs379",
+      "role": "one production caller under SharedState->scene locks",
+      "fate": "wire real Activated/Released/Cancelled; preserve geometry and post-lock persist"
+    },
+    {
+      "owner": "InputProcessor recognizer",
+      "source": "input/lib.rs1740–1878; drag.rs37–73,98–132",
+      "role": "hold/immediate header/move/tolerance/device ownership",
+      "fate": "read-only compatibility; no new public input field/clock"
+    },
+    {
+      "owner": "visible portal handle + group",
+      "source": "scene/graph/queries.rs78–160; compositor/widget_geometry.rs88–127; runtime/portal.rs721,1040",
+      "role": "visible band anchor/full bounds vs largest lease/backstop translation anchor",
+      "fate": "one marker/border; existing contained cohort z; far shield excluded"
+    },
+    {
+      "owner": "scene setters/removal",
+      "source": "scene/graph/queries.rs398–412; node_tree.rs151–176",
+      "role": "production availability + active-set idempotence; existing removal notification",
+      "fate": "epoch dirty only changed; source version/schema/Node/Tile untouched"
+    },
+    {
+      "owner": "sorted production readers",
+      "source": "compositor/frame.rs189; tile_render.rs646,1289; text.rs349,1102,1155; encode_pass.rs568; hit_regions.rs181",
+      "role": "geometry/text/image/local hit ordering share sort_tiles_with_drag_boost",
+      "fate": "derive coherent boost in existing private sort path, no second ordering"
+    },
+    {
+      "owner": "build/signature/present admission",
+      "source": "compositor/frame.rs647,1006,1048; runtime/windowed/mod.rs1812",
+      "role": "border SDF is in actual build/hash after idle gate",
+      "fate": "epoch admits toggle build; visible target signature changes, off-target stays same"
+    },
+    {
+      "owner": "opacity sources",
+      "source": "compositor/animation.rs130–208,222; tile_render.rs440,951; retained.rs183,515–540",
+      "role": "root presence fades; base boost1; headless-only retained rejects portals/drag",
+      "fate": "exclude asserted causes, preserve legit fades, real Windows cause UNPROVEN"
+    },
+    {
+      "owner": "private struct constructors",
+      "source": "runtime/windowed/mod.rs3102; portal.rs2061; event_loop_harness.rs109",
+      "role": "ALL three actual WindowedRuntimeState literals",
+      "fate": "initialize one private terminal context, workspace all-target/default/Windows check"
+    },
+    {
+      "owner": "external integration consumer",
+      "source": "tests/integration/drag_reposition.rs613",
+      "role": "test-support feature enabled by test Cargo package",
+      "fate": "retain external method semantics; not substitute for production cfg check"
+    }
+  ],
+  "failure_time_concurrency_replay_matrix": [
+    {
+      "case": "grip Down / under threshold",
+      "required_fate": "inactive; keep focus and no movement",
+      "evidence_limit": "planned existing runtime fixture; no current run"
+    },
+    {
+      "case": "grip threshold / first qualifying Move",
+      "required_fate": "active mark -> one dirty epoch -> border build",
+      "evidence_limit": "current source missing wire; red inference only"
+    },
+    {
+      "case": "header first Move",
+      "required_fate": "activate immediately; visible band/full bounds",
+      "evidence_limit": "existing semantic retained; no new hold"
+    },
+    {
+      "case": "Move in activated group",
+      "required_fate": "all existing cohort translates, no scene.version bump; coherent z",
+      "evidence_limit": "existing production geometry preserved"
+    },
+    {
+      "case": "Cancelled / tolerance / short Up",
+      "required_fate": "clear only old feedback, no persistence",
+      "evidence_limit": "no marker added prematurely"
+    },
+    {
+      "case": "successful Released",
+      "required_fate": "clear feedback then original group coordinates persisted once post-lock",
+      "evidence_limit": "actual terminal event retained"
+    },
+    {
+      "case": "Up at exhausted SharedState/scene lock",
+      "required_fate": "one captured old-gesture terminal; availability retry, not polling",
+      "evidence_limit": "conditional source loss seam; future real held-lock fixture"
+    },
+    {
+      "case": "new Down after pending old Up",
+      "required_fate": "resolve/cancel old first; prevent stale replay ending new gesture",
+      "evidence_limit": "one primary-pointer context, not FIFO"
+    },
+    {
+      "case": "duplicate Up or set/clear",
+      "required_fate": "coalesce exact gesture; no duplicate delivery/persist/epoch",
+      "evidence_limit": "identity and idempotence assertions planned"
+    },
+    {
+      "case": "removed tile/lease / dismissed/detached/reaped",
+      "required_fate": "clear marker/state/pending; no zero geometry or resurrection",
+      "evidence_limit": "existing removed-id seam extended"
+    },
+    {
+      "case": "removed/recreated overlay window",
+      "required_fate": "cancel original WindowId, never secondary ordinal fallback",
+      "evidence_limit": "native liveness proof planned, no host action"
+    },
+    {
+      "case": "two devices same/different target",
+      "required_fate": "last owner clears; unrelated active target retained",
+      "evidence_limit": "helper/device compatibility, production pending context onlydevice0"
+    },
+    {
+      "case": "geometry only, established content",
+      "required_fate": "same intended body alpha/fade state; no drag attenuation",
+      "evidence_limit": "windowed command assertions planned; live cause unknown"
+    },
+    {
+      "case": "legitimate content change/TTL/degradation",
+      "required_fate": "existing fade/reclaim/opaque-degradation fate preserved",
+      "evidence_limit": "no global forced opacity1"
+    },
+    {
+      "case": "inactive / repeated unchanged work",
+      "required_fate": "no periodic wakes; target hashes stable",
+      "evidence_limit": "current72/idle recipe preserved, not measured now"
+    },
+    {
+      "case": "surface/present failure",
+      "required_fate": "existing retry/owed work; no false ACK/submit or indefinite lock",
+      "evidence_limit": "no per-monitor owner absorption"
+    }
+  ],
+  "nearest_existing_fixtures": [
+    {
+      "path": "crates/tze_hud_runtime/src/windowed/portal.rs",
+      "function": "drag_to_move_long_press_moves_tile_bounds",
+      "meaningful_extension": "real processor + apply_drag_handle_pointer_event activation/move/release/cancel/remove/other-device markers",
+      "executed": false
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/windowed/portal.rs",
+      "function": "header_band_anchor_is_the_frame_and_band_drag_is_position_only",
+      "meaningful_extension": "existing app enqueue seam + full portal identity/group + lost actual Up and distinct newer gesture",
+      "executed": false
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/windowed/portal.rs",
+      "function": "drag_to_move_quick_tap_does_not_move_tile",
+      "meaningful_extension": "no feedback on quick tap / early movement; focus and no geometry preserved",
+      "executed": false
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/renderer/tests/hit_drag.rs",
+      "function": "drag_visual_feedback_applied_during_active_drag",
+      "meaningful_extension": "single full portal border, contained coherent z boost, backstop/shield distinction",
+      "executed": false
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/renderer/tests/tile_opacity.rs",
+      "function": "hud_w41ef_portal_backdrop_opaque_after_resize_grow_no_fade",
+      "meaningful_extension": "windowed build body alpha unchanged by settled position-only activation/move/release; original resize retained",
+      "executed": false
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/renderer/tests/surface.rs",
+      "function": "frame_signature_ignores_content_outside_the_target",
+      "meaningful_extension": "real windowed build border signature target intersection/clear/idempotence",
+      "executed": false
+    },
+    {
+      "path": "tests/integration/drag_reposition.rs",
+      "function": "scene_drag_active_elements_set_cleared_correctly",
+      "meaningful_extension": "external public method epoch idempotence + unchanged version; default check separately required",
+      "executed": false
+    }
+  ],
+  "tests_delta": {
+    "FIRST_actual": "+0 ~0 -0",
+    "future_planned": "+0 ~7 -0",
+    "new_species": false
+  },
+  "source_manifest": ".handoff/hud-1wizi-FIRST/source-files.json",
+  "protected_boundaries": [
+    "T7 portal/composer precedence/public surface",
+    "current72 invariant refs, not pass count",
+    "default17 normal app closure",
+    "Node<160/Tile<200",
+    "MCP/gRPC/schema/token defaults",
+    "lease/TTL/replay/override/capture delivery",
+    "live instrumentation and normal PERFoff"
+  ],
+  "existing_owner_dedupe": {
+    "ROOT_lookup": "ROOT message: current3073 fulltext open/nondeferred dedupe found no dedicated terminal retry delivery owner",
+    "related_not_equivalent": [
+      "hud-bstmy.5.11",
+      "hud-bstmy.4.5",
+      "hud-3m097",
+      "hud-1pt5h",
+      "hud-1pt5h.3"
+    ],
+    "foreign_closed_preserved": [
+      "hud-1pt5h.1",
+      "hud-1pt5h.2"
+    ],
+    "new_issue_requested": false
+  },
+  "verification_plan": {
+    "before_execution": "ROOT full FIRST acceptance/canonical installation + separate execution ACK + explicit warmed ROOT target/global GPU lease",
+    "focused": [
+      "runtime lib selected existing drag/header/tap functions positive counts",
+      "compositor selected hit_drag/opacity/surface requireGPU positive counts",
+      "separate integration drag_reposition test target"
+    ],
+    "normal_required": [
+      "fmt",
+      "normal app default closure/dev-mode-guard/current17",
+      "cargo check --workspace",
+      "cargo clippy --workspace --all-targets -- -D warnings via finalCI if positive",
+      "focused Windows GNU app/runtime all-target and normal production cfg",
+      "ONE normal just ci",
+      "current-head Windows native required CI after future PR"
+    ],
+    "host": "later authorized actual owner Windows wholeportal border + opacity + disappearance/drop; pending not substituted by headless alpha"
+  },
+  "rollback": "normal revert owned bug commit; no persisted schema/migration. Current proposal can be replaced before execution.",
+  "limits": [
+    "No production/test/spec/config source edits, Cargo/GPU/cache/host/settings/screenshot/gates or PR actions in FIRST",
+    "No new live failure or measured opacity/idle/performance assertion",
+    "Actual opacity producer remains unidentified; code alone cannot close original owner live AC",
+    "Source facts e5; historical owner68ef distinct",
+    "Exploratory metadata path errors actual2 preserved; unknown PID/raw not fabricated"
+  ],
+  "field_SHA256": {
+    "description": "eaf25a29fe8d5b9f67b9039bc31c375f223b1d46dfe1ee0b8439b4334fc92c5e",
+    "design": "79fda0c3f22c1fb604b48ac5cf839444f254d018062728ac62c23335b9e4637b",
+    "acceptance_criteria": "a8225bc3db78938ac8380bd735c76261e083bc4c898da444fa47468145e9f9af"
+  },
+  "source_supplement_manifest": ".handoff/hud-1wizi-FIRST/source-supplement-files.json",
+  "qualified_source_manifest_count": 37
+}

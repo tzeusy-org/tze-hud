@@ -498,6 +498,41 @@ async fn frame_signature_ignores_content_outside_the_target() {
         signatures[0].1, signatures[1].1,
         "on-window change is visible"
     );
+    let mut scene = corner_tile_scene(Rgba::new(1.0, 0.0, 0.0, 1.0));
+    let tile_id = scene.visible_tiles()[0].id;
+    compositor.prime_markdown_cache(&scene);
+    compositor.prime_truncation_cache(&scene);
+    let idle = compositor.build_windowed_frame(&mut scene, 256, 256);
+    let idle_away = compositor.frame_signature(&idle, &away);
+    let idle_overlap = compositor.frame_signature(&idle, &overlapping);
+    let version = scene.version;
+    let epoch = scene.geometry_epoch;
+    scene.set_drag_active(tile_id);
+    assert_eq!(scene.version, version);
+    assert_eq!(
+        scene.geometry_epoch,
+        epoch + 1,
+        "border admission bypasses content-cache churn"
+    );
+    let active = compositor.build_windowed_frame(&mut scene, 256, 256);
+    assert_eq!(compositor.frame_signature(&active, &away), idle_away);
+    assert_ne!(
+        compositor.frame_signature(&active, &overlapping),
+        idle_overlap
+    );
+    scene.set_drag_active(tile_id);
+    assert_eq!(scene.geometry_epoch, epoch + 1);
+    let unchanged = compositor.build_windowed_frame(&mut scene, 256, 256);
+    assert_eq!(
+        compositor.frame_signature(&unchanged, &overlapping),
+        compositor.frame_signature(&active, &overlapping)
+    );
+    scene.clear_drag_active(tile_id);
+    let cleared = compositor.build_windowed_frame(&mut scene, 256, 256);
+    assert_eq!(
+        compositor.frame_signature(&cleared, &overlapping),
+        idle_overlap
+    );
 }
 
 /// A zone assigned to a secondary display renders in that display's window

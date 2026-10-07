@@ -164,6 +164,7 @@ impl WindowedRuntimeState {
             secondary_recreates: Default::default(),
             overlay_refits: Default::default(),
             press_window: None,
+            primary_drag_gesture: None,
             global_tokens: HashMap::new(),
             element_repositioned_tx: None,
             input_event_tx: None,

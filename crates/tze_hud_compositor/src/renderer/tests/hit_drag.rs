@@ -924,6 +924,102 @@ async fn drag_visual_feedback_applied_during_active_drag() {
         cleared_count, idle_count,
         "after clearing drag, vertex count must return to idle level"
     );
+
+    let frame_bounds = scene.tiles[&tile_id].bounds;
+    let pane = scene
+        .create_tile(
+            tab,
+            "agent-a",
+            lease,
+            Rect::new(130.0, 150.0, 300.0, 160.0),
+            12,
+        )
+        .unwrap();
+    scene
+        .register_tile_scroll_config(pane, TileScrollConfig::vertical())
+        .unwrap();
+    let backstop = scene
+        .create_tile(tab, "agent-a", lease, frame_bounds, 9)
+        .unwrap();
+    scene.tiles.get_mut(&backstop).unwrap().input_mode = tze_hud_scene::InputMode::Passthrough;
+    let shield = scene
+        .create_tile(
+            tab,
+            "agent-a",
+            lease,
+            Rect::new(1900.0, 1070.0, 1.0, 1.0),
+            20,
+        )
+        .unwrap();
+    let other_lease = scene.grant_lease("agent-b", 60_000);
+    let peer = scene
+        .create_tile(tab, "agent-b", other_lease, frame_bounds, 100)
+        .unwrap();
+    let original_order: Vec<_> = scene
+        .visible_tiles()
+        .iter()
+        .map(|tile| (tile.id, tile.z_order))
+        .collect();
+    scene.set_drag_active(tile_id);
+    let handles = compositor.collect_drag_handle_entries(&scene, 1920.0, 1080.0);
+    let frame_handle = handles
+        .iter()
+        .find(|handle| handle.element_id == tile_id)
+        .unwrap();
+    assert!(frame_handle.is_header_band);
+    let highlights = compositor.drag_highlight_cmds(&scene, &handles);
+    assert_eq!(
+        highlights.len(),
+        1,
+        "contained panes have no duplicate border"
+    );
+    assert_eq!(
+        (
+            highlights[0].x,
+            highlights[0].y,
+            highlights[0].width,
+            highlights[0].height
+        ),
+        (
+            frame_bounds.x,
+            frame_bounds.y,
+            frame_bounds.width,
+            frame_bounds.height
+        )
+    );
+    let sorted = Compositor::sort_tiles_with_drag_boost(scene.visible_tiles(), &scene);
+    let ids: Vec<_> = sorted.iter().map(|tile| tile.id).collect();
+    assert!(
+        ids.iter().position(|id| *id == peer).unwrap()
+            < ids.iter().position(|id| *id == backstop).unwrap()
+    );
+    assert!(
+        ids.iter().position(|id| *id == shield).unwrap()
+            < ids.iter().position(|id| *id == backstop).unwrap()
+    );
+    assert_eq!(
+        ids.iter()
+            .copied()
+            .filter(|id| [backstop, tile_id, pane].contains(id))
+            .collect::<Vec<_>>(),
+        [backstop, tile_id, pane],
+        "portal members retain their relative order"
+    );
+    for (id, z) in &original_order {
+        assert_eq!(
+            scene.tiles[id].z_order, *z,
+            "boost never rewrites scene z-order"
+        );
+    }
+    scene.clear_drag_active(tile_id);
+    assert!(compositor.drag_highlight_cmds(&scene, &handles).is_empty());
+    assert_eq!(
+        Compositor::sort_tiles_with_drag_boost(scene.visible_tiles(), &scene)
+            .iter()
+            .map(|tile| (tile.id, tile.z_order))
+            .collect::<Vec<_>>(),
+        original_order
+    );
 }
 
 // ─── Drag z-order + opacity boost unit tests [hud-17c8p] ─────────────────

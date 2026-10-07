@@ -1,0 +1,58 @@
+{
+  "schema": "hud-1wizi-normal-ci-authorized-retry4-launch/v1",
+  "native_pid": 4138042,
+  "child_pid": 4138043,
+  "child_pgid": 4138043,
+  "cwd": "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-1wizi",
+  "args": [
+    "timeout",
+    "--signal=TERM",
+    "--kill-after=10s",
+    "1800",
+    "just",
+    "--set",
+    "py",
+    "/home/orca/orca/projects/tze-hud/.venv/bin/python3",
+    "ci"
+  ],
+  "started_at": "2026-10-07T00:32:44.566113+00:00",
+  "deadline_seconds": 1800,
+  "head": "e5e8044550352d2df42e0c903ca4006d2353eeaa",
+  "source_state": "e5 HEAD plus TEN frozen dirty paths",
+  "source_before_sha256": "3ba969b9326827b1328439a4d7016dd32b736d80b61897f78e71488dfa882d9f",
+  "frozen_source_manifest_sha256": "efcfd8568516d2d562d3c760bb1573b443483db716e4de61ed0dadff0f40a2c1",
+  "known_public_environment": {
+    "CARGO_TARGET_DIR": "/home/orca/orca/projects/tze-hud/target",
+    "CARGO_BUILD_JOBS": "1",
+    "PROTOC": "/usr/bin/protoc",
+    "VK_ICD_FILENAMES": "/usr/share/vulkan/icd.d/lvp_icd.json",
+    "HEADLESS_FORCE_SOFTWARE": "1",
+    "LLVMPIPE_CI": "1",
+    "LIBGL_ALWAYS_SOFTWARE": "1",
+    "TZE_HUD_REQUIRE_GPU": "1"
+  },
+  "variables_unset": [
+    "RUST_TEST_THREADS",
+    "TZE_HUD_PERF_ASSERT",
+    "TZE_HUD_TEST_BUDGET_SLACK",
+    "SKIP_GPU_TESTS",
+    "TZE_HUD_SKIP_GPU_TESTS"
+  ],
+  "git_override_names_stripped": [
+    "GIT_ASKPASS",
+    "GIT_CONFIG_COUNT",
+    "GIT_CONFIG_KEY_0",
+    "GIT_CONFIG_KEY_1",
+    "GIT_CONFIG_VALUE_0",
+    "GIT_CONFIG_VALUE_1",
+    "GIT_PAGER",
+    "GIT_TERMINAL_PROMPT"
+  ],
+  "global_gpu_lease": "/home/orca/orca/projects/tze-hud/.handoff/drag-highlight-1wizi-exclusive-retry4-ONE-CI-GPU-lease.json",
+  "previous_failed_ci_receipt_sha256": [
+    "04157200544df399fa2be0fb134ae7e634d4e1b53e0e8a583094cc06efd09d63",
+    "bcdfbc6b6c39fff1d623bd3a780a07388f3f9bcdedd42b1265b0ee4d4bb8be8b",
+    "9ed7fd23c40955e452ad40364f138b2b83cfc957297a9cbc0f921d8c62b4145a",
+    "9f365d0a2708f727864f2dc1849fc9ac50c493775b9a8041efe8fbb7db03a6ee"
+  ]
+}

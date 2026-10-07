@@ -413,16 +413,48 @@ impl Compositor {
 
     // ─── Drag-boost helpers ───────────────────────────────────────────────────
 
-    /// Return the effective sort key for a tile, applying `DRAG_Z_ORDER_BOOST`
-    /// when the tile is in the `Activated` drag phase.
-    ///
-    /// The boost raises the dragged tile above its peers in painter's-algorithm
-    /// order (back-to-front).  `saturating_add` prevents wraparound for tiles
-    /// already near `u32::MAX`.
-    ///
-    /// Per `tze_hud_input::drag::DRAG_Z_ORDER_BOOST` (0x1000).
-    pub(super) fn effective_tile_z_order(tile: &Tile, scene: &SceneGraph) -> u32 {
+    /// A portal's visible frame owns its border; contained members sharing its
+    /// lease move in front together without changing their relative z-order.
+    /// The remote shield is not contained, and an ordinary tile boosts only itself.
+    fn tile_has_drag_boost(tile: &Tile, scene: &SceneGraph) -> bool {
         if scene.is_drag_active(tile.id) {
+            return true;
+        }
+        scene.overlay.drag_active_elements.iter().any(|id| {
+            let Some(frame) = scene.tiles.get(id) else {
+                return false;
+            };
+            let contains = |candidate: &Tile| {
+                candidate.lease_id == frame.lease_id
+                    && candidate.bounds.x >= frame.bounds.x - 1.0
+                    && candidate.bounds.y >= frame.bounds.y - 1.0
+                    && candidate.bounds.x + candidate.bounds.width
+                        <= frame.bounds.x + frame.bounds.width + 1.0
+                    && candidate.bounds.y + candidate.bounds.height
+                        <= frame.bounds.y + frame.bounds.height + 1.0
+            };
+            contains(tile)
+                && (scene
+                    .overlay
+                    .portal_surfaces
+                    .get(id)
+                    .is_some_and(|surface| {
+                        surface
+                            .parts
+                            .iter()
+                            .any(|part| part.kind == tze_hud_scene::PortalPartKind::Header)
+                    })
+                    || scene
+                        .overlay
+                        .tile_scroll_configs
+                        .keys()
+                        .any(|id| scene.tiles.get(id).is_some_and(contains)))
+        })
+    }
+
+    /// Saturating drag boost preserves the original scene z-order fields.
+    pub(super) fn effective_tile_z_order(tile: &Tile, scene: &SceneGraph) -> u32 {
+        if Self::tile_has_drag_boost(tile, scene) {
             tile.z_order.saturating_add(DRAG_Z_ORDER_BOOST)
         } else {
             tile.z_order
@@ -446,7 +478,7 @@ impl Compositor {
     }
 
     /// Re-sort a slice of tile references by effective z-order (back to front),
-    /// applying `DRAG_Z_ORDER_BOOST` to the dragged tile's sort key.
+    /// applying `DRAG_Z_ORDER_BOOST` to the dragged tile or portal cohort.
     ///
     /// This does not mutate the scene; it returns a new owned `Vec<&Tile>` with
     /// the drag-boosted ordering.  The original `z_order` fields are unchanged.
@@ -455,7 +487,12 @@ impl Compositor {
         scene: &SceneGraph,
     ) -> Vec<&'a Tile> {
         let mut sorted = tiles;
-        sorted.sort_by_key(|t| Self::effective_tile_z_order(t, scene));
+        if scene.overlay.drag_active_elements.is_empty() {
+            sorted.sort_by_key(|tile| tile.z_order);
+        } else {
+            // Resolve each member's cohort once, rather than on every comparison.
+            sorted.sort_by_cached_key(|tile| Self::effective_tile_z_order(tile, scene));
+        }
         sorted
     }
 

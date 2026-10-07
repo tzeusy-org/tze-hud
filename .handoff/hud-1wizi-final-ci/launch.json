@@ -1,0 +1,52 @@
+{
+  "schema": "hud-1wizi-one-normal-ci-launch/v1",
+  "native_pid": 4074059,
+  "child_pid": 4074060,
+  "child_pgid": 4074060,
+  "cwd": "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-1wizi",
+  "args": [
+    "timeout",
+    "--signal=TERM",
+    "--kill-after=10s",
+    "1800",
+    "just",
+    "--set",
+    "py",
+    "/home/orca/orca/projects/tze-hud/.venv/bin/python3",
+    "ci"
+  ],
+  "started_at": "2026-10-06T23:54:09.649332+00:00",
+  "deadline_seconds": 1800,
+  "head": "e5e8044550352d2df42e0c903ca4006d2353eeaa",
+  "source_state": "e5 HEAD plus TEN frozen dirty paths",
+  "source_before_sha256": "41b0075028465f56a565a7e7b542022ca980a02ce6c7e7542c845328291f63b9",
+  "frozen_source_manifest_sha256": "b45ee5c28269d0e99302e54924e02822609f7c239fec795e51ee3ecd918162b7",
+  "known_public_environment": {
+    "CARGO_TARGET_DIR": "/home/orca/orca/projects/tze-hud/target",
+    "CARGO_BUILD_JOBS": "1",
+    "PROTOC": "/usr/bin/protoc",
+    "VK_ICD_FILENAMES": "/usr/share/vulkan/icd.d/lvp_icd.json",
+    "HEADLESS_FORCE_SOFTWARE": "1",
+    "LLVMPIPE_CI": "1",
+    "LIBGL_ALWAYS_SOFTWARE": "1",
+    "TZE_HUD_REQUIRE_GPU": "1"
+  },
+  "variables_unset": [
+    "RUST_TEST_THREADS",
+    "TZE_HUD_PERF_ASSERT",
+    "TZE_HUD_TEST_BUDGET_SLACK",
+    "SKIP_GPU_TESTS",
+    "TZE_HUD_SKIP_GPU_TESTS"
+  ],
+  "git_override_names_stripped": [
+    "GIT_ASKPASS",
+    "GIT_CONFIG_COUNT",
+    "GIT_CONFIG_KEY_0",
+    "GIT_CONFIG_KEY_1",
+    "GIT_CONFIG_VALUE_0",
+    "GIT_CONFIG_VALUE_1",
+    "GIT_PAGER",
+    "GIT_TERMINAL_PROMPT"
+  ],
+  "global_gpu_lease": "/home/orca/orca/projects/tze-hud/.handoff/drag-highlight-1wizi-exclusive-ONE-CI-GPU-lease.json"
+}

@@ -1,0 +1,59 @@
+SKIPPED: overlay-harness-contract needs PowerShell (pwsh)
+cargo check --workspace
+    Checking tze_hud_scene v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-1wizi/crates/tze_hud_scene)
+    Checking tze_hud_resource v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-1wizi/crates/tze_hud_resource)
+   Compiling tze_hud_protocol v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-1wizi/crates/tze_hud_protocol)
+    Checking tze_hud_config v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-1wizi/crates/tze_hud_config)
+    Checking tze_hud_telemetry v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-1wizi/crates/tze_hud_telemetry)
+    Checking tze_hud_projection v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-1wizi/crates/tze_hud_projection)
+    Checking tze_hud_input v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-1wizi/crates/tze_hud_input)
+    Checking tze_hud_compositor v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-1wizi/crates/tze_hud_compositor)
+    Checking tze_hud_mcp v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-1wizi/crates/tze_hud_mcp)
+    Checking tze_hud_widget v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-1wizi/crates/tze_hud_widget)
+    Checking tze_hud_runtime v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-1wizi/crates/tze_hud_runtime)
+   Compiling tze_hud_app v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-1wizi/app/tze_hud_app)
+    Checking render_artifacts v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-1wizi/examples/render_artifacts)
+    Checking poc_demo v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-1wizi/examples/poc_demo)
+    Checking benchmark v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-1wizi/examples/benchmark)
+    Checking vertical_slice v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-1wizi/examples/vertical_slice)
+    Checking widget_publish_load_harness v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-1wizi/examples/widget_publish_load_harness)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 17.23s
+cargo fmt --check
+cargo clippy --workspace --all-targets -- -D warnings
+    Checking tze_hud_scene v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-1wizi/crates/tze_hud_scene)
+    Checking tze_hud_resource v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-1wizi/crates/tze_hud_resource)
+   Compiling tze_hud_protocol v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-1wizi/crates/tze_hud_protocol)
+    Checking tze_hud_telemetry v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-1wizi/crates/tze_hud_telemetry)
+    Checking tze_hud_input v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-1wizi/crates/tze_hud_input)
+    Checking tze_hud_widget v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-1wizi/crates/tze_hud_widget)
+    Checking tze_hud_compositor v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-1wizi/crates/tze_hud_compositor)
+    Checking tze_hud_config v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-1wizi/crates/tze_hud_config)
+    Checking tze_hud_projection v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-1wizi/crates/tze_hud_projection)
+    Checking tze_hud_mcp v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-1wizi/crates/tze_hud_mcp)
+    Checking tze_hud_runtime v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-1wizi/crates/tze_hud_runtime)
+error: this `if` statement can be collapsed
+    --> crates/tze_hud_runtime/src/windowed/portal.rs:1984:9
+     |
+1984 | /         if self
+1985 | |             .state
+1986 | |             .primary_drag_gesture
+1987 | |             .as_ref()
+...    |
+2000 | |         }
+     | |_________^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/master/index.html#collapsible_if
+     = note: `-D clippy::collapsible-if` implied by `-D clippy::all`
+     = help: to override `-D clippy::all` add `#[allow(clippy::collapsible_if)]`
+help: collapse nested if block
+     |
+1988 ~             .is_some_and(|gesture| !original_window_is_live || !gesture.target_is_live(&scene))
+1989 ~             && let Some(gesture) = self.state.primary_drag_gesture.take()
+1990 |                 && self
+ ...
+1997 |                 self.state.input_processor.drag_states.remove(&0);
+1998 ~             }
+     |
+
+error: could not compile `tze_hud_runtime` (lib) due to 1 previous error
+error: recipe `clippy` failed on line 66 with exit code 101
