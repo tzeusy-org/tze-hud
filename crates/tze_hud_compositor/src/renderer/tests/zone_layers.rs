@@ -543,8 +543,11 @@ fn test_publication_ttl_ms_uses_expires_at_wall_us() {
         content_classification: None,
         breakpoints: Vec::new(),
     };
-    let ttl =
-        Compositor::publication_fade_delay_ms(&record_warning, record_warning.published_at_wall_us);
+    let ttl = Compositor::publication_fade_delay_ms(
+        &record_warning,
+        record_warning.published_at_wall_us,
+        150,
+    );
     assert_eq!(
         ttl,
         Some(14_850),
@@ -574,6 +577,7 @@ fn test_publication_ttl_ms_uses_expires_at_wall_us() {
     let ttl_crit = Compositor::publication_fade_delay_ms(
         &record_critical,
         record_critical.published_at_wall_us,
+        150,
     );
     assert_eq!(
         ttl_crit,
@@ -602,7 +606,7 @@ fn test_publication_ttl_ms_uses_expires_at_wall_us() {
         breakpoints: Vec::new(),
     };
     let ttl_both =
-        Compositor::publication_fade_delay_ms(&record_both, record_both.published_at_wall_us);
+        Compositor::publication_fade_delay_ms(&record_both, record_both.published_at_wall_us, 150);
     assert_eq!(
         ttl_both,
         Some(14_850),
@@ -628,10 +632,37 @@ fn test_publication_ttl_ms_uses_expires_at_wall_us() {
         content_classification: None,
         breakpoints: Vec::new(),
     };
-    let ttl_info = Compositor::publication_fade_delay_ms(&record_info, 0);
+    let ttl_info = Compositor::publication_fade_delay_ms(&record_info, 0, 150);
     assert_eq!(
         ttl_info, None,
         "a record with no expiry is held and has no fade delay"
+    );
+    for span in [0, 120, 275] {
+        assert_eq!(
+            Compositor::publication_fade_delay_ms(&record_warning, 0, span),
+            Some(15_000 - u64::from(span))
+        );
+        assert_eq!(
+            Compositor::publication_fade_delay_ms(&record_critical, 0, span),
+            Some(30_000 - u64::from(span))
+        );
+        assert_eq!(
+            Compositor::publication_fade_delay_ms(&record_info, 0, span),
+            None
+        );
+    }
+    let mut short = record_warning.clone();
+    short.expires_at_wall_us = Some(50_000);
+    assert_eq!(
+        Compositor::publication_fade_delay_ms(&short, 0, 120),
+        Some(0),
+        "short TTL starts fading immediately, without extending expiry"
+    );
+    short.expires_at_wall_us = Some(50_001);
+    assert_eq!(
+        Compositor::publication_fade_delay_ms(&short, 0, 0),
+        Some(51),
+        "zero span must not schedule an early sub-millisecond removal"
     );
 }
 
@@ -672,6 +703,10 @@ fn test_fade_in_from_clamps_opacity() {
 #[tokio::test]
 async fn test_transition_interrupt_starts_fade_in_from_current_opacity() {
     let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
+    compositor.set_token_map(HashMap::from([
+        ("motion.enter.easing".into(), "decelerate".into()),
+        ("motion.exit.easing".into(), "accelerate".into()),
+    ]));
 
     let mut scene = SceneGraph::new(1280.0, 720.0);
     scene.register_zone(ZoneDefinition {
@@ -783,6 +818,97 @@ async fn test_transition_interrupt_starts_fade_in_from_current_opacity() {
         (state.from_opacity - pre_interrupt_opacity).abs() < 0.1,
         "fade_in_from must start from current fade-out opacity (~{pre_interrupt_opacity}), got {}",
         state.from_opacity
+    );
+    assert_eq!(state.duration_ms, 200, "explicit zone duration is retained");
+    assert_eq!(state.easing, super::easing::Easing::EaseOutQuad);
+    scene
+        .zone_registry
+        .zones
+        .get_mut("subtitle")
+        .unwrap()
+        .rendering_policy
+        .transition_out_ms = Some(10_000);
+    scene
+        .zone_registry
+        .active_publishes
+        .get_mut("subtitle")
+        .unwrap()
+        .clear();
+    compositor.update_zone_animations(&scene);
+    let state = compositor
+        .zone_animation_states
+        .get_mut("subtitle")
+        .unwrap();
+    assert_eq!(state.easing, super::easing::Easing::EaseInQuad);
+    state.transition_start = std::time::Instant::now() - std::time::Duration::from_secs(5);
+    assert!((state.current_opacity() - 0.75).abs() < 0.01);
+    compositor.set_token_map(HashMap::from([
+        ("motion.enter.easing".into(), "linear".into()),
+        ("motion.exit.easing".into(), "linear".into()),
+    ]));
+    assert_eq!(
+        compositor.zone_animation_states["subtitle"].easing,
+        super::easing::Easing::EaseInQuad,
+        "in-flight curve is captured"
+    );
+    scene
+        .publish_to_zone(
+            "subtitle",
+            ZoneContent::StreamText("Third".into()),
+            "agent",
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    compositor.update_zone_animations(&scene);
+    let state = &compositor.zone_animation_states["subtitle"];
+    assert!(
+        (state.from_opacity - 0.75).abs() < 0.01,
+        "interrupt seeds eased opacity"
+    );
+    assert_eq!(
+        state.easing,
+        super::easing::Easing::Linear,
+        "new profile applies to new transition"
+    );
+    scene
+        .zone_registry
+        .zones
+        .get_mut("subtitle")
+        .unwrap()
+        .rendering_policy
+        .transition_out_ms = Some(0);
+    scene
+        .zone_registry
+        .active_publishes
+        .get_mut("subtitle")
+        .unwrap()
+        .clear();
+    compositor.update_zone_animations(&scene);
+    assert!(!compositor.zone_animation_states.contains_key("subtitle"));
+    scene
+        .zone_registry
+        .zones
+        .get_mut("subtitle")
+        .unwrap()
+        .rendering_policy
+        .transition_in_ms = Some(0);
+    scene
+        .publish_to_zone(
+            "subtitle",
+            ZoneContent::StreamText("Fourth".into()),
+            "agent",
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    compositor.update_zone_animations(&scene);
+    assert!(!compositor.zone_animation_states.contains_key("subtitle"));
+    assert!(
+        !compositor.has_inflight_animation(&scene),
+        "explicit zero does not keep waking"
     );
 }
 

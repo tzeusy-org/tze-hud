@@ -234,13 +234,37 @@ async fn degraded_mode_snaps_widget_transition() {
         return;
     };
     rig.compositor.degradation_level = DegradationLevel::Simplified;
-    rig.publish([("level", WidgetParameterValue::F32(1.0))], 200);
+    let shared = Arc::new(tokio::sync::Mutex::new(rig.scene.clone()));
+    let mut config = tze_hud_mcp::McpConfig::with_psk("motion-test-key");
+    config.widget_transition_ms = tze_hud_config::tokens::resolve_motion_duration_ms(
+        &HashMap::from([("motion.state.ms".into(), "200".into())]),
+        "motion.state.ms",
+    );
+    let server = tze_hud_mcp::McpServer::with_shared_scene(shared.clone()).with_config(config);
+    let reply = server.dispatch(
+        r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"hud_publish","arguments":{"surface":"widget:gauge-1","params":{"level":1.0}}}}"#,
+        &tze_hud_mcp::CallerContext::with_bearer("motion-test-key"),
+    ).await;
+    assert!(
+        !reply.contains("\"error\"") && !reply.contains("\"isError\":true"),
+        "{reply}"
+    );
+    rig.scene = shared.lock().await.clone();
+    assert_eq!(
+        rig.scene.widget_registry.active_publishes[GAUGE]
+            .last()
+            .unwrap()
+            .transition_ms,
+        200
+    );
     assert_eq!(level(&rig.step(0)), 1.0, "snaps with no time elapsed");
     assert_eq!(
         rig.rasters(),
         2,
         "one raster for the change, not one per tick"
     );
+    assert!(!rig.compositor.has_inflight_animation(&rig.scene));
+    assert!(rig.compositor.next_animation_deadline().is_none());
 }
 
 #[tokio::test]
@@ -253,13 +277,50 @@ async fn transition_stops_waking_after_completion() {
         "idle widget schedules nothing"
     );
 
-    rig.publish([("level", WidgetParameterValue::F32(1.0))], 200);
+    let shared = Arc::new(tokio::sync::Mutex::new(rig.scene.clone()));
+    let mut config = tze_hud_mcp::McpConfig::with_psk("motion-test-key");
+    config.widget_transition_ms = tze_hud_config::tokens::resolve_motion_duration_ms(
+        &HashMap::from([("motion.state.ms".into(), "200".into())]),
+        "motion.state.ms",
+    );
+    let server = tze_hud_mcp::McpServer::with_shared_scene(shared.clone()).with_config(config);
+    let caller = tze_hud_mcp::CallerContext::with_bearer("motion-test-key");
+    let reply = server.dispatch(
+        r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"hud_publish","arguments":{"surface":"widget:gauge-1","params":{"level":1.0,"fill_color":{"r":1.0,"g":0.5,"b":0.0,"a":1.0},"severity":"error","label":"CPU"}}}}"#,
+        &caller,
+    ).await;
+    assert!(
+        !reply.contains("\"error\"") && !reply.contains("\"isError\":true"),
+        "{reply}"
+    );
+    rig.scene = shared.lock().await.clone();
+    assert_eq!(
+        rig.scene.widget_registry.active_publishes[GAUGE]
+            .last()
+            .unwrap()
+            .transition_ms,
+        200
+    );
     rig.step(0);
     assert!(
         rig.compositor.next_animation_deadline().is_some(),
         "animating widget wakes the loop"
     );
     assert!(rig.compositor.has_inflight_animation(&rig.scene));
+    assert_eq!(
+        rig.rendered()["severity"],
+        WidgetParameterValue::Enum("error".into())
+    );
+    assert_eq!(
+        rig.rendered()["label"],
+        WidgetParameterValue::String("CPU".into())
+    );
+    let midway = rig.step(100);
+    assert!((level(&midway) - 0.5).abs() < 0.01);
+    let WidgetParameterValue::Color(color) = midway["fill_color"].clone() else {
+        panic!("fill_color must interpolate");
+    };
+    assert!((color.r - 0.5).abs() < 0.01 && color.g > 0.0 && color.g < 0.5);
 
     rig.step(250);
     let landed = rig.rasters();
@@ -271,6 +332,64 @@ async fn transition_stops_waking_after_completion() {
         landed,
         "no raster after the transition lands"
     );
+    // The same MCP producer must preserve W1's zero-duration cancellation.
+    let reply = server.dispatch(
+        r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"hud_publish","arguments":{"surface":"widget:gauge-1","params":{"level":0.0}}}}"#,
+        &caller,
+    ).await;
+    assert!(!reply.contains("\"isError\":true"), "{reply}");
+    rig.scene = shared.lock().await.clone();
+    rig.step(0);
+    rig.step(100);
+    assert!(rig.compositor.has_inflight_animation(&rig.scene));
+    let mut instant = tze_hud_mcp::McpConfig::with_psk("motion-test-key");
+    instant.widget_transition_ms = 0;
+    let server = server.with_config(instant);
+    let reply = server.dispatch(
+        r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"hud_publish","arguments":{"surface":"widget:gauge-1","params":{"level":0.0}}}}"#,
+        &caller,
+    ).await;
+    assert!(!reply.contains("\"isError\":true"), "{reply}");
+    rig.scene = shared.lock().await.clone();
+    assert_eq!(level(&rig.step(0)), 0.0);
+    assert!(!rig.compositor.has_inflight_animation(&rig.scene));
+    assert!(rig.compositor.next_animation_deadline().is_none());
+
+    let reply = server.dispatch(
+        r#"{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"hud_clear","arguments":{"surface":"widget:gauge-1"}}}"#,
+        &caller,
+    ).await;
+    assert!(!reply.contains("\"isError\":true"), "{reply}");
+    {
+        let mut scene = shared.lock().await;
+        scene.clear_widget_for_publisher(GAUGE, "agent-a").unwrap();
+        rig.scene = scene.clone();
+    }
+    rig.render();
+    assert!(
+        rig.compositor
+            .widget_renderer()
+            .unwrap()
+            .texture_entry(GAUGE)
+            .is_none()
+    );
+    assert!(!rig.compositor.has_inflight_animation(&rig.scene));
+    let mut configured = tze_hud_mcp::McpConfig::with_psk("motion-test-key");
+    configured.widget_transition_ms = 200;
+    let server = server.with_config(configured);
+    let reply = server.dispatch(
+        r#"{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"hud_publish","arguments":{"surface":"widget:gauge-1","params":{"level":0.8}}}}"#,
+        &caller,
+    ).await;
+    assert!(!reply.contains("\"isError\":true"), "{reply}");
+    rig.scene = shared.lock().await.clone();
+    assert_eq!(
+        level(&rig.step(0)),
+        0.8,
+        "first appearance snaps despite positive duration"
+    );
+    assert!(!rig.compositor.has_inflight_animation(&rig.scene));
+    assert!(rig.compositor.next_animation_deadline().is_none());
 }
 
 #[tokio::test]

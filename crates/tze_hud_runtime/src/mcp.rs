@@ -43,6 +43,8 @@ use crate::threads::ShutdownToken;
 /// Created internally by the windowed runtime from `WindowedConfig` fields.
 #[derive(Debug, Clone)]
 pub struct McpServerConfig {
+    /// Implicit widget duration from the same resolved startup theme as the compositor.
+    pub widget_transition_ms: u32,
     /// Addresses to listen on, one listener each. The windowed runtime passes
     /// loopback plus the local Tailscale addresses (see [`crate::net_addrs`]).
     pub bind_addrs: Vec<SocketAddr>,
@@ -199,7 +201,10 @@ pub async fn start_mcp_http_server_with_render_wake(
     });
 
     let mut server_builder = McpServer::with_shared_scene(scene)
-        .with_config(McpConfig::with_agents(config.agents.clone()))
+        .with_config(McpConfig {
+            agents: config.agents.clone(),
+            widget_transition_ms: config.widget_transition_ms,
+        })
         .with_render_wake_notifier(render_wake)
         .with_portal_ingress_wake_notifier(portal_ingress_wake)
         .with_safe_mode(safe_mode);
@@ -571,6 +576,10 @@ mod tests {
 
     fn make_config(port: u16, psk: &str) -> McpServerConfig {
         McpServerConfig {
+            widget_transition_ms: tze_hud_config::tokens::resolve_motion_duration_ms(
+                &Default::default(),
+                "motion.state.ms",
+            ),
             bind_addrs: vec![format!("127.0.0.1:{port}").parse().unwrap()],
             late_tailnet_port: None,
             agents: tze_hud_scene::config::AgentDirectory::unrestricted(psk).shared(),
@@ -1099,6 +1108,10 @@ mod tests {
     #[tokio::test]
     async fn mcp_http_tools_list_on_every_listener() {
         let config = McpServerConfig {
+            widget_transition_ms: tze_hud_config::tokens::resolve_motion_duration_ms(
+                &Default::default(),
+                "motion.state.ms",
+            ),
             bind_addrs: vec![
                 "127.0.0.1:0".parse().unwrap(),
                 "127.0.0.2:0".parse().unwrap(),
@@ -1137,6 +1150,10 @@ mod tests {
     async fn mcp_http_only_loopback_bind_failure_is_fatal() {
         let agents = tze_hud_scene::config::AgentDirectory::unrestricted("k").shared();
         let cfg = |addrs: [&str; 2]| McpServerConfig {
+            widget_transition_ms: tze_hud_config::tokens::resolve_motion_duration_ms(
+                &Default::default(),
+                "motion.state.ms",
+            ),
             bind_addrs: addrs.iter().map(|a| a.parse().unwrap()).collect(),
             late_tailnet_port: None,
             agents: agents.clone(),
@@ -1258,12 +1275,34 @@ mod tests {
                     layer_attachment: LayerAttachment::Content,
                 },
             );
+            let raw: tze_hud_config::raw::RawConfig = toml::from_str(
+                r#"
+                [[tabs]]
+                name = "Main"
+                default_tab = true
+                [[tabs.widgets]]
+                widget_type = "gauge"
+                instance_id = "motion-gauge"
+            "#,
+            )
+            .unwrap();
+            crate::widget_startup::init_widget_registry(
+                &mut s,
+                &raw,
+                None,
+                &std::collections::HashMap::new(),
+                &tze_hud_config::themes::resolve_config_tokens(&Default::default()),
+            );
         }
 
-        let config = make_config(0, "test-key");
+        let mut config = make_config(0, "test-key");
+        config.widget_transition_ms = tze_hud_config::tokens::resolve_motion_duration_ms(
+            &std::collections::HashMap::from([("motion.state.ms".into(), "240".into())]),
+            "motion.state.ms",
+        );
         let shutdown = ShutdownToken::new();
 
-        let (handle, addrs) = start_mcp_http_server(scene, config, shutdown.clone(), None)
+        let (handle, addrs) = start_mcp_http_server(scene.clone(), config, shutdown.clone(), None)
             .await
             .expect("bind");
         let addr = addrs[0];
@@ -1278,6 +1317,21 @@ mod tests {
             resp.contains(r#"{\"expires_in_ms\":60000,\"ok\":true}"#),
             "expected a successful publish, got: {resp}"
         );
+        let body = r#"{"jsonrpc":"2.0","method":"tools/call","params":{"name":"hud_publish","arguments":{"surface":"widget:motion-gauge","params":{"level":0.75,"label":"CPU"}}},"id":5}"#;
+        let resp = http_post(addr, body, Some("test-key")).await;
+        assert!(resp.contains("HTTP/1.1 200"));
+        {
+            let scene = scene.lock().await;
+            let record = &scene.widget_registry.active_publishes["motion-gauge"][0];
+            assert_eq!(
+                record.transition_ms, 240,
+                "HTTP bridge must forward startup duration"
+            );
+            assert_eq!(
+                record.params["level"],
+                tze_hud_scene::types::WidgetParameterValue::F32(0.75)
+            );
+        }
 
         shutdown.trigger(crate::threads::ShutdownReason::Clean);
         handle.await.expect("task");

@@ -228,7 +228,13 @@ async fn notification_countdown_is_not_inflight_animation() {
 #[tokio::test]
 async fn idle_with_notification_renders_only_at_fade() {
     let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(320, 200).await);
-    let scene = countdown_notification_scene();
+    compositor.set_token_map(HashMap::from([
+        ("motion.exit.ms".into(), "240".into()),
+        ("motion.exit.easing".into(), "accelerate".into()),
+    ]));
+    let clock = std::sync::Arc::new(tze_hud_scene::clock::TestClock::new(1_000));
+    let mut scene =
+        countdown_notification_scene_on(SceneGraph::new_with_clock(1280.0, 720.0, clock));
     compositor.update_publication_animations(&scene);
     let (origin, ttl) = {
         let s = compositor.pub_animation_states["notification-area"]
@@ -240,6 +246,7 @@ async fn idle_with_notification_renders_only_at_fade() {
             std::time::Duration::from_millis(s.ttl_ms.unwrap()),
         )
     };
+    assert_eq!(ttl, std::time::Duration::from_millis(7_760));
 
     // Virtual clock: step to each wake the loop would take. Rewinding
     // `first_seen` by the virtual elapsed time stands in for waiting.
@@ -267,6 +274,25 @@ async fn idle_with_notification_renders_only_at_fade() {
         "no frames rendered during countdown"
     );
     assert!(compositor.has_inflight_animation(&scene), "fade renders");
+    for zone in compositor.pub_animation_states.values_mut() {
+        for state in zone.values_mut() {
+            assert_eq!(state.fade_duration_ms, 240);
+            assert_eq!(state.easing, super::easing::Easing::EaseInQuad);
+            state.fade_start =
+                Some(std::time::Instant::now() - std::time::Duration::from_millis(120));
+            assert!((state.current_opacity() - 0.75).abs() < 0.03);
+            state.fade_start =
+                Some(std::time::Instant::now() - std::time::Duration::from_millis(241));
+        }
+    }
+    compositor.prune_faded_publications(&mut scene);
+    compositor.update_publication_animations(&scene);
+    assert!(!compositor.has_inflight_animation(&scene));
+    assert_eq!(
+        compositor.next_animation_deadline(),
+        None,
+        "landed fade leaves no deadline"
+    );
 }
 
 /// Idle render gate — composer carve-out (hud-ilivg / hud-r3ax6).
@@ -438,6 +464,10 @@ async fn hold_moves_the_fade_deadline_and_ttl_zero_never_fades() {
     use tze_hud_scene::clock::TestClock;
 
     let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(320, 200).await);
+    compositor.set_token_map(HashMap::from([
+        ("motion.exit.ms".into(), "240".into()),
+        ("motion.exit.easing".into(), "accelerate".into()),
+    ]));
     let clock = Arc::new(TestClock::new(1_000));
     let mut scene =
         countdown_notification_scene_on(SceneGraph::new_with_clock(1280.0, 720.0, clock.clone()));
@@ -451,16 +481,16 @@ async fn hold_moves_the_fade_deadline_and_ttl_zero_never_fades() {
     compositor.update_publication_animations(&scene);
     assert_eq!(
         delay(&compositor),
-        Some(7_850),
+        Some(7_760),
         "urgency default, 8 s - fade"
     );
 
-    // 5 s in, hold 20 s: the fade is due 19.85 s from now, one deadline.
+    // 5 s in, hold 20 s: the captured 240ms fade is due 19.76 s from now.
     clock.advance(5_000);
     let first_deadline = compositor.next_animation_deadline().unwrap();
     assert!(scene.hold_zone_publications("notification-area", "agent-a", Some(20_000_000)));
     compositor.update_publication_animations(&scene);
-    assert_eq!(delay(&compositor), Some(19_850));
+    assert_eq!(delay(&compositor), Some(19_760));
     let moved = compositor.next_animation_deadline().unwrap();
     assert!(
         moved > first_deadline + Duration::from_secs(10),
@@ -470,6 +500,13 @@ async fn hold_moves_the_fade_deadline_and_ttl_zero_never_fades() {
         !compositor.has_inflight_animation(&scene),
         "still just counting down"
     );
+    compositor.set_token_map(HashMap::from([("motion.exit.ms".into(), "500".into())]));
+    for state in compositor.pub_animation_states["notification-area"].values() {
+        assert_eq!(
+            state.fade_duration_ms, 240,
+            "existing publication retains its profile"
+        );
+    }
 
     // ttl_ms:0 holds: no deadline, no animation, past auto_clear_ms and the sweep.
     assert!(scene.hold_zone_publications("notification-area", "agent-a", None));
@@ -497,6 +534,9 @@ async fn hold_moves_the_fade_deadline_and_ttl_zero_never_fades() {
     );
 
     // hud_clear removes it.
+    let content = scene.zone_registry.active_publishes["notification-area"][0]
+        .content
+        .clone();
     scene
         .clear_zone_for_publisher("notification-area", "agent-a")
         .unwrap();
@@ -507,5 +547,62 @@ async fn hold_moves_the_fade_deadline_and_ttl_zero_never_fades() {
             .values()
             .all(|zone| zone.is_empty())
     );
+    assert_eq!(compositor.next_animation_deadline(), None);
+    // Explicit zero schedules only authoritative expiry, with no fading frames.
+    scene
+        .zone_registry
+        .zones
+        .get_mut("notification-area")
+        .unwrap()
+        .rendering_policy
+        .transition_out_ms = Some(0);
+    scene
+        .publish_to_zone(
+            "notification-area",
+            content.clone(),
+            "agent-a",
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    let expiry = scene.now_wall_us() + 50_000;
+    assert!(scene.hold_zone_publications("notification-area", "agent-a", Some(50_000)));
+    assert_eq!(
+        scene.zone_registry.active_publishes["notification-area"][0].expires_at_wall_us,
+        Some(expiry)
+    );
+    compositor.update_publication_animations(&scene);
+    assert_eq!(delay(&compositor), Some(50));
+    assert!(!compositor.has_inflight_animation(&scene));
+    assert!(compositor.next_animation_deadline().is_some());
+    clock.advance(50);
+    assert_eq!(scene.drain_expired_zone_publications(), 1);
+    compositor.update_publication_animations(&scene);
+    assert_eq!(compositor.next_animation_deadline(), None);
+    // A shorter TTL clips a nonzero fade at the same scene expiry boundary.
+    scene
+        .zone_registry
+        .zones
+        .get_mut("notification-area")
+        .unwrap()
+        .rendering_policy
+        .transition_out_ms = Some(240);
+    scene
+        .publish_to_zone("notification-area", content, "agent-a", None, None, None)
+        .unwrap();
+    let expiry = scene.now_wall_us() + 50_000;
+    assert!(scene.hold_zone_publications("notification-area", "agent-a", Some(50_000)));
+    assert_eq!(
+        scene.zone_registry.active_publishes["notification-area"][0].expires_at_wall_us,
+        Some(expiry)
+    );
+    compositor.update_publication_animations(&scene);
+    assert_eq!(delay(&compositor), Some(0));
+    assert!(compositor.has_inflight_animation(&scene));
+    clock.advance(50);
+    assert_eq!(scene.drain_expired_zone_publications(), 1);
+    compositor.update_publication_animations(&scene);
+    assert!(!compositor.has_inflight_animation(&scene));
     assert_eq!(compositor.next_animation_deadline(), None);
 }

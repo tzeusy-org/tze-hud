@@ -1036,6 +1036,10 @@ mod tests {
         let pairing = Arc::new(rig.pairing);
         let shutdown = crate::threads::ShutdownToken::new();
         let config = crate::mcp::McpServerConfig {
+            widget_transition_ms: tze_hud_config::tokens::resolve_motion_duration_ms(
+                &Default::default(),
+                "motion.state.ms",
+            ),
             bind_addrs: vec!["127.0.0.1:0".parse().unwrap()],
             late_tailnet_port: None,
             agents: rig.agents.clone(),

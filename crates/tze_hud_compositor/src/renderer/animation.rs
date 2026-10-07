@@ -19,8 +19,8 @@ use tze_hud_scene::types::*;
 
 use super::Compositor;
 use super::draw_cmds::{
-    NOTIFICATION_FADE_OUT_MS, PortalTileStreamReveal, PubKey, PublicationAnimationState,
-    StreamRevealState, ZoneAnimationState, common_prefix_len, derive_word_breakpoints,
+    PortalTileStreamReveal, PubKey, PublicationAnimationState, StreamRevealState,
+    ZoneAnimationState, common_prefix_len, derive_word_breakpoints,
 };
 
 impl Compositor {
@@ -64,7 +64,7 @@ impl Compositor {
                 if let Some(zone_def) = scene.zone_registry.zones.get(zone_name) {
                     if let Some(ms) = zone_def.rendering_policy.transition_in_ms {
                         if ms > 0 {
-                            let new_state = if let Some(existing) =
+                            let mut new_state = if let Some(existing) =
                                 self.zone_animation_states.get(zone_name)
                             {
                                 if existing.target_opacity == 0.0 {
@@ -77,8 +77,11 @@ impl Compositor {
                             } else {
                                 ZoneAnimationState::fade_in(ms)
                             };
+                            new_state.easing = self.zone_motion.enter;
                             self.zone_animation_states
                                 .insert(zone_name.clone(), new_state);
+                        } else {
+                            self.zone_animation_states.remove(zone_name);
                         }
                     }
                 }
@@ -87,8 +90,11 @@ impl Compositor {
                 if let Some(zone_def) = scene.zone_registry.zones.get(zone_name) {
                     if let Some(ms) = zone_def.rendering_policy.transition_out_ms {
                         if ms > 0 {
-                            self.zone_animation_states
-                                .insert(zone_name.clone(), ZoneAnimationState::fade_out(ms));
+                            let mut state = ZoneAnimationState::fade_out(ms);
+                            state.easing = self.zone_motion.exit;
+                            self.zone_animation_states.insert(zone_name.clone(), state);
+                        } else {
+                            self.zone_animation_states.remove(zone_name);
                         }
                     }
                 }
@@ -477,6 +483,12 @@ impl Compositor {
                 continue;
             }
 
+            let fade_duration_ms = zone_def
+                .rendering_policy
+                .transition_out_ms
+                .unwrap_or(self.zone_motion.exit_ms);
+            let easing = self.zone_motion.exit;
+
             let zone_states = self
                 .pub_animation_states
                 .entry(zone_name.clone())
@@ -493,16 +505,23 @@ impl Compositor {
 
             // Ensure every active publication has an animation state; tick existing ones.
             for record in publishes {
-                let ttl_ms = Self::publication_fade_delay_ms(record, now_us);
                 let key: PubKey = (
                     record.published_at_wall_us,
                     record.publisher_namespace.clone(),
                 );
                 let state = zone_states.entry(key).or_insert_with(|| {
-                    PublicationAnimationState::new(ttl_ms, record.expires_at_wall_us)
+                    PublicationAnimationState::new(
+                        Self::publication_fade_delay_ms(record, now_us, fade_duration_ms),
+                        record.expires_at_wall_us,
+                        fade_duration_ms,
+                        easing,
+                    )
                 });
                 if state.source_expiry_us != record.expires_at_wall_us {
-                    state.retarget(ttl_ms, record.expires_at_wall_us);
+                    state.retarget(
+                        Self::publication_fade_delay_ms(record, now_us, state.fade_duration_ms),
+                        record.expires_at_wall_us,
+                    );
                 }
                 state.tick();
             }
@@ -516,15 +535,20 @@ impl Compositor {
     /// Delay (ms from `now_us`) until the fade-out of one publication begins,
     /// or `None` when it has no expiry and is held until cleared.
     ///
-    /// The fade starts `NOTIFICATION_FADE_OUT_MS` before the expiry so it
-    /// completes before `drain_expired_zone_publications` removes the record
-    /// (e.g. 14 850 ms for a 15 s warning). Already expired: fade at once.
+    /// The selected exit span precedes expiry; a short TTL may clip the fade
+    /// at authoritative removal. A zero span wakes only at expiry, not per frame.
     pub(super) fn publication_fade_delay_ms(
         record: &ZonePublishRecord,
         now_us: u64,
+        fade_duration_ms: u32,
     ) -> Option<u64> {
         record.expires_at_wall_us.map(|exp_us| {
-            (exp_us.saturating_sub(now_us) / 1_000).saturating_sub(NOTIFICATION_FADE_OUT_MS as u64)
+            let remaining_us = exp_us.saturating_sub(now_us);
+            if fade_duration_ms == 0 {
+                remaining_us.div_ceil(1_000)
+            } else {
+                (remaining_us / 1_000).saturating_sub(u64::from(fade_duration_ms))
+            }
         })
     }
 

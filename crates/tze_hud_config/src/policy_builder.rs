@@ -9,7 +9,9 @@ use std::collections::HashMap;
 
 use tze_hud_scene::types::{FontFamily, RenderingPolicy, Rgba, TextAlign, TextOverflow};
 
-use crate::tokens::{DesignTokenMap, parse_color_hex, parse_font_family, parse_numeric};
+use crate::tokens::{
+    DesignTokenMap, parse_color_hex, parse_font_family, parse_numeric, resolve_motion_duration_ms,
+};
 
 // ─── Token lookup helpers ─────────────────────────────────────────────────────
 
@@ -103,10 +105,10 @@ pub fn apply_subtitle_token_defaults(policy: &mut RenderingPolicy, tokens: &Desi
     }
     // Fade transitions for subtitle publish/clear.
     if policy.transition_in_ms.is_none() {
-        policy.transition_in_ms = Some(200);
+        policy.transition_in_ms = Some(resolve_motion_duration_ms(tokens, "motion.enter.ms"));
     }
     if policy.transition_out_ms.is_none() {
-        policy.transition_out_ms = Some(150);
+        policy.transition_out_ms = Some(resolve_motion_duration_ms(tokens, "motion.exit.ms"));
     }
 }
 
@@ -123,7 +125,7 @@ pub fn apply_subtitle_token_defaults(policy: &mut RenderingPolicy, tokens: &Desi
 /// - `margin_horizontal` ← `spacing.padding.medium`
 /// - `margin_vertical` ← `spacing.padding.medium`
 /// - `backdrop_radius` ← `border.radius.medium`
-/// - `text_align` ← `Start`; transitions 120 ms in / 180 ms out (not token-driven)
+/// - `text_align` ← `Start`; transitions ← `motion.enter.ms` / `motion.exit.ms`
 pub fn apply_notification_area_token_defaults(
     policy: &mut RenderingPolicy,
     tokens: &DesignTokenMap,
@@ -160,10 +162,10 @@ pub fn apply_notification_area_token_defaults(
         policy.text_align = Some(TextAlign::Start);
     }
     if policy.transition_in_ms.is_none() {
-        policy.transition_in_ms = Some(120);
+        policy.transition_in_ms = Some(resolve_motion_duration_ms(tokens, "motion.enter.ms"));
     }
     if policy.transition_out_ms.is_none() {
-        policy.transition_out_ms = Some(180);
+        policy.transition_out_ms = Some(resolve_motion_duration_ms(tokens, "motion.exit.ms"));
     }
 }
 
@@ -346,9 +348,9 @@ mod tests {
             "subtitle zone must not set backdrop (outline-only readability)"
         );
 
-        // transition_in_ms and transition_out_ms should be set
-        assert_eq!(policy.transition_in_ms, Some(200));
-        assert_eq!(policy.transition_out_ms, Some(150));
+        // Fade durations should follow the resolved canonical motion tokens.
+        assert_eq!(policy.transition_in_ms, Some(180));
+        assert_eq!(policy.transition_out_ms, Some(120));
 
         // outline_color should be set
         assert!(policy.outline_color.is_some());
@@ -359,6 +361,15 @@ mod tests {
             Some(TextOverflow::Ellipsis),
             "subtitle zone must default to TextOverflow::Ellipsis"
         );
+
+        let overrides = DesignTokenMap::from([
+            ("motion.enter.ms".into(), "275".into()),
+            ("motion.exit.ms".into(), "85".into()),
+        ]);
+        let resolved = resolve_tokens(&DesignTokenMap::new(), &overrides);
+        let overridden = build_effective_policy("subtitle", &RenderingPolicy::default(), &resolved);
+        assert_eq!(overridden.transition_in_ms, Some(275));
+        assert_eq!(overridden.transition_out_ms, Some(85));
     }
 
     #[test]
@@ -396,6 +407,8 @@ mod tests {
         // Pre-set font_size_px to 32.0 (explicit config value)
         let mut policy = RenderingPolicy {
             font_size_px: Some(32.0),
+            transition_in_ms: Some(0),
+            transition_out_ms: Some(275),
             ..RenderingPolicy::default()
         };
 
@@ -406,6 +419,12 @@ mod tests {
             policy.font_size_px,
             Some(32.0),
             "explicit value must not be overwritten by token default"
+        );
+        assert_eq!(policy.transition_in_ms, Some(0), "explicit snap wins");
+        assert_eq!(
+            policy.transition_out_ms,
+            Some(275),
+            "explicit duration wins"
         );
     }
 
@@ -453,6 +472,22 @@ mod tests {
             (radius - 8.0).abs() < 1e-4,
             "border.radius.medium canonical default is 8.0, got {radius}"
         );
+        assert_eq!(policy.transition_in_ms, Some(180));
+        assert_eq!(policy.transition_out_ms, Some(120));
+        let overridden = resolve_tokens(
+            &DesignTokenMap::new(),
+            &DesignTokenMap::from([
+                ("motion.enter.ms".into(), "320".into()),
+                ("motion.exit.ms".into(), "0".into()),
+            ]),
+        );
+        let policy = build_effective_policy(
+            "notification-area",
+            &RenderingPolicy::default(),
+            &overridden,
+        );
+        assert_eq!(policy.transition_in_ms, Some(320));
+        assert_eq!(policy.transition_out_ms, Some(0));
     }
 
     #[test]

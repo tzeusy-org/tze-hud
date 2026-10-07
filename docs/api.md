@@ -65,11 +65,19 @@ otherwise.
   (`notification` with `title`, `body`, `urgency`, `actions`). `type` may be
   omitted; the runtime infers it from what the zone accepts. `key` is the
   merge key.
-- Widget: `params` is the typed parameter map. A gRPC publish with
-  `transition_ms` > 0 eases f32 and color params from what is on screen; enum
-  and string params snap, and so does everything under degradation. The
-  runtime wakes only until the transition lands. A zero duration, including
-  an MCP publish, cancels an older transition and snaps to the newest value.
+- Widget: `params` is the typed parameter map. Configured HUD startup resolves
+  the selected theme and config overrides once; MCP publishes use its
+  `motion.state.ms` duration without adding a tool parameter. gRPC publishes
+  retain their explicit `transition_ms`. A positive duration eases f32 and
+  color params from what is on screen; enum and string params and a widget's
+  first appearance snap. Simplified degradation snaps and stops transitions.
+  The runtime wakes only until the transition lands. A zero duration cancels
+  an older transition, including a repeated target, and snaps to the newest
+  value. Standalone unconfigured MCP servers retain zero duration. Changing
+  the selected theme takes effect at config load/restart; live theme reload
+  is separate work. Zone enter/exit durations use the resolved motion tokens
+  unless explicitly overridden by zone policy, and Stack TTL fades use the
+  exit duration/curve without extending authoritative expiry.
 - Portal: the first publish to `portal:<id>` attaches (`display_name` is
   optional). `content` is the output text, `status` is the lifecycle state,
   and `expects_reply` arms the composer. `key` replaces the newest output

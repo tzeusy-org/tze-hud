@@ -322,6 +322,8 @@ pub struct Compositor {
     /// Populated by calling `set_token_map` with the global token map from
     /// scene startup.
     pub token_map: HashMap<String, String>,
+    /// Startup-resolved zone curves and fallback exit span, never parsed per frame.
+    zone_motion: easing::ZoneMotion,
     /// Decoded RGBA image bytes indexed by `ResourceId`.
     ///
     /// Populated by calling [`Compositor::register_image_bytes`] after an image
@@ -862,6 +864,7 @@ impl Compositor {
             scroll_smoothing_enabled: false,
             last_scroll_smooth_at: None,
             token_map: HashMap::new(),
+            zone_motion: easing::ZoneMotion::from_token_map(&HashMap::new()),
             markdown_primer: crate::markdown::MarkdownPrimer::new(),
             node_key_cache: HashMap::new(),
             markdown_cache_miss_count: std::cell::Cell::new(0),
@@ -1198,6 +1201,7 @@ impl Compositor {
             scroll_smoothing_enabled: true,
             last_scroll_smooth_at: None,
             token_map: HashMap::new(),
+            zone_motion: easing::ZoneMotion::from_token_map(&HashMap::new()),
             markdown_primer: crate::markdown::MarkdownPrimer::new(),
             node_key_cache: HashMap::new(),
             markdown_cache_miss_count: std::cell::Cell::new(0),
@@ -1597,6 +1601,7 @@ impl Compositor {
     /// to derive alert-banner backdrop colors, falling back to hardcoded constants
     /// when a key is absent or unparseable.
     pub fn set_token_map(&mut self, map: HashMap<String, String>) {
+        self.zone_motion = easing::ZoneMotion::from_token_map(&map);
         // `font.sans` / `font.mono` / `font.serif` (and the runtime-set fonts
         // dir, `fonts::RUNTIME_FONTS_DIR_KEY`) select the
         // font roles; a no-op unless they changed (see `set_font_config`).

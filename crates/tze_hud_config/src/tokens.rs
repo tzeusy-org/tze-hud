@@ -998,12 +998,51 @@ pub fn resolve_tokens(
     resolved
 }
 
+/// Resolve one existing motion duration at profile construction, outside the
+/// frame loop. Missing values use the canonical token; invalid direct maps
+/// keep the same fallback without changing strict config validation.
+pub fn resolve_motion_duration_ms(tokens: &DesignTokenMap, key: &str) -> u32 {
+    let canonical = canonical_token(key)
+        .filter(|_| {
+            matches!(
+                key,
+                "motion.enter.ms" | "motion.exit.ms" | "motion.state.ms"
+            )
+        })
+        .expect("motion duration key must name an existing canonical duration");
+    let duration = |value: &str| {
+        let value = value.trim();
+        let value = value
+            .strip_suffix("px")
+            .unwrap_or(value)
+            .trim()
+            .parse::<f64>()
+            .ok()?;
+        let rounded = value.round();
+        (value.is_finite()
+            && value >= 0.0
+            && value <= f64::from(u32::MAX)
+            && rounded >= 0.0
+            && rounded <= f64::from(u32::MAX))
+        .then_some(rounded as u32)
+    };
+    if let Some(value) = tokens.get(key) {
+        if let Some(ms) = duration(value) {
+            return ms;
+        }
+        tracing::warn!(
+            token_key = key,
+            "invalid motion duration; using canonical default"
+        );
+    }
+    duration(canonical.default_value).expect("canonical motion duration must be valid")
+}
+
 /// Easing curve names accepted by `motion.*.easing` tokens.
 ///
 /// The compositor's curves (`renderer/easing.rs`) map as: `linear` ->
-/// `Linear`, `standard` -> `EaseInOut`, `decelerate` -> `EaseOutQuad`.
-/// `accelerate` (ease-in) has no compositor curve yet; it is added when a
-/// consumer of `motion.exit.easing` lands (hud-h51u7.4).
+/// `Linear`, `standard` -> `EaseInOut`, `decelerate` -> `EaseOutQuad`,
+/// `accelerate` -> `EaseInQuad`. Whole-zone transitions capture these curves.
 const MOTION_EASINGS: &[&str] = &["linear", "standard", "decelerate", "accelerate"];
 
 /// Look up a canonical token definition by key.
@@ -1271,6 +1310,28 @@ mod tests {
                 "canonical token '{}' has wrong default",
                 token.key
             );
+        }
+        for (key, expected) in [
+            ("motion.enter.ms", 180),
+            ("motion.exit.ms", 120),
+            ("motion.state.ms", 100),
+        ] {
+            assert_eq!(resolve_motion_duration_ms(&map, key), expected);
+            for (value, expected_value) in [
+                ("0", 0),
+                ("12.4", 12),
+                ("12.5", 13),
+                ("-1", expected),
+                ("NaN", expected),
+                ("inf", expected),
+                ("4294967294.6", u32::MAX),
+                ("4294967295", u32::MAX),
+                ("4294967295.4", expected),
+                ("4294967296", expected),
+            ] {
+                let overridden = DesignTokenMap::from([(key.into(), value.into())]);
+                assert_eq!(resolve_motion_duration_ms(&overridden, key), expected_value);
+            }
         }
     }
 
