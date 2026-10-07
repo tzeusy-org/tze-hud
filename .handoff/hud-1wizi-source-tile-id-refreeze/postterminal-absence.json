@@ -1,0 +1,202 @@
+{
+  "schema": "hud-1wizi-source-tile-id-refreeze-postterminal/v1",
+  "producer_and_children_actual_absent": true,
+  "receipt_sha256": "56b909ad51a894686c0fd080eaee2657af19a5608b651152eeed82930b2993c7",
+  "processes": [
+    {
+      "kind": "producer",
+      "pid": 4109191,
+      "pid_absent": true
+    },
+    {
+      "kind": "child",
+      "pid": 4109192,
+      "pgid": 4109192,
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "kind": "child",
+      "pid": 4109195,
+      "pgid": 4109195,
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "kind": "child",
+      "pid": 4109196,
+      "pgid": 4109196,
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "kind": "child",
+      "pid": 4109197,
+      "pgid": 4109197,
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "kind": "child",
+      "pid": 4109198,
+      "pgid": 4109198,
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "kind": "child",
+      "pid": 4109199,
+      "pgid": 4109199,
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "kind": "child",
+      "pid": 4109200,
+      "pgid": 4109200,
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "kind": "child",
+      "pid": 4109201,
+      "pgid": 4109201,
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "kind": "child",
+      "pid": 4109204,
+      "pgid": 4109204,
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "kind": "child",
+      "pid": 4109213,
+      "pgid": 4109213,
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "kind": "child",
+      "pid": 4109216,
+      "pgid": 4109216,
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "kind": "child",
+      "pid": 4109219,
+      "pgid": 4109219,
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "kind": "child",
+      "pid": 4109222,
+      "pgid": 4109222,
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "kind": "child",
+      "pid": 4109225,
+      "pgid": 4109225,
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "kind": "child",
+      "pid": 4109238,
+      "pgid": 4109238,
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "kind": "child",
+      "pid": 4109251,
+      "pgid": 4109251,
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "kind": "child",
+      "pid": 4109252,
+      "pgid": 4109252,
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "kind": "child",
+      "pid": 4109253,
+      "pgid": 4109253,
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "kind": "child",
+      "pid": 4109254,
+      "pgid": 4109254,
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "kind": "child",
+      "pid": 4109255,
+      "pgid": 4109255,
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "kind": "child",
+      "pid": 4109256,
+      "pgid": 4109256,
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "kind": "child",
+      "pid": 4109257,
+      "pgid": 4109257,
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "kind": "child",
+      "pid": 4109258,
+      "pgid": 4109258,
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "kind": "child",
+      "pid": 4109259,
+      "pgid": 4109259,
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "kind": "child",
+      "pid": 4109260,
+      "pgid": 4109260,
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "kind": "child",
+      "pid": 4109261,
+      "pgid": 4109261,
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "kind": "inventory",
+      "pid": 4109264,
+      "pgid": 4109264,
+      "pid_absent": true,
+      "pgid_absent": true
+    }
+  ],
+  "cargo_tests_gpu_cache_host_executed_on_revised_source": false
+}

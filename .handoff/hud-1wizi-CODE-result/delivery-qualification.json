@@ -1,0 +1,198 @@
+{
+  "schema": "hud-1wizi-CODE-delivery-qualification/v1",
+  "at": "2026-10-07T00:44:18.616877+00:00",
+  "issue": "hud-1wizi",
+  "phase": "verified source; commit/publication pending explicit ROOT resource ACK",
+  "source_head_before_commit": "e5e8044550352d2df42e0c903ca4006d2353eeaa",
+  "executed_source_state": "e5 Git HEAD plus TEN current frozen dirty paths, not immutable e5 alone",
+  "full_source_input_count": 543,
+  "frozen_source_manifest_sha256": "efcfd8568516d2d562d3c760bb1573b443483db716e4de61ed0dadff0f40a2c1",
+  "source543_before_after_equal": true,
+  "tests_delta": "+0 ~7 -0",
+  "seven_existing_fixture_ledger": [
+    {
+      "test_leaf": "drag_to_move_long_press_moves_tile_bounds",
+      "source_owner": [
+        {
+          "path": "crates/tze_hud_runtime/src/windowed/portal.rs",
+          "line": 2636,
+          "source_sha256": "2847b25648b065aecdb8bb43a9fe5d0c477920d4fb503688e1b55f5cf4248f4d"
+        }
+      ],
+      "meaningful_vector": "Real InputProcessor/helper Down, existing >=250ms activation, motion/release/persistence/cancellation, same and different device ownership, removed target/late Up.",
+      "actual_binary_positive_count": 1
+    },
+    {
+      "test_leaf": "drag_to_move_quick_tap_does_not_move_tile",
+      "source_owner": [
+        {
+          "path": "crates/tze_hud_runtime/src/windowed/portal.rs",
+          "line": 2905,
+          "source_sha256": "2847b25648b065aecdb8bb43a9fe5d0c477920d4fb503688e1b55f5cf4248f4d"
+        }
+      ],
+      "meaningful_vector": "Original quick tap/focus/no movement assertions retained; no marker/epoch for accumulating/tap or early movement cancellation.",
+      "actual_binary_positive_count": 1
+    },
+    {
+      "test_leaf": "header_band_anchor_is_the_frame_and_band_drag_is_position_only",
+      "source_owner": [
+        {
+          "path": "crates/tze_hud_runtime/src/windowed/portal.rs",
+          "line": 7954,
+          "source_sha256": "2847b25648b065aecdb8bb43a9fe5d0c477920d4fb503688e1b55f5cf4248f4d"
+        }
+      ],
+      "meaningful_vector": "Original group translation/version/epoch preserved; real enqueue/hit selection, visible whole frame versus contained/outside seed, SharedState and scene contention terminal snapshots, newer Down, real availability producer completion, one settle/wake/persist, weak allocation absence, lease mismatch and removed target. Headless native-allocation rejection, not empirical HWND reuse.",
+      "actual_binary_positive_count": 1
+    },
+    {
+      "test_leaf": "drag_visual_feedback_applied_during_active_drag",
+      "source_owner": [
+        {
+          "path": "crates/tze_hud_compositor/src/renderer/tests/hit_drag.rs",
+          "line": 844,
+          "source_sha256": "266f7612334cb6979e284f90d2dc368145b17972bc2e1d3ceb6e98447f93fabc"
+        }
+      ],
+      "meaningful_vector": "Original border/grip/clear assertions plus one full portal border, coherent same-lease contained group boost, original z fields, excluded shield/other lease and restore after clear.",
+      "actual_binary_positive_count": 1
+    },
+    {
+      "test_leaf": "hud_w41ef_portal_backdrop_opaque_after_resize_grow_no_fade",
+      "source_owner": [
+        {
+          "path": "crates/tze_hud_compositor/src/renderer/tests/tile_opacity.rs",
+          "line": 137,
+          "source_sha256": "840f7e08d65e6701a0d74f0886cee7ed907da8655dad725e4d13d0644f9058f2"
+        }
+      ],
+      "meaningful_vector": "Original grow pixel alpha retained; actual windowed draw fill/text/image effective opacity/tints unchanged through settled activation/position movement/clear. Native opacity cause remains unknown.",
+      "actual_binary_positive_count": 1
+    },
+    {
+      "test_leaf": "frame_signature_ignores_content_outside_the_target",
+      "source_owner": [
+        {
+          "path": "crates/tze_hud_compositor/src/renderer/tests/surface.rs",
+          "line": 465,
+          "source_sha256": "3b37ca40377f5071bf714a796c42a9419bb65f5b20bbc0584293f568aa1c2146"
+        }
+      ],
+      "meaningful_vector": "Original off/on-target content behavior plus active/moved/cleared actual border signature, off-window stability, version unchanged/epoch changes/idempotent mark.",
+      "actual_binary_positive_count": 1
+    },
+    {
+      "test_leaf": "scene_drag_active_elements_set_cleared_correctly",
+      "source_owner": [
+        {
+          "path": "tests/integration/drag_reposition.rs",
+          "line": 613,
+          "source_sha256": "736af27618949c29eb4a83ed4e2af97cbb205f1e9afa5e043ab5022c8af366ce"
+        }
+      ],
+      "meaningful_vector": "Actual separate external consumer, existing arbitrary-ID set/read/clear retained; epoch membership-only and duplicate idempotence/version preservation.",
+      "actual_binary_positive_count": 1
+    }
+  ],
+  "current72_actual_same_binary_source_proof_sha256": "2b34e93f22420c7c1e1d1dc157e8db81cab65dafb2ce84cb6c1e0e9d8538cf58",
+  "final_ci": {
+    "actual_exit": 0,
+    "elapsed_seconds": 405.3980586619873,
+    "raw_sha256": "e77621a59bb1f77bcea436c0dc9f85bf4122c35799fdeecb6eecd8560ca3854d",
+    "raw_bytes": 440704,
+    "receipt_sha256": "1ad07ce1c75ac829f73524ae21541d1b2fd8959b6f746a003ccfe99589d88ae4",
+    "rust_tests": 3245,
+    "rust_summaries": 70,
+    "failures": 0,
+    "ignored": 0,
+    "separate_integration": {
+      "tests": 170,
+      "summaries": 14
+    },
+    "named_invariants_actual_confirmed": 72,
+    "python_pytest": 76,
+    "pytest_subtests": 3,
+    "ci_unittests": 103,
+    "idle_contracts": [
+      9,
+      3
+    ],
+    "default_closures_actual": 17,
+    "local_tool_skip": "PowerShell overlay harness only",
+    "gpu_adapter_skip": 0,
+    "normal_PERF_ASSERT": "off",
+    "windows_gnu": "Normal recipe three production crates cross-target Clippy; not nativeWindows/app release or GNU ALL-TARGET test execution"
+  },
+  "four_prior_failures_preserved": [
+    {
+      "folder": ".handoff/hud-1wizi-final-ci",
+      "actual_exit": 101,
+      "elapsed_seconds": 34.79622147599002,
+      "log_sha256": "540e3699bcf171327ccf0debb39fbe404bcd5a4cc1867153786214db94a11de3",
+      "log_bytes": 4945,
+      "receipt_sha256": "04157200544df399fa2be0fb134ae7e634d4e1b53e0e8a583094cc06efd09d63",
+      "source_before_after_unchanged": true,
+      "cause_qualification": "Production nested if needed Clippy collapse; source-only inverse equality validated by ROOT."
+    },
+    {
+      "folder": ".handoff/hud-1wizi-final-ci-retry",
+      "actual_exit": 101,
+      "elapsed_seconds": 19.40355272401939,
+      "log_sha256": "61de2715950f967a7601bf672f39ff9c05d89c560d04acf1ad2b222d758ee261",
+      "log_bytes": 3125,
+      "receipt_sha256": "bcdfbc6b6c39fff1d623bd3a780a07388f3f9bcdedd42b1265b0ee4d4bb8be8b",
+      "source_before_after_unchanged": true,
+      "cause_qualification": "Two Copy Option<GeometryPolicy> clones in the same existing header fixture; exact removal, assertions retained."
+    },
+    {
+      "folder": ".handoff/hud-1wizi-final-ci-retry2",
+      "actual_exit": 101,
+      "elapsed_seconds": 389.14903467998374,
+      "log_sha256": "e5e038bdea92872ff9ce02e4582e8d0da5bc915b46b8c3f6d3f872907a26dca3",
+      "log_bytes": 375192,
+      "receipt_sha256": "9ed7fd23c40955e452ad40364f138b2b83cfc957297a9cbc0f921d8c62b4145a",
+      "source_before_after_unchanged": true,
+      "cause_qualification": "Actual first header target assertion failed: portal_band_anchor_tile requires TILE id; new feedback caller passed lease id. Narrow caller argument fixed."
+    },
+    {
+      "folder": ".handoff/hud-1wizi-final-ci-retry3",
+      "actual_exit": 101,
+      "elapsed_seconds": 145.07840732697514,
+      "log_sha256": "1c45521ff48f80822b1447e591834a1f2498c4f70f9d95cdc6cf250887ec8292",
+      "log_bytes": 370806,
+      "receipt_sha256": "9f365d0a2708f727864f2dc1849fc9ac50c493775b9a8041efe8fbb7db03a6ee",
+      "source_before_after_unchanged": true,
+      "cause_qualification": "Actual later held-lock settle scene_changed assertion failed. Raw does not identify Deferred enum. Source-qualified race between dropping the guard and real availability producer completion; same fixture now waits actual main_work_generation after each held leg using bounded watchdog/yield."
+    }
+  ],
+  "original_four_acceptance_rows": [
+    {
+      "row": 1,
+      "state": "Delivered and executed",
+      "evidence": "Runtime long-press/quick-tap/header real helper and enqueue paths; exact active/cleared and cancellation assertions."
+    },
+    {
+      "row": 2,
+      "state": "Delivered and executed",
+      "evidence": "Actual windowed compositor border wraps whole portal; one border and coherent cohort ordering."
+    },
+    {
+      "row": 3,
+      "state": "PARTIAL; owner live observation unresolved",
+      "evidence": "No additional attenuation in actual settled windowed draw commands. No alpha producer changed; live Windows translucency cause UNKNOWN; no invented intended translucency authority."
+    },
+    {
+      "row": 4,
+      "state": "PENDING; owner live Windows criterion UNEXECUTED",
+      "evidence": "No host deployment, screenshot or live overlay acceptance was run by this worker."
+    }
+  ],
+  "protected_boundaries": {
+    "unchanged": "Node/Tile fields/serde/proto/config/auth/caps/budget/TTL/token/public signatures, theme/alpha/content fades, original z fields, movement/persistence/input thresholds, generic capture/ring/delivery/latency path; T7 and current72/default17 remain positively tested",
+    "private_change": "One original-Down seeded PrimaryDragGesture context with Weak<Window> allocation identity plus WindowId; three literals initialized; original Up only terminal retry through existing availability wake",
+    "generic_ingress_limit": "Generic input/capture/agent/latency are solely at ingress, not replayed or guaranteed after missed acquisition; input ring already ran exactly once",
+    "native_window_limit": "Weak allocation plus ID source guard; absent headless allocation rejection tested. Real native recycled HWND/WindowId runtime scenario UNEXECUTED"
+  },
+  "lifecycle": "Original hud-1wizi remains PARTIAL until original owner live border/opacity acceptance, even after independent code review and merge. No duplicate acceptance issue or closure edge. ROOT alone lifecycle and resource writer."
+}

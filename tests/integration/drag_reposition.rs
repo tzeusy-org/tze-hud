@@ -615,10 +615,30 @@ fn scene_drag_active_elements_set_cleared_correctly() {
     let eid = element_id();
 
     assert!(!scene.is_drag_active(eid), "initially not active");
+    let version = scene.version;
+    let epoch = scene.geometry_epoch;
     scene.set_drag_active(eid);
     assert!(scene.is_drag_active(eid), "must be active after set");
+    assert_eq!(scene.geometry_epoch, epoch + 1);
+    scene.set_drag_active(eid);
+    assert_eq!(
+        scene.geometry_epoch,
+        epoch + 1,
+        "setting an existing marker is idempotent"
+    );
     scene.clear_drag_active(eid);
     assert!(!scene.is_drag_active(eid), "must be inactive after clear");
+    assert_eq!(scene.geometry_epoch, epoch + 2);
+    scene.clear_drag_active(eid);
+    assert_eq!(
+        scene.geometry_epoch,
+        epoch + 2,
+        "clearing an absent marker is idempotent"
+    );
+    assert_eq!(
+        scene.version, version,
+        "feedback must not invalidate content caches"
+    );
 }
 
 // ── Reset-to-default (hud-zc7f) ──────────────────────────────────────────────

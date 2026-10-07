@@ -395,16 +395,18 @@ impl SceneGraph {
         }
     }
 
-    /// Mark an element as actively dragged in drag-feedback fixtures.
-    #[cfg(any(test, feature = "test-support"))]
+    /// Mark the viewer's drag-feedback target without invalidating content caches.
     pub fn set_drag_active(&mut self, element_id: SceneId) {
-        self.overlay.drag_active_elements.insert(element_id);
+        if self.overlay.drag_active_elements.insert(element_id) {
+            self.bump_geometry_epoch();
+        }
     }
 
-    /// Clear the active drag mark in drag-feedback fixtures.
-    #[cfg(any(test, feature = "test-support"))]
+    /// Clear viewer drag feedback without invalidating content caches.
     pub fn clear_drag_active(&mut self, element_id: SceneId) {
-        self.overlay.drag_active_elements.remove(&element_id);
+        if self.overlay.drag_active_elements.remove(&element_id) {
+            self.bump_geometry_epoch();
+        }
     }
 
     /// Returns `true` if the element is currently being dragged.

@@ -460,6 +460,8 @@ struct WindowedRuntimeState {
     /// Window that received the current left-button press; it keeps
     /// capturing until release.
     press_window: Option<WindowId>,
+    /// Original primary drag identity and, only on a missed Up, its terminal event.
+    primary_drag_gesture: Option<portal::PrimaryDragGesture>,
     /// Global design token map from scene startup.
     ///
     /// Stashed here after `run_scene_startup` returns so it can be applied
@@ -853,8 +855,26 @@ impl WinitApp {
         let portal_drain = self.drain_portal_projection();
         // Prune stale portal_resize_states entries for tiles removed from the
         // scene (hud-kgu8u). Uses try_lock; silently deferred if lock is busy.
-        self.prune_portal_resize_states();
-        portal_drain
+        let pruned_drag = self.prune_portal_resize_states();
+        let settled_drag = self.drain_pending_drag_terminal();
+        let drag_scene_changed = pruned_drag || settled_drag;
+        match portal_drain {
+            PortalProjectionDrain::Completed { scene_changed } => {
+                PortalProjectionDrain::Completed {
+                    scene_changed: scene_changed || drag_scene_changed,
+                }
+            }
+            PortalProjectionDrain::Deferred => {
+                if drag_scene_changed {
+                    // The scene became available between drains. Preserve the
+                    // portal retry while publishing the drag mutation already made.
+                    self.state.wake.notify_compositor(
+                        crate::idle_efficiency::RuntimeWakeupSource::SceneChange,
+                    );
+                }
+                PortalProjectionDrain::Deferred
+            }
+        }
     }
 }
 
@@ -1039,7 +1059,12 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
         }
         let has_deferred_scene_work = portal_drain.is_deferred()
             || !self.state.pending_input_capture_commands.is_empty()
-            || !self.state.pending_keyboard_events.is_empty();
+            || !self.state.pending_keyboard_events.is_empty()
+            || self
+                .state
+                .primary_drag_gesture
+                .as_ref()
+                .is_some_and(|gesture| gesture.terminal.is_some());
         if !inspected_scene_deadlines || has_deferred_scene_work {
             // Lock contention is not a deadline. Install one coalesced waiter
             // that wakes the main loop only after the shared scene is actually
@@ -3157,6 +3182,7 @@ impl WindowedRuntime {
             secondary_recreates: Default::default(),
             overlay_refits: Default::default(),
             press_window: None,
+            primary_drag_gesture: None,
             global_tokens: startup_compositor_tokens,
             element_repositioned_tx,
             input_event_tx,

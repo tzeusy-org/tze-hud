@@ -1,0 +1,547 @@
+{
+  "schema": "hud-1wizi-source-incarnation-refreeze-native/v1",
+  "native_pid": 4039047,
+  "cwd": "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-1wizi",
+  "git_override_names_stripped": [
+    "GIT_ASKPASS",
+    "GIT_CONFIG_COUNT",
+    "GIT_CONFIG_KEY_0",
+    "GIT_CONFIG_KEY_1",
+    "GIT_CONFIG_VALUE_0",
+    "GIT_CONFIG_VALUE_1",
+    "GIT_PAGER",
+    "GIT_TERMINAL_PROMPT"
+  ],
+  "commands": [
+    {
+      "label": "context-before",
+      "args": [
+        "python3",
+        "/home/orca/.dotfiles/ai-bootstrap/skills/personal/beads-orchestration/subskills/beads-worker/scripts/assert_worker_context.py",
+        "--worktree-path",
+        "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-1wizi",
+        "--repo-root",
+        "/home/orca/orca/projects/tze-hud",
+        "--issue-id",
+        "hud-1wizi",
+        "--current-path",
+        "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-1wizi"
+      ],
+      "pid": 4039048,
+      "pgid": 4039048,
+      "exit_code": 0,
+      "elapsed_seconds": 0.05419371399329975,
+      "stdout_path": ".handoff/hud-1wizi-source-incarnation-refreeze/context-before.stdout",
+      "stdout_bytes": 337,
+      "stdout_sha256": "b1de16e9cfc6f31b15793ccf926253ba6ec9a0f510be0a9e7b6dbccb9c2becb3",
+      "stderr_path": ".handoff/hud-1wizi-source-incarnation-refreeze/context-before.stderr",
+      "stderr_bytes": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "native-identity",
+      "args": [
+        "id"
+      ],
+      "pid": 4039051,
+      "pgid": 4039051,
+      "exit_code": 0,
+      "elapsed_seconds": 0.0044307119969744235,
+      "stdout_path": ".handoff/hud-1wizi-source-incarnation-refreeze/native-identity.stdout",
+      "stdout_bytes": 45,
+      "stdout_sha256": "0d285853b4708db45790e11122993c93c4a7d0b2a9a9e77bbf9a2840ca60f9a8",
+      "stderr_path": ".handoff/hud-1wizi-source-incarnation-refreeze/native-identity.stderr",
+      "stderr_bytes": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "native-cwd",
+      "args": [
+        "pwd",
+        "-P"
+      ],
+      "pid": 4039052,
+      "pgid": 4039052,
+      "exit_code": 0,
+      "elapsed_seconds": 0.00212910701520741,
+      "stdout_path": ".handoff/hud-1wizi-source-incarnation-refreeze/native-cwd.stdout",
+      "stdout_bytes": 70,
+      "stdout_sha256": "f3b5d5c2065a27c6516bf7e88b9995177db3960971acd6c21e03a721f68e4798",
+      "stderr_path": ".handoff/hud-1wizi-source-incarnation-refreeze/native-cwd.stderr",
+      "stderr_bytes": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "git-head",
+      "args": [
+        "git",
+        "rev-parse",
+        "HEAD"
+      ],
+      "pid": 4039053,
+      "pgid": 4039053,
+      "exit_code": 0,
+      "elapsed_seconds": 0.0011235940037295222,
+      "stdout_path": ".handoff/hud-1wizi-source-incarnation-refreeze/git-head.stdout",
+      "stdout_bytes": 41,
+      "stdout_sha256": "340ff96de9f5fac260e3bb55615fc214f2fed264e3480c82f728ec6f45834ac2",
+      "stderr_path": ".handoff/hud-1wizi-source-incarnation-refreeze/git-head.stderr",
+      "stderr_bytes": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "git-branch",
+      "args": [
+        "git",
+        "branch",
+        "--show-current"
+      ],
+      "pid": 4039054,
+      "pgid": 4039054,
+      "exit_code": 0,
+      "elapsed_seconds": 0.0016747310000937432,
+      "stdout_path": ".handoff/hud-1wizi-source-incarnation-refreeze/git-branch.stdout",
+      "stdout_bytes": 16,
+      "stdout_sha256": "eb3ec8ef1583d1d0fd92f78a99cca9a744379d9a21e7944e9ce032747fe2bef5",
+      "stderr_path": ".handoff/hud-1wizi-source-incarnation-refreeze/git-branch.stderr",
+      "stderr_bytes": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "git-common",
+      "args": [
+        "git",
+        "rev-parse",
+        "--git-common-dir"
+      ],
+      "pid": 4039055,
+      "pgid": 4039055,
+      "exit_code": 0,
+      "elapsed_seconds": 0.0010247020109090954,
+      "stdout_path": ".handoff/hud-1wizi-source-incarnation-refreeze/git-common.stdout",
+      "stdout_bytes": 38,
+      "stdout_sha256": "e847e7187c95724df0108f1eaa7c7fd841bd88243f6f309f5d0caa6db922ba20",
+      "stderr_path": ".handoff/hud-1wizi-source-incarnation-refreeze/git-common.stderr",
+      "stderr_bytes": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "git-linked",
+      "args": [
+        "git",
+        "rev-parse",
+        "--absolute-git-dir"
+      ],
+      "pid": 4039056,
+      "pgid": 4039056,
+      "exit_code": 0,
+      "elapsed_seconds": 0.0010929239797405899,
+      "stdout_path": ".handoff/hud-1wizi-source-incarnation-refreeze/git-linked.stdout",
+      "stdout_bytes": 58,
+      "stdout_sha256": "02dbb394560f05154d45d5245f0a349d2a58197a77b7695f793423096f7fd525",
+      "stderr_path": ".handoff/hud-1wizi-source-incarnation-refreeze/git-linked.stderr",
+      "stderr_bytes": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "changed-paths",
+      "args": [
+        "git",
+        "diff",
+        "--name-only"
+      ],
+      "pid": 4039057,
+      "pgid": 4039057,
+      "exit_code": 0,
+      "elapsed_seconds": 0.013555970013840124,
+      "stdout_path": ".handoff/hud-1wizi-source-incarnation-refreeze/changed-paths.stdout",
+      "stdout_bytes": 503,
+      "stdout_sha256": "bd167c18e123f75cfb03d64e4accb29aff1b7c7e56d386973df79686bc0769a4",
+      "stderr_path": ".handoff/hud-1wizi-source-incarnation-refreeze/changed-paths.stderr",
+      "stderr_bytes": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "source-rustfmt",
+      "args": [
+        "rustfmt",
+        "--edition",
+        "2024",
+        "--config",
+        "skip_children=true",
+        "crates/tze_hud_compositor/src/renderer/tests/hit_drag.rs",
+        "crates/tze_hud_compositor/src/renderer/tests/surface.rs",
+        "crates/tze_hud_compositor/src/renderer/tests/tile_opacity.rs",
+        "crates/tze_hud_compositor/src/renderer/tile_render.rs",
+        "crates/tze_hud_runtime/src/windowed/event_loop_harness.rs",
+        "crates/tze_hud_runtime/src/windowed/lifecycle.rs",
+        "crates/tze_hud_runtime/src/windowed/mod.rs",
+        "crates/tze_hud_runtime/src/windowed/portal.rs",
+        "crates/tze_hud_scene/src/graph/queries.rs",
+        "tests/integration/drag_reposition.rs"
+      ],
+      "pid": 4039060,
+      "pgid": 4039060,
+      "exit_code": 0,
+      "elapsed_seconds": 0.1801656240131706,
+      "stdout_path": ".handoff/hud-1wizi-source-incarnation-refreeze/source-rustfmt.stdout",
+      "stdout_bytes": 0,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_path": ".handoff/hud-1wizi-source-incarnation-refreeze/source-rustfmt.stderr",
+      "stderr_bytes": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "diff-check",
+      "args": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "pid": 4039069,
+      "pgid": 4039069,
+      "exit_code": 0,
+      "elapsed_seconds": 0.010038246982730925,
+      "stdout_path": ".handoff/hud-1wizi-source-incarnation-refreeze/diff-check.stdout",
+      "stdout_bytes": 0,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_path": ".handoff/hud-1wizi-source-incarnation-refreeze/diff-check.stderr",
+      "stderr_bytes": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "source-diff",
+      "args": [
+        "git",
+        "diff",
+        "--binary",
+        "--",
+        "crates/tze_hud_compositor/src/renderer/tests/hit_drag.rs",
+        "crates/tze_hud_compositor/src/renderer/tests/surface.rs",
+        "crates/tze_hud_compositor/src/renderer/tests/tile_opacity.rs",
+        "crates/tze_hud_compositor/src/renderer/tile_render.rs",
+        "crates/tze_hud_runtime/src/windowed/event_loop_harness.rs",
+        "crates/tze_hud_runtime/src/windowed/lifecycle.rs",
+        "crates/tze_hud_runtime/src/windowed/mod.rs",
+        "crates/tze_hud_runtime/src/windowed/portal.rs",
+        "crates/tze_hud_scene/src/graph/queries.rs",
+        "tests/integration/drag_reposition.rs"
+      ],
+      "pid": 4039072,
+      "pgid": 4039072,
+      "exit_code": 0,
+      "elapsed_seconds": 0.01362122897990048,
+      "stdout_path": ".handoff/hud-1wizi-source-incarnation-refreeze/source-diff.stdout",
+      "stdout_bytes": 60698,
+      "stdout_sha256": "0df19531c2f9eebfd4f4ea65a1109cce05e642c6cf2cce7c50e423fe718e8efb",
+      "stderr_path": ".handoff/hud-1wizi-source-incarnation-refreeze/source-diff.stderr",
+      "stderr_bytes": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "source-stat",
+      "args": [
+        "git",
+        "diff",
+        "--stat",
+        "--",
+        "crates/tze_hud_compositor/src/renderer/tests/hit_drag.rs",
+        "crates/tze_hud_compositor/src/renderer/tests/surface.rs",
+        "crates/tze_hud_compositor/src/renderer/tests/tile_opacity.rs",
+        "crates/tze_hud_compositor/src/renderer/tile_render.rs",
+        "crates/tze_hud_runtime/src/windowed/event_loop_harness.rs",
+        "crates/tze_hud_runtime/src/windowed/lifecycle.rs",
+        "crates/tze_hud_runtime/src/windowed/mod.rs",
+        "crates/tze_hud_runtime/src/windowed/portal.rs",
+        "crates/tze_hud_scene/src/graph/queries.rs",
+        "tests/integration/drag_reposition.rs"
+      ],
+      "pid": 4039075,
+      "pgid": 4039075,
+      "exit_code": 0,
+      "elapsed_seconds": 0.009068649000255391,
+      "stdout_path": ".handoff/hud-1wizi-source-incarnation-refreeze/source-stat.stdout",
+      "stdout_bytes": 685,
+      "stdout_sha256": "8b61fb38f05947fe77232ce744ee7f708970682bda769dc3a65a4ad2323c78fb",
+      "stderr_path": ".handoff/hud-1wizi-source-incarnation-refreeze/source-stat.stderr",
+      "stderr_bytes": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "tracked-status",
+      "args": [
+        "git",
+        "status",
+        "--porcelain=v1",
+        "--untracked-files=no"
+      ],
+      "pid": 4039078,
+      "pgid": 4039078,
+      "exit_code": 0,
+      "elapsed_seconds": 0.0033407680166419595,
+      "stdout_path": ".handoff/hud-1wizi-source-incarnation-refreeze/tracked-status.stdout",
+      "stdout_bytes": 533,
+      "stdout_sha256": "14b5a0218d3a84c96a1286b2914046258ab11fa5a341b7fef01e5e2030ed0ef4",
+      "stderr_path": ".handoff/hud-1wizi-source-incarnation-refreeze/tracked-status.stderr",
+      "stderr_bytes": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "owned-callers",
+      "args": [
+        "rg",
+        "-n",
+        "set_drag_active|clear_drag_active|apply_drag_handle_pointer_event|primary_drag_gesture:|WindowedRuntimeState \\{",
+        "app",
+        "crates",
+        "examples",
+        "tests/integration",
+        "--glob",
+        "*.rs"
+      ],
+      "pid": 4039081,
+      "pgid": 4039081,
+      "exit_code": 0,
+      "elapsed_seconds": 0.022759866988053545,
+      "stdout_path": ".handoff/hud-1wizi-source-incarnation-refreeze/owned-callers.stdout",
+      "stdout_bytes": 4808,
+      "stdout_sha256": "d30f188eebd4972ad495520036be37b99b15a63a86cb12c1a44a811ba05e9b55",
+      "stderr_path": ".handoff/hud-1wizi-source-incarnation-refreeze/owned-callers.stderr",
+      "stderr_bytes": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "fixture-declarations",
+      "args": [
+        "rg",
+        "-n",
+        "fn (drag_to_move_long_press_moves_tile_bounds|drag_to_move_quick_tap_does_not_move_tile|header_band_anchor_is_the_frame_and_band_drag_is_position_only|drag_visual_feedback_applied_during_active_drag|hud_w41ef_portal_backdrop_opaque_after_resize_grow_no_fade|frame_signature_ignores_content_outside_the_target|scene_drag_active_elements_set_cleared_correctly)",
+        "crates",
+        "tests/integration",
+        "--glob",
+        "*.rs"
+      ],
+      "pid": 4039094,
+      "pgid": 4039094,
+      "exit_code": 0,
+      "elapsed_seconds": 0.009066306025488302,
+      "stdout_path": ".handoff/hud-1wizi-source-incarnation-refreeze/fixture-declarations.stdout",
+      "stdout_bytes": 813,
+      "stdout_sha256": "6d4c1921581c078593829a369b44eb7c2c02c3ae2156289647f558318be3997d",
+      "stderr_path": ".handoff/hud-1wizi-source-incarnation-refreeze/fixture-declarations.stderr",
+      "stderr_bytes": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "base-0",
+      "args": [
+        "git",
+        "show",
+        "e5e8044550352d2df42e0c903ca4006d2353eeaa:crates/tze_hud_compositor/src/renderer/tests/hit_drag.rs"
+      ],
+      "pid": 4039107,
+      "pgid": 4039107,
+      "exit_code": 0,
+      "elapsed_seconds": 0.0027421500126365572,
+      "stdout_path": ".handoff/hud-1wizi-source-incarnation-refreeze/base-0.stdout",
+      "stdout_bytes": 37308,
+      "stdout_sha256": "3aae3e78b74f3cfa5c981fc88ea782df9351bf95667b81a25914e0b9d07c9862",
+      "stderr_path": ".handoff/hud-1wizi-source-incarnation-refreeze/base-0.stderr",
+      "stderr_bytes": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "base-1",
+      "args": [
+        "git",
+        "show",
+        "e5e8044550352d2df42e0c903ca4006d2353eeaa:crates/tze_hud_compositor/src/renderer/tests/surface.rs"
+      ],
+      "pid": 4039108,
+      "pgid": 4039108,
+      "exit_code": 0,
+      "elapsed_seconds": 0.0013817140134051442,
+      "stdout_path": ".handoff/hud-1wizi-source-incarnation-refreeze/base-1.stdout",
+      "stdout_bytes": 25097,
+      "stdout_sha256": "b5b7039a866856a088b9900fb29b53fb020b232dfad6e83862faf168aca52573",
+      "stderr_path": ".handoff/hud-1wizi-source-incarnation-refreeze/base-1.stderr",
+      "stderr_bytes": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "base-2",
+      "args": [
+        "git",
+        "show",
+        "e5e8044550352d2df42e0c903ca4006d2353eeaa:crates/tze_hud_compositor/src/renderer/tests/tile_opacity.rs"
+      ],
+      "pid": 4039109,
+      "pgid": 4039109,
+      "exit_code": 0,
+      "elapsed_seconds": 0.001397494983393699,
+      "stdout_path": ".handoff/hud-1wizi-source-incarnation-refreeze/base-2.stdout",
+      "stdout_bytes": 25679,
+      "stdout_sha256": "c183d5235ec0fdb034149ca0229044d99d4b520a9c5355d6a0e56c04c008609a",
+      "stderr_path": ".handoff/hud-1wizi-source-incarnation-refreeze/base-2.stderr",
+      "stderr_bytes": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "base-3",
+      "args": [
+        "git",
+        "show",
+        "e5e8044550352d2df42e0c903ca4006d2353eeaa:crates/tze_hud_compositor/src/renderer/tile_render.rs"
+      ],
+      "pid": 4039110,
+      "pgid": 4039110,
+      "exit_code": 0,
+      "elapsed_seconds": 0.001846075989305973,
+      "stdout_path": ".handoff/hud-1wizi-source-incarnation-refreeze/base-3.stdout",
+      "stdout_bytes": 149662,
+      "stdout_sha256": "053058cea840797d8b2c1dba458e6478f56466f42f699f23f5d744a99a04519f",
+      "stderr_path": ".handoff/hud-1wizi-source-incarnation-refreeze/base-3.stderr",
+      "stderr_bytes": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "base-4",
+      "args": [
+        "git",
+        "show",
+        "e5e8044550352d2df42e0c903ca4006d2353eeaa:crates/tze_hud_runtime/src/windowed/event_loop_harness.rs"
+      ],
+      "pid": 4039111,
+      "pgid": 4039111,
+      "exit_code": 0,
+      "elapsed_seconds": 0.0025172669847961515,
+      "stdout_path": ".handoff/hud-1wizi-source-incarnation-refreeze/base-4.stdout",
+      "stdout_bytes": 92409,
+      "stdout_sha256": "79106b76f77692a3eec145406535a951703683b1cb393f8db5edb4ffa90a873d",
+      "stderr_path": ".handoff/hud-1wizi-source-incarnation-refreeze/base-4.stderr",
+      "stderr_bytes": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "base-5",
+      "args": [
+        "git",
+        "show",
+        "e5e8044550352d2df42e0c903ca4006d2353eeaa:crates/tze_hud_runtime/src/windowed/lifecycle.rs"
+      ],
+      "pid": 4039112,
+      "pgid": 4039112,
+      "exit_code": 0,
+      "elapsed_seconds": 0.002595691999886185,
+      "stdout_path": ".handoff/hud-1wizi-source-incarnation-refreeze/base-5.stdout",
+      "stdout_bytes": 122872,
+      "stdout_sha256": "ef232f643b01b9d24656a8d030bca65f11a0c9597516b4fb1a77e078f5330375",
+      "stderr_path": ".handoff/hud-1wizi-source-incarnation-refreeze/base-5.stderr",
+      "stderr_bytes": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "base-6",
+      "args": [
+        "git",
+        "show",
+        "e5e8044550352d2df42e0c903ca4006d2353eeaa:crates/tze_hud_runtime/src/windowed/mod.rs"
+      ],
+      "pid": 4039113,
+      "pgid": 4039113,
+      "exit_code": 0,
+      "elapsed_seconds": 0.0022637119982391596,
+      "stdout_path": ".handoff/hud-1wizi-source-incarnation-refreeze/base-6.stdout",
+      "stdout_bytes": 184586,
+      "stdout_sha256": "d6565b1c9612ffdaa73d7e7e336b1a877946c89b13a509b67875dcc8416f4e2a",
+      "stderr_path": ".handoff/hud-1wizi-source-incarnation-refreeze/base-6.stderr",
+      "stderr_bytes": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "base-7",
+      "args": [
+        "git",
+        "show",
+        "e5e8044550352d2df42e0c903ca4006d2353eeaa:crates/tze_hud_runtime/src/windowed/portal.rs"
+      ],
+      "pid": 4039114,
+      "pgid": 4039114,
+      "exit_code": 0,
+      "elapsed_seconds": 0.003863627993268892,
+      "stdout_path": ".handoff/hud-1wizi-source-incarnation-refreeze/base-7.stdout",
+      "stdout_bytes": 336281,
+      "stdout_sha256": "69dbf0fff57aa3792fe3b283faab96411cfb176140982830477cb99f8ae7ecb7",
+      "stderr_path": ".handoff/hud-1wizi-source-incarnation-refreeze/base-7.stderr",
+      "stderr_bytes": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "base-8",
+      "args": [
+        "git",
+        "show",
+        "e5e8044550352d2df42e0c903ca4006d2353eeaa:crates/tze_hud_scene/src/graph/queries.rs"
+      ],
+      "pid": 4039115,
+      "pgid": 4039115,
+      "exit_code": 0,
+      "elapsed_seconds": 0.0020125209994148463,
+      "stdout_path": ".handoff/hud-1wizi-source-incarnation-refreeze/base-8.stdout",
+      "stdout_bytes": 28047,
+      "stdout_sha256": "a77544ef5b5c85c57882a2e3b23eb7b91a95a04cca63f3a22965b7a1e52a210f",
+      "stderr_path": ".handoff/hud-1wizi-source-incarnation-refreeze/base-8.stderr",
+      "stderr_bytes": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "base-9",
+      "args": [
+        "git",
+        "show",
+        "e5e8044550352d2df42e0c903ca4006d2353eeaa:tests/integration/drag_reposition.rs"
+      ],
+      "pid": 4039116,
+      "pgid": 4039116,
+      "exit_code": 0,
+      "elapsed_seconds": 0.0016879900067579001,
+      "stdout_path": ".handoff/hud-1wizi-source-incarnation-refreeze/base-9.stdout",
+      "stdout_bytes": 27943,
+      "stdout_sha256": "6307456f0cb48c84ac45c157c08cf5eb467bc7abe67b979b2198fa5a712cb201",
+      "stderr_path": ".handoff/hud-1wizi-source-incarnation-refreeze/base-9.stderr",
+      "stderr_bytes": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "context-after",
+      "args": [
+        "python3",
+        "/home/orca/.dotfiles/ai-bootstrap/skills/personal/beads-orchestration/subskills/beads-worker/scripts/assert_worker_context.py",
+        "--worktree-path",
+        "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-1wizi",
+        "--repo-root",
+        "/home/orca/orca/projects/tze-hud",
+        "--issue-id",
+        "hud-1wizi",
+        "--current-path",
+        "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-1wizi"
+      ],
+      "pid": 4039117,
+      "pgid": 4039117,
+      "exit_code": 0,
+      "elapsed_seconds": 0.03296439500991255,
+      "stdout_path": ".handoff/hud-1wizi-source-incarnation-refreeze/context-after.stdout",
+      "stdout_bytes": 337,
+      "stdout_sha256": "b1de16e9cfc6f31b15793ccf926253ba6ec9a0f510be0a9e7b6dbccb9c2becb3",
+      "stderr_path": ".handoff/hud-1wizi-source-incarnation-refreeze/context-after.stderr",
+      "stderr_bytes": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "all_commands_exit_zero": true,
+  "all_owned_children_and_groups_absent": true,
+  "manifest_path": ".handoff/hud-1wizi-source-incarnation-refreeze/source-freeze-manifest.json",
+  "manifest_sha256": "a2009ae9c0177232b10da1919bdb5f890f3f65187c9a570c8372b3aaf0806f01",
+  "all_tracked_source_manifest_sha256": "5834ab1d141ddd5b433e37125a557a29901a1c165c841fb61a11a4c1046a9b9c",
+  "cargo_tests_gpu_cache_host_executed": false
+}

@@ -1,0 +1,220 @@
+{
+  "schema": "hud-1wizi-failed-ci-retry-resource-release/v1",
+  "at": "2026-10-06T23:59:21.032528+00:00",
+  "issue_id": "hud-1wizi",
+  "actual_exit_code": 101,
+  "elapsed_seconds": 19.40355272401939,
+  "full_ci_log_sha256": "61de2715950f967a7601bf672f39ff9c05d89c560d04acf1ad2b222d758ee261",
+  "full_ci_receipt_sha256": "bcdfbc6b6c39fff1d623bd3a780a07388f3f9bcdedd42b1265b0ee4d4bb8be8b",
+  "full_source_543_before_after_equal": true,
+  "cpu_gpu_cargo_commands_terminal": true,
+  "all_native_known_processes_groups_absent": true,
+  "processes": [
+    {
+      "pid": 4078233,
+      "kind": "producer",
+      "pid_absent": true
+    },
+    {
+      "pid": 4078234,
+      "pgid": 4078234,
+      "kind": "child",
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "pid": 4078234,
+      "pgid": 4078234,
+      "kind": "known child",
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "pid": 4078258,
+      "pgid": 4078234,
+      "kind": "known child",
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "pid": 4078235,
+      "pgid": 4078234,
+      "kind": "known child",
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "pid": 4078238,
+      "pgid": 4078234,
+      "kind": "known child",
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "pid": 4078239,
+      "pgid": 4078234,
+      "kind": "known child",
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "pid": 4078276,
+      "pgid": 4078234,
+      "kind": "known child",
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "pid": 4078290,
+      "pgid": 4078234,
+      "kind": "known child",
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "pid": 4078336,
+      "pgid": 4078234,
+      "kind": "known child",
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "pid": 4078317,
+      "pgid": 4078234,
+      "kind": "known child",
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "pid": 4078318,
+      "pgid": 4078234,
+      "kind": "known child",
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "pid": 4078346,
+      "pgid": 4078234,
+      "kind": "known child",
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "pid": 4078347,
+      "pgid": 4078234,
+      "kind": "known child",
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "pid": 4078364,
+      "pgid": 4078234,
+      "kind": "known child",
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "pid": 4078373,
+      "pgid": 4078234,
+      "kind": "known child",
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "pid": 4078509,
+      "pgid": 4078234,
+      "kind": "known child",
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "pid": 4078522,
+      "pgid": 4078234,
+      "kind": "known child",
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "pid": 4078534,
+      "pgid": 4078234,
+      "kind": "known child",
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "pid": 4078552,
+      "pgid": 4078234,
+      "kind": "known child",
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "pid": 4078566,
+      "pgid": 4078234,
+      "kind": "known child",
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "pid": 4078579,
+      "pgid": 4078234,
+      "kind": "known child",
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "pid": 4078597,
+      "pgid": 4078234,
+      "kind": "known child",
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "pid": 4078613,
+      "pgid": 4078234,
+      "kind": "known child",
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "pid": 4078653,
+      "pgid": 4078234,
+      "kind": "known child",
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "pid": 4078665,
+      "pgid": 4078234,
+      "kind": "known child",
+      "pid_absent": true,
+      "pgid_absent": true
+    }
+  ],
+  "locks": [
+    {
+      "path": "/home/orca/orca/projects/tze-hud/target/debug/.cargo-lock",
+      "exists": true,
+      "unheld": true
+    },
+    {
+      "path": "/home/orca/orca/projects/tze-hud/target/x86_64-pc-windows-gnu/debug/.cargo-lock",
+      "exists": true,
+      "unheld": true
+    }
+  ],
+  "root_release_ack_received": false,
+  "failure": "Two Clippy clone_on_copy in extended existing portal fixture at portal.rs:8213,8250",
+  "unexecuted": [
+    "Windows GNU clippy",
+    "dependency/default17 gates",
+    "seven changed fixtures",
+    "current72 execution",
+    "GPU tests",
+    "integration",
+    "Python",
+    "token footprint",
+    "production boots"
+  ],
+  "scope": "Source unchanged. No retry or source fix; awaiting ROOT scoped authorization."
+}

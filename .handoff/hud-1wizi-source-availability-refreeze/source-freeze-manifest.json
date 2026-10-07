@@ -1,0 +1,162 @@
+{
+  "schema": "hud-1wizi-source-availability-refreeze/v1",
+  "issue_id": "hud-1wizi",
+  "cwd": "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-1wizi",
+  "branch": "agent/hud-1wizi",
+  "base_head": "e5e8044550352d2df42e0c903ca4006d2353eeaa",
+  "implementation_commit": null,
+  "dirty_source_qualified": true,
+  "files": [
+    {
+      "path": "crates/tze_hud_compositor/src/renderer/tests/hit_drag.rs",
+      "size": 40335,
+      "sha256": "266f7612334cb6979e284f90d2dc368145b17972bc2e1d3ceb6e98447f93fabc",
+      "base_size": 37308,
+      "base_sha256": "3aae3e78b74f3cfa5c981fc88ea782df9351bf95667b81a25914e0b9d07c9862"
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/renderer/tests/surface.rs",
+      "size": 26549,
+      "sha256": "3b37ca40377f5071bf714a796c42a9419bb65f5b20bbc0584293f568aa1c2146",
+      "base_size": 25097,
+      "base_sha256": "b5b7039a866856a088b9900fb29b53fb020b232dfad6e83862faf168aca52573"
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/renderer/tests/tile_opacity.rs",
+      "size": 29062,
+      "sha256": "840f7e08d65e6701a0d74f0886cee7ed907da8655dad725e4d13d0644f9058f2",
+      "base_size": 25679,
+      "base_sha256": "c183d5235ec0fdb034149ca0229044d99d4b520a9c5355d6a0e56c04c008609a"
+    },
+    {
+      "path": "crates/tze_hud_compositor/src/renderer/tile_render.rs",
+      "size": 151304,
+      "sha256": "b4ca6484047e188c90084fb4d442992895b934bd53af964dfde2feb866af6344",
+      "base_size": 149662,
+      "base_sha256": "053058cea840797d8b2c1dba458e6478f56466f42f699f23f5d744a99a04519f"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/windowed/event_loop_harness.rs",
+      "size": 92449,
+      "sha256": "6d6123a925814b5193b9609a341f2d54ad100c94d06b84cc28d2c0bd47b2ea91",
+      "base_size": 92409,
+      "base_sha256": "79106b76f77692a3eec145406535a951703683b1cb393f8db5edb4ffa90a873d"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/windowed/lifecycle.rs",
+      "size": 126375,
+      "sha256": "157c715c05c7909cb571f5ecdd2d0209bad57f0bfed082d3720616b879081f8a",
+      "base_size": 122872,
+      "base_sha256": "ef232f643b01b9d24656a8d030bca65f11a0c9597516b4fb1a77e078f5330375"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/windowed/mod.rs",
+      "size": 185824,
+      "sha256": "2326126ea5b9cd15db04eb617931343da971e8d25a383a5b2d519a297a382d2d",
+      "base_size": 184586,
+      "base_sha256": "d6565b1c9612ffdaa73d7e7e336b1a877946c89b13a509b67875dcc8416f4e2a"
+    },
+    {
+      "path": "crates/tze_hud_runtime/src/windowed/portal.rs",
+      "size": 363577,
+      "sha256": "2847b25648b065aecdb8bb43a9fe5d0c477920d4fb503688e1b55f5cf4248f4d",
+      "base_size": 336281,
+      "base_sha256": "69dbf0fff57aa3792fe3b283faab96411cfb176140982830477cb99f8ae7ecb7"
+    },
+    {
+      "path": "crates/tze_hud_scene/src/graph/queries.rs",
+      "size": 28082,
+      "sha256": "c02ede1dc4bb6a10be01f2f2ce99e3706f21e150e7953c91a349945fed30b6cf",
+      "base_size": 28047,
+      "base_sha256": "a77544ef5b5c85c57882a2e3b23eb7b91a95a04cca63f3a22965b7a1e52a210f"
+    },
+    {
+      "path": "tests/integration/drag_reposition.rs",
+      "size": 28532,
+      "sha256": "736af27618949c29eb4a83ed4e2af97cbb205f1e9afa5e043ab5022c8af366ce",
+      "base_size": 27943,
+      "base_sha256": "6307456f0cb48c84ac45c157c08cf5eb467bc7abe67b979b2198fa5a712cb201"
+    }
+  ],
+  "source_diff_sha256": "b48b9b5e962952cd954aea81df88626c603f873663b9c2a0aaf23c1131c127b7",
+  "source_diff_bytes": 62608,
+  "tests_delta": {
+    "added": 0,
+    "modified": 7,
+    "removed": 0,
+    "execution": "UNEXECUTED"
+  },
+  "source_scope": "six production owner paths including exactly three private runtime constructors; seven existing fixture bodies across five paths, with portal.rs shared",
+  "cargo_tests_gpu_cache_host_publication_lifecycle_executed": false,
+  "opacity_cause": "UNKNOWN; no new alpha producer or forced opacity change",
+  "live_border_opacity_acceptance": "PENDING; fixtures cannot discharge owner Windows criteria",
+  "supersedes_prior_freeze_manifest_sha256": "06b055fcbc2e5d7afc87650d1e98e15e914d4ed2c4c8ecb6e974e8c89031b4c2",
+  "scope_correction": "ROOT-authorized new marker eligibility only: grabbed tile must be contained in the visible frame with a contained same-lease scrollable member; explicit declared-header owner retained. Real existing runtime body now distinguishes contained member and activated outside seed. Movement/persistence is unchanged.",
+  "supersedes_prior_refreeze_manifest_sha256": "7e5a5f6ae5355d9df649699f1bd3524d78bd8fbb6ebebd34a0fb4ed5b500ee11",
+  "window_incarnation_correction": "ROOT-qualified source defect only, UNEXECUTED: retain original WindowId plus Weak<Window> captured from the actual registered Arc at successful Down; validate Weak upgrade and Arc::ptr_eq against currently registered primary or secondary allocation as well as id. Removed allocation is not retained. Headless None requires no native window; fixture expired Weak rejection does not prove native HWND reuse.",
+  "window_handle_authority": "https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-iswindow",
+  "supersedes_prior_incarnation_refreeze_manifest_sha256": "a2009ae9c0177232b10da1919bdb5f890f3f65187c9a570c8372b3aaf0806f01",
+  "comment_correction": "ROOT-authorized comment-only correction: generic input/capture/latency remain solely at ingress; only input ring enqueue certainly ran on a scene-lock miss. Retry replays none of them. Other nine changed files and previous portal bytes outside this exact comment remain byte-identical to incarnation refreeze.",
+  "previous_freezes_preserved": [
+    ".handoff/hud-1wizi-source-freeze",
+    ".handoff/hud-1wizi-source-refreeze",
+    ".handoff/hud-1wizi-source-incarnation-refreeze",
+    ".handoff/hud-1wizi-source-final-comment-refreeze",
+    ".handoff/hud-1wizi-source-clippy-refreeze",
+    ".handoff/hud-1wizi-source-copy-refreeze",
+    ".handoff/hud-1wizi-source-tile-id-refreeze"
+  ],
+  "supersedes_final_comment_refreeze_manifest_sha256": "8b67093e773b58fa6c94612a7cc54da10943250af01f4f7837f86347d804a7f9",
+  "clippy_correction": "ROOT-authorized ONLY collapsible_if at portal.rs:1984. Outer invalid-original condition short-circuits before take(); take still executes once when invalid, even if matching-drag predicate is false; existing matching state removal and subsequent reconciliation retain order. Inverse exact block replacement reproduces prior frozen portal SHA; other542 source inputs unchanged.",
+  "failed_ci": {
+    "path": ".handoff/hud-1wizi-final-ci/full-ci-receipt.json",
+    "actual_exit_code": 101,
+    "log_sha256": "540e3699bcf171327ccf0debb39fbe404bcd5a4cc1867153786214db94a11de3",
+    "tests_execution": "UNEXECUTED; stopped at Clippy",
+    "source_543_before_after_equal": true
+  },
+  "source_formatter_scope": [
+    "crates/tze_hud_runtime/src/windowed/portal.rs"
+  ],
+  "supersedes_clippy_refreeze_manifest_sha256": "7cf0aafcf72d72ef86a91441bd6647357ec020f49e1d6f49c1a2762e2a4c2cdd",
+  "copy_correction": "ROOT-authorized only two clone_on_copy removals from saved_override snapshots in SAME existing header fixture. Option<GeometryPolicy> is Copy, value/assertions/order unchanged. Exact inverse two replacements restore previous frozen portal SHA; all other542 inputs unchanged.",
+  "failed_ci_retry": {
+    "path": ".handoff/hud-1wizi-final-ci-retry/full-ci-receipt.json",
+    "actual_exit_code": 101,
+    "log_sha256": "61de2715950f967a7601bf672f39ff9c05d89c560d04acf1ad2b222d758ee261",
+    "tests_execution": "UNEXECUTED; stopped at all-target Clippy lib-test",
+    "source_543_before_after_equal": true
+  },
+  "supersedes_copy_refreeze_manifest_sha256": "c0c4f9132b3049d15068255da6ca06c68120aec56f84344a28f4d97955475dc6",
+  "tile_id_correction": "ROOT-confirmed actual header fixture failure: new drag_feedback_target passed a lease ID into existing portal_band_anchor_tile(tile_id), whose initial tile lookup returned None. Only argument changed to element_id, preserving visible/Passthrough/containment/scroll/declared-header guards and all assertions/movement/persistence. Exact inverse single substitution restores prior portal SHA; other542 source inputs unchanged.",
+  "failed_ci_retry2": {
+    "path": ".handoff/hud-1wizi-final-ci-retry2/full-ci-receipt.json",
+    "actual_exit_code": 101,
+    "log_sha256": "e5e038bdea92872ff9ce02e4582e8d0da5bc915b46b8c3f6d3f872907a26dca3",
+    "rust_summary_count": 32,
+    "rust_passed": 2424,
+    "rust_failed": 1,
+    "rust_ignored": 0,
+    "changed_fixtures_passed": 5,
+    "header_fixture": "FAILED at first new contained-target assertion; later branches UNEXECUTED",
+    "integration_fixture": "UNEXECUTED; not reached",
+    "current72_full_execution": "NOT established",
+    "source_543_before_after_equal": true
+  },
+  "supersedes_tile_id_refreeze_manifest_sha256": "2aa22c102500fbf1ae645f209f107a1a7336e59c74128bdeae236543986ad19f",
+  "availability_fixture_correction": "ROOT-authorized ONLY existing header fixture: four inline completion-witness blocks cover first SharedState leg, scene-lock replacement leg, two invalid-identity/lease iterations, removed-target leg. Capture real main_work_generation while guard held after queued operations/mutations; release then bounded1s watchdog/yield until actual availability producer changes generation before settle/Down. No helpers/new tests/sleeps/production changes; all assertions retained. Exact inverse four block replacements restore prior portal SHA; other542 inputs unchanged. Raw scene_changed false does not establish Deferred; race is source-qualified.",
+  "failed_ci_retry3": {
+    "path": ".handoff/hud-1wizi-final-ci-retry3/full-ci-receipt.json",
+    "actual_exit_code": 101,
+    "log_sha256": "1c45521ff48f80822b1447e591834a1f2498c4f70f9d95cdc6cf250887ec8292",
+    "rust_summary_count": 32,
+    "rust_passed": 2424,
+    "rust_failed": 1,
+    "rust_ignored": 0,
+    "changed_fixtures_passed": 5,
+    "header_fixture": "FAILED release settled.scene_changed at8135; initial contained-target and activation guards passed; later branches unexecuted",
+    "integration_fixture": "UNEXECUTED; not reached",
+    "current72_full_execution": "NOT established",
+    "source_543_before_after_equal": true
+  }
+}

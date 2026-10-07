@@ -11,6 +11,104 @@ use super::input_dispatch::{deliver_composer_batch, dispatch_portal_geometry_eve
 use super::keyboard::ComposerDeliveryContext;
 use super::lifecycle::{INTERACTION_LOCK_BUDGET, spin_acquire};
 
+/// Identity of the primary drag that actually entered the recognizer under lock.
+/// A missed Up retains only this gesture's terminal event, never generic input.
+#[derive(Clone, Debug)]
+pub(super) struct PrimaryDragGesture {
+    pub(super) element_id: tze_hud_scene::SceneId,
+    pub(super) lease_id: tze_hud_scene::SceneId,
+    pub(super) feedback_target: tze_hud_scene::SceneId,
+    pub(super) interaction_id: String,
+    pub(super) press_start: std::time::Instant,
+    pub(super) window_id: Option<winit::window::WindowId>,
+    pub(super) window_allocation: Option<std::sync::Weak<winit::window::Window>>,
+    pub(super) terminal: Option<PointerEvent>,
+}
+
+impl PrimaryDragGesture {
+    pub(super) fn matches(&self, drag: &tze_hud_input::drag::DeviceDragState) -> bool {
+        self.element_id == drag.element_id
+            && self.interaction_id == drag.interaction_id
+            && self.press_start == drag.press_start
+    }
+
+    pub(super) fn target_is_live(&self, scene: &tze_hud_scene::SceneGraph) -> bool {
+        scene
+            .tiles
+            .get(&self.element_id)
+            .is_some_and(|tile| tile.lease_id == self.lease_id)
+            && scene
+                .tiles
+                .get(&self.feedback_target)
+                .is_some_and(|tile| tile.lease_id == self.lease_id)
+    }
+}
+
+pub(super) fn drag_feedback_target(
+    scene: &tze_hud_scene::SceneGraph,
+    element_id: tze_hud_scene::SceneId,
+) -> tze_hud_scene::SceneId {
+    let Some(tile) = scene.tiles.get(&element_id) else {
+        return element_id;
+    };
+    if scene
+        .overlay
+        .portal_surfaces
+        .get(&element_id)
+        .is_some_and(|surface| {
+            surface
+                .parts
+                .iter()
+                .any(|part| part.kind == tze_hud_scene::PortalPartKind::Header)
+        })
+    {
+        return element_id;
+    }
+    if let Some(anchor_id) = scene.portal_band_anchor_tile(element_id)
+        && let Some(frame) = scene.tiles.get(&anchor_id)
+        && rect_contains(&frame.bounds, &tile.bounds, 1.0)
+        && scene.overlay.tile_scroll_configs.keys().any(|id| {
+            scene.tiles.get(id).is_some_and(|member| {
+                member.lease_id == tile.lease_id
+                    && rect_contains(&frame.bounds, &member.bounds, 1.0)
+            })
+        })
+    {
+        anchor_id
+    } else {
+        element_id
+    }
+}
+
+/// Reconcile shared feedback from all remaining activated device gestures.
+/// Releasing one device must not clear another device's border on the same frame.
+pub(super) fn reconcile_drag_feedback(
+    input: &InputProcessor,
+    scene: &mut tze_hud_scene::SceneGraph,
+) {
+    let active: std::collections::HashSet<_> = input
+        .drag_states
+        .values()
+        .filter(|drag| {
+            drag.phase == tze_hud_input::drag::DragPhase::Activated
+                && scene.tiles.contains_key(&drag.element_id)
+        })
+        .map(|drag| drag_feedback_target(scene, drag.element_id))
+        .collect();
+    let obsolete: Vec<_> = scene
+        .overlay
+        .drag_active_elements
+        .difference(&active)
+        .copied()
+        .collect();
+    for id in obsolete {
+        scene.clear_drag_active(id);
+    }
+    for id in active {
+        scene.set_drag_active(id);
+    }
+}
+
 /// Result of one best-effort portal projection drain.
 ///
 /// A busy scene is distinct from a completed no-op: the windowed scheduler
@@ -409,12 +507,12 @@ pub(super) fn apply_drag_handle_pointer_event(
 
     // On PointerDown on a drag handle, start accumulating.
     if pointer_event.kind == PointerEventKind::Down {
+        input_processor.drag_states.remove(&device_id);
         if let Some((interaction_id, element_id, element_kind, is_header_band)) = hit_drag_info {
-            let element_bounds = scene
-                .tiles
-                .get(&element_id)
-                .map(|t| t.bounds)
-                .unwrap_or_else(|| tze_hud_scene::Rect::new(0.0, 0.0, 0.0, 0.0));
+            let Some(element_bounds) = scene.tiles.get(&element_id).map(|tile| tile.bounds) else {
+                reconcile_drag_feedback(input_processor, scene);
+                return None;
+            };
             let outcome = input_processor.process_drag_handle_pointer(
                 pointer_event,
                 interaction_id,
@@ -433,6 +531,7 @@ pub(super) fn apply_drag_handle_pointer_event(
                 "drag-handle: PointerDown accumulating"
             );
         }
+        reconcile_drag_feedback(input_processor, scene);
         return None;
     }
 
@@ -448,11 +547,11 @@ pub(super) fn apply_drag_handle_pointer_event(
     };
 
     // Snapshot element bounds; element_id is the tile being dragged.
-    let element_bounds = scene
-        .tiles
-        .get(&element_id)
-        .map(|t| t.bounds)
-        .unwrap_or_else(|| tze_hud_scene::Rect::new(0.0, 0.0, 0.0, 0.0));
+    let Some(element_bounds) = scene.tiles.get(&element_id).map(|tile| tile.bounds) else {
+        input_processor.drag_states.remove(&device_id);
+        reconcile_drag_feedback(input_processor, scene);
+        return None;
+    };
 
     // The drag is already in flight for this device; its DeviceDragState already
     // carries the immediate/band flag, so the value passed here is unused on
@@ -468,7 +567,7 @@ pub(super) fn apply_drag_handle_pointer_event(
         false,
     );
 
-    match outcome {
+    let released = match outcome {
         DragEventOutcome::Idle | DragEventOutcome::Accumulating { .. } => {
             // Nothing to do locally.
             None
@@ -604,7 +703,9 @@ pub(super) fn apply_drag_handle_pointer_event(
                 group_members,
             })
         }
-    }
+    };
+    reconcile_drag_feedback(input_processor, scene);
+    released
 }
 
 /// Compute the maximum resize dimensions for a portal tile, combining the
@@ -1504,6 +1605,119 @@ impl WinitApp {
         }
     }
 
+    /// Apply a retained Up only to the original live gesture. Generic input,
+    /// capture dispatch and latency recording remain solely at ingress; only
+    /// the ring enqueue certainly ran on a lock miss. None is replayed here.
+    pub(super) fn drain_pending_drag_terminal(&mut self) -> bool {
+        let Some(gesture) = self.state.primary_drag_gesture.clone() else {
+            return false;
+        };
+        let Some(terminal) = gesture.terminal.as_ref() else {
+            return false;
+        };
+        let window_is_live = self.primary_drag_window_is_live();
+        let (released, scene_changed) = {
+            let Ok(state) = self.state.shared_state.try_lock() else {
+                return false;
+            };
+            let Ok(mut scene) = state.scene.try_lock() else {
+                return false;
+            };
+            let epoch_before = scene.geometry_epoch;
+            let same_gesture = self
+                .state
+                .input_processor
+                .drag_states
+                .get(&0)
+                .is_some_and(|drag| gesture.matches(drag));
+            let feedback_is_live =
+                self.state
+                    .input_processor
+                    .drag_states
+                    .get(&0)
+                    .is_some_and(|drag| {
+                        drag.phase != tze_hud_input::DragPhase::Activated
+                            || scene.is_drag_active(gesture.feedback_target)
+                    });
+            let released = if same_gesture
+                && window_is_live
+                && feedback_is_live
+                && gesture.target_is_live(&scene)
+            {
+                apply_drag_handle_pointer_event(
+                    &mut self.state.input_processor,
+                    terminal,
+                    &HitResult::Passthrough,
+                    &mut scene,
+                    self.state.config.window.width as f32,
+                    self.state.config.window.height as f32,
+                )
+            } else {
+                // A late terminal cannot remove a newer drag, resurrect a removed
+                // tile, or persist geometry from a different window allocation.
+                if same_gesture {
+                    self.state.input_processor.drag_states.remove(&0);
+                }
+                reconcile_drag_feedback(&self.state.input_processor, &mut scene);
+                None
+            };
+            self.state.primary_drag_gesture = None;
+            (released, scene.geometry_epoch != epoch_before)
+        };
+        if let Some(released) = released {
+            self.persist_drag_release(released);
+        }
+        scene_changed
+    }
+
+    pub(super) fn primary_drag_window_is_live(&self) -> bool {
+        let Some(gesture) = self.state.primary_drag_gesture.as_ref() else {
+            return true;
+        };
+        match gesture.window_id {
+            Some(id) => {
+                let Some(original) = gesture
+                    .window_allocation
+                    .as_ref()
+                    .and_then(std::sync::Weak::upgrade)
+                else {
+                    return false;
+                };
+                self.state.window.as_ref().is_some_and(|window| {
+                    window.id() == id && std::sync::Arc::ptr_eq(window, &original)
+                }) || self.state.secondaries.iter().any(|display| {
+                    display.window.id() == id && std::sync::Arc::ptr_eq(&display.window, &original)
+                })
+            }
+            None => {
+                gesture.window_allocation.is_none()
+                    && self.state.window.is_none()
+                    && self.state.secondaries.is_empty()
+            }
+        }
+    }
+
+    /// Weak allocation identity distinguishes recreated windows even if the OS
+    /// recycles their numeric WindowId, without keeping a retired window alive.
+    pub(super) fn primary_drag_window_allocation(
+        &self,
+        id: Option<winit::window::WindowId>,
+    ) -> Option<std::sync::Weak<winit::window::Window>> {
+        let id = id?;
+        self.state
+            .window
+            .as_ref()
+            .filter(|window| window.id() == id)
+            .or_else(|| {
+                self.state
+                    .secondaries
+                    .iter()
+                    .find(|display| display.window.id() == id)
+                    .map(|display| &display.window)
+            })
+            .map(std::sync::Arc::downgrade)
+    }
+
     /// Persist the geometry override for a completed drag and broadcast an
     /// `ElementRepositionedEvent`.
     ///
@@ -1732,8 +1946,8 @@ impl WinitApp {
         PortalProjectionDrain::Completed { scene_changed }
     }
 
-    /// Remove stale per-tile resize and raw-history state for tiles that no
-    /// longer exist in the scene.
+    /// Remove stale resize, history and drag state. Returns whether drag feedback
+    /// changed, so a main-only availability wake can admit its cleared frame.
     ///
     /// Called once per `about_to_wait` iteration.  Uses a two-phase approach:
     ///
@@ -1751,15 +1965,38 @@ impl WinitApp {
     /// The eager path handles the common case (each `DeleteTile` generates
     /// exactly one removal notification).  The fallback prevents unbounded
     /// accumulation in pathological cases.
-    pub(super) fn prune_portal_resize_states(&mut self) {
+    pub(super) fn prune_portal_resize_states(&mut self) -> bool {
+        let original_window_is_live = self.primary_drag_window_is_live();
         let Ok(state) = self.state.shared_state.try_lock() else {
             tracing::trace!("portal resize prune deferred: shared_state lock busy");
-            return;
+            return false;
         };
         let Ok(mut scene) = state.scene.try_lock() else {
             tracing::trace!("portal resize prune deferred: scene lock busy");
-            return;
+            return false;
         };
+        let epoch_before = scene.geometry_epoch;
+
+        self.state
+            .input_processor
+            .drag_states
+            .retain(|_, drag| scene.tiles.contains_key(&drag.element_id));
+        if self
+            .state
+            .primary_drag_gesture
+            .as_ref()
+            .is_some_and(|gesture| !original_window_is_live || !gesture.target_is_live(&scene))
+            && let Some(gesture) = self.state.primary_drag_gesture.take()
+            && self
+                .state
+                .input_processor
+                .drag_states
+                .get(&0)
+                .is_some_and(|drag| gesture.matches(drag))
+        {
+            self.state.input_processor.drag_states.remove(&0);
+        }
+        reconcile_drag_feedback(&self.state.input_processor, &mut scene);
 
         // Phase 1: eager drain — O(removed), handles the common `DeleteTile` path.
         let removed_ids = scene.drain_removed_tile_ids();
@@ -1790,7 +2027,7 @@ impl WinitApp {
         if self.state.portal_resize_states.is_empty()
             && self.state.input_history_seed_states.is_empty()
         {
-            return;
+            return scene.geometry_epoch != epoch_before;
         }
         let resize_before = self.state.portal_resize_states.len();
         let history_before = self.state.input_history_seed_states.len();
@@ -1810,6 +2047,7 @@ impl WinitApp {
                 "portal resize: sweep-pruned stale per-tile state for removed tiles"
             );
         }
+        scene.geometry_epoch != epoch_before
     }
     /// Apply a Ctrl-gated portal resize hotkey to the focused portal tile.
     ///
@@ -2118,6 +2356,7 @@ mod tests {
             secondary_recreates: Default::default(),
             overlay_refits: Default::default(),
             press_window: None,
+            primary_drag_gesture: None,
             global_tokens: std::collections::HashMap::new(),
             element_repositioned_tx: None,
             input_event_tx: Some(input_event_tx),
@@ -2395,7 +2634,6 @@ mod tests {
     /// - Click-focus is unaffected: a short tap (no long-press) produces no move.
     #[test]
     fn drag_to_move_long_press_moves_tile_bounds() {
-        use std::thread;
         use std::time::Duration;
         use tze_hud_input::{InputProcessor, PointerEvent};
 
@@ -2443,8 +2681,9 @@ mod tests {
             "drag state must be created for device 0 after PointerDown on handle"
         );
 
-        // ── Step 2: Wait for long-press threshold (250 ms) ───────────────────
-        thread::sleep(Duration::from_millis(260));
+        assert!(!scene.is_drag_active(tile_id), "accumulation has no border");
+        // Age the existing recognizer's press; no wall-clock wait is needed.
+        processor.drag_states.get_mut(&0).unwrap().press_start -= Duration::from_millis(250);
 
         // ── Step 3: PointerMove — first move activates the drag, second moves tile ──
         //
@@ -2471,6 +2710,10 @@ mod tests {
         assert!(
             released_on_move1.is_none(),
             "first PointerMove (Activated) must not trigger release"
+        );
+        assert!(
+            scene.is_drag_active(tile_id),
+            "activation must publish local feedback"
         );
 
         // Second PointerMove — now in Activated phase, returns Moved.
@@ -2516,6 +2759,27 @@ mod tests {
             timestamp: None,
         };
         let result_up = processor.process(&up, &mut scene);
+        // A second activated device owns the same feedback target independently.
+        processor
+            .drag_states
+            .insert(1, processor.drag_states.get(&0).unwrap().clone());
+        let (tab, lease) = {
+            let tile = &scene.tiles[&tile_id];
+            (tile.tab_id, tile.lease_id)
+        };
+        let unrelated_id = scene
+            .create_tile(
+                tab,
+                "portal-agent",
+                lease,
+                tze_hud_scene::Rect::new(20.0, 20.0, 100.0, 80.0),
+                0,
+            )
+            .unwrap();
+        let mut unrelated_drag = processor.drag_states[&0].clone();
+        unrelated_drag.element_id = unrelated_id;
+        unrelated_drag.interaction_id = "unrelated-device-drag".to_string();
+        processor.drag_states.insert(2, unrelated_drag);
         let released_on_up = super::apply_drag_handle_pointer_event(
             &mut processor,
             &up,
@@ -2545,6 +2809,90 @@ mod tests {
             !processor.drag_states.contains_key(&0),
             "drag state must be removed after PointerUp"
         );
+        assert!(
+            scene.is_drag_active(tile_id),
+            "the second device still owns the border"
+        );
+        let other_up = PointerEvent { device_id: 1, ..up };
+        assert!(
+            super::apply_drag_handle_pointer_event(
+                &mut processor,
+                &other_up,
+                &HitResult::Passthrough,
+                &mut scene,
+                1920.0,
+                1080.0,
+            )
+            .is_some()
+        );
+        assert!(
+            !scene.is_drag_active(tile_id),
+            "the last release clears the border"
+        );
+        assert!(
+            scene.is_drag_active(unrelated_id),
+            "an unrelated device's target remains active"
+        );
+        let unrelated_up = PointerEvent {
+            device_id: 2,
+            ..other_up.clone()
+        };
+        super::apply_drag_handle_pointer_event(
+            &mut processor,
+            &unrelated_up,
+            &HitResult::Passthrough,
+            &mut scene,
+            1920.0,
+            1080.0,
+        );
+        assert!(!scene.is_drag_active(unrelated_id));
+        let result_down = processor.process(&down, &mut scene);
+        super::apply_drag_handle_pointer_event(
+            &mut processor,
+            &down,
+            &result_down.hit,
+            &mut scene,
+            1920.0,
+            1080.0,
+        );
+        processor.drag_states.get_mut(&0).unwrap().press_start -= Duration::from_millis(250);
+        super::apply_drag_handle_pointer_event(
+            &mut processor,
+            &move1,
+            &HitResult::Passthrough,
+            &mut scene,
+            1920.0,
+            1080.0,
+        );
+        assert!(scene.is_drag_active(tile_id));
+        scene.delete_tile(tile_id, "portal-agent").unwrap();
+        assert!(
+            super::apply_drag_handle_pointer_event(
+                &mut processor,
+                &other_up,
+                &HitResult::Passthrough,
+                &mut scene,
+                1920.0,
+                1080.0
+            )
+            .is_none()
+        );
+        super::apply_drag_handle_pointer_event(
+            &mut processor,
+            &PointerEvent {
+                device_id: 0,
+                ..other_up
+            },
+            &HitResult::Passthrough,
+            &mut scene,
+            1920.0,
+            1080.0,
+        );
+        assert!(
+            !processor.drag_states.contains_key(&0),
+            "removed targets cannot resume a stale drag"
+        );
+        assert!(!scene.is_drag_active(tile_id));
     }
 
     /// A quick tap (PointerDown immediately followed by PointerUp, no long-press)
@@ -2566,6 +2914,7 @@ mod tests {
         let handle_cy = 300.0_f32;
 
         let mut processor = InputProcessor::new();
+        let epoch_before = scene.geometry_epoch;
 
         // PointerDown.
         let down = PointerEvent {
@@ -2619,6 +2968,39 @@ mod tests {
             tile.bounds.y, 300.0,
             "tile Y must not change after a tap on the drag handle"
         );
+        assert!(!scene.is_drag_active(tile_id));
+        assert_eq!(
+            scene.geometry_epoch, epoch_before,
+            "a quick tap never enters drag feedback"
+        );
+        let result_down = processor.process(&down, &mut scene);
+        super::apply_drag_handle_pointer_event(
+            &mut processor,
+            &down,
+            &result_down.hit,
+            &mut scene,
+            1920.0,
+            1080.0,
+        );
+        let cancelled_move = PointerEvent {
+            x: handle_cx + 30.0,
+            kind: PointerEventKind::Move,
+            ..down
+        };
+        super::apply_drag_handle_pointer_event(
+            &mut processor,
+            &cancelled_move,
+            &HitResult::Passthrough,
+            &mut scene,
+            1920.0,
+            1080.0,
+        );
+        assert!(
+            !processor.drag_states.contains_key(&0),
+            "early movement cancels recognition"
+        );
+        assert!(!scene.is_drag_active(tile_id));
+        assert_eq!(scene.geometry_epoch, epoch_before);
     }
 
     #[test]
@@ -7612,6 +7994,313 @@ mod tests {
                 "every member must translate by the band-drag delta"
             );
         }
+
+        // The visible frame, not an equal-bounds passthrough backstop, owns
+        // the real runtime gesture and its one whole-portal highlight.
+        let frame = scene.tiles.get(&frame_id).unwrap().clone();
+        let backstop = scene
+            .create_tile(
+                frame.tab_id,
+                "portal-agent",
+                frame.lease_id,
+                frame.bounds,
+                0,
+            )
+            .unwrap();
+        scene.tiles.get_mut(&backstop).unwrap().input_mode = tze_hud_scene::InputMode::Passthrough;
+        let (_, band) = scene
+            .portal_header_band_anchors(52.0)
+            .into_iter()
+            .find(|(id, _)| *id == frame_id)
+            .unwrap();
+        let interaction_id = format!("drag-handle:{frame_id}");
+        scene
+            .overlay
+            .drag_handle_hit_regions
+            .push(tze_hud_scene::DragHandleHitRegion {
+                element_id: frame_id,
+                element_kind: tze_hud_scene::DragHandleElementKind::Tile,
+                bounds: band,
+                interaction_id: interaction_id.clone(),
+                hit_region: tze_hud_scene::HitRegionNode {
+                    bounds: band,
+                    interaction_id,
+                    accepts_pointer: true,
+                    ..Default::default()
+                },
+                tab_order: 0,
+                is_header_band: true,
+            });
+        assert_eq!(
+            drag_feedback_target(&scene, transcript_id),
+            frame_id,
+            "a contained surface uses the visible frame"
+        );
+        assert_eq!(
+            drag_feedback_target(&scene, _shield),
+            _shield,
+            "an outside seed is not a portal feedback member"
+        );
+        let outside_grip = tze_hud_scene::Rect::new(1880.0, 1060.0, 40.0, 20.0);
+        let mut outside_handle = scene.overlay.drag_handle_hit_regions[0].clone();
+        outside_handle.element_id = _shield;
+        outside_handle.bounds = outside_grip;
+        outside_handle.hit_region.bounds = outside_grip;
+        outside_handle.interaction_id = format!("drag-handle:{_shield}");
+        outside_handle.hit_region.interaction_id = outside_handle.interaction_id.clone();
+        outside_handle.is_header_band = false;
+        scene.overlay.drag_handle_hit_regions.push(outside_handle);
+        let (mut app, _rx) =
+            make_windowed_keyboard_test_app(scene, FocusManager::new(), InputProcessor::new());
+        seed_tile_entries(
+            &app,
+            &[frame_id, transcript_id, composer_id, backstop, _shield],
+            "portal-agent",
+        );
+        app.state.cursor_x = 1900.0;
+        app.state.cursor_y = 1070.0;
+        app.enqueue_pointer_event(PointerEventKind::Down);
+        app.state
+            .input_processor
+            .drag_states
+            .get_mut(&0)
+            .unwrap()
+            .press_start -= std::time::Duration::from_millis(250);
+        // This private identity follows the same press seed in this fixture.
+        app.state.primary_drag_gesture.as_mut().unwrap().press_start =
+            app.state.input_processor.drag_states[&0].press_start;
+        app.state.cursor_x += 1.0;
+        app.enqueue_pointer_event(PointerEventKind::Move);
+        {
+            let shared = app.state.shared_state.try_lock().unwrap();
+            let scene = shared.scene.try_lock().unwrap();
+            assert!(scene.is_drag_active(_shield));
+            assert!(
+                !scene.is_drag_active(frame_id),
+                "the real outside gesture cannot mark the portal frame"
+            );
+            assert_eq!(
+                app.state
+                    .primary_drag_gesture
+                    .as_ref()
+                    .unwrap()
+                    .feedback_target,
+                _shield
+            );
+        }
+        app.state.cursor_x = band.x + 50.0;
+        app.state.cursor_y = band.y + 12.0;
+        app.enqueue_pointer_event(PointerEventKind::Down);
+        assert!(
+            app.state.primary_drag_gesture.is_some(),
+            "the actual Down seeds the gesture"
+        );
+        app.state.cursor_x += 5.0;
+        app.enqueue_pointer_event(PointerEventKind::Move);
+        {
+            let shared = app.state.shared_state.try_lock().unwrap();
+            let scene = shared.scene.try_lock().unwrap();
+            assert!(scene.is_drag_active(frame_id));
+            assert_eq!(scene.overlay.drag_active_elements.len(), 1);
+            assert!(!scene.is_drag_active(backstop));
+        }
+        app.state.cursor_x += 35.0;
+        app.state.cursor_y += 20.0;
+        app.enqueue_pointer_event(PointerEventKind::Move);
+
+        // Exhaust the real SharedState acquisition budget on Up. The actual
+        // event is retained once and a newer Down cannot steal its identity.
+        let shared_state = Arc::clone(&app.state.shared_state);
+        let held = shared_state.try_lock().unwrap();
+        let original_press = app.state.primary_drag_gesture.as_ref().unwrap().press_start;
+        app.enqueue_pointer_event(PointerEventKind::Up);
+        assert!(
+            app.state
+                .primary_drag_gesture
+                .as_ref()
+                .unwrap()
+                .terminal
+                .is_some()
+        );
+        let ring_after_up = app.state.input_ring.lock().unwrap().len();
+        app.enqueue_pointer_event(PointerEventKind::Down);
+        assert_eq!(
+            app.state.primary_drag_gesture.as_ref().unwrap().press_start,
+            original_press
+        );
+        assert_eq!(app.state.input_ring.lock().unwrap().len(), ring_after_up);
+        let main_work_before = app.state.wake.main_work_generation();
+        drop(held);
+        // The real availability waiter briefly reacquires both scene locks.
+        // Settle only after its completion, as the event loop does on its wake.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+        while app.state.wake.main_work_generation() == main_work_before {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "release availability must schedule the retained terminal"
+            );
+            std::thread::yield_now();
+        }
+        let checkpoint = app.state.wake.main_work_checkpoint();
+        let settled = app.settle_scene_work();
+        assert!(
+            settled.scene_changed(),
+            "release must admit the cleared-border frame"
+        );
+        assert!(
+            app.state
+                .wake
+                .finish_main_work_after_settle(checkpoint, settled.scene_changed())
+        );
+        assert!(app.state.primary_drag_gesture.is_none());
+        assert!(!app.state.input_processor.drag_states.contains_key(&0));
+        assert_eq!(
+            app.state.input_ring.lock().unwrap().len(),
+            ring_after_up,
+            "retry emits no second input"
+        );
+        for id in [frame_id, transcript_id, composer_id, backstop] {
+            assert!(
+                has_override(&app, id),
+                "the original release persists every member"
+            );
+        }
+        assert!(
+            !has_override(&app, _shield),
+            "the distant shield is not a portal member"
+        );
+
+        // Exercise the independent scene-lock failure, then admit a new Down
+        // only after the retained Up has ended the original gesture.
+        {
+            let shared = shared_state.try_lock().unwrap();
+            let mut scene = shared.scene.try_lock().unwrap();
+            assert!(!scene.is_drag_active(frame_id));
+            let (_, band) = scene
+                .portal_header_band_anchors(52.0)
+                .into_iter()
+                .find(|(id, _)| *id == frame_id)
+                .unwrap();
+            scene.overlay.drag_handle_hit_regions[0].bounds = band;
+            scene.overlay.drag_handle_hit_regions[0].hit_region.bounds = band;
+            app.state.cursor_x = band.x + 50.0;
+            app.state.cursor_y = band.y + 12.0;
+        }
+        app.enqueue_pointer_event(PointerEventKind::Down);
+        app.state.cursor_x += 5.0;
+        app.enqueue_pointer_event(PointerEventKind::Move);
+        let original_press = app.state.primary_drag_gesture.as_ref().unwrap().press_start;
+        let scene_arc = Arc::clone(&shared_state.try_lock().unwrap().scene);
+        let held = scene_arc.try_lock().unwrap();
+        app.enqueue_pointer_event(PointerEventKind::Up);
+        assert!(
+            app.state
+                .primary_drag_gesture
+                .as_ref()
+                .unwrap()
+                .terminal
+                .is_some()
+        );
+        let main_work_before = app.state.wake.main_work_generation();
+        drop(held);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+        while app.state.wake.main_work_generation() == main_work_before {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "scene release availability must precede the replacement Down"
+            );
+            std::thread::yield_now();
+        }
+        app.enqueue_pointer_event(PointerEventKind::Down);
+        let replacement = app.state.primary_drag_gesture.as_ref().unwrap();
+        assert_ne!(replacement.press_start, original_press);
+        assert!(replacement.terminal.is_none());
+        assert_eq!(
+            app.state.input_processor.drag_states[&0].phase,
+            tze_hud_input::DragPhase::Accumulating
+        );
+        app.enqueue_pointer_event(PointerEventKind::Up);
+        assert!(app.state.primary_drag_gesture.is_none());
+
+        // Headless identity checks prove rejection of an absent original window
+        // allocation and a changed lease, without claiming native capture coverage.
+        for invalid_window in [true, false] {
+            app.enqueue_pointer_event(PointerEventKind::Down);
+            app.state.cursor_x += 5.0;
+            app.enqueue_pointer_event(PointerEventKind::Move);
+            let held = shared_state.try_lock().unwrap();
+            app.enqueue_pointer_event(PointerEventKind::Up);
+            let saved_override = held.element_store.entries[&frame_id].geometry_override;
+            if invalid_window {
+                app.state.primary_drag_gesture.as_mut().unwrap().window_id =
+                    Some(winit::window::WindowId::dummy());
+                app.state
+                    .primary_drag_gesture
+                    .as_mut()
+                    .unwrap()
+                    .window_allocation = Some(std::sync::Weak::new());
+            } else {
+                let mut scene = held.scene.try_lock().unwrap();
+                let different_lease = scene.grant_lease("portal-agent", 60_000);
+                scene.tiles.get_mut(&frame_id).unwrap().lease_id = different_lease;
+            }
+            let main_work_before = app.state.wake.main_work_generation();
+            drop(held);
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+            while app.state.wake.main_work_generation() == main_work_before {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "invalid-identity release availability must precede cancellation"
+                );
+                std::thread::yield_now();
+            }
+            app.settle_scene_work();
+            assert!(app.state.primary_drag_gesture.is_none());
+            assert!(!app.state.input_processor.drag_states.contains_key(&0));
+            let held = shared_state.try_lock().unwrap();
+            let mut scene = held.scene.try_lock().unwrap();
+            assert!(!scene.is_drag_active(frame_id));
+            assert_eq!(
+                held.element_store.entries[&frame_id].geometry_override,
+                saved_override
+            );
+            scene.tiles.get_mut(&frame_id).unwrap().lease_id = frame.lease_id;
+        }
+
+        // A removed target cancels the retained terminal instead of applying
+        // its stale final coordinates or persisting a phantom tile.
+        app.enqueue_pointer_event(PointerEventKind::Down);
+        app.state.cursor_x += 5.0;
+        app.enqueue_pointer_event(PointerEventKind::Move);
+        let held = shared_state.try_lock().unwrap();
+        app.enqueue_pointer_event(PointerEventKind::Up);
+        let saved_override = held.element_store.entries[&frame_id].geometry_override;
+        held.scene
+            .try_lock()
+            .unwrap()
+            .delete_tile(frame_id, "portal-agent")
+            .unwrap();
+        let main_work_before = app.state.wake.main_work_generation();
+        drop(held);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+        while app.state.wake.main_work_generation() == main_work_before {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "removed-target release availability must precede cancellation"
+            );
+            std::thread::yield_now();
+        }
+        app.settle_scene_work();
+        assert!(app.state.primary_drag_gesture.is_none());
+        assert!(!app.state.input_processor.drag_states.contains_key(&0));
+        let shared = shared_state.try_lock().unwrap();
+        let scene = shared.scene.try_lock().unwrap();
+        assert!(!scene.tiles.contains_key(&frame_id));
+        assert!(!scene.is_drag_active(frame_id));
+        assert_eq!(
+            shared.element_store.entries[&frame_id].geometry_override,
+            saved_override
+        );
     }
 
     /// A single non-portal tile drag must NOT engage the whole-portal translate

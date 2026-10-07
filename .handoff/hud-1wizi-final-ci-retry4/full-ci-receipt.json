@@ -1,0 +1,2163 @@
+{
+  "schema": "hud-1wizi-normal-ci-authorized-retry4-receipt/v1",
+  "native_pid": 4138042,
+  "child_pid": 4138043,
+  "child_pgid": 4138043,
+  "cwd": "/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-1wizi",
+  "args": [
+    "timeout",
+    "--signal=TERM",
+    "--kill-after=10s",
+    "1800",
+    "just",
+    "--set",
+    "py",
+    "/home/orca/orca/projects/tze-hud/.venv/bin/python3",
+    "ci"
+  ],
+  "started_at": "2026-10-07T00:32:44.566113+00:00",
+  "deadline_seconds": 1800,
+  "head": "e5e8044550352d2df42e0c903ca4006d2353eeaa",
+  "source_state": "e5 HEAD plus TEN frozen dirty paths",
+  "source_before_sha256": "3ba969b9326827b1328439a4d7016dd32b736d80b61897f78e71488dfa882d9f",
+  "frozen_source_manifest_sha256": "efcfd8568516d2d562d3c760bb1573b443483db716e4de61ed0dadff0f40a2c1",
+  "known_public_environment": {
+    "CARGO_TARGET_DIR": "/home/orca/orca/projects/tze-hud/target",
+    "CARGO_BUILD_JOBS": "1",
+    "PROTOC": "/usr/bin/protoc",
+    "VK_ICD_FILENAMES": "/usr/share/vulkan/icd.d/lvp_icd.json",
+    "HEADLESS_FORCE_SOFTWARE": "1",
+    "LLVMPIPE_CI": "1",
+    "LIBGL_ALWAYS_SOFTWARE": "1",
+    "TZE_HUD_REQUIRE_GPU": "1"
+  },
+  "variables_unset": [
+    "RUST_TEST_THREADS",
+    "TZE_HUD_PERF_ASSERT",
+    "TZE_HUD_TEST_BUDGET_SLACK",
+    "SKIP_GPU_TESTS",
+    "TZE_HUD_SKIP_GPU_TESTS"
+  ],
+  "git_override_names_stripped": [
+    "GIT_ASKPASS",
+    "GIT_CONFIG_COUNT",
+    "GIT_CONFIG_KEY_0",
+    "GIT_CONFIG_KEY_1",
+    "GIT_CONFIG_VALUE_0",
+    "GIT_CONFIG_VALUE_1",
+    "GIT_PAGER",
+    "GIT_TERMINAL_PROMPT"
+  ],
+  "global_gpu_lease": "/home/orca/orca/projects/tze-hud/.handoff/drag-highlight-1wizi-exclusive-retry4-ONE-CI-GPU-lease.json",
+  "previous_failed_ci_receipt_sha256": [
+    "04157200544df399fa2be0fb134ae7e634d4e1b53e0e8a583094cc06efd09d63",
+    "bcdfbc6b6c39fff1d623bd3a780a07388f3f9bcdedd42b1265b0ee4d4bb8be8b",
+    "9ed7fd23c40955e452ad40364f138b2b83cfc957297a9cbc0f921d8c62b4145a",
+    "9f365d0a2708f727864f2dc1849fc9ac50c493775b9a8041efe8fbb7db03a6ee"
+  ],
+  "finished_at": "2026-10-07T00:39:29.965051+00:00",
+  "elapsed_seconds": 405.3980586619873,
+  "actual_exit_code": 0,
+  "source_after_sha256": "37de054c7bbc95c66ef489da6e495ba71a1babe33e7b0a7511a6b919fa1b432a",
+  "full_source_543_before_after_equal": true,
+  "source_changed_paths": [],
+  "log_path": ".handoff/hud-1wizi-final-ci-retry4/full-ci.log",
+  "log_bytes": 440704,
+  "log_sha256": "e77621a59bb1f77bcea436c0dc9f85bf4122c35799fdeecb6eecd8560ca3854d",
+  "known_processes": [
+    {
+      "pid": 4138043,
+      "ppid": 4138042,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17431065,
+      "state": "S"
+    },
+    {
+      "pid": 4138044,
+      "ppid": 4138043,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17431065,
+      "state": "S"
+    },
+    {
+      "pid": 4138048,
+      "ppid": 4138047,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17431065,
+      "state": "S"
+    },
+    {
+      "pid": 4138063,
+      "ppid": 4138048,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17431109,
+      "state": "S"
+    },
+    {
+      "pid": 4138047,
+      "ppid": 4138044,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17431065,
+      "state": "S"
+    },
+    {
+      "pid": 4138093,
+      "ppid": 4138048,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17431364,
+      "state": "S"
+    },
+    {
+      "pid": 4138146,
+      "ppid": 4138048,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17431416,
+      "state": "S"
+    },
+    {
+      "pid": 4138152,
+      "ppid": 4138044,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17431426,
+      "state": "S"
+    },
+    {
+      "pid": 4138153,
+      "ppid": 4138152,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17431426,
+      "state": "S"
+    },
+    {
+      "pid": 4138171,
+      "ppid": 4138153,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17431430,
+      "state": "R"
+    },
+    {
+      "pid": 4138213,
+      "ppid": 4138205,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17431569,
+      "state": "S"
+    },
+    {
+      "pid": 4138187,
+      "ppid": 4138044,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17431540,
+      "state": "S"
+    },
+    {
+      "pid": 4138188,
+      "ppid": 4138187,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17431540,
+      "state": "S"
+    },
+    {
+      "pid": 4138205,
+      "ppid": 4138188,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17431543,
+      "state": "S"
+    },
+    {
+      "pid": 4138241,
+      "ppid": 4138205,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17431772,
+      "state": "R"
+    },
+    {
+      "pid": 4138265,
+      "ppid": 4138205,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17431821,
+      "state": "S"
+    },
+    {
+      "pid": 4138283,
+      "ppid": 4138205,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17431857,
+      "state": "S"
+    },
+    {
+      "pid": 4138319,
+      "ppid": 4138205,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17431923,
+      "state": "S"
+    },
+    {
+      "pid": 4138357,
+      "ppid": 4138205,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17431966,
+      "state": "S"
+    },
+    {
+      "pid": 4138363,
+      "ppid": 4138205,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17431979,
+      "state": "S"
+    },
+    {
+      "pid": 4138416,
+      "ppid": 4138205,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17432273,
+      "state": "S"
+    },
+    {
+      "pid": 4138440,
+      "ppid": 4138205,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17432316,
+      "state": "S"
+    },
+    {
+      "pid": 4138458,
+      "ppid": 4138205,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17432373,
+      "state": "Z"
+    },
+    {
+      "pid": 4138494,
+      "ppid": 4138205,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17432421,
+      "state": "S"
+    },
+    {
+      "pid": 4138519,
+      "ppid": 4138205,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17432468,
+      "state": "S"
+    },
+    {
+      "pid": 4138535,
+      "ppid": 4138524,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17432491,
+      "state": "S"
+    },
+    {
+      "pid": 4138552,
+      "ppid": 4138535,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17432494,
+      "state": "S"
+    },
+    {
+      "pid": 4138524,
+      "ppid": 4138044,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17432488,
+      "state": "S"
+    },
+    {
+      "pid": 4138558,
+      "ppid": 4138552,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17432519,
+      "state": "S"
+    },
+    {
+      "pid": 4138600,
+      "ppid": 4138590,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17432748,
+      "state": "S"
+    },
+    {
+      "pid": 4138637,
+      "ppid": 4138600,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17432766,
+      "state": "S"
+    },
+    {
+      "pid": 4138638,
+      "ppid": 4138637,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17432766,
+      "state": "S"
+    },
+    {
+      "pid": 4138639,
+      "ppid": 4138638,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17432766,
+      "state": "S"
+    },
+    {
+      "pid": 4138641,
+      "ppid": 4138600,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17432771,
+      "state": "R"
+    },
+    {
+      "pid": 4138590,
+      "ppid": 4138044,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17432745,
+      "state": "S"
+    },
+    {
+      "pid": 4138654,
+      "ppid": 4138044,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17432881,
+      "state": "S"
+    },
+    {
+      "pid": 4138655,
+      "ppid": 4138654,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17432881,
+      "state": "R"
+    },
+    {
+      "pid": 4138707,
+      "ppid": 4138044,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17432903,
+      "state": "S"
+    },
+    {
+      "pid": 4138708,
+      "ppid": 4138707,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17432903,
+      "state": "S"
+    },
+    {
+      "pid": 4138719,
+      "ppid": 4138708,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17432928,
+      "state": "S"
+    },
+    {
+      "pid": 4138989,
+      "ppid": 4138708,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17433121,
+      "state": "S"
+    },
+    {
+      "pid": 4139060,
+      "ppid": 4138708,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17433141,
+      "state": "S"
+    },
+    {
+      "pid": 4139076,
+      "ppid": 4138708,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17433262,
+      "state": "S"
+    },
+    {
+      "pid": 4139111,
+      "ppid": 4139076,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17433282,
+      "state": "S"
+    },
+    {
+      "pid": 4139112,
+      "ppid": 4139111,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17433283,
+      "state": "S"
+    },
+    {
+      "pid": 4139113,
+      "ppid": 4139112,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17433283,
+      "state": "R"
+    },
+    {
+      "pid": 4139155,
+      "ppid": 4138708,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17433826,
+      "state": "S"
+    },
+    {
+      "pid": 4139375,
+      "ppid": 4139155,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17433851,
+      "state": "S"
+    },
+    {
+      "pid": 4139376,
+      "ppid": 4139375,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17433852,
+      "state": "S"
+    },
+    {
+      "pid": 4139377,
+      "ppid": 4139376,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17433852,
+      "state": "R"
+    },
+    {
+      "pid": 4139529,
+      "ppid": 4139408,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17434653,
+      "state": "S"
+    },
+    {
+      "pid": 4139530,
+      "ppid": 4139529,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17434653,
+      "state": "S"
+    },
+    {
+      "pid": 4139408,
+      "ppid": 4138708,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17434615,
+      "state": "S"
+    },
+    {
+      "pid": 4139531,
+      "ppid": 4139530,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17434653,
+      "state": "R"
+    },
+    {
+      "pid": 4139754,
+      "ppid": 4139678,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17435390,
+      "state": "S"
+    },
+    {
+      "pid": 4139755,
+      "ppid": 4139754,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17435391,
+      "state": "S"
+    },
+    {
+      "pid": 4139756,
+      "ppid": 4139755,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17435391,
+      "state": "R"
+    },
+    {
+      "pid": 4139678,
+      "ppid": 4138708,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17435371,
+      "state": "S"
+    },
+    {
+      "pid": 4139814,
+      "ppid": 4139789,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17435857,
+      "state": "S"
+    },
+    {
+      "pid": 4139815,
+      "ppid": 4139814,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17435857,
+      "state": "S"
+    },
+    {
+      "pid": 4139816,
+      "ppid": 4139815,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17435857,
+      "state": "R"
+    },
+    {
+      "pid": 4139789,
+      "ppid": 4138708,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17435853,
+      "state": "S"
+    },
+    {
+      "pid": 4139818,
+      "ppid": 4138708,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17435897,
+      "state": "S"
+    },
+    {
+      "pid": 4140003,
+      "ppid": 4139818,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17435919,
+      "state": "S"
+    },
+    {
+      "pid": 4140004,
+      "ppid": 4140003,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17435919,
+      "state": "S"
+    },
+    {
+      "pid": 4140005,
+      "ppid": 4140004,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17435920,
+      "state": "R"
+    },
+    {
+      "pid": 4140055,
+      "ppid": 4138708,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17436458,
+      "state": "S"
+    },
+    {
+      "pid": 4140109,
+      "ppid": 4140055,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17436487,
+      "state": "S"
+    },
+    {
+      "pid": 4140110,
+      "ppid": 4140109,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17436488,
+      "state": "S"
+    },
+    {
+      "pid": 4140111,
+      "ppid": 4140110,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17436488,
+      "state": "R"
+    },
+    {
+      "pid": 4140296,
+      "ppid": 4140269,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17436945,
+      "state": "S"
+    },
+    {
+      "pid": 4140297,
+      "ppid": 4140296,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17436945,
+      "state": "S"
+    },
+    {
+      "pid": 4140298,
+      "ppid": 4140297,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17436945,
+      "state": "D"
+    },
+    {
+      "pid": 4140269,
+      "ppid": 4138708,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17436935,
+      "state": "S"
+    },
+    {
+      "pid": 4140357,
+      "ppid": 4138708,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17437021,
+      "state": "S"
+    },
+    {
+      "pid": 4140491,
+      "ppid": 4138708,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17437078,
+      "state": "S"
+    },
+    {
+      "pid": 4140573,
+      "ppid": 4140572,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17437097,
+      "state": "S"
+    },
+    {
+      "pid": 4140572,
+      "ppid": 4140491,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17437096,
+      "state": "S"
+    },
+    {
+      "pid": 4140574,
+      "ppid": 4140573,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17437097,
+      "state": "R"
+    },
+    {
+      "pid": 4140739,
+      "ppid": 4138708,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17437663,
+      "state": "S"
+    },
+    {
+      "pid": 4141045,
+      "ppid": 4140739,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17437912,
+      "state": "S"
+    },
+    {
+      "pid": 4141046,
+      "ppid": 4141045,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17437912,
+      "state": "S"
+    },
+    {
+      "pid": 4141047,
+      "ppid": 4141046,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17437912,
+      "state": "R"
+    },
+    {
+      "pid": 4141379,
+      "ppid": 4141286,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17438719,
+      "state": "S"
+    },
+    {
+      "pid": 4141380,
+      "ppid": 4141379,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17438719,
+      "state": "S"
+    },
+    {
+      "pid": 4141381,
+      "ppid": 4141380,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17438719,
+      "state": "R"
+    },
+    {
+      "pid": 4141286,
+      "ppid": 4138708,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17438691,
+      "state": "S"
+    },
+    {
+      "pid": 4141545,
+      "ppid": 4138708,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17439294,
+      "state": "S"
+    },
+    {
+      "pid": 4141600,
+      "ppid": 4141599,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17439334,
+      "state": "S"
+    },
+    {
+      "pid": 4141601,
+      "ppid": 4141600,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17439334,
+      "state": "R"
+    },
+    {
+      "pid": 4141576,
+      "ppid": 4138708,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17439321,
+      "state": "S"
+    },
+    {
+      "pid": 4141599,
+      "ppid": 4141576,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17439334,
+      "state": "S"
+    },
+    {
+      "pid": 4141714,
+      "ppid": 4138708,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17439919,
+      "state": "S"
+    },
+    {
+      "pid": 4141806,
+      "ppid": 4141714,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17439944,
+      "state": "S"
+    },
+    {
+      "pid": 4141807,
+      "ppid": 4141806,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17439944,
+      "state": "S"
+    },
+    {
+      "pid": 4141808,
+      "ppid": 4141807,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17439944,
+      "state": "R"
+    },
+    {
+      "pid": 4141911,
+      "ppid": 4138708,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17440438,
+      "state": "S"
+    },
+    {
+      "pid": 4142112,
+      "ppid": 4141911,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17440464,
+      "state": "S"
+    },
+    {
+      "pid": 4142113,
+      "ppid": 4142112,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17440465,
+      "state": "S"
+    },
+    {
+      "pid": 4142114,
+      "ppid": 4142113,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17440465,
+      "state": "R"
+    },
+    {
+      "pid": 4142251,
+      "ppid": 4138708,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17441207,
+      "state": "S"
+    },
+    {
+      "pid": 4142429,
+      "ppid": 4142251,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17441238,
+      "state": "S"
+    },
+    {
+      "pid": 4142430,
+      "ppid": 4142429,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17441239,
+      "state": "S"
+    },
+    {
+      "pid": 4142431,
+      "ppid": 4142430,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17441239,
+      "state": "D"
+    },
+    {
+      "pid": 4142442,
+      "ppid": 4138708,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17441786,
+      "state": "S"
+    },
+    {
+      "pid": 4142509,
+      "ppid": 4142442,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17441808,
+      "state": "S"
+    },
+    {
+      "pid": 4142510,
+      "ppid": 4142509,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17441808,
+      "state": "S"
+    },
+    {
+      "pid": 4142511,
+      "ppid": 4142510,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17441808,
+      "state": "D"
+    },
+    {
+      "pid": 4142624,
+      "ppid": 4142543,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17442705,
+      "state": "S"
+    },
+    {
+      "pid": 4142543,
+      "ppid": 4138708,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17442687,
+      "state": "S"
+    },
+    {
+      "pid": 4142625,
+      "ppid": 4142624,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17442708,
+      "state": "S"
+    },
+    {
+      "pid": 4142626,
+      "ppid": 4142625,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17442708,
+      "state": "R"
+    },
+    {
+      "pid": 4142688,
+      "ppid": 4138708,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17443009,
+      "state": "S"
+    },
+    {
+      "pid": 4142722,
+      "ppid": 4138708,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17443363,
+      "state": "S"
+    },
+    {
+      "pid": 4142778,
+      "ppid": 4138708,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17443397,
+      "state": "S"
+    },
+    {
+      "pid": 4143081,
+      "ppid": 4138708,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17443440,
+      "state": "S"
+    },
+    {
+      "pid": 4151064,
+      "ppid": 4138708,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17444217,
+      "state": "S"
+    },
+    {
+      "pid": 4151504,
+      "ppid": 4138708,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17444245,
+      "state": "S"
+    },
+    {
+      "pid": 4152144,
+      "ppid": 4138708,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17444288,
+      "state": "R"
+    },
+    {
+      "pid": 4153049,
+      "ppid": 4138708,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17444756,
+      "state": "S"
+    },
+    {
+      "pid": 4153293,
+      "ppid": 4138708,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17444872,
+      "state": "S"
+    },
+    {
+      "pid": 4153489,
+      "ppid": 4138708,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17445048,
+      "state": "S"
+    },
+    {
+      "pid": 4155135,
+      "ppid": 4138708,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17445119,
+      "state": "S"
+    },
+    {
+      "pid": 4156994,
+      "ppid": 4138708,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17445284,
+      "state": "S"
+    },
+    {
+      "pid": 4157581,
+      "ppid": 4138708,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17445337,
+      "state": "R"
+    },
+    {
+      "pid": 4157776,
+      "ppid": 4138708,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17445381,
+      "state": "S"
+    },
+    {
+      "pid": 4157931,
+      "ppid": 4138708,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17445392,
+      "state": "S"
+    },
+    {
+      "pid": 4159449,
+      "ppid": 4138044,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17445537,
+      "state": "S"
+    },
+    {
+      "pid": 4159450,
+      "ppid": 4159449,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17445537,
+      "state": "S"
+    },
+    {
+      "pid": 4159462,
+      "ppid": 4159450,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17445584,
+      "state": "S"
+    },
+    {
+      "pid": 4159727,
+      "ppid": 4159450,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17446121,
+      "state": "S"
+    },
+    {
+      "pid": 4159895,
+      "ppid": 4159450,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17446193,
+      "state": "S"
+    },
+    {
+      "pid": 4159978,
+      "ppid": 4159450,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17446247,
+      "state": "R"
+    },
+    {
+      "pid": 4159981,
+      "ppid": 4159450,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17446256,
+      "state": "S"
+    },
+    {
+      "pid": 4160333,
+      "ppid": 4159450,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17446642,
+      "state": "S"
+    },
+    {
+      "pid": 4160538,
+      "ppid": 4159450,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17446809,
+      "state": "S"
+    },
+    {
+      "pid": 4160665,
+      "ppid": 4159450,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17446975,
+      "state": "S"
+    },
+    {
+      "pid": 4160805,
+      "ppid": 4159450,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17447110,
+      "state": "S"
+    },
+    {
+      "pid": 4160888,
+      "ppid": 4159450,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17447180,
+      "state": "S"
+    },
+    {
+      "pid": 4161187,
+      "ppid": 4159450,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17447785,
+      "state": "S"
+    },
+    {
+      "pid": 4161290,
+      "ppid": 4159450,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17447852,
+      "state": "S"
+    },
+    {
+      "pid": 4161392,
+      "ppid": 4159450,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17447935,
+      "state": "S"
+    },
+    {
+      "pid": 4161719,
+      "ppid": 4159450,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17449417,
+      "state": "S"
+    },
+    {
+      "pid": 4161889,
+      "ppid": 4161719,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17449499,
+      "state": "S"
+    },
+    {
+      "pid": 4161890,
+      "ppid": 4161889,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17449500,
+      "state": "S"
+    },
+    {
+      "pid": 4161891,
+      "ppid": 4161890,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17449500,
+      "state": "R"
+    },
+    {
+      "pid": 4161900,
+      "ppid": 4159450,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17449585,
+      "state": "S"
+    },
+    {
+      "pid": 4161966,
+      "ppid": 4161900,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17449642,
+      "state": "S"
+    },
+    {
+      "pid": 4161967,
+      "ppid": 4161966,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17449643,
+      "state": "S"
+    },
+    {
+      "pid": 4161968,
+      "ppid": 4161967,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17449643,
+      "state": "R"
+    },
+    {
+      "pid": 4162020,
+      "ppid": 4159450,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17450594,
+      "state": "S"
+    },
+    {
+      "pid": 4162112,
+      "ppid": 4162111,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17450687,
+      "state": "R"
+    },
+    {
+      "pid": 4162110,
+      "ppid": 4162020,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17450687,
+      "state": "S"
+    },
+    {
+      "pid": 4162111,
+      "ppid": 4162110,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17450687,
+      "state": "S"
+    },
+    {
+      "pid": 4162124,
+      "ppid": 4159450,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17451400,
+      "state": "S"
+    },
+    {
+      "pid": 4162163,
+      "ppid": 4162124,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17451422,
+      "state": "S"
+    },
+    {
+      "pid": 4162164,
+      "ppid": 4162163,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17451422,
+      "state": "S"
+    },
+    {
+      "pid": 4162165,
+      "ppid": 4162164,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17451422,
+      "state": "R"
+    },
+    {
+      "pid": 4162233,
+      "ppid": 4162232,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17451580,
+      "state": "S"
+    },
+    {
+      "pid": 4162167,
+      "ppid": 4159450,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17451552,
+      "state": "S"
+    },
+    {
+      "pid": 4162232,
+      "ppid": 4162167,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17451579,
+      "state": "S"
+    },
+    {
+      "pid": 4162234,
+      "ppid": 4162233,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17451580,
+      "state": "R"
+    },
+    {
+      "pid": 4162237,
+      "ppid": 4159450,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17451608,
+      "state": "S"
+    },
+    {
+      "pid": 4162464,
+      "ppid": 4162463,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17451786,
+      "state": "R"
+    },
+    {
+      "pid": 4162462,
+      "ppid": 4162237,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17451786,
+      "state": "S"
+    },
+    {
+      "pid": 4162463,
+      "ppid": 4162462,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17451786,
+      "state": "S"
+    },
+    {
+      "pid": 4162477,
+      "ppid": 4159450,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17452339,
+      "state": "S"
+    },
+    {
+      "pid": 4162536,
+      "ppid": 4162477,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17452375,
+      "state": "S"
+    },
+    {
+      "pid": 4162537,
+      "ppid": 4162536,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17452376,
+      "state": "S"
+    },
+    {
+      "pid": 4162538,
+      "ppid": 4162537,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17452376,
+      "state": "R"
+    },
+    {
+      "pid": 4162591,
+      "ppid": 4159450,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17452487,
+      "state": "S"
+    },
+    {
+      "pid": 4162784,
+      "ppid": 4162783,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17452618,
+      "state": "S"
+    },
+    {
+      "pid": 4162785,
+      "ppid": 4162784,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17452618,
+      "state": "R"
+    },
+    {
+      "pid": 4162783,
+      "ppid": 4162591,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17452617,
+      "state": "S"
+    },
+    {
+      "pid": 4162933,
+      "ppid": 4159450,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17453570,
+      "state": "S"
+    },
+    {
+      "pid": 4163203,
+      "ppid": 4162933,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17453841,
+      "state": "S"
+    },
+    {
+      "pid": 4163204,
+      "ppid": 4163203,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17453842,
+      "state": "S"
+    },
+    {
+      "pid": 4163205,
+      "ppid": 4163204,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17453842,
+      "state": "R"
+    },
+    {
+      "pid": 4163381,
+      "ppid": 4159450,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17454658,
+      "state": "S"
+    },
+    {
+      "pid": 4163592,
+      "ppid": 4163381,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17454785,
+      "state": "S"
+    },
+    {
+      "pid": 4163593,
+      "ppid": 4163592,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17454786,
+      "state": "S"
+    },
+    {
+      "pid": 4163594,
+      "ppid": 4163593,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17454786,
+      "state": "R"
+    },
+    {
+      "pid": 4163668,
+      "ppid": 4159450,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17455374,
+      "state": "S"
+    },
+    {
+      "pid": 4163912,
+      "ppid": 4163668,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17455533,
+      "state": "S"
+    },
+    {
+      "pid": 4163913,
+      "ppid": 4163912,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17455534,
+      "state": "S"
+    },
+    {
+      "pid": 4163914,
+      "ppid": 4163913,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17455534,
+      "state": "R"
+    },
+    {
+      "pid": 4163924,
+      "ppid": 4159450,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17456148,
+      "state": "S"
+    },
+    {
+      "pid": 4163955,
+      "ppid": 4163924,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17456176,
+      "state": "S"
+    },
+    {
+      "pid": 4163956,
+      "ppid": 4163955,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17456176,
+      "state": "S"
+    },
+    {
+      "pid": 4163957,
+      "ppid": 4163956,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17456176,
+      "state": "R"
+    },
+    {
+      "pid": 4164010,
+      "ppid": 4159450,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17456452,
+      "state": "S"
+    },
+    {
+      "pid": 4164040,
+      "ppid": 4164010,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17456484,
+      "state": "S"
+    },
+    {
+      "pid": 4164041,
+      "ppid": 4164040,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17456485,
+      "state": "S"
+    },
+    {
+      "pid": 4164042,
+      "ppid": 4164041,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17456485,
+      "state": "R"
+    },
+    {
+      "pid": 4164087,
+      "ppid": 4159450,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17456915,
+      "state": "S"
+    },
+    {
+      "pid": 4164139,
+      "ppid": 4164087,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17456951,
+      "state": "S"
+    },
+    {
+      "pid": 4164140,
+      "ppid": 4164139,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17456951,
+      "state": "S"
+    },
+    {
+      "pid": 4164141,
+      "ppid": 4164140,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17456951,
+      "state": "D"
+    },
+    {
+      "pid": 4164314,
+      "ppid": 4159450,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17457787,
+      "state": "R"
+    },
+    {
+      "pid": 4164342,
+      "ppid": 4159450,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17457792,
+      "state": "S"
+    },
+    {
+      "pid": 4164543,
+      "ppid": 4159450,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17457841,
+      "state": "S"
+    },
+    {
+      "pid": 4165048,
+      "ppid": 4159450,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17457931,
+      "state": "S"
+    },
+    {
+      "pid": 4165356,
+      "ppid": 4165355,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17457999,
+      "state": "S"
+    },
+    {
+      "pid": 4165355,
+      "ppid": 4138044,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17457999,
+      "state": "S"
+    },
+    {
+      "pid": 4165377,
+      "ppid": 4165356,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17458090,
+      "state": "R"
+    },
+    {
+      "pid": 4165506,
+      "ppid": 4165356,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17458544,
+      "state": "S"
+    },
+    {
+      "pid": 4165638,
+      "ppid": 4138044,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17458581,
+      "state": "S"
+    },
+    {
+      "pid": 4165639,
+      "ppid": 4165638,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17458581,
+      "state": "R"
+    },
+    {
+      "pid": 4165651,
+      "ppid": 4165639,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17458638,
+      "state": "S"
+    },
+    {
+      "pid": 4166051,
+      "ppid": 4165639,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17459168,
+      "state": "S"
+    },
+    {
+      "pid": 4166214,
+      "ppid": 4165639,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17459246,
+      "state": "S"
+    },
+    {
+      "pid": 4166307,
+      "ppid": 4166214,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17459274,
+      "state": "S"
+    },
+    {
+      "pid": 4166308,
+      "ppid": 4166307,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17459274,
+      "state": "S"
+    },
+    {
+      "pid": 4166309,
+      "ppid": 4166308,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17459274,
+      "state": "R"
+    },
+    {
+      "pid": 4166316,
+      "ppid": 4165639,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17459319,
+      "state": "S"
+    },
+    {
+      "pid": 4166766,
+      "ppid": 4165639,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17459892,
+      "state": "S"
+    },
+    {
+      "pid": 4166994,
+      "ppid": 4165639,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17460063,
+      "state": "S"
+    },
+    {
+      "pid": 4167148,
+      "ppid": 4165639,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17460233,
+      "state": "S"
+    },
+    {
+      "pid": 4167309,
+      "ppid": 4165639,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17460372,
+      "state": "S"
+    },
+    {
+      "pid": 4167402,
+      "ppid": 4165639,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17460443,
+      "state": "S"
+    },
+    {
+      "pid": 4167751,
+      "ppid": 4165639,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17461060,
+      "state": "S"
+    },
+    {
+      "pid": 4167856,
+      "ppid": 4165639,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17461145,
+      "state": "S"
+    },
+    {
+      "pid": 4167972,
+      "ppid": 4165639,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17461231,
+      "state": "S"
+    },
+    {
+      "pid": 4168500,
+      "ppid": 4165639,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17462448,
+      "state": "S"
+    },
+    {
+      "pid": 4168672,
+      "ppid": 4168500,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17462614,
+      "state": "S"
+    },
+    {
+      "pid": 4168679,
+      "ppid": 4168672,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17462615,
+      "state": "S"
+    },
+    {
+      "pid": 4168688,
+      "ppid": 4168679,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17462615,
+      "state": "R"
+    },
+    {
+      "pid": 4168956,
+      "ppid": 4168955,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17463415,
+      "state": "R"
+    },
+    {
+      "pid": 4168955,
+      "ppid": 4138044,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17463415,
+      "state": "S"
+    },
+    {
+      "pid": 4169096,
+      "ppid": 4138044,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17463505,
+      "state": "S"
+    },
+    {
+      "pid": 4169097,
+      "ppid": 4169096,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17463505,
+      "state": "S"
+    },
+    {
+      "pid": 4169108,
+      "ppid": 4169097,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17463520,
+      "state": "S"
+    },
+    {
+      "pid": 4169207,
+      "ppid": 4169108,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17463551,
+      "state": "S"
+    },
+    {
+      "pid": 4169208,
+      "ppid": 4169207,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17463552,
+      "state": "S"
+    },
+    {
+      "pid": 4169209,
+      "ppid": 4169208,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17463552,
+      "state": "R"
+    },
+    {
+      "pid": 4169215,
+      "ppid": 4169097,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17463592,
+      "state": "S"
+    },
+    {
+      "pid": 4169519,
+      "ppid": 4169097,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17463959,
+      "state": "S"
+    },
+    {
+      "pid": 4169645,
+      "ppid": 4169097,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17464115,
+      "state": "S"
+    },
+    {
+      "pid": 4169749,
+      "ppid": 4169097,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17464186,
+      "state": "S"
+    },
+    {
+      "pid": 4170071,
+      "ppid": 4169097,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17465534,
+      "state": "S"
+    },
+    {
+      "pid": 4170139,
+      "ppid": 4170138,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17465606,
+      "state": "S"
+    },
+    {
+      "pid": 4170140,
+      "ppid": 4170139,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17465606,
+      "state": "R"
+    },
+    {
+      "pid": 4170138,
+      "ppid": 4170071,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17465605,
+      "state": "S"
+    },
+    {
+      "pid": 4170186,
+      "ppid": 4169097,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17466570,
+      "state": "S"
+    },
+    {
+      "pid": 4170385,
+      "ppid": 4170186,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17466735,
+      "state": "S"
+    },
+    {
+      "pid": 4170386,
+      "ppid": 4170385,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17466735,
+      "state": "S"
+    },
+    {
+      "pid": 4170387,
+      "ppid": 4170386,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17466735,
+      "state": "R"
+    },
+    {
+      "pid": 4170616,
+      "ppid": 4138044,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17467666,
+      "state": "S"
+    },
+    {
+      "pid": 4170617,
+      "ppid": 4170616,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17467666,
+      "state": "S"
+    },
+    {
+      "pid": 4170628,
+      "ppid": 4170617,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17467687,
+      "state": "S"
+    },
+    {
+      "pid": 4170899,
+      "ppid": 4170617,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17468073,
+      "state": "S"
+    },
+    {
+      "pid": 4171025,
+      "ppid": 4170617,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17468231,
+      "state": "S"
+    },
+    {
+      "pid": 4171131,
+      "ppid": 4170617,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17468299,
+      "state": "S"
+    },
+    {
+      "pid": 4171475,
+      "ppid": 4170617,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17469534,
+      "state": "S"
+    },
+    {
+      "pid": 4171662,
+      "ppid": 4171475,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17469672,
+      "state": "S"
+    },
+    {
+      "pid": 4171663,
+      "ppid": 4171662,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17469673,
+      "state": "S"
+    },
+    {
+      "pid": 4171664,
+      "ppid": 4171663,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17469673,
+      "state": "R"
+    },
+    {
+      "pid": 4171688,
+      "ppid": 4170617,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17470362,
+      "state": "S"
+    },
+    {
+      "pid": 4171811,
+      "ppid": 4171688,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17470446,
+      "state": "S"
+    },
+    {
+      "pid": 4171812,
+      "ppid": 4171811,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17470446,
+      "state": "S"
+    },
+    {
+      "pid": 4171813,
+      "ppid": 4171812,
+      "pgid": 4138043,
+      "session_id": 4138043,
+      "start_ticks": 17470446,
+      "state": "R"
+    }
+  ],
+  "owned_processes_still_alive": [],
+  "child_process_group_absent": true,
+  "phase_observations_sha256": "477679f8027d9d7b0f2b110e00866ccbe628c9d7459594f4c3753ef47882284e",
+  "lease_released": false,
+  "source_publication_executed": false,
+  "original_live_border_opacity_acceptance": "PENDING; opacity cause UNKNOWN; native HWND reuse UNEXECUTED"
+}

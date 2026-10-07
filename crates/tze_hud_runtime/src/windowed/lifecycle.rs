@@ -30,8 +30,9 @@ use super::input_dispatch::{
 };
 use super::keyboard::ComposerDeliveryContext;
 use super::portal::{
-    DragReleasedData, PortalResizePointerOutcome, apply_drag_handle_pointer_event,
-    apply_portal_resize_pointer_event,
+    DragReleasedData, PortalResizePointerOutcome, PrimaryDragGesture,
+    apply_drag_handle_pointer_event, apply_portal_resize_pointer_event, drag_feedback_target,
+    reconcile_drag_feedback,
 };
 use super::{WindowedBenchmarkConfig, WindowedQuiescentEfficiencyConfig, WinitApp};
 
@@ -1592,6 +1593,27 @@ impl WinitApp {
     /// - Inside a hit-region → `set_cursor_hittest(true)` (window captures events).
     /// - Outside all hit-regions → `set_cursor_hittest(false)` (events pass through).
     pub(super) fn enqueue_pointer_event(&mut self, kind: PointerEventKind) {
+        // Settle the old terminal before admitting any newer drag. If the lock
+        // is still busy, retain the original Up instead of retargeting it to a
+        // new Down or moving the already-released gesture.
+        if self
+            .state
+            .primary_drag_gesture
+            .as_ref()
+            .is_some_and(|gesture| gesture.terminal.is_some())
+        {
+            self.drain_pending_drag_terminal();
+            if self
+                .state
+                .primary_drag_gesture
+                .as_ref()
+                .is_some_and(|gesture| gesture.terminal.is_some())
+            {
+                self.schedule_shared_scene_availability_wake();
+                return;
+            }
+        }
+        let original_window_is_live = self.primary_drag_window_is_live();
         self.refresh_widget_hover_tracking();
         let x = self.state.cursor_x;
         let y = self.state.cursor_y;
@@ -1654,6 +1676,7 @@ impl WinitApp {
         // compositor (which renders caret/selection from the local echo slot,
         // not the input processor) without a borrow conflict (hud-etrs0).
         let mut composer_selection_changed = false;
+        let mut pointer_processed = false;
         // Interactive gestures require guaranteed same-frame local feedback
         // (local-feedback-first).  For those events, acquire the locks with a
         // bounded spin instead of a single `try_lock`, so a contended scene lock
@@ -1726,6 +1749,7 @@ impl WinitApp {
                 state.scene.try_lock().ok()
             };
             if let Some(mut scene) = scene_guard {
+                pointer_processed = true;
                 // ── Click-to-focus (Stage 2) ─────────────────────────────────
                 // Use process_with_focus on every pointer event so that a
                 // pointer-down on a focusable HitRegionNode transfers keyboard
@@ -2012,6 +2036,26 @@ impl WinitApp {
                 // long-press recognition (Cancelled).
                 let display_w = self.state.config.window.width as f32;
                 let display_h = self.state.config.window.height as f32;
+                if self
+                    .state
+                    .primary_drag_gesture
+                    .as_ref()
+                    .is_some_and(|gesture| {
+                        !original_window_is_live || !gesture.target_is_live(&scene)
+                    })
+                {
+                    if let Some(gesture) = self.state.primary_drag_gesture.take()
+                        && self
+                            .state
+                            .input_processor
+                            .drag_states
+                            .get(&0)
+                            .is_some_and(|drag| gesture.matches(drag))
+                    {
+                        self.state.input_processor.drag_states.remove(&0);
+                    }
+                    reconcile_drag_feedback(&self.state.input_processor, &mut scene);
+                }
                 drag_released = apply_drag_handle_pointer_event(
                     &mut self.state.input_processor,
                     &pointer_event,
@@ -2020,6 +2064,31 @@ impl WinitApp {
                     display_w,
                     display_h,
                 );
+                if pointer_event.kind == PointerEventKind::Down {
+                    self.state.primary_drag_gesture = self
+                        .state
+                        .input_processor
+                        .drag_states
+                        .get(&0)
+                        .and_then(|drag| {
+                            scene
+                                .tiles
+                                .get(&drag.element_id)
+                                .map(|tile| PrimaryDragGesture {
+                                    element_id: drag.element_id,
+                                    lease_id: tile.lease_id,
+                                    feedback_target: drag_feedback_target(&scene, drag.element_id),
+                                    interaction_id: drag.interaction_id.clone(),
+                                    press_start: drag.press_start,
+                                    window_id: self.state.press_window,
+                                    window_allocation: self
+                                        .primary_drag_window_allocation(self.state.press_window),
+                                    terminal: None,
+                                })
+                        });
+                } else if !self.state.input_processor.drag_states.contains_key(&0) {
+                    self.state.primary_drag_gesture = None;
+                }
 
                 // ── Pointer-affordance portal resize (§6b.1) ─────────────────
                 // Hit-test the focused portal's resize affordance strip on every
@@ -2089,6 +2158,14 @@ impl WinitApp {
         } else {
             drag_released = None;
             portal_resize_outcome = None;
+        }
+
+        if !pointer_processed
+            && pointer_event.kind == PointerEventKind::Up
+            && let Some(gesture) = self.state.primary_drag_gesture.as_mut()
+        {
+            gesture.terminal = Some(pointer_event);
+            self.schedule_shared_scene_availability_wake();
         }
 
         // ── Post-lock: persist geometry override after drag release ───────────

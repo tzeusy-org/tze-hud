@@ -1,0 +1,202 @@
+{
+  "schema": "hud-1wizi-source-final-comment-refreeze-postterminal/v1",
+  "producer_and_children_actual_absent": true,
+  "receipt_sha256": "506c6596b106839df5a38fa074105743367bb49e48c6e0f4a542c6e1be0ebc56",
+  "processes": [
+    {
+      "kind": "producer",
+      "pid": 4071974,
+      "pid_absent": true
+    },
+    {
+      "kind": "child",
+      "pid": 4071975,
+      "pgid": 4071975,
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "kind": "child",
+      "pid": 4071978,
+      "pgid": 4071978,
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "kind": "child",
+      "pid": 4071979,
+      "pgid": 4071979,
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "kind": "child",
+      "pid": 4071980,
+      "pgid": 4071980,
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "kind": "child",
+      "pid": 4071981,
+      "pgid": 4071981,
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "kind": "child",
+      "pid": 4071982,
+      "pgid": 4071982,
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "kind": "child",
+      "pid": 4071983,
+      "pgid": 4071983,
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "kind": "child",
+      "pid": 4071984,
+      "pgid": 4071984,
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "kind": "child",
+      "pid": 4071987,
+      "pgid": 4071987,
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "kind": "child",
+      "pid": 4071996,
+      "pgid": 4071996,
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "kind": "child",
+      "pid": 4071999,
+      "pgid": 4071999,
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "kind": "child",
+      "pid": 4072002,
+      "pgid": 4072002,
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "kind": "child",
+      "pid": 4072005,
+      "pgid": 4072005,
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "kind": "child",
+      "pid": 4072008,
+      "pgid": 4072008,
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "kind": "child",
+      "pid": 4072021,
+      "pgid": 4072021,
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "kind": "child",
+      "pid": 4072034,
+      "pgid": 4072034,
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "kind": "child",
+      "pid": 4072035,
+      "pgid": 4072035,
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "kind": "child",
+      "pid": 4072036,
+      "pgid": 4072036,
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "kind": "child",
+      "pid": 4072037,
+      "pgid": 4072037,
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "kind": "child",
+      "pid": 4072038,
+      "pgid": 4072038,
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "kind": "child",
+      "pid": 4072039,
+      "pgid": 4072039,
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "kind": "child",
+      "pid": 4072040,
+      "pgid": 4072040,
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "kind": "child",
+      "pid": 4072041,
+      "pgid": 4072041,
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "kind": "child",
+      "pid": 4072042,
+      "pgid": 4072042,
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "kind": "child",
+      "pid": 4072043,
+      "pgid": 4072043,
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "kind": "child",
+      "pid": 4072044,
+      "pgid": 4072044,
+      "pid_absent": true,
+      "pgid_absent": true
+    },
+    {
+      "kind": "inventory",
+      "pid": 4072047,
+      "pgid": 4072047,
+      "pid_absent": true,
+      "pgid_absent": true
+    }
+  ],
+  "cargo_tests_gpu_cache_host_executed": false
+}
