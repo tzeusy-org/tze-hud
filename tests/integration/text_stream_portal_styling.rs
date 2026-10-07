@@ -577,10 +577,25 @@ fn token_change_propagates_to_adapter_on_republish() {
         "token change must propagate to adapter on republish"
     );
 
-    // Blue channel must be dominant after #4A90D9
-    assert!(
-        cycle2_background.b > 0.7,
-        "cycle 2 transcript background must have high blue channel (#4A90D9)"
+    // Independent decoded #4A90D9 reference; the republished blue stays dominant.
+    for (actual, expected) in [
+        cycle2_background.r,
+        cycle2_background.g,
+        cycle2_background.b,
+    ]
+    .into_iter()
+    .zip([
+        0.06847816984440017_f64,
+        0.2788942634768104,
+        0.6938717612919899,
+    ]) {
+        assert!((f64::from(actual) - expected).abs() < 1e-6);
+    }
+    assert!(cycle2_background.b > cycle2_background.g);
+    assert!(cycle2_background.g > cycle2_background.r);
+    assert_eq!(
+        cycle2_background.a.to_bits(),
+        cycle2_part.transcript_background.a.to_bits(),
     );
 }
 
