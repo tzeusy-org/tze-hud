@@ -459,6 +459,34 @@ default_tab = true
             (text_color.b - 1.0).abs() < 1e-3,
             "subtitle text_color.b should be 1.0 for #FFFFFF"
         );
+        assert_eq!(subtitle.rendering_policy.transition_in_ms, Some(180));
+        assert_eq!(subtitle.rendering_policy.transition_out_ms, Some(120));
+        assert_eq!(
+            tze_hud_config::tokens::resolve_motion_duration_ms(
+                &result.global_tokens,
+                "motion.state.ms",
+            ),
+            100
+        );
+
+        // A selected theme and explicit override reach the actual startup producer.
+        let mut overridden = raw.clone();
+        let tokens = &mut overridden.design_tokens.as_mut().unwrap().0;
+        tokens.insert("theme".into(), "classic".into());
+        tokens.insert("motion.enter.ms".into(), "275".into());
+        tokens.insert("motion.state.ms".into(), "240".into());
+        let mut changed_scene = SceneGraph::new(1920.0, 1080.0);
+        let changed = run_scene_startup(&overridden, None, &mut changed_scene);
+        let policy = &changed_scene.zone_registry.zones["subtitle"].rendering_policy;
+        assert_eq!(policy.transition_in_ms, Some(275));
+        assert_eq!(policy.transition_out_ms, Some(100));
+        assert_eq!(
+            tze_hud_config::tokens::resolve_motion_duration_ms(
+                &changed.global_tokens,
+                "motion.state.ms",
+            ),
+            240
+        );
     }
 
     // ── Step 2.5: Config-declared tab bootstrap (hud-d5rcd) ───────────────────

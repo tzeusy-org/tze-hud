@@ -10,6 +10,7 @@ license.workspace = true
 dev-mode = ["tze_hud_telemetry/dev-mode"]
 
 [dependencies]
+tze_hud_config = { path = "../tze_hud_config", version = "0.1.0" }
 tze_hud_scene = { path = "../tze_hud_scene", version = "0.1.0" }
 tze_hud_resource = { path = "../tze_hud_resource", version = "0.1.0" }
 tze_hud_input = { path = "../tze_hud_input", version = "0.1.0" }
@@ -35,6 +36,7 @@ ab_glyph = { workspace = true }
 windows = { workspace = true }
 
 [dev-dependencies]
+tze_hud_mcp = { path = "../tze_hud_mcp", version = "0.1.0" }
 tze_hud_telemetry = { path = "../tze_hud_telemetry", version = "0.1.0", features = ["dev-mode"] }
 tze_hud_scene = { path = "../tze_hud_scene", version = "0.1.0", features = ["test-support"] }
 tokio = { workspace = true }

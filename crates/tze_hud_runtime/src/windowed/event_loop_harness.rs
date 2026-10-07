@@ -291,6 +291,10 @@ impl HeadlessEventLoopHarness {
 
         let (portal_op_tx, portal_op_rx) = tokio::sync::mpsc::unbounded_channel();
         let mcp_config = crate::mcp::McpServerConfig {
+            widget_transition_ms: tze_hud_config::tokens::resolve_motion_duration_ms(
+                &global_tokens,
+                "motion.state.ms",
+            ),
             bind_addrs: vec![SocketAddr::from(([127, 0, 0, 1], 0))],
             late_tailnet_port: None,
             agents: Arc::clone(&cfg.agents),

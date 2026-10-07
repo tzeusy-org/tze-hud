@@ -335,6 +335,10 @@ mod calibration {
         let portal_task = spawn_portal_driver(portal_rx);
         let shutdown = ShutdownToken::new();
         let config = McpServerConfig {
+            widget_transition_ms: tze_hud_config::tokens::resolve_motion_duration_ms(
+                &Default::default(),
+                "motion.state.ms",
+            ),
             bind_addrs: vec![SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0)],
             late_tailnet_port: None,
             agents: tze_hud_scene::config::AgentDirectory::unrestricted(PSK).shared(),

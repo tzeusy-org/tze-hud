@@ -3026,6 +3026,10 @@ impl WindowedRuntime {
             if let Some(ref rt) = network_rt {
                 // Same addresses as gRPC: loopback plus local Tailscale.
                 let mcp_config = McpServerConfig {
+                    widget_transition_ms: tze_hud_config::tokens::resolve_motion_duration_ms(
+                        &startup_compositor_tokens,
+                        "motion.state.ms",
+                    ),
                     bind_addrs: crate::net_addrs::listen_addrs(
                         &crate::net_addrs::local_ips(),
                         cfg.mcp_port,

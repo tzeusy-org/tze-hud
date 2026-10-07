@@ -157,6 +157,8 @@ pub(super) fn compute_fit_mode(
 ///
 /// Modeled after `WidgetAnimationState` in `crate::widget`.
 pub(crate) struct ZoneAnimationState {
+    /// Captured whole-zone direction curve; legacy/portal constructors are linear.
+    pub(crate) easing: super::easing::Easing,
     /// Wall-clock time when the transition started.
     pub(crate) transition_start: std::time::Instant,
     /// Duration of the transition in milliseconds.
@@ -171,6 +173,7 @@ impl ZoneAnimationState {
     /// Create a fade-in state (opacity 0 → 1) with the given duration.
     pub(crate) fn fade_in(duration_ms: u32) -> Self {
         Self {
+            easing: super::easing::Easing::Linear,
             transition_start: std::time::Instant::now(),
             duration_ms,
             from_opacity: 0.0,
@@ -191,6 +194,7 @@ impl ZoneAnimationState {
     /// opacity (not from zero)."
     pub(crate) fn fade_in_from(duration_ms: u32, from_opacity: f32) -> Self {
         Self {
+            easing: super::easing::Easing::Linear,
             transition_start: std::time::Instant::now(),
             duration_ms,
             from_opacity: from_opacity.clamp(0.0, 1.0),
@@ -201,6 +205,7 @@ impl ZoneAnimationState {
     /// Create a fade-out state (opacity 1 → 0) with the given duration.
     pub(crate) fn fade_out(duration_ms: u32) -> Self {
         Self {
+            easing: super::easing::Easing::Linear,
             transition_start: std::time::Instant::now(),
             duration_ms,
             from_opacity: 1.0,
@@ -230,22 +235,22 @@ impl ZoneAnimationState {
         self.from_opacity + (self.target_opacity - self.from_opacity) * t.clamp(0.0, 1.0)
     }
 
-    /// Compute the current interpolated opacity (linear).
+    /// Compute the current opacity using the captured whole-zone curve.
     ///
     /// Returns `target_opacity` once the transition has elapsed.
     pub(crate) fn current_opacity(&self) -> f32 {
         if self.duration_ms == 0 {
             return self.target_opacity;
         }
-        self.opacity_at(self.linear_progress())
+        self.opacity_at(self.easing.apply(self.linear_progress()))
     }
 
     /// Compute the current interpolated opacity with an easing curve applied.
     ///
     /// Used by the portal tile transition path (hud-bq0gl.10) so collapse/expand
     /// fades accelerate/decelerate instead of ramping linearly. Zone subtitle
-    /// fades keep [`current_opacity`](Self::current_opacity) (linear) so their
-    /// contention/timing behavior is unchanged.
+    /// fades use [`current_opacity`](Self::current_opacity) with their captured
+    /// theme curve. This explicit portal sampler applies its curve only once.
     pub(crate) fn current_opacity_eased(&self, easing: super::easing::Easing) -> f32 {
         if self.duration_ms == 0 {
             return self.target_opacity;
@@ -276,9 +281,9 @@ pub(crate) type PubKey = (u64, String);
 /// 1. Created when the compositor first sees the publication.  `fade_start` is
 ///    `None` (publication is fully visible at opacity 1.0).
 /// 2. When `first_seen.elapsed() >= ttl_ms`, the compositor sets
-///    `fade_start = Some(Instant::now())` to begin the 150 ms fade-out.
+///    `fade_start = Some(Instant::now())` to begin its captured fade-out.
 /// 3. While fading: `current_opacity()` interpolates from 1.0 → 0.0 over
-///    `NOTIFICATION_FADE_OUT_MS` ms.
+///    its selected exit duration and curve.
 /// 4. When `is_fade_complete()` returns `true`, the publication is removed
 ///    from `SceneGraph::zone_registry::active_publishes`.
 ///
@@ -297,22 +302,26 @@ pub(crate) struct PublicationAnimationState {
     /// Instant when the fade-out transition started.  `None` means the
     /// publication is still fully visible (TTL has not yet expired).
     pub(crate) fade_start: Option<std::time::Instant>,
-    /// Fade-out duration in milliseconds (always 150 for notifications).
+    /// Captured fade-out duration; authoritative expiry may clip a short TTL.
     pub(crate) fade_duration_ms: u32,
+    pub(crate) easing: super::easing::Easing,
 }
-
-/// Duration of the per-notification fade-out transition (ms).
-pub(crate) const NOTIFICATION_FADE_OUT_MS: u32 = 150;
 
 impl PublicationAnimationState {
     /// Create a new state for a freshly-seen publication.
-    pub(crate) fn new(ttl_ms: Option<u64>, source_expiry_us: Option<u64>) -> Self {
+    pub(crate) fn new(
+        ttl_ms: Option<u64>,
+        source_expiry_us: Option<u64>,
+        fade_duration_ms: u32,
+        easing: super::easing::Easing,
+    ) -> Self {
         Self {
             first_seen: std::time::Instant::now(),
             ttl_ms,
             source_expiry_us,
             fade_start: None,
-            fade_duration_ms: NOTIFICATION_FADE_OUT_MS,
+            fade_duration_ms,
+            easing,
         }
     }
 
@@ -333,13 +342,13 @@ impl PublicationAnimationState {
     /// Follow a changed record expiry (`hud_hold`): the fade delay counts from
     /// now, and a fade already under way is cancelled.
     pub(crate) fn retarget(&mut self, ttl_ms: Option<u64>, source_expiry_us: Option<u64>) {
-        *self = Self::new(ttl_ms, source_expiry_us);
+        *self = Self::new(ttl_ms, source_expiry_us, self.fade_duration_ms, self.easing);
     }
 
     /// Returns the current effective opacity for this publication (0.0–1.0).
     ///
     /// Before fade: 1.0.
-    /// During fade: linear interpolation from 1.0 → 0.0.
+    /// During fade: captured exit curve from 1.0 → 0.0.
     /// After fade: 0.0.
     pub(crate) fn current_opacity(&self) -> f32 {
         let Some(start) = self.fade_start else {
@@ -350,7 +359,7 @@ impl PublicationAnimationState {
         }
         let elapsed_ms = start.elapsed().as_millis() as f32;
         let t = (elapsed_ms / self.fade_duration_ms as f32).clamp(0.0, 1.0);
-        1.0 - t
+        1.0 - self.easing.apply(t)
     }
 
     /// Instant at which the fade-out will start, or `None` once it has (or
@@ -712,6 +721,17 @@ mod tests {
         assert!(
             eased_quarter < linear_quarter,
             "ease-in-out should lag linear in the first quarter: {eased_quarter} !< {linear_quarter}"
+        );
+        let seeded = ZoneAnimationState::fade_in_from(100, 0.4);
+        assert!((seeded.opacity_at(Easing::EaseOutQuad.apply(0.5)) - 0.85).abs() < EPS);
+        assert!((seeded.opacity_at(Easing::EaseInQuad.apply(0.5)) - 0.55).abs() < EPS);
+        let mut captured = ZoneAnimationState::fade_out(10_000);
+        captured.easing = Easing::EaseInQuad;
+        captured.transition_start = std::time::Instant::now() - std::time::Duration::from_secs(5);
+        assert!((captured.current_opacity() - 0.75).abs() < 0.01);
+        assert!(
+            (captured.current_opacity_eased(Easing::EaseOutQuad) - 0.25).abs() < 0.01,
+            "explicit portal sampler must not apply the captured curve twice"
         );
     }
 

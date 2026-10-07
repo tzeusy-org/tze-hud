@@ -549,6 +549,41 @@ mod tests {
             assert_ne!(classic[key], config[key]);
             assert_eq!(resolved[key], config[key]);
         }
+        for (theme, enter, exit) in [
+            ("tonal-glass", 180, 120),
+            ("classic", 150, 100),
+            ("blueprint", 200, 100),
+        ] {
+            let resolved = resolve_config_tokens(&tokens(&[("theme", theme)]));
+            let policy = crate::policy_builder::build_effective_policy(
+                "subtitle",
+                &tze_hud_scene::types::RenderingPolicy::default(),
+                &resolved,
+            );
+            assert_eq!(policy.transition_in_ms, Some(enter), "{theme}");
+            assert_eq!(policy.transition_out_ms, Some(exit), "{theme}");
+            assert_eq!(
+                crate::tokens::resolve_motion_duration_ms(&resolved, "motion.state.ms"),
+                100
+            );
+            let overridden = resolve_config_tokens(&tokens(&[
+                ("theme", theme),
+                ("motion.enter.ms", "275"),
+                ("motion.exit.ms", "0"),
+                ("motion.state.ms", "250"),
+            ]));
+            let policy = crate::policy_builder::build_effective_policy(
+                "subtitle",
+                &tze_hud_scene::types::RenderingPolicy::default(),
+                &overridden,
+            );
+            assert_eq!(policy.transition_in_ms, Some(275));
+            assert_eq!(policy.transition_out_ms, Some(0));
+            assert_eq!(
+                crate::tokens::resolve_motion_duration_ms(&overridden, "motion.state.ms"),
+                250
+            );
+        }
     }
 
     #[test]

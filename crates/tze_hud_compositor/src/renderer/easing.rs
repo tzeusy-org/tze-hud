@@ -19,7 +19,6 @@
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub(crate) enum Easing {
     /// Identity — `f(t) = t`. No acceleration; matches the legacy linear fades.
-    #[cfg(test)]
     Linear,
     /// Smoothstep `f(t) = 3t² − 2t³`: gentle acceleration then deceleration.
     /// The default for collapse/expand and tile fades — symmetric about `t=0.5`.
@@ -28,6 +27,8 @@ pub(crate) enum Easing {
     /// Quadratic ease-out `f(t) = 1 − (1 − t)²`: fast start, soft stop. Used for
     /// follow-tail catch-up so newly-arrived content settles gently.
     EaseOutQuad,
+    /// Quadratic ease-in `f(t) = t²`, the existing `accelerate` motion token.
+    EaseInQuad,
 }
 
 impl Easing {
@@ -38,13 +39,54 @@ impl Easing {
     pub(crate) fn apply(self, t: f32) -> f32 {
         let t = t.clamp(0.0, 1.0);
         match self {
-            #[cfg(test)]
             Easing::Linear => t,
             Easing::EaseInOut => t * t * (3.0 - 2.0 * t),
             Easing::EaseOutQuad => {
                 let inv = 1.0 - t;
                 1.0 - inv * inv
             }
+            Easing::EaseInQuad => t * t,
+        }
+    }
+}
+
+/// Zone-only motion parsed once when the compositor receives its startup map.
+/// In-flight states capture their curve; later maps affect only new transitions.
+pub(super) struct ZoneMotion {
+    pub(super) enter: Easing,
+    pub(super) exit: Easing,
+    pub(super) exit_ms: u32,
+}
+
+impl ZoneMotion {
+    pub(super) fn from_token_map(tokens: &std::collections::HashMap<String, String>) -> Self {
+        let curve = |key: &str| {
+            let parse = |value: &str| match value {
+                "linear" => Some(Easing::Linear),
+                "standard" => Some(Easing::EaseInOut),
+                "decelerate" => Some(Easing::EaseOutQuad),
+                "accelerate" => Some(Easing::EaseInQuad),
+                _ => None,
+            };
+            if let Some(value) = tokens.get(key) {
+                if let Some(curve) = parse(value) {
+                    return curve;
+                }
+                tracing::warn!(
+                    token_key = key,
+                    "invalid motion easing; using canonical default"
+                );
+            }
+            let canonical = tze_hud_config::tokens::CANONICAL_TOKENS
+                .iter()
+                .find(|token| token.key == key)
+                .expect("zone easing key must be canonical");
+            parse(canonical.default_value).expect("canonical zone easing must be valid")
+        };
+        Self {
+            enter: curve("motion.enter.easing"),
+            exit: curve("motion.exit.easing"),
+            exit_ms: tze_hud_config::tokens::resolve_motion_duration_ms(tokens, "motion.exit.ms"),
         }
     }
 }
@@ -223,7 +265,12 @@ mod tests {
 
     #[test]
     fn easing_fixed_endpoints() {
-        for e in [Easing::Linear, Easing::EaseInOut, Easing::EaseOutQuad] {
+        for e in [
+            Easing::Linear,
+            Easing::EaseInOut,
+            Easing::EaseOutQuad,
+            Easing::EaseInQuad,
+        ] {
             assert!((e.apply(0.0) - 0.0).abs() < EPS, "{e:?} f(0) != 0");
             assert!((e.apply(1.0) - 1.0).abs() < EPS, "{e:?} f(1) != 1");
         }
@@ -231,7 +278,12 @@ mod tests {
 
     #[test]
     fn easing_clamps_out_of_range() {
-        for e in [Easing::Linear, Easing::EaseInOut, Easing::EaseOutQuad] {
+        for e in [
+            Easing::Linear,
+            Easing::EaseInOut,
+            Easing::EaseOutQuad,
+            Easing::EaseInQuad,
+        ] {
             assert!(
                 (e.apply(-5.0) - 0.0).abs() < EPS,
                 "{e:?} below-0 not clamped"
@@ -259,11 +311,40 @@ mod tests {
         // Ease-out is ahead of linear in the first half (fast start).
         assert!(Easing::EaseOutQuad.apply(0.25) > 0.25);
         assert!((Easing::EaseOutQuad.apply(0.5) - 0.75).abs() < EPS);
+        assert!((Easing::EaseInQuad.apply(0.25) - 0.0625).abs() < EPS);
+        assert!((Easing::EaseInQuad.apply(0.5) - 0.25).abs() < EPS);
+        let profile = ZoneMotion::from_token_map(&std::collections::HashMap::from([
+            ("motion.enter.easing".into(), "decelerate".into()),
+            ("motion.exit.easing".into(), "accelerate".into()),
+            ("motion.exit.ms".into(), "240".into()),
+        ]));
+        assert_eq!(profile.enter, Easing::EaseOutQuad);
+        assert_eq!(profile.exit, Easing::EaseInQuad);
+        assert_eq!(profile.exit_ms, 240);
+        let fallback = ZoneMotion::from_token_map(&std::collections::HashMap::from([
+            ("motion.enter.easing".into(), "invalid".into()),
+            ("motion.exit.easing".into(), "invalid".into()),
+            ("motion.exit.ms".into(), "-10".into()),
+        ]));
+        assert_eq!(fallback.enter, Easing::EaseOutQuad);
+        assert_eq!(fallback.exit, Easing::EaseInQuad);
+        assert_eq!(fallback.exit_ms, 120);
+        let linear = ZoneMotion::from_token_map(&std::collections::HashMap::from([
+            ("motion.enter.easing".into(), "linear".into()),
+            ("motion.exit.easing".into(), "standard".into()),
+        ]));
+        assert_eq!(linear.enter, Easing::Linear);
+        assert_eq!(linear.exit, Easing::EaseInOut);
     }
 
     #[test]
     fn easing_is_monotonic_non_decreasing() {
-        for e in [Easing::Linear, Easing::EaseInOut, Easing::EaseOutQuad] {
+        for e in [
+            Easing::Linear,
+            Easing::EaseInOut,
+            Easing::EaseOutQuad,
+            Easing::EaseInQuad,
+        ] {
             let mut prev = e.apply(0.0);
             for i in 1..=100 {
                 let v = e.apply(i as f32 / 100.0);

@@ -94,6 +94,8 @@ pub struct ToolCtx<'a> {
     /// mutating verb is refused.
     pub safe_mode: &'a AtomicBool,
     pub agent: &'a AgentIdentity,
+    /// Server-owned implicit widget motion; never a model-visible parameter.
+    pub widget_transition_ms: u32,
 }
 
 /// The one error every mutating verb returns while the human has paused agents.
@@ -563,7 +565,15 @@ async fn publish_widget(ctx: &ToolCtx<'_>, widget: &str, p: PublishParams) -> Mc
     let ttl_ms = p.ttl_ms.unwrap_or(0);
     let expires = (ttl_ms > 0).then(|| now_us(&scene).saturating_add(ttl_ms * 1_000));
     scene
-        .publish_to_widget_for_lease(widget, typed, &ns, p.key, 0, expires, Some(lease_id))
+        .publish_to_widget_for_lease(
+            widget,
+            typed,
+            &ns,
+            p.key,
+            ctx.widget_transition_ms,
+            expires,
+            Some(lease_id),
+        )
         .map_err(|e| scene_error(&e))?;
     Ok(ok_with_expiry((ttl_ms > 0).then_some(ttl_ms)))
 }

@@ -2768,6 +2768,14 @@ mod tests {
             !windowed_frame_needs_render(false, false, false, false, false, false),
             "normal unchanged runtime sessions must remain behind the idle render gate"
         );
+        assert!(
+            windowed_frame_needs_render(false, false, true, false, false, false),
+            "normal sessions render while the compositor reports a transition"
+        );
+        assert!(
+            !windowed_frame_needs_render(false, false, false, false, false, false),
+            "the same production consumer sleeps after the transition lands"
+        );
     }
 
     #[test]

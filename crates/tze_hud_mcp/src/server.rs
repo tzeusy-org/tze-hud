@@ -66,6 +66,9 @@ pub struct McpConfig {
     /// A caller's PSK resolves to an agent id (its namespace) and its
     /// allow-list permissions. With no agents, every call is rejected.
     pub agents: SharedAgents,
+    /// Implicit widget transition duration supplied by the HUD's resolved
+    /// startup profile. Standalone unconfigured servers retain instant updates.
+    pub widget_transition_ms: u32,
 }
 
 impl McpConfig {
@@ -76,7 +79,10 @@ impl McpConfig {
 
     /// Use the live agent directory shared with the runtime.
     pub fn with_agents(agents: SharedAgents) -> Self {
-        Self { agents }
+        Self {
+            agents,
+            widget_transition_ms: 0,
+        }
     }
 
     /// Load a dev PSK from `MCP_TEST_PSK` (test harnesses). Unset means
@@ -256,6 +262,7 @@ impl McpServer {
                     state: &self.state,
                     safe_mode: &self.safe_mode,
                     agent: &identity,
+                    widget_transition_ms: self.config.widget_transition_ms,
                 };
                 let result = match name {
                     "hud_surfaces" => tools::hud_surfaces(&tool_ctx).await,

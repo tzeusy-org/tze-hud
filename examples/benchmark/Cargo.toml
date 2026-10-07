@@ -18,6 +18,7 @@ path = "src/token_footprint_calibration.rs"
 headless = []
 
 [dependencies]
+tze_hud_config = { path = "../../crates/tze_hud_config", version = "0.1.0" }
 tze_hud_scene = { path = "../../crates/tze_hud_scene", version = "0.1.0" }
 tze_hud_input = { path = "../../crates/tze_hud_input", version = "0.1.0" }
 tze_hud_runtime = { path = "../../crates/tze_hud_runtime", version = "0.1.0" }

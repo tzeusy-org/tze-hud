@@ -900,13 +900,31 @@ async fn mcp_lease_is_reused_across_publishes() {
 #[tokio::test]
 async fn widget_publish_hold_clear() {
     let (server, _) = server();
+    let mut config = McpConfig::with_psk(psk());
+    config.widget_transition_ms = 200;
+    let server = server.with_config(config);
     let v = call(
         &server,
         "hud_publish",
-        json!({"surface": "widget:gauge", "params": {"level": 0.75, "label": "CPU"}}),
+        json!({"surface": "widget:gauge", "params": {"level": 0.75, "label": "CPU",
+            "fill_color": {"r": 1.0, "g": 0.0, "b": 0.0, "a": 1.0}}}),
     )
     .await;
     assert_eq!(v, json!({"ok": true}), "widgets are durable by default");
+    {
+        let scene = server.scene.lock().await;
+        let record = &scene.widget_registry.active_publishes["gauge"][0];
+        assert_eq!(record.transition_ms, 200);
+        assert_eq!(record.params["level"], WidgetParameterValue::F32(0.75));
+        assert_eq!(
+            record.params["label"],
+            WidgetParameterValue::String("CPU".into())
+        );
+        assert_eq!(
+            record.params["fill_color"],
+            WidgetParameterValue::Color(Rgba::new(1.0, 0.0, 0.0, 1.0))
+        );
+    }
     let err = call_err(
         &server,
         "hud_publish",
@@ -929,6 +947,20 @@ async fn widget_publish_hold_clear() {
             .active_publishes
             .get("gauge")
             .is_none_or(Vec::is_empty)
+    );
+    drop(scene);
+    let mut instant = McpConfig::with_psk(psk());
+    instant.widget_transition_ms = 0;
+    let server = server.with_config(instant);
+    call(
+        &server,
+        "hud_publish",
+        json!({"surface":"widget:gauge", "params":{"level":0.75}}),
+    )
+    .await;
+    assert_eq!(
+        server.scene.lock().await.widget_registry.active_publishes["gauge"][0].transition_ms,
+        0
     );
 }
 

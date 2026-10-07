@@ -173,6 +173,7 @@ async fn hud_w41ef_portal_backdrop_opaque_after_resize_grow_no_fade() {
         super::draw_cmds::ZoneAnimationState {
             transition_start: std::time::Instant::now(),
             duration_ms: 0,
+            easing: super::easing::Easing::Linear,
             from_opacity: 1.0,
             target_opacity: 1.0,
         },
@@ -542,6 +543,7 @@ async fn hud_b0x0m_static_image_tint_scaled_by_tile_opacity() {
         super::draw_cmds::ZoneAnimationState {
             transition_start: std::time::Instant::now(),
             duration_ms: 0,
+            easing: super::easing::Easing::Linear,
             from_opacity: 0.5,
             target_opacity: 0.5,
         },
@@ -683,6 +685,7 @@ async fn hud_dat3x_transient_portal_fade_still_shapes_text() {
         super::draw_cmds::ZoneAnimationState {
             transition_start: std::time::Instant::now(),
             duration_ms: 0,
+            easing: super::easing::Easing::Linear,
             from_opacity: 0.0,
             target_opacity: 0.0,
         },
