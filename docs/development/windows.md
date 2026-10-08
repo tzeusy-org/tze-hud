@@ -13,11 +13,15 @@ There are two ways to work on this machine:
 - **WSL2.** Keep the repo and agents in Linux, and run only the HUD as a
   Windows process. See [Developing from WSL2](#developing-from-wsl2).
 
-Linux CI (`ci.yml`) is still the merge gate. The Windows CI job (`windows.yml`)
-builds the release exe, boot-smokes it, and runs an install and uninstall
-smoke test. Linux CI also runs clippy for the `windows-gnu` target. Neither
-runs `cargo test` on Windows, so a green Windows test run proves less than a
-green CI.
+Linux CI (`ci.yml`) is still the merge gate. The native MSVC Windows job
+(`windows.yml`) builds the release exe, boot-smokes it, and runs install and
+uninstall smoke tests. It also executes two selected native test filters:
+`cargo test --release --locked -p tze_hud_runtime --lib firewall::remote::`
+and `cargo test --release --locked -p tze_hud_app --bin tze_hud parse_options_`.
+These are pure firewall transaction/launcher fixtures and option parsing;
+they do not alter the runner's firewall or run the entire workspace suite.
+Linux CI's `windows-gnu` Clippy job is compilation/lint evidence, not native
+Windows test execution. Neither substitutes for the owner-host overlay checks.
 
 ## One-time setup
 
@@ -137,8 +141,9 @@ to `.git/info/exclude` to keep it from being committed. To pair an agent:
 - The agent trades the code for its PSK with `POST /pair`. See
   [Pair an agent](../operations/windows-install.md#pair-an-agent).
 
-`scripts/quickstart.sh` runs under Git Bash but was written for Linux. On
-Windows, `--print-attach-info` plus pairing is the more direct path.
+Follow the [Windows-first Quickstart](../QUICKSTART.md) for the install,
+pairing, MCP connection and real session-portal path. `--print-attach-info`
+prints redacted discovery information without launching another window.
 
 ### Runtime behavior specific to Windows
 
