@@ -2,8 +2,8 @@
 //! (budgets are hard caps) and §8 (errors are affordances for the model).
 //!
 //! Everything goes through `ResourceStore`'s public upload calls. Uploads use
-//! raw RGBA8 so a resource's decoded size is exactly `w * h * 4`. Nothing here
-//! reads a clock or sleeps.
+//! raw RGBA8 or compact encoded fixtures; decoded accounting is `w * h * 4`.
+//! Nothing here reads a clock or sleeps.
 
 use tze_hud_resource::{
     AgentBudget, CHUNK_SIZE_LIMIT, MAX_CONCURRENT_UPLOADS_PER_AGENT, ResourceError, ResourceId,
@@ -274,6 +274,216 @@ async fn rejections_carry_stable_wire_code_and_actionable_detail() {
         assert!(msg.contains(names), "{msg:?} should mention {names:?}");
     }
     assert_eq!(store.dedup_index().len(), 0, "no rejection stored anything");
+
+    use image::{ExtendedColorType, ImageEncoder};
+    use tze_hud_resource::{ResidentLedger, ResidentLedgerLimits};
+
+    fn encoded(resource_type: ResourceType, color: ExtendedColorType, pixels: &[u8]) -> Vec<u8> {
+        let mut data = Vec::new();
+        match resource_type {
+            ResourceType::ImagePng => image::codecs::png::PngEncoder::new(&mut data)
+                .write_image(pixels, 2, 2, color)
+                .unwrap(),
+            ResourceType::ImageJpeg => image::codecs::jpeg::JpegEncoder::new(&mut data)
+                .write_image(pixels, 2, 2, color)
+                .unwrap(),
+            _ => unreachable!("encoded fixtures are PNG/JPEG"),
+        }
+        data
+    }
+
+    fn crc32(bytes: &[u8]) -> u32 {
+        let mut crc = u32::MAX;
+        for &byte in bytes {
+            crc ^= u32::from(byte);
+            for _ in 0..8 {
+                crc = (crc >> 1) ^ (0xEDB8_8320 & 0u32.wrapping_sub(crc & 1));
+            }
+        }
+        !crc
+    }
+
+    // Keep real decoder-readable headers, then damage only the raster. Cap
+    // rejection must win over that damage without materializing a huge image.
+    fn malformed_raster(
+        mut data: Vec<u8>,
+        resource_type: ResourceType,
+        width: u32,
+        height: u32,
+    ) -> Vec<u8> {
+        match resource_type {
+            ResourceType::ImagePng => {
+                data[16..20].copy_from_slice(&width.to_be_bytes());
+                data[20..24].copy_from_slice(&height.to_be_bytes());
+                let crc = crc32(&data[12..29]);
+                data[29..33].copy_from_slice(&crc.to_be_bytes());
+                let mut offset = 8;
+                while offset + 12 <= data.len() {
+                    let length =
+                        u32::from_be_bytes(data[offset..offset + 4].try_into().unwrap()) as usize;
+                    let end = offset + 8 + length;
+                    if &data[offset + 4..offset + 8] == b"IDAT" {
+                        data[offset + 8..end].fill(0); // invalid zlib stream
+                        let crc = crc32(&data[offset + 4..end]);
+                        data[end..end + 4].copy_from_slice(&crc.to_be_bytes());
+                        return data;
+                    }
+                    offset = end + 4;
+                }
+            }
+            ResourceType::ImageJpeg => {
+                let mut offset = 2; // skip SOI
+                while offset + 4 <= data.len() {
+                    assert_eq!(data[offset], 0xFF);
+                    let marker = data[offset + 1];
+                    let length = usize::from(u16::from_be_bytes(
+                        data[offset + 2..offset + 4].try_into().unwrap(),
+                    ));
+                    // Baseline SOF carries the dimensions.
+                    if marker == 0xC0 {
+                        data[offset + 5..offset + 7]
+                            .copy_from_slice(&u16::try_from(height).unwrap().to_be_bytes());
+                        data[offset + 7..offset + 9]
+                            .copy_from_slice(&u16::try_from(width).unwrap().to_be_bytes());
+                    }
+                    // SOS stays decoder-readable, but its scan references an
+                    // absent Huffman table. Entropy errors alone are tolerated
+                    // by the JPEG decoder's existing permissive mode.
+                    if marker == 0xDA {
+                        data[offset + 6] = 0x33; // first component's DC/AC table 3
+                        data.truncate(offset + 2 + length);
+                        data.extend_from_slice(&[0xFF, 0x02]); // unknown entropy marker
+                        return data;
+                    }
+                    offset += 2 + length;
+                }
+            }
+            _ => unreachable!("encoded fixtures are PNG/JPEG"),
+        }
+        panic!("encoded fixture must contain a raster");
+    }
+
+    async fn upload_encoded(
+        store: &ResourceStore,
+        resource_type: ResourceType,
+        data: Vec<u8>,
+        chunked: bool,
+    ) -> Result<tze_hud_resource::ResourceStored, ResourceError> {
+        let mut req = inline_req("encoded", 1, 0, data.clone(), unlimited());
+        req.resource_type = resource_type;
+        if !chunked {
+            return store
+                .handle_upload_start(req)
+                .await
+                .map(|result| result.expect("inline upload completes immediately"));
+        }
+        let id = req.upload_id;
+        req.inline_data.clear();
+        assert!(store.handle_upload_start(req).await.unwrap().is_none());
+        assert_eq!(store.in_flight_count("encoded").await, 1);
+        store
+            .handle_upload_chunk("encoded", id, 0, data)
+            .await
+            .unwrap();
+        let result = store
+            .handle_upload_complete("encoded", id, &caps(), &unlimited())
+            .await;
+        assert_eq!(store.in_flight_count("encoded").await, 0);
+        result
+    }
+
+    let valid_png = encoded(ResourceType::ImagePng, ExtendedColorType::Rgba8, &[42; 16]);
+    let valid_jpeg = encoded(ResourceType::ImageJpeg, ExtendedColorType::Rgb8, &[42; 12]);
+    for (resource_type, valid) in [
+        (ResourceType::ImagePng, &valid_png),
+        (ResourceType::ImageJpeg, &valid_jpeg),
+    ] {
+        for chunked in [false, true] {
+            for (width, height, cap, code, quantity) in [
+                (8193, 2, 16, "RESOURCE_SIZE_EXCEEDED", "8192"),
+                (2, 8193, 16, "RESOURCE_SIZE_EXCEEDED", "8192"),
+                (2, 2, 15, "RESOURCE_SIZE_EXCEEDED", "15"),
+                (2, 2, 16, "RESOURCE_DECODE_ERROR", "IMAGE_"),
+            ] {
+                let ledger = ResidentLedger::new(ResidentLedgerLimits {
+                    aggregate_bytes: 64,
+                    resource_bytes: 64,
+                    widget_source_bytes: 0,
+                    widget_raster_bytes: 0,
+                    font_bytes: 0,
+                });
+                let store = ResourceStore::new_with_resident_ledger(
+                    ResourceStoreConfig {
+                        max_decoded_texture_bytes: cap,
+                        ..ResourceStoreConfig::default()
+                    },
+                    ledger.clone(),
+                );
+                let before = ledger.snapshot();
+                let data = malformed_raster(valid.clone(), resource_type, width, height);
+                let err = upload_encoded(&store, resource_type, data, chunked)
+                    .await
+                    .expect_err(&format!(
+                        "{resource_type} {width}x{height}, cap={cap}, chunked={chunked}, expected={code}"
+                    ));
+                assert_eq!(err.wire_code(), code, "{resource_type}, chunked={chunked}");
+                let message = err.to_string();
+                assert!(message.starts_with(code), "{message}");
+                assert!(message.contains(quantity), "{message}");
+                assert_eq!(store.dedup_index().len(), 0);
+                assert_eq!(store.dedup_index().total_decoded_bytes(), 0);
+                assert_eq!(
+                    ledger.snapshot(),
+                    before,
+                    "rejection must not debit storage"
+                );
+            }
+        }
+    }
+
+    // Equal RGBA8 caps accept intact rasters, including 16-bit PNG whose
+    // native allocation exceeds its 16-byte RGBA8 accounting charge.
+    let valid_png16 = encoded(ResourceType::ImagePng, ExtendedColorType::Rgba16, &[42; 32]);
+    for (resource_type, data) in [
+        (ResourceType::ImagePng, valid_png),
+        (ResourceType::ImageJpeg, valid_jpeg),
+        (ResourceType::ImagePng, valid_png16),
+    ] {
+        for chunked in [false, true] {
+            let ledger = ResidentLedger::new(ResidentLedgerLimits {
+                aggregate_bytes: 16,
+                resource_bytes: 16,
+                widget_source_bytes: 0,
+                widget_raster_bytes: 0,
+                font_bytes: 0,
+            });
+            let store = ResourceStore::new_with_resident_ledger(
+                ResourceStoreConfig {
+                    max_decoded_texture_bytes: 16,
+                    ..ResourceStoreConfig::default()
+                },
+                ledger.clone(),
+            );
+            let result = upload_encoded(&store, resource_type, data.clone(), chunked)
+                .await
+                .unwrap();
+            assert_eq!(result.resource_id, ResourceId::from_bytes(hash(&data)));
+            assert_eq!(result.decoded_bytes, 16);
+            assert!(!result.was_deduplicated);
+            let record = store.dedup_index().get(&result.resource_id).unwrap();
+            assert_eq!(record.resource_type, resource_type);
+            assert_eq!(store.dedup_index().total_decoded_bytes(), 16);
+            let charged = ledger.snapshot();
+            assert_eq!(charged.resource_bytes, 16);
+            assert_eq!(charged.allocation_count, 1);
+            let mut repeat = inline_req("encoded", 2, 0, data.clone(), unlimited());
+            repeat.resource_type = resource_type;
+            let repeated = store.handle_upload_start(repeat).await.unwrap().unwrap();
+            assert_eq!(repeated.resource_id, result.resource_id);
+            assert!(repeated.was_deduplicated);
+            assert_eq!(ledger.snapshot(), charged, "dedup must not debit twice");
+        }
+    }
 }
 
 #[tokio::test]

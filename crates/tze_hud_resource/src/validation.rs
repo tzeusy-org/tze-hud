@@ -246,7 +246,11 @@ fn decode_image(
     resource_type: ResourceType,
     config: &ResourceStoreConfig,
 ) -> Result<DecodedMeta, ResourceError> {
-    use image::ImageFormat;
+    use std::io::Cursor;
+
+    use image::{
+        ImageDecoder, ImageError, ImageFormat, ImageReader, Limits, error::LimitErrorKind,
+    };
 
     let format = match resource_type {
         ResourceType::ImagePng => ImageFormat::Png,
@@ -254,12 +258,28 @@ fn decode_image(
         _ => unreachable!("only PNG and JPEG are routed here"),
     };
 
-    // Decode to RGBA8.  The `image` crate will return an error for corrupt data.
-    let img = image::load_from_memory_with_format(data, format)
-        .map_err(|e| ResourceError::DecodeError(format!("{resource_type}: {e}")))?;
+    // Apply strict dimensions while reading headers, before allocating pixels.
+    // Keep image's default native allocation limit: the accounting below is
+    // RGBA8, while valid 16-bit PNGs can use more bytes in their native format.
+    let mut limits = Limits::default();
+    limits.max_image_width = Some(MAX_TEXTURE_DIMENSION_PX);
+    limits.max_image_height = Some(MAX_TEXTURE_DIMENSION_PX);
+    let mut reader = ImageReader::with_format(Cursor::new(data), format);
+    reader.limits(limits.clone());
+    let mut decoder = reader.into_decoder().map_err(|error| {
+        if matches!(&error, ImageError::Limits(limit) if limit.kind() == LimitErrorKind::DimensionError)
+        {
+            ResourceError::SizeExceeded {
+                detail: format!(
+                    "{resource_type} dimensions exceed maximum {MAX_TEXTURE_DIMENSION_PX}"
+                ),
+            }
+        } else {
+            ResourceError::DecodeError(format!("{resource_type}: {error}"))
+        }
+    })?;
 
-    let width_px = img.width();
-    let height_px = img.height();
+    let (width_px, height_px) = decoder.dimensions();
 
     // Dimension check (decompression bomb defense, spec lines 290-292).
     if width_px > MAX_TEXTURE_DIMENSION_PX || height_px > MAX_TEXTURE_DIMENSION_PX {
@@ -289,6 +309,16 @@ fn decode_image(
             ),
         });
     }
+
+    // Mirror ImageReader::decode's native allocation reservation, but only
+    // after the project's checked RGBA8 size cap has passed. Reading pixels
+    // still validates the complete raster; header-only acceptance is unsafe.
+    let decode_error = |error| ResourceError::DecodeError(format!("{resource_type}: {error}"));
+    limits
+        .reserve(decoder.total_bytes())
+        .map_err(decode_error)?;
+    decoder.set_limits(limits).map_err(decode_error)?;
+    image::DynamicImage::from_decoder(decoder).map_err(decode_error)?;
 
     Ok(DecodedMeta {
         decoded_bytes,
