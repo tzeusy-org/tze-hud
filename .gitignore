@@ -54,9 +54,9 @@ docs/operations/private/
 # Isolated worker target dir (hud-nottc)
 /target-nottc/
 
-# First-run quickstart artifacts (scripts/quickstart.sh) — local config + secrets.
+# Local setup artifacts — local config + secrets.
 # Secret patterns are unanchored so generated credentials are ignored no matter
-# which directory quickstart.sh is run from; the non-secret config stays root-anchored.
+# which directory setup is run from; the non-secret config stays root-anchored.
 /tze_hud.toml
 tze_hud.psk
 tze-hud.mcp.json
