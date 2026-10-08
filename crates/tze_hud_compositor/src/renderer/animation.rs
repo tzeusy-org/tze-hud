@@ -34,7 +34,16 @@ impl Compositor {
     /// possible since the zone_def is gone, so the state is simply pruned).
     ///
     /// Prunes completed transitions.
+    #[cfg(test)]
     pub(crate) fn update_zone_animations(&mut self, scene: &SceneGraph) {
+        self.update_zone_animations_at(scene, std::time::Instant::now());
+    }
+
+    pub(crate) fn update_zone_animations_at(
+        &mut self,
+        scene: &SceneGraph,
+        now: std::time::Instant,
+    ) {
         // Build current active-zone set (zone_name → has active publishes).
         let current_active: HashMap<String, bool> = scene
             .zone_registry
@@ -64,19 +73,22 @@ impl Compositor {
                 if let Some(zone_def) = scene.zone_registry.zones.get(zone_name) {
                     if let Some(ms) = zone_def.rendering_policy.transition_in_ms {
                         if ms > 0 {
-                            let mut new_state = if let Some(existing) =
-                                self.zone_animation_states.get(zone_name)
-                            {
-                                if existing.target_opacity == 0.0 {
-                                    // Interrupt active fade-out: begin fade-in from
-                                    // current opacity so there is no blank frame.
-                                    ZoneAnimationState::fade_in_from(ms, existing.current_opacity())
+                            let mut new_state =
+                                if let Some(existing) = self.zone_animation_states.get(zone_name) {
+                                    if existing.target_opacity == 0.0 {
+                                        // Interrupt active fade-out: begin fade-in from
+                                        // current opacity so there is no blank frame.
+                                        ZoneAnimationState::fade_in_from_at(
+                                            ms,
+                                            existing.current_opacity_at(now),
+                                            now,
+                                        )
+                                    } else {
+                                        ZoneAnimationState::fade_in_at(ms, now)
+                                    }
                                 } else {
-                                    ZoneAnimationState::fade_in(ms)
-                                }
-                            } else {
-                                ZoneAnimationState::fade_in(ms)
-                            };
+                                    ZoneAnimationState::fade_in_at(ms, now)
+                                };
                             new_state.easing = self.zone_motion.enter;
                             self.zone_animation_states
                                 .insert(zone_name.clone(), new_state);
@@ -90,7 +102,7 @@ impl Compositor {
                 if let Some(zone_def) = scene.zone_registry.zones.get(zone_name) {
                     if let Some(ms) = zone_def.rendering_policy.transition_out_ms {
                         if ms > 0 {
-                            let mut state = ZoneAnimationState::fade_out(ms);
+                            let mut state = ZoneAnimationState::fade_out_at(ms, now);
                             state.easing = self.zone_motion.exit;
                             self.zone_animation_states.insert(zone_name.clone(), state);
                         } else {
@@ -110,14 +122,14 @@ impl Compositor {
 
         // Prune completed transitions (reached target opacity).
         self.zone_animation_states
-            .retain(|_, state| !state.is_complete());
+            .retain(|_, state| !state.is_complete_at(now));
 
         self.prev_active_zones = current_active;
     }
 
     /// Update per-portal-tile fade animation state (§6.3 — transition tokens).
     ///
-    /// Runs the same appear/disappear transition logic as [`update_zone_animations`]
+    /// Runs the same appear/disappear transition logic as [`update_zone_animations_at`]
     /// but for portal tiles (scrollable tiles identified by a registered
     /// [`TileScrollConfig`]).  Durations are sourced from the
     /// `portal.transition.in_ms` and `portal.transition.out_ms` design tokens
@@ -133,7 +145,16 @@ impl Compositor {
     /// Completed transitions are pruned after each update.
     ///
     /// Must be called once per frame alongside `update_zone_animations`.
+    #[cfg(test)]
     pub(crate) fn update_portal_tile_animations(&mut self, scene: &SceneGraph) {
+        self.update_portal_tile_animations_at(scene, std::time::Instant::now());
+    }
+
+    pub(crate) fn update_portal_tile_animations_at(
+        &mut self,
+        scene: &SceneGraph,
+        now: std::time::Instant,
+    ) {
         // Resolve transition durations from design tokens (§6.1 — no literals).
         let transition_in_ms: u32 = self
             .token_map
@@ -181,23 +202,26 @@ impl Compositor {
                     let new_state =
                         if let Some(existing) = self.portal_tile_anim_states.get(&tile_id) {
                             if existing.target_opacity == 0.0 {
-                                ZoneAnimationState::fade_in_from(
+                                ZoneAnimationState::fade_in_from_at(
                                     transition_in_ms,
-                                    self.portal_tile_anim_opacity(tile_id),
+                                    self.portal_tile_anim_opacity_at(tile_id, now),
+                                    now,
                                 )
                             } else {
-                                ZoneAnimationState::fade_in(transition_in_ms)
+                                ZoneAnimationState::fade_in_at(transition_in_ms, now)
                             }
                         } else {
-                            ZoneAnimationState::fade_in(transition_in_ms)
+                            ZoneAnimationState::fade_in_at(transition_in_ms, now)
                         };
                     self.portal_tile_anim_states.insert(tile_id, new_state);
                 }
             } else if !has_content && had_content {
                 // Tile just lost content — start fade-out.
                 if transition_out_ms > 0 {
-                    self.portal_tile_anim_states
-                        .insert(tile_id, ZoneAnimationState::fade_out(transition_out_ms));
+                    self.portal_tile_anim_states.insert(
+                        tile_id,
+                        ZoneAnimationState::fade_out_at(transition_out_ms, now),
+                    );
                 }
             }
         }
@@ -208,7 +232,7 @@ impl Compositor {
 
         // Prune completed transitions.
         self.portal_tile_anim_states
-            .retain(|_, state| !state.is_complete());
+            .retain(|_, state| !state.is_complete_at(now));
 
         self.prev_portal_tile_has_content = current;
     }
@@ -226,12 +250,21 @@ impl Compositor {
     /// completed transition still rests at full opacity.
     #[inline]
     pub(crate) fn portal_tile_anim_opacity(&self, tile_id: SceneId) -> f32 {
+        self.portal_tile_anim_opacity_at(tile_id, std::time::Instant::now())
+    }
+
+    #[inline]
+    pub(crate) fn portal_tile_anim_opacity_at(
+        &self,
+        tile_id: SceneId,
+        now: std::time::Instant,
+    ) -> f32 {
         if self.degradation_policy.level >= DegradationLevel::Simplified {
             return 1.0;
         }
         self.portal_tile_anim_states
             .get(&tile_id)
-            .map(|s| s.current_opacity_eased(super::easing::Easing::EaseInOut))
+            .map(|s| s.current_opacity_eased_at(super::easing::Easing::EaseInOut, now))
             .unwrap_or(1.0)
     }
 
@@ -472,6 +505,14 @@ impl Compositor {
     /// Call order per frame: `update_zone_animations` → `update_publication_animations`
     /// → `prune_faded_publications(scene)` → render.
     pub fn update_publication_animations(&mut self, scene: &SceneGraph) {
+        self.update_publication_animations_at(scene, std::time::Instant::now());
+    }
+
+    pub(crate) fn update_publication_animations_at(
+        &mut self,
+        scene: &SceneGraph,
+        now: std::time::Instant,
+    ) {
         let now_us = scene.now_wall_us();
         for (zone_name, publishes) in &scene.zone_registry.active_publishes {
             let zone_def = match scene.zone_registry.zones.get(zone_name) {
@@ -510,20 +551,22 @@ impl Compositor {
                     record.publisher_namespace.clone(),
                 );
                 let state = zone_states.entry(key).or_insert_with(|| {
-                    PublicationAnimationState::new(
+                    PublicationAnimationState::new_at(
                         Self::publication_fade_delay_ms(record, now_us, fade_duration_ms),
                         record.expires_at_wall_us,
                         fade_duration_ms,
                         easing,
+                        now,
                     )
                 });
                 if state.source_expiry_us != record.expires_at_wall_us {
-                    state.retarget(
+                    state.retarget_at(
                         Self::publication_fade_delay_ms(record, now_us, state.fade_duration_ms),
                         record.expires_at_wall_us,
+                        now,
                     );
                 }
-                state.tick();
+                state.tick_at(now);
             }
         }
 
@@ -555,7 +598,17 @@ impl Compositor {
     /// Look up the current opacity for a publication in `pub_animation_states`.
     ///
     /// Returns 1.0 if no animation state is found (publication is fully visible).
+    #[cfg(test)]
     pub(crate) fn pub_opacity(&self, zone_name: &str, record: &ZonePublishRecord) -> f32 {
+        self.pub_opacity_at(zone_name, record, std::time::Instant::now())
+    }
+
+    pub(crate) fn pub_opacity_at(
+        &self,
+        zone_name: &str,
+        record: &ZonePublishRecord,
+        now: std::time::Instant,
+    ) -> f32 {
         if self.degradation_policy.level >= DegradationLevel::Simplified {
             return 1.0;
         }
@@ -566,7 +619,7 @@ impl Compositor {
         self.pub_animation_states
             .get(zone_name)
             .and_then(|zone_states| zone_states.get(&key))
-            .map(|s| s.current_opacity())
+            .map(|s| s.current_opacity_at(now))
             .unwrap_or(1.0)
     }
 
@@ -580,6 +633,14 @@ impl Compositor {
     /// Intended call site: runtime frame loop, between scene commit and render,
     /// alongside `SceneGraph::drain_expired_zone_publications`.
     pub fn prune_faded_publications(&mut self, scene: &mut SceneGraph) {
+        self.prune_faded_publications_at(scene, std::time::Instant::now());
+    }
+
+    pub(crate) fn prune_faded_publications_at(
+        &mut self,
+        scene: &mut SceneGraph,
+        now: std::time::Instant,
+    ) {
         for (zone_name, zone_states) in &self.pub_animation_states {
             let publishes = match scene.zone_registry.active_publishes.get_mut(zone_name) {
                 Some(p) => p,
@@ -593,7 +654,7 @@ impl Compositor {
                 );
                 !zone_states
                     .get(&key)
-                    .map(|s| s.is_fade_complete())
+                    .map(|s| s.is_fade_complete_at(now))
                     .unwrap_or(false)
             });
             if publishes.len() < before {
@@ -705,6 +766,13 @@ impl Compositor {
     /// The windowed loop folds this into its wake deadline so countdowns and a
     /// blinking caret cost one wake per transition, not a frame per vsync.
     pub fn next_animation_deadline(&self) -> Option<std::time::Instant> {
+        self.next_animation_deadline_at(std::time::Instant::now())
+    }
+
+    pub(crate) fn next_animation_deadline_at(
+        &self,
+        now: std::time::Instant,
+    ) -> Option<std::time::Instant> {
         let fade_starts = self
             .pub_animation_states
             .values()
@@ -712,7 +780,9 @@ impl Compositor {
             .filter_map(|s| s.fade_start_deadline());
         let caret_toggle = self.local_composer.as_ref().map(|_| {
             let half = crate::renderer::image_cache::CARET_BLINK_HALF_PERIOD.as_nanos();
-            let elapsed = self.composer_caret_blink_start.elapsed().as_nanos();
+            let elapsed = now
+                .saturating_duration_since(self.composer_caret_blink_start)
+                .as_nanos();
             let next_toggle_ns = (elapsed / half + 1) * half;
             self.composer_caret_blink_start + std::time::Duration::from_nanos(next_toggle_ns as u64)
         });
@@ -722,7 +792,7 @@ impl Compositor {
             .widget_renderer
             .as_ref()
             .filter(|wr| wr.has_active_transition())
-            .map(|_| std::time::Instant::now() + crate::widget::WIDGET_TRANSITION_TICK);
+            .map(|_| now + crate::widget::WIDGET_TRANSITION_TICK);
         fade_starts.chain(caret_toggle).chain(widget_tick).min()
     }
 
@@ -741,6 +811,14 @@ impl Compositor {
     /// (via the version check), which populates these maps; from then on this
     /// predicate sustains the animation until it completes and self-prunes.
     pub fn has_inflight_animation(&self, scene: &SceneGraph) -> bool {
+        self.has_inflight_animation_at(scene, std::time::Instant::now())
+    }
+
+    pub(crate) fn has_inflight_animation_at(
+        &self,
+        scene: &SceneGraph,
+        now: std::time::Instant,
+    ) -> bool {
         // Zone fade-in / fade-out transitions (subtitles, content/chrome zones).
         // Completed transitions are pruned by `update_zone_animations`, but a
         // just-completed entry may linger for one frame — `!is_complete()` is the
@@ -748,7 +826,7 @@ impl Compositor {
         if self
             .zone_animation_states
             .values()
-            .any(|s| !s.is_complete())
+            .any(|s| !s.is_complete_at(now))
         {
             return true;
         }
@@ -757,7 +835,7 @@ impl Compositor {
         if self
             .portal_tile_anim_states
             .values()
-            .any(|s| !s.is_complete())
+            .any(|s| !s.is_complete_at(now))
         {
             return true;
         }
@@ -769,7 +847,7 @@ impl Compositor {
         if self
             .pub_animation_states
             .values()
-            .any(|zone| zone.values().any(|s| s.is_fading()))
+            .any(|zone| zone.values().any(|s| s.is_fading_at(now)))
         {
             return true;
         }

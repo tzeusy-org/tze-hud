@@ -351,6 +351,7 @@ impl super::Compositor {
         sw: f32,
         sh: f32,
     ) -> LayerPartitionedRoundedRectCmds {
+        let now = std::time::Instant::now();
         let mut result = LayerPartitionedRoundedRectCmds {
             background: Vec::new(),
             content: Vec::new(),
@@ -395,7 +396,7 @@ impl super::Compositor {
             } else {
                 self.zone_animation_states
                     .get(zone_name)
-                    .map(|s| s.current_opacity())
+                    .map(|s| s.current_opacity_at(now))
                     .unwrap_or(1.0)
             };
 
@@ -406,8 +407,8 @@ impl super::Compositor {
                     let layout = self.zone_slot_layout(zone_name, publishes, policy, h);
                     for (pub_idx, slot_y, effective_slot_h) in layout.iter_visible(y) {
                         let record = &publishes[pub_idx];
-                        let opacity =
-                            (anim_opacity * self.pub_opacity(zone_name, record)).clamp(0.0, 1.0);
+                        let opacity = (anim_opacity * self.pub_opacity_at(zone_name, record, now))
+                            .clamp(0.0, 1.0);
                         let slot = Rect::new(x, slot_y, w, effective_slot_h);
                         let pushed = self.push_zone_backdrop_cmd(
                             out,

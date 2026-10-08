@@ -65,6 +65,7 @@ impl Compositor {
     ///
     /// No per-content-type color branching — all visual properties come from
     /// `RenderingPolicy` fields (spec §Refactoring note, §Default Zone Rendering).
+    #[cfg(test)]
     pub(super) fn render_zone_content(
         &self,
         scene: &tze_hud_scene::graph::SceneGraph,
@@ -74,6 +75,26 @@ impl Compositor {
         sh: f32,
         only_layer: Option<LayerAttachment>,
     ) {
+        self.render_zone_content_at(
+            scene,
+            vertices,
+            textured_cmds,
+            (sw, sh),
+            only_layer,
+            std::time::Instant::now(),
+        );
+    }
+
+    pub(super) fn render_zone_content_at(
+        &self,
+        scene: &tze_hud_scene::graph::SceneGraph,
+        vertices: &mut Vec<RectVertex>,
+        textured_cmds: &mut Vec<TexturedDrawCmd>,
+        viewport: (f32, f32),
+        only_layer: Option<LayerAttachment>,
+        now: std::time::Instant,
+    ) {
+        let (sw, sh) = viewport;
         for (zone_name, publishes) in &scene.zone_registry.active_publishes {
             if publishes.is_empty() {
                 continue;
@@ -106,7 +127,7 @@ impl Compositor {
                 } else {
                     self.zone_animation_states
                         .get(zone_name)
-                        .map(|s| s.current_opacity())
+                        .map(|s| s.current_opacity_at(now))
                         .unwrap_or(1.0)
                 };
 
@@ -134,7 +155,7 @@ impl Compositor {
                         let record = &publishes[pub_idx];
 
                         // Per-publication fade-out opacity (1.0 when no fade active).
-                        let pub_opacity = self.pub_opacity(zone_name, record);
+                        let pub_opacity = self.pub_opacity_at(zone_name, record, now);
                         // Combined opacity: zone animation × per-publication fade.
                         let combined_opacity = (anim_opacity * pub_opacity).clamp(0.0, 1.0);
 
@@ -155,7 +176,7 @@ impl Compositor {
                                 // filling this publication's slot.
                                 if self.image_texture_cache.contains_key(resource_id) {
                                     let combined_opacity = (anim_opacity
-                                        * self.pub_opacity(zone_name, record))
+                                        * self.pub_opacity_at(zone_name, record, now))
                                     .clamp(0.0, 1.0);
                                     textured_cmds.push(TexturedDrawCmd {
                                         resource_id: *resource_id,
