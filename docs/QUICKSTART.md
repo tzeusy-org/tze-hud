@@ -1,285 +1,176 @@
-# tze_hud Quickstart — portal as your primary LLM interface
+# Quickstart: a Windows HUD with an agent in WSL
 
-**Goal:** in under 10 minutes, get the tze_hud runtime up and have a fresh
-Claude or Codex session project itself onto your screen as a live text-stream
-portal — so the portal becomes how you watch and talk to the session.
+Run the HUD on your Windows desktop and keep your agent session in WSL. This
+walkthrough installs the overlay, pairs the agent, and connects a real session
+portal. Linux is used for headless checks and Windows cross-builds.
 
-**Doctrine:** this is *cooperative opt-in projection*. The runtime owns the
-screen (placement, timing, composition, permissions); the LLM session
-*chooses* to attach and publish. Nothing is scraped from your terminal.
+Projection is cooperative: the session chooses to publish its output and
+collect replies. The HUD does not scrape your terminal. The runtime owns
+placement, timing, composition and permissions.
 
-> Platform note: the steps below are for running the portal on your **own Linux
-> desktop** (a local display server / X or Wayland session). For fullscreen wall
-> displays, overlay mode on Windows, or cross-machine deployment, see the
-> **Cross-Machine Deployment** and **TigerVNC** sections of the top-level
-> [`README.md`](../README.md). A headless CI box cannot open a GUI window.
+## 1. Start the Windows HUD
 
----
+Download the rolling `dev` release of `tze_hud.exe`, verify its signature, and
+double-click it. Follow the existing
+[Windows install runbook](operations/windows-install.md#download-and-verify).
+This installs for the current user, creates the default config if needed,
+and starts the overlay. No administrator rights are needed for installation.
+An existing config and paired agents are preserved on upgrades.
 
-## TL;DR (the one command)
-
-From the repo root:
-
-```bash
-# Build the runtime once (5–10 min the first time), then bootstrap + launch.
-cargo build --bin tze_hud --release
-scripts/quickstart.sh --window-mode overlay
-```
-
-`quickstart.sh` scaffolds a minimal config, generates a strong PSK, prints the
-redacted **ATTACH INFO** block (MCP URL + credential instructions + a client
-config template), and launches the runtime. Then jump to
-[Step 4: attach a session](#step-4-attach-an-llm-session).
-
-To create a ready-to-use client config without building or launching the
-runtime, use the protected-file form (implemented by
-[`scripts/quickstart.sh`](../scripts/quickstart.sh)):
+If you are building from source in WSL instead, run this from the repo root
+with the [build dependencies](../README.md#1-build-on-linux--windows) installed:
 
 ```bash
-scripts/quickstart.sh --emit-mcp-config=tze-hud.mcp.json
-# Creates a new mode-600 file and refuses to overwrite an existing file.
+just build-windows
+# Output: target/x86_64-pc-windows-gnu/release/tze_hud.exe
 ```
 
-To see the attach block **without** launching a window (e.g. to wire up your MCP
-client first, or on a headless box):
+Copy that executable to a Windows development directory. Run it from your
+interactive Windows desktop with explicit arguments, for example in
+PowerShell from that directory:
+
+```powershell
+.\tze_hud.exe --config C:\path\to\repo\app\tze_hud_app\config\production.toml --window-mode overlay
+```
+
+Replace the example config path with your actual checkout path. A bare dev
+launch installs the executable and can replace your installed HUD. Keep the
+arguments for an in-place run, and stop an already-running instance first:
+only one HUD runs per Windows user. See
+[Windows development](development/windows.md#always-pass-arguments-to-a-dev-build).
+
+The first-run card shows a pairing code and the Windows host's Tailscale
+address. Use that address from WSL; WSL's loopback is not assumed to be the
+Windows listener. The HUD binds loopback and its Tailscale addresses, never
+a wildcard address.
+
+If the card reports blocked tailnet access, the Windows owner can use the
+explicit firewall helper for the executable being reached:
+
+```powershell
+& "$env:LOCALAPPDATA\Programs\tze_hud\tze_hud.exe" --allow-remote
+# Undo that helper's change for the same executable:
+& "$env:LOCALAPPDATA\Programs\tze_hud\tze_hud.exe" --disallow-remote
+```
+
+For an in-place build, use its actual executable path instead. Match any
+custom MCP/gRPC port flags. The helper may request UAC approval; ordinary
+startup does not change firewall policy. It creates a program-scoped tailnet
+rule, not a general network bind. Read the
+[remote-agent guidance](operations/windows-install.md#remote-agents) for
+BLOCK-rule handling and undo limits.
+
+## 2. Pair from WSL
+
+Open a fresh WSL terminal in this checkout. Replace the placeholders below
+with the host address and the current six-digit code from the HUD card:
 
 ```bash
-scripts/quickstart.sh --print-attach-info
+python3 .claude/skills/user-test/scripts/hud_pair.py \
+  --host '<Windows-Tailscale-address[:MCP-port]>' \
+  --code '<six-digit-code-from-card>' --agent claude
 ```
 
-The binary also has this built in — no shell required, so it works on Windows
-too. Once you have a `tze_hud` binary, ask it directly and it prints the same
-attach block (MCP URL + auth rule + paste-ready MCP config) and
-exits **without** starting the runtime:
+The code expires after five minutes and works once. To obtain another code,
+focus the HUD and press Ctrl+Shift+P, or use `tze_hud.exe --pair` on Windows.
+
+The helper saves the PSK privately in `~/.config/tze-hud/<host>.psk` and stores
+nonsecret endpoint metadata for the actual MCP port. It never prints the key.
+The HUD stores only its SHA-256 in `agents.toml` beside the active config.
+Pairing updates the running runtime without a restart. Do not copy the key
+into `.mcp.json`, command arguments, transcripts, screenshots or Git.
+Admin access is optional and is not needed for portal projection.
+
+## 3. Connect a fresh agent session
+
+Start Claude Code from this repo in a fresh WSL session and accept its normal
+project MCP approval. The tracked `.mcp.json` uses the existing Linux/WSL
+stdio adapter to the authenticated HTTP server; it contains no PSK.
+
+- With one paired host and `HUD_HOST` unset, the adapter selects that host.
+- An explicit `HUD_HOST` selects a host/port; multiple paired hosts require
+  explicit selection. No paired host produces the pairing-command hint.
+- Newly paired custom ports come from endpoint metadata. Legacy key-only
+  pairs default to 9090; select an old custom port explicitly or re-pair.
+  Invalid or stale metadata fails closed.
+
+For explicit selection, set only the nonsecret address in the terminal
+launching the client:
 
 ```bash
-./target/release/tze_hud --print-attach-info
-# honours --config / --mcp-port / --grpc-port so the printed info matches
-# the runtime it describes; never prints the PSK value.
+export HUD_HOST='<Windows-Tailscale-address[:MCP-port]>'
 ```
 
-The rest of this doc is the same flow, step by step, explaining each piece.
+Confirm fresh authenticated `initialize`/`tools/list` discovery of all five
+tools: `hud_surfaces`, `hud_publish`, `hud_hold`, `hud_clear`, and
+`hud_input`. Cached tool names alone do not prove a connection.
+Local/user MCP entries with the same name can shadow the project entry; use
+the client's normal settings controls to resolve that without overwriting
+trust or credentials. Other clients must use their supported authenticated
+transport; this project entry is specifically for Claude Code.
 
----
+The Windows executable can print redacted discovery information without
+starting another window or exposing the PSK:
 
-## Prerequisites
+```powershell
+& "$env:LOCALAPPDATA\Programs\tze_hud\tze_hud.exe" --print-attach-info
+```
 
-- Linux with a display server (X11 or Wayland) — you need to be able to open a
-  GPU window. Build deps and toolchain are in [`README.md`](../README.md)
-  (§1 Build). In short: `build-essential pkg-config protobuf-compiler`, the X/
-  Wayland `-dev` libs, and Rust 1.88 (pinned in `rust-toolchain.toml`).
-- An LLM client that speaks **MCP over HTTP** and lets you set a bearer header —
-  e.g. Claude Code or Codex with an MCP server entry.
+Use the actual dev path and `--config` for an in-place build. See the
+[projection skill's MCP client instructions](../.claude/skills/hud-projection/SKILL.md#mcp-client)
+for the current adapter and selection behavior.
 
----
+## 4. Attach the session to a portal
 
-## Step 1 — Build the runtime
+In that connected session, say **“project this session to the HUD”**. The
+[hud-projection skill](../.claude/skills/hud-projection/SKILL.md) uses a stable
+`portal:<id>` owned by the paired agent:
+
+1. Its first `hud_publish` attaches the portal and publishes session output.
+2. Publish a prompt with `expects_reply: true`, then type a reply on the HUD.
+   The composer echoes locally; `hud_input` retrieves the reply and its ID.
+3. Acknowledge that input through the skill's normal acknowledgement path.
+4. `hud_clear` detaches the portal when the session is finished.
+
+Watch the actual output and typed reply on the Windows overlay. An HTTP
+success alone does not establish that they appeared or that input worked.
+
+Outside an MCP client, the existing
+[portal client](../.claude/skills/hud-projection/scripts/portal_client.py)
+uses explicit `HUD_HOST` and the same private paired-key file for publish,
+poll, acknowledge and clear. It does not start a replacement runtime.
+
+## 5. Run the demo against that same HUD
+
+The default installed config has the demo zones and widgets. An in-place
+build should use `app/tze_hud_app/config/production.toml`. In WSL, replace
+each placeholder with the paired host, ports and key filename:
 
 ```bash
-cargo build --bin tze_hud --release
-# → target/release/tze_hud
+TZE_HUD_PSK_FILE="$HOME/.config/tze-hud/<host>.psk" \
+  cargo run -p poc_demo -- all \
+  --mcp '<Windows-Tailscale-address>:9090' \
+  --grpc '<Windows-Tailscale-address>:50051' --agent claude
 ```
 
-`tze_hud` is the **canonical runtime binary** (not a demo). It starts the
-windowed compositor plus the gRPC and MCP listeners.
-
----
-
-## Step 2 — Scaffold config + credentials
-
-You can let `quickstart.sh` do this, or do it by hand.
-
-**Automatic:**
-
-```bash
-scripts/quickstart.sh --print-attach-info
-```
-
-This writes two files in the current directory (both idempotent):
-
-- `tze_hud.toml` — the minimal valid config: `[runtime]` + one default
-  `[[tabs]]`. A text-stream portal renders into that **Main** tab using the
-  runtime's built-in zero-config placement, size, and design-token defaults —
-  no widget wiring is required for session projection.
-- `tze_hud.psk` — a freshly generated strong pre-shared key (`chmod 600`),
-  kept by the agent side as its MCP bearer.
-- `agents.toml` — next to the config: pairs that PSK as agent `claude` with
-  `allow = ["*"]`, storing only the PSK's SHA-256. The runtime never sees the
-  PSK itself.
-
-To scaffold those files and also create a secret-bearing MCP client config,
-run `scripts/quickstart.sh --emit-mcp-config=tze-hud.mcp.json`. The output file
-is created with mode `600`; the script fails rather than replacing an existing
-client config. The bare `--emit-mcp-config` form instead writes exactly one JSON
-document to stdout and exits, for piping into a client-specific merge command.
-Treat that stdout as a secret: do not paste it into logs or tickets.
-
-**Manual equivalent** (if you prefer):
-
-```bash
-cat > tze_hud.toml <<'TOML'
-[runtime]
-profile = "full-display"
-
-[[tabs]]
-name        = "Main"
-default_tab = true
-TOML
-
-( umask 077; openssl rand -hex 24 > tze_hud.psk )
-cat > agents.toml <<TOML
-[agents.claude]
-psk_sha256 = "$(tr -d '[:space:]' < tze_hud.psk | sha256sum | cut -d' ' -f1)"
-allow      = ["*"]
-TOML
-```
-
-> **Why a config and a paired agent are mandatory:** canonical startup is
-> *fail-closed*. Launching with no readable config, or an invalid
-> `agents.toml`, is a hard startup error. With no `agents.toml` the runtime
-> starts but rejects every request until an agent is paired. The quickstart
-> script sets up both for you.
-
----
-
-## Step 3 — Launch
-
-```bash
-scripts/quickstart.sh --window-mode overlay
-```
-
-or equivalently, by hand:
-
-```bash
-./target/release/tze_hud \
-  --config tze_hud.toml \
-  --window-mode overlay \
-  --mcp-port 9090 \
-  --grpc-port 50051
-```
-
-The runtime takes no PSK: it authenticates each request against the hashes
-in `agents.toml` next to `--config`.
-
-A window opens. The MCP listener is on `http://127.0.0.1:9090/mcp` (the runtime
-listens on loopback plus this host's Tailscale addresses, nothing else).
-
-On launch the runtime also prints a short **startup banner** to stdout — once,
-unconditionally, even when `TZE_HUD_LOG` is unset — so you can see where it is
-listening without turning on logging:
-
-```text
-────────────────────────────────────────────────────────────────────
- tze_hud runtime ready
-   gRPC   : 127.0.0.1:50051
-   MCP    : http://127.0.0.1:9090/mcp   (auth: Authorization: Bearer <agent PSK>)
-   attach : invoke the `hud-projection` skill in an LLM session, or run
-            scripts/quickstart.sh — see docs/QUICKSTART.md
-────────────────────────────────────────────────────────────────────
-```
-
-The banner is deliberately non-secret: it shows only the bound addresses and an
-attach hint, never the PSK. (A disabled service — `--mcp-port 0` or
-`--grpc-port 0` — shows as `disabled`.)
-
-> **Identity is the PSK.** The MCP bearer identifies an agent, and that
-> agent's `allow` list in `agents.toml` decides which tools it may call. The
-> generated `agents.toml` pairs `[agents.claude]` with `allow = ["*"]`, so
-> sending the PSK from `tze_hud.psk` as the MCP `Authorization: Bearer` gets
-> you the portal tools. A disallowed call fails with `NOT_ALLOWED` and a hint
-> naming the `allow` entry to add.
-
----
-
-## Step 4 — Attach an LLM session
-
-Generate a client config with the endpoint and bearer already wired:
-
-```bash
-scripts/quickstart.sh --emit-mcp-config=tze-hud.mcp.json
-```
-
-Merge the resulting `mcpServers.tze-hud-runtime` entry into your LLM client's
-MCP settings. If you prefer to do that manually, the equivalent shape is:
-
-```json
-{
-  "mcpServers": {
-    "tze-hud-runtime": {
-      "type": "http",
-      "url": "http://127.0.0.1:9090/mcp",
-      "headers": { "Authorization": "Bearer <your PSK>" }
-    }
-  }
-}
-```
-
-`--print-attach-info` remains deliberately redacted. To get both its discovery
-text and a protected credential file in one headless run, use:
-
-```bash
-scripts/quickstart.sh --print-attach-info \
-  --emit-mcp-config=tze-hud.mcp.json
-```
-
-The bare stdout form is rejected when combined with `--print-attach-info`, so a
-headless/redacted command can never print the PSK accidentally.
-
-Then, inside that session, opt into projection. If your client supports the
-bundled skill, just say **"project this session to the HUD"** — that loads the
-[`hud-projection`](../.claude/skills/hud-projection/SKILL.md) skill. Otherwise
-call the tools directly:
-
-1. `hud_publish {"surface": "portal:<id>", "content": "...", "status": "active"}`
-   — the first publish to a stable `<id>` attaches the portal; `display_name`
-   is optional. The portal is keyed by your agent identity (the PSK), so no
-   call takes or returns a token.
-2. `hud_publish` again — publish output fragments; they render in the portal.
-   Add `"expects_reply": true` to arm the composer.
-3. `hud_input {"wait_ms": 30000}` — collect text typed at the HUD; pass the
-   ids back in `ack` on the next call.
-4. `hud_clear {"surface": "portal:<id>"}` — detach when done.
-
-The full contract is in [`docs/api.md`](api.md).
-
-You now have a session whose live output is on the screen and that can read
-input typed at the HUD — the portal is your primary interface to it.
-
----
-
-## Verify it works (no GUI needed)
-
-Confirm the MCP endpoint is reachable and authenticating before debugging the
-UI. `tools/list` should be *accepted* with your PSK and *rejected* without it:
-
-```bash
-# Reachable + authorized (expects a normal JSON-RPC result, not an auth error):
-curl -s -X POST http://127.0.0.1:9090/mcp \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $(cat tze_hud.psk)" \
-  -d '{"jsonrpc":"2.0","method":"tools/list","params":{},"id":1}' | head -c 400
-```
-
----
+Use the actual ports if they differ. `poc_demo` reads the PSK from the file;
+do not put its value in the environment or command. It drives the real
+zones, widgets and resident tile and prints the portal instructions rather
+than simulating a session. The `override-hang` stage waits for you to press
+close or the safe-mode chord; its wait alone does not verify an override.
+See [Demo](../README.md#demo) and [POC acceptance](scope.md#poc-acceptance).
 
 ## Troubleshooting
 
-| Symptom | Cause / fix |
+| Symptom | Next step |
 |---|---|
-| `canonical startup requires a readable config file` | No config resolved. Run from a dir containing `tze_hud.toml`, or pass `--config <path>`. `quickstart.sh` scaffolds one. |
-| `agents.toml: invalid agents.toml` | A `psk_sha256` is not 64 hex characters or an `allow` entry is unknown; the message names the field. |
-| Every MCP call is `-32004` unauthenticated | The bearer's SHA-256 is not in `agents.toml` next to the config. Re-run `quickstart.sh` or add the hash. |
-| Nothing printed on stdout after launch | The runtime always prints a one-time non-secret startup banner (bind addrs + attach hint). *Structured* logs beyond it are gated behind the `TZE_HUD_LOG` env filter — run with `TZE_HUD_LOG=info` for detailed startup/bind logs. (`quickstart.sh` prints the attach block regardless.) |
-| Portal call returns `NOT_ALLOWED` | The bearer's agent lacks `portal` in its `allow` list. Add it (or `*`) to that `[agents.<id>]` table in `agents.toml`, as the hint says, and restart. |
-| `No active tab` on the autonomous test VM | WARP-VM-specific: the config's `[[tabs]]` did not materialize. Restart the HUD task; tabs are not creatable over MCP. Not seen on a normal GPU desktop. |
-| Window won't open on a headless box | Expected — you need a real display server. Use overlay/fullscreen on a desktop, or the TigerVNC path in `README.md`. |
+| Pairing connection times out | Use the card's actual Tailscale address and MCP port; check the Windows card's firewall diagnosis and the runbook. |
+| Pairing code rejected | Request a fresh card; codes expire and are single-use. |
+| No host or multiple hosts selected | Pair first or select the intended host with `HUD_HOST`; retain the private key and matching endpoint metadata. |
+| Stale metadata or unsafe key mode | Follow the adapter's refusal and re-pair privately; never print the key to debug it. |
+| Authenticated call refused | Use the key for that host and the same agent; its `allow` list governs tools. See [identity and permissions](api.md#identity-and-permissions). |
+| Dev executable exits as already running | Stop the previous Windows instance before the explicit in-place launch. |
+| No overlay or typed reply visible | Verify the actual interactive Windows desktop, portal attachment and input acknowledgement; headless checks cannot prove these. |
 
----
-
-## Where to go next
-
-- **Skill internals & full contract:** [`hud-projection` SKILL](../.claude/skills/hud-projection/SKILL.md)
-- **One-shot zone/widget publishing** (no session lifecycle): the `th-hud-publish` skill
-- **Full config surface** (widgets, agents, profiles): [`app/tze_hud_app/config/production.toml`](../app/tze_hud_app/config/production.toml)
-- **All CLI flags / env vars:** `./target/release/tze_hud --help`
-- **Cross-machine / Windows deployment:** [`README.md`](../README.md)
+Continue with the [API](api.md), [scope](scope.md), and
+[Windows operation runbook](operations/windows-install.md).

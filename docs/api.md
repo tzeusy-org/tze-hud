@@ -128,9 +128,8 @@ allow = ["zone:*", "widget:gauge", "portal", "tiles"]
 ```
 
 - The runtime loads `agents.toml` at startup and shares it live between MCP
-  and gRPC, so pairing adds an agent without a restart. Hand edits (and
-  `scripts/quickstart.sh`) need a restart. `[agents]` in the config file is a
-  config error.
+  and gRPC, so pairing adds an agent without a restart. Hand edits to `agents.toml`
+  need a restart. `[agents]` in the config file is a config error.
 - **Pairing** (`POST /pair` on the MCP port, no bearer). While no agent exists,
   and after `tze_hud --pair` or Ctrl+Shift+P, the HUD shows a 6-digit one-time
   code and its address on the system card. The agent trades it for a key:
