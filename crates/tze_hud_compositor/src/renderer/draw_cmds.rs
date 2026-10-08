@@ -159,7 +159,7 @@ pub(super) fn compute_fit_mode(
 pub(crate) struct ZoneAnimationState {
     /// Captured whole-zone direction curve; legacy/portal constructors are linear.
     pub(crate) easing: super::easing::Easing,
-    /// Wall-clock time when the transition started.
+    /// Monotonic renderer instant when the transition started.
     pub(crate) transition_start: std::time::Instant,
     /// Duration of the transition in milliseconds.
     pub(crate) duration_ms: u32,
@@ -171,10 +171,15 @@ pub(crate) struct ZoneAnimationState {
 
 impl ZoneAnimationState {
     /// Create a fade-in state (opacity 0 → 1) with the given duration.
+    #[cfg(test)]
     pub(crate) fn fade_in(duration_ms: u32) -> Self {
+        Self::fade_in_at(duration_ms, std::time::Instant::now())
+    }
+
+    pub(crate) fn fade_in_at(duration_ms: u32, now: std::time::Instant) -> Self {
         Self {
             easing: super::easing::Easing::Linear,
-            transition_start: std::time::Instant::now(),
+            transition_start: now,
             duration_ms,
             from_opacity: 0.0,
             target_opacity: 1.0,
@@ -192,10 +197,19 @@ impl ZoneAnimationState {
     /// semantics note: "the fade-out MUST be cancelled immediately and the new
     /// content MUST begin its transition_in_ms fade-in from the current composite
     /// opacity (not from zero)."
+    #[cfg(test)]
     pub(crate) fn fade_in_from(duration_ms: u32, from_opacity: f32) -> Self {
+        Self::fade_in_from_at(duration_ms, from_opacity, std::time::Instant::now())
+    }
+
+    pub(crate) fn fade_in_from_at(
+        duration_ms: u32,
+        from_opacity: f32,
+        now: std::time::Instant,
+    ) -> Self {
         Self {
             easing: super::easing::Easing::Linear,
-            transition_start: std::time::Instant::now(),
+            transition_start: now,
             duration_ms,
             from_opacity: from_opacity.clamp(0.0, 1.0),
             target_opacity: 1.0,
@@ -203,26 +217,39 @@ impl ZoneAnimationState {
     }
 
     /// Create a fade-out state (opacity 1 → 0) with the given duration.
+    #[cfg(test)]
     pub(crate) fn fade_out(duration_ms: u32) -> Self {
+        Self::fade_out_at(duration_ms, std::time::Instant::now())
+    }
+
+    pub(crate) fn fade_out_at(duration_ms: u32, now: std::time::Instant) -> Self {
         Self {
             easing: super::easing::Easing::Linear,
-            transition_start: std::time::Instant::now(),
+            transition_start: now,
             duration_ms,
             from_opacity: 1.0,
             target_opacity: 0.0,
         }
     }
 
-    /// Raw linear progress `∈ [0, 1]` derived from elapsed wall time.
+    /// Raw linear progress `∈ [0, 1]` derived from elapsed renderer time.
     ///
     /// A `duration_ms` of `0` reports `1.0` (already complete). Split out so the
     /// time source and the interpolation math are independently testable.
     #[inline]
+    #[cfg(test)]
     pub(crate) fn linear_progress(&self) -> f32 {
+        self.linear_progress_at(std::time::Instant::now())
+    }
+
+    #[inline]
+    pub(crate) fn linear_progress_at(&self, now: std::time::Instant) -> f32 {
         if self.duration_ms == 0 {
             return 1.0;
         }
-        let elapsed_ms = self.transition_start.elapsed().as_millis() as f32;
+        let elapsed_ms = now
+            .saturating_duration_since(self.transition_start)
+            .as_millis() as f32;
         (elapsed_ms / self.duration_ms as f32).clamp(0.0, 1.0)
     }
 
@@ -238,29 +265,50 @@ impl ZoneAnimationState {
     /// Compute the current opacity using the captured whole-zone curve.
     ///
     /// Returns `target_opacity` once the transition has elapsed.
+    #[cfg(test)]
     pub(crate) fn current_opacity(&self) -> f32 {
+        self.current_opacity_at(std::time::Instant::now())
+    }
+
+    pub(crate) fn current_opacity_at(&self, now: std::time::Instant) -> f32 {
         if self.duration_ms == 0 {
             return self.target_opacity;
         }
-        self.opacity_at(self.easing.apply(self.linear_progress()))
+        self.opacity_at(self.easing.apply(self.linear_progress_at(now)))
     }
 
     /// Compute the current interpolated opacity with an easing curve applied.
     ///
     /// Used by the portal tile transition path (hud-bq0gl.10) so collapse/expand
     /// fades accelerate/decelerate instead of ramping linearly. Zone subtitle
-    /// fades use [`current_opacity`](Self::current_opacity) with their captured
+    /// fades use [`current_opacity_at`](Self::current_opacity_at) with their captured
     /// theme curve. This explicit portal sampler applies its curve only once.
+    #[cfg(test)]
     pub(crate) fn current_opacity_eased(&self, easing: super::easing::Easing) -> f32 {
+        self.current_opacity_eased_at(easing, std::time::Instant::now())
+    }
+
+    pub(crate) fn current_opacity_eased_at(
+        &self,
+        easing: super::easing::Easing,
+        now: std::time::Instant,
+    ) -> f32 {
         if self.duration_ms == 0 {
             return self.target_opacity;
         }
-        self.opacity_at(easing.apply(self.linear_progress()))
+        self.opacity_at(easing.apply(self.linear_progress_at(now)))
     }
 
     /// Returns `true` if the transition has fully completed.
+    #[cfg(test)]
     pub(crate) fn is_complete(&self) -> bool {
-        self.transition_start.elapsed().as_millis() >= self.duration_ms as u128
+        self.is_complete_at(std::time::Instant::now())
+    }
+
+    pub(crate) fn is_complete_at(&self, now: std::time::Instant) -> bool {
+        now.saturating_duration_since(self.transition_start)
+            .as_millis()
+            >= self.duration_ms as u128
     }
 }
 
@@ -290,9 +338,9 @@ pub(crate) type PubKey = (u64, String);
 /// The fade delay is derived by [`Compositor::publication_fade_delay_ms`] from
 /// `ZonePublishRecord.expires_at_wall_us` alone. A publication with no expiry
 /// is held until cleared and never fades; `hud_hold` moves the expiry, which
-/// [`Self::retarget`] follows.
+/// [`Self::retarget_at`] follows.
 pub(crate) struct PublicationAnimationState {
-    /// Wall-clock instant when the compositor first rendered this publication.
+    /// Monotonic renderer instant when the compositor first rendered this publication.
     pub(crate) first_seen: std::time::Instant,
     /// Fade-out begins once this many ms have elapsed since `first_seen`;
     /// `None` is held until cleared (no fade).
@@ -309,14 +357,31 @@ pub(crate) struct PublicationAnimationState {
 
 impl PublicationAnimationState {
     /// Create a new state for a freshly-seen publication.
+    #[cfg(test)]
     pub(crate) fn new(
         ttl_ms: Option<u64>,
         source_expiry_us: Option<u64>,
         fade_duration_ms: u32,
         easing: super::easing::Easing,
     ) -> Self {
+        Self::new_at(
+            ttl_ms,
+            source_expiry_us,
+            fade_duration_ms,
+            easing,
+            std::time::Instant::now(),
+        )
+    }
+
+    pub(crate) fn new_at(
+        ttl_ms: Option<u64>,
+        source_expiry_us: Option<u64>,
+        fade_duration_ms: u32,
+        easing: super::easing::Easing,
+        now: std::time::Instant,
+    ) -> Self {
         Self {
-            first_seen: std::time::Instant::now(),
+            first_seen: now,
             ttl_ms,
             source_expiry_us,
             fade_start: None,
@@ -329,20 +394,41 @@ impl PublicationAnimationState {
     ///
     /// Must be called once per frame per publication.  Idempotent after the
     /// fade has started.
+    #[cfg(test)]
     pub(crate) fn tick(&mut self) {
+        self.tick_at(std::time::Instant::now());
+    }
+
+    pub(crate) fn tick_at(&mut self, now: std::time::Instant) {
         if self.fade_start.is_none()
-            && self
-                .ttl_ms
-                .is_some_and(|ttl| self.first_seen.elapsed().as_millis() as u64 >= ttl)
+            && self.ttl_ms.is_some_and(|ttl| {
+                now.saturating_duration_since(self.first_seen).as_millis() as u64 >= ttl
+            })
         {
-            self.fade_start = Some(std::time::Instant::now());
+            self.fade_start = Some(now);
         }
     }
 
     /// Follow a changed record expiry (`hud_hold`): the fade delay counts from
     /// now, and a fade already under way is cancelled.
+    #[cfg(test)]
     pub(crate) fn retarget(&mut self, ttl_ms: Option<u64>, source_expiry_us: Option<u64>) {
-        *self = Self::new(ttl_ms, source_expiry_us, self.fade_duration_ms, self.easing);
+        self.retarget_at(ttl_ms, source_expiry_us, std::time::Instant::now());
+    }
+
+    pub(crate) fn retarget_at(
+        &mut self,
+        ttl_ms: Option<u64>,
+        source_expiry_us: Option<u64>,
+        now: std::time::Instant,
+    ) {
+        *self = Self::new_at(
+            ttl_ms,
+            source_expiry_us,
+            self.fade_duration_ms,
+            self.easing,
+            now,
+        );
     }
 
     /// Returns the current effective opacity for this publication (0.0–1.0).
@@ -350,14 +436,19 @@ impl PublicationAnimationState {
     /// Before fade: 1.0.
     /// During fade: captured exit curve from 1.0 → 0.0.
     /// After fade: 0.0.
+    #[cfg(test)]
     pub(crate) fn current_opacity(&self) -> f32 {
+        self.current_opacity_at(std::time::Instant::now())
+    }
+
+    pub(crate) fn current_opacity_at(&self, now: std::time::Instant) -> f32 {
         let Some(start) = self.fade_start else {
             return 1.0;
         };
         if self.fade_duration_ms == 0 {
             return 0.0;
         }
-        let elapsed_ms = start.elapsed().as_millis() as f32;
+        let elapsed_ms = now.saturating_duration_since(start).as_millis() as f32;
         let t = (elapsed_ms / self.fade_duration_ms as f32).clamp(0.0, 1.0);
         1.0 - self.easing.apply(t)
     }
@@ -373,16 +464,21 @@ impl PublicationAnimationState {
     }
 
     /// Returns `true` while the fade-out is running (started, not complete).
-    pub(crate) fn is_fading(&self) -> bool {
-        self.fade_start.is_some() && !self.is_fade_complete()
+    pub(crate) fn is_fading_at(&self, now: std::time::Instant) -> bool {
+        self.fade_start.is_some() && !self.is_fade_complete_at(now)
     }
 
     /// Returns `true` when the fade-out transition has fully completed.
+    #[cfg(test)]
     pub(crate) fn is_fade_complete(&self) -> bool {
+        self.is_fade_complete_at(std::time::Instant::now())
+    }
+
+    pub(crate) fn is_fade_complete_at(&self, now: std::time::Instant) -> bool {
         let Some(start) = self.fade_start else {
             return false;
         };
-        start.elapsed().as_millis() >= self.fade_duration_ms as u128
+        now.saturating_duration_since(start).as_millis() >= self.fade_duration_ms as u128
     }
 }
 

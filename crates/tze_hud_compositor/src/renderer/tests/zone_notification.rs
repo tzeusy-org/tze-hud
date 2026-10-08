@@ -1077,18 +1077,29 @@ fn test_zone_animation_state_fade_out_completes() {
 /// ZoneAnimationState with non-zero duration: opacity is interpolated.
 #[test]
 fn test_zone_animation_state_interpolates() {
-    // 10_000ms duration — very long, so elapsed << duration.
-    let state = ZoneAnimationState::fade_in(10_000);
-    // Very shortly after creation, opacity should be close to 0.
-    let opacity = state.current_opacity();
+    let now = std::time::Instant::now();
+    let state = ZoneAnimationState::fade_in_at(10_000, now);
+    let opacity = state.current_opacity_at(now);
     assert!(
         (0.0..=0.1).contains(&opacity),
         "fade-in opacity shortly after start should be near 0, got {opacity}"
     );
     assert!(
-        !state.is_complete(),
+        !state.is_complete_at(now),
         "10s fade-in should not be complete immediately"
     );
+    let midpoint = now + std::time::Duration::from_millis(5_000);
+    assert_eq!(state.current_opacity_at(midpoint), 0.5);
+    let interrupted =
+        ZoneAnimationState::fade_in_from_at(100, state.current_opacity_at(midpoint), midpoint);
+    assert_eq!(interrupted.current_opacity_at(midpoint), 0.5);
+    assert_eq!(
+        interrupted.current_opacity_at(midpoint + std::time::Duration::from_millis(50)),
+        0.75
+    );
+    let end = now + std::time::Duration::from_millis(10_000);
+    assert_eq!(state.current_opacity_at(end), 1.0);
+    assert!(state.is_complete_at(end));
 }
 
 /// backdrop_opacity overrides the backdrop color's alpha channel.

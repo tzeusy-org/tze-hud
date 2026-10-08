@@ -835,18 +835,31 @@ fn test_pub_anim_state_before_ttl_expiry_opacity_is_1() {
 /// AC: notification published with ttl_ms=3000 begins fade-out at 3000ms.
 #[test]
 fn test_pub_anim_state_custom_ttl_3000ms_triggers_fade() {
-    let mut state =
-        PublicationAnimationState::new(Some(3_000), None, 150, super::easing::Easing::Linear);
-
-    // Simulate 3001ms elapsed by setting first_seen to the past.
-    state.first_seen = std::time::Instant::now() - std::time::Duration::from_millis(3_001);
-
-    state.tick();
+    let now = std::time::Instant::now();
+    let mut state = PublicationAnimationState::new_at(
+        Some(3_000),
+        None,
+        150,
+        super::easing::Easing::Linear,
+        now,
+    );
+    state.tick_at(now + std::time::Duration::from_millis(2_999));
+    assert_eq!(state.fade_start, None, "not before the fade deadline");
+    assert_eq!(
+        state.fade_start_deadline(),
+        Some(now + std::time::Duration::from_millis(3_000))
+    );
+    let fade_at = now + std::time::Duration::from_millis(3_000);
+    state.tick_at(fade_at);
 
     assert!(
         state.fade_start.is_some(),
         "fade must start after TTL (3000ms) has elapsed"
     );
+    assert_eq!(state.fade_start, Some(fade_at));
+    state.tick_at(fade_at + std::time::Duration::from_millis(1));
+    assert_eq!(state.fade_start, Some(fade_at), "ticking is idempotent");
+    assert_eq!(state.fade_start_deadline(), None);
 }
 
 /// PublicationAnimationState: at 75ms into the 150ms fade, opacity ≈ 0.5.
@@ -854,20 +867,29 @@ fn test_pub_anim_state_custom_ttl_3000ms_triggers_fade() {
 /// AC: opacity interpolates linearly; at midpoint it must be approximately 0.5.
 #[test]
 fn test_pub_anim_state_opacity_at_75ms_midpoint_is_half() {
-    let mut state =
-        PublicationAnimationState::new(Some(0), None, 150, super::easing::Easing::Linear); // TTL=0 → instant expire
-
-    // TTL already expired: set first_seen far in the past.
-    state.first_seen = std::time::Instant::now() - std::time::Duration::from_secs(1);
-    state.tick(); // starts fade
-
-    // Now simulate 75ms into the fade.
-    state.fade_start = Some(std::time::Instant::now() - std::time::Duration::from_millis(75));
-
-    let opacity = state.current_opacity();
+    let now = std::time::Instant::now();
+    let mut state = PublicationAnimationState::new_at(
+        Some(0), // zero fade delay, unlike a held scene record's None
+        None,
+        150,
+        super::easing::Easing::Linear,
+        now,
+    );
+    state.tick_at(now);
+    assert_eq!(state.current_opacity_at(now), 1.0);
+    let opacity = state.current_opacity_at(now + std::time::Duration::from_millis(75));
     assert!(
         (opacity - 0.5).abs() < 0.1,
         "at 75ms midpoint, opacity must be ≈ 0.5, got {opacity}"
+    );
+    assert!(!state.is_fade_complete_at(now + std::time::Duration::from_millis(149)));
+    let end = now + std::time::Duration::from_millis(150);
+    assert!(state.is_fade_complete_at(end));
+    assert_eq!(state.current_opacity_at(end), 0.0);
+    assert_eq!(
+        state.current_opacity_at(now - std::time::Duration::from_millis(1)),
+        1.0,
+        "an earlier explicit sample saturates at the start"
     );
 }
 

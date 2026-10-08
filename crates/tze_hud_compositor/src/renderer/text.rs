@@ -337,6 +337,7 @@ impl super::Compositor {
     ///
     /// Returns a flat `Vec<TextItem>` ready for `TextRasterizer::prepare_text_items`.
     pub(super) fn collect_text_items(&self, scene: &SceneGraph, sw: f32, sh: f32) -> Vec<TextItem> {
+        let now = std::time::Instant::now();
         let mut items: Vec<TextItem> = Vec::new();
 
         // Transcript optimal-measure cap (hud-rivcy): resolve once per frame; a
@@ -461,7 +462,7 @@ impl super::Compositor {
             } else {
                 self.zone_animation_states
                     .get(zone_name)
-                    .map(|s| s.current_opacity())
+                    .map(|s| s.current_opacity_at(now))
                     .unwrap_or(1.0)
             };
 
@@ -518,7 +519,7 @@ impl super::Compositor {
                         let record = &publishes[pub_idx];
 
                         // Per-publication fade-out opacity (1.0 when no fade active).
-                        let pub_opacity = self.pub_opacity(zone_name, record);
+                        let pub_opacity = self.pub_opacity_at(zone_name, record, now);
                         // Combined opacity: zone animation × per-publication fade.
                         let effective_opacity = anim_opacity * pub_opacity;
 

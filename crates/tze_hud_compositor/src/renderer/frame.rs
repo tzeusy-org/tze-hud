@@ -185,6 +185,7 @@ impl Compositor {
         sh: f32,
         telemetry: &mut FrameTelemetry,
     ) -> (Vec<RectVertex>, Vec<TexturedDrawCmd>, usize) {
+        let animation_now = std::time::Instant::now();
         // Collect visible tiles, re-sorted with drag-z-order boost applied.
         let tiles = Self::sort_tiles_with_drag_boost(self.policy_visible_tiles(scene), scene);
         telemetry.tile_count = tiles.len() as u32;
@@ -246,11 +247,11 @@ impl Compositor {
 
         // Update zone animation states (fade-in/fade-out) before rendering.
         // Must run before any render_zone_content call below.
-        self.update_zone_animations(scene);
+        self.update_zone_animations_at(scene, animation_now);
         // §6.3 portal transition: advance per-portal-tile fade animations
         // alongside zone animations (hud-58rg1). Folded in here so all three
         // render entry points share the single update site.
-        self.update_portal_tile_animations(scene);
+        self.update_portal_tile_animations_at(scene, animation_now);
         // Smooth scroll / animated follow-tail (hud-bq0gl.10): advance the
         // per-portal-tile scroll smoothers once per frame, BEFORE the tile loop
         // and the later text/encode passes read displayed offsets via
@@ -259,13 +260,13 @@ impl Compositor {
 
         // ── Layer ordering: Background → Tiles → Content zones → Chrome zones ─
         // Background zones render first so agent tiles occlude them.
-        self.render_zone_content(
+        self.render_zone_content_at(
             scene,
             &mut vertices,
             &mut textured_cmds,
-            sw,
-            sh,
+            (sw, sh),
             Some(LayerAttachment::Background),
+            animation_now,
         );
 
         // Capture the vertex count after Background zones so the caller can split
@@ -472,10 +473,10 @@ impl Compositor {
         self.append_tile_close_button_vertices(scene, &mut vertices, sw, sh);
 
         // Update zone animation states (fade-in/fade-out) before rendering.
-        self.update_zone_animations(scene);
+        self.update_zone_animations_at(scene, animation_now);
         // §6.3 portal transition: advance per-portal-tile fade animations
         // alongside zone animations (hud-58rg1).
-        self.update_portal_tile_animations(scene);
+        self.update_portal_tile_animations_at(scene, animation_now);
 
         // Update streaming word-by-word reveal state.
         self.update_stream_reveals(scene);
@@ -486,22 +487,22 @@ impl Compositor {
         self.update_portal_tile_reveals(scene);
 
         // Content zones render as a batch after all tiles (above background, below chrome).
-        self.render_zone_content(
+        self.render_zone_content_at(
             scene,
             &mut vertices,
             &mut textured_cmds,
-            sw,
-            sh,
+            (sw, sh),
             Some(LayerAttachment::Content),
+            animation_now,
         );
         // Chrome zones render last, above tiles and content zones.
-        self.render_zone_content(
+        self.render_zone_content_at(
             scene,
             &mut vertices,
             &mut textured_cmds,
-            sw,
-            sh,
+            (sw, sh),
             Some(LayerAttachment::Chrome),
+            animation_now,
         );
         // The system card is not part of this vertex list: it is drawn by the
         // final `encode_system_card_pass` above every other pass (hud-w5zon).

@@ -460,7 +460,9 @@ fn static_focus_and_resize_grip_transitions_each_dirty_exactly_once() {
 #[tokio::test]
 async fn hold_moves_the_fade_deadline_and_ttl_zero_never_fades() {
     use std::sync::Arc;
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
+
+    let mut now = Instant::now();
     use tze_hud_scene::clock::TestClock;
 
     let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(320, 200).await);
@@ -478,7 +480,7 @@ async fn hold_moves_the_fade_deadline_and_ttl_zero_never_fades() {
         assert_eq!(states.len(), 1);
         states[0].ttl_ms
     };
-    compositor.update_publication_animations(&scene);
+    compositor.update_publication_animations_at(&scene, now);
     assert_eq!(
         delay(&compositor),
         Some(7_760),
@@ -487,17 +489,18 @@ async fn hold_moves_the_fade_deadline_and_ttl_zero_never_fades() {
 
     // 5 s in, hold 20 s: the captured 240ms fade is due 19.76 s from now.
     clock.advance(5_000);
-    let first_deadline = compositor.next_animation_deadline().unwrap();
+    now += Duration::from_millis(5_000);
+    let first_deadline = compositor.next_animation_deadline_at(now).unwrap();
     assert!(scene.hold_zone_publications("notification-area", "agent-a", Some(20_000_000)));
-    compositor.update_publication_animations(&scene);
+    compositor.update_publication_animations_at(&scene, now);
     assert_eq!(delay(&compositor), Some(19_760));
-    let moved = compositor.next_animation_deadline().unwrap();
+    let moved = compositor.next_animation_deadline_at(now).unwrap();
     assert!(
         moved > first_deadline + Duration::from_secs(10),
         "deadline moved out"
     );
     assert!(
-        !compositor.has_inflight_animation(&scene),
+        !compositor.has_inflight_animation_at(&scene, now),
         "still just counting down"
     );
     compositor.set_token_map(HashMap::from([("motion.exit.ms".into(), "500".into())]));
@@ -508,23 +511,51 @@ async fn hold_moves_the_fade_deadline_and_ttl_zero_never_fades() {
         );
     }
 
+    // The same explicit phase time and scene clock reach the moved deadline.
+    // Counting down remains idle, then the captured accelerated fade advances.
+    clock.advance(19_759);
+    now += Duration::from_millis(19_759);
+    compositor.update_publication_animations_at(&scene, now);
+    assert!(!compositor.has_inflight_animation_at(&scene, now));
+    assert_eq!(
+        compositor.next_animation_deadline_at(now),
+        Some(now + Duration::from_millis(1))
+    );
+    clock.advance(1);
+    now += Duration::from_millis(1);
+    compositor.update_publication_animations_at(&scene, now);
+    assert!(compositor.has_inflight_animation_at(&scene, now));
+    clock.advance(120);
+    now += Duration::from_millis(120);
+    compositor.update_publication_animations_at(&scene, now);
+    assert_eq!(
+        compositor.pub_opacity_at(
+            "notification-area",
+            &scene.zone_registry.active_publishes["notification-area"][0],
+            now,
+        ),
+        0.75,
+        "halfway through the originally captured 240ms accelerated exit"
+    );
+
     // ttl_ms:0 holds: no deadline, no animation, past auto_clear_ms and the sweep.
     assert!(scene.hold_zone_publications("notification-area", "agent-a", None));
-    compositor.update_publication_animations(&scene);
+    compositor.update_publication_animations_at(&scene, now);
     assert_eq!(delay(&compositor), None);
     assert_eq!(
-        compositor.next_animation_deadline(),
+        compositor.next_animation_deadline_at(now),
         None,
         "held schedules no wake"
     );
     clock.advance(60_000);
+    now += Duration::from_millis(60_000);
     assert_eq!(
         scene.drain_expired_zone_publications(),
         0,
         "scene sweep keeps it"
     );
-    compositor.update_publication_animations(&scene);
-    assert!(!compositor.has_inflight_animation(&scene));
+    compositor.update_publication_animations_at(&scene, now);
+    assert!(!compositor.has_inflight_animation_at(&scene, now));
     assert_eq!(
         compositor.pub_opacity(
             "notification-area",
@@ -540,14 +571,14 @@ async fn hold_moves_the_fade_deadline_and_ttl_zero_never_fades() {
     scene
         .clear_zone_for_publisher("notification-area", "agent-a")
         .unwrap();
-    compositor.update_publication_animations(&scene);
+    compositor.update_publication_animations_at(&scene, now);
     assert!(
         compositor
             .pub_animation_states
             .values()
             .all(|zone| zone.is_empty())
     );
-    assert_eq!(compositor.next_animation_deadline(), None);
+    assert_eq!(compositor.next_animation_deadline_at(now), None);
     // Explicit zero schedules only authoritative expiry, with no fading frames.
     scene
         .zone_registry
@@ -572,14 +603,15 @@ async fn hold_moves_the_fade_deadline_and_ttl_zero_never_fades() {
         scene.zone_registry.active_publishes["notification-area"][0].expires_at_wall_us,
         Some(expiry)
     );
-    compositor.update_publication_animations(&scene);
+    compositor.update_publication_animations_at(&scene, now);
     assert_eq!(delay(&compositor), Some(50));
-    assert!(!compositor.has_inflight_animation(&scene));
-    assert!(compositor.next_animation_deadline().is_some());
+    assert!(!compositor.has_inflight_animation_at(&scene, now));
+    assert!(compositor.next_animation_deadline_at(now).is_some());
     clock.advance(50);
+    now += Duration::from_millis(50);
     assert_eq!(scene.drain_expired_zone_publications(), 1);
-    compositor.update_publication_animations(&scene);
-    assert_eq!(compositor.next_animation_deadline(), None);
+    compositor.update_publication_animations_at(&scene, now);
+    assert_eq!(compositor.next_animation_deadline_at(now), None);
     // A shorter TTL clips a nonzero fade at the same scene expiry boundary.
     scene
         .zone_registry
@@ -589,7 +621,14 @@ async fn hold_moves_the_fade_deadline_and_ttl_zero_never_fades() {
         .rendering_policy
         .transition_out_ms = Some(240);
     scene
-        .publish_to_zone("notification-area", content, "agent-a", None, None, None)
+        .publish_to_zone(
+            "notification-area",
+            content.clone(),
+            "agent-a",
+            None,
+            None,
+            None,
+        )
         .unwrap();
     let expiry = scene.now_wall_us() + 50_000;
     assert!(scene.hold_zone_publications("notification-area", "agent-a", Some(50_000)));
@@ -597,12 +636,64 @@ async fn hold_moves_the_fade_deadline_and_ttl_zero_never_fades() {
         scene.zone_registry.active_publishes["notification-area"][0].expires_at_wall_us,
         Some(expiry)
     );
-    compositor.update_publication_animations(&scene);
+    compositor.update_publication_animations_at(&scene, now);
     assert_eq!(delay(&compositor), Some(0));
-    assert!(compositor.has_inflight_animation(&scene));
+    assert!(compositor.has_inflight_animation_at(&scene, now));
     clock.advance(50);
+    now += Duration::from_millis(50);
     assert_eq!(scene.drain_expired_zone_publications(), 1);
-    compositor.update_publication_animations(&scene);
-    assert!(!compositor.has_inflight_animation(&scene));
-    assert_eq!(compositor.next_animation_deadline(), None);
+    compositor.update_publication_animations_at(&scene, now);
+    assert!(!compositor.has_inflight_animation_at(&scene, now));
+    assert_eq!(compositor.next_animation_deadline_at(now), None);
+
+    // A full positive fade reaches completion without another agent publication
+    // being pruned. The scene sweep still owns expiry, including clipped fades.
+    scene
+        .publish_to_zone(
+            "notification-area",
+            content.clone(),
+            "agent-a",
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    assert!(scene.hold_zone_publications("notification-area", "agent-a", Some(3_000_000)));
+    compositor.update_publication_animations_at(&scene, now);
+    assert_eq!(delay(&compositor), Some(2_760));
+    clock.advance(2_759);
+    now += Duration::from_millis(2_759);
+    compositor.update_publication_animations_at(&scene, now);
+    assert!(!compositor.has_inflight_animation_at(&scene, now));
+    clock.advance(1);
+    now += Duration::from_millis(1);
+    compositor.update_publication_animations_at(&scene, now);
+    assert!(compositor.has_inflight_animation_at(&scene, now));
+    clock.advance(120);
+    now += Duration::from_millis(120);
+    compositor.update_publication_animations_at(&scene, now);
+    let opacity = compositor.pub_opacity_at(
+        "notification-area",
+        &scene.zone_registry.active_publishes["notification-area"][0],
+        now,
+    );
+    assert!(opacity > 0.0 && opacity < 1.0);
+    scene
+        .publish_to_zone("notification-area", content, "agent-b", None, None, None)
+        .unwrap();
+    compositor.update_publication_animations_at(&scene, now);
+    clock.advance(120);
+    now += Duration::from_millis(120);
+    compositor.prune_faded_publications_at(&mut scene, now);
+    let survivors = &scene.zone_registry.active_publishes["notification-area"];
+    assert_eq!(survivors.len(), 1);
+    assert_eq!(survivors[0].publisher_namespace, "agent-b");
+    assert_eq!(scene.drain_expired_zone_publications(), 0);
+    compositor.update_publication_animations_at(&scene, now);
+    assert!(!compositor.has_inflight_animation_at(&scene, now));
+    scene
+        .clear_zone_for_publisher("notification-area", "agent-b")
+        .unwrap();
+    compositor.update_publication_animations_at(&scene, now);
+    assert_eq!(compositor.next_animation_deadline_at(now), None);
 }
