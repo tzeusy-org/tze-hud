@@ -186,6 +186,10 @@ pub struct SessionRegistry {
     /// Observers of the full normal cleanup boundary, never a cleanup trigger.
     #[cfg(test)]
     cleanup_observers: HashMap<SceneId, Vec<tokio::sync::oneshot::Sender<()>>>,
+    /// The registry and wire use distinct IDs. Bind their actual identities
+    /// before a handshake reply so resumed transports can observe cleanup too.
+    #[cfg(test)]
+    cleanup_session_ids: HashMap<String, SceneId>,
 }
 
 impl SessionRegistry {
@@ -213,6 +217,26 @@ impl SessionRegistry {
         self.sessions.remove(session_id)
     }
 
+    #[cfg(test)]
+    pub(crate) fn bind_cleanup_session(&mut self, registry_id: &str, scene_id: SceneId) {
+        self.cleanup_session_ids
+            .insert(registry_id.to_string(), scene_id);
+    }
+
+    /// Observe the actual scene session corresponding to a registered transport,
+    /// including resumes whose response does not expose the scene session ID.
+    #[cfg(test)]
+    pub(crate) fn observe_registered_cleanup(
+        &mut self,
+        registry_id: &str,
+    ) -> tokio::sync::oneshot::Receiver<()> {
+        let scene_id = *self
+            .cleanup_session_ids
+            .get(registry_id)
+            .expect("registered transport must have a bound scene session identity");
+        self.observe_cleanup(&scene_id)
+    }
+
     /// Register before dropping the transport, keyed by the scene session ID
     /// carried by SessionEstablished (distinct from the internal registry ID).
     /// Simultaneous connections in one namespace stay distinct; oneshots retain
@@ -234,6 +258,8 @@ impl SessionRegistry {
     /// RegistryGuard's removal-only fallback must not signal this boundary.
     #[cfg(test)]
     pub(crate) fn finish_cleanup(&mut self, session_id: &SceneId) {
+        self.cleanup_session_ids
+            .retain(|_, scene_id| scene_id != session_id);
         if let Some(observers) = self.cleanup_observers.remove(session_id) {
             for observer in observers {
                 let _ = observer.send(());

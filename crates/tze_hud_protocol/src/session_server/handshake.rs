@@ -193,12 +193,16 @@ pub(super) async fn handle_session_init(
     let (session_id, upload_rate_limit_bytes_per_sec) = {
         let mut st = state.lock().await;
         let registered = st.sessions.register(&namespace, &granted_capabilities);
+        #[cfg(test)]
+        st.sessions
+            .bind_cleanup_session(&registered.session_id, scene_session_id);
         (
             registered.session_id,
             st.resource_store.upload_rate_limit_bytes_per_sec(),
         )
     };
-    let session_open_at = now_wall_us();
+    let scene_clock = Arc::clone(&state.lock().await.scene);
+    let session_open_at = scene_clock.lock().await.now_wall_us();
     let mut session = StreamSession {
         session_id,
         namespace: namespace.clone(),
@@ -392,13 +396,17 @@ pub(super) async fn handle_session_resume(
     let (session_id, upload_rate_limit_bytes_per_sec) = {
         let mut st = state.lock().await;
         let registered = st.sessions.register(&namespace, &identity.permissions);
+        #[cfg(test)]
+        st.sessions
+            .bind_cleanup_session(&registered.session_id, scene_session_id);
         (
             registered.session_id,
             st.resource_store.upload_rate_limit_bytes_per_sec(),
         )
     };
 
-    let session_open_at = now_wall_us();
+    let scene_clock = Arc::clone(&state.lock().await.scene);
+    let session_open_at = scene_clock.lock().await.now_wall_us();
     let mut session = StreamSession {
         session_id,
         namespace: namespace.clone(),

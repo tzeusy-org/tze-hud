@@ -8,6 +8,7 @@
 //!   loop when the scene is unfrozen).
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use tokio::sync::Mutex;
 use tonic::Status;
@@ -304,6 +305,12 @@ fn convert_proto_mutations(
     Ok(scene_mutations)
 }
 
+// Sample before the dedup operation; no scene guard survives an outbound await.
+async fn replay_now(scene: &Arc<Mutex<tze_hud_scene::SceneGraph>>) -> Duration {
+    let now_us = scene.lock().await.now_monotonic_us();
+    Duration::from_micros(now_us)
+}
+
 pub(super) async fn handle_mutation_batch(
     state: &Arc<Mutex<SharedState>>,
     session: &mut StreamSession,
@@ -312,6 +319,7 @@ pub(super) async fn handle_mutation_batch(
     batch: MutationBatch,
     render_wake: &tze_hud_scene::render_wake::RenderWakeNotifier,
 ) {
+    let clock_scene = Arc::clone(&state.lock().await.scene);
     // ── Step 1: Safe mode check (RFC 0005 §3.7) ─────────────────────────────
     // Reject MutationBatch when safe mode is active.
     // Session-local flag tracks per-session suspension (from SessionSuspended delivery).
@@ -375,7 +383,10 @@ pub(super) async fn handle_mutation_batch(
             // response the client receives for a queued batch; drain does not send
             // a second RequestResult.
             if !batch.batch_id.is_empty() {
-                if let Some(cached) = session.dedup_window.lookup(&batch.batch_id) {
+                if let Some(cached) = session
+                    .dedup_window
+                    .lookup_at(&batch.batch_id, replay_now(&clock_scene).await)
+                {
                     let seq = session.next_server_seq();
                     drop(st);
                     let _ = tx
@@ -408,7 +419,7 @@ pub(super) async fn handle_mutation_batch(
                     // created_ids is empty because the queued path sends no
                     // created-element IDs at enqueue time (they are not known yet).
                     if !batch.batch_id.is_empty() {
-                        session.dedup_window.insert(
+                        session.dedup_window.insert_at(
                             batch.batch_id.clone(),
                             CachedResult {
                                 accepted: true,
@@ -416,6 +427,7 @@ pub(super) async fn handle_mutation_batch(
                                 error_code: String::new(),
                                 error_message: String::new(),
                             },
+                            replay_now(&clock_scene).await,
                         );
                     }
                     if pressure_warning {
@@ -459,7 +471,7 @@ pub(super) async fn handle_mutation_batch(
                     // Coalesced with an existing entry — accepted. Cache so retransmits
                     // while frozen do not re-coalesce or create duplicate queue entries.
                     if !batch.batch_id.is_empty() {
-                        session.dedup_window.insert(
+                        session.dedup_window.insert_at(
                             batch.batch_id.clone(),
                             CachedResult {
                                 accepted: true,
@@ -467,6 +479,7 @@ pub(super) async fn handle_mutation_batch(
                                 error_code: String::new(),
                                 error_message: String::new(),
                             },
+                            replay_now(&clock_scene).await,
                         );
                     }
                     let seq = session.next_server_seq();
@@ -490,7 +503,7 @@ pub(super) async fn handle_mutation_batch(
                     // Cache the new batch as accepted so retransmits while frozen
                     // are suppressed.
                     if !batch.batch_id.is_empty() {
-                        session.dedup_window.insert(
+                        session.dedup_window.insert_at(
                             batch.batch_id.clone(),
                             CachedResult {
                                 accepted: true,
@@ -498,6 +511,7 @@ pub(super) async fn handle_mutation_batch(
                                 error_code: String::new(),
                                 error_message: String::new(),
                             },
+                            replay_now(&clock_scene).await,
                         );
                     }
                     // Invalidate any stale accepted=true entry for the evicted batch.
@@ -506,7 +520,7 @@ pub(super) async fn handle_mutation_batch(
                     // even though the mutation was dropped.  Overwrite with the actual
                     // outcome so the dedup window reflects reality.
                     if !evicted_batch_id.is_empty() {
-                        session.dedup_window.insert(
+                        session.dedup_window.insert_at(
                             evicted_batch_id.clone(),
                             CachedResult {
                                 accepted: false,
@@ -516,6 +530,7 @@ pub(super) async fn handle_mutation_batch(
                                     "Mutation evicted from queue due to capacity pressure."
                                         .to_string(),
                             },
+                            replay_now(&clock_scene).await,
                         );
                     }
                     // Send MUTATION_DROPPED for the evicted batch (generic signal).
@@ -602,7 +617,10 @@ pub(super) async fn handle_mutation_batch(
     // without re-applying mutations. This covers retransmission scenarios where
     // the agent resends with the same batch_id and a new sequence number.
     if !batch.batch_id.is_empty() {
-        if let Some(cached) = session.dedup_window.lookup(&batch.batch_id) {
+        if let Some(cached) = session
+            .dedup_window
+            .lookup_at(&batch.batch_id, replay_now(&clock_scene).await)
+        {
             let seq = session.next_server_seq();
             let _ = tx
                 .send(Ok(ServerMessage {
@@ -624,10 +642,12 @@ pub(super) async fn handle_mutation_batch(
 
     // ── TimingHints validation (RFC 0003 §3.5, RFC 0005 §3.3) ────────────────
     if let Some(ref hints) = batch.timing {
+        let now_wall = clock_scene.lock().await.now_wall_us();
         if let Err((error_code, message)) = validate_timing_hints(
             hints,
             session.session_open_at_wall_us,
             DEFAULT_MAX_FUTURE_SCHEDULE_US,
+            now_wall,
         ) {
             let seq = session.next_server_seq();
             let _ = tx
@@ -659,9 +679,11 @@ pub(super) async fn handle_mutation_batch(
                         .to_string(),
             };
             if !batch.batch_id.is_empty() {
-                session
-                    .dedup_window
-                    .insert(batch.batch_id.clone(), cached.clone());
+                session.dedup_window.insert_at(
+                    batch.batch_id.clone(),
+                    cached.clone(),
+                    replay_now(&clock_scene).await,
+                );
             }
             let seq = session.next_server_seq();
             // Drop lock before awaiting send to avoid holding mutex across await point.
@@ -696,9 +718,11 @@ pub(super) async fn handle_mutation_batch(
                 error_message: error_message.clone(),
             };
             if !batch.batch_id.is_empty() {
-                session
-                    .dedup_window
-                    .insert(batch.batch_id.clone(), cached.clone());
+                session.dedup_window.insert_at(
+                    batch.batch_id.clone(),
+                    cached.clone(),
+                    replay_now(&clock_scene).await,
+                );
             }
             let seq = session.next_server_seq();
             drop(st);
@@ -765,9 +789,11 @@ pub(super) async fn handle_mutation_batch(
                     error_message: format!("{error_code}: {message}"),
                 };
                 if !batch.batch_id.is_empty() {
-                    session
-                        .dedup_window
-                        .insert(batch.batch_id.clone(), cached.clone());
+                    session.dedup_window.insert_at(
+                        batch.batch_id.clone(),
+                        cached.clone(),
+                        replay_now(&clock_scene).await,
+                    );
                 }
                 let seq = session.next_server_seq();
                 drop(st);
@@ -796,7 +822,7 @@ pub(super) async fn handle_mutation_batch(
             .await
             .schedule_batch(present_at, scene_batch);
         if !batch.batch_id.is_empty() {
-            session.dedup_window.insert(
+            session.dedup_window.insert_at(
                 batch.batch_id.clone(),
                 CachedResult {
                     accepted: true,
@@ -804,6 +830,7 @@ pub(super) async fn handle_mutation_batch(
                     error_code: String::new(),
                     error_message: String::new(),
                 },
+                replay_now(&clock_scene).await,
             );
         }
         let seq = session.next_server_seq();
@@ -857,7 +884,7 @@ pub(super) async fn handle_mutation_batch(
 
         // Cache result before sending.
         if !batch.batch_id.is_empty() {
-            session.dedup_window.insert(
+            session.dedup_window.insert_at(
                 batch.batch_id.clone(),
                 CachedResult {
                     accepted: true,
@@ -865,6 +892,7 @@ pub(super) async fn handle_mutation_batch(
                     error_code: String::new(),
                     error_message: String::new(),
                 },
+                replay_now(&clock_scene).await,
             );
         }
 
@@ -897,7 +925,7 @@ pub(super) async fn handle_mutation_batch(
 
         // Cache rejection result before sending.
         if !batch.batch_id.is_empty() {
-            session.dedup_window.insert(
+            session.dedup_window.insert_at(
                 batch.batch_id.clone(),
                 CachedResult {
                     accepted: false,
@@ -905,6 +933,7 @@ pub(super) async fn handle_mutation_batch(
                     error_code: error_code.to_string(),
                     error_message: error_message.clone(),
                 },
+                replay_now(&clock_scene).await,
             );
         }
 

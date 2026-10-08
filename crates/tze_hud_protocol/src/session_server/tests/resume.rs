@@ -1,22 +1,36 @@
 use super::*;
 
+/// Drop the real transport only after its session-specific witness is registered.
+async fn disconnect_after_cleanup_registration(
+    tx: tokio::sync::mpsc::Sender<ClientMessage>,
+    stream: tonic::Streaming<ServerMessage>,
+    cleanup: tokio::sync::oneshot::Receiver<()>,
+) {
+    drop(tx);
+    drop(stream);
+    tokio::time::timeout(Duration::from_secs(5), cleanup)
+        .await
+        .expect("real session cleanup did not complete")
+        .expect("cleanup witness dropped before normal cleanup completed");
+}
+
 #[tokio::test]
 async fn test_resume_with_token() {
-    let (mut client, _server) = setup_test().await;
+    let (mut client, _server, state) = setup_test_with_state().await;
 
-    // Start initial session to get a resume token
-    let (tx, init_messages, _stream) = handshake(&mut client, "resumable", "test-key").await;
-    drop(tx); // Close the first stream
-    drop(_stream);
-
-    // Wait a bit for cleanup
-    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-
-    // Now resume with the token
-    let resume_token = match &init_messages[0].payload {
-        Some(ServerPayload::SessionEstablished(established)) => established.resume_token.clone(),
+    // Start initial session to get a resume token and its actual scene identity.
+    let (tx, init_messages, stream) = handshake(&mut client, "resumable", "test-key").await;
+    let (resume_token, session_id) = match &init_messages[0].payload {
+        Some(ServerPayload::SessionEstablished(e)) => (
+            e.resume_token.clone(),
+            bytes_to_scene_id(&e.session_id).unwrap(),
+        ),
         _ => panic!("Expected SessionEstablished"),
     };
+    let cleanup = state.lock().await.sessions.observe_cleanup(&session_id);
+    disconnect_after_cleanup_registration(tx, stream, cleanup).await;
+
+    // Now resume with the token after observed complete cleanup.
 
     let (resume_tx, resume_rx) = tokio::sync::mpsc::channel::<ClientMessage>(64);
     let resume_stream = tokio_stream::wrappers::ReceiverStream::new(resume_rx);
@@ -79,16 +93,18 @@ async fn handshake_and_disconnect(
     client: &mut HudSessionClient<tonic::transport::Channel>,
     agent_id: &str,
     psk: &str,
+    state: &Arc<Mutex<SharedState>>,
 ) -> Vec<u8> {
     let (tx, init_messages, stream) = handshake(client, agent_id, psk).await;
-    let resume_token = match &init_messages[0].payload {
-        Some(ServerPayload::SessionEstablished(e)) => e.resume_token.clone(),
+    let (resume_token, session_id) = match &init_messages[0].payload {
+        Some(ServerPayload::SessionEstablished(e)) => (
+            e.resume_token.clone(),
+            bytes_to_scene_id(&e.session_id).unwrap(),
+        ),
         _ => panic!("Expected SessionEstablished"),
     };
-    drop(tx);
-    drop(stream);
-    // Allow server task to process EOF and register the resume token.
-    tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
+    let cleanup = state.lock().await.sessions.observe_cleanup(&session_id);
+    disconnect_after_cleanup_registration(tx, stream, cleanup).await;
     resume_token
 }
 
@@ -96,8 +112,9 @@ async fn handshake_and_disconnect(
 /// `SessionResumeResult(accepted=true)`.
 #[tokio::test]
 async fn test_reconnect_within_grace_accepted() {
-    let (mut client, _server) = setup_test().await;
-    let resume_token = handshake_and_disconnect(&mut client, "resume-ok-agent", "test-key").await;
+    let (mut client, _server, state) = setup_test_with_state().await;
+    let resume_token =
+        handshake_and_disconnect(&mut client, "resume-ok-agent", "test-key", &state).await;
 
     let (resume_tx, resume_rx) = tokio::sync::mpsc::channel::<ClientMessage>(64);
     let resume_stream = tokio_stream::wrappers::ReceiverStream::new(resume_rx);
@@ -151,8 +168,9 @@ async fn test_reconnect_within_grace_accepted() {
 /// is single-use and consumed.
 #[tokio::test]
 async fn test_resume_token_single_use() {
-    let (mut client, _server) = setup_test().await;
-    let resume_token = handshake_and_disconnect(&mut client, "single-use-agent", "test-key").await;
+    let (mut client, _server, state) = setup_test_with_state().await;
+    let resume_token =
+        handshake_and_disconnect(&mut client, "single-use-agent", "test-key", &state).await;
 
     // First resume: should succeed and consume the token.
     let (tx1, rx1) = tokio::sync::mpsc::channel::<ClientMessage>(64);
@@ -179,9 +197,19 @@ async fn test_resume_token_single_use() {
         }
         other => panic!("Expected SessionResumeResult, got: {other:?}"),
     }
-    drop(tx1);
-    drop(r1);
-    tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
+    // Resume responses expose no scene session ID. Resolve the actual registered
+    // transport through the test-only identity binding, never a count predicate.
+    let cleanup = {
+        let mut st = state.lock().await;
+        let registry_id = st
+            .sessions
+            .session_for_namespace("single-use-agent")
+            .expect("accepted resume must register its transport")
+            .session_id
+            .clone();
+        st.sessions.observe_registered_cleanup(&registry_id)
+    };
+    disconnect_after_cleanup_registration(tx1, r1, cleanup).await;
 
     // Second resume attempt with the same original token: must fail.
     let (tx2, rx2) = tokio::sync::mpsc::channel::<ClientMessage>(64);
@@ -218,8 +246,9 @@ async fn test_resume_token_single_use() {
 /// Invalid credentials result in `SessionError(AUTH_FAILED)`.
 #[tokio::test]
 async fn test_resume_auth_required() {
-    let (mut client, _server) = setup_test().await;
-    let resume_token = handshake_and_disconnect(&mut client, "auth-check-agent", "test-key").await;
+    let (mut client, _server, state) = setup_test_with_state().await;
+    let resume_token =
+        handshake_and_disconnect(&mut client, "auth-check-agent", "test-key", &state).await;
 
     let (resume_tx, resume_rx) = tokio::sync::mpsc::channel::<ClientMessage>(64);
     let resume_stream = tokio_stream::wrappers::ReceiverStream::new(resume_rx);
@@ -302,7 +331,7 @@ async fn test_bogus_token_rejected_with_grace_expired() {
 /// Agents must use the confirmed subscription state, not assume the pre-disconnect set.
 #[tokio::test]
 async fn test_resume_result_carries_subscription_state() {
-    let (mut client, _server) = setup_test().await;
+    let (mut client, _server, state) = setup_test_with_state().await;
 
     // Establish a session that requested a specific subscription.
     let (tx, rx) = tokio::sync::mpsc::channel::<ClientMessage>(64);
@@ -326,14 +355,15 @@ async fn test_resume_result_carries_subscription_state() {
 
     let mut response_stream = client.session(stream).await.unwrap().into_inner();
     let established_msg = response_stream.next().await.unwrap().unwrap();
-    let resume_token = match &established_msg.payload {
-        Some(ServerPayload::SessionEstablished(e)) => e.resume_token.clone(),
+    let (resume_token, session_id) = match &established_msg.payload {
+        Some(ServerPayload::SessionEstablished(e)) => (
+            e.resume_token.clone(),
+            bytes_to_scene_id(&e.session_id).unwrap(),
+        ),
         other => panic!("Expected SessionEstablished, got: {other:?}"),
     };
-
-    drop(tx);
-    drop(response_stream);
-    tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
+    let cleanup = state.lock().await.sessions.observe_cleanup(&session_id);
+    disconnect_after_cleanup_registration(tx, response_stream, cleanup).await;
 
     // Now resume.
     let (rtx, rrx) = tokio::sync::mpsc::channel::<ClientMessage>(64);

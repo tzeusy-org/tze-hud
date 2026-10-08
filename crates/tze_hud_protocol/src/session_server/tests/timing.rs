@@ -5,85 +5,141 @@ use super::*;
 /// Unit test for validate_timing_hints: TIMESTAMP_TOO_OLD.
 #[test]
 fn test_timing_hints_too_old() {
-    // present_at_wall_us = session_open - 61 seconds → TIMESTAMP_TOO_OLD
-    let session_open = 200_000_000u64; // arbitrary µs baseline
-    let present = session_open - 61_000_001; // > 60s before session open
-    let hints = TimingHints {
+    let session_open = 200_000_000u64;
+    let now = session_open;
+    let present = session_open - 61_000_001;
+    let mut hints = TimingHints {
         present_at_wall_us: present,
         expires_at_wall_us: 0,
     };
-    let result = validate_timing_hints(&hints, session_open, DEFAULT_MAX_FUTURE_SCHEDULE_US);
+    let result = validate_timing_hints(&hints, session_open, DEFAULT_MAX_FUTURE_SCHEDULE_US, now);
     assert!(result.is_err());
     let (code, _) = result.unwrap_err();
     assert_eq!(code, "TIMESTAMP_TOO_OLD");
+
+    let threshold = session_open - 60_000_000;
+    hints.present_at_wall_us = threshold - 1;
+    assert_eq!(
+        validate_timing_hints(&hints, session_open, DEFAULT_MAX_FUTURE_SCHEDULE_US, now)
+            .unwrap_err()
+            .0,
+        "TIMESTAMP_TOO_OLD"
+    );
+    for present in [threshold, threshold + 1] {
+        hints.present_at_wall_us = present;
+        assert!(
+            validate_timing_hints(&hints, session_open, DEFAULT_MAX_FUTURE_SCHEDULE_US, now)
+                .is_ok()
+        );
+    }
 }
 
 /// Unit test for validate_timing_hints: TIMESTAMP_TOO_FUTURE.
 #[test]
 fn test_timing_hints_too_future() {
-    let session_open = now_wall_us();
+    let session_open = 200_000_000u64;
+    let now = session_open;
     let max_future = DEFAULT_MAX_FUTURE_SCHEDULE_US;
-    // Use session_open as baseline and a large margin (1 full second) to avoid
-    // flakiness from the µs gap between now_wall_us() calls.
-    // present must exceed current_wall_us + max_future, where current_wall_us is
-    // re-sampled inside validate_timing_hints. The 1-second buffer ensures the
-    // margin holds even under scheduler jitter.
-    let present = session_open + max_future + 1_000_000; // 1s beyond horizon
-    let hints = TimingHints {
-        present_at_wall_us: present,
+    let horizon = now + max_future;
+    let mut hints = TimingHints {
+        present_at_wall_us: horizon + 1,
         expires_at_wall_us: 0,
     };
-    let result = validate_timing_hints(&hints, session_open, max_future);
+    let result = validate_timing_hints(&hints, session_open, max_future, now);
     assert!(result.is_err());
     let (code, _) = result.unwrap_err();
     assert_eq!(code, "TIMESTAMP_TOO_FUTURE");
+    for present in [horizon - 1, horizon] {
+        hints.present_at_wall_us = present;
+        assert!(validate_timing_hints(&hints, session_open, max_future, now).is_ok());
+    }
 }
 
 /// Unit test for validate_timing_hints: TIMESTAMP_EXPIRY_BEFORE_PRESENT.
 #[test]
 fn test_timing_hints_expiry_before_present() {
-    let session_open = now_wall_us().saturating_sub(1_000_000); // 1s ago
-    let now = now_wall_us();
-    let present = now + 1_000_000; // 1s in future (valid range)
-    let expires = present - 1; // expires before present → invalid
-    let hints = TimingHints {
+    let now = 200_000_000u64;
+    let session_open = now - 1_000_000;
+    let present = now + 1_000_000;
+    let mut hints = TimingHints {
         present_at_wall_us: present,
-        expires_at_wall_us: expires,
+        expires_at_wall_us: present - 1,
     };
-    let result = validate_timing_hints(&hints, session_open, DEFAULT_MAX_FUTURE_SCHEDULE_US);
+    let result = validate_timing_hints(&hints, session_open, DEFAULT_MAX_FUTURE_SCHEDULE_US, now);
     assert!(result.is_err());
     let (code, _) = result.unwrap_err();
     assert_eq!(code, "TIMESTAMP_EXPIRY_BEFORE_PRESENT");
+    hints.expires_at_wall_us = present;
+    assert_eq!(
+        validate_timing_hints(&hints, session_open, DEFAULT_MAX_FUTURE_SCHEDULE_US, now)
+            .unwrap_err()
+            .0,
+        "TIMESTAMP_EXPIRY_BEFORE_PRESENT"
+    );
+    hints.expires_at_wall_us = present + 1;
+    assert!(
+        validate_timing_hints(&hints, session_open, DEFAULT_MAX_FUTURE_SCHEDULE_US, now).is_ok()
+    );
 }
 
 /// Unit test for validate_timing_hints: valid future scheduling (present_at in future).
 #[test]
 fn test_timing_hints_valid_future() {
-    let session_open = now_wall_us().saturating_sub(1_000_000); // 1s ago
-    let now = now_wall_us();
-    let present = now + 500_000; // 500ms in the future (well within 5 min)
-    let expires = present + 2_000_000; // 2s after present → valid
+    let now = 200_000_000u64;
+    let session_open = now - 1_000_000;
+    let present = now + 500_000;
+    let expires = present + 2_000_000;
     let hints = TimingHints {
         present_at_wall_us: present,
         expires_at_wall_us: expires,
     };
     assert!(
-        validate_timing_hints(&hints, session_open, DEFAULT_MAX_FUTURE_SCHEDULE_US).is_ok(),
+        validate_timing_hints(&hints, session_open, DEFAULT_MAX_FUTURE_SCHEDULE_US, now).is_ok(),
         "Valid future TimingHints should not be rejected"
+    );
+    // Horizon addition remains saturating at the wall-clock representation limit.
+    let hints = TimingHints {
+        present_at_wall_us: u64::MAX,
+        expires_at_wall_us: 0,
+    };
+    assert!(
+        validate_timing_hints(
+            &hints,
+            u64::MAX,
+            DEFAULT_MAX_FUTURE_SCHEDULE_US,
+            u64::MAX - 1
+        )
+        .is_ok()
     );
 }
 
 /// Unit test for validate_timing_hints: zero fields bypass validation.
 #[test]
 fn test_timing_hints_zero_bypasses_validation() {
-    let session_open = now_wall_us();
-    let hints = TimingHints {
+    let session_open = 200_000_000u64;
+    let mut hints = TimingHints {
         present_at_wall_us: 0,
         expires_at_wall_us: 0,
     };
     assert!(
-        validate_timing_hints(&hints, session_open, DEFAULT_MAX_FUTURE_SCHEDULE_US).is_ok(),
+        validate_timing_hints(
+            &hints,
+            session_open,
+            DEFAULT_MAX_FUTURE_SCHEDULE_US,
+            session_open
+        )
+        .is_ok(),
         "Zero TimingHints should always be valid"
+    );
+    hints.expires_at_wall_us = 1;
+    assert!(
+        validate_timing_hints(
+            &hints,
+            session_open,
+            DEFAULT_MAX_FUTURE_SCHEDULE_US,
+            session_open
+        )
+        .is_ok()
     );
 }
 
