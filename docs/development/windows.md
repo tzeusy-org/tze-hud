@@ -334,22 +334,44 @@ as your Windows user, in your desktop session, and gets a real overlay
 (confirmed 2026-10-05). If the window comes up grey and opaque, start it from
 a Windows terminal instead.
 
-- Copy the exe and its config to a Windows directory, and run it from there.
-  The exe and the config are the only files it needs, because widget bundles
-  are built in. Running it from the Linux filesystem would put the paired
-  `agents.toml` beside the config, over a `\\wsl.localhost\...` path that
-  hasn't been tested.
-- Paths passed to the exe must be Windows paths. Convert them with
-  `wslpath -w`.
-- Stop the HUD from WSL with `taskkill.exe /IM tze_hud.exe /F`. Ctrl+C in the
-  WSL terminal is ignored, the same as natively.
+For the first launch, put the exe and its config in a Windows development
+directory and start it with explicit arguments. Widget bundles are built in;
+pair agents beside the intended config. Running from the Linux filesystem
+would put `agents.toml` over an untested `\\wsl.localhost\...` path. Paths
+passed to the exe must be Windows paths (`wslpath -w` converts a WSL path).
+
+After that first launch, update the running development HUD with one command:
 
 ```sh
-dst=/mnt/c/Users/<you>/tze_hud-dev
-mkdir -p "$dst" && cp -f target/x86_64-pc-windows-gnu/release/tze_hud.exe "$dst/"
-cp -f app/tze_hud_app/config/production.toml "$dst/tze_hud.toml"
-"$dst/tze_hud.exe" --config "$(wslpath -w "$dst/tze_hud.toml")" --window-mode overlay &
+just dev-run 'C:\Users\<you>\tze_hud-dev' tzehouse-windows:9090
 ```
+
+This requires local WSL Windows interop (`powershell.exe` and `wslpath`) and a
+paired **admin** agent for that HUD. The existing private pairing store supplies
+the key; never put it on the command line. An omitted host uses the sole paired
+endpoint. Remote agent hosts without local Windows process access fail closed.
+
+Before building, the client checks `/admin/status`, the local Windows listener,
+and native process creation/image identities. It always refuses the per-user
+installed production executable, even if its channel says `ci`. Otherwise the
+running HUD must be `ci` or inside the selected canonical dev directory.
+Unresolved aliases, reparse points, PID changes and inaccessible metadata are
+refused. The directory identifies the existing process; it is never sent as a
+relaunch argument.
+
+The command runs `just build-windows`, stages the verified PE beside that image,
+parks the old exe, then sends one empty `POST /admin/restart`. Config, pairing,
+firewall rules and unrelated backups stay intact. Its own lock/receipt makes
+the swap single-flight. A definitive pre-admission failure restores the old
+pathname; an uncertain restart or 45-second observation timeout retains the
+backup and journal for inspection. Do not blindly retry or delete another
+updater's `.old` file. There is no `taskkill`, install or elevation fallback.
+
+Output includes `sha`, `channel`, `cpu_pct_2s`, executable hash and new process
+identity. A dirty rebuild at the same HEAD prints `sha_changed: false`; it does
+not prove a new commit reached the overlay. The required owner-host acceptance
+run must record a genuinely new SHA and retained pairing/config on the real
+overlay. Offline fixtures and Linux CI cannot supply that live proof.
 
 The [one-instance](#one-instance-per-user) and
 [always-pass-arguments](#always-pass-arguments-to-a-dev-build) rules still

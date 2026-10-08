@@ -233,6 +233,10 @@ bootstrap *args:
 build-windows *args:
     cargo build --release --target x86_64-pc-windows-gnu -p tze_hud_app --bin tze_hud {{args}}
 
+# Update only the verified local Windows dev HUD, preserving its config/pairing.
+dev-run dev_dir host="":
+    bash scripts/dev-run.sh --dev-dir {{quote(dev_dir)}} --host {{quote(host)}}
+
 # ── Full local CI sweep ───────────────────────────────────────────────────────
 
 # Run all CI gates that are feasible locally. GPU and pixel_readback tests are
