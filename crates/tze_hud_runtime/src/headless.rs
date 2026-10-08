@@ -358,6 +358,8 @@ impl HeadlessRuntime {
     /// Stages 1-8 run sequentially in the calling task (no cross-thread signalling
     /// in headless mode). Per-stage telemetry is recorded in the returned
     /// `FrameTelemetry`.
+    /// Same-frame widget raster observations from the compositor are preserved
+    /// in both this return value and the telemetry collector.
     ///
     /// The compositor renders the current scene to the headless surface via
     /// `render_frame_headless()`, which includes the `copy_to_buffer` step so
@@ -542,6 +544,7 @@ impl HeadlessRuntime {
         telemetry.active_leases = compositor_telemetry.active_leases;
         telemetry.mutations_applied = compositor_telemetry.mutations_applied;
         telemetry.hit_region_updates = compositor_telemetry.hit_region_updates;
+        telemetry.widget_rasterized = compositor_telemetry.widget_rasterized;
         // Propagate commit-time markdown prime cost (hud-380dl).
         // Non-zero only when scene.version changed this frame (new/changed content
         // required a parse pass); zero on steady-state frames (cache hit, no work).

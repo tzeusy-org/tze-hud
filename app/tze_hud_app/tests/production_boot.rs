@@ -18,8 +18,11 @@
 #[path = "../../../crates/tze_hud_runtime/src/test_support.rs"]
 mod gpu_init;
 
+use std::collections::HashMap;
+
 use tze_hud_runtime::HeadlessRuntime;
 use tze_hud_runtime::headless::HeadlessConfig;
+use tze_hud_scene::types::WidgetParameterValue;
 
 const PRODUCTION_CONFIG: &str = include_str!("../config/production.toml");
 fn canonical_headless_config() -> HeadlessConfig {
@@ -47,7 +50,7 @@ async fn canonical_app_production_config_boot_succeeds() {
 
 #[tokio::test]
 async fn production_config_boots_with_builtin_widget_bundles() {
-    let runtime =
+    let mut runtime =
         gpu_init::serialized_headless_init(HeadlessRuntime::new(canonical_headless_config()))
             .await
             .expect("runtime must start with canonical app production config");
@@ -103,6 +106,72 @@ async fn production_config_boots_with_builtin_widget_bundles() {
         text_color.g,
         text_color.b
     );
+    drop(scene);
+
+    // Use the registered production widgets and the real scene publication path.
+    {
+        let mut scene = scene_handle.lock().await;
+        for (instance, parameter) in [("main-gauge", "level"), ("main-progress", "progress")] {
+            scene
+                .publish_to_widget_for_lease(
+                    instance,
+                    HashMap::from([(parameter.to_string(), WidgetParameterValue::F32(0.25))]),
+                    "raster-telemetry-fixture",
+                    None,
+                    0,
+                    None,
+                    None,
+                )
+                .expect("registered widget publication must succeed");
+        }
+    }
+    let first = runtime.render_frame().await;
+    let mut first_names = first.widget_rasterized.clone();
+    first_names.sort();
+    assert_eq!(first_names, ["main-gauge", "main-progress"]);
+    let first_record = runtime
+        .telemetry
+        .records()
+        .last()
+        .expect("first frame record");
+    assert_eq!(first_record.frame_number, first.frame_number);
+    assert_eq!(first_record.widget_rasterized, first.widget_rasterized);
+
+    // Changing only the gauge must preserve that exact same-frame observation.
+    {
+        let mut scene = scene_handle.lock().await;
+        scene
+            .publish_to_widget_for_lease(
+                "main-gauge",
+                HashMap::from([("level".to_string(), WidgetParameterValue::F32(0.75))]),
+                "raster-telemetry-fixture",
+                None,
+                0,
+                None,
+                None,
+            )
+            .expect("gauge update must succeed");
+    }
+    let update = runtime.render_frame().await;
+    assert_eq!(update.widget_rasterized, ["main-gauge"]);
+    let update_record = runtime
+        .telemetry
+        .records()
+        .last()
+        .expect("updated frame record");
+    assert_eq!(update_record.frame_number, update.frame_number);
+    assert_eq!(update_record.widget_rasterized, update.widget_rasterized);
+
+    // An actually rendered idle frame must not carry the previous raster list.
+    let idle = runtime.render_frame().await;
+    assert!(idle.widget_rasterized.is_empty());
+    let idle_record = runtime
+        .telemetry
+        .records()
+        .last()
+        .expect("idle frame record");
+    assert_eq!(idle_record.frame_number, idle.frame_number);
+    assert_eq!(idle_record.widget_rasterized, idle.widget_rasterized);
 }
 
 /// Only agents paired in `agents.toml` may connect: an unpaired PSK is
