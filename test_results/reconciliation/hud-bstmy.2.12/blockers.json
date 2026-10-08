@@ -1,9 +1,0 @@
-[
-  {
-    "title": "Materialize and merge the concrete GEN2 residual repairs before terminal generation3",
-    "type": "task",
-    "priority": 2,
-    "rationale": "Evidence-only GEN2 does not implement R2/P2/E2/T2; current negative/universal requirements remain partial.",
-    "unblock_condition": "Coordinator materializes exact candidate IDs, merges their independently reviewed outcomes and this evidence PR, then runs only the generation3 terminal reconciliation. No lifecycle changes or generation4."
-  }
-]

@@ -1,5 +1,0 @@
-Traceback (most recent call last):
-  File "<string>", line 1, in <module>
-    import json; from pathlib import Path; p=json.loads(Path('test_results/reconciliation/hud-bstmy.1.15/requirements-matrix.json').read_text()); assert p['verdict']=='implemented', 'coverage gaps remain: terminal generation-3 is partial'
-                                                                                                                                                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^
-AssertionError: coverage gaps remain: terminal generation-3 is partial

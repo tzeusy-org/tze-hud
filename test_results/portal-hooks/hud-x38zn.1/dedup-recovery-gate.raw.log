@@ -1,9 +1,0 @@
-============================= test session starts ==============================
-platform linux -- Python 3.14.4, pytest-9.1.1, pluggy-1.6.0 -- /home/orca/orca/projects/tze-hud/.venv/bin/python3
-cachedir: .pytest_cache
-rootdir: /home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-x38zn.1
-collecting ... collected 8 items / 7 deselected / 1 selected
-
-.claude/skills/user-test/tests/test_portal_client.py::test_hook_unavailable_malformed_privacy_and_state_failures PASSED [100%]
-
-======================= 1 passed, 7 deselected in 4.55s ========================

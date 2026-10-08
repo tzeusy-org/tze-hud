@@ -1,3 +1,0 @@
-   Compiling tze_hud_compositor v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-bstmy.5.9/crates/tze_hud_compositor)
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 18.65s
-  Executable tests/widget_raster_count.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/widget_raster_count-62d0ba327c59efe4)

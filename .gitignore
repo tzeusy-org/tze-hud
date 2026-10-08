@@ -24,6 +24,7 @@ __pycache__/
 .runtime/
 
 test_results/
+/.handoff/
 hud-eqjn/
 hud-zeiq/
 hud-au1w/

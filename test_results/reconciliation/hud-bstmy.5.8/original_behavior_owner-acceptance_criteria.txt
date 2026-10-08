@@ -1,8 +1,0 @@
-1. `cargo fmt --all --check` is clean.
-2. `cargo clippy --workspace --all-targets -- -D warnings` is clean.
-3. `cargo test -p tze_hud_widget -p tze_hud_runtime -p tze_hud_mcp` passes (quiet).
-4. Compositor tests pass via `just test-gpu` (or `just test` with HEADLESS_FORCE_SOFTWARE=1 if the llvmpipe-recipe bead has not landed); never bare `cargo test -p tze_hud_compositor`.
-5. A test publishes a gauge value with transition_ms=200 and, advancing a TestClock, observes an intermediate value at 100 ms and the final at >=200 ms.
-6. `git grep -n 'Instant::now' crates/tze_hud_compositor/src/widget.rs` prints nothing.
-7. Every test named in docs/invariants.md still exists (grep each name) or docs/invariants.md was updated in the same PR.
-8. `just ci` is green once before handoff.

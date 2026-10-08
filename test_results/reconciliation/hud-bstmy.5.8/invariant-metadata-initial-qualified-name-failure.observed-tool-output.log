@@ -1,3 +1,0 @@
-Traceback (most recent call last):
-  File "<stdin>", line 10, in <module>
-AssertionError: ('graph::widget_tests::widget_ttl_only_expired_publication_removed_when_mixed', {'path': 'crates/tze_hud_scene/src/graph/widget_tests.rs', 'line': 1096})

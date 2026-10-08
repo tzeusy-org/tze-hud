@@ -1,6 +1,0 @@
-{
-  "whole_diff_check_exit": 2,
-  "only_raw_Cargo_log_whitespace_findings": true,
-  "non_log_evidence_diff_check_exit": 0,
-  "raw_logs_preserved_byte_for_byte": "Native cargo tree diagram spacing/newline preserved; do not alter SHA-verified proof for source formatting."
-}

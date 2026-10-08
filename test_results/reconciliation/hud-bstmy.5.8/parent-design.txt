@@ -1,5 +1,0 @@
-[decision] Widget transitions: wire them with an injected clock; keep transition_ms.
-[decision] Change-efficiency artifact -> counters; keep one idle-no-redraw behavior test.
-[decision] Delete the soak suite.
-[decision] Keep vertical_slice (required check) and the weekly perf lane.
-[escalate] Freeze deletion amends invariant 3 -> needs-human bead.

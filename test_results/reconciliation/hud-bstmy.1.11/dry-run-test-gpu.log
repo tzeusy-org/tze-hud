@@ -1,5 +1,0 @@
-test -f /usr/share/vulkan/icd.d/lvp_icd.json || { echo "missing /usr/share/vulkan/icd.d/lvp_icd.json (install mesa-vulkan-drivers)"; exit 1; }
-cargo test -p tze_hud_compositor --all-targets --no-run
-cargo test -p tze_hud_runtime --test pixel_readback --features dev-mode --no-run
-VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json HEADLESS_FORCE_SOFTWARE=1 LLVMPIPE_CI=1 TZE_HUD_REQUIRE_GPU=1 timeout 900 cargo test -p tze_hud_compositor --all-targets
-VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json HEADLESS_FORCE_SOFTWARE=1 LLVMPIPE_CI=1 TZE_HUD_REQUIRE_GPU=1 timeout 900 cargo test -p tze_hud_runtime --test pixel_readback --features dev-mode
