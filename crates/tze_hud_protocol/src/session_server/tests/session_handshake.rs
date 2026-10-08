@@ -444,10 +444,36 @@ async fn test_sequence_monotonic_accepted() {
 /// The session stream should terminate cleanly after SessionClose is sent.
 #[tokio::test]
 async fn test_graceful_disconnect_session_close() {
-    let (mut client, _server) = setup_test().await;
-    let (tx, _init_messages, mut stream) = handshake(&mut client, "close-agent", "test-key").await;
+    // One observation seam for both the real stream and the watchdog
+    // counterfactual: only None establishes stream termination.
+    async fn observe_stream_end(
+        stream: &mut (impl tokio_stream::Stream<Item = Result<ServerMessage, Status>> + Unpin),
+        watchdog: Duration,
+    ) -> bool {
+        tokio::time::timeout(watchdog, async {
+            while let Some(message) = stream.next().await {
+                message.expect("session stream failed instead of ending cleanly");
+            }
+        })
+        .await
+        .is_ok()
+    }
 
-    // Send SessionClose
+    let mut pending = tokio_stream::pending::<Result<ServerMessage, Status>>();
+    assert!(
+        !observe_stream_end(&mut pending, Duration::ZERO).await,
+        "watchdog timeout must not count as stream termination"
+    );
+
+    let (mut client, _server, state) = setup_test_with_state().await;
+    let (tx, init_messages, mut stream) = handshake(&mut client, "close-agent", "test-key").await;
+    let session_id = match &init_messages[0].payload {
+        Some(ServerPayload::SessionEstablished(e)) => bytes_to_scene_id(&e.session_id).unwrap(),
+        other => panic!("Expected SessionEstablished, got: {other:?}"),
+    };
+    let cleanup = state.lock().await.sessions.observe_cleanup(&session_id);
+
+    // Register before the real close request; neither lock spans the await.
     tx.send(ClientMessage {
         sequence: 2,
         timestamp_wall_us: now_wall_us(),
@@ -458,34 +484,16 @@ async fn test_graceful_disconnect_session_close() {
     .await
     .unwrap();
 
-    // Stream should close (no response expected for SessionClose)
-    // Give the server a moment to process
-    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-
-    // The stream should be closed; next() should return None or an error
-    // (The server closes the stream after transitioning to Closed state)
     drop(tx);
-    // Drain any remaining messages
-    let mut got_stream_end = false;
-    let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_millis(500);
-    loop {
-        if tokio::time::Instant::now() > deadline {
-            break;
-        }
-        match tokio::time::timeout(tokio::time::Duration::from_millis(100), stream.next()).await {
-            Ok(None) | Err(_) => {
-                got_stream_end = true;
-                break;
-            }
-            Ok(Some(_)) => {
-                // Some message still in transit, keep draining
-            }
-        }
-    }
+    let got_stream_end = observe_stream_end(&mut stream, Duration::from_millis(500)).await;
     assert!(
         got_stream_end,
         "session stream did not terminate after SessionClose — graceful disconnect had no observable effect"
     );
+    tokio::time::timeout(Duration::from_secs(5), cleanup)
+        .await
+        .expect("real session cleanup did not complete")
+        .expect("cleanup witness dropped before normal cleanup completed");
 }
 
 // ─── Handshake auth, version, capability, subscription ───────────────────────

@@ -1080,17 +1080,17 @@ pub(super) const DEFAULT_MAX_FUTURE_SCHEDULE_US: u64 = 300_000_000;
 /// - `expires_at_wall_us > 0 && expires_at_wall_us <= present_at_wall_us` → TIMESTAMP_EXPIRY_BEFORE_PRESENT
 ///
 /// A value of 0 in either field means "no constraint".
+/// `now` comes from the same injected scene wall clock as the session stamp.
 pub(super) fn validate_timing_hints(
     hints: &TimingHints,
     session_open_at_wall_us: u64,
     max_future_schedule_us: u64,
+    now: u64,
 ) -> Result<(), (&'static str, String)> {
     let present = hints.present_at_wall_us;
     let expires = hints.expires_at_wall_us;
 
     if present > 0 {
-        let now = now_wall_us();
-
         // TIMESTAMP_TOO_OLD: present_at_wall_us more than 60 seconds before session open
         // (RFC 0003 §3.5; 60s = 60_000_000 µs)
         let too_old_threshold = session_open_at_wall_us.saturating_sub(60_000_000);

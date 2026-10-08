@@ -10,7 +10,7 @@
 //! A window entry expires under either of two conditions (whichever comes first):
 //! - The per-session entry count reaches `max_entries` (default: 1000). On
 //!   overflow the oldest entry is evicted (FIFO).
-//! - The entry age exceeds `ttl_s` (default: 60 seconds). Stale entries are
+//! - The entry age reaches `ttl_s` (default: 60 seconds). Stale entries are
 //!   purged lazily on the next `insert` or `lookup`.
 //!
 //! ## Cloning
@@ -19,7 +19,9 @@
 //! return a copy of the cached result while keeping the original in the window.
 
 use std::collections::{HashMap, VecDeque};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+#[cfg(test)]
+use std::time::Instant;
 
 /// A cached outcome for a previously-processed `MutationBatch`.
 #[derive(Debug, Clone)]
@@ -37,7 +39,7 @@ pub struct CachedResult {
 /// Entry stored in the deduplication table.
 struct Entry {
     result: CachedResult,
-    inserted_at: Instant,
+    inserted_at: Duration,
 }
 
 /// Per-session deduplication window.
@@ -52,6 +54,9 @@ pub struct DedupWindow {
     max_entries: usize,
     /// Maximum age of an entry before it is considered expired.
     ttl: Duration,
+    /// Default monotonic domain for the compatibility operations.
+    #[cfg(test)]
+    clock_origin: Instant,
     /// Insertion-ordered queue of batch IDs for FIFO eviction.
     order: VecDeque<Vec<u8>>,
     /// Map from batch_id bytes to the cached result.
@@ -67,6 +72,8 @@ impl DedupWindow {
         Self {
             max_entries,
             ttl: Duration::from_secs(ttl_s),
+            #[cfg(test)]
+            clock_origin: Instant::now(),
             order: VecDeque::with_capacity(max_entries),
             cache: HashMap::with_capacity(max_entries),
         }
@@ -76,11 +83,10 @@ impl DedupWindow {
     ///
     /// Called lazily before every `insert` or `lookup` so the window never
     /// silently holds stale entries beyond the spec-mandated 60-second window.
-    fn purge_expired(&mut self) {
-        let now = Instant::now();
+    fn purge_expired_at(&mut self, now: Duration) {
         while let Some(front) = self.order.front() {
             match self.cache.get(front) {
-                Some(entry) if now.duration_since(entry.inserted_at) >= self.ttl => {
+                Some(entry) if now.saturating_sub(entry.inserted_at) >= self.ttl => {
                     let key = self.order.pop_front().unwrap();
                     self.cache.remove(&key);
                 }
@@ -95,11 +101,18 @@ impl DedupWindow {
     /// `None` otherwise.
     ///
     /// Expired entries are purged lazily before the lookup.
+    #[cfg(test)]
     pub fn lookup(&mut self, batch_id: &[u8]) -> Option<CachedResult> {
-        self.purge_expired();
-        let now = Instant::now();
+        self.lookup_at(batch_id, self.clock_origin.elapsed())
+    }
+
+    /// Look up using the caller's monotonic clock. All explicit operations on a
+    /// window must use the same clock domain; the session server uses its scene
+    /// clock rather than mixing these with the default-clock wrappers.
+    pub fn lookup_at(&mut self, batch_id: &[u8], now: Duration) -> Option<CachedResult> {
+        self.purge_expired_at(now);
         match self.cache.get(batch_id) {
-            Some(entry) if now.duration_since(entry.inserted_at) < self.ttl => {
+            Some(entry) if now.saturating_sub(entry.inserted_at) < self.ttl => {
                 Some(entry.result.clone())
             }
             Some(_) => {
@@ -118,8 +131,14 @@ impl DedupWindow {
     ///
     /// Re-inserting an existing `batch_id` (possible after TTL expiry and re-use)
     /// updates the entry in place and moves it to the back of the FIFO queue.
+    #[cfg(test)]
     pub fn insert(&mut self, batch_id: Vec<u8>, result: CachedResult) {
-        self.purge_expired();
+        self.insert_at(batch_id, result, self.clock_origin.elapsed());
+    }
+
+    /// Insert using the same monotonic clock domain as [`Self::lookup_at`].
+    pub fn insert_at(&mut self, batch_id: Vec<u8>, result: CachedResult, now: Duration) {
+        self.purge_expired_at(now);
 
         // If the key already exists, remove it from the cache and order queue
         // so we can re-insert at the back with a fresh timestamp.
@@ -139,7 +158,7 @@ impl DedupWindow {
             batch_id,
             Entry {
                 result,
-                inserted_at: Instant::now(),
+                inserted_at: now,
             },
         );
     }
@@ -223,39 +242,58 @@ mod tests {
 
     #[test]
     fn test_ttl_expiry() {
-        // Use a 1-second TTL for testability; we'll manually manipulate Instants
-        // by inserting and then waiting.  For unit test speed we use a 0-second
-        // TTL which expires immediately.
-        let mut w = DedupWindow::new(1000, 0); // 0s = expires immediately
+        let now = Duration::from_secs(100);
+        let expiry = now + Duration::from_secs(60);
+        let mut w = DedupWindow::new(1000, 60);
         let id = b"expiring00000000".to_vec();
-        w.insert(id.clone(), make_result(true));
-        // With ttl=0, the entry should be absent after the next lookup.
+        w.insert_at(id.clone(), make_result(true), now);
         assert!(
-            w.lookup(&id).is_none(),
-            "entry should have expired immediately"
+            w.lookup_at(&id, expiry - Duration::from_nanos(1))
+                .unwrap()
+                .accepted
         );
+        assert!(
+            w.lookup_at(&id, expiry).is_none(),
+            "entry should have expired at its TTL"
+        );
+        assert!(w.lookup_at(&id, expiry + Duration::from_nanos(1)).is_none());
     }
 
     #[test]
     fn test_re_insert_after_expiry_treated_as_new() {
-        let mut w = DedupWindow::new(1000, 0); // expires immediately
+        let now = Duration::from_secs(100);
+        let expiry = now + Duration::from_secs(60);
+        let mut w = DedupWindow::new(1000, 60);
         let id = b"reinsert00000000".to_vec();
-        w.insert(id.clone(), make_result(false));
-        // With ttl=0, entry expires immediately.
-        assert!(w.lookup(&id).is_none(), "ttl=0 entry should miss on lookup");
+        w.insert_at(id.clone(), make_result(false), now);
+        assert!(
+            !w.lookup_at(&id, expiry - Duration::from_nanos(1))
+                .unwrap()
+                .accepted
+        );
+        assert!(
+            w.lookup_at(&id, expiry).is_none(),
+            "expired entry should miss on lookup"
+        );
 
         // Re-insert as new with different result.
-        w.insert(id.clone(), make_result(true));
-        // The freshly inserted entry is present in the cache (not yet purged).
-        // A lookup triggers purge_expired, causing this entry to be swept too.
+        w.insert_at(id.clone(), make_result(true), expiry);
         assert_eq!(w.len(), 1, "freshly inserted entry exists before lookup");
-        // Lookup triggers purge; with ttl=0 the new entry also expires immediately.
+        let new_expiry = expiry + Duration::from_secs(60);
         assert!(
-            w.lookup(&id).is_none(),
-            "ttl=0 re-insert should also miss on lookup"
+            w.lookup_at(&id, new_expiry - Duration::from_nanos(1))
+                .unwrap()
+                .accepted
         );
-        // After lookup purge, cache is empty.
-        assert_eq!(w.len(), 0, "entry purged after ttl=0 lookup");
+        assert!(
+            w.lookup_at(&id, new_expiry).is_none(),
+            "re-insert should also miss after its fresh TTL"
+        );
+        assert_eq!(w.len(), 0, "entry purged after expired lookup");
+        assert!(
+            w.lookup_at(&id, new_expiry + Duration::from_nanos(1))
+                .is_none()
+        );
     }
 
     #[test]
