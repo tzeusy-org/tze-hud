@@ -1,13 +1,14 @@
 # Windows build, boot smoke, and release.
 #
-# windows-build — native x86_64-pc-windows-msvc release build on a Windows
+# windows-build — native x86_64-pc-windows-msvc optimized build on a Windows
 #   runner, then boots the binary with the production config (WARP software
 #   rendering) and drives the MCP lifecycle (scripts/ci/windows_smoke.py),
 #   (also: widget and notification TTL, delay_ms, and a killed resident tile
 #   reclaimed after its grace, plus an informational idle-with-content
 #   measurement), then exercises self-install, single instance, and uninstall
 #   (scripts/ci/windows_install_smoke.py).
-#   Runs on every PR, merge-queue entry, push to main, and v* tag.
+#   Runs on every PR, merge-queue entry, push to main, and v* tag. Non-tag
+#   events use release-dev; v* tags keep the full release profile.
 # release — signs the exe with minisign (secret MINISIGN_SECRET_KEY; public key
 #   app/tze_hud_app/minisign.pub) and publishes it:
 #     push to main → rolling `dev` prerelease (tag `dev` moves to the commit)
@@ -36,6 +37,8 @@ jobs:
     name: windows build + boot smoke
     runs-on: windows-latest
     timeout-minutes: 45
+    env:
+      HUD_BUILD_PROFILE: ${{ startsWith(github.ref, 'refs/tags/v') && 'release' || 'release-dev' }}
     steps:
       - uses: actions/checkout@v5
 
@@ -47,7 +50,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2.9.1
         timeout-minutes: 10
         with:
-          shared-key: windows-msvc-release
+          shared-key: windows-msvc-${{ env.HUD_BUILD_PROFILE }}
 
       - name: Install protoc
         timeout-minutes: 5
@@ -58,29 +61,44 @@ jobs:
           Expand-Archive "$dir.zip" -DestinationPath $dir
           "$dir\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
 
-      - name: Build tze_hud.exe (release, static CRT)
+      - name: Build tze_hud.exe (selected profile, static CRT)
         env:
           # Reported by /admin/status: `dev` on main, the tag on tags, else `ci`.
           TZE_HUD_CHANNEL: ${{ github.ref == 'refs/heads/main' && 'dev' || (startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'ci') }}
-        run: cargo build --release --locked -p tze_hud_app --bin tze_hud
+        shell: pwsh
+        run: |
+          $profileArgs = if ($env:HUD_BUILD_PROFILE -eq "release") { @("--release") } else { @("--profile", "release-dev") }
+          cargo build @profileArgs --locked -p tze_hud_app --bin tze_hud
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      # Pure transaction/launcher fixtures and standalone COM rule objects only:
-      # these tests never modify the runner's firewall or request elevation.
-      - name: Explicit remote helper fixtures (no policy mutation)
+      # Non-tags cover the runtime library; tags retain the remote fixtures.
+      # Fresh per-step storage isolates headless element/widget persistence.
+      - name: Runtime unit tests and app parser (selected profile)
         timeout-minutes: 8
         shell: pwsh
         run: |
-          cargo test --release --locked -p tze_hud_runtime --lib firewall::remote:: -- --nocapture
+          $env:LOCALAPPDATA = Join-Path $env:RUNNER_TEMP ("runtime-unit-" + [guid]::NewGuid().ToString("N"))
+          New-Item -ItemType Directory -Path $env:LOCALAPPDATA | Out-Null
+          $profileArgs = if ($env:HUD_BUILD_PROFILE -eq "release") { @("--release") } else { @("--profile", "release-dev") }
+          if ($env:HUD_BUILD_PROFILE -eq "release") {
+            cargo test --release --locked -p tze_hud_runtime --lib firewall::remote:: -- --nocapture
+          } else {
+            cargo test --profile release-dev --locked -p tze_hud_runtime --lib -- --nocapture
+          }
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cargo test --release --locked -p tze_hud_app --bin tze_hud parse_options_ -- --nocapture
+          cargo test @profileArgs --locked -p tze_hud_app --bin tze_hud parse_options_ -- --nocapture
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Build poc_demo.exe (resident-tile driver for the smoke)
-        run: cargo build --release --locked -p poc_demo --bin poc_demo
+        shell: pwsh
+        run: |
+          $profileArgs = if ($env:HUD_BUILD_PROFILE -eq "release") { @("--release") } else { @("--profile", "release-dev") }
+          cargo build @profileArgs --locked -p poc_demo --bin poc_demo
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Boot smoke (production config, MCP lifecycle, POC stages)
         timeout-minutes: 10
-        run: python scripts/ci/windows_smoke.py --exe target/release/tze_hud.exe --poc-demo target/release/poc_demo.exe --config app/tze_hud_app/config/production.toml
+        run: python scripts/ci/windows_smoke.py --exe "target/$env:HUD_BUILD_PROFILE/tze_hud.exe" --poc-demo "target/$env:HUD_BUILD_PROFILE/poc_demo.exe" --config app/tze_hud_app/config/production.toml
 
       # Informational, not a gate: boots a second HUD under the runtime's own
       # idle measurement (5 s settle + 60 s), with held content on screen, and
@@ -90,19 +108,19 @@ jobs:
       - name: Quiescent with content (informational)
         continue-on-error: true
         timeout-minutes: 5
-        run: python scripts/ci/windows_smoke.py --quiescent-with-content --exe target/release/tze_hud.exe --config app/tze_hud_app/config/production.toml
+        run: python scripts/ci/windows_smoke.py --quiescent-with-content --exe "target/$env:HUD_BUILD_PROFILE/tze_hud.exe" --config app/tze_hud_app/config/production.toml
 
       - name: Install, single-instance, uninstall smoke
         timeout-minutes: 5
-        run: python scripts/ci/windows_install_smoke.py --exe target/release/tze_hud.exe
+        run: python scripts/ci/windows_install_smoke.py --exe "target/$env:HUD_BUILD_PROFILE/tze_hud.exe"
 
       - name: Stage artifact
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p dist
-          cp target/release/tze_hud.exe dist/
-          cp target/release/tze_hud.pdb dist/ 2>/dev/null || echo "no PDB emitted"
+          cp "target/$HUD_BUILD_PROFILE/tze_hud.exe" dist/
+          cp "target/$HUD_BUILD_PROFILE/tze_hud.pdb" dist/ 2>/dev/null || echo "no PDB emitted"
           (cd dist && sha256sum tze_hud.exe > tze_hud.exe.sha256)
           cat dist/tze_hud.exe.sha256
 

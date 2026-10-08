@@ -84,12 +84,16 @@ Alternatively, add Defender exclusions for those paths.
 ## Building and running the HUD
 
 ```powershell
-cargo build --release -p tze_hud_app --bin tze_hud
+cargo build --profile release-dev -p tze_hud_app --bin tze_hud
 ```
 
-This is the same build CI ships. `.cargo/config.toml` links the CRT statically
-for `x86_64-pc-windows-msvc`, so the exe needs no VC++ redistributable. A
-debug build (`cargo build -p tze_hud_app --bin tze_hud`) is fine for iteration.
+PR, merge-queue, main, and manual Windows builds use `release-dev`: optimized
+code with thin LTO and 16 codegen units. Version tags keep `--release` with
+full LTO and one codegen unit; `perf-budget.yml` also keeps `--release`.
+`perf-assert.yml` keeps its existing default test profile.
+`.cargo/config.toml` links the CRT statically for `x86_64-pc-windows-msvc`,
+so the exe needs no VC++ redistributable. A debug build
+(`cargo build -p tze_hud_app --bin tze_hud`) is fine for iteration.
 
 ### Always pass arguments to a dev build
 
@@ -97,13 +101,13 @@ A bare launch, with no arguments and from outside the install directory,
 installs the exe for the current user. It then registers autostart and
 relaunches the installed copy (see
 [`windows-install.md`](../operations/windows-install.md#install)). Running a
-freshly built `target\release\tze_hud.exe` with no arguments therefore replaces
+freshly built `target\release-dev\tze_hud.exe` with no arguments therefore replaces
 your installed HUD with the dev build. Any argument at all makes it run in
 place instead:
 
 ```powershell
-.\target\release\tze_hud.exe --config app\tze_hud_app\config\production.toml --window-mode overlay
-.\target\release\tze_hud.exe --print-attach-info   # MCP URL + client config, no window
+.\target\release-dev\tze_hud.exe --config app\tze_hud_app\config\production.toml --window-mode overlay
+.\target\release-dev\tze_hud.exe --print-attach-info   # MCP URL + client config, no window
 ```
 
 ### One instance per user
@@ -246,16 +250,20 @@ Linux. Whether they pass on Windows has not been checked. Tests marked
 `#[cfg(unix)]` (for example in `crates/tze_hud_projection/src/tests/mod.rs`)
 don't run on Windows. Linux CI covers them.
 
-To reproduce the Windows CI job (`windows.yml`) locally, run the commands
-below. Stop your installed HUD first. The install smoke test points
+For the non-tag Windows CI build and smoke (`windows.yml`), run the commands
+below. CI also runs the full runtime library and the app parser tests in
+`release-dev`, with a fresh `LOCALAPPDATA` directory under `RUNNER_TEMP`
+scoped to that test step. Version tags retain the remote helper subset and
+parser tests with `--release` and artifacts under `target/release`. Stop your installed HUD first. The install smoke test points
 `LOCALAPPDATA` and `APPDATA` at temp dirs, but it writes and then deletes the
 real `HKCU\...\Run\tze_hud` autostart value. Afterwards, reinstall your HUD
 (bare launch, or `--install`) to get autostart back.
 
 ```powershell
-cargo build --release --locked -p tze_hud_app --bin tze_hud
-python scripts/ci/windows_smoke.py --exe target/release/tze_hud.exe --config app/tze_hud_app/config/production.toml
-python scripts/ci/windows_install_smoke.py --exe target/release/tze_hud.exe
+cargo build --profile release-dev --locked -p tze_hud_app --bin tze_hud
+cargo build --profile release-dev --locked -p poc_demo --bin poc_demo
+python scripts/ci/windows_smoke.py --exe target/release-dev/tze_hud.exe --poc-demo target/release-dev/poc_demo.exe --config app/tze_hud_app/config/production.toml
+python scripts/ci/windows_install_smoke.py --exe target/release-dev/tze_hud.exe
 ```
 
 ## Developing from WSL2
