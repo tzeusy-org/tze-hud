@@ -36,9 +36,11 @@ change must not give one class another's delivery semantics.
 
 ## 3. The runtime owns the screen; the human override always wins
 
-Safe mode, freeze, and dismiss work without any agent's cooperation and take
+Safe mode and dismiss work without any agent's cooperation and take
 effect even when agents are hung. Agents never see or address chrome, and
 shell state exposes no portal identity or transcript.
+
+Owner decision (2026-10-07): freeze promise removed; safe mode already pauses agents; updates during a pause are rejected, not buffered.
 
 - `tze_hud_runtime` `shell::safe_mode` `test_enter_safe_mode_suspends_active_leases`,
   `test_mutations_rejected_via_shared_state_flag`
