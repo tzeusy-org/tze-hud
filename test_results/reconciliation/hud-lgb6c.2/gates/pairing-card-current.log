@@ -1,8 +1,0 @@
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.24s
-     Running unittests src/lib.rs (/home/orca/orca/projects/tze-hud/target/debug/deps/tze_hud_runtime-b0506276d1cc4779)
-
-running 1 test
-test pairing::tests::firewall_warning_line_only_when_blocked ... ok
-
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 532 filtered out; finished in 0.00s
-

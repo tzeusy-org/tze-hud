@@ -1,8 +1,0 @@
-# narrowed 23 pub items in tze_hud_resource
-# 6 dead item(s) in tze_hud_resource
-crates/tze_hud_resource/src/dedup.rs:71:19: warning: methods `inc_refcount` and `dec_refcount` are never used
-crates/tze_hud_resource/src/runtime_widget_store.rs:114:19: warning: methods `put_svg`, `asset_count`, and `total_bytes_used` are never used
-crates/tze_hud_resource/src/runtime_widget_store.rs:345:4: warning: function `write_atomic` is never used
-crates/tze_hud_resource/src/runtime_widget_store.rs:367:4: warning: function `sync_parent_dir` is never used
-crates/tze_hud_resource/src/upload.rs:174:19: warning: methods `dedup_index`, `abort_upload`, and `in_flight_count` are never used
-crates/tze_hud_resource/src/validation.rs:481:15: warning: function `validate_upload` is never used

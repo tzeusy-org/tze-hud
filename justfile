@@ -49,6 +49,10 @@ default: check
 
 # ── Fast fail ────────────────────────────────────────────────────────────────
 
+# Keep local execution receipts out of Git (mirror the early CI fmt guard).
+untracked-evidence:
+    bash scripts/ci/check_untracked_evidence.sh
+
 # cargo check: fast compilation gate (no codegen)
 check:
     cargo check --workspace
@@ -238,4 +242,4 @@ build-windows *args:
 # Excluded by design: the Windows-only jobs (windows.yml), the informational
 # test-gpu-pixel-readback job (covered by `test`), and the weekly perf lanes.
 # Runs in the same logical order as CI: fast-fail gates first, then tests.
-ci: overlay-harness-contract check fmt clippy clippy-windows-gnu cargo-deny deps-unused dev-mode-guard idle-efficiency-checker test test-integration test-python token-footprint production-boot canonical-app-boot
+ci: untracked-evidence overlay-harness-contract check fmt clippy clippy-windows-gnu cargo-deny deps-unused dev-mode-guard idle-efficiency-checker test test-integration test-python token-footprint production-boot canonical-app-boot

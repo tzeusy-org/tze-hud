@@ -121,6 +121,8 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v5
+      - name: Check evidence roots are untracked
+        run: bash scripts/ci/check_untracked_evidence.sh
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: "1.88"

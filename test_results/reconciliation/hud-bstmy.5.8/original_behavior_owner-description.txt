@@ -1,9 +1,0 @@
-Goal: Make transition_ms do what it says: the widget publish path starts a transition, driven by the injected clock (invariant 9).
-
-Non-goals: New animation kinds; changing the wire.
-
-Governing spec: docs/scope.md T8 row (delete code without a current user; behavior tests tied to docs/invariants.md; resource tests; llvmpipe recipe; strip pre-reset refs) and 'Working rules' (prefer deleting over generalizing; tests guard behavior a user would notice, not internal structure); docs/vision.md; docs/invariants.md; CLAUDE.md Rules; AGENTS.md (just recipes).
-
-T7 boundary: do not edit crates/tze_hud_projection/**, crates/tze_hud_runtime/src/portal_projection_driver.rs, crates/tze_hud_runtime/src/windowed/portal.rs, crates/tze_hud_input/src/{composer_draft,portal_resize}.rs, crates/tze_hud_config/src/portal_tokens.rs, crates/tze_hud_mcp/src/portal_op.rs or tests/integration/text_stream_portal_*.rs; keep every pub item those files import until T7 (epic hud-lirh2) lands.
-
-Line refs are at windows-release-pipeline@44d355ef (same content as main@1eb8f7cb); re-grep symbols before editing. The planning survey is not persisted; this bead is self-contained.

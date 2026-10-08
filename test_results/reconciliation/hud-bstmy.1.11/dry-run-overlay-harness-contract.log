@@ -1,6 +1,0 @@
-#!/usr/bin/env bash
-set -euo pipefail
-if ! command -v pwsh >/dev/null; then
-    echo "SKIPPED: overlay-harness-contract needs PowerShell (pwsh)"; exit 0
-fi
-pwsh -File ./scripts/ci/windows/test-windowed-fullscreen-overlay-perf.ps1

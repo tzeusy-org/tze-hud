@@ -1,9 +1,0 @@
-test_copy_skips_beads_and_own_build_dir_is_removed (scripts.tests.test_dead_code.MainTests.test_copy_skips_beads_and_own_build_dir_is_removed) ... # narrowed 1 pub items in foo
-# 0 dead item(s) in foo
-ok
-test_narrows_unused_pub_and_keeps_externally_used_or_reexports (scripts.tests.test_dead_code.NarrowTests.test_narrows_unused_pub_and_keeps_externally_used_or_reexports) ... ok
-
-----------------------------------------------------------------------
-Ran 2 tests in 0.002s
-
-OK

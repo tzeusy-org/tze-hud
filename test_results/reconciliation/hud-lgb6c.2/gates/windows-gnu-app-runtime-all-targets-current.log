@@ -1,4 +1,0 @@
-    Blocking waiting for file lock on build directory
-    Checking tze_hud_runtime v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-lgb6c.2/crates/tze_hud_runtime)
-   Compiling tze_hud_app v0.1.0 (/home/orca/orca/projects/tze-hud/.worktrees/parallel-agents/hud-lgb6c.2/app/tze_hud_app)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 38.85s

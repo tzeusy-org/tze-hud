@@ -1,6 +1,0 @@
-{
-  "audited_source_head": "398c6f91de6e0d4883b10a41b6c63044e6192730",
-  "initial_source_head": "b5c8852bb065ec71eabdac1ef41166b325855a8e",
-  "tracked_source_changes_during_audit": [],
-  "scope": "All committed changes will be evidence-only under this directory. Gate receipts execute source398; later evidence commit SHA is not represented as whole-head gate execution. Verify git diff audited_source_head..artifact_head -- . :!test_results/reconciliation/hud-bstmy.2.12 is empty."
-}

@@ -1,7 +1,0 @@
-{
-  "head": "a5312842111daa6bbdd7c27db9a27f450a32a082",
-  "only_mutation": "remove real WinitApp::settle_scene_work -> clear_focus_on_removed_tile statement",
-  "production_restored_byte_identical": true,
-  "production_sha256": "2c7817ba8dabc7fa7f31f7e8ba1f0f8b40e0364ad89020b6fa8d5deaa9af9747",
-  "experiment_wrapper": "dead_code allowed only for runtime --test compilation, no default/dependency/final flag change"
-}

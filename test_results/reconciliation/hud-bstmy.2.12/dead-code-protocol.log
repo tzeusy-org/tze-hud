@@ -1,7 +1,0 @@
-# narrowed 59 pub items in tze_hud_protocol
-# 5 dead item(s) in tze_hud_protocol
-crates/tze_hud_protocol/src/convert.rs:1040:15: warning: function `scene_portal_peer_class_to_proto` is never used
-crates/tze_hud_protocol/src/convert.rs:1084:15: warning: function `scene_portal_lifecycle_to_proto` is never used
-crates/tze_hud_protocol/src/convert.rs:1132:15: warning: function `scene_portal_display_state_to_proto` is never used
-crates/tze_hud_protocol/src/convert.rs:1171:15: warning: function `scene_portal_part_kind_to_proto` is never used
-crates/tze_hud_protocol/src/convert.rs:1243:15: warning: function `scene_portal_surface_to_proto` is never used

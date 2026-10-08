@@ -1,9 +1,0 @@
-{
-  "source": "git show origin/agent/hud-bstmy.2.12:test_results/reconciliation/hud-bstmy.2.12/gap-packets.json",
-  "head": "c96cebbd4adacddf9e4cf583abc08dea600c11ff",
-  "pr": 1370,
-  "state_at_read": "MERGED",
-  "packet_sha256": "8ad2bd4bdcc35acc7c912bca7c1a93f82e05db57fcae0847d9ea1a848400d03c",
-  "execution_source": "398c6f91de6e0d4883b10a41b6c63044e6192730",
-  "claim": "Final delivered proposal snapshot only; not a materialized or implemented repair."
-}

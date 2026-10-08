@@ -1,4 +1,0 @@
-# narrowed 119 pub items in tze_hud_scene
-# 2 dead item(s) in tze_hud_scene
-crates/tze_hud_scene/src/mutation.rs:311:16: warning: field `budget_warning` is never read
-crates/tze_hud_scene/src/types.rs:2838:12: warning: method `to_json` is never used
