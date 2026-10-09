@@ -620,6 +620,7 @@ mod tests {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         let mut conn = tokio::net::TcpStream::connect(addr).await.expect("connect");
         conn.write_all(request.as_bytes()).await.expect("write");
+        conn.shutdown().await.expect("shutdown writer");
         let mut resp = Vec::new();
         conn.read_to_end(&mut resp).await.expect("read");
         String::from_utf8_lossy(&resp).into_owned()
@@ -1043,12 +1044,58 @@ mod tests {
                 "501",
                 format!("POST / HTTP/1.1\r\n{auth}Transfer-Encoding: chunked\r\n\r\n{body}"),
             ),
+            (
+                "400",
+                format!("PO\tST / HTTP/1.1\r\n{auth}Content-Length: {n}\r\n\r\n{body}"),
+            ),
+            (
+                "400",
+                format!("POST / HTTP/1.1\r\n{auth}X: a\0b\r\nContent-Length: {n}\r\n\r\n{body}"),
+            ),
+            (
+                "400",
+                format!("POST / HTTP/1.1\r\n{auth}X: a\rb\r\nContent-Length: {n}\r\n\r\n{body}"),
+            ),
+            (
+                "400",
+                format!("POST / HTTP/1.1\r\n{auth}X: a\nb\r\nContent-Length: {n}\r\n\r\n{body}"),
+            ),
+            (
+                "400",
+                format!(
+                    "POST / HTTP/1.1\r\n{auth}X: \x0bvalue\x0c\r\nContent-Length: {n}\r\n\r\n{body}"
+                ),
+            ),
+            (
+                "400",
+                format!("POST / HTTP/1.1\r\n{auth}Transfer-Encoding : chunked\r\n\r\n{body}"),
+            ),
+            (
+                "400",
+                "POST / HTTP/1.1\r\nContent-Length: 1\r\n\r\n".to_owned(),
+            ),
+            (
+                "400",
+                format!(
+                    "POST / HTTP/1.1\r\n{auth}Content-Length: {}\r\n\r\n{body}",
+                    n + 1
+                ),
+            ),
         ];
         for (status, req) in cases {
             let r = http_raw(addr, &req).await;
             assert!(r.starts_with(&format!("HTTP/1.1 {status} ")), "{req}: {r}");
             assert!(!r.contains("jsonrpc"), "{r}");
         }
+        let dropped = http_raw(
+            addr,
+            "POST / HTTP/1.1\r\nContent-Length: 18446744073709551616\r\n\r\n",
+        )
+        .await;
+        assert!(
+            dropped.is_empty(),
+            "overflow must retain connection drop: {dropped}"
+        );
         shutdown.trigger(crate::threads::ShutdownReason::Clean);
         handle.await.expect("task");
     }
