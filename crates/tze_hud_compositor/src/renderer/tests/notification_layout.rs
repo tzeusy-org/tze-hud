@@ -8,64 +8,6 @@ use super::*;
 //   - left-aligned, 9px inset (8px padding + 1px border)
 //   - clips at content area boundary (no wrapping in v1)
 
-/// Notification text uses typography.body.size (default 16px) when token absent.
-///
-/// AC: notification text must use font_size_px resolved from typography.body.size.
-#[tokio::test]
-async fn test_notification_text_uses_body_typography_token_default() {
-    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
-
-    let mut scene = SceneGraph::new(1280.0, 720.0);
-    scene.register_zone(ZoneDefinition {
-        id: SceneId::new(),
-        name: "notification-area".to_owned(),
-        description: "text rendering test".to_owned(),
-        geometry_policy: GeometryPolicy::Relative {
-            x_pct: 0.75,
-            y_pct: 0.0,
-            width_pct: 0.25,
-            height_pct: 0.5,
-        },
-        accepted_media_types: vec![ZoneMediaType::ShortTextWithIcon],
-        rendering_policy: RenderingPolicy {
-            backdrop: Some(Rgba::new(0.1, 0.1, 0.1, 0.9)),
-            // No font_size_px set — must fall through to typography.body.size token.
-            ..Default::default()
-        },
-        contention_policy: ContentionPolicy::Stack { max_depth: 5 },
-        max_publishers: 8,
-        auto_clear_ms: Some(8_000),
-        ephemeral: false,
-        layer_attachment: LayerAttachment::Chrome,
-    });
-
-    scene
-        .publish_to_zone(
-            "notification-area",
-            ZoneContent::Notification(NotificationPayload {
-                text: "Doorbell rang".to_owned(),
-                icon: String::new(),
-                urgency: 1,
-                ttl_ms: None,
-                title: String::new(),
-                actions: Vec::new(),
-            }),
-            "agent-a",
-            None,
-            None,
-            None,
-        )
-        .unwrap();
-
-    // No token map set → typography.body.size absent → default 16px.
-    let items = compositor.collect_text_items(&scene, 1280.0, 720.0);
-    assert_eq!(items.len(), 1, "must produce one TextItem for notification");
-    assert_eq!(
-        items[0].font_size_px, 16.0,
-        "notification text must use typography.body.size default (16px)"
-    );
-}
-
 /// `typography.body.size` sets the notification font size (with or without a `px`
 /// suffix); absent, it is 16px.
 #[test]
@@ -183,149 +125,128 @@ async fn test_notification_stack_adds_dismiss_label_and_reserves_text_width() {
 //   2. Token path: typography.notification.dismiss.font_size_px and
 //      typography.notification.dismiss.font_weight override the defaults.
 
-/// Dismiss button uses default font_size_px (12.0) and font_weight (700)
-/// when dismiss typography tokens are absent.
-///
-/// AC 1: no-token path preserves visual defaults.
-#[tokio::test]
-async fn test_dismiss_button_uses_default_font_size_and_weight() {
-    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
-    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
-
-    let mut scene = SceneGraph::new(1280.0, 720.0);
-    scene.register_zone(ZoneDefinition {
-        id: SceneId::new(),
-        name: "notification-area".to_owned(),
-        description: "dismiss font default test".to_owned(),
-        geometry_policy: GeometryPolicy::Relative {
-            x_pct: 0.0,
-            y_pct: 0.0,
-            width_pct: 0.25,
-            height_pct: 0.5,
-        },
-        accepted_media_types: vec![ZoneMediaType::ShortTextWithIcon],
-        rendering_policy: RenderingPolicy {
-            backdrop: Some(Rgba::new(0.1, 0.1, 0.1, 0.9)),
-            ..Default::default()
-        },
-        contention_policy: ContentionPolicy::Stack { max_depth: 5 },
-        max_publishers: 8,
-        auto_clear_ms: Some(8_000),
-        ephemeral: false,
-        layer_attachment: LayerAttachment::Chrome,
-    });
-
-    scene
-        .publish_to_zone(
-            "notification-area",
-            ZoneContent::Notification(NotificationPayload {
-                text: "Default dismiss test".to_owned(),
-                icon: String::new(),
-                urgency: 1,
-                ttl_ms: None,
-                title: String::new(),
-                actions: Vec::new(),
-            }),
-            "agent-a",
-            None,
-            None,
-            None,
-        )
-        .unwrap();
-
-    let items = compositor.collect_text_items(&scene, 1280.0, 720.0);
-    let dismiss_item = items
-        .iter()
-        .find(|item| &*item.text == "X")
-        .expect("dismiss text item must exist");
-
-    assert_eq!(
-        dismiss_item.font_size_px, NOTIFICATION_DISMISS_FONT_SIZE_PX,
-        "dismiss button font_size_px must be the default (12.0) when token absent"
-    );
-    assert_eq!(
-        dismiss_item.font_weight, NOTIFICATION_DISMISS_FONT_WEIGHT,
-        "dismiss button font_weight must be the default (700) when token absent"
-    );
-}
-
-/// Dismiss button font_size_px and font_weight read from design tokens when
+/// Notification body and dismiss defaults stay intact; dismiss font_size_px and
+/// font_weight read from design tokens when
 /// `typography.notification.dismiss.font_size_px` and
 /// `typography.notification.dismiss.font_weight` are present.
 ///
-/// AC 2: token-override path correctly propagates to the rendered TextItem.
+/// The production collector covers the original body default, dismiss defaults,
+/// and token overrides with independent expected values.
 #[tokio::test]
 async fn test_dismiss_button_respects_typography_tokens() {
     let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
-    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
+    let mut text_renderer_initialized = false;
 
-    // Inject dismiss typography tokens.
-    let mut token_map = HashMap::new();
-    token_map.insert(
-        "typography.notification.dismiss.font_size_px".to_string(),
-        "16px".to_string(),
-    );
-    token_map.insert(
-        "typography.notification.dismiss.font_weight".to_string(),
-        "400".to_string(),
-    );
-    compositor.set_token_map(token_map);
-
-    let mut scene = SceneGraph::new(1280.0, 720.0);
-    scene.register_zone(ZoneDefinition {
-        id: SceneId::new(),
-        name: "notification-area".to_owned(),
-        description: "dismiss font token test".to_owned(),
-        geometry_policy: GeometryPolicy::Relative {
-            x_pct: 0.0,
-            y_pct: 0.0,
-            width_pct: 0.25,
-            height_pct: 0.5,
-        },
-        accepted_media_types: vec![ZoneMediaType::ShortTextWithIcon],
-        rendering_policy: RenderingPolicy {
-            backdrop: Some(Rgba::new(0.1, 0.1, 0.1, 0.9)),
-            ..Default::default()
-        },
-        contention_policy: ContentionPolicy::Stack { max_depth: 5 },
-        max_publishers: 8,
-        auto_clear_ms: Some(8_000),
-        ephemeral: false,
-        layer_attachment: LayerAttachment::Chrome,
-    });
-
-    scene
-        .publish_to_zone(
-            "notification-area",
-            ZoneContent::Notification(NotificationPayload {
-                text: "Token override dismiss test".to_owned(),
-                icon: String::new(),
-                urgency: 1,
-                ttl_ms: None,
-                title: String::new(),
-                actions: Vec::new(),
-            }),
+    for (case, text, agent, x_pct, tokens, expected_dismiss) in [
+        ("body-default", "Doorbell rang", "agent-a", 0.75, None, None),
+        (
+            "dismiss-default",
+            "Default dismiss test",
+            "agent-a",
+            0.0,
+            None,
+            Some((12.0_f32, 700_u16)),
+        ),
+        (
+            "dismiss-token-override",
+            "Token override dismiss test",
             "agent-b",
-            None,
-            None,
-            None,
-        )
-        .unwrap();
+            0.0,
+            Some(("16px", "400")),
+            Some((16.0, 400)),
+        ),
+    ] {
+        if expected_dismiss.is_some() && !text_renderer_initialized {
+            compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
+            text_renderer_initialized = true;
+        }
 
-    let items = compositor.collect_text_items(&scene, 1280.0, 720.0);
-    let dismiss_item = items
-        .iter()
-        .find(|item| &*item.text == "X")
-        .expect("dismiss text item must exist");
+        let mut token_map = HashMap::new();
+        if let Some((size, weight)) = tokens {
+            token_map.insert(
+                "typography.notification.dismiss.font_size_px".to_string(),
+                size.to_string(),
+            );
+            token_map.insert(
+                "typography.notification.dismiss.font_weight".to_string(),
+                weight.to_string(),
+            );
+        }
+        compositor.set_token_map(token_map);
 
-    assert_eq!(
-        dismiss_item.font_size_px, 16.0,
-        "dismiss button font_size_px must be 16.0 from token override"
-    );
-    assert_eq!(
-        dismiss_item.font_weight, 400,
-        "dismiss button font_weight must be 400 from token override"
-    );
+        let mut scene = SceneGraph::new(1280.0, 720.0);
+        scene.register_zone(ZoneDefinition {
+            id: SceneId::new(),
+            name: "notification-area".to_owned(),
+            description: case.to_owned(),
+            geometry_policy: GeometryPolicy::Relative {
+                x_pct,
+                y_pct: 0.0,
+                width_pct: 0.25,
+                height_pct: 0.5,
+            },
+            accepted_media_types: vec![ZoneMediaType::ShortTextWithIcon],
+            rendering_policy: RenderingPolicy {
+                backdrop: Some(Rgba::new(0.1, 0.1, 0.1, 0.9)),
+                // No explicit font size or body token: the independent default is 16px.
+                ..Default::default()
+            },
+            contention_policy: ContentionPolicy::Stack { max_depth: 5 },
+            max_publishers: 8,
+            auto_clear_ms: Some(8_000),
+            ephemeral: false,
+            layer_attachment: LayerAttachment::Chrome,
+        });
+
+        scene
+            .publish_to_zone(
+                "notification-area",
+                ZoneContent::Notification(NotificationPayload {
+                    text: text.to_owned(),
+                    icon: String::new(),
+                    urgency: 1,
+                    ttl_ms: None,
+                    title: String::new(),
+                    actions: Vec::new(),
+                }),
+                agent,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+
+        let items = compositor.collect_text_items(&scene, 1280.0, 720.0);
+        let body_item = items
+            .iter()
+            .find(|item| &*item.text == text)
+            .unwrap_or_else(|| panic!("{case}: notification body text item must exist"));
+        assert_eq!(
+            body_item.font_size_px, 16.0,
+            "{case}: notification body must use the independent 16px default"
+        );
+
+        if let Some((size, weight)) = expected_dismiss {
+            let dismiss_item = items
+                .iter()
+                .find(|item| &*item.text == "X")
+                .unwrap_or_else(|| panic!("{case}: dismiss text item must exist"));
+            assert_eq!(
+                dismiss_item.font_size_px, size,
+                "{case}: dismiss font_size_px"
+            );
+            assert_eq!(
+                dismiss_item.font_weight, weight,
+                "{case}: dismiss font_weight"
+            );
+        } else {
+            assert_eq!(
+                items.len(),
+                1,
+                "{case}: must produce one notification TextItem"
+            );
+        }
+    }
 }
 
 /// Notification text is inset by 9px (8px padding + 1px border) from backdrop edges.
