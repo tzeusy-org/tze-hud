@@ -101,6 +101,7 @@ enum PrimitiveItem {
 struct PrimitiveRect {
     id: Option<String>,
     ancestor_ids: Vec<String>,
+    ancestors: Vec<PrimitiveGroup>,
     x: f32,
     y: f32,
     width: f32,
@@ -113,12 +114,14 @@ struct PrimitiveRect {
     stroke_opacity: f32,
     stroke_width: f32,
     opacity: f32,
+    local_opacity: f32,
 }
 
 #[derive(Clone)]
 struct PrimitiveCircle {
     id: Option<String>,
     ancestor_ids: Vec<String>,
+    ancestors: Vec<PrimitiveGroup>,
     cx: f32,
     cy: f32,
     r: f32,
@@ -128,12 +131,14 @@ struct PrimitiveCircle {
     stroke_opacity: f32,
     stroke_width: f32,
     opacity: f32,
+    local_opacity: f32,
 }
 
 #[derive(Clone)]
 struct PrimitiveText {
     id: Option<String>,
     ancestor_ids: Vec<String>,
+    ancestors: Vec<PrimitiveGroup>,
     view_box: SvgViewBox,
     x: f32,
     y: f32,
@@ -143,6 +148,7 @@ struct PrimitiveText {
     font_size: f32,
     fill: Option<String>,
     opacity: f32,
+    local_opacity: f32,
     content: String,
 }
 
@@ -539,6 +545,7 @@ impl PrimitiveRect {
         Some(Self {
             id: attrs.get("id").cloned(),
             ancestor_ids: group_ids(groups),
+            ancestors: groups.to_vec(),
             x: parse_f32_attr(attrs, "x").unwrap_or(0.0),
             y: parse_f32_attr(attrs, "y").unwrap_or(0.0),
             width: parse_f32_attr(attrs, "width")?,
@@ -551,6 +558,7 @@ impl PrimitiveRect {
             stroke_opacity: parse_f32_attr(attrs, "stroke-opacity").unwrap_or(1.0),
             stroke_width: parse_f32_attr(attrs, "stroke-width").unwrap_or(1.0),
             opacity: parse_f32_attr(attrs, "opacity").unwrap_or(1.0) * group_opacity(groups),
+            local_opacity: parse_f32_attr(attrs, "opacity").unwrap_or(1.0),
         })
     }
 
@@ -624,7 +632,8 @@ impl PrimitiveRect {
     }
 
     fn effective_opacity(&self, bindings: &ResolvedLayerBindings) -> f32 {
-        self.opacity * bound_ancestor_opacity(&self.ancestor_ids, bindings)
+        bound_ancestor_opacity(&self.ancestor_ids, &self.ancestors, bindings)
+            .map_or(self.opacity, |opacity| self.local_opacity * opacity)
     }
 
     fn has_active_binding(&self, bindings: &ResolvedLayerBindings) -> bool {
@@ -670,6 +679,7 @@ impl PrimitiveCircle {
         Some(Self {
             id: attrs.get("id").cloned(),
             ancestor_ids: group_ids(groups),
+            ancestors: groups.to_vec(),
             cx: parse_f32_attr(attrs, "cx")?,
             cy: parse_f32_attr(attrs, "cy")?,
             r: parse_f32_attr(attrs, "r")?,
@@ -679,6 +689,7 @@ impl PrimitiveCircle {
             stroke_opacity: parse_f32_attr(attrs, "stroke-opacity").unwrap_or(1.0),
             stroke_width: parse_f32_attr(attrs, "stroke-width").unwrap_or(1.0),
             opacity: parse_f32_attr(attrs, "opacity").unwrap_or(1.0) * group_opacity(groups),
+            local_opacity: parse_f32_attr(attrs, "opacity").unwrap_or(1.0),
         })
     }
 
@@ -727,7 +738,8 @@ impl PrimitiveCircle {
     }
 
     fn effective_opacity(&self, bindings: &ResolvedLayerBindings) -> f32 {
-        self.opacity * bound_ancestor_opacity(&self.ancestor_ids, bindings)
+        bound_ancestor_opacity(&self.ancestor_ids, &self.ancestors, bindings)
+            .map_or(self.opacity, |opacity| self.local_opacity * opacity)
     }
 
     fn has_active_binding(&self, bindings: &ResolvedLayerBindings) -> bool {
@@ -778,6 +790,7 @@ impl PrimitiveText {
         Some(Self {
             id: attrs.get("id").cloned(),
             ancestor_ids: group_ids(groups),
+            ancestors: groups.to_vec(),
             view_box,
             x: parse_f32_attr(attrs, "x").unwrap_or(0.0),
             y: parse_f32_attr(attrs, "y").unwrap_or(0.0),
@@ -787,6 +800,7 @@ impl PrimitiveText {
             font_size: parse_f32_attr(attrs, "font-size").unwrap_or(12.0),
             fill: attrs.get("fill").cloned(),
             opacity: parse_f32_attr(attrs, "opacity").unwrap_or(1.0) * group_opacity(groups),
+            local_opacity: parse_f32_attr(attrs, "opacity").unwrap_or(1.0),
             content: html_unescape_text(content),
         })
     }
@@ -809,7 +823,8 @@ impl PrimitiveText {
             return;
         }
         let color = fill.and_then(parse_svg_color).unwrap_or((0, 0, 0, 1.0));
-        let opacity = self.opacity * bound_ancestor_opacity(&self.ancestor_ids, bindings);
+        let opacity = bound_ancestor_opacity(&self.ancestor_ids, &self.ancestors, bindings)
+            .map_or(self.opacity, |opacity| self.local_opacity * opacity);
         if opacity <= 0.0 {
             return;
         }
@@ -1089,16 +1104,31 @@ fn group_opacity(groups: &[PrimitiveGroup]) -> f32 {
         .fold(1.0, |acc, opacity| acc * opacity)
 }
 
-fn bound_ancestor_opacity(ancestor_ids: &[String], bindings: &ResolvedLayerBindings) -> f32 {
-    ancestor_ids.iter().fold(1.0, |acc, id| {
-        let bound = bindings
+// A binding replaces the authored opacity of its group. Keep the precomputed
+// opacity fast path when no ancestor has an opacity binding.
+fn bound_ancestor_opacity(
+    ancestor_ids: &[String],
+    ancestors: &[PrimitiveGroup],
+    bindings: &ResolvedLayerBindings,
+) -> Option<f32> {
+    let has_bound_opacity = ancestor_ids.iter().any(|id| {
+        bindings
             .by_target_attr
             .get(id)
+            .is_some_and(|attrs| attrs.contains_key("opacity"))
+    });
+    if !has_bound_opacity {
+        return None;
+    }
+    Some(ancestors.iter().fold(1.0, |acc, ancestor| {
+        let bound = ancestor
+            .id
+            .as_ref()
+            .and_then(|id| bindings.by_target_attr.get(id))
             .and_then(|attrs| attrs.get("opacity"))
-            .and_then(|value| parse_svg_number(value))
-            .unwrap_or(1.0);
-        acc * bound
-    })
+            .and_then(|value| parse_svg_number(value));
+        acc * bound.unwrap_or(ancestor.opacity)
+    }))
 }
 
 fn target_or_ancestor_has_binding(
@@ -3893,6 +3923,118 @@ mod tests {
                 .contains_key(&expected_key),
             "opacity-only changes should cache text glyphs without baking opacity into the SVG key"
         );
+
+        // Bindings replace the authored opacity of each ancestor, including
+        // groups that start hidden. Unbound named and anonymous groups still
+        // multiply with the primitive's own opacity exactly once.
+        for authored in ["0", "0.82", "1"] {
+            let nested_svg = format!(
+                r##"<svg xmlns="http://www.w3.org/2000/svg" width="96" height="40">
+                    <g opacity="0.5"><g id="static" opacity="0.8">
+                    <g id="fade" opacity="{authored}"><g id="inner" opacity="0.5">
+                        <rect x="0" y="0" width="16" height="16" fill="#ffffff" opacity="0.8"/>
+                        <circle cx="40" cy="8" r="7" fill="#ffffff" opacity="0.8"/>
+                        <text id="nested-label" x="60" y="16" font-size="12" fill="#ffffff" opacity="0.8">CPU</text>
+                    </g></g></g></g>
+                </svg>"##
+            );
+            let nested_bindings = vec![
+                bindings[0].clone(),
+                WidgetBinding {
+                    param: "inner_opacity".to_string(),
+                    target_element: "inner".to_string(),
+                    target_attribute: "opacity".to_string(),
+                    mapping: WidgetBindingMapping::Linear {
+                        attr_min: 0.0,
+                        attr_max: 1.0,
+                    },
+                },
+            ];
+            let nested_plan = WidgetRenderPlan::compile(&[(&nested_svg, &nested_bindings)]);
+            let nested_constraints = HashMap::from([
+                ("opacity".to_string(), (0.0f32, 1.0f32)),
+                ("inner_opacity".to_string(), (0.0f32, 1.0f32)),
+            ]);
+            let mut frames = Vec::new();
+            for (value, replacement) in [(0.0, 0.25), (1.0, 0.75)] {
+                let params = HashMap::from([
+                    ("opacity".to_string(), WidgetParameterValue::F32(value)),
+                    ("inner_opacity".to_string(), WidgetParameterValue::F32(0.5)),
+                ]);
+                let frame = rasterize_widget_render_plan(
+                    &nested_plan,
+                    &nested_constraints,
+                    &params,
+                    96,
+                    40,
+                )
+                .expect("bound nested primitives should rasterize");
+                // Anonymous .5, unbound named .8, replaced outer, replaced
+                // inner .5, and local .8. This expected alpha is independent
+                // of the render-plan implementation and the authored outer.
+                let expected_alpha = (255.0f32 * 0.5 * 0.8 * replacement * 0.5 * 0.8).round();
+                for (x, y) in [(8, 8), (40, 8)] {
+                    let alpha = frame.pixel(x, y).expect("interior sample").alpha();
+                    assert!(
+                        (f32::from(alpha) - expected_alpha).abs() <= 1.0,
+                        "bound opacity must replace authored {authored}, sample ({x}, {y}): {alpha} vs {expected_alpha}"
+                    );
+                }
+                frames.push(frame);
+            }
+            assert_ne!(
+                frames[0].data(),
+                frames[1].data(),
+                "opacity updates on a retained plan must change the final pixels"
+            );
+            let text_alpha = |frame: &tiny_skia::Pixmap| {
+                frame
+                    .pixels()
+                    .chunks(96)
+                    .flat_map(|line| line[60..].iter().map(|pixel| pixel.alpha()))
+                    .max()
+                    .expect("text region")
+            };
+            assert!(
+                text_alpha(&frames[1]) > text_alpha(&frames[0]),
+                "bound ancestor opacity must also change text pixels"
+            );
+
+            let unbound = rasterize_widget_render_plan(
+                &nested_plan,
+                &nested_constraints,
+                &HashMap::new(),
+                96,
+                40,
+            )
+            .expect("unbound authored opacity should rasterize");
+            let authored_opacity: f32 = authored.parse().expect("fixture opacity");
+            let expected_unbound = (255.0f32 * 0.5 * 0.8 * authored_opacity * 0.5 * 0.8).round();
+            for (x, y) in [(8, 8), (40, 8)] {
+                let alpha = unbound
+                    .pixel(x, y)
+                    .expect("unbound interior sample")
+                    .alpha();
+                assert!(
+                    (f32::from(alpha) - expected_unbound).abs() <= 1.0,
+                    "unbound hierarchy must retain authored {authored}: {alpha} vs {expected_unbound}"
+                );
+            }
+            let nested_primitives = PrimitiveSvgLayerPlan::parse(&nested_svg)
+                .expect("nested primitive SVG should parse");
+            let PrimitiveItem::Text(nested_text) = &nested_primitives.items[2] else {
+                panic!("expected nested text primitive");
+            };
+            let nested_key = expected_text_mask_cache_key(nested_text, "CPU", 96, 40);
+            assert!(
+                text_svg_layer_cache()
+                    .lock()
+                    .expect("text cache")
+                    .entries
+                    .contains_key(&nested_key),
+                "bound opacity must reuse the opacity-independent nested glyph mask"
+            );
+        }
     }
 
     #[test]
