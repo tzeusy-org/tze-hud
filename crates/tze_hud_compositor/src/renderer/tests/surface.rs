@@ -304,6 +304,26 @@ async fn capture_windowed_frame_reads_back_the_built_frame() {
     let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(320, 200).await);
     compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
     let mut scene = SceneGraph::new(320.0, 200.0);
+    let tab = scene.create_tab("capture", 0).unwrap();
+    let lease = scene.grant_lease("capture", 60_000);
+    let tile = scene
+        .create_tile(tab, "capture", lease, Rect::new(16.0, 16.0, 128.0, 64.0), 1)
+        .unwrap();
+    scene
+        .set_tile_root(
+            tile,
+            Node {
+                layout: Default::default(),
+                id: SceneId::new(),
+                children: vec![],
+                data: NodeData::SolidColor(SolidColorNode {
+                    color: Rgba::new(1.0, 0.0, 0.0, 1.0),
+                    bounds: Rect::new(0.0, 0.0, 128.0, 64.0),
+                    radius: None,
+                }),
+            },
+        )
+        .unwrap();
     compositor.prime_markdown_cache(&scene);
     compositor.prime_truncation_cache(&scene);
 
@@ -317,6 +337,18 @@ async fn capture_windowed_frame_reads_back_the_built_frame() {
         .expect("capture");
     assert_eq!((frame.width, frame.height), (320, 200));
     assert_eq!(frame.rgba.len(), 320 * 200 * 4);
+    let inside = (40 * frame.width as usize + 40) * 4;
+    let red = &frame.rgba[inside..inside + 4];
+    assert!(
+        red[0] > 200 && red[1] < 40 && red[2] < 40 && red[3] == 255,
+        "captured tile must contain actual red pixels: {red:?}"
+    );
+    let outside = (180 * frame.width as usize + 290) * 4;
+    assert_ne!(
+        red,
+        &frame.rgba[outside..outside + 4],
+        "capture must distinguish the rendered tile from its background"
+    );
 
     let build = compositor.build_windowed_frame(&mut scene, 320, 200);
     let unsupported = compositor.capture_windowed_frame(

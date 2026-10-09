@@ -54,6 +54,7 @@ pub mod portal_projection_driver;
 pub mod portal_tokens;
 pub(crate) mod runtime_context;
 pub(crate) mod scene_startup;
+pub use scene_startup::{SceneStartupResult, run_scene_startup};
 pub(crate) mod shell;
 #[cfg(test)]
 pub(crate) mod test_support;
