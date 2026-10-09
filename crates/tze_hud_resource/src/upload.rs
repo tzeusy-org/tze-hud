@@ -123,6 +123,8 @@ impl AgentUploads {
 #[derive(Clone)]
 pub struct ResourceStore {
     dedup: DedupIndex,
+    /// Serializes distinct-resource admission across all clones of this store.
+    admission: Arc<Mutex<()>>,
     config: Arc<ResourceStoreConfig>,
     /// Per-agent upload state.  Keyed by agent namespace string.
     agent_uploads: Arc<Mutex<HashMap<String, AgentUploads>>>,
@@ -139,6 +141,7 @@ impl ResourceStore {
     pub fn new(config: ResourceStoreConfig) -> Self {
         Self {
             dedup: DedupIndex::new(),
+            admission: Arc::new(Mutex::new(())),
             config: Arc::new(config),
             agent_uploads: Arc::new(Mutex::new(HashMap::new())),
             font_bytes: FontBytesStore::new(),
@@ -152,6 +155,7 @@ impl ResourceStore {
     ) -> Self {
         Self {
             dedup: DedupIndex::new(),
+            admission: Arc::new(Mutex::new(())),
             config: Arc::new(config),
             agent_uploads: Arc::new(Mutex::new(HashMap::new())),
             font_bytes: FontBytesStore::new_with_resident_ledger(resident_ledger.clone()),
@@ -470,7 +474,26 @@ impl ResourceStore {
         // Decode validation (also checks decoded size limits).
         let meta = decode_and_validate(&data, resource_type, &self.config, width, height)?;
 
-        // Budget check.
+        // Validation and font-byte preparation stay outside the admission guard.
+        let resource_id = ResourceId::from_bytes(expected_hash);
+        let font_data = matches!(resource_type, ResourceType::FontTtf | ResourceType::FontOtf)
+            .then(|| Arc::<[u8]>::from(data));
+        let _admission = self.admission.lock().await;
+
+        // Another completion may have inserted this content while we validated it.
+        // Same-type dedup consumes no new capacity, including at the hard cap.
+        // Mismatched types retain the existing validated admission path.
+        if let Some(existing) = self.dedup.get(&resource_id)
+            && existing.resource_type == resource_type
+        {
+            return Ok(ResourceStored {
+                resource_id: existing.resource_id,
+                was_deduplicated: true,
+                decoded_bytes: existing.decoded_bytes,
+            });
+        }
+
+        // Budget and count checks through insertion form one admission operation.
         let runtime_used = self.dedup.total_decoded_bytes();
         check_budget(meta.decoded_bytes, agent_budget, runtime_used, &self.config)?;
 
@@ -484,8 +507,7 @@ impl ResourceStore {
             });
         }
 
-        // Insert into dedup index.
-        let resource_id = ResourceId::from_bytes(expected_hash);
+        // Resident admission and insertion stay under the same guard.
         if !matches!(resource_type, ResourceType::FontTtf | ResourceType::FontOtf)
             && let Some(ledger) = &self.resident_ledger
         {
@@ -499,9 +521,9 @@ impl ResourceStore {
                     detail: format!("resident resource admission denied: {error:?}"),
                 })?;
         }
-        if matches!(resource_type, ResourceType::FontTtf | ResourceType::FontOtf) {
+        if let Some(font_data) = font_data {
             self.font_bytes
-                .try_insert(resource_id, data.clone().into())
+                .try_insert(resource_id, font_data)
                 .map_err(|error| ResourceError::BudgetExceeded {
                     detail: format!("resident font admission denied: {error:?}"),
                 })?;
@@ -519,8 +541,8 @@ impl ResourceStore {
                 (rec.resource_id, false)
             }
             Err(existing) => {
-                // Race: another upload completed between our dedup check and
-                // insert.  Return the existing record (still correct content).
+                // Preserve the immutable record for validated type collisions.
+                // Same-type production completions are caught by the recheck.
                 tracing::debug!(
                     resource_id = %existing.resource_id,
                     agent = %agent_namespace,

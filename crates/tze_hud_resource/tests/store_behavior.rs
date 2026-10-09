@@ -145,6 +145,199 @@ async fn resource_count_cap_rejects_the_extra_resource() {
         .unwrap()
         .unwrap();
     assert!(again.was_deduplicated);
+
+    // Finite public completions exercise the shared count cap. The start
+    // barrier does not force the private check/insert interleaving, so even
+    // a passing vector cannot establish a global count transaction.
+    for namespaces in [["a", "a"], ["a", "b"]] {
+        let ledger =
+            tze_hud_resource::ResidentLedger::new(tze_hud_resource::ResidentLedgerLimits {
+                aggregate_bytes: 128,
+                resource_bytes: 128,
+                widget_source_bytes: 0,
+                widget_raster_bytes: 0,
+                font_bytes: 0,
+            });
+        let shared = ResourceStore::new_with_resident_ledger(
+            ResourceStoreConfig {
+                max_concurrent_resources: 2,
+                ..ResourceStoreConfig::default()
+            },
+            ledger.clone(),
+        );
+        let retained = shared
+            .handle_upload_start(inline_req("retained", 1, 1, rgba(1, 1), unlimited()))
+            .await
+            .unwrap()
+            .unwrap();
+        let runtime = tokio::runtime::Handle::current();
+        let outcomes = std::thread::scope(|scope| {
+            let start = std::sync::Arc::new(std::sync::Barrier::new(2));
+            let workers: Vec<_> = namespaces
+                .into_iter()
+                .zip([2_u8, 3])
+                .map(|(namespace, seed)| {
+                    let store = shared.clone();
+                    let runtime = runtime.clone();
+                    let start = start.clone();
+                    scope.spawn(move || {
+                        let data = rgba(1, seed);
+                        let expected = ResourceId::from_bytes(hash(&data));
+                        start.wait();
+                        let result = runtime
+                            .block_on(store.handle_upload_start(inline_req(
+                                namespace,
+                                seed,
+                                1,
+                                data,
+                                unlimited(),
+                            )))
+                            .map(|stored| stored.expect("inline completion"));
+                        (namespace, seed, expected, result)
+                    })
+                })
+                .collect();
+            workers
+                .into_iter()
+                .map(|worker| worker.join().expect("upload thread completed"))
+                .collect::<Vec<_>>()
+        });
+        println!("count namespaces={namespaces:?} joined={outcomes:?}");
+        assert_eq!(
+            outcomes
+                .iter()
+                .filter(|(_, _, _, result)| result.is_ok())
+                .count(),
+            1,
+            "one remaining count slot must admit exactly one distinct completion: {outcomes:?}"
+        );
+        for (_, _, expected, result) in &outcomes {
+            match result {
+                Ok(stored) => {
+                    assert_eq!(stored.resource_id, *expected);
+                    assert!(!stored.was_deduplicated);
+                    assert!(shared.dedup_index().contains(expected));
+                }
+                Err(error) => {
+                    assert!(matches!(error, ResourceError::BudgetExceeded { .. }));
+                    assert_eq!(error.wire_code(), "RESOURCE_BUDGET_EXCEEDED");
+                    assert!(!shared.dedup_index().contains(expected));
+                }
+            }
+        }
+        assert_eq!(shared.dedup_index().len(), 2);
+        assert!(shared.dedup_index().contains(&retained.resource_id));
+        assert_eq!(shared.dedup_index().total_decoded_bytes(), 8);
+        let full = ledger.snapshot();
+        assert_eq!(full.resource_bytes, 8);
+        assert_eq!(full.aggregate_bytes, 8);
+        assert_eq!(full.allocation_count, 2);
+
+        // Both real threads re-upload the retained hash at the full cap.
+        // All public replies must keep its ID and charge no physical bytes.
+        let repeated = std::thread::scope(|scope| {
+            let start = std::sync::Arc::new(std::sync::Barrier::new(2));
+            let workers: Vec<_> = namespaces
+                .into_iter()
+                .zip([10_u8, 11])
+                .map(|(namespace, request)| {
+                    let store = shared.clone();
+                    let runtime = runtime.clone();
+                    let start = start.clone();
+                    scope.spawn(move || {
+                        start.wait();
+                        let result = runtime
+                            .block_on(store.handle_upload_start(inline_req(
+                                namespace,
+                                request,
+                                1,
+                                rgba(1, 1),
+                                unlimited(),
+                            )))
+                            .map(|stored| stored.expect("dedup completion"));
+                        (namespace, request, result)
+                    })
+                })
+                .collect();
+            workers
+                .into_iter()
+                .map(|worker| worker.join().expect("dedup thread completed"))
+                .collect::<Vec<_>>()
+        });
+        println!("dedup namespaces={namespaces:?} joined={repeated:?}");
+        for (_, _, result) in repeated {
+            let stored = result.unwrap();
+            assert_eq!(stored.resource_id, retained.resource_id);
+            assert!(stored.was_deduplicated);
+        }
+        assert_eq!(ledger.snapshot(), full);
+        assert_eq!(shared.dedup_index().len(), 2);
+
+        // Rejected chunked completion removes only its owned upload slot.
+        let data = rgba(1, 4);
+        for id in [20, 21] {
+            assert!(
+                shared
+                    .handle_upload_start(chunked_start("a", id, 1, &data))
+                    .await
+                    .unwrap()
+                    .is_none()
+            );
+        }
+        let owned = UploadId::from_bytes([20; 16]);
+        shared
+            .handle_upload_chunk("a", owned, 0, data.clone())
+            .await
+            .unwrap();
+        let error = shared
+            .handle_upload_complete("a", owned, &caps(), &unlimited())
+            .await
+            .unwrap_err();
+        println!("chunked rejected upload={owned:?} error={error:?}");
+        assert_eq!(error.wire_code(), "RESOURCE_BUDGET_EXCEEDED");
+        assert_eq!(shared.in_flight_count("a").await, 1);
+        assert!(
+            !shared
+                .dedup_index()
+                .contains(&ResourceId::from_bytes(hash(&data)))
+        );
+        assert_eq!(ledger.snapshot(), full);
+        assert!(shared.dedup_index().contains(&retained.resource_id));
+        for id in [22, 23, 24] {
+            assert!(
+                shared
+                    .handle_upload_start(chunked_start("a", id, 1, &data))
+                    .await
+                    .unwrap()
+                    .is_none()
+            );
+        }
+        assert!(matches!(
+            shared
+                .handle_upload_start(chunked_start("a", 25, 1, &data))
+                .await,
+            Err(ResourceError::TooManyUploads)
+        ));
+        for id in [22, 23, 24] {
+            shared
+                .abort_upload("a", UploadId::from_bytes([id; 16]))
+                .await;
+        }
+        assert_eq!(shared.in_flight_count("a").await, 1);
+        // The peer upload remains usable, rather than merely counted.
+        let peer = UploadId::from_bytes([21; 16]);
+        shared
+            .handle_upload_chunk("a", peer, 0, data)
+            .await
+            .unwrap();
+        let peer_error = shared
+            .handle_upload_complete("a", peer, &caps(), &unlimited())
+            .await
+            .unwrap_err();
+        assert_eq!(peer_error.wire_code(), "RESOURCE_BUDGET_EXCEEDED");
+        assert_eq!(shared.in_flight_count("a").await, 0);
+        assert_eq!(ledger.snapshot(), full);
+    }
 }
 
 #[tokio::test]
