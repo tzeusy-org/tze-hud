@@ -4813,7 +4813,7 @@ mod tests {
         // so `route_portal_composer_batch` returns true and
         // `append_raw_tile_viewer_echo` never runs — isolating the keyboard
         // submit-terminal reset as the only thing that can pin the tail.
-        let driver = crate::portal_projection_driver::InProcessPortalDriver::new();
+        let mut driver = crate::portal_projection_driver::InProcessPortalDriver::new();
         driver
             .hub_mut()
             .publish(
