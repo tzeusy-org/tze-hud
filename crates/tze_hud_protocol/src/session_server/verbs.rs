@@ -410,7 +410,10 @@ fn claim_in_scene(
     if result.is_err() {
         let _ = scene.revoke_lease(lease_id);
     }
-    result.map(|(tile, nodes)| (tile, lease_id, nodes))
+    result.map(|(tile, nodes)| {
+        scene.adopt_publications(session.publication_origin, lease_id);
+        (tile, lease_id, nodes)
+    })
 }
 
 fn place_and_fill(
@@ -647,10 +650,14 @@ fn publish_zone(
     };
     // present_at in the future: hold the publish until due (invariant 1).
     if publish.present_at_us > now {
-        scene.schedule_batch(publish.present_at_us, batch);
+        scene.schedule_batch_for_origin(
+            publish.present_at_us,
+            batch,
+            Some(session.publication_origin),
+        );
         return ok(seq);
     }
-    let result = scene.apply_batch(&batch);
+    let result = scene.apply_batch_for_origin(&batch, Some(session.publication_origin));
     match result.error {
         None if result.applied => ok(seq),
         Some(e) => fail(seq, validation_error_code(&e), e.to_string()),
@@ -671,7 +678,7 @@ fn publish_widget(
         .filter_map(crate::convert::proto_to_widget_param_value)
         .collect();
     let now = scene.now_wall_us();
-    match scene.publish_to_widget_for_lease(
+    match scene.publish_to_widget_for_origin(
         widget,
         params,
         &session.namespace,
@@ -679,6 +686,7 @@ fn publish_widget(
         publish.transition_ms,
         expires_at_wall_us(publish, now),
         session.lease_ids.first().copied(),
+        Some(session.publication_origin),
     ) {
         Ok(_) => ok(seq),
         Err(e) => fail(seq, validation_error_code(&e), e.to_string()),

@@ -302,6 +302,37 @@ impl SceneGraph {
         self.version += 1;
     }
 
+    /// Give publication-only sessions the same finite reconnect grace as leases.
+    /// The protocol passes the same captured scene time used for its resume token.
+    pub fn orphan_publications(&mut self, origin: SceneId, now_ms: u64, grace_ms: u64) -> bool {
+        self.prune_publication_orphans();
+        if !self.has_publications_for_origin(origin) {
+            return false;
+        }
+        self.publication_orphans
+            .insert(origin, now_ms.saturating_add(grace_ms));
+        true
+    }
+
+    /// Successful authenticated resume cancels only this origin's cleanup.
+    pub fn resume_publications(&mut self, origin: SceneId) -> bool {
+        self.reap_orphaned_publications(self.clock.now_millis());
+        self.publication_orphans.remove(&origin).is_some()
+    }
+
+    pub(crate) fn reap_orphaned_publications(&mut self, now_ms: u64) {
+        self.prune_publication_orphans();
+        let expired: Vec<_> = self
+            .publication_orphans
+            .iter()
+            .filter(|(_, deadline)| **deadline <= now_ms)
+            .map(|(origin, _)| *origin)
+            .collect();
+        for origin in expired {
+            self.clear_publications_for_origin(origin);
+        }
+    }
+
     /// Expire all leases past their TTL, handle grace period expiry for
     /// disconnected leases, and handle suspension timeout.
     ///
@@ -313,6 +344,7 @@ impl SceneGraph {
     /// Like `expire_leases` but with a configurable max suspension time.
     pub fn expire_leases_with_max_suspend(&mut self, max_suspend_ms: u64) -> Vec<LeaseExpiry> {
         let now = self.clock.now_millis();
+        self.reap_orphaned_publications(now);
 
         // Collect leases that need cleanup
         let to_process: Vec<(SceneId, LeaseState)> = self
@@ -358,6 +390,7 @@ impl SceneGraph {
                 | LeaseState::Expired
                 | LeaseState::Released => None,
             })
+            .chain(self.publication_orphans.values().copied())
             .min()
     }
 

@@ -2174,6 +2174,10 @@ pub struct ZonePublishRecord {
     /// exactly the publications carrying its id; `None` belongs to no lease.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lease_id: Option<SceneId>,
+    /// In-memory gRPC origin for publications made before a lease claim.
+    /// Not part of snapshots or the wire; leased and MCP publications use None.
+    #[serde(skip)]
+    pub publication_origin: Option<SceneId>,
 }
 
 /// A zone instance — zone type bound to a specific tab.
@@ -2425,6 +2429,10 @@ pub struct WidgetPublishRecord {
     /// The lease this publication was made under (see `ZonePublishRecord`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lease_id: Option<SceneId>,
+    /// In-memory gRPC origin for publications made before a lease claim.
+    /// Not part of snapshots or the wire; leased and MCP publications use None.
+    #[serde(skip)]
+    pub publication_origin: Option<SceneId>,
 }
 
 /// Resolved occupancy state for a widget instance after contention policy.

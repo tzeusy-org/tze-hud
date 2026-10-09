@@ -1293,6 +1293,7 @@ fn test_update_publication_animations_seeds_fresh_state() {
     // No expiry: held, not the zone auto_clear_ms.
     let record_no_ttl = ZonePublishRecord {
         lease_id: None,
+        publication_origin: None,
         zone_name: "notification-area".to_string(),
         publisher_namespace: "agent-b".to_string(),
         content: ZoneContent::Notification(NotificationPayload {

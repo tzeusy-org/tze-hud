@@ -44,6 +44,8 @@ pub struct ResumeEntry {
     /// Lease IDs that were held by the agent at disconnect.
     /// The runtime may use these to reclaim/restore orphaned leases.
     pub orphaned_lease_ids: Vec<SceneId>,
+    /// Transient gRPC publication owner, independent of a resumed physical session.
+    pub(crate) publication_origin: Option<SceneId>,
     /// Wall-clock expiry time in milliseconds (since UNIX epoch).
     /// After this instant the token is invalid regardless of other fields.
     pub expires_at_ms: u64,
@@ -87,11 +89,36 @@ impl TokenStore {
         grace_period_ms: u64,
         now_ms: u64,
     ) {
+        self.insert_with_publication_origin(
+            token,
+            agent_id,
+            capabilities,
+            subscriptions,
+            orphaned_lease_ids,
+            grace_period_ms,
+            now_ms,
+            None,
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn insert_with_publication_origin(
+        &mut self,
+        token: Vec<u8>,
+        agent_id: String,
+        capabilities: Vec<String>,
+        subscriptions: Vec<String>,
+        orphaned_lease_ids: Vec<SceneId>,
+        grace_period_ms: u64,
+        now_ms: u64,
+        publication_origin: Option<SceneId>,
+    ) {
         let entry = ResumeEntry {
             agent_id,
             capabilities,
             subscriptions,
             orphaned_lease_ids,
+            publication_origin,
             expires_at_ms: now_ms.saturating_add(grace_period_ms),
         };
         self.entries.insert(token, entry);
@@ -385,7 +412,8 @@ mod tests {
         let now = 1_000_000u64;
         let lease_id = SceneId::new();
 
-        store.insert(
+        let origin = SceneId::new();
+        store.insert_with_publication_origin(
             token.clone(),
             "agent-a".to_string(),
             vec![],
@@ -393,10 +421,12 @@ mod tests {
             vec![lease_id],
             30_000,
             now,
+            Some(origin),
         );
 
         let entry = store.consume(&token, "agent-a", now + 1_000).unwrap();
         assert_eq!(entry.orphaned_lease_ids.len(), 1);
         assert_eq!(entry.orphaned_lease_ids[0], lease_id);
+        assert_eq!(entry.publication_origin, Some(origin));
     }
 }
