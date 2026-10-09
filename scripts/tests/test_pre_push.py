@@ -263,6 +263,32 @@ class PrePushTests(unittest.TestCase):
                 self.assertEqual(config.read_bytes(), guarded)
                 self.assertEqual(unrelated.read_text(), "#!/bin/sh\nexit 0\n")
 
+            # Git rename detection must not hide removal of a sensitive path.
+            # Each proposed HEAD differs only by this exact-content R100 rename.
+            for label, sensitive in [
+                ("Rust source", "module.rs"),
+                ("TOML", "settings.toml"),
+                ("lockfile", "Cargo.lock"),
+            ]:
+                git("checkout", "-qB", "rename-sensitive", base)
+                baseline = commit(sensitive, "exact rename fixture\n")
+                git("update-ref", "refs/remotes/origin/main", baseline)
+                git("mv", sensitive, "notes.md")
+                git("commit", "-qm", "rename sensitive path to documentation")
+                proposed = git("rev-parse", "HEAD")
+                with self.subTest(rename_sensitive_path=sensitive):
+                    rename = git("diff", "--name-status", baseline, proposed, "--")
+                    self.assertEqual(rename, f"R100\t{sensitive}\tnotes.md")
+                    result, calls = invoke(update(proposed))
+                    print(json.dumps({
+                        "rename_case": label, "sensitive_path": sensitive,
+                        "baseline": baseline, "proposed_HEAD": proposed,
+                        "actual_name_status": rename,
+                        "selector_exit": result.returncode, "checker_calls": calls,
+                    }))
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(calls, [["pre-push-check"]])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -63,7 +63,7 @@ def commit(oid: str) -> str:
 
 
 def has_rust_changes(baseline: str, proposed: str) -> bool:
-    paths = git("diff", "--name-only", "-z", baseline, proposed, "--").split(b"\0")
+    paths = git("diff", "--no-renames", "--name-only", "-z", baseline, proposed, "--").split(b"\0")
     return any(
         path.endswith((b".rs", b".toml")) or path.rsplit(b"/", 1)[-1] == b"Cargo.lock"
         for path in paths
