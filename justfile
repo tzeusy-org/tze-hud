@@ -6,6 +6,7 @@
 #   just           # run the default gate (check)
 #   just fmt       # format check
 #   just clippy    # lint check
+#   just pre-push  # ref-aware fmt + workspace all-target Clippy before pushing
 #   just test      # workspace tests (excludes integration), incl. GPU + pixel_readback tests
 #   just test-gpu  # GPU subset only (compositor + pixel_readback), llvmpipe-pinned, with timeouts
 #   just test-integration   # integration headless suites
@@ -67,6 +68,18 @@ fmt-fix:
 
 # cargo clippy: lint gate — all targets, deny warnings (mirror CI clippy job)
 clippy:
+    cargo clippy --workspace --all-targets -- -D warnings
+
+# Git supplies all proposed ref tuples; direct invocation checks current HEAD.
+[positional-arguments]
+pre-push mode="head":
+    #!/usr/bin/env sh
+    exec {{py}} scripts/pre_push.py "$1"
+
+# Selection belongs to pre-push; never select only the changed crates.
+[private]
+pre-push-check:
+    cargo fmt --all --check
     cargo clippy --workspace --all-targets -- -D warnings
 
 # ── Tests ────────────────────────────────────────────────────────────────────
