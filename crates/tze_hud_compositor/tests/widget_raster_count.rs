@@ -508,12 +508,54 @@ async fn widget_param_update_rasterizes_only_that_instance() {
         );
         tooltip_frames.push(pixels);
     }
-    for pixels in &tooltip_frames[..3] {
+    // Report the existing isolation predicates before a foreground failure can
+    // stop their later assertions. These diagnostics do not change the oracle.
+    println!(
+        "tooltip binding isolation: label_changed={} reason_stable_on_label={} reason_changed={} label_stable_on_reason={}",
+        region(&tooltip_frames[0], label_roi) != region(&tooltip_frames[1], label_roi),
+        region(&tooltip_frames[0], reason_roi) == region(&tooltip_frames[1], reason_roi),
+        region(&tooltip_frames[1], reason_roi) != region(&tooltip_frames[2], reason_roi),
+        region(&tooltip_frames[1], label_roi) == region(&tooltip_frames[2], label_roi),
+    );
+    for (case, pixels) in tooltip_frames[..3].iter().enumerate() {
         assert!(
             region(pixels, panel_roi) != region(&baseline, panel_roi),
             "tooltip panel missing"
         );
-        for roi in [label_roi, reason_roi] {
+        for (name, roi) in [("label", label_roi), ("reason", reason_roi)] {
+            let roi_pixels = region(pixels, roi);
+            let peak_pixel = roi_pixels
+                .iter()
+                .max_by_key(|p| p[..3].iter().copied().min().unwrap_or(0))
+                .copied()
+                .unwrap_or([0; 4]);
+            let peak_min_rgb = peak_pixel[..3].iter().copied().min().unwrap_or(0);
+            let channel_max: [u8; 3] = std::array::from_fn(|channel| {
+                roi_pixels.iter().map(|p| p[channel]).max().unwrap_or(0)
+            });
+            // Independent shipped friendly-panel literal; all shown cases bind
+            // tooltip_visible=1, so its opaque interior has no text coverage.
+            let expected_panel =
+                expected_badge_pixel([0x12, 0x20, 0x18], 1.0, region(&baseline, roi)[0]);
+            let maximum_panel_contrast = roi_pixels
+                .iter()
+                .map(|p| {
+                    (0..3)
+                        .map(|channel| p[channel].abs_diff(expected_panel[channel]))
+                        .max()
+                        .unwrap_or(0)
+                })
+                .max()
+                .unwrap_or(0);
+            let bright_pixels = roi_pixels
+                .iter()
+                .filter(|p| p[..3].iter().all(|v| *v > 180))
+                .count();
+            let case_name = ["ready", "label-paused", "reason-awaiting-operator"][case];
+            println!(
+                "tooltip diagnostic case={case_name} roi={name} local_bounds={roi:?} origin={origin:?} peak_min_rgb={peak_min_rgb} peak_pixel={peak_pixel:?} channel_max={channel_max:?} foreground_gt180_count={bright_pixels} expected_panel={expected_panel:?} maximum_panel_contrast={maximum_panel_contrast} observed_panel_sample={:?}",
+                region(pixels, panel_roi)[0],
+            );
             assert!(
                 region(pixels, roi)
                     .iter()
