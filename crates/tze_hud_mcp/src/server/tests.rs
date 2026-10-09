@@ -1254,7 +1254,7 @@ async fn portal_flow_attach_publish_poll_ack_clear() {
             json!({"surface":"portal:main", "ttl_ms":1000})
         )
         .await,
-        json!({"ok":true})
+        json!({"ok":true,"expires_in_ms":1000})
     );
     assert_eq!(ingress.load(Ordering::SeqCst), 4);
     assert_eq!(render.load(Ordering::SeqCst), 0);
