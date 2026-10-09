@@ -77,37 +77,6 @@ impl ChromeState {
         }
     }
 
-    /// Remove a tab by id.
-    pub fn remove_tab(&mut self, id: u32) {
-        if let Some(pos) = self.tabs.iter().position(|t| t.id == id) {
-            let old_active = self.active_tab_index;
-            self.tabs.remove(pos);
-
-            if self.tabs.is_empty() {
-                self.active_tab_index = 0;
-                return;
-            }
-
-            // Recompute active_tab_index correctly:
-            // - Removed before active → active shifts left by 1.
-            // - Removed at active → clamp to last tab.
-            // - Removed after active → index unchanged.
-            self.active_tab_index = if pos < old_active {
-                old_active - 1
-            } else if pos == old_active {
-                old_active.min(self.tabs.len() - 1)
-            } else {
-                old_active
-            };
-
-            // Ensure exactly one tab carries the active flag.
-            for tab in &mut self.tabs {
-                tab.active = false;
-            }
-            self.tabs[self.active_tab_index].active = true;
-        }
-    }
-
     /// Switch to tab by index. Returns `true` if the switch occurred.
     pub fn switch_to_tab_index(&mut self, idx: usize) -> bool {
         if idx >= self.tabs.len() {
