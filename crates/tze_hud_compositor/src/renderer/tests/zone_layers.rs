@@ -527,6 +527,7 @@ fn test_publication_ttl_ms_uses_expires_at_wall_us() {
     // Expected: 15_000 ms - 150 ms fade = 14_850 ms until fade starts.
     let record_warning = ZonePublishRecord {
         lease_id: None,
+        publication_origin: None,
         zone_name: "alert-banner".to_string(),
         publisher_namespace: "agent-warn".to_string(),
         content: ZoneContent::Notification(NotificationPayload {
@@ -558,6 +559,7 @@ fn test_publication_ttl_ms_uses_expires_at_wall_us() {
     // Expected: 30_000 ms - 150 ms fade = 29_850 ms until fade starts.
     let record_critical = ZonePublishRecord {
         lease_id: None,
+        publication_origin: None,
         zone_name: "alert-banner".to_string(),
         publisher_namespace: "agent-crit".to_string(),
         content: ZoneContent::Notification(NotificationPayload {
@@ -589,6 +591,7 @@ fn test_publication_ttl_ms_uses_expires_at_wall_us() {
     // published=1s, expires=16s → duration=15s → 15_000 - 150 = 14_850 ms until fade.
     let record_both = ZonePublishRecord {
         lease_id: None,
+        publication_origin: None,
         zone_name: "alert-banner".to_string(),
         publisher_namespace: "agent-both".to_string(),
         content: ZoneContent::Notification(NotificationPayload {
@@ -616,6 +619,7 @@ fn test_publication_ttl_ms_uses_expires_at_wall_us() {
     // No expires_at: held until cleared, whatever the payload ttl_ms says.
     let record_info = ZonePublishRecord {
         lease_id: None,
+        publication_origin: None,
         zone_name: "alert-banner".to_string(),
         publisher_namespace: "agent-info".to_string(),
         content: ZoneContent::Notification(NotificationPayload {

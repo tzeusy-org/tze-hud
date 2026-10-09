@@ -1536,6 +1536,7 @@ mod tests {
         let _runtime_guard = crate::test_support::lock_headless_runtime().await;
         let mut runtime = HeadlessRuntime::new(config).await.expect("runtime init");
         let clock = tze_hud_scene::TestClock::new(1_000);
+        let publication_origin = SceneId::new();
         let (lease_id, tile_id) = {
             let state = runtime.shared_state().lock().await;
             let mut scene = state.scene.lock().await;
@@ -1555,6 +1556,33 @@ mod tests {
             scene
                 .disconnect_lease(&lease_id, now_ms)
                 .expect("orphan the lease");
+            scene.zone_registry = tze_hud_scene::ZoneRegistry::with_defaults();
+            let batch = tze_hud_scene::mutation::MutationBatch {
+                batch_id: SceneId::new(),
+                agent_namespace: "publication-only".into(),
+                mutations: vec![tze_hud_scene::mutation::SceneMutation::PublishToZone {
+                    zone_name: "subtitle".into(),
+                    content: tze_hud_scene::ZoneContent::StreamText("held".into()),
+                    publish_token: tze_hud_scene::ZonePublishToken { token: Vec::new() },
+                    merge_key: None,
+                    expires_at_wall_us: None,
+                    content_classification: None,
+                    breakpoints: Vec::new(),
+                    held: false,
+                }],
+                timing_hints: None,
+                lease_id: None,
+            };
+            assert!(
+                scene
+                    .apply_batch_for_origin(&batch, Some(publication_origin))
+                    .applied
+            );
+            scene.orphan_publications(
+                publication_origin,
+                now_ms,
+                SceneGraph::DEFAULT_GRACE_PERIOD_MS,
+            );
             (lease_id, tile_id)
         };
 
@@ -1564,6 +1592,7 @@ mod tests {
             let state = runtime.shared_state().lock().await;
             let scene = state.scene.lock().await;
             assert!(scene.tiles.contains_key(&tile_id), "kept within grace");
+            assert_eq!(scene.zone_registry.active_for_zone("subtitle").len(), 1);
         }
 
         clock.advance(1);
@@ -1571,6 +1600,11 @@ mod tests {
         let state = runtime.shared_state().lock().await;
         let scene = state.scene.lock().await;
         assert!(!scene.tiles.contains_key(&tile_id), "tile reclaimed");
+        assert!(scene.zone_registry.active_for_zone("subtitle").is_empty());
+        assert_eq!(
+            scene.next_lease_deadline_ms(SceneGraph::DEFAULT_MAX_SUSPENSION_MS),
+            None
+        );
         assert!(
             scene
                 .leases

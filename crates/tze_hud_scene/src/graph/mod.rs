@@ -110,6 +110,10 @@ pub struct SceneGraph {
     /// Batches held until their `present_at` time (see [`timed`]).
     #[serde(skip, default)]
     pub scheduled_batches: Vec<timed::ScheduledBatch>,
+    /// Existing resume-grace deadlines for disconnected, unleased publications.
+    /// Entries exist only while current content or scheduled batches own the origin.
+    #[serde(skip, default)]
+    publication_orphans: HashMap<SceneId, u64>,
     /// Notification action presses waiting for their publisher to collect
     /// them (MCP `hud_input`). Bounded; oldest dropped first.
     #[serde(skip, default)]
@@ -231,6 +235,7 @@ impl SceneGraph {
             geometry_epoch: 0,
             sequence_number: 0,
             scheduled_batches: Vec::new(),
+            publication_orphans: HashMap::new(),
             pending_actions: std::collections::VecDeque::new(),
             registered_resources: HashMap::new(),
             overlay: RuntimeOverlayState::default(),

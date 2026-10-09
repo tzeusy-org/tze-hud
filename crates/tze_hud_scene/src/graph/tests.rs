@@ -722,6 +722,44 @@ fn test_lease_expiry() {
     let expired = scene.expire_leases();
     assert_eq!(expired.len(), 1);
     assert_eq!(scene.tile_count(), 0);
+    scene.zone_registry = ZoneRegistry::with_defaults();
+    let origin = SceneId::new();
+    let batch = crate::mutation::MutationBatch {
+        batch_id: SceneId::new(),
+        agent_namespace: "test".into(),
+        mutations: vec![crate::mutation::SceneMutation::PublishToZone {
+            zone_name: "subtitle".into(),
+            content: ZoneContent::StreamText("publication-only".into()),
+            publish_token: ZonePublishToken { token: Vec::new() },
+            merge_key: None,
+            expires_at_wall_us: None,
+            content_classification: None,
+            breakpoints: Vec::new(),
+            held: false,
+        }],
+        timing_hints: None,
+        lease_id: None,
+    };
+    assert!(scene.apply_batch_for_origin(&batch, Some(origin)).applied);
+    let now = scene.now_millis();
+    assert!(scene.orphan_publications(origin, now, SceneGraph::DEFAULT_GRACE_PERIOD_MS));
+    assert_eq!(
+        scene.next_lease_deadline_ms(SceneGraph::DEFAULT_MAX_SUSPENSION_MS),
+        Some(now + SceneGraph::DEFAULT_GRACE_PERIOD_MS)
+    );
+    clock.advance(SceneGraph::DEFAULT_GRACE_PERIOD_MS - 1);
+    assert!(scene.expire_leases().is_empty());
+    assert_eq!(scene.zone_registry.active_for_zone("subtitle").len(), 1);
+    clock.advance(1);
+    assert!(
+        scene.expire_leases().is_empty(),
+        "publication-only cleanup invents no lease expiry"
+    );
+    assert!(scene.zone_registry.active_for_zone("subtitle").is_empty());
+    assert_eq!(
+        scene.next_lease_deadline_ms(SceneGraph::DEFAULT_MAX_SUSPENSION_MS),
+        None
+    );
 }
 
 #[test]

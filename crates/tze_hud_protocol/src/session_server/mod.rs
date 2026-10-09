@@ -243,6 +243,10 @@ impl HudSession for HudSessionImpl {
                 return; // Handshake failed, error already sent
             };
 
+            if session.state == SessionState::Resuming {
+                render_wake.notify();
+            }
+
             // The handshake registered this session; from here on, every exit
             // (early `break 'active`, panic, task cancellation) must unregister
             // it. Normal exits run the full cleanup below and disarm the guard.
@@ -511,9 +515,14 @@ impl HudSession for HudSessionImpl {
                                 let _ = scene.disconnect_lease(lease_id, now);
                             }
                         }
+                        scene.orphan_publications(
+                            session.publication_origin,
+                            now,
+                            DEFAULT_GRACE_PERIOD_MS,
+                        );
                         now
                     };
-                    st.token_store.insert(
+                    st.token_store.insert_with_publication_origin(
                         session.resume_token.clone(),
                         session.agent_name.clone(),
                         session.capabilities.clone(),
@@ -521,9 +530,11 @@ impl HudSession for HudSessionImpl {
                         session.lease_ids.clone(),
                         DEFAULT_GRACE_PERIOD_MS,
                         now,
+                        Some(session.publication_origin),
                     );
                 }
             }
+            render_wake.notify();
             if let Some(enforcer) = &session.budget_enforcer {
                 enforcer.remove_session(session.scene_session_id);
             }

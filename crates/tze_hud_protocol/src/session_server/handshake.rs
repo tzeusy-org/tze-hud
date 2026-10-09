@@ -210,6 +210,7 @@ pub(super) async fn handle_session_init(
         capabilities: granted_capabilities,
         lease_ids: Vec::new(),
         scene_session_id,
+        publication_origin: scene_session_id,
         resource_budget,
         budget_enforcer: budget_enforcer.cloned(),
         subscriptions: sub_result.active.clone(),
@@ -326,23 +327,6 @@ pub(super) async fn handle_session_resume(
         }
     };
 
-    // Reconnect the orphaned leases (ORPHANED → ACTIVE, badge cleared). Leases
-    // the runtime already reclaimed are dropped from the restored set.
-    {
-        let st = state.lock().await;
-        let mut scene = st.scene.lock().await;
-        let now = scene.now_millis();
-        prior_entry.orphaned_lease_ids.retain(|lease_id| {
-            match scene.leases.get(lease_id).map(|l| l.state) {
-                Some(tze_hud_scene::LeaseState::Orphaned) => {
-                    scene.reconnect_lease(lease_id, now).is_ok()
-                }
-                Some(state) => !state.is_terminal(),
-                None => false,
-            }
-        });
-    }
-
     // Step 3: Build restored session.
     let session_uuid = uuid::Uuid::now_v7();
     let namespace = identity.agent_id.clone();
@@ -390,6 +374,26 @@ pub(super) async fn handle_session_resume(
         }
     }
 
+    // Reconnect the orphaned leases (ORPHANED → ACTIVE, badge cleared). Leases
+    // the runtime already reclaimed are dropped from the restored set.
+    {
+        let st = state.lock().await;
+        let mut scene = st.scene.lock().await;
+        let now = scene.now_millis();
+        if let Some(origin) = prior_entry.publication_origin {
+            scene.resume_publications(origin);
+        }
+        prior_entry.orphaned_lease_ids.retain(|lease_id| {
+            match scene.leases.get(lease_id).map(|l| l.state) {
+                Some(tze_hud_scene::LeaseState::Orphaned) => {
+                    scene.reconnect_lease(lease_id, now).is_ok()
+                }
+                Some(state) => !state.is_terminal(),
+                None => false,
+            }
+        });
+    }
+
     // Register the resumed agent in the session registry so shared-state
     // operations (e.g. lease grant, broadcast) can find it, and capture the
     // current upload-rate configuration for this session.
@@ -416,6 +420,7 @@ pub(super) async fn handle_session_resume(
         // Restore orphaned leases so the agent can continue using them.
         lease_ids: prior_entry.orphaned_lease_ids.clone(),
         scene_session_id,
+        publication_origin: prior_entry.publication_origin.unwrap_or(scene_session_id),
         resource_budget,
         budget_enforcer: budget_enforcer.cloned(),
         // Restore subscription set from before the disconnect.

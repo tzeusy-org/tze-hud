@@ -102,6 +102,7 @@ impl SceneGraph {
     /// Register a zone definition in the zone registry.
     pub fn register_zone(&mut self, zone: ZoneDefinition) {
         self.zone_registry.register(zone);
+        self.prune_publication_orphans();
         self.version += 1;
     }
 
@@ -110,6 +111,7 @@ impl SceneGraph {
     pub(crate) fn unregister_zone(&mut self, name: &str) -> Option<ZoneDefinition> {
         let removed = self.zone_registry.unregister(name);
         if removed.is_some() {
+            self.prune_publication_orphans();
             self.version += 1;
         }
         removed
@@ -175,6 +177,7 @@ impl SceneGraph {
             content_classification,
             breakpoints,
             lease_id,
+            None,
             true,
         )
     }
@@ -192,6 +195,7 @@ impl SceneGraph {
         content_classification: Option<String>,
         breakpoints: Vec<u64>,
         lease_id: Option<SceneId>,
+        publication_origin: Option<SceneId>,
         urgency_default: bool,
     ) -> Result<(), ValidationError> {
         // Check zone exists and content type is accepted
@@ -251,6 +255,7 @@ impl SceneGraph {
             content_classification,
             breakpoints,
             lease_id,
+            publication_origin: publication_origin.filter(|_| lease_id.is_none()),
         };
 
         let publishes = self
@@ -270,6 +275,7 @@ impl SceneGraph {
             },
         )?;
 
+        self.prune_publication_orphans();
         self.version += 1;
         Ok(())
     }
@@ -369,6 +375,7 @@ impl SceneGraph {
             None,
             Vec::new(),
             Some(lease_id),
+            None,
             false,
         )
     }
@@ -489,6 +496,31 @@ impl SceneGraph {
         expires_at_wall_us: Option<u64>,
         lease_id: Option<SceneId>,
     ) -> Result<bool, ValidationError> {
+        self.publish_to_widget_for_origin(
+            widget_name,
+            params,
+            publisher_namespace,
+            merge_key,
+            transition_ms,
+            expires_at_wall_us,
+            lease_id,
+            None,
+        )
+    }
+
+    /// The gRPC preclaim path supplies its stable in-memory session origin.
+    #[allow(clippy::too_many_arguments)]
+    pub fn publish_to_widget_for_origin(
+        &mut self,
+        widget_name: &str,
+        params: std::collections::HashMap<String, crate::types::WidgetParameterValue>,
+        publisher_namespace: &str,
+        merge_key: Option<String>,
+        transition_ms: u32,
+        expires_at_wall_us: Option<u64>,
+        lease_id: Option<SceneId>,
+        publication_origin: Option<SceneId>,
+    ) -> Result<bool, ValidationError> {
         // ── Step 0: Safe mode ────────────────────────────────────────────────
         // A Suspended lease means the human paused this agent; widget publishes
         // are refused like zone publishes. (No lease at all is allowed here.)
@@ -558,6 +590,7 @@ impl SceneGraph {
             expires_at_wall_us,
             transition_ms,
             lease_id,
+            publication_origin: publication_origin.filter(|_| lease_id.is_none()),
         };
 
         let publishes = self
@@ -590,6 +623,7 @@ impl SceneGraph {
             }
         }
 
+        self.prune_publication_orphans();
         self.version += 1;
         // Return true for durable, false for ephemeral (caller decides whether to send ack)
         Ok(!is_ephemeral)
@@ -637,6 +671,7 @@ impl SceneGraph {
 
         if let Some(inst) = self.widget_registry.instances.get_mut(widget_name) {
             inst.current_params.insert(param_name.to_string(), coerced);
+            self.prune_publication_orphans();
             self.version += 1;
             return Ok(());
         }
@@ -657,6 +692,7 @@ impl SceneGraph {
             });
         }
         self.zone_registry.active_publishes.remove(zone_name);
+        self.prune_publication_orphans();
         self.version += 1;
         Ok(())
     }
@@ -685,6 +721,7 @@ impl SceneGraph {
             held = true;
         }
         if held {
+            self.prune_publication_orphans();
             self.version += 1;
         }
         held
@@ -710,6 +747,7 @@ impl SceneGraph {
             held = true;
         }
         if held {
+            self.prune_publication_orphans();
             self.version += 1;
         }
         held
@@ -736,6 +774,7 @@ impl SceneGraph {
             let before = publishes.len();
             publishes.retain(|r| r.publisher_namespace != publisher_namespace);
             if publishes.len() != before {
+                self.prune_publication_orphans();
                 self.version += 1;
             }
         }
@@ -799,9 +838,97 @@ impl SceneGraph {
                     && r.published_at_wall_us == published_at_wall_us
                     && r.publisher_namespace == publisher_namespace)
             });
+            self.prune_publication_orphans();
             self.version += 1;
         }
         removed
+    }
+
+    /// Whether current content or a pending unleased batch still owns this origin.
+    pub(crate) fn has_publications_for_origin(&self, origin: SceneId) -> bool {
+        self.zone_registry
+            .active_publishes
+            .values()
+            .flatten()
+            .any(|r| r.lease_id.is_none() && r.publication_origin == Some(origin))
+            || self
+                .widget_registry
+                .active_publishes
+                .values()
+                .flatten()
+                .any(|r| r.lease_id.is_none() && r.publication_origin == Some(origin))
+            || self
+                .scheduled_batches
+                .iter()
+                .any(|s| s.batch.lease_id.is_none() && s.publication_origin == Some(origin))
+    }
+
+    /// Keep orphan state bounded by the current publications, never request history.
+    pub(crate) fn prune_publication_orphans(&mut self) {
+        if self.publication_orphans.is_empty() {
+            return;
+        }
+        let empty: Vec<_> = self
+            .publication_orphans
+            .keys()
+            .copied()
+            .filter(|origin| !self.has_publications_for_origin(*origin))
+            .collect();
+        for origin in empty {
+            self.publication_orphans.remove(&origin);
+        }
+    }
+
+    /// Adopt only this session's still-unleased content after a complete claim.
+    /// Existing independently leased publications (including later claims) are untouched.
+    pub fn adopt_publications(&mut self, origin: SceneId, lease_id: SceneId) {
+        for r in self.zone_registry.active_publishes.values_mut().flatten() {
+            if r.lease_id.is_none() && r.publication_origin == Some(origin) {
+                r.lease_id = Some(lease_id);
+                r.publication_origin = None;
+            }
+        }
+        for r in self.widget_registry.active_publishes.values_mut().flatten() {
+            if r.lease_id.is_none() && r.publication_origin == Some(origin) {
+                r.lease_id = Some(lease_id);
+                r.publication_origin = None;
+            }
+        }
+        for s in &mut self.scheduled_batches {
+            if s.batch.lease_id.is_none() && s.publication_origin == Some(origin) {
+                s.batch.lease_id = Some(lease_id);
+                s.publication_origin = None;
+            }
+        }
+        self.publication_orphans.remove(&origin);
+    }
+
+    /// Scoped counterpart of lease cleanup for a publication-only session.
+    pub(crate) fn clear_publications_for_origin(&mut self, origin: SceneId) {
+        for publishes in self.zone_registry.active_publishes.values_mut() {
+            publishes.retain(|r| r.publication_origin != Some(origin) || r.lease_id.is_some());
+        }
+        self.zone_registry
+            .active_publishes
+            .retain(|_, v| !v.is_empty());
+        let mut touched = Vec::new();
+        for (name, publishes) in &mut self.widget_registry.active_publishes {
+            let before = publishes.len();
+            publishes.retain(|r| r.publication_origin != Some(origin) || r.lease_id.is_some());
+            if before != publishes.len() {
+                touched.push(name.clone());
+            }
+        }
+        self.widget_registry
+            .active_publishes
+            .retain(|_, v| !v.is_empty());
+        for name in touched {
+            self.refresh_widget_current_params(&name);
+        }
+        self.scheduled_batches
+            .retain(|s| s.publication_origin != Some(origin) || s.batch.lease_id.is_some());
+        self.publication_orphans.remove(&origin);
+        self.version += 1;
     }
 
     /// Clear every zone and widget publication recorded under `lease_id`.
@@ -833,6 +960,7 @@ impl SceneGraph {
             for widget_name in touched_widgets {
                 self.refresh_widget_current_params(&widget_name);
             }
+            self.prune_publication_orphans();
             self.version += 1;
         }
     }
@@ -860,6 +988,7 @@ impl SceneGraph {
                     self.widget_registry.active_publishes.remove(widget_name);
                 }
                 self.refresh_widget_current_params(widget_name);
+                self.prune_publication_orphans();
                 self.version += 1;
             }
         }
@@ -920,6 +1049,7 @@ impl SceneGraph {
             self.zone_registry
                 .active_publishes
                 .retain(|_, v| !v.is_empty());
+            self.prune_publication_orphans();
             self.version += 1;
         }
 
@@ -986,6 +1116,7 @@ impl SceneGraph {
             for widget_name in touched_widgets {
                 self.refresh_widget_current_params(&widget_name);
             }
+            self.prune_publication_orphans();
             self.version += 1;
         }
 

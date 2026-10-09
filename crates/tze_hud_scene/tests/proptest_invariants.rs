@@ -388,6 +388,7 @@ proptest! {
                 zone_name.clone(),
                 vec![ZonePublishRecord {
                     lease_id: None,
+                    publication_origin: None,
                     zone_name: zone_name.clone(),
                     publisher_namespace: "agent.alpha".into(),
                     content: ZoneContent::StreamText("hello world".into()),

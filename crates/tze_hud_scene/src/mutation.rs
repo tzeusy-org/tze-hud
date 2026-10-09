@@ -350,6 +350,16 @@ impl SceneGraph {
     /// On any failure the live graph is untouched. The returned [`MutationResult`]
     /// carries a structured [`BatchRejected`] with per-mutation diagnostics.
     pub fn apply_batch(&mut self, batch: &MutationBatch) -> MutationResult {
+        self.apply_batch_for_origin(batch, None)
+    }
+
+    /// Apply through the same validation/rollback core, tagging only unleased
+    /// publications from the authenticated gRPC session. No wire batch field.
+    pub fn apply_batch_for_origin(
+        &mut self,
+        batch: &MutationBatch,
+        publication_origin: Option<SceneId>,
+    ) -> MutationResult {
         // ── Batch size limit ───────────────────────────────────────────────
         if batch.mutations.len() > MAX_BATCH_SIZE {
             let err = ValidationError::BatchSizeExceeded {
@@ -496,7 +506,12 @@ impl SceneGraph {
 
             // Stage 3: Bounds check (in-line in apply_single_mutation via bounds validation)
             // Stage 4: Type check (in-line — references validated by apply_single_mutation)
-            match self.apply_single_mutation(mutation, &batch.agent_namespace, batch.lease_id) {
+            match self.apply_single_mutation(
+                mutation,
+                &batch.agent_namespace,
+                batch.lease_id,
+                publication_origin,
+            ) {
                 Ok(ids) => created_ids.extend(ids),
                 Err(e) => {
                     // Rollback to snapshot
@@ -693,6 +708,7 @@ impl SceneGraph {
         mutation: &SceneMutation,
         namespace: &str,
         batch_lease_id: Option<SceneId>,
+        publication_origin: Option<SceneId>,
     ) -> Result<Vec<SceneId>, ValidationError> {
         match mutation {
             // ── Tab mutations ─────────────────────────────────────────────────
@@ -800,6 +816,7 @@ impl SceneGraph {
                     content_classification.clone(),
                     breakpoints,
                     batch_lease_id,
+                    publication_origin,
                     !*held,
                 )?;
                 Ok(vec![])

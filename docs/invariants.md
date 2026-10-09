@@ -77,7 +77,16 @@ a grace period. Reconnecting within the grace period with the resume token
 restores the same surfaces and their budget usage; when the grace period
 ends, the runtime reclaims everything with no agent help. Reclaiming a lease
 clears only the zone and widget publications made under that lease, never the
-rest of the agent's namespace.
+rest of the agent's namespace. Before a gRPC session's first successful tile
+claim, zone and widget publications (including scheduled zone content) carry
+that session's transient origin. A complete successful claim adopts only its
+still-unleased publications into the granted lease; failed claims change no
+publication ownership. Publication-only disconnects use the same finite resume
+grace and idle deadline as orphaned leases. Authenticated resume within grace
+restores the origin; grace expiry reclaims its current content and pending
+publishes without touching concurrent sessions, overwritten content, MCP
+publications, or independently leased content. This origin is in-memory only,
+not a wire or snapshot field.
 
 - `tze_hud_protocol` `disconnect_transitions_to_orphaned_and_sets_disconnection_badge`,
   `grace_period_expiry_removes_tile_and_nodes`
