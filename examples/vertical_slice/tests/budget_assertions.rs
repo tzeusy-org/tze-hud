@@ -240,29 +240,57 @@ async fn test_input_to_local_ack_p99_within_budget() {
     }
 }
 
-/// Assert that input_to_scene_commit p99 is under the 50ms budget.
+// Shared target setup for the two retained input-response budget fixtures.
+fn seed_input_response_tile(
+    scene: &mut SceneGraph,
+    namespace: &str,
+    bounds: Rect,
+    z_order: u32,
+) -> (SceneId, SceneId, SceneId, SceneId) {
+    let tab = scene.active_tab.expect("fixture has an active tab");
+    let lease = scene.grant_lease(namespace, 60_000);
+    let tile = scene
+        .create_tile(tab, namespace, lease, bounds, z_order)
+        .unwrap();
+    let hit = SceneId::new();
+    let content = SceneId::new();
+    scene
+        .set_tile_root_tree(
+            tile,
+            Node {
+                layout: Default::default(),
+                id: hit,
+                data: NodeData::HitRegion(HitRegionNode {
+                    bounds: Rect::new(0.0, 0.0, bounds.width, bounds.height),
+                    interaction_id: "input-response".to_string(),
+                    accepts_pointer: true,
+                    ..Default::default()
+                }),
+                children: vec![content],
+            },
+            vec![Node {
+                layout: Default::default(),
+                id: content,
+                data: NodeData::SolidColor(SolidColorNode {
+                    color: Rgba::BLACK,
+                    bounds: Rect::new(0.0, 0.0, bounds.width, bounds.height),
+                    radius: None,
+                }),
+                children: vec![],
+            }],
+        )
+        .unwrap();
+    (tile, hit, content, lease)
+}
+
+/// Actual pointer input -> controlled applied response -> containing local submit.
 ///
-/// Runs 30 headless frames and records the `input_to_scene_commit_us` field
-/// emitted by `render_frame()`. Note: in the headless pipeline there is no
-/// live agent applying mutations between frames, so `input_to_scene_commit_us`
-/// will be 0 on frames with no applied mutations (see
-/// `headless.rs` — the field is gated on `mutations_applied > 0`). This test
-/// therefore validates the timing infrastructure plumbing rather than asserting
-/// a representative agent round-trip latency. Budget assertion checks that any
-/// non-zero samples are under 50ms (which they should be, even on slow CI).
-///
-/// ## Pipeline derivation
-/// `render_frame()` sets `input_to_scene_commit_us` as wall time from
-/// `frame_start` to end of Stage 4, which is the proxy for the
-/// input-to-commit path from the frame start boundary.
-///
-/// ## CI note
-/// The 50ms budget includes agent network round-trip time. The headless path
-/// measures only the local pipeline, so no multiplier is needed — the local
-/// commit should be far under 50ms even on slow CI machines.
+/// The 30 observations exclude warmup, idle, rejected, absent and cached replies.
+/// This proves the local runtime boundary; the 50ms threshold is unchanged and
+/// does not turn this controlled in-process response into a remote roundtrip.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_input_to_scene_commit_p99_within_budget() {
-    const BUDGET_US: u64 = 50_000; // 50ms — covers agent network round-trip
+    const BUDGET_US: u64 = 50_000;
     const CYCLE_COUNT: usize = 30;
 
     let config = HeadlessConfig {
@@ -275,23 +303,119 @@ async fn test_input_to_scene_commit_p99_within_budget() {
     let mut runtime = serialized_headless_init(HeadlessRuntime::new(config))
         .await
         .expect("runtime init");
-
-    // Set up a minimal scene
-    {
+    let (target, unrelated, foreign) = {
         let state = runtime.shared_state().lock().await;
-        state.scene.lock().await.create_tab("Main", 0).unwrap();
-    }
-
+        let mut scene = state.scene.lock().await;
+        scene.create_tab("Main", 0).unwrap();
+        (
+            seed_input_response_tile(
+                &mut scene,
+                "test-agent",
+                Rect::new(100.0, 100.0, 200.0, 200.0),
+                1,
+            ),
+            seed_input_response_tile(
+                &mut scene,
+                "test-agent",
+                Rect::new(400.0, 100.0, 100.0, 100.0),
+                2,
+            ),
+            seed_input_response_tile(
+                &mut scene,
+                "other-agent",
+                Rect::new(650.0, 100.0, 100.0, 100.0),
+                3,
+            ),
+        )
+    };
+    let warmup = runtime.render_frame().await;
+    assert_eq!(warmup.input_to_scene_commit_us, 0);
+    assert_eq!(warmup.input_to_next_present_us, 0);
+    runtime.telemetry = tze_hud_telemetry::TelemetryCollector::new();
+    let event = PointerEvent {
+        x: 150.0,
+        y: 150.0,
+        kind: PointerEventKind::Down,
+        device_id: 0,
+        timestamp: None,
+    };
     let mut bucket = LatencyBucket::new("input_to_scene_commit");
-
-    for _ in 0..CYCLE_COUNT {
-        // render_frame() executes the full pipeline and reports
-        // input_to_scene_commit_us = stages 1–4 combined (local commit path)
-        let telemetry = runtime.render_frame().await;
+    let mut cached = None;
+    for index in 0..CYCLE_COUNT {
+        let batch_id = SceneId::new();
+        let color = if index % 2 == 0 {
+            Rgba::new(1.0, 0.0, 0.0, 1.0)
+        } else {
+            Rgba::new(0.0, 1.0, 0.0, 1.0)
+        };
+        let (telemetry, input, response) = runtime
+            .render_frame_with_input_response(&event, |dispatch, scene| {
+                assert_eq!(dispatch.namespace, "test-agent");
+                assert_eq!(dispatch.tile_id, target.0);
+                assert_eq!(dispatch.node_id, target.1);
+                assert_eq!(dispatch.interaction_id, "input-response");
+                assert_eq!(dispatch.kind, tze_hud_input::AgentDispatchKind::PointerDown);
+                let batch = MutationBatch {
+                    batch_id,
+                    agent_namespace: dispatch.namespace.clone(),
+                    mutations: vec![SceneMutation::UpdateNodeContent {
+                        tile_id: dispatch.tile_id,
+                        node_id: target.2,
+                        data: NodeData::SolidColor(SolidColorNode {
+                            color,
+                            bounds: Rect::new(0.0, 0.0, 200.0, 200.0),
+                            radius: None,
+                        }),
+                    }],
+                    timing_hints: None,
+                    lease_id: Some(target.3),
+                };
+                let result = scene.apply_batch(&batch);
+                cached = Some((batch.clone(), result.clone()));
+                Some((batch, result))
+            })
+            .await;
+        let response = response.expect("controlled response");
+        assert!(response.applied);
+        assert_eq!(response.batch_id, batch_id);
+        assert!(response.sequence_number.is_some());
+        assert_eq!(input.dispatch.as_ref().unwrap().tile_id, target.0);
+        assert!(telemetry.input_to_scene_commit_us > 0);
+        assert!(telemetry.input_to_scene_commit_us >= telemetry.input_to_local_ack_us);
+        assert!(telemetry.input_to_next_present_us >= telemetry.input_to_scene_commit_us);
+        let recorded = runtime.telemetry.records().last().unwrap();
+        assert_eq!(recorded.frame_number, telemetry.frame_number);
+        assert_eq!(
+            recorded.input_to_scene_commit_us,
+            telemetry.input_to_scene_commit_us
+        );
+        assert_eq!(
+            recorded.input_to_next_present_us,
+            telemetry.input_to_next_present_us
+        );
+        let expected = if index % 2 == 0 {
+            [255, 0, 0, 255]
+        } else {
+            [0, 255, 0, 255]
+        };
+        pixels::assert_pixel_color(
+            &runtime.read_pixels(),
+            800,
+            150,
+            150,
+            expected,
+            2,
+            "accepted response in containing frame",
+        )
+        .unwrap();
         bucket.record(telemetry.input_to_scene_commit_us);
     }
-
-    // Timing assertion: gated — wall-clock budget.  (hud-1aswu.3)
+    assert_eq!(bucket.samples.len(), CYCLE_COUNT);
+    let p99 = bucket.p99().expect("nonempty actual response population");
+    eprintln!(
+        "input_to_scene_commit count={} p99={p99}us",
+        bucket.samples.len()
+    );
     if perf_assert_enabled() {
         bucket
             .assert_p99_under(BUDGET_US)
@@ -299,34 +423,79 @@ async fn test_input_to_scene_commit_p99_within_budget() {
     } else {
         let raw_p99 = bucket.p99().unwrap_or(0);
         eprintln!(
-            "[SKIP-TIMING] input_to_scene_commit raw_p99={raw_p99}us; \
-             set TZE_HUD_PERF_ASSERT=1 to enforce budget"
+            "[SKIP-TIMING] input_to_scene_commit raw_p99={raw_p99}us; set TZE_HUD_PERF_ASSERT=1 to enforce budget"
         );
     }
+
+    // These real inputs/operations are deliberately excluded from the population.
+    // A cached accepted reply returns its old result without another apply_batch.
+    for case in 0..7 {
+        let (telemetry, _, response) = runtime
+            .render_frame_with_input_response(&event, |dispatch, scene| {
+                if case == 0 {
+                    return None;
+                }
+                if case == 1 {
+                    return cached.clone();
+                }
+                let (tile, node, lease, namespace) = match case {
+                    3 => (unrelated.0, unrelated.2, unrelated.3, "test-agent"),
+                    6 => (foreign.0, foreign.2, foreign.3, "other-agent"),
+                    _ => (target.0, target.2, target.3, dispatch.namespace.as_str()),
+                };
+                let batch = MutationBatch {
+                    batch_id: SceneId::new(),
+                    agent_namespace: if case == 2 { "wrong-owner" } else { namespace }.to_string(),
+                    mutations: if case == 4 {
+                        vec![]
+                    } else {
+                        vec![SceneMutation::UpdateNodeContent {
+                            tile_id: tile,
+                            node_id: if case == 5 { SceneId::new() } else { node },
+                            data: NodeData::SolidColor(SolidColorNode {
+                                color: Rgba::WHITE,
+                                bounds: Rect::new(0.0, 0.0, 100.0, 100.0),
+                                radius: None,
+                            }),
+                        }]
+                    },
+                    timing_hints: None,
+                    lease_id: Some(lease),
+                };
+                let result = scene.apply_batch(&batch);
+                Some((batch, result))
+            })
+            .await;
+        if case == 0 {
+            assert!(response.is_none());
+        } else {
+            assert_eq!(response.unwrap().applied, matches!(case, 1 | 3 | 4 | 6));
+        }
+        assert_eq!(
+            telemetry.input_to_scene_commit_us, 0,
+            "non-response case {case}"
+        );
+        assert_eq!(
+            telemetry.input_to_next_present_us, 0,
+            "non-response case {case}"
+        );
+    }
+    let idle = runtime.render_frame().await;
+    assert_eq!(idle.input_to_local_ack_us, 0);
+    assert_eq!(idle.input_to_scene_commit_us, 0);
+    assert_eq!(idle.input_to_next_present_us, 0);
 }
 
-/// Assert that input_to_next_present p99 is under the 33ms budget at 60Hz.
+/// Twenty actual response-bearing local GPU submissions, with warmup excluded.
 ///
-/// Runs 20 headless frames and verifies that the time from frame start (proxy
-/// for input event arrival) to Stage 7 completion (GPU present) stays under
-/// the 33ms two-frame budget at 60Hz.
-///
-/// ## Pipeline derivation
-/// `render_frame()` sets `input_to_next_present_us = frame_time_us`, which is
-/// the total wall time from Stage 1 start to Stage 7 end. This is the correct
-/// measurement point: the present happens at Stage 7, and the frame pipeline
-/// begins at the input drain boundary (Stage 1).
-///
-/// ## Hardware normalization
-/// The 33ms budget is for real GPU hardware at 60Hz. On llvmpipe/SwiftShader
-/// the same 10× headless multiplier used for frame-time tests applies.
+/// The original 33ms x10 headless threshold stays unchanged. Submission of the
+/// changed response pixels is measured here; no Windows/network/photon claim.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_input_to_next_present_p99_within_budget() {
-    const NOMINAL_BUDGET_US: u64 = 33_000; // 33ms at 60Hz (two frames)
+    const NOMINAL_BUDGET_US: u64 = 33_000;
     const HEADLESS_MULTIPLIER: u64 = 10;
     const BUDGET_US: u64 = NOMINAL_BUDGET_US * HEADLESS_MULTIPLIER;
     const FRAME_COUNT: usize = 20;
-
     let config = HeadlessConfig {
         width: 800,
         height: 600,
@@ -337,43 +506,106 @@ async fn test_input_to_next_present_p99_within_budget() {
     let mut runtime = serialized_headless_init(HeadlessRuntime::new(config))
         .await
         .expect("runtime init");
-
-    // Create a scene with one tile to exercise the full render path
-    {
+    let target = {
         let state = runtime.shared_state().lock().await;
         let mut scene = state.scene.lock().await;
-        let tab = scene.create_tab("Main", 0).unwrap();
-        let lease = scene.grant_lease("test-agent", 60_000);
-        scene
-            .create_tile(
-                tab,
-                "test-agent",
-                lease,
-                Rect::new(10.0, 10.0, 200.0, 100.0),
-                1,
-            )
-            .unwrap();
-    }
-
-    // Discard the first frame to avoid wgpu pipeline/shader compilation overhead.
+        scene.create_tab("Main", 0).unwrap();
+        seed_input_response_tile(
+            &mut scene,
+            "test-agent",
+            Rect::new(100.0, 100.0, 200.0, 100.0),
+            1,
+        )
+    };
     runtime.render_frame().await;
     runtime.telemetry = tze_hud_telemetry::TelemetryCollector::new();
-
+    let event = PointerEvent {
+        x: 150.0,
+        y: 150.0,
+        kind: PointerEventKind::Down,
+        device_id: 0,
+        timestamp: None,
+    };
     let mut bucket = LatencyBucket::new("input_to_next_present");
-
-    for _ in 0..FRAME_COUNT {
-        let telemetry = runtime.render_frame().await;
+    for index in 0..FRAME_COUNT {
+        let batch_id = SceneId::new();
+        let color = if index % 2 == 0 {
+            Rgba::new(1.0, 0.0, 0.0, 1.0)
+        } else {
+            Rgba::new(0.0, 1.0, 0.0, 1.0)
+        };
+        let (telemetry, input, response) = runtime
+            .render_frame_with_input_response(&event, |dispatch, scene| {
+                assert_eq!(dispatch.namespace, "test-agent");
+                assert_eq!(dispatch.tile_id, target.0);
+                assert_eq!(dispatch.node_id, target.1);
+                assert_eq!(dispatch.interaction_id, "input-response");
+                assert_eq!(dispatch.kind, tze_hud_input::AgentDispatchKind::PointerDown);
+                let batch = MutationBatch {
+                    batch_id,
+                    agent_namespace: dispatch.namespace.clone(),
+                    mutations: vec![SceneMutation::UpdateNodeContent {
+                        tile_id: dispatch.tile_id,
+                        node_id: target.2,
+                        data: NodeData::SolidColor(SolidColorNode {
+                            color,
+                            bounds: Rect::new(0.0, 0.0, 200.0, 100.0),
+                            radius: None,
+                        }),
+                    }],
+                    timing_hints: None,
+                    lease_id: Some(target.3),
+                };
+                let result = scene.apply_batch(&batch);
+                Some((batch, result))
+            })
+            .await;
+        let response = response.expect("controlled response");
+        assert!(response.applied);
+        assert_eq!(response.batch_id, batch_id);
+        assert!(response.sequence_number.is_some());
+        assert_eq!(input.dispatch.as_ref().unwrap().tile_id, target.0);
+        assert!(telemetry.input_to_scene_commit_us > 0);
+        assert!(telemetry.input_to_next_present_us > 0);
+        assert!(telemetry.input_to_scene_commit_us >= telemetry.input_to_local_ack_us);
+        assert!(telemetry.input_to_next_present_us >= telemetry.input_to_scene_commit_us);
+        let recorded = runtime.telemetry.records().last().unwrap();
+        assert_eq!(recorded.frame_number, telemetry.frame_number);
+        assert_eq!(
+            recorded.input_to_scene_commit_us,
+            telemetry.input_to_scene_commit_us
+        );
+        assert_eq!(
+            recorded.input_to_next_present_us,
+            telemetry.input_to_next_present_us
+        );
+        let expected = if index % 2 == 0 {
+            [255, 0, 0, 255]
+        } else {
+            [0, 255, 0, 255]
+        };
+        pixels::assert_pixel_color(
+            &runtime.read_pixels(),
+            800,
+            150,
+            150,
+            expected,
+            2,
+            "accepted response in containing frame",
+        )
+        .unwrap();
         bucket.record(telemetry.input_to_next_present_us);
     }
-
-    // Structural assertion: always runs — validates sample collection plumbing.
     assert_eq!(
         bucket.samples.len(),
         FRAME_COUNT,
         "expected {FRAME_COUNT} samples in input_to_next_present bucket"
     );
-
-    // Timing assertion: gated — wall-clock budget.  (hud-1aswu.3)
+    let p99 = bucket.p99().expect("nonempty actual response population");
+    eprintln!(
+        "input_to_next_present count={} p99={p99}us",
+        bucket.samples.len()
+    );
     if perf_assert_enabled() {
         bucket
             .assert_p99_under(BUDGET_US)
@@ -381,10 +613,12 @@ async fn test_input_to_next_present_p99_within_budget() {
     } else {
         let raw_p99 = bucket.p99().unwrap_or(0);
         eprintln!(
-            "[SKIP-TIMING] input_to_next_present raw_p99={raw_p99}us; \
-             set TZE_HUD_PERF_ASSERT=1 to enforce budget"
+            "[SKIP-TIMING] input_to_next_present raw_p99={raw_p99}us; set TZE_HUD_PERF_ASSERT=1 to enforce budget"
         );
     }
+    let idle = runtime.render_frame().await;
+    assert_eq!(idle.input_to_scene_commit_us, 0);
+    assert_eq!(idle.input_to_next_present_us, 0);
 }
 
 /// Assert that hit-test p99 is under the 100µs budget.

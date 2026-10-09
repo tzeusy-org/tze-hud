@@ -1961,7 +1961,6 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                             // `WindowedFrameBuild`. Crucially this phase does NOT
                             // touch the swapchain surface — so it never blocks on
                             // vsync while the lock is held.
-                            let scene_commit_at = Instant::now();
                             let (surf_w, surf_h) = surface_for_compositor.size();
                             let build = compositor.build_windowed_frame(&mut scene, surf_w, surf_h);
                             // Hit-region refresh + hit-test snapshot are still
@@ -2113,8 +2112,8 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                             if let Some((local_ack_us, scene_commit_us, next_present_us)) =
                                 drain_pending_input_latency(
                                     &pending_input_latency,
-                                    scene_commit_at,
-                                    Instant::now(),
+                                    &presented_batch_ids,
+                                    frame_submitted.then(Instant::now),
                                 )
                             {
                                 telem.input_to_local_ack_us = local_ack_us;
