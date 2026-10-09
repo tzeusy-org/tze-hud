@@ -44,6 +44,7 @@ pub(crate) mod firewall;
 pub mod headless;
 pub mod http;
 pub(crate) mod idle_efficiency;
+mod input_latency;
 pub(crate) mod mcp;
 pub(crate) mod mutation_budget_bridge;
 pub(crate) mod net_addrs;

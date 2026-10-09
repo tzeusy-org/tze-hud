@@ -1,5 +1,7 @@
+#[cfg(test)]
 use std::collections::VecDeque;
-use std::sync::{Arc, Mutex as StdMutex};
+#[cfg(test)]
+use std::sync::Mutex as StdMutex;
 use std::time::{Duration, Instant};
 
 use tokio::sync::Mutex;
@@ -597,60 +599,22 @@ const WINDOWED_BENCHMARK_INPUT_Y: f32 = 16.0;
 pub(super) const BENCHMARK_NO_PROGRESS_TIMEOUT: std::time::Duration =
     std::time::Duration::from_secs(30);
 
-#[derive(Clone, Copy, Debug)]
-pub(super) struct PendingInputLatencySample {
-    input_started_at: Instant,
-    local_ack_us: u64,
-}
+pub(super) use crate::input_latency::{
+    PendingInputLatencySamples, drain_pending_input_latency, record_pending_input_latency,
+};
 
-pub(super) type PendingInputLatencySamples = Arc<StdMutex<VecDeque<PendingInputLatencySample>>>;
-
-pub(super) fn record_pending_input_latency(
+/// Finish local input latency at the actual primary queue submission.
+/// The stage duration is an aggregate-success sentinel, not submission evidence.
+pub(super) fn drain_windowed_input_latency(
     pending: &PendingInputLatencySamples,
-    input_started_at: Instant,
-    local_ack_us: u64,
-) {
-    let local_ack_us = local_ack_us.max(1);
-    if let Ok(mut samples) = pending.lock() {
-        samples.push_back(PendingInputLatencySample {
-            input_started_at,
-            local_ack_us,
-        });
-    }
-}
-
-pub(super) fn drain_pending_input_latency(
-    pending: &PendingInputLatencySamples,
-    scene_commit_at: Instant,
-    frame_present_at: Instant,
+    submitted_batch_ids: &[tze_hud_scene::SceneId],
+    gpu_submitted: bool,
 ) -> Option<(u64, u64, u64)> {
-    let mut samples = pending.lock().ok()?;
-    if samples.is_empty() {
-        return None;
-    }
-
-    let mut local_ack_us = 0;
-    let mut input_to_scene_commit_us = 0;
-    let mut input_to_next_present_us = 0;
-    while let Some(sample) = samples.pop_front() {
-        local_ack_us = local_ack_us.max(sample.local_ack_us);
-        input_to_scene_commit_us = input_to_scene_commit_us.max(
-            scene_commit_at
-                .saturating_duration_since(sample.input_started_at)
-                .as_micros() as u64,
-        );
-        input_to_next_present_us = input_to_next_present_us.max(
-            frame_present_at
-                .saturating_duration_since(sample.input_started_at)
-                .as_micros() as u64,
-        );
-    }
-
-    Some((
-        local_ack_us,
-        input_to_scene_commit_us,
-        input_to_next_present_us,
-    ))
+    drain_pending_input_latency(
+        pending,
+        submitted_batch_ids,
+        gpu_submitted.then(Instant::now),
+    )
 }
 
 pub(super) fn seed_windowed_benchmark_scene(scene: &mut SceneGraph, width: u32, height: u32) {
@@ -2621,13 +2585,55 @@ mod tests {
 
     #[test]
     fn pending_input_latency_drains_into_split_latency_fields() {
+        use crate::input_latency::record_committed_input_response;
+
         let pending = Arc::new(StdMutex::new(VecDeque::new()));
         let started = Instant::now() - std::time::Duration::from_millis(3);
         let scene_commit_at = Instant::now() - std::time::Duration::from_millis(1);
+        let batch_id = tze_hud_scene::SceneId::new();
         record_pending_input_latency(&pending, started, 125);
+        record_committed_input_response(&pending, started, 125, batch_id, scene_commit_at);
+        // Repeating an outstanding response does not append another sample.
+        record_committed_input_response(&pending, started, 999, batch_id, scene_commit_at);
+        assert!(drain_pending_input_latency(&pending, &[batch_id], None).is_none());
+        let mut failed_telemetry = tze_hud_telemetry::FrameTelemetry::new(1);
+        failed_telemetry.stage7_gpu_submit_us = 17;
+        let failed_outcome = tze_hud_compositor::renderer::frame::WindowedPresentOutcome {
+            telemetry: failed_telemetry,
+            surface_acquired: true,
+            gpu_submitted: false,
+        };
+        // A duration must never substitute for the actual submission result.
+        assert!(
+            drain_windowed_input_latency(&pending, &[batch_id], failed_outcome.gpu_submitted)
+                .is_none()
+        );
+        assert_eq!(failed_outcome.telemetry.stage7_gpu_submit_us, 17);
+        assert_eq!(
+            pending.lock().unwrap().len(),
+            2,
+            "failed submit retains samples"
+        );
+        let unrelated = tze_hud_scene::SceneId::new();
+        // Inject the production post-submit present/poll failure shape; this is
+        // outcome-to-drain coverage, not a GPU panic reproduction.
+        let submitted_outcome = tze_hud_compositor::renderer::frame::WindowedPresentOutcome {
+            telemetry: tze_hud_telemetry::FrameTelemetry::new(2),
+            surface_acquired: true,
+            gpu_submitted: true,
+        };
+        let gpu_submitted = submitted_outcome.gpu_submitted;
+        let skipped_stage_telemetry = submitted_outcome.telemetry;
+        assert_eq!(skipped_stage_telemetry.stage7_gpu_submit_us, 0);
+        assert_eq!(
+            drain_windowed_input_latency(&pending, &[unrelated], gpu_submitted),
+            Some((125, 0, 0)),
+            "anonymous input is local ack only; an unrelated batch is not a response"
+        );
+        assert_eq!(pending.lock().unwrap().len(), 1);
 
         let (local_ack, scene_commit, next_present) =
-            drain_pending_input_latency(&pending, scene_commit_at, Instant::now())
+            drain_pending_input_latency(&pending, &[batch_id], Some(Instant::now()))
                 .expect("sample drains");
 
         assert_eq!(local_ack, 125);
@@ -2635,9 +2641,12 @@ mod tests {
         assert!(next_present >= 3_000);
         assert!(scene_commit < next_present);
         assert!(
-            drain_pending_input_latency(&pending, scene_commit_at, Instant::now()).is_none(),
+            drain_pending_input_latency(&pending, &[batch_id], Some(Instant::now())).is_none(),
             "sample should be consumed exactly once"
         );
+        // An invalid commit ordering is refused, rather than becoming a zero sample.
+        record_committed_input_response(&pending, Instant::now(), 125, batch_id, started);
+        assert!(drain_pending_input_latency(&pending, &[batch_id], Some(Instant::now())).is_none());
     }
 
     #[test]
@@ -2646,9 +2655,8 @@ mod tests {
         let started = Instant::now() - std::time::Duration::from_millis(1);
         record_pending_input_latency(&pending, started, 0);
 
-        let (local_ack, _, _) =
-            drain_pending_input_latency(&pending, Instant::now(), Instant::now())
-                .expect("sample drains");
+        let (local_ack, _, _) = drain_pending_input_latency(&pending, &[], Some(Instant::now()))
+            .expect("sample drains");
 
         assert_eq!(local_ack, 1);
     }

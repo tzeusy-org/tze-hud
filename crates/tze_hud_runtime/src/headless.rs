@@ -42,6 +42,10 @@
 
 use crate::degradation::{DegradationController, DegradationEnvelope};
 use crate::element_store::bootstrap_scene_element_store;
+use crate::input_latency::{
+    PendingInputLatencySamples, drain_pending_input_latency, record_committed_input_response,
+    record_pending_input_latency,
+};
 use crate::pipeline::{FramePipeline, HitTestSnapshot};
 use crate::runtime_context::RuntimeContext;
 use crate::scene_startup::run_scene_startup;
@@ -51,7 +55,7 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::Mutex;
 use tze_hud_compositor::{Compositor, HeadlessSurface};
 use tze_hud_config::resolve_runtime_widget_asset_store;
-use tze_hud_input::{InputProcessor, ScrollEvent};
+use tze_hud_input::{AgentDispatch, InputProcessor, InputResult, PointerEvent, ScrollEvent};
 use tze_hud_protocol::proto::FramePresented;
 use tze_hud_protocol::proto::session::hud_session_server::HudSessionServer;
 use tze_hud_protocol::session::SharedState;
@@ -61,6 +65,7 @@ use tze_hud_resource::{
 };
 use tze_hud_scene::config::{AgentDirectory, SharedAgents};
 use tze_hud_scene::graph::SceneGraph;
+use tze_hud_scene::mutation::{MutationBatch, MutationResult, SceneMutation};
 use tze_hud_telemetry::{FrameTelemetry, TelemetryCollector};
 use wgpu::TextureFormat;
 
@@ -169,6 +174,8 @@ pub struct HeadlessRuntime {
     pub agents: SharedAgents,
     /// Keeps the durable runtime widget asset store alive for runtime lifetime.
     _runtime_widget_store: Option<RuntimeWidgetStore>,
+    /// Actual input samples; response context exists only for applied batches.
+    pending_input_latency: PendingInputLatencySamples,
     /// Broadcast sender for batch-correlated present acknowledgments (hud-91uu6).
     ///
     /// When set, `render_frame` drains the scene's present-ack queue after each
@@ -328,6 +335,9 @@ impl HeadlessRuntime {
             runtime_context,
             agents,
             _runtime_widget_store: runtime_widget_store,
+            pending_input_latency: Arc::new(std::sync::Mutex::new(
+                std::collections::VecDeque::new(),
+            )),
             frame_presented_tx: None,
             degradation_controller: DegradationController::with_envelope(
                 crate::degradation::DegradationConfig::default(),
@@ -365,6 +375,49 @@ impl HeadlessRuntime {
     /// `render_frame_headless()`, which includes the `copy_to_buffer` step so
     /// that `read_pixels()` returns actual rendered pixel data after this call.
     pub async fn render_frame(&mut self) -> FrameTelemetry {
+        self.render_frame_inner::<
+            fn(&AgentDispatch, &mut SceneGraph) -> Option<(MutationBatch, MutationResult)>,
+        >(None)
+        .await
+        .0
+    }
+
+    /// Process actual pointer input, a controlled in-process response, and its frame.
+    ///
+    /// The handler receives the real dispatch and applies its response through
+    /// `SceneGraph::apply_batch`, returning that batch and result. Only a newly
+    /// applied content/opacity response for this dispatch's owner and tile is
+    /// associated. Cached replies, unrelated work and rejected responses are not
+    /// input-to-response measurements. The scene lock covers processing through
+    /// submit, so this frame contains the accepted response without an intervening
+    /// agent mutation. This is a local submit boundary, not a network roundtrip or
+    /// Windows surface present/scanout; it is not an authentication boundary.
+    pub async fn render_frame_with_input_response<F>(
+        &mut self,
+        event: &PointerEvent,
+        respond: F,
+    ) -> (FrameTelemetry, InputResult, Option<MutationResult>)
+    where
+        F: FnOnce(&AgentDispatch, &mut SceneGraph) -> Option<(MutationBatch, MutationResult)>,
+    {
+        let (telemetry, input) = self.render_frame_inner(Some((event, respond))).await;
+        let (input, response) = input.expect("the supplied pointer event was processed");
+        (telemetry, input, response)
+    }
+
+    async fn render_frame_inner<F>(
+        &mut self,
+        input: Option<(&PointerEvent, F)>,
+    ) -> (
+        FrameTelemetry,
+        Option<(InputResult, Option<MutationResult>)>,
+    )
+    where
+        F: FnOnce(&AgentDispatch, &mut SceneGraph) -> Option<(MutationBatch, MutationResult)>,
+    {
+        // Stamp the actual input entry, including scene-lock wait. Ordinary frames
+        // have no input timestamp and cannot become input measurements.
+        let input_started_at = input.as_ref().map(|_| Instant::now());
         let frame_start = Instant::now();
         // Include all active scene/compositor work performed for this frame;
         // this boundary precedes expiry, animation, and Stage 3 work and ends
@@ -414,10 +467,55 @@ impl HeadlessRuntime {
         // *previous* frame. It must not publish a new snapshot (that is Stage 4's job).
         let s2_start = Instant::now();
         let _snap_ref = self.pipeline.hit_test_snapshot.load();
+        let input_result = input
+            .as_ref()
+            .map(|(event, _)| self.input_processor.process(event, &mut scene_guard));
         let stage2_us = s2_start.elapsed().as_micros() as u64;
 
-        // Stage 3: Mutation Intake (headless — mutations committed before render)
+        // Stage 3: Mutation Intake (ordinary headless mutations arrive before render;
+        // a controlled input handler applies its actual response at this boundary).
         let s3_start = Instant::now();
+        let mut associated_response = false;
+        let response = input.and_then(|(_, respond)| {
+            let result = input_result.as_ref()?;
+            let dispatch = result.dispatch.as_ref()?;
+            let sequence_before = scene_guard.sequence_number;
+            let (batch, response) = respond(dispatch, &mut scene_guard)?;
+            let matches_target = batch.agent_namespace == dispatch.namespace
+                && !batch.mutations.is_empty()
+                && batch.mutations.iter().all(|mutation| match mutation {
+                    SceneMutation::UpdateNodeContent { tile_id, .. }
+                    | SceneMutation::UpdateTileOpacity { tile_id, .. } => {
+                        *tile_id == dispatch.tile_id
+                    }
+                    _ => false,
+                });
+            let newly_applied = response.applied
+                && response.batch_id == batch.batch_id
+                && response.sequence_number.is_some_and(|sequence| {
+                    sequence > sequence_before && sequence == scene_guard.sequence_number
+                });
+            if matches_target && newly_applied {
+                record_committed_input_response(
+                    &self.pending_input_latency,
+                    input_started_at.expect("input entry has a timestamp"),
+                    result.local_ack_us,
+                    batch.batch_id,
+                    Instant::now(),
+                );
+                associated_response = true;
+            }
+            Some(response)
+        });
+        if let Some(result) = &input_result
+            && !associated_response
+        {
+            record_pending_input_latency(
+                &self.pending_input_latency,
+                input_started_at.expect("input entry has a timestamp"),
+                result.local_ack_us,
+            );
+        }
         let stage3_us = s3_start.elapsed().as_micros() as u64;
 
         // Stage 4: Scene Commit (headless — scene already committed)
@@ -446,10 +544,6 @@ impl HeadlessRuntime {
             .set_degradation_policy(self.degradation_controller.compositor_policy());
 
         let stage4_us = s4_start.elapsed().as_micros() as u64;
-        // input_to_scene_commit: wall time from frame_start to end of Stage 4.
-        // Measured as elapsed since frame_start (not a sum of stage durations)
-        // so that any inter-stage overhead is included in the measurement.
-        let input_to_scene_commit_us = frame_start.elapsed().as_micros() as u64;
 
         // Stage 5: Layout Resolve
         let s5_start = Instant::now();
@@ -461,9 +555,10 @@ impl HeadlessRuntime {
         // render_frame_headless takes &mut SceneGraph to populate zone_hit_regions after
         // rendering so that interactive zone affordances are ready for the next frame's
         // hit-testing.
-        let compositor_telemetry = self
+        let (compositor_telemetry, frame_submitted) = self
             .compositor
-            .render_frame_headless(&mut scene_guard, &self.surface);
+            .render_frame_headless_with_submission(&mut scene_guard, &self.surface);
+        let submitted_at = frame_submitted.then(Instant::now);
         // Total frame time from Compositor covers encode + submit
         let stage6_us = compositor_telemetry.stage6_render_encode_us;
         let stage7_us = compositor_telemetry.stage7_gpu_submit_us;
@@ -471,10 +566,6 @@ impl HeadlessRuntime {
         // Total frame time: stage 1 start → stage 7 end
         let frame_time_us = frame_start.elapsed().as_micros() as u64;
         let degradation_work_time_us = degradation_work_start.elapsed().as_micros() as u64;
-        // input_to_next_present: time from frame start (proxy for input event
-        // arrival) to Stage 7 completion (GPU present). Equals total frame time
-        // since the frame pipeline starts at the input drain boundary.
-        let input_to_next_present_us = frame_time_us;
 
         // ── Batch-correlated present acknowledgment (hud-91uu6) ───────────────
         // Stage 7 (GPU submit) is complete, so any batches applied to the scene
@@ -482,7 +573,18 @@ impl HeadlessRuntime {
         // is wired, emit a FramePresented pairing those batch_ids with this
         // frame's number + present wall-clock. The drain runs unconditionally so
         // the queue never grows unbounded even when no subscriber is attached.
-        let present_ack_batch_ids = scene_guard.drain_present_ack_batch_ids();
+        // A skipped submission leaves both batch identity and timing context
+        // pending for a frame that actually carries the response.
+        let present_ack_batch_ids = if frame_submitted {
+            scene_guard.drain_present_ack_batch_ids()
+        } else {
+            Vec::new()
+        };
+        let input_latencies = drain_pending_input_latency(
+            &self.pending_input_latency,
+            &present_ack_batch_ids,
+            submitted_at,
+        );
         if let Some(tx) = &self.frame_presented_tx
             && !present_ack_batch_ids.is_empty()
         {
@@ -519,26 +621,14 @@ impl HeadlessRuntime {
         telemetry.degradation_work_time_us = degradation_work_time_us;
         telemetry.degradation_level = applied_degradation_level.as_u8();
         // ── Split input latency fields ─────────────────────────────────────
-        // input_to_local_ack_us is populated externally by the input processor
-        // (via input_processor.process() → InputProcessResult::local_ack_us) and
-        // recorded into the summary by callers. The FrameTelemetry field is left
-        // at 0 here because headless render_frame() has no input event to ack.
-        //
-        // input_to_scene_commit_us and input_to_next_present_us are gated on
-        // mutations_applied > 0, keeping the documented semantics ("0 when no
-        // input/agent response occurred this frame") consistent across runtimes.
-        let had_scene_commit = compositor_telemetry.mutations_applied > 0;
-        telemetry.input_to_local_ack_us = 0; // populated by input_processor callers
-        telemetry.input_to_scene_commit_us = if had_scene_commit {
-            input_to_scene_commit_us
-        } else {
-            0
-        };
-        telemetry.input_to_next_present_us = if had_scene_commit {
-            input_to_next_present_us
-        } else {
-            0
-        };
+        // Only actual input and its newly applied associated response populate
+        // these fields. Ordinary/no-response frames retain constructor-zero;
+        // frame_start and unrelated scene work are never input-arrival proxies.
+        if let Some((local_ack, scene_commit, next_submit)) = input_latencies {
+            telemetry.input_to_local_ack_us = local_ack;
+            telemetry.input_to_scene_commit_us = scene_commit;
+            telemetry.input_to_next_present_us = next_submit;
+        }
         telemetry.tile_count = compositor_telemetry.tile_count;
         telemetry.node_count = compositor_telemetry.node_count;
         telemetry.active_leases = compositor_telemetry.active_leases;
@@ -583,7 +673,7 @@ impl HeadlessRuntime {
         self.telemetry.record(telemetry.clone());
         telemetry.stage8_telemetry_emit_us = s8_start.elapsed().as_micros() as u64;
 
-        telemetry
+        (telemetry, input_result.map(|input| (input, response)))
     }
 
     /// Read back pixels from the last rendered frame.

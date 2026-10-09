@@ -1142,6 +1142,18 @@ impl Compositor {
         scene: &mut SceneGraph,
         surface: &HeadlessSurface,
     ) -> FrameTelemetry {
+        self.render_frame_headless_with_submission(scene, surface).0
+    }
+
+    /// Render through the same headless pipeline and report whether it submitted.
+    ///
+    /// This is an actual queue outcome, independent of microsecond rounding.
+    /// A local headless submit is not a windowed surface present or scanout.
+    pub fn render_frame_headless_with_submission(
+        &mut self,
+        scene: &mut SceneGraph,
+        surface: &HeadlessSurface,
+    ) -> (FrameTelemetry, bool) {
         #[cfg(any(test, feature = "dev-mode"))]
         self.begin_headless_work_observation();
         let frame_start = std::time::Instant::now();
@@ -1196,7 +1208,8 @@ impl Compositor {
         // the previously submitted surface. Every other scene falls through to
         // the established full-frame path below.
         if let Some(retained_telemetry) = self.try_render_retained_headless(scene, surface) {
-            return retained_telemetry;
+            // The retained delegate returns Some only after its real queue submission.
+            return (retained_telemetry, true);
         }
 
         // Build the shared per-frame geometry (Background → tiles → Content →
@@ -1234,7 +1247,7 @@ impl Compositor {
             None => {
                 // Surface unavailable: skip render pass, return zeroed telemetry.
                 telemetry.frame_time_us = frame_start.elapsed().as_micros() as u64;
-                return telemetry;
+                return (telemetry, false);
             }
         };
 
@@ -1310,6 +1323,6 @@ impl Compositor {
         // evidence.
         self.observe_full_headless_frame(scene, surface);
 
-        telemetry
+        (telemetry, true)
     }
 }
