@@ -703,6 +703,110 @@ async fn grpc_grace_expiry_reclaims_orphaned_lease_and_rejects_resume() {
         Some(ServerPayload::SessionError(e)) => assert_eq!(e.code, "SESSION_GRACE_EXPIRED"),
         other => panic!("expected expired token, got {other:?}"),
     }
+    // Two publication-only origins become due before grace expires. Applying
+    // one must not prune the other's deadline while it is still scheduled.
+    let present_at = state.lock().await.scene.lock().await.now_wall_us() + 1_000_000;
+    let mut scheduled_sessions = Vec::new();
+    for agent in ["pending-a", "pending-b"] {
+        let (tx, init, mut stream) = handshake(&mut client, agent, "test-key").await;
+        let origin = match &init[0].payload {
+            Some(ServerPayload::SessionEstablished(e)) => bytes_to_scene_id(&e.session_id).unwrap(),
+            other => panic!("expected establishment, got {other:?}"),
+        };
+        let publish = Publish {
+            surface: "zone:status-bar".into(),
+            content: Some(crate::proto::ZoneContent {
+                payload: Some(crate::proto::zone_content::Payload::StatusBar(
+                    crate::proto::StatusBarPayload {
+                        entries: HashMap::from([(agent.to_string(), "pending".into())]),
+                    },
+                )),
+            }),
+            present_at_us: present_at,
+            key: agent.into(),
+            ..Default::default()
+        };
+        assert!(publish_and_ack(&tx, &mut stream, 2, publish).await.ok);
+        scheduled_sessions.push((tx, stream, origin));
+    }
+    let origins: Vec<_> = scheduled_sessions
+        .iter()
+        .map(|(_, _, origin)| *origin)
+        .collect();
+    for (tx, stream, origin) in scheduled_sessions {
+        let cleanup = state.lock().await.sessions.observe_cleanup(&origin);
+        drop(tx);
+        drop(stream);
+        await_session_cleanup(cleanup).await;
+    }
+    {
+        let st = state.lock().await;
+        let mut scene = st.scene.lock().await;
+        assert!(
+            scene
+                .zone_registry
+                .active_publishes
+                .get("status-bar")
+                .is_none_or(Vec::is_empty)
+        );
+        assert_eq!(scene.scheduled_batches.len(), 2);
+        assert!(
+            scene
+                .scheduled_batches
+                .iter()
+                .all(|s| s.batch.lease_id.is_none())
+        );
+        let grace_deadline = scene.now_wall_us() / 1_000 + crate::token::DEFAULT_GRACE_PERIOD_MS;
+        assert_eq!(
+            scene.next_lease_deadline_ms(SceneGraph::DEFAULT_MAX_SUSPENSION_MS),
+            Some(grace_deadline)
+        );
+        scene
+            .publish_to_zone(
+                "status-bar",
+                tze_hud_scene::ZoneContent::StatusBar(tze_hud_scene::StatusBarPayload {
+                    entries: HashMap::from([("operator".into(), "keep".into())]),
+                }),
+                "operator",
+                Some("operator".into()),
+                None,
+                None,
+            )
+            .unwrap();
+        clock.advance(1_000);
+        let results = scene.apply_due_batches();
+        assert_eq!(results.len(), 2);
+        assert!(results.iter().all(|r| r.applied), "{results:?}");
+        assert!(scene.scheduled_batches.is_empty());
+        let records = &scene.zone_registry.active_publishes["status-bar"];
+        assert_eq!(records.len(), 3);
+        for origin in origins {
+            let record = records
+                .iter()
+                .find(|r| r.publication_origin == Some(origin))
+                .unwrap();
+            assert_eq!(record.lease_id, None);
+            assert_eq!(record.expires_at_wall_us, None);
+        }
+        assert_eq!(
+            scene.next_lease_deadline_ms(SceneGraph::DEFAULT_MAX_SUSPENSION_MS),
+            Some(grace_deadline)
+        );
+        clock.advance(crate::token::DEFAULT_GRACE_PERIOD_MS - 1_000);
+        scene.expire_leases();
+        let remaining = &scene.zone_registry.active_publishes["status-bar"];
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].publisher_namespace, "operator");
+        assert_eq!(remaining[0].publication_origin, None);
+        assert_eq!(remaining[0].lease_id, None);
+        assert_eq!(remaining[0].expires_at_wall_us, None);
+        assert!(scene.apply_due_batches().is_empty());
+        assert_eq!(
+            scene.next_lease_deadline_ms(SceneGraph::DEFAULT_MAX_SUSPENSION_MS),
+            None
+        );
+    }
+
     server.abort();
 }
 

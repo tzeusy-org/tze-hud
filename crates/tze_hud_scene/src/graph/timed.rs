@@ -113,11 +113,21 @@ impl SceneGraph {
         let (mut due, pending): (Vec<_>, Vec<_>) = std::mem::take(&mut self.scheduled_batches)
             .into_iter()
             .partition(|s| s.present_at_wall_us <= now_us);
-        self.scheduled_batches = pending;
         due.sort_by_key(|s| s.present_at_wall_us);
-        due.into_iter()
-            .map(|s| self.apply_batch_for_origin(&s.batch, s.publication_origin))
-            .collect()
+        let due_count = due.len();
+        self.scheduled_batches = due;
+        self.scheduled_batches.extend(pending);
+        let mut results = Vec::with_capacity(due_count);
+        for index in 0..due_count {
+            // Publication pruning must still see the other due origins. Mutation
+            // application (including rollback) leaves scheduled batches intact.
+            let scheduled = self.scheduled_batches[index].clone();
+            results
+                .push(self.apply_batch_for_origin(&scheduled.batch, scheduled.publication_origin));
+        }
+        self.scheduled_batches.drain(..due_count);
+        self.prune_publication_orphans();
+        results
     }
 
     /// Stamp the batch's `expires_at` on the tiles it created or targeted.
