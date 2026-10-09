@@ -390,6 +390,22 @@ hooks are shell scripts, and Git for Windows runs them through its bundled
 
 ## Worktrees and agent sessions
 
+Active-build cache preservation is a cleanup recommendation, not an implemented
+control: preserve owned build roots and evidence until gate terminals are consumed;
+record the active lease, cache epoch, canonical root identity and owning PID/start
+time. Cleanup selectors should exclude active roots and their ancestors, refuse
+live or unknown ownership, and never use mtime or a closed bead alone as eligibility.
+On 2026-10-09 in WSL, the repository `target/` and HOME-managed cache were verified
+at 04:16 UTC and absent by 04:19:38 UTC: 121 protected artifacts were missing, while
+3,281 retained their SHA/device/inode identities. The cause remains unestablished;
+user scheduling evidence was unavailable. A replacement under HOME
+`.local/share/tze-hud-agent-tools/` narrows conventional cache-cleanup overlap but
+does not establish prevention. Before remediation, an operator must identify the
+actual cleanup policy/selector and available redacted deletion audit for that
+interval, then validate its existing dry-run selection against bounded live,
+unproven and released fixtures without touching active caches. Mitigation
+validation remains pending.
+
 - `scripts/worktree-add.sh` relocates `target/` to `/data` on the Linux build
   host. On Windows, use plain
   `git worktree add .worktrees/<name> -b <branch>`. Each worktree builds its
