@@ -1,0 +1,89 @@
+{
+  "images": [
+    {
+      "file": "blueprint-all-zones-test.png",
+      "fixture": "all-zones-test.json",
+      "sha256": "77818e0b20ebf71fc1b92def0a9465af3bf5223dbb0f23940267d73ce8a6b305",
+      "theme": "blueprint",
+      "wall_seconds": 0.5739060170017183
+    },
+    {
+      "file": "blueprint-notification-full-gamut.png",
+      "fixture": "notification-full-gamut.json",
+      "sha256": "92bf1b228ed2fe9bdffa8564e12ed3f8962889ce1193c7b2b6637e937ae706ab",
+      "theme": "blueprint",
+      "wall_seconds": 0.5397271529654972
+    },
+    {
+      "file": "blueprint-status-indicator-theme-status-matrix-test.png",
+      "fixture": "status-indicator-theme-status-matrix-test.json",
+      "sha256": "dfa2f335c97c25787ac424392915a08daf5af5994d6d6c08e9084e2dec3f530a",
+      "theme": "blueprint",
+      "wall_seconds": 0.5218174059991725
+    },
+    {
+      "file": "blueprint-subtitle-multiline.png",
+      "fixture": "subtitle-multiline.json",
+      "sha256": "8661249b0a6b92ba045cbde78353e2c85066df029529a256357f2d56002bb841",
+      "theme": "blueprint",
+      "wall_seconds": 0.5267580060171895
+    },
+    {
+      "file": "classic-all-zones-test.png",
+      "fixture": "all-zones-test.json",
+      "sha256": "8eed60ffd2fbd4affe9400d522b72ed28be844208ded5086d2024803c9c7f42e",
+      "theme": "classic",
+      "wall_seconds": 0.5286409039981663
+    },
+    {
+      "file": "classic-notification-full-gamut.png",
+      "fixture": "notification-full-gamut.json",
+      "sha256": "7c5b025e6f0429f1b286805f9654421f3aef4bc281476f4e0cfb5e302128fc04",
+      "theme": "classic",
+      "wall_seconds": 0.5331508269882761
+    },
+    {
+      "file": "classic-status-indicator-theme-status-matrix-test.png",
+      "fixture": "status-indicator-theme-status-matrix-test.json",
+      "sha256": "dfa2f335c97c25787ac424392915a08daf5af5994d6d6c08e9084e2dec3f530a",
+      "theme": "classic",
+      "wall_seconds": 0.5264004039927386
+    },
+    {
+      "file": "classic-subtitle-multiline.png",
+      "fixture": "subtitle-multiline.json",
+      "sha256": "96731faad7aaee1c07d05bff4cd3e8934409dcfa1a312d0cd2e63c0d791d7445",
+      "theme": "classic",
+      "wall_seconds": 0.5429184669628739
+    },
+    {
+      "file": "tonal-glass-all-zones-test.png",
+      "fixture": "all-zones-test.json",
+      "sha256": "3b70ce7510ea2c4038b40e5250596ee48c2b17db18f7d4ccaf8e555416720553",
+      "theme": "tonal-glass",
+      "wall_seconds": 0.5390377440489829
+    },
+    {
+      "file": "tonal-glass-notification-full-gamut.png",
+      "fixture": "notification-full-gamut.json",
+      "sha256": "afd0a6192c9559ee1f7655c506100b776bcec0a0270d65767880d703a7e91728",
+      "theme": "tonal-glass",
+      "wall_seconds": 0.5406741110491566
+    },
+    {
+      "file": "tonal-glass-status-indicator-theme-status-matrix-test.png",
+      "fixture": "status-indicator-theme-status-matrix-test.json",
+      "sha256": "dfa2f335c97c25787ac424392915a08daf5af5994d6d6c08e9084e2dec3f530a",
+      "theme": "tonal-glass",
+      "wall_seconds": 0.5389370719785802
+    },
+    {
+      "file": "tonal-glass-subtitle-multiline.png",
+      "fixture": "subtitle-multiline.json",
+      "sha256": "7e73e60f35b48a1d98e1273090066c60892916fae7b7c4d00e01c9c9d1e8d3ad",
+      "theme": "tonal-glass",
+      "wall_seconds": 0.5298731959774159
+    }
+  ],
+  "source_commit": "c9676df3fc24d47300517dd71e91f6ff1d6d4678"
+}
