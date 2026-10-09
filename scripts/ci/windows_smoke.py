@@ -36,6 +36,7 @@ Stdlib only. Exits non-zero on the first failed check and prints the HUD log.
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 import hashlib
 import importlib.util
 import json
@@ -52,7 +53,7 @@ import urllib.error
 import urllib.request
 import zlib
 from pathlib import Path
-from typing import Callable, TypeVar
+from typing import Callable, Iterator, TypeVar
 
 MIN_CHANGED_PIXELS = 200
 POLL_S = 0.25
@@ -143,51 +144,95 @@ def quiescent_summary(artifact: dict) -> str:
     )
 
 
+class RequestFailure(AssertionError):
+    """Safe request context, with transient startup failures distinguished."""
+
+    def __init__(self, message: str, *, retryable: bool) -> None:
+        super().__init__(message)
+        self.retryable = retryable
+
+
 class Smoke:
     def __init__(self, url: str, psk: str) -> None:
         self.url = url
         self.psk = psk
         self.next_id = 0
 
-    def rpc(self, method: str, params: dict | None = None) -> dict:
+    @contextmanager
+    def _boundary(self, label: str) -> Iterator[None]:
+        started = time.monotonic()
+        print(f"request begin {label}", flush=True)
+        try:
+            yield
+        except Exception as err:
+            elapsed = time.monotonic() - started
+            error_class = type(err).__name__
+            print(f"request failure {label} elapsed_s={elapsed:.3f} error={error_class}", flush=True)
+            # Keep exception values, including URLs and response payloads, out of
+            # both diagnostics and the eventual traceback. Only startup discovery
+            # may retry these transport failures; this boundary never retries.
+            raise RequestFailure(
+                f"{label}: {error_class} after {elapsed:.3f}s",
+                retryable=isinstance(err, (urllib.error.URLError, ConnectionError, TimeoutError)),
+            ) from None
+        else:
+            print(f"request end {label} elapsed_s={time.monotonic() - started:.3f}", flush=True)
+
+    @staticmethod
+    def _operator_label(method: str, path: str) -> str:
+        safe_method = method if method in {"GET", "POST"} else "other"
+        route = path.partition("?")[0]
+        safe_path = route if route in {
+            "/admin/status", "/admin/logs", "/admin/screenshot", "/admin/restart", "/pair",
+        } else "other"
+        return f"operator method={safe_method} path={safe_path}"
+
+    def rpc(self, method: str, params: dict | None = None, *, timeout_s: float = 10) -> dict:
         self.next_id += 1
-        body = {"jsonrpc": "2.0", "id": self.next_id, "method": method}
-        if params is not None:
-            body["params"] = params
-        req = urllib.request.Request(
-            self.url,
-            data=json.dumps(body).encode(),
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {self.psk}",
-            },
-        )
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            reply = json.load(resp)
-        if "error" in reply:
-            raise AssertionError(f"{method}: JSON-RPC error {reply['error']}")
-        return reply["result"]
+        safe_method = method if method in {"initialize", "tools/list", "tools/call"} else "other"
+        label = f"rpc id={self.next_id} method={safe_method}"
+        if method == "tools/call":
+            tool = params.get("name") if isinstance(params, dict) else None
+            label += f" tool={tool if isinstance(tool, str) and tool in TOOLS else 'other'}"
+        with self._boundary(label):
+            body = {"jsonrpc": "2.0", "id": self.next_id, "method": method}
+            if params is not None:
+                body["params"] = params
+            req = urllib.request.Request(
+                self.url,
+                data=json.dumps(body).encode(),
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {self.psk}",
+                },
+            )
+            with urllib.request.urlopen(req, timeout=timeout_s) as resp:
+                reply = json.load(resp)
+            if "error" in reply:
+                raise AssertionError("JSON-RPC error response")
+            return reply["result"]
 
     def request(self, method: str, path: str) -> tuple[int, str, bytes]:
         """Call an operator endpoint on the same port; return (status, content type, body)."""
-        base = self.url.rsplit("/", 1)[0]
-        req = urllib.request.Request(
-            base + path,
-            method=method,
-            data=b"" if method == "POST" else None,
-            headers={"Authorization": f"Bearer {self.psk}"},
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=15) as resp:
-                return resp.status, resp.headers.get("Content-Type", ""), resp.read()
-        except urllib.error.HTTPError as err:
-            return err.code, err.headers.get("Content-Type", ""), err.read()
+        with self._boundary(self._operator_label(method, path)):
+            base = self.url.rsplit("/", 1)[0]
+            req = urllib.request.Request(
+                base + path,
+                method=method,
+                data=b"" if method == "POST" else None,
+                headers={"Authorization": f"Bearer {self.psk}"},
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    return resp.status, resp.headers.get("Content-Type", ""), resp.read()
+            except urllib.error.HTTPError as err:
+                return err.code, err.headers.get("Content-Type", ""), err.read()
 
     def get_bytes(self, path: str) -> tuple[int, str, bytes]:
         """GET an operator endpoint; a non-2xx status raises."""
         status, ctype, body = self.request("GET", path)
         if status >= 300:
-            raise AssertionError(f"GET {path}: {status} {body[:200]!r}")
+            raise AssertionError(f"{self._operator_label('GET', path)}: HTTP {status}")
         return status, ctype, body
 
     def get(self, path: str) -> tuple[int, str]:
@@ -195,30 +240,66 @@ class Smoke:
         status, _, body = self.get_bytes(path)
         return status, body.decode("utf-8", "replace")
 
-    def call(self, tool: str, args: dict | None = None) -> tuple[bool, dict]:
+    def call(self, tool: str, args: dict | None = None, *, timeout_s: float = 10) -> tuple[bool, dict]:
         """Call a tool; return (is_error, parsed result text)."""
-        result = self.rpc("tools/call", {"name": tool, "arguments": args or {}})
+        result = self.rpc("tools/call", {"name": tool, "arguments": args or {}}, timeout_s=timeout_s)
         text = result["content"][0]["text"]
         return bool(result.get("isError")), json.loads(text)
 
-    def ok(self, tool: str, args: dict | None = None) -> dict:
-        is_error, payload = self.call(tool, args)
+    def ok(self, tool: str, args: dict | None = None, *, timeout_s: float = 10) -> dict:
+        is_error, payload = self.call(tool, args, timeout_s=timeout_s)
         if is_error:
-            raise AssertionError(f"{tool} {args}: {payload}")
+            raise AssertionError(f"{tool if tool in TOOLS else 'other'}: tool error response")
         return payload
 
 
-def wait_for_mcp(smoke: Smoke, proc: subprocess.Popen, timeout_s: float) -> None:
-    deadline = time.monotonic() + timeout_s
-    while time.monotonic() < deadline:
+def wait_for_mcp(
+    smoke: Smoke,
+    proc: subprocess.Popen,
+    timeout_s: float,
+    *,
+    clock: Callable[[], float] = time.monotonic,
+    sleep: Callable[[float], None] = time.sleep,
+) -> None:
+    """Require metadata and scene/portal discovery within the original guard.
+
+    Request timeouts cap each socket operation, not overall wall cancellation.
+    A response observed at or after the deadline cannot establish readiness.
+    """
+    deadline = clock() + timeout_s
+    while clock() < deadline:
         if proc.poll() is not None:
             raise AssertionError(f"tze_hud exited during startup (code {proc.returncode})")
         try:
-            smoke.rpc("initialize", {"protocolVersion": "2025-06-18", "capabilities": {}})
+            remaining = deadline - clock()
+            if remaining <= 0:
+                break
+            smoke.rpc(
+                "initialize", {"protocolVersion": "2025-06-18", "capabilities": {}},
+                timeout_s=min(10, remaining),
+            )
+            if proc.poll() is not None:
+                raise AssertionError(f"tze_hud exited during startup (code {proc.returncode})")
+            remaining = deadline - clock()
+            if remaining <= 0:
+                break
+            surfaces = smoke.ok("hud_surfaces", timeout_s=min(10, remaining))
+            assert isinstance(surfaces, dict) and isinstance(surfaces.get("surfaces"), list), (
+                "hud_surfaces: invalid startup discovery response"
+            )
+            if proc.poll() is not None:
+                raise AssertionError(f"tze_hud exited during startup (code {proc.returncode})")
+            if clock() >= deadline:
+                break
             return
-        except (urllib.error.URLError, ConnectionError, TimeoutError):
-            time.sleep(0.5)
-    raise AssertionError(f"MCP not reachable at {smoke.url} after {timeout_s:.0f}s")
+        except RequestFailure as err:
+            if not err.retryable:
+                raise
+        remaining = deadline - clock()
+        if remaining <= 0:
+            break
+        sleep(min(0.5, remaining))
+    raise AssertionError(f"MCP metadata and scene discovery not ready after {timeout_s:.0f}s")
 
 
 def run_checks(smoke: Smoke) -> None:
@@ -456,14 +537,15 @@ def check_admin(smoke: Smoke) -> None:
 
 
 def pair_post(smoke: Smoke, code: str) -> tuple[int, bytes]:
-    base = smoke.url.rsplit("/", 1)[0]
-    body = json.dumps({"agent": "ci-pair", "code": code}).encode()
-    req = urllib.request.Request(base + "/pair", data=body)  # no bearer: the code is the credential
-    try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            return resp.status, resp.read()
-    except urllib.error.HTTPError as err:
-        return err.code, err.read()
+    with smoke._boundary(smoke._operator_label("POST", "/pair")):
+        base = smoke.url.rsplit("/", 1)[0]
+        body = json.dumps({"agent": "ci-pair", "code": code}).encode()
+        req = urllib.request.Request(base + "/pair", data=body)  # no bearer: the code is the credential
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                return resp.status, resp.read()
+        except urllib.error.HTTPError as err:
+            return err.code, err.read()
 
 
 def check_pair(smoke: Smoke, exe: Path) -> None:
