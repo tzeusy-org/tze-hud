@@ -380,6 +380,64 @@ Python packages go in `scripts/requirements-dev.txt`, which CI also uses.
 Keep the checkout on the WSL filesystem (`~/...`), not
 `/mnt/c`, because cargo and git over the Windows mount are many times slower.
 
+### Offline scene and widget PNGs in WSL
+
+`just render-scene` applies a user-test JSON batch to an isolated scene through
+the normal typed MCP handlers, then uses the compositor's **windowed frame
+build/capture** seam. It creates no HUD window, listener, paired credential or
+desktop screenshot. The GPU recipe requires Mesa llvmpipe; adapter failures
+are errors. The default 1920×1080 layout uses the canonical production scene.
+
+```bash
+mkdir -p test_results/render-scene
+just render-scene --fixture .claude/skills/user-test/scripts/all-zones-test.json \
+  --theme tonal-glass --output test_results/render-scene/zones.png \
+  > test_results/render-scene/zones.json
+just render-widget --widget assets/widget_bundles/status-indicator \
+  --params '{"status":"online","theme":"friendly","label":"Butler"}' \
+  --width 252 --height 96 --output test_results/render-scene/widget.png \
+  > test_results/render-scene/widget.json
+```
+
+Both recipes forward arguments to the single `render-scene` binary. Widget
+mode validates the bundle and typed parameters, then uses the existing retained
+`WidgetRenderPlan` primitive/resvg CPU rasterizer. `--theme` selects `tonal-glass`,
+`classic` or `blueprint`; `--tokens FILE` reads a flat `[design_tokens]` TOML
+table, with an explicit `--theme` taking precedence over its selector. Positive
+`--width`/`--height` are bounded to 8192 per axis and 16M pixels total.
+
+The batch accepts ordered zone/content or widget/params publishes, clears and
+holds. TTL, merge keys and supported delayed zone publication go through their
+existing owners; errors in response bodies fail the command. Scene mode builds
+an initial real frame before waiting for the checkpoint. `--capture-at-ms` is
+0 to 5000ms after the ordered messages: the default 250ms settles the named
+matrix fixtures' immediate entrance transitions (at most 200ms), while an
+explicit `--capture-at-ms 0` captures the initial frame. Delayed publications
+still become active when due and may be entering at the chosen checkpoint;
+this is not a promise that arbitrary delays or streaming content have settled.
+CPU widget mode defaults to 0ms. The status fixture
+`status-indicator-theme-status-matrix-test.json` updates `main-status` twelve
+times: one final image shows **friendly/offline**, not all twelve states.
+Use separate checkpoint fixtures/images to make intermediate-state claims.
+
+The PNG is straight-alpha sRGB RGBA: GPU sRGB framebuffer bytes are decoded,
+unpremultiplied in linear RGB and re-encoded; tiny-skia widget bytes are
+unpremultiplied in their byte domain. Zero alpha becomes transparent black.
+Output publication is atomic and refuses an existing destination. The JSON
+manifest on stdout records hashes, dimensions, checkpoint, adapter and elapsed
+scope. Its checkout HEAD is observed at invocation, while its compiled-example
+source hash identifies embedded source; the surrounding build receipt binds
+the complete tested source and executable. Separate initial compilation from
+warm **full-command wall time**, which must be under 10 seconds per matrix cell.
+
+The authoring matrix is three themes × `all-zones-test.json`,
+`notification-full-gamut.json`, `subtitle-multiline.json` and the exact status
+fixture above. Deliver all twelve WSL-produced PNGs and their manifests through
+PR-linked CI artifacts with byte-for-byte upload/download verification; local
+paths or separately regenerated CI images do not establish that attachment.
+These are informational authoring images, not required pixel goldens or owner
+visual sign-off: Mesa/WARP antialiasing, fonts and desktop/DPI remain distinct.
+
 ## Beads
 
 `.beads/config.yaml` points `bd` at the Dolt server

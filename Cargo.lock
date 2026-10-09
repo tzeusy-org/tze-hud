@@ -2509,12 +2509,19 @@ checksum = "dc897dd8d9e8bd1ed8cdad82b5966c3e0ecae09fb1907d58efaa013543185d0a"
 name = "render_artifacts"
 version = "0.1.0"
 dependencies = [
+ "image",
  "serde",
  "serde_json",
+ "sha2",
  "tokio",
+ "toml 0.8.23",
  "tze_hud_compositor",
+ "tze_hud_config",
+ "tze_hud_mcp",
  "tze_hud_runtime",
  "tze_hud_scene",
+ "tze_hud_widget",
+ "wgpu",
 ]
 
 [[package]]
