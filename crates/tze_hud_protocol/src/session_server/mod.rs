@@ -605,6 +605,16 @@ async fn handle_client_message(
 ) {
     let client_sequence = msg.sequence;
     let Some(payload) = msg.payload else {
+        verbs::send_result(
+            session,
+            tx,
+            verbs::fail(
+                client_sequence,
+                "INVALID_ARGUMENT",
+                "ClientMessage needs a supported request payload; use the current session.proto schema and send a recognized request",
+            ),
+        )
+        .await;
         return;
     };
 

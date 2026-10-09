@@ -199,6 +199,7 @@ unknown PSK) is a JSON-RPC error.
 
 - The message isn't repeated. The hint names the next call.
 - Typed zone content is strict: an unknown or nested key is `INVALID_ARGUMENT` with the allowed keys in the hint, and so is empty content (a notification with no title or body, `stream_text` without text, `solid_color` missing r/g/b; over gRPC, a blank notification).
+- A sequence-valid post-handshake gRPC `ClientMessage` with no recognized request payload returns `RequestResult{ok: false, code: INVALID_ARGUMENT}` with a hint to use the current schema and a supported request. This covers empty envelopes and requests containing only unknown or removed fields. Protobuf discards those fields, so the server cannot identify the discarded request tag or name. Unknown fields alongside a recognized request keep its normal behavior.
 - Codes are a closed set shared by both planes (invariant 8;
   `crates/tze_hud_scene/src/error_codes.rs` `ERROR_CODES`, kept in sync with
   this list by a test). gRPC `RequestResult.code` uses the same set, checked
@@ -252,8 +253,10 @@ down to the lifecycle.
   bounds or z-order.
 - **Every `RequestResult` carries `code` + `hint`.** Scene validation hints
   reach the agent rather than being flattened to `MUTATION_REJECTED`.
-  `seq` echoes the request's `sequence`; ephemeral zone publishes get no
-  reply. `ClaimTile`, `Hold`, and `Clear` retransmits replay the cached reply.
+  `seq` echoes the request's `sequence`, including legacy zero and rejected
+  empty/unknown-only envelopes; those rejections keep the stream open.
+  Ephemeral zone publishes get no reply. `ClaimTile`, `Hold`, and `Clear`
+  retransmits replay the cached reply.
 - **Timing hints are honored**, not just validated: `present_at_us` holds
   content, and `expires_at_us` sweeps it (invariant 1). On `Publish`,
   `expires_at_us` wins over `ttl_ms`, which counts from presentation.
