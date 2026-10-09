@@ -262,12 +262,13 @@ pub fn query_param<'a>(query: &'a str, key: &str) -> Option<&'a str> {
 /// Why a request could not be read.
 #[derive(Debug, PartialEq, Eq)]
 pub enum ReadError {
-    /// Peer closed or errored before a full request arrived.
+    /// Peer closed before complete headers, or a transport read failed.
     Closed,
     /// Request exceeded [`MAX_REQUEST`].
     TooLarge,
     /// Bad request line, malformed header, or ambiguous framing/credentials
-    /// (duplicate or non-numeric `Content-Length`, duplicate `Authorization`).
+    /// (duplicate or non-numeric `Content-Length`, duplicate `Authorization`),
+    /// forbidden raw header controls, or EOF before the declared body is complete.
     Malformed,
     /// `Transfer-Encoding` present; only `Content-Length` bodies are supported.
     NotImplemented,
@@ -317,6 +318,9 @@ async fn read_request_inner<R: AsyncRead + Unpin>(stream: &mut R) -> Result<Requ
         return Err(ReadError::Malformed);
     };
     if method.is_empty()
+        || !method
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&b))
         || !target.starts_with('/')
         || target.bytes().any(|b| b.is_ascii_control())
         || !matches!(version, "HTTP/1.0" | "HTTP/1.1")
@@ -339,6 +343,11 @@ async fn read_request_inner<R: AsyncRead + Unpin>(stream: &mut R) -> Result<Requ
                 .any(|b| b.is_ascii_whitespace() || b.is_ascii_control())
             || line.contains('\n')
         {
+            return Err(ReadError::Malformed);
+        }
+        // Validate before trim: whitespace normalization must not hide raw
+        // controls at a value's edges. HTAB is the only permitted control.
+        if value.bytes().any(|b| b.is_ascii_control() && b != b'\t') {
             return Err(ReadError::Malformed);
         }
         let value = value.trim();
@@ -376,7 +385,7 @@ async fn read_request_inner<R: AsyncRead + Unpin>(stream: &mut R) -> Result<Requ
     while buf.len() < body_end {
         let n = stream.read(&mut tmp).await.map_err(|_| ReadError::Closed)?;
         if n == 0 {
-            break; // EOF: use what we have
+            return Err(ReadError::Malformed); // The declared body must arrive in full.
         }
         buf.extend_from_slice(&tmp[..n]);
     }
@@ -523,6 +532,10 @@ mod tests {
             read_request(&mut s, READ_TIMEOUT).await,
             Err(ReadError::TooLarge)
         );
+        assert_eq!(
+            read_raw(b"POST / HTTP/1.1\r\nContent-Length: 18446744073709551616\r\n\r\n").await,
+            Err(ReadError::TooLarge)
+        );
         let (mut c, mut s) = tokio::io::duplex(1024);
         c.write_all(b"GARBAGE\r\n\r\n").await.unwrap();
         assert_eq!(
@@ -534,6 +547,7 @@ mod tests {
     async fn read_raw(req: &[u8]) -> Result<Request, ReadError> {
         let (mut c, mut s) = tokio::io::duplex(1024);
         c.write_all(req).await.unwrap();
+        c.shutdown().await.unwrap();
         read_request(&mut s, READ_TIMEOUT).await
     }
 
@@ -558,6 +572,32 @@ mod tests {
             b"GET / FOO\r\n\r\n",
             b"GET nope HTTP/1.1\r\n\r\n",
             b"GET  / HTTP/1.1\r\n\r\n",
+            // Methods must be ASCII tokens, including at the raw control boundary.
+            b"PO\0ST / HTTP/1.1\r\n\r\n",
+            b"PO\tST / HTTP/1.1\r\n\r\n",
+            b"PO\rST / HTTP/1.1\r\n\r\n",
+            b"PO\nST / HTTP/1.1\r\n\r\n",
+            b"PO/ST / HTTP/1.1\r\n\r\n",
+            b"PO(ST / HTTP/1.1\r\n\r\n",
+            b"PO:ST / HTTP/1.1\r\n\r\n",
+            b"PO\xc3\xa9ST / HTTP/1.1\r\n\r\n",
+            b"PO\xffST / HTTP/1.1\r\n\r\n",
+            // Raw header controls must not be removed by trimming or the TE path.
+            b"POST / HTTP/1.1\r\nX: a\0b\r\n\r\n",
+            b"POST / HTTP/1.1\r\nX: a\rb\r\n\r\n",
+            b"POST / HTTP/1.1\r\nX: a\nb\r\n\r\n",
+            b"POST / HTTP/1.1\r\nX: \x0bvalue\x0c\r\n\r\n",
+            b"POST / HTTP/1.1\r\nX: value\x7f\r\n\r\n",
+            b"POST / HTTP/1.1\r\nAuthorization: \x0bBearer t\r\n\r\n",
+            b"POST / HTTP/1.1\r\nContent-Length: 0\r\r\n\r\n",
+            b"POST / HTTP/1.1\r\nTransfer-Encoding: \x0bchunked\r\n\r\n",
+            b"POST / HTTP/1.1\r\nX\0: value\r\n\r\n",
+            b"POST / HTTP/1.1\r\nX: value\nContent-Length: 0\r\n\r\n",
+            b"POST / HTTP/1.1\r\nTransfer-Encoding : chunked\r\n\r\n",
+            b"POST / HTTP/1.1\r\nTransfer-\tEncoding: chunked\r\n\r\n",
+            // Complete headers plus EOF cannot truncate a declared body.
+            b"POST / HTTP/1.1\r\nContent-Length: 1\r\n\r\n",
+            b"POST / HTTP/1.1\r\nContent-Length: 4\r\n\r\nab",
         ];
         for req in bad {
             assert_eq!(
@@ -590,6 +630,29 @@ mod tests {
         assert_eq!(
             (req.bearer.as_deref(), req.body.as_slice()),
             (Some("t"), &b"hi"[..])
+        );
+        let method = "aZ09!#$%&'*+-.^_`|~";
+        let request = format!(
+            "{method} /mcp?tail=3 HTTP/1.1\r\nX: \t value \t\r\nAuthorization: \tBearer t \t\r\nContent-Length: \t6 \t\r\n\r\n"
+        );
+        let mut bytes = request.into_bytes();
+        bytes.extend_from_slice(b"\0\t\r\n\x7fX");
+        let req = read_raw(&bytes).await.unwrap();
+        assert_eq!(req.method, method);
+        assert_eq!((req.path.as_str(), req.query.as_str()), ("/mcp", "tail=3"));
+        assert_eq!(req.bearer.as_deref(), Some("t"));
+        assert_eq!(req.body, b"\0\t\r\n\x7fX");
+        for headers in ["", "Content-Length: 0\r\n"] {
+            let req = read_raw(format!("post /mcp HTTP/1.1\r\n{headers}\r\n").as_bytes())
+                .await
+                .unwrap();
+            assert_eq!(req.method, "post");
+            assert!(req.body.is_empty());
+            assert_eq!(route(&req.method, &req.path), route("GET", "/mcp"));
+        }
+        assert_eq!(
+            read_raw(b"POST / HTTP/1.1\r\nX: value").await,
+            Err(ReadError::Closed)
         );
     }
 
