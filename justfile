@@ -50,16 +50,18 @@ default: check
 
 # Offline authoring: the real windowed build/capture seam, without a HUD listener.
 # Arguments go unchanged to the example; compilation is separate from warm timing.
+[positional-arguments]
 render-scene *args:
     #!/usr/bin/env bash
     set -euo pipefail
     [[ -f "{{lvp}}" ]] || { echo 'required llvmpipe ICD is missing' >&2; exit 1; }
     export VK_ICD_FILENAMES="{{lvp}}" HEADLESS_FORCE_SOFTWARE=1 TZE_HUD_REQUIRE_GPU=1
-    cargo run --quiet -p render_artifacts --bin render-scene -- {{args}}
+    cargo run --quiet -p render_artifacts --bin render-scene -- "$@"
 
 # CPU retained WidgetRenderPlan/resvg mode of the same authoring binary.
+[positional-arguments]
 render-widget *args:
-    cargo run --quiet -p render_artifacts --bin render-scene -- {{args}}
+    cargo run --quiet -p render_artifacts --bin render-scene -- "$@"
 
 # ── Fast fail ────────────────────────────────────────────────────────────────
 
