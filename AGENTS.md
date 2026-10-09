@@ -13,6 +13,7 @@ just check           # cargo check (fast compilation gate)
 just fmt             # cargo fmt --check
 just fmt-fix         # cargo fmt (apply formatting)
 just clippy          # cargo clippy --workspace --all-targets -D warnings
+just pre-push        # current-HEAD Rust/Cargo diff: fmt --all + workspace all-target Clippy
 just test            # cargo nextest run --workspace --all-targets --exclude integration --features tze_hud_runtime/dev-mode (GPU + pixel_readback)
 just test-gpu        # GPU subset only (compositor + pixel_readback), llvmpipe-pinned
 just test-integration # integration headless suites
@@ -125,6 +126,19 @@ Use a worktree of this repo for isolated workers; don't switch branches in the m
 ```bash
 scripts/worktree-add.sh .worktrees/<name> -b <branch>
 ```
+
+Run `just pre-push` before pushing Rust/Cargo changes. `just bootstrap` installs
+the repository-local `.githooks/pre-push` only when existing hooks are safe;
+`--check` reports installation without changing it. The hook checks every pushed
+ref against `origin/main`, skips proven docs-only/deletion pushes, and refuses
+Rust-bearing heads that are not checked out. Missing metadata fails closed.
+`just bootstrap --hooks-only` installs only that guarded hook;
+`just bootstrap --hooks-only --check` reports it without writes (either flag order
+works). Default bootstrap still performs full dependency setup; hook-only success
+does not establish host readiness.
+Its lock serializes hooks, not other Cargo processes: workers still need the
+coordinator's target/resource lease. `git push --no-verify` is an explicit bypass
+only when the coordinator has accepted exact-source gates and authorized it.
 
 ## Beads / Issue Tracking
 

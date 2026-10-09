@@ -8,6 +8,8 @@
 # Usage:
 #   scripts/dev-bootstrap.sh            # install what can be installed, report the rest
 #   scripts/dev-bootstrap.sh --check    # report only; exit 1 if anything required is missing
+#   scripts/dev-bootstrap.sh --hooks-only # install/check only the guarded repository hook
+#   scripts/dev-bootstrap.sh --hooks-only --check # report hook installation without writes
 #
 # apt packages need root. When passwordless sudo is unavailable the script
 # prints the exact `sudo apt-get install` line for a human to run, then
@@ -42,12 +44,16 @@ VENV=.venv
 
 # ── Plumbing ────────────────────────────────────────────────────────────────
 CHECK_ONLY=0
-case "${1:-}" in
-    --check) CHECK_ONLY=1 ;;
-    "") ;;
-    -h|--help) sed -n '2,14p' "$0"; exit 0 ;;
-    *) echo "unknown argument: $1" >&2; exit 2 ;;
-esac
+HOOKS_ONLY=0
+while (($#)); do
+    case "$1" in
+        --check) CHECK_ONLY=1 ;;
+        --hooks-only) HOOKS_ONLY=1 ;;
+        -h|--help) sed -n '2,16p' "$0"; exit 0 ;;
+        *) echo "unknown argument: $1" >&2; exit 2 ;;
+    esac
+    shift
+done
 
 cd "$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
 
@@ -61,6 +67,80 @@ install_cargo_tool() {
     if command -v cargo-binstall >/dev/null; then cargo binstall -y --locked "$1"
     else cargo install --locked "$1"; fi
 }
+
+# ── Repository hook ─────────────────────────────────────────────────────────
+# Repository-local config is shared by linked worktrees. Never mask an unowned
+# hook, copy a user's config, or install anything during --check.
+section "pre-push hook"
+if ! command -v python3 >/dev/null; then
+    miss "python3 is required to check/install the repository hook"
+elif python3 - "$CHECK_ONLY" <<'PY'
+import hashlib
+import os
+from pathlib import Path
+import subprocess
+import sys
+
+class UnsafeHook(ValueError):
+    pass
+
+def git(*args, optional=False):
+    result = subprocess.run(["git", *args], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if optional and result.returncode == 1:
+        return b""
+    if result.returncode:
+        raise UnsafeHook("cannot verify repository hook metadata")
+    return result.stdout
+
+def inspect():
+    effective = git("config", "--get-all", "core.hooksPath", optional=True).splitlines()
+    local = git("config", "--local", "--get-all", "core.hooksPath", optional=True).splitlines()
+    if effective not in ([], [b".githooks"]) or local != effective:
+        raise UnsafeHook("custom hooksPath retained; merge hooks manually before installing")
+    common = Path(os.fsdecode(git("rev-parse", "--git-common-dir").strip())).resolve()
+    hooks = common / "hooks"
+    if hooks.is_symlink() or (hooks.exists() and any(not p.name.endswith(".sample") for p in hooks.iterdir())):
+        raise UnsafeHook("unowned common Git hooks retained; merge hooks manually before installing")
+    shipped = Path(".githooks/pre-push")
+    if shipped.parent.is_symlink() or shipped.is_symlink() or not shipped.is_file():
+        raise UnsafeHook("shipped pre-push hook is absent or unsafe")
+    if any(p.name != "pre-push" and not p.name.endswith(".sample") for p in shipped.parent.iterdir()):
+        raise UnsafeHook("additional repository hooks retained; inspect them before installing")
+    content = shipped.read_bytes()
+    if content != git("show", "HEAD:.githooks/pre-push") or not os.access(shipped, os.X_OK):
+        raise UnsafeHook("commit the shipped executable pre-push hook before installing")
+    return effective, local, hashlib.sha256(content).digest()
+
+try:
+    before = inspect()
+    if before[0] == [b".githooks"]:
+        print("  ok      repository pre-push hook (existing setting retained)")
+    elif sys.argv[1] == "1":
+        raise UnsafeHook("repository pre-push hook is not installed (re-run bootstrap without --check)")
+    else:
+        if inspect() != before:
+            raise UnsafeHook("hook/config changed during inspection; re-run bootstrap")
+        git("config", "--local", "core.hooksPath", ".githooks")
+        if inspect()[0] != [b".githooks"]:
+            raise UnsafeHook("repository hook installation could not be verified")
+        print("  fixed   repository pre-push hook")
+except UnsafeHook as error:
+    print("  MISSING " + str(error), file=sys.stderr)
+    sys.exit(1)
+except (OSError, ValueError) as error:
+    print("  MISSING safe hook inspection failed (" + type(error).__name__ + ")", file=sys.stderr)
+    sys.exit(1)
+PY
+then
+    :
+else
+    miss "repository pre-push hook (no unsafe overwrite)"
+fi
+
+if ((HOOKS_ONLY)); then
+    # Hook readiness is separate from apt/toolchain/linker/venv host readiness.
+    exit "$missing"
+fi
 
 # ── apt packages ────────────────────────────────────────────────────────────
 section "apt packages"
