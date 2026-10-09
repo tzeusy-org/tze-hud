@@ -162,3 +162,9 @@ debug = "line-tables-only"
 [profile.release]
 lto = true
 codegen-units = 1
+
+# Faster optimized builds for development and non-tag Windows CI.
+[profile.release-dev]
+inherits = "release"
+lto = "thin"
+codegen-units = 16
