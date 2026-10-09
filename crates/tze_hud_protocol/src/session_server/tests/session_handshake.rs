@@ -941,10 +941,11 @@ async fn test_psk_with_capability_allows_input_events_subscription() {
 
 /// Removed client requests (subscription change, input focus/capture, widget
 /// asset register, element listing) are reserved field numbers: a peer that
-/// still sends one decodes to an empty payload, which the server ignores.
-#[test]
-fn removed_client_request_numbers_decode_to_empty_payload() {
+/// still sends one decodes to an empty payload and gets a correlated rejection.
+#[tokio::test]
+async fn removed_client_request_numbers_decode_to_empty_payload() {
     use prost::Message;
+    let mut removed = Vec::new();
     for field in [24u64, 27, 28, 29, 34, 39] {
         // tag = field << 3 | length-delimited, then an empty message body.
         let mut wire = vec![0x08, 0x07];
@@ -955,6 +956,123 @@ fn removed_client_request_numbers_decode_to_empty_payload() {
         assert!(
             msg.payload.is_none(),
             "field {field} must not map to a payload"
+        );
+        removed.push(msg);
+    }
+
+    let (mut client, _server, state) = setup_test_with_state().await;
+    let (tx, initial, mut stream) = handshake(&mut client, "empty-payload-agent", "test-key").await;
+    let mut server_sequence = initial.last().unwrap().sequence;
+    let (scene_before, scheduled_before, leases_before) = {
+        let state = state.lock().await;
+        let scene = state.scene.lock().await;
+        (
+            serde_json::to_value(&*scene).unwrap(),
+            scene.scheduled_batches.len(),
+            state
+                .sessions
+                .session_for_namespace("empty-payload-agent")
+                .unwrap()
+                .lease_ids
+                .clone(),
+        )
+    };
+
+    let mut future_wire = vec![0x08, 0x07];
+    prost::encoding::encode_varint(100 << 3 | 2, &mut future_wire);
+    future_wire.push(0);
+    let future = ClientMessage::decode(future_wire.as_slice()).unwrap();
+    assert!(future.payload.is_none());
+    let mut rejected = removed;
+    rejected.push(ClientMessage::default());
+    rejected.push(future);
+    let mut client_sequence = 2;
+    for mut request in rejected {
+        request.sequence = client_sequence;
+        tx.send(request).await.unwrap();
+        let response = tokio::time::timeout(Duration::from_secs(5), stream.next())
+            .await
+            .expect("empty-payload rejection must not leave callers waiting")
+            .expect("the stream remains open")
+            .unwrap();
+        server_sequence += 1;
+        assert_eq!(response.sequence, server_sequence);
+        let Some(ServerPayload::RequestResult(result)) = response.payload else {
+            panic!("expected a correlated RequestResult");
+        };
+        assert_eq!(result.seq, client_sequence);
+        assert!(!result.ok);
+        assert_eq!(result.code, "INVALID_ARGUMENT");
+        assert!(result.hint.contains("current session.proto schema"));
+        assert!(result.hint.contains("recognized request"));
+        client_sequence += 1;
+    }
+
+    // Legacy zero skips client sequence validation but is still echoed exactly.
+    tx.send(ClientMessage::default()).await.unwrap();
+    let response = tokio::time::timeout(Duration::from_secs(5), stream.next())
+        .await
+        .expect("legacy zero gets a rejection")
+        .expect("the stream remains open")
+        .unwrap();
+    server_sequence += 1;
+    assert_eq!(response.sequence, server_sequence);
+    let Some(ServerPayload::RequestResult(result)) = response.payload else {
+        panic!("expected a legacy-zero RequestResult");
+    };
+    assert_eq!(result.seq, 0);
+    assert!(!result.ok);
+    assert_eq!(result.code, "INVALID_ARGUMENT");
+    assert!(result.hint.contains("current session.proto schema"));
+
+    // Unknown fields do not invalidate a recognized oneof or poison the stream.
+    for (mono_us, append_unknown) in [(123u64, true), (456, false)] {
+        let heartbeat = ClientMessage {
+            sequence: client_sequence,
+            timestamp_wall_us: now_wall_us(),
+            payload: Some(ClientPayload::Heartbeat(Heartbeat {
+                timestamp_mono_us: mono_us,
+            })),
+        };
+        let mut wire = heartbeat.encode_to_vec();
+        if append_unknown {
+            prost::encoding::encode_varint(100 << 3 | 2, &mut wire);
+            wire.push(0);
+        }
+        let decoded = ClientMessage::decode(wire.as_slice()).unwrap();
+        assert_eq!(decoded.payload, heartbeat.payload);
+        tx.send(decoded).await.unwrap();
+        let response = tokio::time::timeout(Duration::from_secs(5), stream.next())
+            .await
+            .expect("valid Heartbeat succeeds after rejection")
+            .expect("the stream remains open")
+            .unwrap();
+        server_sequence += 1;
+        assert_eq!(response.sequence, server_sequence);
+        let Some(ServerPayload::Heartbeat(echo)) = response.payload else {
+            panic!("expected a normal Heartbeat echo, with no extra rejection");
+        };
+        assert_eq!(echo.timestamp_mono_us, mono_us);
+        client_sequence += 1;
+    }
+    assert!(
+        tokio::time::timeout(Duration::from_millis(50), stream.next())
+            .await
+            .is_err(),
+        "each rejected request produces exactly one result"
+    );
+    {
+        let state = state.lock().await;
+        let scene = state.scene.lock().await;
+        assert_eq!(serde_json::to_value(&*scene).unwrap(), scene_before);
+        assert_eq!(scene.scheduled_batches.len(), scheduled_before);
+        assert_eq!(
+            state
+                .sessions
+                .session_for_namespace("empty-payload-agent")
+                .unwrap()
+                .lease_ids,
+            leases_before
         );
     }
 }
