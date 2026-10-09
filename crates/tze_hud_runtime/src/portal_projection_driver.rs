@@ -37,7 +37,7 @@ use tze_hud_projection::{
     ProjectedPortalAdapterFamily, ProjectedPortalAttention, ProjectedPortalLayer,
     ProjectedPortalPresentation, ProjectedPortalRuntimeAuthority, ProjectedPortalState,
     ProjectionErrorCode, ProjectionLifecycleState, ProviderKind, TranscriptUnit,
-    hub::{DeadlineKind, Portal, PortalError, PortalStatus, Transition, Unit},
+    hub::{DeadlineKind, Due, Portal, PortalError, PortalStatus, Transition, Unit},
     resident_grpc::{
         ResidentGrpcPortalAdapter, ResidentGrpcPortalConfig, portal_visual_tokens_from_part_tokens,
     },
@@ -660,7 +660,18 @@ impl InProcessPortalDriver {
                 .filter(|(key, entry)| hub.incarnation(key) != entry.incarnation)
                 .map(|(key, _)| key.clone())
                 .collect();
-            (stale, hub.sweep(now_us), hub.take_due(now_us))
+            let transitions = hub.sweep(now_us);
+            let due: Vec<_> = hub
+                .take_due(now_us)
+                .into_iter()
+                .map(|due| {
+                    let incarnation = hub
+                        .incarnation(&due.key)
+                        .expect("due portal is live under the same Hub guard");
+                    (due, incarnation)
+                })
+                .collect();
+            (stale, transitions, due)
         };
         for key in stale {
             self.drive.detach(&key);
@@ -685,10 +696,7 @@ impl InProcessPortalDriver {
         self.reconnect_recovered_leases(scene);
 
         for due in due {
-            if due.unread > 0 {
-                self.drive.entry(&due.key).carried_unread = due.unread;
-            }
-            self.render(&due.key, scene, input_processor, tab_id, now_us);
+            self.apply_due(due, scene, input_processor, tab_id, now_us);
         }
 
         // Activity-cue quiesce (hud-kbm80): the "⋯ writing" cue derives from
@@ -711,6 +719,35 @@ impl InProcessPortalDriver {
         // Orphan after rendering, so the degraded repaint lands first.
         self.orphan_degraded_leases(scene);
         self.forget_lost_surfaces(scene);
+    }
+
+    /// Apply only the attachment that supplied this due batch. A direct clear
+    /// may replace the key after collection, before its first scene paint.
+    fn apply_due(
+        &mut self,
+        (due, incarnation): (Due, u64),
+        scene: &mut SceneGraph,
+        input_processor: &mut InputProcessor,
+        tab_id: Option<SceneId>,
+        now_us: u64,
+    ) {
+        let current = {
+            let Some(hub) = self.lock_hub() else {
+                return;
+            };
+            hub.incarnation(&due.key)
+        };
+        if current != Some(incarnation) {
+            self.drive.detach(&due.key);
+            self.revoke_pending_leases(scene);
+            return;
+        }
+        let entry = self.drive.entry(&due.key);
+        entry.incarnation = Some(incarnation);
+        if due.unread > 0 {
+            entry.carried_unread = due.unread;
+        }
+        self.render(&due.key, scene, input_processor, tab_id, now_us);
     }
 
     /// Render one portal: create its tile on first render, then paint and
@@ -740,6 +777,7 @@ impl InProcessPortalDriver {
         {
             self.drive.detach(key);
             self.revoke_pending_leases(scene);
+            return;
         }
         self.drive.entry(key).incarnation = Some(incarnation);
         let created = self.drive.entry(key).tile_scene_id.is_none();
@@ -1655,6 +1693,67 @@ mod tests {
             None,
             "poison never busy-retries"
         );
+
+        // Collect old unread work, then clear and replace the key before its
+        // first paint. Applying that old due batch must not paint the new one.
+        let mut first_paint_driver = InProcessPortalDriver::new();
+        let (mut first_scene, first_tab, mut first_processor) = self::scene();
+        publish(&mut first_paint_driver, "p", "old first", 100);
+        publish(&mut first_paint_driver, "p", "old second", 101);
+        let pending = {
+            let mut hub = first_paint_driver.hub_mut();
+            let due = hub.take_due(200).into_iter().next().unwrap();
+            let incarnation = hub.incarnation(&due.key).unwrap();
+            (due, incarnation)
+        };
+        assert_eq!(pending.0.unread, 2);
+        assert!(first_paint_driver.drive.entries.is_empty());
+        assert_eq!(first_paint_driver.hub_mut().clear(&key("p")), Ok(()));
+        publish(&mut first_paint_driver, "p", "fresh replacement", 300);
+        let replacement_before = {
+            let hub = first_paint_driver.hub_mut();
+            let replacement = hub.get(&key("p")).unwrap();
+            assert_eq!(replacement.unread, 1);
+            assert!(replacement.dirty);
+            assert_ne!(hub.incarnation(&key("p")), Some(pending.1));
+            format!("{replacement:?}")
+        };
+        let version_before = first_scene.version;
+        first_paint_driver.apply_due(
+            pending,
+            &mut first_scene,
+            &mut first_processor,
+            Some(first_tab),
+            400,
+        );
+        assert!(first_paint_driver.drive.entries.is_empty());
+        assert_eq!(first_scene.tile_count(), 0);
+        assert!(first_scene.leases.is_empty());
+        assert_eq!(
+            first_scene.version, version_before,
+            "stale due paints nothing"
+        );
+        assert_eq!(
+            format!("{:?}", first_paint_driver.hub_mut().get(&key("p")).unwrap()),
+            replacement_before,
+            "replacement dirty/unread/content remains authoritative and unconsumed"
+        );
+        first_paint_driver.drain_inner(
+            &mut first_scene,
+            &mut first_processor,
+            Some(first_tab),
+            500,
+        );
+        let fresh_tile = tile(&first_paint_driver, "p");
+        let fresh_content = tile_markdown(&first_scene, fresh_tile);
+        assert!(fresh_content.contains("fresh replacement"));
+        assert!(!fresh_content.contains("old first") && !fresh_content.contains("old second"));
+        assert!(fresh_content.contains("1 unread"));
+        assert_eq!(first_scene.tile_unread_count(fresh_tile), 1);
+        assert!(first_scene.lease_is_active(&lease(&first_paint_driver, "p")));
+        let hub = first_paint_driver.hub_mut();
+        assert_eq!(hub.get(&key("p")).unwrap().unread, 0);
+        assert!(!hub.get(&key("p")).unwrap().dirty);
     }
 
     /// Invariant 3: the viewer's dismiss reclaims the portal on the spot;
