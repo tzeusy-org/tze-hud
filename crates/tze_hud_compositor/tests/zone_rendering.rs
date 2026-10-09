@@ -461,13 +461,14 @@ async fn ambient_static_image_draws_texture_or_placeholder() {
             );
             // Source suggests full-zone/full-UV coverage; these literal pixels
             // decide whether the original opaque 16x8 symptom is reproducible.
+            // Sample the top edge outside the default drag grip at x=116..140.
             let repeated = gpu.render(&mut scene);
             for (x, y) in [
                 (0, 0),
                 (255, 0),
                 (0, 255),
                 (255, 255),
-                (128, 0),
+                (64, 0),
                 (128, 255),
                 (0, 128),
                 (255, 128),
@@ -602,7 +603,7 @@ async fn ambient_static_image_draws_texture_or_placeholder() {
             (255, 0),
             (0, 255),
             (255, 255),
-            (128, 0),
+            (64, 0),
             (128, 255),
             (0, 128),
             (255, 128),
