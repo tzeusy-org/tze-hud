@@ -27,11 +27,12 @@ use tze_hud_widget::loader::{BundleScanResult, LoadedBundle, load_bundle_dir_wit
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 const MAX_INPUT: usize = 1024 * 1024;
+const DEFAULT_SCENE_CAPTURE_MS: u64 = 250;
 const LOCAL_IDENTITY: &str = "offline-render-scene-not-a-paired-credential";
 const HELP: &str = "Usage: render-scene (--fixture FILE | --widget BUNDLE --params JSON) --output PNG\n\
     [--theme tonal-glass|classic|blueprint] [--tokens TOML] [--width PX] [--height PX]\n\
     [--capture-at-ms MS]\n\
-Scene defaults: 1920x1080, tonal-glass, final fixture state at 0ms.\n\
+Scene defaults: 1920x1080, tonal-glass, fixture checkpoint at 250ms (explicit 0ms is the first frame).\n\
 Capture bounds: 1..8192 per axis, <=16M pixels; checkpoint <=5000ms.\n\
 Output must not exist. JSON manifest is printed to stdout; compile time is separate.";
 
@@ -62,7 +63,7 @@ fn parse_args(values: impl IntoIterator<Item = String>) -> Result<Option<Args>> 
         tokens: None,
         width: 1920,
         height: 1080,
-        capture_at_ms: 0,
+        capture_at_ms: DEFAULT_SCENE_CAPTURE_MS,
         output: PathBuf::new(),
     };
     let mut seen = std::collections::HashSet::new();
@@ -102,6 +103,9 @@ fn parse_args(values: impl IntoIterator<Item = String>) -> Result<Option<Args>> 
     }
     if args.fixture.is_some() && seen.contains("--params") {
         return Err(error("--params belongs to --widget"));
+    }
+    if args.widget.is_some() && !seen.contains("--capture-at-ms") {
+        args.capture_at_ms = 0;
     }
     validate_args(&args)?;
     Ok(Some(args))
@@ -414,6 +418,20 @@ async fn render_fixture(args: &Args, raw: &RawConfig) -> Result<(CapturedFrame, 
     for request in &requests {
         dispatch(&server, request).await?;
     }
+    // The first real frame starts the compositor's publication transitions.
+    // Sleeping before that build would capture their first instant at any delay.
+    // Explicit zero remains the initial frame; positive checkpoints begin from
+    // the immediate, due-batch/TTL-consistent scene without holding its lock
+    // across the wait. Scheduled publications still enter when their owner
+    // applies them at the requested checkpoint.
+    if args.capture_at_ms > 0 {
+        settle(&server, 0).await?;
+        let handle = server.scene_handle();
+        let mut scene = handle.lock().await;
+        compositor.prime_markdown_cache(&scene);
+        compositor.prime_truncation_cache(&scene);
+        let _initial = compositor.build_windowed_frame(&mut scene, args.width, args.height);
+    }
     settle(&server, args.capture_at_ms).await?;
     let handle = server.scene_handle();
     let mut scene = handle.lock().await;
@@ -618,8 +636,8 @@ async fn main() -> Result<()> {
 mod tests {
     use super::*;
 
-    /// CPU widget PNG/input behavior; GPU capture content is covered by the
-    /// retained compositor fixture and the required actual WSL scene matrix.
+    /// Typed input/widget behavior and real notification checkpoint coverage.
+    /// This parent reaches a GPU constructor and joins the existing GPU group.
     #[tokio::test]
     async fn render_scene_validates_typed_input_and_writes_a_real_png() {
         let dir = std::env::temp_dir().join(format!(
@@ -731,6 +749,77 @@ mod tests {
             parse_args(["--fixture", "a", "--widget", "b", "--output", "c"].map(str::to_owned))
                 .is_err()
         );
+        // A background or portal grip cannot establish that the full-gamut
+        // payloads rendered. Pin all four cards' title/body regions at the
+        // canonical 1920x1080 layout, without a font or antialiasing golden.
+        let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.claude/skills/user-test/scripts/notification-full-gamut.json");
+        let payloads: Vec<Value> = serde_json::from_slice(&fs::read(&fixture).unwrap()).unwrap();
+        assert_eq!(payloads.len(), 4);
+        let titles = [
+            "Critical / Red-Black",
+            "Urgent / Amber-Black",
+            "Normal / Blue-Black",
+            "Low / Smoke Black",
+        ];
+        for (payload, title) in payloads.iter().rev().zip(titles) {
+            assert_eq!(payload["zone"], "notification-area");
+            assert_eq!(payload["content"]["title"], title);
+            assert!(!payload["content"]["body"].as_str().unwrap().is_empty());
+        }
+        let scene_args = Args {
+            fixture: Some(fixture),
+            widget: None,
+            params: json!({}),
+            width: 1920,
+            height: 1080,
+            capture_at_ms: 0,
+            output: dir.join("notification-initial.png"),
+            ..args.clone()
+        };
+        let first_manifest = execute(&scene_args).await.unwrap();
+        let first_bytes = fs::read(&scene_args.output).unwrap();
+        let first = image::load_from_memory(&first_bytes).unwrap().to_rgba8();
+        let settled_args = Args {
+            capture_at_ms: DEFAULT_SCENE_CAPTURE_MS,
+            output: dir.join("notification-settled.png"),
+            ..scene_args
+        };
+        let settled_manifest = execute(&settled_args).await.unwrap();
+        let settled_bytes = fs::read(&settled_args.output).unwrap();
+        let settled = image::load_from_memory(&settled_bytes).unwrap().to_rgba8();
+        assert_eq!(first_manifest["capture_at_ms"], 0);
+        assert_eq!(settled_manifest["capture_at_ms"], DEFAULT_SCENE_CAPTURE_MS);
+        assert_eq!(settled_manifest["messages_applied"], 4);
+        assert_eq!(settled_manifest["png_sha256"], hash(&settled_bytes));
+        assert_eq!(first.dimensions(), (1920, 1080));
+        assert_eq!(settled.dimensions(), first.dimensions());
+        for (slot, title) in titles.iter().enumerate() {
+            // Canonical notification area starts at (75%, 2%); Tonal Glass
+            // has four 65.9px two-line slots, newest at the top. These interior
+            // regions exclude borders, dismiss controls and the portal grip.
+            let top = (21.6 + slot as f32 * 65.9) as u32;
+            for (line, from, to) in [("title", top + 10, top + 31), ("body", top + 33, top + 52)] {
+                let ink = |pixels: &image::RgbaImage| {
+                    (from..to)
+                        .flat_map(|y| (1450..1800).map(move |x| pixels.get_pixel(x, y)))
+                        .filter(|p| p[0] > 128 && p[1] > 128 && p[2] > 128 && p[3] > 160)
+                        .count()
+                };
+                assert!(
+                    ink(&settled) > ink(&first) + 20,
+                    "{title} {line} must contain visible foreground text after entrance"
+                );
+            }
+            let card_changed = (top + 10..top + 40)
+                .flat_map(|y| (1860..1880).map(move |x| (x, y)))
+                .filter(|&(x, y)| settled.get_pixel(x, y) != first.get_pixel(x, y))
+                .count();
+            assert!(
+                card_changed > 300,
+                "{title} must paint its card interior, not just text or unrelated chrome"
+            );
+        }
         // The task controller retains this fixture directory as evidence.
     }
 }

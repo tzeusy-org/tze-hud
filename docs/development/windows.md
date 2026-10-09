@@ -408,8 +408,14 @@ table, with an explicit `--theme` taking precedence over its selector. Positive
 
 The batch accepts ordered zone/content or widget/params publishes, clears and
 holds. TTL, merge keys and supported delayed zone publication go through their
-existing owners; errors in response bodies fail the command. `--capture-at-ms`
-selects a checkpoint after the last message, from 0 to 5000ms. The status fixture
+existing owners; errors in response bodies fail the command. Scene mode builds
+an initial real frame before waiting for the checkpoint. `--capture-at-ms` is
+0 to 5000ms after the ordered messages: the default 250ms settles the named
+matrix fixtures' immediate entrance transitions (at most 200ms), while an
+explicit `--capture-at-ms 0` captures the initial frame. Delayed publications
+still become active when due and may be entering at the chosen checkpoint;
+this is not a promise that arbitrary delays or streaming content have settled.
+CPU widget mode defaults to 0ms. The status fixture
 `status-indicator-theme-status-matrix-test.json` updates `main-status` twelve
 times: one final image shows **friendly/offline**, not all twelve states.
 Use separate checkpoint fixtures/images to make intermediate-state claims.

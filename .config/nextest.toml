@@ -36,5 +36,6 @@ retries = 2
 # The five existing Criterion callback/setup chains are CPU-only. A new or
 # unresolved GPU bench must join THIS group rather than blindly inherit this
 # exclusion. Their actual identities/default-group assignment remain required.
-filter = "(package(=tze_hud_compositor) | package(=tze_hud_runtime) | package(=vertical_slice) | package(=tze_hud_app)) & not kind(bench)"
+# The one render-scene feature parent now reaches the real GPU constructor.
+filter = "((package(=tze_hud_compositor) | package(=tze_hud_runtime) | package(=vertical_slice) | package(=tze_hud_app)) & not kind(bench)) | (package(=render_artifacts) & binary(=render-scene) & test(=tests::render_scene_validates_typed_input_and_writes_a_real_png))"
 test-group = "gpu"
