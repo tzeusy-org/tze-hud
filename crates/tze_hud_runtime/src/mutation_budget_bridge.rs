@@ -39,11 +39,56 @@ struct AggregateBudgetState {
 }
 
 struct SessionBudgetState {
+    namespace: String,
     resident: bool,
     budget: ResourceBudget,
     tiles: u32,
     texture_bytes: u64,
     recent_updates: VecDeque<Instant>,
+}
+
+impl AggregateBudgetState {
+    /// Check the proposed session usage together with its same-agent peers.
+    /// Replacing one session's usage preserves every peer during rollback/resume.
+    fn check_namespace_usage(
+        &self,
+        namespace: &str,
+        replaced_session: Option<SceneId>,
+        proposed: MutationBudgetUsage,
+        budget: &ResourceBudget,
+    ) -> Option<String> {
+        let (tiles, texture_bytes) = self
+            .sessions
+            .iter()
+            .filter(|(id, session)| {
+                Some(**id) != replaced_session && session.namespace == namespace
+            })
+            .fold(
+                (
+                    u128::from(proposed.tiles),
+                    u128::from(proposed.texture_bytes),
+                ),
+                |(tiles, texture_bytes), (_, session)| {
+                    (
+                        tiles + u128::from(session.tiles),
+                        texture_bytes + u128::from(session.texture_bytes),
+                    )
+                },
+            );
+        if tiles > u128::from(budget.max_tiles) {
+            return Some(format!(
+                "agent tiles proposed={tiles} limit={}",
+                budget.max_tiles
+            ));
+        }
+        if texture_bytes > u128::from(budget.max_texture_bytes) {
+            return Some(format!(
+                "agent texture_bytes proposed={texture_bytes} limit={}",
+                budget.max_texture_bytes
+            ));
+        }
+        None
+    }
 }
 
 impl SessionBudgetState {
@@ -172,7 +217,7 @@ impl MutationBudgetEnforcerContract for RuntimeMutationBudgetEnforcer {
     fn register_session(
         &self,
         session_id: SceneId,
-        _namespace: String,
+        namespace: String,
         budget: ResourceBudget,
         resident: bool,
         initial_usage: MutationBudgetUsage,
@@ -211,7 +256,15 @@ impl MutationBudgetEnforcerContract for RuntimeMutationBudgetEnforcer {
                 state.max_leased_texture_bytes
             ));
         }
+        if let Some(message) = state.check_namespace_usage(&namespace, None, initial_usage, &budget)
+        {
+            return MutationBudgetDecision::Reject {
+                error_code: "RESOURCE_BUDGET_EXCEEDED",
+                message: format!("restored agent usage rejected: {message}"),
+            };
+        }
         let mut session = SessionBudgetState {
+            namespace,
             resident,
             budget,
             tiles: 0,
@@ -267,7 +320,7 @@ impl MutationBudgetEnforcerContract for RuntimeMutationBudgetEnforcer {
     ) -> MutationBudgetDecision {
         let mut guard = self.lock();
         let state = &mut *guard;
-        let Some(session) = state.sessions.get_mut(&session_id) else {
+        let Some(session) = state.sessions.get(&session_id) else {
             return MutationBudgetDecision::Reject {
                 error_code: "RESOURCE_BUDGET_SESSION_UNKNOWN",
                 message: format!("session_id {session_id} is not registered"),
@@ -289,6 +342,24 @@ impl MutationBudgetEnforcerContract for RuntimeMutationBudgetEnforcer {
         }
         let session_tiles = apply_delta_u32(session.tiles, delta_tiles);
         let session_texture = apply_delta_u64(session.texture_bytes, delta_texture_bytes);
+        if let Some(message) = state.check_namespace_usage(
+            &session.namespace,
+            Some(session_id),
+            MutationBudgetUsage {
+                tiles: session_tiles,
+                texture_bytes: session_texture,
+            },
+            &session.budget,
+        ) {
+            return MutationBudgetDecision::Reject {
+                error_code: "RESOURCE_BUDGET_EXCEEDED",
+                message,
+            };
+        }
+        let session = state
+            .sessions
+            .get_mut(&session_id)
+            .expect("session remains registered under the state lock");
         if let Some(message) = session.check(
             session_tiles,
             session_texture,
@@ -541,6 +612,227 @@ mod tests {
             MutationBudgetDecision::Reject { message, .. }
                 if message.contains("resident_sessions")
         ));
+
+        // Local caps are lower than the global ceiling, so neither can mask
+        // the other. Rollback must release only the successful own delta.
+        for (label, tiles, bytes) in [("tiles", 1, 0), ("texture", 0, 12)] {
+            let local = RuntimeMutationBudgetEnforcer::with_limits(2, 8, 100);
+            let session = SceneId::new();
+            assert_eq!(
+                local.register_session(
+                    session,
+                    "local".to_string(),
+                    ResourceBudget {
+                        max_tiles: 1,
+                        max_texture_bytes: 20,
+                        ..ResourceBudget::default()
+                    },
+                    true,
+                    MutationBudgetUsage::default()
+                ),
+                MutationBudgetDecision::Allow
+            );
+            assert_eq!(
+                local.reserve_mutation(session, tiles, bytes, 1),
+                MutationBudgetDecision::Allow
+            );
+            let rejected = local.reserve_mutation(session, tiles, bytes, 1);
+            println!("local {label} session={session} rejected={rejected:?}");
+            assert!(matches!(
+                rejected,
+                MutationBudgetDecision::Reject {
+                    error_code: "RESOURCE_BUDGET_EXCEEDED",
+                    ..
+                }
+            ));
+            local.rollback_mutation(session, tiles, bytes);
+            assert_eq!(
+                local.reserve_mutation(session, tiles, bytes, 1),
+                MutationBudgetDecision::Allow
+            );
+            local.remove_session(session);
+        }
+
+        // Joined execution threads contend on the existing global mutex.
+        // A rejected delta reserves nothing; actual rollback/removal frees
+        // capacity for the other session without releasing its peer usage.
+        for (label, tiles, bytes) in [("tiles", 1, 0), ("texture", 0, 12)] {
+            let global = RuntimeMutationBudgetEnforcer::with_limits(2, 1, 20);
+            let sessions = [SceneId::new(), SceneId::new()];
+            for (session, namespace) in sessions.into_iter().zip(["agent-a", "agent-b"]) {
+                assert_eq!(
+                    global.register_session(
+                        session,
+                        namespace.to_string(),
+                        ResourceBudget {
+                            max_tiles: 2,
+                            max_texture_bytes: 100,
+                            ..ResourceBudget::default()
+                        },
+                        true,
+                        MutationBudgetUsage::default()
+                    ),
+                    MutationBudgetDecision::Allow
+                );
+            }
+            let outcomes = std::thread::scope(|scope| {
+                let start = std::sync::Arc::new(std::sync::Barrier::new(2));
+                let workers: Vec<_> = sessions
+                    .into_iter()
+                    .map(|session| {
+                        let start = start.clone();
+                        let global = &global;
+                        scope.spawn(move || {
+                            start.wait();
+                            (session, global.reserve_mutation(session, tiles, bytes, 1))
+                        })
+                    })
+                    .collect();
+                workers
+                    .into_iter()
+                    .map(|worker| worker.join().expect("global reserve thread completed"))
+                    .collect::<Vec<_>>()
+            });
+            println!("global {label} joined={outcomes:?}");
+            assert_eq!(
+                outcomes
+                    .iter()
+                    .filter(|(_, decision)| *decision == MutationBudgetDecision::Allow)
+                    .count(),
+                1
+            );
+            let winner = outcomes
+                .iter()
+                .find(|(_, decision)| *decision == MutationBudgetDecision::Allow)
+                .unwrap()
+                .0;
+            let loser = outcomes
+                .iter()
+                .find(|(_, decision)| {
+                    matches!(
+                        decision,
+                        MutationBudgetDecision::Reject {
+                            error_code: "RESOURCE_EXHAUSTED",
+                            ..
+                        }
+                    )
+                })
+                .unwrap()
+                .0;
+            global.rollback_mutation(winner, tiles, bytes);
+            assert_eq!(
+                global.reserve_mutation(loser, tiles, bytes, 1),
+                MutationBudgetDecision::Allow
+            );
+            assert!(matches!(
+                global.reserve_mutation(winner, tiles, bytes, 1),
+                MutationBudgetDecision::Reject {
+                    error_code: "RESOURCE_EXHAUSTED",
+                    ..
+                }
+            ));
+            global.remove_session(loser);
+            assert_eq!(
+                global.reserve_mutation(winner, tiles, bytes, 1),
+                MutationBudgetDecision::Allow
+            );
+        }
+
+        // I7 and ResourceBudget/trait say per-agent. API session wording does
+        // not explicitly permit aggregate excess across the same identity.
+        // These are injected-namespace unit rows, not an authenticated wire
+        // witness. Record all joined outcomes before the normative assertion;
+        // preserve a failure instead of changing policy to match the code.
+        let mut aggregate_rows = Vec::new();
+        for (label, tiles, bytes) in [("tiles", 1, 0), ("texture", 0, 12)] {
+            for namespaces in [["same-agent", "same-agent"], ["agent-a", "agent-b"]] {
+                for order in ["forward", "reverse", "parallel"] {
+                    let aggregate = RuntimeMutationBudgetEnforcer::with_limits(2, 8, 100);
+                    let sessions = [SceneId::new(), SceneId::new()];
+                    for (session, namespace) in sessions.into_iter().zip(namespaces) {
+                        assert_eq!(
+                            aggregate.register_session(
+                                session,
+                                namespace.to_string(),
+                                ResourceBudget {
+                                    max_tiles: 1,
+                                    max_texture_bytes: 20,
+                                    ..ResourceBudget::default()
+                                },
+                                true,
+                                MutationBudgetUsage::default()
+                            ),
+                            MutationBudgetDecision::Allow
+                        );
+                    }
+                    let attempts = if order == "reverse" {
+                        [sessions[1], sessions[0]]
+                    } else {
+                        sessions
+                    };
+                    let outcomes = if order == "parallel" {
+                        std::thread::scope(|scope| {
+                            let start = std::sync::Arc::new(std::sync::Barrier::new(2));
+                            let workers: Vec<_> = attempts
+                                .into_iter()
+                                .map(|session| {
+                                    let start = start.clone();
+                                    let aggregate = &aggregate;
+                                    scope.spawn(move || {
+                                        start.wait();
+                                        (
+                                            session,
+                                            aggregate.reserve_mutation(session, tiles, bytes, 1),
+                                        )
+                                    })
+                                })
+                                .collect();
+                            workers
+                                .into_iter()
+                                .map(|worker| {
+                                    worker.join().expect("same-agent reserve thread completed")
+                                })
+                                .collect::<Vec<_>>()
+                        })
+                    } else {
+                        attempts
+                            .into_iter()
+                            .map(|session| {
+                                (
+                                    session,
+                                    aggregate.reserve_mutation(session, tiles, bytes, 1),
+                                )
+                            })
+                            .collect()
+                    };
+                    println!(
+                        "aggregate {label} namespaces={namespaces:?} order={order} joined={outcomes:?}"
+                    );
+                    aggregate_rows.push((label, namespaces, order, outcomes));
+                }
+            }
+        }
+        for (label, namespaces, order, outcomes) in aggregate_rows {
+            let expected_admitted = if namespaces[0] == namespaces[1] { 1 } else { 2 };
+            assert_eq!(
+                outcomes
+                    .iter()
+                    .filter(|(_, decision)| *decision == MutationBudgetDecision::Allow)
+                    .count(),
+                expected_admitted,
+                "I7 per-agent {label} cap; namespaces={namespaces:?} order={order}: {outcomes:?}"
+            );
+            for (_, decision) in outcomes {
+                assert!(matches!(
+                    decision,
+                    MutationBudgetDecision::Allow
+                        | MutationBudgetDecision::Reject {
+                            error_code: "RESOURCE_BUDGET_EXCEEDED",
+                            ..
+                        }
+                ));
+            }
+        }
     }
 
     #[test]
