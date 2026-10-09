@@ -466,7 +466,7 @@ async fn grpc_disconnect_orphans_leases_and_badges_tiles() {
         assert!(
             !scene.zone_registry.active_publishes["subtitle"]
                 .iter()
-                .any(|r| r.merge_key.as_deref() == Some(&format!("delayed-{}", session_origin)))
+                .any(|r| r.merge_key.as_deref() == Some(&format!("delayed-{session_origin}")))
         );
     }
     peer.disconnect(&state).await;
