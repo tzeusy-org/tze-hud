@@ -944,6 +944,266 @@ mod tests {
             1,
             "an action press must not dismiss the notification"
         );
+
+        drop(scene);
+        drop(shared);
+
+        use tze_hud_input::ScrollEvent;
+        use tze_hud_scene::{TileScrollConfig, types::ZoneHitRegion};
+
+        // Use real publications and the harness's compositor hit-region pass.
+        let shared_state = Arc::clone(&harness.app.state.shared_state);
+        {
+            let shared = shared_state.blocking_lock();
+            let mut scene = shared.scene.blocking_lock();
+            scene
+                .publish_to_zone(
+                    "notification-area",
+                    ZoneContent::Notification(NotificationPayload {
+                        text: "Keep this notification".into(),
+                        icon: String::new(),
+                        urgency: 1,
+                        ttl_ms: None,
+                        title: "Control".into(),
+                        actions: vec![NotificationAction {
+                            label: "Keep".into(),
+                            callback_id: "keep".into(),
+                        }],
+                    }),
+                    "control-agent",
+                    None,
+                    None,
+                    None,
+                )
+                .unwrap();
+        }
+        while !harness.tick() {}
+        let notifications = || {
+            let shared = shared_state.blocking_lock();
+            let scene = shared.scene.blocking_lock();
+            (
+                scene
+                    .zone_registry
+                    .active_for_zone("notification-area")
+                    .to_vec(),
+                scene.overlay.zone_hit_regions.clone(),
+            )
+        };
+        let before_dismiss = notifications();
+        assert_eq!(before_dismiss.0.len(), 2);
+        let target = before_dismiss
+            .0
+            .iter()
+            .find(|record| record.publisher_namespace == "notif-agent")
+            .expect("the action notification remains the dismiss target");
+        let dismiss = before_dismiss
+            .1
+            .iter()
+            .find(|hit| {
+                hit.zone_name == target.zone_name
+                    && hit.publisher_namespace == target.publisher_namespace
+                    && hit.published_at_wall_us == target.published_at_wall_us
+                    && matches!(hit.kind, ZoneInteractionKind::Dismiss)
+            })
+            .expect("the real notification pass generated the target dismiss hit");
+        harness.app.state.cursor_x = dismiss.bounds.x + dismiss.bounds.width / 2.0;
+        harness.app.state.cursor_y = dismiss.bounds.y + dismiss.bounds.height / 2.0;
+        harness.app.enqueue_pointer_event(PointerEventKind::Down);
+        assert_eq!(
+            notifications(),
+            before_dismiss,
+            "Down cannot dismiss either identity"
+        );
+        harness.app.enqueue_pointer_event(PointerEventKind::Up);
+        let mut after_dismiss = before_dismiss.clone();
+        after_dismiss.0.retain(|record| {
+            record.publisher_namespace != target.publisher_namespace
+                || record.published_at_wall_us != target.published_at_wall_us
+        });
+        after_dismiss.1.retain(|hit| {
+            hit.zone_name != target.zone_name
+                || hit.publisher_namespace != target.publisher_namespace
+                || hit.published_at_wall_us != target.published_at_wall_us
+        });
+        assert_eq!(after_dismiss.0.len(), 1);
+        assert_eq!(after_dismiss.0[0].publisher_namespace, "control-agent");
+        assert!(after_dismiss.1.iter().any(|hit| {
+            matches!(&hit.kind, ZoneInteractionKind::Action { callback_id } if callback_id == "keep")
+        }), "the unrelated action hit survives");
+        assert_eq!(
+            notifications(),
+            after_dismiss,
+            "Up removes only the exact publication and its stale hits"
+        );
+        // Do not repopulate cards between these events: this Up has no target hit.
+        harness.app.enqueue_pointer_event(PointerEventKind::Up);
+        assert_eq!(
+            notifications(),
+            after_dismiss,
+            "another Up cannot dismiss the control"
+        );
+
+        let (tile_id, control_id, untracked_id, tail_offset) = {
+            let shared = shared_state.blocking_lock();
+            let mut scene = shared.scene.blocking_lock();
+            let tab = scene.active_tab.unwrap();
+            let lease = scene.grant_lease("scroll-agent", 60_000);
+            let tile = scene
+                .create_tile(
+                    tab,
+                    "scroll-agent",
+                    lease,
+                    Rect::new(100.0, 400.0, 400.0, 100.0),
+                    1,
+                )
+                .unwrap();
+            let control = scene
+                .create_tile(
+                    tab,
+                    "scroll-agent",
+                    lease,
+                    Rect::new(700.0, 400.0, 400.0, 100.0),
+                    1,
+                )
+                .unwrap();
+            let untracked = scene
+                .create_tile(
+                    tab,
+                    "scroll-agent",
+                    lease,
+                    Rect::new(100.0, 700.0, 400.0, 100.0),
+                    1,
+                )
+                .unwrap();
+            for id in [tile, control, untracked] {
+                scene
+                    .register_tile_scroll_config(id, TileScrollConfig::vertical())
+                    .unwrap();
+            }
+            let processor = &mut harness.app.state.input_processor;
+            processor.notify_tile_content_appended(tile, 400.0, 100.0, 20.0, &mut scene);
+            let tail = scene.tile_scroll_offset_local(tile);
+            assert_eq!(
+                tail,
+                (0.0, 300.0),
+                "content minus viewport independently pins the tail"
+            );
+            processor
+                .process_scroll_event(
+                    &ScrollEvent {
+                        x: 200.0,
+                        y: 450.0,
+                        delta_x: 0.0,
+                        delta_y: -120.0,
+                    },
+                    &mut scene,
+                )
+                .expect("a real scroll event moves its tracked tile");
+            assert_ne!(scene.tile_scroll_offset_local(tile), tail);
+            assert!(!scene.tile_follow_tail_at_tail(tile));
+            processor.notify_tile_content_appended(control, 600.0, 100.0, 20.0, &mut scene);
+            processor
+                .process_scroll_event(
+                    &ScrollEvent {
+                        x: 800.0,
+                        y: 450.0,
+                        delta_x: 0.0,
+                        delta_y: -100.0,
+                    },
+                    &mut scene,
+                )
+                .expect("a real scroll event moves its tracked tile");
+            assert!(!scene.tile_follow_tail_at_tail(control));
+            // Existing scene state with no InputProcessor registration must stay intact.
+            assert_eq!(processor.tile_total_content_height_px(untracked), 0.0);
+            scene
+                .set_tile_scroll_offset_local(untracked, 0.0, 37.0)
+                .unwrap();
+            scene.set_tile_follow_tail_at_tail(untracked, false);
+            // Typed input fixture only; this does not assert compositor button geometry.
+            scene.overlay.zone_hit_regions.push(ZoneHitRegion {
+                zone_name: "__jump_to_latest__".into(),
+                published_at_wall_us: 0,
+                publisher_namespace: "runtime".into(),
+                bounds: Rect::new(550.0, 550.0, 20.0, 20.0),
+                kind: ZoneInteractionKind::JumpToLatest { tile_id: tile },
+                interaction_id: format!("jump-to-latest:{tile}"),
+                tab_order: 0,
+            });
+            (tile, control, untracked, tail)
+        };
+        let target_scroll = || {
+            let shared = shared_state.blocking_lock();
+            let scene = shared.scene.blocking_lock();
+            (
+                scene.tile_scroll_offset_local(tile_id),
+                scene.tile_follow_tail_at_tail(tile_id),
+            )
+        };
+        let unrelated = || {
+            let shared = shared_state.blocking_lock();
+            let scene = shared.scene.blocking_lock();
+            (
+                scene.tiles.clone(),
+                scene.leases.clone(),
+                scene.tile_scroll_offset_local(control_id),
+                scene.tile_follow_tail_at_tail(control_id),
+                scene.tile_scroll_offset_local(untracked_id),
+                scene.tile_follow_tail_at_tail(untracked_id),
+                scene
+                    .zone_registry
+                    .active_for_zone("notification-area")
+                    .to_vec(),
+                scene.overlay.zone_hit_regions.clone(),
+            )
+        };
+        let scrolled_back = target_scroll();
+        let control_before_jump = unrelated();
+        harness.app.state.cursor_x = 560.0;
+        harness.app.state.cursor_y = 560.0;
+        harness.app.enqueue_pointer_event(PointerEventKind::Down);
+        assert_eq!(target_scroll(), scrolled_back, "Down cannot jump");
+        assert_eq!(unrelated(), control_before_jump);
+        harness.app.enqueue_pointer_event(PointerEventKind::Up);
+        assert_eq!(
+            target_scroll(),
+            (tail_offset, true),
+            "Up restores the recorded tail and AtTail synchronously"
+        );
+        assert_eq!(
+            unrelated(),
+            control_before_jump,
+            "other tiles, leases and publications are unchanged"
+        );
+        harness.app.enqueue_pointer_event(PointerEventKind::Up);
+        assert_eq!(
+            target_scroll(),
+            (tail_offset, true),
+            "Up at tail is idempotent"
+        );
+        assert_eq!(unrelated(), control_before_jump);
+        {
+            let shared = shared_state.blocking_lock();
+            let mut scene = shared.scene.blocking_lock();
+            let jump = scene.overlay.zone_hit_regions.last_mut().unwrap();
+            assert!(
+                matches!(jump.kind, ZoneInteractionKind::JumpToLatest { tile_id: id } if id == tile_id)
+            );
+            jump.kind = ZoneInteractionKind::JumpToLatest {
+                tile_id: untracked_id,
+            };
+            jump.interaction_id = format!("jump-to-latest:{untracked_id}");
+        }
+        let before_untracked_jump = unrelated();
+        harness.app.enqueue_pointer_event(PointerEventKind::Down);
+        assert_eq!(unrelated(), before_untracked_jump);
+        harness.app.enqueue_pointer_event(PointerEventKind::Up);
+        assert_eq!(
+            unrelated(),
+            before_untracked_jump,
+            "an untracked scroll-state jump is a no-op"
+        );
+        assert_eq!(target_scroll(), (tail_offset, true));
     }
 
     /// Hovering a tile publishes it as the close-button target (and not while the
