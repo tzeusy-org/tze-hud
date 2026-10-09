@@ -1,0 +1,3 @@
+#!/usr/bin/env sh
+# Git supplies remote details as arguments; only its ref tuples are needed.
+exec just pre-push git-stdin
