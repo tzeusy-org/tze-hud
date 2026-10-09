@@ -1,0 +1,105 @@
+# Upload sealed WSL images; this workflow never renders or approves pixels.
+# Dispatch at an evidence ref containing the flat native12 directory below.
+name: renderer evidence
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  upload-native12:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Validate the sealed twelve-image manifest
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import math
+          import os
+          from pathlib import Path
+          import re
+
+          root = Path("renderer-evidence/native12")
+          themes = ("tonal-glass", "classic", "blueprint")
+          fixtures = (
+              "all-zones-test",
+              "notification-full-gamut",
+              "subtitle-multiline",
+              "status-indicator-theme-status-matrix-test",
+          )
+          expected = {
+              f"{theme}-{fixture}.png": (theme, f"{fixture}.json")
+              for theme in themes for fixture in fixtures
+          }
+          if root.parent.is_symlink() or root.is_symlink() or not root.is_dir():
+              raise SystemExit("Expected a regular renderer-evidence/native12 directory")
+          if {path.name for path in root.iterdir()} != set(expected) | {"manifest.json"}:
+              raise SystemExit("Expected manifest.json and exactly the twelve matrix PNGs; no warmup or extra files")
+          if any(path.is_symlink() or not path.is_file() for path in root.iterdir()):
+              raise SystemExit("Evidence entries must be regular files, not symlinks or directories")
+
+          def unique_object(pairs):
+              result = {}
+              for key, value in pairs:
+                  if key in result:
+                      raise ValueError("Duplicate manifest key")
+                  result[key] = value
+              return result
+
+          try:
+              manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"), object_pairs_hook=unique_object)
+          except (ValueError, UnicodeError):
+              raise SystemExit("Invalid manifest.json") from None
+          if not isinstance(manifest, dict):
+              raise SystemExit("Manifest must be an object")
+          source_commit = manifest.get("source_commit")
+          if not isinstance(source_commit, str) or not re.fullmatch(r"[0-9a-f]{40}", source_commit):
+              raise SystemExit("Manifest must identify the exact renderer source_commit")
+          images = manifest.get("images")
+          if not isinstance(images, list) or len(images) != len(expected):
+              raise SystemExit("Manifest must contain exactly twelve image entries")
+          seen = set()
+          for image in images:
+              if not isinstance(image, dict):
+                  raise SystemExit("Invalid image entry")
+              filename = image.get("file")
+              if not isinstance(filename, str) or filename not in expected or filename in seen:
+                  raise SystemExit("Missing, duplicate or unsafe image filename")
+              seen.add(filename)
+              theme, fixture = expected[filename]
+              wall = image.get("wall_seconds")
+              if image.get("theme") != theme or image.get("fixture") != fixture:
+                  raise SystemExit("Image theme/fixture provenance does not match its matrix filename")
+              if isinstance(wall, bool) or not isinstance(wall, (int, float)) or wall < 0 or (isinstance(wall, float) and not math.isfinite(wall)):
+                  raise SystemExit("Image must record its measured full CLI wall_seconds")
+              digest = image.get("sha256")
+              if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+                  raise SystemExit("Image must declare its SHA-256")
+              data = (root / filename).read_bytes()
+              if not data.startswith(b"\x89PNG\r\n\x1a\n"):
+                  raise SystemExit("Evidence image is not a PNG")
+              if hashlib.sha256(data).hexdigest() != digest:
+                  raise SystemExit("Evidence image SHA-256 mismatch")
+          if seen != set(expected):
+              raise SystemExit("Incomplete twelve-image manifest")
+          # The evidence commit includes this manifest; source_commit names the
+          # separately measured renderer source. Upload is not timing/visual proof.
+          print(f"renderer source_commit={manifest['source_commit']}")
+          print(f"evidence checkout_commit={os.environ['GITHUB_SHA']}")
+          print("Validated twelve sealed PNG byte hashes; no rendering or visual approval")
+          PY
+
+      - name: Upload the sealed renderer matrix
+        uses: actions/upload-artifact@v6
+        with:
+          name: renderer-native12
+          path: renderer-evidence/native12/
+          if-no-files-found: error
+          retention-days: 30
