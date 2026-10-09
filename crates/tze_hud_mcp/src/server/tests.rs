@@ -1282,3 +1282,163 @@ async fn resume_restores_mcp_publishing() {
     let scene = server.scene.lock().await;
     assert_eq!(scene.leases.len(), 1, "the original lease serves again");
 }
+
+#[tokio::test]
+async fn user_test_zone_fixtures_and_documented_examples_match_production_parser() {
+    fn zone_messages(value: Value, origin: &str) -> Vec<(String, Value)> {
+        value
+            .as_array()
+            .unwrap_or_else(|| panic!("{origin}: expected a message array"))
+            .iter()
+            .enumerate()
+            .filter_map(|(index, message)| {
+                assert!(message.is_object(), "{origin}[{index}]: expected a message");
+                if message.get("zone").is_none() && message.get("content").is_none() {
+                    return None; // Widget messages have no zone content.
+                }
+                let zone = message["zone"]
+                    .as_str()
+                    .unwrap_or_else(|| panic!("{origin}[{index}]: missing zone"));
+                let content = message
+                    .get("content")
+                    .unwrap_or_else(|| panic!("{origin}[{index}]: missing content"));
+                Some((format!("zone:{zone}"), content.clone()))
+            })
+            .collect()
+    }
+
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
+    let skill = root.join(".claude/skills/user-test");
+    let mut fixtures: Vec<_> = std::fs::read_dir(skill.join("scripts"))
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "json"))
+        .collect();
+    fixtures.sort();
+    let mut messages = Vec::new();
+    for path in fixtures {
+        let value = serde_json::from_slice(&std::fs::read(&path).unwrap())
+            .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+        messages.extend(zone_messages(value, &path.display().to_string()));
+    }
+    assert!(
+        !messages.is_empty(),
+        "no user-test zone fixtures were checked"
+    );
+    let fixture_count = messages.len();
+
+    let reference = std::fs::read_to_string(skill.join("references/message-payloads.md")).unwrap();
+    let mut block = None::<String>;
+    for line in reference.lines() {
+        match line.trim() {
+            "```json" => {
+                assert!(block.is_none(), "nested JSON fence in message-payloads.md");
+                block = Some(String::new());
+            }
+            "```" => {
+                if let Some(text) = block.take() {
+                    let value = serde_json::from_str(&text)
+                        .expect("message-payloads.md JSON examples must remain executable");
+                    messages.extend(zone_messages(value, "message-payloads.md"));
+                }
+            }
+            _ => {
+                if let Some(text) = block.as_mut() {
+                    text.push_str(line);
+                    text.push('\n');
+                }
+            }
+        }
+    }
+    assert!(
+        block.is_none(),
+        "unterminated JSON example in message-payloads.md"
+    );
+    assert!(
+        messages.len() > fixture_count,
+        "no documented zone examples were checked"
+    );
+
+    // Exercise hud_publish's real type inference, strict parser and blank prefilter.
+    // A fresh CPU scene keeps stack capacity and TTL separate from content validity.
+    for (surface, content) in messages {
+        let (server, _) = server();
+        call(
+            &server,
+            "hud_publish",
+            json!({"surface": surface, "content": content}),
+        )
+        .await;
+    }
+
+    for (surface, content) in [
+        (
+            "zone:notification-area",
+            json!({"type": "notification", "body": "valid"}),
+        ),
+        (
+            "zone:status-bar",
+            json!({"type": "status_bar", "entries": {"build": "passing"}}),
+        ),
+        (
+            "zone:pip",
+            json!({"type": "solid_color", "r": 0.2, "g": 0.6, "b": 0.9}),
+        ),
+        (
+            "zone:subtitle",
+            json!({"type": "stream_text", "text": "valid"}),
+        ),
+    ] {
+        let mut unknown = content.clone();
+        unknown
+            .as_object_mut()
+            .unwrap()
+            .insert("unexpected_fixture_key".into(), json!(true));
+        let kind = content["type"].as_str().unwrap();
+        let mut nested = serde_json::Map::new();
+        nested.insert("type".into(), json!(kind));
+        nested.insert(kind.into(), content);
+        for (bad, hint) in [
+            (unknown, "unknown field"),
+            (Value::Object(nested), "not nested"),
+        ] {
+            let (server, _) = server();
+            let error = call_err(
+                &server,
+                "hud_publish",
+                json!({"surface": surface, "content": bad}),
+            )
+            .await;
+            assert_eq!(error["code"], "INVALID_ARGUMENT", "{error}");
+            assert!(error["hint"].as_str().unwrap().contains(hint), "{error}");
+        }
+    }
+    for (surface, content, hint) in [
+        ("zone:subtitle", json!(""), "needs content"),
+        (
+            "zone:subtitle",
+            json!({"type": "stream_text", "text": ""}),
+            "non-empty",
+        ),
+        (
+            "zone:notification-area",
+            json!({"urgency": 1}),
+            "title or body",
+        ),
+        ("zone:pip", json!({"type": "solid_color"}), "numeric"),
+    ] {
+        let (server, _) = server();
+        let error = call_err(
+            &server,
+            "hud_publish",
+            json!({"surface": surface, "content": content}),
+        )
+        .await;
+        assert_eq!(error["code"], "INVALID_ARGUMENT", "{error}");
+        assert!(error["hint"].as_str().unwrap().contains(hint), "{error}");
+    }
+}
