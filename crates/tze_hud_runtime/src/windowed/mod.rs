@@ -206,7 +206,7 @@ use self::input_dispatch::{
 use self::keyboard::{ComposerDeliveryContext, PendingKeyboardEvent};
 use self::lifecycle::{
     BENCHMARK_NO_PROGRESS_TIMEOUT, PendingInputLatencySamples, WindowedBenchmarkRunState,
-    WindowedQuiescentEfficiencyRunState, begin_os_mouse_capture, drain_pending_input_latency,
+    WindowedQuiescentEfficiencyRunState, begin_os_mouse_capture, drain_windowed_input_latency,
     end_os_mouse_capture, focus_window_for_text_input, read_windows_clipboard_text,
     seed_windowed_benchmark_scene, update_surface_repaint_pending, windowed_frame_needs_render,
 };
@@ -1961,7 +1961,6 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                             // `WindowedFrameBuild`. Crucially this phase does NOT
                             // touch the swapchain surface — so it never blocks on
                             // vsync while the lock is held.
-                            let scene_commit_at = Instant::now();
                             let (surf_w, surf_h) = surface_for_compositor.size();
                             let build = compositor.build_windowed_frame(&mut scene, surf_w, surf_h);
                             // Hit-region refresh + hit-test snapshot are still
@@ -2006,6 +2005,9 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                                 &tze_hud_compositor::FrameTarget::primary(surf_w, surf_h),
                                 surface_for_compositor.as_ref(),
                             );
+                            // Input latency ends at the actual primary queue submission,
+                            // even if a later present/poll failure clears stage telemetry.
+                            let latency_gpu_submitted = present_outcome.gpu_submitted;
                             if present_outcome.surface_acquired {
                                 compositor_wake.counters().record_surface_acquisition();
                             }
@@ -2111,10 +2113,10 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                             // u64 read, no atomics, no cross-thread access.
                             telem.scene_lock_miss_count = scene_lock_miss_count;
                             if let Some((local_ack_us, scene_commit_us, next_present_us)) =
-                                drain_pending_input_latency(
+                                drain_windowed_input_latency(
                                     &pending_input_latency,
-                                    scene_commit_at,
-                                    Instant::now(),
+                                    &presented_batch_ids,
+                                    latency_gpu_submitted,
                                 )
                             {
                                 telem.input_to_local_ack_us = local_ack_us;

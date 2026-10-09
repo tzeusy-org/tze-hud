@@ -101,11 +101,12 @@ pub struct FrameTelemetry {
 
     // ── Split input latency measurements ────────────────────────────────────
     //
-    // These three fields carry the split latency measurements required by
-    // validation-framework/spec.md §"Split Latency Budgets". Each records
-    // the elapsed time from the triggering input event to a specific pipeline
-    // boundary for the *current frame*. A value of 0 means no input event
-    // occurred this frame for that measurement point.
+    // Each field records actual triggering input to its specific boundary for
+    // this frame. Response fields require explicit association with a newly
+    // applied response; arbitrary input plus unrelated scene work is insufficient.
+    // Zero means absent input/response at that measurement point. Anonymous local
+    // feedback may populate only local_ack. Headless completion is local GPU
+    // submission, not Windows surface.present/scanout or a remote roundtrip.
     /// input_to_local_ack — time from input event arrival to Stage 2 completion
     /// (local visual feedback rendered). p99 budget: 4ms (4_000 µs).
     /// Populated by the input processor; 0 when no input event occurred this frame.
@@ -118,7 +119,7 @@ pub struct FrameTelemetry {
     pub input_to_scene_commit_us: u64,
 
     /// input_to_next_present — time from input event arrival to Stage 7
-    /// completion (GPU present of the frame containing the agent response).
+    /// completion (submission of the frame containing the associated response).
     /// p99 budget: 33ms (two frames at 60Hz). Populated when Stage 7 completes
     /// on a frame that carries a scene commit triggered by input; 0 otherwise.
     pub input_to_next_present_us: u64,
