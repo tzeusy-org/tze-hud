@@ -391,11 +391,17 @@ async fn background_layer_renders_below_content_zone() {
 /// and the warm-grey placeholder until then.
 #[tokio::test]
 async fn ambient_static_image_draws_texture_or_placeholder() {
+    let require_gpu = std::env::var("TZE_HUD_REQUIRE_GPU").is_ok_and(|v| v.trim() == "1");
     let Some(mut gpu) = Gpu::new(256, 256).await else {
+        assert!(
+            !require_gpu,
+            "required ambient-image GPU proof cannot skip or lack an adapter"
+        );
         return;
     };
     // Textures are evicted once unreferenced, so register right before each frame.
-    // Non-square images are fitted, so only the centre is sampled for them.
+    // Retain the old centre check; the controls below test full-zone coverage
+    // rather than assuming a tile-style non-square fitting policy.
     let cases = [
         (
             "square",
@@ -415,6 +421,11 @@ async fn ambient_static_image_draws_texture_or_placeholder() {
         let id = match image {
             Some((w, h, px)) => {
                 let (id, bytes) = rgba_image(w, h, px);
+                println!(
+                    "ambient image input {what}: {w}x{h}, RGBA bytes={}, resource={}",
+                    bytes.len(),
+                    id.to_hex()
+                );
                 gpu.compositor
                     .register_image_bytes(id, Arc::from(bytes.as_slice()), w, h);
                 id
@@ -434,6 +445,173 @@ async fn ambient_static_image_draws_texture_or_placeholder() {
             &[(128, 128)]
         };
         for &(x, y) in points {
+            frame.expect(x, y, expected, 20, what);
+        }
+        if what == "non-square" {
+            let definition = scene
+                .zone_registry
+                .get_by_name("ambient-background")
+                .unwrap();
+            println!(
+                "default ambient geometry={:?}, policy={:?}, contention={:?}, layer={:?}",
+                definition.geometry_policy,
+                definition.rendering_policy,
+                definition.contention_policy,
+                definition.layer_attachment
+            );
+            // Source suggests full-zone/full-UV coverage; these literal pixels
+            // decide whether the original opaque 16x8 symptom is reproducible.
+            let repeated = gpu.render(&mut scene);
+            for (x, y) in [
+                (0, 0),
+                (255, 0),
+                (0, 255),
+                (255, 255),
+                (128, 0),
+                (128, 255),
+                (0, 128),
+                (255, 128),
+                (128, 128),
+            ] {
+                println!(
+                    "opaque16x8 ({x},{y}): actual={:?}, expected={expected:?}, repeated={:?}",
+                    frame.at(x, y),
+                    repeated.at(x, y)
+                );
+                frame.expect(x, y, expected, 20, "opaque 16x8 full-zone sample");
+                assert_eq!(frame.at(x, y), repeated.at(x, y), "referenced repeat");
+            }
+        }
+    }
+
+    // Directional source quadrants pin UV orientation and scaling without a
+    // private draw-command oracle or sampling a filtered colour boundary.
+    let mut directional: Vec<u8> = Vec::with_capacity(16 * 8 * 4);
+    for y in 0..8 {
+        for x in 0..16 {
+            directional.extend_from_slice(&match (x < 8, y < 4) {
+                (true, true) => [255, 0, 0, 255],
+                (false, true) => [0, 255, 0, 255],
+                (true, false) => [0, 0, 255, 255],
+                (false, false) => [255, 255, 0, 255],
+            });
+        }
+    }
+    let directional_id = ResourceId::of(&directional);
+    println!(
+        "directional16x8 RGBA bytes={}, resource={}",
+        directional.len(),
+        directional_id.to_hex()
+    );
+    gpu.compositor
+        .register_image_bytes(directional_id, Arc::from(directional.as_slice()), 16, 8);
+    let mut scene = default_scene(256, 256);
+    publish(
+        &mut scene,
+        "ambient-background",
+        ZoneContent::StaticImage(directional_id),
+    );
+    let directional_frame = gpu.render(&mut scene);
+    let directional_repeat = gpu.render(&mut scene);
+    for (x, y, expected) in [
+        (32, 32, [255, 0, 0, 255]),
+        (224, 32, [0, 255, 0, 255]),
+        (32, 224, [0, 0, 255, 255]),
+        (224, 224, [255, 255, 0, 255]),
+    ] {
+        println!(
+            "directional16x8 ({x},{y}): actual={:?}, expected={expected:?}",
+            directional_frame.at(x, y)
+        );
+        directional_frame.expect(x, y, expected, 20, "directional quadrant");
+        assert_eq!(
+            directional_frame.at(x, y),
+            directional_repeat.at(x, y),
+            "directional referenced repeat"
+        );
+    }
+
+    // Zero-alpha source corners show the compositor clear colour, not a missing
+    // resource placeholder. The opaque source centre remains independently green.
+    let mut alpha: Vec<u8> = Vec::with_capacity(16 * 8 * 4);
+    for y in 0..8 {
+        for x in 0..16 {
+            alpha.extend_from_slice(&if (4..12).contains(&x) && (2..6).contains(&y) {
+                [0, 255, 0, 255]
+            } else {
+                [0, 0, 0, 0]
+            });
+        }
+    }
+    let alpha_id = ResourceId::of(&alpha);
+    println!(
+        "alpha16x8 RGBA bytes={}, resource={}",
+        alpha.len(),
+        alpha_id.to_hex()
+    );
+    gpu.compositor
+        .register_image_bytes(alpha_id, Arc::from(alpha.as_slice()), 16, 8);
+    publish(
+        &mut scene,
+        "ambient-background",
+        ZoneContent::StaticImage(alpha_id),
+    );
+    let alpha_frame = gpu.render(&mut scene);
+    for (x, y) in [(0, 0), (255, 0), (0, 255), (255, 255)] {
+        println!(
+            "alpha16x8 ({x},{y}): actual={:?}, clear={CLEAR:?}, placeholder={PLACEHOLDER:?}",
+            alpha_frame.at(x, y)
+        );
+        alpha_frame.expect(x, y, CLEAR, 20, "transparent source corner");
+        assert_ne!(alpha_frame.at(x, y), PLACEHOLDER);
+    }
+    alpha_frame.expect(
+        128,
+        128,
+        [0, 255, 0, 255],
+        20,
+        "opaque alpha-control centre",
+    );
+
+    // Default Replace transitions keep resource identity: missing -> registered
+    // -> missing -> registered cannot retain a previous texture or placeholder.
+    let missing = ResourceId::of(b"replace-never-registered");
+    let (blue_id, blue) = rgba_image(16, 8, [0, 0, 255, 255]);
+    for (what, registered, expected) in [
+        ("replace missing", false, PLACEHOLDER),
+        ("replace registered", true, [0, 0, 255, 255]),
+        ("replace missing again", false, PLACEHOLDER),
+        ("replace registered again", true, [0, 0, 255, 255]),
+    ] {
+        let id = if registered {
+            // The previous missing frame legitimately evicts unreferenced bytes.
+            gpu.compositor
+                .register_image_bytes(blue_id, Arc::from(blue.as_slice()), 16, 8);
+            blue_id
+        } else {
+            missing
+        };
+        publish(
+            &mut scene,
+            "ambient-background",
+            ZoneContent::StaticImage(id),
+        );
+        let frame = gpu.render(&mut scene);
+        for (x, y) in [
+            (0, 0),
+            (255, 0),
+            (0, 255),
+            (255, 255),
+            (128, 0),
+            (128, 255),
+            (0, 128),
+            (255, 128),
+            (128, 128),
+        ] {
+            println!(
+                "{what} ({x},{y}): actual={:?}, expected={expected:?}",
+                frame.at(x, y)
+            );
             frame.expect(x, y, expected, 20, what);
         }
     }
