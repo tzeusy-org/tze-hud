@@ -212,6 +212,17 @@ impl Portal {
         }
     }
 
+    /// An upstream loss starts grace once, including portals not yet rendered.
+    fn degrade(&mut self, now_us: u64) -> bool {
+        if !self.live() || self.degraded_since_us.is_some() {
+            return false;
+        }
+        self.degraded_since_us = Some(now_us);
+        self.status = PortalStatus::Degraded;
+        self.dirty = true;
+        true
+    }
+
     /// When an idle portal degrades; `None` while held until cleared.
     fn degrade_at(&self, limits: &PortalLimits) -> Option<u64> {
         match self.hold_until_us {
@@ -554,14 +565,21 @@ impl PortalHub {
     /// Degrade a portal now, regardless of hold (its upstream went away).
     pub fn degrade(&mut self, key: &PortalKey, now_us: u64) -> bool {
         match self.live_mut(key) {
-            Ok(portal) if portal.degraded_since_us.is_none() => {
-                portal.degraded_since_us = Some(now_us);
-                portal.status = PortalStatus::Degraded;
-                portal.dirty = true;
-                true
-            }
-            _ => false,
+            Ok(portal) => portal.degrade(now_us),
+            Err(_) => false,
         }
+    }
+
+    /// Degrade all live portals when their shared upstream goes away.
+    /// Returns only changed identities; holds cannot keep a disconnected stream live.
+    pub fn degrade_all(&mut self, now_us: u64) -> Vec<PortalKey> {
+        let mut changed = Vec::new();
+        for (key, portal) in &mut self.portals {
+            if portal.degrade(now_us) {
+                changed.push(key.clone());
+            }
+        }
+        changed
     }
 
     /// The runtime took the portal away (viewer dismiss, lost surface).

@@ -437,11 +437,8 @@ impl InProcessPortalDriver {
     /// schedule.
     pub fn mark_all_projections_disconnected(&mut self) {
         let now = self.now_wall_us();
-        let keys: Vec<PortalKey> = self.drive.entries.keys().cloned().collect();
-        for key in keys {
-            if self.hub.degrade(&key, now) {
-                tracing::info!(portal = %key.id, "portal: upstream dropped — degraded");
-            }
+        for key in self.hub.degrade_all(now) {
+            tracing::info!(portal = %key.id, "portal: upstream dropped — degraded");
         }
     }
 
@@ -1827,6 +1824,215 @@ mod tests {
 
         driver.drain(&mut scene, &mut processor, Some(tab));
         assert_eq!(scene.tile_count(), 0, "nothing revives");
+
+        // A channel close can arrive after accepted publishes but before the
+        // first render. The hub owns these identities; renderer entries do not.
+        for returning_agent in [false, true] {
+            let (mut driver, mut scene, tab, mut processor, clock) = clocked();
+            publish(
+                &mut driver,
+                "dismissed",
+                "RECLAIMED-control",
+                clock.now_us(),
+            );
+            driver.drain(&mut scene, &mut processor, Some(tab));
+            let dismissed_tile = tile(&driver, "dismissed");
+            driver.viewer_dismiss_tile(&mut scene, dismissed_tile);
+            assert!(driver.hub.get(&key("dismissed")).is_none());
+            assert!(driver.drive.entries.is_empty());
+            assert_eq!(scene.tile_count(), 0);
+
+            let publications = [
+                (
+                    PortalKey::new("unrendered-a", "shared"),
+                    "ALPHA-before-render",
+                ),
+                (
+                    PortalKey::new("unrendered-b", "shared"),
+                    "BETA-before-render",
+                ),
+            ];
+            for (identity, text) in &publications {
+                let (reply, mut accepted) = tokio::sync::oneshot::channel();
+                driver.dispatch_portal_op_at(
+                    PortalOp::Publish {
+                        agent: identity.agent.clone(),
+                        portal: identity.id.clone(),
+                        display_name: None,
+                        text: Some((*text).into()),
+                        key: None,
+                        expects_reply: false,
+                        status: None,
+                        reply,
+                    },
+                    clock.now_us(),
+                );
+                assert_eq!(accepted.try_recv().expect("real publish reply"), Ok(()));
+            }
+            let alpha = &publications[0].0;
+            let beta = &publications[1].0;
+            assert_eq!(
+                hold(&mut driver, &alpha.agent, &alpha.id, 0, clock.now_us()),
+                Ok(())
+            );
+            driver
+                .hub
+                .submit_reply(alpha, "pending human input".into(), clock.now_us())
+                .unwrap();
+            let before: Vec<_> = publications
+                .iter()
+                .map(|(identity, _)| driver.hub.get(identity).unwrap().clone())
+                .collect();
+            assert!(before.iter().all(|portal| portal.last_render_us.is_none()));
+            assert!(driver.drive.entries.is_empty());
+            assert_eq!(
+                scene.tile_count(),
+                0,
+                "neither accepted publish has rendered"
+            );
+
+            let dropped_at_us = clock.now_us();
+            let reclaim_at_us = dropped_at_us + driver.hub.limits().reclaim_after_us;
+            driver.mark_all_projections_disconnected();
+            for ((identity, _), old) in publications.iter().zip(&before) {
+                let portal = driver.hub.get(identity).unwrap();
+                assert_eq!(portal.degraded_since_us, Some(dropped_at_us));
+                assert_eq!(portal.status, PortalStatus::Degraded);
+                assert!(portal.dirty);
+                assert_eq!(portal.transcript, old.transcript);
+                assert_eq!(portal.replies, old.replies);
+                assert_eq!(portal.inputs, old.inputs);
+                assert_eq!(portal.hold_until_us, old.hold_until_us);
+            }
+            assert_eq!(driver.hub.get(alpha).unwrap().hold_until_us, Some(u64::MAX));
+            driver.drain(&mut scene, &mut processor, Some(tab));
+            let surfaces: Vec<_> = publications
+                .iter()
+                .map(|(identity, _)| {
+                    let entry = &driver.drive.entries[identity];
+                    (entry.tile_scene_id.unwrap(), entry.scene_lease_id.unwrap())
+                })
+                .collect();
+            assert_ne!(surfaces[0].0, surfaces[1].0);
+            assert_ne!(surfaces[0].1, surfaces[1].1);
+            assert_eq!(scene.tile_count(), 2);
+            for ((_, marker), (tile_id, lease_id)) in publications.iter().zip(&surfaces) {
+                assert!(
+                    scene.lease_is_orphaned(lease_id),
+                    "first drain already orphans"
+                );
+                let content = tile_markdown(&scene, *tile_id);
+                assert_eq!(content.matches(marker).count(), 1, "{content}");
+                assert!(
+                    content.contains("⊘ disconnected — stream stale"),
+                    "{content}"
+                );
+            }
+            assert!(driver.hub.get(&key("dismissed")).is_none());
+            assert!(!scene.tiles.contains_key(&dismissed_tile));
+
+            clock.advance(1_000);
+            driver.mark_all_projections_disconnected();
+            for ((identity, _), (tile_id, lease_id)) in publications.iter().zip(&surfaces) {
+                assert_eq!(
+                    driver.hub.get(identity).unwrap().degraded_since_us,
+                    Some(dropped_at_us)
+                );
+                assert!(
+                    !driver.hub.get(identity).unwrap().dirty,
+                    "repeat close does not dirty"
+                );
+                let entry = &driver.drive.entries[identity];
+                assert_eq!(entry.tile_scene_id, Some(*tile_id));
+                assert_eq!(entry.scene_lease_id, Some(*lease_id));
+            }
+            if returning_agent {
+                let (reply, mut accepted) = tokio::sync::oneshot::channel();
+                driver.dispatch_portal_op_at(
+                    PortalOp::Publish {
+                        agent: alpha.agent.clone(),
+                        portal: alpha.id.clone(),
+                        display_name: None,
+                        text: Some("ALPHA-after-resume".into()),
+                        key: None,
+                        expects_reply: false,
+                        status: None,
+                        reply,
+                    },
+                    clock.now_us(),
+                );
+                assert_eq!(accepted.try_recv().expect("real resume reply"), Ok(()));
+                driver.drain(&mut scene, &mut processor, Some(tab));
+                let entry = &driver.drive.entries[alpha];
+                assert_eq!(entry.tile_scene_id, Some(surfaces[0].0));
+                assert_eq!(entry.scene_lease_id, Some(surfaces[0].1));
+                assert!(scene.lease_is_active(&surfaces[0].1));
+                assert_eq!(driver.hub.get(alpha).unwrap().degraded_since_us, None);
+                let content = tile_markdown(&scene, surfaces[0].0);
+                assert_eq!(
+                    content.matches("ALPHA-before-render").count(),
+                    1,
+                    "{content}"
+                );
+                assert_eq!(
+                    content.matches("ALPHA-after-resume").count(),
+                    1,
+                    "{content}"
+                );
+                assert!(
+                    !content.contains("⊘ disconnected — stream stale"),
+                    "{content}"
+                );
+                assert!(scene.lease_is_orphaned(&surfaces[1].1));
+                assert_eq!(
+                    driver.hub.get(beta).unwrap().degraded_since_us,
+                    Some(dropped_at_us)
+                );
+            }
+
+            clock.set_us(reclaim_at_us - 1);
+            driver.drain(&mut scene, &mut processor, Some(tab));
+            assert_eq!(
+                scene.tile_count(),
+                2,
+                "content lasts through original grace"
+            );
+            for (tile_id, _) in &surfaces {
+                assert!(scene.tiles.contains_key(tile_id));
+            }
+            assert!(scene.lease_is_orphaned(&surfaces[1].1));
+            clock.set_us(reclaim_at_us);
+            driver.drain(&mut scene, &mut processor, Some(tab));
+            assert_eq!(scene.tile_count(), usize::from(returning_agent));
+            for (index, ((identity, _), (tile_id, lease_id))) in
+                publications.iter().zip(&surfaces).enumerate()
+            {
+                if returning_agent && index == 0 {
+                    assert!(scene.tiles.contains_key(tile_id));
+                    assert!(scene.lease_is_active(lease_id));
+                    assert!(driver.hub.get(identity).is_some());
+                } else {
+                    assert!(!scene.tiles.contains_key(tile_id));
+                    assert!(scene.leases[lease_id].state.is_terminal());
+                    assert!(!driver.drive.entries.contains_key(identity));
+                    assert!(driver.hub.get(identity).is_none());
+                }
+            }
+            if !returning_agent {
+                let version = scene.version;
+                driver.mark_all_projections_disconnected();
+                driver.drain(&mut scene, &mut processor, Some(tab));
+                assert_eq!(scene.version, version, "reclaimed identities do not revive");
+                assert_eq!(scene.tile_count(), 0);
+                assert!(driver.drive.entries.is_empty());
+                assert!(driver.hub.list(AGENT).is_empty());
+            }
+        }
+        let (mut empty, mut scene, tab, mut processor, _) = clocked();
+        empty.mark_all_projections_disconnected();
+        empty.drain(&mut scene, &mut processor, Some(tab));
+        assert_eq!(scene.tile_count(), 0);
+        assert!(empty.drive.entries.is_empty());
     }
 
     /// `hud_hold` keeps a portal past the idle reap window (degrade + reclaim)
