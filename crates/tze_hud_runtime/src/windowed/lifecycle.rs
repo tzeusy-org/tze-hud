@@ -603,6 +603,20 @@ pub(super) use crate::input_latency::{
     PendingInputLatencySamples, drain_pending_input_latency, record_pending_input_latency,
 };
 
+/// Finish local input latency at the actual primary queue submission.
+/// The stage duration is an aggregate-success sentinel, not submission evidence.
+pub(super) fn drain_windowed_input_latency(
+    pending: &PendingInputLatencySamples,
+    submitted_batch_ids: &[tze_hud_scene::SceneId],
+    gpu_submitted: bool,
+) -> Option<(u64, u64, u64)> {
+    drain_pending_input_latency(
+        pending,
+        submitted_batch_ids,
+        gpu_submitted.then(Instant::now),
+    )
+}
+
 pub(super) fn seed_windowed_benchmark_scene(scene: &mut SceneGraph, width: u32, height: u32) {
     use tze_hud_scene::types::HitRegionNode;
     use tze_hud_scene::{Node, NodeData, Rect, Rgba, SceneId, SolidColorNode};
@@ -2582,14 +2596,37 @@ mod tests {
         // Repeating an outstanding response does not append another sample.
         record_committed_input_response(&pending, started, 999, batch_id, scene_commit_at);
         assert!(drain_pending_input_latency(&pending, &[batch_id], None).is_none());
+        let mut failed_telemetry = tze_hud_telemetry::FrameTelemetry::new(1);
+        failed_telemetry.stage7_gpu_submit_us = 17;
+        let failed_outcome = tze_hud_compositor::renderer::frame::WindowedPresentOutcome {
+            telemetry: failed_telemetry,
+            surface_acquired: true,
+            gpu_submitted: false,
+        };
+        // A duration must never substitute for the actual submission result.
+        assert!(
+            drain_windowed_input_latency(&pending, &[batch_id], failed_outcome.gpu_submitted)
+                .is_none()
+        );
+        assert_eq!(failed_outcome.telemetry.stage7_gpu_submit_us, 17);
         assert_eq!(
             pending.lock().unwrap().len(),
             2,
             "failed submit retains samples"
         );
         let unrelated = tze_hud_scene::SceneId::new();
+        // Inject the production post-submit present/poll failure shape; this is
+        // outcome-to-drain coverage, not a GPU panic reproduction.
+        let submitted_outcome = tze_hud_compositor::renderer::frame::WindowedPresentOutcome {
+            telemetry: tze_hud_telemetry::FrameTelemetry::new(2),
+            surface_acquired: true,
+            gpu_submitted: true,
+        };
+        let gpu_submitted = submitted_outcome.gpu_submitted;
+        let skipped_stage_telemetry = submitted_outcome.telemetry;
+        assert_eq!(skipped_stage_telemetry.stage7_gpu_submit_us, 0);
         assert_eq!(
-            drain_pending_input_latency(&pending, &[unrelated], Some(Instant::now())),
+            drain_windowed_input_latency(&pending, &[unrelated], gpu_submitted),
             Some((125, 0, 0)),
             "anonymous input is local ack only; an unrelated batch is not a response"
         );
