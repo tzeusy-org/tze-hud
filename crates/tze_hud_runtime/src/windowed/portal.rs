@@ -1872,44 +1872,6 @@ impl WinitApp {
         }
     }
 
-    /// Run the in-process portal projection drain loop (hud-2iup7).
-    ///
-    /// Drain pending [`PortalOp`] messages from the MCP channel (hud-bq0gl.2).
-    ///
-    /// Called from `about_to_wait` BEFORE `drain_portal_projection` so that
-    /// content published in the same event-loop tick renders in the
-    /// immediately-following drain call.
-    ///
-    /// Uses `try_recv` in a non-blocking loop — never blocks the event-loop
-    /// thread.  Each op is applied synchronously to the portal hub by
-    /// `InProcessPortalDriver::dispatch_portal_op`.
-    pub(super) fn drain_portal_ops(&mut self) {
-        let Some(ref mut rx) = self.state.portal_op_rx else {
-            return;
-        };
-        loop {
-            match rx.try_recv() {
-                Ok(op) => {
-                    self.state.portal_projection_driver.dispatch_portal_op(op);
-                }
-                Err(tokio::sync::mpsc::error::TryRecvError::Empty) => break,
-                Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
-                    tracing::warn!(
-                        "portal_op channel disconnected — MCP portal tools will no longer function"
-                    );
-                    // The ingress that feeds portal ops went away: no agent
-                    // can reach its portals. Degrade them all so the surfaces
-                    // stop looking live (hud-5i16d).
-                    self.state
-                        .portal_projection_driver
-                        .mark_all_projections_disconnected();
-                    self.state.portal_op_rx = None;
-                    break;
-                }
-            }
-        }
-    }
-
     /// Called from `about_to_wait` after composer-draft flush.  Drives
     /// `InProcessPortalDriver::drain` which calls
     /// `InputProcessor::notify_tile_content_appended` for every `RenderPortal`
@@ -2376,7 +2338,6 @@ mod tests {
             cursor_left_window: false,
             composer_visual_layout: Arc::new(StdMutex::new(None)),
             portal_projection_driver: crate::portal_projection_driver::InProcessPortalDriver::new(),
-            portal_op_rx: None,
             capture_inbox: crate::operator::screenshot::CaptureInbox::detached(),
             pending_keyboard_events: VecDeque::new(),
             interaction_feedback_lock_misses: std::sync::atomic::AtomicU64::new(0),
@@ -2388,7 +2349,7 @@ mod tests {
     }
 
     fn make_windowed_app_with_pending_portal_publish(projection_id: &str) -> WinitApp {
-        let mut driver = crate::portal_projection_driver::InProcessPortalDriver::new();
+        let driver = crate::portal_projection_driver::InProcessPortalDriver::new();
         driver
             .hub_mut()
             .publish(
@@ -2447,11 +2408,19 @@ mod tests {
         let guard = shared_state
             .try_lock()
             .expect("shared scene must be free before inducing contention");
+        let portals = app.state.portal_projection_driver.portal_handle();
+        let key = tze_hud_projection::hub::PortalKey::new("wake-test", "proj-availability-wake");
+        let before = format!("{:?}", portals.hub.lock().unwrap().get(&key).unwrap());
         let compositor_before = app.state.wake.compositor().checkpoint();
         let main_work_before = app.state.wake.main_work_generation();
 
         let drain = app.drain_portal_projection();
         assert_eq!(drain, PortalProjectionDrain::Deferred);
+        assert_eq!(
+            format!("{:?}", portals.hub.lock().unwrap().get(&key).unwrap()),
+            before,
+            "deferred Scene availability consumes neither due nor dirty/unread state"
+        );
         app.schedule_shared_scene_availability_wake();
         std::thread::sleep(Duration::from_millis(20));
         assert_eq!(
@@ -4844,7 +4813,7 @@ mod tests {
         // so `route_portal_composer_batch` returns true and
         // `append_raw_tile_viewer_echo` never runs — isolating the keyboard
         // submit-terminal reset as the only thing that can pin the tail.
-        let mut driver = crate::portal_projection_driver::InProcessPortalDriver::new();
+        let driver = crate::portal_projection_driver::InProcessPortalDriver::new();
         driver
             .hub_mut()
             .publish(
