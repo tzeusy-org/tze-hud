@@ -557,9 +557,9 @@ async fn widget_param_update_rasterizes_only_that_instance() {
                 region(pixels, panel_roi)[0],
             );
             assert!(
-                region(pixels, roi)
-                    .iter()
-                    .any(|p| p[..3].iter().all(|v| *v > 180)),
+                region(pixels, roi).iter().any(|p| (0..3).all(
+                    |channel| u16::from(p[channel]) >= u16::from(expected_panel[channel]) + 64
+                )),
                 "tooltip text region contains no foreground"
             );
         }
