@@ -1246,6 +1246,31 @@ async fn portal_flow_attach_publish_poll_ack_clear() {
         format!("{:?}", hub.lock().unwrap().get(&other).unwrap()),
         format!("{other_before:?}")
     );
+    // Portal hold/clear ring main work after the Hub guard, never pre-driver rendering.
+    assert_eq!(
+        call(
+            &server,
+            "hud_hold",
+            json!({"surface":"portal:main", "ttl_ms":1000})
+        )
+        .await,
+        json!({"ok":true})
+    );
+    assert_eq!(ingress.load(Ordering::SeqCst), 4);
+    assert_eq!(render.load(Ordering::SeqCst), 0);
+    assert_eq!(locked_notification.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        call(&server, "hud_clear", json!({"surface":"portal:main"})).await,
+        json!({"ok":true})
+    );
+    assert!(hub.lock().unwrap().get(&key).is_none());
+    assert_eq!(ingress.load(Ordering::SeqCst), 5);
+    assert_eq!(render.load(Ordering::SeqCst), 0);
+    assert_eq!(locked_notification.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        format!("{:?}", hub.lock().unwrap().get(&other).unwrap()),
+        format!("{other_before:?}")
+    );
 }
 
 #[tokio::test]

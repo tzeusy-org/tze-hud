@@ -287,6 +287,11 @@ impl McpServer {
                     agent: &identity,
                     widget_transition_ms: self.config.widget_transition_ms,
                 };
+                let portal_target = args
+                    .get("surface")
+                    .and_then(serde_json::Value::as_str)
+                    .and_then(|surface| tools::Surface::parse(surface).ok())
+                    .is_some_and(|surface| matches!(surface, tools::Surface::Portal(_)));
                 let result = match name {
                     "hud_surfaces" => tools::hud_surfaces(&tool_ctx).await,
                     "hud_publish" => tools::hud_publish(&tool_ctx, args).await,
@@ -296,7 +301,9 @@ impl McpServer {
                 };
                 let body = match &result {
                     Ok(value) => {
-                        if matches!(name, "hud_publish" | "hud_hold" | "hud_clear") {
+                        if !portal_target
+                            && matches!(name, "hud_publish" | "hud_hold" | "hud_clear")
+                        {
                             self.render_wake.notify();
                         }
                         tool_result(value)
