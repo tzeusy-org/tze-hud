@@ -439,12 +439,13 @@ async fn test_focus_ring_suppressed_on_non_active_tab() {
 #[tokio::test]
 async fn system_card_emits_draw_cmds_only_while_set() {
     use crate::renderer::{SystemCardKind, SystemCardModel};
-    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(800, 600).await);
+    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(1_000, 500).await);
     let card = SystemCardModel {
         kind: SystemCardKind::Pairing,
         title: "Pair an agent".into(),
         lines: vec!["482913".into()],
     };
+    let retained_card = card.clone();
 
     assert!(compositor.system_card_vertices(800.0, 600.0).is_empty());
     assert!(
@@ -468,4 +469,103 @@ async fn system_card_emits_draw_cmds_only_while_set() {
     assert!(compositor.set_system_card(None));
     assert!(compositor.system_card_vertices(800.0, 600.0).is_empty());
     assert!(compositor.system_card_text_items(800.0, 600.0).is_empty());
+
+    // Seed the actual retained baseline without a card, then sample a small
+    // backdrop region outside the changed tile and away from card glyphs.
+    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
+    let (mut scene, first_tile_id, first_root_id) = canonical_retained_scene();
+    let backdrop = crate::renderer::system_card::system_card_layout(
+        &compositor.token_map,
+        &retained_card,
+        1_000.0,
+        500.0,
+    )
+    .rects[0];
+    let sample_x = (backdrop.x + backdrop.w - 8.0).floor() as usize;
+    let sample_y = (backdrop.y + backdrop.h - 8.0).floor() as usize;
+    assert!(sample_x >= 100 && sample_y >= 100);
+    assert!(sample_x + 3 < 1_000 && sample_y + 3 < 500);
+    let card_pixels = |pixels: &[u8]| {
+        let mut region = Vec::with_capacity(3 * 3 * 4);
+        for y in sample_y..sample_y + 3 {
+            for x in sample_x..sample_x + 3 {
+                let offset = (y * 1_000 + x) * 4;
+                region.extend_from_slice(&pixels[offset..offset + 4]);
+            }
+        }
+        region
+    };
+    let change_text = |scene: &mut SceneGraph, content: &str| {
+        let mut text = match &scene.nodes[&first_root_id].data {
+            NodeData::TextMarkdown(text) => text.clone(),
+            other => panic!("expected canonical text root, got {other:?}"),
+        };
+        text.content = content.into();
+        scene
+            .update_node_content(first_tile_id, first_root_id, NodeData::TextMarkdown(text))
+            .expect("controlled canonical text mutation");
+    };
+
+    compositor.prime_markdown_cache(&scene);
+    compositor.prime_truncation_cache(&scene);
+    compositor.render_frame_headless(&mut scene, &surface);
+    let baseline_work = compositor.take_work_counts().expect("card-free baseline");
+    assert!(baseline_work.full_frame, "{baseline_work:?}");
+    assert_eq!(baseline_work.damage_px, 1_000 * 500);
+    let card_free_pixels = card_pixels(&surface.read_pixels(&compositor.device));
+
+    assert!(compositor.set_system_card(Some(retained_card)));
+    change_text(&mut scene, "BA");
+    compositor.prime_markdown_cache(&scene);
+    compositor.prime_truncation_cache(&scene);
+    compositor.render_frame_headless(&mut scene, &surface);
+    let first_card_work = compositor.take_work_counts().expect("first card frame");
+    assert!(first_card_work.full_frame, "{first_card_work:?}");
+    assert_eq!(first_card_work.damage_px, 1_000 * 500);
+    let visible_card_pixels = card_pixels(&surface.read_pixels(&compositor.device));
+    assert_ne!(
+        visible_card_pixels, card_free_pixels,
+        "card backdrop is visible"
+    );
+
+    // A second eligible text change must still use the full card pass; the
+    // preceding card frame must not have become a retained baseline.
+    change_text(&mut scene, "AB");
+    compositor.prime_markdown_cache(&scene);
+    compositor.prime_truncation_cache(&scene);
+    compositor.render_frame_headless(&mut scene, &surface);
+    let second_card_work = compositor.take_work_counts().expect("second card frame");
+    assert!(second_card_work.full_frame, "{second_card_work:?}");
+    assert_eq!(second_card_work.damage_px, 1_000 * 500);
+    assert_eq!(
+        card_pixels(&surface.read_pixels(&compositor.device)),
+        visible_card_pixels,
+        "card stays visible outside the changed tile"
+    );
+
+    assert!(compositor.set_system_card(None));
+    compositor.render_frame_headless(&mut scene, &surface);
+    let clear_work = compositor.take_work_counts().expect("clean card removal");
+    assert!(clear_work.full_frame, "{clear_work:?}");
+    assert_eq!(clear_work.damage_px, 1_000 * 500);
+    assert_eq!(
+        card_pixels(&surface.read_pixels(&compositor.device)),
+        card_free_pixels,
+        "full clean frame removes the card"
+    );
+
+    change_text(&mut scene, "BA");
+    compositor.prime_markdown_cache(&scene);
+    compositor.prime_truncation_cache(&scene);
+    compositor.render_frame_headless(&mut scene, &surface);
+    let resumed_work = compositor
+        .take_work_counts()
+        .expect("resumed retained frame");
+    assert!(!resumed_work.full_frame, "{resumed_work:?}");
+    assert!(resumed_work.damage_px < 1_000 * 500, "{resumed_work:?}");
+    assert_eq!(
+        card_pixels(&surface.read_pixels(&compositor.device)),
+        card_free_pixels,
+        "retained update must not restore stale card pixels"
+    );
 }

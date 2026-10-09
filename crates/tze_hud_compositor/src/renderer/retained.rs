@@ -507,6 +507,7 @@ impl Compositor {
             && self.resize_grip_hover.is_none()
             && self.tile_close_hover.is_none()
             && self.local_composer.is_none()
+            && self.system_card.is_none()
     }
 }
 
