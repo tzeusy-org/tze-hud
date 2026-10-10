@@ -935,10 +935,12 @@ mod tests {
 
         lifecycle_scene.reconnect_lease(&lease_id, 1_001).unwrap();
         assert!(lifecycle_scene.version > orphan_version);
-        assert!(lifecycle_scene
-            .tiles
-            .values()
-            .all(|tile| tile.visual_hint == tze_hud_scene::lease::TileVisualHint::None));
+        assert!(
+            lifecycle_scene
+                .tiles
+                .values()
+                .all(|tile| tile.visual_hint == tze_hud_scene::lease::TileVisualHint::None)
+        );
         assert!(
             canonical_snapshot(&lifecycle_scene, 1_000, 500).is_some(),
             "the same resumed surfaces become retained-eligible again"
