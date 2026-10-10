@@ -27,7 +27,7 @@ impl SceneGraph {
         self.grant_lease_for_session(namespace, SceneId::nil(), ttl_ms)
     }
 
-    /// Grant a lease, enforcing runtime-wide and per-session caps.
+    /// Grant a lease, enforcing the runtime-wide 64-lease cap (`MAX_RUNTIME_LEASES`).
     ///
     /// Panics if caps are exceeded (use `try_grant_lease_for_session` for graceful errors).
     pub fn grant_lease_for_session(
@@ -40,7 +40,7 @@ impl SceneGraph {
             .expect("lease grant failed cap check")
     }
 
-    /// Try to grant a lease, returning an error if runtime or session caps are exceeded.
+    /// Try to grant a lease, returning an error if the runtime-wide 64-lease cap is exceeded.
     ///
     /// Enforces the lease caps:
     /// - Max 64 leases per runtime across all agents (`MAX_RUNTIME_LEASES`).

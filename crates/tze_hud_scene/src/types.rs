@@ -1222,7 +1222,7 @@ pub enum LeaseError {
     InvalidTransition { from: LeaseState, to: LeaseState },
     /// Lease not found in the scene graph.
     LeaseNotFound(SceneId),
-    /// Lease caps exceeded (runtime-wide or per-session).
+    /// Runtime-wide lease cap (`MAX_RUNTIME_LEASES` = 64) exceeded.
     CapsExceeded(CapsError),
 }
 
