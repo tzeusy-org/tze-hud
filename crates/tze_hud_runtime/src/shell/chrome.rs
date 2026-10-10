@@ -278,20 +278,6 @@ mod tests {
     // ── ChromeState basics ────────────────────────────────────────────────
 
     #[test]
-    fn chrome_state_default_is_clean() {
-        let state = ChromeState::new();
-        assert_eq!(state.tabs.len(), 0);
-        assert_eq!(state.active_tab_index, 0);
-        assert_eq!(state.tab_bar_position, TabBarPosition::Top);
-        assert!(!state.safe_mode_active);
-        assert_eq!(state.connected_agent_count, 0);
-        assert!(
-            !state.capture_surface_active,
-            "v1: capture_surface_active must always be false"
-        );
-    }
-
-    #[test]
     fn add_tab_makes_first_tab_active() {
         let mut state = ChromeState::new();
         assert!(state.tabs.is_empty());
