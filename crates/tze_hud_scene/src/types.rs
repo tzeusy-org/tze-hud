@@ -901,7 +901,7 @@ pub struct LocalStyle {
 
 /// Hit-test spatial query result.
 ///
-/// Returned by [`SceneGraph::hit_test`].  Represents the outcome of mapping a
+/// Returned by [`SceneGraph::hit_test`](crate::graph::SceneGraph::hit_test).  Represents the outcome of mapping a
 /// 2D display-coordinate point to the deepest interactive scene element per the
 /// traversal contract:
 ///
@@ -2019,7 +2019,7 @@ pub enum DragHandleElementKind {
 ///
 /// # Input routing contract
 ///
-/// When [`SceneGraph::hit_test`] finds no tile hit at a point, it falls through
+/// When [`SceneGraph::hit_test`](crate::graph::SceneGraph::hit_test) finds no tile hit at a point, it falls through
 /// to the zone hit region list.  The first region whose `bounds` contain the
 /// display-space point produces a [`HitResult::ZoneInteraction`] result.
 ///
@@ -2717,7 +2717,7 @@ pub struct SceneGraphZoneRegistry {
 ///   checksum field itself, see [`SceneGraphSnapshot::compute_checksum`])
 ///
 /// # Determinism
-/// Given identical scene state, two calls to [`SceneGraph::take_snapshot`]
+/// Given identical scene state, two calls to [`SceneGraph::take_snapshot`](crate::graph::SceneGraph::take_snapshot)
 /// at the same sequence number MUST produce byte-identical output.
 ///
 /// # v1 Scope Constraints
@@ -2764,11 +2764,10 @@ pub struct SceneGraphSnapshot {
     /// Visibility mirrors [`tiles`](Self::tiles): a surface is keyed by its host
     /// tile id, so a session filtering the snapshot to the tiles it owns keeps
     /// exactly the surfaces on those tiles and no others. A `PortalPart.node` that
-    /// was nulled by [`revalidate_portal_surface_part_nodes`] after a transcript
+    /// was nulled by `revalidate_portal_surface_part_nodes` after a transcript
     /// republish is serialized as `null` faithfully — the snapshot never fabricates
     /// a node reference.
     ///
-    /// [`revalidate_portal_surface_part_nodes`]: crate::graph::SceneGraph::revalidate_portal_surface_part_nodes
     ///
     /// Serde: `default` on read (older snapshots that predate this field
     /// deserialize to an empty map) and `skip_serializing_if` empty on write, so

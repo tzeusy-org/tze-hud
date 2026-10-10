@@ -78,8 +78,8 @@ impl WindowedRuntimeState {
     ///
     /// - `window` / `window_surface` / `compositor` / `compositor_handle` — `None`.
     /// - `network_rt` / `network_handles` — no gRPC/MCP servers are spawned.
-    /// - the broadcast/op channels (`element_repositioned_tx`, `input_event_tx`,
-    ///   `portal_op_rx`) — `None`.
+    /// - the broadcast channels (`element_repositioned_tx`, `input_event_tx`) — `None`.
+    /// - portal state is an empty synchronous Hub; no network ingress is spawned.
     ///
     /// The `safe_mode_atomic` and `active_tab_mirror` `Arc`s are shared between
     /// the state and its embedded [`SharedState`] exactly as production does, so
@@ -184,7 +184,6 @@ impl WindowedRuntimeState {
             cursor_left_window: false,
             composer_visual_layout: Arc::new(StdMutex::new(None)),
             portal_projection_driver: crate::portal_projection_driver::InProcessPortalDriver::new(),
-            portal_op_rx: None,
             capture_inbox: crate::operator::screenshot::CaptureInbox::detached(),
             pending_keyboard_events: VecDeque::new(),
             interaction_feedback_lock_misses: std::sync::atomic::AtomicU64::new(0),
@@ -289,7 +288,10 @@ impl HeadlessEventLoopHarness {
             Arc::clone(&shared.scene)
         };
 
-        let (portal_op_tx, portal_op_rx) = tokio::sync::mpsc::unbounded_channel();
+        let portals = tze_hud_mcp::PortalHandle::new(
+            tze_hud_projection::hub::PortalHub::default(),
+            Arc::clone(&clock),
+        );
         let mcp_config = crate::mcp::McpServerConfig {
             widget_transition_ms: tze_hud_config::tokens::resolve_motion_duration_ms(
                 &global_tokens,
@@ -309,7 +311,7 @@ impl HeadlessEventLoopHarness {
             scene_handle,
             mcp_config,
             state.shutdown.clone(),
-            Some(portal_op_tx),
+            Some(portals.clone()),
             Default::default(),
             Default::default(),
             Arc::clone(&state.safe_mode_atomic),
@@ -353,10 +355,8 @@ impl HeadlessEventLoopHarness {
             state.shutdown.clone(),
         );
 
-        let mut driver = crate::portal_projection_driver::InProcessPortalDriver::new();
-        driver.set_clock(clock);
+        let driver = crate::portal_projection_driver::InProcessPortalDriver::with_portals(portals);
         state.portal_projection_driver = driver;
-        state.portal_op_rx = Some(portal_op_rx);
         state.global_tokens = global_tokens;
         state.runtime_context = runtime_context;
         state.config = cfg;

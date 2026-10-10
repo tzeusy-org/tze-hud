@@ -34,7 +34,7 @@ fn next_scene_instance_id() -> u64 {
 /// Time-dependent operations (lease grant, tab creation timestamps, expiry
 /// checks) are routed through the injected [`Clock`].  Use
 /// [`SceneGraph::new`] for production code — it installs a [`SystemClock`].
-/// Use [`SceneGraph::new_with_clock`] in tests to inject a [`TestClock`].
+/// Use [`SceneGraph::new_with_clock`] in tests to inject a [`TestClock`](crate::clock::TestClock).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SceneGraph {
     /// Clock used for all `now_millis()` calls inside the graph.
@@ -104,7 +104,7 @@ pub struct SceneGraph {
     pub geometry_epoch: u64,
     /// Monotonically increasing sequence number assigned to each committed batch.
     ///
-    /// Incremented by [`SceneGraph::next_sequence_number`] on every successful
+    /// Incremented by `SceneGraph::next_sequence_number` on every successful
     /// [`crate::mutation::MutationBatch`] commit. Per RFC 0001 §3.5.
     pub sequence_number: u64,
     /// Batches held until their `present_at` time (see [`timed`]).

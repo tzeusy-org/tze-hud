@@ -157,7 +157,7 @@ def wait_request(request_id, timeout=3):
 def owned_children(parent):
     try:
         ids = Path(f"/proc/{parent}/task/{parent}/children").read_text().split()
-    except FileNotFoundError:
+    except (FileNotFoundError, ProcessLookupError):
         ids = []
     result = {}
     for pid in ids:
@@ -165,7 +165,7 @@ def owned_children(parent):
             text = Path(f"/proc/{pid}/stat").read_text()
             values = text[text.rindex(")") + 2:].split()
             result[int(pid)] = {"start": values[19], "state": values[0], "parent": int(values[1])}
-        except FileNotFoundError:
+        except (FileNotFoundError, ProcessLookupError):
             pass
     return result
 
@@ -173,7 +173,7 @@ def owned_children(parent):
 def child_live(pid, identity):
     try:
         text = Path(f"/proc/{pid}/stat").read_text()
-    except FileNotFoundError:
+    except (FileNotFoundError, ProcessLookupError):
         return False
     values = text[text.rindex(")") + 2:].split()
     return values[19] == identity["start"] and values[0] != "Z"
@@ -512,7 +512,52 @@ def test_load_psk_refuses_a_group_or_world_readable_file(hud, monkeypatch):
     assert FakeHud.last_psk not in adapter.stderr
 
 
-def test_mcp_headers_needs_a_bare_host(hud):
+def test_mcp_headers_needs_a_bare_host(hud, monkeypatch):
+    # Controlled proc observations; no real PID reuse or permission changes.
+    parent, gone, sibling = 9_000_001, 9_000_002, 9_000_003
+    children_path = Path(f"/proc/{parent}/task/{parent}/children")
+    gone_path, sibling_path = Path(f"/proc/{gone}/stat"), Path(f"/proc/{sibling}/stat")
+    identity = {"start": "123", "state": "S", "parent": parent}
+    read_text = Path.read_text
+    outcomes = {}
+
+    def proc_stat(pid, state="S", start="123"):
+        fields = [state, str(parent), *["0"] * 17, start]
+        return f"{pid} (fixture worker) " + " ".join(fields)
+
+    def proc_read(path, *args, **kwargs):
+        if path not in outcomes:
+            return read_text(path, *args, **kwargs)
+        outcome = outcomes[path]
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return outcome
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "read_text", proc_read)
+        for error, number in [(FileNotFoundError, 2), (ProcessLookupError, 3)]:
+            outcomes.clear()
+            outcomes[children_path] = error(number, "fixture process disappeared")
+            assert owned_children(parent) == {}
+            outcomes.update({children_path: f"{gone} {sibling}",
+                             gone_path: error(number, "fixture child disappeared"),
+                             sibling_path: proc_stat(sibling)})
+            assert owned_children(parent) == {sibling: identity}
+            assert not child_live(gone, identity)
+        for denied in [children_path, gone_path, sibling_path]:
+            outcomes.clear()
+            outcomes.update({children_path: f"{gone} {sibling}",
+                             gone_path: proc_stat(gone), sibling_path: proc_stat(sibling)})
+            outcomes[denied] = PermissionError(13, "fixture permission denied")
+            with pytest.raises(PermissionError):
+                owned_children(parent) if denied != sibling_path else child_live(sibling, identity)
+        outcomes[gone_path] = proc_stat(gone)
+        assert child_live(gone, identity)
+        outcomes[gone_path] = proc_stat(gone, start="456")
+        assert not child_live(gone, identity)
+        outcomes[gone_path] = proc_stat(gone, state="Z")
+        assert not child_live(gone, identity)
+
     host, home = hud
     pair(host, home)
     env = {**os.environ, "HOME": str(home), "HUD_HOST": "127.0.0.1"}
