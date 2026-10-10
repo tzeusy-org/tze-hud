@@ -1262,6 +1262,15 @@ async fn test_notification_no_backdrop_when_backdrop_is_none() {
         "no backdrop or border quads should be rendered when policy.backdrop is None, got {} vertices",
         vertices.len()
     );
+
+    // Notification borders use the SDF pass, separate from flat backdrop vertices.
+    let rounded_rects = compositor.collect_all_rounded_rect_cmds(&scene, 1280.0, 720.0);
+    assert!(
+        rounded_rects.background.is_empty()
+            && rounded_rects.content.is_empty()
+            && rounded_rects.chrome.is_empty(),
+        "no rounded-rect commands should be rendered when policy.backdrop is None"
+    );
 }
 
 /// text.rs: TextItem::from_zone_policy respects all RenderingPolicy fields.
