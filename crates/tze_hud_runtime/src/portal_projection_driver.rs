@@ -36,7 +36,7 @@ use tze_hud_projection::{
     OutputKind, PortalInputFeedback, PortalInputFeedbackState, PortalView,
     ProjectedPortalAttention, ProjectedPortalPresentation, ProjectionLifecycleState,
     TranscriptUnit,
-    hub::{DeadlineKind, Due, Portal, PortalError, PortalStatus, Transition, Unit},
+    hub::{DeadlineKind, Due, Portal, PortalStatus, Transition, Unit},
     resident_grpc::{
         ResidentGrpcPortalAdapter, ResidentGrpcPortalConfig, portal_visual_tokens_from_part_tokens,
     },
@@ -1063,7 +1063,7 @@ impl Default for InProcessPortalDriver {
 mod tests {
     use super::*;
     use tze_hud_input::{DraftSubmission, GeometrySnapshot, PortalRect};
-    use tze_hud_projection::hub::PortalLimits;
+    use tze_hud_projection::hub::{PortalError, PortalLimits};
     use tze_hud_scene::{NodeData, TestClock};
 
     /// The header marker line the resident adapter paints while the agent is
