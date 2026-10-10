@@ -63,11 +63,10 @@ impl AggregateBudgetState {
                 Some(**id) != replaced_session && session.namespace == namespace
             })
             .map(|(_, session)| {
-                session
-                    .recent_updates
-                    .iter()
-                    .filter(|t| now.duration_since(**t) < UPDATE_RATE_WINDOW)
-                    .count()
+                let updates = &session.recent_updates;
+                let expired =
+                    updates.partition_point(|t| now.duration_since(*t) >= UPDATE_RATE_WINDOW);
+                updates.len() - expired
             })
             .sum()
     }
