@@ -58,15 +58,15 @@
 //!
 //! # Complexity
 //!
-//! `truncate_for_ellipsis` shapes the full text once (O(n)) and then locates
-//! the ellipsis cut point with O(log W) additional shape calls via binary
-//! search, where W is the number of word (or grapheme) boundaries.  Each
-//! individual shape call is O(k) in the prefix length k, giving a total of
-//! O(n + k·log W) ≈ O(n log n) — sub-quadratic in text length.  The old
-//! linear scan over candidates was O(W·k) — one full reshape per candidate,
-//! each costing O(k) in its prefix length — which is O(n²) in the worst case
-//! when W and k are both O(n).  Results must be cached by the caller
-//! keyed on `(content_hash, bounds_width, bounds_height, font_size_px)`.
+//! `truncate_for_ellipsis` still shapes the full text once to determine its
+//! layout. It locates the ellipsis cut point by growing a short-prefix bracket
+//! exponentially, then binary-searching that bracket. There are O(log W)
+//! candidate measurements for W word (or grapheme) boundaries, under the
+//! existing monotone-fit assumption. Each measurement shapes the entire
+//! candidate; the search avoids an unconditional longest-prefix measurement
+//! but does not bound the initial full-text shaping cost or guarantee a frame
+//! budget. Results must be cached by the caller keyed on content, geometry and
+//! the effective shaping attributes.
 
 use glyphon::{Attrs, Buffer, FontSystem, Metrics, Shaping, Wrap};
 use unicode_segmentation::UnicodeSegmentation;
@@ -951,15 +951,18 @@ fn run_start_slice(paragraph_text: &str, run_start_byte: usize) -> &str {
 /// The old O(W·k) implementation issued one full `measure_single_line` reshape
 /// per candidate in a right-to-left linear scan (O(k) per candidate, O(W·k) =
 /// O(n²) total in the worst case).  This version uses binary search to reduce
-/// shape calls from O(W) to O(log W):
+/// shape calls from O(W) to O(log W), starting with short prefixes:
 ///
 /// 1. Collect word-boundary byte offsets into a sorted slice.
-/// 2. Binary-search for the largest boundary where `measure("prefix…") ≤
+/// 2. Grow an exponential fit/nonfit bracket, then binary-search for the
+///    largest boundary where `measure("prefix…") ≤
 ///    bounds_width`.  The combined shape is measured as a single unit so that
 ///    any kerning/ligature between the last glyph of the prefix and `"…"` is
 ///    accounted for (critical with `Shaping::Advanced`).  The predicate is
-///    monotone: once a prefix+ellipsis is too wide, all longer prefixes also
-///    produce a wider result.  Binary search issues O(log W) shape calls.
+///    required to be monotone: once a prefix+ellipsis is too wide, longer
+///    prefixes must not fit again. This is the existing search assumption,
+///    not a universal guarantee about context-sensitive shaping. Bracketing
+///    and binary search together issue O(log W) shape calls.
 /// 3. If no non-empty word boundary fits, repeat the binary search over
 ///    grapheme-cluster boundaries (O(log G) shapes, G = grapheme count).
 /// 4. If even a single grapheme + ellipsis does not fit, return just `"…"`.
@@ -1259,15 +1262,17 @@ fn binary_search_smallest_fitting(
 }
 
 /// Find the largest element in the **sorted, ascending** `boundaries` slice
-/// such that `measure(boundary) ≤ budget`, using binary search.
+/// such that `measure(boundary) ≤ budget`, using an exponential bracket
+/// followed by binary search.
 ///
 /// Returns `None` if no boundary fits (all are too wide or the slice is empty).
 ///
 /// # Correctness requirement
 ///
 /// The predicate `measure(b) ≤ budget` must be **monotone**: if boundary `b`
-/// fits, all boundaries `b' < b` also fit.  This holds for text width because
-/// removing characters from a prefix cannot increase its shaped width.
+/// fits, all boundaries `b' < b` also fit. This is the existing search
+/// assumption; real shaping of supported grapheme/RTL/bidi inputs must retain
+/// its established outputs rather than assuming arbitrary text is monotone.
 ///
 /// # Complexity
 ///
@@ -1281,24 +1286,31 @@ fn binary_search_largest_fitting(
         return None;
     }
 
-    // Quick check: does the largest boundary fit?  If yes, return it directly
-    // (common case: the line nearly fits and only needs a tiny trim).
-    let last = *boundaries.last().unwrap();
-    if measure(last) <= budget {
-        return Some(last);
-    }
-
     // Quick check: does even the smallest boundary fit?  If not, nothing fits.
     let first = boundaries[0];
     if measure(first) > budget {
         return None;
     }
 
-    // Binary search over the index space [0, boundaries.len()).
-    // Invariant: boundaries[lo] fits, boundaries[hi] does not fit.
-    let mut lo = 0usize;
-    let mut hi = boundaries.len() - 1;
+    let last = boundaries.len() - 1;
+    if last == 0 {
+        return Some(first);
+    }
 
+    // Start near the visible prefix, rather than reshaping the full paragraph
+    // before knowing whether even its first few boundaries fill the box.
+    let mut lo = 0usize;
+    let mut hi = 1usize;
+    while measure(boundaries[hi]) <= budget {
+        if hi == last {
+            return Some(boundaries[hi]);
+        }
+        lo = hi;
+        hi = hi.saturating_mul(2).min(last);
+    }
+
+    // Both endpoints have already been measured: lo fits, hi does not.
+    // Search only their interior and never measure either endpoint again.
     while lo + 1 < hi {
         let mid = lo + (hi - lo) / 2;
         if measure(boundaries[mid]) <= budget {
@@ -1575,6 +1587,43 @@ mod tests {
         assert!(
             result.text.len() < long_word.len() + ELLIPSIS.len(),
             "grapheme-fallback result must be shorter than original + ellipsis"
+        );
+
+        // The named long-token workload must retain a fitting, maximal
+        // grapheme prefix. Measure the actual candidates independently with a
+        // real Buffer, rather than deriving an expected cut from the search.
+        let payload = "x".repeat(4096);
+        let bounds_width = 60.0;
+        let burst_result = truncate_for_ellipsis(
+            &payload,
+            base_attrs(),
+            bounds_width,
+            100.0,
+            16.0,
+            22.4,
+            &mut fs,
+        );
+        assert!(burst_result.was_truncated);
+        let prefix = burst_result.text.strip_suffix(ELLIPSIS).unwrap();
+        assert!(!prefix.is_empty());
+        assert!(payload.starts_with(prefix));
+        assert!(prefix.len() < payload.len());
+        let mut shaped_width = |text: &str| {
+            let mut buffer = Buffer::new(&mut fs, Metrics::new(16.0, 22.4));
+            buffer.set_size(&mut fs, Some(bounds_width * 2.0), None);
+            buffer.set_wrap(&mut fs, Wrap::None);
+            buffer.set_text(&mut fs, text, base_attrs(), Shaping::Advanced);
+            buffer.shape_until_scroll(&mut fs, false);
+            buffer
+                .layout_runs()
+                .map(|run| run.line_w)
+                .fold(0.0_f32, f32::max)
+        };
+        assert!(shaped_width(&burst_result.text) <= bounds_width);
+        let next_candidate = format!("{}{ELLIPSIS}", &payload[..prefix.len() + 1]);
+        assert!(
+            shaped_width(&next_candidate) > bounds_width,
+            "one more whole x grapheme must exceed the box"
         );
     }
 

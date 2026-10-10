@@ -5752,6 +5752,67 @@ mod tests {
             result_base.text,
             result_bold.text,
         );
+
+        // Repeated priming at the exact effective attributes must preserve the
+        // bold result and its single cache slot. A base-weight result remains
+        // separate even when both live in the same cache.
+        let repeated_bold = cache_bold
+            .prime(
+                expected_bold_key,
+                content,
+                narrow_w,
+                height,
+                font_size,
+                FontFamily::SystemSansSerif,
+                eff_weight,
+                TruncationViewport::HeadAnchored,
+                1.4,
+                &mut fs,
+            )
+            .clone();
+        assert_eq!(repeated_bold, result_bold);
+        assert_eq!(cache_bold.entries.len(), 1);
+        let separate_base = cache_bold
+            .prime(
+                base_key,
+                content,
+                narrow_w,
+                height,
+                font_size,
+                FontFamily::SystemSansSerif,
+                base_weight,
+                TruncationViewport::HeadAnchored,
+                1.4,
+                &mut fs,
+            )
+            .clone();
+        assert_eq!(separate_base, result_base);
+        assert_eq!(cache_bold.entries.len(), 2);
+        assert_eq!(
+            cache_bold.entries.get(&expected_bold_key),
+            Some(&result_bold)
+        );
+
+        // The cached strings must actually fit when shaped at their respective
+        // effective weights, independently of the key and prefix-length checks.
+        for (result, weight) in [(&result_base, base_weight), (&result_bold, eff_weight)] {
+            let mut buffer = Buffer::new(&mut fs, Metrics::new(font_size, font_size * 1.4));
+            buffer.set_size(&mut fs, Some(narrow_w), None);
+            buffer.set_wrap(&mut fs, Wrap::Word);
+            buffer.set_text(
+                &mut fs,
+                &result.text,
+                Attrs::new()
+                    .family(Family::SansSerif)
+                    .weight(Weight(weight)),
+                Shaping::Advanced,
+            );
+            buffer.shape_until_scroll(&mut fs, false);
+            let runs: Vec<_> = buffer.layout_runs().collect();
+            assert!(!runs.is_empty());
+            assert!(runs.len() <= 1, "the 40px box contains one whole line");
+            assert!(runs.iter().all(|run| run.line_w <= narrow_w));
+        }
     }
 
     /// Phase 2 (hud-9ieev): `compute_inline_backdrop_quads` returns a quad for a
