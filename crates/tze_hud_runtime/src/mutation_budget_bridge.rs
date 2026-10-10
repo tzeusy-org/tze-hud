@@ -874,6 +874,104 @@ mod tests {
         for (label, satisfied) in rows {
             assert!(satisfied, "per-agent rate contract: {label}");
         }
+
+        // A saturated peer must not change fresh registration admission.
+        // Its successful registration sample still counts for later mutations.
+        let mut saturated = RuntimeMutationBudgetEnforcer::new();
+        let read_clock = clock.clone();
+        saturated.clock = Some(std::sync::Arc::new(move || *read_clock.lock().unwrap()));
+        let peer = SceneId::new();
+        assert_eq!(
+            saturated.register_session(
+                peer,
+                "saturated-agent".into(),
+                rate_budget.clone(),
+                true,
+                MutationBudgetUsage::default(),
+            ),
+            MutationBudgetDecision::Allow
+        );
+        for _ in 0..2 {
+            assert_eq!(
+                saturated.reserve_mutation(peer, 1, 10, 1),
+                MutationBudgetDecision::Allow
+            );
+        }
+        let before_registration = {
+            let state = saturated.lock();
+            assert_eq!(state.sessions[&peer].recent_updates.len(), 3);
+            assert!(
+                state.sessions[&peer]
+                    .recent_updates
+                    .iter()
+                    .all(|sample| *sample == t0 + UPDATE_RATE_WINDOW)
+            );
+            (
+                state.sessions.len(),
+                state.leased_tiles,
+                state.leased_texture_bytes,
+            )
+        };
+        let fresh = SceneId::new();
+        let fresh_registration = saturated.register_session(
+            fresh,
+            "saturated-agent".into(),
+            rate_budget,
+            true,
+            MutationBudgetUsage {
+                tiles: 1,
+                texture_bytes: 10,
+            },
+        );
+        let after_registration = {
+            let state = saturated.lock();
+            assert_eq!(state.sessions[&peer].recent_updates.len(), 3);
+            (
+                state.sessions.len(),
+                state.leased_tiles,
+                state.leased_texture_bytes,
+            )
+        };
+        println!(
+            "saturated-peer fresh registration: decision={fresh_registration:?}; before={before_registration:?}; after={after_registration:?}"
+        );
+        assert_eq!(before_registration, (1, 2, 20));
+        assert_eq!(
+            fresh_registration,
+            MutationBudgetDecision::Allow,
+            "saturated peer history preserves fresh registration admission"
+        );
+        assert_eq!(after_registration, (2, 3, 30));
+        assert_eq!(saturated.lock().sessions[&fresh].recent_updates.len(), 1);
+        let first_after_registration = saturated.reserve_mutation(fresh, 1, 10, 1);
+        let after_rejection = {
+            let state = saturated.lock();
+            assert_eq!(state.sessions[&peer].recent_updates.len(), 3);
+            assert_eq!(state.sessions[&fresh].recent_updates.len(), 2);
+            assert_eq!(
+                (
+                    state.sessions[&fresh].tiles,
+                    state.sessions[&fresh].texture_bytes
+                ),
+                (1, 10)
+            );
+            (
+                state.sessions.len(),
+                state.leased_tiles,
+                state.leased_texture_bytes,
+            )
+        };
+        println!(
+            "saturated-peer mutation after registration: decision={first_after_registration:?}; before={after_registration:?}; after={after_rejection:?}"
+        );
+        assert!(matches!(
+            first_after_registration,
+            MutationBudgetDecision::Reject {
+                error_code: "RESOURCE_BUDGET_EXCEEDED",
+                ..
+            }
+        ));
+        assert_eq!(after_rejection, after_registration);
     }
 
     #[test]
