@@ -1,17 +1,13 @@
 [package]
 name = "tze_hud_projection"
-description = "Provider-neutral cooperative HUD projection operation contract"
+description = "Shared in-process portal state and resident rendering"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
 serde = { workspace = true }
-serde_json = { workspace = true }
 thiserror = { workspace = true }
-blake3 = { workspace = true }
-getrandom = { workspace = true }
-subtle = { workspace = true }
 tze_hud_config = { path = "../tze_hud_config", version = "0.1.0", optional = true }
 tze_hud_protocol = { path = "../tze_hud_protocol", version = "0.1.0", optional = true }
 uuid = { workspace = true, optional = true }
@@ -25,11 +21,5 @@ resident-grpc = ["dep:tze_hud_config", "dep:tze_hud_protocol", "dep:uuid"]
 
 [dev-dependencies]
 proptest = { workspace = true }
-# Required for the hud-0528i follow-tail end-to-end tests that simulate the
-# runtime calling InputProcessor::notify_tile_content_appended with geometry
-# carried in CliPortalDrainRecord::append_geometry.
-tze_hud_input = { path = "../tze_hud_input", version = "0.1.0" }
-tze_hud_scene = { path = "../tze_hud_scene", version = "0.1.0" }
-
 [lints]
 workspace = true

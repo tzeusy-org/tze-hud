@@ -437,7 +437,7 @@ impl ScrollTileState {
 
     /// Notify this tile that leading (head) content has been removed.
     ///
-    /// Head-trim operations (e.g. `PortalCadenceCoalescer` byte-cap or
+    /// Head-trim operations (e.g. `PortalHub` byte-cap or
     /// `visible_transcript_window` capping) remove the oldest content from the
     /// **start** of the buffer.  Without this notification, a `ScrolledBack`
     /// viewport holds a raw pixel offset that now points into empty space —

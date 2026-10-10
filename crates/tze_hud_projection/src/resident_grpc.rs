@@ -16,9 +16,8 @@ use tze_hud_protocol::proto::session as session_proto;
 use thiserror::Error;
 
 use crate::{
-    AdapterDraftBatch, AdapterDraftNotification, ContentClassification, InputDeliveryState,
-    OutputKind, PortalInputFeedback, PortalInputFeedbackState, PortalInputSubmission,
-    ProjectedPortalPresentation, ProjectedPortalState, ProjectionAuthority, ProjectionErrorCode,
+    AdapterDraftBatch, AdapterDraftNotification, InputDeliveryState, OutputKind, PortalError,
+    PortalInputFeedback, PortalInputFeedbackState, PortalView, ProjectedPortalPresentation,
     ProjectionLifecycleState, TranscriptUnit,
 };
 
@@ -110,7 +109,7 @@ const PORTAL_STREAMING_CURSOR_GLYPH: &str = " ▍";
 /// goes silent under redaction rather than asserting a value. The mapping is
 /// total; refinement toward `WaitingForInput`/`Blocked` is left to the authority
 /// that owns richer session semantics.
-fn portal_lifecycle_state_proto(state: &ProjectedPortalState) -> i32 {
+fn portal_lifecycle_state_proto(state: &PortalView) -> i32 {
     use ProjectionLifecycleState as P;
     let e = match state.lifecycle_state {
         None => proto::PortalLifecycleStateProto::PortalLifecycleStateUnspecified,
@@ -130,7 +129,7 @@ fn portal_lifecycle_state_proto(state: &ProjectedPortalState) -> i32 {
 /// Map the projected portal's presentation to the first-class
 /// [`proto::PortalDisplayStateProto`] i32 (hud-rpm9s). Total — presentation is
 /// never redacted, so this always asserts a concrete Expanded/Collapsed value.
-fn portal_display_state_proto(state: &ProjectedPortalState) -> i32 {
+fn portal_display_state_proto(state: &PortalView) -> i32 {
     let e = match state.presentation {
         ProjectedPortalPresentation::Expanded => {
             proto::PortalDisplayStateProto::PortalDisplayStateExpanded
@@ -217,7 +216,7 @@ const PORTAL_ACTIVITY_QUIESCE_WINDOW_US: u64 = 2_000_000;
 /// authority from the session lifecycle), NOT the redaction-gated
 /// `lifecycle_state`, so the degraded treatment is applied even for a restricted
 /// viewer.
-fn is_connection_degraded(state: &ProjectedPortalState) -> bool {
+fn is_connection_degraded(state: &PortalView) -> bool {
     state.connection_degraded
 }
 
@@ -246,7 +245,7 @@ fn is_connection_degraded(state: &ProjectedPortalState) -> bool {
 /// gate is a freshness window, continuous streaming keeps re-satisfying it
 /// without any attention re-escalation, and it quiesces promptly once appends
 /// stop (§activity cue is not a notification).
-fn agent_activity_active(state: &ProjectedPortalState, now_wall_us: u64) -> bool {
+fn agent_activity_active(state: &PortalView, now_wall_us: u64) -> bool {
     // The cue is active exactly while `now` has not passed the newest agent
     // tail's clear-due deadline. Factored through
     // `agent_activity_clear_deadline_us` so the drive loop can schedule a
@@ -273,7 +272,7 @@ fn agent_activity_active(state: &ProjectedPortalState, now_wall_us: u64) -> bool
 /// Cue: the cue SHALL "quiesce promptly once appends stop"). The driver reads
 /// this deadline to schedule a single force-repaint past it, at which point the
 /// derivation above evaluates false and the cue clears.
-pub fn agent_activity_clear_deadline_us(state: &ProjectedPortalState) -> Option<u64> {
+pub fn agent_activity_clear_deadline_us(state: &PortalView) -> Option<u64> {
     if state.presentation != ProjectedPortalPresentation::Expanded
         || is_connection_degraded(state)
         || !state.has_ever_connected
@@ -333,8 +332,8 @@ const EXPANDED_PORTAL_CORNER_RADIUS_PX: f32 = 14.0;
 /// ## Redaction safety (§6.3)
 ///
 /// Redaction is **structural**, not time-based: the `redacted` flag on
-/// `ProjectedPortalState` is computed from viewer clearance vs. content
-/// classification by the `ProjectionAuthority`, independently of any transition
+/// `PortalView` carries the renderer's redaction presentation control,
+/// independently of any transition
 /// animation position. A restricted viewer therefore sees `redacted = true` in
 /// every frame — expanded, collapsed, and any intermediate transition state.
 ///
@@ -611,14 +610,6 @@ pub struct ResidentGrpcPortalCommand {
     pub budget: ResidentGrpcBudgetSample,
 }
 
-/// Local-first result for a HUD composer submission mapped into the semantic
-/// cooperative projection inbox.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ResidentGrpcPortalInputResult {
-    pub feedback: PortalInputFeedback,
-    pub budget: ResidentGrpcBudgetSample,
-}
-
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum ResidentGrpcAdapterError {
     #[error("resident portal tile has not been created or recorded")]
@@ -680,7 +671,6 @@ pub struct ResidentGrpcDraftCommand {
 pub struct ResidentGrpcPortalAdapter {
     config: ResidentGrpcPortalConfig,
     tile_id: Option<Vec<u8>>,
-    next_input_sequence: u64,
     /// Latest draft sequence seen by this adapter — used to skip stale
     /// state-stream notifications that arrive out of order.
     last_draft_sequence: u64,
@@ -776,7 +766,6 @@ impl ResidentGrpcPortalAdapter {
         Self {
             config,
             tile_id: None,
-            next_input_sequence: 0,
             last_draft_sequence: 0,
             visual_tokens: PortalVisualTokens::default(),
             composer_display: None,
@@ -796,7 +785,6 @@ impl ResidentGrpcPortalAdapter {
         Self {
             config,
             tile_id: None,
-            next_input_sequence: 0,
             last_draft_sequence: 0,
             visual_tokens: tokens,
             composer_display: None,
@@ -883,7 +871,7 @@ impl ResidentGrpcPortalAdapter {
     /// Ambient per-turn timestamps (hud-g1ena.4) are presented per the adapter's
     /// profile-resolved granularity, so the drain-record markdown matches the tile
     /// content byte-for-byte.
-    pub fn render_portal_markdown(&self, state: &ProjectedPortalState, now_wall_us: u64) -> String {
+    pub fn render_portal_markdown(&self, state: &PortalView, now_wall_us: u64) -> String {
         portal_markdown_with(
             state,
             self.composer_display.as_ref(),
@@ -896,7 +884,7 @@ impl ResidentGrpcPortalAdapter {
     /// portal tile, including current geometry and input mode.
     pub fn render_portal_message(
         &mut self,
-        state: &ProjectedPortalState,
+        state: &PortalView,
         sequence: u64,
         timestamp_wall_us: u64,
     ) -> Result<ResidentGrpcPortalCommand, ResidentGrpcAdapterError> {
@@ -924,7 +912,7 @@ impl ResidentGrpcPortalAdapter {
     //      from the runtime's ComposerDraft notification path.
     //   2. For state-stream notifications: renders a `UpdateComposerDisplay`
     //      command containing the latest draft text (for compositor display).
-    //   3. For transactional submissions: calls `submit_composer_text`.
+    //   3. The runtime driver queues transactional submissions in PortalHub.
     //
     // This satisfies spec §4.6: "update the cooperative projection adapter …
     // to consume draft-state notifications instead of per-keystroke republish."
@@ -990,7 +978,7 @@ impl ResidentGrpcPortalAdapter {
         }
 
         // Transactional submission (handled separately; caller should also
-        // call `submit_composer_text` with the submission text).
+        // queue the submission text through PortalHub::submit_reply).
         // Submission clears composer display state (post-submit display clear).
         // Advance last_draft_sequence so that any delayed state-stream
         // notifications with sequence ≤ submission.sequence are ignored.
@@ -1045,36 +1033,6 @@ impl ResidentGrpcPortalAdapter {
         self.last_draft_sequence
     }
 
-    /// Map submitted HUD composer text to the cooperative semantic inbox. This
-    /// is not a raw keystroke path; the active LLM session later polls the
-    /// pending item through the projection operation contract.
-    pub fn submit_composer_text(
-        &mut self,
-        authority: &mut ProjectionAuthority,
-        projection_id: &str,
-        text: String,
-        submitted_at_wall_us: u64,
-        expires_at_wall_us: Option<u64>,
-        content_classification: ContentClassification,
-    ) -> ResidentGrpcPortalInputResult {
-        let started = Instant::now();
-        self.next_input_sequence += 1;
-        let feedback = authority.submit_portal_input(
-            projection_id,
-            PortalInputSubmission {
-                input_id: format!("input-{}", self.next_input_sequence),
-                submission_text: text,
-                submitted_at_wall_us,
-                expires_at_wall_us,
-                content_classification,
-            },
-        );
-        ResidentGrpcPortalInputResult {
-            feedback,
-            budget: sample_budget(started, RESIDENT_PORTAL_INPUT_FEEDBACK_BUDGET_US),
-        }
-    }
-
     /// Build the portal-content `MutationBatch` for the given projected state.
     ///
     /// This is the single render path shared by both adapter families: the
@@ -1095,7 +1053,7 @@ impl ResidentGrpcPortalAdapter {
     /// cursor because `now - appended_at` exceeds the quiesce window.
     pub fn render_batch(
         &self,
-        state: &ProjectedPortalState,
+        state: &PortalView,
         now_wall_us: u64,
     ) -> Result<session_proto::MutationBatch, ResidentGrpcAdapterError> {
         let tile_id = self
@@ -1317,7 +1275,7 @@ impl ResidentGrpcPortalAdapter {
     /// Requires `record_created_tile` first (same contract as `render_batch`).
     pub fn render_batch_with_surface(
         &mut self,
-        state: &ProjectedPortalState,
+        state: &PortalView,
         now_wall_us: u64,
     ) -> Result<session_proto::MutationBatch, ResidentGrpcAdapterError> {
         let mut batch = self.render_batch(state, now_wall_us)?;
@@ -1372,7 +1330,7 @@ impl ResidentGrpcPortalAdapter {
     /// [`ResidentGrpcAdapterError::MissingPortalTile`] otherwise).
     pub fn portal_surface_declaration_mutation(
         &self,
-        state: &ProjectedPortalState,
+        state: &PortalView,
     ) -> Result<proto::MutationProto, ResidentGrpcAdapterError> {
         let tile_id = self
             .tile_id
@@ -1398,7 +1356,7 @@ impl ResidentGrpcPortalAdapter {
     /// surface, an Expanded portal splits into `Header`, INPUT `Composer`, OUTPUT
     /// `Transcript`, and `Divider`, and a Collapsed portal declares a
     /// `CollapsedCard`.
-    fn portal_surface_proto(&self, state: &ProjectedPortalState) -> proto::PortalSurfaceProto {
+    fn portal_surface_proto(&self, state: &PortalView) -> proto::PortalSurfaceProto {
         let full = self.local_bounds_for_state(state);
         let part = |kind: proto::PortalPartKindProto, bounds: proto::Rect| proto::PortalPartProto {
             kind: kind as i32,
@@ -1453,7 +1411,7 @@ impl ResidentGrpcPortalAdapter {
         }
     }
 
-    fn expanded_portal_geometry(&self, state: &ProjectedPortalState) -> ExpandedPortalGeometry {
+    fn expanded_portal_geometry(&self, state: &PortalView) -> ExpandedPortalGeometry {
         let full = self.local_bounds_for_state(state);
         let header_h = self
             .visual_tokens
@@ -1577,7 +1535,7 @@ impl ResidentGrpcPortalAdapter {
 
     fn portal_node(
         &self,
-        state: &ProjectedPortalState,
+        state: &PortalView,
         root_id_le: Vec<u8>,
         now_wall_us: u64,
     ) -> proto::NodeProto {
@@ -1718,7 +1676,7 @@ impl ResidentGrpcPortalAdapter {
 
     fn portal_text_node(
         &self,
-        state: &ProjectedPortalState,
+        state: &PortalView,
         root_id_le: Vec<u8>,
         now_wall_us: u64,
     ) -> proto::NodeProto {
@@ -1923,7 +1881,7 @@ impl ResidentGrpcPortalAdapter {
         }
     }
 
-    fn bounds_for_state(&self, state: &ProjectedPortalState) -> proto::Rect {
+    fn bounds_for_state(&self, state: &PortalView) -> proto::Rect {
         match state.presentation {
             ProjectedPortalPresentation::Expanded => {
                 // hud-v4k1h: an Expanded portal that has been resized renders its
@@ -1958,7 +1916,7 @@ impl ResidentGrpcPortalAdapter {
         }
     }
 
-    fn local_bounds_for_state(&self, state: &ProjectedPortalState) -> proto::Rect {
+    fn local_bounds_for_state(&self, state: &PortalView) -> proto::Rect {
         let source = self.bounds_for_state(state);
         proto::Rect {
             x: 0.0,
@@ -1997,7 +1955,7 @@ impl ResidentGrpcPortalAdapter {
 /// adapter's profile-resolved [`TimestampGranularity`]; hence `#[cfg(test)]`.
 #[cfg(test)]
 fn portal_markdown(
-    state: &ProjectedPortalState,
+    state: &PortalView,
     composer_display: Option<&ComposerDisplayState>,
     now_wall_us: u64,
 ) -> String {
@@ -2017,7 +1975,7 @@ fn portal_markdown(
 /// the rendered content (e.g. the drain-record markdown); the render path uses
 /// the spans variant to attribute turns by role.
 fn portal_markdown_with(
-    state: &ProjectedPortalState,
+    state: &PortalView,
     composer_display: Option<&ComposerDisplayState>,
     now_wall_us: u64,
     timestamps: TimestampGranularity,
@@ -2030,7 +1988,7 @@ fn portal_markdown_with(
 /// viewer turns are materialized independently in the INPUT pane, so neither is
 /// allowed to enter this byte stream.
 fn portal_output_markdown_with_spans(
-    state: &ProjectedPortalState,
+    state: &PortalView,
     now_wall_us: u64,
     timestamps: TimestampGranularity,
 ) -> (String, Vec<TranscriptTurnSpan>) {
@@ -2076,7 +2034,7 @@ fn portal_output_markdown_with_spans(
 /// presentations return none. The `String` half is byte-identical to the
 /// pre-spans `portal_markdown_with` output.
 fn portal_markdown_with_spans(
-    state: &ProjectedPortalState,
+    state: &PortalView,
     composer_display: Option<&ComposerDisplayState>,
     now_wall_us: u64,
     timestamps: TimestampGranularity,
@@ -2402,7 +2360,7 @@ fn apply_tail_reserved_truncation(
 /// whole blob after the presentation match, displacing the composer status from
 /// the guaranteed-visible tail. In the Collapsed arm (no composer status line)
 /// they follow the compact preview.
-fn push_input_status_lines(result: &mut String, state: &ProjectedPortalState) {
+fn push_input_status_lines(result: &mut String, state: &PortalView) {
     if let Some(pending) = state.pending_input_count {
         push_line(result, &format!("pending HUD input: {pending}"));
     }
@@ -2423,22 +2381,11 @@ fn composer_feedback_line(feedback: &PortalInputFeedback) -> String {
         PortalInputFeedbackState::Accepted => "✓ sent".to_string(),
         PortalInputFeedbackState::Rejected => {
             let reason = match feedback.error_code {
-                Some(ProjectionErrorCode::ProjectionHudUnavailable) => {
-                    "the agent is disconnected".to_string()
-                }
-                Some(ProjectionErrorCode::ProjectionInputQueueFull) => {
+                Some(PortalError::NotHeld) => "the agent is disconnected".to_string(),
+                Some(PortalError::QueueFull) => {
                     "too many replies waiting — try again shortly".to_string()
                 }
-                Some(ProjectionErrorCode::ProjectionInputTooLarge) => {
-                    "message too long".to_string()
-                }
-                Some(ProjectionErrorCode::ProjectionRateLimited) => {
-                    "sending too fast — try again shortly".to_string()
-                }
-                Some(
-                    ProjectionErrorCode::ProjectionTokenExpired
-                    | ProjectionErrorCode::ProjectionUnauthorized,
-                ) => "the projection session expired".to_string(),
+                Some(PortalError::TooLarge { .. }) => "message too long".to_string(),
                 _ => clamp_one_line(&feedback.status_summary, 160),
             };
             format!("⚠ not sent — {reason}")
@@ -2502,7 +2449,7 @@ fn composer_line(
 ///
 /// §2: the marker color is token-driven — no literal color in the render path.
 fn stale_marker_color_runs(
-    state: &ProjectedPortalState,
+    state: &PortalView,
     stale_marker_color: proto::Rgba,
 ) -> Vec<proto::TextColorRunProto> {
     if !is_connection_degraded(state) {
@@ -2538,7 +2485,7 @@ fn unread_indicator_line(unread_output_count: Option<usize>) -> Option<String> {
 /// (§6.1). Empty when there is nothing unread or the count is redacted —
 /// matching `unread_indicator_line`'s gating exactly.
 fn unread_indicator_color_runs(
-    state: &ProjectedPortalState,
+    state: &PortalView,
     unread_indicator_color: proto::Rgba,
 ) -> Vec<proto::TextColorRunProto> {
     match state.unread_output_count {
@@ -2578,7 +2525,7 @@ fn unread_indicator_color_runs(
 /// the walk exhausts and the divider sits at the **oldest retained unseen unit** —
 /// the first retained agent-authored turn — matching the spec's "the count MAY
 /// exceed the units visibly below the divider".
-fn unread_divider_boundary(state: &ProjectedPortalState) -> Option<usize> {
+fn unread_divider_boundary(state: &PortalView) -> Option<usize> {
     let count = match state.visible_unread_output_count {
         Some(count) if count > 0 => count,
         _ => return None,
@@ -2609,7 +2556,7 @@ fn unread_divider_boundary(state: &ProjectedPortalState) -> Option<usize> {
 /// agent-authored turn (`unread_divider_boundary` is `Some`). Empty otherwise, so
 /// it disappears the moment the count clears on tail view.
 fn unread_divider_color_runs(
-    state: &ProjectedPortalState,
+    state: &PortalView,
     unread_divider_color: proto::Rgba,
 ) -> Vec<proto::TextColorRunProto> {
     if state.presentation == ProjectedPortalPresentation::Expanded
@@ -2637,7 +2584,7 @@ fn unread_divider_color_runs(
 ///   (`OutputKind::Viewer`) is appended with `expects_reply == false`
 ///   (`submit_portal_input`), so once the viewer responds it becomes the new
 ///   last unit and the cue clears — no separate "answered" bookkeeping needed.
-fn awaiting_reply(state: &ProjectedPortalState) -> bool {
+fn awaiting_reply(state: &PortalView) -> bool {
     state
         .visible_transcript
         .last()
@@ -2652,7 +2599,7 @@ fn awaiting_reply(state: &ProjectedPortalState) -> bool {
 /// `awaiting_reply_color` so the token drives the signal without any literal
 /// color in the render path (§6.1). Empty when nothing is awaiting reply.
 fn awaiting_reply_color_runs(
-    state: &ProjectedPortalState,
+    state: &PortalView,
     awaiting_reply_color: proto::Rgba,
 ) -> Vec<proto::TextColorRunProto> {
     if awaiting_reply(state) {
@@ -2720,7 +2667,7 @@ impl DeliveryCueClass {
 /// falls out for free under redaction: the authority leaves
 /// `latest_viewer_delivery_state == None` whenever the transcript is not visible to
 /// this viewer, so the cue redacts together with the echoed turn it annotates.
-fn delivery_cue_class(state: &ProjectedPortalState) -> Option<DeliveryCueClass> {
+fn delivery_cue_class(state: &PortalView) -> Option<DeliveryCueClass> {
     state
         .latest_viewer_delivery_state
         .map(DeliveryCueClass::from_delivery_state)
@@ -2737,7 +2684,7 @@ fn delivery_cue_class(state: &ProjectedPortalState) -> Option<DeliveryCueClass> 
 /// otherwise, so it disappears with the transcript under redaction and when there
 /// is no tracked viewer submission.
 fn delivery_cue_color_runs(
-    state: &ProjectedPortalState,
+    state: &PortalView,
     tokens: &PortalVisualTokens,
 ) -> Vec<proto::TextColorRunProto> {
     match delivery_cue_class(state) {
@@ -2814,7 +2761,7 @@ fn lifecycle_accent_color(
 /// viewer gets no lifecycle affordance, exactly like the redaction-gated
 /// `status:` line.
 fn lifecycle_marker_color_runs(
-    state: &ProjectedPortalState,
+    state: &PortalView,
     tokens: &PortalVisualTokens,
 ) -> Vec<proto::TextColorRunProto> {
     let Some(lifecycle) = state.lifecycle_state else {
@@ -2848,7 +2795,7 @@ fn lifecycle_marker_color_runs(
 ///
 /// Yields immediately to real content: the caller only renders this when
 /// `visible_transcript.is_empty()`, so the first appended unit replaces it.
-fn empty_portal_markdown(state: &ProjectedPortalState) -> &'static str {
+fn empty_portal_markdown(state: &PortalView) -> &'static str {
     if !state.has_ever_connected {
         return PORTAL_CONNECTING_LINE;
     }
@@ -2869,7 +2816,7 @@ fn empty_portal_markdown(state: &ProjectedPortalState) -> &'static str {
 /// (`!has_ever_connected`) is intentionally excluded: it carries its own distinct
 /// token via `connecting_color_runs` (hud-g1ena.7).
 fn empty_state_color_runs(
-    state: &ProjectedPortalState,
+    state: &PortalView,
     empty_state_color: proto::Rgba,
 ) -> Vec<proto::TextColorRunProto> {
     if state.presentation == ProjectedPortalPresentation::Expanded
@@ -2903,7 +2850,7 @@ fn empty_state_color_runs(
 /// the connecting hue reveals only connection state, no identity or content, so
 /// it is emitted even for a restricted viewer.
 fn connecting_color_runs(
-    state: &ProjectedPortalState,
+    state: &PortalView,
     connecting_marker_color: proto::Rgba,
 ) -> Vec<proto::TextColorRunProto> {
     if state.presentation == ProjectedPortalPresentation::Expanded
@@ -2933,7 +2880,7 @@ fn connecting_color_runs(
 /// otherwise, so it quiesces with the append cadence and suppresses under
 /// redaction exactly like the header line.
 fn activity_cue_color_runs(
-    state: &ProjectedPortalState,
+    state: &PortalView,
     activity_cue_color: proto::Rgba,
     now_wall_us: u64,
 ) -> Vec<proto::TextColorRunProto> {
@@ -2972,7 +2919,7 @@ fn activity_cue_color_runs(
 /// layout-measured tail of the latest agent turn. This supersedes the old byte-0
 /// sentinel, which the cached path discarded — the cursor never took its accent.
 fn streaming_cursor_color_runs(
-    state: &ProjectedPortalState,
+    state: &PortalView,
     streaming_cursor_color: proto::Rgba,
     now_wall_us: u64,
     content_len: usize,
@@ -3017,7 +2964,7 @@ fn streaming_cursor_color_runs(
 /// the token color; the text-visible `HH:MM` prefix marks each stamp. Promotion-
 /// era structured multi-node layout will color the stamp spans precisely.
 fn timestamp_color_runs(
-    state: &ProjectedPortalState,
+    state: &PortalView,
     timestamp_color: proto::Rgba,
     granularity: TimestampGranularity,
 ) -> Vec<proto::TextColorRunProto> {
@@ -3231,7 +3178,7 @@ fn input_history_markdown(units: &[TranscriptUnit], timestamps: TimestampGranula
 /// line preserve the established composer availability contract for both pixels
 /// and headless verification.
 fn portal_input_markdown(
-    state: &ProjectedPortalState,
+    state: &PortalView,
     composer_display: Option<&ComposerDisplayState>,
     timestamps: TimestampGranularity,
 ) -> String {
@@ -3390,21 +3337,15 @@ pub fn portal_visual_tokens_from_part_tokens(
 mod tests {
     use super::*;
     use crate::{
-        ContentClassification, OutputKind, ProjectedPortalAdapterFamily, ProjectedPortalAttention,
-        ProjectedPortalLayer, ProjectedPortalPresentation, ProjectedPortalRuntimeAuthority,
-        ProjectedPortalState, ProjectionLifecycleState,
+        OutputKind, PortalView, ProjectedPortalAttention, ProjectedPortalPresentation,
+        ProjectionLifecycleState,
     };
 
     /// Build a minimal interaction-enabled expanded portal state for adapter tests.
-    fn make_expanded_interaction_state(portal_id: &str) -> ProjectedPortalState {
-        ProjectedPortalState {
-            projection_id: "test-proj-1".to_string(),
+    fn make_expanded_interaction_state(portal_id: &str) -> PortalView {
+        PortalView {
             portal_id: portal_id.to_string(),
-            adapter_family: ProjectedPortalAdapterFamily::CooperativeProjection,
-            runtime_authority: ProjectedPortalRuntimeAuthority::ResidentSessionLease,
-            layer: ProjectedPortalLayer::Content,
             presentation: ProjectedPortalPresentation::Expanded,
-            preserve_geometry: false,
             redacted: false,
             connection_degraded: false,
             // Live, interactive fixture: the session has connected (so the
@@ -3412,24 +3353,16 @@ mod tests {
             has_ever_connected: true,
             interaction_enabled: true,
             attention: ProjectedPortalAttention::Ambient,
-            provider_kind: None,
             display_name: Some("Test Session".to_string()),
-            workspace_hint: None,
-            repository_hint: None,
-            icon_profile_hint: None,
-            hud_target: None,
             lifecycle_state: None,
             status_text: None,
             visible_transcript: vec![],
-            visible_transcript_bytes: 0,
             input_history: vec![],
             unread_output_count: None,
             visible_unread_output_count: None,
             pending_input_count: None,
-            pending_input_bytes: None,
             last_input_feedback: None,
             latest_viewer_delivery_state: None,
-            draft_batch: None,
             geometry_batch: None,
             resized_bounds: None,
         }
@@ -4736,9 +4669,6 @@ mod tests {
                 sequence: 1,
                 output_text: "first".to_string(),
                 output_kind: OutputKind::Assistant,
-                content_classification: ContentClassification::Private,
-                logical_unit_id: None,
-                coalesce_key: None,
                 expects_reply: false,
                 appended_at_wall_us: 1,
             },
@@ -4746,9 +4676,6 @@ mod tests {
                 sequence: 2,
                 output_text: "é".repeat(3_000),
                 output_kind: OutputKind::Assistant,
-                content_classification: ContentClassification::Private,
-                logical_unit_id: None,
-                coalesce_key: None,
                 expects_reply: false,
                 appended_at_wall_us: 2,
             },
@@ -4907,7 +4834,7 @@ mod tests {
     }
 
     /// hud-meqet: `unread_output_count` was already threaded (un-nulled)
-    /// through to `ProjectedPortalState` by the authority, but the render
+    /// through to `PortalView` by the authority, but the render
     /// path never read it, so it was never drawn. A nonzero, visible count
     /// must emit an ambient text-item line ("N unread") plus a token-driven
     /// sentinel color run (mirroring the stale-marker/composer Phase-1
@@ -5024,9 +4951,6 @@ mod tests {
             sequence,
             output_text: text.to_string(),
             output_kind,
-            content_classification: ContentClassification::Private,
-            logical_unit_id: None,
-            coalesce_key: None,
             expects_reply: false,
             appended_at_wall_us: sequence,
         }
@@ -5330,11 +5254,6 @@ mod tests {
             OutputKind::Assistant,
             "agent says hi",
         )];
-        state.visible_transcript_bytes = state
-            .visible_transcript
-            .iter()
-            .map(|u| u.output_text.len())
-            .sum();
         state.input_history = vec![
             transcript_unit_text(2, OutputKind::Viewer, "viewer reply one"),
             transcript_unit_text(3, OutputKind::Viewer, "viewer reply two"),
@@ -5394,11 +5313,6 @@ mod tests {
             OutputKind::Assistant,
             "agent says hi",
         )];
-        state.visible_transcript_bytes = state
-            .visible_transcript
-            .iter()
-            .map(|u| u.output_text.len())
-            .sum();
         // A large INPUT-history band — enough entries that, before hud-0e44r,
         // the composer status line (positioned BEFORE the band) would have been
         // pushed far outside any tail-anchored truncation window.
@@ -5978,9 +5892,6 @@ mod tests {
             sequence,
             output_text: "example output".to_string(),
             output_kind,
-            content_classification: ContentClassification::Private,
-            logical_unit_id: None,
-            coalesce_key: None,
             expects_reply,
             appended_at_wall_us: sequence,
         }
@@ -6414,7 +6325,7 @@ mod tests {
         let appended_at = 1_000_000;
         let now = appended_at + 500_000; // fresh — so only the guards can suppress
 
-        let assert_suppressed = |state: &ProjectedPortalState, case: &str| {
+        let assert_suppressed = |state: &PortalView, case: &str| {
             assert!(
                 !agent_activity_active(state, now),
                 "{case}: predicate must be false"
@@ -7510,9 +7421,6 @@ mod tests {
             sequence,
             output_text: text.to_string(),
             output_kind: OutputKind::Assistant,
-            content_classification: ContentClassification::Private,
-            logical_unit_id: None,
-            coalesce_key: None,
             expects_reply: false,
             appended_at_wall_us: wall_us,
         }

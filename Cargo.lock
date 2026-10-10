@@ -3621,17 +3621,11 @@ dependencies = [
 name = "tze_hud_projection"
 version = "0.1.0"
 dependencies = [
- "blake3",
- "getrandom 0.3.4",
  "proptest",
  "serde",
- "serde_json",
- "subtle",
  "thiserror 2.0.18",
  "tze_hud_config",
- "tze_hud_input",
  "tze_hud_protocol",
- "tze_hud_scene",
  "uuid",
 ]
 

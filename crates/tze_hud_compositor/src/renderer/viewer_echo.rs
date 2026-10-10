@@ -2,7 +2,7 @@
 //!
 //! On a raw-tile pilot portal the transcript is adapter-owned (the exemplar
 //! publishes its own transcript node over `HudSession`), and the tile is not
-//! attached to the [`ProjectionAuthority`], so the authority-path
+//! attached to the [`PortalHub`], so the authority-path
 //! `append_viewer_echo` never fires. Without this, an accepted composer
 //! submission clears the composer and the viewer's words vanish from the surface
 //! ("whenever I press Enter my text disappears").
@@ -16,7 +16,7 @@
 //! cannot forge it (the adapter output-publication path rejects the viewer kind,
 //! unchanged).
 //!
-//! [`ProjectionAuthority`]: https://docs.rs/tze_hud_projection
+//! [`PortalHub`]: https://docs.rs/tze_hud_projection
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex as StdMutex};

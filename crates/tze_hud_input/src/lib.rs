@@ -587,7 +587,7 @@ impl InputProcessor {
     /// Notify a tile that leading (head) content has been removed.
     ///
     /// Called when the transcript head is trimmed — either by the 64 KiB
-    /// `PortalCadenceCoalescer` payload cap or the 16 KiB `visible_transcript_window`
+    /// `PortalHub` payload cap or the 16 KiB `visible_transcript_window`
     /// cap — so that a scrolled-back viewport stays visually stable rather than
     /// jumping into the gap left by the removed content (spec §3.3 / hud-pkg2g).
     ///

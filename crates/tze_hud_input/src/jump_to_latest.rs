@@ -31,7 +31,7 @@
 //! Per portal-chat-grade-affordances §Jump-to-Latest Affordance, the pill MAY
 //! carry the ambient unread count. When the tile has a nonzero, non-redacted
 //! unread-output count (plumbed onto the tile by the portal projection driver
-//! from `ProjectedPortalState::unread_output_count`), the compositor renders
+//! from `PortalView::unread_output_count`), the compositor renders
 //! the [`jump_to_latest_badge_label`] centered in the pill. The count is a
 //! quiet, token-styled label — never a notification; it updates in place as the
 //! backlog grows and clears with the pill itself the instant the viewer returns
@@ -129,7 +129,7 @@ impl Default for JumpToLatestTokens {
 /// MAY carry the ambient unread count").
 ///
 /// The input is the runtime-owned aggregate unread-output count already tracked
-/// end-to-end (`ProjectedPortalState::unread_output_count`, plumbed onto the
+/// end-to-end (`PortalView::unread_output_count`, plumbed onto the
 /// tile by the portal projection driver). It is `None` when the count is
 /// redacted by the authority's `reveal_unread` policy.
 ///

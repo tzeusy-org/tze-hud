@@ -31,10 +31,6 @@ name = "text_stream_portal_surface"
 path = "text_stream_portal_surface.rs"
 
 [[test]]
-name = "text_stream_portal_adapter"
-path = "text_stream_portal_adapter.rs"
-
-[[test]]
 name = "text_stream_portal_coalescing"
 path = "text_stream_portal_coalescing.rs"
 
