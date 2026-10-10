@@ -634,6 +634,8 @@ async fn test_three_pass_ordering_independent_of_registration_order() {
             None,
         )
         .unwrap();
+    compositor.prime_markdown_cache(&layered);
+    compositor.prime_truncation_cache(&layered);
     let (flat, _, bg_end, chrome_start) =
         compositor.build_frame_vertices(&layered, 1280.0, 720.0, &mut FrameTelemetry::new(0));
     assert_eq!((bg_end, chrome_start, flat.len()), (6, 12, 18));
