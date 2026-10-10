@@ -96,10 +96,8 @@ pub struct McpServerConfig {
 /// * `scene`           — shared scene graph for MCP tool dispatch.
 /// * `config`          — MCP server configuration (bind addresses, agents).
 /// * `shutdown`        — token that stops the accept loops when triggered.
-/// * `portal_op_tx` — optional channel sender for portal projection operations
-///   (hud-bq0gl.2).  When `Some`, the MCP server forwards portal surface
-///   operations through this channel to the winit event-loop thread where the
-///   `InProcessPortalDriver` lives.
+/// * `portals` — optional shared portal hub and clock
+///   (hud-bq0gl.2).  When `Some`, MCP calls this hub directly; the winit driver shares the same state and clock.
 ///
 /// # Returns
 ///
@@ -115,13 +113,13 @@ pub async fn start_mcp_http_server(
     scene: Arc<Mutex<SceneGraph>>,
     config: McpServerConfig,
     shutdown: ShutdownToken,
-    portal_op_tx: Option<tokio::sync::mpsc::UnboundedSender<tze_hud_mcp::portal_op::PortalOp>>,
+    portals: Option<tze_hud_mcp::PortalHandle>,
 ) -> std::io::Result<(tokio::task::JoinHandle<()>, Vec<SocketAddr>)> {
     start_mcp_http_server_with_render_wake(
         scene,
         config,
         shutdown,
-        portal_op_tx,
+        portals,
         tze_hud_scene::render_wake::RenderWakeNotifier::default(),
         tze_hud_scene::render_wake::RenderWakeNotifier::default(),
         Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -133,7 +131,7 @@ pub async fn start_mcp_http_server_with_render_wake(
     scene: Arc<Mutex<SceneGraph>>,
     config: McpServerConfig,
     shutdown: ShutdownToken,
-    portal_op_tx: Option<tokio::sync::mpsc::UnboundedSender<tze_hud_mcp::portal_op::PortalOp>>,
+    portals: Option<tze_hud_mcp::PortalHandle>,
     render_wake: tze_hud_scene::render_wake::RenderWakeNotifier,
     portal_ingress_wake: tze_hud_scene::render_wake::RenderWakeNotifier,
     safe_mode: Arc<std::sync::atomic::AtomicBool>,
@@ -208,8 +206,8 @@ pub async fn start_mcp_http_server_with_render_wake(
         .with_render_wake_notifier(render_wake)
         .with_portal_ingress_wake_notifier(portal_ingress_wake)
         .with_safe_mode(safe_mode);
-    if let Some(tx) = portal_op_tx {
-        server_builder = server_builder.with_portal_op_tx(tx);
+    if let Some(tx) = portals {
+        server_builder = server_builder.with_portals(tx);
     }
     let server = Arc::new(server_builder);
 

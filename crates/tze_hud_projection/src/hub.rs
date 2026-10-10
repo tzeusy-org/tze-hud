@@ -139,6 +139,7 @@ pub struct Input {
 
 #[derive(Clone, Debug)]
 pub struct Portal {
+    incarnation: u64,
     pub display_name: String,
     pub status: PortalStatus,
     pub transcript: VecDeque<Unit>,
@@ -164,6 +165,7 @@ pub struct Portal {
 impl Portal {
     fn new(display_name: String, now_us: u64) -> Self {
         Self {
+            incarnation: 0,
             display_name,
             status: PortalStatus::Attached,
             transcript: VecDeque::new(),
@@ -319,6 +321,7 @@ pub struct Deadline {
 #[derive(Debug, Default)]
 pub struct PortalHub {
     portals: BTreeMap<PortalKey, Portal>,
+    next_incarnation: u64,
     next_input: u64,
     limits: PortalLimits,
 }
@@ -327,6 +330,7 @@ impl PortalHub {
     pub fn new(limits: PortalLimits) -> Self {
         Self {
             portals: BTreeMap::new(),
+            next_incarnation: 0,
             next_input: 0,
             limits,
         }
@@ -339,6 +343,11 @@ impl PortalHub {
     /// A live portal (not reclaimed).
     pub fn get(&self, key: &PortalKey) -> Option<&Portal> {
         self.portals.get(key).filter(|p| p.live())
+    }
+
+    /// Identifies one attachment across clear/re-publish, but not a resume.
+    pub fn incarnation(&self, key: &PortalKey) -> Option<u64> {
+        self.get(key).map(|p| p.incarnation)
     }
 
     fn live_mut(&mut self, key: &PortalKey) -> Result<&mut Portal, PortalError> {
@@ -363,15 +372,16 @@ impl PortalHub {
             return Err(PortalError::TooLarge { limit });
         }
         let retained = self.limits.retained_bytes;
-        let portal = self
-            .portals
-            .entry(key.clone())
-            .and_modify(|portal| {
-                if !portal.live() {
-                    *portal = Portal::new(key.id.clone(), now_us);
-                }
-            })
-            .or_insert_with(|| Portal::new(key.id.clone(), now_us));
+        if self.get(key).is_none() {
+            self.next_incarnation = self
+                .next_incarnation
+                .checked_add(1)
+                .ok_or(PortalError::InvalidArgument)?;
+            let mut portal = Portal::new(key.id.clone(), now_us);
+            portal.incarnation = self.next_incarnation;
+            self.portals.insert(key.clone(), portal);
+        }
+        let portal = self.portals.get_mut(key).expect("attached above");
         portal.touch(now_us);
         portal.dirty = true;
         if let Some(name) = p.display_name {
@@ -447,11 +457,26 @@ impl PortalHub {
         max: Option<usize>,
         now_us: u64,
     ) -> InputBatch {
+        self.poll_input_with_changes(agent, ack, max, now_us).0
+    }
+
+    /// The ordinary input batch plus whether this pass changed rendered state.
+    /// An existing dirty portal, or another agent's portal, is not a change.
+    pub fn poll_input_with_changes(
+        &mut self,
+        agent: &str,
+        ack: &[String],
+        max: Option<usize>,
+        now_us: u64,
+    ) -> (InputBatch, bool) {
+        let mut changed = false;
         let mut queued: Vec<(u64, &str, &mut Input)> = Vec::new();
         for (key, portal) in self.portals.iter_mut() {
             if key.agent != agent || !portal.live() {
                 continue;
             }
+            changed |= portal.degraded_since_us.is_some();
+            let was_dirty = portal.dirty;
             portal.touch(now_us);
             let before = portal.inputs.len();
             portal
@@ -459,6 +484,7 @@ impl PortalHub {
                 .retain(|i| !ack.contains(&i.id) && i.expires_us > now_us);
             if portal.inputs.len() != before {
                 portal.dirty = true;
+                changed = true;
             }
             for input in portal.inputs.iter_mut() {
                 if !input.delivered {
@@ -466,6 +492,7 @@ impl PortalHub {
                 }
                 queued.push((input.at_us, key.id.as_str(), input));
             }
+            changed |= !was_dirty && portal.dirty;
         }
         queued.sort_by_key(|(at, _, _)| *at);
         let take = max.unwrap_or(usize::MAX).min(queued.len());
@@ -474,6 +501,7 @@ impl PortalHub {
             .into_iter()
             .take(take)
             .map(|(_, portal, input)| {
+                changed |= !input.delivered;
                 input.delivered = true;
                 PolledInput {
                     portal: portal.to_string(),
@@ -482,7 +510,7 @@ impl PortalHub {
                 }
             })
             .collect();
-        InputBatch { items, remaining }
+        (InputBatch { items, remaining }, changed)
     }
 
     /// The agent's live portals.
