@@ -9,7 +9,7 @@
 //!    returns into a scene tile, creating the tile (under its own scene
 //!    lease) on first render. Rendering goes through
 //!    `ResidentGrpcPortalAdapter::render_batch_with_surface`, fed a
-//!    `ProjectedPortalState` built from the hub's portal.
+//!    `PortalView` built from the hub's portal.
 //! 3. Mirrors liveness onto the scene lease: a degraded portal's lease is
 //!    orphaned (disconnection badge, content kept, invariant 4) and
 //!    reconnected when the agent returns. A reclaimed portal's lease is
@@ -32,11 +32,10 @@ pub use tze_hud_mcp::PortalHandle;
 pub use tze_hud_projection::hub::{PortalHub, PortalKey};
 use tze_hud_projection::{
     AdapterDraftBatch, AdapterDraftCancel, AdapterDraftNotification, AdapterDraftSubmission,
-    AdapterGeometryBatch, AdapterGeometrySnapshot, AdapterPortalRect, ContentClassification,
-    InputDeliveryState, OutputKind, PortalInputFeedback, PortalInputFeedbackState,
-    ProjectedPortalAdapterFamily, ProjectedPortalAttention, ProjectedPortalLayer,
-    ProjectedPortalPresentation, ProjectedPortalRuntimeAuthority, ProjectedPortalState,
-    ProjectionErrorCode, ProjectionLifecycleState, ProviderKind, TranscriptUnit,
+    AdapterGeometryBatch, AdapterGeometrySnapshot, AdapterPortalRect, InputDeliveryState,
+    OutputKind, PortalInputFeedback, PortalInputFeedbackState, PortalView,
+    ProjectedPortalAttention, ProjectedPortalPresentation, ProjectionLifecycleState,
+    TranscriptUnit,
     hub::{DeadlineKind, Due, Portal, PortalError, PortalStatus, Transition, Unit},
     resident_grpc::{
         ResidentGrpcPortalAdapter, ResidentGrpcPortalConfig, portal_visual_tokens_from_part_tokens,
@@ -97,7 +96,7 @@ const PORTAL_LEASE_TTL_MS: u64 = 86_400_000;
 /// The wall-clock instant (µs) at which the drive loop should force one repaint
 /// so `state`'s agent-activity / streaming-cursor cue quiesces (hud-kbm80), or
 /// `None` when the state carries no cue active as of `now_us`.
-fn activity_cue_clear_due_us(state: &ProjectedPortalState, now_us: u64) -> Option<u64> {
+fn activity_cue_clear_due_us(state: &PortalView, now_us: u64) -> Option<u64> {
     tze_hud_projection::resident_grpc::agent_activity_clear_deadline_us(state)
         .filter(|deadline| *deadline >= now_us)
         .map(|deadline| deadline.saturating_add(1))
@@ -236,14 +235,11 @@ fn portal_state(
     portal: &Portal,
     entry: &DriveEntry,
     visible_bytes: usize,
-) -> ProjectedPortalState {
+) -> PortalView {
     let unit = |u: &Unit, output_kind| TranscriptUnit {
         sequence: u.seq,
         output_text: u.text.clone(),
         output_kind,
-        content_classification: ContentClassification::default(),
-        logical_unit_id: None,
-        coalesce_key: u.key.clone(),
         expects_reply: u.expects_reply,
         appended_at_wall_us: u.at_us,
     };
@@ -252,26 +248,16 @@ fn portal_state(
         .map(|u| unit(u, OutputKind::Assistant))
         .collect();
     let degraded = portal.degraded_since_us.is_some();
-    ProjectedPortalState {
-        projection_id: key.id.clone(),
+    PortalView {
         portal_id: format!("text-stream://portal/{}/{}", key.agent, key.id),
-        adapter_family: ProjectedPortalAdapterFamily::CooperativeProjection,
-        runtime_authority: ProjectedPortalRuntimeAuthority::ResidentSessionLease,
-        layer: ProjectedPortalLayer::Content,
         presentation: ProjectedPortalPresentation::Expanded,
-        preserve_geometry: true,
         redacted: false,
         connection_degraded: degraded,
         // The portal exists because its agent published: it is connected.
         has_ever_connected: true,
         interaction_enabled: !degraded,
         attention: ProjectedPortalAttention::Ambient,
-        provider_kind: Some(ProviderKind::Other),
         display_name: Some(portal.display_name.clone()),
-        workspace_hint: None,
-        repository_hint: None,
-        icon_profile_hint: None,
-        hud_target: None,
         lifecycle_state: Some(match portal.status {
             PortalStatus::Attached => ProjectionLifecycleState::Attached,
             PortalStatus::Active => ProjectionLifecycleState::Active,
@@ -279,7 +265,6 @@ fn portal_state(
             PortalStatus::Detached => ProjectionLifecycleState::Detached,
         }),
         status_text: None,
-        visible_transcript_bytes: visible_transcript.iter().map(|u| u.output_text.len()).sum(),
         unread_output_count: Some(entry.carried_unread),
         visible_unread_output_count: Some(entry.carried_unread.min(visible_transcript.len())),
         visible_transcript,
@@ -289,7 +274,6 @@ fn portal_state(
             .map(|u| unit(u, OutputKind::Viewer))
             .collect(),
         pending_input_count: Some(portal.inputs.len()),
-        pending_input_bytes: Some(portal.input_bytes()),
         latest_viewer_delivery_state: portal.inputs.back().map(|i| {
             if i.delivered {
                 InputDeliveryState::Delivered
@@ -298,7 +282,6 @@ fn portal_state(
             }
         }),
         last_input_feedback: entry.last_input_feedback.clone(),
-        draft_batch: None,
         geometry_batch: entry.pending_geometry.clone(),
         resized_bounds: entry.latest_geometry.map(|g| g.rect),
     }
@@ -558,12 +541,7 @@ impl InProcessPortalDriver {
                 projection_id: key.id.clone(),
                 input_id: String::new(),
                 feedback_state: PortalInputFeedbackState::Rejected,
-                error_code: Some(match error {
-                    PortalError::TooLarge { .. } => ProjectionErrorCode::ProjectionInputTooLarge,
-                    PortalError::QueueFull => ProjectionErrorCode::ProjectionInputQueueFull,
-                    PortalError::NotHeld => ProjectionErrorCode::ProjectionNotFound,
-                    PortalError::InvalidArgument => ProjectionErrorCode::ProjectionInvalidArgument,
-                }),
+                error_code: Some(error),
                 pending_input_count,
                 pending_input_bytes,
                 status_summary: "portal input rejected".to_string(),
