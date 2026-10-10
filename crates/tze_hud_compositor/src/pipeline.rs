@@ -421,24 +421,10 @@ pub(crate) fn rounded_rect_cmd_vertices(
     if cmd.width <= 0.0 || cmd.height <= 0.0 {
         return None;
     }
-    // Hairline geometry is already in device pixels. Snap both shape edges
-    // together so raster coverage and the SDF use the same one-pixel band.
-    let (shape_x, shape_y, shape_w, shape_h) = if cmd.border.is_some_and(|b| b.width == 1.0) {
-        let x = cmd.x.round();
-        let y = cmd.y.round();
-        let right = (cmd.x + cmd.width).round();
-        let bottom = (cmd.y + cmd.height).round();
-        (x, y, right - x, bottom - y)
-    } else {
-        (cmd.x, cmd.y, cmd.width, cmd.height)
-    };
-    if shape_w <= 0.0 || shape_h <= 0.0 {
-        return None;
-    }
     let (draw_x, draw_y, draw_w, draw_h) = match cmd.clip {
         Some(c) if c.width <= 0.0 || c.height <= 0.0 => return None,
         Some(c) => (c.x, c.y, c.width, c.height),
-        None => (shape_x, shape_y, shape_w, shape_h),
+        None => (cmd.x, cmd.y, cmd.width, cmd.height),
     };
 
     // NDC corners
@@ -455,8 +441,8 @@ pub(crate) fn rounded_rect_cmd_vertices(
     let v = |px: f32, py: f32, ndc_x: f32, ndc_y: f32| RoundedRectVertex {
         position: [ndc_x, ndc_y],
         frag_pos: [px, py],
-        rect_center: [shape_x + shape_w * 0.5, shape_y + shape_h * 0.5],
-        rect_half_size: [shape_w * 0.5, shape_h * 0.5],
+        rect_center: [cmd.x + cmd.width * 0.5, cmd.y + cmd.height * 0.5],
+        rect_half_size: [cmd.width * 0.5, cmd.height * 0.5],
         radius: cmd.radius,
         color: cmd.color,
         border_width,
@@ -535,7 +521,25 @@ fn sdf_rounded_box(p: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {
 /// `-border_width < d <= 0` with the fill edge's AA on both sides. Offsetting
 /// the SDF keeps inner corners concentric (radius r - border_width).
 fn coverage_and_fill(in: VertexOutput) -> vec2<f32> {
-    let d = sdf_rounded_box(in.frag_pos - in.rect_center, in.rect_half_size, in.radius);
+    var d = sdf_rounded_box(in.frag_pos - in.rect_center, in.rect_half_size, in.radius);
+    if (in.border_width == 1.0) {
+        let q = abs(in.frag_pos - in.rect_center) - in.rect_half_size + vec2<f32>(in.radius);
+        // Keep curved corners and their tangents on the original SDF.
+        if (q.x <= 0.0 || q.y <= 0.0) {
+            let snapped_min = round(in.rect_center - in.rect_half_size);
+            let snapped_max = round(in.rect_center + in.rect_half_size);
+            if (all(snapped_max > snapped_min)) {
+                let snapped_d = max(
+                    max(snapped_min.x - in.frag_pos.x, in.frag_pos.x - snapped_max.x),
+                    max(snapped_min.y - in.frag_pos.y, in.frag_pos.y - snapped_max.y)
+                );
+                // Fade to the original distance over the last physical pixel
+                // of the straight side, avoiding a jump at the corner tangent.
+                let straight_weight = clamp(-min(q.x, q.y), 0.0, 1.0);
+                d = mix(d, snapped_d, straight_weight);
+            }
+        }
+    }
     let coverage = smoothstep(0.5, -0.5, d);
     var fill = 1.0;
     if (in.border_width > 0.0) {
