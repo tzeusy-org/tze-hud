@@ -26,7 +26,6 @@ use tze_hud_runtime::{
 use tze_hud_scene::clock::{Clock, TestClock};
 use tze_hud_scene::{
     graph::SceneGraph,
-    mutation::{MutationBatch, SceneMutation},
     types::{Node, NodeData, Rect, Rgba, SceneId, SolidColorNode},
 };
 use tze_hud_telemetry::{LatencyBucket, SessionSummary};
