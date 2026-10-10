@@ -298,7 +298,6 @@ impl MutationBudgetEnforcerContract for RuntimeMutationBudgetEnforcer {
             };
         }
         let now = self.now();
-        let peer_updates = state.namespace_peer_updates(&namespace, None, now);
         let mut session = SessionBudgetState {
             namespace,
             resident,
@@ -307,13 +306,9 @@ impl MutationBudgetEnforcerContract for RuntimeMutationBudgetEnforcer {
             texture_bytes: 0,
             recent_updates: VecDeque::new(),
         };
-        if let Some(message) = session.check(
-            initial_usage.tiles,
-            initial_usage.texture_bytes,
-            0,
-            now,
-            peer_updates,
-        ) {
+        if let Some(message) =
+            session.check(initial_usage.tiles, initial_usage.texture_bytes, 0, now, 0)
+        {
             return MutationBudgetDecision::Reject {
                 error_code: "RESOURCE_BUDGET_EXCEEDED",
                 message: format!("restored session usage rejected: {message}"),
