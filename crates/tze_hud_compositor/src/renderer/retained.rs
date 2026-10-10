@@ -546,7 +546,9 @@ fn canonical_snapshot(
 
     let mut tiles = Vec::with_capacity(CANONICAL_TILE_COUNT);
     for tile in visible_tiles {
-        if !tile.opacity.is_finite()
+        // This narrow pass cannot repaint the full renderer's disconnect badge.
+        if tile.visual_hint == tze_hud_scene::lease::TileVisualHint::DisconnectionBadge
+            || !tile.opacity.is_finite()
             || !(0.0..=1.0).contains(&tile.opacity)
             || !rect_is_inside_viewport(tile.bounds, width, height)
         {
@@ -893,6 +895,59 @@ mod tests {
         assert!(
             canonical_snapshot(&scene, 1_000, 500).is_none(),
             "hover or press chrome must remain on the established full-frame path"
+        );
+
+        let mut lifecycle_scene = canonical_scene_with_first_content("AB");
+        let previous = canonical_snapshot(&lifecycle_scene, 1_000, 500)
+            .expect("the live plain-text control is retained-eligible");
+        let tile_id = previous.tiles[0].tile_id;
+        let node_id = previous.tiles[0].node_id;
+        let lease_id = lifecycle_scene.tiles[&tile_id].lease_id;
+        let retained = RetainedRenderState {
+            snapshot: Some(previous),
+            ..Default::default()
+        };
+        let live_version = lifecycle_scene.version;
+
+        lifecycle_scene.disconnect_lease(&lease_id, 1_000).unwrap();
+        assert!(lifecycle_scene.version > live_version);
+        assert!(lifecycle_scene.tiles.values().all(|tile| {
+            tile.visual_hint == tze_hud_scene::lease::TileVisualHint::DisconnectionBadge
+        }));
+        assert!(
+            canonical_snapshot(&lifecycle_scene, 1_000, 500).is_none(),
+            "orphan badge chrome must remain on the full-frame path"
+        );
+        let NodeData::TextMarkdown(text) =
+            &mut lifecycle_scene.nodes.get_mut(&node_id).unwrap().data
+        else {
+            panic!("canonical tile must keep its text node on disconnect");
+        };
+        assert_eq!(text.content, "AB", "disconnect keeps the tile's content");
+        // A same-glyph content permutation would otherwise select a scoped
+        // repaint. This is a CPU planner input, not an orphan-agent mutation.
+        text.content = "BA".into();
+        assert!(
+            plan_headless(&retained, &lifecycle_scene, 1_000, 500).is_none(),
+            "a text change must not bypass the orphan-badge fallback"
+        );
+        let orphan_version = lifecycle_scene.version;
+
+        lifecycle_scene.reconnect_lease(&lease_id, 1_001).unwrap();
+        assert!(lifecycle_scene.version > orphan_version);
+        assert!(
+            lifecycle_scene
+                .tiles
+                .values()
+                .all(|tile| tile.visual_hint == tze_hud_scene::lease::TileVisualHint::None)
+        );
+        assert!(
+            canonical_snapshot(&lifecycle_scene, 1_000, 500).is_some(),
+            "the same resumed surfaces become retained-eligible again"
+        );
+        assert!(
+            plan_headless(&retained, &lifecycle_scene, 1_000, 500).is_some(),
+            "the identical text permutation is a valid live retained control"
         );
     }
 
