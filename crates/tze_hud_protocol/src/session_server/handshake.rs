@@ -24,12 +24,42 @@ use super::stream_session::StreamSession;
 use super::upload::UploadByteRateLimiter;
 use super::{DEFAULT_HEARTBEAT_INTERVAL_MS, now_wall_us};
 
+/// Owns the exact successful budget registration across handshake and handler awaits.
+pub(super) struct BudgetRegistrationGuard {
+    scene_session_id: tze_hud_scene::SceneId,
+    enforcer: Option<super::SharedMutationBudgetEnforcer>,
+}
+
+impl BudgetRegistrationGuard {
+    fn new(
+        scene_session_id: tze_hud_scene::SceneId,
+        enforcer: super::SharedMutationBudgetEnforcer,
+    ) -> Self {
+        Self {
+            scene_session_id,
+            enforcer: Some(enforcer),
+        }
+    }
+
+    pub(super) fn disarm(&mut self) {
+        self.enforcer = None;
+    }
+}
+
+impl Drop for BudgetRegistrationGuard {
+    fn drop(&mut self) {
+        if let Some(enforcer) = self.enforcer.take() {
+            enforcer.remove_session(self.scene_session_id);
+        }
+    }
+}
+
 /// Dispatch the initial inbound read, including failures before identification.
 pub(super) async fn handle_handshake_read(
     ctx: HandshakeCtx<'_>,
     tx: &tokio::sync::mpsc::Sender<Result<ServerMessage, Status>>,
     read: Result<Option<ClientMessage>, Status>,
-) -> Option<StreamSession> {
+) -> Option<(StreamSession, Option<BudgetRegistrationGuard>)> {
     let error = match read {
         Ok(Some(message)) => match message.payload {
             Some(client_message::Payload::SessionInit(init)) => {
@@ -100,7 +130,7 @@ pub(super) async fn handle_session_init(
     ctx: HandshakeCtx<'_>,
     tx: &tokio::sync::mpsc::Sender<Result<ServerMessage, Status>>,
     init: &SessionInit,
-) -> Option<StreamSession> {
+) -> Option<(StreamSession, Option<BudgetRegistrationGuard>)> {
     let HandshakeCtx {
         state,
         agents,
@@ -162,7 +192,7 @@ pub(super) async fn handle_session_init(
     let resume_token = uuid::Uuid::now_v7().as_bytes().to_vec();
     let scene_session_id = tze_hud_scene::SceneId::from_uuid(session_uuid);
     let resource_budget = resource_budget.clone();
-    if let Some(enforcer) = budget_enforcer {
+    let registration_guard = if let Some(enforcer) = budget_enforcer {
         if let super::MutationBudgetDecision::Reject {
             error_code,
             message,
@@ -187,7 +217,13 @@ pub(super) async fn handle_session_init(
                 .await;
             return None;
         }
-    }
+        Some(BudgetRegistrationGuard::new(
+            scene_session_id,
+            Arc::clone(enforcer),
+        ))
+    } else {
+        None
+    };
 
     // Register session in the session registry and capture upload rate config.
     let (session_id, upload_rate_limit_bytes_per_sec) = {
@@ -253,7 +289,7 @@ pub(super) async fn handle_session_init(
         }))
         .await;
 
-    Some(session)
+    Some((session, registration_guard))
 }
 
 /// Handle a `SessionResume` message — the first message on a reconnecting stream
@@ -274,7 +310,7 @@ pub(super) async fn handle_session_resume(
     ctx: HandshakeCtx<'_>,
     tx: &tokio::sync::mpsc::Sender<Result<ServerMessage, Status>>,
     resume: &SessionResume,
-) -> Option<StreamSession> {
+) -> Option<(StreamSession, Option<BudgetRegistrationGuard>)> {
     let HandshakeCtx {
         state,
         agents,
@@ -347,7 +383,7 @@ pub(super) async fn handle_session_resume(
             },
         )
     };
-    if let Some(enforcer) = budget_enforcer {
+    let registration_guard = if let Some(enforcer) = budget_enforcer {
         if let super::MutationBudgetDecision::Reject {
             error_code,
             message,
@@ -372,7 +408,13 @@ pub(super) async fn handle_session_resume(
                 .await;
             return None;
         }
-    }
+        Some(BudgetRegistrationGuard::new(
+            scene_session_id,
+            Arc::clone(enforcer),
+        ))
+    } else {
+        None
+    };
 
     // Reconnect the orphaned leases (ORPHANED → ACTIVE, badge cleared). Leases
     // the runtime already reclaimed are dropped from the restored set.
@@ -460,5 +502,5 @@ pub(super) async fn handle_session_resume(
         }))
         .await;
 
-    Some(session)
+    Some((session, registration_guard))
 }
