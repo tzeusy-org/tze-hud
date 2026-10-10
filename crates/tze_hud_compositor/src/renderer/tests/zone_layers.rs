@@ -635,7 +635,7 @@ async fn test_three_pass_ordering_independent_of_registration_order() {
         )
         .unwrap();
     let (flat, _, bg_end, chrome_start) =
-        compositor.build_frame_vertices(&layered, 1280.0, 720.0, &mut FrameTelemetry::default());
+        compositor.build_frame_vertices(&layered, 1280.0, 720.0, &mut FrameTelemetry::new(0));
     assert_eq!((bg_end, chrome_start, flat.len()), (6, 12, 18));
     let inputs = compositor.collect_encode_inputs(&layered, 1280, 720);
     assert!(inputs.rr_background.is_empty());
