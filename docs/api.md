@@ -418,6 +418,19 @@ Its discover budget is the production row above: the three built-in widgets
 add about 100 tokens, all typed parameter names and ranges the model needs to
 publish, so shrinking further would drop information the model acts on.
 
+These four parameters remain because they control behavior in the shipped bundles:
+
+- `status-indicator.theme` selects the widget's minimal, system, or friendly
+  appearance independently of the global `[design_tokens].theme`; publishers
+  need that choice when selecting a status presentation.
+- `status-indicator.tooltip_visible` is a declared `f32` parameter used by the
+  delayed runtime-local hover path to reveal the tooltip. The loader validates
+  that hover target and its SVG bindings against the parameter schema.
+- `gauge.label` supplies publisher-chosen metric identification inside the hover
+  tooltip, so a gauge can explain which quantity its value represents.
+- `progress-bar.label` supplies publisher-chosen task or progress text centered
+  on the bar, bounded to 32 bytes by its schema.
+
 ## Design decisions (T5, 2026-10-02)
 
 1. **Tiles are gRPC only.** MCP loses `create_tile`, `set_content`,
