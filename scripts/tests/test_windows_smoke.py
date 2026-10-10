@@ -197,7 +197,7 @@ def test_quiescent_summary_reports_the_gate_counters(tmp_path, monkeypatch, caps
     saved = summary_path.read_text(encoding="utf-8")
     assert saved.startswith(prefix)
     assert saved.count("### Quiescent efficiency counters") == 2
-    for counter in ("presents=2", "submissions=2", "acquisitions=2", "runtime_wakeups=7", "settle_ms=5000", "interval_ms=60000"):
+    for counter in ("presents=2", "submissions=2", "acquisitions=2", "runtime\\_wakeups=7", "settle\\_ms=5000", "interval\\_ms=60000"):
         assert saved.count(counter) == 2
 
     marker = "synthetic-sensitive-artifact-field"
@@ -255,7 +255,7 @@ def test_quiescent_summary_reports_the_gate_counters(tmp_path, monkeypatch, caps
             assert actual == private_artifact and require_constrained is False
             saved = summary_path.read_text(encoding="utf-8")
             assert saved.startswith(before) and saved != before
-            assert "runtime_wakeups=7" in saved[len(before):] and marker not in saved
+            assert "runtime\\_wakeups=7" in saved[len(before):] and marker not in saved
             checked.append(True)
             return {}, ["controlled invalid artifact"]
 
