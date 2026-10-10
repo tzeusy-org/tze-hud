@@ -684,7 +684,7 @@ impl SceneGraph {
     /// Clear all active publishes for a zone (regardless of publisher).
     ///
     /// This removes ALL publications from the zone. For per-publisher clearing,
-    /// use [`clear_zone_for_publisher`].
+    /// use [`clear_zone_for_publisher`](Self::clear_zone_for_publisher).
     pub fn clear_zone(&mut self, zone_name: &str) -> Result<(), ValidationError> {
         if !self.zone_registry.zones.contains_key(zone_name) {
             return Err(ValidationError::ZoneNotFound {
