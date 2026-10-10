@@ -78,17 +78,32 @@ def wait_until(
 ) -> tuple[T, float]:
     """Poll `probe` until it reports done; return (last observation, seconds waited).
 
-    `probe` returns `(done, observation)`. Always probes once, then until the
-    hang guard; a timeout names `what` and the last observation.
+    `probe` returns `(done, observation)` and must only observe, never mutate.
+    Always probes once; transient transport errors share the same hang guard.
+    HTTP/logic failures propagate. A running request is not canceled by this
+    guard; a timeout names `what`, the last observation and transport class.
     """
     start = clock()
+    observed: T | None = None
+    has_observation = False
+    transport_class = None
     while True:
-        done, observed = probe()
+        try:
+            done, observed = probe()
+            has_observation = True
+            transport_class = None
+        except urllib.error.HTTPError:
+            raise  # HTTPError is also a URLError: never retry HTTP/auth failures.
+        except (urllib.error.URLError, ConnectionError, TimeoutError) as error:
+            done = False
+            transport_class = type(error).__name__
         waited = clock() - start
         if done:
             return observed, waited
         if waited >= timeout_s:
-            raise AssertionError(f"{what}: not met after {timeout_s:.0f}s (last seen: {observed!r})")
+            last = repr(observed) if has_observation else "no observation"
+            detail = f" (transport: {transport_class})" if transport_class else ""
+            raise AssertionError(f"{what}: not met after {timeout_s:.0f}s (last seen: {last}){detail}")
         sleep(min(interval_s, timeout_s - waited))
 
 
@@ -141,6 +156,23 @@ def quiescent_summary(artifact: dict) -> str:
         f"interval_ms={artifact.get('interval_duration_ms')} "
         f"adapter={artifact.get('renderer', {}).get('adapter')!r}"
     )
+
+
+def write_step_summary(summary: str) -> None:
+    """Append measured counters when Actions supplies a summary file.
+
+    This is an observation, not a pass marker. Escape adapter text as Markdown
+    and keep the existing summary content; missing counters remain missing.
+    """
+    path = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not path:
+        return
+    text = summary.replace("\r", " ").replace("\n", " ").replace("\\", "\\\\")
+    for control in "`*_[]()#|":
+        text = text.replace(control, "\\" + control)
+    text = text.replace("<", "&lt;").replace(">", "&gt;")
+    with open(path, "a", encoding="utf-8") as handle:
+        handle.write(f"### Quiescent efficiency counters\n\n{text}\n\n")
 
 
 class Smoke:
@@ -592,7 +624,9 @@ def run_quiescent(args: argparse.Namespace) -> int:
         wait_until(written, what="quiescent artifact", timeout_s=args.quiescent_timeout, interval_s=1)
         assert artifact_path.exists(), f"tze_hud exited ({proc.returncode}) without writing {artifact_path.name}"
         artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
-        print("measured:", quiescent_summary(artifact))
+        summary = quiescent_summary(artifact)
+        print("measured:", summary)
+        write_step_summary(summary)
         _, failures = load_efficiency_checker().validate_artifact(artifact, require_constrained=False)
         assert not failures, "quiescent gate failed: " + "; ".join(failures)
         print("ok  held content on screen, then no presents, submissions, or acquisitions for the interval")
