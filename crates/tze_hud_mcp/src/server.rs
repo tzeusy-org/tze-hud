@@ -20,17 +20,18 @@
 //! `{"code":"...","hint":"..."}` (see [`crate::error`]). Only unusable
 //! requests (bad JSON, unknown method or tool, bad auth) are JSON-RPC errors.
 
-use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, Mutex as HubMutex};
 use tokio::sync::Mutex;
 use tracing::{debug, warn};
+use tze_hud_projection::hub::PortalHub;
 use tze_hud_scene::config::{AgentDirectory, SharedAgents};
 use tze_hud_scene::graph::SceneGraph;
 use tze_hud_scene::render_wake::RenderWakeNotifier;
+use tze_hud_scene::{Clock, SystemClock};
 
 use crate::{
     error::{JsonRpcError, McpError},
-    portal_op::PortalOp,
     tools::{self, McpState, ToolCtx},
     types::{McpRequest, McpResponse},
 };
@@ -120,14 +121,36 @@ const TOOL_NAMES: &[&str] = &[
 
 // ─── Server ──────────────────────────────────────────────────────────────────
 
+/// The single portal state and wall clock shared by MCP and the winit driver.
+#[derive(Clone)]
+pub struct PortalHandle {
+    pub hub: Arc<HubMutex<PortalHub>>,
+    pub clock: Arc<dyn Clock>,
+}
+
+impl PortalHandle {
+    pub fn new(hub: PortalHub, clock: Arc<dyn Clock>) -> Self {
+        Self {
+            hub: Arc::new(HubMutex::new(hub)),
+            clock,
+        }
+    }
+}
+
+impl Default for PortalHandle {
+    fn default() -> Self {
+        Self::new(PortalHub::default(), Arc::new(SystemClock::new()))
+    }
+}
+
 pub struct McpServer {
     scene: Arc<Mutex<SceneGraph>>,
     render_wake: RenderWakeNotifier,
     portal_ingress_wake: RenderWakeNotifier,
     config: McpConfig,
-    /// Channel to the portal authority on the winit thread. `None` means
+    /// Shared portal service. `None` means
     /// portal surfaces answer `UNAVAILABLE`.
-    portal_op_tx: Option<tokio::sync::mpsc::UnboundedSender<PortalOp>>,
+    portals: Option<PortalHandle>,
     /// Per-agent leases and unacked action presses.
     state: McpState,
     /// Runtime safe-mode flag (shared with gRPC); false when standalone.
@@ -148,7 +171,7 @@ impl McpServer {
             render_wake: RenderWakeNotifier::default(),
             portal_ingress_wake: RenderWakeNotifier::default(),
             config: McpConfig::default(),
-            portal_op_tx: None,
+            portals: None,
             state: McpState::default(),
             safe_mode: Arc::new(AtomicBool::new(false)),
         }
@@ -172,9 +195,9 @@ impl McpServer {
         self
     }
 
-    /// Attach the portal-operation channel to the winit thread.
-    pub fn with_portal_op_tx(mut self, tx: tokio::sync::mpsc::UnboundedSender<PortalOp>) -> Self {
-        self.portal_op_tx = Some(tx);
+    /// Share the runtime's portal hub; no main-thread round trip is needed.
+    pub fn with_portals(mut self, portals: PortalHandle) -> Self {
+        self.portals = Some(portals);
         self
     }
 
@@ -257,13 +280,18 @@ impl McpServer {
                 debug!(tool = name, agent = %identity.agent_id, "MCP: tools/call");
                 let tool_ctx = ToolCtx {
                     scene: &self.scene,
-                    portal_op_tx: self.portal_op_tx.as_ref(),
+                    portals: self.portals.as_ref(),
                     portal_wake: &self.portal_ingress_wake,
                     state: &self.state,
                     safe_mode: &self.safe_mode,
                     agent: &identity,
                     widget_transition_ms: self.config.widget_transition_ms,
                 };
+                let portal_target = args
+                    .get("surface")
+                    .and_then(serde_json::Value::as_str)
+                    .and_then(|surface| tools::Surface::parse(surface).ok())
+                    .is_some_and(|surface| matches!(surface, tools::Surface::Portal(_)));
                 let result = match name {
                     "hud_surfaces" => tools::hud_surfaces(&tool_ctx).await,
                     "hud_publish" => tools::hud_publish(&tool_ctx, args).await,
@@ -273,7 +301,9 @@ impl McpServer {
                 };
                 let body = match &result {
                     Ok(value) => {
-                        if matches!(name, "hud_publish" | "hud_hold" | "hud_clear") {
+                        if !portal_target
+                            && matches!(name, "hud_publish" | "hud_hold" | "hud_clear")
+                        {
                             self.render_wake.notify();
                         }
                         tool_result(value)

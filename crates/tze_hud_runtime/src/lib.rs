@@ -42,7 +42,7 @@ pub mod diag;
 pub mod element_store;
 pub(crate) mod firewall;
 pub mod headless;
-pub mod http;
+pub(crate) mod http;
 pub(crate) mod idle_efficiency;
 mod input_latency;
 pub(crate) mod mcp;
