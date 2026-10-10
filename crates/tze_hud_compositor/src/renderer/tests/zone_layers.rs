@@ -332,7 +332,9 @@ async fn test_layer_filter_chrome_only_emits_chrome_vertices() {
 /// the correct ordering regardless of registration order.
 #[tokio::test]
 async fn test_three_pass_ordering_independent_of_registration_order() {
-    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
+    let gpu = make_compositor_and_surface(1280, 720).await;
+    assert!(gpu.is_some(), "layer-order pixel proof requires a real GPU");
+    let (mut compositor, surface) = require_gpu!(gpu);
     let mut scene = SceneGraph::new(1280.0, 720.0);
 
     // Register in REVERSE order: Chrome first, then Background, then Content.
@@ -512,6 +514,216 @@ async fn test_three_pass_ordering_independent_of_registration_order() {
     assert!(
         chrome_g > 0.9,
         "Third quad (chrome) must be yellow (G≈1.0); got G={chrome_g}"
+    );
+
+    // Exercise the production builder and the plan the real encoder consumes.
+    // Integer card geometry: (128,72)-(384,104); dismiss: (364,72)-(384,92).
+    // Chrome starts at x=380, covering the right borders but leaving the left
+    // dismiss outline and left card border as independent positive controls.
+    compositor.set_token_map(HashMap::from([
+        ("color.border.default".to_owned(), "#00FF00".to_owned()),
+        (
+            "color.notification.urgency.low".to_owned(),
+            "#FF0000".to_owned(),
+        ),
+    ]));
+    let mut layered = SceneGraph::new(1280.0, 720.0);
+    for (name, layer, x, y, width, height, radius) in [
+        (
+            "chrome-rounded",
+            LayerAttachment::Chrome,
+            0.25,
+            0.125,
+            0.1,
+            0.1,
+            Some(12.0),
+        ),
+        (
+            "chrome-flat",
+            LayerAttachment::Chrome,
+            0.296875,
+            0.0,
+            0.05,
+            0.2,
+            None,
+        ),
+        (
+            "background",
+            LayerAttachment::Background,
+            0.0,
+            0.0,
+            1.0,
+            1.0,
+            None,
+        ),
+        (
+            "content-card",
+            LayerAttachment::Content,
+            0.1,
+            0.1,
+            0.2,
+            0.2,
+            None,
+        ),
+    ] {
+        let card = name == "content-card";
+        layered.register_zone(ZoneDefinition {
+            id: SceneId::new(),
+            name: name.to_owned(),
+            description: "production layer overlap".to_owned(),
+            geometry_policy: GeometryPolicy::Relative {
+                x_pct: x,
+                y_pct: y,
+                width_pct: width,
+                height_pct: height,
+            },
+            accepted_media_types: if card {
+                vec![ZoneMediaType::ShortTextWithIcon]
+            } else {
+                vec![ZoneMediaType::SolidColor]
+            },
+            rendering_policy: RenderingPolicy {
+                backdrop: card.then_some(Rgba::new(0.0, 0.0, 0.0, 1.0)),
+                backdrop_radius: radius,
+                font_size_px: Some(20.0),
+                margin_vertical: Some(0.0),
+                text_color: Some(Rgba::new(0.0, 1.0, 1.0, 1.0)),
+                ..Default::default()
+            },
+            contention_policy: if card {
+                ContentionPolicy::Stack { max_depth: 1 }
+            } else {
+                ContentionPolicy::LatestWins
+            },
+            max_publishers: 1,
+            auto_clear_ms: None,
+            ephemeral: false,
+            layer_attachment: layer,
+        });
+    }
+    for (name, color) in [
+        ("chrome-rounded", Rgba::new(1.0, 0.0, 1.0, 1.0)),
+        ("chrome-flat", Rgba::new(0.0, 0.0, 1.0, 1.0)),
+        ("background", Rgba::new(1.0, 1.0, 0.0, 1.0)),
+    ] {
+        layered
+            .publish_to_zone(
+                name,
+                ZoneContent::SolidColor(color),
+                "agent",
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+    }
+    layered
+        .publish_to_zone(
+            "content-card",
+            ZoneContent::Notification(NotificationPayload {
+                text: "layered notification".to_owned(),
+                icon: String::new(),
+                urgency: 0,
+                ttl_ms: None,
+                title: String::new(),
+                actions: Vec::new(),
+            }),
+            "agent",
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    compositor.prime_markdown_cache(&layered);
+    compositor.prime_truncation_cache(&layered);
+    let (flat, _, bg_end, chrome_start) =
+        compositor.build_frame_vertices(&layered, 1280.0, 720.0, &mut FrameTelemetry::new(0));
+    assert_eq!((bg_end, chrome_start, flat.len()), (6, 12, 18));
+    let inputs = compositor.collect_encode_inputs(&layered, 1280, 720);
+    assert!(inputs.rr_background.is_empty());
+    assert_eq!(
+        inputs.rr_content.len(),
+        2,
+        "actual card border and dismiss outline"
+    );
+    assert_eq!(inputs.rr_post.len(), 1, "actual Chrome SDF control");
+    assert_eq!(
+        inputs.rr_content[0].color, [0.0; 4],
+        "flat card is border-only SDF"
+    );
+    assert_eq!(
+        inputs.rr_content[1].color, [0.0; 4],
+        "dismiss is border-only SDF"
+    );
+    let passes = geometry_pass_plan(&inputs, flat.len(), bg_end, chrome_start);
+    assert!(
+        matches!(&passes[0], GeometryPass::Flat { vertices, clear: true } if vertices == &(0..6))
+    );
+    assert!(matches!(&passes[1], GeometryPass::RoundedRects(cmds) if cmds.is_empty()));
+    assert!(
+        matches!(&passes[2], GeometryPass::Flat { vertices, clear: false } if vertices == &(6..12))
+    );
+    assert!(
+        matches!(&passes[3], GeometryPass::RoundedRects(cmds) if std::ptr::eq(*cmds, inputs.rr_content.as_slice()))
+    );
+    assert!(
+        matches!(&passes[4], GeometryPass::Flat { vertices, clear: false } if vertices == &(12..18))
+    );
+    assert!(
+        matches!(&passes[5], GeometryPass::RoundedRects(cmds) if std::ptr::eq(*cmds, inputs.rr_post.as_slice()))
+    );
+
+    compositor.render_frame_headless(&mut layered, &surface);
+    let pixels = surface.read_pixels(&compositor.device);
+    let pixel = |x: usize, y: usize| {
+        let offset = (y * 1280 + x) * 4;
+        [
+            pixels[offset],
+            pixels[offset + 1],
+            pixels[offset + 2],
+            pixels[offset + 3],
+        ]
+    };
+    for (label, x, y, expected) in [
+        (
+            "Chrome covers Content card border",
+            381,
+            72,
+            [0u8, 0, 255, 255],
+        ),
+        (
+            "Chrome covers Content dismiss outline",
+            383,
+            80,
+            [0, 0, 255, 255],
+        ),
+        ("inner flat Chrome", 420, 50, [0, 0, 255, 255]),
+        ("uncovered Background", 80, 40, [255, 255, 0, 255]),
+        ("Chrome SDF above Chrome flat", 400, 100, [255, 0, 255, 255]),
+    ] {
+        let actual = pixel(x, y);
+        assert!(
+            actual
+                .iter()
+                .zip(expected)
+                .all(|(&a, b)| a.abs_diff(b) <= 5),
+            "{label}: ({x},{y}) expected {expected:?}, got {actual:?}"
+        );
+    }
+    let fill = pixel(200, 80);
+    assert!(
+        fill[0] > 200 && fill[1] < 180 && fill[2] < 30,
+        "Content fill must occlude the yellow Background, got {fill:?}"
+    );
+    let border = pixel(128, 80);
+    assert!(
+        border[1] > 150 && border[1].saturating_sub(border[0]) > 60 && border[2] < 60,
+        "uncovered Content border must remain green, got {border:?}"
+    );
+    let dismiss = pixel(364, 80);
+    assert!(
+        dismiss[1] > 150 && dismiss[2] > 150 && dismiss[0] < 100,
+        "uncovered dismiss outline must remain cyan, got {dismiss:?}"
     );
 }
 

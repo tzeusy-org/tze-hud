@@ -648,7 +648,9 @@ pub(crate) struct EncodeInputs {
     /// Background-layer SDF rounded-rect commands (drawn between the Clear pass
     /// and the tile/content/chrome flat-rect pass).
     rr_background: Vec<RoundedRectDrawCmd>,
-    /// Content + Chrome + per-tile SDF rounded-rect commands (drawn above tiles).
+    /// Content-layer SDF commands, drawn before Chrome flat geometry.
+    rr_content: Vec<RoundedRectDrawCmd>,
+    /// Existing Chrome + per-tile SDF tail, drawn after Chrome flat geometry.
     rr_post: Vec<RoundedRectDrawCmd>,
     /// Inline code-span backdrop vertices, already color-transformed through
     /// `gpu_color_raw` (so the encode stage needs no `&self` method borrow).
@@ -668,10 +670,49 @@ pub(crate) struct EncodeInputs {
 /// map and prepare its own view after the scene lock is released.
 pub(crate) struct EncodeSources {
     pub(crate) rr_background: Vec<RoundedRectDrawCmd>,
+    pub(crate) rr_content: Vec<RoundedRectDrawCmd>,
     pub(crate) rr_post: Vec<RoundedRectDrawCmd>,
     pub(crate) text_items: Vec<TextItem>,
     /// System card text (primary display only).
     pub(crate) card_items: Vec<TextItem>,
+}
+
+/// The borrowed geometry plan consumed by the actual GPU encoder.
+/// Content SDF must finish before Chrome flat geometry; the legacy SDF tail
+/// and later text/image/widget passes retain their existing order.
+enum GeometryPass<'a> {
+    Flat {
+        vertices: std::ops::Range<usize>,
+        clear: bool,
+    },
+    RoundedRects(&'a [RoundedRectDrawCmd]),
+}
+
+fn geometry_pass_plan(
+    inputs: &EncodeInputs,
+    vertex_count: usize,
+    bg_vertex_count: usize,
+    chrome_vertex_start: usize,
+) -> [GeometryPass<'_>; 6] {
+    let bg_end = bg_vertex_count.min(vertex_count);
+    let chrome_start = chrome_vertex_start.clamp(bg_end, vertex_count);
+    [
+        GeometryPass::Flat {
+            vertices: 0..bg_end,
+            clear: true,
+        },
+        GeometryPass::RoundedRects(&inputs.rr_background),
+        GeometryPass::Flat {
+            vertices: bg_end..chrome_start,
+            clear: false,
+        },
+        GeometryPass::RoundedRects(&inputs.rr_content),
+        GeometryPass::Flat {
+            vertices: chrome_start..vertex_count,
+            clear: false,
+        },
+        GeometryPass::RoundedRects(&inputs.rr_post),
+    ]
 }
 
 /// Per-zone Stack slot layout, computed once per zone per frame by
@@ -2297,11 +2338,11 @@ impl Compositor {
         let sources = self.collect_encode_sources(scene, surf_w, surf_h);
         self.prepare_encode_inputs(
             sources.rr_background,
+            sources.rr_content,
             sources.rr_post,
             &sources.text_items,
             &sources.card_items,
-            surf_w,
-            surf_h,
+            (surf_w, surf_h),
         )
     }
 
@@ -2321,8 +2362,8 @@ impl Compositor {
         // ── Single-pass partition of all rounded-rect commands ────────────────
         let rr_all = self.collect_all_rounded_rect_cmds(scene, sw, sh);
         let rr_background = rr_all.background;
+        let rr_content = rr_all.content;
         let mut rr_post: Vec<crate::pipeline::RoundedRectDrawCmd> = Vec::new();
-        rr_post.extend(rr_all.content);
         rr_post.extend(rr_all.chrome);
         rr_post.extend(self.collect_tile_rounded_rect_cmds(scene));
 
@@ -2343,6 +2384,7 @@ impl Compositor {
         };
         EncodeSources {
             rr_background,
+            rr_content,
             rr_post,
             text_items,
             card_items,
@@ -2354,11 +2396,11 @@ impl Compositor {
     fn prepare_encode_inputs(
         &mut self,
         rr_background: Vec<crate::pipeline::RoundedRectDrawCmd>,
+        rr_content: Vec<crate::pipeline::RoundedRectDrawCmd>,
         rr_post: Vec<crate::pipeline::RoundedRectDrawCmd>,
         text_items: &[TextItem],
         card_items: &[TextItem],
-        surf_w: u32,
-        surf_h: u32,
+        (surf_w, surf_h): (u32, u32),
     ) -> EncodeInputs {
         let sw = surf_w as f32;
         let sh = surf_h as f32;
@@ -2429,6 +2471,7 @@ impl Compositor {
 
         EncodeInputs {
             rr_background,
+            rr_content,
             rr_post,
             inline_verts,
             render_text,
@@ -2456,6 +2499,7 @@ impl Compositor {
         surf_h: u32,
         use_overlay_pipeline: bool,
         bg_vertex_count: usize,
+        chrome_vertex_start: usize,
     ) -> (wgpu::CommandEncoder, u64) {
         let encode_start = std::time::Instant::now();
 
@@ -2483,93 +2527,60 @@ impl Compositor {
         let sw = surf_w as f32;
         let sh = surf_h as f32;
 
-        // Both flat-rect geometry sub-passes use the same pipeline selector:
+        // All flat-rect geometry sub-passes use the same pipeline selector:
         // in overlay mode, the clear_pipeline (no blending) is used for ALL
         // flat-rect rendering. The first 6 vertices are a full-screen
         // transparent quad that zeros out every pixel's alpha. Subsequent
         // content overwrites specific regions with their own alpha.
 
-        // ── Geometry pass 1: Background flat-rect zones ───────────────────────
-        // Clears the surface and draws Background-layer zone backdrops (those
-        // without backdrop_radius; zones with backdrop_radius emit no vertices
-        // here).  Tile/content/chrome vertices are deferred to pass 2 so that
-        // the Background SDF pass can be interleaved between the two.
+        for pass in geometry_pass_plan(inputs, vertices.len(), bg_vertex_count, chrome_vertex_start)
         {
-            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("frame_pass_bg"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: frame_view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(self.clear_color()),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-            });
-
-            if use_overlay_pipeline || self.use_opaque_rect_pipeline() {
-                render_pass.set_pipeline(&self.clear_pipeline);
-            } else {
-                render_pass.set_pipeline(&self.pipeline);
-            }
-
-            if let Some(ref buffer) = vertex_buffer {
-                let bg_end = bg_vertex_count.min(vertices.len());
-                if bg_end > 0 {
-                    render_pass.set_vertex_buffer(0, buffer.slice(..));
-                    render_pass.draw(0..bg_end as u32, 0..1);
+            match pass {
+                GeometryPass::RoundedRects(cmds) => {
+                    self.encode_rounded_rect_pass(&mut encoder, frame_view, cmds, sw, sh);
+                }
+                GeometryPass::Flat { vertices, clear } => {
+                    // The initial Clear pass always runs, including an empty frame.
+                    // Empty later ranges need no pass or draw work.
+                    if !clear && vertices.is_empty() {
+                        continue;
+                    }
+                    let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some(if clear {
+                            "frame_pass_bg"
+                        } else {
+                            "frame_pass_tiles_content_chrome"
+                        }),
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view: frame_view,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: if clear {
+                                    wgpu::LoadOp::Clear(self.clear_color())
+                                } else {
+                                    wgpu::LoadOp::Load
+                                },
+                                store: wgpu::StoreOp::Store,
+                            },
+                        })],
+                        depth_stencil_attachment: None,
+                        timestamp_writes: None,
+                        occlusion_query_set: None,
+                    });
+                    if use_overlay_pipeline || self.use_opaque_rect_pipeline() {
+                        render_pass.set_pipeline(&self.clear_pipeline);
+                    } else {
+                        render_pass.set_pipeline(&self.pipeline);
+                    }
+                    if let Some(ref buffer) = vertex_buffer {
+                        if !vertices.is_empty() {
+                            render_pass.set_vertex_buffer(0, buffer.slice(..));
+                            render_pass.draw(vertices.start as u32..vertices.end as u32, 0..1);
+                        }
+                    }
                 }
             }
         }
-
-        // ── Background SDF rounded-rect pass ──────────────────────────────────
-        // Runs after the Clear pass (so it composites over the cleared surface)
-        // but BEFORE tile/content/chrome geometry — this is what ensures
-        // Background backdrops are correctly occluded by agent tiles. Commands
-        // were collected scene-side in `collect_encode_inputs`.
-        self.encode_rounded_rect_pass(&mut encoder, frame_view, &inputs.rr_background, sw, sh);
-
-        // ── Geometry pass 2: Tiles + Content + Chrome flat-rect zones ─────────
-        // Uses LoadOp::Load to preserve the Background geometry drawn above.
-        {
-            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("frame_pass_tiles_content_chrome"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: frame_view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-            });
-
-            if use_overlay_pipeline || self.use_opaque_rect_pipeline() {
-                render_pass.set_pipeline(&self.clear_pipeline);
-            } else {
-                render_pass.set_pipeline(&self.pipeline);
-            }
-
-            if let Some(ref buffer) = vertex_buffer {
-                let bg_end = bg_vertex_count.min(vertices.len());
-                let rest_count = vertices.len().saturating_sub(bg_end);
-                if rest_count > 0 {
-                    render_pass.set_vertex_buffer(0, buffer.slice(..));
-                    render_pass.draw(bg_end as u32..vertices.len() as u32, 0..1);
-                }
-            }
-        }
-
-        // ── Content + Chrome SDF rounded-rect pass ────────────────────────────
-        // Runs after tiles so Content/Chrome backdrops composite above tiles.
-        // `rr_post` (content + chrome + per-tile) was collected scene-side.
-        self.encode_rounded_rect_pass(&mut encoder, frame_view, &inputs.rr_post, sw, sh);
 
         // ── Text pass (Stage 6) ───────────────────────────────────────────────
         // The text items were collected and glyphon-prepared scene-side in
@@ -2698,6 +2709,7 @@ impl Compositor {
         surf_h: u32,
         use_overlay_pipeline: bool,
         bg_vertex_count: usize,
+        chrome_vertex_start: usize,
     ) -> (wgpu::CommandEncoder, u64, EncodeInputs) {
         let inputs = self.collect_encode_inputs(scene, surf_w, surf_h);
         let (encoder, encode_us) = self.encode_from_inputs(
@@ -2708,6 +2720,7 @@ impl Compositor {
             surf_h,
             use_overlay_pipeline,
             bg_vertex_count,
+            chrome_vertex_start,
         );
         (encoder, encode_us, inputs)
     }
