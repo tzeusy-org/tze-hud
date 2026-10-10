@@ -294,6 +294,9 @@ mod tests {
     #[test]
     fn add_tab_makes_first_tab_active() {
         let mut state = ChromeState::new();
+        assert!(state.tabs.is_empty());
+        assert_eq!(state.active_tab_index, 0);
+        assert_eq!(state.tab_bar_position, TabBarPosition::Top);
         state.add_tab(1, "Tab A".into());
         assert_eq!(state.tabs.len(), 1);
         assert!(state.tabs[0].active);
@@ -441,6 +444,22 @@ mod tests {
     #[test]
     fn diagnostic_snapshot_contains_expected_fields() {
         let mut state = ChromeState::new();
+        let initial = collect_diagnostic(&state, 123_456, 0);
+        assert_eq!(initial.timestamp_mono_us, 123_456);
+        assert_eq!(initial.active_lease_count, 0);
+        assert_eq!(initial.tab_count, 0);
+        assert_eq!(initial.active_tab_index, 0);
+        assert_eq!(initial.tab_bar_position_label, "top");
+        assert_eq!(initial.connected_agent_count, 0);
+        assert!(
+            !initial.safe_mode_active,
+            "new chrome diagnostics must default to safe mode off"
+        );
+        assert!(
+            !initial.capture_surface_active,
+            "new chrome diagnostics must keep the reserved capture surface inactive"
+        );
+
         state.add_tab(1, "A".into());
         state.add_tab(2, "B".into());
         state.connected_agent_count = 3;
