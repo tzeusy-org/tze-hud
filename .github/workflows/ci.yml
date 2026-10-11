@@ -90,19 +90,6 @@ jobs:
         timeout-minutes: 10
       - name: Validate locked dependency graph
         run: cargo metadata --locked --format-version 1 >/dev/null
-      - name: Install protobuf compiler (required by tze_hud_protocol build script)
-        timeout-minutes: 5
-        run: |
-          # Remove only the observed Azure HTTP route; keep signed HTTPS fallbacks.
-          # An unsupported hosted image layout must fail before package acquisition.
-          apt_mirror_list=/etc/apt/apt-mirrors.txt
-          test -f "$apt_mirror_list"
-          test ! -L "$apt_mirror_list"
-          grep -Eq '^https://archive[.]ubuntu[.]com/ubuntu/?([[:space:]]|$)' "$apt_mirror_list"
-          grep -Eq '^https://security[.]ubuntu[.]com/ubuntu/?([[:space:]]|$)' "$apt_mirror_list"
-          sudo sed -Ei '\|^http://azure[.]archive[.]ubuntu[.]com/ubuntu/?([[:space:]].*)?$|d' "$apt_mirror_list"
-          sudo apt-get $APT_OPTS update -q --error-on=any
-          sudo apt-get $APT_OPTS install -y --no-install-recommends protobuf-compiler
       - name: cargo check (workspace)
         run: cargo check --workspace
       # Unused dependencies. Needs no build; false positives go in
@@ -156,19 +143,6 @@ jobs:
       # v2.9.1 pins to a specific stable release rather than the floating v2 alias.
       - uses: Swatinem/rust-cache@v2.9.1
         timeout-minutes: 10
-      - name: Install protobuf compiler (required by tze_hud_protocol build script)
-        timeout-minutes: 5
-        run: |
-          # Remove only the observed Azure HTTP route; keep signed HTTPS fallbacks.
-          # An unsupported hosted image layout must fail before package acquisition.
-          apt_mirror_list=/etc/apt/apt-mirrors.txt
-          test -f "$apt_mirror_list"
-          test ! -L "$apt_mirror_list"
-          grep -Eq '^https://archive[.]ubuntu[.]com/ubuntu/?([[:space:]]|$)' "$apt_mirror_list"
-          grep -Eq '^https://security[.]ubuntu[.]com/ubuntu/?([[:space:]]|$)' "$apt_mirror_list"
-          sudo sed -Ei '\|^http://azure[.]archive[.]ubuntu[.]com/ubuntu/?([[:space:]].*)?$|d' "$apt_mirror_list"
-          sudo apt-get $APT_OPTS update -q --error-on=any
-          sudo apt-get $APT_OPTS install -y --no-install-recommends protobuf-compiler
       - name: cargo clippy (workspace, all targets, deny warnings)
         run: cargo clippy --workspace --all-targets -- -D warnings
 
@@ -214,19 +188,6 @@ jobs:
           targets: x86_64-pc-windows-gnu
       - uses: Swatinem/rust-cache@v2.9.1
         timeout-minutes: 10
-      - name: Install protobuf compiler
-        timeout-minutes: 5
-        run: |
-          # Remove only the observed Azure HTTP route; keep signed HTTPS fallbacks.
-          # An unsupported hosted image layout must fail before package acquisition.
-          apt_mirror_list=/etc/apt/apt-mirrors.txt
-          test -f "$apt_mirror_list"
-          test ! -L "$apt_mirror_list"
-          grep -Eq '^https://archive[.]ubuntu[.]com/ubuntu/?([[:space:]]|$)' "$apt_mirror_list"
-          grep -Eq '^https://security[.]ubuntu[.]com/ubuntu/?([[:space:]]|$)' "$apt_mirror_list"
-          sudo sed -Ei '\|^http://azure[.]archive[.]ubuntu[.]com/ubuntu/?([[:space:]].*)?$|d' "$apt_mirror_list"
-          sudo apt-get $APT_OPTS update -q --error-on=any
-          sudo apt-get $APT_OPTS install -y --no-install-recommends protobuf-compiler
       - name: cargo clippy (windows-gnu, cfg(windows) crates, deny warnings)
         env:
           # Lint only; real Windows builds retain their compiler/hash backend.
@@ -272,7 +233,7 @@ jobs:
       # v2.9.1 pins to a specific stable release rather than the floating v2 alias.
       - uses: Swatinem/rust-cache@v2.9.1
         timeout-minutes: 10
-      - name: Install Mesa / llvmpipe + protobuf compiler
+      - name: Install Mesa / llvmpipe
         timeout-minutes: 5
         run: |
           # Remove only the observed Azure HTTP route; keep signed HTTPS fallbacks.
@@ -289,8 +250,7 @@ jobs:
             mesa-vulkan-drivers \
             mesa-utils \
             libegl-mesa0 \
-            libgl1-mesa-dri \
-            protobuf-compiler
+            libgl1-mesa-dri
       - name: Install pinned Nextest
         uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad
         timeout-minutes: 2
@@ -392,7 +352,7 @@ jobs:
       # v2.9.1 pins to a specific stable release rather than the floating v2 alias.
       - uses: Swatinem/rust-cache@v2.9.1
         timeout-minutes: 10
-      - name: Install Mesa / llvmpipe + protobuf compiler
+      - name: Install Mesa / llvmpipe
         timeout-minutes: 5
         run: |
           # Remove only the observed Azure HTTP route; keep signed HTTPS fallbacks.
@@ -409,8 +369,7 @@ jobs:
             mesa-vulkan-drivers \
             mesa-utils \
             libegl-mesa0 \
-            libgl1-mesa-dri \
-            protobuf-compiler
+            libgl1-mesa-dri
       - name: cargo test -p integration (headless suites)
         run: |
           cargo test -p integration --tests
@@ -480,7 +439,7 @@ jobs:
       # v2.9.1 pins to a specific stable release rather than the floating v2 alias.
       - uses: Swatinem/rust-cache@v2.9.1
         timeout-minutes: 10
-      - name: Install Mesa / llvmpipe + protobuf compiler
+      - name: Install Mesa / llvmpipe
         timeout-minutes: 5
         run: |
           # Remove only the observed Azure HTTP route; keep signed HTTPS fallbacks.
@@ -497,8 +456,7 @@ jobs:
             mesa-vulkan-drivers \
             mesa-utils \
             libegl-mesa0 \
-            libgl1-mesa-dri \
-            protobuf-compiler
+            libgl1-mesa-dri
       - name: cargo test -p vertical_slice --test production_boot
         run: |
           cargo test \
@@ -540,7 +498,7 @@ jobs:
       # v2.9.1 pins to a specific stable release rather than the floating v2 alias.
       - uses: Swatinem/rust-cache@v2.9.1
         timeout-minutes: 10
-      - name: Install Mesa / llvmpipe + protobuf compiler
+      - name: Install Mesa / llvmpipe
         timeout-minutes: 5
         run: |
           # Remove only the observed Azure HTTP route; keep signed HTTPS fallbacks.
@@ -557,8 +515,7 @@ jobs:
             mesa-vulkan-drivers \
             mesa-utils \
             libegl-mesa0 \
-            libgl1-mesa-dri \
-            protobuf-compiler
+            libgl1-mesa-dri
       - name: cargo test -p tze_hud_app --test production_boot
         run: |
           cargo test \
@@ -701,7 +658,7 @@ jobs:
       # v2.9.1 pins to a specific stable release rather than the floating v2 alias.
       - uses: Swatinem/rust-cache@v2.9.1
         timeout-minutes: 10
-      - name: Install Mesa / llvmpipe + Vulkan loader + protobuf compiler
+      - name: Install Mesa / llvmpipe + Vulkan loader
         timeout-minutes: 5
         run: |
           # Remove only the observed Azure HTTP route; keep signed HTTPS fallbacks.
@@ -719,8 +676,7 @@ jobs:
             mesa-utils \
             libegl-mesa0 \
             libgl1-mesa-dri \
-            vulkan-tools \
-            protobuf-compiler
+            vulkan-tools
       - name: Verify Vulkan adapter available
         run: vulkaninfo --summary 2>&1 | head -30 || true
       - name: cargo test pixel_readback (software GPU)

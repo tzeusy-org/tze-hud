@@ -1,6 +1,6 @@
 # tze_hud dev harness — reproduces the CI gate commands locally.
 #
-# Prerequisites: just (https://github.com/casey/just), protobuf-compiler (protoc).
+# Prerequisite: just (https://github.com/casey/just); protoc is fetched by Cargo.
 #
 # Usage:
 #   just           # run the default gate (check)
@@ -36,7 +36,7 @@
 # concurrent device construction can wedge the driver. Do not run bare
 # `cargo test -p tze_hud_compositor` on a host with a hardware GPU ICD.
 #
-# Building needs protoc >= 3.15; if /usr/bin/protoc is older, set PROTOC=/path/to/protoc.
+# Protocol builds select bundled protoc 31.1 (=3.2.0) for the build host, ignoring PROTOC.
 
 # Mesa llvmpipe Vulkan ICD (mesa-vulkan-drivers); GPU recipes use it when present.
 # Older Mesa names it lvp_icd.x86_64.json; Mesa 25+ (Ubuntu 26.04) lvp_icd.json.

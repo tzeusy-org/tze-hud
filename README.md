@@ -138,13 +138,18 @@ GPU-free headless runtime.
 
 ## 1) Build on Linux / Windows
 
+Protocol generation fetches pinned `protoc-bin-vendored =3.2.0` (protoc 31.1)
+through Cargo and selects the build-host binary explicitly. No system protoc
+installation or `PROTOC` override is used. The original three schemas regenerate
+into `OUT_DIR` during the build; unsupported hosts fail without a system fallback.
+
 ### Linux (Ubuntu/Debian) - Native Build
 
 ```bash
-# System deps (Rust toolchain deps + protobuf compiler + common windowing libs)
+# System deps (Rust toolchain deps + common windowing libs)
 sudo apt update
 sudo apt install -y \
-  build-essential pkg-config protobuf-compiler \
+  build-essential pkg-config \
   libx11-dev libxrandr-dev libxi-dev libxcursor-dev libxinerama-dev \
   libxkbcommon-dev libwayland-dev
 
@@ -183,7 +188,6 @@ cargo build --bin tze_hud --release --target x86_64-pc-windows-gnu
 ```powershell
 # Install toolchain/deps (run in elevated PowerShell)
 winget install -e --id Rustlang.Rustup
-winget install -e --id ProtocolBuffers.Protobuf
 winget install -e --id Microsoft.VisualStudio.2022.BuildTools
 
 # Rust toolchain

@@ -60,15 +60,6 @@ jobs:
         with:
           shared-key: windows-msvc-${{ env.HUD_BUILD_PROFILE }}
 
-      - name: Install protoc
-        timeout-minutes: 5
-        shell: pwsh
-        run: |
-          $dir = Join-Path $env:RUNNER_TEMP "protoc"
-          Invoke-WebRequest -Uri "https://github.com/protocolbuffers/protobuf/releases/download/v29.3/protoc-29.3-win64.zip" -OutFile "$dir.zip"
-          Expand-Archive "$dir.zip" -DestinationPath $dir
-          "$dir\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
-
       - name: Build tze_hud.exe (selected profile, static CRT)
         env:
           # Reported by /admin/status: `dev` on main, the tag on tags, else `ci`.

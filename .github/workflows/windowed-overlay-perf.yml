@@ -42,15 +42,6 @@ jobs:
           toolchain: "1.88"
           targets: x86_64-pc-windows-msvc
 
-      - name: Ensure protoc is available
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          if (-not (Get-Command protoc -ErrorAction SilentlyContinue)) {
-            choco install protoc -y --no-progress
-          }
-          protoc --version
-
       - uses: Swatinem/rust-cache@v2.9.1
         with:
           cache-on-failure: true

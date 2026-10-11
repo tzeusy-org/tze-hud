@@ -21,7 +21,6 @@ set -euo pipefail
 APT_PACKAGES=(
     build-essential pkg-config cmake
     mold                                    # native Linux links; never replaces system ld
-    protobuf-compiler                       # tze_hud_protocol build (protoc >= 3.15)
     mesa-vulkan-drivers libvulkan1          # llvmpipe Vulkan ICD for GPU tests
     libegl-mesa0 libgl1-mesa-dri
     libssl-dev libfontconfig1-dev
@@ -179,10 +178,6 @@ for entry in "${REQUIRED_COMMANDS[@]}"; do
     c=${entry%%:*}
     if command -v "$c" >/dev/null; then ok "$c"; else miss "$c (${entry#*:})"; fi
 done
-if command -v protoc >/dev/null; then
-    v=$(protoc --version | awk '{print $2}')
-    if printf '3.15\n%s\n' "$v" | sort -V -C; then ok "protoc $v"; else miss "protoc >= 3.15 (have $v; set PROTOC)"; fi
-fi
 
 # ── Rust ────────────────────────────────────────────────────────────────────
 section "rust"
