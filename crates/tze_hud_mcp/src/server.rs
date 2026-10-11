@@ -292,6 +292,13 @@ impl McpServer {
                     .and_then(serde_json::Value::as_str)
                     .and_then(|surface| tools::Surface::parse(surface).ok())
                     .is_some_and(|surface| matches!(surface, tools::Surface::Portal(_)));
+                let tool_started =
+                    tracing::enabled!(target: "tze_hud_mcp_phases", tracing::Level::DEBUG)
+                        .then(std::time::Instant::now);
+                if tool_started.is_some() {
+                    // `name` has passed the five-name allowlist above.
+                    debug!(target: "tze_hud_mcp_phases", phase = "tool_begin", tool = name);
+                }
                 let result = match name {
                     "hud_surfaces" => tools::hud_surfaces(&tool_ctx).await,
                     "hud_publish" => tools::hud_publish(&tool_ctx, args).await,
@@ -299,6 +306,18 @@ impl McpServer {
                     "hud_clear" => tools::hud_clear(&tool_ctx, args).await,
                     _ => tools::hud_input(&tool_ctx, args).await,
                 };
+                if let Some(started) = &tool_started {
+                    debug!(
+                        target: "tze_hud_mcp_phases",
+                        phase = "tool_return",
+                        tool = name,
+                        code = match &result {
+                            Ok(_) => "OK",
+                            Err(error) => error.code(),
+                        },
+                        elapsed_us = started.elapsed().as_micros()
+                    );
+                }
                 let body = match &result {
                     Ok(value) => {
                         if !portal_target
