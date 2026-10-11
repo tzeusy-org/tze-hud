@@ -492,4 +492,3 @@ def test_request_boundaries_and_startup_readiness(monkeypatch, subtests):
                 with pytest.raises(AssertionError, match="exited during startup.*17"):
                     ws.wait_for_mcp(ws.Smoke(url, marker), child, 90, clock=clock, sleep=clock.sleep)
                 assert calls == ([10] if during_request else []) and clock.sleeps == []
-
