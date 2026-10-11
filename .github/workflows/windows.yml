@@ -45,6 +45,12 @@ jobs:
     name: windows build + boot smoke
     runs-on: windows-latest
     timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: read
+      # Changed-only capture comment; fork tokens may be read-only. Never use
+      # pull_request_target or grant write access to repository contents.
+      pull-requests: write
     env:
       HUD_BUILD_PROFILE: ${{ startsWith(github.ref, 'refs/tags/v') && 'release' || 'release-dev' }}
     steps:
@@ -115,6 +121,35 @@ jobs:
       - name: Install, single-instance, uninstall smoke
         timeout-minutes: 5
         run: python scripts/ci/windows_install_smoke.py --exe "target/$env:HUD_BUILD_PROFILE/tze_hud.exe"
+
+      # Own-frame WARP comparisons are informational, not owner signoff or a
+      # required check. First main run bootstraps an explicitly absent baseline.
+      - name: Theme fixture captures (informational)
+        id: captures
+        continue-on-error: true
+        timeout-minutes: 10
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python scripts/ci/windows_smoke.py --captures "$env:RUNNER_TEMP/windows-captures" --exe "target/$env:HUD_BUILD_PROFILE/tze_hud.exe" --config app/tze_hud_app/config/production.toml
+
+      - name: Upload theme captures
+        id: capture-upload
+        if: always() && steps.captures.outcome != 'skipped'
+        continue-on-error: true
+        uses: actions/upload-artifact@v6
+        with:
+          name: windows-captures
+          path: ${{ runner.temp }}/windows-captures/captures.zip
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Changed-scene PR comment (informational)
+        if: github.event_name == 'pull_request' && steps.captures.outcome == 'success' && steps.capture-upload.outcome == 'success'
+        continue-on-error: true
+        timeout-minutes: 2
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python scripts/ci/windows_smoke.py --capture-comment "$env:RUNNER_TEMP/windows-captures"
 
       - name: Stage artifact
         shell: bash

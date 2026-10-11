@@ -492,3 +492,164 @@ def test_request_boundaries_and_startup_readiness(monkeypatch, subtests):
                 with pytest.raises(AssertionError, match="exited during startup.*17"):
                     ws.wait_for_mcp(ws.Smoke(url, marker), child, 90, clock=clock, sleep=clock.sleep)
                 assert calls == ([10] if during_request else []) and clock.sleeps == []
+
+
+def test_capture_png_pixels_baseline_and_changed_only_comment(tmp_path, monkeypatch):
+    """One offline behavior fixture: independent PNG bytes and a fake API sink."""
+    import io
+    import json
+    import struct
+    import zipfile
+    import zlib
+
+    def chunk(kind, body):
+        return struct.pack(">I", len(body)) + kind + body + struct.pack(">I", zlib.crc32(kind + body) & 0xFFFFFFFF)
+
+    def png(rows, width=2, height=2):
+        return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0))
+                + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b""))
+
+    # Independent precomputed filter vectors; no copy of the decoder recurrence.
+    pixels = bytes([10, 20, 30, 255, 30, 40, 50, 255, 20, 30, 40, 255, 50, 60, 70, 255])
+    vectors = [
+        [0, 10, 20, 30, 255, 30, 40, 50, 255, 0, 20, 30, 40, 255, 50, 60, 70, 255],
+        [1, 10, 20, 30, 255, 20, 20, 20, 0, 1, 20, 30, 40, 255, 30, 30, 30, 0],
+        [2, 10, 20, 30, 255, 30, 40, 50, 255, 2, 10, 10, 10, 0, 20, 20, 20, 0],
+        [3, 10, 20, 30, 255, 25, 30, 35, 128, 3, 15, 20, 25, 128, 25, 25, 25, 0],
+        [4, 10, 20, 30, 255, 20, 20, 20, 0, 4, 10, 10, 10, 0, 20, 20, 20, 0],
+    ]
+    for rows in vectors:
+        assert ws.decode_png_rgba(png(bytes(rows))) == (2, 2, pixels)
+    valid = png(bytes(vectors[0]))
+    invalid_filter = png(bytes([5, *vectors[0][1:]]))
+    for bad in (valid[:-1], valid + b"trailing", invalid_filter,
+                png(b"\0" * 19), png(b"", width=8192, height=8192),
+                valid[:20] + bytes([valid[20] ^ 1]) + valid[21:]):
+        with pytest.raises(AssertionError):
+            ws.decode_png_rgba(bad)
+    assert ws.decode_png_rgba(ws.encode_png_rgba(2, 2, pixels)) == (2, 2, pixels)
+
+    metadata = {"theme": "classic", "fixture": "subtitle-multiline", "fixture_sha256": "input",
+                "checkpoint": 1, "width": 2, "height": 2, "renderer": {"backend": "Dx12", "device_name": "WARP"},
+                "window_mode": "fullscreen", "settle_s": 1}
+    same = ws.compare_capture(metadata, metadata, valid, valid)
+    assert same["status"] == "unchanged" and same["changed_pixels"] == same["tolerated_pixels"] == 0
+    within = bytearray(pixels)
+    within[0] += 6
+    tolerated = ws.compare_capture(metadata, metadata, valid, ws.encode_png_rgba(2, 2, within))
+    assert tolerated["status"] == "unchanged" and tolerated["tolerated_pixels"] == 1
+    within[4] += 7
+    within[11] -= 1  # Alpha has no tolerance, independent of RGB tolerance.
+    changed = ws.compare_capture(metadata, metadata, valid, ws.encode_png_rgba(2, 2, within))
+    assert changed["changed_pixels"] == 2 and changed["tolerated_pixels"] == 1
+    assert ws.decode_png_rgba(changed["diff_png"])[2] == bytes([0, 0, 0, 255, 255, 0, 255, 255, 255, 0, 255, 255, 0, 0, 0, 255])
+    assert ws.compare_capture(metadata, None, None, valid)["status"] == "unavailable"
+    for key, value in (("width", 1), ("renderer", {"device_name": "hardware"}), ("fixture_sha256", "other")):
+        assert ws.compare_capture(metadata, {**metadata, key: value}, valid, valid)["status"] == "unavailable"
+    assert ws.compare_capture(metadata, metadata, ws.encode_png_rgba(1, 1, b"\0\0\0\xff"), valid)["status"] == "unavailable"
+
+    comments, operations = [], []
+
+    def sink(route, method="GET", body=None):
+        operations.append((route, method))
+        if method == "GET":
+            return comments
+        if method == "POST":
+            comments.append({"id": 42, "user": {"login": "github-actions[bot]"}, **body})
+        else:
+            assert method == "PATCH" and route.endswith("/42")
+            comments[0].update(body)
+        return comments[0]
+
+    body = ws.COMMENT_MARKER + "\nchanged scenes"
+    assert ws.update_capture_comment(sink, "owner/repo", 7, body, False).startswith("not posted")
+    assert operations == []
+    assert ws.update_capture_comment(sink, "owner/repo", 7, body, True) == "created"
+    assert ws.update_capture_comment(sink, "owner/repo", 7, body + " newer", True) == "updated"
+    assert len(comments) == 1 and comments[0]["body"] == body + " newer"
+    assert [method for _, method in operations] == ["GET", "POST", "GET", "PATCH"]
+
+    # Drive actual artifact-selection/ZIP/provenance behavior with no GH process.
+    main_run = {"id": 12, "head_branch": "main", "event": "push", "conclusion": "success", "head_sha": "main-sha", "path": ".github/workflows/windows.yml", "created_at": "2026-10-11T00:00:00Z"}
+    baseline_manifest = {"schema": 1, "workflow": "windows.yml", "repo": "owner/repo", "event": "push",
+                         "run_id": "12", "head": "main-sha", "capture_complete": True, "cells": {"cell": metadata}}
+    archive_bytes = io.BytesIO()
+    with zipfile.ZipFile(archive_bytes, "w") as archive:
+        archive.writestr("manifest.json", json.dumps(baseline_manifest))
+        archive.writestr("cell.png", valid)
+    download_bytes = io.BytesIO()
+    with zipfile.ZipFile(download_bytes, "w") as archive:
+        archive.writestr("captures.zip", archive_bytes.getvalue())
+    artifact = {"id": 99, "name": ws.CAPTURE_ARTIFACT, "expired": False, "size_in_bytes": len(download_bytes.getvalue()), "workflow_run": {"id": 12, "head_branch": "main"}, "created_at": "2026-10-11T00:01:00Z"}
+    requests = []
+
+    def api(route):
+        requests.append(route)
+        if "/actions/runs/" in route:
+            return main_run
+        assert "name=windows-captures&per_page=100" in route
+        return {"artifacts": [artifact]}
+
+    capabilities = {"help": "  --allow-escape-sequences  Allow binary output", "exit": 0}
+    download_calls = []
+
+    def download(command, **kwargs):
+        download_calls.append(command)
+        if command == ["gh", "api", "--help"]:
+            assert kwargs == {"capture_output": True, "text": True, "timeout": 10}
+            return ws.argparse.Namespace(returncode=capabilities["exit"], stdout=capabilities["help"])
+        expected = ["gh", "api", "repos/owner/repo/actions/artifacts/99/zip"]
+        if "--allow-escape-sequences" in capabilities["help"]:
+            expected.append("--allow-escape-sequences")
+        assert command == expected
+        assert kwargs["stderr"] == ws.subprocess.DEVNULL and kwargs["timeout"] == 45
+        kwargs["stdout"].write(download_bytes.getvalue())
+        return ws.argparse.Namespace(returncode=0)
+
+    monkeypatch.setattr(ws, "capture_github_api", api)
+    monkeypatch.setattr(ws.subprocess, "run", download)
+    manifest, archive, reason = ws.capture_baseline("owner/repo")
+    assert reason == "available" and manifest["head"] == "main-sha" and manifest["baseline_artifact_id"] == 99
+    with archive:
+        assert archive.read("cell.png") == valid
+    assert download_calls == [["gh", "api", "--help"],
+                              ["gh", "api", "repos/owner/repo/actions/artifacts/99/zip", "--allow-escape-sequences"]]
+    capabilities["help"] = "Legacy gh API help without binary-output guard"
+    download_calls.clear()
+    manifest, archive, reason = ws.capture_baseline("owner/repo")
+    assert reason == "available" and manifest["head"] == "main-sha"
+    with archive:
+        assert archive.read("cell.png") == valid
+    assert download_calls == [["gh", "api", "--help"], ["gh", "api", "repos/owner/repo/actions/artifacts/99/zip"]]
+    capabilities["exit"] = 1
+    download_calls.clear()
+    assert ws.capture_baseline("owner/repo") == (None, None, "baseline download capability unavailable")
+    assert download_calls == [["gh", "api", "--help"]]
+    capabilities["exit"] = 0
+    artifact["expired"] = True
+    assert ws.capture_baseline("owner/repo")[0:2] == (None, None)
+    artifact["expired"] = False
+    monkeypatch.setattr(ws, "capture_github_api", lambda route: {"artifacts": []})
+    assert ws.capture_baseline("owner/repo")[0:2] == (None, None)
+
+    # Publisher preserves exact typed messages/key/TTL and every widget update;
+    # the fake owns no HUD process and cleanup is limited to this fixture's surfaces.
+    traced = []
+
+    class FixtureSmoke:
+        def ok(self, tool, args):
+            traced.append((tool, args))
+            return {"ok": True}
+
+    fixture = [{"zone": "subtitle", "content": "hello", "ttl_ms": 10, "key": "k"},
+               {"zone": "subtitle", "content": "second", "ttl_ms": 20}]
+    ws.capture_fixture(FixtureSmoke(), fixture, lambda index: traced.append(("frame", index)))
+    assert traced == [("hud_clear", {"surface": "zone:subtitle"}),
+                      ("hud_publish", {"surface": "zone:subtitle", "content": "hello", "ttl_ms": 10, "key": "k"}),
+                      ("hud_publish", {"surface": "zone:subtitle", "content": "second", "ttl_ms": 20}),
+                      ("frame", 2), ("hud_clear", {"surface": "zone:subtitle"})]
+    traced.clear()
+    widgets = [{"widget": "main-status", "params": {"status": status}, "ttl_ms": 60000} for status in ("online", "away")]
+    ws.capture_fixture(FixtureSmoke(), widgets, lambda index: traced.append(("frame", index)))
+    assert [args for tool, args in traced if tool == "frame"] == [1, 2]
+    assert [args["params"] for tool, args in traced if tool == "hud_publish"] == [{"status": "online"}, {"status": "away"}]
