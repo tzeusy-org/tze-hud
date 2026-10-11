@@ -167,6 +167,8 @@ def doctor(host: str | None) -> int:
             reason = "deadline_unavailable"
         else:
             reason = "unknown"
+        if reason == "deadline_unavailable":
+            action = "Run doctor from a POSIX alarm-capable agent host; no network probe was performed."
         print(json.dumps({"ok": False, "layer": layer, "reason": reason, "action": action}))
         return 1
 

@@ -566,7 +566,9 @@ def test_admin_sends_the_paired_psk_as_bearer(hud, monkeypatch, capsys):
         assert json.loads(capsys.readouterr().out)["reason"] == "deadline_exceeded"
     monkeypatch.delattr(admin.signal, "setitimer", raising=False)
     assert admin.main(["--host", host, "doctor"]) == 1
-    assert json.loads(capsys.readouterr().out)["reason"] == "deadline_unavailable"
+    unsupported = json.loads(capsys.readouterr().out)
+    assert unsupported["reason"] == "deadline_unavailable"
+    assert unsupported["action"] == "Run doctor from a POSIX alarm-capable agent host; no network probe was performed."
 
 
 def test_pair_creates_a_private_dir_and_ignores_planted_files(hud):
