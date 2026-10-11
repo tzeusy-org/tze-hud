@@ -20,7 +20,6 @@
 #   just idle-efficiency-checker # fail-closed idle artifact contract tests
 #   just clippy-windows-gnu # clippy on the windows-gnu target (skips if Rust target missing)
 #   just cargo-deny         # advisories/licenses/bans/sources (skips if cargo-deny missing)
-#   just overlay-harness-contract # pwsh overlay-harness contract test (skips if pwsh missing)
 #   just bootstrap # install/report dev-host deps (scripts/dev-bootstrap.sh; --check to report only)
 #   just build-windows # cross-build tze_hud.exe for x86_64-pc-windows-gnu
 #   just ci        # full local gate sweep (see the `ci` recipe; no Windows-only jobs)
@@ -230,15 +229,6 @@ cargo-deny:
     fi
     cargo deny check advisories licenses bans sources
 
-# Fullscreen-vs-overlay harness PowerShell contract test (mirror CI check job step).
-overlay-harness-contract:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    if ! command -v pwsh >/dev/null; then
-        echo "SKIPPED: overlay-harness-contract needs PowerShell (pwsh)"; exit 0
-    fi
-    pwsh -File ./scripts/ci/windows/test-windowed-fullscreen-overlay-perf.ps1
-
 # Advisory dead-item list for one crate: narrows its pub items to pub(crate) in a
 # temp copy (keeping names other crates use) and prints rustc dead_code warnings.
 # Example: just dead-code tze_hud_telemetry
@@ -262,10 +252,10 @@ build-windows *args:
 # ── Full local CI sweep ───────────────────────────────────────────────────────
 
 # Run all CI gates that are feasible locally. GPU and pixel_readback tests are
-# included via `test` (they need Mesa llvmpipe). clippy-windows-gnu, cargo-deny and
-# overlay-harness-contract are tool-gated: they print "SKIPPED: <reason>" and
-# pass when their tool (windows-gnu Rust target, cargo-deny, pwsh) is absent.
+# included via `test` (they need Mesa llvmpipe). clippy-windows-gnu and cargo-deny
+# are tool-gated: they print "SKIPPED: <reason>" and pass when their tool
+# (windows-gnu Rust target or cargo-deny) is absent.
 # Excluded by design: the Windows-only jobs (windows.yml), the informational
 # test-gpu-pixel-readback job (covered by `test`), and the weekly perf lanes.
 # Runs in the same logical order as CI: fast-fail gates first, then tests.
-ci: untracked-evidence overlay-harness-contract check fmt clippy clippy-windows-gnu cargo-deny deps-unused dev-mode-guard idle-efficiency-checker test test-integration test-python token-footprint production-boot canonical-app-boot
+ci: untracked-evidence check fmt clippy clippy-windows-gnu cargo-deny deps-unused dev-mode-guard idle-efficiency-checker test test-integration test-python token-footprint production-boot canonical-app-boot

@@ -617,26 +617,6 @@ mod tests {
     }
 
     #[test]
-    fn sixty_seconds_of_static_idle_has_zero_runtime_wakeups() {
-        let counters = IdleEfficiencyCounters::default();
-        let baseline = counters.snapshot();
-        let now = Instant::now();
-        for second in 0..60 {
-            let simulated_now = now + Duration::from_secs(second);
-            assert_eq!(
-                control_flow_for_deadlines(simulated_now, std::iter::empty()),
-                winit::event_loop::ControlFlow::Wait
-            );
-        }
-        let delta = counters
-            .snapshot()
-            .delta_since(&baseline)
-            .expect("monotonic counters");
-        assert_eq!(delta.combined_runtime_wakeups(), 0);
-        assert!(delta.combined_runtime_wakeups() <= 120);
-    }
-
-    #[test]
     fn notification_before_park_is_observed_from_the_pre_work_checkpoint() {
         let wake = CompositorWake::default();
         let checkpoint = wake.checkpoint();

@@ -126,10 +126,9 @@ pub enum TruncationViewport {
 /// When a single uncached truncation would shape an input larger than this many
 /// bytes, [`viewport_adjacent_input`] restricts the shaped input to a
 /// viewport-adjacent window of whole source lines instead of the full retained
-/// transcript.  The default sits well below the ~8 KiB point where the
-/// `overflow_truncate` benchmark first exceeds the Stage-5 Layout Resolve budget
-/// (< 1 ms, `about/craft-and-care/engineering-bar.md` §2), keeping a single
-/// uncached call within budget for multi-line transcripts.
+/// transcript. The 4096-byte default bounds work toward the Stage-5 Layout
+/// Resolve target (< 1 ms, `about/craft-and-care/engineering-bar.md` §2);
+/// conformance still requires measurement of the actual workload.
 pub const DEFAULT_MAX_TRUNCATION_INPUT_BYTES: usize = 4096;
 
 /// Bounded whole-line overscan margin kept beyond the visible layout window when
@@ -1738,8 +1737,8 @@ mod tests {
     //
     // Iteration count is 32 to keep total CI time well under 10 s in debug mode
     // with software font rasterisation.  The invariant guarantee comes from random
-    // input coverage, not iteration count; real regression detection uses criterion
-    // benchmarks in crates/tze_hud_compositor/benches/overflow_truncate.rs.
+    // input coverage, not iteration count. These check correctness; latency
+    // conformance requires separate workload measurements.
 
     proptest! {
         #![proptest_config(proptest::test_runner::Config {
@@ -3295,8 +3294,8 @@ mod tests {
     }
 
     /// A ~64 KiB transcript truncated through the windowed fallback yields the
-    /// same visible result as shaping the whole input. (The warm-path latency
-    /// budget is measured by the `overflow_truncate/fallback_64KiB` bench, not here.)
+    /// same visible result as shaping the whole input. This correctness
+    /// comparison does not establish warm-path latency conformance.
     #[test]
     fn windowed_fallback_matches_full_input_on_large_transcript() {
         let text = transcript(64 * 1024 / 40); // ~64 KiB transcript, far above bound
