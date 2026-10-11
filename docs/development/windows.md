@@ -232,7 +232,6 @@ as Linux CI: `cargo nextest run --workspace --all-targets --exclude integration 
 | `test`, `test-integration`, `production-boot`, `canonical-app-boot`, `token-footprint` | Run on WARP through `HEADLESS_FORCE_SOFTWARE=1`. The llvmpipe pin (`VK_ICD_FILENAMES`) applies only when the Linux ICD file exists, so it does nothing here. CI never runs these on Windows, so treat a failure as a possible Windows-only gap and check it against Linux CI. Running them with a hardware GPU present has not been tested (see the note below) |
 | `test-gpu` | Always fails: it requires the Linux Mesa llvmpipe ICD. Leave it to CI |
 | `clippy-windows-gnu` | Prints `SKIPPED` unless the `x86_64-pc-windows-gnu` target and MinGW are installed. On an MSVC host, plain `clippy` already covers the same Windows code paths |
-| `overlay-harness-contract` | Runs when `pwsh` (PowerShell 7) is on `PATH`, otherwise prints `SKIPPED` |
 | `cargo-deny`, `deps-unused` | Need `cargo install --locked cargo-deny cargo-machete` |
 | `idle-efficiency-checker`, `test-python` | Work once `python3` is fixed |
 

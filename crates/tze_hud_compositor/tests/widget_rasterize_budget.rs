@@ -12,9 +12,8 @@
 //!
 //! The CI test uses the lenient 500ms threshold so it does not produce false
 //! failures on software-rendered CI runners (llvmpipe, WARP) in debug builds.
-//! The strict 2ms spec requirement is enforced by the Criterion benchmark in
-//! `benches/widget_rasterize.rs` which should be run on release-optimised
-//! reference hardware.
+//! The strict 2ms spec requirement remains a separate measurement obligation
+//! on release-optimised reference hardware; this CI test does not prove it.
 //!
 //! ## Design note
 //!
@@ -44,13 +43,12 @@ use tze_hud_scene::types::{Rgba, WidgetBinding, WidgetBindingMapping, WidgetPara
 /// regressions (e.g., an accidental O(n²) path or a missing fast-path that
 /// would push latency to seconds).
 ///
-/// To measure against the 2ms spec requirement, run the Criterion benchmark on
-/// release-optimised reference hardware:
-///   `cargo bench --bench widget_rasterize`
+/// Measuring the 2ms spec requirement requires release-optimised reference
+/// hardware; this lenient CI threshold does not replace that obligation.
 const CI_THRESHOLD_MS: u64 = 500;
 
 /// Spec target for reference hardware documentation purposes only.
-/// Not enforced in this test — use the Criterion benchmark for this.
+/// Not enforced in this test — measure separately on reference hardware.
 #[allow(dead_code)]
 const SPEC_TARGET_MS: u64 = 2;
 
@@ -147,8 +145,8 @@ fn gauge_param_constraints() -> HashMap<String, (f32, f32)> {
 /// SVG re-rasterization < 2ms at 512×512 on reference hardware.
 ///
 /// This test enforces the lenient CI threshold (500ms) and verifies correctness
-/// (non-empty pixmap).  The strict 2ms spec target is measured by the Criterion
-/// benchmark (`benches/widget_rasterize.rs`).
+/// (non-empty pixmap). The strict 2ms spec target requires a separate
+/// release-optimised reference-hardware measurement.
 ///
 /// See: widget-system/spec.md §Requirement: Widget Compositor Rendering,
 ///      task 7.9, task 12.11.
@@ -186,13 +184,13 @@ fn gauge_512x512_rasterize_within_ci_budget() {
     );
 
     // Budget assertion with lenient CI threshold (catches catastrophic regressions only).
-    // For the strict 2ms spec target, run: cargo bench --bench widget_rasterize
+    // The strict 2ms spec target still requires reference-hardware measurement.
     assert!(
         elapsed_ms < CI_THRESHOLD_MS,
         "SVG re-rasterization took {elapsed_ms}ms, exceeds lenient CI threshold of {CI_THRESHOLD_MS}ms \
          (spec target for reference hardware is {SPEC_TARGET_MS}ms). \
          This likely indicates a catastrophic regression — check for O(n²) paths. \
-         Run `cargo bench --bench widget_rasterize` on optimised reference hardware \
+         Measure on release-optimised reference hardware \
          to verify the 2ms spec requirement.",
     );
 }
