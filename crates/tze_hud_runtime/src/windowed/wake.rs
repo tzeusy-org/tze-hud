@@ -537,7 +537,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
     use std::time::{Duration, Instant};
 
-    use crate::idle_efficiency::{IdleEfficiencyCounters, RuntimeWakeupSource};
+    use crate::idle_efficiency::RuntimeWakeupSource;
 
     use super::{
         CompositorWake, Deadline, WindowedWake, control_flow_for_deadlines, cursor_entry_armed,
