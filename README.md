@@ -44,8 +44,8 @@ The rest of this README is command-first and focused on four workflows:
 
 CI (`.github/workflows/ci.yml`) runs the gates below on every PR; `just ci`
 reproduces the blocking set locally (requires [just](https://github.com/casey/just)).
-`clippy-windows-gnu`, `cargo-deny` and `overlay-harness-contract` are tool-gated:
-if the tool (windows-gnu target + mingw, cargo-deny, `pwsh`) is missing they print
+`clippy-windows-gnu` and `cargo-deny` are tool-gated:
+if the tool (windows-gnu Rust target or cargo-deny) is missing they print
 `SKIPPED: <reason>` and pass, so a green local `just ci` does not prove them;
 CI always runs them.
 Each local recipe maps to a CI job:
@@ -63,7 +63,6 @@ Each local recipe maps to a CI job:
 | `canonical-app-boot` | `canonical-app-production-boot` | canonical app production-config boot |
 | `dev-mode-guard` | `dev-mode-guard` | dev-mode not enabled in any package's default-build dependency closure (shipped binary included) |
 | `deps-unused` | `check` | `cargo machete`: unused dependencies |
-| `overlay-harness-contract` | `check` | pwsh fullscreen-vs-overlay harness contract test |
 | `idle-efficiency-checker` | `check` | fail-closed idle artifact contract tests |
 | `test-gpu` | — | GPU subset of `test` only (compositor + `pixel_readback`), llvmpipe-pinned with timeouts; already covered by `test`, so not a separate `just ci` step |
 | `clippy-windows-gnu` | `clippy-windows-gnu` | clippy on the `x86_64-pc-windows-gnu` target for the crates carrying `cfg(windows)` code |
@@ -138,13 +137,18 @@ GPU-free headless runtime.
 
 ## 1) Build on Linux / Windows
 
+Protocol generation fetches pinned `protoc-bin-vendored =3.2.0` (protoc 31.1)
+through Cargo and selects the build-host binary explicitly. No system protoc
+installation or `PROTOC` override is used. The original three schemas regenerate
+into `OUT_DIR` during the build; unsupported hosts fail without a system fallback.
+
 ### Linux (Ubuntu/Debian) - Native Build
 
 ```bash
-# System deps (Rust toolchain deps + protobuf compiler + common windowing libs)
+# System deps (Rust toolchain deps + common windowing libs)
 sudo apt update
 sudo apt install -y \
-  build-essential pkg-config protobuf-compiler \
+  build-essential pkg-config \
   libx11-dev libxrandr-dev libxi-dev libxcursor-dev libxinerama-dev \
   libxkbcommon-dev libwayland-dev
 
@@ -183,7 +187,6 @@ cargo build --bin tze_hud --release --target x86_64-pc-windows-gnu
 ```powershell
 # Install toolchain/deps (run in elevated PowerShell)
 winget install -e --id Rustlang.Rustup
-winget install -e --id ProtocolBuffers.Protobuf
 winget install -e --id Microsoft.VisualStudio.2022.BuildTools
 
 # Rust toolchain

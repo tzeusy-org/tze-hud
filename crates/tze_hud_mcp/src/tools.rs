@@ -7,14 +7,14 @@
 //! namespace or token. Times are milliseconds. Failures are
 //! [`McpError::Tool`] with a stable code and a hint naming the next call.
 
-use crate::{error::McpError, portal_op::PortalOp, types::McpResult};
+use crate::{error::McpError, server::PortalHandle, types::McpResult};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use tokio::sync::Mutex;
-use tze_hud_projection::hub::PortalError;
+use tze_hud_projection::hub::{PortalError, PortalHub, PortalKey, PortalStatus, Publish};
 use tze_hud_scene::{
     SceneId, ValidationError,
     config::AgentIdentity,
@@ -87,7 +87,7 @@ impl McpState {
 /// Everything a verb needs for one call.
 pub struct ToolCtx<'a> {
     pub scene: &'a Arc<Mutex<SceneGraph>>,
-    pub portal_op_tx: Option<&'a tokio::sync::mpsc::UnboundedSender<PortalOp>>,
+    pub portals: Option<&'a PortalHandle>,
     pub portal_wake: &'a RenderWakeNotifier,
     pub state: &'a McpState,
     /// The runtime's safe-mode flag, shared with gRPC. While set, every
@@ -293,11 +293,8 @@ pub async fn hud_surfaces(ctx: &ToolCtx<'_>) -> McpResult<Value> {
         }
     }
     if portals_enabled(ctx) {
-        // Discovery still answers if the portal service is down.
-        let agent = ns.to_string();
-        let portals = portal_call(ctx, |reply| PortalOp::List { agent, reply })
-            .await
-            .unwrap_or_default();
+        // Absent service stays undiscoverable; a present failed Hub refuses.
+        let portals = with_portals(ctx, |hub, _| (Ok(hub.list(ns)), false))?;
         for p in portals {
             let mut o = Map::new();
             o.insert("s".into(), json!(format!("portal:{}", p.id)));
@@ -581,16 +578,16 @@ async fn publish_widget(ctx: &ToolCtx<'_>, widget: &str, p: PublishParams) -> Mc
 /// Whether this agent may hold portals and the portal driver is wired, so
 /// discovery and input polling ask it.
 fn portals_enabled(ctx: &ToolCtx<'_>) -> bool {
-    ctx.portal_op_tx.is_some()
+    ctx.portals.is_some()
         && ctx
             .agent
             .allows(&Surface::Portal(String::new()).permission().0)
 }
 
-/// Send one operation to the portal driver and await its reply.
-async fn portal_call<T>(
+/// Complete one synchronous Hub operation, then wake eligible work unlocked.
+fn with_portals<T>(
     ctx: &ToolCtx<'_>,
-    build: impl FnOnce(tokio::sync::oneshot::Sender<T>) -> PortalOp,
+    apply: impl FnOnce(&mut PortalHub, u64) -> (McpResult<T>, bool),
 ) -> McpResult<T> {
     let unavailable = || {
         tool_err(
@@ -598,11 +595,20 @@ async fn portal_call<T>(
             "the portal service isn't running; retry later",
         )
     };
-    let tx = ctx.portal_op_tx.ok_or_else(unavailable)?;
-    let (reply, rx) = tokio::sync::oneshot::channel();
-    tx.send(build(reply)).map_err(|_| unavailable())?;
-    ctx.portal_wake.notify();
-    rx.await.map_err(|_| unavailable())
+    let portals = ctx.portals.ok_or_else(unavailable)?;
+    let (result, changed) = {
+        let mut hub = portals.hub.lock().map_err(|_| {
+            tool_err(
+                "INTERNAL",
+                "the portal service failed; retry after it restarts",
+            )
+        })?;
+        apply(&mut hub, portals.clock.now_us())
+    };
+    if result.is_ok() && changed {
+        ctx.portal_wake.notify();
+    }
+    result
 }
 
 /// A portal refusal in the shared error set; `NotHeld` names the surface.
@@ -623,18 +629,29 @@ async fn publish_portal(ctx: &ToolCtx<'_>, pid: &str, p: PublishParams) -> McpRe
         Some(Value::String(s)) => Some(s),
         Some(_) => return Err(invalid("portal content is the output text (a string)")),
     };
-    portal_call(ctx, |reply| PortalOp::Publish {
-        agent: ctx.agent.agent_id.clone(),
-        portal: pid.to_string(),
-        display_name: p.display_name,
-        text,
-        key: p.key,
-        expects_reply: p.expects_reply.unwrap_or(false),
-        status: p.status,
-        reply,
-    })
-    .await?
-    .map_err(|e| portal_err(e, &p.surface))?;
+    let status = p
+        .status
+        .as_deref()
+        .map(PortalStatus::parse)
+        .transpose()
+        .map_err(|e| portal_err(e, &p.surface))?;
+    with_portals(ctx, |hub, now| {
+        (
+            hub.publish(
+                &PortalKey::new(ctx.agent.agent_id.clone(), pid),
+                Publish {
+                    display_name: p.display_name,
+                    text,
+                    key: p.key,
+                    expects_reply: p.expects_reply.unwrap_or(false),
+                    status,
+                },
+                now,
+            )
+            .map_err(|e| portal_err(e, &p.surface)),
+            true,
+        )
+    })?;
     Ok(json!({ "ok": true }))
 }
 
@@ -683,14 +700,13 @@ pub async fn hud_hold(ctx: &ToolCtx<'_>, args: Value) -> McpResult<Value> {
         Surface::Portal(pid) => {
             // The runtime keeps a held portal (and its transcript) past the
             // idle reclaim until the hold lapses or hud_clear.
-            portal_call(ctx, |reply| PortalOp::Hold {
-                agent: ns,
-                portal: pid,
-                ttl_ms: p.ttl_ms,
-                reply,
-            })
-            .await?
-            .map_err(|e| portal_err(e, &p.surface))?;
+            with_portals(ctx, |hub, now| {
+                (
+                    hub.hold(&PortalKey::new(ns, pid), p.ttl_ms, now)
+                        .map_err(|e| portal_err(e, &p.surface)),
+                    true,
+                )
+            })?;
         }
     }
     Ok(result)
@@ -726,13 +742,13 @@ pub async fn hud_clear(ctx: &ToolCtx<'_>, args: Value) -> McpResult<Value> {
                 .map_err(|e| scene_error(&e))?;
         }
         Surface::Portal(pid) => {
-            portal_call(ctx, |reply| PortalOp::Clear {
-                agent: ns,
-                portal: pid,
-                reply,
-            })
-            .await?
-            .map_err(|e| portal_err(e, &p.surface))?;
+            with_portals(ctx, |hub, _| {
+                (
+                    hub.clear(&PortalKey::new(ns, pid))
+                        .map_err(|e| portal_err(e, &p.surface)),
+                    true,
+                )
+            })?;
         }
     }
     Ok(json!({ "ok": true }))
@@ -785,13 +801,15 @@ pub async fn hud_input(ctx: &ToolCtx<'_>, args: Value) -> McpResult<Value> {
         });
         let mut backlog = ctx.state.with(&ns, |s| s.delivered.len()) - items.len();
         if portals_enabled(ctx) {
-            let batch = portal_call(ctx, |reply| PortalOp::Input {
-                agent: ns.clone(),
-                ack: std::mem::take(&mut ack),
-                max_items: Some(max_items - items.len()),
-                reply,
-            })
-            .await?;
+            let batch = with_portals(ctx, |hub, now| {
+                let (batch, changed) = hub.poll_input_with_changes(
+                    &ns,
+                    &std::mem::take(&mut ack),
+                    Some(max_items - items.len()),
+                    now,
+                );
+                (Ok(batch), changed)
+            })?;
             backlog += batch.remaining;
             items.extend(batch.items.into_iter().map(
                 |i| json!({ "id": i.id, "s": format!("portal:{}", i.portal), "text": i.text }),

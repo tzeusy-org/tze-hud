@@ -30,7 +30,17 @@ or stale metadata is refused. The established `.psk` store is the only raw-key
 file; no key belongs in MCP config, argv, environment or evidence. Ordinary
 admin scripts below still use explicit `HUD_HOST`. Fresh Claude authenticated
 five-tool discovery is separate live acceptance, not proven by fake fixtures.
-The adapter bounds four HTTP workers and whole requests to 60s; EOF/signals
+The adapter bounds four HTTP workers. Initialize has a 3s absolute startup
+deadline from frame acceptance, including DNS, connect and response/read;
+established calls such as `hud_input` retain their 60s absolute deadline,
+including queued time. Caught resolver failures name DNS, caught connect
+failures name TCP, and selected-key or HTTP401/403 refusals name auth. A worker
+deadline without a known phase reports DNS/TCP/startup with phase unavailable;
+it is not a DNS diagnosis. Errors omit credentials and exception details, with
+no fallback, re-pair, retry or replay. Adapter-interpreter startup before frame
+acceptance and subsequent TERM/KILL cleanup add scheduling-dependent time;
+the accepted-frame budget includes worker startup.
+EOF/signals
 abort with one global 1s TERM + 1s KILL/reap budget, subject to OS scheduling.
 Abrupt parent death relies on Linux kernel termination/OS adoption; native
 Windows/macOS client lifetime is unsupported. Remote accepted work is uncertain

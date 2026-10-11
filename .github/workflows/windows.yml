@@ -7,8 +7,11 @@
 #   reclaimed after its grace, plus an informational idle-with-content
 #   measurement), then exercises self-install, single instance, and uninstall
 #   (scripts/ci/windows_install_smoke.py).
-#   Runs on every PR, merge-queue entry, push to main, and v* tag. Non-tag
-#   events use release-dev; v* tags keep the full release profile.
+#   Runs on non-docs PRs and main pushes, v* tags, and manual dispatch.
+#   Informational: omit merge_group while this check is not required. Restore
+#   merge_group in the same hud-bstmy.8.8 change that makes it required.
+#   Docs-only PR/main updates skip; tag and manual runs are unaffected.
+#   Non-tag events use release-dev; v* tags keep the full release profile.
 # release — signs the exe with minisign (secret MINISIGN_SECRET_KEY; public key
 #   app/tze_hud_app/minisign.pub) and publishes it:
 #     push to main → rolling `dev` prerelease (tag `dev` moves to the commit)
@@ -19,10 +22,15 @@ name: windows
 
 on:
   pull_request:
-  merge_group:
+    paths-ignore:
+      - "docs/**"
+      - "*.md"
   push:
     branches: [main]
     tags: ["v*"]
+    paths-ignore:
+      - "docs/**"
+      - "*.md"
   workflow_dispatch: {}
 
 permissions:
@@ -51,15 +59,6 @@ jobs:
         timeout-minutes: 10
         with:
           shared-key: windows-msvc-${{ env.HUD_BUILD_PROFILE }}
-
-      - name: Install protoc
-        timeout-minutes: 5
-        shell: pwsh
-        run: |
-          $dir = Join-Path $env:RUNNER_TEMP "protoc"
-          Invoke-WebRequest -Uri "https://github.com/protocolbuffers/protobuf/releases/download/v29.3/protoc-29.3-win64.zip" -OutFile "$dir.zip"
-          Expand-Archive "$dir.zip" -DestinationPath $dir
-          "$dir\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
 
       - name: Build tze_hud.exe (selected profile, static CRT)
         env:

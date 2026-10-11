@@ -521,7 +521,25 @@ fn sdf_rounded_box(p: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {
 /// `-border_width < d <= 0` with the fill edge's AA on both sides. Offsetting
 /// the SDF keeps inner corners concentric (radius r - border_width).
 fn coverage_and_fill(in: VertexOutput) -> vec2<f32> {
-    let d = sdf_rounded_box(in.frag_pos - in.rect_center, in.rect_half_size, in.radius);
+    var d = sdf_rounded_box(in.frag_pos - in.rect_center, in.rect_half_size, in.radius);
+    if (in.border_width == 1.0) {
+        let q = abs(in.frag_pos - in.rect_center) - in.rect_half_size + vec2<f32>(in.radius);
+        // Keep curved corners and their tangents on the original SDF.
+        if (q.x <= 0.0 || q.y <= 0.0) {
+            let snapped_min = round(in.rect_center - in.rect_half_size);
+            let snapped_max = round(in.rect_center + in.rect_half_size);
+            if (all(snapped_max > snapped_min)) {
+                let snapped_d = max(
+                    max(snapped_min.x - in.frag_pos.x, in.frag_pos.x - snapped_max.x),
+                    max(snapped_min.y - in.frag_pos.y, in.frag_pos.y - snapped_max.y)
+                );
+                // Fade to the original distance over the last physical pixel
+                // of the straight side, avoiding a jump at the corner tangent.
+                let straight_weight = clamp(-min(q.x, q.y), 0.0, 1.0);
+                d = mix(d, snapped_d, straight_weight);
+            }
+        }
+    }
     let coverage = smoothstep(0.5, -0.5, d);
     var fill = 1.0;
     if (in.border_width > 0.0) {

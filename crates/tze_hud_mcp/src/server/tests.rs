@@ -995,17 +995,14 @@ async fn action_presses_are_delivered_until_acked() {
 
 // ── Portal ───────────────────────────────────────────────────────────────────
 
-/// Run a portal hub answering `PortalOp`s, as the runtime's driver does.
+/// Share the real portal hub directly, with the deterministic test wall clock.
 fn hub_portal(server: McpServer) -> (McpServer, Arc<std::sync::Mutex<PortalHub>>) {
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<PortalOp>();
-    let hub = Arc::new(std::sync::Mutex::new(PortalHub::default()));
-    let h = Arc::clone(&hub);
-    tokio::spawn(async move {
-        while let Some(op) = rx.recv().await {
-            op.apply(&mut h.lock().unwrap(), 0);
-        }
-    });
-    (server.with_portal_op_tx(tx), hub)
+    let portals = PortalHandle::new(
+        PortalHub::default(),
+        Arc::new(tze_hud_scene::TestClock::new(0)),
+    );
+    let hub = Arc::clone(&portals.hub);
+    (server.with_portals(portals), hub)
 }
 
 #[tokio::test]
@@ -1101,6 +1098,179 @@ async fn portal_flow_attach_publish_poll_ack_clear() {
     ] {
         assert_eq!(call_err(&server, verb, args).await["code"], "NOT_HELD");
     }
+
+    // The real zero-portal caller polls the shared Hub across several passes.
+    // An unrelated pre-existing dirty portal must neither wake nor get touched.
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let ingress = Arc::new(AtomicUsize::new(0));
+    let render = Arc::new(AtomicUsize::new(0));
+    let locked_notification = Arc::new(AtomicUsize::new(0));
+    let server = server
+        .with_portal_ingress_wake_notifier(tze_hud_scene::render_wake::RenderWakeNotifier::new({
+            let ingress = Arc::clone(&ingress);
+            let hub = Arc::clone(&hub);
+            let locked_notification = Arc::clone(&locked_notification);
+            move || {
+                ingress.fetch_add(1, Ordering::SeqCst);
+                if hub.try_lock().is_err() {
+                    locked_notification.fetch_add(1, Ordering::SeqCst);
+                }
+            }
+        }))
+        .with_render_wake_notifier(tze_hud_scene::render_wake::RenderWakeNotifier::new({
+            let render = Arc::clone(&render);
+            move || {
+                render.fetch_add(1, Ordering::SeqCst);
+            }
+        }));
+    let other = PortalKey::new("another-agent", "main");
+    hub.lock()
+        .unwrap()
+        .publish(
+            &other,
+            tze_hud_projection::hub::Publish {
+                text: Some("untouched other-agent output".into()),
+                ..Default::default()
+            },
+            0,
+        )
+        .unwrap();
+    let other_before = hub.lock().unwrap().get(&other).unwrap().clone();
+    let empty = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        call(&server, "hud_input", json!({"wait_ms": 350})),
+    )
+    .await
+    .unwrap();
+    assert_eq!(empty, json!({"items": [], "remaining": 0}));
+    assert_eq!(
+        ingress.load(Ordering::SeqCst),
+        0,
+        "empty passes do not ring main work"
+    );
+    assert_eq!(
+        render.load(Ordering::SeqCst),
+        0,
+        "empty passes do not ring rendering"
+    );
+    assert_eq!(
+        format!("{:?}", hub.lock().unwrap().get(&other).unwrap()),
+        format!("{other_before:?}")
+    );
+
+    // First attachment arrives after earlier empty passes; no cached zero count.
+    let waiting = call(&server, "hud_input", json!({"wait_ms": 1500}));
+    let first_arrival = async {
+        tokio::time::sleep(std::time::Duration::from_millis(350)).await;
+        assert_eq!(
+            call(
+                &server,
+                "hud_publish",
+                json!({"surface":"portal:main", "content":"first during wait"})
+            )
+            .await,
+            json!({"ok":true})
+        );
+        hub.lock()
+            .unwrap()
+            .submit_reply(&key, "reply during wait".into(), 0)
+            .unwrap()
+    };
+    let (found, first_id) = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        tokio::join!(waiting, first_arrival)
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        found,
+        json!({"items":[{"id":first_id,"s":"portal:main","text":"reply during wait"}],"remaining":0})
+    );
+    assert_eq!(
+        ingress.load(Ordering::SeqCst),
+        2,
+        "publish and actual first delivery wake after unlock"
+    );
+    call(&server, "hud_surfaces", json!({})).await;
+    assert_eq!(ingress.load(Ordering::SeqCst), 2, "discovery is read-only");
+    assert_eq!(
+        call(&server, "hud_input", json!({})).await["items"][0]["id"],
+        first_id
+    );
+    assert_eq!(
+        ingress.load(Ordering::SeqCst),
+        2,
+        "redelivery of already-dirty content changes nothing"
+    );
+    assert_eq!(
+        call(&server, "hud_input", json!({"ack":[first_id]})).await,
+        json!({"items":[],"remaining":0})
+    );
+    assert_eq!(
+        ingress.load(Ordering::SeqCst),
+        3,
+        "ack changes rendered pending input"
+    );
+    server
+        .scene
+        .lock()
+        .await
+        .push_pending_action(PendingAction {
+            publisher_namespace: psk_agent(),
+            zone_name: "notification-area".into(),
+            callback_id: "approve".into(),
+        });
+    let action = call(&server, "hud_input", json!({})).await;
+    assert_eq!(action["items"].as_array().unwrap().len(), 1);
+    assert_eq!(action["items"][0]["action"], "approve");
+    let action_id = action["items"][0]["id"].clone();
+    assert_eq!(
+        call(&server, "hud_input", json!({})).await["items"][0]["id"],
+        action_id
+    );
+    assert_eq!(
+        call(&server, "hud_input", json!({"ack":[action_id]})).await,
+        json!({"items":[],"remaining":0})
+    );
+    assert_eq!(
+        ingress.load(Ordering::SeqCst),
+        3,
+        "zone actions do not create portal work"
+    );
+    assert_eq!(render.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        locked_notification.load(Ordering::SeqCst),
+        0,
+        "callbacks run outside the Hub guard"
+    );
+    assert_eq!(
+        format!("{:?}", hub.lock().unwrap().get(&other).unwrap()),
+        format!("{other_before:?}")
+    );
+    // Portal hold/clear ring main work after the Hub guard, never pre-driver rendering.
+    assert_eq!(
+        call(
+            &server,
+            "hud_hold",
+            json!({"surface":"portal:main", "ttl_ms":1000})
+        )
+        .await,
+        json!({"ok":true,"expires_in_ms":1000})
+    );
+    assert_eq!(ingress.load(Ordering::SeqCst), 4);
+    assert_eq!(render.load(Ordering::SeqCst), 0);
+    assert_eq!(locked_notification.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        call(&server, "hud_clear", json!({"surface":"portal:main"})).await,
+        json!({"ok":true})
+    );
+    assert!(hub.lock().unwrap().get(&key).is_none());
+    assert_eq!(ingress.load(Ordering::SeqCst), 5);
+    assert_eq!(render.load(Ordering::SeqCst), 0);
+    assert_eq!(locked_notification.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        format!("{:?}", hub.lock().unwrap().get(&other).unwrap()),
+        format!("{other_before:?}")
+    );
 }
 
 #[tokio::test]
@@ -1113,6 +1283,29 @@ async fn portal_without_authority_is_unavailable() {
     )
     .await;
     assert_eq!(err["code"], "UNAVAILABLE");
+
+    let portals = PortalHandle::default();
+    let hub = Arc::clone(&portals.hub);
+    let poisoned = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _guard = hub.lock().unwrap();
+        panic!("fixture poison");
+    }));
+    assert!(poisoned.is_err() && hub.is_poisoned());
+    let server = server.with_portals(portals);
+    for (verb, args) in [
+        (
+            "hud_publish",
+            json!({"surface":"portal:main","content":"x"}),
+        ),
+        ("hud_hold", json!({"surface":"portal:main","ttl_ms":0})),
+        ("hud_clear", json!({"surface":"portal:main"})),
+        ("hud_input", json!({})),
+        ("hud_surfaces", json!({})),
+    ] {
+        let err = call_err(&server, verb, args).await;
+        assert_eq!(err["code"], "INTERNAL", "present failed Hub refuses {verb}");
+        assert!(!err["hint"].as_str().unwrap().is_empty());
+    }
 }
 
 fn psk_agent() -> String {
@@ -1281,4 +1474,164 @@ async fn resume_restores_mcp_publishing() {
     .await;
     let scene = server.scene.lock().await;
     assert_eq!(scene.leases.len(), 1, "the original lease serves again");
+}
+
+#[tokio::test]
+async fn user_test_zone_fixtures_and_documented_examples_match_production_parser() {
+    fn zone_messages(value: Value, origin: &str) -> Vec<(String, Value)> {
+        value
+            .as_array()
+            .unwrap_or_else(|| panic!("{origin}: expected a message array"))
+            .iter()
+            .enumerate()
+            .filter_map(|(index, message)| {
+                assert!(message.is_object(), "{origin}[{index}]: expected a message");
+                if message.get("zone").is_none() && message.get("content").is_none() {
+                    return None; // Widget messages have no zone content.
+                }
+                let zone = message["zone"]
+                    .as_str()
+                    .unwrap_or_else(|| panic!("{origin}[{index}]: missing zone"));
+                let content = message
+                    .get("content")
+                    .unwrap_or_else(|| panic!("{origin}[{index}]: missing content"));
+                Some((format!("zone:{zone}"), content.clone()))
+            })
+            .collect()
+    }
+
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
+    let skill = root.join(".claude/skills/user-test");
+    let mut fixtures: Vec<_> = std::fs::read_dir(skill.join("scripts"))
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "json"))
+        .collect();
+    fixtures.sort();
+    let mut messages = Vec::new();
+    for path in fixtures {
+        let value = serde_json::from_slice(&std::fs::read(&path).unwrap())
+            .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+        messages.extend(zone_messages(value, &path.display().to_string()));
+    }
+    assert!(
+        !messages.is_empty(),
+        "no user-test zone fixtures were checked"
+    );
+    let fixture_count = messages.len();
+
+    let reference = std::fs::read_to_string(skill.join("references/message-payloads.md")).unwrap();
+    let mut block = None::<String>;
+    for line in reference.lines() {
+        match line.trim() {
+            "```json" => {
+                assert!(block.is_none(), "nested JSON fence in message-payloads.md");
+                block = Some(String::new());
+            }
+            "```" => {
+                if let Some(text) = block.take() {
+                    let value = serde_json::from_str(&text)
+                        .expect("message-payloads.md JSON examples must remain executable");
+                    messages.extend(zone_messages(value, "message-payloads.md"));
+                }
+            }
+            _ => {
+                if let Some(text) = block.as_mut() {
+                    text.push_str(line);
+                    text.push('\n');
+                }
+            }
+        }
+    }
+    assert!(
+        block.is_none(),
+        "unterminated JSON example in message-payloads.md"
+    );
+    assert!(
+        messages.len() > fixture_count,
+        "no documented zone examples were checked"
+    );
+
+    // Exercise hud_publish's real type inference, strict parser and blank prefilter.
+    // A fresh CPU scene keeps stack capacity and TTL separate from content validity.
+    for (surface, content) in messages {
+        let (server, _) = server();
+        call(
+            &server,
+            "hud_publish",
+            json!({"surface": surface, "content": content}),
+        )
+        .await;
+    }
+
+    for (surface, content) in [
+        (
+            "zone:notification-area",
+            json!({"type": "notification", "body": "valid"}),
+        ),
+        (
+            "zone:status-bar",
+            json!({"type": "status_bar", "entries": {"build": "passing"}}),
+        ),
+        (
+            "zone:pip",
+            json!({"type": "solid_color", "r": 0.2, "g": 0.6, "b": 0.9}),
+        ),
+        (
+            "zone:subtitle",
+            json!({"type": "stream_text", "text": "valid"}),
+        ),
+    ] {
+        let mut unknown = content.clone();
+        unknown
+            .as_object_mut()
+            .unwrap()
+            .insert("unexpected_fixture_key".into(), json!(true));
+        let kind = content["type"].as_str().unwrap();
+        let mut nested = serde_json::Map::new();
+        nested.insert("type".into(), json!(kind));
+        nested.insert(kind.into(), content);
+        for (bad, hint) in [
+            (unknown, "unknown field"),
+            (Value::Object(nested), "not nested"),
+        ] {
+            let (server, _) = server();
+            let error = call_err(
+                &server,
+                "hud_publish",
+                json!({"surface": surface, "content": bad}),
+            )
+            .await;
+            assert_eq!(error["code"], "INVALID_ARGUMENT", "{error}");
+            assert!(error["hint"].as_str().unwrap().contains(hint), "{error}");
+        }
+    }
+    for (surface, content, hint) in [
+        ("zone:subtitle", json!(""), "needs content"),
+        (
+            "zone:subtitle",
+            json!({"type": "stream_text", "text": ""}),
+            "non-empty",
+        ),
+        (
+            "zone:notification-area",
+            json!({"urgency": 1}),
+            "title or body",
+        ),
+        ("zone:pip", json!({"type": "solid_color"}), "numeric"),
+    ] {
+        let (server, _) = server();
+        let error = call_err(
+            &server,
+            "hud_publish",
+            json!({"surface": surface, "content": content}),
+        )
+        .await;
+        assert_eq!(error["code"], "INVALID_ARGUMENT", "{error}");
+        assert!(error["hint"].as_str().unwrap().contains(hint), "{error}");
+    }
 }

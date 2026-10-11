@@ -167,7 +167,7 @@ pub struct RuntimeOverlayState {
     /// (hud-iofav). Maps host tile id → the derived hit-region node's id.
     ///
     /// Written by the composer-interaction reattach path
-    /// ([`SceneGraph::ensure_tile_composer_node`]) so a stale derived node can be
+    /// (`SceneGraph::ensure_tile_composer_node`) so a stale derived node can be
     /// detached before a fresh one is attached (on spec change or root replacement).
     /// A mapped node that no longer exists in `nodes` (e.g. removed with the old
     /// root subtree on republish) is treated as absent and rebuilt.
@@ -199,7 +199,7 @@ pub struct RuntimeOverlayState {
     pub portal_surfaces: HashMap<SceneId, PortalSurface>,
     /// Tile IDs removed since the last runtime drain.
     ///
-    /// Populated by [`SceneGraph::remove_tile_and_nodes`] on every tile
+    /// Populated by `SceneGraph::remove_tile_and_nodes` on every tile
     /// deletion; drained by the windowed runtime in `about_to_wait` via
     /// [`SceneGraph::drain_removed_tile_ids`].  Allows the runtime to eagerly
     /// prune per-tile state that cannot live inside the scene graph due to
@@ -296,7 +296,7 @@ impl SceneGraph {
 
     /// Drain the list of tile IDs removed since the last call.
     ///
-    /// Populated by [`SceneGraph::remove_tile_and_nodes`].  The windowed
+    /// Populated by `SceneGraph::remove_tile_and_nodes`.  The windowed
     /// runtime calls this in `about_to_wait` (inside
     /// `prune_portal_resize_states`) to eagerly prune per-tile state held
     /// outside the scene graph (e.g. `portal_resize_states`).
@@ -505,7 +505,7 @@ impl SceneGraph {
     /// The spec is stored as overlay state keyed by `tile_id`; the scene derives a
     /// [`HitRegionNode`] child of the tile root from it and re-attaches that node
     /// after every `SetTileRoot`/`PublishToTile` republish (see
-    /// [`ensure_tile_composer_node`](Self::ensure_tile_composer_node)). This keeps
+    /// `ensure_tile_composer_node`). This keeps
     /// an interaction-enabled portal's transcript republish coalescible: the
     /// composer never rides a per-republish `AddNode` (which would flip the batch
     /// Transactional, hud-mzk74 / hud-iofav).
@@ -893,7 +893,7 @@ impl SceneGraph {
     /// Return whether a tile's viewport is currently at the tail.
     ///
     /// Returns `true` (at-tail, tail-anchored mode) when the tile has been
-    /// explicitly registered via [`set_tile_follow_tail_at_tail`] with `true`.
+    /// explicitly registered via [`set_tile_follow_tail_at_tail`](Self::set_tile_follow_tail_at_tail) with `true`.
     ///
     /// Returns `false` (head-anchored mode) when:
     /// - the tile has been scrolled back, or

@@ -24,6 +24,8 @@ pub(super) struct StreamSession {
     pub(super) capabilities: Vec<String>,
     pub(super) lease_ids: Vec<tze_hud_scene::SceneId>,
     pub(super) scene_session_id: SceneId,
+    /// Stable ownership across authenticated resumes; physical scene_session_id stays fresh.
+    pub(super) publication_origin: SceneId,
     pub(super) resource_budget: ResourceBudget,
     pub(super) budget_enforcer: Option<SharedMutationBudgetEnforcer>,
     pub(super) subscriptions: Vec<String>,

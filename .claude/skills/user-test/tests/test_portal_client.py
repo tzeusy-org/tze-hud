@@ -124,6 +124,7 @@ class HookHarness:
     def __init__(self, home):
         self.home = home
         home.mkdir()
+        self.private_cwd = str(home.resolve())
         self.records = []
         self.release = threading.Event()
         self.received = threading.Event()
@@ -172,7 +173,8 @@ class HookHarness:
 
         self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Server)
         self.server.daemon_threads = True
-        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        # Avoid paying the default half-second shutdown poll for every case.
+        self.thread = threading.Thread(target=lambda: self.server.serve_forever(poll_interval=0.01), daemon=True)
         self.thread.start()
         self.env = os.environ.copy()
         self.env.update(HOME=str(home), HUD_HOST=f"127.0.0.1:{self.server.server_port}")
@@ -192,6 +194,7 @@ class HookHarness:
         self.server.shutdown()
         self.server.server_close()
         self.thread.join(2)
+        assert not self.thread.is_alive()
 
     def payload(self, kind, **fields):
         value = {"hook_event_name": kind, "session_id": "synthetic-session", "prompt_id": self.prompt}
@@ -225,7 +228,7 @@ class HookHarness:
             if not entry.name.isdigit():
                 continue
             try:
-                if (entry / "cwd").resolve() == self.home:
+                if os.readlink(entry / "cwd") == self.private_cwd:
                     args = (entry / "cmdline").read_bytes().split(b"\0")
                     if str(HOOK).encode() in args:
                         found.append(int(entry.name))

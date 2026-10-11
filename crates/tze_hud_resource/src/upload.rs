@@ -433,7 +433,8 @@ impl ResourceStore {
     }
 
     /// Abort all in-flight uploads for an agent namespace.
-    pub async fn abort_all_uploads(&self, agent_namespace: &str) {
+    #[cfg(test)]
+    async fn abort_all_uploads(&self, agent_namespace: &str) {
         let mut guard = self.agent_uploads.lock().await;
         guard.remove(agent_namespace);
     }

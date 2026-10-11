@@ -24,6 +24,8 @@ const UPDATE_RATE_WINDOW: Duration = Duration::from_secs(1);
 /// Shared enforcement object used by production gRPC session handlers.
 pub struct RuntimeMutationBudgetEnforcer {
     inner: Mutex<AggregateBudgetState>,
+    #[cfg(test)]
+    clock: Option<std::sync::Arc<dyn Fn() -> Instant + Send + Sync>>,
 }
 
 struct AggregateBudgetState {
@@ -48,6 +50,27 @@ struct SessionBudgetState {
 }
 
 impl AggregateBudgetState {
+    /// Count recent attempts by the requesting agent's other live sessions.
+    fn namespace_peer_updates(
+        &self,
+        namespace: &str,
+        replaced_session: Option<SceneId>,
+        now: Instant,
+    ) -> usize {
+        self.sessions
+            .iter()
+            .filter(|(id, session)| {
+                Some(**id) != replaced_session && session.namespace == namespace
+            })
+            .map(|(_, session)| {
+                let updates = &session.recent_updates;
+                let expired =
+                    updates.partition_point(|t| now.duration_since(*t) >= UPDATE_RATE_WINDOW);
+                updates.len() - expired
+            })
+            .sum()
+    }
+
     /// Check the proposed session usage together with its same-agent peers.
     /// Replacing one session's usage preserves every peer during rollback/resume.
     fn check_namespace_usage(
@@ -100,6 +123,7 @@ impl SessionBudgetState {
         proposed_texture_bytes: u64,
         max_nodes_in_batch: u32,
         now: Instant,
+        peer_updates: usize,
     ) -> Option<String> {
         if proposed_tiles > self.budget.max_tiles {
             return Some(format!(
@@ -127,7 +151,7 @@ impl SessionBudgetState {
             self.recent_updates.pop_front();
         }
         self.recent_updates.push_back(now);
-        let rate_hz = self.recent_updates.len() as f32;
+        let rate_hz = (self.recent_updates.len() + peer_updates) as f32;
         if rate_hz > self.budget.max_update_rate_hz {
             return Some(format!(
                 "update_rate_hz current={rate_hz} limit={}",
@@ -179,6 +203,8 @@ impl RuntimeMutationBudgetEnforcer {
         max_leased_texture_bytes: u64,
     ) -> Self {
         Self {
+            #[cfg(test)]
+            clock: None,
             inner: Mutex::new(AggregateBudgetState {
                 sessions: HashMap::new(),
                 resident_sessions: 0,
@@ -197,6 +223,14 @@ impl RuntimeMutationBudgetEnforcer {
         self.inner
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    fn now(&self) -> Instant {
+        #[cfg(test)]
+        if let Some(clock) = &self.clock {
+            return clock();
+        }
+        Instant::now()
     }
 }
 
@@ -263,6 +297,7 @@ impl MutationBudgetEnforcerContract for RuntimeMutationBudgetEnforcer {
                 message: format!("restored agent usage rejected: {message}"),
             };
         }
+        let now = self.now();
         let mut session = SessionBudgetState {
             namespace,
             resident,
@@ -271,12 +306,9 @@ impl MutationBudgetEnforcerContract for RuntimeMutationBudgetEnforcer {
             texture_bytes: 0,
             recent_updates: VecDeque::new(),
         };
-        if let Some(message) = session.check(
-            initial_usage.tiles,
-            initial_usage.texture_bytes,
-            0,
-            Instant::now(),
-        ) {
+        if let Some(message) =
+            session.check(initial_usage.tiles, initial_usage.texture_bytes, 0, now, 0)
+        {
             return MutationBudgetDecision::Reject {
                 error_code: "RESOURCE_BUDGET_EXCEEDED",
                 message: format!("restored session usage rejected: {message}"),
@@ -356,6 +388,8 @@ impl MutationBudgetEnforcerContract for RuntimeMutationBudgetEnforcer {
                 message,
             };
         }
+        let now = self.now();
+        let peer_updates = state.namespace_peer_updates(&session.namespace, Some(session_id), now);
         let session = state
             .sessions
             .get_mut(&session_id)
@@ -364,7 +398,8 @@ impl MutationBudgetEnforcerContract for RuntimeMutationBudgetEnforcer {
             session_tiles,
             session_texture,
             max_nodes_in_batch,
-            Instant::now(),
+            now,
+            peer_updates,
         ) {
             return MutationBudgetDecision::Reject {
                 error_code: "RESOURCE_BUDGET_EXCEEDED",
@@ -428,6 +463,510 @@ mod tests {
                 ..
             }
         ));
+
+        // Drive the real registration/reservation carrier without wall sleeps.
+        // Successful registrations and rate-reaching rejected attempts are
+        // existing samples; rollback and disconnect retain their existing fate.
+        let t0 = Instant::now();
+        let clock = std::sync::Arc::new(Mutex::new(t0));
+        let mut rate = RuntimeMutationBudgetEnforcer::new();
+        let read_clock = clock.clone();
+        rate.clock = Some(std::sync::Arc::new(move || *read_clock.lock().unwrap()));
+        let a = SceneId::new();
+        let b = SceneId::new();
+        let rate_budget = ResourceBudget {
+            max_update_rate_hz: 3.0,
+            ..ResourceBudget::default()
+        };
+        for id in [a, b] {
+            assert_eq!(
+                rate.register_session(
+                    id,
+                    "same-agent".into(),
+                    rate_budget.clone(),
+                    true,
+                    MutationBudgetUsage::default(),
+                ),
+                MutationBudgetDecision::Allow
+            );
+        }
+        let mut rows = Vec::new();
+        let first = rate.reserve_mutation(a, 1, 10, 1);
+        assert_eq!(first, MutationBudgetDecision::Allow);
+        let before = {
+            let state = rate.lock();
+            (
+                state.leased_tiles,
+                state.leased_texture_bytes,
+                state.sessions[&b].tiles,
+                state.sessions[&b].texture_bytes,
+            )
+        };
+        let fourth = rate.reserve_mutation(b, 1, 10, 1);
+        let after = {
+            let state = rate.lock();
+            assert_eq!(state.sessions[&a].recent_updates.len(), 2);
+            assert_eq!(state.sessions[&b].recent_updates.len(), 2);
+            (
+                state.leased_tiles,
+                state.leased_texture_bytes,
+                state.sessions[&b].tiles,
+                state.sessions[&b].texture_bytes,
+            )
+        };
+        rows.push((
+            "same-agent fourth counted attempt rejects",
+            matches!(
+                fourth,
+                MutationBudgetDecision::Reject {
+                    error_code: "RESOURCE_BUDGET_EXCEEDED",
+                    ..
+                }
+            ),
+        ));
+        rows.push((
+            "rate rejection leaves resource usage atomic",
+            before == after,
+        ));
+
+        let other = SceneId::new();
+        assert_eq!(
+            rate.register_session(
+                other,
+                "distinct-agent".into(),
+                rate_budget.clone(),
+                false,
+                MutationBudgetUsage::default(),
+            ),
+            MutationBudgetDecision::Allow
+        );
+        for _ in 0..2 {
+            assert_eq!(
+                rate.reserve_mutation(other, 0, 0, 1),
+                MutationBudgetDecision::Allow
+            );
+        }
+        assert!(matches!(
+            rate.reserve_mutation(other, 0, 0, 1),
+            MutationBudgetDecision::Reject {
+                error_code: "RESOURCE_BUDGET_EXCEEDED",
+                ..
+            }
+        ));
+        assert_eq!(rate.lock().sessions[&other].recent_updates.len(), 4);
+
+        *clock.lock().unwrap() = t0 + Duration::from_millis(999);
+        rows.push((
+            "same-agent history remains at 999ms",
+            matches!(
+                rate.reserve_mutation(a, 0, 0, 1),
+                MutationBudgetDecision::Reject {
+                    error_code: "RESOURCE_BUDGET_EXCEEDED",
+                    ..
+                }
+            ),
+        ));
+        *clock.lock().unwrap() = t0 + UPDATE_RATE_WINDOW;
+        assert_eq!(
+            rate.reserve_mutation(a, 0, 0, 1),
+            MutationBudgetDecision::Allow
+        );
+        assert_eq!(
+            rate.reserve_mutation(b, 0, 0, 1),
+            MutationBudgetDecision::Allow
+        );
+        rows.push((
+            "one-second expiry keeps the 999ms attempt",
+            matches!(
+                rate.reserve_mutation(b, 0, 0, 1),
+                MutationBudgetDecision::Reject {
+                    error_code: "RESOURCE_BUDGET_EXCEEDED",
+                    ..
+                }
+            ),
+        ));
+        assert_eq!(rate.lock().sessions[&a].recent_updates.len(), 2);
+        assert_eq!(rate.lock().sessions[&b].recent_updates.len(), 2);
+
+        // Early resource/node/unknown-session failures do not reach rate intake.
+        let mut early = RuntimeMutationBudgetEnforcer::with_limits(4, 100, 1000);
+        let read_clock = clock.clone();
+        early.clock = Some(std::sync::Arc::new(move || *read_clock.lock().unwrap()));
+        let early_id = SceneId::new();
+        assert_eq!(
+            early.register_session(
+                early_id,
+                "early".into(),
+                ResourceBudget {
+                    max_tiles: 1,
+                    max_texture_bytes: 10,
+                    max_nodes_per_tile: 1,
+                    max_update_rate_hz: 3.0,
+                    ..ResourceBudget::default()
+                },
+                true,
+                MutationBudgetUsage::default(),
+            ),
+            MutationBudgetDecision::Allow
+        );
+        for (tiles, bytes, nodes) in [(2, 0, 1), (0, 11, 1), (0, 0, 2)] {
+            assert!(matches!(
+                early.reserve_mutation(early_id, tiles, bytes, nodes),
+                MutationBudgetDecision::Reject {
+                    error_code: "RESOURCE_BUDGET_EXCEEDED",
+                    ..
+                }
+            ));
+            assert_eq!(early.lock().sessions[&early_id].recent_updates.len(), 1);
+        }
+        assert!(matches!(
+            early.reserve_mutation(SceneId::new(), 0, 0, 1),
+            MutationBudgetDecision::Reject {
+                error_code: "RESOURCE_BUDGET_SESSION_UNKNOWN",
+                ..
+            }
+        ));
+        assert_eq!(
+            early.reserve_mutation(early_id, 1, 10, 1),
+            MutationBudgetDecision::Allow
+        );
+        early.rollback_mutation(early_id, 1, 10);
+        {
+            let state = early.lock();
+            assert_eq!((state.leased_tiles, state.leased_texture_bytes), (0, 0));
+            assert_eq!(state.sessions[&early_id].recent_updates.len(), 2);
+        }
+        let mut global = RuntimeMutationBudgetEnforcer::with_limits(1, 0, 0);
+        let read_clock = clock.clone();
+        global.clock = Some(std::sync::Arc::new(move || *read_clock.lock().unwrap()));
+        let global_id = SceneId::new();
+        assert_eq!(
+            global.register_session(
+                global_id,
+                "global".into(),
+                ResourceBudget::default(),
+                true,
+                MutationBudgetUsage::default(),
+            ),
+            MutationBudgetDecision::Allow
+        );
+        for (tiles, bytes) in [(1, 0), (0, 1)] {
+            assert!(matches!(
+                global.reserve_mutation(global_id, tiles, bytes, 1),
+                MutationBudgetDecision::Reject {
+                    error_code: "RESOURCE_EXHAUSTED",
+                    ..
+                }
+            ));
+            assert_eq!(global.lock().sessions[&global_id].recent_updates.len(), 1);
+        }
+
+        // Removal discards only that queue; resume registration is a fresh sample.
+        let mut lifecycle = RuntimeMutationBudgetEnforcer::new();
+        let read_clock = clock.clone();
+        lifecycle.clock = Some(std::sync::Arc::new(move || *read_clock.lock().unwrap()));
+        let old = SceneId::new();
+        let peer = SceneId::new();
+        for id in [old, peer] {
+            assert_eq!(
+                lifecycle.register_session(
+                    id,
+                    "lifecycle".into(),
+                    ResourceBudget {
+                        max_update_rate_hz: 4.0,
+                        ..ResourceBudget::default()
+                    },
+                    true,
+                    MutationBudgetUsage::default(),
+                ),
+                MutationBudgetDecision::Allow
+            );
+        }
+        assert_eq!(
+            lifecycle.reserve_mutation(old, 1, 10, 1),
+            MutationBudgetDecision::Allow
+        );
+        lifecycle.remove_session(old);
+        assert!(!lifecycle.lock().sessions.contains_key(&old));
+        assert_eq!(lifecycle.lock().sessions[&peer].recent_updates.len(), 1);
+        let resumed = SceneId::new();
+        assert_eq!(
+            lifecycle.register_session(
+                resumed,
+                "lifecycle".into(),
+                ResourceBudget {
+                    max_update_rate_hz: 4.0,
+                    ..ResourceBudget::default()
+                },
+                true,
+                MutationBudgetUsage {
+                    tiles: 1,
+                    texture_bytes: 10
+                },
+            ),
+            MutationBudgetDecision::Allow
+        );
+        assert_eq!(lifecycle.lock().sessions[&resumed].recent_updates.len(), 1);
+        assert_eq!(
+            lifecycle.reserve_mutation(peer, 0, 0, 1),
+            MutationBudgetDecision::Allow
+        );
+        assert_eq!(
+            lifecycle.reserve_mutation(resumed, 0, 0, 1),
+            MutationBudgetDecision::Allow
+        );
+        rows.push((
+            "resume preserves live peer rate history",
+            matches!(
+                lifecycle.reserve_mutation(peer, 0, 0, 1),
+                MutationBudgetDecision::Reject {
+                    error_code: "RESOURCE_BUDGET_EXCEEDED",
+                    ..
+                }
+            ),
+        ));
+
+        // Heterogeneous direct trait callers retain the requester-budget rule.
+        let mut mixed = RuntimeMutationBudgetEnforcer::new();
+        let read_clock = clock.clone();
+        mixed.clock = Some(std::sync::Arc::new(move || *read_clock.lock().unwrap()));
+        let low = SceneId::new();
+        let high = SceneId::new();
+        for (id, limit) in [(low, 3.0), (high, 5.0)] {
+            assert_eq!(
+                mixed.register_session(
+                    id,
+                    "mixed".into(),
+                    ResourceBudget {
+                        max_update_rate_hz: limit,
+                        ..ResourceBudget::default()
+                    },
+                    true,
+                    MutationBudgetUsage::default()
+                ),
+                MutationBudgetDecision::Allow
+            );
+        }
+        assert_eq!(
+            mixed.reserve_mutation(low, 0, 0, 1),
+            MutationBudgetDecision::Allow
+        );
+        for _ in 0..2 {
+            assert_eq!(
+                mixed.reserve_mutation(high, 0, 0, 1),
+                MutationBudgetDecision::Allow
+            );
+        }
+        rows.push((
+            "heterogeneous requester limit remains its own",
+            matches!(
+                mixed.reserve_mutation(low, 0, 0, 1),
+                MutationBudgetDecision::Reject {
+                    error_code: "RESOURCE_BUDGET_EXCEEDED",
+                    ..
+                }
+            ),
+        ));
+        let mut fractional = RuntimeMutationBudgetEnforcer::new();
+        let read_clock = clock.clone();
+        fractional.clock = Some(std::sync::Arc::new(move || *read_clock.lock().unwrap()));
+        let ids = [SceneId::new(), SceneId::new()];
+        for id in ids {
+            assert_eq!(
+                fractional.register_session(
+                    id,
+                    "fractional".into(),
+                    ResourceBudget {
+                        max_update_rate_hz: 2.5,
+                        ..ResourceBudget::default()
+                    },
+                    true,
+                    MutationBudgetUsage::default()
+                ),
+                MutationBudgetDecision::Allow
+            );
+        }
+        rows.push((
+            "fractional rate keeps existing count comparison",
+            matches!(
+                fractional.reserve_mutation(ids[0], 0, 0, 1),
+                MutationBudgetDecision::Reject {
+                    error_code: "RESOURCE_BUDGET_EXCEEDED",
+                    ..
+                }
+            ),
+        ));
+
+        for order in ["forward", "reverse", "parallel"] {
+            let mut ordered = RuntimeMutationBudgetEnforcer::new();
+            let read_clock = clock.clone();
+            ordered.clock = Some(std::sync::Arc::new(move || *read_clock.lock().unwrap()));
+            let ids = [SceneId::new(), SceneId::new()];
+            for id in ids {
+                assert_eq!(
+                    ordered.register_session(
+                        id,
+                        "ordered".into(),
+                        rate_budget.clone(),
+                        true,
+                        MutationBudgetUsage::default()
+                    ),
+                    MutationBudgetDecision::Allow
+                );
+            }
+            let attempts = if order == "reverse" {
+                [ids[1], ids[0]]
+            } else {
+                ids
+            };
+            let outcomes = if order == "parallel" {
+                std::thread::scope(|scope| {
+                    let start = std::sync::Arc::new(std::sync::Barrier::new(2));
+                    let workers: Vec<_> = attempts
+                        .into_iter()
+                        .map(|id| {
+                            let start = start.clone();
+                            let ordered = &ordered;
+                            scope.spawn(move || {
+                                start.wait();
+                                ordered.reserve_mutation(id, 0, 0, 1)
+                            })
+                        })
+                        .collect();
+                    workers
+                        .into_iter()
+                        .map(|worker| worker.join().expect("rate reserve worker joined"))
+                        .collect::<Vec<_>>()
+                })
+            } else {
+                attempts
+                    .into_iter()
+                    .map(|id| ordered.reserve_mutation(id, 0, 0, 1))
+                    .collect()
+            };
+            for decision in &outcomes {
+                assert!(matches!(
+                    decision,
+                    MutationBudgetDecision::Allow
+                        | MutationBudgetDecision::Reject {
+                            error_code: "RESOURCE_BUDGET_EXCEEDED",
+                            ..
+                        }
+                ));
+            }
+            rows.push((
+                order,
+                outcomes
+                    .iter()
+                    .filter(|decision| **decision == MutationBudgetDecision::Allow)
+                    .count()
+                    == 1,
+            ));
+        }
+        println!(
+            "same-agent rate boundary and compatibility rows: {rows:?}; fourth={fourth:?}; before={before:?}; after={after:?}"
+        );
+        for (label, satisfied) in rows {
+            assert!(satisfied, "per-agent rate contract: {label}");
+        }
+
+        // A saturated peer must not change fresh registration admission.
+        // Its successful registration sample still counts for later mutations.
+        let mut saturated = RuntimeMutationBudgetEnforcer::new();
+        let read_clock = clock.clone();
+        saturated.clock = Some(std::sync::Arc::new(move || *read_clock.lock().unwrap()));
+        let peer = SceneId::new();
+        assert_eq!(
+            saturated.register_session(
+                peer,
+                "saturated-agent".into(),
+                rate_budget.clone(),
+                true,
+                MutationBudgetUsage::default(),
+            ),
+            MutationBudgetDecision::Allow
+        );
+        for _ in 0..2 {
+            assert_eq!(
+                saturated.reserve_mutation(peer, 1, 10, 1),
+                MutationBudgetDecision::Allow
+            );
+        }
+        let before_registration = {
+            let state = saturated.lock();
+            assert_eq!(state.sessions[&peer].recent_updates.len(), 3);
+            assert!(
+                state.sessions[&peer]
+                    .recent_updates
+                    .iter()
+                    .all(|sample| *sample == t0 + UPDATE_RATE_WINDOW)
+            );
+            (
+                state.sessions.len(),
+                state.leased_tiles,
+                state.leased_texture_bytes,
+            )
+        };
+        let fresh = SceneId::new();
+        let fresh_registration = saturated.register_session(
+            fresh,
+            "saturated-agent".into(),
+            rate_budget,
+            true,
+            MutationBudgetUsage {
+                tiles: 1,
+                texture_bytes: 10,
+            },
+        );
+        let after_registration = {
+            let state = saturated.lock();
+            assert_eq!(state.sessions[&peer].recent_updates.len(), 3);
+            (
+                state.sessions.len(),
+                state.leased_tiles,
+                state.leased_texture_bytes,
+            )
+        };
+        println!(
+            "saturated-peer fresh registration: decision={fresh_registration:?}; before={before_registration:?}; after={after_registration:?}"
+        );
+        assert_eq!(before_registration, (1, 2, 20));
+        assert_eq!(
+            fresh_registration,
+            MutationBudgetDecision::Allow,
+            "saturated peer history preserves fresh registration admission"
+        );
+        assert_eq!(after_registration, (2, 3, 30));
+        assert_eq!(saturated.lock().sessions[&fresh].recent_updates.len(), 1);
+        let first_after_registration = saturated.reserve_mutation(fresh, 1, 10, 1);
+        let after_rejection = {
+            let state = saturated.lock();
+            assert_eq!(state.sessions[&peer].recent_updates.len(), 3);
+            assert_eq!(state.sessions[&fresh].recent_updates.len(), 2);
+            assert_eq!(
+                (
+                    state.sessions[&fresh].tiles,
+                    state.sessions[&fresh].texture_bytes
+                ),
+                (1, 10)
+            );
+            (
+                state.sessions.len(),
+                state.leased_tiles,
+                state.leased_texture_bytes,
+            )
+        };
+        println!(
+            "saturated-peer mutation after registration: decision={first_after_registration:?}; before={after_registration:?}; after={after_rejection:?}"
+        );
+        assert!(matches!(
+            first_after_registration,
+            MutationBudgetDecision::Reject {
+                error_code: "RESOURCE_BUDGET_EXCEEDED",
+                ..
+            }
+        ));
+        assert_eq!(after_rejection, after_registration);
     }
 
     #[test]

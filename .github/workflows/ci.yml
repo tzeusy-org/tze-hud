@@ -64,16 +64,13 @@ jobs:
 
   check:
     name: cargo check
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
       # Native Linux only: preserve MinGW/MSVC flags and the system ld.
       CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
     steps:
       - uses: actions/checkout@v5
-      - name: Test fullscreen vs overlay harness contract
-        shell: pwsh
-        run: .\scripts\ci\windows\test-windowed-fullscreen-overlay-perf.ps1
       - name: Install pinned mold (native Linux linker)
         uses: rui314/setup-mold@10ca16bf91dc22e05ebdc935cad9c75ea248f621
         timeout-minutes: 5
@@ -88,19 +85,8 @@ jobs:
       # v2.9.1 pins to a specific stable release rather than the floating v2 alias.
       - uses: Swatinem/rust-cache@v2.9.1
         timeout-minutes: 10
-      - name: Install protobuf compiler (required by tze_hud_protocol build script)
-        timeout-minutes: 5
-        run: |
-          # Remove only the observed Azure HTTP route; keep signed HTTPS fallbacks.
-          # An unsupported hosted image layout must fail before package acquisition.
-          apt_mirror_list=/etc/apt/apt-mirrors.txt
-          test -f "$apt_mirror_list"
-          test ! -L "$apt_mirror_list"
-          grep -Eq '^https://archive[.]ubuntu[.]com/ubuntu/?([[:space:]]|$)' "$apt_mirror_list"
-          grep -Eq '^https://security[.]ubuntu[.]com/ubuntu/?([[:space:]]|$)' "$apt_mirror_list"
-          sudo sed -Ei '\|^http://azure[.]archive[.]ubuntu[.]com/ubuntu/?([[:space:]].*)?$|d' "$apt_mirror_list"
-          sudo apt-get $APT_OPTS update -q --error-on=any
-          sudo apt-get $APT_OPTS install -y --no-install-recommends protobuf-compiler
+      - name: Validate locked dependency graph
+        run: cargo metadata --locked --format-version 1 >/dev/null
       - name: cargo check (workspace)
         run: cargo check --workspace
       # Unused dependencies. Needs no build; false positives go in
@@ -117,7 +103,7 @@ jobs:
 
   fmt:
     name: cargo fmt
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v5
@@ -132,7 +118,7 @@ jobs:
 
   clippy:
     name: cargo clippy
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
       # Native Linux only: preserve MinGW/MSVC flags and the system ld.
@@ -154,19 +140,6 @@ jobs:
       # v2.9.1 pins to a specific stable release rather than the floating v2 alias.
       - uses: Swatinem/rust-cache@v2.9.1
         timeout-minutes: 10
-      - name: Install protobuf compiler (required by tze_hud_protocol build script)
-        timeout-minutes: 5
-        run: |
-          # Remove only the observed Azure HTTP route; keep signed HTTPS fallbacks.
-          # An unsupported hosted image layout must fail before package acquisition.
-          apt_mirror_list=/etc/apt/apt-mirrors.txt
-          test -f "$apt_mirror_list"
-          test ! -L "$apt_mirror_list"
-          grep -Eq '^https://archive[.]ubuntu[.]com/ubuntu/?([[:space:]]|$)' "$apt_mirror_list"
-          grep -Eq '^https://security[.]ubuntu[.]com/ubuntu/?([[:space:]]|$)' "$apt_mirror_list"
-          sudo sed -Ei '\|^http://azure[.]archive[.]ubuntu[.]com/ubuntu/?([[:space:]].*)?$|d' "$apt_mirror_list"
-          sudo apt-get $APT_OPTS update -q --error-on=any
-          sudo apt-get $APT_OPTS install -y --no-install-recommends protobuf-compiler
       - name: cargo clippy (workspace, all targets, deny warnings)
         run: cargo clippy --workspace --all-targets -- -D warnings
 
@@ -179,8 +152,8 @@ jobs:
   # gap let slip onto main undetected (PR #1042 fixed it).
   #
   # This job cross-compiles+lints just the crates that carry cfg(windows)
-  # code, using the mingw-w64 cross toolchain (no linking/execution — clippy
-  # only needs to typecheck). A workspace-wide `--workspace --target
+  # code, using blake3's portable Rust backend without MinGW (no linking or
+  # execution — clippy only needs to typecheck). A workspace-wide `--workspace --target
   # x86_64-pc-windows-gnu` clippy run is NOT used here: several workspace
   # members pull in Linux-only windowing deps that do not
   # cross-compile, so this job is deliberately scoped to the three crates
@@ -192,7 +165,7 @@ jobs:
 
   clippy-windows-gnu:
     name: cargo clippy (windows-gnu cross-target)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
       # Native Linux only: preserve MinGW/MSVC flags and the system ld.
@@ -212,22 +185,10 @@ jobs:
           targets: x86_64-pc-windows-gnu
       - uses: Swatinem/rust-cache@v2.9.1
         timeout-minutes: 10
-      - name: Install protobuf compiler + MinGW cross toolchain
-        timeout-minutes: 5
-        run: |
-          # Remove only the observed Azure HTTP route; keep signed HTTPS fallbacks.
-          # An unsupported hosted image layout must fail before package acquisition.
-          apt_mirror_list=/etc/apt/apt-mirrors.txt
-          test -f "$apt_mirror_list"
-          test ! -L "$apt_mirror_list"
-          grep -Eq '^https://archive[.]ubuntu[.]com/ubuntu/?([[:space:]]|$)' "$apt_mirror_list"
-          grep -Eq '^https://security[.]ubuntu[.]com/ubuntu/?([[:space:]]|$)' "$apt_mirror_list"
-          sudo sed -Ei '\|^http://azure[.]archive[.]ubuntu[.]com/ubuntu/?([[:space:]].*)?$|d' "$apt_mirror_list"
-          sudo apt-get $APT_OPTS update -q --error-on=any
-          sudo apt-get $APT_OPTS install -y --no-install-recommends \
-            protobuf-compiler \
-            mingw-w64
       - name: cargo clippy (windows-gnu, cfg(windows) crates, deny warnings)
+        env:
+          # Lint only; real Windows builds retain their compiler/hash backend.
+          CARGO_FEATURE_PURE: "1"
         run: |
           cargo clippy \
             -p tze_hud_runtime \
@@ -247,7 +208,7 @@ jobs:
 
   test-unit:
     name: cargo test (unit)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 8
     needs: [check]
     env:
@@ -269,7 +230,7 @@ jobs:
       # v2.9.1 pins to a specific stable release rather than the floating v2 alias.
       - uses: Swatinem/rust-cache@v2.9.1
         timeout-minutes: 10
-      - name: Install Mesa / llvmpipe + protobuf compiler
+      - name: Install Mesa / llvmpipe
         timeout-minutes: 5
         run: |
           # Remove only the observed Azure HTTP route; keep signed HTTPS fallbacks.
@@ -286,8 +247,7 @@ jobs:
             mesa-vulkan-drivers \
             mesa-utils \
             libegl-mesa0 \
-            libgl1-mesa-dri \
-            protobuf-compiler
+            libgl1-mesa-dri
       - name: Install pinned Nextest
         uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad
         timeout-minutes: 2
@@ -367,7 +327,7 @@ jobs:
 
   test-integration:
     name: cargo test (integration)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     needs: [check]
     env:
@@ -389,7 +349,7 @@ jobs:
       # v2.9.1 pins to a specific stable release rather than the floating v2 alias.
       - uses: Swatinem/rust-cache@v2.9.1
         timeout-minutes: 10
-      - name: Install Mesa / llvmpipe + protobuf compiler
+      - name: Install Mesa / llvmpipe
         timeout-minutes: 5
         run: |
           # Remove only the observed Azure HTTP route; keep signed HTTPS fallbacks.
@@ -406,8 +366,7 @@ jobs:
             mesa-vulkan-drivers \
             mesa-utils \
             libegl-mesa0 \
-            libgl1-mesa-dri \
-            protobuf-compiler
+            libgl1-mesa-dri
       - name: cargo test -p integration (headless suites)
         run: |
           cargo test -p integration --tests
@@ -455,7 +414,7 @@ jobs:
 
   production-boot-vertical-slice:
     name: vertical_slice production config boot
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     needs: [check]
     env:
@@ -477,7 +436,7 @@ jobs:
       # v2.9.1 pins to a specific stable release rather than the floating v2 alias.
       - uses: Swatinem/rust-cache@v2.9.1
         timeout-minutes: 10
-      - name: Install Mesa / llvmpipe + protobuf compiler
+      - name: Install Mesa / llvmpipe
         timeout-minutes: 5
         run: |
           # Remove only the observed Azure HTTP route; keep signed HTTPS fallbacks.
@@ -494,8 +453,7 @@ jobs:
             mesa-vulkan-drivers \
             mesa-utils \
             libegl-mesa0 \
-            libgl1-mesa-dri \
-            protobuf-compiler
+            libgl1-mesa-dri
       - name: cargo test -p vertical_slice --test production_boot
         run: |
           cargo test \
@@ -515,7 +473,7 @@ jobs:
 
   canonical-app-production-boot:
     name: canonical app production config boot gate
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     needs: [check]
     env:
@@ -537,7 +495,7 @@ jobs:
       # v2.9.1 pins to a specific stable release rather than the floating v2 alias.
       - uses: Swatinem/rust-cache@v2.9.1
         timeout-minutes: 10
-      - name: Install Mesa / llvmpipe + protobuf compiler
+      - name: Install Mesa / llvmpipe
         timeout-minutes: 5
         run: |
           # Remove only the observed Azure HTTP route; keep signed HTTPS fallbacks.
@@ -554,8 +512,7 @@ jobs:
             mesa-vulkan-drivers \
             mesa-utils \
             libegl-mesa0 \
-            libgl1-mesa-dri \
-            protobuf-compiler
+            libgl1-mesa-dri
       - name: cargo test -p tze_hud_app --test production_boot
         run: |
           cargo test \
@@ -584,7 +541,7 @@ jobs:
 
   user-test-python-suite:
     name: user-test python suite
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
@@ -614,7 +571,7 @@ jobs:
 
   dev-mode-guard:
     name: dev-mode guard (release build)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     needs: [check]
     steps:
@@ -640,7 +597,7 @@ jobs:
 
   cargo-deny:
     name: cargo deny (advisories + licenses)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
@@ -675,7 +632,7 @@ jobs:
 
   test-gpu-pixel-readback:
     name: pixel readback (GPU / llvmpipe, informational)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     needs: [test-unit]
     continue-on-error: true  # informational duplicate of test-unit coverage; see comment above
@@ -698,7 +655,7 @@ jobs:
       # v2.9.1 pins to a specific stable release rather than the floating v2 alias.
       - uses: Swatinem/rust-cache@v2.9.1
         timeout-minutes: 10
-      - name: Install Mesa / llvmpipe + Vulkan loader + protobuf compiler
+      - name: Install Mesa / llvmpipe + Vulkan loader
         timeout-minutes: 5
         run: |
           # Remove only the observed Azure HTTP route; keep signed HTTPS fallbacks.
@@ -716,8 +673,7 @@ jobs:
             mesa-utils \
             libegl-mesa0 \
             libgl1-mesa-dri \
-            vulkan-tools \
-            protobuf-compiler
+            vulkan-tools
       - name: Verify Vulkan adapter available
         run: vulkaninfo --summary 2>&1 | head -30 || true
       - name: cargo test pixel_readback (software GPU)

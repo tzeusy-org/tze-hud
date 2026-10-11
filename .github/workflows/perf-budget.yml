@@ -41,14 +41,6 @@ jobs:
           toolchain: "1.88"
       - uses: Swatinem/rust-cache@v2.9.1
         timeout-minutes: 10
-      - name: Ensure protobuf compiler is available
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          if (-not (Get-Command protoc -ErrorAction SilentlyContinue)) {
-            choco install protoc -y --no-progress
-          }
-          protoc --version
       - name: Run headless benchmark artifact
         shell: pwsh
         run: |
@@ -170,7 +162,6 @@ jobs:
           sudo apt-get $APT_OPTS update -q
           sudo apt-get $APT_OPTS install -y --no-install-recommends \
             mesa-vulkan-drivers \
-            protobuf-compiler \
             util-linux
       - name: Run constrained-envelope benchmark and unchanged normalized budget gate
         run: scripts/ci/run_constrained_envelope.sh

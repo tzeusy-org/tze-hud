@@ -6,66 +6,13 @@ use super::*;
 /// content produces the same BLAKE3 key; distinct content produces distinct
 /// keys; get_by_key returns the parsed entry after prime.
 ///
-/// This is a CPU-only prerequisite test for the node_key_cache contract — it
-/// does not call Compositor::prime_markdown_cache.
+/// CPU-only cache key and lookup behavior; this does not construct a compositor.
 #[test]
 fn markdown_cache_compute_key_is_deterministic_and_content_addressed() {
-    use tze_hud_scene::types::{
-        FontFamily, NodeData, Rect, TextAlign, TextMarkdownNode, TextOverflow,
-    };
-
-    // Build a scene with two TextMarkdown nodes.
     let content_a = "# Hello\n\nThis is **bold** text.";
     let content_b = "Plain text with `code`.";
 
-    let mut scene = SceneGraph::new(256.0, 256.0);
-    let tab_id = scene.create_tab("test", 0).unwrap();
-    let lease_id = scene.grant_lease("test", 60_000);
-
-    let node_a_id = SceneId::new();
-    let node_a = Node {
-        layout: Default::default(),
-        id: node_a_id,
-        children: vec![],
-        data: NodeData::TextMarkdown(TextMarkdownNode {
-            content: content_a.to_string(),
-            bounds: Rect::new(0.0, 0.0, 200.0, 100.0),
-            font_size_px: 14.0,
-            font_family: FontFamily::SystemSansSerif,
-            color: tze_hud_scene::types::Rgba {
-                r: 1.0,
-                g: 1.0,
-                b: 1.0,
-                a: 1.0,
-            },
-            background: None,
-            alignment: TextAlign::Start,
-            overflow: TextOverflow::Clip,
-            color_runs: Box::default(),
-        }),
-    };
-
-    let tile_id = scene
-        .create_tile(
-            tab_id,
-            "test",
-            lease_id,
-            Rect::new(0.0, 0.0, 256.0, 256.0),
-            1,
-        )
-        .unwrap();
-    scene.set_tile_root(tile_id, node_a).unwrap();
-
-    // Build a minimal headless compositor without GPU (no render pipeline needed
-    // for this unit test — prime_markdown_cache only touches CPU caches).
-    //
-    // Since Compositor::new_headless requires GPU, we test the cache logic
-    // in isolation by exercising MarkdownCache directly (which is the same
-    // code path called by prime_markdown_cache).
-    //
-    // The key contract to verify: the key for content_a matches
-    // MarkdownCache::compute_key(content_a, tokens).  The key folds the
-    // token-set identity (hud-3ryie), so it is computed with a token set.
+    // The key includes token-set identity as well as content (hud-3ryie).
     let tokens = crate::markdown::MarkdownTokens::default();
     let expected_key_a = crate::markdown::MarkdownCache::compute_key(content_a, &tokens);
     let expected_key_b = crate::markdown::MarkdownCache::compute_key(content_b, &tokens);
@@ -94,14 +41,6 @@ fn markdown_cache_compute_key_is_deterministic_and_content_addressed() {
         cache.get(content_a, &tokens).is_some(),
         "get must also find content after prime"
     );
-
-    // Verify the node_key_cache is populated correctly by prime_markdown_cache.
-    // We exercise the actual prime_markdown_cache code path through a
-    // gpu-free partial compositor state if the environment supports it.
-    //
-    // Contract: after prime_markdown_cache, node_key_cache[node_a_id] ==
-    // MarkdownCache::compute_key(content_a).
-    let _ = (scene, node_a_id, tile_id, content_b); // mark used
 }
 
 /// Per-tile markdown scoping (hud-3ryie): `portal_markdown_node_ids` classifies
@@ -203,7 +142,11 @@ async fn render_frame_headless_is_parse_free_after_commit_time_prime() {
         FontFamily, NodeData, Rect, TextAlign, TextMarkdownNode, TextOverflow,
     };
 
-    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(64, 64).await);
+    let gpu = make_compositor_and_surface(64, 64).await;
+    if std::env::var("TZE_HUD_REQUIRE_GPU").ok().as_deref() == Some("1") {
+        assert!(gpu.is_some(), "this parent requires a real GPU constructor");
+    }
+    let (mut compositor, surface) = require_gpu!(gpu);
     compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
 
     let content = "# Commit-time prime test\n\n**bold** and *italic*.";
@@ -250,7 +193,15 @@ async fn render_frame_headless_is_parse_free_after_commit_time_prime() {
     // render_frame_headless checks `scene.version != markdown_cache_scene_version`
     // and finds them equal → no parse occurs → the cache-miss fallback is NOT
     // triggered.  The scene version sentinel is not modified by render_frame_headless.
+    let parses_before_frame =
+        crate::markdown::PARSE_MARKDOWN_SUBSET_CALLS.with(|calls| calls.get());
     let _telemetry = compositor.render_frame_headless(&mut scene, &surface);
+    assert_eq!(
+        crate::markdown::PARSE_MARKDOWN_SUBSET_CALLS.with(|calls| calls.get())
+            - parses_before_frame,
+        0,
+        "the first commit-primed frame must perform no current-thread markdown parsing"
+    );
 
     // After render: the sentinel must still equal scene.version (render_frame_headless
     // must NOT have re-primed or changed the sentinel as a side-effect of rendering).
@@ -274,10 +225,64 @@ async fn render_frame_headless_is_parse_free_after_commit_time_prime() {
     // ── Second frame — unchanged scene, still parse-free ─────────────────
     // Rendering the same scene a second time must also be parse-free.
     let scene_version_before = scene.version;
+    let parses_before_second_frame =
+        crate::markdown::PARSE_MARKDOWN_SUBSET_CALLS.with(|calls| calls.get());
     let _telemetry2 = compositor.render_frame_headless(&mut scene, &surface);
+    assert_eq!(
+        crate::markdown::PARSE_MARKDOWN_SUBSET_CALLS.with(|calls| calls.get())
+            - parses_before_second_frame,
+        0,
+        "the second unchanged frame must perform no current-thread markdown parsing"
+    );
     assert_eq!(
         compositor.markdown_cache_scene_version, scene_version_before,
         "second render of unchanged scene must not change markdown_cache_scene_version"
+    );
+
+    // A real content mutation and small inline commit prime prove that this
+    // current-thread counter can observe actual parse work, not just zeroes.
+    let mut changed = match &scene.nodes.get(&node_id).unwrap().data {
+        NodeData::TextMarkdown(node) => node.clone(),
+        _ => panic!("the retained fixture must contain a TextMarkdown node"),
+    };
+    changed.content = "Updated **bold** content".to_owned();
+    let tile_id = scene
+        .tiles
+        .values()
+        .find(|tile| tile.root_node == Some(node_id))
+        .unwrap()
+        .id;
+    let version_before_change = scene.version;
+    scene
+        .update_node_content_checked(tile_id, node_id, NodeData::TextMarkdown(changed), "test")
+        .unwrap();
+    assert!(scene.version > version_before_change);
+    let parses_before_commit =
+        crate::markdown::PARSE_MARKDOWN_SUBSET_CALLS.with(|calls| calls.get());
+    compositor.prime_markdown_cache(&scene);
+    assert!(
+        crate::markdown::PARSE_MARKDOWN_SUBSET_CALLS.with(|calls| calls.get())
+            > parses_before_commit,
+        "changed content must actually parse during the small commit prime"
+    );
+    compositor.prime_truncation_cache(&scene);
+    assert_eq!(compositor.markdown_cache_scene_version, scene.version);
+    let parses_before_changed_frame =
+        crate::markdown::PARSE_MARKDOWN_SUBSET_CALLS.with(|calls| calls.get());
+    let _changed_telemetry = compositor.render_frame_headless(&mut scene, &surface);
+    let changed_items = compositor.collect_text_items(&scene, 64.0, 64.0);
+    assert_eq!(changed_items.len(), 1);
+    assert_eq!(&*changed_items[0].text, "Updated bold content");
+    assert!(changed_items[0].styled_runs.iter().any(|run| {
+        run.start_byte <= 8
+            && run.end_byte >= 12
+            && run.weight.map(|weight| weight >= 700).unwrap_or(false)
+    }));
+    assert_eq!(
+        crate::markdown::PARSE_MARKDOWN_SUBSET_CALLS.with(|calls| calls.get())
+            - parses_before_changed_frame,
+        0,
+        "changed content is already primed before its real frame and collection"
     );
 }
 
@@ -289,15 +294,15 @@ async fn render_frame_headless_is_parse_free_after_commit_time_prime() {
 /// `parse_markdown_subset` inline and produce `styled_runs` that encode
 /// the markdown structure.
 ///
-/// Invariants verified (CPU-only, no GPU):
+/// Retain direct parser/adapter controls, then verify the real cold collector:
 ///  - `TextItem::text` equals the non-lossy plain text from `parse_markdown_subset`
 ///    for the same content (not the output of `strip_markdown_v1`).
 ///  - `TextItem::styled_runs` is non-empty for content that contains
 ///    markdown constructs (e.g. `**bold**` → at least one bold run).
 ///
-/// This is a Layer 0 invariant test for the 'never dropped' contract.
-#[test]
-fn markdown_cache_miss_fallback_is_non_lossy() {
+/// Parser-entry deltas cover only synchronous work on this test thread.
+#[tokio::test]
+async fn markdown_cache_miss_fallback_is_non_lossy() {
     use tze_hud_scene::types::{FontFamily, Rect, Rgba, TextAlign, TextMarkdownNode, TextOverflow};
 
     // Content with markdown constructs that distinguish the lossy path from
@@ -360,6 +365,63 @@ fn markdown_cache_miss_fallback_is_non_lossy() {
     assert!(
         has_bold_run,
         "non-lossy fallback must produce a bold styled run for **bold** markdown syntax"
+    );
+
+    let gpu = make_compositor_and_surface(256, 256).await;
+    if std::env::var("TZE_HUD_REQUIRE_GPU").ok().as_deref() == Some("1") {
+        assert!(gpu.is_some(), "this parent requires a real GPU constructor");
+    }
+    let (compositor, _surface) = require_gpu!(gpu);
+    let scene = scene_with_node(Node {
+        layout: Default::default(),
+        id: SceneId::new(),
+        children: vec![],
+        data: tze_hud_scene::types::NodeData::TextMarkdown(node),
+    });
+    let actual_key =
+        crate::markdown::MarkdownCache::compute_key(content, &compositor.markdown_tokens_generic);
+    assert!(
+        compositor
+            .markdown_cache()
+            .get_by_key(&actual_key)
+            .is_none()
+    );
+    let misses_before = compositor.markdown_cache_miss_count();
+    let parses_before = crate::markdown::PARSE_MARKDOWN_SUBSET_CALLS.with(|calls| calls.get());
+    let first = compositor.collect_text_items(&scene, 256.0, 256.0);
+    let parses_after_first = crate::markdown::PARSE_MARKDOWN_SUBSET_CALLS.with(|calls| calls.get());
+    assert_eq!(first.len(), 1);
+    assert_eq!(&*first[0].text, "Hello bold world");
+    assert!(!first[0].styled_runs.is_empty());
+    assert!(first[0].styled_runs.iter().any(|run| {
+        run.start_byte <= 6
+            && run.end_byte >= 10
+            && run.weight.map(|weight| weight >= 700).unwrap_or(false)
+    }));
+    assert_eq!(parses_after_first - parses_before, 1);
+    assert_eq!(compositor.markdown_cache_miss_count() - misses_before, 1);
+
+    let parses_before_second =
+        crate::markdown::PARSE_MARKDOWN_SUBSET_CALLS.with(|calls| calls.get());
+    let second = compositor.collect_text_items(&scene, 256.0, 256.0);
+    let parses_after_second =
+        crate::markdown::PARSE_MARKDOWN_SUBSET_CALLS.with(|calls| calls.get());
+    assert_eq!(second.len(), 1);
+    assert_eq!(&*second[0].text, "Hello bold world");
+    assert!(!second[0].styled_runs.is_empty());
+    assert!(second[0].styled_runs.iter().any(|run| {
+        run.start_byte <= 6
+            && run.end_byte >= 10
+            && run.weight.map(|weight| weight >= 700).unwrap_or(false)
+    }));
+    assert_eq!(parses_after_second - parses_before_second, 0);
+    // The authoritative snapshot still misses; its miss counter is not a parse counter.
+    assert_eq!(compositor.markdown_cache_miss_count() - misses_before, 2);
+    assert!(
+        compositor
+            .markdown_cache()
+            .get_by_key(&actual_key)
+            .is_none()
     );
 }
 

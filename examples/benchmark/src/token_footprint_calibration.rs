@@ -7,9 +7,8 @@ mod calibration {
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
     use std::path::{Path, PathBuf};
     use std::process::Command;
-    use tokio::sync::mpsc;
     use tze_hud_runtime::headless::{HeadlessConfig, HeadlessRuntime};
-    use tze_hud_runtime::portal_projection_driver::{InProcessPortalDriver, PortalKey, PortalOp};
+    use tze_hud_runtime::portal_projection_driver::{PortalHandle, PortalHub, PortalKey};
     use tze_hud_runtime::threads::{ShutdownReason, ShutdownToken};
     use tze_hud_runtime::{McpServerConfig, start_mcp_http_server};
     use tze_hud_scene::types::{
@@ -149,37 +148,6 @@ mod calibration {
     ) -> std::sync::Arc<tokio::sync::Mutex<tze_hud_scene::graph::SceneGraph>> {
         let state = runtime.shared_state().lock().await;
         state.scene.clone()
-    }
-
-    fn spawn_portal_driver(
-        mut rx: mpsc::UnboundedReceiver<PortalOp>,
-    ) -> tokio::task::JoinHandle<()> {
-        tokio::spawn(async move {
-            let mut driver = InProcessPortalDriver::new();
-            let mut input_injected = false;
-            while let Some(op) = rx.recv().await {
-                // The first publish attaches the portal; queue the canonical
-                // HUD reply on it.
-                let attached = match &op {
-                    PortalOp::Publish { agent, portal, .. } if !input_injected => {
-                        Some(PortalKey::new(agent.clone(), portal.clone()))
-                    }
-                    _ => None,
-                };
-                driver.dispatch_portal_op(op);
-                if let Some(key) = attached {
-                    assert!(
-                        driver.inject_input(
-                            &key,
-                            "canonical-input-0001",
-                            "Canonical HUD-originated input."
-                        ),
-                        "inject canonical portal input"
-                    );
-                    input_injected = true;
-                }
-            }
-        })
     }
 
     fn run_python_driver(address: SocketAddr) -> DriverOutput {
@@ -331,8 +299,10 @@ mod calibration {
         let runtime = HeadlessRuntime::new(headless_config()).await?;
         prepare_scene(&runtime).await;
         let scene = scene_handle(&runtime).await;
-        let (portal_tx, portal_rx) = mpsc::unbounded_channel();
-        let portal_task = spawn_portal_driver(portal_rx);
+        let portals = PortalHandle::new(
+            PortalHub::default(),
+            std::sync::Arc::new(tze_hud_scene::SystemClock::new()),
+        );
         let shutdown = ShutdownToken::new();
         let config = McpServerConfig {
             widget_transition_ms: tze_hud_config::tokens::resolve_motion_duration_ms(
@@ -350,9 +320,32 @@ mod calibration {
             pairing: None,
         };
         let (server_task, addresses) =
-            start_mcp_http_server(scene, config, shutdown.clone(), Some(portal_tx.clone())).await?;
-        let driver_output =
-            tokio::task::spawn_blocking(move || run_python_driver(addresses[0])).await?;
+            start_mcp_http_server(scene, config, shutdown.clone(), Some(portals.clone())).await?;
+        let mut python = tokio::task::spawn_blocking(move || run_python_driver(addresses[0]));
+        let agent = tze_hud_scene::config::AgentDirectory::unrestricted(PSK)
+            .resolve(PSK, "")
+            .expect("calibration agent")
+            .agent_id;
+        let mut input_injected = false;
+        let driver_output = loop {
+            if !input_injected {
+                let mut hub = portals.hub.lock().expect("calibration hub");
+                if let Some(first) = hub.list(&agent).first() {
+                    let key = PortalKey::new(agent.clone(), first.id.clone());
+                    hub.inject_input(
+                        &key,
+                        "canonical-input-0001",
+                        "Canonical HUD-originated input.",
+                    )
+                    .expect("inject canonical portal input");
+                    input_injected = true;
+                }
+            }
+            tokio::select! {
+                result = &mut python => break result?,
+                _ = tokio::time::sleep(std::time::Duration::from_millis(1)) => {}
+            }
+        };
         let output = build_output(driver_output);
         if let Some(parent) = output_path.parent() {
             std::fs::create_dir_all(parent)?;
@@ -360,8 +353,6 @@ mod calibration {
         std::fs::write(&output_path, serde_json::to_vec_pretty(&output)?)?;
         shutdown.trigger(ShutdownReason::Clean);
         server_task.await?;
-        drop(portal_tx);
-        portal_task.await?;
         Ok(())
     }
 

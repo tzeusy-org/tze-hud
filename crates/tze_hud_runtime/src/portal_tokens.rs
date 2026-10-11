@@ -1,9 +1,8 @@
 //! Production bridge: `PortalPartTokens` → `PortalVisualTokens`.
 //!
 //! The canonical conversion function lives in `tze_hud_projection::resident_grpc`
-//! so that it can be used directly from the projection authority binary without
-//! pulling in the full runtime crate (which would create a circular dependency:
-//! `tze_hud_runtime` already depends on `tze_hud_projection`).
+//! alongside the resident portal adapter. The runtime depends on that crate
+//! and re-exports the conversion here for its consumers.
 //!
 //! This module re-exports `portal_visual_tokens_from_part_tokens` for consumers
 //! that import from `tze_hud_runtime`.

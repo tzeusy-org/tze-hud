@@ -13,13 +13,26 @@ path = "src/bin/cooperative_projection_readback.rs"
 name = "vertical-flow-readback"
 path = "src/bin/vertical_flow_readback.rs"
 
+[[bin]]
+name = "render-scene"
+path = "src/bin/render_scene.rs"
+
 [dependencies]
 tze_hud_scene = { path = "../../crates/tze_hud_scene", version = "0.1.0" }
 tze_hud_compositor = { path = "../../crates/tze_hud_compositor", version = "0.1.0" }
 tze_hud_runtime = { path = "../../crates/tze_hud_runtime", version = "0.1.0" }
+tze_hud_config = { path = "../../crates/tze_hud_config", version = "0.1.0" }
+tze_hud_mcp = { path = "../../crates/tze_hud_mcp", version = "0.1.0" }
+tze_hud_widget = { path = "../../crates/tze_hud_widget", version = "0.1.0" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
+toml = { workspace = true }
+wgpu = { workspace = true }
+sha2 = { workspace = true }
+
+[dev-dependencies]
+image = { workspace = true, features = ["png"] }
 
 [lints]
 workspace = true

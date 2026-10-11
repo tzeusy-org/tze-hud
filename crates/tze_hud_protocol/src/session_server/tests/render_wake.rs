@@ -8,6 +8,7 @@ fn direct_handler_test_session(namespace: &str, capabilities: Vec<String>) -> St
         capabilities,
         lease_ids: Vec::new(),
         scene_session_id: SceneId::new(),
+        publication_origin: SceneId::new(),
         resource_budget: ResourceBudget::default(),
         budget_enforcer: None,
         subscriptions: Vec::new(),

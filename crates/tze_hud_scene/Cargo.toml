@@ -21,19 +21,10 @@ arc-swap = { workspace = true }
 test-support = []
 
 [dev-dependencies]
-# Integration tests and benches link the lib without cfg(test), so they get the
+# Integration tests link the lib without cfg(test), so they get the
 # fixtures by enabling the feature on the crate itself.
 tze_hud_scene = { path = ".", features = ["test-support"] }
 proptest = { workspace = true }
-criterion = { workspace = true }
-
-[[bench]]
-name = "hit_test"
-harness = false
-
-[[bench]]
-name = "snapshot"
-harness = false
 
 [lints]
 workspace = true

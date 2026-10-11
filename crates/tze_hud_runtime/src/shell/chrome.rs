@@ -77,37 +77,6 @@ impl ChromeState {
         }
     }
 
-    /// Remove a tab by id.
-    pub fn remove_tab(&mut self, id: u32) {
-        if let Some(pos) = self.tabs.iter().position(|t| t.id == id) {
-            let old_active = self.active_tab_index;
-            self.tabs.remove(pos);
-
-            if self.tabs.is_empty() {
-                self.active_tab_index = 0;
-                return;
-            }
-
-            // Recompute active_tab_index correctly:
-            // - Removed before active → active shifts left by 1.
-            // - Removed at active → clamp to last tab.
-            // - Removed after active → index unchanged.
-            self.active_tab_index = if pos < old_active {
-                old_active - 1
-            } else if pos == old_active {
-                old_active.min(self.tabs.len() - 1)
-            } else {
-                old_active
-            };
-
-            // Ensure exactly one tab carries the active flag.
-            for tab in &mut self.tabs {
-                tab.active = false;
-            }
-            self.tabs[self.active_tab_index].active = true;
-        }
-    }
-
     /// Switch to tab by index. Returns `true` if the switch occurred.
     pub fn switch_to_tab_index(&mut self, idx: usize) -> bool {
         if idx >= self.tabs.len() {
@@ -309,22 +278,11 @@ mod tests {
     // ── ChromeState basics ────────────────────────────────────────────────
 
     #[test]
-    fn chrome_state_default_is_clean() {
-        let state = ChromeState::new();
-        assert_eq!(state.tabs.len(), 0);
-        assert_eq!(state.active_tab_index, 0);
-        assert_eq!(state.tab_bar_position, TabBarPosition::Top);
-        assert!(!state.safe_mode_active);
-        assert_eq!(state.connected_agent_count, 0);
-        assert!(
-            !state.capture_surface_active,
-            "v1: capture_surface_active must always be false"
-        );
-    }
-
-    #[test]
     fn add_tab_makes_first_tab_active() {
         let mut state = ChromeState::new();
+        assert!(state.tabs.is_empty());
+        assert_eq!(state.active_tab_index, 0);
+        assert_eq!(state.tab_bar_position, TabBarPosition::Top);
         state.add_tab(1, "Tab A".into());
         assert_eq!(state.tabs.len(), 1);
         assert!(state.tabs[0].active);
@@ -472,6 +430,22 @@ mod tests {
     #[test]
     fn diagnostic_snapshot_contains_expected_fields() {
         let mut state = ChromeState::new();
+        let initial = collect_diagnostic(&state, 123_456, 0);
+        assert_eq!(initial.timestamp_mono_us, 123_456);
+        assert_eq!(initial.active_lease_count, 0);
+        assert_eq!(initial.tab_count, 0);
+        assert_eq!(initial.active_tab_index, 0);
+        assert_eq!(initial.tab_bar_position_label, "top");
+        assert_eq!(initial.connected_agent_count, 0);
+        assert!(
+            !initial.safe_mode_active,
+            "new chrome diagnostics must default to safe mode off"
+        );
+        assert!(
+            !initial.capture_surface_active,
+            "new chrome diagnostics must keep the reserved capture surface inactive"
+        );
+
         state.add_tab(1, "A".into());
         state.add_tab(2, "B".into());
         state.connected_agent_count = 3;

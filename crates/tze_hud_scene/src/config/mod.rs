@@ -86,9 +86,9 @@ pub struct ParseError {
 ///
 /// This mirrors `tze_hud_compositor::overflow::DEFAULT_MAX_TRUNCATION_INPUT_BYTES`:
 /// the compositor's `TruncationCache` falls back to this same value when no
-/// profile-supplied bound is applied. The value sits well below the ~8 KiB
-/// point where the `overflow_truncate` benchmark first exceeds the Stage-5
-/// Layout Resolve budget (< 1 ms).
+/// profile-supplied bound is applied. The 4096-byte default bounds work toward
+/// the Stage-5 Layout Resolve target (< 1 ms); conformance still requires
+/// measurement of the actual workload.
 pub const DEFAULT_MAX_TRUNCATION_INPUT_BYTES: u32 = 4096;
 
 /// A resolved display profile with its budget values.

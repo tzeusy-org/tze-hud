@@ -96,10 +96,8 @@ pub struct McpServerConfig {
 /// * `scene`           — shared scene graph for MCP tool dispatch.
 /// * `config`          — MCP server configuration (bind addresses, agents).
 /// * `shutdown`        — token that stops the accept loops when triggered.
-/// * `portal_op_tx` — optional channel sender for portal projection operations
-///   (hud-bq0gl.2).  When `Some`, the MCP server forwards portal surface
-///   operations through this channel to the winit event-loop thread where the
-///   `InProcessPortalDriver` lives.
+/// * `portals` — optional shared portal hub and clock
+///   (hud-bq0gl.2).  When `Some`, MCP calls this hub directly; the winit driver shares the same state and clock.
 ///
 /// # Returns
 ///
@@ -115,13 +113,13 @@ pub async fn start_mcp_http_server(
     scene: Arc<Mutex<SceneGraph>>,
     config: McpServerConfig,
     shutdown: ShutdownToken,
-    portal_op_tx: Option<tokio::sync::mpsc::UnboundedSender<tze_hud_mcp::portal_op::PortalOp>>,
+    portals: Option<tze_hud_mcp::PortalHandle>,
 ) -> std::io::Result<(tokio::task::JoinHandle<()>, Vec<SocketAddr>)> {
     start_mcp_http_server_with_render_wake(
         scene,
         config,
         shutdown,
-        portal_op_tx,
+        portals,
         tze_hud_scene::render_wake::RenderWakeNotifier::default(),
         tze_hud_scene::render_wake::RenderWakeNotifier::default(),
         Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -133,7 +131,7 @@ pub async fn start_mcp_http_server_with_render_wake(
     scene: Arc<Mutex<SceneGraph>>,
     config: McpServerConfig,
     shutdown: ShutdownToken,
-    portal_op_tx: Option<tokio::sync::mpsc::UnboundedSender<tze_hud_mcp::portal_op::PortalOp>>,
+    portals: Option<tze_hud_mcp::PortalHandle>,
     render_wake: tze_hud_scene::render_wake::RenderWakeNotifier,
     portal_ingress_wake: tze_hud_scene::render_wake::RenderWakeNotifier,
     safe_mode: Arc<std::sync::atomic::AtomicBool>,
@@ -208,8 +206,8 @@ pub async fn start_mcp_http_server_with_render_wake(
         .with_render_wake_notifier(render_wake)
         .with_portal_ingress_wake_notifier(portal_ingress_wake)
         .with_safe_mode(safe_mode);
-    if let Some(tx) = portal_op_tx {
-        server_builder = server_builder.with_portal_op_tx(tx);
+    if let Some(tx) = portals {
+        server_builder = server_builder.with_portals(tx);
     }
     let server = Arc::new(server_builder);
 
@@ -620,6 +618,7 @@ mod tests {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         let mut conn = tokio::net::TcpStream::connect(addr).await.expect("connect");
         conn.write_all(request.as_bytes()).await.expect("write");
+        conn.shutdown().await.expect("shutdown writer");
         let mut resp = Vec::new();
         conn.read_to_end(&mut resp).await.expect("read");
         String::from_utf8_lossy(&resp).into_owned()
@@ -1043,12 +1042,58 @@ mod tests {
                 "501",
                 format!("POST / HTTP/1.1\r\n{auth}Transfer-Encoding: chunked\r\n\r\n{body}"),
             ),
+            (
+                "400",
+                format!("PO\tST / HTTP/1.1\r\n{auth}Content-Length: {n}\r\n\r\n{body}"),
+            ),
+            (
+                "400",
+                format!("POST / HTTP/1.1\r\n{auth}X: a\0b\r\nContent-Length: {n}\r\n\r\n{body}"),
+            ),
+            (
+                "400",
+                format!("POST / HTTP/1.1\r\n{auth}X: a\rb\r\nContent-Length: {n}\r\n\r\n{body}"),
+            ),
+            (
+                "400",
+                format!("POST / HTTP/1.1\r\n{auth}X: a\nb\r\nContent-Length: {n}\r\n\r\n{body}"),
+            ),
+            (
+                "400",
+                format!(
+                    "POST / HTTP/1.1\r\n{auth}X: \x0bvalue\x0c\r\nContent-Length: {n}\r\n\r\n{body}"
+                ),
+            ),
+            (
+                "400",
+                format!("POST / HTTP/1.1\r\n{auth}Transfer-Encoding : chunked\r\n\r\n{body}"),
+            ),
+            (
+                "400",
+                "POST / HTTP/1.1\r\nContent-Length: 1\r\n\r\n".to_owned(),
+            ),
+            (
+                "400",
+                format!(
+                    "POST / HTTP/1.1\r\n{auth}Content-Length: {}\r\n\r\n{body}",
+                    n + 1
+                ),
+            ),
         ];
         for (status, req) in cases {
             let r = http_raw(addr, &req).await;
             assert!(r.starts_with(&format!("HTTP/1.1 {status} ")), "{req}: {r}");
             assert!(!r.contains("jsonrpc"), "{r}");
         }
+        let dropped = http_raw(
+            addr,
+            "POST / HTTP/1.1\r\nContent-Length: 18446744073709551616\r\n\r\n",
+        )
+        .await;
+        assert!(
+            dropped.is_empty(),
+            "overflow must retain connection drop: {dropped}"
+        );
         shutdown.trigger(crate::threads::ShutdownReason::Clean);
         handle.await.expect("task");
     }

@@ -1,6 +1,6 @@
 # tze_hud dev harness — reproduces the CI gate commands locally.
 #
-# Prerequisites: just (https://github.com/casey/just), protobuf-compiler (protoc).
+# Prerequisite: just (https://github.com/casey/just); protoc is fetched by Cargo.
 #
 # Usage:
 #   just           # run the default gate (check)
@@ -18,9 +18,8 @@
 #   just dead-code <crate>  # advisory list of dead pub items in one crate
 #   just dev-mode-guard     # verify dev-mode is not enabled in any package's default build
 #   just idle-efficiency-checker # fail-closed idle artifact contract tests
-#   just clippy-windows-gnu # clippy on the windows-gnu target (skips if target/mingw missing)
+#   just clippy-windows-gnu # clippy on the windows-gnu target (skips if Rust target missing)
 #   just cargo-deny         # advisories/licenses/bans/sources (skips if cargo-deny missing)
-#   just overlay-harness-contract # pwsh overlay-harness contract test (skips if pwsh missing)
 #   just bootstrap # install/report dev-host deps (scripts/dev-bootstrap.sh; --check to report only)
 #   just build-windows # cross-build tze_hud.exe for x86_64-pc-windows-gnu
 #   just ci        # full local gate sweep (see the `ci` recipe; no Windows-only jobs)
@@ -36,7 +35,7 @@
 # concurrent device construction can wedge the driver. Do not run bare
 # `cargo test -p tze_hud_compositor` on a host with a hardware GPU ICD.
 #
-# Building needs protoc >= 3.15; if /usr/bin/protoc is older, set PROTOC=/path/to/protoc.
+# Protocol builds select bundled protoc 31.1 (=3.2.0) for the build host, ignoring PROTOC.
 
 # Mesa llvmpipe Vulkan ICD (mesa-vulkan-drivers); GPU recipes use it when present.
 # Older Mesa names it lvp_icd.x86_64.json; Mesa 25+ (Ubuntu 26.04) lvp_icd.json.
@@ -47,6 +46,21 @@ py := if path_exists(".venv/bin/python3") == "true" { ".venv/bin/python3" } else
 
 # Default recipe: fast compilation gate
 default: check
+
+# Offline authoring: the real windowed build/capture seam, without a HUD listener.
+# Arguments go unchanged to the example; compilation is separate from warm timing.
+[positional-arguments]
+render-scene *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    [[ -f "{{lvp}}" ]] || { echo 'required llvmpipe ICD is missing' >&2; exit 1; }
+    export VK_ICD_FILENAMES="{{lvp}}" HEADLESS_FORCE_SOFTWARE=1 TZE_HUD_REQUIRE_GPU=1
+    cargo run --quiet -p render_artifacts --bin render-scene -- "$@"
+
+# CPU retained WidgetRenderPlan/resvg mode of the same authoring binary.
+[positional-arguments]
+render-widget *args:
+    cargo run --quiet -p render_artifacts --bin render-scene -- "$@"
 
 # ── Fast fail ────────────────────────────────────────────────────────────────
 
@@ -191,17 +205,15 @@ deps-unused:
 # the tool, so these remain blocking there.
 
 # clippy on the windows-gnu cross-target (mirror CI clippy-windows-gnu job).
-# Needs `rustup target add x86_64-pc-windows-gnu` and mingw-w64.
+# Needs `rustup target add x86_64-pc-windows-gnu`; no MinGW compiler for lint.
+# The portable blake3 backend is scoped to this command. build-windows still needs MinGW.
 clippy-windows-gnu:
     #!/usr/bin/env bash
     set -euo pipefail
     if ! rustup target list --installed | grep -qx x86_64-pc-windows-gnu; then
         echo "SKIPPED: clippy-windows-gnu needs the rustup target (rustup target add x86_64-pc-windows-gnu)"; exit 0
     fi
-    if ! command -v x86_64-w64-mingw32-gcc >/dev/null; then
-        echo "SKIPPED: clippy-windows-gnu needs the MinGW cross toolchain (apt install mingw-w64)"; exit 0
-    fi
-    cargo clippy \
+    CARGO_FEATURE_PURE=1 cargo clippy \
         -p tze_hud_runtime \
         -p tze_hud_compositor \
         -p tze_hud_config \
@@ -216,15 +228,6 @@ cargo-deny:
         echo "SKIPPED: cargo-deny not installed (cargo install --locked cargo-deny)"; exit 0
     fi
     cargo deny check advisories licenses bans sources
-
-# Fullscreen-vs-overlay harness PowerShell contract test (mirror CI check job step).
-overlay-harness-contract:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    if ! command -v pwsh >/dev/null; then
-        echo "SKIPPED: overlay-harness-contract needs PowerShell (pwsh)"; exit 0
-    fi
-    pwsh -File ./scripts/ci/windows/test-windowed-fullscreen-overlay-perf.ps1
 
 # Advisory dead-item list for one crate: narrows its pub items to pub(crate) in a
 # temp copy (keeping names other crates use) and prints rustc dead_code warnings.
@@ -249,10 +252,10 @@ build-windows *args:
 # ── Full local CI sweep ───────────────────────────────────────────────────────
 
 # Run all CI gates that are feasible locally. GPU and pixel_readback tests are
-# included via `test` (they need Mesa llvmpipe). clippy-windows-gnu, cargo-deny and
-# overlay-harness-contract are tool-gated: they print "SKIPPED: <reason>" and
-# pass when their tool (windows-gnu target + mingw, cargo-deny, pwsh) is absent.
+# included via `test` (they need Mesa llvmpipe). clippy-windows-gnu and cargo-deny
+# are tool-gated: they print "SKIPPED: <reason>" and pass when their tool
+# (windows-gnu Rust target or cargo-deny) is absent.
 # Excluded by design: the Windows-only jobs (windows.yml), the informational
 # test-gpu-pixel-readback job (covered by `test`), and the weekly perf lanes.
 # Runs in the same logical order as CI: fast-fail gates first, then tests.
-ci: untracked-evidence overlay-harness-contract check fmt clippy clippy-windows-gnu cargo-deny deps-unused dev-mode-guard idle-efficiency-checker test test-integration test-python token-footprint production-boot canonical-app-boot
+ci: untracked-evidence check fmt clippy clippy-windows-gnu cargo-deny deps-unused dev-mode-guard idle-efficiency-checker test test-integration test-python token-footprint production-boot canonical-app-boot

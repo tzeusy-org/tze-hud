@@ -12,6 +12,7 @@ struct TargetView<'a> {
     vertices: Cow<'a, [RectVertex]>,
     textured_cmds: Cow<'a, [TexturedDrawCmd]>,
     rr_background: Cow<'a, [RoundedRectDrawCmd]>,
+    rr_content: Cow<'a, [RoundedRectDrawCmd]>,
     rr_post: Cow<'a, [RoundedRectDrawCmd]>,
     text_items: Cow<'a, [TextItem]>,
     card_items: &'a [TextItem],
@@ -73,9 +74,10 @@ pub struct WindowedFrameBuild {
     surf_w: u32,
     surf_h: u32,
     /// Flat-rect geometry (Background → tiles → Content → Chrome) and the vertex
-    /// offset just past the Background zones (for the split flat-rect pass).
+    /// offsets just past Background and at the start of Chrome flat geometry.
     vertices: Vec<RectVertex>,
     bg_vertex_count: usize,
+    chrome_vertex_start: usize,
     /// Textured image draw commands (composited above the color geometry).
     textured_cmds: Vec<TexturedDrawCmd>,
     /// Scene-free encode inputs (rounded-rect cmds + unprepared text). Each
@@ -173,18 +175,17 @@ impl Compositor {
     /// background went through `gpu_color_raw` but the headless copy did
     /// not — benign only because headless never set overlay mode.)
     ///
-    /// Returns `(vertices, textured_cmds, bg_vertex_count)`, where
-    /// `bg_vertex_count` is the vertex offset just after the Background-layer
-    /// flat-rect zones — used by the caller to split the flat-rect pass so the
-    /// Background SDF pass can be interleaved. Also populates the `tile_count`,
+    /// Returns geometry and the Background-end/Chrome-start flat vertex offsets,
+    /// so each layer's SDF can be interleaved by the shared GPU encoder.
+    /// Also populates the `tile_count`,
     /// `node_count`, and `active_leases` telemetry fields.
-    fn build_frame_vertices(
+    pub(super) fn build_frame_vertices(
         &mut self,
         scene: &SceneGraph,
         sw: f32,
         sh: f32,
         telemetry: &mut FrameTelemetry,
-    ) -> (Vec<RectVertex>, Vec<TexturedDrawCmd>, usize) {
+    ) -> (Vec<RectVertex>, Vec<TexturedDrawCmd>, usize, usize) {
         let animation_now = std::time::Instant::now();
         // Collect visible tiles, re-sorted with drag-z-order boost applied.
         let tiles = Self::sort_tiles_with_drag_boost(self.policy_visible_tiles(scene), scene);
@@ -495,6 +496,7 @@ impl Compositor {
             Some(LayerAttachment::Content),
             animation_now,
         );
+        let chrome_vertex_start = vertices.len();
         // Chrome zones render last, above tiles and content zones.
         self.render_zone_content_at(
             scene,
@@ -507,7 +509,12 @@ impl Compositor {
         // The system card is not part of this vertex list: it is drawn by the
         // final `encode_system_card_pass` above every other pass (hud-w5zon).
 
-        (vertices, textured_cmds, bg_vertex_count)
+        (
+            vertices,
+            textured_cmds,
+            bg_vertex_count,
+            chrome_vertex_start,
+        )
     }
 
     /// Build all CPU-side, scene-free frame data under the scene lock (hud-uyhpn).
@@ -614,7 +621,7 @@ impl Compositor {
         // the alpha-zeroing full-screen quad.
         let sw = surf_w as f32;
         let sh = surf_h as f32;
-        let (vertices, textured_cmds, bg_vertex_count) =
+        let (vertices, textured_cmds, bg_vertex_count, chrome_vertex_start) =
             self.build_frame_vertices(scene, sw, sh, &mut telemetry);
 
         // Publish this frame's displayed (smoothed/lagged) scroll offsets into
@@ -689,6 +696,7 @@ impl Compositor {
             surf_h,
             vertices,
             bg_vertex_count,
+            chrome_vertex_start,
             textured_cmds,
             encode_sources,
             drag_handle_vertices,
@@ -833,11 +841,11 @@ impl Compositor {
         // before the encode that replays it.
         let inputs = self.prepare_encode_inputs(
             tv.rr_background.into_owned(),
+            tv.rr_content.into_owned(),
             tv.rr_post.into_owned(),
             &tv.text_items,
             tv.card_items,
-            tv.width,
-            tv.height,
+            (tv.width, tv.height),
         );
 
         let (mut encoder, encode_us) = self.encode_from_inputs(
@@ -848,6 +856,7 @@ impl Compositor {
             tv.height,
             self.overlay_mode,
             build.bg_vertex_count,
+            build.chrome_vertex_start,
         );
 
         // ── Image pass: draw textured quads on top of color geometry ─────────
@@ -901,6 +910,7 @@ impl Compositor {
                 vertices: Cow::Borrowed(&build.vertices),
                 textured_cmds: Cow::Borrowed(&build.textured_cmds),
                 rr_background: Cow::Borrowed(&build.encode_sources.rr_background),
+                rr_content: Cow::Borrowed(&build.encode_sources.rr_content),
                 rr_post: Cow::Borrowed(&build.encode_sources.rr_post),
                 text_items: Cow::Borrowed(&build.encode_sources.text_items),
                 card_items: &build.encode_sources.card_items,
@@ -978,6 +988,7 @@ impl Compositor {
             vertices: Cow::Owned(vertices),
             textured_cmds: Cow::Owned(textured_cmds),
             rr_background: Cow::Owned(shift_rr(&build.encode_sources.rr_background)),
+            rr_content: Cow::Owned(shift_rr(&build.encode_sources.rr_content)),
             rr_post: Cow::Owned(shift_rr(&build.encode_sources.rr_post)),
             text_items: Cow::Owned(text_items),
             card_items: if target.primary {
@@ -1014,7 +1025,10 @@ impl Compositor {
         let bg = build.bg_vertex_count.min(tv.vertices.len());
         hash_visible_triangles(&mut hasher, &tv.vertices[..bg]);
         0xB6u8.hash(&mut hasher); // background / rest split
-        hash_visible_triangles(&mut hasher, &tv.vertices[bg..]);
+        let chrome = build.chrome_vertex_start.clamp(bg, tv.vertices.len());
+        hash_visible_triangles(&mut hasher, &tv.vertices[bg..chrome]);
+        0xC6u8.hash(&mut hasher); // Content SDF / Chrome flat split
+        hash_visible_triangles(&mut hasher, &tv.vertices[chrome..]);
         for list in [
             &tv.drag_handle_vertices,
             &tv.focus_ring_vertices,
@@ -1046,7 +1060,12 @@ impl Compositor {
             hash_f32s(&mut hasher, uv_rect);
             hash_f32s(&mut hasher, tint);
         }
-        for list in [&tv.rr_background, &tv.rr_post, &tv.drag_highlight_cmds] {
+        for list in [
+            &tv.rr_background,
+            &tv.rr_content,
+            &tv.rr_post,
+            &tv.drag_highlight_cmds,
+        ] {
             0xD8u8.hash(&mut hasher);
             for cmd in list.iter() {
                 let RoundedRectDrawCmd {
@@ -1220,7 +1239,7 @@ impl Compositor {
         let (surf_w, surf_h) = surface.size();
         let sw = surf_w as f32;
         let sh = surf_h as f32;
-        let (vertices, textured_cmds, bg_vertex_count) =
+        let (vertices, textured_cmds, bg_vertex_count, chrome_vertex_start) =
             self.build_frame_vertices(scene, sw, sh, &mut telemetry);
 
         // Collect drag handle entries once and reuse for both rendering and hit-region
@@ -1260,6 +1279,7 @@ impl Compositor {
             surf_h,
             false,
             bg_vertex_count,
+            chrome_vertex_start,
         );
         telemetry.stage6_render_encode_us = encode_us;
 

@@ -167,6 +167,99 @@ pub(super) fn bytes_to_scene_id(bytes: &[u8]) -> Result<tze_hud_scene::SceneId, 
 /// a session handler is also processing mutation responses.
 const BROADCAST_CHANNEL_CAPACITY: usize = 1024;
 
+// This observer is private to the owning service's retained lifecycle fixture.
+// The handle is the real session task, not the Tonic transport server task.
+#[cfg(test)]
+struct ObservedSessionHandler {
+    task: tokio::task::JoinHandle<()>,
+    panic: tokio::sync::oneshot::Sender<()>,
+}
+
+#[cfg(test)]
+fn session_handler_observers() -> &'static std::sync::Mutex<
+    std::collections::HashMap<usize, tokio::sync::mpsc::UnboundedSender<ObservedSessionHandler>>,
+> {
+    static OBSERVERS: std::sync::OnceLock<
+        std::sync::Mutex<
+            std::collections::HashMap<
+                usize,
+                tokio::sync::mpsc::UnboundedSender<ObservedSessionHandler>,
+            >,
+        >,
+    > = std::sync::OnceLock::new();
+    OBSERVERS.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
+#[cfg(test)]
+struct SessionHandlerObserver {
+    state: Arc<Mutex<SharedState>>,
+}
+
+#[cfg(test)]
+impl Drop for SessionHandlerObserver {
+    fn drop(&mut self) {
+        session_handler_observers()
+            .lock()
+            .unwrap()
+            .remove(&(Arc::as_ptr(&self.state) as usize));
+    }
+}
+
+#[cfg(test)]
+fn observe_session_handlers(
+    state: &Arc<Mutex<SharedState>>,
+) -> (
+    SessionHandlerObserver,
+    tokio::sync::mpsc::UnboundedReceiver<ObservedSessionHandler>,
+) {
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    assert!(
+        session_handler_observers()
+            .lock()
+            .unwrap()
+            .insert(Arc::as_ptr(state) as usize, tx)
+            .is_none(),
+        "only one observer may own this exact test service"
+    );
+    (
+        SessionHandlerObserver {
+            state: Arc::clone(state),
+        },
+        rx,
+    )
+}
+
+#[cfg(test)]
+fn spawn_observed_session_handler(
+    state: &Arc<Mutex<SharedState>>,
+    handler: impl std::future::Future<Output = ()> + Send + 'static,
+) {
+    let observer = session_handler_observers()
+        .lock()
+        .unwrap()
+        .get(&(Arc::as_ptr(state) as usize))
+        .cloned();
+    if let Some(observer) = observer {
+        let (panic, panic_rx) = tokio::sync::oneshot::channel();
+        let task = tokio::spawn(async move {
+            tokio::pin!(handler);
+            tokio::select! {
+                () = &mut handler => {}
+                requested = panic_rx => {
+                    if requested.is_ok() {
+                        panic!("retained fixture requested panic in its actual session handler");
+                    }
+                    handler.await;
+                }
+            }
+        });
+        // Dropping an observer does not cancel an unrelated or unobserved task.
+        let _ = observer.send(ObservedSessionHandler { task, panic });
+    } else {
+        tokio::spawn(handler);
+    }
+}
+
 // ─── Service implementation (SS-5) ──────────────────────────────────────────
 //
 // `HudSessionImpl` struct, constructors, and non-session runtime helpers live in
@@ -203,7 +296,9 @@ impl HudSession for HudSessionImpl {
         );
 
         // Spawn the session handler task
-        tokio::spawn(async move {
+        #[cfg(test)]
+        let handler_state = Arc::clone(&state);
+        let session_handler = async move {
             // Wait for the first message (must be SessionInit or SessionResume)
             let first_read = match tokio::time::timeout(
                 tokio::time::Duration::from_millis(5000),
@@ -239,9 +334,13 @@ impl HudSession for HudSessionImpl {
             };
             let mut session = handle_handshake_read(handshake_ctx, &tx, first_read).await;
 
-            let Some(ref mut session) = session else {
+            let Some((ref mut session, ref mut budget_registration_guard)) = session else {
                 return; // Handshake failed, error already sent
             };
+
+            if session.state == SessionState::Resuming {
+                render_wake.notify();
+            }
 
             // The handshake registered this session; from here on, every exit
             // (early `break 'active`, panic, task cancellation) must unregister
@@ -511,9 +610,14 @@ impl HudSession for HudSessionImpl {
                                 let _ = scene.disconnect_lease(lease_id, now);
                             }
                         }
+                        scene.orphan_publications(
+                            session.publication_origin,
+                            now,
+                            DEFAULT_GRACE_PERIOD_MS,
+                        );
                         now
                     };
-                    st.token_store.insert(
+                    st.token_store.insert_with_publication_origin(
                         session.resume_token.clone(),
                         session.agent_name.clone(),
                         session.capabilities.clone(),
@@ -521,11 +625,16 @@ impl HudSession for HudSessionImpl {
                         session.lease_ids.clone(),
                         DEFAULT_GRACE_PERIOD_MS,
                         now,
+                        Some(session.publication_origin),
                     );
                 }
             }
+            render_wake.notify();
             if let Some(enforcer) = &session.budget_enforcer {
                 enforcer.remove_session(session.scene_session_id);
+            }
+            if let Some(guard) = budget_registration_guard.as_mut() {
+                guard.disarm();
             }
             #[cfg(test)]
             state
@@ -533,7 +642,11 @@ impl HudSession for HudSessionImpl {
                 .await
                 .sessions
                 .finish_cleanup(&session.scene_session_id);
-        });
+        };
+        #[cfg(not(test))]
+        tokio::spawn(session_handler);
+        #[cfg(test)]
+        spawn_observed_session_handler(&handler_state, session_handler);
 
         // Return the receiver stream as the response
         let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
@@ -594,6 +707,16 @@ async fn handle_client_message(
 ) {
     let client_sequence = msg.sequence;
     let Some(payload) = msg.payload else {
+        verbs::send_result(
+            session,
+            tx,
+            verbs::fail(
+                client_sequence,
+                "INVALID_ARGUMENT",
+                "ClientMessage needs a supported request payload; use the current session.proto schema and send a recognized request",
+            ),
+        )
+        .await;
         return;
     };
 

@@ -18,15 +18,28 @@ use crate::types::SceneId;
 pub struct ScheduledBatch {
     pub present_at_wall_us: u64,
     pub batch: MutationBatch,
+    pub(crate) publication_origin: Option<SceneId>,
 }
 
 impl SceneGraph {
     /// Hold `batch` until `present_at_wall_us`, then apply it on the first
     /// commit at or after that time. Validation happens at apply time.
     pub fn schedule_batch(&mut self, present_at_wall_us: u64, batch: MutationBatch) {
+        self.schedule_batch_for_origin(present_at_wall_us, batch, None);
+    }
+
+    /// The preclaim gRPC verb preserves its session ownership while held.
+    pub fn schedule_batch_for_origin(
+        &mut self,
+        present_at_wall_us: u64,
+        batch: MutationBatch,
+        publication_origin: Option<SceneId>,
+    ) {
+        let publication_origin = publication_origin.filter(|_| batch.lease_id.is_none());
         self.scheduled_batches.push(ScheduledBatch {
             present_at_wall_us,
             batch,
+            publication_origin,
         });
     }
 
@@ -46,6 +59,7 @@ impl SceneGraph {
         }
         self.scheduled_batches
             .retain(|s| !s.batch.mutations.is_empty());
+        self.prune_publication_orphans();
         cancelled
     }
 
@@ -86,6 +100,8 @@ impl SceneGraph {
     /// deadline first. Returns each batch's result so callers can report
     /// late rejections.
     pub fn apply_due_batches(&mut self) -> Vec<MutationResult> {
+        // Grace cancellation precedes materializing due content in every runtime.
+        self.reap_orphaned_publications(self.clock.now_millis());
         let now_us = self.clock.now_us();
         if !self
             .scheduled_batches
@@ -99,9 +115,16 @@ impl SceneGraph {
             .partition(|s| s.present_at_wall_us <= now_us);
         self.scheduled_batches = pending;
         due.sort_by_key(|s| s.present_at_wall_us);
-        due.into_iter()
-            .map(|s| self.apply_batch(&s.batch))
-            .collect()
+        // Due payloads stay outside the scene's per-batch rollback snapshots.
+        // Defer orphan pruning until all due origins have had a chance to apply.
+        let orphan_deadlines = std::mem::take(&mut self.publication_orphans);
+        let results = due
+            .into_iter()
+            .map(|s| self.apply_batch_for_origin(&s.batch, s.publication_origin))
+            .collect();
+        self.publication_orphans = orphan_deadlines;
+        self.prune_publication_orphans();
+        results
     }
 
     /// Stamp the batch's `expires_at` on the tiles it created or targeted.

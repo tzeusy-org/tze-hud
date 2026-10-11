@@ -792,10 +792,16 @@ mod tests {
 
     #[test]
     fn restart_is_single_flight_and_failure_leaves_it_retryable() {
+        const RETRY_FINISHED: &str = "restart retry spawn completed";
+        let spawn_calls = Arc::new(AtomicUsize::new(0));
+        let s = Arc::clone(&spawn_calls);
         let quit_calls = Arc::new(AtomicUsize::new(0));
         let q = Arc::clone(&quit_calls);
         let h = RestartHandle::with_spawner(
-            Box::new(|_| {
+            Box::new(move |_| {
+                if s.fetch_add(1, Ordering::SeqCst) == 1 {
+                    return Err(io::Error::other(RETRY_FINISHED));
+                }
                 Ok(Box::new(Fake {
                     exited: Arc::new(Mutex::new(None)),
                     killed: Arc::new(AtomicBool::new(false)),
@@ -819,6 +825,66 @@ mod tests {
         assert_eq!(quit_calls.load(Ordering::SeqCst), 0);
         // The silent child timed out, so the old instance may try again.
         h.request().unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !h.last_json()["error"]
+            .as_str()
+            .is_some_and(|error| error.contains(RETRY_FINISHED))
+        {
+            assert!(Instant::now() < deadline, "second restart never finished");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(spawn_calls.load(Ordering::SeqCst), 2);
+        assert_eq!(h.last_json()["ok"], json!(false));
+        assert_eq!(quit_calls.load(Ordering::SeqCst), 0);
+
+        // Panic inside the actual restart worker, with its BusyGuard held.
+        // A distinct retry result proves completion, rather than a stale result.
+        const AFTER_PANIC: &str = "restart after panic spawn completed";
+        let panic_entries = Arc::new(AtomicUsize::new(0));
+        let entries = Arc::clone(&panic_entries);
+        let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+        let q = Arc::clone(&quit_calls);
+        let panicking = RestartHandle::with_spawner(
+            Box::new(move |_| {
+                let entry = entries.fetch_add(1, Ordering::SeqCst);
+                if entry == 0 {
+                    entered_tx.send(()).unwrap();
+                    panic!("controlled restart spawner panic");
+                }
+                assert_eq!(entry, 1, "unexpected extra restart worker");
+                Err(io::Error::other(AFTER_PANIC))
+            }),
+            Arc::new(move || {
+                q.fetch_add(1, Ordering::SeqCst);
+            }),
+            SHORT,
+            Busy::default(),
+        );
+        assert_eq!(panicking.last_json(), Value::Null);
+        panicking.request().unwrap();
+        entered_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            match panicking.request() {
+                Ok(()) => break,
+                Err(RestartError::Busy) => {
+                    assert!(Instant::now() < deadline, "panic left restart busy");
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                Err(error) => panic!("retry could not start: {error:?}"),
+            }
+        }
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !panicking.last_json()["error"]
+            .as_str()
+            .is_some_and(|error| error.contains(AFTER_PANIC))
+        {
+            assert!(Instant::now() < deadline, "panic retry never finished");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(panic_entries.load(Ordering::SeqCst), 2);
+        assert_eq!(panicking.last_json()["ok"], json!(false));
+        assert_eq!(quit_calls.load(Ordering::SeqCst), 0);
     }
 
     #[test]

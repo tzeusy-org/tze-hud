@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Bounded Linux/WSL stdio client for the HUD's existing authenticated HTTP MCP.
 
-Each accepted message has a 60s absolute deadline and owns one of four child
-slots until that child is reaped. Cancellation is local best effort: a POST
+Initialize has a 3s absolute startup deadline; established messages retain 60s.
+Each owns one of four child slots until reaped. Cancellation is local best effort: a POST
 already accepted remotely is never replayed or rolled back. Native macOS and
 Windows client lifetime primitives are unsupported; the Windows HUD is unchanged.
 """
@@ -15,6 +15,7 @@ import json
 import os
 import selectors
 import signal
+import socket
 import subprocess
 import sys
 import time
@@ -26,6 +27,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import hud_env
 
 REQUEST_SECONDS = 60.0
+INITIALIZE_SECONDS = 3.0
+INITIALIZE_TIMEOUT = "HUD initialize DNS/TCP/startup deadline exceeded (phase unavailable)"
 TERM_SECONDS = 1.0
 KILL_SECONDS = 1.0
 OUTPUT_STALL_SECONDS = 5.0
@@ -61,6 +64,8 @@ def worker(parent: int, deadline: float) -> int:
     request_id = None
     notification = False
     failed = False
+    initializing = False
+    phase = "protocol"
     try:
         data = sys.stdin.buffer.read(MAX_REQUEST + 4097)
         job = json.loads(data, parse_constant=invalid_number)
@@ -73,7 +78,10 @@ def worker(parent: int, deadline: float) -> int:
         if not notification and not valid_id(request_id):
             request_id = None
             raise ValueError("invalid worker request ID")
+        initializing = request["method"] == "initialize"
+        phase = "auth"
         key = hud_env.adapter_key(job["endpoint"])
+        phase = "protocol"
         url = urlsplit(job["endpoint"]["url"])
         body = json.dumps(request, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode()
         headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json",
@@ -82,13 +90,18 @@ def worker(parent: int, deadline: float) -> int:
             headers["MCP-Protocol-Version"] = job["protocol"]
         connection = http.client.HTTPConnection(url.hostname, url.port, timeout=max(0.001, deadline - time.monotonic()))
         try:
+            phase = "TCP"
+            connection.connect()
+            phase = "response/read"
             connection.request("POST", "/mcp", body=body, headers=headers)
             response = connection.getresponse()
             if response.status != 200 and not (notification and response.status == 202):
+                phase = "auth" if response.status in (401, 403) else "HTTP"
                 raise ValueError("HTTP refusal or redirect")
             raw = response.read(MAX_RESPONSE + 1)
         finally:
             connection.close()
+        phase = "protocol"
         if len(raw) > MAX_RESPONSE or key.encode() in raw:
             raise ValueError("unsafe or oversized response")
         result = None if notification else json.loads(raw, parse_constant=invalid_number)
@@ -97,9 +110,16 @@ def worker(parent: int, deadline: float) -> int:
         if not notification and (not isinstance(result, dict) or result.get("jsonrpc") != "2.0"
                                  or not valid_id(result.get("id")) or result.get("id") != request_id):
             raise ValueError("invalid response")
+    except socket.gaierror:
+        failed = True
+        result = None if notification else failure(
+            request_id, "HUD initialize DNS lookup failed" if initializing else "HUD connection failed"
+        )
     except Exception:
         failed = True
-        result = None if notification else failure(request_id)
+        result = None if notification else failure(
+            request_id, f"HUD initialize {phase} failed" if initializing else "HUD connection failed"
+        )
     # Parent owns stdout; this pipe carries one bounded private result only.
     sys.stdout.buffer.write(json.dumps(result, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode())
     sys.stdout.buffer.flush()
@@ -215,7 +235,8 @@ class Adapter:
                        or any("id" in r and r["id"] == request_id for r, _ in self.waiting)):
             self.queue(failure(request_id, "Request ID is already pending"))
             return
-        deadline = deadline if deadline is not None else time.monotonic() + REQUEST_SECONDS
+        seconds = INITIALIZE_SECONDS if method == "initialize" else REQUEST_SECONDS
+        deadline = deadline if deadline is not None else time.monotonic() + seconds
         if len(self.tasks) + len(self.waiting) >= MAX_WORKERS or time.monotonic() >= deadline:
             if has_id:
                 self.queue(failure(request_id, "HUD request deadline or capacity exceeded"))
@@ -279,7 +300,7 @@ class Adapter:
                 break
             line, _, rest = self.input.partition(b"\n")
             self.input = bytearray(rest)
-            deadline = time.monotonic() + REQUEST_SECONDS
+            accepted_at = time.monotonic()
             if len(line) > MAX_REQUEST:
                 self.queue(failure(None, "Request exceeds the HUD client limit"))
                 continue
@@ -291,7 +312,9 @@ class Adapter:
                 request_id = request.get("id") if isinstance(request, dict) else None
                 self.queue(failure(request_id if valid_id(request_id) else None, "Invalid JSON-RPC message"))
                 continue
-            self.admit(request, deadline)
+            seconds = (INITIALIZE_SECONDS if isinstance(request, dict)
+                       and request.get("method") == "initialize" else REQUEST_SECONDS)
+            self.admit(request, accepted_at + seconds)
 
     def result(self, task):
         try:
@@ -303,7 +326,11 @@ class Adapter:
             elif response is not None:
                 raise ValueError("invalid worker notification response")
         except (TypeError, ValueError, UnicodeError):
-            response = failure(task.request.get("id"))
+            message = "HUD connection failed"
+            if task.request["method"] == "initialize":
+                message = (INITIALIZE_TIMEOUT if task.process.returncode == -signal.SIGALRM
+                           else "HUD initialize startup/protocol failed (phase unavailable)")
+            response = failure(task.request.get("id"), message)
         if task.cancelled:
             return
         method = task.request["method"]
@@ -353,7 +380,8 @@ class Adapter:
                 return False
             elif task.abort_phase is None and now >= task.deadline:
                 if "id" in task.request:
-                    self.queue(failure(task.request["id"], "HUD request deadline exceeded"))
+                    message = INITIALIZE_TIMEOUT if task.request["method"] == "initialize" else "HUD request deadline exceeded"
+                    self.queue(failure(task.request["id"], message))
                 if task.request["method"] == "initialize":
                     self.initializing = False
                 self.abort([task])

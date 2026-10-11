@@ -199,6 +199,7 @@ unknown PSK) is a JSON-RPC error.
 
 - The message isn't repeated. The hint names the next call.
 - Typed zone content is strict: an unknown or nested key is `INVALID_ARGUMENT` with the allowed keys in the hint, and so is empty content (a notification with no title or body, `stream_text` without text, `solid_color` missing r/g/b; over gRPC, a blank notification).
+- A sequence-valid post-handshake gRPC `ClientMessage` with no recognized request payload returns `RequestResult{ok: false, code: INVALID_ARGUMENT}` with a hint to use the current schema and a supported request. This covers empty envelopes and requests containing only unknown or removed fields. Protobuf discards those fields, so the server cannot identify the discarded request tag or name. Unknown fields alongside a recognized request keep its normal behavior.
 - Codes are a closed set shared by both planes (invariant 8;
   `crates/tze_hud_scene/src/error_codes.rs` `ERROR_CODES`, kept in sync with
   this list by a test). gRPC `RequestResult.code` uses the same set, checked
@@ -252,11 +253,28 @@ down to the lifecycle.
   bounds or z-order.
 - **Every `RequestResult` carries `code` + `hint`.** Scene validation hints
   reach the agent rather than being flattened to `MUTATION_REJECTED`.
-  `seq` echoes the request's `sequence`; ephemeral zone publishes get no
-  reply. `ClaimTile`, `Hold`, and `Clear` retransmits replay the cached reply.
+  `seq` echoes the request's `sequence`, including legacy zero and rejected
+  empty/unknown-only envelopes; those rejections keep the stream open.
+  Ephemeral zone publishes get no reply. `ClaimTile`, `Hold`, and `Clear`
+  retransmits replay the cached reply.
 - **Timing hints are honored**, not just validated: `present_at_us` holds
   content, and `expires_at_us` sweeps it (invariant 1). On `Publish`,
   `expires_at_us` wins over `ttl_ms`, which counts from presentation.
+- **Zero means the surface default on `Publish`.** Omitted scalar fields
+  arrive as zero. With both `ttl_ms` and `expires_at_us` zero, notifications
+  expire after 8 s (urgency 0/1), 15 s (2), or 30 s (3+), counted from
+  presentation. Other zone content and widget publications have no derived
+  content expiry. MCP differs: omitted zone `ttl_ms` gives 60 s, while an
+  explicit `ttl_ms: 0` holds even a notification until cleared.
+- **Hold a notification with `Publish`, then `Hold{surface, ttl_ms: 0}`.**
+  Hold removes content expiry from the agent's active and pending publications
+  on that zone; it is namespace-wide, not limited to one merge key. Pending
+  content still waits for `present_at_us`, and `Clear` cancels it. The two
+  requests are not atomic: if nothing remains when Hold arrives, it returns
+  `NOT_HELD`. A later Publish uses its own timing, so republishing a
+  notification can restore an expiry. Held content remains subject to
+  clearing, human override and lease/session-origin reclamation (invariant 4);
+  Hold does not make a lease immortal. There is no atomic held mode on Publish.
 - **Runtime-internal mutations.** `CreateTile`, `PublishToTile`, and the
   portal mutations (`MutationProto` 13–17) are applied only by the runtime's
   in-process portal driver. The session server rejects them from agents with
@@ -414,6 +432,19 @@ acceptance flows (`docs/scope.md`), run end to end against `production.toml`.
 Its discover budget is the production row above: the three built-in widgets
 add about 100 tokens, all typed parameter names and ranges the model needs to
 publish, so shrinking further would drop information the model acts on.
+
+These four parameters remain because they control behavior in the shipped bundles:
+
+- `status-indicator.theme` selects the widget's minimal, system, or friendly
+  appearance independently of the global `[design_tokens].theme`; publishers
+  need that choice when selecting a status presentation.
+- `status-indicator.tooltip_visible` is a declared `f32` parameter used by the
+  delayed runtime-local hover path to reveal the tooltip. The loader validates
+  that hover target and its SVG bindings against the parameter schema.
+- `gauge.label` supplies publisher-chosen metric identification inside the hover
+  tooltip, so a gauge can explain which quantity its value represents.
+- `progress-bar.label` supplies publisher-chosen task or progress text centered
+  on the bar, bounded to 32 bytes by its schema.
 
 ## Design decisions (T5, 2026-10-02)
 
