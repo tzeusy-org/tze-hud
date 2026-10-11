@@ -451,7 +451,7 @@ def test_hud_env_derives_urls_and_reads_the_file(hud, monkeypatch):
     endpoint_file(home).chmod(0o600)
 
 
-def test_admin_sends_the_paired_psk_as_bearer(hud):
+def test_admin_sends_the_paired_psk_as_bearer(hud, monkeypatch, capsys):
     host, home = hud
     pair(host, home)
     env = {**os.environ, "HOME": str(home), "HUD_HOST": host}
@@ -461,6 +461,112 @@ def test_admin_sends_the_paired_psk_as_bearer(hud):
     )
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout) == {"path": "/admin/logs?tail=5"}
+
+    monkeypatch.syspath_prepend(str(SCRIPTS))
+    monkeypatch.setenv("HOME", str(home))
+    import hud_admin as admin
+
+    sha, marker = "a" * 40, "synthetic-private-doctor-detail"
+    trace, outcome = [], {}
+
+    def resolve(*args, **kwargs):
+        trace.append("dns")
+        if outcome.get("dns"):
+            raise outcome["dns"]
+        return [(admin.socket.AF_INET, admin.socket.SOCK_STREAM, 0, "", ("127.0.0.1", 9090))]
+
+    class Connection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return False
+
+        def settimeout(self, seconds):
+            assert seconds == admin.DOCTOR_LAYER_SECONDS
+
+        def connect(self, address):
+            trace.append("tcp")
+            assert address == ("127.0.0.1", 9090)
+            if outcome.get("tcp"):
+                raise outcome["tcp"]
+
+    class Response:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return False
+
+        def read(self, limit):
+            assert limit == 131073
+            return json.dumps(self.payload).encode()
+
+    class Opener:
+        def open(self, request, timeout):
+            assert request.get_method() == "GET" and request.data is None
+            assert timeout == admin.DOCTOR_LAYER_SECONDS
+            if request.full_url.endswith("/admin/status"):
+                trace.append("auth")
+                assert request.full_url == f"http://{host}/admin/status"
+                assert request.get_header("Authorization") == f"Bearer {FakeHud.last_psk}"
+                if outcome.get("auth"):
+                    raise admin.urllib.error.HTTPError(request.full_url, outcome["auth"], marker, {}, None)
+                return Response({"sha": outcome.get("sha", sha), "agents": marker,
+                                 "tailnet_inbound": {"state": outcome.get("firewall", "allowed"), "error": marker}})
+            assert request.get_header("Authorization") is None
+            trace.append("release")
+            if outcome.get("release"):
+                raise admin.urllib.error.HTTPError(request.full_url, outcome["release"], marker, {}, None)
+            if request.full_url.endswith("/releases/tags/dev"):
+                return Response({"tag_name": "dev", "draft": False, "target_commitish": "main", "assets": marker})
+            if request.full_url.endswith("/git/ref/tags/dev"):
+                return Response({"object": {"type": "tag", "sha": "b" * 40}})
+            assert request.full_url == admin.DEV_API + "/git/tags/" + "b" * 40
+            return Response({"object": {"type": "commit", "sha": outcome.get("latest", sha)}})
+
+    monkeypatch.setattr(admin.socket, "getaddrinfo", resolve)
+    monkeypatch.setattr(admin.socket, "socket", lambda *_: Connection())
+    monkeypatch.setattr(admin.urllib.request, "build_opener", lambda handler: Opener())
+    cases = [
+        ({}, 0, "dev_commit", None, ["dns", "tcp", "auth", "release", "release", "release"]),
+        ({"dns": admin.socket.gaierror(marker)}, 1, "dns", "resolution_failed", ["dns"]),
+        ({"tcp": ConnectionRefusedError(marker)}, 1, "tcp", "connection_refused", ["dns", "tcp"]),
+        ({"tcp": TimeoutError(marker)}, 1, "tcp", "deadline_exceeded", ["dns", "tcp"]),
+        *[({"auth": code}, 1, "auth", reason, ["dns", "tcp", "auth"])
+          for code, reason in [(401, "unauthenticated"), (403, "not_admin"), (500, "http_error")]],
+        *[({"firewall": state}, 1, "firewall", state, ["dns", "tcp", "auth"])
+          for state in ["blocked", "unknown", "not_applicable"]],
+        ({"sha": "unknown"}, 1, "build", "unknown", ["dns", "tcp", "auth"]),
+        ({"release": 403}, 1, "release", "http_error", ["dns", "tcp", "auth", "release"]),
+        ({"latest": "main"}, 1, "release", "unknown", ["dns", "tcp", "auth", "release", "release", "release"]),
+        ({"latest": "c" * 40}, 1, "build", "sha_mismatch", ["dns", "tcp", "auth", "release", "release", "release"]),
+    ]
+    for configured, code, layer, reason, expected in cases:
+        outcome.clear()
+        outcome.update(configured)
+        trace.clear()
+        assert admin.main(["--host", host, "doctor"]) == code
+        captured = capsys.readouterr()
+        observed = json.loads(captured.out)
+        assert observed["layer"] == layer and observed.get("reason") == reason
+        assert trace == expected and not captured.err
+        assert marker not in captured.out and FakeHud.last_psk not in captured.out
+        if code:
+            assert observed["action"]
+
+    # A whole-layer alarm bounds a resolver that ignores socket timeouts.
+    if hasattr(admin.signal, "setitimer"):
+        monkeypatch.setattr(admin, "DOCTOR_LAYER_SECONDS", 0.01)
+        monkeypatch.setattr(admin.socket, "getaddrinfo", lambda *a, **k: time.sleep(0.1))
+        assert admin.main(["--host", host, "doctor"]) == 1
+        assert json.loads(capsys.readouterr().out)["reason"] == "deadline_exceeded"
+    monkeypatch.delattr(admin.signal, "setitimer", raising=False)
+    assert admin.main(["--host", host, "doctor"]) == 1
+    assert json.loads(capsys.readouterr().out)["reason"] == "deadline_unavailable"
 
 
 def test_pair_creates_a_private_dir_and_ignores_planted_files(hud):

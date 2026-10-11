@@ -324,6 +324,107 @@ def test_parse_tile_count_finds_the_line_among_other_output():
             ws.parse_tile_count(bad)
 
 
+def test_borrowed_url_routes_only_authorized_publications_and_own_cleanup(monkeypatch, capsys):
+    import json
+
+    scripts = Path(__file__).resolve().parents[2] / ".claude/skills/user-test/scripts"
+    monkeypatch.syspath_prepend(str(scripts))
+    import hud_env
+
+    trace, held, faults = [], set(), {}
+    entries = [{"s": "zone:subtitle", "accepts": "text"},
+               *[{"s": "widget:" + name} for name in ("main-gauge", "main-progress", "main-status")]]
+    key = "synthetic-live-smoke-key"
+    monkeypatch.setattr(hud_env, "load_psk", lambda selected: key if selected == "http://paired:9090/mcp" else pytest.fail("wrong pairing"))
+
+    class Response:
+        def __init__(self, result):
+            self.result = result
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return False
+
+        def read(self):
+            return json.dumps({"result": self.result}).encode()
+
+    class Opener:
+        def open(self, request, timeout):
+            assert request.full_url == "http://paired:9090/mcp"
+            assert request.get_method() == "POST" and request.get_header("Authorization") == "Bearer " + key
+            body = json.loads(request.data)
+            method, params = body["method"], body.get("params", {})
+            if method == "initialize":
+                trace.append("initialize")
+                return Response({})
+            if method == "tools/list":
+                return Response({"tools": [{"name": name} for name in ws.TOOLS]})
+            tool, args = params["name"], params["arguments"]
+            surface = args.get("surface")
+            trace.append((tool, surface))
+            if tool == "hud_surfaces":
+                payload = {"surfaces": [{**entry, **({"held": True} if entry["s"] in held else {})} for entry in entries]
+                           + [{"s": name, "state": "attached"} for name in held if name.startswith("portal:")]}
+            elif tool == "hud_input":
+                payload = {"items": []}
+            elif surface == "zone:no-such-zone":
+                return Response({"isError": True, "content": [{"text": json.dumps({"code": "ZONE_NOT_FOUND", "hint": "unknown"})}]})
+            elif tool == "hud_publish":
+                held.add(surface)
+                if faults.get("lost_reply"):
+                    raise ws.urllib.error.URLError("synthetic-private-response-detail")
+                payload = {"ok": True}
+            elif tool == "hud_clear":
+                assert surface in held  # No clearing a pre-existing/untracked surface.
+                held.remove(surface)
+                payload = {"ok": True}
+            else:
+                pytest.fail("unexpected tool")
+            return Response({"content": [{"text": json.dumps(payload)}]})
+
+    monkeypatch.setattr(ws.urllib.request, "build_opener", lambda handler: Opener())
+    monkeypatch.setattr(ws.time, "sleep", lambda _: None)
+    for name in ("seed_config", "wait_for_mcp", "check_pair", "check_restart", "check_tile_orphan", "run_quiescent", "kill_pid"):
+        monkeypatch.setattr(ws, name, lambda *a, **k: pytest.fail("borrowed process/lifecycle mutation"))
+    monkeypatch.setattr(ws.subprocess, "Popen", lambda *a, **k: pytest.fail("borrowed spawn"))
+    checks = []
+    for name in ("check_admin", "check_widget", "check_notification_ttl", "check_delay"):
+        monkeypatch.setattr(ws, name, lambda smoke, name=name: checks.append(name))
+    assert ws.main(["--url", "http://paired:9090/mcp"]) == 0
+    assert checks == ["check_admin", "check_widget", "check_notification_ttl", "check_delay"]
+    assert not held
+    portals = [row[1] for row in trace if isinstance(row, tuple) and row[0] == "hud_publish" and row[1].startswith("portal:")]
+    assert len(portals) == 1 and portals[0].startswith("portal:live-smoke-")
+    assert {row[1] for row in trace if isinstance(row, tuple) and row[0] == "hud_clear"} == {"widget:main-gauge", "zone:subtitle", portals[0]}
+    captured = capsys.readouterr()
+    assert captured.out.count("UNEXECUTED owner-only:") == 6 and key not in captured.out + captured.err
+
+    # A lost publish reply can still mean a mutation: clean its tracked surface.
+    trace.clear()
+    faults["lost_reply"] = True
+    assert ws.main(["--url", "http://paired:9090/mcp"]) == 1
+    assert not held
+    assert [row for row in trace if isinstance(row, tuple) and row[0] == "hud_clear"] == [("hud_clear", "widget:main-gauge")]
+    captured = capsys.readouterr()
+    assert "synthetic-private-response-detail" not in captured.out + captured.err
+    faults.clear()
+
+    trace.clear()
+    held.add("zone:subtitle")
+    assert ws.main(["--url", "http://paired:9090/mcp"]) == 1
+    assert held == {"zone:subtitle"} and trace == ["initialize", ("hud_surfaces", None)]
+    assert "FAIL borrowed" in capsys.readouterr().err
+    for argv in ([], ["--url", "http://paired", "--exe", "hud.exe"], ["--url", "http://paired", "--config", "x"], ["--exe", "hud.exe"]):
+        with pytest.raises(SystemExit) as failed:
+            ws.main(argv)
+        assert failed.value.code == 2
+    # Owned quiescent routing and its required config remain supported.
+    monkeypatch.setattr(ws, "run_quiescent", lambda args: 17)
+    assert ws.main(["--exe", "hud.exe", "--config", "production.toml", "--quiescent-with-content"]) == 17
+
+
 def test_quiescent_summary_reports_the_gate_counters(tmp_path, monkeypatch, capsys, subtests):
     artifact = {
         "gpu": {"presents": 2, "queue_submissions": 2, "surface_acquisitions": 2},

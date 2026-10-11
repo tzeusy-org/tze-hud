@@ -73,6 +73,36 @@ and never automatically replayed.
 6. **On failure:** `hud_admin.py logs --tail 200`, plus `status` (`last_update`,
    `last_restart`, `safe_mode`). Quote exact error payloads.
 
+### Read-only diagnosis and authorized live smoke
+
+`python3 .claude/skills/user-test/scripts/hud_admin.py doctor` checks DNS,
+TCP, authenticated `/admin/status`, tailnet inbound policy, then the running
+build commit against the resolved rolling `dev` tag. It stops at the first
+failure or unknown with an owner action; it never pairs, repairs, updates or
+restarts. Each network layer has a five-second deadline, including DNS and
+response reads. This agent-host command requires POSIX alarm support; on an
+unsupported host it reports `deadline_unavailable` rather than running an
+unbounded probe. A 401 requires a valid pairing; 403 `NOT_ADMIN` requires the
+owner's admin pairing. Neither grants permission to elevate or re-pair.
+
+After explicit authorization to publish test content, use:
+
+```bash
+python3 scripts/ci/windows_smoke.py --url http://<host>:9090/mcp
+```
+
+This smoke is **mutating**, unlike `doctor`. Use an idle dedicated paired
+agent with no concurrent or pending publications. Existing holdings/portals
+are refused; a unique smoke portal and touched surfaces are tracked for
+cleanup. MCP clears are agent-and-surface scoped, not atomic per-run tokens;
+other agents' content is untouched, but a concurrent use of the same pairing
+is unsupported. The URL route never owns or kills the HUD, seeds config or
+credentials, reopens pairing, restarts, updates, or repairs firewall rules.
+Owned startup/config/WARP, pair/wrong-code, executable restart/health,
+quiescent-efficiency emission, resident POC/orphan and theme/fixture capture
+checks are individually reported `UNEXECUTED owner-only`. They stay in the
+owned CI `--exe` route. This route does not replace the required owner-host acceptance run.
+
 ## Publish
 
 Discover first, never invent surface names:
