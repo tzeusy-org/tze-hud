@@ -27,7 +27,6 @@ Install these and make sure each one is on `PATH`:
 |---|---|---|
 | Visual Studio Build Tools, "Desktop development with C++" | MSVC linker, plus `rc.exe` from the Windows SDK | `app/tze_hud_app/build.rs` embeds the DPI manifest with `embed-resource`, which needs the SDK resource compiler |
 | rustup | Toolchain | `rust-toolchain.toml` pins 1.88 with rustfmt and clippy. The default host triple must be `x86_64-pc-windows-msvc` |
-| `protoc` | `tze_hud_protocol` build | CI uses protobuf v29.3 `win64.zip`. Unzip it and add `bin\` to `PATH`, or set `PROTOC` |
 | Git for Windows | Git, plus `sh`, `bash`, `env` and `cygpath` for `just` recipes and git hooks | See [Git settings](#git-settings); Bash shebang recipes use their declared interpreter |
 | `just` | `just ci` and other recipes | `winget install Casey.Just` |
 | `cargo-nextest`0.9.114 | Required by `just test` | `cargo install --locked --version 0.9.114 cargo-nextest`; verify `cargo nextest --version` |
@@ -35,6 +34,12 @@ Install these and make sure each one is on `PATH`:
 | `gh` | PRs, releases | |
 | Tailscale | Reaching the Beads Dolt server | See [Beads](#beads) |
 | `bd` | Issue tracking | |
+
+Protocol generation uses Cargo's pinned `protoc-bin-vendored =3.2.0` (protoc
+31.1), selecting the native build-host binary explicitly. It does not use a
+system `protoc` or `PROTOC` override. Linux-to-Windows cross-builds select the
+Linux tool; native Windows builds select the bundled executable. Unsupported
+hosts fail without falling back.
 
 ### Git settings
 
@@ -370,7 +375,7 @@ arguments.
 again whenever a dependency is added. It is idempotent, and it installs or
 reports everything the gates need. That includes `mesa-vulkan-drivers` and
 `libvulkan1`, so GPU recipes pin llvmpipe instead of the WSL GPU driver,
-`protoc` 3.15 or later, `mingw-w64` for `clippy-windows-gnu`, required pinned
+`mingw-w64` for actual Windows cross-linking (GNU Clippy uses portable Rust), required pinned
 `cargo-nextest`0.9.114 for `just test`, and the Python venv for `just test-python`. Without passwordless sudo, it prints the
 `apt-get install` line to run, and `just bootstrap --check` reports without
 installing. It also checks WSL interop, networking mode, and Tailscale. New

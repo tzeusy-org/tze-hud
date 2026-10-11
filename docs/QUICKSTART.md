@@ -66,8 +66,9 @@ The rest of this doc is the same flow, step by step, explaining each piece.
 
 - Linux with a display server (X11 or Wayland) — you need to be able to open a
   GPU window. Build deps and toolchain are in [`README.md`](../README.md)
-  (§1 Build). In short: `build-essential pkg-config protobuf-compiler`, the X/
-  Wayland `-dev` libs, and Rust 1.88 (pinned in `rust-toolchain.toml`).
+  (§1 Build). In short: `build-essential pkg-config`, the X/
+  Wayland `-dev` libs, and Rust 1.88 (pinned in `rust-toolchain.toml`). Cargo
+  fetches bundled protoc 31.1 for protocol generation; system protoc is unnecessary.
 - An LLM client that speaks **MCP over HTTP** and lets you set a bearer header —
   e.g. Claude Code or Codex with an MCP server entry.
 

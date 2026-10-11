@@ -48,6 +48,9 @@ proptest = { workspace = true }
 tempfile = { workspace = true }
 
 [build-dependencies]
+# Explicit Config selects the same pinned compiler on native and cross-target builds.
+prost-build = "=0.13.5"
+protoc-bin-vendored = "=3.2.0" # protoc 31.1; build-host tool, not shipped in the HUD
 tonic-build = "0.13"
 
 [package.metadata.cargo-machete]

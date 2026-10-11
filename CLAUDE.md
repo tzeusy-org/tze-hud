@@ -43,7 +43,7 @@ requirements. Do not restore them or design against them.
 
 See `AGENTS.md` for the `just` recipes (`just ci` mirrors the blocking CI gates)
 and operational notes. Run GPU tests with `just test-gpu` (llvmpipe-only), not bare
-`cargo test -p tze_hud_compositor`. Set `PROTOC` if `/usr/bin/protoc` is older than 3.15.
+`cargo test -p tze_hud_compositor`. Protocol generation uses bundled protoc 31.1 (`protoc-bin-vendored =3.2.0`) for the build host; it does not use system protoc or `PROTOC` overrides.
 
 ## LLM Self-Projection
 
