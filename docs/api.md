@@ -260,6 +260,21 @@ down to the lifecycle.
 - **Timing hints are honored**, not just validated: `present_at_us` holds
   content, and `expires_at_us` sweeps it (invariant 1). On `Publish`,
   `expires_at_us` wins over `ttl_ms`, which counts from presentation.
+- **Zero means the surface default on `Publish`.** Omitted scalar fields
+  arrive as zero. With both `ttl_ms` and `expires_at_us` zero, notifications
+  expire after 8 s (urgency 0/1), 15 s (2), or 30 s (3+), counted from
+  presentation. Other zone content and widget publications have no derived
+  content expiry. MCP differs: omitted zone `ttl_ms` gives 60 s, while an
+  explicit `ttl_ms: 0` holds even a notification until cleared.
+- **Hold a notification with `Publish`, then `Hold{surface, ttl_ms: 0}`.**
+  Hold removes content expiry from the agent's active and pending publications
+  on that zone; it is namespace-wide, not limited to one merge key. Pending
+  content still waits for `present_at_us`, and `Clear` cancels it. The two
+  requests are not atomic: if nothing remains when Hold arrives, it returns
+  `NOT_HELD`. A later Publish uses its own timing, so republishing a
+  notification can restore an expiry. Held content remains subject to
+  clearing, human override and lease/session-origin reclamation (invariant 4);
+  Hold does not make a lease immortal. There is no atomic held mode on Publish.
 - **Runtime-internal mutations.** `CreateTile`, `PublishToTile`, and the
   portal mutations (`MutationProto` 13–17) are applied only by the runtime's
   in-process portal driver. The session server rejects them from agents with
