@@ -18,7 +18,7 @@
 #   just dead-code <crate>  # advisory list of dead pub items in one crate
 #   just dev-mode-guard     # verify dev-mode is not enabled in any package's default build
 #   just idle-efficiency-checker # fail-closed idle artifact contract tests
-#   just clippy-windows-gnu # clippy on the windows-gnu target (skips if target/mingw missing)
+#   just clippy-windows-gnu # clippy on the windows-gnu target (skips if Rust target missing)
 #   just cargo-deny         # advisories/licenses/bans/sources (skips if cargo-deny missing)
 #   just overlay-harness-contract # pwsh overlay-harness contract test (skips if pwsh missing)
 #   just bootstrap # install/report dev-host deps (scripts/dev-bootstrap.sh; --check to report only)
@@ -206,17 +206,15 @@ deps-unused:
 # the tool, so these remain blocking there.
 
 # clippy on the windows-gnu cross-target (mirror CI clippy-windows-gnu job).
-# Needs `rustup target add x86_64-pc-windows-gnu` and mingw-w64.
+# Needs `rustup target add x86_64-pc-windows-gnu`; no MinGW compiler for lint.
+# The portable blake3 backend is scoped to this command. build-windows still needs MinGW.
 clippy-windows-gnu:
     #!/usr/bin/env bash
     set -euo pipefail
     if ! rustup target list --installed | grep -qx x86_64-pc-windows-gnu; then
         echo "SKIPPED: clippy-windows-gnu needs the rustup target (rustup target add x86_64-pc-windows-gnu)"; exit 0
     fi
-    if ! command -v x86_64-w64-mingw32-gcc >/dev/null; then
-        echo "SKIPPED: clippy-windows-gnu needs the MinGW cross toolchain (apt install mingw-w64)"; exit 0
-    fi
-    cargo clippy \
+    CARGO_FEATURE_PURE=1 cargo clippy \
         -p tze_hud_runtime \
         -p tze_hud_compositor \
         -p tze_hud_config \
@@ -266,7 +264,7 @@ build-windows *args:
 # Run all CI gates that are feasible locally. GPU and pixel_readback tests are
 # included via `test` (they need Mesa llvmpipe). clippy-windows-gnu, cargo-deny and
 # overlay-harness-contract are tool-gated: they print "SKIPPED: <reason>" and
-# pass when their tool (windows-gnu target + mingw, cargo-deny, pwsh) is absent.
+# pass when their tool (windows-gnu Rust target, cargo-deny, pwsh) is absent.
 # Excluded by design: the Windows-only jobs (windows.yml), the informational
 # test-gpu-pixel-readback job (covered by `test`), and the weekly perf lanes.
 # Runs in the same logical order as CI: fast-fail gates first, then tests.
