@@ -71,6 +71,7 @@ class Operations:
         self.saved = None
         self.receipt_value = None
         self.actions = []
+        self.native_mutations = []
         self.paths = {label: root / label for label in ("exe", "old", "stage", "failed", "lock")}
         self.paths["exe"].write_bytes(b"original executable")
         for name in ("config.toml", "agents.toml", "unrelated.old.exe"):
@@ -79,7 +80,7 @@ class Operations:
             self.paths["lock"].write_bytes(b"another transaction")
         if case == "stale":
             self.paths["old"].write_bytes(b"someone else's backup")
-        if case == "owned-backup":
+        if case in {"owned-backup", "owned-old-remove-timeout"}:
             self.paths["old"].write_bytes(b"previous own executable")
             self.receipt_value = {"schema": 1, "phase": "complete",
                                   "image": dr.windows_path(r"C:\Users\owner\dev\tze_hud.exe"),
@@ -138,19 +139,25 @@ class Operations:
                 "sha": "a" * 40 if self.case == "same-head" else "b" * 40}
 
     def lock(self):
+        self.native_mutations.append("lock")
         with self.paths["lock"].open("xb") as stream:
             stream.write(self.token.encode())
 
     def unlock(self):
+        self.native_mutations.append("unlock")
         self.paths["lock"].unlink()
 
     def journal(self, state):
+        self.native_mutations.append("journal")
+        if self.case == "initial-journal-timeout":
+            raise dr.FileOutcomeUnknown("simulated initial journal writer timeout")
         self.saved = json.loads(json.dumps(state))
 
     def receipt(self):
         return self.receipt_value
 
     def write_receipt(self, state):
+        self.native_mutations.append("write_receipt")
         self.receipt_value = json.loads(json.dumps(state))
 
     def file(self, label):
@@ -161,6 +168,7 @@ class Operations:
         return {"id": f"{info.st_dev}:{info.st_ino}", "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
 
     def copy_stage(self, build):
+        self.native_mutations.append("copy_stage")
         if self.case == "copy-timeout":
             raise dr.FileOutcomeUnknown("simulated interop writer timeout")
         if self.case == "copy":
@@ -169,6 +177,7 @@ class Operations:
         return self.file("stage")
 
     def rename(self, source, destination, expected):
+        self.native_mutations.append("rename")
         self.actions.append((source, destination))
         if ((self.case == "park" and source == "exe" and destination == "old")
                 or (self.case == "place" and source == "stage")
@@ -184,6 +193,10 @@ class Operations:
 
     def remove(self, label, expected):
         assert self.file(label) == expected
+        self.native_mutations.append("remove")
+        if self.case == "owned-old-remove-timeout":
+            assert label == "old"
+            raise dr.FileOutcomeUnknown("simulated owned backup remover timeout")
         self.paths[label].unlink()
 
     def restart(self, timeout):
@@ -263,3 +276,32 @@ def test_dev_run_production_refusal_transaction_and_bounded_restart(tmp_path):
         signal.setitimer(signal.ITIMER_REAL, 0)
         signal.signal(signal.SIGALRM, original_handler)
         signal.setitimer(signal.ITIMER_REAL, *original_timer)
+
+
+    # Keep the entire existing 27-case and active-alarm prefix above. Exercise
+    # both initial unknown writers before comparing their retained-lock traces.
+    unknown_initial_writes = []
+    for case in ("initial-journal-timeout", "owned-old-remove-timeout"):
+        ops = Operations(tmp_path / case, case)
+        protected = {name: (ops.root / name).read_bytes()
+                     for name in ("exe", "old", "config.toml", "agents.toml", "unrelated.old.exe")
+                     if (ops.root / name).exists()}
+        prior_receipt = ops.receipt_value
+        with pytest.raises(dr.FileOutcomeUnknown):
+            dr.deploy(ops)
+        assert ops.builds == ops.posts == 0 and not ops.actions
+        assert ops.saved is None and ops.receipt_value == prior_receipt
+        assert not ops.paths["stage"].exists() and not ops.paths["failed"].exists()
+        assert all((ops.root / name).read_bytes() == data for name, data in protected.items())
+        unknown_initial_writes.append({
+            "case": case,
+            "lock_retained": (ops.paths["lock"].exists()
+                              and ops.paths["lock"].read_bytes() == ops.token.encode()),
+            "native_mutations": ops.native_mutations,
+        })
+    assert unknown_initial_writes == [
+        {"case": "initial-journal-timeout", "lock_retained": True,
+         "native_mutations": ["lock", "journal"]},
+        {"case": "owned-old-remove-timeout", "lock_retained": True,
+         "native_mutations": ["lock", "remove"]},
+    ]

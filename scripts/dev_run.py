@@ -157,6 +157,10 @@ class Transaction:
             if self.state["old_file"] is None:
                 raise DevRunError("verified executable disappeared")
             self.save()
+        except FileOutcomeUnknown:
+            # The native writer may still own this initial operation. Retain
+            # the lock and do not race it with any cleanup mutation.
+            raise
         except Exception:
             self.ops.unlock()
             raise
