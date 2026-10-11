@@ -216,6 +216,268 @@ mod tests {
         }
         assert!(builtin_theme_names().any(|n| n == DEFAULT_THEME));
 
+        // Built-in portal colors come from each theme, not portal fallbacks.
+        // Contrast models settled linear-light fills, not rendered screenshots,
+        // fades, desktop composition during transitions, or user overrides.
+        {
+            let role_colors = [
+                ("portal.frame.background", "color.surface.container"),
+                ("portal.frame.border_color", "color.outline.variant"),
+                ("portal.header.text_color", "color.on_surface"),
+                (
+                    "portal.composer.background",
+                    "color.surface.container.highest",
+                ),
+                ("portal.composer.text_color", "color.on_surface"),
+                ("portal.composer.at_capacity_color", "color.caution"),
+                ("portal.transcript.background", "color.surface.container"),
+                ("portal.transcript.text_color", "color.on_surface"),
+                ("portal.transcript.system_color", "color.on_surface.variant"),
+                (
+                    "portal.transcript.code_background",
+                    "color.surface.container.high",
+                ),
+                ("portal.transcript.code_text", "color.on_surface"),
+                ("portal.transcript.link_color", "color.primary"),
+                (
+                    "portal.transcript.dim_text_color",
+                    "color.on_surface.variant",
+                ),
+                (
+                    "portal.transcript.dim_background",
+                    "color.surface.container.low",
+                ),
+                ("portal.stale_marker.color", "color.caution"),
+                ("portal.disconnect_badge.color", "color.caution"),
+                ("portal.unread_indicator.color", "color.on_surface.variant"),
+                ("portal.awaiting_reply.color", "color.primary"),
+                ("portal.empty_state.color", "color.on_surface.variant"),
+                ("portal.connecting_marker.color", "color.primary"),
+                ("portal.activity_cue.color", "color.on_surface.variant"),
+                ("portal.streaming_cursor.color", "color.on_surface.variant"),
+                ("portal.delivery.inflight_color", "color.primary"),
+                ("portal.delivery.delivered_color", "color.success"),
+                ("portal.delivery.failed_color", "color.error"),
+                ("portal.timestamp.color", "color.on_surface.variant"),
+                ("portal.lifecycle.active_color", "color.success"),
+                ("portal.lifecycle.attached_color", "color.primary"),
+                ("portal.lifecycle.attention_color", "color.caution"),
+                (
+                    "portal.lifecycle.inactive_color",
+                    "color.on_surface.variant",
+                ),
+                ("portal.divider.color", "color.outline.variant"),
+                ("portal.unread_divider.color", "color.outline"),
+                (
+                    "portal.collapsed_card.background",
+                    "color.surface.container",
+                ),
+                ("portal.collapsed_card.text_color", "color.on_surface"),
+                ("portal.scroll_indicator.color", "color.outline"),
+                ("portal.composer.caret_color", "color.on_surface"),
+                (
+                    "portal.composer.placeholder_color",
+                    "color.on_surface.variant",
+                ),
+                ("portal.focus_ring.color", "color.primary"),
+                ("portal.window.resize_grip.color", "color.outline"),
+                (
+                    "portal.window.resize_grip.hover_color",
+                    "color.on_surface.variant",
+                ),
+            ];
+            let rgb = |value: &str| {
+                let hex = value.trim().strip_prefix('#').unwrap();
+                assert_eq!(hex.len(), 6, "settled foreground/background must be opaque");
+                [0, 2, 4]
+                    .map(|i| f64::from(u8::from_str_radix(&hex[i..i + 2], 16).unwrap()) / 255.0)
+            };
+            let linearize = |channel: f64| {
+                if channel <= 0.04045 {
+                    channel / 12.92
+                } else {
+                    ((channel + 0.055) / 1.055).powf(2.4)
+                }
+            };
+            let luminance = |channels: [f64; 3]| {
+                0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2]
+            };
+            let contrast = |foreground: [f64; 3], background: [f64; 3]| {
+                let a = luminance(foreground);
+                let b = luminance(background);
+                (a.max(b) + 0.05) / (a.min(b) + 0.05)
+            };
+            for (name, _) in BUILTIN_THEMES {
+                let theme = builtin_theme(name).unwrap();
+                let selected = resolve_config_tokens(&tokens(&[(THEME_KEY, name)]));
+                assert_eq!(role_colors.len() + 1, PORTAL_COLOR_KEYS.len());
+                for (key, role) in role_colors {
+                    assert_eq!(theme[key], theme[role], "{name}: {key} must use {role}");
+                    assert_eq!(selected[key], theme[key], "{name} must supply {key}");
+                }
+                let hover = theme["state.hover.opacity"].parse::<f64>().unwrap();
+                assert!((0.0..=1.0).contains(&hover));
+                let alpha = (hover * 255.0).round() as u8;
+                let primary = &theme["color.primary"];
+                let selection = format!("{primary}{alpha:02X}");
+                assert_eq!(theme["portal.composer.selection_color"], selection);
+                assert_eq!(selected["portal.composer.selection_color"], selection);
+                let part = portal_tokens::resolve_portal_tokens(&selected);
+                assert_eq!(
+                    part.frame_background,
+                    parse_color_hex(&theme["color.surface.container"]).unwrap()
+                );
+                assert_eq!(part.transcript_background, part.frame_background);
+                assert_eq!(part.collapsed_background, part.frame_background);
+                assert_eq!(
+                    part.composer_background,
+                    parse_color_hex(&theme["color.surface.container.highest"]).unwrap()
+                );
+                assert_eq!(
+                    part.composer_selection_color,
+                    parse_color_hex(&selection).unwrap()
+                );
+                assert_eq!(
+                    part.frame_opacity,
+                    portal_tokens::PortalPartTokens::default().frame_opacity
+                );
+                for background_key in [
+                    "portal.frame.background",
+                    "portal.transcript.background",
+                    "portal.composer.background",
+                ] {
+                    let explicit = resolve_config_tokens(&tokens(&[
+                        (THEME_KEY, name),
+                        (background_key, "#abcdef"),
+                    ]));
+                    assert_eq!(
+                        explicit[background_key], "#abcdef",
+                        "explicit config wins over {name}"
+                    );
+                }
+                for (foreground, background) in [
+                    (
+                        "portal.transcript.text_color",
+                        "portal.transcript.background",
+                    ),
+                    (
+                        "portal.transcript.system_color",
+                        "portal.transcript.background",
+                    ),
+                    (
+                        "portal.transcript.link_color",
+                        "portal.transcript.background",
+                    ),
+                    ("portal.timestamp.color", "portal.transcript.background"),
+                    (
+                        "portal.awaiting_reply.color",
+                        "portal.transcript.background",
+                    ),
+                    (
+                        "portal.connecting_marker.color",
+                        "portal.transcript.background",
+                    ),
+                    ("portal.activity_cue.color", "portal.transcript.background"),
+                    (
+                        "portal.delivery.inflight_color",
+                        "portal.transcript.background",
+                    ),
+                    (
+                        "portal.delivery.delivered_color",
+                        "portal.transcript.background",
+                    ),
+                    (
+                        "portal.delivery.failed_color",
+                        "portal.transcript.background",
+                    ),
+                    ("portal.stale_marker.color", "portal.transcript.background"),
+                    (
+                        "portal.disconnect_badge.color",
+                        "portal.transcript.background",
+                    ),
+                    ("portal.empty_state.color", "portal.transcript.background"),
+                    (
+                        "portal.transcript.dim_text_color",
+                        "portal.transcript.dim_background",
+                    ),
+                    (
+                        "portal.transcript.code_text",
+                        "portal.transcript.code_background",
+                    ),
+                    (
+                        "portal.collapsed_card.text_color",
+                        "portal.collapsed_card.background",
+                    ),
+                    ("portal.header.text_color", "portal.composer.background"),
+                    ("portal.composer.text_color", "portal.composer.background"),
+                    (
+                        "portal.composer.placeholder_color",
+                        "portal.composer.background",
+                    ),
+                    (
+                        "portal.composer.at_capacity_color",
+                        "portal.composer.background",
+                    ),
+                ] {
+                    let ratio = contrast(
+                        rgb(&selected[foreground]).map(linearize),
+                        rgb(&selected[background]).map(linearize),
+                    );
+                    assert!(
+                        ratio >= 4.5,
+                        "{name}: {foreground}/{background} contrast {ratio}"
+                    );
+                }
+                let composer = rgb(&selected["portal.composer.background"]).map(linearize);
+                let primary = rgb(primary).map(linearize);
+                let alpha = f64::from(alpha) / 255.0;
+                let selection_background =
+                    std::array::from_fn(|i| composer[i] * (1.0 - alpha) + primary[i] * alpha);
+                for foreground in [
+                    "portal.composer.text_color",
+                    "portal.composer.at_capacity_color",
+                ] {
+                    let ratio = contrast(
+                        rgb(&selected[foreground]).map(linearize),
+                        selection_background,
+                    );
+                    assert!(
+                        ratio >= 4.5,
+                        "{name}: selected {foreground} contrast {ratio}"
+                    );
+                }
+                // White is the brightest desktop under the retained 0.98 frame;
+                // opaque child panes do not inherit this alpha. Test normal and
+                // degraded header fills separately, including the repeated fill.
+                let opacity = f64::from(part.frame_opacity);
+                let frame = rgb(&selected["portal.frame.background"]).map(linearize);
+                for header in [
+                    "portal.frame.background",
+                    "portal.transcript.dim_background",
+                ] {
+                    let header_rgb = rgb(&selected[header]).map(linearize);
+                    for repeated in [false, true] {
+                        let under = if repeated {
+                            std::array::from_fn(|i| frame[i] * opacity + 1.0 - opacity)
+                        } else {
+                            [1.0; 3]
+                        };
+                        let background = std::array::from_fn(|i| {
+                            header_rgb[i] * opacity + under[i] * (1.0 - opacity)
+                        });
+                        let ratio = contrast(
+                            rgb(&selected["portal.header.text_color"]).map(linearize),
+                            background,
+                        );
+                        assert!(
+                            ratio >= 4.5,
+                            "{name}: settled header {header}, repeated={repeated}, contrast {ratio}"
+                        );
+                    }
+                }
+            }
+        }
+
         // Enumerate the documented keys independently of the validator list:
         // every existing color must accept both formats and preserve the input.
         let documented_colors = [
