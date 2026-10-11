@@ -234,8 +234,12 @@ rolling `dev` release tag, in that order. It emits only a first-failure
 classification and owner action. `blocked`, `unknown`, `not_applicable`, an
 unknown build, unavailable release metadata and a commit mismatch fail;
 `target_commitish: main` or an executable SHA-256 is not commit provenance.
-Each network layer is bounded to five seconds, including DNS/response reads,
-on POSIX agent hosts. Other hosts fail with `deadline_unavailable`. No
+An independent parent enforces each network layer's five-second deadline,
+including blocked C resolver/HTTP calls in its owned local probe child. The
+parent signals only that helper's pidfd, escalates TERM to KILL and reaps it;
+termination waits add at most 0.4 seconds, and an unconfirmed exit reports
+`cleanup_failed`. This agent-host command requires Linux/WSL pidfd and
+parent-death support; other hosts fail with `deadline_unavailable`. No
 automatic pairing, privilege change, repair, restart or update occurs. A
 401/403 remains an owner pairing problem, not permission to gain admin.
 

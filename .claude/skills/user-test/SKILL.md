@@ -79,10 +79,12 @@ and never automatically replayed.
 TCP, authenticated `/admin/status`, tailnet inbound policy, then the running
 build commit against the resolved rolling `dev` tag. It stops at the first
 failure or unknown with an owner action; it never pairs, repairs, updates or
-restarts. Each network layer has a five-second deadline, including DNS and
-response reads. This agent-host command requires POSIX alarm support; on an
-unsupported host it reports `deadline_unavailable` rather than running an
-unbounded probe. A 401 requires a valid pairing; 403 `NOT_ADMIN` requires the
+restarts. A parent supervisor enforces each network layer's five-second
+deadline even while its local probe child blocks in DNS or response reads.
+Only that owned helper is terminated/killed and reaped, with at most 0.4 seconds
+of bounded termination waits; an unconfirmed exit is `cleanup_failed`.
+This command requires Linux/WSL pidfd and parent-death support; other hosts
+report `deadline_unavailable` without an unbounded probe. A 401 requires a valid pairing; 403 `NOT_ADMIN` requires the
 owner's admin pairing. Neither grants permission to elevate or re-pair.
 
 After explicit authorization to publish test content, use:

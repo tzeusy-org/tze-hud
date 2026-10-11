@@ -14,10 +14,11 @@ Needs an agent paired with --admin. Host comes from HUD_HOST.
 from __future__ import annotations
 
 import argparse
-from contextlib import contextmanager
+import ctypes
 import json
 import os
 import re
+import select
 import signal
 import socket
 import sys
@@ -30,10 +31,7 @@ import hud_env
 
 DOCTOR_LAYER_SECONDS = 5
 DEV_API = "https://api.github.com/repos/tzeusy-org/tze-hud"
-
-
-class DoctorTimeout(Exception):
-    """Whole-layer deadline, including resolver or response read."""
+DOCTOR_HOST_ACTION = "Run doctor from a Linux/WSL agent host with owned-process deadline support; no network probe was performed."
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -41,32 +39,15 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         return None  # Never forward a paired bearer to another endpoint.
 
 
-@contextmanager
-def doctor_deadline():
-    """Bound resolver and whole HTTP reads, including trickling responses.
-
-    Doctor is a POSIX agent-host command; unsupported hosts fail closed.
-    Restore any caller alarm without extending its deadline.
-    """
-    if not hasattr(signal, "setitimer"):
-        raise RuntimeError("deadline unavailable")
-    old_handler = signal.getsignal(signal.SIGALRM)
-    started = time.monotonic()
-
-    def expired(*_):
-        raise DoctorTimeout
-
-    signal.signal(signal.SIGALRM, expired)
-    old_timer = signal.getitimer(signal.ITIMER_REAL)
-    bound = min(DOCTOR_LAYER_SECONDS, old_timer[0]) if old_timer[0] else DOCTOR_LAYER_SECONDS
-    signal.setitimer(signal.ITIMER_REAL, bound)
-    try:
-        yield
-    finally:
-        signal.setitimer(signal.ITIMER_REAL, 0)
-        signal.signal(signal.SIGALRM, old_handler)
-        if old_timer[0]:
-            signal.setitimer(signal.ITIMER_REAL, max(0.000001, old_timer[0] - (time.monotonic() - started)), old_timer[1])
+DOCTOR_ACTIONS = {
+    "endpoint": "Select a valid HTTP HUD host[:port] without credentials.",
+    "dns": "Check the selected tailnet hostname and Tailscale DNS on the agent host.",
+    "tcp": "Check HUD listener and tailnet reachability; the owner must inspect host firewall policy.",
+    "auth": "Ask the owner to supply the selected valid admin pairing; no pairing or privilege change was performed.",
+    "firewall": "Ask the owner to inspect tailnet inbound policy on the intended Windows HUD; no repair was performed.",
+    "build": "Ask the owner to identify the running HUD build commit; unknown build provenance cannot pass.",
+    "release": "Check availability and commit provenance of the rolling dev release; local HUD checks already completed.",
+}
 
 
 def doctor_json(url: str, psk: str | None = None) -> dict:
@@ -102,54 +83,57 @@ def dev_commit() -> str:
     raise ValueError("unresolved dev tag")
 
 
-def doctor(host: str | None) -> int:
-    """Read-only first-failure diagnosis; output only whitelisted classifications."""
+def doctor_probe(host: str | None, progress) -> dict:
+    """Read-only probe in an owned child; no Python signal deadline assumption."""
     layer = "endpoint"
-    action = "Select a valid HTTP HUD host[:port] without credentials."
+    action = DOCTOR_ACTIONS[layer]
     try:
         name, url = hud_env._adapter_url(host or os.environ.get("HUD_HOST", ""))
         port = hud_env._split(url)[1]
-        layer, action = "dns", "Check the selected tailnet hostname and Tailscale DNS on the agent host."
-        with doctor_deadline():
-            addresses = socket.getaddrinfo(name, port, type=socket.SOCK_STREAM)
-            if not addresses:
-                raise socket.gaierror
-        layer, action = "tcp", "Check HUD listener and tailnet reachability; the owner must inspect host firewall policy."
-        with doctor_deadline():
-            last_error = None
-            for family, kind, protocol, _, address in addresses:
-                try:
-                    with socket.socket(family, kind, protocol) as connection:
-                        connection.settimeout(DOCTOR_LAYER_SECONDS)
-                        connection.connect(address)
-                    break
-                except OSError as error:
-                    last_error = error
-            else:
-                raise last_error or ConnectionError()
-        layer, action = "auth", "Ask the owner to supply the selected valid admin pairing; no pairing or privilege change was performed."
-        with doctor_deadline():
-            status = doctor_json(url.removesuffix("/mcp") + "/admin/status", hud_env.load_psk(host))
-        layer, action = "firewall", "Ask the owner to inspect tailnet inbound policy on the intended Windows HUD; no repair was performed."
+        layer = "dns"
+        action = DOCTOR_ACTIONS[layer]
+        progress({"phase": layer, "deadline": time.monotonic() + DOCTOR_LAYER_SECONDS})
+        addresses = socket.getaddrinfo(name, port, type=socket.SOCK_STREAM)
+        if not addresses:
+            raise socket.gaierror
+        layer = "tcp"
+        action = DOCTOR_ACTIONS[layer]
+        progress({"phase": layer, "deadline": time.monotonic() + DOCTOR_LAYER_SECONDS})
+        last_error = None
+        for family, kind, protocol, _, address in addresses:
+            try:
+                with socket.socket(family, kind, protocol) as connection:
+                    connection.settimeout(DOCTOR_LAYER_SECONDS)
+                    connection.connect(address)
+                break
+            except OSError as error:
+                last_error = error
+        else:
+            raise last_error or ConnectionError()
+        layer = "auth"
+        action = DOCTOR_ACTIONS[layer]
+        progress({"phase": layer, "deadline": time.monotonic() + DOCTOR_LAYER_SECONDS})
+        status = doctor_json(url.removesuffix("/mcp") + "/admin/status", hud_env.load_psk(host))
+        layer = "firewall"
+        action = DOCTOR_ACTIONS[layer]
         firewall = status.get("tailnet_inbound", {})
         state = firewall.get("state") if isinstance(firewall, dict) else None
         if state != "allowed":
             reason = state if state in ("blocked", "unknown", "not_applicable") else "unknown"
-            print(json.dumps({"ok": False, "layer": layer, "reason": reason, "action": action}))
-            return 1
-        layer, action = "build", "Ask the owner to identify the running HUD build commit; unknown build provenance cannot pass."
+            return {"ok": False, "layer": layer, "reason": reason, "action": action}
+        layer = "build"
+        action = DOCTOR_ACTIONS[layer]
         sha = status.get("sha", "")
         if not isinstance(sha, str) or not re.fullmatch(r"[0-9a-fA-F]{40}", sha):
             raise ValueError
-        layer, action = "release", "Check availability and commit provenance of the rolling dev release; local HUD checks already completed."
-        with doctor_deadline():
-            latest = dev_commit()
+        layer = "release"
+        action = DOCTOR_ACTIONS[layer]
+        progress({"phase": layer, "deadline": time.monotonic() + DOCTOR_LAYER_SECONDS})
+        latest = dev_commit()
         if sha.lower() != latest:
-            print(json.dumps({"ok": False, "layer": "build", "reason": "sha_mismatch",
-                              "action": "Ask the owner to update to the resolved dev commit; no update was performed."}))
-            return 1
-        print(json.dumps({"ok": True, "layer": "dev_commit", "sha": latest}))
-        return 0
+            return {"ok": False, "layer": "build", "reason": "sha_mismatch",
+                    "action": "Ask the owner to update to the resolved dev commit; no update was performed."}
+        return {"ok": True, "layer": "dev_commit", "sha": latest}
     except Exception as error:
         if isinstance(error, urllib.error.HTTPError):
             reason = ("unauthenticated" if layer == "auth" and error.code == 401 else
@@ -159,18 +143,154 @@ def doctor(host: str | None) -> int:
             reason = "resolution_failed"
         elif isinstance(error, ConnectionRefusedError):
             reason = "connection_refused"
-        elif isinstance(error, (TimeoutError, DoctorTimeout)):
+        elif isinstance(error, TimeoutError):
             reason = "deadline_exceeded"
         elif isinstance(error, hud_env.HudEnvError):
             reason = "pairing_unavailable" if layer == "auth" else "invalid_endpoint"
-        elif isinstance(error, RuntimeError):
-            reason = "deadline_unavailable"
         else:
             reason = "unknown"
-        if reason == "deadline_unavailable":
-            action = "Run doctor from a POSIX alarm-capable agent host; no network probe was performed."
-        print(json.dumps({"ok": False, "layer": layer, "reason": reason, "action": action}))
+        return {"ok": False, "layer": layer, "reason": reason, "action": action}
+
+
+def reap_doctor(pid: int, pidfd: int, stop: bool) -> int:
+    """Signal only this owned pidfd, then reap; every wait is bounded.
+
+    Failure to observe exit stays cleanup_failed, never a success/reap claim.
+    """
+    if not stop and select.select([pidfd], [], [], 0.2)[0]:
+        return os.waitpid(pid, 0)[1]
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        try:
+            signal.pidfd_send_signal(pidfd, sig)
+        except ProcessLookupError:
+            pass
+        if select.select([pidfd], [], [], 0.2)[0]:
+            return os.waitpid(pid, 0)[1]
+    raise RuntimeError("owned probe cleanup incomplete")
+
+
+def doctor(host: str | None) -> int:
+    """Parent-enforced deadlines remain effective while child C calls block."""
+    if (sys.platform != "linux" or not hasattr(os, "fork") or
+            not hasattr(os, "pidfd_open") or not hasattr(signal, "pidfd_send_signal")):
+        print(json.dumps({"ok": False, "layer": "endpoint", "reason": "deadline_unavailable",
+                          "action": DOCTOR_HOST_ACTION}))
         return 1
+    fds = []
+    parent = os.getpid()
+    try:
+        read_fd, write_fd = os.pipe()
+        fds.extend((read_fd, write_fd))
+        start_read, start_write = os.pipe()
+        fds.extend((start_read, start_write))
+        pid = os.fork()
+    except OSError:
+        for fd in fds:
+            os.close(fd)
+        print(json.dumps({"ok": False, "layer": "endpoint", "reason": "deadline_unavailable", "action": DOCTOR_HOST_ACTION}))
+        return 1
+    if pid == 0:
+        os.close(read_fd)
+        os.close(start_write)
+        code = 1
+        try:
+            def emit(message):
+                os.write(write_fd, json.dumps(message).encode() + b"\n")
+
+            # Same lifetime pattern as hud_mcp_stdio: no orphan on parent death.
+            if ctypes.CDLL(None, use_errno=True).prctl(1, signal.SIGKILL, 0, 0, 0) != 0 or os.getppid() != parent:
+                emit({"unavailable": True})
+                os._exit(1)
+            signal.signal(signal.SIGTERM, signal.SIG_DFL)
+            # No key load or network call until parent has a stable owned pidfd.
+            if os.read(start_read, 1) != b"1":
+                os._exit(1)
+            os.close(start_read)
+            result = doctor_probe(host, emit)
+            emit({"result": result})
+            code = 0 if result["ok"] else 1
+        except BaseException:
+            pass  # Never send an arbitrary child exception/credential context.
+        finally:
+            os._exit(code)
+    os.close(write_fd)
+    os.close(start_read)
+    pidfd = None
+    layer, deadline = "endpoint", time.monotonic() + DOCTOR_LAYER_SECONDS
+    phases = iter(("dns", "tcp", "auth", "release"))
+    result, buffer, reaped, cleanup_attempted = None, b"", False, False
+    try:
+        pidfd = os.pidfd_open(pid)
+        os.write(start_write, b"1")
+        os.close(start_write)
+        start_write = None
+        while result is None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or not select.select([read_fd], [], [], remaining)[0]:
+                result = {"ok": False, "layer": layer, "reason": "deadline_exceeded", "action": DOCTOR_ACTIONS[layer]}
+                break
+            data = os.read(read_fd, 4096)
+            if not data:
+                raise ValueError("probe exited without result")
+            buffer += data
+            if len(buffer) > 4096:
+                raise ValueError("oversized probe result")
+            while b"\n" in buffer:
+                line, buffer = buffer.split(b"\n", 1)
+                message = json.loads(line)
+                if "phase" in message:
+                    if message["phase"] != next(phases):
+                        raise ValueError("invalid probe phase")
+                    layer = message["phase"]
+                    deadline = min(float(message["deadline"]), time.monotonic() + DOCTOR_LAYER_SECONDS)
+                elif message.get("unavailable") is True:
+                    result = {"ok": False, "layer": "endpoint", "reason": "deadline_unavailable", "action": DOCTOR_HOST_ACTION}
+                else:
+                    result = message["result"]
+                    if (set(result) - {"ok", "layer", "reason", "action", "sha"} or type(result.get("ok")) is not bool or
+                            result.get("action") not in (*DOCTOR_ACTIONS.values(), DOCTOR_HOST_ACTION,
+                                                        "Ask the owner to update to the resolved dev commit; no update was performed.", None)):
+                        raise ValueError("invalid probe result")
+        cleanup_attempted = True
+        status = reap_doctor(pid, pidfd, result.get("reason") == "deadline_exceeded")
+        reaped = True
+        if result.get("reason") != "deadline_exceeded" and os.waitstatus_to_exitcode(status) != (0 if result["ok"] else 1):
+            raise ValueError("probe terminal mismatch")
+    except BaseException as error:
+        if start_write is not None:
+            os.close(start_write)  # EOF releases the unadmitted child to exit.
+            start_write = None
+        if pidfd is not None and not reaped:
+            try:
+                if cleanup_attempted:
+                    raise RuntimeError("owned probe cleanup incomplete")
+                reap_doctor(pid, pidfd, True)
+                reaped = True
+            except (OSError, RuntimeError):
+                result = {"ok": False, "layer": layer, "reason": "cleanup_failed", "action": "The owned local probe could not be confirmed stopped; inspect the agent host. No HUD repair was performed."}
+        elif pidfd is None:
+            # No probe was admitted. Closing the startup gate makes it exit;
+            # never block indefinitely waiting on an unavailable lifetime API.
+            until = time.monotonic() + 0.4
+            while time.monotonic() < until:
+                if os.waitpid(pid, os.WNOHANG)[0] == pid:
+                    reaped = True
+                    break
+                time.sleep(0.01)
+            result = {"ok": False, "layer": "endpoint", "reason": "deadline_unavailable" if reaped else "cleanup_failed",
+                      "action": DOCTOR_HOST_ACTION if reaped else "The unadmitted local probe could not be confirmed stopped; inspect the agent host."}
+        if isinstance(error, (KeyboardInterrupt, SystemExit)):
+            raise
+        if result is None or result.get("reason") not in ("cleanup_failed", "deadline_unavailable"):
+            result = {"ok": False, "layer": layer, "reason": "unknown", "action": DOCTOR_ACTIONS[layer]}
+    finally:
+        if start_write is not None:
+            os.close(start_write)
+        os.close(read_fd)
+        if pidfd is not None:
+            os.close(pidfd)
+    print(json.dumps(result))
+    return 0 if result["ok"] else 1
 
 
 def call(path: str, body: dict | None = None, host: str | None = None) -> tuple[int, bytes]:
