@@ -115,6 +115,11 @@ def wait_until(
             transport_class = None
         except urllib.error.HTTPError:
             raise  # HTTPError is also a URLError: never retry HTTP/auth failures.
+        except RequestFailure as error:
+            if not error.retryable:
+                raise
+            done = False
+            transport_class = error.transport_class
         except (urllib.error.URLError, ConnectionError, TimeoutError) as error:
             done = False
             transport_class = type(error).__name__
@@ -180,11 +185,12 @@ def quiescent_summary(artifact: dict) -> str:
 
 
 class RequestFailure(AssertionError):
-    """Safe request context, with transient startup failures distinguished."""
+    """Safe request context, with transient transport failures distinguished."""
 
-    def __init__(self, message: str, *, retryable: bool) -> None:
+    def __init__(self, message: str, *, retryable: bool, transport_class: str | None = None) -> None:
         super().__init__(message)
         self.retryable = retryable
+        self.transport_class = transport_class
 
 def write_step_summary(summary: str) -> None:
     """Append measured counters when Actions supplies a summary file.
@@ -220,11 +226,13 @@ class Smoke:
             error_class = type(err).__name__
             print(f"request failure {label} elapsed_s={elapsed:.3f} error={error_class}", flush=True)
             # Keep exception values, including URLs and response payloads, out of
-            # both diagnostics and the eventual traceback. Only startup discovery
+            # both diagnostics and the eventual traceback. Only read-only polling
             # may retry these transport failures; this boundary never retries.
             raise RequestFailure(
                 f"{label}: {error_class} after {elapsed:.3f}s",
-                retryable=isinstance(err, (urllib.error.URLError, ConnectionError, TimeoutError)),
+                retryable=isinstance(err, (urllib.error.URLError, ConnectionError, TimeoutError))
+                and not isinstance(err, urllib.error.HTTPError),
+                transport_class=error_class,
             ) from None
         else:
             print(f"request end {label} elapsed_s={time.monotonic() - started:.3f}", flush=True)

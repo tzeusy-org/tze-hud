@@ -354,7 +354,7 @@ def test_request_boundaries_and_startup_readiness(monkeypatch, subtests):
                     else:
                         ws.pair_post(smoke, marker)
                 assert calls == [15 if route == "operator mutation" else 10]
-                assert failure.value.retryable is True  # Only startup discovery consumes this flag.
+                assert failure.value.retryable is True  # Only read-only polling consumes this flag.
                 assert "TimeoutError" in output.getvalue() and "request failure" in output.getvalue()
                 assert "request end" not in output.getvalue()
                 assert marker not in output.getvalue() + str(failure.value)
@@ -492,6 +492,89 @@ def test_request_boundaries_and_startup_readiness(monkeypatch, subtests):
                 with pytest.raises(AssertionError, match="exited during startup.*17"):
                     ws.wait_for_mcp(ws.Smoke(url, marker), child, 90, clock=clock, sleep=clock.sleep)
                 assert calls == ([10] if during_request else []) and clock.sleeps == []
+
+    for error in (urllib.error.URLError(marker + url), ConnectionError(marker), TimeoutError(marker)):
+        with subtests.test(case=type(error).__name__ + " wrapped held probe recovers without republishing"):
+            with monkeypatch.context() as patch:
+                clock, output, calls, reads = FakeClock(), Output(), [], []
+                patch.setattr(ws.sys, "stdout", output)
+                patch.setattr(ws.time, "monotonic", clock)
+
+                def held_response(req, timeout):
+                    request = json.loads(req.data)
+                    tool = request["params"]["name"]
+                    calls.append((tool, timeout))
+                    if tool == "hud_publish":
+                        payload = {"ok": True}
+                    else:
+                        assert tool == "hud_surfaces"
+                        reads.append(clock.now)
+                        if len(reads) == 1:
+                            raise error
+                        payload = {"surfaces": [{"s": "zone:z", "held": True}]}
+                    return Response(json.dumps({"result": {
+                        "content": [{"text": json.dumps(payload)}], "isError": False,
+                    }}).encode())
+
+                patch.setattr(ws.urllib.request, "urlopen", held_response)
+                smoke = ws.Smoke(url, marker)
+                assert smoke.ok("hud_publish", {"surface": "zone:z", "content": marker}) == {"ok": True}
+                observed, waited = ws.wait_until(ws.held_probe(smoke, "zone:z", True), what="held",
+                                                clock=clock, sleep=clock.sleep)
+                assert observed == {"s": "zone:z", "held": True} and waited == ws.POLL_S
+                assert calls == [("hud_publish", 10), ("hud_surfaces", 10), ("hud_surfaces", 10)]
+                assert reads == [0, ws.POLL_S] and clock.sleeps == [ws.POLL_S]
+                assert marker not in output.getvalue() and url not in output.getvalue()
+
+    errors = [
+        *(urllib.error.HTTPError(url, code, marker, None, None) for code in (401, 403, 500)),
+        AssertionError(marker),
+        json.JSONDecodeError(marker, "", 0),
+    ]
+    for error in errors:
+        for route in ("held probe", "startup"):
+            with subtests.test(case=type(error).__name__ + " " + route + " fails without retry"):
+                with monkeypatch.context() as patch:
+                    clock, output, calls = FakeClock(), Output(), []
+                    patch.setattr(ws.sys, "stdout", output)
+                    patch.setattr(ws.time, "monotonic", clock)
+
+                    def rejected_request(req, timeout):
+                        calls.append(timeout)
+                        raise error
+
+                    patch.setattr(ws.urllib.request, "urlopen", rejected_request)
+                    smoke = ws.Smoke(url, marker)
+                    with pytest.raises(ws.RequestFailure) as failure:
+                        if route == "held probe":
+                            ws.wait_until(ws.held_probe(smoke, "zone:z", True), what="fail closed",
+                                          clock=clock, sleep=clock.sleep)
+                        else:
+                            ws.wait_for_mcp(smoke, Child(), 90, clock=clock, sleep=clock.sleep)
+                    assert failure.value.retryable is False
+                    assert failure.value.transport_class == type(error).__name__
+                    assert calls == [10] and clock.sleeps == [] and clock.now == 0
+                    assert marker not in output.getvalue() + str(failure.value)
+                    assert url not in output.getvalue() + str(failure.value)
+
+    with subtests.test(case="wrapped held transport retains the guard and safe original class"):
+        with monkeypatch.context() as patch:
+            clock, output, calls = FakeClock(), Output(), []
+            patch.setattr(ws.sys, "stdout", output)
+            patch.setattr(ws.time, "monotonic", clock)
+
+            def unavailable_request(req, timeout):
+                calls.append(clock.now)
+                raise urllib.error.URLError(marker + url)
+
+            patch.setattr(ws.urllib.request, "urlopen", unavailable_request)
+            with pytest.raises(AssertionError) as failure:
+                ws.wait_until(ws.held_probe(ws.Smoke(url, marker), "zone:z", True), what="bounded held",
+                              timeout_s=2.5, interval_s=1, clock=clock, sleep=clock.sleep)
+            assert calls == [0, 1, 2, 2.5] and clock.sleeps == [1, 1, 0.5] and clock.now == 2.5
+            assert "URLError" in str(failure.value) and "RequestFailure" not in str(failure.value)
+            assert marker not in output.getvalue() + str(failure.value)
+            assert url not in output.getvalue() + str(failure.value)
 
 
 def test_capture_png_pixels_baseline_and_changed_only_comment(tmp_path, monkeypatch):
