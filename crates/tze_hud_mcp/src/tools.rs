@@ -229,7 +229,24 @@ pub async fn hud_surfaces(ctx: &ToolCtx<'_>) -> McpResult<Value> {
     let ns = ctx.agent.agent_id.as_str();
     let mut surfaces = Vec::new();
     {
+        let lock_started = tracing::enabled!(target: "tze_hud_mcp_phases", tracing::Level::DEBUG)
+            .then(std::time::Instant::now);
+        if lock_started.is_some() {
+            tracing::debug!(
+                target: "tze_hud_mcp_phases",
+                phase = "scene_lock_wait",
+                operation = "surfaces"
+            );
+        }
         let scene = ctx.scene.lock().await;
+        if let Some(started) = &lock_started {
+            tracing::debug!(
+                target: "tze_hud_mcp_phases",
+                phase = "scene_lock_acquired",
+                operation = "surfaces",
+                elapsed_us = started.elapsed().as_micros()
+            );
+        }
         let now = now_us(&scene);
         let mut zones: Vec<_> = scene.zone_registry.zones.values().collect();
         zones.sort_by(|a, b| a.name.cmp(&b.name));
@@ -498,7 +515,24 @@ async fn publish_zone(ctx: &ToolCtx<'_>, zone: &str, p: PublishParams) -> McpRes
         ));
     }
     let ttl_ms = p.ttl_ms.unwrap_or(DEFAULT_ZONE_TTL_MS);
+    let lock_started = tracing::enabled!(target: "tze_hud_mcp_phases", tracing::Level::DEBUG)
+        .then(std::time::Instant::now);
+    if lock_started.is_some() {
+        tracing::debug!(
+            target: "tze_hud_mcp_phases",
+            phase = "scene_lock_wait",
+            operation = "publish_zone"
+        );
+    }
     let mut scene = ctx.scene.lock().await;
+    if let Some(started) = &lock_started {
+        tracing::debug!(
+            target: "tze_hud_mcp_phases",
+            phase = "scene_lock_acquired",
+            operation = "publish_zone",
+            elapsed_us = started.elapsed().as_micros()
+        );
+    }
     let Some(def) = scene.zone_registry.zones.get(zone) else {
         return Err(tool_err(
             "ZONE_NOT_FOUND",
@@ -596,15 +630,47 @@ fn with_portals<T>(
         )
     };
     let portals = ctx.portals.ok_or_else(unavailable)?;
+    let portal_started = tracing::enabled!(target: "tze_hud_mcp_phases", tracing::Level::DEBUG)
+        .then(std::time::Instant::now);
+    if portal_started.is_some() {
+        tracing::debug!(target: "tze_hud_mcp_phases", phase = "portal_lock_wait");
+    }
     let (result, changed) = {
         let mut hub = portals.hub.lock().map_err(|_| {
+            if let Some(started) = &portal_started {
+                tracing::debug!(
+                    target: "tze_hud_mcp_phases",
+                    phase = "portal_lock_error",
+                    code = "INTERNAL",
+                    elapsed_us = started.elapsed().as_micros()
+                );
+            }
             tool_err(
                 "INTERNAL",
                 "the portal service failed; retry after it restarts",
             )
         })?;
+        if let Some(started) = &portal_started {
+            tracing::debug!(
+                target: "tze_hud_mcp_phases",
+                phase = "portal_lock_acquired",
+                elapsed_us = started.elapsed().as_micros()
+            );
+        }
         apply(&mut hub, portals.clock.now_us())
     };
+    if let Some(started) = &portal_started {
+        // The current Hub returns synchronously; this is not a remote acknowledgement.
+        tracing::debug!(
+            target: "tze_hud_mcp_phases",
+            phase = "portal_reply",
+            code = match &result {
+                Ok(_) => "OK",
+                Err(error) => error.code(),
+            },
+            elapsed_us = started.elapsed().as_micros()
+        );
+    }
     if result.is_ok() && changed {
         ctx.portal_wake.notify();
     }
