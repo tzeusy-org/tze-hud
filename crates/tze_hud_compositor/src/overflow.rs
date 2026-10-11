@@ -1254,8 +1254,10 @@ fn binary_search_smallest_fitting(
 /// # Correctness requirement
 ///
 /// The predicate `measure(b) ≤ budget` must be **monotone**: if boundary `b`
-/// fits, all boundaries `b' < b` also fit.  This holds for text width because
-/// removing characters from a prefix cannot increase its shaped width.
+/// fits, all boundaries `b' < b` also fit. Contextual Advanced shaping does
+/// not guarantee monotone prefix widths for arbitrary text. The text callers
+/// rely on this precondition; retained parity tests qualify the covered cases
+/// rather than proving it universally.
 ///
 /// # Complexity
 ///
