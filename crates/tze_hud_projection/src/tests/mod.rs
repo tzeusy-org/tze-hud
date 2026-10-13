@@ -178,11 +178,7 @@ fn list_projections_is_caller_scoped_bounded_and_content_free() {
 
     let mut output = output_request("alpha", &alpha_token, "publish-alpha");
     output.output_text = "private transcript must never leak".to_string();
-    assert!(
-        authority
-            .handle_publish_output(output, "resident-a", 14)
-            .accepted
-    );
+    assert!(authority.handle_publish_output(output, 14).accepted);
     authority
         .enqueue_input(
             "alpha",
@@ -402,7 +398,6 @@ fn idempotent_attach_replay_rotates_owner_token_and_invalidates_previous_token()
 
     let stale = authority.handle_publish_status(
         status_request("projection-a", &first_token, "req-stale"),
-        "caller-a",
         12,
     );
     assert!(!stale.accepted);
@@ -413,7 +408,6 @@ fn idempotent_attach_replay_rotates_owner_token_and_invalidates_previous_token()
 
     let current = authority.handle_publish_status(
         status_request("projection-a", &replay_token, "req-current"),
-        "caller-a",
         13,
     );
     assert!(current.accepted);
@@ -448,11 +442,8 @@ fn repeated_idempotent_attach_replays_leave_exactly_one_current_verifier() {
         ("req-first-stale", first_token),
         ("req-replay-one-stale", replay_one_token),
     ] {
-        let stale = authority.handle_publish_status(
-            status_request("projection-a", &stale_token, request_id),
-            "caller-a",
-            13,
-        );
+        let stale = authority
+            .handle_publish_status(status_request("projection-a", &stale_token, request_id), 13);
         assert!(!stale.accepted);
         assert_eq!(
             stale.error_code,
@@ -463,7 +454,6 @@ fn repeated_idempotent_attach_replays_leave_exactly_one_current_verifier() {
         authority
             .handle_publish_status(
                 status_request("projection-a", &replay_two_token, "req-latest"),
-                "caller-a",
                 13,
             )
             .accepted
@@ -507,7 +497,6 @@ fn unrelated_attach_keys_cannot_rotate_or_mint_owner_tokens() {
         authority
             .handle_publish_status(
                 status_request("projection-a", &first_token, "req-original-still-current"),
-                "caller-a",
                 14,
             )
             .accepted
@@ -534,7 +523,6 @@ fn idempotent_attach_replay_preserves_original_token_expiry() {
         authority
             .handle_publish_status(
                 status_request("projection-a", &replay_token, "req-before-expiry"),
-                "caller-a",
                 29,
             )
             .accepted
@@ -542,7 +530,6 @@ fn idempotent_attach_replay_preserves_original_token_expiry() {
 
     let expired = authority.handle_publish_status(
         status_request("projection-a", &replay_token, "req-at-original-expiry"),
-        "caller-a",
         30,
     );
     assert!(!expired.accepted);
@@ -566,7 +553,6 @@ fn attach_at_expiry_starts_fresh_session_with_fresh_ttl() {
         authority
             .handle_publish_output(
                 output_request("projection-a", &first_token, "req-old-output"),
-                "caller-a",
                 20,
             )
             .accepted
@@ -593,7 +579,6 @@ fn attach_at_expiry_starts_fresh_session_with_fresh_ttl() {
         authority
             .handle_publish_status(
                 status_request("projection-a", &fresh_token, "req-fresh-current"),
-                "caller-a",
                 49,
             )
             .accepted,
@@ -628,7 +613,6 @@ fn cross_projection_read_fails_closed() {
             max_items: None,
             max_bytes: None,
         },
-        "caller-b",
         30,
     );
     assert!(!denied.accepted);
@@ -650,7 +634,7 @@ fn oversized_output_is_rejected_with_stable_code() {
     let mut request = output_request("projection-a", &owner_token, "req-output");
     request.output_text = "too large".to_string();
 
-    let response = authority.handle_publish_output(request, "caller-a", 20);
+    let response = authority.handle_publish_output(request, 20);
     assert!(!response.accepted);
     assert_eq!(
         response.error_code,
@@ -675,7 +659,7 @@ fn viewer_kind_publish_is_rejected_at_contract_layer() {
     let mut request = output_request("projection-a", &owner_token, "req-output");
     request.output_kind = OutputKind::Viewer;
 
-    let response = authority.handle_publish_output(request, "caller-a", 20);
+    let response = authority.handle_publish_output(request, 20);
     assert!(
         !response.accepted,
         "a forged viewer-kind publish must be rejected at the contract layer"
@@ -702,12 +686,10 @@ fn logical_unit_id_replay_is_idempotent() {
     let owner_token = attach(&mut authority, "projection-a");
     let first = authority.handle_publish_output(
         output_request("projection-a", &owner_token, "req-output-1"),
-        "caller-a",
         20,
     );
     let replay = authority.handle_publish_output(
         output_request("projection-a", &owner_token, "req-output-2"),
-        "caller-a",
         21,
     );
     assert!(first.accepted);
@@ -726,15 +708,13 @@ fn logical_unit_id_cache_is_bounded() {
 
     let first = authority.handle_publish_output(
         output_request("projection-a", &owner_token, "req-output-1"),
-        "caller-a",
         20,
     );
     let mut second_request = output_request("projection-a", &owner_token, "req-output-2");
     second_request.logical_unit_id = Some("unit-2".to_string());
-    let second = authority.handle_publish_output(second_request, "caller-a", 21);
+    let second = authority.handle_publish_output(second_request, 21);
     let first_again = authority.handle_publish_output(
         output_request("projection-a", &owner_token, "req-output-3"),
-        "caller-a",
         22,
     );
 
@@ -807,7 +787,6 @@ fn portal_composer_submission_is_transactional_bounded_inbox_feedback() {
             max_items: None,
             max_bytes: None,
         },
-        "caller-a",
         40,
     );
     assert!(poll.accepted);
@@ -911,7 +890,6 @@ fn bridged_jump_to_latest_badge_reflects_unread_and_ignores_viewer_echo() {
                         Some(unit),
                         None,
                     ),
-                    "caller-a",
                     ts,
                 )
                 .accepted
@@ -971,11 +949,7 @@ fn rate_limited_viewer_echo_is_drained_and_stays_unread_zero() {
     // Spend the single rate slot with an agent publish at wall 20, then drain it
     // so the session returns to unread==0 && !pending.
     let publish = output_request("projection-a", &owner_token, "req-output-1");
-    assert!(
-        authority
-            .handle_publish_output(publish, "caller-a", 20)
-            .accepted
-    );
+    assert!(authority.handle_publish_output(publish, 20).accepted);
     let drained = authority
         .take_due_portal_update("projection-a", 20)
         .unwrap()
@@ -1040,7 +1014,6 @@ fn acknowledged_portal_input_schedules_state_render_without_output() {
             max_items: None,
             max_bytes: None,
         },
-        "caller-a",
         40,
     );
     assert!(poll.accepted);
@@ -1059,7 +1032,6 @@ fn acknowledged_portal_input_schedules_state_render_without_output() {
             ack_message: None,
             not_before_wall_us: None,
         },
-        "caller-a",
         41,
     );
     assert!(handled.accepted);
@@ -1161,7 +1133,6 @@ fn default_and_oversized_item_poll_requests_return_32_small_fifo_inputs() {
                 max_items,
                 max_bytes: None,
             },
-            "caller-a",
             100,
         );
 
@@ -1223,7 +1194,6 @@ fn default_and_oversized_byte_poll_requests_keep_byte_backpressure() {
                 max_items: Some(DEFAULT_MAX_POLL_ITEMS + 1),
                 max_bytes,
             },
-            "caller-a",
             100,
         );
 
@@ -1282,7 +1252,6 @@ fn byte_bounded_polling_keeps_the_fifo_prefix_after_the_first_overflow() {
                 max_items: Some(DEFAULT_MAX_POLL_ITEMS + 1),
                 max_bytes,
             },
-            "caller-a",
             100,
         );
 
@@ -1316,11 +1285,7 @@ fn collapsed_redacted_projection_preserves_geometry_and_suppresses_private_affor
     let owner_token = attach(&mut authority, "projection-a");
     let mut output = output_request("projection-a", &owner_token, "req-output");
     output.output_text = "private projected transcript".to_string();
-    assert!(
-        authority
-            .handle_publish_output(output, "caller-a", 20)
-            .accepted
-    );
+    assert!(authority.handle_publish_output(output, 20).accepted);
     let feedback =
         authority.submit_portal_input("projection-a", portal_submission("input-1", "help"));
     assert_eq!(feedback.feedback_state, PortalInputFeedbackState::Accepted);
@@ -1363,11 +1328,7 @@ fn unread_output_count_flows_through_to_projected_portal_state_when_revealed() {
     let mut authority = ProjectionAuthority::default();
     let owner_token = attach(&mut authority, "projection-a");
     let output = output_request("projection-a", &owner_token, "req-output");
-    assert!(
-        authority
-            .handle_publish_output(output, "caller-a", 20)
-            .accepted
-    );
+    assert!(authority.handle_publish_output(output, 20).accepted);
 
     let visible = authority
         .projected_portal_state("projection-a", &ProjectedPortalPolicy::permit_all())
@@ -1430,11 +1391,7 @@ fn visible_unread_output_count_excludes_clearance_filtered_unread_turns() {
     sensitive_b.content_classification = ContentClassification::Sensitive;
 
     for (request, ts) in [(private_turn, 20), (sensitive_a, 21), (sensitive_b, 22)] {
-        assert!(
-            authority
-                .handle_publish_output(request, "caller-a", ts)
-                .accepted
-        );
+        assert!(authority.handle_publish_output(request, ts).accepted);
     }
 
     // A Private-cleared viewer that still reveals the transcript and unread count.
@@ -1500,11 +1457,7 @@ fn expects_reply_round_trips_from_publish_output_to_projected_portal_state() {
         None,
     );
     assert!(!unset.expects_reply, "expects_reply must default to false");
-    assert!(
-        authority
-            .handle_publish_output(unset, "caller-a", 20)
-            .accepted
-    );
+    assert!(authority.handle_publish_output(unset, 20).accepted);
     let after_unset = authority
         .projected_portal_state("projection-a", &ProjectedPortalPolicy::permit_all())
         .expect("portal state materializes");
@@ -1527,11 +1480,7 @@ fn expects_reply_round_trips_from_publish_output_to_projected_portal_state() {
         None,
     );
     question.expects_reply = true;
-    assert!(
-        authority
-            .handle_publish_output(question, "caller-a", 21)
-            .accepted
-    );
+    assert!(authority.handle_publish_output(question, 21).accepted);
     let after_question = authority
         .projected_portal_state("projection-a", &ProjectedPortalPolicy::permit_all())
         .expect("portal state materializes");
@@ -1660,11 +1609,7 @@ fn input_history_and_output_transcript_survive_reconnect() {
     // Agent output → OUTPUT transcript; viewer reply → INPUT history.
     assert!(
         authority
-            .handle_publish_output(
-                output_request("projection-a", &owner_token, "req-1"),
-                "caller-a",
-                20,
-            )
+            .handle_publish_output(output_request("projection-a", &owner_token, "req-1"), 20,)
             .accepted
     );
     assert_eq!(
@@ -1764,7 +1709,6 @@ fn latest_viewer_delivery_state_flows_into_projected_portal_state() {
             max_items: None,
             max_bytes: None,
         },
-        "caller-a",
         200,
     );
     assert!(poll.accepted, "owner poll must succeed: {poll:?}");
@@ -1914,7 +1858,6 @@ fn owner_poll_delivery_transition_schedules_portal_repaint() {
             max_items: None,
             max_bytes: None,
         },
-        "caller-a",
         41,
     );
     assert!(poll.accepted, "owner poll must succeed: {poll:?}");
@@ -1958,7 +1901,6 @@ fn owner_poll_without_delivery_transition_schedules_no_repaint() {
             max_items: None,
             max_bytes: None,
         },
-        "caller-a",
         41,
     );
     assert!(poll.accepted);
@@ -2050,11 +1992,7 @@ fn projection_private_state_is_memory_only_and_purged_on_detach_cleanup_and_expi
         .unwrap();
     let mut output = output_request("projection-a", &owner_token, "req-output");
     output.output_text = "private transcript text".to_string();
-    assert!(
-        authority
-            .handle_publish_output(output, "caller-a", 24)
-            .accepted
-    );
+    assert!(authority.handle_publish_output(output, 24).accepted);
 
     let summary = authority.state_summary("projection-a").unwrap();
     assert!(summary.has_hud_connection);
@@ -2072,7 +2010,6 @@ fn projection_private_state_is_memory_only_and_purged_on_detach_cleanup_and_expi
             owner_token: owner_token.clone(),
             reason: "done".to_string(),
         },
-        "caller-a",
         25,
     );
     assert!(detached.accepted);
@@ -2096,7 +2033,6 @@ fn projection_private_state_is_memory_only_and_purged_on_detach_cleanup_and_expi
             lifecycle_state: ProjectionLifecycleState::Active,
             status_text: None,
         },
-        "caller-a",
         DEFAULT_OWNER_TOKEN_TTL_WALL_US + 20,
     );
     assert!(!expired.accepted);
@@ -2375,7 +2311,6 @@ fn agent_liveness_authenticated_projection_operations_refresh_and_recover() {
 
     let denied = authority.handle_publish_output(
         output_request("projection-a", "wrong-owner-token", "req-denied"),
-        "caller-a",
         1_000_019,
     );
     assert!(!denied.accepted);
@@ -2400,7 +2335,6 @@ fn agent_liveness_authenticated_projection_operations_refresh_and_recover() {
             max_items: Some(1),
             max_bytes: None,
         },
-        "caller-a",
         1_000_020,
     );
     assert!(poll.accepted);
@@ -2438,7 +2372,6 @@ fn agent_liveness_authenticated_projection_operations_refresh_and_recover() {
             ack_message: None,
             not_before_wall_us: None,
         },
-        "caller-a",
         2_000_030,
     );
     assert!(ack.accepted);
@@ -2458,7 +2391,6 @@ fn agent_liveness_authenticated_projection_operations_refresh_and_recover() {
     );
     let status = authority.handle_publish_status(
         status_request("projection-a", &owner_token, "req-status-recover"),
-        "caller-a",
         3_000_040,
     );
     assert!(status.accepted);
@@ -2478,7 +2410,6 @@ fn agent_liveness_authenticated_projection_operations_refresh_and_recover() {
     );
     let publish = authority.handle_publish_output(
         output_request("projection-a", &owner_token, "req-publish-recover"),
-        "caller-a",
         4_000_050,
     );
     assert!(publish.accepted);
@@ -2533,11 +2464,7 @@ fn reconnect_preserves_transcript_inbox_ack_state_and_requires_new_lease() {
     let owner_token = attach(&mut authority, "projection-a");
     let mut output = output_request("projection-a", &owner_token, "req-output");
     output.output_text = "retained across HUD reconnect".to_string();
-    assert!(
-        authority
-            .handle_publish_output(output, "caller-a", 20)
-            .accepted
-    );
+    assert!(authority.handle_publish_output(output, 20).accepted);
     authority
         .enqueue_input(
             "projection-a",
@@ -2559,7 +2486,6 @@ fn reconnect_preserves_transcript_inbox_ack_state_and_requires_new_lease() {
             max_items: Some(1),
             max_bytes: None,
         },
-        "caller-a",
         22,
     );
     assert!(delivered.accepted);
@@ -2611,7 +2537,6 @@ fn reconnect_preserves_transcript_inbox_ack_state_and_requires_new_lease() {
             ack_message: None,
             not_before_wall_us: None,
         },
-        "caller-a",
         42,
     );
     assert!(handled_after_reconnect.accepted);
@@ -2639,7 +2564,6 @@ fn owner_degraded_lifecycle_is_not_overwritten_by_connection_or_output() {
             lifecycle_state: ProjectionLifecycleState::Degraded,
             status_text: Some("HUD projection is degraded".to_string()),
         },
-        "caller-a",
         20,
     );
     assert!(degraded.accepted);
@@ -2657,7 +2581,6 @@ fn owner_degraded_lifecycle_is_not_overwritten_by_connection_or_output() {
 
     let published = authority.handle_publish_output(
         output_request("projection-a", &owner_token, "req-output"),
-        "caller-a",
         21,
     );
     assert!(published.accepted);
@@ -2702,7 +2625,6 @@ fn status_only_publish_marks_portal_due_for_refresh() {
             lifecycle_state: ProjectionLifecycleState::Degraded,
             status_text: Some("blocked on input".to_string()),
         },
-        "caller-a",
         20,
     );
     assert!(accepted.accepted);
@@ -2728,7 +2650,6 @@ fn status_only_publish_marks_portal_due_for_refresh() {
             lifecycle_state: ProjectionLifecycleState::Active,
             status_text: None,
         },
-        "caller-a",
         22,
     );
     assert!(!denied.accepted);
@@ -2764,7 +2685,6 @@ fn acknowledgement_and_detach_cleanup_update_projected_portal_state() {
             max_items: None,
             max_bytes: None,
         },
-        "caller-a",
         40,
     );
     assert!(poll.accepted);
@@ -2781,7 +2701,6 @@ fn acknowledgement_and_detach_cleanup_update_projected_portal_state() {
             ack_message: None,
             not_before_wall_us: None,
         },
-        "caller-a",
         41,
     );
     assert!(handled.accepted);
@@ -2797,7 +2716,6 @@ fn acknowledgement_and_detach_cleanup_update_projected_portal_state() {
             owner_token,
             reason: "session complete".to_string(),
         },
-        "caller-a",
         42,
     );
     assert!(detached.accepted);
@@ -2862,7 +2780,6 @@ fn provider_kind_does_not_change_projection_semantics() {
             authority
                 .handle_publish_output(
                     output_request(&projection_id, &owner_token, "req-output"),
-                    "caller-a",
                     20,
                 )
                 .accepted
@@ -2881,7 +2798,6 @@ fn provider_kind_does_not_change_projection_semantics() {
                 max_items: None,
                 max_bytes: None,
             },
-            "caller-a",
             30,
         );
         assert!(poll.accepted);
@@ -2892,7 +2808,6 @@ fn provider_kind_does_not_change_projection_semantics() {
                 owner_token,
                 reason: "done".to_string(),
             },
-            "caller-a",
             40,
         );
         assert!(detached.accepted);
@@ -2912,7 +2827,7 @@ fn ready_portal_update_can_be_taken_without_spending_another_rate_slot() {
     let mut first = output_request("projection-a", &owner_token, "req-output-1");
     first.output_text = "first".to_string();
     first.logical_unit_id = Some("unit-first".to_string());
-    let first_response = authority.handle_publish_output(first, "caller-a", 20);
+    let first_response = authority.handle_publish_output(first, 20);
     assert!(first_response.accepted);
     assert!(first_response.portal_update_ready);
 
@@ -2932,7 +2847,7 @@ fn ready_portal_update_can_be_taken_without_spending_another_rate_slot() {
     let mut second = output_request("projection-a", &owner_token, "req-output-2");
     second.output_text = "second".to_string();
     second.logical_unit_id = Some("unit-second".to_string());
-    let second_response = authority.handle_publish_output(second, "caller-a", 20);
+    let second_response = authority.handle_publish_output(second, 20);
     assert!(second_response.accepted);
     assert!(!second_response.portal_update_ready);
     assert!(
@@ -2972,7 +2887,7 @@ fn transcript_pruning_and_portal_update_rate_coalescing_are_bounded() {
     let mut first = output_request("projection-a", &owner_token, "req-output-1");
     first.output_text = "aaaa".to_string();
     first.logical_unit_id = Some("unit-a".to_string());
-    let first_response = authority.handle_publish_output(first, "caller-a", 20);
+    let first_response = authority.handle_publish_output(first, 20);
     assert!(first_response.accepted);
     assert!(first_response.portal_update_ready);
 
@@ -2980,7 +2895,7 @@ fn transcript_pruning_and_portal_update_rate_coalescing_are_bounded() {
     second.output_text = "bbbb".to_string();
     second.logical_unit_id = Some("unit-b".to_string());
     second.coalesce_key = Some("status-line".to_string());
-    let second_response = authority.handle_publish_output(second, "caller-a", 20);
+    let second_response = authority.handle_publish_output(second, 20);
     assert!(second_response.accepted);
     assert!(!second_response.portal_update_ready);
     assert_eq!(second_response.coalesced_output_count, 1);
@@ -2989,7 +2904,7 @@ fn transcript_pruning_and_portal_update_rate_coalescing_are_bounded() {
     third.output_text = "cccc".to_string();
     third.logical_unit_id = Some("unit-c".to_string());
     third.coalesce_key = Some("status-line".to_string());
-    let third_response = authority.handle_publish_output(third, "caller-a", 20);
+    let third_response = authority.handle_publish_output(third, 20);
     assert!(third_response.accepted);
     assert!(!third_response.portal_update_ready);
     assert_eq!(third_response.coalesced_output_count, 2);
@@ -3014,17 +2929,13 @@ fn transcript_pruning_and_portal_update_rate_coalescing_are_bounded() {
     let mut fourth = output_request("projection-a", &owner_token, "req-output-4");
     fourth.output_text = "dddd".to_string();
     fourth.logical_unit_id = Some("unit-d".to_string());
-    assert!(
-        authority
-            .handle_publish_output(fourth, "caller-a", 20)
-            .accepted
-    );
+    assert!(authority.handle_publish_output(fourth, 20).accepted);
 
     let mut fifth = output_request("projection-a", &owner_token, "req-output-5");
     fifth.output_text = "eeee".to_string();
     fifth.logical_unit_id = Some("unit-e".to_string());
     let fifth_response =
-        authority.handle_publish_output(fifth, "caller-a", PORTAL_UPDATE_RATE_WINDOW_WALL_US + 21);
+        authority.handle_publish_output(fifth, PORTAL_UPDATE_RATE_WINDOW_WALL_US + 21);
     assert!(fifth_response.accepted);
     assert!(fifth_response.portal_update_ready);
     assert_eq!(fifth_response.coalesced_output_count, 3);
@@ -3091,7 +3002,6 @@ fn pending_input_bounds_and_acknowledgement_state_conflicts_are_enforced() {
             max_items: Some(8),
             max_bytes: None,
         },
-        "caller-a",
         30,
     );
     assert!(poll.accepted);
@@ -3113,7 +3023,6 @@ fn pending_input_bounds_and_acknowledgement_state_conflicts_are_enforced() {
             ack_message: None,
             not_before_wall_us: None,
         },
-        "caller-a",
         31,
     );
     assert!(handled.accepted);
@@ -3131,7 +3040,6 @@ fn pending_input_bounds_and_acknowledgement_state_conflicts_are_enforced() {
             ack_message: None,
             not_before_wall_us: None,
         },
-        "caller-a",
         32,
     );
     assert!(replay.accepted);
@@ -3149,7 +3057,6 @@ fn pending_input_bounds_and_acknowledgement_state_conflicts_are_enforced() {
             ack_message: None,
             not_before_wall_us: None,
         },
-        "caller-a",
         33,
     );
     assert!(!conflict.accepted);
@@ -3223,7 +3130,6 @@ fn deferred_input_redelivers_after_not_before_and_expires_before_delivery() {
             max_items: Some(1),
             max_bytes: None,
         },
-        "caller-a",
         30,
     );
     assert_eq!(first_poll.pending_input[0].input_id, "input-1");
@@ -3241,7 +3147,6 @@ fn deferred_input_redelivers_after_not_before_and_expires_before_delivery() {
             ack_message: None,
             not_before_wall_us: Some(60),
         },
-        "caller-a",
         31,
     );
     assert!(deferred.accepted);
@@ -3257,7 +3162,6 @@ fn deferred_input_redelivers_after_not_before_and_expires_before_delivery() {
             max_items: Some(8),
             max_bytes: None,
         },
-        "caller-a",
         50,
     );
     assert!(hidden.pending_input.is_empty());
@@ -3273,7 +3177,6 @@ fn deferred_input_redelivers_after_not_before_and_expires_before_delivery() {
             max_items: Some(8),
             max_bytes: None,
         },
-        "caller-a",
         61,
     );
     assert_eq!(redelivered.pending_input.len(), 1);
@@ -3296,7 +3199,6 @@ fn deferred_input_redelivers_after_not_before_and_expires_before_delivery() {
             ack_message: None,
             not_before_wall_us: None,
         },
-        "caller-a",
         62,
     );
     assert!(!expired_ack.accepted);
@@ -3336,7 +3238,6 @@ fn terminal_pending_input_is_pruned_without_losing_ack_replay() {
             max_items: Some(8),
             max_bytes: None,
         },
-        "caller-a",
         30,
     );
     assert!(poll.accepted);
@@ -3354,7 +3255,6 @@ fn terminal_pending_input_is_pruned_without_losing_ack_replay() {
             ack_message: None,
             not_before_wall_us: None,
         },
-        "caller-a",
         31,
     );
     assert!(handled.accepted);
@@ -3383,7 +3283,6 @@ fn terminal_pending_input_is_pruned_without_losing_ack_replay() {
             ack_message: None,
             not_before_wall_us: None,
         },
-        "caller-a",
         33,
     );
     assert!(replay.accepted);
@@ -3418,7 +3317,6 @@ fn not_before_is_rejected_for_terminal_acknowledgements() {
             ack_message: None,
             not_before_wall_us: Some(50),
         },
-        "caller-a",
         30,
     );
 
@@ -3455,7 +3353,6 @@ fn token_expiry_fails_with_stable_code() {
             lifecycle_state: ProjectionLifecycleState::Active,
             status_text: None,
         },
-        "caller-a",
         20,
     );
     assert!(!response.accepted);
@@ -3507,7 +3404,6 @@ proptest! {
                 max_items: Some(requested_items),
                 max_bytes: Some(requested_bytes),
             },
-            "caller-a",
             100,
         );
 
@@ -3614,7 +3510,6 @@ proptest! {
                             owner_token: owner_token.clone(),
                             reason: "property lifecycle detach".to_string(),
                         },
-                        "caller-a",
                         now,
                     );
                     prop_assert!(response.accepted);
@@ -3869,7 +3764,7 @@ fn coalesce_key_final_state_reappears_after_drain_without_fresh_append() {
     first.output_text = "initial".to_string();
     first.logical_unit_id = Some("unit-1".to_string());
     first.coalesce_key = Some("status".to_string());
-    let r1 = authority.handle_publish_output(first, "caller", 10);
+    let r1 = authority.handle_publish_output(first, 10);
     assert!(r1.accepted, "first append must be accepted");
     assert!(
         r1.portal_update_ready,
@@ -3902,7 +3797,7 @@ fn coalesce_key_final_state_reappears_after_drain_without_fresh_append() {
     second.output_text = "final-value".to_string();
     second.logical_unit_id = Some("unit-2".to_string());
     second.coalesce_key = Some("status".to_string());
-    let r2 = authority.handle_publish_output(second, "caller", 10);
+    let r2 = authority.handle_publish_output(second, 10);
     assert!(r2.accepted, "second append must be accepted");
     assert!(
         !r2.portal_update_ready,
@@ -3952,7 +3847,7 @@ fn coalesce_key_successive_in_place_updates_stay_in_oracle() {
     seed.output_text = "seed".to_string();
     seed.logical_unit_id = Some("unit-seed".to_string());
     seed.coalesce_key = Some("progress".to_string());
-    authority.handle_publish_output(seed, "caller", 5);
+    authority.handle_publish_output(seed, 5);
     authority
         .take_due_portal_update(portal_id, 5)
         .expect("no error")
@@ -3964,7 +3859,7 @@ fn coalesce_key_successive_in_place_updates_stay_in_oracle() {
         req.output_text = format!("progress-{i}");
         req.logical_unit_id = None;
         req.coalesce_key = Some("progress".to_string());
-        let r = authority.handle_publish_output(req, "caller", 5);
+        let r = authority.handle_publish_output(req, 5);
         assert!(r.accepted);
         // After each in-place update the oracle must show this portal.
         assert_eq!(
@@ -4009,7 +3904,7 @@ fn portal_next_due_at_us_returns_wait_hint_when_rate_limited() {
     let mut first = output_request(portal_id, &owner_token, "req-1");
     first.output_text = "first".to_string();
     first.logical_unit_id = Some("unit-1".to_string());
-    authority.handle_publish_output(first, "caller", 100);
+    authority.handle_publish_output(first, 100);
 
     // Drain the first update.
     authority
@@ -4021,7 +3916,7 @@ fn portal_next_due_at_us_returns_wait_hint_when_rate_limited() {
     let mut second = output_request(portal_id, &owner_token, "req-2");
     second.output_text = "second".to_string();
     second.logical_unit_id = Some("unit-2".to_string());
-    authority.handle_publish_output(second, "caller", 100);
+    authority.handle_publish_output(second, 100);
 
     // next_due_projection_id returns the portal (coalescer has a pending entry).
     assert_eq!(
@@ -4095,7 +3990,7 @@ fn portal_next_due_at_us_returns_none_when_no_pending_entry() {
 
     let mut req = output_request(portal_id, &owner_token, "req-1");
     req.logical_unit_id = Some("unit-1".to_string());
-    authority.handle_publish_output(req, "caller", 10);
+    authority.handle_publish_output(req, 10);
     authority
         .take_due_portal_update(portal_id, 10)
         .expect("no error")
@@ -4216,7 +4111,6 @@ fn connection_degraded_latches_until_real_reconnect_not_owner_traffic() {
     // lifecycle back to Active but must NOT clear the connection-degraded latch.
     let accepted = authority.handle_publish_output(
         output_request("projection-a", &owner_token, "pub-after-disconnect"),
-        "caller-a",
         40,
     );
     assert!(
@@ -4306,7 +4200,6 @@ fn reconnect_resumes_from_retained_window_and_clears_stale_treatment() {
                 Some("unit-pre"),
                 None,
             ),
-            "caller-a",
             20,
         )
         .accepted
@@ -4393,7 +4286,6 @@ fn reconnect_continues_in_progress_unit_in_place_via_coalesce_key() {
                 Some("unit-stream-a"),
                 Some("coalesce-stream"),
             ),
-            "caller-a",
             20,
         )
         .accepted
@@ -4425,7 +4317,6 @@ fn reconnect_continues_in_progress_unit_in_place_via_coalesce_key() {
             Some("unit-stream-b"),
             Some("coalesce-stream"),
         ),
-        "caller-a",
         50,
     );
     assert!(continued.accepted, "continuation publish accepted");
@@ -4462,7 +4353,6 @@ fn reconnect_replayed_logical_unit_id_stays_idempotent() {
                 Some("unit-replayed"),
                 None,
             ),
-            "caller-a",
             20,
         )
         .accepted
@@ -4499,7 +4389,6 @@ fn reconnect_replayed_logical_unit_id_stays_idempotent() {
             Some("unit-replayed"),
             None,
         ),
-        "caller-a",
         50,
     );
     assert!(replay.accepted, "replay accepted at the protocol level");
@@ -4549,7 +4438,6 @@ fn reconnect_materializes_only_bounded_visible_window() {
                     Some(&format!("unit-{i}")),
                     None,
                 ),
-                "caller-a",
                 20 + u64::from(i),
             )
             .accepted
@@ -4628,7 +4516,6 @@ fn stale_to_live_transition_respects_redaction_every_frame() {
                 Some("unit-secret"),
                 None,
             ),
-            "caller-a",
             20,
         )
         .accepted
@@ -4676,7 +4563,6 @@ fn stale_to_live_transition_respects_redaction_every_frame() {
                 Some("unit-secret-2"),
                 None,
             ),
-            "caller-a",
             50,
         )
         .accepted

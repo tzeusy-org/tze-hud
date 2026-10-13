@@ -956,7 +956,7 @@ fn arrival_to_present_elapsed_measured_via_submitted_at_us() {
             expects_reply: false,
         };
         // `server_timestamp_wall_us` is `submitted_at` so the coalescer records it.
-        authority.handle_publish_output(publish, "caller-timing", submitted_at);
+        authority.handle_publish_output(publish, submitted_at);
     }
 
     // ── Present: simulated "frame present" time is SIMULATED_PRESENT_OFFSET_US
@@ -1074,16 +1074,8 @@ fn dual_portal_arrival_to_present_skew_bounded_by_round_robin() {
         expects_reply: false,
     };
 
-    authority.handle_publish_output(
-        make_publish(proj_a, &token_a, 0),
-        "caller-timing",
-        SUBMIT_AT_US,
-    );
-    authority.handle_publish_output(
-        make_publish(proj_b, &token_b, 0),
-        "caller-timing",
-        SUBMIT_AT_US,
-    );
+    authority.handle_publish_output(make_publish(proj_a, &token_a, 0), SUBMIT_AT_US);
+    authority.handle_publish_output(make_publish(proj_b, &token_b, 0), SUBMIT_AT_US);
 
     // Collect submitted_at_us from both portals via round-robin scheduling.
     let mut submitted_timestamps: Vec<(String, u64)> = Vec::new();

@@ -1005,7 +1005,6 @@ impl ProjectionAuthority {
     pub fn handle_publish_output(
         &mut self,
         request: PublishOutputRequest,
-        _caller_identity: &str,
         server_timestamp_wall_us: u64,
     ) -> ProjectionResponse {
         if let Err(error) = request.validate(&self.bounds) {
@@ -1101,7 +1100,6 @@ impl ProjectionAuthority {
     pub fn handle_publish_status(
         &mut self,
         request: PublishStatusRequest,
-        _caller_identity: &str,
         server_timestamp_wall_us: u64,
     ) -> ProjectionResponse {
         if let Err(error) = request.validate(&self.bounds) {
@@ -1318,7 +1316,6 @@ impl ProjectionAuthority {
     pub fn handle_get_pending_input(
         &mut self,
         request: GetPendingInputRequest,
-        _caller_identity: &str,
         server_timestamp_wall_us: u64,
     ) -> ProjectionResponse {
         if let Err(error) = request.validate() {
@@ -1422,7 +1419,6 @@ impl ProjectionAuthority {
     pub fn handle_acknowledge_input(
         &mut self,
         request: AcknowledgeInputRequest,
-        _caller_identity: &str,
         server_timestamp_wall_us: u64,
     ) -> ProjectionResponse {
         if let Err(error) = request.validate() {
@@ -1468,7 +1464,6 @@ impl ProjectionAuthority {
     pub fn handle_detach(
         &mut self,
         request: DetachRequest,
-        _caller_identity: &str,
         server_timestamp_wall_us: u64,
     ) -> ProjectionResponse {
         if let Err(error) = request.validate() {
