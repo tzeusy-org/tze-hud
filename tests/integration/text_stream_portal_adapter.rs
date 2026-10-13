@@ -674,7 +674,6 @@ fn cooperative_projection_adapter_satisfies_text_portal_contract_without_process
             coalesce_key: None,
             expects_reply: false,
         },
-        "projection-daemon",
         20,
     );
     assert!(published.accepted);
@@ -725,7 +724,6 @@ fn cooperative_projection_adapter_satisfies_text_portal_contract_without_process
             max_items: None,
             max_bytes: None,
         },
-        "codex-session",
         40,
     );
     assert!(poll.accepted);
