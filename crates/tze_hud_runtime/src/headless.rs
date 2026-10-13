@@ -722,8 +722,9 @@ impl HeadlessRuntime {
 
     /// Adopt a continuously owned fixture listener without changing the public
     /// configured-port checks or binding behavior.
-    #[cfg(test)]
-    fn start_grpc_server_on_listener(
+    /// Available only to unit tests and the explicit `test-harness` feature.
+    #[cfg(any(test, feature = "test-harness"))]
+    pub fn start_grpc_server_on_listener(
         &self,
         listener: tokio::net::TcpListener,
     ) -> tokio::task::JoinHandle<()> {
