@@ -288,7 +288,14 @@ class PrePushTests(unittest.TestCase):
                 "target = pathlib.Path(os.environ['CARGO_TARGET_DIR'])\n"
                 "target.joinpath('owned-artifact').write_text('owned fixture artifact\\n')\n"
                 "if os.environ.get('FAKE_CARGO_TERMINATE'):\n"
-                "    os.kill(os.getpid(), signal.SIGTERM)\n"
+                "    if os.name == 'nt':\n"
+                "        import ctypes\n"
+                "        exit_process = ctypes.WinDLL('kernel32').ExitProcess\n"
+                "        exit_process.argtypes = [ctypes.c_uint]\n"
+                "        exit_process.restype = None\n"
+                "        exit_process(0xC000013A)\n"
+                "    else:\n"
+                "        os.kill(os.getpid(), signal.SIGTERM)\n"
                 "if os.environ.get('FAKE_SOURCE_CHANGE'):\n"
                 "    pathlib.Path('lib.rs').write_text('changed during Cargo\\n')\n"
                 "sys.exit(int(os.environ.get('FAKE_CARGO_EXIT', '0')))\n"
@@ -361,12 +368,13 @@ class PrePushTests(unittest.TestCase):
             self.assertEqual(calls, [["deny", "--version"]])
             self.assertFalse(json.loads((probe_target / ".tze-hud-source-binding.json").read_text())["valid"])
             git("restore", "lib.rs")
-            if os.name != "nt":
-                terminated_target = root / "terminated-probe-target"
-                result, calls = guarded(terminated_target, args=("deny", "--version"), tool_probe=True, FAKE_CARGO_TERMINATE="1")
-                self.assertEqual(result.returncode, 86)
-                self.assertEqual(calls, [["deny", "--version"]])
-                self.assertFalse(json.loads((terminated_target / ".tze-hud-source-binding.json").read_text())["valid"])
+            # Negative signals are POSIX-only; Windows uses an explicit UINT
+            # ExitProcess status in the owned child, not os.kill(SIGTERM).
+            terminated_target = root / "terminated-probe-target"
+            result, calls = guarded(terminated_target, args=("deny", "--version"), tool_probe=True, FAKE_CARGO_TERMINATE="1")
+            self.assertEqual(result.returncode, 86)
+            self.assertEqual(calls, [["deny", "--version"]])
+            self.assertFalse(json.loads((terminated_target / ".tze-hud-source-binding.json").read_text())["valid"])
 
             frozen_head = git("rev-parse", "HEAD")
             other_source = root / "other-source"
