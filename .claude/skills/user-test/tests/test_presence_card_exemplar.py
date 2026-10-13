@@ -33,6 +33,7 @@ class FakePairedClient(HudClient):
         self.closed = False
         self.dropped = False
         self.released = []
+        self.release_attempts = []
         self.mutations = []
         self.heartbeats = 0
         self.tile_id = uuid.UUID(int=1000 + self.index).bytes
@@ -72,6 +73,11 @@ class FakePairedClient(HudClient):
         await asyncio.Event().wait()
 
     async def release_tile(self, tile_id):
+        self.release_attempts.append(tile_id)
+        if self.fail_phase == "clear_denied":
+            raise RuntimeError(f"NOT_ALLOWED: scoped Clear denied {self.key}")
+        if self.fail_phase == "clear_timeout":
+            raise TimeoutError("scoped Clear acknowledgement timed out")
         self.released.append(tile_id)
 
     async def close(self, **kwargs):
@@ -151,13 +157,23 @@ class PresenceCardExemplarTests(unittest.IsolatedAsyncioTestCase):
                     self.assertFalse(any(m.WhichOneof("mutation") == "update_node_content" for c in clients for m in c.mutations))
 
     async def test_rejected_update_and_interrupt_leave_failed_receipt_and_cleanup(self) -> None:
-        for failure, exit_code in (("update", 1), ("interrupt", 130)):
+        for failure, exit_code in (("update", 1), ("interrupt", 130), ("clear_denied", 1), ("clear_timeout", 1)):
             with self.subTest(failure=failure):
                 code, receipt, clients = await self.run_fixture(fail_phase=failure)
                 self.assertEqual(code, exit_code)
-                self.assertTrue(all(client.closed for client in clients))
-                self.assertTrue(all(client.released == [client.tile_id] for client in clients))
-                self.assertEqual([step["code"] for step in receipt["steps"] if step["status"] == "failed"], ["update"])
+                if failure.startswith("clear_"):
+                    self.assertTrue(all(client.closed for client in clients[:-1]))
+                    self.assertTrue(all(client.release_attempts == [client.tile_id] for client in clients[:-1]))
+                    self.assertTrue(all(client.released == [] for client in clients))
+                    self.assertTrue(clients[-1].dropped)
+                    self.assertEqual(clients[-1].release_attempts, [])
+                    expected_failures = ["cleanup", "cleanup"]
+                else:
+                    self.assertTrue(all(client.closed for client in clients))
+                    self.assertTrue(all(client.released == [client.tile_id] for client in clients))
+                    expected_failures = ["update"]
+                self.assertEqual([step["code"] for step in receipt["steps"] if step["status"] == "failed"], expected_failures)
+                self.assertEqual(receipt["steps"][-1]["status"], "failed")
                 self.assertFalse(any(step["status"] == "protocol_complete" for step in receipt["steps"]))
 
 

@@ -79,8 +79,10 @@ card labels, lease/tile/node IDs and accepted update target/text. `status` is
 `started`, `acknowledged`, `transport_dropped`, `observation_pending`,
 `protocol_complete`, or `failed`. Every event's `visual_observation` is
 `unverified`: an acknowledgement establishes accepted protocol work, not pixels.
-Failures exit nonzero and do not mark the protocol complete. Ctrl+C attempts
-cleanup and records interruption; an unknown remote outcome is not replayed.
+`protocol_complete` is emitted only after this run's scoped cleanup succeeds.
+A denied or timed-out `Clear` leaves a failed cleanup event and a nonzero exit,
+without a completion event. Ctrl+C attempts cleanup and records interruption;
+an unknown remote outcome is not replayed.
 
 ## Owner-host visual acceptance
 

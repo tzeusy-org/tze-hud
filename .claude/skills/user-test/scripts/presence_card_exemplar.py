@@ -84,7 +84,7 @@ def build_step_plan(update_wait_s: int, orphan_grace_s: int) -> list[dict[str, s
          "expected_visual": "disconnection badge on gamma only; text and avatar remain"},
         {"code": "cleanup_wait", "action": f"wait {orphan_grace_s}s for configured orphan grace",
          "expected_visual": "gamma reclaimed; alpha and beta remain at their original positions"},
-        {"code": "final_state", "action": "record protocol completion, then clear this run's survivors",
+        {"code": "final_state", "action": "clear this run's survivors, then record protocol completion",
          "expected_visual": "2 surviving cards before cleanup; this run's cards gone afterward"},
     ]
 
@@ -234,10 +234,6 @@ async def run_scenario(args: argparse.Namespace) -> int:
         emit_step_event(transcript, "observation_pending", phase)
 
         phase = plan[5]
-        emit_step_event(transcript, "protocol_complete", phase,
-                        surviving_labels=[agent.spec.name for agent in agents[:-1]],
-                        orphan_reclaim_observation="unverified",
-                        rendering_followups=["hud-pcscu", "hud-o5elz"])
         exit_code = 0
     except (Exception, asyncio.CancelledError) as exc:
         # A server/transport exception is untrusted text. Never let a credential
@@ -254,6 +250,11 @@ async def run_scenario(args: argparse.Namespace) -> int:
                 emit_step_event(transcript, "failed", {"code": "cleanup", "action": "clear only this run's known survivors"},
                                 card_label=agent.spec.name, error=type(exc).__name__)
                 exit_code = 1
+        if exit_code == 0:
+            emit_step_event(transcript, "protocol_complete", phase,
+                            surviving_labels=[agent.spec.name for agent in agents[:-1]],
+                            orphan_reclaim_observation="unverified",
+                            rendering_followups=["hud-pcscu", "hud-o5elz"])
         if args.transcript_out:
             write_transcript(args.transcript_out, {"target": target, "exit_code": exit_code, "steps": transcript})
     return exit_code
