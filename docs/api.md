@@ -68,8 +68,20 @@ otherwise. Scheduled zone publications count as held before presentation;
   (default 1), and optional `actions: [{label, callback_id}]`; both action
   fields are non-empty strings). `type` may be
   omitted; the runtime infers it from what the zone accepts. `key` is the
-  merge key.
-- Widget: `params` is the typed parameter map. Configured HUD startup resolves
+  merge key. Supplied notification urgency must be an integer 0–3; only
+  omission defaults to 1. `status_bar.entries` must be a non-empty object
+  whose every value is a string; an empty string removes that entry.
+  Notification TTL belongs at the publish's top-level `ttl_ms`; an inner
+  `content.ttl_ms` is rejected with a hint to move it.
+- Widget: `params` is the typed parameter map. F32 values must be finite and
+  within the declaration's inclusive bounds (including one-sided bounds).
+  Both MCP and gRPC reject out-of-range values rather than clamping them.
+  MCP colors are exact `#RRGGBB` strings or `{r,g,b,a?}` objects: RGB are
+  required numeric channels in 0–1, alpha defaults to 1 only when absent,
+  and supplied alpha must also be numeric in 0–1. Both planes reject
+  nonfinite/out-of-range RGBA. Config bundle byte-array defaults are a separate
+  loader format, normalized before admission.
+  Configured HUD startup resolves
   the selected theme and config overrides once; MCP publishes use its
   `motion.state.ms` duration without adding a tool parameter. gRPC publishes
   retain their explicit `transition_ms`. A positive duration eases f32 and
@@ -217,6 +229,10 @@ unknown PSK) is a JSON-RPC error.
 
 - The message isn't repeated. The hint names the next call.
 - Typed zone content is strict: an unknown or nested key is `INVALID_ARGUMENT` with the allowed keys in the hint, and so is empty content (a notification with no title or body, `stream_text` without text, `solid_color` missing r/g/b; over gRPC, a blank notification).
+- Invalid widget values return `WIDGET_PARAMETER_INVALID` with the parameter
+  and its required type/range; invalid urgency/status entries/inner TTL return
+  `INVALID_ARGUMENT`. Mixed valid/invalid updates reject whole before changing
+  publications, current parameters, transitions or MCP lease renewals.
 - A sequence-valid post-handshake gRPC `ClientMessage` with no recognized request payload returns `RequestResult{ok: false, code: INVALID_ARGUMENT}` with a hint to use the current schema and a supported request. This covers empty envelopes and requests containing only unknown or removed fields. Protobuf discards those fields, so the server cannot identify the discarded request tag or name. Unknown fields alongside a recognized request keep its normal behavior.
 - Codes are a closed set shared by both planes (invariant 8;
   `crates/tze_hud_scene/src/error_codes.rs` `ERROR_CODES`, kept in sync with

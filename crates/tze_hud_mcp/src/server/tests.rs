@@ -939,10 +939,18 @@ async fn mcp_lease_is_reused_across_publishes() {
 
 #[tokio::test]
 async fn widget_publish_hold_clear() {
-    let (server, _) = server();
+    let (server, clock) = server();
     let mut config = McpConfig::with_psk(psk());
     config.widget_transition_ms = 200;
     let server = server.with_config(config);
+    let invalid = call_err(
+        &server,
+        "hud_publish",
+        json!({"surface":"widget:gauge","params":{"level":2.0}}),
+    )
+    .await;
+    assert_eq!(invalid["code"], "WIDGET_PARAMETER_INVALID");
+    assert!(server.scene.lock().await.leases.is_empty());
     let v = call(
         &server,
         "hud_publish",
@@ -963,6 +971,110 @@ async fn widget_publish_hold_clear() {
         assert_eq!(
             record.params["fill_color"],
             WidgetParameterValue::Color(Rgba::new(1.0, 0.0, 0.0, 1.0))
+        );
+    }
+    let before = {
+        let scene = server.scene.lock().await;
+        (
+            scene.version,
+            scene.widget_registry.instances["gauge"]
+                .current_params
+                .clone(),
+            scene.widget_registry.active_publishes["gauge"][0]
+                .params
+                .clone(),
+            scene.leases.clone(),
+        )
+    };
+    clock.advance(1000);
+    let mut bad = vec![
+        (json!({"level": -0.1}), "0..1"),
+        (json!({"level": 2.0}), "0..1"),
+        (json!({"level": 1.0000000001}), "0..1"),
+        (json!({"level": 1e100}), "finite"),
+        (json!({"level": "high"}), "f32"),
+    ];
+    for value in [
+        json!({}),
+        json!({"r": 0, "g": 1}),
+        json!({"r": "0", "g": 1, "b": 0}),
+        json!({"r": 0, "g": 1, "b": 0, "a": null}),
+        json!("#123"),
+        json!("#12345678"),
+        json!("#GG0000"),
+        json!("red"),
+        json!("#ééé"),
+        json!([0, 1, 0]),
+    ] {
+        bad.push((json!({"fill_color": value}), "0..1"));
+    }
+    for channel in ["r", "g", "b", "a"] {
+        for value in [json!(true), json!("0.5"), json!(null)] {
+            let mut color = json!({"r": 0.2, "g": 0.3, "b": 0.4, "a": 1});
+            color[channel] = value;
+            bad.push((json!({"fill_color": color}), "numeric"));
+        }
+        if channel != "a" {
+            let mut color = json!({"r": 0.2, "g": 0.3, "b": 0.4});
+            color.as_object_mut().unwrap().remove(channel);
+            bad.push((json!({"fill_color": color}), "numeric"));
+        }
+        for value in [-0.1, 1.0000000001, 255.0, 1e100] {
+            let mut color = json!({"r": 0.2, "g": 0.3, "b": 0.4, "a": 1});
+            color[channel] = json!(value);
+            bad.push((json!({"fill_color": color}), "0..1"));
+        }
+    }
+    for (mut params, hint) in bad {
+        params["label"] = json!("changed");
+        for _ in 0..2 {
+            let error = call_err(
+                &server,
+                "hud_publish",
+                json!({"surface": "widget:gauge", "params": params}),
+            )
+            .await;
+            assert_eq!(error["code"], "WIDGET_PARAMETER_INVALID", "{error}");
+            assert!(error["hint"].as_str().unwrap().contains(hint), "{error}");
+            let scene = server.scene.lock().await;
+            assert_eq!(scene.version, before.0);
+            assert_eq!(scene.leases, before.3);
+            assert_eq!(
+                scene.widget_registry.instances["gauge"].current_params,
+                before.1
+            );
+            let pubs = &scene.widget_registry.active_publishes["gauge"];
+            assert_eq!(pubs.len(), 1);
+            assert_eq!(pubs[0].params, before.2);
+            assert_eq!(pubs[0].transition_ms, 200);
+        }
+    }
+    for (level, color, expected) in [
+        (
+            0.0,
+            json!("#4A9eFF"),
+            Rgba::new(74.0 / 255.0, 158.0 / 255.0, 1.0, 1.0),
+        ),
+        (
+            0.5,
+            json!({"r": 0, "g": 1, "b": 0.5}),
+            Rgba::new(0.0, 1.0, 0.5, 1.0),
+        ),
+        (
+            1.0,
+            json!({"r": 1, "g": 0, "b": 0, "a": 0}),
+            Rgba::new(1.0, 0.0, 0.0, 0.0),
+        ),
+    ] {
+        call(
+            &server,
+            "hud_publish",
+            json!({"surface":"widget:gauge", "params":{"level":level, "fill_color":color}}),
+        )
+        .await;
+        assert_eq!(
+            server.scene.lock().await.widget_registry.instances["gauge"].current_params["fill_color"],
+            WidgetParameterValue::Color(expected)
         );
     }
     let err = call_err(
@@ -1767,5 +1879,120 @@ async fn user_test_zone_fixtures_and_documented_examples_match_production_parser
         .await;
         assert_eq!(error["code"], "INVALID_ARGUMENT", "{error}");
         assert!(error["hint"].as_str().unwrap().contains(hint), "{error}");
+    }
+    let mut invalid = Vec::new();
+    for urgency in [
+        json!("high"),
+        json!(-1),
+        json!(0.5),
+        json!(true),
+        json!(null),
+        json!(4),
+        json!(4294967297_u64),
+        json!(1e100),
+    ] {
+        invalid.push((
+            "zone:notification-area",
+            json!({"body":"valid", "urgency":urgency}),
+            "urgency",
+        ));
+    }
+    for ttl in [json!(1000), json!(0), json!(null), json!("1000"), json!({})] {
+        invalid.push((
+            "zone:notification-area",
+            json!({"body":"valid", "ttl_ms":ttl}),
+            "top-level",
+        ));
+    }
+    for value in [json!(1), json!(true), json!(null), json!({}), json!([])] {
+        invalid.push((
+            "zone:status-bar",
+            json!({"entries":{"good":"ok", "bad":value}}),
+            "entries.bad",
+        ));
+    }
+    for (surface, content, hint) in invalid {
+        let (server, clock) = server();
+        let before = server.scene.lock().await.version;
+        for _ in 0..2 {
+            let error = call_err(
+                &server,
+                "hud_publish",
+                json!({"surface":surface,"content":content,"delay_ms":1000}),
+            )
+            .await;
+            assert_eq!(error["code"], "INVALID_ARGUMENT", "{error}");
+            assert!(error["hint"].as_str().unwrap().contains(hint), "{error}");
+            clock.advance(2000);
+            let mut scene = server.scene.lock().await;
+            assert_eq!(scene.version, before);
+            assert!(
+                scene.leases.is_empty(),
+                "bad content must not grant a lease"
+            );
+            assert!(
+                scene.apply_due_batches().is_empty(),
+                "bad content must not schedule"
+            );
+        }
+        let seed = if surface == "zone:status-bar" {
+            json!({"entries":{"existing":"kept"}})
+        } else {
+            json!({"body":"kept","urgency":1})
+        };
+        call(
+            &server,
+            "hud_publish",
+            json!({"surface":surface,"content":seed,"ttl_ms":0}),
+        )
+        .await;
+        let zone = surface.strip_prefix("zone:").unwrap();
+        let before = {
+            let scene = server.scene.lock().await;
+            (
+                scene.version,
+                scene.leases.clone(),
+                scene.zone_registry.active_publishes[zone][0]
+                    .content
+                    .clone(),
+            )
+        };
+        let error = call_err(
+            &server,
+            "hud_publish",
+            json!({"surface":surface,"content":content,"delay_ms":1000}),
+        )
+        .await;
+        assert_eq!(error["code"], "INVALID_ARGUMENT", "{error}");
+        assert!(error["hint"].as_str().unwrap().contains(hint), "{error}");
+        clock.advance(2000);
+        let mut scene = server.scene.lock().await;
+        assert_eq!(scene.version, before.0);
+        assert_eq!(scene.leases, before.1);
+        assert!(scene.apply_due_batches().is_empty());
+        let pubs = &scene.zone_registry.active_publishes[zone];
+        assert_eq!(pubs.len(), 1);
+        assert_eq!(pubs[0].content, before.2);
+        assert_eq!(pubs[0].expires_at_wall_us, None);
+    }
+    for urgency in [None, Some(0), Some(1), Some(2), Some(3)] {
+        let (server, _) = server();
+        let mut content = json!({"body":"valid"});
+        if let Some(urgency) = urgency {
+            content["urgency"] = json!(urgency);
+        }
+        call(
+            &server,
+            "hud_publish",
+            json!({"surface":"zone:notification-area","content":content,"ttl_ms":1000}),
+        )
+        .await;
+        let scene = server.scene.lock().await;
+        let record = &scene.zone_registry.active_publishes["notification-area"][0];
+        let ZoneContent::Notification(payload) = &record.content else {
+            panic!("notification")
+        };
+        assert_eq!(payload.urgency, urgency.unwrap_or(1));
+        assert_eq!(record.expires_at_wall_us, Some(2_000_000));
     }
 }
