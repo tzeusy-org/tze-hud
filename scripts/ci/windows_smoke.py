@@ -437,19 +437,60 @@ def check_notification_ttl(smoke: Smoke) -> None:
 
 
 def check_delay(smoke: Smoke) -> None:
-    """delay_ms content is absent until due, then appears with nobody calling again."""
+    """Capture absence before due and presence after due without a second publish.
+
+    Screenshots force an offscreen render, so this does not prove an autonomous
+    on-screen presentation or visibility between the observed frames.
+    """
     zone = next(s["s"] for s in surfaces_of(smoke) if s.get("accepts") == "text")
     smoke.ok("hud_clear", {"surface": zone})  # earlier steps may still hold this zone
     assert not is_held(surfaces_of(smoke), zone), f"{zone} still held after hud_clear"
+    warm, _, _ = capture_frame(smoke)
+    time.sleep(POLL_S)  # Let earlier publication fades settle at the existing cadence.
+    baseline, _, _ = capture_frame(smoke)
+    assert baseline[:2] == warm[:2], "screenshot dimensions changed during baseline"
+    assert baseline[2] == warm[2], "delay baseline is not stable after hud_clear"
+    width, height, before = baseline
+
     delay_ms = 3_000
     sent = time.monotonic()
-    smoke.ok("hud_publish", {"surface": zone, "content": "CI delayed", "delay_ms": delay_ms, "ttl_ms": 20_000})
-    assert not is_held(surfaces_of(smoke), zone), f"{zone} held before its {delay_ms} ms delay"
-    wait_until(held_probe(smoke, zone, True), what=f"{zone} delay_ms={delay_ms}")
-    waited = time.monotonic() - sent
-    assert_not_early(waited, delay_ms / 1000, f"{zone} content appeared")
-    smoke.ok("hud_clear", {"surface": zone})
-    print(f"ok  delay_ms={delay_ms} content absent until due, appeared after {waited:.1f}s")
+    try:
+        published = smoke.ok("hud_publish", {"surface": zone, "content": "CI DELAYED CONTENT IS VISIBLE", "delay_ms": delay_ms, "ttl_ms": 20_000})
+        accepted = time.monotonic()
+        assert published.get("ok") is True, f"hud_publish {zone} was not accepted"
+        assert is_held(surfaces_of(smoke), zone), f"{zone} scheduled publication is not held"
+
+        # Processing occurred between the request and its acknowledgement. Use
+        # both bounds; a capture spanning the earliest due time proves no absence.
+        earliest_due, latest_due = sent + delay_ms / 1000, accepted + delay_ms / 1000
+        early, _, early_finished = capture_frame(smoke)
+        assert early_finished < earliest_due, "capture did not finish before the earliest due time"
+        assert early[:2] == (width, height), "screenshot dimensions changed before due"
+        assert early[2] == before, f"{zone} rendered content before its {delay_ms} ms delay"
+
+        remaining = latest_due - time.monotonic()
+        if remaining > 0:
+            time.sleep(remaining)
+        late, late_started, late_finished = capture_frame(smoke)
+        assert late_started >= latest_due, "capture started before the latest due time"
+        assert late[:2] == (width, height), "screenshot dimensions changed after due"
+        after = late[2]
+        changed = sum(1 for i in range(0, len(after), 4) if after[i : i + 4] != before[i : i + 4])
+        assert changed >= MIN_CHANGED_PIXELS, (
+            f"{zone} delayed content changed only {changed} pixels after due (need {MIN_CHANGED_PIXELS})"
+        )
+    finally:
+        # Includes an accepted publication whose response/observation failed.
+        smoke.ok("hud_clear", {"surface": zone})
+
+    assert not is_held(surfaces_of(smoke), zone), f"{zone} still held after delayed content was cleared"
+    restored, _, _ = capture_frame(smoke)
+    assert restored[:2] == (width, height), "screenshot dimensions changed after clear"
+    assert restored[2] == before, "delay capture did not return to its baseline after hud_clear"
+    print(
+        f"ok  delay_ms={delay_ms} held on acceptance, captured absent before due and present "
+        f"after {late_finished - sent:.1f}s without a second publish ({changed} pixels changed; render on request)"
+    )
 
 
 def poc_demo_tiles(poc_demo: Path, psk: str) -> int:
@@ -895,6 +936,20 @@ def post_capture_comment(output: Path) -> int:
         return 1
 
 
+def capture_frame(smoke: Smoke) -> tuple[tuple[int, int, bytes], float, float]:
+    """Decode one own-frame capture, bounded by monotonic request/response times.
+
+    The response timestamp precedes PNG decoding: CPU decode time is not part
+    of the interval in which the compositor could have captured the frame.
+    Capture failures propagate; this helper never retries unavailable evidence.
+    """
+    started = time.monotonic()
+    status, ctype, body = smoke.get_bytes("/admin/screenshot")
+    finished = time.monotonic()
+    assert status == 200 and ctype == "image/png", f"/admin/screenshot: {status} {ctype}"
+    return decode_png_rgba(body), started, finished
+
+
 def check_screenshot(smoke: Smoke) -> None:
     """The screenshot is a real PNG of the frame, and it shows a new notification.
 
@@ -903,12 +958,7 @@ def check_screenshot(smoke: Smoke) -> None:
     meaningful number of pixels (the notification's backdrop and text).
     """
 
-    def shot() -> tuple[int, int, bytes]:
-        status, ctype, body = smoke.get_bytes("/admin/screenshot")
-        assert status == 200 and ctype == "image/png", f"/admin/screenshot: {status} {ctype}"
-        return decode_png_rgba(body)
-
-    width, height, before = shot()
+    (width, height, before), _, _ = capture_frame(smoke)
     if sys.platform == "win32":
         import ctypes
 
@@ -921,7 +971,7 @@ def check_screenshot(smoke: Smoke) -> None:
     deadline, changed = time.monotonic() + 10, 0
     while time.monotonic() < deadline and changed < MIN_CHANGED_PIXELS:
         time.sleep(0.5)  # let the compositor render the publish
-        w2, h2, after = shot()
+        (w2, h2, after), _, _ = capture_frame(smoke)
         assert (w2, h2) == (width, height), f"screenshot size changed: {w2}x{h2}"
         changed = sum(1 for i in range(0, len(after), 4) if after[i : i + 4] != before[i : i + 4])
     assert changed >= MIN_CHANGED_PIXELS, (

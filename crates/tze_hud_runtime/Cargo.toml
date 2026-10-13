@@ -10,9 +10,9 @@ license.workspace = true
 ## unrestricted capability grants. MUST NOT be enabled in production builds.
 ## Safe to enable in tests (which also compile under `cfg(test)`) and examples.
 dev-mode = ["tze_hud_compositor/dev-mode", "tze_hud_telemetry/dev-mode"]
-## Expose `windowed::HeadlessEventLoopHarness`: the GPU-free event-loop
-## harness with a live MCP server and an injected clock, for end-to-end tests
-## (`tests/integration/poc_acceptance.rs`). Not for production builds.
+## Expose `windowed::HeadlessEventLoopHarness` (GPU-free, with live MCP and an
+## injected clock) and headless gRPC listener adoption for end-to-end fixtures.
+## Not for production builds.
 test-harness = ["tze_hud_protocol/dev-mode"]
 
 [dependencies]
