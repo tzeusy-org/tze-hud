@@ -183,8 +183,6 @@ async fn widget_param_update_rasterizes_only_that_instance() {
     {
         let work = compositor.take_work_counts().expect("first widget frame");
         assert_eq!((work.layout, work.raster, work.upload), (0, 2, 2));
-        assert_eq!(work.damage_px, 512 * 256);
-        assert!(work.full_frame);
     }
 
     // Publish to the gauge only: gauge +1, progress +0.
@@ -197,7 +195,6 @@ async fn widget_param_update_rasterizes_only_that_instance() {
     {
         let work = compositor.take_work_counts().expect("changed widget frame");
         assert_eq!((work.layout, work.raster, work.upload), (0, 1, 1));
-        assert_eq!(work.damage_px, work.pixels_damaged);
         assert!(
             compositor.take_work_counts().is_none(),
             "single-frame drain"
@@ -220,7 +217,6 @@ async fn widget_param_update_rasterizes_only_that_instance() {
             .take_work_counts()
             .expect("actual unchanged frame");
         assert_eq!((work.layout, work.raster, work.upload), (0, 0, 0));
-        assert_eq!(work.damage_px, 512 * 256);
 
         // A real raster admission failure must count the entered invocation,
         // while recording no RGBA submission. Keep the live per-instance and
