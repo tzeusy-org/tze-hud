@@ -210,6 +210,8 @@ def test_delay_checks_held_ownership_and_captured_presentation(monkeypatch, subt
                     pixels = background
                 if self.case == "too few pixels" and shot == 4:
                     pixels = shown[:796] + background[796:]
+                if self.case == "native observed footprint" and shot == 4:
+                    pixels = shown[:768] + background[768:]  # 192 still fails the 200-pixel guard.
                 if self.case == "not restored" and shot == 5:
                     pixels = shown
                 dimension_shots = {"baseline dimensions": 2, "early dimensions": 3,
@@ -250,7 +252,7 @@ def test_delay_checks_held_ownership_and_captured_presentation(monkeypatch, subt
                 payload = {"ok": True}
             else:
                 assert tool == "hud_publish"
-                assert args == {"surface": "zone:subtitle", "content": "CI delayed", "delay_ms": 3000, "ttl_ms": 20000}
+                assert args == {"surface": "zone:subtitle", "content": "CI DELAYED CONTENT IS VISIBLE", "delay_ms": 3000, "ttl_ms": 20000}
                 self.held, self.due = True, self.clock() + 3
                 sent = self.clock()
                 self.clock.now += 4 if self.case == "slow acknowledgement" else 0.05
@@ -296,7 +298,7 @@ def test_delay_checks_held_ownership_and_captured_presentation(monkeypatch, subt
     run("normal", success=True)  # The unchanged checker rejects correct held=true.
     run("slow decode", success=True)  # Capture timing ends before PNG CPU work.
     for case in (
-        "premature", "missing", "too few pixels", "unstable baseline", "not restored",
+        "premature", "missing", "too few pixels", "native observed footprint", "unstable baseline", "not restored",
         "baseline dimensions", "early dimensions", "late dimensions", "clear dimensions",
         "cross-due capture", "slow acknowledgement", "not held",
         "missing surface", "publish rejected", "clear failed", "401", "403", "429", "503",

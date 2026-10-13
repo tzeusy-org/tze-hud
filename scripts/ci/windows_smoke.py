@@ -455,7 +455,7 @@ def check_delay(smoke: Smoke) -> None:
     delay_ms = 3_000
     sent = time.monotonic()
     try:
-        published = smoke.ok("hud_publish", {"surface": zone, "content": "CI delayed", "delay_ms": delay_ms, "ttl_ms": 20_000})
+        published = smoke.ok("hud_publish", {"surface": zone, "content": "CI DELAYED CONTENT IS VISIBLE", "delay_ms": delay_ms, "ttl_ms": 20_000})
         accepted = time.monotonic()
         assert published.get("ok") is True, f"hud_publish {zone} was not accepted"
         assert is_held(surfaces_of(smoke), zone), f"{zone} scheduled publication is not held"
