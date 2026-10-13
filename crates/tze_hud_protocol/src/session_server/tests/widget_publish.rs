@@ -3,7 +3,27 @@ use super::*;
 /// Scenario: Durable WidgetPublish with valid params receives WidgetPublishResult(accepted=true).
 #[tokio::test]
 async fn test_durable_widget_publish_receives_result() {
-    let (mut client, _handle) = setup_widget_test().await;
+    let service = setup_widget_service().await;
+    let scene_ref = service.state.lock().await.scene.clone();
+    {
+        let mut scene = scene_ref.lock().await;
+        let def = scene.widget_registry.definitions.get_mut("gauge").unwrap();
+        def.parameter_schema[0].constraints = Some(tze_hud_scene::WidgetParamConstraints {
+            f32_min: Some(0.0),
+            f32_max: Some(1.0),
+            ..Default::default()
+        });
+        def.parameter_schema
+            .push(tze_hud_scene::WidgetParameterDeclaration {
+                name: "color".into(),
+                param_type: tze_hud_scene::WidgetParamType::Color,
+                default_value: tze_hud_scene::WidgetParameterValue::Color(
+                    tze_hud_scene::Rgba::WHITE,
+                ),
+                constraints: None,
+            });
+    }
+    let (mut client, _handle) = setup_widget_test_with_service(service).await;
 
     let (tx, _init_msgs, mut stream) = handshake_with_capabilities(
         &mut client,
@@ -47,6 +67,131 @@ async fn test_durable_widget_publish_receives_result() {
         other => panic!("Expected WidgetPublishResult, got: {other:?}"),
     }
 
+    use crate::proto::widget_parameter_value_proto::Value as Param;
+    let before = {
+        let scene = scene_ref.lock().await;
+        (
+            scene.version,
+            scene.widget_registry.instances["gauge"]
+                .current_params
+                .clone(),
+        )
+    };
+    let mut bad = vec![
+        ("level", Param::F32Value(-0.1), "0..1"),
+        ("level", Param::F32Value(1.1), "0..1"),
+        ("level", Param::F32Value(f32::NAN), "finite"),
+        ("level", Param::F32Value(f32::INFINITY), "finite"),
+    ];
+    for channel in 0..4 {
+        for value in [-0.1, 1.1, f32::NAN, f32::INFINITY] {
+            let mut c = [0.5; 4];
+            c[channel] = value;
+            bad.push((
+                "color",
+                Param::ColorValue(crate::proto::Rgba {
+                    r: c[0],
+                    g: c[1],
+                    b: c[2],
+                    a: c[3],
+                }),
+                "0..1",
+            ));
+        }
+    }
+    for (index, (param, value, hint)) in bad.into_iter().enumerate() {
+        let sequence = 3 + index as u64;
+        let mut params = vec![crate::proto::WidgetParameterValueProto {
+            param_name: param.into(),
+            value: Some(value),
+        }];
+        params.push(if param == "level" {
+            crate::proto::WidgetParameterValueProto {
+                param_name: "color".into(),
+                value: Some(Param::ColorValue(crate::proto::Rgba {
+                    r: 0.2,
+                    g: 0.3,
+                    b: 0.4,
+                    a: 1.0,
+                })),
+            }
+        } else {
+            crate::proto::WidgetParameterValueProto {
+                param_name: "level".into(),
+                value: Some(Param::F32Value(0.5)),
+            }
+        });
+        tx.send(ClientMessage {
+            sequence,
+            timestamp_wall_us: now_wall_us(),
+            payload: Some(ClientPayload::Publish(Publish {
+                surface: "widget:gauge".into(),
+                transition_ms: 100,
+                params,
+                ..Default::default()
+            })),
+        })
+        .await
+        .unwrap();
+        let message = next_server_msg(&mut stream).await;
+        let Some(ServerPayload::RequestResult(result)) = message.payload else {
+            panic!("request result")
+        };
+        assert!(!result.ok);
+        assert_eq!(result.seq, sequence);
+        assert_eq!(result.code, "WIDGET_PARAMETER_INVALID");
+        assert!(
+            result.hint.contains(param) && result.hint.contains(hint),
+            "{}",
+            result.hint
+        );
+        let scene = scene_ref.lock().await;
+        assert_eq!(scene.version, before.0);
+        assert_eq!(
+            scene.widget_registry.instances["gauge"].current_params,
+            before.1
+        );
+        let pubs = &scene.widget_registry.active_publishes["gauge"];
+        assert_eq!(pubs.len(), 1);
+        assert_eq!(pubs[0].transition_ms, 0);
+        assert_eq!(
+            pubs[0].params["level"],
+            tze_hud_scene::WidgetParameterValue::F32(0.75)
+        );
+    }
+    for (sequence, level) in [(30, 0.0), (31, 1.0)] {
+        tx.send(ClientMessage {
+            sequence,
+            timestamp_wall_us: now_wall_us(),
+            payload: Some(ClientPayload::Publish(Publish {
+                surface: "widget:gauge".into(),
+                params: vec![
+                    crate::proto::WidgetParameterValueProto {
+                        param_name: "level".into(),
+                        value: Some(Param::F32Value(level)),
+                    },
+                    crate::proto::WidgetParameterValueProto {
+                        param_name: "color".into(),
+                        value: Some(Param::ColorValue(crate::proto::Rgba {
+                            r: 0.0,
+                            g: 1.0,
+                            b: 0.5,
+                            a: 1.0,
+                        })),
+                    },
+                ],
+                ..Default::default()
+            })),
+        })
+        .await
+        .unwrap();
+        let message = next_server_msg(&mut stream).await;
+        assert!(matches!(message.payload, Some(ServerPayload::RequestResult(result)) if result.ok));
+        assert_eq!(
+            scene_ref.lock().await.widget_registry.instances["gauge"].current_params["level"],
+            tze_hud_scene::WidgetParameterValue::F32(level)
+        );
+    }
     drop(tx);
 }
 

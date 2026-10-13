@@ -286,31 +286,62 @@ fn gauge_and_progress_bar_svgs_have_no_hardcoded_hex_colors() {
 // ─── Publishing to shipped widgets ────────────────────────────────────────────
 
 #[test]
-fn shipped_widgets_clamp_out_of_range_f32() {
-    // (widget, param, published, stored)
-    for (widget, param, published, stored) in [
-        ("gauge", "level", 1.5, 1.0),
-        ("gauge", "level", -0.5, 0.0),
-        ("gauge", "level", 0.4, 0.4),
-        ("progress-bar", "progress", 2.0, 1.0),
+fn shipped_widgets_reject_out_of_range_f32() {
+    for (widget, param, published, accepted) in [
+        ("gauge", "level", 1.5, false),
+        ("gauge", "level", -0.5, false),
+        ("gauge", "level", 0.4, true),
+        ("gauge", "level", 0.0, true),
+        ("gauge", "level", 1.0, true),
+        ("progress-bar", "progress", 2.0, false),
     ] {
         let mut scene = scene_with(widget);
-        publish(
+        let result = publish(
             &mut scene,
             widget,
             &[(param, WidgetParameterValue::F32(published))],
-        )
-        .unwrap();
+        );
+        assert_eq!(
+            result.is_ok(),
+            accepted,
+            "{widget}.{param}={published}: {result:?}"
+        );
         let pubs = scene.widget_registry.active_for_widget(widget);
+        if !accepted {
+            assert!(pubs.is_empty());
+            continue;
+        }
         match pubs[0].params.get(param) {
             Some(WidgetParameterValue::F32(got)) => {
                 assert!(
-                    (got - stored).abs() < 1e-6,
+                    (got - published).abs() < 1e-6,
                     "{widget}.{param}={published}: stored {got}"
                 )
             }
             other => panic!("{widget}.{param}: {other:?}"),
         }
+        let color = scene.widget_registry.definitions[widget]
+            .parameter_schema
+            .iter()
+            .find(|p| p.name == "fill_color")
+            .unwrap()
+            .default_value
+            .clone();
+        assert_eq!(
+            color,
+            WidgetParameterValue::Color(tze_hud_scene::Rgba::new(
+                74.0 / 255.0,
+                158.0 / 255.0,
+                1.0,
+                1.0
+            )),
+            "config byte-array default must be normalized"
+        );
+        publish(&mut scene, widget, &[("fill_color", color.clone())]).unwrap();
+        assert_eq!(
+            scene.widget_registry.instances[widget].current_params["fill_color"],
+            color
+        );
     }
 }
 

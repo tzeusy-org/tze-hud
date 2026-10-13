@@ -510,11 +510,8 @@ pub fn proto_zone_content_to_scene(c: &proto::ZoneContent) -> Option<ZoneContent
             text: n.text.clone(),
             icon: n.icon.clone(),
             urgency: n.urgency,
-            // ttl_ms is intentionally None on the gRPC path: the protobuf
-            // NotificationPayload does not yet carry a ttl_ms field.
-            // Per-notification TTL override is currently MCP-only.
-            // To support it over gRPC, add the field to types.proto and
-            // round-trip it in both directions here.
+            // The legacy inner member controls no expiry/fade. Both transports
+            // use the top-level Publish TTL/expiry, counted from presentation.
             ttl_ms: None,
             title: n.title.clone(),
             actions: n
