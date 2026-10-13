@@ -167,12 +167,18 @@ def test_assert_not_early_allows_slack_but_rejects_an_early_event():
         ws.assert_not_early(1.0, 3.0, "x")
 
 
-def test_delay_checks_held_ownership_and_captured_presentation(monkeypatch, subtests):
+def test_delay_checks_held_ownership_and_captured_presentation(monkeypatch, subtests, capsys):
     """Exercise the real smoke/PNG path with one publish and an offline clock."""
     background = b"\x10\x20\x30\xff" * 400
     shown = b"\x90\xa0\xb0\xff" * 200 + background[800:]
     baseline_png = ws.encode_png_rgba(20, 20, background)
     decode = ws.decode_png_rgba
+
+    class ClockInfo:
+        def __init__(self, name):
+            self.implementation = "offline-" + name
+            self.resolution = 0.015625 if name == "monotonic" else 0.000001
+            self.monotonic, self.adjustable = True, False
 
     class Response:
         def __init__(self, body, status=200, ctype="application/json"):
@@ -267,6 +273,8 @@ def test_delay_checks_held_ownership_and_captured_presentation(monkeypatch, subt
         endpoint = Endpoint(clock, case)
         with monkeypatch.context() as patch:
             patch.setattr(ws.time, "monotonic", clock)
+            patch.setattr(ws.time, "perf_counter", lambda: clock() + 123.0)
+            patch.setattr(ws.time, "get_clock_info", ClockInfo)
             patch.setattr(ws.time, "sleep", clock.sleep)
             patch.setattr(ws.urllib.request, "urlopen", endpoint.urlopen)
             if case == "slow decode":
@@ -294,6 +302,40 @@ def test_delay_checks_held_ownership_and_captured_presentation(monkeypatch, subt
                     assert len(endpoint.publishes) == (0 if baseline_failed else 1)
                     assert endpoint.clears == (1 if baseline_failed else 2)
                     assert len(endpoint.captures) <= 5  # No retry on invalid evidence.
+
+                output = capsys.readouterr()
+                assert "synthetic-unused-key" not in output.out + output.err
+                assert "CI DELAYED CONTENT IS VISIBLE" not in output.out + output.err
+                records = [ws.json.loads(line.removeprefix("[DEBUG-hud-4gqnb] "))
+                           for line in output.out.splitlines() if line.startswith("[DEBUG-hud-4gqnb] ")]
+                baseline_failed = case in ("unstable baseline", "baseline dimensions")
+                assert len(records) == (0 if baseline_failed else 1)
+                if records:
+                    record = records[0]
+                    assert set(record) == {"python_version", "clocks", "events"}
+                    assert record["python_version"] == list(sys.version_info[:3])
+                    assert record["clocks"] == {
+                        name: {"implementation": "offline-" + name,
+                               "resolution_s": 0.015625 if name == "monotonic" else 0.000001,
+                               "monotonic": True, "adjustable": False}
+                        for name in ("monotonic", "perf_counter")
+                    }
+                    events = record["events"]
+                    assert 1 <= len(events) <= 6
+                    assert events[0]["event"] == "publish_sent"
+                    for event in events:
+                        assert set(event) == {"event", "monotonic_s", "perf_counter_s"}
+                        assert isinstance(event["monotonic_s"], (int, float))
+                        assert event["perf_counter_s"] == event["monotonic_s"] + 123.0
+                    if success or case in ("missing", "too few pixels", "native observed footprint"):
+                        assert [event["event"] for event in events] == [
+                            "publish_sent", "publish_acknowledged", "early_request", "early_response",
+                            "late_request", "late_response",
+                        ]
+                        captures = endpoint.captures[invocation * 5 :]
+                        assert [event["monotonic_s"] for event in events] == [
+                            *endpoint.publishes[-1], *captures[2], *captures[3],
+                        ]
 
     run("normal", success=True)  # The unchanged checker rejects correct held=true.
     run("slow decode", success=True)  # Capture timing ends before PNG CPU work.
