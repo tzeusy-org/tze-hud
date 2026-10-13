@@ -138,7 +138,6 @@ fn build_expanded_state(
             coalesce_key: None,
             expects_reply: false,
         },
-        "codex-session",
         21,
     );
     assert!(published.accepted, "publish output must succeed");
@@ -155,7 +154,6 @@ fn build_expanded_state(
             lifecycle_state: ProjectionLifecycleState::Active,
             status_text: Some("styling test active".to_string()),
         },
-        "codex-session",
         23,
     );
     assert!(active.accepted, "publish status must succeed");

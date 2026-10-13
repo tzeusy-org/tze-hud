@@ -30,7 +30,6 @@ fn widget_publish_with_suspended_lease_is_safe_mode_active() {
 
 /// WHEN an f32 NaN or infinity is submitted THEN publish_to_widget returns
 /// WidgetParameterInvalidValue.
-/// Source: widget-system/spec.md §Requirement: Widget Parameter Validation (F32 invariant).
 #[test]
 fn widget_publish_f32_nan_rejected() {
     for (label, value) in [
@@ -51,6 +50,47 @@ fn widget_publish_f32_nan_rejected() {
             ),
             "{label} f32 should produce WidgetParameterInvalidValue, got: {result:?}"
         );
+    }
+    for (min, max, value, accepted) in [
+        (Some(0.0), None, -0.1, false),
+        (Some(0.0), None, 0.0, true),
+        (Some(0.0), None, 2.0, true),
+        (None, Some(1.0), 1.1, false),
+        (None, Some(1.0), 1.0, true),
+        (None, Some(1.0), -2.0, true),
+        (None, None, f32::MAX, true),
+        (None, None, f32::INFINITY, false),
+    ] {
+        let (mut scene, _) = scene_with_gauge(ContentionPolicy::LatestWins);
+        let constraints = scene
+            .widget_registry
+            .definitions
+            .get_mut("gauge")
+            .unwrap()
+            .parameter_schema[0]
+            .constraints
+            .as_mut()
+            .unwrap();
+        constraints.f32_min = min;
+        constraints.f32_max = max;
+        let result = scene.publish_to_widget(
+            "gauge",
+            std::collections::HashMap::from([(
+                "level".to_string(),
+                WidgetParameterValue::F32(value),
+            )]),
+            "agent.test",
+            None,
+            0,
+            None,
+        );
+        assert_eq!(result.is_ok(), accepted, "{min:?}..{max:?} {value}");
+        if accepted {
+            assert_eq!(
+                scene.widget_registry.instances["gauge"].current_params["level"],
+                WidgetParameterValue::F32(value)
+            );
+        }
     }
 }
 
@@ -117,25 +157,119 @@ fn widget_publish_f32_in_range_accepted_unchanged() {
     assert!(result.is_ok(), "in-range f32 should be accepted");
 }
 
-/// WHEN an f32 value exceeds max THEN it is clamped, not rejected.
-/// Source: widget-system/spec.md — f32 out of range is clamped.
+/// Invalid numeric params reject the whole update, without publication changes.
 #[test]
-fn widget_publish_f32_above_max_clamped() {
+fn widget_publish_out_of_range_values_rejected() {
     let (mut scene, _tab) = scene_with_gauge(ContentionPolicy::LatestWins);
-    // level has max=1.0; submit 2.5 — should clamp to 1.0 without error
-    let params =
-        std::collections::HashMap::from([("level".to_string(), WidgetParameterValue::F32(2.5))]);
-    let result = scene.publish_to_widget("gauge", params, "agent.test", None, 0, None);
-    assert!(result.is_ok(), "out-of-range f32 should clamp, not reject");
-
-    // The recorded publish should contain the clamped value.
-    let pubs = scene.widget_registry.active_for_widget("gauge");
-    assert_eq!(pubs.len(), 1);
-    let recorded_level = pubs[0].params.get("level");
-    assert!(
-        matches!(recorded_level, Some(WidgetParameterValue::F32(v)) if (*v - 1.0).abs() < 1e-6),
-        "clamped value should be 1.0, got: {recorded_level:?}"
-    );
+    scene
+        .widget_registry
+        .definitions
+        .get_mut("gauge")
+        .unwrap()
+        .parameter_schema
+        .push(crate::types::WidgetParameterDeclaration {
+            name: "color".into(),
+            param_type: crate::types::WidgetParamType::Color,
+            default_value: WidgetParameterValue::Color(Rgba::WHITE),
+            constraints: None,
+        });
+    for boundary in [0.0, 0.4, 1.0] {
+        scene
+            .publish_to_widget(
+                "gauge",
+                std::collections::HashMap::from([(
+                    "level".into(),
+                    WidgetParameterValue::F32(boundary),
+                )]),
+                "agent.test",
+                None,
+                20,
+                None,
+            )
+            .unwrap();
+        assert_eq!(
+            scene.widget_registry.instances["gauge"].current_params["level"],
+            WidgetParameterValue::F32(boundary)
+        );
+    }
+    let before = scene.widget_registry.instances["gauge"]
+        .current_params
+        .clone();
+    let version = scene.version;
+    let mut invalid = vec![
+        ("level", WidgetParameterValue::F32(-0.1)),
+        ("level", WidgetParameterValue::F32(2.5)),
+    ];
+    for channel in 0..4 {
+        for value in [-0.1, 1.1, f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            let mut channels = [0.5; 4];
+            channels[channel] = value;
+            invalid.push((
+                "color",
+                WidgetParameterValue::Color(Rgba::new(
+                    channels[0],
+                    channels[1],
+                    channels[2],
+                    channels[3],
+                )),
+            ));
+        }
+    }
+    for (param, value) in invalid {
+        for _ in 0..2 {
+            let result = scene.publish_to_widget(
+                "gauge",
+                std::collections::HashMap::from([
+                    (
+                        "label".into(),
+                        WidgetParameterValue::String("changed".into()),
+                    ),
+                    (param.into(), value.clone()),
+                ]),
+                "agent.test",
+                None,
+                100,
+                None,
+            );
+            assert!(
+                matches!(
+                    result,
+                    Err(ValidationError::WidgetParameterInvalidValue { .. })
+                ),
+                "{result:?}"
+            );
+            assert_eq!(scene.version, version);
+            assert_eq!(
+                scene.widget_registry.instances["gauge"].current_params,
+                before
+            );
+            let pubs = scene.widget_registry.active_for_widget("gauge");
+            assert_eq!(pubs.len(), 1);
+            assert_eq!(pubs[0].transition_ms, 20);
+            assert_eq!(pubs[0].params["level"], WidgetParameterValue::F32(1.0));
+        }
+        assert!(scene.set_widget_param_local("gauge", param, value).is_err());
+        assert_eq!(
+            scene.widget_registry.instances["gauge"].current_params,
+            before
+        );
+    }
+    scene
+        .publish_to_widget(
+            "gauge",
+            std::collections::HashMap::from([
+                ("level".into(), WidgetParameterValue::F32(0.5)),
+                (
+                    "color".into(),
+                    WidgetParameterValue::Color(Rgba::new(0.0, 1.0, 0.5, 1.0)),
+                ),
+            ]),
+            "agent.test",
+            None,
+            0,
+            None,
+        )
+        .unwrap();
 }
 
 /// WHEN a parameter name is not in the widget schema THEN unknown-parameter error.

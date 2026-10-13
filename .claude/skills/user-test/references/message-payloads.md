@@ -54,6 +54,12 @@ Message shape — `content` is either a plain string (StreamText) or a typed JSO
 agent the PSK belongs to; a message cannot set it. `type` may be omitted: the
 runtime infers it from what the zone accepts.
 
+Notification urgency, when supplied, is an integer 0–3; omission defaults to 1.
+Put TTL at the message/publish top level, never inside notification content.
+Every status entry must be a string; an empty string removes its key.
+Widget f32 values must satisfy their discovered ranges. Widget colors accept
+`#RRGGBB` or numeric `{r,g,b,a?}` in 0–1, with absent alpha defaulting to 1.
+
 - `widget_messages`: array of widget publishes (optional)
 
 Widget message shape:
