@@ -107,10 +107,8 @@ impl PortalStatus {
     /// It only labels the portal; liveness is the runtime's.
     pub fn parse(s: &str) -> Result<Self, PortalError> {
         match s {
-            "attached" => Ok(Self::Attached),
             "active" => Ok(Self::Active),
-            "degraded" | "hud_unavailable" => Ok(Self::Degraded),
-            "detached" => Ok(Self::Detached),
+            "degraded" => Ok(Self::Degraded),
             _ => Err(PortalError::InvalidArgument),
         }
     }
@@ -269,6 +267,13 @@ pub struct Publish {
     pub status: Option<PortalStatus>,
 }
 
+/// Facts from the completed publish, without transcript or reply content.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PublishOutcome {
+    pub reattached: bool,
+    pub pending_input: usize,
+}
+
 /// One input item returned by [`PortalHub::poll_input`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PolledInput {
@@ -326,6 +331,14 @@ pub struct PortalHub {
     limits: PortalLimits,
 }
 
+fn hold_deadline(ttl_ms: u64, now_us: u64) -> u64 {
+    if ttl_ms == 0 {
+        u64::MAX
+    } else {
+        now_us.saturating_add(ttl_ms.saturating_mul(1_000))
+    }
+}
+
 impl PortalHub {
     pub fn new(limits: PortalLimits) -> Self {
         Self {
@@ -360,6 +373,18 @@ impl PortalHub {
     /// Publish to a portal, attaching it first if the agent has none with
     /// this id. With neither text nor status it only attaches.
     pub fn publish(&mut self, key: &PortalKey, p: Publish, now_us: u64) -> Result<(), PortalError> {
+        self.publish_with_hold(key, p, None, now_us).map(|_| ())
+    }
+
+    /// Publish and optionally hold in one operation. A runtime-reclaimed id
+    /// attaches fresh; an explicitly cleared id is a first attachment again.
+    pub fn publish_with_hold(
+        &mut self,
+        key: &PortalKey,
+        p: Publish,
+        ttl_ms: Option<u64>,
+        now_us: u64,
+    ) -> Result<PublishOutcome, PortalError> {
         let name_ok = |s: &str| !s.is_empty() && s.len() <= MAX_NAME_BYTES;
         if !name_ok(&key.id)
             || !p.display_name.as_deref().is_none_or(name_ok)
@@ -372,6 +397,10 @@ impl PortalHub {
             return Err(PortalError::TooLarge { limit });
         }
         let retained = self.limits.retained_bytes;
+        let reattached = self
+            .portals
+            .get(key)
+            .is_some_and(|p| p.reclaimed_by_runtime);
         if self.get(key).is_none() {
             self.next_incarnation = self
                 .next_incarnation
@@ -423,18 +452,20 @@ impl PortalHub {
         if let Some(status) = p.status {
             portal.status = status;
         }
-        Ok(())
+        if let Some(ttl_ms) = ttl_ms {
+            portal.hold_until_us = Some(hold_deadline(ttl_ms, now_us));
+        }
+        Ok(PublishOutcome {
+            reattached,
+            pending_input: portal.inputs.len(),
+        })
     }
 
     /// Keep a portal past the idle degrade for `ttl_ms` (0 = until cleared).
     pub fn hold(&mut self, key: &PortalKey, ttl_ms: u64, now_us: u64) -> Result<(), PortalError> {
         let portal = self.live_mut(key)?;
         portal.touch(now_us);
-        portal.hold_until_us = Some(if ttl_ms == 0 {
-            u64::MAX
-        } else {
-            now_us.saturating_add(ttl_ms.saturating_mul(1_000))
-        });
+        portal.hold_until_us = Some(hold_deadline(ttl_ms, now_us));
         Ok(())
     }
 
@@ -751,13 +782,7 @@ mod tests {
             Err(PortalError::TooLarge { limit: 16 * 1024 })
         );
         // Every `status` in the hud_publish schema enum labels a live portal.
-        for status in [
-            "attached",
-            "active",
-            "degraded",
-            "hud_unavailable",
-            "detached",
-        ] {
+        for status in ["active", "degraded"] {
             let status = Some(PortalStatus::parse(status).unwrap());
             hub.publish(
                 &a,
@@ -770,10 +795,12 @@ mod tests {
             .unwrap();
             assert_eq!(hub.list("alice").len(), 1);
         }
-        assert_eq!(
-            PortalStatus::parse("busy"),
-            Err(PortalError::InvalidArgument)
-        );
+        for status in ["attached", "detached", "hud_unavailable", "busy"] {
+            assert_eq!(
+                PortalStatus::parse(status),
+                Err(PortalError::InvalidArgument)
+            );
+        }
     }
 
     #[test]
@@ -976,54 +1003,80 @@ mod tests {
 
     #[test]
     fn hold_ttl_outlives_reap_window_then_lapses() {
-        let mut hub = PortalHub::default();
-        let k = key("a", "p");
-        hub.publish(&k, text("kept"), 0).unwrap();
-        hub.take_due(0);
-        hub.hold(&k, 300_000, 0).unwrap();
-        assert_eq!(
-            hub.next_deadline(),
-            Some(Deadline {
-                at_us: 300 * S,
-                kind: DeadlineKind::Liveness
-            })
-        );
-        assert_eq!(
-            hub.sweep(120 * S),
-            [],
-            "past the 60 s idle reap, inside the hold"
-        );
-        assert_eq!(texts(&hub, &k), ["kept"]);
-        assert_eq!(hub.sweep(300 * S), [Transition::Degraded(k.clone())]);
-        assert_eq!(hub.sweep(330 * S), [Transition::Reclaimed(k)]);
+        for publish_hold in [false, true] {
+            let mut hub = PortalHub::default();
+            let k = key("a", "p");
+            if publish_hold {
+                hub.publish_with_hold(&k, text("kept"), Some(300_000), 0)
+                    .unwrap();
+            } else {
+                hub.publish(&k, text("kept"), 0).unwrap();
+                hub.hold(&k, 300_000, 0).unwrap();
+            }
+            hub.take_due(0);
+            assert_eq!(
+                hub.next_deadline(),
+                Some(Deadline {
+                    at_us: 300 * S,
+                    kind: DeadlineKind::Liveness
+                })
+            );
+            assert_eq!(
+                hub.sweep(120 * S),
+                [],
+                "past the 60 s idle reap, inside the hold"
+            );
+            assert_eq!(texts(&hub, &k), ["kept"]);
+            assert_eq!(hub.sweep(300 * S), [Transition::Degraded(k.clone())]);
+            assert_eq!(hub.sweep(330 * S), [Transition::Reclaimed(k)]);
+        }
     }
 
     #[test]
     fn hold_zero_never_degrades() {
-        let mut hub = PortalHub::default();
-        let k = key("a", "p");
-        hub.publish(&k, text("t"), 0).unwrap();
-        hub.take_due(0);
-        hub.hold(&k, 0, 0).unwrap();
-        assert_eq!(hub.next_deadline(), None);
-        assert_eq!(hub.sweep(u64::MAX - 1), []);
-        assert_eq!(hub.hold(&key("b", "p"), 0, 0), Err(PortalError::NotHeld));
+        for publish_hold in [false, true] {
+            let mut hub = PortalHub::default();
+            let k = key("a", "p");
+            if publish_hold {
+                hub.publish_with_hold(&k, text("t"), Some(0), 0).unwrap();
+            } else {
+                hub.publish(&k, text("t"), 0).unwrap();
+                hub.hold(&k, 0, 0).unwrap();
+            }
+            hub.take_due(0);
+            assert_eq!(hub.next_deadline(), None);
+            assert_eq!(hub.sweep(u64::MAX - 1), []);
+            assert_eq!(hub.hold(&key("b", "p"), 0, 0), Err(PortalError::NotHeld));
+        }
     }
 
     #[test]
     fn clear_frees_id_for_fresh_attach() {
         let mut hub = PortalHub::default();
         let k = key("a", "p");
-        hub.publish(&k, text("old"), 0).unwrap();
+        let first = hub.publish_with_hold(&k, text("old"), None, 0).unwrap();
+        assert!(!first.reattached);
+        assert_eq!(first.pending_input, 0);
         hub.submit_reply(&k, "r".into(), 0).unwrap();
+        let update = hub.publish_with_hold(&k, text("more"), None, 0).unwrap();
+        assert!(!update.reattached);
+        assert_eq!(update.pending_input, 1);
         hub.clear(&k).unwrap();
         assert_eq!(hub.clear(&k), Err(PortalError::NotHeld));
-        hub.publish(&k, text("new"), 1).unwrap();
+        assert!(
+            !hub.publish_with_hold(&k, text("new"), None, 1)
+                .unwrap()
+                .reattached
+        );
         assert_eq!(texts(&hub, &k), ["new"]);
         assert!(hub.get(&k).unwrap().inputs.is_empty());
 
         hub.reclaim(&k);
-        hub.publish(&k, text("after reclaim"), 2).unwrap();
+        let again = hub
+            .publish_with_hold(&k, text("after reclaim"), Some(0), 2)
+            .unwrap();
+        assert!(again.reattached);
+        assert_eq!(again.pending_input, 0);
         assert_eq!(texts(&hub, &k), ["after reclaim"]);
     }
 

@@ -625,7 +625,10 @@ async fn poc_portal_attach_stream_reply_detach() {
                 json!({"surface": PORTAL, "content": line, "expects_reply": true}),
             )
             .await;
-        assert_eq!(reply.body, json!({"ok": true}));
+        assert_eq!(
+            reply.body,
+            json!({"ok": true, "reattached": false, "pending_input": 0})
+        );
         flow_tokens += reply.model_tokens;
     }
     assert_eq!(poc.hud.tile_count(), 1, "the portal is on screen");
@@ -673,7 +676,11 @@ async fn poc_portal_attach_stream_reply_detach() {
 async fn poc_portal_viewer_dismiss_then_mcp_verbs() {
     let publish = json!({"surface": PORTAL, "content": "Working."});
     let mut poc = Poc::boot().await;
-    poc.call("hud_publish", publish.clone()).await;
+    let first = poc.call("hud_publish", publish.clone()).await;
+    assert_eq!(
+        first.body,
+        json!({"ok": true, "reattached": false, "pending_input": 0})
+    );
     assert_eq!(poc.hud.tile_count(), 1);
 
     poc.hud.viewer_dismiss_all_tiles();
@@ -687,7 +694,11 @@ async fn poc_portal_viewer_dismiss_then_mcp_verbs() {
 
     // hud_hold dropped the stale holding; re-attach, dismiss again, and prove
     // hud_clear is a no-op success on a stale (still cached) token.
-    poc.call("hud_publish", publish.clone()).await;
+    let reattached = poc.call("hud_publish", publish.clone()).await;
+    assert_eq!(
+        reattached.body,
+        json!({"ok": true, "reattached": true, "pending_input": 0})
+    );
     assert_eq!(
         poc.hud.tile_count(),
         1,
@@ -699,7 +710,10 @@ async fn poc_portal_viewer_dismiss_then_mcp_verbs() {
     assert_eq!(clear.body, json!({"ok": true}));
 
     let again = poc.call("hud_publish", publish).await;
-    assert_eq!(again.body, json!({"ok": true}));
+    assert_eq!(
+        again.body,
+        json!({"ok": true, "reattached": false, "pending_input": 0})
+    );
     assert_eq!(
         poc.hud.tile_count(),
         1,

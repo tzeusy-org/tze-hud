@@ -356,7 +356,9 @@ def delivery(event, deadline):
     if kind == "SessionEnd":
         call("hud_clear", surface)
         return
-    arguments = dict(surface, status="attached" if kind == "Stop" else "active")
+    arguments = dict(surface)
+    if kind != "Stop":
+        arguments["status"] = "active"
     if event.get("content"):
         arguments.update(content=event["content"], key=event["key"])
     call("hud_publish", arguments)

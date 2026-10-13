@@ -258,20 +258,22 @@ pub async fn hud_surfaces(ctx: &ToolCtx<'_>) -> McpResult<Value> {
             let mut o = Map::new();
             o.insert("s".into(), json!(format!("zone:{}", z.name)));
             o.insert("accepts".into(), json!(accepts(&z.accepted_media_types)));
-            let mine: Vec<_> = scene
+            let expiries: Vec<_> = scene
                 .zone_registry
                 .active_publishes
                 .get(&z.name)
                 .into_iter()
                 .flatten()
                 .filter(|r| r.publisher_namespace == ns)
+                .map(|r| r.expires_at_wall_us)
+                .chain(scene.scheduled_zone_publication_expiries(&z.name, ns))
                 .collect();
-            if !mine.is_empty() {
+            if !expiries.is_empty() {
                 o.insert("held".into(), json!(true));
             }
-            if let Some(ms) = mine
+            if let Some(ms) = expiries
                 .iter()
-                .filter_map(|r| remaining_ms(r.expires_at_wall_us, now))
+                .filter_map(|expiry| remaining_ms(*expiry, now))
                 .max()
             {
                 o.insert("expires_in_ms".into(), json!(ms));
@@ -390,7 +392,6 @@ fn check_fields(surface: &Surface, p: &PublishParams) -> McpResult<()> {
         .find(|(_, set)| *set),
         Surface::Portal(_) => [
             ("params", p.params.is_some()),
-            ("ttl_ms", p.ttl_ms.is_some()),
             ("delay_ms", p.delay_ms.is_some()),
         ]
         .into_iter()
@@ -700,10 +701,10 @@ async fn publish_portal(ctx: &ToolCtx<'_>, pid: &str, p: PublishParams) -> McpRe
         .as_deref()
         .map(PortalStatus::parse)
         .transpose()
-        .map_err(|e| portal_err(e, &p.surface))?;
-    with_portals(ctx, |hub, now| {
+        .map_err(|_| invalid("portal status must be active or degraded; hud_clear detaches"))?;
+    let outcome = with_portals(ctx, |hub, now| {
         (
-            hub.publish(
+            hub.publish_with_hold(
                 &PortalKey::new(ctx.agent.agent_id.clone(), pid),
                 Publish {
                     display_name: p.display_name,
@@ -712,13 +713,17 @@ async fn publish_portal(ctx: &ToolCtx<'_>, pid: &str, p: PublishParams) -> McpRe
                     expects_reply: p.expects_reply.unwrap_or(false),
                     status,
                 },
+                p.ttl_ms,
                 now,
             )
             .map_err(|e| portal_err(e, &p.surface)),
             true,
         )
     })?;
-    Ok(json!({ "ok": true }))
+    let mut result = ok_with_expiry(p.ttl_ms.filter(|ms| *ms > 0));
+    result["reattached"] = json!(outcome.reattached);
+    result["pending_input"] = json!(outcome.pending_input);
+    Ok(result)
 }
 
 // ─── hud_hold ────────────────────────────────────────────────────────────────
@@ -784,8 +789,6 @@ pub async fn hud_hold(ctx: &ToolCtx<'_>, args: Value) -> McpResult<Value> {
 #[serde(deny_unknown_fields)]
 pub struct ClearParams {
     pub surface: String,
-    #[serde(default)]
-    pub reason: Option<String>,
 }
 
 /// Release a zone publication, a widget publication, or a portal (detach).
