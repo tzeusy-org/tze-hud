@@ -1,10 +1,11 @@
 # Installing tze_hud on Windows
 
 CI builds `tze_hud.exe` (`x86_64-pc-windows-msvc`, static CRT, one file) and
-publishes it from `.github/workflows/windows.yml`:
+publishes it from [the Windows workflow](../../.github/workflows/windows.yml):
 
-- **`dev`**: a rolling prerelease rebuilt from every merge to `main`.
-- **`v*`**: a release per tag.
+- **`dev`**: a rolling prerelease published after successful non-docs pushes to
+  `main`. Docs-only main updates skip the workflow, so `dev` can lag main.
+- **`v*`**: a release after a successful tag build.
 
 Each release carries `tze_hud.exe`, `tze_hud.exe.sha256`, `tze_hud.exe.minisig`,
 and `tze_hud.pdb` (symbols for WPA, PIX, and crash dumps) when emitted.
