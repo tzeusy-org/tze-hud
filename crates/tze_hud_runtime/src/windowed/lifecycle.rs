@@ -1297,19 +1297,34 @@ impl WinitApp {
         state.refresh_active_tab_mirror(&scene);
     }
 
-    /// Drop keyboard focus from a tile that lease revocation or expiry removed.
+    /// Drop keyboard focus from a tile that lease revocation, expiry, or a
+    /// portal clear removed. A composer on that tile is blurred and its local
+    /// echo cleared; otherwise the compositor keeps blinking a caret for a
+    /// composer that no longer exists, presenting a frame per blink on an
+    /// otherwise idle HUD (hud-oyo7k).
     /// Non-blocking: skips this frame if the scene lock is busy.
     pub(super) fn clear_focus_on_removed_tile(&mut self) {
-        let Ok(state) = self.state.shared_state.try_lock() else {
-            return;
+        let composer_lost = {
+            let Ok(state) = self.state.shared_state.try_lock() else {
+                return;
+            };
+            let Ok(mut scene) = state.scene.try_lock() else {
+                return;
+            };
+            let Some(tab_id) = scene.active_tab else {
+                return;
+            };
+            let was_active = self.state.input_processor.is_composer_active();
+            self.state.input_processor.clear_focus_on_missing_tile(
+                &mut self.state.focus_manager,
+                &mut scene,
+                tab_id,
+            );
+            was_active && !self.state.input_processor.is_composer_active()
         };
-        let Ok(scene) = state.scene.try_lock() else {
-            return;
-        };
-        if let Some(tab_id) = scene.active_tab {
-            self.state
-                .focus_manager
-                .clear_focus_on_missing_tile(tab_id, &scene);
+        if composer_lost {
+            self.clear_local_composer_echo();
+            self.state.composer_pointer_drag_anchor = None;
         }
     }
 
