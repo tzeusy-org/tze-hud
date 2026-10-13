@@ -21,6 +21,8 @@ tracing-subscriber = { workspace = true }
 toml = { workspace = true }
 tokio-stream = { workspace = true }
 tze_hud_protocol = { path = "../../crates/tze_hud_protocol", version = "0.1.0" }
+# Test-only listener adoption for the production-config authentication fixture.
+tze_hud_runtime = { path = "../../crates/tze_hud_runtime", version = "0.1.0", features = ["test-harness"] }
 
 # Build scripts compile for the host even when Cargo targets Windows, so this
 # dependency must be available during Linux-to-Windows cross-builds. build.rs
